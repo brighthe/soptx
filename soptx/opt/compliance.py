@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from soptx.solver import ElasticFEMSolver
 from soptx.opt import ObjectiveBase
-from soptx.utils import timer
 
 @dataclass
 class ComplianceConfig:
@@ -14,26 +13,12 @@ class ComplianceConfig:
     diff_mode: Literal["auto", "manual"] = "manual"  # 微分模式选择
 
 class ComplianceObjective(ObjectiveBase):
-    """结构柔度最小化目标函数
-    
-    该类负责：
-    1. 计算目标函数值（柔顺度）
-    2. 计算目标函数对密度的梯度
-    3. 管理状态变量（位移场）的更新和缓存
-    4. 管理密度与柔顺度的对应关系
-    
-    变量说明：
-    - rho: density, 密度场
-    - u: displacement, 位移场
-    - ce: element compliance, 单元柔顺度
-    """
-    
+    """结构柔顺度最小化问题的目标函数"""
     def __init__(self, solver: ElasticFEMSolver):
         """
         Parameters
         - solver : 有限元求解器
         """
-
         self.solver = solver
         self.materials = solver.materials
 
@@ -69,14 +54,7 @@ class ComplianceObjective(ObjectiveBase):
         return self._current_u
 
     def _compute_element_compliance(self, u: TensorLike) -> TensorLike:
-        """计算单元柔顺度向量
-        
-        Parameters
-        - u : 位移场
-        
-        Returns
-        - ce : 单元柔顺度向量
-        """
+        """计算单元柔顺度向量"""
         ke0 = self.solver.get_base_local_stiffness_matrix()
         cell2dof = self.solver.tensor_space.cell_to_dof()
         ue = u[cell2dof]
@@ -128,9 +106,9 @@ class ComplianceObjective(ObjectiveBase):
             E = self.materials.calculate_elastic_modulus(rho_i)
             
             # 计算单元柔顺度并取负值 : -(E * u^T * K * u)
-            dE = -E * bm.einsum('i, ij, j', ue_i, ke0_i, ue_i)
+            c_i = -E * bm.einsum('i, ij, j', ue_i, ke0_i, ue_i)
             
-            return dE
+            return c_i
         
         # 创建向量化的梯度计算函数
         # 最内层：lambda x: compliance_contribution(x, u, k)
@@ -144,9 +122,9 @@ class ComplianceObjective(ObjectiveBase):
 
         # 外层：bm.vmap(lambda r, u, k: ...)
         # vmap 将这个操作向量化，使其可以并行处理所有单元
-        vmap_grad = bm.vmap(lambda r, u, k: bm.jacrev(
-            lambda x: compliance_contribution(x, u, k)
-        )(r))
+        vmap_grad = bm.vmap(lambda r, u, k: 
+                        bm.jacrev(lambda x: compliance_contribution(x, u, k))
+                            (r))
         
         # 直接对所有单元进行并行计算
         # 这一步同时处理所有单元，对应关系是：
@@ -154,7 +132,8 @@ class ComplianceObjective(ObjectiveBase):
         # rho 对应每个单元的密度值
         # ue 对应每个单元的位移向量
         # ke0 对应每个单元的基础刚度矩阵
-        return vmap_grad(rho, ue, ke0)
+        dc = vmap_grad(rho, ue, ke0)
+        return dc
     
     def get_element_compliance(self) -> TensorLike:
         """获取单元柔顺度"""
@@ -206,6 +185,8 @@ class ComplianceObjective(ObjectiveBase):
             dc = self._compute_gradient_manual(rho, u)
         elif diff_mode == "auto":  
             dc = self._compute_gradient_auto(rho)
+        else:
+            raise ValueError(f"Unknown diff_mode: {diff_mode}")
         
         return dc
     

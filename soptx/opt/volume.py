@@ -1,71 +1,104 @@
-from typing import Optional, Dict, Any
 from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.mesh import Mesh
+from fealpy.typing import TensorLike, Literal
 
+from typing import Dict, Optional, Any
+from dataclasses import dataclass
+
+from soptx.solver import ElasticFEMSolver
 from soptx.opt import ConstraintBase
 
+@dataclass
+class VolumeConfig:
+    """Configuration for volume constraint computation"""
+    diff_mode: Literal["auto", "manual"] = "manual"
+
 class VolumeConstraint(ConstraintBase):
-    """体积约束
-    
-    负责：
-    1. 计算体积约束函数值
-    2. 计算体积约束的梯度
-    3. 对约束进行滤波（如果需要）
-    """
-    
+    """不等式体积约束"""
     def __init__(self,
-                mesh: Mesh,
+                solver: ElasticFEMSolver,
                 volume_fraction: float):
         """
         Parameters
-        - mesh : 有限元网格
+        - solver : 有限元求解器
         - volume_fraction : 目标体积分数
         """
-        self._mesh = mesh
+        self.solver = solver
         self.volume_fraction = volume_fraction
+        self.mesh = solver.tensor_space.mesh
+
+    #---------------------------------------------------------------------------
+    # 内部方法
+    #---------------------------------------------------------------------------
+    def _compute_gradient_manual(self, rho: TensorLike) -> TensorLike:
+        """使用解析方法计算梯度"""
+        cell_measure = self.mesh.entity_measure('cell')
+        dg = cell_measure
+
+        return dg
+    
+    def _compute_gradient_auto(self, rho: TensorLike) -> TensorLike:
+        """使用自动微分计算梯度"""
+        cell_measure = self.mesh.entity_measure('cell')
         
+        def volume_contribution(rho_i: float, measure_i: float) -> float:
+            """计算单个单元的体积贡献
+            
+            Parameters
+            - rho_i : 单个单元的密度值
+            - measure_i : 单个单元的测度
+            """
+            g_i = measure_i * rho_i
+            return g_i
+        
+        # 创建向量化的梯度计算函数
+        vmap_grad = bm.vmap(lambda r, m: 
+                        bm.jacrev(lambda x: volume_contribution(x, m))
+                            (r))
+        
+        # 并行计算所有单元的梯度
+        dg = vmap_grad(rho, cell_measure)
+        return dg
+        
+    #---------------------------------------------------------------------------
+    # 优化相关方法
+    #---------------------------------------------------------------------------
     def fun(self, 
             rho: TensorLike, 
             u: Optional[TensorLike] = None) -> float:
-        """计算体积约束函数值
-        
-        Parameters
-        - rho : 密度场
-            
-        Returns
-        - gneq : 约束函数值：(当前体积分数 - 目标体积分数) * 单元数量
-        """
-        NC = self._mesh.number_of_cells()
-        cell_measure = self._mesh.entity_measure('cell')
-        gneq = bm.einsum('c, c -> ', cell_measure, rho) / (self.volume_fraction * NC) - 1 # float
+        """计算体积约束函数值"""
+        cell_measure = self.mesh.entity_measure('cell')
+        gneq = bm.einsum('c, c -> ', cell_measure, rho) - \
+                bm.einsum('c ->', cell_measure * self.volume_fraction)
          
         return gneq
         
     def jac(self,
             rho: TensorLike,
-            u: Optional[TensorLike] = None) -> TensorLike:
-        """计算体积约束对密度的梯度
+            u: Optional[TensorLike] = None,
+            diff_mode: Literal["auto", "manual"] = "manual") -> TensorLike:
+        """计算体积约束的梯度
         
         Parameters
         - rho : 密度场
-        - u : 可选的位移场（体积约束不需要，但为了接口一致）
+        - u : 位移场（体积约束不需要，但为了接口一致）
+        - diff_mode : 梯度计算方式
+            - "manual": 使用解析推导的梯度公式（默认）
+            - "auto": 使用自动微分技术
         """
-        cell_measure = self._mesh.entity_measure('cell')
-        dg = bm.copy(cell_measure)
-
+        if diff_mode == "manual":
+            dg = self._compute_gradient_manual(rho)
+        elif diff_mode == "auto":
+            dg = self._compute_gradient_auto(rho)
+        else:
+            raise ValueError(f"Unknown diff_mode: {diff_mode}")
+            
         return dg
         
     def hess(self, rho: TensorLike, lambda_: Dict[str, Any]) -> TensorLike:
-        """计算体积约束 Hessian 矩阵（未实现）
-        
-        Parameters
-        ----------
-        rho : 密度场
-        lambda_ : Lagrange乘子相关参数
-        
-        Returns
-        -------
-        hessian : 约束函数的 Hessian 矩阵
-        """
+        """计算体积约束 Hessian 矩阵 (未实现)"""
         pass
+
+    @property
+    def constraint_type(self) -> str:
+        """返回约束类型 - 拓扑优化中体积约束一定是不等式约束"""
+        return "inequality"

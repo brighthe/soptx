@@ -11,12 +11,64 @@ from soptx.filter import Filter
 @dataclass
 class OCOptions:
     """OC 算法的配置选项"""
+    # 用户级参数：直接暴露给用户
     max_iterations: int = 100     # 最大迭代次数
-    move_limit: float = 0.2       # 正向移动限制 m
-    damping_coef: float = 0.5     # 阻尼系数 η
     tolerance: float = 0.01       # 收敛容差
-    initial_lambda: float = 1e9   # 初始 lambda 值
-    bisection_tol: float = 1e-3   # 二分法收敛容差
+
+    # 高级参数：通过专门的方法修改
+    @property
+    def move_limit(self) -> float:
+        """正向移动限制 m"""
+        return self._move_limit
+        
+    @property
+    def damping_coef(self) -> float:
+        """阻尼系数 η"""
+        return self._damping_coef
+        
+    @property
+    def initial_lambda(self) -> float:
+        """初始 lambda 值"""
+        return self._initial_lambda
+        
+    @property
+    def bisection_tol(self) -> float:
+        """二分法收敛容差"""
+        return self._bisection_tol
+
+    def __init__(self):
+        """初始化高级参数的默认值"""
+        self._move_limit = 0.2
+        self._damping_coef = 0.5
+        self._initial_lambda = 1e9
+        self._bisection_tol = 1e-3
+        
+    def set_advanced_options(self, **kwargs):
+        """设置高级选项，仅供专业用户使用
+        
+        Parameters
+        - **kwargs : 高级参数设置，可包含：
+            - move_limit : 移动限制
+            - damping_coef : 阻尼系数
+            - initial_lambda : 初始 lambda 值
+            - bisection_tol : 二分法收敛容差
+        """
+        import warnings
+        warnings.warn("Modifying advanced options may affect algorithm stability",
+                     UserWarning)
+        
+        valid_params = {
+            'move_limit': '_move_limit',
+            'damping_coef': '_damping_coef',
+            'initial_lambda': '_initial_lambda',
+            'bisection_tol': '_bisection_tol'
+        }
+        
+        for key, value in kwargs.items():
+            if key in valid_params:
+                setattr(self, valid_params[key], value)
+            else:
+                raise ValueError(f"Unknown parameter: {key}")
 
 @dataclass
 class OptimizationHistory:
@@ -48,22 +100,26 @@ class OCOptimizer(OptimizerBase):
                  options: Optional[Dict[str, Any]] = None):
         """
         Parameters
-        ----------
-        objective : 目标函数对象
-        constraint : 约束条件对象
-        filter : 滤波器对象
-        options : 算法参数配置
+        - objective : 目标函数对象
+        - constraint : 约束条件对象
+        - filter : 滤波器对象
+        - options : 算法参数配置
         """
         self.objective = objective
         self.constraint = constraint
         self.filter = filter
         
-        # 设置默认参数
+        # 设置基本参数
         self.options = OCOptions()
         if options is not None:
+            # 只允许设置用户级参数
+            user_params = ['max_iterations', 'tolerance']
             for key, value in options.items():
-                if hasattr(self.options, key):
+                if key in user_params:
                     setattr(self.options, key, value)
+                else:
+                    raise ValueError(f"Invalid parameter in options: {key}. "
+                                   f"Use set_advanced_options() for advanced parameters.")
                     
     def _update_density(self,
                        rho: TensorLike,
@@ -98,22 +154,16 @@ class OCOptimizer(OptimizerBase):
         """运行 OC 优化算法
 
         Parameters
-        ----------
         - rho : 初始密度场
-        - **kwargs : 其他参数，例如：
-            -- beta: Heaviside 投影参数
+        - **kwargs : 其他参数
         """
         # 获取优化参数
         max_iters = self.options.max_iterations
         tol = self.options.tolerance
         bisection_tol = self.options.bisection_tol
-
-        # 准备 Heaviside 投影的参数 (如果需要)
-        filter_params = {'beta': kwargs.get('beta')} if 'beta' in kwargs else None
         
-        # 获取物理密度(对于非 Heaviside 投影，就是设计密度本身)
-        rho_phys = (self.filter.get_physical_density(rho, filter_params) 
-                   if self.filter is not None else rho)
+        # 获取物理密度 (对于非 Heaviside 投影滤波，就是设计密度本身)
+        rho_phys = (self.filter.get_physical_density(rho) if self.filter is not None else rho)
         
         # 初始化历史记录
         history = OptimizationHistory()
@@ -125,17 +175,16 @@ class OCOptimizer(OptimizerBase):
             # 使用物理密度计算目标函数值和梯度
             obj_val = self.objective.fun(rho_phys)
             obj_grad = self.objective.jac(rho_phys)  # (NC, )
+            
             if self.filter is not None:
-                obj_grad = self.filter.filter_sensitivity(
-                                        obj_grad, rho_phys, 'objective', filter_params)
+                obj_grad = self.filter.filter_sensitivity(obj_grad, rho_phys, 'objective')
             
             # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
-                con_grad = self.filter.filter_sensitivity(
-                                        con_grad, rho_phys, 'constraint', filter_params)
-            
+                con_grad = self.filter.filter_sensitivity(con_grad, rho_phys, 'constraint')
+
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             
@@ -145,7 +194,7 @@ class OCOptimizer(OptimizerBase):
                 
                 # 计算新的物理密度
                 if self.filter is not None:
-                    rho_phys = self.filter.filter_density(rho_new, filter_params)
+                    rho_phys = self.filter.filter_density(rho_new)
                 else:
                     rho_phys = rho_new
                     
@@ -155,6 +204,7 @@ class OCOptimizer(OptimizerBase):
                 else:
                     l2 = lmid
 
+            
             # 计算收敛性
             change = bm.max(bm.abs(rho_new - rho))
             # 更新设计变量，确保目标函数内部状态同步
@@ -176,10 +226,9 @@ def save_optimization_history(mesh, history: OptimizationHistory, save_path: str
     """保存优化过程的所有迭代结果
     
     Parameters
-    ----------
-    mesh : 有限元网格对象
-    history : 优化历史记录
-    save_path : 保存路径
+    - mesh : 有限元网格对象
+    - history : 优化历史记录
+    - save_path : 保存路径
     """
     for i, density in enumerate(history.densities):
         mesh.celldata['density'] = density

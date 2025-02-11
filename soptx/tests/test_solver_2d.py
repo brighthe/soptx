@@ -57,17 +57,18 @@ def create_base_components(config: TestConfig):
         if config.mesh_type == 'triangle_mesh':
             mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
     elif config.pde_type == 'cantilever_2d_1':
+        extent = [0, config.nx, 0, config.ny]
+        h = [1.0, 1.0]
+        origin = [0.0, 0.0]
         pde = Cantilever2dData1(
                     xmin=0, xmax=extent[1] * h[0],
-                    ymin=0, ymax=extent[3] * h[1]
+                    ymin=0, ymax=extent[3] * h[1],
+                    T = config.load
                 )
         if config.mesh_type == 'uniform_mesh_2d':
-            extent = [0, config.nx, 0, config.ny]
-            h = [1.0, 1.0]
-            origin = [0.0, 0.0]
             mesh = UniformMesh2d(
                         extent=extent, h=h, origin=origin,
-                        ipoints_ordering='yx', flip_direction=None,
+                        ipoints_ordering='yx', flip_direction='y',
                         device='cpu'
                     )
 
@@ -139,6 +140,39 @@ def run_solve_test(config: TestConfig):
         t.send('求解时间')
         t.send(None)
 
+def run_solver_exact_test(config: TestConfig):
+    """测试 solver 模块求解位移的正确性
+    与 Efficient topology optimization in MATLAB using 88 lines of code 比较
+    cg 和 MUMPS 求解器的结果一致
+    """
+    materials, tensor_space_C, pde, rho = create_base_components(config)
+
+    solver_cg = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=config.assembly_method,
+                    solver_type='cg',
+                    solver_params={'maxiter': 1000, 'atol': 1e-8, 'rtol': 1e-8}, 
+                )
+    solver_cg.update_status(rho[:])
+    solver_result_cg = solver_cg.solve()
+    uh_cg = solver_result_cg.displacement
+    solver_mumps = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=config.assembly_method,
+                    solver_type='direct',
+                    solver_params={'solver_type': 'mumps'}, 
+                )
+    solver_mumps.update_status(rho[:])
+    solver_result_mumps = solver_mumps.solve()
+    uh_mumps = solver_result_mumps.displacement
+    diff = bm.max(bm.abs(uh_cg - uh_mumps))
+    print(f"Difference between CG and MUMPS : {diff:.6e}")
+
+
 if __name__ == "__main__":
     config_standard_assemble = TestConfig(
                                     backend='numpy',
@@ -190,5 +224,17 @@ if __name__ == "__main__":
                                 solver_type='direct', 
                                 solver_params={'solver_type': 'mumps'},
                             )
-    result1 = run_solve_test(config_cg_solve)
-    result2 = run_solve_test(config_mumps_solve)
+    config_solve_exact_test = TestConfig(
+                            backend='numpy',
+                            pde_type='cantilever_2d_1',
+                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                            domain_length=160, domain_width=100,
+                            load=-1,
+                            volume_fraction=0.4,
+                            penalty_factor=3.0,
+                            mesh_type='uniform_mesh_2d', nx=160, ny=100,
+                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                            solver_type=None, 
+                            solver_params=None,
+                        )
+    result1 = run_solver_exact_test(config_solve_exact_test)

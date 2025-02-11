@@ -11,10 +11,11 @@ class Cantilever2dData1:
     '''
     def __init__(self, 
                 xmin: float, xmax: float, 
-                ymin: float, ymax: float):
+                ymin: float, ymax: float,
+                T: float = -1):
         """
         位移边界条件：梁的左边界固定
-        载荷：梁的右边界的下点施加垂直向下的力 F = -1
+        载荷：梁的右边界的下点施加垂直向下的力 T = -1
         flip_direction = True
         0 ------- 3 ------- 6 
         |    0    |    2    |
@@ -24,6 +25,7 @@ class Cantilever2dData1:
         """
         self.xmin, self.xmax = xmin, xmax
         self.ymin, self.ymax = ymin, ymax
+        self.T = T 
         self.eps = 1e-12
 
     def domain(self) -> list:
@@ -44,7 +46,7 @@ class Cantilever2dData1:
             (bm.abs(y - domain[2]) < self.eps)
         )
         val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
-        val[coord, 1] = -1
+        val[coord, 1] = self.T
 
         return val
     

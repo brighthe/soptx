@@ -10,23 +10,44 @@ from .matrix import FilterMatrix
 
 class FilterType(IntEnum):
     """滤波器类型枚举"""
-    SENSITIVITY = 0  # 灵敏度滤波
-    DENSITY = 1      # 密度滤波
-    HEAVISIDE = 2    # Heaviside投影滤波
+    NONE = -1        # 不使用滤波器
+    SENSITIVITY = 0  # 灵敏度滤波器
+    DENSITY = 1      # 密度滤波器
+    HEAVISIDE = 2    # Heaviside 投影滤波器
 
 @dataclass
 class FilterConfig:
     """滤波器配置类"""
-    filter_type: FilterType  # 使用枚举类型
+    filter_type: str  
     filter_radius: float
+    heaviside_beta: float = 1.0
 
     def __post_init__(self):
         if self.filter_radius <= 0:
             raise ValueError("Filter radius must be positive")
-        if not isinstance(self.filter_type, (FilterType, int)):
-            raise ValueError("Filter type must be a FilterType enum or valid integer")
-        if isinstance(self.filter_type, int):
-            self.filter_type = FilterType(self.filter_type)
+        
+        # 字符串到枚举的映射
+        filter_type_map = {
+            'none': FilterType.NONE,
+            'sensitivity': FilterType.SENSITIVITY,
+            'density': FilterType.DENSITY,
+            'heaviside': FilterType.HEAVISIDE
+        }
+        
+        # 转换为小写并查找对应的枚举值
+        filter_type_str = self.filter_type.lower()
+        if filter_type_str not in filter_type_map:
+            raise ValueError(f"Unsupported filter type: {self.filter_type}")
+        
+        self._filter_type = filter_type_map[filter_type_str]
+        
+        if self._filter_type == FilterType.HEAVISIDE and self.heaviside_beta <= 0:
+            raise ValueError("Heaviside beta must be positive")
+        
+    @property
+    def type(self) -> FilterType:
+        """获取滤波器类型枚举值"""
+        return self._filter_type
 
 class Filter:
     """滤波器类，负责滤波矩阵计算和灵敏度修改"""
@@ -42,7 +63,11 @@ class Filter:
     def initialize(self, mesh) -> None:
         """根据网格初始化滤波矩阵"""
         self._mesh = mesh
-        self._H, self._Hs = FilterMatrix.create_filter_matrix(mesh, self.config.filter_radius)
+        if self.config.type != FilterType.NONE:
+            self._H, self._Hs = FilterMatrix.create_filter_matrix(
+                                                    mesh, 
+                                                    self.config.filter_radius
+                                                )
 
     @property
     def get_intermediate_density(self) -> Optional[TensorLike]:
@@ -63,31 +88,16 @@ class Filter:
             raise ValueError("Filter scaling vector is not initialized")
         return self._Hs
     
-    def get_physical_density(self, 
-                        density: TensorLike,
-                        filter_params: Optional[dict] = None) -> TensorLike:
+    def get_physical_density(self, density: TensorLike) -> TensorLike:
         """
         获取物理密度场. 
         只有在 Heaviside 投影滤波时才会对密度进行变换, 其他情况直接返回输入密度.
 
         Parameters
-        ----------
-        density : TensorLike
-            原始密度场
-        filter_params : Optional[dict]
-            过滤器参数 (Heaviside 投影需要)
-            - beta: 投影参数
-
-        Returns
-        -------
-        TensorLike
-            物理密度场
+        - density : 原始密度场
         """
-        if self.config.filter_type == FilterType.HEAVISIDE:
-            if filter_params is None or 'beta' not in filter_params:
-                raise ValueError("Heaviside projection requires 'beta' parameter")
-
-            beta = filter_params['beta']
+        if self.config.type == FilterType.HEAVISIDE:
+            beta = self.config.heaviside_beta
             # 计算并存储中间密度场
             self._rho_tilde = density
             # 应用 Heaviside 投影
@@ -96,15 +106,15 @@ class Filter:
 
             return physical_density
         else:
-            # 对于灵敏度滤波和密度滤波，初始物理密度等于设计密度
+            # 对于不使用 Heaviside 投影滤波器的情况, 初始物理密度等于设计密度
             return density
 
         
     def filter_sensitivity(self,
-                         gradient: TensorLike,
-                         design_vars: TensorLike,
-                         gradient_type: Literal['objective', 'constraint'],
-                         filter_params: Optional[dict] = None) -> TensorLike:
+                        gradient: TensorLike,
+                        design_vars: TensorLike,
+                        gradient_type: Literal['objective', 'constraint'],
+                    ) -> TensorLike:
         """
         应用滤波器修改灵敏度
         
@@ -112,13 +122,13 @@ class Filter:
         - gradient : 原始梯度
         - design_vars : 设计变量
         - gradient_type : 梯度类型, 用于区分目标函数梯度和约束函数梯度
-        - filter_params : 滤波器参数
-            
-        Returns
         """
+        if self.config.type == FilterType.NONE:
+            return gradient
+    
         cell_measure = self._mesh.entity_measure('cell')
 
-        if self.config.filter_type == FilterType.SENSITIVITY:
+        if self.config.type == FilterType.SENSITIVITY:
             # 灵敏度滤波只修改目标函数的梯度
             if gradient_type == 'objective':
                 # 计算密度加权的灵敏度
@@ -135,7 +145,7 @@ class Filter:
                 # 约束函数的梯度不做修改
                 return gradient
                 
-        elif self.config.filter_type == FilterType.DENSITY:
+        elif self.config.type == FilterType.DENSITY:
             # 密度滤波对两种梯度都进行修改
             # 计算单元度量加权的灵敏度
             weighted_gradient = gradient * cell_measure
@@ -146,44 +156,37 @@ class Filter:
 
             return filtered_gradient
             
-        elif self.config.filter_type == FilterType.HEAVISIDE:
+        elif self.config.type == FilterType.HEAVISIDE:
             if self._rho_tilde is None:
                 raise ValueError("Intermediate density not available. Call get_physical_density first to initialize intermediate density field.")
-
-            if not filter_params or 'beta' not in filter_params:
-                raise ValueError("Heaviside projection requires beta parameter")
-            
-            beta = filter_params['beta']
+            beta = self.config.heaviside_beta
             # 计算投影导数
             dx = beta * bm.exp(-beta * self._rho_tilde) + bm.exp(-beta)
             # 修改梯度
             weighted_gradient = gradient * dx * cell_measure
             filtered_gradient = self._H.matmul(weighted_gradient)
             normalization_factor = self._H.matmul(cell_measure)
+
             return filtered_gradient / normalization_factor
     
-    def filter_density(self,
-                density: TensorLike,
-                filter_params: Optional[dict] = None) -> TensorLike:
+    def filter_density(self, density: TensorLike) -> TensorLike:
         """
         对密度进行滤波
 
         Parameters
         - density : 原始密度场
-        - filter_params : 过滤器参数, 对于 Heaviside 滤波需要:
-            - beta: 投影参数
-
-        Returns
-        - 过滤后的物理密度场
         """
+        if self.config.type == FilterType.NONE:
+            return density  
+        
         # 获取单元度量
         cell_measure = self._mesh.entity_measure('cell')
 
-        if self.config.filter_type == FilterType.SENSITIVITY:
+        if self.config.type == FilterType.SENSITIVITY:
             # 灵敏度滤波时，物理密度等于设计密度
             return density  
 
-        elif self.config.filter_type == FilterType.DENSITY:
+        elif self.config.type == FilterType.DENSITY:
             # 计算加权密度
             weighted_density = density * cell_measure
             # 应用滤波矩阵
@@ -195,11 +198,8 @@ class Filter:
 
             return physical_density
 
-        elif self.config.filter_type == FilterType.HEAVISIDE:
-            if filter_params is None or 'beta' not in filter_params:
-                raise ValueError("Heaviside projection requires beta parameter")
-
-            beta = filter_params['beta']
+        elif self.config.type == FilterType.HEAVISIDE:
+            beta = self.config.heaviside_beta
 
             # 计算并存储中间密度场
             weighted_density = density * cell_measure
