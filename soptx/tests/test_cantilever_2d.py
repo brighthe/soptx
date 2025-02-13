@@ -15,6 +15,9 @@ from soptx.material import (
 from soptx.pde import Cantilever2dData1, Cantilever2dData2
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (Filter, FilterConfig, FilterType)
+from soptx.filter import (SensitivityBasicFilter, 
+                          DensityBasicFilter, 
+                          HeavisideProjectionBasicFilter)
 from soptx.opt import ComplianceObjective, VolumeConstraint
 from soptx.opt import OCOptimizer, save_optimization_history
 from soptx.opt import MMAOptimizer
@@ -40,6 +43,8 @@ class TestConfig:
     mesh_type: Literal['uniform_mesh_2d', 'triangle_mesh']
     nx: int
     ny: int
+    hx: float
+    hy: float
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -73,15 +78,14 @@ def create_base_components(config: TestConfig):
             mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
     elif config.pde_type == 'cantilever_2d_1':
         extent = [0, config.nx, 0, config.ny]
-        h = [1.0, 1.0]
         origin = [0.0, 0.0]
         pde = Cantilever2dData1(
-                    xmin=0, xmax=extent[1] * h[0],
-                    ymin=0, ymax=extent[3] * h[1]
+                    xmin=0, xmax=extent[1] * config.hx,
+                    ymin=0, ymax=extent[3] * config.hy
                 )
         if config.mesh_type == 'uniform_mesh_2d':
             mesh = UniformMesh2d(
-                        extent=extent, h=h, origin=origin,
+                        extent=extent, h=[config.hx, config.hy], origin=origin,
                         ipoints_ordering='yx', flip_direction='y',
                         device='cpu'
                     )
@@ -122,32 +126,23 @@ def create_base_components(config: TestConfig):
     
     return rho, objective, constraint
 
-def run_filter_exact_test(config: TestConfig) -> Dict[str, Any]:
+def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     """
-    基于 Efficient topology optimization in MATLAB using 88 lines of code 的结果,
-        测试 filter 类不同滤波器的正确性.
+    测试 filter 类不同滤波器的正确性.
     """
     rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
+    if config.filter_type == 'None':
+        filter = None
+    elif config.filter_type == 'sensitivity':
+        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius) 
+    elif config.filter_type == 'density':
+        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
+    elif config.filter_type == 'heaviside':
+        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius)   
+
     if config.optimizer_type == 'oc':
-        if config.filter_type == 'None':
-            filter = None
-        elif config.filter_type == 'heaviside':
-            filter_config = FilterConfig(
-                                filter_type=config.filter_type,
-                                filter_radius=config.filter_radius,
-                                heaviside_beta=1.0
-                            )
-            filter = Filter(filter_config)
-            filter.initialize(mesh)
-        else:
-            filter_config = FilterConfig(
-                                filter_type=config.filter_type,
-                                filter_radius=config.filter_radius,
-                            )
-            filter = Filter(filter_config)
-            filter.initialize(mesh)
         optimizer = OCOptimizer(
                         objective=objective,
                         constraint=constraint,
@@ -201,17 +196,16 @@ def run_filter_exact_test(config: TestConfig) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
-
-    # 使用 OC 优化器的配置
     '''
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
-    OC 优化方法, 灵敏度滤波器
     '''
     pde_type = 'cantilever_2d_1'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
     nx = 160
     ny = 100
+    hx = 1
+    hy = 1
     config_sens_filter = TestConfig(
                             backend='numpy',
                             pde_type=pde_type,
@@ -220,7 +214,7 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.4,
                             penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny,
+                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
                             assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
@@ -237,14 +231,37 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.4,
                             penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny,
-                            assembly_method=AssemblyMethod.STANDARD,
+                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
                             filter_type=filter_type, filter_radius=6.0,
                             save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
                         )
-    # result1 = run_filter_exact_test(config_sens_filter)
-    result2 = run_filter_exact_test(config_none_filter)
+    result1 = run_basic_filter_test(config_sens_filter)
+    # result2 = run_filter_exact_test(config_none_filter)
+
+    # '''
+    # 参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
+    # '''
+    # pde_type = 'cantilever_2d_2'
+    # config_canti_2d_2 = TestConfig(
+    #                         backend='numpy',
+    #                         pde_type=pde_type,
+    #                         elastic_modulus=1e5, poisson_ratio=0.3, minimal_modulus=1e-9,
+    #                         domain_length=3.0, domain_width=1.0,
+    #                         load=2000,
+    #                         volume_fraction=0.5,
+    #                         penalty_factor=3.0,
+    #                         mesh_type='triangle_mesh', nx=300, ny=100,
+    #                         assembly_method=AssemblyMethod.SYMBOLIC,
+    #                         solver_type='direct', solver_params={'solver_type': 'mumps'},
+    #                         diff_mode='manual',
+    #                         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+    #                         filter_type=filter_type, filter_radius=6.0,
+    #                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+    #                     )
+    # result3 = run_filter_exact_test(config_canti_2d_2)
+    
     

@@ -4,9 +4,14 @@ from dataclasses import dataclass
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
+from fealpy.mesh import StructuredMesh
 
 from soptx.opt import ObjectiveBase, ConstraintBase, OptimizerBase
 from soptx.filter import Filter
+from soptx.filter import (BasicFilter,
+                          SensitivityBasicFilter, 
+                          DensityBasicFilter, 
+                          HeavisideProjectionBasicFilter)
 
 @dataclass
 class OCOptions:
@@ -96,7 +101,7 @@ class OCOptimizer(OptimizerBase):
     def __init__(self,
                  objective: ObjectiveBase,
                  constraint: ConstraintBase,
-                 filter: Optional[Filter] = None,
+                 filter: Optional[BasicFilter] = None,
                  options: Optional[Dict[str, Any]] = None):
         """
         Parameters
@@ -162,8 +167,14 @@ class OCOptimizer(OptimizerBase):
         tol = self.options.tolerance
         bisection_tol = self.options.bisection_tol
         
-        # 获取物理密度 (对于非 Heaviside 投影滤波，就是设计密度本身)
-        rho_phys = (self.filter.get_physical_density(rho) if self.filter is not None else rho)
+        rho_phys = bm.zeros_like(rho)
+        if self.filter is not None:
+            self.filter.get_initial_density(rho, rho_phys)
+        else:
+            rho_phys[:] = rho
+
+        # # 获取物理密度 (对于非 Heaviside 投影滤波，就是设计密度本身)
+        # rho_phys = (self.filter.get_physical_density(rho) if self.filter is not None else rho)
         
         # 初始化历史记录
         history = OptimizationHistory()
@@ -177,13 +188,15 @@ class OCOptimizer(OptimizerBase):
             obj_grad = self.objective.jac(rho_phys)  # (NC, )
             
             if self.filter is not None:
-                obj_grad = self.filter.filter_sensitivity(obj_grad, rho_phys, 'objective')
+                # obj_grad = self.filter.filter_sensitivity(obj_grad, rho_phys, 'objective')
+                self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
             
             # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
-                con_grad = self.filter.filter_sensitivity(con_grad, rho_phys, 'constraint')
+                # con_grad = self.filter.filter_sensitivity(con_grad, rho_phys, 'constraint')
+                self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
 
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
@@ -194,7 +207,8 @@ class OCOptimizer(OptimizerBase):
                 
                 # 计算新的物理密度
                 if self.filter is not None:
-                    rho_phys = self.filter.filter_density(rho_new)
+                    # rho_phys = self.filter.filter_density(rho_new)
+                    self.filter.filter_variables(rho_new, rho_phys)
                 else:
                     rho_phys = rho_new
                     
@@ -232,4 +246,7 @@ def save_optimization_history(mesh, history: OptimizationHistory, save_path: str
     """
     for i, density in enumerate(history.densities):
         mesh.celldata['density'] = density
-        mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
+        if isinstance(mesh, StructuredMesh):
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
+        else:
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")

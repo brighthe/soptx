@@ -58,7 +58,7 @@ class Filter:
         self._Hs: Optional[TensorLike] = None
         self._mesh = None
 
-        self._rho_tilde = None  # 存储中间密度场(对 Heaviside 投影有用)
+        self._rho_tilde = None  # 存储中间密度场 (对 Heaviside 投影有用)
 
     def initialize(self, mesh) -> None:
         """根据网格初始化滤波矩阵"""
