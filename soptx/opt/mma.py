@@ -2,13 +2,16 @@ from typing import Dict, Any, Optional, Tuple
 from time import time
 from dataclasses import dataclass
 
-from scipy.sparse import csr_matrix, spdiags
-
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
+from fealpy.mesh import StructuredMesh
 
 from soptx.opt import ObjectiveBase, ConstraintBase, OptimizerBase
 from soptx.filter import Filter
+from soptx.filter import (BasicFilter,
+                          SensitivityBasicFilter, 
+                          DensityBasicFilter, 
+                          HeavisideProjectionBasicFilter)
 from soptx.opt.utils import solve_mma_subproblem
 
 @dataclass
@@ -220,9 +223,6 @@ class MMAOptimizer(OptimizerBase):
         # TODO 使用 einsum 替代对角矩阵乘法
         P = bm.einsum('j, ij -> ij', ux2.flatten(), P)
         Q = bm.einsum('j, ij -> ij', xl2.flatten(), Q)
-        # from numpy import diag as diags
-        # P = (diags(ux2.flatten(), 0) @ P.T).T
-        # Q = (diags(xl2.flatten(), 0) @ Q.T).T
         b = bm.dot(P, uxinv) + bm.dot(Q, xlinv) - fval  # (1, 1)
         
         # 求解子问题
@@ -238,21 +238,25 @@ class MMAOptimizer(OptimizerBase):
         return xmma.reshape(-1), low, upp
         
     def optimize(self, rho: TensorLike, **kwargs) -> Tuple[TensorLike, OptimizationHistory]:
-        """运行 MMA 优化算法"""
-        # 获取参数
+        """运行 MMA 优化算法
+        
+        Parameters
+        - rho : 初始密度场
+        - **kwargs : 其他参数
+        """
+        # 获取优化参数
         max_iters = self.options.max_iterations
         tol = self.options.tolerance
 
         low = bm.ones_like(rho)
         upp = bm.ones_like(rho)
-        
-        # 准备 Heaviside 投影的参数
-        filter_params = {'beta': kwargs.get('beta')} if 'beta' in kwargs else None
-        
-        # 获取物理密度
-        rho_phys = (self.filter.get_physical_density(rho, filter_params) 
-                   if self.filter is not None else rho)
-        
+
+        rho_phys = bm.zeros_like(rho)
+        if self.filter is not None:
+            self.filter.get_initial_density(rho, rho_phys)
+        else:
+            rho_phys[:] = rho
+
         # 初始化历史记录
         history = OptimizationHistory()
 
@@ -266,34 +270,35 @@ class MMAOptimizer(OptimizerBase):
             # 更新迭代计数
             self._epoch = iter_idx + 1
             
-            # 计算目标函数值和梯度
+            # 使用物理密度计算目标函数值和梯度
             obj_val = self.objective.fun(rho_phys)
             obj_grad = self.objective.jac(rho_phys) # (NC, )
             if self.filter is not None:
-                obj_grad = self.filter.filter_sensitivity(
-                                        obj_grad, rho_phys, 'objective', filter_params)
+                self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
             
-            # 计算约束值和约束值梯度
+            # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys) # (NC, )
             if self.filter is not None:
-                con_grad = self.filter.filter_sensitivity(
-                                        con_grad, rho_phys, 'constraint', filter_params)
+                self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
             
             # MMA 方法
             volfrac = self.constraint.volume_fraction
+            # 标准化的约束函数值
+            cell_measure = self.filter.mesh.entity_measure('cell')
+            fval = con_val / (volfrac * bm.sum(cell_measure))
             # 标准化的约束值梯度
             dfdx = con_grad[:, None].T / (volfrac * con_grad.shape[0])     # (m, n)
             rho_new, low, upp = self._solve_subproblem(
-                                        xval=rho[:, None], fval=con_val, 
+                                        xval=rho[:, None], fval=fval, 
                                         df0dx=obj_grad[:, None], dfdx=dfdx, 
                                         low=low, upp=upp,
-                                        xold1=xold1[:, None], xold2=xold2[..., None]
+                                        xold1=xold1[:, None], xold2=xold2[:, None]
                                     )
 
             # 更新物理密度
             if self.filter is not None:
-                rho_phys = self.filter.filter_density(rho_new, filter_params)
+                self.filter.filter_variables(rho_new, rho_phys)
             else:
                 rho_phys = rho_new
 
@@ -302,8 +307,7 @@ class MMAOptimizer(OptimizerBase):
             
             # 计算收敛性
             change = bm.max(bm.abs(rho_new - rho))
-            
-            # 更新密度场
+            # 更新设计变量，确保目标函数内部状态同步
             rho = rho_new
                 
             # 记录当前迭代信息
@@ -311,9 +315,30 @@ class MMAOptimizer(OptimizerBase):
             history.log_iteration(iter_idx, obj_val, bm.mean(rho_phys), 
                                 change, iteration_time, rho_phys)
             
+            # 处理 Heaviside 投影的 beta continuation
+            if isinstance(self.filter, HeavisideProjectionBasicFilter):
+                change, continued = self.filter.continuation_step(change)
+                if continued:
+                    continue
+            
             # 收敛检查
             if change <= tol:
                 print(f"Converged after {iter_idx + 1} iterations")
                 break
                 
         return rho, history
+    
+def save_optimization_history(mesh, history: OptimizationHistory, save_path: str):
+    """保存优化过程的所有迭代结果
+    
+    Parameters
+    - mesh : 有限元网格对象
+    - history : 优化历史记录
+    - save_path : 保存路径
+    """
+    for i, density in enumerate(history.densities):
+        mesh.celldata['density'] = density
+        if isinstance(mesh, StructuredMesh):
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
+        else:
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")

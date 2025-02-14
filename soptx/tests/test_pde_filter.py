@@ -1,4 +1,4 @@
-"""测试 filter 模块中的 basic_filter."""
+"""测试 filter 模块中的 pde_filter."""
 
 from dataclasses import dataclass
 from typing import Literal, Dict, Any
@@ -7,10 +7,8 @@ from fealpy.backend import backend_manager as bm
 from fealpy.mesh import UniformMesh2d, TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
-from soptx.filter import (SensitivityBasicFilter, 
-                          DensityBasicFilter, 
-                          HeavisideProjectionBasicFilter)
-from soptx.filter import (FilterMatrix, Filter, FilterConfig)
+from soptx.filter import (SensitivityPDEBasedFilter, 
+                          DensityPDEBasedFilter)
 
 @dataclass
 class TestConfig:
@@ -36,24 +34,18 @@ def run_filter_H_test(config: TestConfig):
     origin = [0.0, 0.0]
     mesh = UniformMesh2d(
                 extent=extent, h=[config.hx, config.hy], origin=origin,
-                ipoints_ordering='yx', flip_direction='y',
+                ipoints_ordering='yx', flip_direction=None,
                 device='cpu'
             )
 
-    H1, Hs1 = FilterMatrix._compute_filter_2d(nx=config.nx, ny=config.ny, 
-                                        rmin=config.filter_radius)
-    SF = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius)
-    H2, Hs2 = SF.H, SF.Hs
-
-    diffH = bm.sum(bm.abs(H1.toarray() - H2.toarray()))
-    diffHs = bm.sum(bm.abs(Hs1 - Hs2))
-    print(f"Diff H: {diffH}, Diff Hs: {diffHs}")
+    SPF = SensitivityPDEBasedFilter(mesh=mesh, rmin=config.filter_radius)
+    SPF._build_filter_matrix()
 
 if __name__ == "__main__":
     config = TestConfig(
         backend='numpy',
         mesh_type='uniform_mesh_2d',
-        nx=160, ny=100, hx=1, hy=1,
-        filter_radius=6.0,
+        nx=60, ny=20, hx=1, hy=1,
+        filter_radius=2.4,
     )
     run_filter_H_test(config)

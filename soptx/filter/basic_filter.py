@@ -261,7 +261,8 @@ class DensityBasicFilter(BasicFilter):
 
 class HeavisideProjectionBasicFilter(BasicFilter):
     """Heaviside 投影滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float, beta: float = 1.0):
+    def __init__(self, mesh: StructuredMesh, rmin: float, 
+                beta: float = 1.0, max_beta: float = 512, continuation_iter: int = 50):
         """
         Parameters
         - mesh : 均匀网格
@@ -273,7 +274,11 @@ class HeavisideProjectionBasicFilter(BasicFilter):
             raise ValueError("Heaviside beta must be positive")
             
         self.beta = beta
+        self.max_beta = max_beta
+        self.continuation_iter = continuation_iter
         self._xTilde = None  # 存储中间密度场
+
+        self._beta_iter = 0  # 用于追踪 continuation 的内部状态
 
     def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> None:
         """Heaviside 投影滤波器的初始物理密度需要投影"""
@@ -286,7 +291,7 @@ class HeavisideProjectionBasicFilter(BasicFilter):
         weighted_x = cell_measure * x
         filtered_x = self._H.matmul(weighted_x)
         normalize_factor = self._H.matmul(cell_measure)
-        self._rho_tilde = filtered_x / normalize_factor
+        self._xTilde = filtered_x / normalize_factor
 
         xPhys[:] = (1 - bm.exp(-self.beta * self._xTilde) + 
                         self._xTilde * bm.exp(-self.beta))
@@ -300,8 +305,7 @@ class HeavisideProjectionBasicFilter(BasicFilter):
         # 修改灵敏度并应用密度滤波
         weighted_dobj = dobj * dx * cell_measure
         normalize_factor = self._H.matmul(cell_measure)
-        dobj[:] = self._H.matmul(weighted_dobj) / normalize_factor
-
+        dobj[:] = self._H.matmul(weighted_dobj / normalize_factor)
 
     def filter_constraint_sensitivities(self, 
                                     xPhys: TensorLike, dcons: TensorLike) -> None:
@@ -312,4 +316,31 @@ class HeavisideProjectionBasicFilter(BasicFilter):
         # 修改灵敏度并应用密度滤波
         weighted_dcons = dcons * dx * cell_measure
         normalize_factor = self._H.matmul(cell_measure)
-        dcons[:] = self._H.matmul(weighted_dcons) / normalize_factor
+        dcons[:] = self._H.matmul(weighted_dcons / normalize_factor)
+
+    def continuation_step(self, change: float) -> Tuple[float, bool]:
+        """
+        执行一步 beta continuation
+        
+        Parameters
+        - change : 当前的收敛变化量
+        
+        Returns
+        - new_change : 更新后的收敛变化量
+        - continued : 是否执行了 continuation
+
+        """
+        self._beta_iter += 1
+        
+        if (self.beta < self.max_beta and 
+                (self._beta_iter >= self.continuation_iter or change <= 0.01)):
+            # 增加 beta 值
+            self.beta *= 2
+            # 重置计数器
+            self._beta_iter = 0
+            print(f"Beta increased to {self.beta}")
+            return 1.0, True
+        
+        # 如果没有执行 continuation，返回原始的 change 值和 False
+        return change, False
+            

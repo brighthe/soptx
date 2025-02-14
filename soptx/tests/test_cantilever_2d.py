@@ -14,7 +14,6 @@ from soptx.material import (
                         )
 from soptx.pde import Cantilever2dData1, Cantilever2dData2
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
-from soptx.filter import (Filter, FilterConfig, FilterType)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)

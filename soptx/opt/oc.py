@@ -7,7 +7,6 @@ from fealpy.typing import TensorLike
 from fealpy.mesh import StructuredMesh
 
 from soptx.opt import ObjectiveBase, ConstraintBase, OptimizerBase
-from soptx.filter import Filter
 from soptx.filter import (BasicFilter,
                           SensitivityBasicFilter, 
                           DensityBasicFilter, 
@@ -172,9 +171,6 @@ class OCOptimizer(OptimizerBase):
             self.filter.get_initial_density(rho, rho_phys)
         else:
             rho_phys[:] = rho
-
-        # # 获取物理密度 (对于非 Heaviside 投影滤波，就是设计密度本身)
-        # rho_phys = (self.filter.get_physical_density(rho) if self.filter is not None else rho)
         
         # 初始化历史记录
         history = OptimizationHistory()
@@ -186,16 +182,13 @@ class OCOptimizer(OptimizerBase):
             # 使用物理密度计算目标函数值和梯度
             obj_val = self.objective.fun(rho_phys)
             obj_grad = self.objective.jac(rho_phys)  # (NC, )
-            
             if self.filter is not None:
-                # obj_grad = self.filter.filter_sensitivity(obj_grad, rho_phys, 'objective')
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
             
             # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
-                # con_grad = self.filter.filter_sensitivity(con_grad, rho_phys, 'constraint')
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
 
             # 二分法求解拉格朗日乘子
@@ -207,7 +200,6 @@ class OCOptimizer(OptimizerBase):
                 
                 # 计算新的物理密度
                 if self.filter is not None:
-                    # rho_phys = self.filter.filter_density(rho_new)
                     self.filter.filter_variables(rho_new, rho_phys)
                 else:
                     rho_phys = rho_new
@@ -218,17 +210,22 @@ class OCOptimizer(OptimizerBase):
                 else:
                     l2 = lmid
 
-            
             # 计算收敛性
             change = bm.max(bm.abs(rho_new - rho))
             # 更新设计变量，确保目标函数内部状态同步
             rho = rho_new
             
+            # 记录当前迭代信息
             iteration_time = time() - start_time
-
             history.log_iteration(iter_idx, obj_val, bm.mean(rho_phys[:]), 
                                 change, iteration_time, rho_phys[:])
             
+            # 处理 Heaviside 投影的 beta continuation
+            if isinstance(self.filter, HeavisideProjectionBasicFilter):
+                change, continued = self.filter.continuation_step(change)
+                if continued:
+                    continue
+                
             # 收敛检查
             if change <= tol:
                 print(f"Converged after {iter_idx + 1} iterations")

@@ -132,7 +132,8 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     elif config.filter_type == 'density':
         filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
     elif config.filter_type == 'heaviside':
-        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius)   
+        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius,
+                                            beta=1, max_beta=512, continuation_iter=50)   
 
     if config.optimizer_type == 'oc':
         optimizer = OCOptimizer(
@@ -230,5 +231,23 @@ if __name__ == "__main__":
                             filter_type=filter_type, filter_radius=nx*0.04,
                             save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
                         )
+    filter_type = 'heaviside'
+    config_heav_filter = TestConfig(
+                            backend='numpy',
+                            pde_type=pde_type,
+                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                            domain_length=nx, domain_width=ny,
+                            load=-1,
+                            volume_fraction=0.5,
+                            penalty_factor=3.0,
+                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                            solver_type='direct', solver_params={'solver_type': 'mumps'},
+                            diff_mode='manual',
+                            optimizer_type=optimizer_type, max_iterations=500, tolerance=0.01,
+                            filter_type=filter_type, filter_radius=nx*0.03,
+                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+                        )
     # result1 = run_basic_filter_test(config_sens_filter)
-    result2 = run_basic_filter_test(config_dens_filter)
+    # result2 = run_basic_filter_test(config_dens_filter)
+    result3 = run_basic_filter_test(config_heav_filter)

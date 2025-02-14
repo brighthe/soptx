@@ -32,7 +32,7 @@ class VolumeConstraint(ConstraintBase):
     def _compute_gradient_manual(self, rho: TensorLike) -> TensorLike:
         """使用解析方法计算梯度"""
         cell_measure = self.mesh.entity_measure('cell')
-        dg = cell_measure
+        dg = cell_measure.copy()
 
         return dg
     
@@ -68,7 +68,9 @@ class VolumeConstraint(ConstraintBase):
         """计算体积约束函数值"""
         cell_measure = self.mesh.entity_measure('cell')
         gneq = bm.einsum('c, c -> ', cell_measure, rho) - \
-                bm.einsum('c ->', cell_measure * self.volume_fraction)
+                self.volume_fraction * bm.sum(cell_measure)
+        # gneq = bm.einsum('c, c -> ', cell_measure, rho) / \
+        #         (self.volume_fraction * bm.sum(cell_measure)) - 1 # float
          
         return gneq
         

@@ -13,7 +13,8 @@ class Cantilever3dData1:
     def __init__(self,
                 xmin: float=0, xmax: float=60, 
                 ymin: float=0, ymax: float=20,
-                zmin: float=0, zmax: float=4):
+                zmin: float=0, zmax: float=4,
+                T: float = -1):
         """
            3------- 7
          / |       /|
@@ -28,6 +29,7 @@ class Cantilever3dData1:
         self.xmin, self.xmax = xmin, xmax
         self.ymin, self.ymax = ymin, ymax
         self.zmin, self.zmax = zmin, zmax
+        self.T = T 
         self.eps = 1e-12
 
     def domain(self) -> list:
@@ -51,7 +53,7 @@ class Cantilever3dData1:
             (bm.abs(y - domain[2]) < self.eps)
         )
         val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
-        val[coord, 1] = -1
+        val[coord, 1] = self.T
 
         return val
     
