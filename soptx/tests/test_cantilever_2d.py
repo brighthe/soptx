@@ -18,9 +18,7 @@ from soptx.filter import (SensitivityBasicFilter,
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
 from soptx.opt import ComplianceObjective, VolumeConstraint
-from soptx.opt import OCOptimizer, save_optimization_history
-from soptx.opt import MMAOptimizer
-
+from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history
 @dataclass
 class TestConfig:
     """Configuration for topology optimization test cases."""

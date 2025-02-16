@@ -19,8 +19,7 @@ from soptx.filter import (SensitivityBasicFilter,
                           HeavisideProjectionBasicFilter)
 from soptx.opt import ComplianceObjective, VolumeConstraint
 
-from soptx.opt import OCOptimizer, save_optimization_history
-from soptx.opt import MMAOptimizer, save_optimization_history
+from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history
 
 @dataclass
 class TestConfig:
@@ -165,16 +164,19 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
                         options={
                             'max_iterations': config.max_iterations,
                             'tolerance': config.tolerance,
-                            'm': 1,
-                            'n': NC,
-                            'xmin': bm.zeros(NC, dtype=bm.float64).reshape(-1, 1),
-                            'xmax': bm.ones(NC, dtype=bm.float64).reshape(-1, 1),
-                            "a0": 1,
-                            "a": bm.zeros(1, dtype=bm.float64).reshape(-1, 1),
-                            'c': 1e4 * bm.ones(1, dtype=bm.float64).reshape(-1, 1),
-                            'd': bm.zeros(1, dtype=bm.float64).reshape(-1,),
                         }
                     )
+        # 设置高级参数 (可选)
+        optimizer.options.set_advanced_options(
+                                m=1,
+                                n=NC,
+                                xmin=bm.zeros((NC, 1)),
+                                xmax=bm.ones((NC, 1)),
+                                a0=1,
+                                a=bm.zeros((1, 1)),
+                                c=1e4 * bm.ones((1, 1)),
+                                d=bm.zeros((1, 1)),
+                            )
     else:
         raise ValueError(f"Unsupported optimizer type: {config.optimizer_type}")
 

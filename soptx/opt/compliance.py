@@ -48,8 +48,8 @@ class ComplianceObjective(ObjectiveBase):
             
             # 更新求解器中的密度并求解
             self.solver.update_status(rho)
-            self._current_u = self.solver.solve().displacement 
-            self._current_rho = rho.copy()
+            self._current_u = self.solver.solve().displacement
+            self._current_rho = bm.copy(rho)
             
         return self._current_u
 

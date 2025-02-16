@@ -1,8 +1,8 @@
-"""Method of Moving Asymptotes (MMA) 子问题求解器
+"""拓扑优化工具函数模块
 
-该模块实现了 MMA 算法中子问题的求解,使用原始-对偶内点法.
-参考：Svanberg, K. (1987). The method of moving asymptotes—a new method for 
-structural optimization. International Journal for Numerical Methods in Engineering.
+该模块包含了拓扑优化中使用的通用工具函数，包括：
+- MMA 子问题求解器
+- 优化历史记录保存功能
 """
 
 from typing import Tuple
@@ -11,7 +11,14 @@ from numpy.linalg import solve
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.solver import cg, spsolve
+from fealpy.mesh import StructuredMesh
 
+"""Method of Moving Asymptotes (MMA) 子问题求解器
+
+实现了 MMA 算法中子问题的求解,使用原始-对偶内点法.
+参考 : Svanberg, K. (1987). The method of moving asymptotes—a new method for 
+structural optimization. International Journal for Numerical Methods in Engineering.
+"""
 def solve_mma_subproblem(m: int, n: int, 
                         epsimin: float,
                         low: TensorLike, upp: TensorLike,
@@ -287,3 +294,23 @@ def solve_mma_subproblem(m: int, n: int,
     smma = s
 
     return xmma, ymma, zmma, lamma, xsimma, etamma, mumma, zetmma, smma
+
+
+def save_optimization_history(mesh, history, save_path: str):
+    """保存优化过程的所有迭代结果
+    
+    Parameters
+    ----------
+    mesh : StructuredMesh or TetrahedronMesh
+        有限元网格对象
+    history : OptimizationHistory
+        优化历史记录，包含每次迭代的密度场
+    save_path : str
+        保存路径
+    """
+    for i, density in enumerate(history.densities):
+        mesh.celldata['density'] = density
+        if isinstance(mesh, StructuredMesh):
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
+        else:  
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")

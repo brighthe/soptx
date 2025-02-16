@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional
 from time import time
 from dataclasses import dataclass
+import warnings
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -57,7 +58,6 @@ class OCOptions:
             - initial_lambda : 初始 lambda 值
             - bisection_tol : 二分法收敛容差
         """
-        import warnings
         warnings.warn("Modifying advanced options may affect algorithm stability",
                      UserWarning)
         
@@ -232,18 +232,3 @@ class OCOptimizer(OptimizerBase):
                 break
                 
         return rho, history
-    
-def save_optimization_history(mesh, history: OptimizationHistory, save_path: str):
-    """保存优化过程的所有迭代结果
-    
-    Parameters
-    - mesh : 有限元网格对象
-    - history : 优化历史记录
-    - save_path : 保存路径
-    """
-    for i, density in enumerate(history.densities):
-        mesh.celldata['density'] = density
-        if isinstance(mesh, StructuredMesh):
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
-        else:
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")

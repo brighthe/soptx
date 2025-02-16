@@ -1,13 +1,13 @@
 from typing import Dict, Any, Optional, Tuple
 from time import time
 from dataclasses import dataclass
+import warnings
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.mesh import StructuredMesh
 
 from soptx.opt import ObjectiveBase, ConstraintBase, OptimizerBase
-from soptx.filter import Filter
 from soptx.filter import (BasicFilter,
                           SensitivityBasicFilter, 
                           DensityBasicFilter, 
@@ -17,21 +17,105 @@ from soptx.opt.utils import solve_mma_subproblem
 @dataclass
 class MMAOptions:
     """MMA 算法的配置选项"""
-    # 算法控制参数
+    # 用户级参数：直接暴露给用户
     max_iterations: int = 200       # 最大迭代次数
     tolerance: float = 0.001        # 收敛容差
 
-    # 问题规模参数
-    m: int = 1                         # 约束函数的数量, 默认 1 个约束
-    n: Optional[int] = None            # 设计变量的数量
+        # 高级参数：通过专门的方法修改
+    @property
+    def m(self) -> int:
+        """约束函数的数量"""
+        return self._m
 
-    # MMA 子问题参数
-    xmin: Optional[TensorLike] = None  # 设计变量的下界
-    xmax: Optional[TensorLike] = None  # 设计变量的上界
-    a0: float = 1.0                    # a_0*z 项的常数系数 a_0
-    a: Optional[TensorLike] = None     # a_i*z 项的线性系数 a_i
-    c: Optional[TensorLike] = None     # c_i*y_i 项的线性系数 c_i
-    d: Optional[TensorLike] = None     # 0.5*d_i*(y_i)**2 项的二次项系数 d_i
+    @property
+    def n(self) -> Optional[int]:
+        """设计变量的数量"""
+        return self._n
+
+    @property
+    def xmin(self) -> Optional[TensorLike]:
+        """设计变量的下界"""
+        return self._xmin
+
+    @property
+    def xmax(self) -> Optional[TensorLike]:
+        """设计变量的上界"""
+        return self._xmax
+
+    @property
+    def a0(self) -> float:
+        """a_0*z 项的常数系数 a_0"""
+        return self._a0
+
+    @property
+    def a(self) -> Optional[TensorLike]:
+        """a_i*z 项的线性系数 a_i"""
+        return self._a
+
+    @property
+    def c(self) -> Optional[TensorLike]:
+        """c_i*y_i 项的线性系数 c_i"""
+        return self._c
+
+    @property
+    def d(self) -> Optional[TensorLike]:
+        """0.5*d_i*(y_i)**2 项的二次项系数 d_i"""
+        return self._d
+
+    def __init__(self):
+        """初始化高级参数的默认值"""
+        self._m = 1
+        self._n = None
+        self._xmin = None
+        self._xmax = None
+        self._a0 = 1.0
+        self._a = None
+        self._c = None
+        self._d = None
+
+    def set_advanced_options(self, **kwargs):
+        """设置高级选项，仅供专业用户使用
+        
+        Parameters
+        - **kwargs : 高级参数设置，可包含：
+            - m : 约束函数的数量
+            - n : 设计变量的数量
+            - xmin : 设计变量的下界
+            - xmax : 设计变量的上界
+            - a0 : a_0*z 项的常数系数
+            - a : a_i*z 项的线性系数
+            - c : c_i*y_i 项的线性系数
+            - d : 0.5*d_i*(y_i)**2 项的二次项系数
+        """
+        warnings.warn("Modifying advanced options may affect algorithm stability",
+                     UserWarning)
+        
+        valid_params = {
+                        'm': '_m',
+                        'n': '_n',
+                        'xmin': '_xmin',
+                        'xmax': '_xmax',
+                        'a0': '_a0',
+                        'a': '_a',
+                        'c': '_c',
+                        'd': '_d'
+                    }
+        
+        for key, value in kwargs.items():
+            if key in valid_params:
+                setattr(self, valid_params[key], value)
+            else:
+                raise ValueError(f"Unknown parameter: {key}")
+            
+        # 如果设置了 m，且相关参数为 None，则初始化它们
+        if 'm' in kwargs:
+            m = kwargs['m']
+            if self._a is None:
+                self._a = bm.zeros((m, 1))
+            if self._c is None:
+                self._c = 1e4 * bm.ones((m, 1))
+            if self._d is None:
+                self._d = bm.zeros((m, 1))
 
 @dataclass
 class OptimizationHistory:
@@ -72,33 +156,39 @@ class MMAOptimizer(OptimizerBase):
     def __init__(self,
                 objective: ObjectiveBase,
                 constraint: ConstraintBase,
-                filter: Optional[Filter] = None,
+                filter: Optional[BasicFilter] = None,
                 options: Dict[str, Any] = None):
         """初始化 MMA 优化器 """
         self.objective = objective
         self.constraint = constraint
         self.filter = filter
 
-        # 使用用户提供的参数初始化选项
-        self.options = MMAOptions(**(options or {}))
-
-        # 设置问题规模参数的默认值
-        if self.options.n is None:
-            self.options.n = constraint.mesh.number_of_cells()  # 默认使用网格单元数
+        # 设置基本参数
+        self.options = MMAOptions()
+        if options is not None:
+            # 只允许设置用户级参数
+            user_params = ['max_iterations', 'tolerance']
+            for key, value in options.items():
+                if key in user_params:
+                    setattr(self.options, key, value)
+                else:
+                    raise ValueError(f"Invalid parameter in options: {key}. "
+                                   f"Use set_advanced_options() for advanced parameters.")
         
-        # 初始化未设置的 MMA 参数
-        m = self.options.m
-        n = self.options.n
+
+        # 设置依赖于问题规模的参数（仅当它们尚未设置时）
+        n = filter.mesh.number_of_cells()
+        advanced_params = {}
+        
+        if self.options.n is None:
+            advanced_params['n'] = n
         if self.options.xmin is None:
-            self.options.xmin = bm.zeros((n, 1))
+            advanced_params['xmin'] = bm.zeros((n, 1))
         if self.options.xmax is None:
-            self.options.xmax = bm.ones((n, 1))
-        if self.options.a is None:
-            self.options.a = bm.zeros((m, 1))
-        if self.options.c is None:
-            self.options.c = 1e4 * bm.ones((m, 1))
-        if self.options.d is None:
-            self.options.d = bm.zeros((m, 1))
+            advanced_params['xmax'] = bm.ones((n, 1))
+            
+        if advanced_params:  # 只有当有参数需要设置时才调用
+            self.options.set_advanced_options(**advanced_params)
                     
         # MMA 内部状态
         self._epoch = 0
@@ -327,18 +417,3 @@ class MMAOptimizer(OptimizerBase):
                 break
                 
         return rho, history
-    
-def save_optimization_history(mesh, history: OptimizationHistory, save_path: str):
-    """保存优化过程的所有迭代结果
-    
-    Parameters
-    - mesh : 有限元网格对象
-    - history : 优化历史记录
-    - save_path : 保存路径
-    """
-    for i, density in enumerate(history.densities):
-        mesh.celldata['density'] = density
-        if isinstance(mesh, StructuredMesh):
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
-        else:
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")

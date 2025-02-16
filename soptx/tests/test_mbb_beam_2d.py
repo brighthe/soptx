@@ -14,13 +14,11 @@ from soptx.material import (
                         )
 from soptx.pde import MBBBeam2dData1
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
-from soptx.filter import (Filter, FilterConfig, FilterType)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
 from soptx.opt import ComplianceObjective, VolumeConstraint
-from soptx.opt import OCOptimizer, save_optimization_history
-from soptx.opt import MMAOptimizer
+from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history
 
 @dataclass
 class TestConfig:

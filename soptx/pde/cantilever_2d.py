@@ -45,15 +45,17 @@ class Cantilever2dData1:
             (bm.abs(x - domain[1]) < self.eps) & 
             (bm.abs(y - domain[2]) < self.eps)
         )
-        val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
         val[coord, 1] = self.T
 
         return val
     
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
-
-        return bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
+        kwargs = bm.context(points)
+        # 这里仍然是固定左边界的位移
+        return bm.zeros(points.shape, **kwargs)
     
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
@@ -106,6 +108,7 @@ class Cantilever2dData2:
 
     def domain(self) -> list:
         box = [self.xmin, self.xmax, self.ymin, self.ymax]
+
         return box
     
     @cartesian
@@ -121,15 +124,17 @@ class Cantilever2dData2:
             (bm.abs(y - (domain[2] + domain[3]) / 2) < self.eps)  # 位于右边界中点
         )
         
-        val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
         val[coord, 1] = -self.T  # 施加单位力 T
         
         return val
     
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
         # 这里仍然是固定左边界的位移
-        return bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
+        return bm.zeros(points.shape, **kwargs)
     
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:

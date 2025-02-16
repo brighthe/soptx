@@ -44,15 +44,17 @@ class MBBBeam2dData1:
             (bm.abs(x - domain[0]) < self.eps) & 
             (bm.abs(y - domain[3]) < self.eps)
         )
-        val = bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
         val[coord, 1] = self.T
 
         return val
     
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
-
-        return bm.zeros(points.shape, dtype=points.dtype, device=bm.get_device(points))
+        kwargs = bm.context(points)
+        # 这里仍然是固定左边界的位移
+        return bm.zeros(points.shape, **kwargs)
     
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:

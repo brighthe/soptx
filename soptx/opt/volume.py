@@ -32,7 +32,7 @@ class VolumeConstraint(ConstraintBase):
     def _compute_gradient_manual(self, rho: TensorLike) -> TensorLike:
         """使用解析方法计算梯度"""
         cell_measure = self.mesh.entity_measure('cell')
-        dg = cell_measure.copy()
+        dg = bm.copy(cell_measure)
 
         return dg
     
