@@ -12,6 +12,7 @@ from soptx.filter import (BasicFilter,
                           SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
+from soptx.utils import timer
 
 @dataclass
 class OCOptions:
@@ -133,17 +134,19 @@ class OCOptimizer(OptimizerBase):
         """使用 OC 准则更新密度"""
         m = self.options.move_limit
         eta = self.options.damping_coef
+
+        kwargs = bm.context(rho)
         
         B_e = -dc / (dg * lmid)
         B_e_damped = bm.power(B_e, eta)
 
         # OC update scheme
         rho_new = bm.maximum(
-            bm.tensor(0.0, dtype=rho.dtype), 
+            bm.tensor(0.0, **kwargs), 
             bm.maximum(
                 rho - m, 
                 bm.minimum(
-                    bm.tensor(1.0, dtype=rho.dtype), 
+                    bm.tensor(1.0, **kwargs), 
                     bm.minimum(
                         rho + m, 
                         rho * B_e_damped
@@ -166,7 +169,8 @@ class OCOptimizer(OptimizerBase):
         tol = self.options.tolerance
         bisection_tol = self.options.bisection_tol
         
-        rho_phys = bm.zeros_like(rho)
+        tensor_kwargs = bm.context(rho)
+        rho_phys = bm.zeros_like(rho, **tensor_kwargs)
         if self.filter is not None:
             self.filter.get_initial_density(rho, rho_phys)
         else:
@@ -179,37 +183,57 @@ class OCOptimizer(OptimizerBase):
         for iter_idx in range(max_iters):
             start_time = time()
             
+            # t = timer(f"OC Iteration {iter_idx + 1}")
+            # next(t) 
             # 使用物理密度计算目标函数值和梯度
             obj_val = self.objective.fun(rho_phys)
             obj_grad = self.objective.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
-            
+            # t.send('objective_sens')
             # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
-
+            # t.send('constrain_sens')
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
-            
+            # bisection_iter = 0
+            # bisection_start = time()
             while (l2 - l1) / (l2 + l1) > bisection_tol:
+                # iter_start = time()
+
                 lmid = 0.5 * (l2 + l1)
                 rho_new = self._update_density(rho, obj_grad, con_grad, lmid)
                 
+                # filter_start = time()
                 # 计算新的物理密度
                 if self.filter is not None:
                     self.filter.filter_variables(rho_new, rho_phys)
                 else:
                     rho_phys = rho_new
+                # filter_time = time() - filter_start
                     
+                # constraint_start = time()
                 # 检查约束
                 if self.constraint.fun(rho_phys) > 0:
                     l1 = lmid
                 else:
                     l2 = lmid
-
+            #     constraint_time = time() - constraint_start
+            #     iter_time = time() - iter_start
+            #     bisection_iter += 1
+            #     print(f"    Bisection iter {bisection_iter:3d}: "
+            #           f"Total time = {iter_time:.4f}s, "
+            #           f"Filter time = {filter_time:.4f}s, "
+            #           f"Constraint time = {constraint_time:.4f}s")
+            
+            # bisection_total = time() - bisection_start
+            # print(f"  Bisection completed in {bisection_iter} iterations, "
+            #       f"total time: {bisection_total:.4f}s")
+            # t.send('varaiable_update')
+            # t.send(None)
             # 计算收敛性
             change = bm.max(bm.abs(rho_new - rho))
             # 更新设计变量，确保目标函数内部状态同步

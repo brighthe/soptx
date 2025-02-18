@@ -163,20 +163,23 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
         optimizer = MMAOptimizer(
                         objective=objective,
                         constraint=constraint,
-                        filter=None,
+                        filter=filter,
                         options={
                             'max_iterations': config.max_iterations,
                             'tolerance': config.tolerance,
-                            'm': 1,
-                            'n': NC,
-                            'xmin': bm.zeros(NC, dtype=bm.float64).reshape(-1, 1),
-                            'xmax': bm.ones(NC, dtype=bm.float64).reshape(-1, 1),
-                            "a0": 1,
-                            "a": bm.zeros(1, dtype=bm.float64).reshape(-1, 1),
-                            'c': 1e4 * bm.ones(1, dtype=bm.float64).reshape(-1, 1),
-                            'd': bm.zeros(1, dtype=bm.float64).reshape(-1,),
                         }
                     )
+        # 设置高级参数 (可选)
+        optimizer.options.set_advanced_options(
+                                m=1,
+                                n=NC,
+                                xmin=bm.zeros((NC, 1)),
+                                xmax=bm.ones((NC, 1)),
+                                a0=1,
+                                a=bm.zeros((1, 1)),
+                                c=1e4 * bm.ones((1, 1)),
+                                d=bm.zeros((1, 1)),
+                            )
     else:
         raise ValueError(f"Unsupported optimizer type: {config.optimizer_type}")
 
@@ -200,8 +203,8 @@ if __name__ == "__main__":
     pde_type = 'mbb_beam_2d_1'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    nx = 60
-    ny = 20
+    nx = 150
+    ny = 50
     hx = 1
     hy = 1
     config_sens_filter = TestConfig(
@@ -218,7 +221,7 @@ if __name__ == "__main__":
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
                             filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
     filter_type = 'density'
     config_dens_filter = TestConfig(
@@ -233,9 +236,9 @@ if __name__ == "__main__":
                             assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+                            optimizer_type=optimizer_type, max_iterations=400, tolerance=0.01,
                             filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
     filter_type = 'heaviside'
     config_heav_filter = TestConfig(
@@ -250,10 +253,29 @@ if __name__ == "__main__":
                             assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=500, tolerance=0.01,
+                            optimizer_type=optimizer_type, max_iterations=600, tolerance=0.01,
                             filter_type=filter_type, filter_radius=nx*0.03,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
+    optimizer_type = 'mma'
+    filter_type = 'sensitivity'
+    config_mma_sens_filter = TestConfig(
+                        backend='numpy',
+                        pde_type=pde_type,
+                        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                        domain_length=nx, domain_width=ny,
+                        load=-1,
+                        volume_fraction=0.5,
+                        penalty_factor=3.0,
+                        mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+                        assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                        solver_type='direct', solver_params={'solver_type': 'mumps'},
+                        diff_mode='manual',
+                        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+                        filter_type=filter_type, filter_radius=nx*0.04,
+                        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+                    )
     # result1 = run_basic_filter_test(config_sens_filter)
-    result2 = run_basic_filter_test(config_dens_filter)
+    # result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_heav_filter)
+    result4 = run_basic_filter_test(config_mma_sens_filter)
