@@ -158,10 +158,8 @@ class ComplianceObjective(ObjectiveBase):
         # 获取位移场
         if u is None:
             u = self._update_u(rho)
-            
         # 计算单元柔度
         ce = self._compute_element_compliance(u)
-        
         # 计算总柔度
         E = self.materials.elastic_modulus
         c = bm.einsum('c, c -> ', E, ce)

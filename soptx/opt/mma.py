@@ -363,9 +363,12 @@ class MMAOptimizer(OptimizerBase):
             # 使用物理密度计算目标函数值和梯度
             obj_val = self.objective.fun(rho_phys)
             obj_grad = self.objective.jac(rho_phys) # (NC, )
+            print(f"xPhys: {bm.mean(rho_phys):.10f}")
+            print(f"u: {bm.mean(self.objective._current_u):.10f}")
+
             if self.filter is not None:
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
-            
+        
             # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys) # (NC, )
@@ -377,6 +380,8 @@ class MMAOptimizer(OptimizerBase):
             # 标准化的约束函数值
             cell_measure = self.filter.mesh.entity_measure('cell')
             fval = con_val / (volfrac * bm.sum(cell_measure))
+            NC = self.filter.mesh.number_of_cells()
+            fval_test = bm.sum(rho_phys) / (volfrac * NC) - 1
             # 标准化的约束值梯度
             dfdx = con_grad[:, None].T / (volfrac * con_grad.shape[0])     # (m, n)
             rho_new, low, upp = self._solve_subproblem(
@@ -385,6 +390,20 @@ class MMAOptimizer(OptimizerBase):
                                         low=low, upp=upp,
                                         xold1=xold1[:, None], xold2=xold2[:, None]
                                     )
+            # if (iter_idx + 1 == 14 or iter_idx + 1 == 11 or iter_idx + 1 == 12 or iter_idx + 1 == 13
+            #         or iter_idx + 1 == 36 or iter_idx + 1 == 37 or iter_idx + 1 == 38):
+            #     print(f"xPhys: {bm.mean(rho_phys):.10f}")
+            #     print(f"u: {bm.mean(self.objective._current_u):.10f}")
+            #     print(f"con_val: {bm.mean(con_val):.10f}")
+            #     print(f"fval: {bm.mean(fval):.10f}")
+            #     print(f"fval_test: {bm.mean(fval_test):.10f}")
+            #     print(f"xnew: {bm.mean(rho_new):.10f}")
+            #     print(f"----------------")
+            # if (iter_idx + 1 == 106 or iter_idx + 1 == 107 or iter_idx + 1 == 108 or iter_idx + 1 == 109):
+            #     print(f"xPhys: {bm.mean(rho_phys):.10f}")
+            #     print(f"u: {bm.mean(self.objective._current_u):.10f}")
+            #     print(f"xnew: {bm.mean(rho_new):.10f}")
+            #     print(f"----------------")
 
             # 更新物理密度
             if self.filter is not None:

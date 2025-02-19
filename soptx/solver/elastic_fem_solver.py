@@ -73,8 +73,8 @@ class ElasticFEMSolver:
             
         # 缓存
         self._base_local_stiffness_matrix = None
-        self._global_stiffness_matrix = None
-        self._global_force_vector = None
+        # self._global_stiffness_matrix = None
+        # self._global_force_vector = None
 
 
     #---------------------------------------------------------------------------
@@ -107,20 +107,20 @@ class ElasticFEMSolver:
         # 2. 根据新密度更新材料属性
         self.materials.update_elastic_modulus(self._current_density)
 
-        # 3. 清除依赖于密度的缓存
-        self._global_stiffness_matrix = None
-        self._global_force_vector = None
+        # # 3. 清除依赖于密度的缓存
+        # self._global_stiffness_matrix = None
+        # self._global_force_vector = None
 
     #---------------------------------------------------------------------------
     # 矩阵计算和缓存相关方法
     #---------------------------------------------------------------------------
-    def get_global_stiffness_matrix(self) -> Optional[CSRTensor]:
-        """获取最近一次求解时的全局刚度矩阵"""
-        return self._global_stiffness_matrix
+    # def get_global_stiffness_matrix(self) -> Optional[CSRTensor]:
+    #     """获取最近一次求解时的全局刚度矩阵"""
+    #     return self._global_stiffness_matrix
         
-    def get_global_force_vector(self) -> Optional[TensorLike]:
-        """获取最近一次求解时的全局载荷向量"""
-        return self._global_force_vector
+    # def get_global_force_vector(self) -> Optional[TensorLike]:
+    #     """获取最近一次求解时的全局载荷向量"""
+    #     return self._global_force_vector
     
     def get_base_local_stiffness_matrix(self) -> TensorLike:
         """获取基础材料的局部刚度矩阵（会被缓存）"""
@@ -137,8 +137,7 @@ class ElasticFEMSolver:
     
     def compute_local_stiffness_matrix(self) -> TensorLike:
         """计算当前材料的局部刚度矩阵（每次重新计算）"""
-        if self._current_material is None:
-            raise ValueError("Material not initialized. Call update_density first.")
+
         
         integrator = self._integrator
  
@@ -196,7 +195,7 @@ class ElasticFEMSolver:
         bform.add_integrator(integrator)
         K = bform.assembly(format='csr')
 
-        self._global_stiffness_matrix = K
+        # self._global_stiffness_matrix = K
 
         return K
     
@@ -205,7 +204,7 @@ class ElasticFEMSolver:
         force = self.pde.force
         F = self.tensor_space.interpolate(force)
 
-        self._global_force_vector = F
+        # self._global_force_vector = F
 
         return F
     

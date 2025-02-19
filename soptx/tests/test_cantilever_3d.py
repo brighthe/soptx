@@ -5,6 +5,8 @@ from typing import Literal, Optional, Union, Dict, Any
 from pathlib import Path
 
 from fealpy.backend import backend_manager as bm
+from fealpy.typing import TensorLike
+from fealpy.decorator import cartesian
 from fealpy.mesh import UniformMesh3d, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
@@ -113,8 +115,13 @@ def create_base_components(config: TestConfig):
                 solver_params=config.solver_params 
             )
     
-    array = config.volume_fraction * bm.ones(mesh.number_of_cells(), dtype=bm.float64)
-    rho = space_D.function(array)
+    node = mesh.entity('node')
+    kwargs = bm.context(node)
+    @cartesian
+    def density_func(x: TensorLike):
+        val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
+        return val
+    rho = space_D.interpolate(u=density_func)
 
     objective = ComplianceObjective(solver=solver)
     constraint = VolumeConstraint(solver=solver, 
@@ -195,7 +202,6 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
-
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
@@ -251,13 +257,31 @@ if __name__ == "__main__":
                         assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',
-                        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+                        optimizer_type=optimizer_type, max_iterations=500, tolerance=0.01,
                         filter_type=filter_type, filter_radius=1.5,
-                        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+                        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
+                    )
+    filter_type = 'sensitivity'
+    config_mma_sens_filter = TestConfig(
+                        backend='numpy',
+                        pde_type=pde_type,
+                        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                        domain_length=nx, domain_width=ny, domain_height=nz,
+                        load=-1,
+                        volume_fraction=0.3,
+                        penalty_factor=3.0,
+                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
+                        solver_type='direct', solver_params={'solver_type': 'mumps'},
+                        diff_mode='manual',
+                        optimizer_type=optimizer_type, max_iterations=110, tolerance=0.01,
+                        filter_type=filter_type, filter_radius=1.5,
+                        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                     )
     # result1 = run_basic_filter_test(config_sens_filter)
     # result2 = run_basic_filter_test(config_dens_filter)
     result3 = run_basic_filter_test(config_mma_dens_filter)
+    # result4 = run_basic_filter_test(config_mma_sens_filter)
 
 
 
