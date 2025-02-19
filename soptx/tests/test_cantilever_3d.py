@@ -241,7 +241,7 @@ if __name__ == "__main__":
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
                             filter_type=filter_type, filter_radius=1.5,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                         )
     optimizer_type = 'mma'
     filter_type = 'density'
@@ -279,8 +279,8 @@ if __name__ == "__main__":
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                     )
     # result1 = run_basic_filter_test(config_sens_filter)
-    # result2 = run_basic_filter_test(config_dens_filter)
-    result3 = run_basic_filter_test(config_mma_dens_filter)
+    result2 = run_basic_filter_test(config_dens_filter)
+    # result3 = run_basic_filter_test(config_mma_dens_filter)
     # result4 = run_basic_filter_test(config_mma_sens_filter)
 
 
