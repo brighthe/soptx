@@ -224,7 +224,7 @@ if __name__ == "__main__":
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
                             filter_type=filter_type, filter_radius=1.5,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
+                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                         )
     filter_type = 'density'
     config_dens_filter = TestConfig(
@@ -239,7 +239,7 @@ if __name__ == "__main__":
                             assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+                            optimizer_type=optimizer_type, max_iterations=400, tolerance=0.01,
                             filter_type=filter_type, filter_radius=1.5,
                             save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                         )
@@ -279,59 +279,7 @@ if __name__ == "__main__":
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                     )
     # result1 = run_basic_filter_test(config_sens_filter)
-    result2 = run_basic_filter_test(config_dens_filter)
+    # result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_mma_dens_filter)
-    # result4 = run_basic_filter_test(config_mma_sens_filter)
-
-
-
-    # # 使用 OC 优化器的配置
-    # optimizer_type = 'oc'
-    # filter_type = 'density'
-    # config_oc_dens = TestConfig(
-    #     nx=60, ny=20, nz=4,
-    #     volume_fraction=0.3,
-    #     filter_radius=1.5,
-    #     filter_type=filter_type,       # 指定使用密度滤波器
-    #     save_dir=f'{base_dir}/cantilever_3d_{optimizer_type}_{filter_type}',
-    #     mesh_type='uniform_mesh_3d',
-    #     assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
-    #     optimizer_type=optimizer_type,  # 指定使用 OC 优化器
-    #     max_iterations=200,
-    #     tolerance=0.01
-    # )
-    # filter_type = 'sensitivity'
-    # config_oc_sens = TestConfig(
-    #     nx=60, ny=20, nz=4,
-    #     volume_fraction=0.3,
-    #     filter_radius=1.5,
-    #     filter_type=filter_type,       # 指定使用灵敏度滤波器
-    #     save_dir=f'{base_dir}/cantilever_3d_{optimizer_type}_{filter_type}',
-    #     mesh_type='uniform_mesh_3d',
-    #     assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
-    #     optimizer_type=optimizer_type,  # 指定使用 OC 优化器
-    #     max_iterations=200,
-    #     tolerance=0.01
-    # )
-    
-    # '''
-    # 参数来源论文: An efficient 3D topology optimization code written in Matlab
-    # '''
-    # # 使用 MMA 优化器的配置
-    # filter_type = 'density'
-    # optimizer_type = 'mma'
-    # config2 = TestConfig(
-    #     nx=60, ny=20, nz=4,
-    #     volume_fraction=0.3,
-    #     filter_radius=1.5,
-    #     filter_type=filter_type,        # 指定使用密度滤波器
-    #     save_dir=f'{base_dir}/cantilever_3d_{optimizer_type}_{filter_type}',
-    #     mesh_type='uniform_mesh_3d',
-    #     assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
-    #     optimizer_type=optimizer_type,  # 指定使用 MMA 优化器
-    #     max_iterations=200,
-    #     tolerance=0.01
-    # )
-
-    # result = run_optimization_test(config_oc_dens)
+    result4 = run_basic_filter_test(config_mma_sens_filter)
     

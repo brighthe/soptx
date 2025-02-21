@@ -169,7 +169,7 @@ def solve_mma_subproblem(m: int, n: int,
                 D_lamyi = diaglamyi * bm.eye(1)  
                 GD_xG = bm.einsum('ik, k, jk -> ij', GG, diagxinv.flatten(), GG)  
                 Alam = D_lamyi + GD_xG  # (m, 1)
-                # Alam = bm.asarray(diags(diaglamyi.flatten(), 0) + \
+                # Alam = bm.asarray(d5 = riags(diaglamyi.flatten(), 0) + \
                 #         (diags(diagxinv.flatten(), 0).dot(GG.T).T).dot(GG.T))
                 AAr1 = bm.concatenate((Alam, a), axis=1)     # (m, m+1)
                 AAr2 = bm.concatenate((a, -zet/z), axis=0).T # (1, m+1)

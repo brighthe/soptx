@@ -90,7 +90,7 @@ class OptimizationHistory:
         self.densities.append(density.copy())
         
         print(f"Iteration: {iter_idx + 1}, "
-              f"Objective: {obj_val:.4f}, "
+              f"Objective: {obj_val:.12f}, "
               f"Volume: {volume:.4f}, "
               f"Change: {change:.4f}, "
               f"Time: {time:.3f} sec")
@@ -186,16 +186,15 @@ class OCOptimizer(OptimizerBase):
             # 使用物理密度计算目标函数值和梯度
             obj_val = self.objective.fun(rho_phys)
             obj_grad = self.objective.jac(rho_phys)  # (NC, )
-            print(f"xPhys: {bm.mean(rho_phys):.10f}")
-            print(f"u: {bm.mean(self.objective._current_u):.10f}")
-
             if self.filter is not None:
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
+
             # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
+            
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             while (l2 - l1) / (l2 + l1) > bisection_tol:
@@ -213,7 +212,6 @@ class OCOptimizer(OptimizerBase):
                     l1 = lmid
                 else:
                     l2 = lmid
-                      
             # 计算收敛性
             change = bm.max(bm.abs(rho_new - rho))
             # 更新设计变量，确保目标函数内部状态同步

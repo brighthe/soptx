@@ -203,8 +203,8 @@ if __name__ == "__main__":
     pde_type = 'mbb_beam_2d_1'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    nx = 150
-    ny = 50
+    nx = 60
+    ny = 20
     hx = 1
     hy = 1
     config_sens_filter = TestConfig(
@@ -275,7 +275,25 @@ if __name__ == "__main__":
                         filter_type=filter_type, filter_radius=nx*0.04,
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                     )
+    filter_type = 'density'
+    config_mma_dens_filter = TestConfig(
+                        backend='numpy',
+                        pde_type=pde_type,
+                        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                        domain_length=nx, domain_width=ny,
+                        load=-1,
+                        volume_fraction=0.5,
+                        penalty_factor=3.0,
+                        mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+                        assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                        solver_type='direct', solver_params={'solver_type': 'mumps'},
+                        diff_mode='manual',
+                        optimizer_type=optimizer_type, max_iterations=500, tolerance=0.01,
+                        filter_type=filter_type, filter_radius=nx*0.04,
+                        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+                    )
     # result1 = run_basic_filter_test(config_sens_filter)
-    # result2 = run_basic_filter_test(config_dens_filter)
+    result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_heav_filter)
-    result4 = run_basic_filter_test(config_mma_sens_filter)
+    # result4 = run_basic_filter_test(config_mma_sens_filter)
+    # result5 = run_basic_filter_test(config_mma_dens_filter)

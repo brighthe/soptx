@@ -69,7 +69,7 @@ class BasicFilter(ABC):
         
         iH = bm.zeros(nfilter, dtype=bm.int32)
         jH = bm.zeros(nfilter, dtype=bm.int32)
-        sH = bm.ones(nfilter, dtype=bm.float64)
+        sH = bm.zeros(nfilter, dtype=bm.float64)
         cc = 0
 
         for i in range(nx):
@@ -124,17 +124,17 @@ class BasicFilter(ABC):
             for j in range(ny):
                 for k in range(nz):
                     # 单元的编号顺序: z -> y -> x
-                    row = k + j * nz + i * ny * nz 
-                    ii1 = max(i - (ceil(rmin/hx) - 1), 0)
-                    ii2 = min(i + (ceil(rmin/hx) - 1), nx - 1)
-                    jj1 = max(j - (ceil(rmin/hy) - 1), 0)
-                    jj2 = min(j + (ceil(rmin/hy) - 1), ny - 1)
-                    kk1 = max(k - (ceil(rmin/hz) - 1), 0)
-                    kk2 = min(k + (ceil(rmin/hz) - 1), nz - 1)
+                    row = k + j * nz + i * ny * nz
+                    ii1 = int(max(i - (ceil(rmin/hx) - 1), 0))
+                    ii2 = int(min(i + ceil(rmin/hx), nx))
+                    jj1 = int(max(j - (ceil(rmin/hy) - 1), 0))
+                    jj2 = int(min(j + ceil(rmin/hy), ny))
+                    kk1 = int(max(k - (ceil(rmin/hz) - 1), 0))
+                    kk2 = int(min(k + ceil(rmin/hz), nz))
                     
-                    for ii in range(ii1, ii2 + 1):
-                        for jj in range(jj1, jj2 + 1):
-                            for kk in range(kk1, kk2 + 1):
+                    for ii in range(ii1, ii2):
+                        for jj in range(jj1, jj2):
+                            for kk in range(kk1, kk2):
                                 # 单元的编号顺序: z -> y -> x
                                 col = kk + jj * nz + ii * ny * nz
                                 # 计算实际物理距离 
@@ -144,10 +144,11 @@ class BasicFilter(ABC):
                                                     (k - kk)**2 * hz**2
                                                 )
                                 fac = rmin - physical_dist
-                                iH[cc] = row
-                                jH[cc] = col
-                                sH[cc] = max(0.0, fac)
-                                cc += 1
+                                if fac > 0:
+                                    iH[cc] = row
+                                    jH[cc] = col
+                                    sH[cc] = max(0.0, fac)
+                                    cc += 1
 
         H = COOTensor(
             indices=bm.astype(bm.stack((iH[:cc], jH[:cc]), axis=0), bm.int32),
