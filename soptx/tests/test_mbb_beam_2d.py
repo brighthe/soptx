@@ -19,13 +19,14 @@ from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
-from soptx.opt import ComplianceObjective, VolumeConstraint
+from soptx.opt import (ComplianceObjective, ComplianceConfig,
+                       VolumeConstraint, VolumeConfig)
 from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history
 
 @dataclass
 class TestConfig:
     """Configuration for topology optimization test cases."""
-    backend: Literal['numpy', 'pytorch']
+    backend: Literal['numpy', 'pytorch', 'jax']
     pde_type: Literal['mbb_beam_2d_1']
 
     elastic_modulus: float
@@ -67,6 +68,8 @@ def create_base_components(config: TestConfig):
         bm.set_backend('numpy')
     elif config.backend == 'pytorch':
         bm.set_backend('pytorch')
+    elif config.backend == 'jax':
+        bm.set_backend('jax')
 
     if config.pde_type == 'mbb_beam_2d_1':
         pde = MBBBeam2dData1(
@@ -79,7 +82,7 @@ def create_base_components(config: TestConfig):
             origin = [0.0, 0.0]
             mesh = UniformMesh2d(
                         extent=extent, h=[config.hx, config.hy], origin=origin,
-                        ipoints_ordering='yx', flip_direction='y',
+                        ipoints_ordering='yx', flip_direction=None,
                         device='cpu'
                     )
 
@@ -118,11 +121,86 @@ def create_base_components(config: TestConfig):
         return val
     rho = space_D.interpolate(u=density_func)
 
-    objective = ComplianceObjective(solver=solver)
+    obj_config = ComplianceConfig(diff_mode=config.diff_mode)
+    objective = ComplianceObjective(solver=solver, config=obj_config)
+    cons_config = VolumeConfig(diff_mode=config.diff_mode)
     constraint = VolumeConstraint(solver=solver, 
-                                volume_fraction=config.volume_fraction)
+                                volume_fraction=config.volume_fraction,
+                                config=cons_config)
     
     return rho, objective, constraint
+
+def run_diff_mode_test(config: TestConfig) -> Dict[str, Any]:
+    """
+    测试自动微分和手动微分计算的结果.
+    """
+    rho, objective, constraint = create_base_components(config)
+    mesh = objective.solver.tensor_space.mesh
+
+    if config.filter_type == 'None':
+        filter = None
+    elif config.filter_type == 'sensitivity':
+        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius) 
+    elif config.filter_type == 'density':
+        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
+    elif config.filter_type == 'heaviside':
+        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius,
+                                            beta=1, max_beta=512, continuation_iter=50)   
+
+    if config.optimizer_type == 'oc':
+        optimizer = OCOptimizer(
+                        objective=objective,
+                        constraint=constraint,
+                        filter=filter,
+                        options={
+                            'max_iterations': config.max_iterations,
+                            'tolerance': config.tolerance,
+                        }
+                    )
+        # 设置高级参数 (可选)
+        optimizer.options.set_advanced_options(
+                                move_limit=0.2,
+                                damping_coef=0.5,
+                                initial_lambda=1e9,
+                                bisection_tol=1e-3
+                            )
+    elif config.optimizer_type == 'mma':
+        NC = mesh.number_of_cells()
+        optimizer = MMAOptimizer(
+                        objective=objective,
+                        constraint=constraint,
+                        filter=filter,
+                        options={
+                            'max_iterations': config.max_iterations,
+                            'tolerance': config.tolerance,
+                        }
+                    )
+        # 设置高级参数 (可选)
+        optimizer.options.set_advanced_options(
+                                m=1,
+                                n=NC,
+                                xmin=bm.zeros((NC, 1)),
+                                xmax=bm.ones((NC, 1)),
+                                a0=1,
+                                a=bm.zeros((1, 1)),
+                                c=1e4 * bm.ones((1, 1)),
+                                d=bm.zeros((1, 1)),
+                            )
+    else:
+        raise ValueError(f"Unsupported optimizer type: {config.optimizer_type}")
+
+    rho_opt, history = optimizer.optimize(rho=rho[:])
+    
+    # Save results
+    save_path = Path(config.save_dir)
+    save_path.mkdir(parents=True, exist_ok=True)
+    save_optimization_history(mesh, history, str(save_path))
+    
+    return {
+        'optimal_density': rho_opt,
+        'history': history,
+        'mesh': mesh
+    }
 
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     """
@@ -195,6 +273,7 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
         'history': history,
         'mesh': mesh
     }
+
 if __name__ == "__main__":
     base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
     '''
@@ -203,8 +282,7 @@ if __name__ == "__main__":
     pde_type = 'mbb_beam_2d_1'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    nx = 60
-    ny = 20
+    nx, ny = 60, 20
     hx = 1
     hy = 1
     config_sens_filter = TestConfig(
@@ -223,6 +301,26 @@ if __name__ == "__main__":
                             filter_type=filter_type, filter_radius=nx*0.04,
                             save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
+    
+    diff_modo = 'auto'
+    nx, ny = 150, 50
+    backend = 'pytorch'
+    config_sens_filter_auto = TestConfig(
+        backend=backend,
+        pde_type=pde_type,
+        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+        domain_length=nx, domain_width=ny,
+        load=-1,
+        volume_fraction=0.5,
+        penalty_factor=3.0,
+        mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+        assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+        solver_type='direct', solver_params={'solver_type': 'mumps'},
+        diff_mode=diff_modo,
+        optimizer_type='oc', max_iterations=200, tolerance=0.01,
+        filter_type='sensitivity', filter_radius=nx*0.04,
+        save_dir=f'{base_dir}/{backend}_{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}_{diff_modo}',
+    )
     filter_type = 'density'
     config_dens_filter = TestConfig(
                             backend='numpy',
@@ -293,7 +391,8 @@ if __name__ == "__main__":
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                     )
     # result1 = run_basic_filter_test(config_sens_filter)
-    result2 = run_basic_filter_test(config_dens_filter)
+    result_11 = run_diff_mode_test(config_sens_filter_auto)
+    # result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_heav_filter)
     # result4 = run_basic_filter_test(config_mma_sens_filter)
     # result5 = run_basic_filter_test(config_mma_dens_filter)

@@ -7,7 +7,7 @@ from pathlib import Path
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh3d
+from fealpy.mesh import UniformMesh3d, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
@@ -16,6 +16,7 @@ from soptx.material import (
                         )
 from soptx.pde import Cantilever3dData1
 from soptx.solver import ElasticFEMSolver, AssemblyMethod
+from soptx.utils import timer
 
 @dataclass
 class TestConfig:
@@ -71,6 +72,11 @@ def create_base_components(config: TestConfig):
                         ipoints_ordering='zyx', flip_direction=None,
                         device='cpu'
                     )
+        elif config.mesh_type == 'tetrahedron_mesh':
+            mesh = TetrahedronMesh.from_box(
+                                    box=[0, config.domain_length, 0, config.domain_width, 0, config.domain_height], 
+                                    nx=config.nx, ny=config.ny, nz=config.nz,
+                                    device='cpu')
 
     GD = mesh.geo_dimension()
     
@@ -137,6 +143,15 @@ def run_assmeble_exact_test(config: TestConfig):
                     solver_type=config.solver_type,
                     solver_params=config.solver_params 
                 )
+    
+    solver_symbol = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=AssemblyMethod.SYMBOLIC,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
     solver_s.update_status(rho[:])
     K_s = solver_s._assemble_global_stiffness_matrix()
     K_s_full = K_s.toarray()
@@ -157,6 +172,40 @@ def run_assmeble_exact_test(config: TestConfig):
     print(f"diff_K1: {bm.sum(bm.abs(K_f3u_full - K_vu_full))}")
     print(f"diff_K2: {bm.sum(bm.abs(K_vu_full - K_v_full))}")
     print(f"-------------------------------")
+
+def run_assemble_time_test(config: TestConfig):
+    """测试 SOPTX 中不同的 assembly_method 的效率."""
+    materials, tensor_space_C, pde, rho = create_base_components(config)
+
+    solver_s = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=config.assembly_method,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
+    solver_s.update_status(rho[:])
+    K_s = solver_s._assemble_global_stiffness_matrix()
+    K_s_full = K_s.toarray()
+
+    solver_f3u = ElasticFEMSolver(
+                materials=materials,
+                tensor_space=tensor_space_C,
+                pde=pde,
+                assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
+                solver_type=config.solver_type,
+                solver_params=config.solver_params 
+            )
+    
+    solver_symbol = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=AssemblyMethod.SYMBOLIC,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
 
 def run_solve_uh_exact_test(config: TestConfig):
     """测试位移求解是否正确."""
@@ -222,10 +271,10 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        mesh_type='tetrahedron_mesh', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
                         assembly_method=None,
                         solver_type='direct', 
                         solver_params={'solver_type': 'mumps'},
                         )
-    result = run_solve_uh_exact_test(config_solve_uh_exact)
-    # result2 = run_assmeble_exact_test(config_assmeble_exact)
+    # result = run_solve_uh_exact_test(config_solve_uh_exact)
+    result2 = run_assmeble_exact_test(config_assmeble_exact)

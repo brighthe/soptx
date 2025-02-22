@@ -73,6 +73,8 @@ def create_base_components(config: TestConfig):
                         ipoints_ordering='yx', flip_direction=None,
                         device='cpu'
                     )
+        elif config.mesh_type == 'triangle_mesh':
+            mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
 
     GD = mesh.geo_dimension()
     
@@ -161,6 +163,16 @@ def run_assmeble_exact_test(config: TestConfig):
                     solver_type=config.solver_type,
                     solver_params=config.solver_params 
                 )
+    
+    solver_symbol = ElasticFEMSolver(
+                materials=materials,
+                tensor_space=tensor_space_C,
+                pde=pde,
+                assembly_method=AssemblyMethod.SYMBOLIC,
+                solver_type=config.solver_type,
+                solver_params=config.solver_params 
+            )
+    
     solver_s.update_status(rho[:])
     K_s = solver_s._assemble_global_stiffness_matrix()
     K_s_full = K_s.toarray()
@@ -177,9 +189,14 @@ def run_assmeble_exact_test(config: TestConfig):
     K_v = solver_v._assemble_global_stiffness_matrix()
     K_v_full = K_v.toarray()
 
+    solver_symbol.update_status(rho[:])
+    K_symbol = solver_symbol._assemble_global_stiffness_matrix()
+    K_symbol_full = K_symbol.toarray()
+
     print(f"diff_K1: {bm.sum(bm.abs(K_s_full - K_fsu_full))}")
-    print(f"diff_K1: {bm.sum(bm.abs(K_fsu_full - K_vu_full))}")
-    print(f"diff_K2: {bm.sum(bm.abs(K_vu_full - K_v_full))}")
+    print(f"diff_K2: {bm.sum(bm.abs(K_fsu_full - K_vu_full))}")
+    print(f"diff_K3: {bm.sum(bm.abs(K_vu_full - K_v_full))}")
+    print(f"diff_K4: {bm.sum(bm.abs(K_v_full - K_symbol_full))}")
     print(f"-------------------------------")
 
 def run_solve_test(config: TestConfig):
@@ -242,72 +259,6 @@ def run_solve_uh_exact_test(config: TestConfig):
     # diff = bm.max(bm.abs(uh_cg - uh_mumps))
     # print(f"Difference between CG and MUMPS : {diff:.6e}")
 
-def run_solver_assemble_test(config: TestConfig):
-    """测试不同矩阵组装方法的 solver."""
-    materials, tensor_space_C, pde, _ = create_base_components(config)
-    mesh = tensor_space_C.scalar_space.mesh
-    space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
-    solver_f3u= ElasticFEMSolver(
-                        materials=materials,
-                        tensor_space=tensor_space_C,
-                        pde=pde,
-                        assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
-                        solver_type=config.solver_type,
-                        solver_params=config.solver_params 
-                    )
-    solver_s = ElasticFEMSolver(
-                        materials=materials,
-                        tensor_space=tensor_space_C,
-                        pde=pde,
-                        assembly_method=AssemblyMethod.STANDARD,
-                        solver_type=config.solver_type,
-                        solver_params=config.solver_params 
-                    )
-    
-    node = mesh.entity('node')
-    kwargs = bm.context(node)
-    @cartesian
-    def density_func(x: TensorLike):
-        val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
-        return val
-    from fealpy.solver import cg, spsolve
-    
-    rho_f3u = space_D.interpolate(u=density_func)
-    solver_f3u.update_status(rho_f3u[:])
-    solver_result_f3u = solver_f3u.solve()
-    K_f3u = solver_f3u.get_global_stiffness_matrix()
-    K_f3u_full = K_f3u.toarray()
-    F_f3u = solver_f3u.get_global_force_vector()
-    K_f3u_1, F_f3u_1 = solver_f3u._apply_boundary_conditions(
-                            K=K_f3u, F=F_f3u
-                        )
-    uh_f3u = solver_result_f3u.displacement
-    uh_f3u_1 = tensor_space_C.function()
-    uh_f3u_1[:] = spsolve(K_f3u_1, F_f3u_1, solver="mumps")
-
-    rho_s = space_D.interpolate(u=density_func)
-    solver_s.update_status(rho_s[:])
-    solver_result_s = solver_s.solve()
-    K_s = solver_s.get_global_stiffness_matrix()
-    K_s_full = K_s.toarray()
-    F_s = solver_s.get_global_force_vector()
-    K_s_1, F_s_1 = solver_s._apply_boundary_conditions(
-                            K=K_s, F=F_s
-                        )
-    uh_s = solver_result_s.displacement
-    uh_s_1 = tensor_space_C.function()
-    uh_s_1[:] = spsolve(K_s_1, F_s_1, solver="mumps")
-
-    print(f'diff_K: {bm.sum(bm.abs(K_f3u_full - K_s_full))}')
-    print(f"diff_F: {bm.sum(bm.abs(F_f3u - F_s))}")
-    print(f"diff_K1: {bm.sum(bm.abs(K_f3u_1.toarray() - K_s_1.toarray()))}")
-    print(f"diff_F1: {bm.sum(bm.abs(F_f3u_1 - F_s_1))}")
-    print(f"diff_uh: {bm.sum(bm.abs(uh_f3u - uh_s))}")
-    print(f"diff_uh_1: {bm.sum(bm.abs(uh_f3u_1 - uh_s_1))}")
-    print(f"uh_f3u: {bm.mean(uh_f3u):.10f}")
-    print(f"uh_s: {bm.mean(uh_s):.10f}")
-    print(f"-------------------------------")
-
 
 if __name__ == "__main__":
     config_standard_assemble = TestConfig(
@@ -342,7 +293,7 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.4,
                             penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=160, ny=100,
+                            mesh_type='triangle_mesh', nx=160, ny=100,
                             assembly_method=None,
                             solver_type='direct', 
                             solver_params={'solver_type': 'mumps'},
@@ -400,7 +351,7 @@ if __name__ == "__main__":
                             solver_params={'solver_type': 'mumps'},
                             )
     
-    result1 = run_solve_uh_exact_test(config_solve_exact_test)
+    # result1 = run_solve_uh_exact_test(config_solve_exact_test)
     # result2 = run_solver_assemble_test(config_solver_assmeble)
     # result3 = run_assmeble_time_test(config_standard_assemble)
-    # result4 = run_assmeble_exact_test(config_assmeble_exact)
+    result4 = run_assmeble_exact_test(config_assmeble_exact)

@@ -79,21 +79,49 @@ class OCOptions:
 class OptimizationHistory:
     """优化过程的历史记录"""
     densities: list       # 密度场历史
+    iteration_times: list # 迭代时间历史
+    start_time: float     # 优化开始时间
 
     def __init__(self):
         """初始化各个记录列表"""
         self.densities = []
+        self.iteration_times = []
+        self.start_time = time()
 
     def log_iteration(self, iter_idx: int, obj_val: float, volume: float, 
-                     change: float, time: float, density: TensorLike):
+                     change: float, time_cost: float, density: TensorLike):
         """记录一次迭代的信息"""
-        self.densities.append(density.copy())
+        self.densities.append(bm.copy(density))
+        self.iteration_times.append(time_cost)
         
         print(f"Iteration: {iter_idx + 1}, "
               f"Objective: {obj_val:.12f}, "
               f"Volume: {volume:.4f}, "
               f"Change: {change:.4f}, "
-              f"Time: {time:.3f} sec")
+              f"Time: {time_cost:.3f} sec")
+        
+    def get_total_time(self) -> float:
+        """获取总优化时间"""
+        return time() - self.start_time
+        
+    def get_average_iteration_time(self) -> float:
+        """获取平均每次迭代时间（排除第一次）"""
+        if len(self.iteration_times) <= 1:
+            return 0.0
+        return sum(self.iteration_times[1:]) / (len(self.iteration_times) - 1)
+        
+    def print_time_statistics(self):
+        """打印时间统计信息"""
+        total_time = self.get_total_time()
+        avg_time = self.get_average_iteration_time()
+        
+        print("\nTime Statistics:")
+        print(f"Total optimization time: {total_time:.3f} sec")
+        if len(self.iteration_times) > 0:
+            print(f"First iteration time: {self.iteration_times[0]:.3f} sec")
+        if len(self.iteration_times) > 1:
+            print(f"Average iteration time (excluding first): {avg_time:.3f} sec")
+            print(f"Number of iterations: {len(self.iteration_times)}")
 
 class OCOptimizer(OptimizerBase):
     """Optimality Criteria (OC) 优化器"""
@@ -138,7 +166,7 @@ class OCOptimizer(OptimizerBase):
         kwargs = bm.context(rho)
         
         B_e = -dc / (dg * lmid)
-        B_e_damped = bm.power(B_e, eta)
+        B_e_damped = bm.pow(B_e, eta)
 
         # OC update scheme
         rho_new = bm.maximum(
@@ -232,5 +260,8 @@ class OCOptimizer(OptimizerBase):
             if change <= tol:
                 print(f"Converged after {iter_idx + 1} iterations")
                 break
+
+        # 打印时间统计信息
+        history.print_time_statistics()
                 
         return rho, history

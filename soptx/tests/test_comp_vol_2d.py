@@ -12,7 +12,7 @@ from soptx.material import (
                             ElasticMaterialConfig,
                             ElasticMaterialInstance,
                         )
-from soptx.pde import Cantilever2dData1, Cantilever2dData2
+from soptx.pde import Cantilever2dData1, Cantilever2dData2, MBBBeam2dData1
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.opt import ComplianceObjective, VolumeConstraint
 from soptx.utils import timer
@@ -21,7 +21,7 @@ from soptx.utils import timer
 class TestConfig:
     """Configuration for topology optimization test cases."""
     backend: Literal['numpy', 'pytorch']
-    pde_type: Literal['cantilever_2d_1', 'cantilever_2d_2']
+    pde_type: Literal['cantilever_2d_1', 'cantilever_2d_2', 'mbb_beam_2d_1']
 
     elastic_modulus: float
     poisson_ratio: float
@@ -38,6 +38,8 @@ class TestConfig:
     mesh_type: Literal['uniform_mesh_2d', 'triangle_mesh']
     nx: int
     ny: int
+    hx: float
+    hy: float
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -62,16 +64,29 @@ def create_base_components(config: TestConfig):
             mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
     elif config.pde_type == 'cantilever_2d_1':
         extent = [0, config.nx, 0, config.ny]
-        h = [1.0, 1.0]
         origin = [0.0, 0.0]
         pde = Cantilever2dData1(
-                    xmin=0, xmax=extent[1] * h[0],
-                    ymin=0, ymax=extent[3] * h[1]
+                    xmin=0, xmax=extent[1] * hx,
+                    ymin=0, ymax=extent[3] * hy
                 )
         if config.mesh_type == 'uniform_mesh_2d':
             mesh = UniformMesh2d(
-                        extent=extent, h=h, origin=origin,
-                        ipoints_ordering='yx', flip_direction='y',
+                        extent=extent, h=[hx, hy], origin=origin,
+                        ipoints_ordering='yx', flip_direction=None,
+                        device='cpu'
+                    )
+    elif config.pde_type == 'mbb_beam_2d_1':
+        extent = [0, config.nx, 0, config.ny]
+        origin = [0.0, 0.0]
+        pde = MBBBeam2dData1(
+                    xmin=0, xmax=extent[1] * hx,
+                    ymin=0, ymax=extent[3] * hy,
+                    T=-1,
+                )
+        if config.mesh_type == 'uniform_mesh_2d':
+            mesh = UniformMesh2d(
+                        extent=extent, h=[hx, hy], origin=origin,
+                        ipoints_ordering='yx', flip_direction=None,
                         device='cpu'
                     )
 
@@ -186,6 +201,7 @@ def run_diff_mode_test(config: TestConfig):
     print(f"Difference Objective_diff between auto and manual : {diff_obj:.6e}")
     diff_cons = bm.max(bm.abs(dge_auto - dge_manual))
     print(f"Difference Constraint_diff between auto and manual : {diff_cons:.6e}")
+    print("--------------------------------")
 
 
 if __name__ == "__main__":
@@ -197,41 +213,51 @@ if __name__ == "__main__":
                     load=2000,
                     volume_fraction=0.5,
                     penalty_factor=3.0,
-                    mesh_type='triangle_mesh', nx=300, ny=100,
+                    mesh_type='triangle_mesh', nx=300, ny=100, hx=1, hy=1,
                     assembly_method=AssemblyMethod.STANDARD,
                     solver_type='direct', solver_params={'solver_type': 'mumps'},
                     diff_mode='manual',
                 )
-    
+    pde_type = 'mbb_beam_2d_1'
+    optimizer_type = 'oc'
+    filter_type = 'sensitivity'
+    nx, ny = 150, 50
+    hx, hy = 1, 1
+    volfrac = 0.5
     config_compliance_volume_exact_test = TestConfig(
                                 backend='numpy',
-                                pde_type='cantilever_2d_1',
+                                pde_type=pde_type,
                                 elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                                domain_length=160, domain_width=100,
+                                domain_length=nx, domain_width=ny,
                                 load=-1,
-                                volume_fraction=0.4,
+                                volume_fraction=volfrac,
                                 penalty_factor=3.0,
-                                mesh_type='uniform_mesh_2d', nx=160, ny=100,
+                                mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hx, hy=hy,
                                 assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
                                 solver_type='direct', solver_params={'solver_type': 'mumps'},
                                 diff_mode="manual",
                             )
 
+    pde_type = 'mbb_beam_2d_1'
+    optimizer_type = 'oc'
+    filter_type = 'sensitivity'
+    nx, ny = 150, 100
+    hx, hy = 1, 1
     config_diff_mode_test = TestConfig(
                                 backend='pytorch',
-                                pde_type='cantilever_2d_1',
+                                pde_type=pde_type,
                                 elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                                domain_length=160, domain_width=100,
+                                domain_length=nx, domain_width=ny,
                                 load=-1,
-                                volume_fraction=0.4,
+                                volume_fraction=0.5,
                                 penalty_factor=3.0,
-                                mesh_type='uniform_mesh_2d', nx=160, ny=100,
+                                mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hx, hy=hy,
                                 assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
                                 solver_type='direct', solver_params={'solver_type': 'mumps'},
                                 diff_mode=None,
                             )
     
-    # result1 = run_compliane_exact_test(config_compliance_volume_exact_test)
+    result1 = run_compliane_exact_test(config_compliance_volume_exact_test)
     # result2 = run_volume_exact_test(config_compliance_volume_exact_test)
-    result3 = run_diff_mode_test(config_diff_mode_test)
+    # result3 = run_diff_mode_test(config_diff_mode_test)
     

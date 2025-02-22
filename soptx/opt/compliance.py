@@ -14,13 +14,18 @@ class ComplianceConfig:
 
 class ComplianceObjective(ObjectiveBase):
     """结构柔顺度最小化问题的目标函数"""
-    def __init__(self, solver: ElasticFEMSolver):
+    def __init__(self, 
+                solver: ElasticFEMSolver, 
+                config: Optional[ComplianceConfig] = None):
         """
         Parameters
         - solver : 有限元求解器
+        - config : 柔顺度计算的配置参数, 如果为 None 则使用默认配置
         """
         self.solver = solver
         self.materials = solver.materials
+
+        self.config = config if config is not None else ComplianceConfig()
 
         # 缓存状态
         self._current_rho = None          # 当前密度场
@@ -168,17 +173,19 @@ class ComplianceObjective(ObjectiveBase):
     
     def jac(self, 
             rho: TensorLike, u: Optional[TensorLike] = None,
-            diff_mode: Literal["auto", "manual"] = "manual"
+            diff_mode: Optional[Literal["auto", "manual"]] = None
             ) -> TensorLike:
         """计算目标函数梯度
         
         Parameters
         - rho : 密度场
         - u : 可选的位移场，如果为 None 则自动计算或使用缓存的位移场
-        - diff_mode : 梯度计算方式
-            - "manual": 使用解析推导的梯度公式（默认）
+        - diff_mode : 梯度计算方式, 如果为 None 则使用配置中的默认值
+            - "manual": 使用解析推导的梯度公式
             - "auto": 使用自动微分技术
         """
+        if diff_mode is None:
+            diff_mode = self.config.diff_mode
         if diff_mode == "manual":
             dc = self._compute_gradient_manual(rho, u)
         elif diff_mode == "auto":  
