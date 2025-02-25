@@ -12,19 +12,19 @@ from soptx.utils import timer
 class BasicFilter(ABC):
     """基础滤波器抽象基类"""
     
-    def __init__(self, mesh: StructuredMesh, rmin: float):
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: Optional[list] = None):
         """
         Parameters
-        - mesh : 均匀网格
+        - mesh : 网格
         - rmin : 滤波半径 (物理距离)
+        - domain : 计算域的边界
         """
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
-        if not isinstance(mesh, StructuredMesh):
-            raise TypeError("Mesh must be StructuredMesh")
         
-        self.rmin = rmin
         self.mesh = mesh
+        self.rmin = rmin
+        self.domain = domain
         
         self._H, self._Hs = self._compute_filter_matrix()
         self._cell_measure = self.mesh.entity_measure('cell')
@@ -54,7 +54,96 @@ class BasicFilter(ABC):
                                 self.mesh.h[0], self.mesh.h[1], self.mesh.h[2],
                                 self.rmin
                             )
+        else:
+            return self._compute_filter_general(
+                                self.mesh.entity_barycenter('cell'), 
+                                self.rmin, 
+                                domain=self.domain,
+                            )
         
+    def _compute_filter_general(self, 
+                cell_centers: TensorLike,
+                rmin: float,
+                domain=None,
+                periodic=[False, False, False]
+            ) -> Tuple[COOTensor, TensorLike]:
+        """计算任意网格的滤波矩阵
+        
+        参数:
+        - cell_centers: 单元中心点坐标, 形状为 (NC, GD)
+        - rmin: 滤波半径
+        - domain: 计算域的边界, 
+            例如 [xmin, xmax, ymin, ymax] 或 [xmin, xmax, ymin, ymax, zmin, zmax]
+        - periodic: 各方向是否周期性, 默认为 [False, False, False]
+            
+        返回值:
+        - H: 滤波矩阵, 形状为 (NC, NC)
+        - Hs: 滤波矩阵行和, 形状为 (NC, )
+        """
+        #TODO 实现 3D 情况下的邻域搜索
+        GD = self.mesh.geo_dimension()
+        if GD > 2:
+            raise NotImplementedError("query_point currently only supports 2D data.\
+                                        3D implementation is not available yet.")
+    
+        # 使用 KD-tree 查询临近点
+        cell_indices, neighbor_indices = bm.query_point(
+                                            x=cell_centers, y=cell_centers, h=rmin, 
+                                            box_size=domain, mask_self=False, periodic=periodic
+                                        )
+        
+        # 计算节点总数
+        NC = cell_centers.shape[0]
+        
+        # 准备存储过滤器矩阵的数组
+        # 预估非零元素的数量（包括对角线元素）
+        max_nnz = len(cell_indices) + NC
+        iH = bm.zeros(max_nnz, dtype=bm.int32)
+        jH = bm.zeros(max_nnz, dtype=bm.int32)
+        sH = bm.zeros(max_nnz, dtype=bm.float64)
+        
+        # 首先添加对角线元素（自身单元）
+        for i in range(NC):
+            iH[i] = i
+            jH[i] = i
+            # 自身权重为 rmin（最大权重）
+            sH[i] = rmin
+        
+        # 当前非零元素计数
+        nnz = NC
+        
+        # 填充其余非零元素（邻居点）
+        for idx in range(len(cell_indices)):
+            i = cell_indices[idx]
+            j = neighbor_indices[idx]
+            
+            # 计算节点间的物理距离
+            physical_dist = bm.sqrt(bm.sum((cell_centers[i] - cell_centers[j])**2))
+            
+            # 计算权重因子
+            fac = rmin - physical_dist
+            
+            if fac > 0:
+                iH[nnz] = i
+                jH[nnz] = j
+                sH[nnz] = fac
+                nnz += 1
+        
+        # 创建稀疏矩阵（只使用有效的非零元素）
+        H = COOTensor(
+            indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
+            values=sH[:nnz],
+            spshape=(NC, NC)
+        )
+        
+        # 转换为 CSR 格式以便于后续操作
+        H = H.tocsr()
+        
+        # 计算滤波矩阵行和
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
+        
+        return H, Hs
+
     def _compute_filter_2d(self, 
                 nx: int, ny: int, 
                 hx: float, hy: float,
@@ -206,8 +295,8 @@ class BasicFilter(ABC):
 
 class SensitivityBasicFilter(BasicFilter):
     """灵敏度滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float):
-        super().__init__(mesh, rmin)
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: Optional[list] = None):
+        super().__init__(mesh, rmin, domain=domain)
     
     def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> None:
         """灵敏度滤波器的初始物理密度等于设计变量"""
@@ -231,8 +320,8 @@ class SensitivityBasicFilter(BasicFilter):
 
 class DensityBasicFilter(BasicFilter):
     """密度滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float):
-        super().__init__(mesh, rmin)
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: Optional[list] = None):
+        super().__init__(mesh, rmin, domain=domain)
     
     def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> None:
         """密度滤波器的初始物理密度等于设计变量"""

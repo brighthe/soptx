@@ -85,6 +85,9 @@ def create_base_components(config: TestConfig):
                         ipoints_ordering='yx', flip_direction=None,
                         device='cpu'
                     )
+        elif config.mesh_type == 'triangle_mesh':
+            mesh = TriangleMesh.from_box(box=pde.domain(), 
+                                        nx=config.nx, ny=config.ny)
 
     GD = mesh.geo_dimension()
     
@@ -128,7 +131,7 @@ def create_base_components(config: TestConfig):
                                 volume_fraction=config.volume_fraction,
                                 config=cons_config)
     
-    return rho, objective, constraint
+    return pde, rho, objective, constraint
 
 def run_diff_mode_test(config: TestConfig) -> Dict[str, Any]:
     """
@@ -206,13 +209,14 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     """
     测试 filter 类不同滤波器的正确性.
     """
-    rho, objective, constraint = create_base_components(config)
+    pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
     if config.filter_type == 'None':
         filter = None
     elif config.filter_type == 'sensitivity':
-        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius) 
+        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius, 
+                                        domain=pde.domain()) 
     elif config.filter_type == 'density':
         filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
     elif config.filter_type == 'heaviside':
@@ -281,11 +285,10 @@ if __name__ == "__main__":
     '''
     pde_type = 'mbb_beam_2d_1'
     optimizer_type = 'oc'
+    mesh_type = 'uniform_mesh_2d'
     filter_type = 'sensitivity'
     nx, ny = 60, 20
-    hx = 1
-    hy = 1
-    config_sens_filter = TestConfig(
+    config_u2_sens_filter = TestConfig(
                             backend='numpy',
                             pde_type=pde_type,
                             elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
@@ -293,8 +296,24 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.5,
                             penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+                            mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
                             assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                            solver_type='direct', solver_params={'solver_type': 'mumps'},
+                            diff_mode='manual',
+                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+                            filter_type=filter_type, filter_radius=nx*0.04,
+                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+                        )
+    config_tri_sens_filter = TestConfig(
+                            backend='numpy',
+                            pde_type=pde_type,
+                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                            domain_length=nx, domain_width=ny,
+                            load=-1,
+                            volume_fraction=0.5,
+                            penalty_factor=3.0,
+                            mesh_type='triangle_mesh', nx=nx, ny=ny, hx=None, hy=None,
+                            assembly_method=AssemblyMethod.STANDARD,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
@@ -304,6 +323,7 @@ if __name__ == "__main__":
     
     diff_modo = 'auto'
     nx, ny = 150, 50
+    hx, hy = 1, 1
     backend = 'pytorch'
     config_sens_filter_auto = TestConfig(
         backend=backend,
@@ -390,8 +410,8 @@ if __name__ == "__main__":
                         filter_type=filter_type, filter_radius=nx*0.04,
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                     )
-    # result1 = run_basic_filter_test(config_sens_filter)
-    result_11 = run_diff_mode_test(config_sens_filter_auto)
+    result1 = run_basic_filter_test(config_u2_sens_filter)
+    # result_11 = run_diff_mode_test(config_sens_filter_auto)
     # result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_heav_filter)
     # result4 = run_basic_filter_test(config_mma_sens_filter)
