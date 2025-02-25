@@ -278,8 +278,8 @@ if __name__ == "__main__":
                         filter_type=filter_type, filter_radius=1.5,
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                     )
-    # result1 = run_basic_filter_test(config_sens_filter)
+    result1 = run_basic_filter_test(config_sens_filter)
     # result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_mma_dens_filter)
-    result4 = run_basic_filter_test(config_mma_sens_filter)
+    # result4 = run_basic_filter_test(config_mma_sens_filter)
     

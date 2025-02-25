@@ -20,7 +20,7 @@ from soptx.utils import timer
 @dataclass
 class TestConfig:
     """Configuration for topology optimization test cases."""
-    backend: Literal['numpy', 'pytorch']
+    backend: Literal['numpy', 'pytorch', 'jax']
     pde_type: Literal['cantilever_2d_1', 'cantilever_2d_2', 'mbb_beam_2d_1']
 
     elastic_modulus: float
@@ -53,6 +53,8 @@ def create_base_components(config: TestConfig):
         bm.set_backend('numpy')
     elif config.backend == 'pytorch':
         bm.set_backend('pytorch')
+    elif config.backend == 'jax':
+        bm.set_backend('jax')
 
     if config.pde_type == 'cantilever_2d_2':
         pde = Cantilever2dData2(
@@ -225,7 +227,7 @@ if __name__ == "__main__":
     hx, hy = 1, 1
     volfrac = 0.5
     config_compliance_volume_exact_test = TestConfig(
-                                backend='numpy',
+                                backend='jax',
                                 pde_type=pde_type,
                                 elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
                                 domain_length=nx, domain_width=ny,
@@ -244,7 +246,7 @@ if __name__ == "__main__":
     nx, ny = 150, 100
     hx, hy = 1, 1
     config_diff_mode_test = TestConfig(
-                                backend='pytorch',
+                                backend='jax',
                                 pde_type=pde_type,
                                 elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
                                 domain_length=nx, domain_width=ny,
@@ -257,7 +259,7 @@ if __name__ == "__main__":
                                 diff_mode=None,
                             )
     
-    result1 = run_compliane_exact_test(config_compliance_volume_exact_test)
+    # result1 = run_compliane_exact_test(config_compliance_volume_exact_test)
     # result2 = run_volume_exact_test(config_compliance_volume_exact_test)
-    # result3 = run_diff_mode_test(config_diff_mode_test)
+    result3 = run_diff_mode_test(config_diff_mode_test)
     

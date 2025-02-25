@@ -77,11 +77,15 @@ def create_base_components(config: TestConfig):
             mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
 
     GD = mesh.geo_dimension()
+    print(f"NN: {mesh.number_of_nodes()}")
+    print(f"NC: {mesh.number_of_cells()}")
     
     p = 1
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
+    print(f"CGDOF: {tensor_space_C.number_of_global_dofs()}")
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
+    print(f"DGDOF: {space_D.number_of_global_dofs()}")
     
     material_config = ElasticMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
@@ -118,7 +122,7 @@ def run_assmeble_time_test(config: TestConfig):
                 )
     for i in range(5):
         # 创建计时器
-        t = timer(f"{config.assembly_method} Timing")
+        t = timer(f"{config.assembly_method}")
         next(t)  # 启动计时器
         solver.update_status(rho[:])
         t.send('准备时间')
@@ -164,14 +168,14 @@ def run_assmeble_exact_test(config: TestConfig):
                     solver_params=config.solver_params 
                 )
     
-    solver_symbol = ElasticFEMSolver(
-                materials=materials,
-                tensor_space=tensor_space_C,
-                pde=pde,
-                assembly_method=AssemblyMethod.SYMBOLIC,
-                solver_type=config.solver_type,
-                solver_params=config.solver_params 
-            )
+    # solver_symbol = ElasticFEMSolver(
+    #             materials=materials,
+    #             tensor_space=tensor_space_C,
+    #             pde=pde,
+    #             assembly_method=AssemblyMethod.SYMBOLIC,
+    #             solver_type=config.solver_type,
+    #             solver_params=config.solver_params 
+    #         )
     
     solver_s.update_status(rho[:])
     K_s = solver_s._assemble_global_stiffness_matrix()
@@ -189,14 +193,14 @@ def run_assmeble_exact_test(config: TestConfig):
     K_v = solver_v._assemble_global_stiffness_matrix()
     K_v_full = K_v.toarray()
 
-    solver_symbol.update_status(rho[:])
-    K_symbol = solver_symbol._assemble_global_stiffness_matrix()
-    K_symbol_full = K_symbol.toarray()
+    # solver_symbol.update_status(rho[:])
+    # K_symbol = solver_symbol._assemble_global_stiffness_matrix()
+    # K_symbol_full = K_symbol.toarray()
 
     print(f"diff_K1: {bm.sum(bm.abs(K_s_full - K_fsu_full))}")
     print(f"diff_K2: {bm.sum(bm.abs(K_fsu_full - K_vu_full))}")
     print(f"diff_K3: {bm.sum(bm.abs(K_vu_full - K_v_full))}")
-    print(f"diff_K4: {bm.sum(bm.abs(K_v_full - K_symbol_full))}")
+    # print(f"diff_K4: {bm.sum(bm.abs(K_v_full - K_symbol_full))}")
     print(f"-------------------------------")
 
 def run_solve_test(config: TestConfig):
@@ -285,6 +289,7 @@ if __name__ == "__main__":
                                     assembly_method=AssemblyMethod.SYMBOLIC,
                                     solver_type='direct', solver_params={'solver_type': 'mumps'},
                                 )
+    
     config_assmeble_exact = TestConfig(
                             backend='numpy',
                             pde_type='cantilever_2d_1',
@@ -293,7 +298,7 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.4,
                             penalty_factor=3.0,
-                            mesh_type='triangle_mesh', nx=160, ny=100,
+                            mesh_type='uniform_mesh_2d', nx=160, ny=100,
                             assembly_method=None,
                             solver_type='direct', 
                             solver_params={'solver_type': 'mumps'},
@@ -353,5 +358,5 @@ if __name__ == "__main__":
     
     # result1 = run_solve_uh_exact_test(config_solve_exact_test)
     # result2 = run_solver_assemble_test(config_solver_assmeble)
-    # result3 = run_assmeble_time_test(config_standard_assemble)
-    result4 = run_assmeble_exact_test(config_assmeble_exact)
+    result3 = run_assmeble_time_test(config_standard_assemble)
+    # result4 = run_assmeble_exact_test(config_assmeble_exact)

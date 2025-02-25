@@ -84,6 +84,7 @@ def create_base_components(config: TestConfig):
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
+    print(f"CGDOF: {tensor_space_C.number_of_global_dofs()}")
     
     material_config = ElasticMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
@@ -144,14 +145,14 @@ def run_assmeble_exact_test(config: TestConfig):
                     solver_params=config.solver_params 
                 )
     
-    solver_symbol = ElasticFEMSolver(
-                    materials=materials,
-                    tensor_space=tensor_space_C,
-                    pde=pde,
-                    assembly_method=AssemblyMethod.SYMBOLIC,
-                    solver_type=config.solver_type,
-                    solver_params=config.solver_params 
-                )
+    # solver_symbol = ElasticFEMSolver(
+    #                 materials=materials,
+    #                 tensor_space=tensor_space_C,
+    #                 pde=pde,
+    #                 assembly_method=AssemblyMethod.SYMBOLIC,
+    #                 solver_type=config.solver_type,
+    #                 solver_params=config.solver_params 
+    #             )
     solver_s.update_status(rho[:])
     K_s = solver_s._assemble_global_stiffness_matrix()
     K_s_full = K_s.toarray()
@@ -177,7 +178,7 @@ def run_assemble_time_test(config: TestConfig):
     """测试 SOPTX 中不同的 assembly_method 的效率."""
     materials, tensor_space_C, pde, rho = create_base_components(config)
 
-    solver_s = ElasticFEMSolver(
+    solver = ElasticFEMSolver(
                     materials=materials,
                     tensor_space=tensor_space_C,
                     pde=pde,
@@ -185,27 +186,15 @@ def run_assemble_time_test(config: TestConfig):
                     solver_type=config.solver_type,
                     solver_params=config.solver_params 
                 )
-    solver_s.update_status(rho[:])
-    K_s = solver_s._assemble_global_stiffness_matrix()
-    K_s_full = K_s.toarray()
-
-    solver_f3u = ElasticFEMSolver(
-                materials=materials,
-                tensor_space=tensor_space_C,
-                pde=pde,
-                assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
-                solver_type=config.solver_type,
-                solver_params=config.solver_params 
-            )
-    
-    solver_symbol = ElasticFEMSolver(
-                    materials=materials,
-                    tensor_space=tensor_space_C,
-                    pde=pde,
-                    assembly_method=AssemblyMethod.SYMBOLIC,
-                    solver_type=config.solver_type,
-                    solver_params=config.solver_params 
-                )
+    for i in range(5):
+        # 创建计时器
+        t = timer(f"{config.assembly_method}")
+        next(t)  # 启动计时器
+        solver.update_status(rho[:])
+        t.send('准备时间')
+        K = solver._assemble_global_stiffness_matrix()
+        t.send('组装时间')
+        t.send(None)
 
 def run_solve_uh_exact_test(config: TestConfig):
     """测试位移求解是否正确."""
@@ -271,10 +260,11 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='tetrahedron_mesh', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                        assembly_method=None,
+                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        assembly_method=AssemblyMethod.STANDARD,
                         solver_type='direct', 
                         solver_params={'solver_type': 'mumps'},
                         )
     # result = run_solve_uh_exact_test(config_solve_uh_exact)
-    result2 = run_assmeble_exact_test(config_assmeble_exact)
+    # result2 = run_assmeble_exact_test(config_assmeble_exact)
+    result3 = run_assemble_time_test(config=config_assmeble_exact)
