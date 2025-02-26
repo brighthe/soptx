@@ -284,11 +284,12 @@ if __name__ == "__main__":
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
     pde_type = 'mbb_beam_2d_1'
-    optimizer_type = 'oc'
     mesh_type = 'uniform_mesh_2d'
+    # mesh_type = 'triangle_mesh'
+    optimizer_type = 'oc'
     filter_type = 'sensitivity'
     nx, ny = 60, 20
-    config_u2_sens_filter = TestConfig(
+    config_basic_filter = TestConfig(
                             backend='numpy',
                             pde_type=pde_type,
                             elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
@@ -297,14 +298,15 @@ if __name__ == "__main__":
                             volume_fraction=0.5,
                             penalty_factor=3.0,
                             mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
-                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                            assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
                             filter_type=filter_type, filter_radius=nx*0.04,
                             save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
-    config_tri_sens_filter = TestConfig(
+    mesh_type = 'triangle_mesh'
+    config_t_sens = TestConfig(
                             backend='numpy',
                             pde_type=pde_type,
                             elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
@@ -312,13 +314,13 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.5,
                             penalty_factor=3.0,
-                            mesh_type='triangle_mesh', nx=nx, ny=ny, hx=None, hy=None,
-                            assembly_method=AssemblyMethod.STANDARD,
+                            mesh_type=mesh_type, nx=nx, ny=ny, hx=None, hy=None,
+                            assembly_method=AssemblyMethod.SYMBOLIC,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
                             filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
     
     diff_modo = 'auto'
@@ -334,7 +336,7 @@ if __name__ == "__main__":
         volume_fraction=0.5,
         penalty_factor=3.0,
         mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-        assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+        assembly_method=AssemblyMethod.FAST,
         solver_type='direct', solver_params={'solver_type': 'mumps'},
         diff_mode=diff_modo,
         optimizer_type='oc', max_iterations=200, tolerance=0.01,
@@ -351,7 +353,7 @@ if __name__ == "__main__":
                             volume_fraction=0.5,
                             penalty_factor=3.0,
                             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                            assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=400, tolerance=0.01,
@@ -368,7 +370,7 @@ if __name__ == "__main__":
                             volume_fraction=0.5,
                             penalty_factor=3.0,
                             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                            assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=600, tolerance=0.01,
@@ -386,7 +388,7 @@ if __name__ == "__main__":
                         volume_fraction=0.5,
                         penalty_factor=3.0,
                         mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                        assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                        assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',
                         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
@@ -403,14 +405,14 @@ if __name__ == "__main__":
                         volume_fraction=0.5,
                         penalty_factor=3.0,
                         mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                        assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
+                        assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',
                         optimizer_type=optimizer_type, max_iterations=500, tolerance=0.01,
                         filter_type=filter_type, filter_radius=nx*0.04,
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                     )
-    result1 = run_basic_filter_test(config_u2_sens_filter)
+    result1 = run_basic_filter_test(config_basic_filter)
     # result_11 = run_diff_mode_test(config_sens_filter_auto)
     # result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_heav_filter)

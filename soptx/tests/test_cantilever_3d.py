@@ -87,6 +87,9 @@ def create_base_components(config: TestConfig):
                         ipoints_ordering='zyx', flip_direction=None,
                         device='cpu'
                     )
+        elif config.mesh_type == 'tetrahedron_mesh':
+            mesh = TetrahedronMesh.from_box(box=pde.domain(), 
+                                            nx=config.nx, ny=config.ny, nz=config.nz)
 
     GD = mesh.geo_dimension()
     
@@ -127,23 +130,23 @@ def create_base_components(config: TestConfig):
     constraint = VolumeConstraint(solver=solver, 
                                 volume_fraction=config.volume_fraction)
     
-    return rho, objective, constraint
+    return pde, rho, objective, constraint
 
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     """
     测试 filter 类不同滤波器的正确性.
     """
-    rho, objective, constraint = create_base_components(config)
+    pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
     if config.filter_type == 'None':
         filter = None
     elif config.filter_type == 'sensitivity':
-        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius) 
+        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain()) 
     elif config.filter_type == 'density':
-        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
+        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())
     elif config.filter_type == 'heaviside':
-        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius)   
+        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())   
 
     if config.optimizer_type == 'oc':
         optimizer = OCOptimizer(
@@ -206,11 +209,13 @@ if __name__ == "__main__":
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
     pde_type = 'cantilever_3d_1'
+    # mesh_type = 'tetrahedron_mesh'
+    mesh_type = 'uniform_mesh_3d'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
     nx, ny, nz = 60, 20, 4
     hx, hy, hz = 1, 1, 1
-    config_sens_filter = TestConfig(
+    config_basic_filter = TestConfig(
                             backend='numpy',
                             pde_type=pde_type,
                             elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
@@ -218,13 +223,13 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.3,
                             penalty_factor=3.0,
-                            mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                            assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
+                            mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                            assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
                             filter_type=filter_type, filter_radius=1.5,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
+                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                         )
     filter_type = 'density'
     config_dens_filter = TestConfig(
@@ -236,7 +241,7 @@ if __name__ == "__main__":
                             volume_fraction=0.3,
                             penalty_factor=3.0,
                             mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                            assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
+                            assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
                             optimizer_type=optimizer_type, max_iterations=400, tolerance=0.01,
@@ -254,7 +259,7 @@ if __name__ == "__main__":
                         volume_fraction=0.3,
                         penalty_factor=3.0,
                         mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                        assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
+                        assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',
                         optimizer_type=optimizer_type, max_iterations=500, tolerance=0.01,
@@ -271,14 +276,14 @@ if __name__ == "__main__":
                         volume_fraction=0.3,
                         penalty_factor=3.0,
                         mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                        assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
+                        assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',
                         optimizer_type=optimizer_type, max_iterations=110, tolerance=0.01,
                         filter_type=filter_type, filter_radius=1.5,
                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
                     )
-    result1 = run_basic_filter_test(config_sens_filter)
+    result1 = run_basic_filter_test(config_basic_filter )
     # result2 = run_basic_filter_test(config_dens_filter)
     # result3 = run_basic_filter_test(config_mma_dens_filter)
     # result4 = run_basic_filter_test(config_mma_sens_filter)

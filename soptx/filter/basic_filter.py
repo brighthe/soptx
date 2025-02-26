@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Literal, Tuple
+from typing import Optional, Literal, Tuple, List
 from math import ceil, sqrt
 
 from fealpy.backend import backend_manager as bm
@@ -12,7 +12,7 @@ from soptx.utils import timer
 class BasicFilter(ABC):
     """基础滤波器抽象基类"""
     
-    def __init__(self, mesh: StructuredMesh, rmin: float, domain: Optional[list] = None):
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List):
         """
         Parameters
         - mesh : 网格
@@ -80,12 +80,6 @@ class BasicFilter(ABC):
         - H: 滤波矩阵, 形状为 (NC, NC)
         - Hs: 滤波矩阵行和, 形状为 (NC, )
         """
-        #TODO 实现 3D 情况下的邻域搜索
-        GD = self.mesh.geo_dimension()
-        if GD > 2:
-            raise NotImplementedError("query_point currently only supports 2D data.\
-                                        3D implementation is not available yet.")
-    
         # 使用 KD-tree 查询临近点
         cell_indices, neighbor_indices = bm.query_point(
                                             x=cell_centers, y=cell_centers, h=rmin, 
@@ -149,9 +143,7 @@ class BasicFilter(ABC):
                 hx: float, hy: float,
                 rmin: float
             ) -> Tuple[COOTensor, TensorLike]:
-        """计算 2D 滤波矩阵
-        TODO 能否使用 kd-tree 优化邻域搜索 (query_ipoint 函数)
-        """
+        """计算 2D 滤波矩阵"""
         min_h = min(hx, hy)
         max_cells = ceil(rmin/min_h)
         nfilter = int(nx * ny * ((2 * (max_cells - 1) + 1) ** 2))
@@ -295,7 +287,7 @@ class BasicFilter(ABC):
 
 class SensitivityBasicFilter(BasicFilter):
     """灵敏度滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float, domain: Optional[list] = None):
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List):
         super().__init__(mesh, rmin, domain=domain)
     
     def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> None:
@@ -320,7 +312,7 @@ class SensitivityBasicFilter(BasicFilter):
 
 class DensityBasicFilter(BasicFilter):
     """密度滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float, domain: Optional[list] = None):
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List):
         super().__init__(mesh, rmin, domain=domain)
     
     def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> None:
@@ -353,7 +345,7 @@ class DensityBasicFilter(BasicFilter):
 
 class HeavisideProjectionBasicFilter(BasicFilter):
     """Heaviside 投影滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float, 
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List,
                 beta: float = 1.0, max_beta: float = 512, continuation_iter: int = 50):
         """
         Parameters
@@ -361,7 +353,7 @@ class HeavisideProjectionBasicFilter(BasicFilter):
         - rmin : 滤波半径 (物理距离)
         - beta : Heaviside 投影参数
         """
-        super().__init__(mesh, rmin)
+        super().__init__(mesh, rmin, domain=domain)
         if beta <= 0:
             raise ValueError("Heaviside beta must be positive")
             

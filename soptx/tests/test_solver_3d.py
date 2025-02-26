@@ -111,7 +111,7 @@ def run_assmeble_exact_test(config: TestConfig):
     """测试 SOPTX 中不同的 assembly_method 的正确性."""
     materials, tensor_space_C, pde, rho = create_base_components(config)
 
-    solver_s = ElasticFEMSolver(
+    solver_sta = ElasticFEMSolver(
                     materials=materials,
                     tensor_space=tensor_space_C,
                     pde=pde,
@@ -119,24 +119,7 @@ def run_assmeble_exact_test(config: TestConfig):
                     solver_type=config.solver_type,
                     solver_params=config.solver_params 
                 )
-    solver_f3u = ElasticFEMSolver(
-                    materials=materials,
-                    tensor_space=tensor_space_C,
-                    pde=pde,
-                    assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
-                    solver_type=config.solver_type,
-                    solver_params=config.solver_params 
-                )
-    solver_vu = ElasticFEMSolver(
-                    materials=materials,
-                    tensor_space=tensor_space_C,
-                    pde=pde,
-                    assembly_method=AssemblyMethod.VOIGT_UNIFORM,
-                    solver_type=config.solver_type,
-                    solver_params=config.solver_params 
-                )
-    
-    solver_v = ElasticFEMSolver(
+    solver_voi = ElasticFEMSolver(
                     materials=materials,
                     tensor_space=tensor_space_C,
                     pde=pde,
@@ -144,34 +127,42 @@ def run_assmeble_exact_test(config: TestConfig):
                     solver_type=config.solver_type,
                     solver_params=config.solver_params 
                 )
+    solver_fas = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=AssemblyMethod.FAST,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
+    solver_sym = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=AssemblyMethod.SYMBOLIC,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
     
-    # solver_symbol = ElasticFEMSolver(
-    #                 materials=materials,
-    #                 tensor_space=tensor_space_C,
-    #                 pde=pde,
-    #                 assembly_method=AssemblyMethod.SYMBOLIC,
-    #                 solver_type=config.solver_type,
-    #                 solver_params=config.solver_params 
-    #             )
-    solver_s.update_status(rho[:])
-    K_s = solver_s._assemble_global_stiffness_matrix()
-    K_s_full = K_s.toarray()
+    solver_sta.update_status(rho[:])
+    K_sta = solver_sta._assemble_global_stiffness_matrix()
+    K_sta_full = K_sta.toarray()
 
-    solver_f3u.update_status(rho[:])
-    K_f3u = solver_f3u._assemble_global_stiffness_matrix()
-    K_f3u_full = K_f3u.toarray()
+    solver_voi.update_status(rho[:])
+    K_voi = solver_voi._assemble_global_stiffness_matrix()
+    K_voi_full = K_voi.toarray()
 
-    solver_vu.update_status(rho[:])
-    K_vu = solver_vu._assemble_global_stiffness_matrix()
-    K_vu_full = K_vu.toarray()
+    solver_fas.update_status(rho[:])
+    K_fas = solver_fas._assemble_global_stiffness_matrix()
+    K_fas_full = K_fas.toarray()
 
-    solver_v.update_status(rho[:])
-    K_v = solver_v._assemble_global_stiffness_matrix()
-    K_v_full = K_v.toarray()
+    solver_sym.update_status(rho[:])
+    K_sym = solver_sym._assemble_global_stiffness_matrix()
+    K_sym_full = K_sym.toarray()
 
-    print(f"diff_K1: {bm.sum(bm.abs(K_s_full - K_f3u_full))}")
-    print(f"diff_K1: {bm.sum(bm.abs(K_f3u_full - K_vu_full))}")
-    print(f"diff_K2: {bm.sum(bm.abs(K_vu_full - K_v_full))}")
+    print(f"diff_K1: {bm.sum(bm.abs(K_sta_full - K_voi_full))}")
+    print(f"diff_K2: {bm.sum(bm.abs(K_voi_full - K_fas_full))}")
+    print(f"diff_K3: {bm.sum(bm.abs(K_fas_full - K_sym_full))}")
     print(f"-------------------------------")
 
 def run_assemble_time_test(config: TestConfig):
@@ -240,18 +231,18 @@ if __name__ == "__main__":
     filter_type = 'sensitivity'
     nx, ny, nz = 60, 20, 4
     hx, hy, hz = 1, 1, 1
-    config_solve_uh_exact = TestConfig(
-            backend='numpy',
-            pde_type=pde_type,
-            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-            domain_length=nx, domain_width=ny, domain_height=nz,
-            load=-1,
-            volume_fraction=0.3,
-            penalty_factor=3.0,
-            mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-            assembly_method=AssemblyMethod.FAST_3D_UNIFORM,
-            solver_type='direct', solver_params={'solver_type': 'mumps'},
-        )
+    config_assemble_time = TestConfig(
+                        backend='numpy',
+                        pde_type=pde_type,
+                        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                        domain_length=nx, domain_width=ny, domain_height=nz,
+                        load=-1,
+                        volume_fraction=0.3,
+                        penalty_factor=3.0,
+                        mesh_type='tetrahedron_mesh', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        assembly_method=AssemblyMethod.STANDARD,
+                        solver_type='direct', solver_params={'solver_type': 'mumps'},
+                    )
     config_assmeble_exact = TestConfig(
                         backend='numpy',
                         pde_type='cantilever_3d_1',
@@ -260,11 +251,11 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                        assembly_method=AssemblyMethod.STANDARD,
+                        mesh_type='tetrahedron_mesh', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        assembly_method=None,
                         solver_type='direct', 
                         solver_params={'solver_type': 'mumps'},
                         )
     # result = run_solve_uh_exact_test(config_solve_uh_exact)
-    # result2 = run_assmeble_exact_test(config_assmeble_exact)
-    result3 = run_assemble_time_test(config=config_assmeble_exact)
+    result2 = run_assmeble_exact_test(config_assmeble_exact)
+    # result3 = run_assemble_time_test(config=config_assemble_time)
