@@ -305,23 +305,6 @@ if __name__ == "__main__":
                             filter_type=filter_type, filter_radius=nx*0.04,
                             save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
-    mesh_type = 'triangle_mesh'
-    config_t_sens = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.5,
-                            penalty_factor=3.0,
-                            mesh_type=mesh_type, nx=nx, ny=ny, hx=None, hy=None,
-                            assembly_method=AssemblyMethod.SYMBOLIC,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                        )
     
     diff_modo = 'auto'
     nx, ny = 150, 50

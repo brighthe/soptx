@@ -209,12 +209,11 @@ if __name__ == "__main__":
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
     pde_type = 'cantilever_3d_1'
-    # mesh_type = 'tetrahedron_mesh'
-    mesh_type = 'uniform_mesh_3d'
+    mesh_type = 'tetrahedron_mesh'
+    # mesh_type = 'uniform_mesh_3d'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
     nx, ny, nz = 60, 20, 4
-    hx, hy, hz = 1, 1, 1
     config_basic_filter = TestConfig(
                             backend='numpy',
                             pde_type=pde_type,
@@ -223,7 +222,7 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.3,
                             penalty_factor=3.0,
-                            mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                            mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
                             assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
@@ -240,7 +239,7 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.3,
                             penalty_factor=3.0,
-                            mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                            mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
                             assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
@@ -258,7 +257,7 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
                         assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',
@@ -275,7 +274,7 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
                         assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',

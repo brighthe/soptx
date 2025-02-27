@@ -11,21 +11,11 @@ struc = ones(nely, nelx);
 shapeSens = zeros(nely, nelx); topSens = zeros(nely, nelx);
 [KE, KTr, lambda, mu] = materialInfo();
 
-% 打开一个文件用于写入
-fileID = fopen('results.txt', 'w');
-% 写入标题
-fprintf(fileID, 'It\tCompl\tVol\n');
-
-% 创建一个视频写入对象
-v = VideoWriter('topology_optimization.avi');
-v.FrameRate = 10; % 设置帧率
-open(v);
-
 % Main loop
 num = 200;
 for iterNum = 1:num
     % FE-analysis, calculate sensitivities
-    [U] = FE(struc, KE);
+    [U] = FE_cantilever(struc, KE);
     for ely = 1:nely
         for elx = 1:nelx
                 n1 = (nely+1)*(elx-1)+ely;
@@ -42,15 +32,8 @@ for iterNum = 1:num
     volCurr = sum(struc(:))/(nelx*nely);
     disp([' It.: ' num2str(iterNum) 'Compl.: ' sprintf('%10.4f', objective(iterNum)) ...,
                                        'Vol.:' sprintf('%6.3f', volCurr)]);
-    % 保存结果到文件
-    % 保存结果到文件
-    fprintf(fileID, '%4i\t%10.4f\t%6.3f\n', iterNum, objective(iterNum), volCurr);
-
 
     colormap("gray");imagesc(-struc, [-1,0]); axis equal; axis tight; axis off; drawnow;
-    % 捕捉当前帧并写入视频
-    frame = getframe(gcf);
-    writeVideo(v, frame);
 
     % Check for convergence
     if iterNum > 5 && (abs(volCurr-volReq)<0.005) && ...,
@@ -68,15 +51,9 @@ for iterNum = 1:num
     topSens = topSens + pi*(la - 1/La*(volCurr-volReq));
 
     % Design update
-    [struc, lsf] = updateStep(lsf, shapeSens, topSens, stepLength, topWeight);
+    [struc, lsf] = updateStep_cantilever(lsf, shapeSens, topSens, stepLength, topWeight);
 
     if ~mod(iterNum, numReinit)
         [lsf] = reinit(struc);
     end
 end
-
-% 关闭文件
-fclose(fileID);
-
-% 关闭视频写入对象
-close(v);
