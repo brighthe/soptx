@@ -26,9 +26,7 @@ class AssemblyMethod(Enum):
     """矩阵组装方法的枚举类"""
     STANDARD = auto()             # 标准组装
     VOIGT = auto()                # Voigt 格式组装
-    VOIGT_UNIFORM = auto          # Voigt 格式组装 (一致网格)
-    FAST_STRESS_UNIFORM = auto()  # 2D 应力快速组装 (一致网格)
-    FAST_3D_UNIFORM = auto()      # 3D 快速组装 (一致网格)
+    FAST = auto()                 # 快速组装
     SYMBOLIC = auto()             # 符号组装
 
 class ElasticFEMSolver:
@@ -73,9 +71,6 @@ class ElasticFEMSolver:
             
         # 缓存
         self._base_local_stiffness_matrix = None
-        self._global_stiffness_matrix = None
-        self._global_force_vector = None
-
 
     #---------------------------------------------------------------------------
     # 公共属性
@@ -106,39 +101,23 @@ class ElasticFEMSolver:
 
         # 2. 根据新密度更新材料属性
         self.materials.update_elastic_modulus(self._current_density)
-
-        # 3. 清除依赖于密度的缓存
-        self._global_stiffness_matrix = None
-        self._global_force_vector = None
-
-    #---------------------------------------------------------------------------
-    # 矩阵计算和缓存相关方法
-    #---------------------------------------------------------------------------
-    def get_global_stiffness_matrix(self) -> Optional[CSRTensor]:
-        """获取最近一次求解时的全局刚度矩阵"""
-        return self._global_stiffness_matrix
-        
-    def get_global_force_vector(self) -> Optional[TensorLike]:
-        """获取最近一次求解时的全局载荷向量"""
-        return self._global_force_vector
     
     def get_base_local_stiffness_matrix(self) -> TensorLike:
-        """获取基础材料的局部刚度矩阵（会被缓存）"""
+        """获取基础材料的局部刚度矩阵 (会被缓存)"""
         if self._base_local_stiffness_matrix is None:
             base_material = self.materials.get_base_material()
             integrator = LinearElasticIntegrator(
                                 material=base_material,
                                 q=self.tensor_space.p+3,
-                                method='voigt_uniform'
+                                method=None
                             )
-            self._base_local_stiffness_matrix = integrator.voigt_assembly_uniform(space=self.tensor_space)
+            self._base_local_stiffness_matrix = integrator.assembly(space=self.tensor_space)
 
         return self._base_local_stiffness_matrix
     
     def compute_local_stiffness_matrix(self) -> TensorLike:
         """计算当前材料的局部刚度矩阵（每次重新计算）"""
-        if self._current_material is None:
-            raise ValueError("Material not initialized. Call update_density first.")
+
         
         integrator = self._integrator
  
@@ -146,9 +125,7 @@ class ElasticFEMSolver:
         method_map = {
             AssemblyMethod.STANDARD: integrator.assembly,
             AssemblyMethod.VOIGT: integrator.voigt_assembly,
-            AssemblyMethod.VOIGT_UNIFORM: integrator.voigt_assembly_uniform,
-            AssemblyMethod.FAST_STRESS_UNIFORM: integrator.fast_assembly_stress_uniform,
-            AssemblyMethod.FAST_3D_UNIFORM: integrator.fast_assembly_uniform,
+            AssemblyMethod.FAST: integrator.fast_assembly,
             AssemblyMethod.SYMBOLIC: integrator.symbolic_assembly,
         }
         
@@ -171,9 +148,7 @@ class ElasticFEMSolver:
         method_map = {
             AssemblyMethod.STANDARD: 'assembly',
             AssemblyMethod.VOIGT: 'voigt',
-            AssemblyMethod.VOIGT_UNIFORM: 'voigt_uniform',
-            AssemblyMethod.FAST_STRESS_UNIFORM: 'fast_stress_uniform',
-            AssemblyMethod.FAST_3D_UNIFORM: 'fast_3d_uniform',
+            AssemblyMethod.FAST: 'fast',
             AssemblyMethod.SYMBOLIC: 'symbolic',
         }
         
@@ -196,16 +171,12 @@ class ElasticFEMSolver:
         bform.add_integrator(integrator)
         K = bform.assembly(format='csr')
 
-        self._global_stiffness_matrix = K
-
         return K
     
     def _assemble_global_force_vector(self) -> TensorLike:
         """组装全局载荷向量"""
         force = self.pde.force
         F = self.tensor_space.interpolate(force)
-
-        self._global_force_vector = F
 
         return F
     

@@ -12,6 +12,7 @@ from soptx.filter import (BasicFilter,
                           SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
+from soptx.utils import timer
 
 @dataclass
 class OCOptions:
@@ -78,21 +79,49 @@ class OCOptions:
 class OptimizationHistory:
     """优化过程的历史记录"""
     densities: list       # 密度场历史
+    iteration_times: list # 迭代时间历史
+    start_time: float     # 优化开始时间
 
     def __init__(self):
         """初始化各个记录列表"""
         self.densities = []
+        self.iteration_times = []
+        self.start_time = time()
 
     def log_iteration(self, iter_idx: int, obj_val: float, volume: float, 
-                     change: float, time: float, density: TensorLike):
+                     change: float, time_cost: float, density: TensorLike):
         """记录一次迭代的信息"""
-        self.densities.append(density.copy())
+        self.densities.append(bm.copy(density))
+        self.iteration_times.append(time_cost)
         
         print(f"Iteration: {iter_idx + 1}, "
-              f"Objective: {obj_val:.4f}, "
+              f"Objective: {obj_val:.12f}, "
               f"Volume: {volume:.4f}, "
               f"Change: {change:.4f}, "
-              f"Time: {time:.3f} sec")
+              f"Time: {time_cost:.3f} sec")
+        
+    def get_total_time(self) -> float:
+        """获取总优化时间"""
+        return time() - self.start_time
+        
+    def get_average_iteration_time(self) -> float:
+        """获取平均每次迭代时间（排除第一次）"""
+        if len(self.iteration_times) <= 1:
+            return 0.0
+        return sum(self.iteration_times[1:]) / (len(self.iteration_times) - 1)
+        
+    def print_time_statistics(self):
+        """打印时间统计信息"""
+        total_time = self.get_total_time()
+        avg_time = self.get_average_iteration_time()
+        
+        print("\nTime Statistics:")
+        print(f"Total optimization time: {total_time:.3f} sec")
+        if len(self.iteration_times) > 0:
+            print(f"First iteration time: {self.iteration_times[0]:.3f} sec")
+        if len(self.iteration_times) > 1:
+            print(f"Average iteration time (excluding first): {avg_time:.3f} sec")
+            print(f"Number of iterations: {len(self.iteration_times)}")
 
 class OCOptimizer(OptimizerBase):
     """Optimality Criteria (OC) 优化器"""
@@ -133,17 +162,19 @@ class OCOptimizer(OptimizerBase):
         """使用 OC 准则更新密度"""
         m = self.options.move_limit
         eta = self.options.damping_coef
+
+        kwargs = bm.context(rho)
         
         B_e = -dc / (dg * lmid)
-        B_e_damped = bm.power(B_e, eta)
+        B_e_damped = bm.pow(B_e, eta)
 
         # OC update scheme
         rho_new = bm.maximum(
-            bm.tensor(0.0, dtype=rho.dtype), 
+            bm.tensor(0.0, **kwargs), 
             bm.maximum(
                 rho - m, 
                 bm.minimum(
-                    bm.tensor(1.0, dtype=rho.dtype), 
+                    bm.tensor(1.0, **kwargs), 
                     bm.minimum(
                         rho + m, 
                         rho * B_e_damped
@@ -166,7 +197,8 @@ class OCOptimizer(OptimizerBase):
         tol = self.options.tolerance
         bisection_tol = self.options.bisection_tol
         
-        rho_phys = bm.zeros_like(rho)
+        tensor_kwargs = bm.context(rho)
+        rho_phys = bm.zeros_like(rho, **tensor_kwargs)
         if self.filter is not None:
             self.filter.get_initial_density(rho, rho_phys)
         else:
@@ -184,16 +216,15 @@ class OCOptimizer(OptimizerBase):
             obj_grad = self.objective.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
-            
+
             # 使用物理密度计算约束值和梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
-
+            
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
-            
             while (l2 - l1) / (l2 + l1) > bisection_tol:
                 lmid = 0.5 * (l2 + l1)
                 rho_new = self._update_density(rho, obj_grad, con_grad, lmid)
@@ -203,13 +234,12 @@ class OCOptimizer(OptimizerBase):
                     self.filter.filter_variables(rho_new, rho_phys)
                 else:
                     rho_phys = rho_new
-                    
+
                 # 检查约束
                 if self.constraint.fun(rho_phys) > 0:
                     l1 = lmid
                 else:
                     l2 = lmid
-
             # 计算收敛性
             change = bm.max(bm.abs(rho_new - rho))
             # 更新设计变量，确保目标函数内部状态同步
@@ -230,5 +260,8 @@ class OCOptimizer(OptimizerBase):
             if change <= tol:
                 print(f"Converged after {iter_idx + 1} iterations")
                 break
+
+        # 打印时间统计信息
+        history.print_time_statistics()
                 
         return rho, history

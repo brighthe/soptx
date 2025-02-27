@@ -16,15 +16,19 @@ class VolumeConstraint(ConstraintBase):
     """不等式体积约束"""
     def __init__(self,
                 solver: ElasticFEMSolver,
-                volume_fraction: float):
+                volume_fraction: float,
+                config: Optional[VolumeConfig] = None):
         """
         Parameters
         - solver : 有限元求解器
         - volume_fraction : 目标体积分数
+        - config : 体积约束计算的配置参数, 如果为 None 则使用默认配置
         """
         self.solver = solver
         self.volume_fraction = volume_fraction
         self.mesh = solver.tensor_space.mesh
+
+        self.config = config if config is not None else VolumeConfig()
 
     #---------------------------------------------------------------------------
     # 内部方法
@@ -77,16 +81,20 @@ class VolumeConstraint(ConstraintBase):
     def jac(self,
             rho: TensorLike,
             u: Optional[TensorLike] = None,
-            diff_mode: Literal["auto", "manual"] = "manual") -> TensorLike:
+            diff_mode: Optional[Literal["auto", "manual"]] = None
+            ) -> TensorLike:
         """计算体积约束的梯度
         
         Parameters
         - rho : 密度场
         - u : 位移场（体积约束不需要，但为了接口一致）
-        - diff_mode : 梯度计算方式
-            - "manual": 使用解析推导的梯度公式（默认）
+        - diff_mode : 梯度计算方式, 如果为 None 则使用配置中的默认值
+            - "manual": 使用解析推导的梯度公式
             - "auto": 使用自动微分技术
         """
+        if diff_mode is None:
+            diff_mode = self.config.diff_mode
+
         if diff_mode == "manual":
             dg = self._compute_gradient_manual(rho)
         elif diff_mode == "auto":

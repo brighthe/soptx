@@ -1,30 +1,34 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Literal, Tuple
+from typing import Optional, Literal, Tuple, List
 from math import ceil, sqrt
 
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import StructuredMesh, UniformMesh2d, UniformMesh3d
 from fealpy.typing import TensorLike
-from fealpy.sparse import COOTensor
+from fealpy.sparse import COOTensor, CSRTensor
+
+from soptx.utils import timer
 
 class BasicFilter(ABC):
     """基础滤波器抽象基类"""
     
-    def __init__(self, mesh: StructuredMesh, rmin: float):
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List):
         """
         Parameters
-        - mesh : 均匀网格
+        - mesh : 网格
         - rmin : 滤波半径 (物理距离)
+        - domain : 计算域的边界
         """
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
-        if not isinstance(mesh, StructuredMesh):
-            raise TypeError("Mesh must be StructuredMesh")
         
-        self.rmin = rmin
         self.mesh = mesh
+        self.rmin = rmin
+        self.domain = domain
         
         self._H, self._Hs = self._compute_filter_matrix()
+        self._cell_measure = self.mesh.entity_measure('cell')
+        self._normalize_factor = self._H.matmul(self._cell_measure)
 
     @property
     def H(self) -> COOTensor:
@@ -50,7 +54,90 @@ class BasicFilter(ABC):
                                 self.mesh.h[0], self.mesh.h[1], self.mesh.h[2],
                                 self.rmin
                             )
+        else:
+            return self._compute_filter_general(
+                                self.mesh.entity_barycenter('cell'), 
+                                self.rmin, 
+                                domain=self.domain,
+                            )
         
+    def _compute_filter_general(self, 
+                cell_centers: TensorLike,
+                rmin: float,
+                domain=None,
+                periodic=[False, False, False]
+            ) -> Tuple[COOTensor, TensorLike]:
+        """计算任意网格的滤波矩阵
+        
+        参数:
+        - cell_centers: 单元中心点坐标, 形状为 (NC, GD)
+        - rmin: 滤波半径
+        - domain: 计算域的边界, 
+            例如 [xmin, xmax, ymin, ymax] 或 [xmin, xmax, ymin, ymax, zmin, zmax]
+        - periodic: 各方向是否周期性, 默认为 [False, False, False]
+            
+        返回值:
+        - H: 滤波矩阵, 形状为 (NC, NC)
+        - Hs: 滤波矩阵行和, 形状为 (NC, )
+        """
+        # 使用 KD-tree 查询临近点
+        cell_indices, neighbor_indices = bm.query_point(
+                                            x=cell_centers, y=cell_centers, h=rmin, 
+                                            box_size=domain, mask_self=False, periodic=periodic
+                                        )
+        
+        # 计算节点总数
+        NC = cell_centers.shape[0]
+        
+        # 准备存储过滤器矩阵的数组
+        # 预估非零元素的数量（包括对角线元素）
+        max_nnz = len(cell_indices) + NC
+        iH = bm.zeros(max_nnz, dtype=bm.int32)
+        jH = bm.zeros(max_nnz, dtype=bm.int32)
+        sH = bm.zeros(max_nnz, dtype=bm.float64)
+        
+        # 首先添加对角线元素（自身单元）
+        for i in range(NC):
+            iH[i] = i
+            jH[i] = i
+            # 自身权重为 rmin（最大权重）
+            sH[i] = rmin
+        
+        # 当前非零元素计数
+        nnz = NC
+        
+        # 填充其余非零元素（邻居点）
+        for idx in range(len(cell_indices)):
+            i = cell_indices[idx]
+            j = neighbor_indices[idx]
+            
+            # 计算节点间的物理距离
+            physical_dist = bm.sqrt(bm.sum((cell_centers[i] - cell_centers[j])**2))
+            
+            # 计算权重因子
+            fac = rmin - physical_dist
+            
+            if fac > 0:
+                iH[nnz] = i
+                jH[nnz] = j
+                sH[nnz] = fac
+                nnz += 1
+        
+        # 创建稀疏矩阵（只使用有效的非零元素）
+        H = COOTensor(
+            indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
+            values=sH[:nnz],
+            spshape=(NC, NC)
+        )
+        
+        # 转换为 CSR 格式以便于后续操作
+        H = H.tocsr()
+        
+        # 计算滤波矩阵行和
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
+        
+        return H, Hs
+
     def _compute_filter_2d(self, 
                 nx: int, ny: int, 
                 hx: float, hy: float,
@@ -63,7 +150,7 @@ class BasicFilter(ABC):
         
         iH = bm.zeros(nfilter, dtype=bm.int32)
         jH = bm.zeros(nfilter, dtype=bm.int32)
-        sH = bm.ones(nfilter, dtype=bm.float64)
+        sH = bm.zeros(nfilter, dtype=bm.float64)
         cc = 0
 
         for i in range(nx):
@@ -94,6 +181,7 @@ class BasicFilter(ABC):
                 values=sH[:cc],
                 spshape=(nx * ny, nx * ny)
             )
+        H = H.tocsr()
         Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
         
         return H, Hs
@@ -117,17 +205,17 @@ class BasicFilter(ABC):
             for j in range(ny):
                 for k in range(nz):
                     # 单元的编号顺序: z -> y -> x
-                    row = k + j * nz + i * ny * nz 
-                    ii1 = max(i - (ceil(rmin/hx) - 1), 0)
-                    ii2 = min(i + (ceil(rmin/hx) - 1), nx - 1)
-                    jj1 = max(j - (ceil(rmin/hy) - 1), 0)
-                    jj2 = min(j + (ceil(rmin/hy) - 1), ny - 1)
-                    kk1 = max(k - (ceil(rmin/hz) - 1), 0)
-                    kk2 = min(k + (ceil(rmin/hz) - 1), nz - 1)
+                    row = k + j * nz + i * ny * nz
+                    ii1 = int(max(i - (ceil(rmin/hx) - 1), 0))
+                    ii2 = int(min(i + ceil(rmin/hx), nx))
+                    jj1 = int(max(j - (ceil(rmin/hy) - 1), 0))
+                    jj2 = int(min(j + ceil(rmin/hy), ny))
+                    kk1 = int(max(k - (ceil(rmin/hz) - 1), 0))
+                    kk2 = int(min(k + ceil(rmin/hz), nz))
                     
-                    for ii in range(ii1, ii2 + 1):
-                        for jj in range(jj1, jj2 + 1):
-                            for kk in range(kk1, kk2 + 1):
+                    for ii in range(ii1, ii2):
+                        for jj in range(jj1, jj2):
+                            for kk in range(kk1, kk2):
                                 # 单元的编号顺序: z -> y -> x
                                 col = kk + jj * nz + ii * ny * nz
                                 # 计算实际物理距离 
@@ -137,16 +225,18 @@ class BasicFilter(ABC):
                                                     (k - kk)**2 * hz**2
                                                 )
                                 fac = rmin - physical_dist
-                                iH[cc] = row
-                                jH[cc] = col
-                                sH[cc] = max(0.0, fac)
-                                cc += 1
+                                if fac > 0:
+                                    iH[cc] = row
+                                    jH[cc] = col
+                                    sH[cc] = max(0.0, fac)
+                                    cc += 1
 
         H = COOTensor(
             indices=bm.astype(bm.stack((iH[:cc], jH[:cc]), axis=0), bm.int32),
             values=sH[:cc],
             spshape=(nx * ny * nz, nx * ny * nz)
         )
+        H = H.tocsr()
         Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
 
         return H, Hs
@@ -197,8 +287,8 @@ class BasicFilter(ABC):
 
 class SensitivityBasicFilter(BasicFilter):
     """灵敏度滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float):
-        super().__init__(mesh, rmin)
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List):
+        super().__init__(mesh, rmin, domain=domain)
     
     def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> None:
         """灵敏度滤波器的初始物理密度等于设计变量"""
@@ -222,46 +312,40 @@ class SensitivityBasicFilter(BasicFilter):
 
 class DensityBasicFilter(BasicFilter):
     """密度滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float):
-        super().__init__(mesh, rmin)
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List):
+        super().__init__(mesh, rmin, domain=domain)
     
     def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> None:
         """密度滤波器的初始物理密度等于设计变量"""
         xPhys[:] = x
 
     def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> None:
-        cell_measure = self.mesh.entity_measure('cell')
+        '''
+        TODO 需要进一步优化 filtered_x = self._H.matmul(weigthed_x) 的计算效率,
+        因为 OC 中二分法求解 Lagrange 乘子的时候会多次调用这个函数
+        '''
         # 计算加权密度
-        weigthed_x = x * cell_measure
+        weigthed_x = x * self._cell_measure
         # 应用滤波矩阵
         filtered_x = self._H.matmul(weigthed_x)
-        # 计算标准化因子
-        normalize_factor = self._H.matmul(cell_measure)
         # 返回标准化后的密度
-        xPhys[:] = filtered_x / normalize_factor
+        xPhys[:] = filtered_x / self._normalize_factor
 
     def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> None:
-        cell_measure = self.mesh.entity_measure('cell')
         # 计算单元测度加权的目标函数灵敏度
-        weighted_dobj = cell_measure * dobj
-        # 计算标准化因子    
-        normalize_factor = self._H.matmul(cell_measure)
+        weighted_dobj = self._cell_measure * dobj
         # 应用滤波矩阵
-        dobj[:] = self._H.matmul(weighted_dobj / normalize_factor)
+        dobj[:] = self._H.matmul(weighted_dobj / self._normalize_factor)
 
     def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> None:
-        #TODO dcons 不能修改，只读，但是 dobj 可以修改
-        cell_measure = self.mesh.entity_measure('cell')
         # 计算单元测度加权的约束函数灵敏度
-        weighted_dcons = cell_measure * dcons
-        # 计算标准化因子    
-        normalize_factor = self._H.matmul(cell_measure)
+        weighted_dcons = self._cell_measure * dcons
         # 应用滤波矩阵
-        dcons[:] = self._H.matmul(weighted_dcons / normalize_factor)
+        dcons[:] = self._H.matmul(weighted_dcons / self._normalize_factor)
 
 class HeavisideProjectionBasicFilter(BasicFilter):
     """Heaviside 投影滤波器"""
-    def __init__(self, mesh: StructuredMesh, rmin: float, 
+    def __init__(self, mesh: StructuredMesh, rmin: float, domain: List,
                 beta: float = 1.0, max_beta: float = 512, continuation_iter: int = 50):
         """
         Parameters
@@ -269,7 +353,7 @@ class HeavisideProjectionBasicFilter(BasicFilter):
         - rmin : 滤波半径 (物理距离)
         - beta : Heaviside 投影参数
         """
-        super().__init__(mesh, rmin)
+        super().__init__(mesh, rmin, domain=domain)
         if beta <= 0:
             raise ValueError("Heaviside beta must be positive")
             
@@ -287,36 +371,28 @@ class HeavisideProjectionBasicFilter(BasicFilter):
                    self._xTilde * bm.exp(-self.beta))
     
     def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> None:
-        cell_measure = self.mesh.entity_measure('cell')
-        weighted_x = cell_measure * x
+        weighted_x = self._cell_measure * x
         filtered_x = self._H.matmul(weighted_x)
-        normalize_factor = self._H.matmul(cell_measure)
-        self._xTilde = filtered_x / normalize_factor
+        self._xTilde = filtered_x / self._normalize_factor
 
         xPhys[:] = (1 - bm.exp(-self.beta * self._xTilde) + 
                         self._xTilde * bm.exp(-self.beta))
 
     def filter_objective_sensitivities(self, 
-                                    xPhys: TensorLike, dobj: TensorLike) -> None:
-        cell_measure = self.mesh.entity_measure('cell')
-        
+                                    xPhys: TensorLike, dobj: TensorLike) -> None:        
         # 计算 Heaviside 投影的导数
         dx = self.beta * bm.exp(-self.beta * self._xTilde) + bm.exp(-self.beta)
         # 修改灵敏度并应用密度滤波
-        weighted_dobj = dobj * dx * cell_measure
-        normalize_factor = self._H.matmul(cell_measure)
-        dobj[:] = self._H.matmul(weighted_dobj / normalize_factor)
+        weighted_dobj = dobj * dx * self._cell_measure
+        dobj[:] = self._H.matmul(weighted_dobj / self._normalize_factor)
 
     def filter_constraint_sensitivities(self, 
-                                    xPhys: TensorLike, dcons: TensorLike) -> None:
-        cell_measure = self.mesh.entity_measure('cell')
-        
+                                    xPhys: TensorLike, dcons: TensorLike) -> None:        
         # 计算 Heaviside 投影的导数
         dx = self.beta * bm.exp(-self.beta * self._xTilde) + bm.exp(-self.beta)
         # 修改灵敏度并应用密度滤波
-        weighted_dcons = dcons * dx * cell_measure
-        normalize_factor = self._H.matmul(cell_measure)
-        dcons[:] = self._H.matmul(weighted_dcons / normalize_factor)
+        weighted_dcons = dcons * dx * self._cell_measure
+        dcons[:] = self._H.matmul(weighted_dcons / self._normalize_factor)
 
     def continuation_step(self, change: float) -> Tuple[float, bool]:
         """
