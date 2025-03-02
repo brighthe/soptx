@@ -1,18 +1,26 @@
 
-from .base import MaterialInterpolation
-# TODO 删除
-from .elastic import (ElasticMaterialProperties, 
-                      ElasticMaterialInstance, 
-                      ElasticMaterialConfig)
-from .linear_elastic_material import (ElasticMaterialInstance, 
-                                      ElasticMaterialConfig)
-from .interpolation_scheme import (SIMPInterpolation, 
-                                   RAMPInterpolation)
+from .linear_elastic_material import (
+                                        BaseElasticMaterialConfig,
+                                        DensityBasedMaterialConfig,
+                                        LevelSetMaterialConfig,
+                                        BaseElasticMaterialInstance,
+                                        DensityBasedMaterialInstance,
+                                        LevelSetMaterialInstance,
+                                    )                                       
+from .interpolation_scheme import (
+                                    MaterialInterpolation,
+                                    SIMPInterpolation, 
+                                    RAMPInterpolation,
+                                )
 
 __all__ = [
+    'BaseElasticMaterialConfig',
+    'DensityBasedMaterialConfig',
+    'LevelSetMaterialConfig',
+    'BaseElasticMaterialInstance',
+    'DensityBasedMaterialInstance',
+    'LevelSetMaterialInstance',
     'MaterialInterpolation',
-    'ElasticMaterialInstance',
-    'ElasticMaterialConfig',
     'SIMPInterpolation',
     'RAMPInterpolation'
 ]

@@ -88,7 +88,7 @@ class OptimizationHistory:
         self.iteration_times = []
         self.start_time = time()
 
-    def log_iteration(self, iter_idx: int, obj_val: float, volume: float, 
+    def log_iteration(self, iter_idx: int, obj_val: float, volfrac: float, 
                      change: float, time_cost: float, density: TensorLike):
         """记录一次迭代的信息"""
         self.densities.append(bm.copy(density))
@@ -96,7 +96,7 @@ class OptimizationHistory:
         
         print(f"Iteration: {iter_idx + 1}, "
               f"Objective: {obj_val:.12f}, "
-              f"Volume: {volume:.4f}, "
+              f"Volfrac: {volfrac:.4f}, "
               f"Change: {change:.4f}, "
               f"Time: {time_cost:.3f} sec")
         
@@ -217,8 +217,8 @@ class OCOptimizer(OptimizerBase):
             if self.filter is not None:
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
 
-            # 使用物理密度计算约束值和梯度
-            con_val = self.constraint.fun(rho_phys)
+            # 使用物理密度计算约束函数值梯度
+            # con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
@@ -235,8 +235,10 @@ class OCOptimizer(OptimizerBase):
                 else:
                     rho_phys = rho_new
 
-                # 检查约束
-                if self.constraint.fun(rho_phys) > 0:
+                # 检查约束函数值
+                con_val = self.constraint.fun(rho_phys)
+                if con_val > 0:
+                # if self.constraint.fun(rho_phys) > 0:
                     l1 = lmid
                 else:
                     l2 = lmid
@@ -247,7 +249,8 @@ class OCOptimizer(OptimizerBase):
             
             # 记录当前迭代信息
             iteration_time = time() - start_time
-            history.log_iteration(iter_idx, obj_val, bm.mean(rho_phys[:]), 
+            vol_frac = self.constraint.get_volume_fraction(rho_phys)
+            history.log_iteration(iter_idx, obj_val, vol_frac, 
                                 change, iteration_time, rho_phys[:])
             
             # 处理 Heaviside 投影的 beta continuation
