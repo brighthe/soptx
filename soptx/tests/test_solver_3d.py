@@ -11,8 +11,8 @@ from fealpy.mesh import UniformMesh3d, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
-                            ElasticMaterialConfig,
-                            ElasticMaterialInstance,
+                            DensityBasedMaterialConfig,
+                            DensityBasedMaterialInstance,
                         )
 from soptx.pde import Cantilever3dData1
 from soptx.solver import ElasticFEMSolver, AssemblyMethod
@@ -69,8 +69,7 @@ def create_base_components(config: TestConfig):
             origin = [0.0, 0.0, 0.0]
             mesh = UniformMesh3d(
                         extent=extent, h=[config.hx, config.hy, config.hz], origin=origin,
-                        ipoints_ordering='zyx', flip_direction=None,
-                        device='cpu'
+                        ipoints_ordering='zyx', device='cpu'
                     )
         elif config.mesh_type == 'tetrahedron_mesh':
             mesh = TetrahedronMesh.from_box(
@@ -86,7 +85,7 @@ def create_base_components(config: TestConfig):
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
     print(f"CGDOF: {tensor_space_C.number_of_global_dofs()}")
     
-    material_config = ElasticMaterialConfig(
+    material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
@@ -95,7 +94,7 @@ def create_base_components(config: TestConfig):
                             penalty_factor=config.penalty_factor
                         )
     
-    materials = ElasticMaterialInstance(config=material_config)
+    materials = DensityBasedMaterialInstance(config=material_config)
 
     node = mesh.entity('node')
     kwargs = bm.context(node)
@@ -243,6 +242,9 @@ if __name__ == "__main__":
                         assembly_method=AssemblyMethod.STANDARD,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                     )
+    # mesh_type = 'uniform_mesh_3d'
+    mesh_type = 'tetrahedron_mesh'
+    nx, ny, nz = 3, 2, 2
     config_assmeble_exact = TestConfig(
                         backend='numpy',
                         pde_type='cantilever_3d_1',
@@ -251,7 +253,7 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='tetrahedron_mesh', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
                         assembly_method=None,
                         solver_type='direct', 
                         solver_params={'solver_type': 'mumps'},

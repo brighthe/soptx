@@ -6,12 +6,12 @@ from typing import Literal, Dict, Any
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh2d, TriangleMesh
+from fealpy.mesh import UniformMesh2d, TriangleMesh, QuadrangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
-                            ElasticMaterialConfig,
-                            ElasticMaterialInstance,
+                            DensityBasedMaterialConfig,
+                            DensityBasedMaterialInstance,
                         )
 from soptx.pde import Cantilever2dData1, Cantilever2dData2
 from soptx.solver import ElasticFEMSolver, AssemblyMethod
@@ -35,9 +35,11 @@ class TestConfig:
     volume_fraction: float
     penalty_factor: float
 
-    mesh_type: Literal['uniform_mesh_2d', 'triangle_mesh']
+    mesh_type: Literal['uniform_mesh_2d', 'triangle_mesh', 'quadrangle_mesh']
     nx: int
     ny: int
+    hx: int
+    hy: int
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -60,7 +62,7 @@ def create_base_components(config: TestConfig):
             mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
     elif config.pde_type == 'cantilever_2d_1':
         extent = [0, config.nx, 0, config.ny]
-        h = [1.0, 1.0]
+        h = [config.hx, config.hy]
         origin = [0.0, 0.0]
         pde = Cantilever2dData1(
                     xmin=0, xmax=extent[1] * h[0],
@@ -70,11 +72,12 @@ def create_base_components(config: TestConfig):
         if config.mesh_type == 'uniform_mesh_2d':
             mesh = UniformMesh2d(
                         extent=extent, h=h, origin=origin,
-                        ipoints_ordering='yx', flip_direction=None,
-                        device='cpu'
+                        ipoints_ordering='yx', device='cpu'
                     )
         elif config.mesh_type == 'triangle_mesh':
             mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
+        elif config.mesh_type == 'quadrangle_mesh':
+            mesh = QuadrangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
 
     GD = mesh.geo_dimension()
     print(f"NN: {mesh.number_of_nodes()}")
@@ -87,7 +90,7 @@ def create_base_components(config: TestConfig):
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
     print(f"DGDOF: {space_D.number_of_global_dofs()}")
     
-    material_config = ElasticMaterialConfig(
+    material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
@@ -96,7 +99,7 @@ def create_base_components(config: TestConfig):
                             penalty_factor=config.penalty_factor
                         )
     
-    materials = ElasticMaterialInstance(config=material_config)
+    materials = DensityBasedMaterialInstance(config=material_config)
     
     node = mesh.entity('node')
     kwargs = bm.context(node)
@@ -261,20 +264,22 @@ if __name__ == "__main__":
                                     load=2000,
                                     volume_fraction=0.5,
                                     penalty_factor=3.0,
-                                    mesh_type='triangle_mesh', nx=300, ny=100,
+                                    mesh_type='triangle_mesh', nx=300, ny=100, hx=1, hy=1,
                                     assembly_method=AssemblyMethod.FAST,
                                     solver_type='direct', solver_params={'solver_type': 'mumps'},
                                 )
     
+    # mesh_type = 'uniform_mesh_2d'
+    mesh_type = 'triangle_mesh'
     config_assmeble_exact = TestConfig(
                                 backend='numpy',
                                 pde_type='cantilever_2d_1',
                                 elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                                domain_length=160, domain_width=100,
+                                domain_length=8, domain_width=5,
                                 load=-1,
                                 volume_fraction=0.4,
                                 penalty_factor=3.0,
-                                mesh_type='uniform_mesh_2d', nx=16, ny=10,
+                                mesh_type=mesh_type, nx=8, ny=5, hx=1, hy=1,
                                 assembly_method=None,
                                 solver_type='direct', 
                                 solver_params={'solver_type': 'mumps'},
@@ -287,7 +292,7 @@ if __name__ == "__main__":
                             load=2000,
                             volume_fraction=0.5,
                             penalty_factor=3.0,
-                            mesh_type='triangle_mesh', nx=300, ny=100,
+                            mesh_type='triangle_mesh', nx=300, ny=100, hx=1, hy=1,
                             assembly_method=AssemblyMethod.STANDARD,
                             solver_type='cg',  
                             solver_params={'maxiter': 1000, 'atol': 1e-8, 'rtol': 1e-8}  
@@ -300,7 +305,7 @@ if __name__ == "__main__":
                                 load=2000,
                                 volume_fraction=0.5,
                                 penalty_factor=3.0,
-                                mesh_type='triangle_mesh', nx=300, ny=100,
+                                mesh_type='triangle_mesh', nx=300, ny=100, hx=1, hy=1,
                                 assembly_method=AssemblyMethod.STANDARD,
                                 solver_type='direct', 
                                 solver_params={'solver_type': 'mumps'},
@@ -313,7 +318,7 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.4,
                             penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=160, ny=100,
+                            mesh_type='uniform_mesh_2d', nx=160, ny=100, hx=1, hy=1, 
                             assembly_method=AssemblyMethod.FAST,
                             solver_type=None, 
                             solver_params=None,
@@ -326,7 +331,7 @@ if __name__ == "__main__":
                             load=-1,
                             volume_fraction=0.4,
                             penalty_factor=3.0,
-                            mesh_type='triangle_mesh', nx=16, ny=10,
+                            mesh_type='triangle_mesh', nx=16, ny=10, hx=1, hy=1,
                             assembly_method=None,
                             solver_type='direct', 
                             solver_params={'solver_type': 'mumps'},
