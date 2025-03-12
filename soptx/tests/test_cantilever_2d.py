@@ -44,6 +44,8 @@ class TestConfig:
     ny: int
     hx: float
     hy: float
+
+    p: int
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -92,7 +94,7 @@ def create_base_components(config: TestConfig):
 
     GD = mesh.geo_dimension()
     
-    p = 1
+    p = config.p
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
@@ -207,7 +209,7 @@ if __name__ == "__main__":
     '''
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
-    backend = 'numpy'
+    backend = 'pytorch'
     pde_type = 'cantilever_2d_1'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
@@ -221,6 +223,7 @@ if __name__ == "__main__":
             volume_fraction=0.4,
             penalty_factor=3.0,
             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
+            p = 1,
             assembly_method=AssemblyMethod.FAST,
             solver_type='direct', solver_params={'solver_type': 'mumps'},
             diff_mode='manual',
@@ -238,6 +241,7 @@ if __name__ == "__main__":
                             volume_fraction=0.4,
                             penalty_factor=3.0,
                             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
+                            p=1,
                             assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',

@@ -82,7 +82,7 @@ def create_base_components(config: TestConfig):
     p = 1
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
-    space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
+    space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     print(f"CGDOF: {tensor_space_C.number_of_global_dofs()}")
     
     material_config = DensityBasedMaterialConfig(

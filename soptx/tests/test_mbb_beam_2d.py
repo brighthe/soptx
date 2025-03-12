@@ -46,6 +46,8 @@ class TestConfig:
     ny: int
     hx: float
     hy: float
+
+    p: int
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -90,10 +92,10 @@ def create_base_components(config: TestConfig):
 
     GD = mesh.geo_dimension()
     
-    p = 1
+    p = config.p
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
-    space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
+    space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     
     material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
@@ -285,25 +287,29 @@ if __name__ == "__main__":
     pde_type = 'mbb_beam_2d_1'
     mesh_type = 'uniform_mesh_2d'
     # mesh_type = 'triangle_mesh'
+    nx, ny = 60, 20
+    # nx, ny = 150, 50
+    # nx ,ny = 300, 100
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    nx, ny = 60, 20
     config_basic_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.5,
-                            penalty_factor=3.0,
-                            mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
-                            assembly_method=AssemblyMethod.FAST,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                        )
+            backend='numpy',
+            pde_type=pde_type,
+            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+            domain_length=nx, domain_width=ny,
+            load=-1,
+            volume_fraction=0.5,
+            penalty_factor=3.0,
+            mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
+            p = 1,
+            assembly_method=AssemblyMethod.FAST,
+            solver_type='direct', solver_params={'solver_type': 'mumps'},
+            # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
+            diff_mode='manual',
+            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+            filter_type=filter_type, filter_radius=nx*0.04,
+            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+        )
     
     diff_modo = 'auto'
     nx, ny = 150, 50
@@ -318,6 +324,7 @@ if __name__ == "__main__":
         volume_fraction=0.5,
         penalty_factor=3.0,
         mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+        p=1,
         assembly_method=AssemblyMethod.FAST,
         solver_type='direct', solver_params={'solver_type': 'mumps'},
         diff_mode=diff_modo,
@@ -335,6 +342,7 @@ if __name__ == "__main__":
                             volume_fraction=0.5,
                             penalty_factor=3.0,
                             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+                            p=1,
                             assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
@@ -352,6 +360,7 @@ if __name__ == "__main__":
                             volume_fraction=0.5,
                             penalty_factor=3.0,
                             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+                            p=1,
                             assembly_method=AssemblyMethod.FAST,
                             solver_type='direct', solver_params={'solver_type': 'mumps'},
                             diff_mode='manual',
@@ -359,27 +368,6 @@ if __name__ == "__main__":
                             filter_type=filter_type, filter_radius=nx*0.03,
                             save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
                         )
-    backend = 'numpy'
-    nx, ny = 150, 50
-    mesh_type = 'uniform_mesh_2d'
-    optimizer_type = 'mma'
-    filter_type = 'sensitivity'
-    config_basic_filter_mma = TestConfig(
-        backend=backend,
-        pde_type=pde_type,
-        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-        domain_length=nx, domain_width=ny,
-        load=-1,
-        volume_fraction=0.5,
-        penalty_factor=3.0,
-        mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
-        assembly_method=AssemblyMethod.FAST,
-        solver_type='direct', solver_params={'solver_type': 'mumps'},
-        diff_mode='manual',
-        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-        filter_type=filter_type, filter_radius=nx*0.04,
-        save_dir=f'{base_dir}/{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-    )
     # result1 = run_basic_filter_test(config_basic_filter)
     # result_11 = run_diff_mode_test(config_sens_filter_auto)
-    result2 = run_basic_filter_test(config_basic_filter_mma)
+    result2 = run_basic_filter_test(config_basic_filter)
