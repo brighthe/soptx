@@ -1,16 +1,19 @@
+%% 参数设置
 nelx = 40;
 nely = 40;
 nelz = 5;
 volfrac = 0.3;
 penal = 3;
 rmin = 1.4;
+ft = 1;     % 密度滤波器
+% ft = 2;   % 灵敏度滤波器
 
 % USER-DEFINED LOOP PARAMETERS
 maxloop = 200;    % Maximum number of iterations
 tolx = 0.01;      % Terminarion criterion
 displayflag = 0;  % Display structure flag
 
-% USER-DEFINED MATERIAL PROPERTIES
+%% MATERIAL PROPERTIES
 k0   = 1;    % Good thermal conductivity
 kmin = 1e-3; % Poor thermal conductivity
 
@@ -64,22 +67,13 @@ end
 H = sparse(iH, jH, sH);
 Hs = sum(H,2);
 
-% INITIALIZE ITERATION
+%% INITIALIZE ITERATION
 x = repmat(volfrac, [nely,nelx,nelz]);
 xPhys = x; 
 loop = 0; 
 change = 1;
 
-fileID = fopen('heat_conduction_OC_density.txt', 'w');
-fprintf(fileID, 'Iteration\tObjective\tVolume\tChange\n');
-figure('Position', [100, 100, 1130, 784]);
-v = VideoWriter('heat_conduction_OC_desnity.avi');
-v.FrameRate = 10;
-open(v);
-firstFrame = true;
-frameSize = [0, 0];
-
-% START ITERATION
+%% START ITERATION
 while change > tolx && loop < maxloop
     loop = loop + 1;
 
@@ -94,48 +88,36 @@ while change > tolx && loop < maxloop
     dc = -penal * (1-kmin) * xPhys .^ (penal-1) .* ce;
     dv = ones(nely, nelx, nelz);
 
-    % FILTERING AND MODIFICATION OF SENSITIVITIES
-    dc(:) = H*(dc(:)./Hs);  
-    dv(:) = H*(dv(:)./Hs);
-    % OPTIMALITY CRITERIA UPDATE
+    %% FILTERING/MODIFICATION OF SENSITIVITIES
+    if ft == 1
+        dc(:) = H*(dc(:)./Hs);
+        dv(:) = H*(dv(:)./Hs);
+    elseif ft == 2
+        dc(:) = H*(x(:).*dc(:))./Hs./max(1e-3,x(:));
+    end
+    %% OPTIMALITY CRITERIA UPDATE OF DESIGN VARIABLES AND PHYSICAL DENSITIES
     l1 = 0; l2 = 1e9; move = 0.2;
     while (l2-l1)/(l1+l2) > 1e-3
         lmid = 0.5*(l2+l1);
-        xnew = max(0,max(x-move,min(1,min(x+move,x.*sqrt(-dc./dv/lmid)))));
-        xPhys(:) = (H*xnew(:))./Hs;
+        xnew = max(0, max(x-move,min(1,min(x+move,x.*sqrt(-dc./dv/lmid)))));
+        if ft == 1
+            xPhys(:) = (H*xnew(:))./Hs;
+        elseif ft == 2
+            xPhys = xnew;
+        end
         if sum(xPhys(:)) > volfrac*nele, l1 = lmid; else l2 = lmid; end
     end
+
     change = max(abs(xnew(:)-x(:)));
     x = xnew;
 
-    % PRINT RESULTS
-    fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f ch.:%7.3f\n', loop, c, mean(xPhys(:)), change);
-    fprintf(fileID, '%4i\t%10.4f\t%6.3f\t%6.3f\n', loop, c, mean(xPhys(:)), change);
+	% PRINT RESULTS
+	iter_time = toc;  % Stop timing and get iteration time
+	fprintf(' It.:%5i Obj.:%11.12f Vol.:%8.4f ch.:%7.3f Time:%7.3f sec\n', loop, c, mean(xPhys(:)), change, iter_time);
 
-    if mod(loop, 10) == 0 || loop == 1 || change <= tolx || loop == maxloop
-        clf;
-        display_3D(xPhys);
-        title(sprintf('Iteration: %d, Objective: %.4f', loop, c));
-        drawnow;
-        
-        % 获取当前帧
-        frame = getframe(gcf);
-        
-        % 检查和调整帧大小
-        if firstFrame
-            frameSize = size(frame.cdata);
-            firstFrame = false;
-        else
-            frame.cdata = imresize(frame.cdata, [frameSize(1), frameSize(2)]);
-        end
-        
-        % 将当前帧添加到视频
-        writeVideo(v, frame);
-    end
+    % PLOT DENSITIES
+    if displayflag, clf; display_3D(xPhys); end
 end
-
-% 关闭视频对象
-close(v);
 
 % 显示最终结果
 clf;

@@ -84,7 +84,7 @@ while change > tolx && loop < maxloop
     loop = loop + 1;
 
     % FE-ANALYSIS
-    sK = reshape(KE(:)*(Emin+xPhys(:)'.^penal*(E0-Emin)),24*24*nele,1);
+    sK = reshape(KE(:)*(Emin+xPhys(:)'.^penal*(E0-Emin)), 24*24*nele,1);
     K = sparse(iK,jK,sK); K = (K+K')/2;
     KFULL = full(K);
     U(freedofs,:) = K(freedofs, freedofs) \ F(freedofs, :);
@@ -111,11 +111,6 @@ while change > tolx && loop < maxloop
         xnewshow = xnew(:);
         if ft == 1
             xPhys(:) = (H*xnew(:))./Hs;
-            % fprintf('xnew: %11.14f\n', sum(abs(xnew(:))));
-            % fprintf('fenzi: %11.14f\n', sum(abs(H*xnew(:))));
-            % fprintf('fenzi_test: %11.14f\n', sum(abs(H1*xnew(:))));
-            % fprintf('xPhys: %11.14f\n', sum(abs(xPhys(:))));
-            % fprintf('-------------------\n')
         elseif ft == 2
             xPhys = xnew;
         end

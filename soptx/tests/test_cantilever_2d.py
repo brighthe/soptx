@@ -123,8 +123,8 @@ def create_base_components(config: TestConfig):
     kwargs = bm.context(node)
     @cartesian
     def density_func(x: TensorLike):
-        val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
-        # val = bm.ones(x.shape[0], **kwargs)
+        # val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
+        val = bm.ones(x.shape[0], **kwargs)
         return val
     rho = space_D.interpolate(u=density_func)
 
