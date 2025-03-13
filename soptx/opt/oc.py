@@ -79,12 +79,16 @@ class OCOptions:
 class OptimizationHistory:
     """优化过程的历史记录"""
     densities: list       # 密度场历史
+    obj_values: list      # 目标函数值历史
+    con_values: list      # 约束函数值历史（体积分数）
     iteration_times: list # 迭代时间历史
     start_time: float     # 优化开始时间
 
     def __init__(self):
         """初始化各个记录列表"""
         self.densities = []
+        self.obj_values = []
+        self.con_values = []
         self.iteration_times = []
         self.start_time = time()
 
@@ -92,6 +96,8 @@ class OptimizationHistory:
                      change: float, time_cost: float, density: TensorLike):
         """记录一次迭代的信息"""
         self.densities.append(bm.copy(density))
+        self.obj_values.append(obj_val)
+        self.con_values.append(volfrac)
         self.iteration_times.append(time_cost)
         
         print(f"Iteration: {iter_idx + 1}, "
@@ -218,7 +224,8 @@ class OCOptimizer(OptimizerBase):
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
 
             # 使用物理密度计算约束函数值梯度
-            # con_val = self.constraint.fun(rho_phys)
+            vol_frac = self.constraint.get_volume_fraction(rho_phys)
+            con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
@@ -236,9 +243,9 @@ class OCOptimizer(OptimizerBase):
                     rho_phys = rho_new
 
                 # 检查约束函数值
-                con_val = self.constraint.fun(rho_phys)
-                if con_val > 0:
-                # if self.constraint.fun(rho_phys) > 0:
+                # con_val = self.constraint.fun(rho_phys)
+                # if con_val > 0:
+                if self.constraint.fun(rho_phys) > 0:
                     l1 = lmid
                 else:
                     l2 = lmid
@@ -249,7 +256,7 @@ class OCOptimizer(OptimizerBase):
             
             # 记录当前迭代信息
             iteration_time = time() - start_time
-            vol_frac = self.constraint.get_volume_fraction(rho_phys)
+
             history.log_iteration(iter_idx, obj_val, vol_frac, 
                                 change, iteration_time, rho_phys[:])
             
