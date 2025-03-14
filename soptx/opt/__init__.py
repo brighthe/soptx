@@ -4,7 +4,7 @@ from .volume import VolumeConstraint, VolumeConfig
 from .oc import OCOptimizer
 from .mma import MMAOptimizer
 from .utils import solve_mma_subproblem
-from .tools import save_optimization_history, plot_optimization_history
+from .tools import OptimizationHistory, save_optimization_history, plot_optimization_history
 
 __all__ = [
     'ObjectiveBase',
@@ -17,6 +17,7 @@ __all__ = [
     'OCOptimizer',
     'MMAOptimizer',
     'solve_mma_subproblem',
+    'OptimizationHistory',
     'save_optimization_history',
     'plot_optimization_history',
 ]

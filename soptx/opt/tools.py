@@ -1,6 +1,86 @@
 from fealpy.backend import backend_manager as bm
 
+from dataclasses import dataclass, field
+from time import time
+from typing import List, Optional
+
+from fealpy.typing import TensorLike
 from fealpy.mesh import StructuredMesh
+
+@dataclass
+class OptimizationHistory:
+    """优化过程的历史记录"""
+    # 密度场历史
+    densities: List[TensorLike] = field(default_factory=list)
+    # 目标函数值历史
+    obj_values: List[float] = field(default_factory=list)
+    # 约束函数值历史（如体积分数）
+    con_values: List[float] = field(default_factory=list)
+    # 迭代时间历史
+    iteration_times: List[float] = field(default_factory=list)
+    # 优化开始时间
+    start_time: float = field(default_factory=time)
+    
+    def log_iteration(self, 
+                     iter_idx: int, 
+                     obj_val: float, 
+                     volfrac: float, 
+                     change: float, 
+                     time_cost: float, 
+                     density: TensorLike,
+                     verbose: bool = True) -> None:
+        """记录一次迭代的信息"""
+        self.densities.append(bm.copy(density))
+        self.obj_values.append(obj_val)
+        self.con_values.append(volfrac)
+        self.iteration_times.append(time_cost)
+        
+        if verbose:
+            print(f"Iteration: {iter_idx + 1}, "
+                  f"Objective: {obj_val:.12f}, "
+                  f"Volfrac: {volfrac:.4f}, "
+                  f"Change: {change:.4f}, "
+                  f"Time: {time_cost:.3f} sec")
+    
+    def get_total_time(self) -> float:
+        """获取总优化时间"""
+        return time() - self.start_time
+    
+    def get_average_iteration_time(self) -> float:
+        """获取平均每次迭代时间（排除第一次）"""
+        if len(self.iteration_times) <= 1:
+            return 0.0
+        return sum(self.iteration_times[1:]) / (len(self.iteration_times) - 1)
+    
+    def print_time_statistics(self) -> None:
+        """打印时间统计信息"""
+        total_time = self.get_total_time()
+        avg_time = self.get_average_iteration_time()
+        
+        print("\nTime Statistics:")
+        print(f"Total optimization time: {total_time:.3f} sec")
+        if len(self.iteration_times) > 0:
+            print(f"First iteration time: {self.iteration_times[0]:.3f} sec")
+        if len(self.iteration_times) > 1:
+            print(f"Average iteration time (excluding first): {avg_time:.3f} sec")
+            print(f"Number of iterations: {len(self.iteration_times)}")
+    
+    def get_best_iteration(self, minimize: bool = True) -> int:
+        """获取最优迭代的索引"""
+        if not self.obj_values:
+            return -1
+        
+        if minimize:
+            return self.obj_values.index(min(self.obj_values))
+        else:
+            return self.obj_values.index(max(self.obj_values))
+    
+    def get_best_density(self, minimize: bool = True) -> Optional[TensorLike]:
+        """获取最优迭代的密度场"""
+        best_idx = self.get_best_iteration(minimize)
+        if best_idx >= 0 and best_idx < len(self.densities):
+            return self.densities[best_idx]
+        return None
 
 def save_optimization_history(mesh, history, save_path=None):
     """保存优化过程的所有迭代结果

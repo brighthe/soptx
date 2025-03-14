@@ -8,6 +8,7 @@ from fealpy.typing import TensorLike
 from fealpy.mesh import StructuredMesh
 
 from soptx.opt import ObjectiveBase, ConstraintBase, OptimizerBase
+from soptx.opt.tools import OptimizationHistory
 from soptx.filter import (BasicFilter,
                           SensitivityBasicFilter, 
                           DensityBasicFilter, 
@@ -116,26 +117,6 @@ class MMAOptions:
                 self._c = 1e4 * bm.ones((m, 1))
             if self._d is None:
                 self._d = bm.zeros((m, 1))
-
-@dataclass
-class OptimizationHistory:
-    """优化过程的历史记录"""
-    densities: list       # 密度场历史
-    
-    def __init__(self):
-        """初始化各个记录列表"""
-        self.densities = []
-        
-    def log_iteration(self, iter_idx: int, obj_val: float, volfrac: float, 
-                     change: float, time: float, density: TensorLike):
-        """记录一次迭代的信息"""
-        self.densities.append(density.copy())
-        
-        print(f"Iteration: {iter_idx + 1}, "
-              f"Objective: {obj_val:.6f}, "
-              f"Volfrac: {volfrac:.6f}, "
-              f"Change: {change:.6f}, "
-              f"Time: {time:.3f} sec")
 
 class MMAOptimizer(OptimizerBase):
     """Method of Moving Asymptotes (MMA) 优化器
@@ -372,14 +353,17 @@ class MMAOptimizer(OptimizerBase):
             con_grad = self.constraint.jac(rho_phys) # (NC, )
             if self.filter is not None:
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
+
+            # 当前体积分数
+            vol_frac = self.constraint.get_volume_fraction(rho_phys)
             
             # MMA 方法
-            volfrac = self.constraint.volume_fraction
             # 标准化的约束函数值
             cm = self.filter.mesh.entity_measure('cell')
-            fval = con_val / (volfrac * bm.sum(cm))
+            fval = con_val / (self.constraint.volume_fraction * bm.sum(cm))
             # 标准化的约束值梯度
-            dfdx = con_grad[:, None].T / (volfrac * con_grad.shape[0])     # (m, n)
+            dfdx = con_grad[:, None].T / \
+                        (self.constraint.volume_fraction * con_grad.shape[0]) # (m, n)
             rho_new, low, upp = self._solve_subproblem(
                                         xval=rho[:, None], fval=fval, 
                                         df0dx=obj_grad[:, None], dfdx=dfdx, 
@@ -402,7 +386,7 @@ class MMAOptimizer(OptimizerBase):
                 
             # 记录当前迭代信息
             iteration_time = time() - start_time
-            vol_frac = self.constraint.get_volume_fraction(rho_phys)
+
             history.log_iteration(iter_idx, obj_val, vol_frac, 
                                 change, iteration_time, rho_phys)
             
