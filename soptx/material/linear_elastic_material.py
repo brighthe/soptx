@@ -41,7 +41,7 @@ class BaseElasticMaterialInstance(LinearElasticMaterial):
 
     def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
         """计算弹性矩阵"""
-        base_D = super().elastic_matrix()
+        base_D = super().elastic_matrix(bcs)
 
         # 处理不同类型的张量
         if len(self._E.shape) > 0:
@@ -52,10 +52,15 @@ class BaseElasticMaterialInstance(LinearElasticMaterial):
         return D
     
     @property
-    def elastic_modulus(self) -> TensorLike:
-        """获取当前的杨氏模量场"""
+    def elastic_modulus_field(self) -> TensorLike:
+        """获取当前的杨氏模量场(可能是标量或张量)"""
         return self._E
-
+    
+    @property
+    def elastic_modulus(self) -> float:
+        """获取杨氏模量 (保留对父类的重写)"""
+        return self.config.elastic_modulus 
+    
 class DensityBasedMaterialInstance(BaseElasticMaterialInstance):
     """基于密度的弹性材料实例，使用插值方案"""
     def __init__(self, config: DensityBasedMaterialConfig, E: TensorLike = None):
@@ -107,6 +112,7 @@ class DensityBasedMaterialInstance(BaseElasticMaterialInstance):
 
 class LevelSetMaterialInstance(BaseElasticMaterialInstance):
     """基于水平集的弹性材料实例，使用二元材料分布"""
+
     def __init__(self, config: LevelSetMaterialConfig, E: TensorLike = None):
         super().__init__(config, E)
 
@@ -114,12 +120,12 @@ class LevelSetMaterialInstance(BaseElasticMaterialInstance):
         """根据二元场更新杨氏模量 (0 或 1)"""
         E = bm.maximum(density, self.config.minimal_modulus) * self.config.elastic_modulus
         self._E = E
-        
+
     def calculate_elastic_modulus(self, density: TensorLike) -> TensorLike:
         """根据二元场计算杨氏模量 (0 或 1)"""
         E = bm.maximum(density, self.config.minimal_modulus) * self.config.elastic_modulus
         return E
-    
+
     def get_base_material(self):
         """获取基础材料实例 (E=1)"""
         E = bm.ones(1, dtype=bm.float64)

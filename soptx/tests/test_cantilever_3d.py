@@ -98,7 +98,9 @@ def create_base_components(config: TestConfig):
     p = 1
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
+    print(f"CGDOF: {tensor_space_C.number_of_global_dofs()}")
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
+    print(f"DGDOF: {space_D.number_of_global_dofs()}")
     
     material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
@@ -229,8 +231,11 @@ if __name__ == "__main__":
         penalty_factor=3.0,
         mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
         p = 1,
-        assembly_method=AssemblyMethod.FAST,
+        # assembly_method=AssemblyMethod.FAST,
+        # assembly_method=AssemblyMethod.STANDARD,
+        assembly_method=AssemblyMethod.SYMBOLIC,
         solver_type='direct', solver_params={'solver_type': 'mumps'},
+        # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
         filter_type=filter_type, filter_radius=1.5,
@@ -238,7 +243,4 @@ if __name__ == "__main__":
     )
 
     result1 = run_basic_filter_test(config_basic_filter )
-    # result2 = run_basic_filter_test(config_dens_filter)
-    # result3 = run_basic_filter_test(config_mma_dens_filter)
-    # result4 = run_basic_filter_test(config_mma_sens_filter)
     

@@ -276,7 +276,7 @@ class ElasticFEMSolver:
                             material=self.materials, 
                             q=q, method=method
                         )
-        integrator.keep_data()
+        integrator.keep_data(True)
         
         return integrator
     
@@ -344,38 +344,44 @@ class ElasticFEMSolver:
         if self._current_density is None:
             raise ValueError("Density not set. Call update_density first.")
     
+        t = timer(f"CG Solver Timing")
+        next(t)
         K0 = self._assemble_global_stiffness_matrix()
-
+        t.send('矩阵组装时间')
         F0 = self._assemble_global_force_vector()
 
         K, F = self._apply_boundary_conditions(K0, F0)
-        
+        t.send('其他')
         uh = self.tensor_space.function()
 
         try:
             # logger.setLevel('INFO')
             # TODO 目前 FEALPy 中的 cg 只能通过 logger 获取迭代步数，无法直接返回
-            uh[:] = cg(K, F[:], x0=x0, maxiter=maxiter, atol=atol, rtol=rtol)
+            uh[:] = cg(K, F[:], x0=x0, atol=atol, rtol=rtol, maxit=maxiter)
         except Exception as e:
             raise RuntimeError(f"CG solver failed: {str(e)}")
-        
+        t.send('求解时间')
+        t.send(None)
         return IterativeSolverResult(displacement=uh)
     
     def solve_direct(self, solver_type: str = 'mumps') -> DirectSolverResult:
         """使用直接法求解"""
         if self._current_density is None:
             raise ValueError("Density not set. Call update_density first.")
-
+        
+        t = timer(f"MUMPS Solver Timing")
+        next(t)
         K0 = self._assemble_global_stiffness_matrix()
-
+        t.send('矩阵组装时间')
         F0 = self._assemble_global_force_vector()
         
         K, F = self._apply_boundary_conditions(K0, F0)
-        
+        t.send('其他')
         uh = self.tensor_space.function()
         try:
             uh[:] = spsolve(K, F[:], solver=solver_type)
         except Exception as e:
             raise RuntimeError(f"Direct solver failed: {str(e)}")
-            
+        t.send('求解时间')
+        t.send(None)
         return DirectSolverResult(displacement=uh)

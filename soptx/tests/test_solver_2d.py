@@ -133,9 +133,6 @@ def run_assmeble_time_test(config: TestConfig):
         t.send('组装时间')
         t.send(None)
 
-def run_symbolic_assemble_test(config: TestConfig):
-    pass
-
 def run_assmeble_exact_test(config: TestConfig):
     """测试 SOPTX 中不同的 assembly_method 的正确性."""
     materials, tensor_space_C, pde, rho = create_base_components(config)
@@ -194,8 +191,8 @@ def run_assmeble_exact_test(config: TestConfig):
     print(f"diff_K3: {bm.sum(bm.abs(K_fas_full - K_sym_full))}")
     print(f"-------------------------------")
 
-def run_solve_test(config: TestConfig):
-    """测试 SOPTX 中不同的 solver_type."""
+def run_solve_uh_time_test(config: TestConfig):
+    """测试求解位移的效率"""
     materials, tensor_space_C, pde, rho = create_base_components(config)
 
     solver = ElasticFEMSolver(
@@ -323,7 +320,7 @@ if __name__ == "__main__":
                             solver_type=None, 
                             solver_params=None,
                         )
-    config_solver_assmeble = TestConfig(
+    config_solver_time_test= TestConfig(
                             backend='numpy',
                             pde_type='cantilever_2d_1',
                             elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
@@ -337,7 +334,8 @@ if __name__ == "__main__":
                             solver_params={'solver_type': 'mumps'},
                             )
     
-    # result1 = run_solve_uh_exact_test(config_solve_exact_test)
+    # result = run_solve_uh_exact_test(config_solve_exact_test)
+    result = run_solve_uh_time_test
     # result2 = run_solver_assemble_test(config_solver_assmeble)
     # result3 = run_assmeble_time_test(config_assemble_time)
-    result4 = run_assmeble_exact_test(config_assmeble_exact)
+    # result4 = run_assmeble_exact_test(config_assmeble_exact)

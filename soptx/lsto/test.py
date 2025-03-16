@@ -31,6 +31,11 @@ material_config = LevelSetMaterialConfig(
                         plane_assumption="plane_stress",    
                     )
 materials = LevelSetMaterialInstance(config=material_config)
+E = materials.elastic_modulus
+nu = materials.poisson_ratio
+lam = materials.lame_lambda
+# lam = E * nu / ((1 + nu) * (1 - nu))
+mu = materials.shear_modulus
 node = mesh.entity('node')
 kwargs = bm.context(node)
 @cartesian
@@ -61,17 +66,12 @@ for iterNum in range(num):
     solver.update_status(rho[:])
     uh = solver.solve().displacement
     uhe = uh[cell2dof]
-    shapeSens[:] = -bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe)
-    topSens[:] = shapeSens
+    # shapeSens[:] = -objective._compute_element_compliance(u=uh)
+    shapeSens[:] = -bm.maximum(rho, 1e-4) * bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe)
+    coef = rho[:] * bm.pi/2 * (lam + 2*mu) / mu / (lam + mu)
+    topSens[:] = coef * (4*mu * bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe) + \
+                            (lam - mu) * bm.einsum('ci, cik, ck -> c', uhe, ktr0, uhe))
     obj_value = objective.fun(rho=rho[:], u=None)
     volfrac = constraint.get_volume_fraction(rho=rho[:])
     print("---------------")
 
-
-
-obj_value = objective.fun(rho=rho[:], u=None)
-volreq = 0.3
-constraint = VolumeConstraint(solver=solver, volume_fraction=volreq)
-volfrac = constraint.get_volume_fraction(rho=rho[:])
-
-print("--------------------------")
