@@ -4,6 +4,7 @@ from enum import Enum, auto
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Union
+from fealpy.mesh import HomogeneousMesh, SimplexMesh, TensorMesh, StructuredMesh
 from fealpy.functionspace import TensorFunctionSpace
 from fealpy.fem import LinearElasticIntegrator, BilinearForm, DirichletBC
 from fealpy.sparse import CSRTensor
@@ -71,6 +72,7 @@ class ElasticFEMSolver:
             
         # 缓存
         self._base_local_stiffness_matrix = None
+        self._base_local_trace_matrix = None
 
     #---------------------------------------------------------------------------
     # 公共属性
@@ -98,7 +100,6 @@ class ElasticFEMSolver:
             
         # 1. 更新密度场
         self._current_density = density
-
         # 2. 根据新密度更新材料属性
         self.materials.update_elastic_modulus(self._current_density)
     
@@ -115,10 +116,125 @@ class ElasticFEMSolver:
 
         return self._base_local_stiffness_matrix
     
+    def get_base_local_trace_matrix(self) -> TensorLike:
+        """获取基础材料的局部迹矩阵 (会被缓存)"""
+        if self._base_local_trace_matrix is None:
+            base_material = self.materials.get_base_material()
+            integrator = LinearElasticIntegrator(
+                            material=base_material,
+                            q=self.tensor_space.p+3,
+                            method=None
+                        )
+            
+            scalar_space = self.tensor_space.scalar_space
+            mesh = getattr(scalar_space, 'mesh', None)
+            
+            cm, bcs, ws, gphi, detJ = integrator.fetch_assembly(self.tensor_space)
+            
+            D = base_material.elastic_matrix(bcs)
+            
+            GD = mesh.geo_dimension()
+            if GD == 2:
+                D00 = D[..., 0, 0, None]  # E/(1-ν²) 或 2μ+λ
+                D01 = D[..., 0, 1, None]  # νE/(1-ν²) 或 λ
+                trace_coef = D00 + D01    # 2(λ+μ) 或 E/(1-ν)
+            else:  # GD == 3
+                D00 = D[..., 0, 0, None]       # 2μ+λ
+                D01 = D[..., 0, 1, None]       # λ
+                D02 = D[..., 0, 2, None]       # λ
+                trace_coef = D00 + D01 + D02   # 3λ + 2μ
+            
+            # 计算基础矩阵
+            if isinstance(mesh, SimplexMesh):
+                A_xx = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 0], gphi[..., 0], cm)
+                A_yy = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 1], gphi[..., 1], cm)
+                A_xy = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 0], gphi[..., 1], cm)
+                A_yx = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 1], gphi[..., 0], cm)
+                
+                if GD == 3:
+                    A_zz = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 2], gphi[..., 2], cm)
+                    A_xz = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 0], gphi[..., 2], cm)
+                    A_zx = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 2], gphi[..., 0], cm)
+                    A_yz = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 1], gphi[..., 2], cm)
+                    A_zy = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 2], gphi[..., 1], cm)
+            else:
+                A_xx = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 0], gphi[..., 0], detJ)
+                A_yy = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 1], gphi[..., 1], detJ)
+                A_xy = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 0], gphi[..., 1], detJ)
+                A_yx = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 1], gphi[..., 0], detJ)
+                
+                if GD == 3:
+                    A_zz = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 2], gphi[..., 2], detJ)
+                    A_xz = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 0], gphi[..., 2], detJ)
+                    A_zx = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 2], gphi[..., 0], detJ)
+                    A_yz = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 1], gphi[..., 2], detJ)
+                    A_zy = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 2], gphi[..., 1], detJ)
+            
+            # 初始化迹矩阵
+            NC = mesh.number_of_cells()
+            ldof = scalar_space.number_of_local_dofs()
+            KTr = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
+            
+            # 根据维度和自由度排序计算迹矩阵
+            if GD == 2:
+                if self.tensor_space.dof_priority:
+                     # 填充对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, ldof), slice(0, ldof)), A_xx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(ldof, 2*ldof), slice(ldof, 2*ldof)), A_yy)
+
+                    # 填充非对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, ldof), slice(ldof, 2*ldof)), A_xy)
+                    KTr = bm.set_at(KTr, (slice(None), slice(ldof, 2*ldof), slice(0, ldof)), A_yx)
+
+                    KTr = trace_coef * KTr
+                else:
+                    # 填充对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, KTr.shape[1], GD), slice(0, KTr.shape[2], GD)), A_xx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(1, KTr.shape[1], GD), slice(1, KTr.shape[2], GD)), A_yy)
+                    
+                    # 填充非对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, KTr.shape[1], GD), slice(1, KTr.shape[2], GD)), A_xy)
+                    KTr = bm.set_at(KTr, (slice(None), slice(1, KTr.shape[1], GD), slice(0, KTr.shape[2], GD)), A_yx)
+
+                    KTr = trace_coef * KTr
+            else: 
+                if self.tensor_space.dof_priority:
+                    # 填充对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, ldof), slice(0, ldof)), A_xx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(ldof, 2*ldof), slice(ldof, 2*ldof)), A_yy)
+                    KTr = bm.set_at(KTr, (slice(None), slice(2*ldof, 3*ldof), slice(2*ldof, 3*ldof)), A_zz)
+                    
+                    # 填充非对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, ldof), slice(ldof, 2*ldof)), A_xy)
+                    KTr = bm.set_at(KTr, (slice(None), slice(ldof, 2*ldof), slice(0, ldof)), A_yx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, ldof), slice(2*ldof, 3*ldof)), A_xz)
+                    KTr = bm.set_at(KTr, (slice(None), slice(2*ldof, 3*ldof), slice(0, ldof)), A_zx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(ldof, 2*ldof), slice(2*ldof, 3*ldof)), A_yz)
+                    KTr = bm.set_at(KTr, (slice(None), slice(2*ldof, 3*ldof), slice(ldof, 2*ldof)), A_zy)
+                    
+                    KTr = trace_coef * KTr
+                else:
+                    # 填充对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, KTr.shape[1], GD), slice(0, KTr.shape[2], GD)), A_xx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(1, KTr.shape[1], GD), slice(1, KTr.shape[2], GD)), A_yy)
+                    KTr = bm.set_at(KTr, (slice(None), slice(2, KTr.shape[1], GD), slice(2, KTr.shape[2], GD)), A_zz)
+                    
+                    # 填充非对角块
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, KTr.shape[1], GD), slice(1, KTr.shape[2], GD)), A_xy)
+                    KTr = bm.set_at(KTr, (slice(None), slice(1, KTr.shape[1], GD), slice(0, KTr.shape[2], GD)), A_yx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(0, KTr.shape[1], GD), slice(2, KTr.shape[2], GD)), A_xz)
+                    KTr = bm.set_at(KTr, (slice(None), slice(2, KTr.shape[1], GD), slice(0, KTr.shape[2], GD)), A_zx)
+                    KTr = bm.set_at(KTr, (slice(None), slice(1, KTr.shape[1], GD), slice(2, KTr.shape[2], GD)), A_yz)
+                    KTr = bm.set_at(KTr, (slice(None), slice(2, KTr.shape[1], GD), slice(1, KTr.shape[2], GD)), A_zy)
+                    
+                    KTr = trace_coef * KTr
+                    
+            self._base_local_trace_matrix = KTr
+            
+        return self._base_local_trace_matrix
+    
     def compute_local_stiffness_matrix(self) -> TensorLike:
         """计算当前材料的局部刚度矩阵（每次重新计算）"""
-
-        
         integrator = self._integrator
  
         # 根据 assembly_config.method 选择对应的组装函数
