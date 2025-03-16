@@ -11,7 +11,7 @@ from numpy.linalg import solve
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.solver import cg, spsolve
-from fealpy.mesh import StructuredMesh
+
 
 """Method of Moving Asymptotes (MMA) 子问题求解器
 
@@ -294,23 +294,3 @@ def solve_mma_subproblem(m: int, n: int,
     smma = s
 
     return xmma, ymma, zmma, lamma, xsimma, etamma, mumma, zetmma, smma
-
-
-def save_optimization_history(mesh, history, save_path: str):
-    """保存优化过程的所有迭代结果
-    
-    Parameters
-    ----------
-    mesh : StructuredMesh or TetrahedronMesh
-        有限元网格对象
-    history : OptimizationHistory
-        优化历史记录，包含每次迭代的密度场
-    save_path : str
-        保存路径
-    """
-    for i, density in enumerate(history.densities):
-        mesh.celldata['density'] = density
-        if isinstance(mesh, StructuredMesh):
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
-        else:  
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")

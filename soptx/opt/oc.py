@@ -8,6 +8,7 @@ from fealpy.typing import TensorLike
 from fealpy.mesh import StructuredMesh
 
 from soptx.opt import ObjectiveBase, ConstraintBase, OptimizerBase
+from soptx.opt.tools import OptimizationHistory
 from soptx.filter import (BasicFilter,
                           SensitivityBasicFilter, 
                           DensityBasicFilter, 
@@ -74,54 +75,6 @@ class OCOptions:
                 setattr(self, valid_params[key], value)
             else:
                 raise ValueError(f"Unknown parameter: {key}")
-
-@dataclass
-class OptimizationHistory:
-    """优化过程的历史记录"""
-    densities: list       # 密度场历史
-    iteration_times: list # 迭代时间历史
-    start_time: float     # 优化开始时间
-
-    def __init__(self):
-        """初始化各个记录列表"""
-        self.densities = []
-        self.iteration_times = []
-        self.start_time = time()
-
-    def log_iteration(self, iter_idx: int, obj_val: float, volume: float, 
-                     change: float, time_cost: float, density: TensorLike):
-        """记录一次迭代的信息"""
-        self.densities.append(bm.copy(density))
-        self.iteration_times.append(time_cost)
-        
-        print(f"Iteration: {iter_idx + 1}, "
-              f"Objective: {obj_val:.12f}, "
-              f"Volume: {volume:.4f}, "
-              f"Change: {change:.4f}, "
-              f"Time: {time_cost:.3f} sec")
-        
-    def get_total_time(self) -> float:
-        """获取总优化时间"""
-        return time() - self.start_time
-        
-    def get_average_iteration_time(self) -> float:
-        """获取平均每次迭代时间（排除第一次）"""
-        if len(self.iteration_times) <= 1:
-            return 0.0
-        return sum(self.iteration_times[1:]) / (len(self.iteration_times) - 1)
-        
-    def print_time_statistics(self):
-        """打印时间统计信息"""
-        total_time = self.get_total_time()
-        avg_time = self.get_average_iteration_time()
-        
-        print("\nTime Statistics:")
-        print(f"Total optimization time: {total_time:.3f} sec")
-        if len(self.iteration_times) > 0:
-            print(f"First iteration time: {self.iteration_times[0]:.3f} sec")
-        if len(self.iteration_times) > 1:
-            print(f"Average iteration time (excluding first): {avg_time:.3f} sec")
-            print(f"Number of iterations: {len(self.iteration_times)}")
 
 class OCOptimizer(OptimizerBase):
     """Optimality Criteria (OC) 优化器"""
@@ -217,11 +170,14 @@ class OCOptimizer(OptimizerBase):
             if self.filter is not None:
                 self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
 
-            # 使用物理密度计算约束值和梯度
+            # 使用物理密度计算约束函数值梯度
             con_val = self.constraint.fun(rho_phys)
             con_grad = self.constraint.jac(rho_phys)  # (NC, )
             if self.filter is not None:
                 self.filter.filter_constraint_sensitivities(rho_phys, con_grad)
+
+            # 当前体积分数
+            vol_frac = self.constraint.get_volume_fraction(rho_phys)
             
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
@@ -235,7 +191,7 @@ class OCOptimizer(OptimizerBase):
                 else:
                     rho_phys = rho_new
 
-                # 检查约束
+                # 检查约束函数值
                 if self.constraint.fun(rho_phys) > 0:
                     l1 = lmid
                 else:
@@ -247,7 +203,8 @@ class OCOptimizer(OptimizerBase):
             
             # 记录当前迭代信息
             iteration_time = time() - start_time
-            history.log_iteration(iter_idx, obj_val, bm.mean(rho_phys[:]), 
+
+            history.log_iteration(iter_idx, obj_val, vol_frac, 
                                 change, iteration_time, rho_phys[:])
             
             # 处理 Heaviside 投影的 beta continuation

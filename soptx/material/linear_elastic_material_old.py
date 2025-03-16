@@ -8,58 +8,26 @@ from fealpy.material.elastic_material import LinearElasticMaterial
 from .interpolation_scheme import SIMPInterpolation, RAMPInterpolation
 
 @dataclass
-class BaseElasticMaterialConfig:
-    """弹性材料属性的基础配置类"""
+class ElasticMaterialConfig:
+    """Configuration class for elastic material properties."""
     elastic_modulus: float = 1.0
     minimal_modulus: float = 1e-9
     poisson_ratio: float = 0.3
     plane_assumption: Literal["plane_stress", "plane_strain", "3d"] = "plane_stress"
-
-@dataclass
-class DensityBasedMaterialConfig(BaseElasticMaterialConfig):
-    """基于密度的材料特定配置"""
     interpolation_model: Literal["SIMP", "RAMP"] = "SIMP"  
     penalty_factor: float = 3.0
 
-@dataclass
-class LevelSetMaterialConfig(BaseElasticMaterialConfig):
-    """基于水平集的材料特定配置"""
-    # 可根据需要添加水平集特有的配置参数
-    pass
-
-class BaseElasticMaterialInstance(LinearElasticMaterial):
-    """具有特定杨氏模量的基础弹性材料实例类"""
-    def __init__(self, config: BaseElasticMaterialConfig, E: TensorLike = None):
+class ElasticMaterialInstance(LinearElasticMaterial):
+    """具有特定杨氏模量的弹性材料实例"""
+    def __init__(self, config: ElasticMaterialConfig, E: TensorLike = None):
         super().__init__(
-                        name="BaseElasticMaterial",
+                        name="ElasticMaterial",
                         elastic_modulus=1.0,                # 基础值, 实际值由 _E 控制
                         poisson_ratio=config.poisson_ratio,
                         hypo=config.plane_assumption
                     )
         self._E = E
         self.config = config
-
-    def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
-        """计算弹性矩阵"""
-        base_D = super().elastic_matrix()
-
-        # 处理不同类型的张量
-        if len(self._E.shape) > 0:
-            D = bm.einsum('b, ijkl -> bjkl', self._E, base_D)
-        else:
-            D = self._E * base_D
-   
-        return D
-    
-    @property
-    def elastic_modulus(self) -> TensorLike:
-        """获取当前的杨氏模量场"""
-        return self._E
-
-class DensityBasedMaterialInstance(BaseElasticMaterialInstance):
-    """基于密度的弹性材料实例，使用插值方案"""
-    def __init__(self, config: DensityBasedMaterialConfig, E: TensorLike = None):
-        super().__init__(config, E)
 
         # 根据配置的插值模型选择相应的插值方法
         if self.config.interpolation_model == "SIMP":
@@ -103,24 +71,23 @@ class DensityBasedMaterialInstance(BaseElasticMaterialInstance):
     def get_base_material(self):
         """获取基础材料实例 (E=1)"""
         E = bm.ones(1, dtype=bm.float64)
-        return DensityBasedMaterialInstance(self.config, E)
 
-class LevelSetMaterialInstance(BaseElasticMaterialInstance):
-    """基于水平集的弹性材料实例，使用二元材料分布"""
-    def __init__(self, config: LevelSetMaterialConfig, E: TensorLike = None):
-        super().__init__(config, E)
+        return ElasticMaterialInstance(self.config, E)
 
-    def update_elastic_modulus(self, density: TensorLike) -> TensorLike:
-        """根据二元场更新杨氏模量 (0 或 1)"""
-        E = bm.maximum(density, self.config.minimal_modulus) * self.config.elastic_modulus
-        self._E = E
         
-    def calculate_elastic_modulus(self, density: TensorLike) -> TensorLike:
-        """根据二元场计算杨氏模量 (0 或 1)"""
-        E = bm.maximum(density, self.config.minimal_modulus) * self.config.elastic_modulus
-        return E
+    def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
+        """计算弹性矩阵"""
+        base_D = super().elastic_matrix()
+
+        # 处理不同类型的张量
+        if len(self._E.shape) > 0:
+            D = bm.einsum('b, ijkl -> bjkl', self._E, base_D)
+        else:
+            D = self._E * base_D
+   
+        return D
     
-    def get_base_material(self):
-        """获取基础材料实例 (E=1)"""
-        E = bm.ones(1, dtype=bm.float64)
-        return LevelSetMaterialInstance(self.config, E)
+    @property
+    def elastic_modulus(self) -> TensorLike:
+        """获取当前的杨氏模量场"""
+        return self._E

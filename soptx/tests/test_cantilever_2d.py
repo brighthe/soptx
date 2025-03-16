@@ -11,8 +11,8 @@ from fealpy.mesh import UniformMesh2d, TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
-                            ElasticMaterialConfig,
-                            ElasticMaterialInstance,
+                            DensityBasedMaterialConfig,
+                            DensityBasedMaterialInstance,
                         )
 from soptx.pde import Cantilever2dData1, Cantilever2dData2
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
@@ -20,7 +20,7 @@ from soptx.filter import (SensitivityBasicFilter,
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
 from soptx.opt import ComplianceObjective, VolumeConstraint
-from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history
+from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history, plot_optimization_history
 @dataclass
 class TestConfig:
     """Configuration for topology optimization test cases."""
@@ -44,6 +44,8 @@ class TestConfig:
     ny: int
     hx: float
     hy: float
+
+    p: int
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -86,18 +88,18 @@ def create_base_components(config: TestConfig):
             origin = [0.0, 0.0]
             mesh = UniformMesh2d(
                         extent=extent, h=[config.hx, config.hy], origin=origin,
-                        ipoints_ordering='yx', flip_direction='y',
-                        device='cpu'
+                        ipoints_ordering='yx',
+                        device='cpu',
                     )
 
     GD = mesh.geo_dimension()
     
-    p = 1
+    p = config.p
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
     
-    material_config = ElasticMaterialConfig(
+    material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
@@ -106,7 +108,7 @@ def create_base_components(config: TestConfig):
                             penalty_factor=config.penalty_factor
                         )
     
-    materials = ElasticMaterialInstance(config=material_config)
+    materials = DensityBasedMaterialInstance(config=material_config)
 
     solver = ElasticFEMSolver(
                 materials=materials,
@@ -121,7 +123,8 @@ def create_base_components(config: TestConfig):
     kwargs = bm.context(node)
     @cartesian
     def density_func(x: TensorLike):
-        val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
+        # val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
+        val = bm.ones(x.shape[0], **kwargs)
         return val
     rho = space_D.interpolate(u=density_func)
 
@@ -129,23 +132,23 @@ def create_base_components(config: TestConfig):
     constraint = VolumeConstraint(solver=solver, 
                                 volume_fraction=config.volume_fraction)
     
-    return rho, objective, constraint
+    return pde, rho, objective, constraint
 
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     """
     测试 filter 类不同滤波器的正确性.
     """
-    rho, objective, constraint = create_base_components(config)
+    pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
     if config.filter_type == 'None':
         filter = None
     elif config.filter_type == 'sensitivity':
-        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius) 
+        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain()) 
     elif config.filter_type == 'density':
-        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
+        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())
     elif config.filter_type == 'heaviside':
-        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius)   
+        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())  
 
     if config.optimizer_type == 'oc':
         optimizer = OCOptimizer(
@@ -169,20 +172,23 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
         optimizer = MMAOptimizer(
                         objective=objective,
                         constraint=constraint,
-                        filter=None,
+                        filter=filter,
                         options={
                             'max_iterations': config.max_iterations,
                             'tolerance': config.tolerance,
-                            'm': 1,
-                            'n': NC,
-                            'xmin': bm.zeros(NC, dtype=bm.float64).reshape(-1, 1),
-                            'xmax': bm.ones(NC, dtype=bm.float64).reshape(-1, 1),
-                            "a0": 1,
-                            "a": bm.zeros(1, dtype=bm.float64).reshape(-1, 1),
-                            'c': 1e4 * bm.ones(1, dtype=bm.float64).reshape(-1, 1),
-                            'd': bm.zeros(1, dtype=bm.float64).reshape(-1,),
                         }
                     )
+        # 设置高级参数 (可选)
+        optimizer.options.set_advanced_options(
+                                m=1,
+                                n=NC,
+                                xmin=bm.zeros((NC, 1)),
+                                xmax=bm.ones((NC, 1)),
+                                a0=1,
+                                a=bm.zeros((1, 1)),
+                                c=1e4 * bm.ones((1, 1)),
+                                d=bm.zeros((1, 1)),
+                            )
     else:
         raise ValueError(f"Unsupported optimizer type: {config.optimizer_type}")
 
@@ -192,6 +198,7 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     save_path = Path(config.save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
     save_optimization_history(mesh, history, str(save_path))
+    plot_optimization_history(history, save_path=str(save_path))
     
     return {
         'optimal_density': rho_opt,
@@ -204,69 +211,29 @@ if __name__ == "__main__":
     '''
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
+    backend = 'numpy'
     pde_type = 'cantilever_2d_1'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    nx = 160
-    ny = 100
-    hx = 1
-    hy = 1
+    nx, ny = 160, 100
     config_sens_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.4,
-                            penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=6.0,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
-                        )
-    filter_type = 'none'
-    config_none_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.4,
-                            penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                            assembly_method=AssemblyMethod.FAST_STRESS_UNIFORM,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=6.0,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
-                        )
+            backend=backend,
+            pde_type=pde_type,
+            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+            domain_length=nx, domain_width=ny,
+            load=-1,
+            volume_fraction=0.4,
+            penalty_factor=3.0,
+            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
+            p = 1,
+            assembly_method=AssemblyMethod.FAST,
+            solver_type='direct', solver_params={'solver_type': 'mumps'},
+            diff_mode='manual',
+            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+            filter_type=filter_type, filter_radius=6.0,
+            save_dir=f'{base_dir}/{backend}_{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+        )
     result1 = run_basic_filter_test(config_sens_filter)
     # result2 = run_filter_exact_test(config_none_filter)
-
-    # '''
-    # 参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
-    # '''
-    # pde_type = 'cantilever_2d_2'
-    # config_canti_2d_2 = TestConfig(
-    #                         backend='numpy',
-    #                         pde_type=pde_type,
-    #                         elastic_modulus=1e5, poisson_ratio=0.3, minimal_modulus=1e-9,
-    #                         domain_length=3.0, domain_width=1.0,
-    #                         load=2000,
-    #                         volume_fraction=0.5,
-    #                         penalty_factor=3.0,
-    #                         mesh_type='triangle_mesh', nx=300, ny=100,
-    #                         assembly_method=AssemblyMethod.SYMBOLIC,
-    #                         solver_type='direct', solver_params={'solver_type': 'mumps'},
-    #                         diff_mode='manual',
-    #                         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-    #                         filter_type=filter_type, filter_radius=6.0,
-    #                         save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}',
-    #                     )
-    # result3 = run_filter_exact_test(config_canti_2d_2)
     
     

@@ -110,9 +110,6 @@ def run_filter_new_3d_test(config: TestConfig):
     H1 = H.toarray()
     
     cell_centers = mesh.entity_barycenter('cell')
-
-    # cell_self, neighbors = bm.query_point(x=cell_centers, y=cell_centers, h=config.filter_radius, 
-    #                                     box_size=domain, mask_self=True, periodic=[False, False, False])
     
     H_test, Hs_test = SF._compute_filter_general(cell_centers=cell_centers, 
                                                 rmin=config.filter_radius, 

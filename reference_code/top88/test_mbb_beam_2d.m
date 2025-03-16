@@ -86,9 +86,7 @@ while change > 0.01
 	ce = reshape(sum((U(edofMat)*KE).*U(edofMat),2), nely, nelx);
 	c = sum(sum((Emin + xPhys.^penal * (E0 - Emin)).*ce));
 	dc = -penal*(E0-Emin)*xPhys.^(penal-1).*ce;
-	dv = ones(nely, nelx);
-    % fprintf('dc: %11.12f\n', sum(abs(dc(:))));
-	
+	dv = ones(nely, nelx);	
 	% FILTERING/MODIFICATION OF SENSITIVITIES
 	if ft == 1
 		dc(:) = H*(x(:).*dc(:))./Hs./max(1e-3, x(:));
@@ -96,9 +94,6 @@ while change > 0.01
 		dc(:) = H*(dc(:)./Hs);
 		dv(:) = H*(dv(:)./Hs);
     end
-    % fprintf('ddc: %11.12f\n', sum(abs(dc(:))));
-    % fprintf('dv: %11.12f\n', sum(abs(dv(:))));
-	
 	% OPTIMALITY CRITERIA UPDATE OF DESIGN VARIABLES AND PHYSICAL DENSITIES
 	l1 = 0; l2 = 1e9; move = 0.2;
 	while (l2-l1)/(l1+l2) > 1e-3
@@ -111,13 +106,11 @@ while change > 0.01
 		end
 		if sum(xPhys(:)) > volfrac*nelx*nely, l1 = lmid; else l2 = lmid; end
     end
-    fprintf('xPhys: %11.12f\n', mean(xPhys(:)));
 	change = max(abs(xnew(:)-x(:)));
 	x = xnew;
 
 	% PRINT RESULTS
 	iter_time = toc;  % Stop timing and get iteration time
-    % meam =  mean(xPhys(:));
 	fprintf(' It.:%5i Obj.:%11.12f Vol.:%8.4jiay jiay f ch.:%7.3f Time:%7.3f sec\n', loop, c, mean(xPhys(:)), change, iter_time);
 
 	% PLOT DENSITIES

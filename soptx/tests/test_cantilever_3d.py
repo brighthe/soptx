@@ -11,8 +11,8 @@ from fealpy.mesh import UniformMesh3d, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
-                            ElasticMaterialConfig,
-                            ElasticMaterialInstance,
+                            DensityBasedMaterialConfig,
+                            DensityBasedMaterialInstance,
                         )
 from soptx.pde import Cantilever3dData1
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
@@ -84,7 +84,7 @@ def create_base_components(config: TestConfig):
             origin = [0.0, 0.0, 0.0]
             mesh = UniformMesh3d(
                         extent=extent, h=[config.hx, config.hy, config.hz], origin=origin,
-                        ipoints_ordering='zyx', flip_direction=None,
+                        ipoints_ordering='zyx',
                         device='cpu'
                     )
         elif config.mesh_type == 'tetrahedron_mesh':
@@ -98,7 +98,7 @@ def create_base_components(config: TestConfig):
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
     
-    material_config = ElasticMaterialConfig(
+    material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
@@ -107,7 +107,7 @@ def create_base_components(config: TestConfig):
                             penalty_factor=config.penalty_factor
                         )
     
-    materials = ElasticMaterialInstance(config=material_config)
+    materials = DensityBasedMaterialInstance(config=material_config)
 
     solver = ElasticFEMSolver(
                 materials=materials,
@@ -214,40 +214,22 @@ if __name__ == "__main__":
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
     nx, ny, nz = 60, 20, 4
-    hx, hy, hz = 1, 1, 1
     config_basic_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny, domain_height=nz,
-                            load=-1,
-                            volume_fraction=0.3,
-                            penalty_factor=3.0,
-                            mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                            assembly_method=AssemblyMethod.FAST,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=1.5,
-                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
-                        )
-    filter_type = 'density'
-    config_dens_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny, domain_height=nz,
-                            load=-1,
-                            volume_fraction=0.3,
-                            penalty_factor=3.0,
-                            mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
-                            assembly_method=AssemblyMethod.FAST,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=400, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=1.5,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
-                        )
+            backend='numpy',
+            pde_type=pde_type,
+            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+            domain_length=nx, domain_width=ny, domain_height=nz,
+            load=-1,
+            volume_fraction=0.3,
+            penalty_factor=3.0,
+            mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
+            assembly_method=AssemblyMethod.FAST,
+            solver_type='direct', solver_params={'solver_type': 'mumps'},
+            diff_mode='manual',
+            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+            filter_type=filter_type, filter_radius=1.5,
+            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
+        )
     optimizer_type = 'mma'
     filter_type = 'density'
     config_mma_dens_filter = TestConfig(
@@ -258,7 +240,7 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
                         assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',
@@ -275,7 +257,7 @@ if __name__ == "__main__":
                         load=-1,
                         volume_fraction=0.3,
                         penalty_factor=3.0,
-                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        mesh_type='uniform_mesh_3d', nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
                         assembly_method=AssemblyMethod.FAST,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                         diff_mode='manual',

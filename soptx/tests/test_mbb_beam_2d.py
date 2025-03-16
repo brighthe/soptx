@@ -11,8 +11,8 @@ from fealpy.mesh import UniformMesh2d, TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
-                            ElasticMaterialConfig,
-                            ElasticMaterialInstance,
+                            DensityBasedMaterialConfig,
+                            DensityBasedMaterialInstance,
                         )
 from soptx.pde import MBBBeam2dData1
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
@@ -21,7 +21,7 @@ from soptx.filter import (SensitivityBasicFilter,
                           HeavisideProjectionBasicFilter)
 from soptx.opt import (ComplianceObjective, ComplianceConfig,
                        VolumeConstraint, VolumeConfig)
-from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history
+from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history, plot_optimization_history
 
 @dataclass
 class TestConfig:
@@ -46,6 +46,8 @@ class TestConfig:
     ny: int
     hx: float
     hy: float
+
+    p: int
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -82,8 +84,7 @@ def create_base_components(config: TestConfig):
             origin = [0.0, 0.0]
             mesh = UniformMesh2d(
                         extent=extent, h=[config.hx, config.hy], origin=origin,
-                        ipoints_ordering='yx', flip_direction=None,
-                        device='cpu'
+                        ipoints_ordering='yx', device='cpu'
                     )
         elif config.mesh_type == 'triangle_mesh':
             mesh = TriangleMesh.from_box(box=pde.domain(), 
@@ -91,12 +92,12 @@ def create_base_components(config: TestConfig):
 
     GD = mesh.geo_dimension()
     
-    p = 1
+    p = config.p
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
-    space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
+    space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     
-    material_config = ElasticMaterialConfig(
+    material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
@@ -105,7 +106,7 @@ def create_base_components(config: TestConfig):
                             penalty_factor=config.penalty_factor
                         )
     
-    materials = ElasticMaterialInstance(config=material_config)
+    materials = DensityBasedMaterialInstance(config=material_config)
 
     solver = ElasticFEMSolver(
                 materials=materials,
@@ -215,13 +216,12 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     if config.filter_type == 'None':
         filter = None
     elif config.filter_type == 'sensitivity':
-        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius, 
-                                        domain=pde.domain()) 
+        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain()) 
     elif config.filter_type == 'density':
-        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
+        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())
     elif config.filter_type == 'heaviside':
-        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius,
-                                            beta=1, max_beta=512, continuation_iter=50)   
+        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())  
+
 
     if config.optimizer_type == 'oc':
         optimizer = OCOptimizer(
@@ -271,6 +271,7 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     save_path = Path(config.save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
     save_optimization_history(mesh, history, str(save_path))
+    plot_optimization_history(history, save_path=str(save_path))
     
     return {
         'optimal_density': rho_opt,
@@ -283,45 +284,38 @@ if __name__ == "__main__":
     '''
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
+    backend = 'numpy'
     pde_type = 'mbb_beam_2d_1'
     mesh_type = 'uniform_mesh_2d'
     # mesh_type = 'triangle_mesh'
-    optimizer_type = 'oc'
+    # nx, ny = 60, 20
+    nx, ny = 150, 50
+    # nx ,ny = 300, 100
+    # optimizer_type = 'oc'
+    optimizer_type = 'mma'
     filter_type = 'sensitivity'
-    nx, ny = 60, 20
+    # filter_type = 'density'
+    filter_radius = nx * 0.04
+    # filter_type = 'heaviside'
+    # filter_radius = nx * 0.03
     config_basic_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.5,
-                            penalty_factor=3.0,
-                            mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
-                            assembly_method=AssemblyMethod.FAST,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                        )
-    mesh_type = 'triangle_mesh'
-    config_t_sens = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.5,
-                            penalty_factor=3.0,
-                            mesh_type=mesh_type, nx=nx, ny=ny, hx=None, hy=None,
-                            assembly_method=AssemblyMethod.SYMBOLIC,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                        )
+        backend=backend,
+        pde_type=pde_type,
+        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+        domain_length=nx, domain_width=ny,
+        load=-1,
+        volume_fraction=0.5,
+        penalty_factor=3.0,
+        mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
+        p = 1,
+        assembly_method=AssemblyMethod.FAST,
+        solver_type='direct', solver_params={'solver_type': 'mumps'},
+        # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
+        diff_mode='manual',
+        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+        filter_type=filter_type, filter_radius=filter_radius,
+        save_dir=f'{base_dir}/{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+        )
     
     diff_modo = 'auto'
     nx, ny = 150, 50
@@ -336,6 +330,7 @@ if __name__ == "__main__":
         volume_fraction=0.5,
         penalty_factor=3.0,
         mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
+        p=1,
         assembly_method=AssemblyMethod.FAST,
         solver_type='direct', solver_params={'solver_type': 'mumps'},
         diff_mode=diff_modo,
@@ -343,78 +338,7 @@ if __name__ == "__main__":
         filter_type='sensitivity', filter_radius=nx*0.04,
         save_dir=f'{base_dir}/{backend}_{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}_{diff_modo}',
     )
-    filter_type = 'density'
-    config_dens_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.5,
-                            penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                            assembly_method=AssemblyMethod.FAST,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=400, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=nx*0.04,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                        )
-    filter_type = 'heaviside'
-    config_heav_filter = TestConfig(
-                            backend='numpy',
-                            pde_type=pde_type,
-                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                            domain_length=nx, domain_width=ny,
-                            load=-1,
-                            volume_fraction=0.5,
-                            penalty_factor=3.0,
-                            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                            assembly_method=AssemblyMethod.FAST,
-                            solver_type='direct', solver_params={'solver_type': 'mumps'},
-                            diff_mode='manual',
-                            optimizer_type=optimizer_type, max_iterations=600, tolerance=0.01,
-                            filter_type=filter_type, filter_radius=nx*0.03,
-                            save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                        )
-    optimizer_type = 'mma'
-    filter_type = 'sensitivity'
-    config_mma_sens_filter = TestConfig(
-                        backend='numpy',
-                        pde_type=pde_type,
-                        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                        domain_length=nx, domain_width=ny,
-                        load=-1,
-                        volume_fraction=0.5,
-                        penalty_factor=3.0,
-                        mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                        assembly_method=AssemblyMethod.FAST,
-                        solver_type='direct', solver_params={'solver_type': 'mumps'},
-                        diff_mode='manual',
-                        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-                        filter_type=filter_type, filter_radius=nx*0.04,
-                        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                    )
-    filter_type = 'density'
-    config_mma_dens_filter = TestConfig(
-                        backend='numpy',
-                        pde_type=pde_type,
-                        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-                        domain_length=nx, domain_width=ny,
-                        load=-1,
-                        volume_fraction=0.5,
-                        penalty_factor=3.0,
-                        mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=hy, hy=hy,
-                        assembly_method=AssemblyMethod.FAST,
-                        solver_type='direct', solver_params={'solver_type': 'mumps'},
-                        diff_mode='manual',
-                        optimizer_type=optimizer_type, max_iterations=500, tolerance=0.01,
-                        filter_type=filter_type, filter_radius=nx*0.04,
-                        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
-                    )
-    result1 = run_basic_filter_test(config_basic_filter)
+
+    # result1 = run_basic_filter_test(config_basic_filter)
     # result_11 = run_diff_mode_test(config_sens_filter_auto)
-    # result2 = run_basic_filter_test(config_dens_filter)
-    # result3 = run_basic_filter_test(config_heav_filter)
-    # result4 = run_basic_filter_test(config_mma_sens_filter)
-    # result5 = run_basic_filter_test(config_mma_dens_filter)
+    result2 = run_basic_filter_test(config_basic_filter)

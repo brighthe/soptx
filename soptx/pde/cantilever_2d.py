@@ -14,14 +14,8 @@ class Cantilever2dData1:
                 ymin: float, ymax: float,
                 T: float = -1):
         """
-        位移边界条件：梁的左边界固定
-        载荷：梁的右边界的下点施加垂直向下的力 T = -1
-        flip_direction = True
-        0 ------- 3 ------- 6 
-        |    0    |    2    |
-        1 ------- 4 ------- 7 
-        |    1    |    3    |
-        2 ------- 5 ------- 8 
+        位移边界条件: 梁的左边界固定
+        载荷: 梁的右边界的下点施加垂直向下的力 T = -1
         """
         self.xmin, self.xmax = xmin, xmax
         self.ymin, self.ymax = ymin, ymax
@@ -86,7 +80,7 @@ class Cantilever2dData2:
     '''
     新模型，适应区域大小和载荷改变：
     载荷施加在右边界的中点位置，大小为 T = 2000
-    区域尺寸：L 和 H
+    区域尺寸: L 和 H
     '''
     def __init__(self, 
                  xmin: float = 0, xmax: float = 3.0, 

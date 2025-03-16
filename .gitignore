@@ -4,6 +4,7 @@
 *.blg
 *.csv
 *.cpython-38.pyc
+*.drawio
 *.eps
 *.fig
 *.gif

@@ -31,6 +31,17 @@ class VolumeConstraint(ConstraintBase):
         self.config = config if config is not None else VolumeConfig()
 
     #---------------------------------------------------------------------------
+    # 体积计算相关方法
+    #---------------------------------------------------------------------------
+    def get_volume_fraction(self, rho: TensorLike) -> float:
+        """计算当前设计的体积分数"""
+        cell_measure = self.mesh.entity_measure('cell')
+        current_volume = bm.einsum('c, c -> ', cell_measure, rho)
+        total_volume = bm.sum(cell_measure)
+        volume_fraction = current_volume / total_volume
+        return volume_fraction
+
+    #---------------------------------------------------------------------------
     # 内部方法
     #---------------------------------------------------------------------------
     def _compute_gradient_manual(self, rho: TensorLike) -> TensorLike:

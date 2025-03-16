@@ -9,7 +9,7 @@ from fealpy.fem import LinearElasticIntegrator, BilinearForm, DirichletBC
 from fealpy.sparse import CSRTensor
 from fealpy.solver import cg, spsolve
 
-from soptx.material import ElasticMaterialInstance
+from soptx.material import BaseElasticMaterialInstance
 from soptx.utils import timer
 
 @dataclass
@@ -40,7 +40,7 @@ class ElasticFEMSolver:
     """
     
     def __init__(self, 
-                materials: ElasticMaterialInstance, 
+                materials: BaseElasticMaterialInstance, 
                 tensor_space: TensorFunctionSpace,
                 pde,
                 assembly_method: AssemblyMethod,
@@ -81,7 +81,7 @@ class ElasticFEMSolver:
         return self._current_density
     
     @property
-    def get_current_material(self) -> Optional[ElasticMaterialInstance]:
+    def get_current_material(self) -> Optional[BaseElasticMaterialInstance]:
         """获取当前材料实例"""
         if self.materials is None:
             raise ValueError("Material not initialized. Call update_density first.")
