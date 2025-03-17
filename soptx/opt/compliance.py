@@ -166,7 +166,7 @@ class ComplianceObjective(ObjectiveBase):
         # 计算单元柔度
         ce = self._compute_element_compliance(u)
         # 计算总柔度
-        E = self.materials.elastic_modulus
+        E = self.materials.elastic_modulus_field
         c = bm.einsum('c, c -> ', E, ce)
         
         return c

@@ -10,10 +10,10 @@ class Bridge2dData1:
     def __init__(self, 
                 xmin: float = 0, xmax: float = 1.0, 
                 ymin: float = 0, ymax: float = 0.3,
-                T: float = -1):
+                T: float = 1):
         """
         位移边界条件：桥梁两端有铰支座
-        载荷：桥梁中点施加垂直向下的力 T = -1
+        载荷：桥梁中点施加垂直向下的力 T = 1
         """
         self.xmin, self.xmax = xmin, xmax
         self.ymin, self.ymax = ymin, ymax
@@ -47,7 +47,6 @@ class Bridge2dData1:
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
-        # 简支梁两端的位移为零
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian

@@ -44,6 +44,8 @@ class TestConfig:
     hx: float
     hy: float
     hz: float
+
+    p: int
     
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
@@ -220,6 +222,29 @@ def run_solve_uh_exact_test(config: TestConfig):
     diff = bm.max(bm.abs(uh_cg - uh_mumps))
     print(f"Difference between CG and MUMPS : {diff:.6e}")
 
+def run_solve_uh_time_test(config: TestConfig):
+    """测试求解位移的效率"""
+    materials, tensor_space_C, pde, rho = create_base_components(config)
+
+    solver = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=config.assembly_method,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
+    for i in range(3):
+        # 创建计时器
+        t = timer(f"{config.solver_type} Timing")
+        next(t)  # 启动计时器
+        solver.update_status(rho[:])
+        t.send('准备时间')
+        solver_result = solver.solve()
+        uh = solver_result.displacement
+        t.send('求解时间')
+        t.send(None)
+
 
 if __name__ == "__main__":
     '''
@@ -239,6 +264,7 @@ if __name__ == "__main__":
                         volume_fraction=0.3,
                         penalty_factor=3.0,
                         mesh_type='tetrahedron_mesh', nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                        p=1,
                         assembly_method=AssemblyMethod.STANDARD,
                         solver_type='direct', solver_params={'solver_type': 'mumps'},
                     )
@@ -254,10 +280,28 @@ if __name__ == "__main__":
                         volume_fraction=0.3,
                         penalty_factor=3.0,
                         mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
+                        p=1,
                         assembly_method=None,
                         solver_type='direct', 
                         solver_params={'solver_type': 'mumps'},
                         )
+    nx, ny, nz = 60, 20, 4
+    hx, hy, hz = 1, 1, 1
+    mesh_type = 'uniform_mesh_3d'
+    config_solver_time = TestConfig(
+                            backend='numpy',
+                            pde_type='cantilever_3d_1',
+                            elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+                            domain_length=nx, domain_width=ny, domain_height=nz,
+                            load=-1,
+                            volume_fraction=0.3,
+                            penalty_factor=3.0,
+                            mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=hy, hy=hy, hz=hz,
+                            p=1,
+                            assembly_method=AssemblyMethod.FAST,
+                            solver_type='direct', solver_params={'solver_type': 'mumps'},
+                        )
     # result = run_solve_uh_exact_test(config_solve_uh_exact)
-    result2 = run_assmeble_exact_test(config_assmeble_exact)
+    # result2 = run_assmeble_exact_test(config_assmeble_exact)
     # result3 = run_assemble_time_test(config=config_assemble_time)
+    result = run_solve_uh_time_test(config=config_solver_time)

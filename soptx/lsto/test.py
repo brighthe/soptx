@@ -11,10 +11,10 @@ from soptx.material import (
 from soptx.solver import ElasticFEMSolver, AssemblyMethod
 from soptx.opt import ComplianceObjective, VolumeConstraint
 
-pde = Bridge2dData1(xmin=0, xmax=60,
-                    ymin=0, ymax=30,
+pde = Bridge2dData1(xmin=0, xmax=6,
+                    ymin=0, ymax=3,
                     T=1)
-mesh = UniformMesh2d(extent=[0, 60, 0, 30], h=[1, 1], origin=[0, 0],
+mesh = UniformMesh2d(extent=[0, 6, 0, 3], h=[1, 1], origin=[0, 0],
                     ipoints_ordering='yx', device='cpu')
 GD = mesh.geo_dimension()
 p = 1
@@ -31,6 +31,11 @@ material_config = LevelSetMaterialConfig(
                         plane_assumption="plane_stress",    
                     )
 materials = LevelSetMaterialInstance(config=material_config)
+E = materials.elastic_modulus
+nu = materials.poisson_ratio
+lam = materials.lame_lambda
+# lam = E * nu / ((1 + nu) * (1 - nu))
+mu = materials.shear_modulus
 node = mesh.entity('node')
 kwargs = bm.context(node)
 @cartesian
@@ -48,12 +53,25 @@ solver = ElasticFEMSolver(
                 solver_params={'solver_type': 'mumps'}, 
             )
 
+shapeSens = bm.zeros_like(rho[:])
+topSens = bm.zeros_like(rho[:])
 objective = ComplianceObjective(solver=solver)
-obj_value = objective.fun(rho=rho[:], u=None)
+num = 200
+ke0 = solver.get_base_local_stiffness_matrix()
+ktr0 = solver.get_base_local_trace_matrix()
+cell2dof = solver.tensor_space.cell_to_dof()
 volreq = 0.3
-constraint = VolumeConstraint(solver=solver, 
-                            volume_fraction=volreq
-                            )
-volfrac = constraint.get_volume_fraction(rho=rho[:])
+constraint = VolumeConstraint(solver=solver, volume_fraction=volreq)
+for iterNum in range(num):
+    solver.update_status(rho[:])
+    uh = solver.solve().displacement
+    uhe = uh[cell2dof]
+    # shapeSens[:] = -objective._compute_element_compliance(u=uh)
+    shapeSens[:] = -bm.maximum(rho, 1e-4) * bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe)
+    coef = rho[:] * bm.pi/2 * (lam + 2*mu) / mu / (lam + mu)
+    topSens[:] = coef * (4*mu * bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe) + \
+                            (lam - mu) * bm.einsum('ci, cik, ck -> c', uhe, ktr0, uhe))
+    obj_value = objective.fun(rho=rho[:], u=None)
+    volfrac = constraint.get_volume_fraction(rho=rho[:])
+    print("---------------")
 
-print("--------------------------")
