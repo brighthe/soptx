@@ -319,12 +319,12 @@ class ElasticFEMSolver:
     #---------------------------------------------------------------------------
     # 求解方法
     #---------------------------------------------------------------------------
-    def solve(self) -> Union[IterativeSolverResult, DirectSolverResult]:
+    def solve(self, enable_timing: bool = False) -> Union[IterativeSolverResult, DirectSolverResult]:
         """统一的求解接口"""
         if self.solver_type == 'cg':
-            return self.solve_cg(**self.solver_params)
+            return self.solve_cg(enable_timing=enable_timing, **self.solver_params)
         elif self.solver_type == 'direct':
-            return self.solve_direct(**self.solver_params)
+            return self.solve_direct(enable_timing=enable_timing, **self.solver_params)
         else:
             raise ValueError(f"Unsupported solver type: {self.solver_type}")
                
@@ -332,7 +332,9 @@ class ElasticFEMSolver:
                 maxiter: int = 5000,
                 atol: float = 1e-12,
                 rtol: float = 1e-12,
-                x0: Optional[TensorLike] = None) -> IterativeSolverResult:
+                x0: Optional[TensorLike] = None,
+                enable_timing: bool = False,
+            ) -> IterativeSolverResult:
         """使用共轭梯度法求解
         
         Parameters
@@ -344,14 +346,22 @@ class ElasticFEMSolver:
         if self._current_density is None:
             raise ValueError("Density not set. Call update_density first.")
     
-        t = timer(f"CG Solver Timing")
-        next(t)
+        t = None
+        if enable_timing:
+            t = timer(f"CG Solver Timing")
+            next(t)
+            
         K0 = self._assemble_global_stiffness_matrix()
-        t.send('矩阵组装时间')
+        
+        if enable_timing:
+            t.send('矩阵组装时间')
+            
         F0 = self._assemble_global_force_vector()
-
         K, F = self._apply_boundary_conditions(K0, F0)
-        t.send('其他')
+        
+        if enable_timing:
+            t.send('其他')
+            
         uh = self.tensor_space.function()
 
         try:
@@ -360,28 +370,46 @@ class ElasticFEMSolver:
             uh[:] = cg(K, F[:], x0=x0, atol=atol, rtol=rtol, maxit=maxiter)
         except Exception as e:
             raise RuntimeError(f"CG solver failed: {str(e)}")
-        t.send('求解时间')
-        t.send(None)
+        
+        if enable_timing:
+            t.send('求解时间')
+            t.send(None)
+
         return IterativeSolverResult(displacement=uh)
     
-    def solve_direct(self, solver_type: str = 'mumps') -> DirectSolverResult:
+    def solve_direct(self, 
+                    solver_type: str = 'mumps', 
+                    enable_timing: bool = False
+                ) -> DirectSolverResult:
         """使用直接法求解"""
         if self._current_density is None:
             raise ValueError("Density not set. Call update_density first.")
         
-        t = timer(f"MUMPS Solver Timing")
-        next(t)
+        t = None
+        if enable_timing:
+            t = timer(f"MUMPS Solver Timing")
+            next(t)
+            
         K0 = self._assemble_global_stiffness_matrix()
-        t.send('矩阵组装时间')
-        F0 = self._assemble_global_force_vector()
         
+        if enable_timing:
+            t.send('矩阵组装时间')
+            
+        F0 = self._assemble_global_force_vector()
         K, F = self._apply_boundary_conditions(K0, F0)
-        t.send('其他')
+        
+        if enable_timing:
+            t.send('其他')
+            
         uh = self.tensor_space.function()
+
         try:
             uh[:] = spsolve(K, F[:], solver=solver_type)
         except Exception as e:
             raise RuntimeError(f"Direct solver failed: {str(e)}")
-        t.send('求解时间')
-        t.send(None)
+        
+        if enable_timing:
+            t.send('求解时间')
+            t.send(None)
+
         return DirectSolverResult(displacement=uh)

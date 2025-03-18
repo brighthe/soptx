@@ -33,8 +33,8 @@ material_config = LevelSetMaterialConfig(
 materials = LevelSetMaterialInstance(config=material_config)
 E = materials.elastic_modulus
 nu = materials.poisson_ratio
-lam = materials.lame_lambda
-# lam = E * nu / ((1 + nu) * (1 - nu))
+# lam = materials.lame_lambda
+lam = E * nu / ((1 + nu) * (1 - nu))
 mu = materials.shear_modulus
 node = mesh.entity('node')
 kwargs = bm.context(node)
@@ -73,5 +73,22 @@ for iterNum in range(num):
                             (lam - mu) * bm.einsum('ci, cik, ck -> c', uhe, ktr0, uhe))
     obj_value = objective.fun(rho=rho[:], u=None)
     volfrac = constraint.get_volume_fraction(rho=rho[:])
+
+    print(f'Iter: {iterNum}, Compliance.: {obj_value:.4f}, Volfrac.: {volfrac:.3f}')
+
+    if iterNum > 5 and (abs(volfrac-volreq) < 0.005) and \
+        bm.all( bm.abs(objective[iterNum] - objective[iterNum-5:iterNum]) < 0.01 * bm.abs(objective[iterNum]) ):
+        break
+
+    if iterNum == 0:
+        la = -0.01
+        La = 1000
+        alpha = 0.9
+    else:
+        la = la - 1/La * (volfrac - volreq)
+        La = alpha * La
+
+    shapeSens = shapeSens - la + 1/La * (volfrac - volreq)
+    topSens = topSens + bm.pi * ( la - 1/La * (volfrac - volreq) )
     print("---------------")
 
