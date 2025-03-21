@@ -1,5 +1,5 @@
-nelx = 60;
-nely = 30;
+nelx = 6;
+nely = 3;
 volReq = 0.3;
 stepLength = 3;
 numReinit = 2;

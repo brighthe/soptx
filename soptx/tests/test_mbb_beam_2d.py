@@ -284,7 +284,8 @@ if __name__ == "__main__":
     '''
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
-    backend = 'numpy'
+    # backend = 'numpy'
+    backend = 'pytorch'
     pde_type = 'mbb_beam_2d_1'
     mesh_type = 'uniform_mesh_2d'
     # mesh_type = 'triangle_mesh'
@@ -311,7 +312,8 @@ if __name__ == "__main__":
         assembly_method=AssemblyMethod.FAST,
         solver_type='direct', solver_params={'solver_type': 'mumps'},
         # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
-        diff_mode='manual',
+        # diff_mode='manual',
+        diff_mode='auto',
         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
         save_dir=f'{base_dir}/{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
