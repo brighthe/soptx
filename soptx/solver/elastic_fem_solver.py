@@ -7,6 +7,7 @@ from fealpy.typing import TensorLike, Union
 from fealpy.mesh import HomogeneousMesh, SimplexMesh, TensorMesh, StructuredMesh
 from fealpy.functionspace import TensorFunctionSpace
 from fealpy.fem import LinearElasticIntegrator, BilinearForm, DirichletBC
+from fealpy.fem.dirichlet_bc import apply_csr_matrix
 from fealpy.sparse import CSRTensor
 from fealpy.solver import cg, spsolve
 
@@ -296,6 +297,40 @@ class ElasticFEMSolver:
 
         return F
     
+    def _apply_matrix_jax(self, A: CSRTensor, isDDof: TensorLike):
+        isIDof = bm.logical_not(isDDof)
+        crow = A.crow
+        col = A.col
+        indices_context = bm.context(col)
+        ZERO = bm.array([0], **indices_context)
+
+        nnz_per_row = crow[1:] - crow[:-1]
+        remain_flag = bm.repeat(isIDof, nnz_per_row) & isIDof[col] # 保留行列均为内部自由度的非零元素
+        rm_cumsum = bm.concat([ZERO, bm.cumsum(remain_flag, axis=0)], axis=0) # 被保留的非零元素数量累积
+        nnz_per_row = rm_cumsum[crow[1:]] - rm_cumsum[crow[:-1]] + isDDof # 计算每行的非零元素数量
+
+        new_crow = bm.cumsum(bm.concat([ZERO, nnz_per_row], axis=0), axis=0)
+
+        NNZ = new_crow[-1]
+        non_diag = bm.ones((NNZ,), dtype=bm.bool, device=bm.get_device(isDDof)) # Field: non-zero elements
+        loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
+        non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
+
+        # 修复：只选取适当数量的值对应设置
+        # 找出所有边界DOF对应的行索引
+        bd_rows = bm.where(loc_flag)[0]
+        new_col = bm.empty((NNZ,), **indices_context)
+        # 设置为相应行的边界DOF位置
+        new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)
+        # 设置非对角元素的列索引
+        new_col = bm.set_at(new_col, non_diag, col[remain_flag])
+
+        new_values = bm.empty((NNZ,), **A.values_context())
+        new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], 1.)
+        new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
+
+        return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
+    
     def _apply_boundary_conditions(self, K: CSRTensor, F: TensorLike) -> tuple[CSRTensor, TensorLike]:
         """应用边界条件"""
         dirichlet = self.pde.dirichlet
@@ -312,7 +347,10 @@ class ElasticFEMSolver:
         
         dbc = DirichletBC(space=self.tensor_space, gd=dirichlet,
                         threshold=threshold, method='interp')
-        K = dbc.apply_matrix(matrix=K, check=True)
+        if bm.backend_name == 'jax':
+            K = self._apply_matrix_jax(A=K, isDDof=isBdDof)
+        else:
+            K = dbc.apply_matrix(matrix=K, check=True)
         
         return K, F
 

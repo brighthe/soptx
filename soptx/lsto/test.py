@@ -22,16 +22,12 @@ def reinit(rho):
     
     # 计算距离变换
     dist_to_struct = distance_transform_edt(1 - rho_padded)  # 从非结构到结构的距离
-    dist_to_void = distance_transform_edt(rho_padded)  # 从结构到非结构的距离
+    dist_to_void = distance_transform_edt(rho_padded)        # 从结构到非结构的距离
     
     # 组合创建水平集函数（结构外为正，结构内为负）
     lsf_padded = (1 - rho_padded) * (dist_to_struct - 0.5) - rho_padded * (dist_to_void - 0.5)
     
-    # 提取中心部分（移除填充）
-    lsf_2d = lsf_padded[1:-1, 1:-1]
-    
-    # 重塑回1D并转换为后端格式
-    lsf = bm.array((lsf_2d.T).flatten(), **kwargs)
+    lsf = bm.array((lsf_padded.T).flatten(), **kwargs)
     
     return lsf
 
@@ -101,7 +97,8 @@ def density_func(x: TensorLike):
     return val
 rho = space_D.interpolate(u=density_func)
 
-lsf = reinit(bm.reshape(rho, (nelx, nely)).T)
+struct = bm.reshape(rho, (nelx, nely)).T
+lsf = reinit(struct)
 
 solver = ElasticFEMSolver(
                 materials=materials,
@@ -112,8 +109,8 @@ solver = ElasticFEMSolver(
                 solver_params={'solver_type': 'mumps'}, 
             )
 
-shapeSens = bm.zeros_like(rho[:])
-topSens = bm.zeros_like(rho[:])
+shapeSens = bm.zeros_like(struct)
+topSens = bm.zeros_like(struct)
 objective = ComplianceObjective(solver=solver)
 num = 200
 ke0 = solver.get_base_local_stiffness_matrix()
@@ -126,7 +123,7 @@ for iterNum in range(num):
     uh = solver.solve().displacement
     uhe = uh[cell2dof]
     # shapeSens[:] = -objective._compute_element_compliance(u=uh)
-    shapeSens[:] = -bm.maximum(rho, 1e-4) * bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe)
+    shapeSens[:] = -bm.maximum(struct, 1e-4) * bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe)
     coef = rho[:] * bm.pi/2 * (lam + 2*mu) / mu / (lam + mu)
     topSens[:] = coef * (4*mu * bm.einsum('ci, cik, ck -> c', uhe, ke0, uhe) + \
                             (lam - mu) * bm.einsum('ci, cik, ck -> c', uhe, ktr0, uhe))
@@ -163,5 +160,7 @@ for iterNum in range(num):
     smooth_topSens = bm.set_at(smooth_topSens, fixed_cells_mask, 0)
 
     v = -smooth_shapeSens
+    lsf_2d = bm.reshape(lsf, (nelx+2, nely+2)).T
+    g = smooth_topSens*(lsf_2d[1:-1, 1:-1] < 0)
     print("---------------")
 
