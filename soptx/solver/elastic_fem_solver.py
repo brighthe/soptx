@@ -18,6 +18,7 @@ from soptx.utils import timer
 class IterativeSolverResult:
     """迭代求解器的结果"""
     displacement: TensorLike
+    solve_info: dict
 
 @dataclass
 class DirectSolverResult:
@@ -369,7 +370,7 @@ class ElasticFEMSolver:
     def solve_cg(self, 
                 maxiter: int = 5000,
                 atol: float = 1e-12,
-                rtol: float = 1e-12,
+                rtol: float = 1e-12,    
                 x0: Optional[TensorLike] = None,
                 enable_timing: bool = False,
             ) -> IterativeSolverResult:
@@ -403,9 +404,9 @@ class ElasticFEMSolver:
         uh = self.tensor_space.function()
 
         try:
-            # logger.setLevel('INFO')
-            # TODO 目前 FEALPy 中的 cg 只能通过 logger 获取迭代步数，无法直接返回
-            uh[:] = cg(K, F[:], x0=x0, atol=atol, rtol=rtol, maxit=maxiter)
+            uh[:], info = cg(K, F[:], x0=x0, 
+                            atol=atol, rtol=rtol, 
+                            maxit=maxiter, returninfo=True)
         except Exception as e:
             raise RuntimeError(f"CG solver failed: {str(e)}")
         
@@ -413,7 +414,7 @@ class ElasticFEMSolver:
             t.send('求解时间')
             t.send(None)
 
-        return IterativeSolverResult(displacement=uh)
+        return IterativeSolverResult(displacement=uh, solve_info=info)
     
     def solve_direct(self, 
                     solver_type: str = 'mumps', 

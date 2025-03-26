@@ -19,8 +19,7 @@ from fealpy.fem.dirichlet_bc import DirichletBC
 from fealpy.decorator import cartesian
 from fealpy.solver import cg, spsolve
 
-from app.soptx.soptx.utils.timer import timer
-
+from soptx.utils import timer
 import argparse
 
 class BoxDomainData2d:
@@ -125,7 +124,7 @@ def main():
                         help='Degree of the Lagrange finite element space, default is 1.')
     parser.add_argument('--solver',
                         choices=['cg', 'spsolve'],
-                        default='spsolve', type=str,
+                        default='cg', type=str,
                         help='Specify the solver type for solving the linear system, default is "mumps".')
     parser.add_argument('--nx', 
                         default=10, type=int, 
@@ -198,7 +197,7 @@ def main():
         uh = tensor_space.function()
 
         if args.solver == 'cg':
-            uh[:] = cg(K, F, maxiter=1000, atol=1e-14, rtol=1e-14)
+            uh[:], info = cg(K, F, maxit=1000, atol=1e-14, rtol=1e-14, returninfo=True)
         elif args.solver == 'spsolve':
             uh[:] = spsolve(K, F, solver='mumps')
         # t.send('Solving Phase')  # 记录求解阶段时间
