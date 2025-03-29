@@ -208,30 +208,56 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
-    '''
-    参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
-    '''
+    # 参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
+    # backend = 'numpy'
+    # pde_type = 'cantilever_2d_1'
+    # optimizer_type = 'oc'
+    # filter_type = 'sensitivity'
+    # nx, ny = 160, 100
+    # config_sens_filter = TestConfig(
+    #         backend=backend,
+    #         pde_type=pde_type,
+    #         elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+    #         domain_length=nx, domain_width=ny,
+    #         load=-1,
+    #         volume_fraction=0.4,
+    #         penalty_factor=3.0,
+    #         mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
+    #         p = 1,
+    #         assembly_method=AssemblyMethod.FAST,
+    #         solver_type='direct', solver_params={'solver_type': 'mumps'},
+    #         diff_mode='manual',
+    #         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+    #         filter_type=filter_type, filter_radius=6.0,
+    #         save_dir=f'{base_dir}/{backend}_{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+    #     )
+    # result1 = run_basic_filter_test(config_sens_filter)
+    
+    # 参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
+    # backend = 'pytorch'
     backend = 'numpy'
     pde_type = 'cantilever_2d_1'
     optimizer_type = 'oc'
+    nx, ny = 256, 128
+    volume_fraction = 0.5
     filter_type = 'sensitivity'
-    nx, ny = 160, 100
+    filter_radius = 5.5
     config_sens_filter = TestConfig(
             backend=backend,
             pde_type=pde_type,
             elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
             domain_length=nx, domain_width=ny,
             load=-1,
-            volume_fraction=0.4,
+            volume_fraction=volume_fraction,
             penalty_factor=3.0,
             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
             p = 1,
             assembly_method=AssemblyMethod.FAST,
             solver_type='direct', solver_params={'solver_type': 'mumps'},
             diff_mode='manual',
-            optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-            filter_type=filter_type, filter_radius=6.0,
-            save_dir=f'{base_dir}/{backend}_{pde_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+            optimizer_type=optimizer_type, max_iterations=100, tolerance=0.01,
+            filter_type=filter_type, filter_radius=filter_radius,
+            save_dir=f'{base_dir}/{backend}_{pde_type}_{optimizer_type}_{filter_type}',
         )
     result1 = run_basic_filter_test(config_sens_filter)
     # result2 = run_filter_exact_test(config_none_filter)
