@@ -1,4 +1,3 @@
-
 # 导入需要公开的类
 from .mbb_beam_2d import MBBBeam2dData1
 from .cantilever_2d import Cantilever2dData1, Cantilever2dData2

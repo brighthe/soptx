@@ -1,4 +1,3 @@
-
 from .linear_elastic_material import (
                                         BaseElasticMaterialConfig,
                                         DensityBasedMaterialConfig,

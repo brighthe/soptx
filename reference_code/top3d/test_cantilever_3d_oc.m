@@ -5,8 +5,8 @@ nelz = 4;
 volfrac = 0.3;
 penal = 3;
 rmin = 1.5;
-ft = 1;     % 密度滤波器
-% ft = 2;   % 灵敏度滤波器
+% ft = 1;     % 密度滤波器
+ft = 2;   % 灵敏度滤波器
 
 % USER-DEFINED LOOP PARAMETERS
 maxloop = 200;    % Maximum number of iterations
