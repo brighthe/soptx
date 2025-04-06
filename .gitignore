@@ -46,6 +46,7 @@
 .VSCodeCounter
 
 __pycache__
+soptx.egg-info
 build
 codetest/*
 code/*.mat
