@@ -75,6 +75,10 @@ def create_base_components(config: TestConfig):
         bm.set_backend('numpy')
     elif config.backend == 'pytorch':
         bm.set_backend('pytorch')
+        if config.device == 'cpu':
+            bm.set_default_device('cpu')
+        elif config.device == 'cuda':
+            bm.set_default_device('cuda')
     elif config.backend == 'jax':
         bm.set_backend('jax')
 
@@ -91,7 +95,7 @@ def create_base_components(config: TestConfig):
             mesh = UniformMesh3d(
                         extent=extent, h=[config.hx, config.hy, config.hz], origin=origin,
                         ipoints_ordering='zyx',
-                        device=config.device
+                        # device=config.device
                     )
         elif config.mesh_type == 'tetrahedron_mesh':
             mesh = TetrahedronMesh.from_box(box=pde.domain(), 
@@ -221,8 +225,8 @@ if __name__ == "__main__":
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
-    backend = 'numpy'
-    # backend = 'pytorch'
+    # backend = 'numpy'
+    backend = 'pytorch'
     # backend = 'jax'
     device = 'cpu'
     # device = 'cuda'
@@ -246,8 +250,8 @@ if __name__ == "__main__":
         assembly_method=AssemblyMethod.FAST,
         # assembly_method=AssemblyMethod.STANDARD,
         # assembly_method=AssemblyMethod.SYMBOLIC,
-        # solver_type='direct', solver_params={'solver_type': 'mumps'},
-        solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
+        solver_type='direct', solver_params={'solver_type': 'mumps'},
+        # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         # diff_mode='auto',
         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
