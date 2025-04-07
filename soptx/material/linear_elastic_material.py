@@ -14,6 +14,7 @@ class BaseElasticMaterialConfig:
     minimal_modulus: float = 1e-9
     poisson_ratio: float = 0.3
     plane_assumption: Literal["plane_stress", "plane_strain", "3d"] = "plane_stress"
+    device: Optional[str] = None
 
 @dataclass
 class DensityBasedMaterialConfig(BaseElasticMaterialConfig):
@@ -32,9 +33,10 @@ class BaseElasticMaterialInstance(LinearElasticMaterial):
     def __init__(self, config: BaseElasticMaterialConfig, E: TensorLike = None):
         super().__init__(
                         name="BaseElasticMaterial",
-                        elastic_modulus=1.0,                # 基础值, 实际值由 _E 控制
+                        elastic_modulus=config.elastic_modulus,    # 基础值, 实际值由 _E 控制
                         poisson_ratio=config.poisson_ratio,
-                        hypo=config.plane_assumption
+                        hypo=config.plane_assumption,
+                        device=config.device
                     )
         self._E = E
         self.config = config
@@ -107,7 +109,7 @@ class DensityBasedMaterialInstance(BaseElasticMaterialInstance):
 
     def get_base_material(self):
         """获取基础材料实例 (E=1)"""
-        E = bm.ones(1, dtype=bm.float64)
+        E = bm.ones(1, dtype=bm.float64, device=self.device)
         return DensityBasedMaterialInstance(self.config, E)
 
 class LevelSetMaterialInstance(BaseElasticMaterialInstance):

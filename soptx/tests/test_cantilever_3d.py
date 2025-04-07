@@ -75,10 +75,10 @@ def create_base_components(config: TestConfig):
         bm.set_backend('numpy')
     elif config.backend == 'pytorch':
         bm.set_backend('pytorch')
-        if config.device == 'cpu':
-            bm.set_default_device('cpu')
-        elif config.device == 'cuda':
-            bm.set_default_device('cuda')
+        # if config.device == 'cpu':
+        #     bm.set_default_device('cpu')
+        # elif config.device == 'cuda':
+        #     bm.set_default_device('cuda')
     elif config.backend == 'jax':
         bm.set_backend('jax')
 
@@ -95,7 +95,7 @@ def create_base_components(config: TestConfig):
             mesh = UniformMesh3d(
                         extent=extent, h=[config.hx, config.hy, config.hz], origin=origin,
                         ipoints_ordering='zyx',
-                        # device=config.device
+                        device=config.device
                     )
         elif config.mesh_type == 'tetrahedron_mesh':
             mesh = TetrahedronMesh.from_box(box=pde.domain(), 
@@ -114,7 +114,8 @@ def create_base_components(config: TestConfig):
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
-                            plane_assumption="3D",    
+                            plane_assumption="3D",
+                            device=config.device,    
                             interpolation_model="SIMP",    
                             penalty_factor=config.penalty_factor
                         )
@@ -149,9 +150,7 @@ def create_base_components(config: TestConfig):
     return pde, rho, objective, constraint
 
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
-    """
-    测试 filter 类不同滤波器的正确性.
-    """
+    """测试 filter 类不同滤波器的正确性."""
     pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
@@ -228,8 +227,8 @@ if __name__ == "__main__":
     # backend = 'numpy'
     backend = 'pytorch'
     # backend = 'jax'
-    device = 'cpu'
-    # device = 'cuda'
+    # device = 'cpu'
+    device = 'cuda'
     pde_type = 'cantilever_3d_1'
     # mesh_type = 'tetrahedron_mesh'
     mesh_type = 'uniform_mesh_3d'

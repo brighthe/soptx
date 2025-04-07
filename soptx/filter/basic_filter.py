@@ -25,6 +25,7 @@ class BasicFilter(ABC):
         self.mesh = mesh
         self.rmin = rmin
         self.domain = domain
+        self.device = mesh.device
         
         self._H, self._Hs = self._compute_filter_matrix()
         self._cell_measure = self.mesh.entity_measure('cell')
@@ -199,9 +200,9 @@ class BasicFilter(ABC):
         max_cells = ceil(rmin/min_h)
         nfilter = nx * ny * nz * ((2 * (max_cells - 1) + 1) ** 3)
         
-        iH = bm.zeros(nfilter, dtype=bm.int32)
-        jH = bm.zeros(nfilter, dtype=bm.int32)
-        sH = bm.zeros(nfilter, dtype=bm.float64)
+        iH = bm.zeros(nfilter, dtype=bm.int32, device=self.device)
+        jH = bm.zeros(nfilter, dtype=bm.int32, device=self.device)
+        sH = bm.zeros(nfilter, dtype=bm.float64, device=self.device)
         cc = 0
 
         for i in range(nx):
@@ -243,7 +244,7 @@ class BasicFilter(ABC):
             spshape=(nx * ny * nz, nx * ny * nz)
         )
         H = H.tocsr()
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device=self.device)
 
         return H, Hs
     
