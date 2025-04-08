@@ -332,19 +332,33 @@ class ElasticFEMSolver:
 
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
     
-    def _apply_boundary_conditions(self, K: CSRTensor, F: TensorLike) -> tuple[CSRTensor, TensorLike]:
+    def _apply_boundary_conditions(self, 
+                                K: CSRTensor, F: TensorLike, 
+                                enable_timing: bool = True
+                            ) -> tuple[CSRTensor, TensorLike]:
         """应用边界条件"""
+        t = None
+        if enable_timing:
+            t = timer(f"Apply Boundary Timing")
+            next(t)
+
         dirichlet = self.pde.dirichlet
         threshold = self.pde.threshold()
-        
+
         uh_bd = bm.zeros(self.tensor_space.number_of_global_dofs(),
-                            dtype=bm.float64, device=bm.get_device(self.tensor_space))
+                            dtype=bm.float64, device=self.tensor_space.device)
                         
         uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
                             gd=dirichlet, threshold=threshold, method='interp')
+        
+        if enable_timing:
+            t.send('1')
 
         F = F - K.matmul(uh_bd[:])  
         F[isBdDof] = uh_bd[isBdDof]
+
+        if enable_timing:
+            t.send('2')
         
         dbc = DirichletBC(space=self.tensor_space, gd=dirichlet,
                         threshold=threshold, method='interp')
@@ -352,18 +366,22 @@ class ElasticFEMSolver:
             K = self._apply_matrix_jax(A=K, isDDof=isBdDof)
         else:
             K = dbc.apply_matrix(matrix=K, check=True)
+
+        if enable_timing:
+            t.send('3')
+            t.send(None)
         
         return K, F
 
     #---------------------------------------------------------------------------
     # 求解方法
     #---------------------------------------------------------------------------
-    def solve(self, enable_timing: bool = False) -> Union[IterativeSolverResult, DirectSolverResult]:
+    def solve(self) -> Union[IterativeSolverResult, DirectSolverResult]:
         """统一的求解接口"""
         if self.solver_type == 'cg':
-            return self.solve_cg(enable_timing=enable_timing, **self.solver_params)
+            return self.solve_cg(**self.solver_params)
         elif self.solver_type == 'direct':
-            return self.solve_direct(enable_timing=enable_timing, **self.solver_params)
+            return self.solve_direct(**self.solver_params)
         else:
             raise ValueError(f"Unsupported solver type: {self.solver_type}")
                
@@ -372,7 +390,7 @@ class ElasticFEMSolver:
                 atol: float = 1e-12,
                 rtol: float = 1e-12,    
                 x0: Optional[TensorLike] = None,
-                enable_timing: bool = False,
+                enable_timing: bool = None,
             ) -> IterativeSolverResult:
         """使用共轭梯度法求解
         
@@ -418,11 +436,11 @@ class ElasticFEMSolver:
     
     def solve_direct(self, 
                     solver_type: str = 'mumps', 
-                    enable_timing: bool = False
+                    enable_timing: bool = True,
                 ) -> DirectSolverResult:
         """使用直接法求解"""
         if self._current_density is None:
-            raise ValueError("Density not set. Call update_density first.")
+            raise ValueError("Density not set. Call 'update_density' first.")
         
         t = None
         if enable_timing:
@@ -435,10 +453,14 @@ class ElasticFEMSolver:
             t.send('矩阵组装时间')
             
         F0 = self._assemble_global_force_vector()
+
+        if enable_timing:
+            t.send('右端项组装时间')
+
         K, F = self._apply_boundary_conditions(K0, F0)
         
         if enable_timing:
-            t.send('其他')
+            t.send('边界条件处理时间')
             
         uh = self.tensor_space.function()
 
