@@ -166,7 +166,9 @@ if __name__ == "__main__":
                     p=1,
                     assembly_method=AssemblyMethod.FAST,
                     # assembly_method=AssemblyMethod.STANDARD,
-                    solver_type='direct', solver_params={'solver_type': 'mumps'},
+                    # solver_type='direct', solver_params={'solver_type': 'mumps'},
+                    # solver_type='direct', solver_params={'solver_type': 'cupy'},
+                    solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
                 )
     result = run_solve_uh_time_test(config=config_uh_time)
 

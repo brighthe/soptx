@@ -298,7 +298,11 @@ class ElasticFEMSolver:
 
         return F
     
-    def _apply_matrix_jax(self, A: CSRTensor, isDDof: TensorLike):
+    def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike):
+        """
+        FEALPy 中的 apply_matrix 使用了 D0@A@D0, 
+        不同后端下 @ 会使用大量的 for 循环, 这在 GPU 下非常缓慢 
+        """
         isIDof = bm.logical_not(isDDof)
         crow = A.crow
         col = A.col
@@ -345,14 +349,6 @@ class ElasticFEMSolver:
         dirichlet = self.pde.dirichlet
         threshold = self.pde.threshold()
 
-        dbc = DirichletBC(space=self.tensor_space, gd=dirichlet,
-                        threshold=threshold, method='interp')
-        
-        # K, F = dbc.apply(A=K, f=F[:])
-        # if enable_timing:
-        #     t.send('3')
-        #     t.send(None)
-
         uh_bd = bm.zeros(self.tensor_space.number_of_global_dofs(),
                             dtype=bm.float64, device=self.tensor_space.device)
                         
@@ -368,12 +364,16 @@ class ElasticFEMSolver:
         if enable_timing:
             t.send('2')
         
-        dbc = DirichletBC(space=self.tensor_space, gd=dirichlet,
-                        threshold=threshold, method='interp')
-        if bm.backend_name == 'jax':
-            K = self._apply_matrix_jax(A=K, isDDof=isBdDof)
-        else:
-            K = dbc.apply_matrix(matrix=K, check=True)
+        K = self._apply_matrix(A=K, isDDof=isBdDof)
+
+        # ! DirichletBC 类在 GPU 下速度非常慢
+        # device = self.tensor_space.scalar_space.mesh.device
+        # dbc = DirichletBC(space=self.tensor_space, gd=dirichlet,
+        #                 threshold=threshold, method='interp')
+        # if bm.backend_name == 'jax' or device == 'cuda':
+        #     K = self._apply_matrix(A=K, isDDof=isBdDof)
+        # else:
+        #     K = dbc.apply_matrix(matrix=K, check=True)
 
         if enable_timing:
             t.send('3')
