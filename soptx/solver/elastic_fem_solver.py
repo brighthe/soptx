@@ -345,6 +345,14 @@ class ElasticFEMSolver:
         dirichlet = self.pde.dirichlet
         threshold = self.pde.threshold()
 
+        dbc = DirichletBC(space=self.tensor_space, gd=dirichlet,
+                        threshold=threshold, method='interp')
+        
+        # K, F = dbc.apply(A=K, f=F[:])
+        # if enable_timing:
+        #     t.send('3')
+        #     t.send(None)
+
         uh_bd = bm.zeros(self.tensor_space.number_of_global_dofs(),
                             dtype=bm.float64, device=self.tensor_space.device)
                         
@@ -390,7 +398,7 @@ class ElasticFEMSolver:
                 atol: float = 1e-12,
                 rtol: float = 1e-12,    
                 x0: Optional[TensorLike] = None,
-                enable_timing: bool = None,
+                enable_timing: bool = True,
             ) -> IterativeSolverResult:
         """使用共轭梯度法求解
         
@@ -414,10 +422,14 @@ class ElasticFEMSolver:
             t.send('矩阵组装时间')
             
         F0 = self._assemble_global_force_vector()
-        K, F = self._apply_boundary_conditions(K0, F0)
-        
+
         if enable_timing:
-            t.send('其他')
+            t.send('右端项组装时间')
+        
+        K, F = self._apply_boundary_conditions(K0, F0)
+
+        if enable_timing:
+            t.send('边界条件处理时间')
             
         uh = self.tensor_space.function()
 

@@ -220,15 +220,15 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     }
 
 if __name__ == "__main__":
-    base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
+    base_dir = '/home/heliang/soptx/soptx/vtu'
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
-    backend = 'numpy'
-    # backend = 'pytorch'
+    # backend = 'numpy'
+    backend = 'pytorch'
     # backend = 'jax'
-    device = 'cpu'
-    # device = 'cuda'
+    # device = 'cpu'
+    device = 'cuda'
     pde_type = 'cantilever_3d_1'
     # mesh_type = 'tetrahedron_mesh'
     mesh_type = 'uniform_mesh_3d'
@@ -252,10 +252,10 @@ if __name__ == "__main__":
         assembly_method=AssemblyMethod.FAST,
         # assembly_method=AssemblyMethod.STANDARD,
         # assembly_method=AssemblyMethod.SYMBOLIC,
-        solver_type='direct', solver_params={'solver_type': 'mumps'},
+        # solver_type='direct', solver_params={'solver_type': 'mumps'},
         # solver_type='direct', solver_params={'solver_type': 'cupy'},
         # solver_type='direct', solver_params={'solver_type': 'scipy'},
-        # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
+        solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         # diff_mode='auto',
         optimizer_type=optimizer_type, max_iterations=3, tolerance=0.01,
