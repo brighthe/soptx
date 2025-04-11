@@ -338,7 +338,7 @@ class ElasticFEMSolver:
     
     def _apply_boundary_conditions(self, 
                                 K: CSRTensor, F: TensorLike, 
-                                enable_timing: bool = True
+                                enable_timing: bool = False
                             ) -> tuple[CSRTensor, TensorLike]:
         """应用边界条件"""
         t = None
