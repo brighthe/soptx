@@ -24,7 +24,6 @@
 *.out
 *.pdf
 *.pickle
-*.png
 *.pkl
 *.pyc
 *.so
@@ -32,10 +31,7 @@
 *.swo
 *.swp
 *.toc
-*.vtk
-*.vtr
-*.vts
-*.vtu
+
 
 .DS_Store
 .fealpy.egg-info
