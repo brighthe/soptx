@@ -12,6 +12,7 @@
 *.inp
 *.ipynb_checkpoints
 *.jpeg
+*.png
 *.jpg
 *.json
 *.log
@@ -31,7 +32,8 @@
 *.swo
 *.swp
 *.toc
-
+*.vtu
+*.vts
 
 .DS_Store
 .fealpy.egg-info
