@@ -1,39 +1,47 @@
-*.avi
-*.aux
-*.bbl
-*.blg
-*.csv
-*.cpython-38.pyc
-*.drawio
-*.eps
-*.fig
-*.gif
-*.html
-*.inp
-*.ipynb_checkpoints
-*.jpeg
-*.png
-*.jpg
-*.json
-*.log
-*.mat
-*.mexa64
-*.mp4
-*.mtx
-*.mypy_cache/
-*.npz
-*.out
-*.pdf
-*.pickle
-*.pkl
-*.pyc
-*.so
-*.swn
-*.swo
-*.swp
-*.toc
+# *.avi
+# *.aux
+# *.bbl
+# *.blg
+# *.csv
+# *.cpython-38.pyc
+# *.drawio
+# *.eps
+# *.fig
+# *.gif
+# *.html
+# *.inp
+# # *.ipynb_checkpoints
+# *.jpeg
+
+# *.json
+# *.log
+# *.mat
+# *.mexa64
+# *.mp4
+# *.mtx
+# *.mypy_cache/
+# *.npz
+# *.out
+# *.pdf
+# *.pickle
+# *.pkl
+# *.pyc
+# *.so
+# *.swn
+# *.swo
+# *.swp
+# *.toc
+
+# 忽略所有 vtu 和 vts 文件
 *.vtu
 *.vts
+*.png
+
+# 但不忽略 soptx/vtu 目录中的这些文件
+!soptx/vtu/**/*.vtu
+!soptx/vtu/**/*.vts
+!!soptx/vtu/**/*.png
+
 
 .DS_Store
 .fealpy.egg-info
