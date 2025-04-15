@@ -75,10 +75,6 @@ def create_base_components(config: TestConfig):
         bm.set_backend('numpy')
     elif config.backend == 'pytorch':
         bm.set_backend('pytorch')
-        # if config.device == 'cpu':
-        #     bm.set_default_device('cpu')
-        # elif config.device == 'cuda':
-        #     bm.set_default_device('cuda')
     elif config.backend == 'jax':
         bm.set_backend('jax')
 
@@ -224,9 +220,9 @@ if __name__ == "__main__":
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
-    backend = 'numpy'
+    # backend = 'numpy'
     # backend = 'pytorch'
-    # backend = 'jax'
+    backend = 'jax'
     device = 'cpu'
     # device = 'cuda'
     pde_type = 'cantilever_3d_1'
@@ -234,10 +230,10 @@ if __name__ == "__main__":
     mesh_type = 'uniform_mesh_3d'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    # nx, ny, nz = 60, 20, 4
-    # filter_radius = 1.5
-    nx, ny, nz = 120, 40, 8
-    filter_radius = 3.0
+    nx, ny, nz = 60, 20, 4
+    filter_radius = 1.5
+    # nx, ny, nz = 120, 40, 8
+    # filter_radius = 3.0
     config_basic_filter = TestConfig(
         backend=backend,
         device=device,
@@ -258,7 +254,7 @@ if __name__ == "__main__":
         # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         # diff_mode='auto',
-        optimizer_type=optimizer_type, max_iterations=3, tolerance=0.01,
+        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
         save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
     )
