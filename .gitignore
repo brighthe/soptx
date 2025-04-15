@@ -32,11 +32,21 @@
 # *.swp
 # *.toc
 
-# 忽略所有 vtu 和 vts 文件
+# 忽略 Abaqus 的 inp 文件 
+*.inp
+
+# 忽略 MATLAB 的 mtx 文件
+*.mtx
+
+*.json
+*.csv
+*.pkl
+
+# 忽略所有文件
 *.vtu
 *.vts
 *.png
-
+*.gif
 # 但不忽略 soptx/vtu 目录中的这些文件
 # !soptx/vtu/**/*.vtu
 # !soptx/vtu/**/*.vts
