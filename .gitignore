@@ -38,9 +38,9 @@
 *.png
 
 # 但不忽略 soptx/vtu 目录中的这些文件
-!soptx/vtu/**/*.vtu
-!soptx/vtu/**/*.vts
-!!soptx/vtu/**/*.png
+# !soptx/vtu/**/*.vtu
+# !soptx/vtu/**/*.vts
+# !!soptx/vtu/**/*.png
 
 
 .DS_Store
@@ -66,7 +66,7 @@ docs/.sass-cache
 docs/_site
 docs/vendor
 fealpy.egg-info
-fealpyapp
+fealpyapp 
 log.txt
 matlab
 meviewer
