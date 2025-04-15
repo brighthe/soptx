@@ -104,28 +104,26 @@ def save_optimization_history(mesh, history, save_path=None):
         else:  
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
 
-def plot_optimization_history(history, save_path=None, show=True, 
-                            fontsize=14, title_fontsize=16, 
-                            figsize=(12, 8), linewidth=2,
+def plot_optimization_history(history, save_path=None, show=True, title=None, 
+                            fontsize=20, figsize=(14, 10), linewidth=2.5,
                             ):
     """绘制优化过程中目标函数和约束函数的变化
     
     Parameters
-    ----------
-    history : OptimizationHistory
+    - history : OptimizationHistory
         优化历史记录
-    save_path : str, optional
+    - save_path : str, optional
         保存路径，如不提供则不保存
-    show : bool, optional
+    - show : bool, optional
         是否显示图像，默认为 True
-    fontsize : int, optional
-        标签和刻度字体大小，默认为 14
-    title_fontsize : int, optional
-        标题字体大小，默认为 16
-    figsize : tuple, optional
-        图形大小，默认为 (12, 8)
-    linewidth : float, optional
-        线条宽度，默认为 2
+    - title : str, optional
+        图表标题，默认为 None
+    - fontsize : int, optional
+        标签和刻度字体大小
+    - figsize : tuple, optional
+        图形大小
+    - linewidth : float, optional
+        线条宽度
     """
     import matplotlib.pyplot as plt
     
@@ -141,28 +139,28 @@ def plot_optimization_history(history, save_path=None, show=True,
     plt.rcParams.update({'font.size': fontsize})
     
     # 绘制目标函数曲线（左轴）
-    ax1.set_xlabel('Iteration', fontsize=fontsize)
-    ax1.set_ylabel('Compliance, c', color='red', fontsize=fontsize)
+    ax1.set_xlabel('Iteration', fontsize=fontsize+6)
+    ax1.set_ylabel('Compliance, c', color='red', fontsize=fontsize+6)
     ax1.plot(iterations, obj_values, 'r-', label='c', linewidth=linewidth)
     ax1.tick_params(axis='y', labelcolor='red', labelsize=fontsize)
     ax1.tick_params(axis='x', labelsize=fontsize)
     
     # 创建右轴
     ax2 = ax1.twinx()
-    ax2.set_ylabel('Volume, v', color='blue', fontsize=fontsize)
+    ax2.set_ylabel('Volume, v', color='blue', fontsize=fontsize+6)
     ax2.plot(iterations, con_values, 'b--', label='v', linewidth=linewidth)
     ax2.tick_params(axis='y', labelcolor='blue', labelsize=fontsize)
-    
-    # 添加网格
+
     ax1.grid(True, linestyle='--', alpha=0.7)
-    
-    # 添加标题
-    plt.title('Optimization History', fontsize=title_fontsize, pad=20)
+
+    # 添加标题（如果提供）
+    if title is not None:
+        plt.title(title, fontsize=fontsize+6, pad=20, fontweight='bold')
     
     # 添加图例
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
-    leg = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=fontsize)
+    leg = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=fontsize+6)
     
     # 创建放大子图
     # 找到适合放大的范围
@@ -186,11 +184,9 @@ def plot_optimization_history(history, save_path=None, show=True,
     
     plt.tight_layout()
     
-    # 保存图像
     if save_path is not None:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
-    # 显示图像
     if show:
         plt.show()
     else:
