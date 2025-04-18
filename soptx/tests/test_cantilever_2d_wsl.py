@@ -80,7 +80,8 @@ def create_base_components(config: TestConfig):
                 )
         if config.mesh_type == 'triangle_mesh':
             mesh = TriangleMesh.from_box(box=pde.domain(), 
-                                        nx=config.nx, ny=config.ny)
+                                        nx=config.nx, ny=config.ny, 
+                                        device=config.device)
     elif config.pde_type == 'cantilever_2d_1':
         pde = Cantilever2dData1(
                     xmin=0, xmax=config.domain_length,

@@ -220,8 +220,8 @@ if __name__ == "__main__":
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
-    # backend = 'numpy'
-    backend = 'pytorch'
+    backend = 'numpy'
+    # backend = 'pytorch'
     # backend = 'jax'
     # device = 'cpu'
     device = 'cuda'
@@ -254,9 +254,9 @@ if __name__ == "__main__":
         solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         # diff_mode='auto',
-        optimizer_type=optimizer_type, max_iterations=180, tolerance=0.01,
+        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
-        save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
+        save_dir=f'{base_dir}/{device}_{backend}_{pde_type}',
     )
 
     result = run_basic_filter_test(config_basic_filter )

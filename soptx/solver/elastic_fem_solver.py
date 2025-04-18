@@ -398,7 +398,7 @@ class ElasticFEMSolver:
                 atol: float = 1e-12,
                 rtol: float = 1e-12,    
                 x0: Optional[TensorLike] = None,
-                enable_timing: bool = True,
+                enable_timing: bool = False,
             ) -> IterativeSolverResult:
         """使用共轭梯度法求解
         
@@ -448,7 +448,7 @@ class ElasticFEMSolver:
     
     def solve_direct(self, 
                     solver_type: str = 'mumps', 
-                    enable_timing: bool = True,
+                    enable_timing: bool = False,
                 ) -> DirectSolverResult:
         """使用直接法求解"""
         if self._current_density is None:
