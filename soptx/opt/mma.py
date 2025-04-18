@@ -401,4 +401,7 @@ class MMAOptimizer(OptimizerBase):
                 print(f"Converged after {iter_idx + 1} iterations")
                 break
                 
+        # 打印时间统计信息
+        history.print_time_statistics()
+        
         return rho, history

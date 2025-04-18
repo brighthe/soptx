@@ -27,6 +27,7 @@ from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history, plot
 class TestConfig:
     """Configuration for topology optimization test cases."""
     backend: Literal['numpy', 'pytorch', 'jax']
+    device: Literal['cpu', 'cuda']
     pde_type: Literal['mbb_beam_2d_1']
 
     elastic_modulus: float
@@ -38,6 +39,7 @@ class TestConfig:
 
     load : float
 
+    init_volume_fraction: float
     volume_fraction: float
     penalty_factor: float
 
@@ -84,24 +86,28 @@ def create_base_components(config: TestConfig):
             origin = [0.0, 0.0]
             mesh = UniformMesh2d(
                         extent=extent, h=[config.hx, config.hy], origin=origin,
-                        ipoints_ordering='yx', device='cpu'
+                        ipoints_ordering='yx', device=config.device,
                     )
         elif config.mesh_type == 'triangle_mesh':
             mesh = TriangleMesh.from_box(box=pde.domain(), 
-                                        nx=config.nx, ny=config.ny)
+                                        nx=config.nx, ny=config.ny,
+                                        device=config.device,)
 
     GD = mesh.geo_dimension()
     
     p = config.p
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
+    #! dof_priority-(GD, -1) 的效率比 gd_prioirty-(-1, GD) 的效率要高
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
+    # tensor_space_C = TensorFunctionSpace(space_C, (GD, -1))
     space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     
     material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
-                            plane_assumption="plane_stress",    
+                            plane_assumption="plane_stress",
+                            device=config.device,      
                             interpolation_model="SIMP",    
                             penalty_factor=config.penalty_factor
                         )
@@ -121,7 +127,7 @@ def create_base_components(config: TestConfig):
     kwargs = bm.context(node)
     @cartesian
     def density_func(x: TensorLike):
-        val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
+        val = config.init_volume_fraction * bm.ones(x.shape[0], **kwargs)
         return val
     rho = space_D.interpolate(u=density_func)
 
@@ -284,17 +290,20 @@ if __name__ == "__main__":
     '''
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
-    # backend = 'numpy'
+    backend = 'numpy'
     # backend = 'pytorch'
-    backend = 'jax'
+    # backend = 'jax'
+    device = 'cpu'
     pde_type = 'mbb_beam_2d_1'
-    mesh_type = 'uniform_mesh_2d'
-    # mesh_type = 'triangle_mesh'
-    nx, ny = 60, 20
-    # nx, ny = 150, 50
+    init_volume_fraction = 0.5
+    volume_fraction = 0.5
+    # mesh_type = 'uniform_mesh_2d'
+    mesh_type = 'triangle_mesh'
+    # nx, ny = 60, 20
+    nx, ny = 150, 50
     # nx ,ny = 300, 100
-    optimizer_type = 'oc'
-    # optimizer_type = 'mma'
+    # optimizer_type = 'oc'
+    optimizer_type = 'mma'
     filter_type = 'sensitivity'
     # filter_type = 'density'
     filter_radius = nx * 0.04
@@ -302,24 +311,24 @@ if __name__ == "__main__":
     # filter_radius = nx * 0.03
     config_basic_filter = TestConfig(
         backend=backend,
+        device=device,
         pde_type=pde_type,
         elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
         domain_length=nx, domain_width=ny,
         load=-1,
-        volume_fraction=0.5,
+        init_volume_fraction=init_volume_fraction,
+        volume_fraction=volume_fraction,
         penalty_factor=3.0,
         mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
         p = 1,
         assembly_method=AssemblyMethod.FAST,
         solver_type='direct', solver_params={'solver_type': 'mumps'},
         # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
-        # diff_mode='manual',
-        diff_mode='auto',
-        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+        diff_mode='manual',
+        # diff_mode='auto',
+        optimizer_type=optimizer_type, max_iterations=600, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
-        save_dir=f'{base_dir}/{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+        save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
         )
 
-
-    # result_11 = run_diff_mode_test(config_sens_filter_auto)
-    result2 = run_basic_filter_test(config_basic_filter)
+    result = run_basic_filter_test(config_basic_filter)

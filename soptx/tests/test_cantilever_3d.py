@@ -220,12 +220,13 @@ if __name__ == "__main__":
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
-    # backend = 'numpy'
+    backend = 'numpy'
     # backend = 'pytorch'
-    backend = 'jax'
+    # backend = 'jax'
     device = 'cpu'
     # device = 'cuda'
     pde_type = 'cantilever_3d_1'
+    volume_fraction = 0.3
     # mesh_type = 'tetrahedron_mesh'
     mesh_type = 'uniform_mesh_3d'
     optimizer_type = 'oc'
@@ -241,17 +242,17 @@ if __name__ == "__main__":
         elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
         domain_length=nx, domain_width=ny, domain_height=nz,
         load=-1,
-        volume_fraction=0.3,
+        volume_fraction=volume_fraction,
         penalty_factor=3.0,
         mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
         p = 1,
         assembly_method=AssemblyMethod.FAST,
         # assembly_method=AssemblyMethod.STANDARD,
         # assembly_method=AssemblyMethod.SYMBOLIC,
-        solver_type='direct', solver_params={'solver_type': 'mumps'},
+        # solver_type='direct', solver_params={'solver_type': 'mumps'},
         # solver_type='direct', solver_params={'solver_type': 'cupy'},
         # solver_type='direct', solver_params={'solver_type': 'scipy'},
-        # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
+        solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         # diff_mode='auto',
         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,

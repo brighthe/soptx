@@ -19,7 +19,8 @@ from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
-from soptx.opt import ComplianceObjective, VolumeConstraint
+from soptx.opt import (ComplianceObjective, ComplianceConfig,
+                       VolumeConstraint, VolumeConfig)
 from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history, plot_optimization_history
 @dataclass
 class TestConfig:
@@ -78,7 +79,8 @@ def create_base_components(config: TestConfig):
                     T = config.load
                 )
         if config.mesh_type == 'triangle_mesh':
-            mesh = TriangleMesh.from_box(box=pde.domain(), nx=config.nx, ny=config.ny)
+            mesh = TriangleMesh.from_box(box=pde.domain(), 
+                                        nx=config.nx, ny=config.ny)
     elif config.pde_type == 'cantilever_2d_1':
         pde = Cantilever2dData1(
                     xmin=0, xmax=config.domain_length,
@@ -131,9 +133,12 @@ def create_base_components(config: TestConfig):
         return val
     rho = space_D.interpolate(u=density_func)
 
-    objective = ComplianceObjective(solver=solver)
+    obj_config = ComplianceConfig(diff_mode=config.diff_mode)
+    objective = ComplianceObjective(solver=solver, config=obj_config)
+    cons_config = VolumeConfig(diff_mode=config.diff_mode)
     constraint = VolumeConstraint(solver=solver, 
-                                volume_fraction=config.volume_fraction)
+                                volume_fraction=config.volume_fraction,
+                                config=cons_config)
     
     return pde, rho, objective, constraint
 
