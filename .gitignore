@@ -1,37 +1,3 @@
-# *.avi
-# *.aux
-# *.bbl
-# *.blg
-# *.csv
-# *.cpython-38.pyc
-# *.drawio
-# *.eps
-# *.fig
-# *.gif
-# *.html
-# *.inp
-# # *.ipynb_checkpoints
-# *.jpeg
-
-# *.json
-# *.log
-# *.mat
-# *.mexa64
-# *.mp4
-# *.mtx
-# *.mypy_cache/
-# *.npz
-# *.out
-# *.pdf
-# *.pickle
-# *.pkl
-# *.pyc
-# *.so
-# *.swn
-# *.swo
-# *.swp
-# *.toc
-
 # 忽略 Abaqus 的 inp 文件 
 *.inp
 
