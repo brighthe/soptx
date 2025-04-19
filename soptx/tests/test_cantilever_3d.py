@@ -220,8 +220,8 @@ if __name__ == "__main__":
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
-    backend = 'numpy'
-    # backend = 'pytorch'
+    # backend = 'numpy'
+    backend = 'pytorch'
     # backend = 'jax'
     device = 'cpu'
     # device = 'cuda'
