@@ -1,10 +1,10 @@
-%%%% AN 88 LINE TOPOLOGY OPTIMIZATION CODE Nov, 2010 %%%%
 nelx = 150;
 nely = 150;
 volfrac = 0.4;
 penal = 3;
 rmin = 6;
-ft = 1;
+ft = 1;   % 灵敏度滤波器
+% ft = 2;   % 密度滤波器
 
 %% MATERIAL PROPERTIES
 E0 = 1;
@@ -22,10 +22,11 @@ edofVec = reshape(2*nodenrs(1:end-1,1:end-1)+1,nelx*nely,1);
 edofMat = repmat(edofVec,1,8)+repmat([0 1 2*nely+[2 3 0 1] -2 -1],nelx*nely,1);
 iK = reshape(kron(edofMat,ones(8,1))',64*nelx*nely,1);
 jK = reshape(kron(edofMat,ones(1,8))',64*nelx*nely,1);
-% DEFINE LOADS AND SUPPORTS (Mutiple Load)
+
+%% DEFINE LOADS AND SUPPORTS (Mutiple Load)
 F = sparse([2*(nely+1)*nelx+2, 2*(nely+1)*(nelx+1)], [1 2],[1 -1],2*(nely+1)*(nelx+1),2);
 U = zeros(2*(nely+1)*(nelx+1),2);
-fixeddofs = union([1:2:2*(nely+1)], [2*(nelx+1)*(nely+1)]);
+fixeddofs = [1:2*(nely+1)];
 alldofs = [1:2*(nely+1)*(nelx+1)];
 freedofs = setdiff(alldofs,fixeddofs);
 
@@ -57,15 +58,6 @@ xPhys = x;
 loop = 0;
 change = 1;
 
-% 打开一个文件用于写入
-fileID = fopen('multiple_load.txt', 'w');
-% 写入标题
-fprintf(fileID, 'Iteration\tObjective\tVolume\tChange\n');
-% 创建一个视频写入对象
-v = VideoWriter('multiple_load.avi');
-v.FrameRate = 10; % 设置帧率
-open(v);
-
 %% START ITERATION
 while change > 0.01
   loop = loop + 1;
@@ -74,6 +66,7 @@ while change > 0.01
   sK = reshape(KE(:)*(Emin+xPhys(:)'.^penal*(E0-Emin)),64*nelx*nely,1);
   K = sparse(iK,jK,sK); K = (K+K')/2;
   U(freedofs, :) = K(freedofs, freedofs) \ F(freedofs, :);
+
   %% OBJECTIVE FUNCTION AND SENSITIVITY ANALYSIS
   c = 0;  
   dc = 0;  
@@ -84,6 +77,7 @@ while change > 0.01
     dc = dc - penal*(E0-Emin)*xPhys.^(penal-1).*ce;  
   end
   dv = ones(nely, nelx);
+
   %% FILTERING/MODIFICATION OF SENSITIVITIES
   if ft == 1
     dc(:) = H*(x(:).*dc(:))./Hs./max(1e-3, x(:));
@@ -91,6 +85,7 @@ while change > 0.01
     dc(:) = H*(dc(:)./Hs);
     dv(:) = H*(dv(:)./Hs);
   end
+
   %% OPTIMALITY CRITERIA UPDATE OF DESIGN VARIABLES AND PHYSICAL DENSITIES
   l1 = 0; l2 = 1e9; move = 0.2;
   while (l2-l1)/(l1+l2) > 1e-3
@@ -107,17 +102,7 @@ while change > 0.01
   x = xnew;
 
   %% PRINT RESULTS
-  fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f ch.:%7.3f\n',loop,c, ...
-    mean(xPhys(:)),change);
-  %% 保存结果到文件
-  fprintf(fileID, '%4i\t%10.4f\t%6.3f\t%6.3f\n', loop, c, mean(xPhys(:)), change);
+  fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f ch.:%7.3f\n',loop,c,mean(xPhys(:)),change);
   %% PLOT DENSITIES
   colormap(gray); imagesc(1-xPhys); caxis([0 1]); axis equal; axis off; drawnow;
-  %% 捕捉当前帧并写入视频
-  % 捕捉当前帧
-  frame = getframe(gcf);
-  % 调整帧大小到 1120x840
-  resized_frame = imresize(frame.cdata, [840, 1120]);
-  % 将帧写入视频
-  writeVideo(v, resized_frame);
 end

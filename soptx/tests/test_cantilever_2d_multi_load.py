@@ -1,7 +1,7 @@
 """测试不同后端、优化器、滤波器、网格下的 2D 悬臂梁"""
 
 from dataclasses import dataclass
-from typing import Literal, Optional, Union, Dict, Any
+from typing import Literal, List, Union, Dict, Any
 from pathlib import Path
 
 from fealpy.backend import backend_manager as bm
@@ -14,7 +14,7 @@ from soptx.material import (
                             DensityBasedMaterialConfig,
                             DensityBasedMaterialInstance,
                         )
-from soptx.pde import Cantilever2dData1
+from soptx.pde import Cantilever2dMultiLoadData1
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
@@ -27,7 +27,7 @@ class TestConfig:
     """Configuration for topology optimization test cases."""
     backend: Literal['numpy', 'pytorch', 'jax']
     device: Literal['cpu', 'cuda']
-    pde_type: Literal['cantilever_2d_1']
+    pde_type: Literal['cantilever_2d_mload_1']
 
     elastic_modulus: float
     poisson_ratio: float
@@ -36,7 +36,7 @@ class TestConfig:
     domain_length : float
     domain_width : float
 
-    load : float
+    load : List[float]
 
     init_volume_fraction: float
     volume_fraction: float
@@ -74,11 +74,11 @@ def create_base_components(config: TestConfig):
     elif config.backend == 'jax':
         bm.set_backend('jax')
 
-    pde = Cantilever2dData1(
-                    xmin=0, xmax=config.domain_length,
-                    ymin=0, ymax=config.domain_width,
-                    T = config.load
-                )
+    pde = Cantilever2dMultiLoadData1(
+                xmin=0, xmax=config.domain_length,
+                ymin=0, ymax=config.domain_width,
+                T = config.load
+            )
     if config.mesh_type == 'uniform_mesh_2d':
         extent = [0, config.nx, 0, config.ny]
         origin = [0.0, 0.0]
@@ -86,7 +86,7 @@ def create_base_components(config: TestConfig):
                     extent=extent, h=[config.hx, config.hy], origin=origin,
                     ipoints_ordering='yx',
                     device=config.device,
-                )
+                ) 
 
     GD = mesh.geo_dimension()
     
@@ -122,7 +122,6 @@ def create_base_components(config: TestConfig):
     @cartesian
     def density_func(x: TensorLike):
         val = config.init_volume_fraction * bm.ones(x.shape[0], **kwargs)
-        # val = bm.ones(x.shape[0], **kwargs)
         return val
     rho = space_D.interpolate(u=density_func)
 
@@ -213,13 +212,13 @@ if __name__ == "__main__":
     # 参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     backend = 'numpy'
     device = 'cpu'
-    pde_type = 'cantilever_2d_1'
-    # init_volume_fraction = 0.4
-    init_volume_fraction = 1.0
+    pde_type = 'cantilever_2d_mload_1'
+    init_volume_fraction = 0.4
+    # init_volume_fraction = 1.0
     volume_fraction = 0.4
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    nx, ny = 160, 100
+    nx, ny = 150, 150
     filter_radius = 6.0
     config_sens_filter = TestConfig(
             backend=backend,
@@ -227,14 +226,15 @@ if __name__ == "__main__":
             pde_type=pde_type,
             elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
             domain_length=nx, domain_width=ny,
-            load=-1,
+            load=[-1, 1],
             init_volume_fraction=init_volume_fraction,
             volume_fraction=volume_fraction,
             penalty_factor=3.0,
             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
             p = 1,
             assembly_method=AssemblyMethod.FAST,
-            solver_type='direct', solver_params={'solver_type': 'mumps'},
+            # solver_type='direct', solver_params={'solver_type': 'mumps'},
+            solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
             diff_mode='manual',
             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
             filter_type=filter_type, filter_radius=filter_radius,

@@ -296,6 +296,18 @@ class ElasticFEMSolver:
         force = self.pde.force
         F = self.tensor_space.interpolate(force)
 
+        # ! 多载荷情况
+        # force = self.pde.force
+        # force_tensor = force(self.tensor_space.mesh.entity('node'))
+        # nloads = force_tensor.shape[0]
+        # tgdof = self.tensor_space.number_of_global_dofs()
+        # kwargs = bm.context(force_tensor)
+        # F = bm.zeros((nloads, tgdof), **kwargs)
+        # for i in range(nloads):
+        #     single_force = lambda p: force_tensor[i]
+        #     F_i = self.tensor_space.interpolate(single_force)
+        #     F[i:, ] = F_i
+
         return F
     
     def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike):
@@ -355,11 +367,27 @@ class ElasticFEMSolver:
         uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
                             gd=dirichlet, threshold=threshold, method='interp')
         
+        # ! 多载荷情况
+        # nloads = F.shape[0]
+        # gdof = self.tensor_space.number_of_global_dofs()
+        # kwargs = bm.context(F)
+        # uh_bd_base = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)
+        # uh_bd_base, isBdDof = self.tensor_space.boundary_interpolate(
+        #                     gd=dirichlet, threshold=threshold, method='interp')
+        # uh_bd = bm.zeros((nloads, gdof), **kwargs)
+        # for i in range(nloads):
+        #     uh_bd[i] = uh_bd_base[:]  
+
         if enable_timing:
             t.send('1')
 
+         # ! 多载荷情况
         F = F - K.matmul(uh_bd[:])  
         F[isBdDof] = uh_bd[isBdDof]
+
+        # for i in range(nloads):
+        #     F[i, :] = F[i, :] - K.matmul(uh_bd[i, :])
+        #     F[i, isBdDof] = uh_bd[i, isBdDof]
 
         if enable_timing:
             t.send('2')

@@ -1,56 +1,49 @@
-# 忽略 Abaqus 的 inp 文件 
+#----------------------------------------
+# 特定领域文件忽略
+#----------------------------------------
+# 忽略 Abaqus 的 inp 文件 - 有限元分析输入文件
 *.inp
 
-# 忽略 MATLAB 的 mtx 文件
+# 忽略 MATLAB 的 mtx 文件 - 矩阵数据文件
 *.mtx
 
-*.json
-*.csv
-*.pkl
+#----------------------------------------
+# 数据文件忽略
+#----------------------------------------
+# 忽略常见数据存储格式
+*.json  
+*.csv   
+*.pkl   
 
-# 忽略所有文件
-*.vtu
-*.vts
-*.png
-*.gif
+#----------------------------------------
+# 可视化与输出文件忽略
+#----------------------------------------
+# 忽略所有可视化和输出文件
+*.vtu   
+*.vts   
+*.png   
+*.gif   
+*.txt   
+
+#----------------------------------------
+# 取消特定忽略的示例（当前已注释）
+#----------------------------------------
 # 但不忽略 soptx/vtu 目录中的这些文件
 # !soptx/vtu/**/*.vtu
 # !soptx/vtu/**/*.vts
 # !!soptx/vtu/**/*.png
 
-
-.DS_Store
-.fealpy.egg-info
-.idea
-.ipynb_checkpoints
-.jekyll-cache
-.vscode
-.VSCodeCounter
-
+#----------------------------------------
+# Python 与开发环境相关
+#----------------------------------------
+# Python 字节码缓存目录
 __pycache__
-soptx.egg-info
+
+# JetBrains IDE 配置目录
+.idea
+
+# Python 构建目录
 build
-codetest/*
-code/*.mat
-data
-dependcies
-dist
-doc/project
-docs/.jekyll-cache
-docs/.jekyll-metadata
-docs/.sass-cache
-docs/_site
-docs/vendor
-fealpy.egg-info
-fealpyapp 
-log.txt
-matlab
-meviewer
-meshdata
-meshfigure
-paper/*.pdf
-refineresults
-result*
-results
-results1
-tags
+
+# Python 包元数据目录
+soptx.egg-info
