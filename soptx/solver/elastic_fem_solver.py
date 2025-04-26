@@ -293,20 +293,20 @@ class ElasticFEMSolver:
     
     def _assemble_global_force_vector(self) -> TensorLike:
         """组装全局载荷向量"""
-        force = self.pde.force
-        F = self.tensor_space.interpolate(force)
+        # force = self.pde.force
+        # F = self.tensor_space.interpolate(force)
 
         # ! 多载荷情况
-        # force = self.pde.force
-        # force_tensor = force(self.tensor_space.mesh.entity('node'))
-        # nloads = force_tensor.shape[0]
-        # tgdof = self.tensor_space.number_of_global_dofs()
-        # kwargs = bm.context(force_tensor)
-        # F = bm.zeros((nloads, tgdof), **kwargs)
-        # for i in range(nloads):
-        #     single_force = lambda p: force_tensor[i]
-        #     F_i = self.tensor_space.interpolate(single_force)
-        #     F[i:, ] = F_i
+        force = self.pde.force
+        force_tensor = force(self.tensor_space.mesh.entity('node'))
+        nloads = force_tensor.shape[0]
+        tgdof = self.tensor_space.number_of_global_dofs()
+        kwargs = bm.context(force_tensor)
+        F = bm.zeros((nloads, tgdof), **kwargs)
+        for i in range(nloads):
+            single_force = lambda p: force_tensor[i]
+            F_i = self.tensor_space.interpolate(single_force)
+            F[i:, ] = F_i
 
         return F
     
@@ -361,33 +361,33 @@ class ElasticFEMSolver:
         dirichlet = self.pde.dirichlet
         threshold = self.pde.threshold()
 
-        uh_bd = bm.zeros(self.tensor_space.number_of_global_dofs(),
-                            dtype=bm.float64, device=self.tensor_space.device)
+        # uh_bd = bm.zeros(self.tensor_space.number_of_global_dofs(),
+        #                     dtype=bm.float64, device=self.tensor_space.device)
                         
-        uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
-                            gd=dirichlet, threshold=threshold, method='interp')
+        # uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
+        #                     gd=dirichlet, threshold=threshold, method='interp')
         
         # ! 多载荷情况
-        # nloads = F.shape[0]
-        # gdof = self.tensor_space.number_of_global_dofs()
-        # kwargs = bm.context(F)
-        # uh_bd_base = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)
-        # uh_bd_base, isBdDof = self.tensor_space.boundary_interpolate(
-        #                     gd=dirichlet, threshold=threshold, method='interp')
-        # uh_bd = bm.zeros((nloads, gdof), **kwargs)
-        # for i in range(nloads):
-        #     uh_bd[i] = uh_bd_base[:]  
+        nloads = F.shape[0]
+        gdof = self.tensor_space.number_of_global_dofs()
+        kwargs = bm.context(F)
+        uh_bd_base = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)
+        uh_bd_base, isBdDof = self.tensor_space.boundary_interpolate(
+                            gd=dirichlet, threshold=threshold, method='interp')
+        uh_bd = bm.zeros((nloads, gdof), **kwargs)
+        for i in range(nloads):
+            uh_bd[i] = uh_bd_base[:]  
 
         if enable_timing:
             t.send('1')
 
-         # ! 多载荷情况
-        F = F - K.matmul(uh_bd[:])  
-        F[isBdDof] = uh_bd[isBdDof]
+        # F = F - K.matmul(uh_bd[:])  
+        # F[isBdDof] = uh_bd[isBdDof]
 
-        # for i in range(nloads):
-        #     F[i, :] = F[i, :] - K.matmul(uh_bd[i, :])
-        #     F[i, isBdDof] = uh_bd[i, isBdDof]
+        # ! 多载荷情况
+        for i in range(nloads):
+            F[i, :] = F[i, :] - K.matmul(uh_bd[i, :])
+            F[i, isBdDof] = uh_bd[i, isBdDof]
 
         if enable_timing:
             t.send('2')
@@ -428,14 +428,7 @@ class ElasticFEMSolver:
                 x0: Optional[TensorLike] = None,
                 enable_timing: bool = False,
             ) -> IterativeSolverResult:
-        """使用共轭梯度法求解
-        
-        Parameters
-        - maxiter : 最大迭代次数
-        - atol : 绝对收敛容差
-        - rtol : 相对收敛容差
-        - x0 : 初始猜测值
-        """
+        """使用共轭梯度法求解"""
         if self._current_density is None:
             raise ValueError("Density not set. Call update_density first.")
     
@@ -459,10 +452,12 @@ class ElasticFEMSolver:
         if enable_timing:
             t.send('边界条件处理时间')
             
-        uh = self.tensor_space.function()
+        uh = bm.zeros_like(F, dtype=bm.float64, device=F.device)
+        # uh = self.tensor_space.function()
 
         try:
-            uh[:], info = cg(K, F[:], x0=x0, 
+            uh[:], info = cg(K, F[:], x0=x0,
+                            batch_first=True, 
                             atol=atol, rtol=rtol, 
                             maxit=maxiter, returninfo=True)
         except Exception as e:

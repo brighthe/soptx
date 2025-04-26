@@ -140,78 +140,6 @@ def create_base_components(config: TestConfig):
     
     return pde, rho, objective, constraint
 
-def run_diff_mode_test(config: TestConfig) -> Dict[str, Any]:
-    """
-    测试自动微分和手动微分计算的结果.
-    """
-    rho, objective, constraint = create_base_components(config)
-    mesh = objective.solver.tensor_space.mesh
-
-    if config.filter_type == 'None':
-        filter = None
-    elif config.filter_type == 'sensitivity':
-        filter = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius) 
-    elif config.filter_type == 'density':
-        filter = DensityBasicFilter(mesh=mesh, rmin=config.filter_radius)
-    elif config.filter_type == 'heaviside':
-        filter = HeavisideProjectionBasicFilter(mesh=mesh, rmin=config.filter_radius,
-                                            beta=1, max_beta=512, continuation_iter=50)   
-
-    if config.optimizer_type == 'oc':
-        optimizer = OCOptimizer(
-                        objective=objective,
-                        constraint=constraint,
-                        filter=filter,
-                        options={
-                            'max_iterations': config.max_iterations,
-                            'tolerance': config.tolerance,
-                        }
-                    )
-        # 设置高级参数 (可选)
-        optimizer.options.set_advanced_options(
-                                move_limit=0.2,
-                                damping_coef=0.5,
-                                initial_lambda=1e9,
-                                bisection_tol=1e-3
-                            )
-    elif config.optimizer_type == 'mma':
-        NC = mesh.number_of_cells()
-        optimizer = MMAOptimizer(
-                        objective=objective,
-                        constraint=constraint,
-                        filter=filter,
-                        options={
-                            'max_iterations': config.max_iterations,
-                            'tolerance': config.tolerance,
-                        }
-                    )
-        # 设置高级参数 (可选)
-        optimizer.options.set_advanced_options(
-                                m=1,
-                                n=NC,
-                                xmin=bm.zeros((NC, 1)),
-                                xmax=bm.ones((NC, 1)),
-                                a0=1,
-                                a=bm.zeros((1, 1)),
-                                c=1e4 * bm.ones((1, 1)),
-                                d=bm.zeros((1, 1)),
-                            )
-    else:
-        raise ValueError(f"Unsupported optimizer type: {config.optimizer_type}")
-
-    rho_opt, history = optimizer.optimize(rho=rho[:])
-    
-    # Save results
-    save_path = Path(config.save_dir)
-    save_path.mkdir(parents=True, exist_ok=True)
-    save_optimization_history(mesh, history, str(save_path))
-    
-    return {
-        'optimal_density': rho_opt,
-        'history': history,
-        'mesh': mesh
-    }
-
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     """
     测试 filter 类不同滤波器的正确性.
@@ -273,7 +201,6 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
     rho_opt, history = optimizer.optimize(rho=rho[:])
     
-    # Save results
     save_path = Path(config.save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
     save_optimization_history(mesh, history, str(save_path))
@@ -297,13 +224,13 @@ if __name__ == "__main__":
     pde_type = 'mbb_beam_2d_1'
     init_volume_fraction = 0.5
     volume_fraction = 0.5
-    # mesh_type = 'uniform_mesh_2d'
-    mesh_type = 'triangle_mesh'
-    # nx, ny = 60, 20
-    nx, ny = 150, 50
+    mesh_type = 'uniform_mesh_2d'
+    # mesh_type = 'triangle_mesh'
+    nx, ny = 60, 20
+    # nx, ny = 150, 50
     # nx ,ny = 300, 100
-    # optimizer_type = 'oc'
-    optimizer_type = 'mma'
+    optimizer_type = 'oc'
+    # optimizer_type = 'mma'
     filter_type = 'sensitivity'
     # filter_type = 'density'
     filter_radius = nx * 0.04
@@ -326,7 +253,7 @@ if __name__ == "__main__":
         # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         # diff_mode='auto',
-        optimizer_type=optimizer_type, max_iterations=600, tolerance=0.01,
+        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
         save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
         )

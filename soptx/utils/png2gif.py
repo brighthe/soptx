@@ -6,10 +6,10 @@ This script converts a series of PNG images into a single GIF animation.
 # 图片文件路径列表
 image_files = []
 # 图片文件的数量
-files_num = 105
+files_num = 60
 # 图片文件的基础目录
 base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu/gif'
-# 生成图片文件路径列表
+# 生成图片文件路径列表 (Suffix Format: _%d)
 for i in range(files_num):
     image_files.append(f'{base_dir}/2d_' + str(i) + '.png')
 

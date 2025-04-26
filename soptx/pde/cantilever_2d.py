@@ -119,14 +119,14 @@ class Cantilever2dMultiLoadData1:
         
         # 确定关键点位置
         bottom_right_corner = (
-            (bm.abs(x - domain[1]) < self.eps) & 
-            (bm.abs(y - domain[2]) < self.eps)
-        )
+                        (bm.abs(x - domain[1]) < self.eps) & 
+                        (bm.abs(y - domain[2]) < self.eps)
+                    )
         
         top_right_corner = (
-            (bm.abs(x - domain[1]) < self.eps) & 
-            (bm.abs(y - domain[3]) < self.eps)
-        )
+                        (bm.abs(x - domain[1]) < self.eps) & 
+                        (bm.abs(y - domain[3]) < self.eps)
+                    )
         
         # 创建批处理的多载荷力向量
         kwargs = bm.context(points)
@@ -240,7 +240,7 @@ class Cantilever2dData2:
 
         x = points[..., 0]
 
-        coord = bm.abs(x - domain[0]) < self.eps  # 左边界的 x 坐标
+        coord = bm.abs(x - domain[0]) < self.eps  
         
         return coord
     
@@ -250,7 +250,7 @@ class Cantilever2dData2:
 
         x = points[..., 0]
 
-        coord = bm.abs(x - domain[0]) < self.eps  # 左边界的 x 坐标
+        coord = bm.abs(x - domain[0]) < self.eps  
         
         return coord
     
