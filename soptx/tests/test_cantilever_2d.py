@@ -7,7 +7,7 @@ from pathlib import Path
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh2d, TriangleMesh
+from fealpy.mesh import UniformMesh, TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
@@ -82,11 +82,12 @@ def create_base_components(config: TestConfig):
     if config.mesh_type == 'uniform_mesh_2d':
         extent = [0, config.nx, 0, config.ny]
         origin = [0.0, 0.0]
-        mesh = UniformMesh2d(
-                    extent=extent, h=[config.hx, config.hy], origin=origin,
-                    ipoints_ordering='yx',
-                    device=config.device,
-                )
+        mesh = UniformMesh(
+                extent=extent, 
+                h=[config.hx, config.hy], 
+                origin=origin, 
+                device=config.device,
+            )
 
     GD = mesh.geo_dimension()
     

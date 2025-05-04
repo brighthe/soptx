@@ -7,7 +7,7 @@ from pathlib import Path
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh3d, TetrahedronMesh
+from fealpy.mesh import UniformMesh, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
@@ -44,7 +44,7 @@ class TestConfig:
     volume_fraction: float
     penalty_factor: float
 
-    mesh_type: Literal['uniform_mesh_3d', 'tetrahedron_mesh']
+    mesh_type: Literal['uniform_mesh', 'tetrahedron_mesh']
     nx: int
     ny: int
     nz: int
@@ -85,12 +85,14 @@ def create_base_components(config: TestConfig):
                     zmin=0, zmax=config.domain_height,
                     T = config.load
                 )
-        if config.mesh_type == 'uniform_mesh_3d':
+        if config.mesh_type == 'uniform_mesh':
             extent = [0, config.nx, 0, config.ny, 0, config.nz]
+            h = [config.hx, config.hy, config.hz]
             origin = [0.0, 0.0, 0.0]
-            mesh = UniformMesh3d(
-                        extent=extent, h=[config.hx, config.hy, config.hz], origin=origin,
-                        ipoints_ordering='zyx',
+            mesh = UniformMesh(
+                        extent=extent, 
+                        h=h, 
+                        origin=origin,
                         device=config.device
                     )
         elif config.mesh_type == 'tetrahedron_mesh':
@@ -220,15 +222,15 @@ if __name__ == "__main__":
     '''
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
-    # backend = 'numpy'
-    backend = 'pytorch'
+    backend = 'numpy'
+    # backend = 'pytorch'
     # backend = 'jax'
     device = 'cpu'
     # device = 'cuda'
     pde_type = 'cantilever_3d_1'
     volume_fraction = 0.3
     # mesh_type = 'tetrahedron_mesh'
-    mesh_type = 'uniform_mesh_3d'
+    mesh_type = 'uniform_mesh'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
     nx, ny, nz = 60, 20, 4

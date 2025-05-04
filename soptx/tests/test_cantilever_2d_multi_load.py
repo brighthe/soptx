@@ -1,5 +1,3 @@
-"""测试不同后端、优化器、滤波器、网格下的 2D 悬臂梁"""
-
 from dataclasses import dataclass
 from typing import Literal, List, Union, Dict, Any
 from pathlib import Path
@@ -7,7 +5,7 @@ from pathlib import Path
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh2d, TriangleMesh
+from fealpy.mesh import UniformMesh, TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
@@ -42,7 +40,7 @@ class TestConfig:
     volume_fraction: float
     penalty_factor: float
 
-    mesh_type: Literal['uniform_mesh_2d', 'triangle_mesh']
+    mesh_type: Literal['uniform_mesh', 'triangle_mesh']
     nx: int
     ny: int
     hx: float
@@ -79,14 +77,14 @@ def create_base_components(config: TestConfig):
                 ymin=0, ymax=config.domain_width,
                 T = config.load
             )
-    if config.mesh_type == 'uniform_mesh_2d':
+    if config.mesh_type == 'uniform_mesh':
         extent = [0, config.nx, 0, config.ny]
+        h = [config.hx, config.hy]
         origin = [0.0, 0.0]
-        mesh = UniformMesh2d(
-                    extent=extent, h=[config.hx, config.hy], origin=origin,
-                    ipoints_ordering='yx',
-                    device=config.device,
-                ) 
+        mesh = UniformMesh(extent=extent, 
+                           h=h, 
+                           origin=origin, 
+                           device=config.device) 
 
     GD = mesh.geo_dimension()
     
@@ -208,6 +206,7 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
+    # TODO 效率需要测试
     base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
     # 参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     backend = 'numpy'
@@ -230,7 +229,7 @@ if __name__ == "__main__":
             init_volume_fraction=init_volume_fraction,
             volume_fraction=volume_fraction,
             penalty_factor=3.0,
-            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
+            mesh_type='uniform_mesh', nx=nx, ny=ny, hx=1, hy=1,
             p = 1,
             assembly_method=AssemblyMethod.FAST,
             # solver_type='direct', solver_params={'solver_type': 'mumps'},

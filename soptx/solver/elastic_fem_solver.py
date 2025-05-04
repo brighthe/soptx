@@ -292,23 +292,49 @@ class ElasticFEMSolver:
         return K
     
     def _assemble_global_force_vector(self) -> TensorLike:
-        """组装全局载荷向量"""
+        """组装全局载荷向量
+
+        Returns:
+        - 单载荷情况: 形状为 (tgdof,) 的一维张量
+        - 多载荷情况: 形状为 (nloads, tgdof) 的二维张量
+        """
+        force = self.pde.force
+        force_at_nodes = force(self.tensor_space.mesh.entity('node'))
+
+        is_multi_load = len(force_at_nodes.shape) == 3
+
+        if is_multi_load:
+            nloads = force_at_nodes.shape[0]
+            tgdof = self.tensor_space.number_of_global_dofs()
+            kwargs = bm.context(force_at_nodes)
+            F = bm.zeros((nloads, tgdof), **kwargs)
+
+            for i in range(nloads):
+                single_force = lambda p: force_at_nodes[i]
+                F_i = self.tensor_space.interpolate(single_force)
+                F[i] = F_i
+        else:
+            F = self.tensor_space.interpolate(force)
+
+        return F
+
+
         # force = self.pde.force
         # F = self.tensor_space.interpolate(force)
 
-        # ! 多载荷情况
-        force = self.pde.force
-        force_tensor = force(self.tensor_space.mesh.entity('node'))
-        nloads = force_tensor.shape[0]
-        tgdof = self.tensor_space.number_of_global_dofs()
-        kwargs = bm.context(force_tensor)
-        F = bm.zeros((nloads, tgdof), **kwargs)
-        for i in range(nloads):
-            single_force = lambda p: force_tensor[i]
-            F_i = self.tensor_space.interpolate(single_force)
-            F[i:, ] = F_i
+        # # ! 多载荷情况
+        # force = self.pde.force
+        # force_tensor = force(self.tensor_space.mesh.entity('node'))
+        # nloads = force_tensor.shape[0]
+        # tgdof = self.tensor_space.number_of_global_dofs()
+        # kwargs = bm.context(force_tensor)
+        # F = bm.zeros((nloads, tgdof), **kwargs)
+        # for i in range(nloads):
+        #     single_force = lambda p: force_tensor[i]
+        #     F_i = self.tensor_space.interpolate(single_force)
+        #     F[i:, ] = F_i
 
-        return F
+        # return F
     
     def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike):
         """
@@ -352,7 +378,12 @@ class ElasticFEMSolver:
                                 K: CSRTensor, F: TensorLike, 
                                 enable_timing: bool = False
                             ) -> tuple[CSRTensor, TensorLike]:
-        """应用边界条件"""
+        """应用边界条件
+        Parameters:
+        - K: 全局刚度矩阵
+        - F: 全局载荷向量, 形状可以是 (tgdof,) 或 (nloads, tgdof)
+        - enable_timing: 是否启用计时
+        """
         t = None
         if enable_timing:
             t = timer(f"Apply Boundary Timing")
@@ -361,33 +392,31 @@ class ElasticFEMSolver:
         dirichlet = self.pde.dirichlet
         threshold = self.pde.threshold()
 
-        # uh_bd = bm.zeros(self.tensor_space.number_of_global_dofs(),
-        #                     dtype=bm.float64, device=self.tensor_space.device)
-                        
-        # uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
-        #                     gd=dirichlet, threshold=threshold, method='interp')
-        
-        # ! 多载荷情况
-        nloads = F.shape[0]
+        is_multi_load = len(F.shape) > 1
+
         gdof = self.tensor_space.number_of_global_dofs()
-        kwargs = bm.context(F)
-        uh_bd_base = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)
+        uh_bd_base = bm.zeros(gdof, 
+                            dtype=bm.float64, device=self.tensor_space.device)
         uh_bd_base, isBdDof = self.tensor_space.boundary_interpolate(
                             gd=dirichlet, threshold=threshold, method='interp')
-        uh_bd = bm.zeros((nloads, gdof), **kwargs)
-        for i in range(nloads):
-            uh_bd[i] = uh_bd_base[:]  
 
         if enable_timing:
             t.send('1')
 
-        # F = F - K.matmul(uh_bd[:])  
-        # F[isBdDof] = uh_bd[isBdDof]
+        if is_multi_load:
+            nloads = F.shape[0]
+            kwargs = bm.context(F)
+            uh_bd = bm.zeros((nloads, gdof), **kwargs)
 
-        # ! 多载荷情况
-        for i in range(nloads):
-            F[i, :] = F[i, :] - K.matmul(uh_bd[i, :])
-            F[i, isBdDof] = uh_bd[i, isBdDof]
+            for i in range(nloads):
+                uh_bd[i] = uh_bd_base[:]  
+            
+            for i in range(nloads):
+                F[i] = F[i] - K.matmul(uh_bd[i])
+                F[i, isBdDof] = uh_bd[i, isBdDof]
+        else:
+            F = F - K.matmul(uh_bd_base[:])
+            F[isBdDof] = uh_bd_base[isBdDof]
 
         if enable_timing:
             t.send('2')
@@ -422,12 +451,12 @@ class ElasticFEMSolver:
             raise ValueError(f"Unsupported solver type: {self.solver_type}")
                
     def solve_cg(self, 
-                maxiter: int = 5000,
-                atol: float = 1e-12,
-                rtol: float = 1e-12,    
-                x0: Optional[TensorLike] = None,
-                enable_timing: bool = False,
-            ) -> IterativeSolverResult:
+            maxiter: int = 5000,
+            atol: float = 1e-12,
+            rtol: float = 1e-12,    
+            x0: Optional[TensorLike] = None,
+            enable_timing: bool = False,
+        ) -> IterativeSolverResult:
         """使用共轭梯度法求解"""
         if self._current_density is None:
             raise ValueError("Density not set. Call update_density first.")
@@ -453,7 +482,6 @@ class ElasticFEMSolver:
             t.send('边界条件处理时间')
             
         uh = bm.zeros_like(F, dtype=bm.float64, device=F.device)
-        # uh = self.tensor_space.function()
 
         try:
             uh[:], info = cg(K, F[:], x0=x0,
@@ -500,6 +528,7 @@ class ElasticFEMSolver:
         uh = self.tensor_space.function()
 
         try:
+            # TODO 能否支持批量求解
             uh[:] = spsolve(K, F[:], solver=solver_type)
         except Exception as e:
             raise RuntimeError(f"Direct solver failed: {str(e)}")

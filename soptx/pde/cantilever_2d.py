@@ -105,13 +105,8 @@ class Cantilever2dMultiLoadData1:
     def force(self, points: TensorLike) -> TensorLike:
         """返回所有载荷工况的力向量
         
-        Parameters:
-        -----------
-        points: 空间点坐标 (npoints, ndim)
-        
         Returns:
-        --------
-        力向量 (nloads, npoints, ndim)，第一维表示不同的载荷工况
+        - 力向量 (nloads, npoints, ndim), 第一维表示不同的载荷工况
         """
         domain = self.domain()
         x = points[..., 0]
