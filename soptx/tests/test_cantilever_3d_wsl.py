@@ -7,7 +7,7 @@ from pathlib import Path
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh3d, TetrahedronMesh
+from fealpy.mesh import UniformMesh, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
@@ -44,7 +44,7 @@ class TestConfig:
     volume_fraction: float
     penalty_factor: float
 
-    mesh_type: Literal['uniform_mesh_3d', 'tetrahedron_mesh']
+    mesh_type: Literal['uniform_mesh', 'tetrahedron_mesh']
     nx: int
     ny: int
     nz: int
@@ -85,12 +85,14 @@ def create_base_components(config: TestConfig):
                     zmin=0, zmax=config.domain_height,
                     T = config.load
                 )
-        if config.mesh_type == 'uniform_mesh_3d':
+        if config.mesh_type == 'uniform_mesh':
             extent = [0, config.nx, 0, config.ny, 0, config.nz]
+            h = [config.hx, config.hy, config.hz]
             origin = [0.0, 0.0, 0.0]
-            mesh = UniformMesh3d(
-                        extent=extent, h=[config.hx, config.hy, config.hz], origin=origin,
-                        ipoints_ordering='zyx',
+            mesh = UniformMesh(
+                        extent=extent, 
+                        h=h, 
+                        origin=origin,
                         device=config.device
                     )
         elif config.mesh_type == 'tetrahedron_mesh':
@@ -223,11 +225,11 @@ if __name__ == "__main__":
     # backend = 'numpy'
     backend = 'pytorch'
     # backend = 'jax'
-    device = 'cpu'
-    # device = 'cuda'
+    # device = 'cpu'
+    device = 'cuda'
     pde_type = 'cantilever_3d_1'
     # mesh_type = 'tetrahedron_mesh'
-    mesh_type = 'uniform_mesh_3d'
+    mesh_type = 'uniform_mesh'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
     # nx, ny, nz = 60, 20, 4
@@ -249,12 +251,12 @@ if __name__ == "__main__":
         # assembly_method=AssemblyMethod.STANDARD,
         # assembly_method=AssemblyMethod.SYMBOLIC,
         # solver_type='direct', solver_params={'solver_type': 'mumps'},
-        # solver_type='direct', solver_params={'solver_type': 'cupy'},
+        solver_type='direct', solver_params={'solver_type': 'cupy'},
         # solver_type='direct', solver_params={'solver_type': 'scipy'},
-        solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-16, 'rtol': 1e-16},
+        # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-16, 'rtol': 1e-16},
         diff_mode='manual',
         # diff_mode='auto',
-        optimizer_type=optimizer_type, max_iterations=155, tolerance=0.01,
+        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
         save_dir=f'{base_dir}/{device}_{backend}_{pde_type}',
     )

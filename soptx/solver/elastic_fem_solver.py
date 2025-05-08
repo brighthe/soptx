@@ -509,7 +509,7 @@ class ElasticFEMSolver:
         if enable_timing:
             t.send('边界条件处理时间')
             
-        uh = bm.zeros_like(F, dtype=bm.float64, device=F.device)
+        uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
 
         try:
             uh[:], info = cg(K, F[:], x0=x0,
