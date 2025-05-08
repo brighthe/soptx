@@ -92,9 +92,9 @@ class ElasticFEMSolver:
         
         return self.materials
 
-    #---------------------------------------------------------------------------
+    #----------------------------------------------------------------------------------
     # 状态管理相关方法
-    #---------------------------------------------------------------------------
+    #----------------------------------------------------------------------------------
     def update_status(self, density: TensorLike) -> None:
         """更新相关状态"""
         if density is None:
@@ -235,8 +235,39 @@ class ElasticFEMSolver:
             
         return self._base_local_trace_matrix
     
-    def compute_local_stiffness_matrix(self) -> TensorLike:
-        """计算当前材料的局部刚度矩阵（每次重新计算）"""
+    def compute_local_stiffness_matrix(self, 
+            density: Optional[TensorLike] = None
+        ) -> TensorLike:
+        """计算特定密度下的局部刚度矩阵"""
+        # 确定要使用的密度
+        if density is not None:
+            if not bm.is_tensor(density):
+                raise TypeError(
+                    f"密度参数类型错误: 期望 TensorLike 类型, 但得到{type(density).__name__}. "
+                    "请提供有效的张量类型."
+                )
+            use_density = density
+        else:
+            # 使用当前状态的密度
+            if self._current_density is None:
+                raise ValueError(
+                    "当前密度未设置. 请先调用 update_status(density) 设置密度,"
+                    "或者在调用 compute_local_stiffness_matrix(density) 时提供密度参数."
+                )
+            use_density = self._current_density
+        
+        base_K = self.get_base_local_stiffness_matrix()
+        E = self.materials.calculate_elastic_modulus(use_density)
+    
+        if len(E.shape) > 0:
+            KE = bm.einsum('c, cij -> cij', E, base_K)
+        else:
+            KE = E * base_K
+        
+        return KE
+
+    def compute_local_stiffness_matrix_old(self) -> TensorLike:
+        """计算当前材料的局部刚度矩阵 (每次重新计算)"""
         integrator = self._integrator
  
         # 根据 assembly_config.method 选择对应的组装函数
@@ -257,9 +288,9 @@ class ElasticFEMSolver:
         
         return KE
 
-    #---------------------------------------------------------------------------
+    #----------------------------------------------------------------------------------
     # 内部方法：组装和边界条件处理
-    #---------------------------------------------------------------------------
+    #----------------------------------------------------------------------------------
     def _create_integrator(self) -> LinearElasticIntegrator:
         """创建适当的积分器实例"""
         # 确定积分方法
@@ -318,10 +349,6 @@ class ElasticFEMSolver:
 
         return F
 
-
-        # force = self.pde.force
-        # F = self.tensor_space.interpolate(force)
-
         # # ! 多载荷情况
         # force = self.pde.force
         # force_tensor = force(self.tensor_space.mesh.entity('node'))
@@ -379,6 +406,7 @@ class ElasticFEMSolver:
                                 enable_timing: bool = False
                             ) -> tuple[CSRTensor, TensorLike]:
         """应用边界条件
+
         Parameters:
         - K: 全局刚度矩阵
         - F: 全局载荷向量, 形状可以是 (tgdof,) 或 (nloads, tgdof)

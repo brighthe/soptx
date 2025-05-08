@@ -5,7 +5,9 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.material.elastic_material import LinearElasticMaterial
 
-from .interpolation_scheme import SIMPInterpolation, RAMPInterpolation
+from .interpolation_scheme import (SIMPInterpolation, 
+                                   RAMPInterpolation, 
+                                   LevelSetAreaRatioInterpolation)
 
 @dataclass
 class BaseElasticMaterialConfig:
@@ -25,19 +27,18 @@ class DensityBasedMaterialConfig(BaseElasticMaterialConfig):
 @dataclass
 class LevelSetMaterialConfig(BaseElasticMaterialConfig):
     """基于水平集的材料特定配置"""
-    # 可根据需要添加水平集特有的配置参数
-    pass
+    interpolation_model: Literal["AreaRatio"] = "AreaRatio"  
 
 class BaseElasticMaterialInstance(LinearElasticMaterial):
     """具有特定杨氏模量的基础弹性材料实例类"""
     def __init__(self, config: BaseElasticMaterialConfig, E: TensorLike = None):
         super().__init__(
-                        name="BaseElasticMaterial",
-                        elastic_modulus=config.elastic_modulus,    # 基础值, 实际值由 _E 控制
-                        poisson_ratio=config.poisson_ratio,
-                        hypo=config.plane_assumption,
-                        device=config.device
-                    )
+                    name="BaseElasticMaterial",
+                    elastic_modulus=config.elastic_modulus, # 基础值, 实际值由 _E 控制
+                    poisson_ratio=config.poisson_ratio,
+                    hypo=config.plane_assumption,
+                    device=config.device
+                )
         self._E = E
         self.config = config
 
@@ -68,48 +69,52 @@ class DensityBasedMaterialInstance(BaseElasticMaterialInstance):
     def __init__(self, config: DensityBasedMaterialConfig, E: TensorLike = None):
         super().__init__(config, E)
 
-        # 根据配置的插值模型选择相应的插值方法
         if self.config.interpolation_model == "SIMP":
-            self.interpolation_model = SIMPInterpolation(penalty_factor=self.config.penalty_factor)
+            self.interpolation_model = SIMPInterpolation(
+                                        penalty_factor=self.config.penalty_factor
+                                    )
         elif self.config.interpolation_model == "RAMP":
-            self.interpolation_model = RAMPInterpolation(penalty_factor=self.config.penalty_factor)
+            self.interpolation_model = RAMPInterpolation(
+                                        penalty_factor=self.config.penalty_factor
+                                    )
         else:
-            raise ValueError(f"Unsupported interpolation model: {self.config.interpolation_model}")
+            raise ValueError(f"Unsupported interpolation model: \
+                            {self.config.interpolation_model}")
 
     def update_elastic_modulus(self, density: TensorLike) -> TensorLike:
         """根据密度更新杨氏模量"""
         E = self.interpolation_model.calculate_property(
-                                            density,
-                                            self.config.elastic_modulus,
-                                            self.config.minimal_modulus,
-                                            self.interpolation_model.penalty_factor
-                                        )
+                                        density,
+                                        self.config.elastic_modulus,
+                                        self.config.minimal_modulus,
+                                        self.interpolation_model.penalty_factor
+                                    )
         self._E = E
         
     def calculate_elastic_modulus(self, density: TensorLike) -> TensorLike:
         """根据密度计算杨氏模量"""
         E = self.interpolation_model.calculate_property(
-                                            density,
-                                            self.config.elastic_modulus,
-                                            self.config.minimal_modulus,
-                                            self.interpolation_model.penalty_factor
-                                        )
+                                        density,
+                                        self.config.elastic_modulus,
+                                        self.config.minimal_modulus,
+                                        self.interpolation_model.penalty_factor
+                                    )
         return E
     
     def calculate_elastic_modulus_derivative(self, density: TensorLike) -> TensorLike:
         """计算杨氏模量对密度的导数"""
         dE = self.interpolation_model.calculate_property_derivative(
-                                                    density,
-                                                    self.config.elastic_modulus,
-                                                    self.config.minimal_modulus,
-                                                    self.interpolation_model.penalty_factor
-                                                )
-        
+                                        density,
+                                        self.config.elastic_modulus,
+                                        self.config.minimal_modulus,
+                                        self.interpolation_model.penalty_factor
+                                    )
         return dE
 
     def get_base_material(self):
         """获取基础材料实例 (E=1)"""
         E = bm.ones(1, dtype=bm.float64, device=self.device)
+
         return DensityBasedMaterialInstance(self.config, E)
 
 class LevelSetMaterialInstance(BaseElasticMaterialInstance):
@@ -132,3 +137,45 @@ class LevelSetMaterialInstance(BaseElasticMaterialInstance):
         """获取基础材料实例 (E=1)"""
         E = bm.ones(1, dtype=bm.float64)
         return LevelSetMaterialInstance(self.config, E)
+    
+class LevelSetAreaRationMaterialInstance(BaseElasticMaterialInstance):
+    """基于水平集的弹性材料实例"""
+
+    def __init__(self, config: LevelSetMaterialConfig, E: TensorLike = None):
+        super().__init__(config, E)
+
+        if self.config.interpolation_model == "AreaRatio":
+            self.interpolation_model = LevelSetAreaRatioInterpolation()                                 
+        else:
+            raise ValueError(f"Unsupported interpolation model: \
+                            {self.config.interpolation_model}")
+        
+    def update_elastic_modulus(self, levelset: TensorLike) -> TensorLike:
+        E = self.interpolation_model.calculate_property(
+                                        phi=levelset,
+                                        max_property=self.config.elastic_modulus,
+                                        min_property=self.config.minimal_modulus,
+                                    )
+        self._E = E
+        
+    def calculate_elastic_modulus(self, levelset: TensorLike) -> TensorLike:
+        E = self.interpolation_model.calculate_property(
+                                        phi=levelset,
+                                        max_property=self.config.elastic_modulus,
+                                        min_property=self.config.minimal_modulus,
+                                    )
+        return E
+
+    def calculate_elastic_modulus_derivative(self, levelset: TensorLike) -> TensorLike:
+        dE = self.interpolation_model.calculate_property_derivative(
+                                        phi=levelset,
+                                        max_property=self.config.elastic_modulus,
+                                        min_property=self.config.minimal_modulus,
+                                    )
+        return dE
+
+    def get_base_material(self):
+        """获取基础材料实例 (E=1)"""
+        E = bm.ones(1, dtype=bm.float64, device=self.device)
+
+        return LevelSetAreaRationMaterialInstance(self.config, E)
