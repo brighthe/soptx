@@ -16,9 +16,11 @@ from soptx.material import (
                         )
 from soptx.pde import Cantilever3dData1
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
-from soptx.filter import (SensitivityBasicFilter, 
-                          DensityBasicFilter, 
-                          HeavisideProjectionBasicFilter)
+from soptx.filter import (BasicFilter,
+                        SensitivityBasicFilter, 
+                        DensityBasicFilter, 
+                        HeavisideProjectionBasicFilter
+                    )
 from soptx.opt import (ComplianceObjective, ComplianceConfig,
                        VolumeConstraint, VolumeConfig)
 
@@ -134,7 +136,6 @@ def create_base_components(config: TestConfig):
     @cartesian
     def density_func(x: TensorLike):
         val = config.volume_fraction * bm.ones(x.shape[0], **kwargs)
-        # val = bm.ones(x.shape[0], **kwargs)
         return val
     rho = space_D.interpolate(u=density_func)
 
@@ -151,6 +152,26 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     """测试 filter 类不同滤波器的正确性."""
     pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
+    # class TestFilter(BasicFilter):
+    #     def get_initial_density(self, x, xPhys):
+    #         return xPhys
+        
+    #     def filter_variables(self, x, xPhys):
+    #         return xPhys
+        
+    #     def filter_objective_sensitivities(self, xPhys, dobj):
+    #         return dobj
+        
+    #     def filter_constraint_sensitivities(self, xPhys, dcons):
+    #         return dcons
+
+    # # 使用这个测试子类
+    # filter_base = TestFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())
+    # H, Hs = filter_base._H, filter_base._Hs
+    # H1, Hs1 = filter_base._compute_filter_3d_math(nx=mesh.nx, ny=mesh.ny, nz=mesh.nz, 
+    #                                     hx=mesh.h[0], hy=mesh.h[1], hz=mesh.h[2], 
+    #                                     rmin=config.filter_radius)
+    # print(f"error: {bm.sum(H.to_dense() - H1.to_dense())}, {bm.sum(Hs - Hs1)}")
 
     if config.filter_type == 'None':
         filter = None
@@ -251,9 +272,9 @@ if __name__ == "__main__":
         # assembly_method=AssemblyMethod.STANDARD,
         # assembly_method=AssemblyMethod.SYMBOLIC,
         # solver_type='direct', solver_params={'solver_type': 'mumps'},
-        solver_type='direct', solver_params={'solver_type': 'cupy'},
+        # solver_type='direct', solver_params={'solver_type': 'cupy'},
         # solver_type='direct', solver_params={'solver_type': 'scipy'},
-        # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-16, 'rtol': 1e-16},
+        solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-16, 'rtol': 1e-16},
         diff_mode='manual',
         # diff_mode='auto',
         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
