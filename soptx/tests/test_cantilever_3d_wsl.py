@@ -168,11 +168,11 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     # # 使用这个测试子类
     # filter_base = TestFilter(mesh=mesh, rmin=config.filter_radius, domain=pde.domain())
     # H, Hs = filter_base._H, filter_base._Hs
-    # H1, Hs1 = filter_base._compute_filter_3d_math(nx=mesh.nx, ny=mesh.ny, nz=mesh.nz, 
-    #                                     hx=mesh.h[0], hy=mesh.h[1], hz=mesh.h[2], 
-    #                                     rmin=config.filter_radius)
+    # H1, Hs1 = filter_base._compute_filter_general(cell_centers=mesh.entity_barycenter('cell'), 
+    #                                             rmin=config.filter_radius, 
+    #                                             domain=pde.domain())
     # print(f"error: {bm.sum(H.to_dense() - H1.to_dense())}, {bm.sum(Hs - Hs1)}")
-
+    
     if config.filter_type == 'None':
         filter = None
     elif config.filter_type == 'sensitivity':
@@ -246,8 +246,8 @@ if __name__ == "__main__":
     # backend = 'numpy'
     backend = 'pytorch'
     # backend = 'jax'
-    # device = 'cpu'
-    device = 'cuda'
+    device = 'cpu'
+    # device = 'cuda'
     pde_type = 'cantilever_3d_1'
     # mesh_type = 'tetrahedron_mesh'
     mesh_type = 'uniform_mesh'
