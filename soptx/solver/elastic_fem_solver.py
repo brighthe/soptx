@@ -6,11 +6,15 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Union
 from fealpy.mesh import HomogeneousMesh, SimplexMesh, TensorMesh, StructuredMesh
 from fealpy.functionspace import TensorFunctionSpace
-from fealpy.fem import LinearElasticIntegrator, BilinearForm, DirichletBC
-from fealpy.fem.dirichlet_bc import apply_csr_matrix
-from fealpy.sparse import CSRTensor
-from fealpy.solver import cg, spsolve
 
+from fealpy.fem import BilinearForm
+from fealpy.fem.dirichlet_bc import apply_csr_matrix
+
+from fealpy.sparse import CSRTensor
+from fealpy.solver import cg, spsolve, DirectSolverManager
+
+# ! 这里调用内部的线弹性积分子
+from soptx.solver import LinearElasticIntegrator
 from soptx.material import BaseElasticMaterialInstance
 from soptx.utils import timer
 
