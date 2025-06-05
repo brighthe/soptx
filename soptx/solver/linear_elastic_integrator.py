@@ -2,15 +2,11 @@ from typing import Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Index, _S
-
-from fealpy.mesh import HomogeneousMesh, SimplexMesh, TensorMesh, StructuredMesh
+from fealpy.mesh import HomogeneousMesh, SimplexMesh, StructuredMesh
 from fealpy.functionspace.space import FunctionSpace as _FS
 from fealpy.functionspace.tensor_space import TensorFunctionSpace as _TS
-from fealpy.fem.integrator import (
-                        LinearInt, OpInt, CellInt,
-                        enable_cache,
-                        assemblymethod
-                    )
+from fealpy.decorator.variantmethod import variantmethod
+from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 from fealpy.fem.utils import LinearSymbolicIntegration
 
 class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
@@ -60,6 +56,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         return cm, bcs, ws, gphi, detJ
     
     # 标准组装方法
+    @variantmethod
     def assembly(self, space: _TS) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
@@ -212,9 +209,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         return cm, ws, detJ, D, B
             
-
-    @assemblymethod('voigt')
-    def voigt_assembly(self, space: _TS) -> TensorLike:
+    @assembly.register('voigt')
+    def assembly(self, space: _TS) -> TensorLike:
         mesh = getattr(space, 'mesh', None)
         cm, ws, detJ, D, B = self.fetch_voigt_assembly(space)
 
@@ -264,8 +260,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             S = bm.einsum('qim, qjn, q -> ijmnq', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, GD, GD, NQ)
             return cm, bcs, detJ, JG, S
 
-    @assemblymethod('fast')
-    def fast_assembly(self, space: _TS) -> TensorLike:
+    @assembly.register('fast')
+    def assembly(self, space: _TS) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
 
@@ -432,8 +428,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         else:
             raise NotImplementedError("symbolic assembly for general meshes is not implemented yet.")
 
-    @assemblymethod('symbolic')
-    def symbolic_assembly(self, space: _TS) -> TensorLike:
+    @assembly.register('symbolic')
+    def assembly(self, space: _TS) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
         
@@ -559,41 +555,3 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         return KK
     
-    @enable_cache
-    def fetch_c3d8_bbar_assembly(self, space: _FS):
-        '''ABAQUS'''
-        index = self.index
-        scalar_space = space.scalar_space
-        mesh = getattr(scalar_space, 'mesh', None)
-    
-        if not isinstance(mesh, HomogeneousMesh):
-            raise RuntimeError("The LinearElasticIntegrator only support spaces on"
-                               f"homogeneous meshes, but {type(mesh).__name__} is"
-                               "not a subclass of HomoMesh.")
-    
-        cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+1 if self.q is None else self.q
-        qf = mesh.quadrature_formula(q)
-        bcs, ws = qf.get_quadrature_points_and_weights()
-        gphi = scalar_space.grad_basis(bcs, index=index, variable='x')
-
-        J = mesh.jacobi_matrix(bcs)
-        detJ = bm.linalg.det(J)
-
-        D = self.material.elastic_matrix(bcs)
-        B = self.material.strain_matrix(dof_priority=space.dof_priority, 
-                                        gphi=gphi, 
-                                        correction='BBar', 
-                                        cm=cm, ws=ws, detJ=detJ)
-            
-        return ws, detJ, D, B
-
-    @assemblymethod('C3D8_BBar')
-    def c3d8_bbar_assembly(self, space: _TS) -> TensorLike:
-        '''ABAQUS'''
-        ws, detJ, D, B  = self.fetch_c3d8_bbar_assembly(space)
-        
-        KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij',
-                        ws, detJ, B, D, B)
-
-        return KK

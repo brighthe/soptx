@@ -270,28 +270,6 @@ class ElasticFEMSolver:
         
         return KE
 
-    def compute_local_stiffness_matrix_old(self) -> TensorLike:
-        """计算当前材料的局部刚度矩阵 (每次重新计算)"""
-        integrator = self._integrator
- 
-        # 根据 assembly_config.method 选择对应的组装函数
-        method_map = {
-            AssemblyMethod.STANDARD: integrator.assembly,
-            AssemblyMethod.VOIGT: integrator.voigt_assembly,
-            AssemblyMethod.FAST: integrator.fast_assembly,
-            AssemblyMethod.SYMBOLIC: integrator.symbolic_assembly,
-        }
-        
-        try:
-            assembly_func = method_map[self.assembly_method]
-        except KeyError:
-            raise RuntimeError(f"Unsupported assembly method: {self.assembly_method}")
-        
-        # 调用选定的组装函数
-        KE = assembly_func(space=self.tensor_space)
-        
-        return KE
-
     #----------------------------------------------------------------------------------
     # 内部方法：组装和边界条件处理
     #----------------------------------------------------------------------------------
@@ -299,7 +277,7 @@ class ElasticFEMSolver:
         """创建适当的积分器实例"""
         # 确定积分方法
         method_map = {
-            AssemblyMethod.STANDARD: 'assembly',
+            AssemblyMethod.STANDARD: None,
             AssemblyMethod.VOIGT: 'voigt',
             AssemblyMethod.FAST: 'fast',
             AssemblyMethod.SYMBOLIC: 'symbolic',
@@ -309,10 +287,7 @@ class ElasticFEMSolver:
 
         # 创建积分器
         q = self.tensor_space.p + 3
-        integrator = LinearElasticIntegrator(
-                            material=self.materials, 
-                            q=q, method=method
-                        )
+        integrator = LinearElasticIntegrator(material=self.materials, q=q, method=method)
         integrator.keep_data(True)
         
         return integrator
@@ -394,7 +369,7 @@ class ElasticFEMSolver:
         # 找出所有边界DOF对应的行索引
         bd_rows = bm.where(loc_flag)[0]
         new_col = bm.empty((NNZ,), **indices_context)
-        # 设置为相应行的边界DOF位置
+        # 设置为相应行的边界 DOF 位置
         new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)
         # 设置非对角元素的列索引
         new_col = bm.set_at(new_col, non_diag, col[remain_flag])

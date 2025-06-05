@@ -1,5 +1,5 @@
+from .linear_elastic_integrator import LinearElasticIntegrator
 from .elastic_fem_solver import (
-                            LinearElasticIntegrator,
                             ElasticFEMSolver, 
                             IterativeSolverResult, DirectSolverResult,
                             AssemblyMethod,

@@ -62,11 +62,13 @@ class ComplianceObjective(ObjectiveBase):
         """计算单元柔顺度向量
 
         Parameters:
-        - u: 位移向量, 形状可以是 (tgdof, ) 或 (nloads, tgdof)
+        -----------
+        u: 位移向量, 形状可以是 (tgdof, ) 或 (nloads, tgdof)
         
         Returns:
-        - 单载荷: 形状为 (NC,) 的单元柔顺度向量
-        - 多载荷: 形状为 (nloads, NC) 的单元柔顺度向量
+        -----------
+        单载荷: 形状为 (NC,) 的单元柔顺度向量
+        多载荷: 形状为 (nloads, NC) 的单元柔顺度向量
         """
         ke0 = self.solver.get_base_local_stiffness_matrix()
         cell2dof = self.solver.tensor_space.cell_to_dof()

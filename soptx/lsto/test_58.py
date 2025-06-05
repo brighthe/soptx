@@ -5,6 +5,9 @@ from fealpy.backend import backend_manager as bm
 from soptx.solver import ElasticFEMSolver, AssemblyMethod
 from soptx.material import DensityBasedMaterialConfig, DensityBasedMaterialInstance
 from soptx.material import LevelSetMaterialConfig, LevelSetAreaRationMaterialInstance
+from soptx.opt import (ComplianceObjective, ComplianceConfig,
+                       VolumeConstraint, VolumeConfig)
+
 from fealpy.mesh import UniformMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.pde import Cantilever2dData1
@@ -79,8 +82,7 @@ def upwind_diff(phi, dx, str_direction):
         fawd_diff = (matrix['j_plus_1'] - phi) / dx
     
     return back_diff, fawd_diff
-
-
+ 
 p = 1
 nx, ny = 32, 22
 h = [1, 1]
@@ -90,6 +92,9 @@ mesh_fe = UniformMesh(
                 extent=[0, nx, 0, ny], h=[1, 1], origin=[0.0, 0.0], 
                 device='cpu'
             )
+NC_fe = mesh_fe.number_of_cells()
+cell_centers = mesh_fe.entity_barycenter('cell')
+
 mesh_ls = UniformMesh(
                 extent=[0, nx+1, 0, ny+1], h=[1, 1], origin=[-0.5, -0.5], 
                 device='cpu'
@@ -109,7 +114,7 @@ cy = domain_height / 100 * bm.array([0, 0, 0, 25, 25, 25, 25, 50, 50, 50, 75, 75
 phi_tmp = np.zeros((NN_ls, len(cx)))
 for i in range(len(cx)):
     phi_tmp[:, i] = -np.sqrt((node_ls_x - cx[i])**2 + (node_ls_y - cy[i])**2) + domain_height / 10
-phi_ls = -(bm.max(phi_tmp, axis=1))
+phi_ls = -(bm.max(phi_tmp, axis=1)) # (NN_ls, )
 
 # 设置边界条件
 boundary_idx = bm.nonzero(mesh_ls.boundary_node_flag())[0]
@@ -121,7 +126,9 @@ node_fe_y = node_fe[:, 1]
 # 将水平集函数投影到有限元节点
 from scipy.interpolate import griddata
 points = np.column_stack((node_ls_x, node_ls_y))
-phi_fe = griddata(points, phi_ls, np.column_stack((node_fe_x, node_fe_y)), method='cubic')
+phi_fe = griddata(points, phi_ls, 
+                np.column_stack((node_fe_x, node_fe_y)), 
+                method='cubic') # (NN_fe, ))
 
 mesh_fe.nodedata['phi_fe'] = phi_fe
 mesh_fe.to_vtk('/home/heliang/FEALPy_Development/soptx/soptx/vtu/fe_phi.vts')
@@ -158,29 +165,41 @@ KE = solver.get_base_local_stiffness_matrix()
 
 cell_fe = mesh_fe.entity('cell')
 phi_fe_elem = phi_fe[cell_fe]
-# E1 = materials.calculate_elastic_modulus(levelset=phi_fe_elem)
-# KE1 = solver.compute_local_stiffness_matrix(density=phi_fe_elem)
 
-# solver.update_status(phi_fe_elem)
-# K = solver._assemble_global_stiffness_matrix()
-# F = solver._assemble_global_force_vector()
+obj_config = ComplianceConfig(diff_mode='manual')
+objective = ComplianceObjective(solver=solver, config=obj_config)
 
-# uh = solver.solve().displacement
 max_iter = 100
+lv = 100  # Lagrange multiplier for volume constraint
+lcur = 0.01  # Lagrange multiplier for perimeter constraint
 for iter_num in range(max_iter):
     print(f"\n迭代 {iter_num+1}/{max_iter}")
     
-    # 1. 有限元分析
+    # 有限元分析
     solver.update_status(phi_fe_elem)
     K = solver._assemble_global_stiffness_matrix()
     F = solver._assemble_global_force_vector()
     uh = solver.solve().displacement
+
+    ce = objective._compute_element_compliance(u=uh) # (NC_fe, )
+
+    # 每个有限元网格单元对应的水平集网格节点
+    ele_ls_grid_id = np.zeros(NC_fe, dtype=int)
+    for i in range(NC_fe):
+        distances = (node_ls_x - cell_centers[i, 0])**2 + (node_ls_y - cell_centers[i, 1])**2
+        ele_ls_grid_id[i] = np.argmin(distances)
 
     mean_compliance = bm.dot(F, uh[:])
 
     volume_ratio = bm.sum(phi_fe > 0) / len(phi_fe)
 
     phi_ls_2d = phi_ls.reshape(ny+2, nx+2)
-    curvature = calc_curvature(phi_ls_2d, h[0], h[1])
+    curvature = calc_curvature(phi_ls_2d, h[0], h[1]) # (NN_ls, )
+
+    ls_gird_beta = np.zeros(NN_ls)
+    for e in range(NC_fe):
+        ls_id = ele_ls_grid_id[e]
+        ls_gird_beta[ls_id] = lv - ce[e] - lcur * curvature[ls_id]
+
     print("------------------------")
 
