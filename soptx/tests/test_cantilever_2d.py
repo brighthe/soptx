@@ -95,7 +95,7 @@ def create_base_components(config: TestConfig):
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
     print(f"CGDOF: {tensor_space_C.number_of_global_dofs()}")
-    space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
+    space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     
     material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
@@ -123,7 +123,6 @@ def create_base_components(config: TestConfig):
     @cartesian
     def density_func(x: TensorLike):
         val = config.init_volume_fraction * bm.ones(x.shape[0], **kwargs)
-        # val = bm.ones(x.shape[0], **kwargs)
         return val
     rho = space_D.interpolate(u=density_func)
 
@@ -235,7 +234,8 @@ if __name__ == "__main__":
             mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
             p = 1,
             assembly_method=AssemblyMethod.FAST,
-            solver_type='direct', solver_params={'solver_type': 'mumps'},
+            # solver_type='direct', solver_params={'solver_type': 'mumps'},
+            solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
             diff_mode='manual',
             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
             filter_type=filter_type, filter_radius=filter_radius,

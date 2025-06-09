@@ -570,7 +570,7 @@ class BasicFilter(ABC):
         """
         pass
 
-    abstractmethod
+    @abstractmethod
     def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> None:
         """
         对设计变量进行滤波得到物理变量
@@ -599,7 +599,7 @@ class BasicFilter(ABC):
         
         Parameters
         - xPhys : 过滤后的物理变量
-        - dcos : 原始的约束函数灵敏度
+        - dcons : 原始的约束函数灵敏度
         """
         pass
 

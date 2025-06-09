@@ -55,14 +55,15 @@ class ElasticFEMSolver:
                 solver_params: Optional[dict]):
         """
         Parameters
-        - materials : 材料
-        - tensor_space : 张量函数空间
-        - pde : 包含荷载和边界条件的 PDE 模型
-        - assembly_method : 矩阵组装方法
-        - solver_type : 求解器类型, 'cg' 或 'direct' 
-        - solver_params : 求解器参数
-            - cg: maxiter, atol, rtol
-            - direct: solver_type
+        -----------
+        materials : 材料
+        tensor_space : 张量函数空间
+        pde : 包含荷载和边界条件的 PDE 模型
+        assembly_method : 矩阵组装方法
+        solver_type : 求解器类型, 'cg' 或 'direct' 
+        solver_params : 求解器参数
+          - cg: maxiter, atol, rtol
+          - direct: solver_type
         """
         self.materials = materials
         self.tensor_space = tensor_space
@@ -275,7 +276,6 @@ class ElasticFEMSolver:
     #----------------------------------------------------------------------------------
     def _create_integrator(self) -> LinearElasticIntegrator:
         """创建适当的积分器实例"""
-        # 确定积分方法
         method_map = {
             AssemblyMethod.STANDARD: None,
             AssemblyMethod.VOIGT: 'voigt',
@@ -285,7 +285,6 @@ class ElasticFEMSolver:
         
         method = method_map[self.assembly_method]
 
-        # 创建积分器
         q = self.tensor_space.p + 3
         integrator = LinearElasticIntegrator(material=self.materials, q=q, method=method)
         integrator.keep_data(True)
@@ -304,9 +303,10 @@ class ElasticFEMSolver:
     def _assemble_global_force_vector(self) -> TensorLike:
         """组装全局载荷向量
 
-        Returns:
-        - 单载荷情况: 形状为 (tgdof,) 的一维张量
-        - 多载荷情况: 形状为 (nloads, tgdof) 的二维张量
+        Returns
+        --------
+        单载荷情况: 形状为 (tgdof,) 的一维张量
+        多载荷情况: 形状为 (nloads, tgdof) 的二维张量
         """
         force = self.pde.force
         force_at_nodes = force(self.tensor_space.mesh.entity('node'))
@@ -505,9 +505,9 @@ class ElasticFEMSolver:
         return IterativeSolverResult(displacement=uh, solve_info=info)
     
     def solve_direct(self, 
-                    solver_type: str = 'mumps', 
-                    enable_timing: bool = True,
-                ) -> DirectSolverResult:
+            solver_type: str = 'mumps', 
+            enable_timing: bool = True,
+        ) -> DirectSolverResult:
         """使用直接法求解"""
         if self._current_density is None:
             raise ValueError("Density not set. Call 'update_density' first.")
