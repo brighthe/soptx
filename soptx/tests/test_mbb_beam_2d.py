@@ -1,5 +1,3 @@
-"""测试不同后端、优化器、滤波器、网格下的 2D mbb 梁"""
-
 from dataclasses import dataclass
 from typing import Literal, Optional, Union, Dict, Any
 from pathlib import Path
@@ -14,7 +12,7 @@ from soptx.material import (
                             DensityBasedMaterialConfig,
                             DensityBasedMaterialInstance,
                         )
-from soptx.pde import MBBBeam2dData1
+from soptx.pde import MBBBeam2dData1, MBBBeam2dData2
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
@@ -28,7 +26,7 @@ class TestConfig:
     """Configuration for topology optimization test cases."""
     backend: Literal['numpy', 'pytorch', 'jax']
     device: Literal['cpu', 'cuda']
-    pde_type: Literal['mbb_beam_2d_1']
+    pde_type: Literal['mbb_beam_2d_1', 'mbb_beam_2d_2']
 
     elastic_modulus: float
     poisson_ratio: float
@@ -68,6 +66,7 @@ class TestConfig:
 
 def create_base_components(config: TestConfig):
     """Create basic components needed for topology optimization based on configuration."""
+
     if config.backend == 'numpy':
         bm.set_backend('numpy')
     elif config.backend == 'pytorch':
@@ -81,25 +80,32 @@ def create_base_components(config: TestConfig):
                     ymin=0, ymax=config.domain_width,
                     T = config.load
                 )
-        if config.mesh_type == 'uniform_mesh_2d':
-            extent = [0, config.nx, 0, config.ny]
-            origin = [0.0, 0.0]
-            mesh = UniformMesh2d(
-                        extent=extent, h=[config.hx, config.hy], origin=origin,
-                        ipoints_ordering='yx', device=config.device,
-                    )
-        elif config.mesh_type == 'triangle_mesh':
-            mesh = TriangleMesh.from_box(box=pde.domain(), 
-                                        nx=config.nx, ny=config.ny,
-                                        device=config.device,)
+    elif config.pde_type == 'mbb_beam_2d_2':
+        pde = MBBBeam2dData2(
+                    xmin=0, xmax=config.domain_length,
+                    ymin=0, ymax=config.domain_width,
+                    T = config.load
+                )
+        
+    if config.mesh_type == 'uniform_mesh_2d':
+        extent = [0, config.nx, 0, config.ny]
+        origin = [0.0, 0.0]
+        mesh = UniformMesh2d(
+                    extent=extent, h=[config.hx, config.hy], origin=origin,
+                    ipoints_ordering='yx', device=config.device,
+                )
+    elif config.mesh_type == 'triangle_mesh':
+        mesh = TriangleMesh.from_box(box=pde.domain(), 
+                                    nx=config.nx, ny=config.ny,
+                                    device=config.device,)
 
     GD = mesh.geo_dimension()
     
     p = config.p
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
     #! dof_priority-(GD, -1) 的效率比 gd_prioirty-(-1, GD) 的效率要高
-    tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
-    # tensor_space_C = TensorFunctionSpace(space_C, (GD, -1))
+    # tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
+    tensor_space_C = TensorFunctionSpace(space_C, (GD, -1))
     space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     
     material_config = DensityBasedMaterialConfig(
@@ -201,6 +207,7 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
     rho_opt, history = optimizer.optimize(rho=rho[:])
     
+    # Save results
     save_path = Path(config.save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
     save_optimization_history(mesh, history, str(save_path))
@@ -213,55 +220,89 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
     }
 
 if __name__ == "__main__":
-    base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
+    current_file = Path(__file__)
+    base_dir = current_file.parent.parent / 'vtu'
+    base_dir = str(base_dir)
+
     backend = 'numpy'
     # backend = 'pytorch'
     # backend = 'jax'
     device = 'cpu'
-    
+
     '''
     参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
-    pde_type = 'mbb_beam_2d_1'
-    init_volume_fraction = 0.5
-    volume_fraction = 0.5
-    mesh_type = 'uniform_mesh_2d'
+    # pde_type = 'mbb_beam_2d_1'
+    # init_volume_fraction = 0.5
+    # volume_fraction = 0.5
+    # # mesh_type = 'uniform_mesh_2d'
     # mesh_type = 'triangle_mesh'
-    nx, ny = 60, 20
-    # nx, ny = 150, 50
-    # nx ,ny = 300, 100
-    optimizer_type = 'oc'
-    # optimizer_type = 'mma'
+    # nx, ny = 60, 20
+    # # nx, ny = 150, 50
+    # # nx ,ny = 300, 100
+    # optimizer_type = 'oc'
+    # # optimizer_type = 'mma'
+    # filter_type = 'sensitivity'
+    # # filter_type = 'density'
+    # filter_radius = nx * 0.04
+    # # filter_type = 'heaviside'
+    # # filter_radius = nx * 0.03
+    # config_basic_filter = TestConfig(
+    #     backend=backend,
+    #     device=device,
+    #     pde_type=pde_type,
+    #     elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
+    #     domain_length=nx, domain_width=ny,
+    #     load=-1,
+    #     init_volume_fraction=init_volume_fraction,
+    #     volume_fraction=volume_fraction,
+    #     penalty_factor=3.0,
+    #     mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
+    #     p = 1,
+    #     assembly_method=AssemblyMethod.FAST,
+    #     solver_type='direct', solver_params={'solver_type': 'mumps'},
+    #     # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
+    #     diff_mode='manual',
+    #     # diff_mode='auto',
+    #     optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+    #     filter_type=filter_type, filter_radius=filter_radius,
+    #     save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+    #     )
+    # result = run_basic_filter_test(config_basic_filter)
+    
+    '''
+    参数来源论文: Topology optimization using the p-version of the finite element method
+    '''
+    pde_type = 'mbb_beam_2d_2'
+    init_volume_fraction = 1.0
+    volume_fraction = 0.6
+    mesh_type = 'uniform_mesh_2d'
+    nx, ny = 60, 10
+    # optimizer_type = 'oc'
+    optimizer_type = 'mma'
     # filter_type = 'sensitivity'
     filter_type = 'density'
-    filter_radius = nx * 0.04
-    # filter_type = 'heaviside'
-    # filter_radius = nx * 0.03
+    filter_radius = 1.2
+    fem_p = 2
+    penalty_factor = 1.0
     config_basic_filter = TestConfig(
         backend=backend,
         device=device,
         pde_type=pde_type,
         elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
         domain_length=nx, domain_width=ny,
-        load=-1,
+        load=1,
         init_volume_fraction=init_volume_fraction,
         volume_fraction=volume_fraction,
-        penalty_factor=3.0,
+        penalty_factor=penalty_factor,
         mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
-        p = 1,
+        p = fem_p,
         assembly_method=AssemblyMethod.FAST,
         solver_type='direct', solver_params={'solver_type': 'mumps'},
         # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
-        # diff_mode='auto',
         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
-        save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
+        save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_p{fem_p}',
         )
-    
-    '''
-    参数来源论文: Topology optimization using the p-version of the finite element method
-    '''
-    
-
     result = run_basic_filter_test(config_basic_filter)

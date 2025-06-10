@@ -18,12 +18,12 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                  q: Optional[int]=None, *,
                  index: Index=_S,
                  method: Optional[str]=None) -> None:
-        method = 'assembly' if (method is None) else method
-        super().__init__(method=method)
+        super().__init__()
 
         self.material = material
         self.q = q
         self.index = index
+        self.assembly.set(method)
 
     @enable_cache
     def to_global_dof(self, space: _FS) -> TensorLike:

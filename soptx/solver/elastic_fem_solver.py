@@ -387,9 +387,10 @@ class ElasticFEMSolver:
         """应用边界条件
 
         Parameters:
-        - K: 全局刚度矩阵
-        - F: 全局载荷向量, 形状可以是 (tgdof,) 或 (nloads, tgdof)
-        - enable_timing: 是否启用计时
+        -----------
+        K: 全局刚度矩阵
+        F: 全局载荷向量, 形状可以是 (tgdof,) 或 (nloads, tgdof)
+        enable_timing: 是否启用计时
         """
         t = None
         if enable_timing:
@@ -528,7 +529,7 @@ class ElasticFEMSolver:
             t.send('右端项组装时间')
 
         K, F = self._apply_boundary_conditions(K0, F0)
-        
+
         if enable_timing:
             t.send('边界条件处理时间')
             
