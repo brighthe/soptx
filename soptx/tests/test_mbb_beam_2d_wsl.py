@@ -214,13 +214,14 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     base_dir = '/home/heliang/soptx/soptx/vtu'
-    '''
-    参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
-    '''
     backend = 'numpy'
     # backend = 'pytorch'
     # backend = 'jax'
     device = 'cpu'
+
+    '''
+    参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
+    '''
     pde_type = 'mbb_beam_2d_1'
     init_volume_fraction = 0.5
     volume_fraction = 0.5
@@ -257,5 +258,9 @@ if __name__ == "__main__":
         filter_type=filter_type, filter_radius=filter_radius,
         save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny}',
         )
+    
+    '''
+    参数来源论文: Topology optimization using the p-version of the finite element method
+    '''
 
     result = run_basic_filter_test(config_basic_filter)

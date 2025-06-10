@@ -10,18 +10,12 @@ class MBBBeam2dData1:
     '''
     模型来源论文: Efficient topology optimization in MATLAB using 88 lines of code
     '''
-    def __init__(self, 
-                xmin: float=0, xmax: float=60, 
-                ymin: float=0, ymax: float=20,
-                T: float = -1):
-        """
-        flip_direction = True
-        0 ------- 3 ------- 6 
-        |    0    |    2    |
-        1 ------- 4 ------- 7 
-        |    1    |    3    |
-        2 ------- 5 ------- 8 
-        """
+    def __init__(
+            self, 
+            xmin: float=0, xmax: float=60, 
+            ymin: float=0, ymax: float=20,
+            T: float = 1
+        ) -> None:
         self.xmin, self.xmax = xmin, xmax
         self.ymin, self.ymax = ymin, ymax
         self.T = T
@@ -47,7 +41,7 @@ class MBBBeam2dData1:
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         # val[coord, 1] = self.T
-        val = bm.set_at(val, (coord, 1), self.T)
+        val = bm.set_at(val, (coord, 1), -self.T)
 
         return val
     
@@ -83,4 +77,44 @@ class MBBBeam2dData1:
 
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
+    
+
+class MBBBeam2dData2:
+    '''
+    模型来源论文: Topology optimization using the p-version of the finite element method
+    '''
+    def __init__(
+            self, 
+            xmin: float=0, xmax: float=60, 
+            ymin: float=0, ymax: float=10,
+            T: float = -1
+        ) -> None:
+        self.xmin, self.xmax = xmin, xmax
+        self.ymin, self.ymax = ymin, ymax
+        self.T = T
+        self.eps = 1e-12
+
+    def domain(self) -> list:
+        
+        box = [self.xmin, self.xmax, self.ymin, self.ymax]
+
+        return box
+    
+    @cartesian
+    def force(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+
+        x = points[..., 0]
+        y = points[..., 1]
+
+        coord = (
+            (bm.abs(x - domain[1] / 2) < self.eps) & 
+            (bm.abs(y - domain[3]) < self.eps)
+        )
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (coord, 1), -self.T)
+
+        return val
+
     
