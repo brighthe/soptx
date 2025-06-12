@@ -128,7 +128,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                             D01 * A_xy + D22 * A_yx)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
                             D01 * A_yx + D22 * A_xy)
-
         else: 
             D00 = D[..., 0, 0, None]  # 2μ + λ
             D01 = D[..., 0, 1, None]  # λ

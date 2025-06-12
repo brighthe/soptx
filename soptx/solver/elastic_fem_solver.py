@@ -11,7 +11,7 @@ from fealpy.fem import BilinearForm
 from fealpy.fem.dirichlet_bc import apply_csr_matrix
 
 from fealpy.sparse import CSRTensor
-from fealpy.solver import cg, spsolve, DirectSolverManager
+from fealpy.solver import cg, spsolve
 
 # ! 这里调用内部的线弹性积分子
 from soptx.solver import LinearElasticIntegrator
@@ -381,9 +381,9 @@ class ElasticFEMSolver:
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
     
     def _apply_boundary_conditions(self, 
-                                K: CSRTensor, F: TensorLike, 
-                                enable_timing: bool = False
-                            ) -> tuple[CSRTensor, TensorLike]:
+                K: CSRTensor, F: TensorLike, 
+                enable_timing: bool = False
+            ) -> tuple[CSRTensor, TensorLike]:
         """应用边界条件
 
         Parameters:

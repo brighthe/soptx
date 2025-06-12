@@ -120,17 +120,17 @@ def main():
                         default='numpy', type=str,
                         help='Specify the backend type for computation, default is "pytorch".')
     parser.add_argument('--degree', 
-                        default=1, type=int, 
+                        default=2, type=int, 
                         help='Degree of the Lagrange finite element space, default is 1.')
     parser.add_argument('--solver',
                         choices=['cg', 'spsolve'],
-                        default='cg', type=str,
+                        default='spsolve', type=str,
                         help='Specify the solver type for solving the linear system, default is "mumps".')
     parser.add_argument('--nx', 
-                        default=10, type=int, 
+                        default=120, type=int, 
                         help='Initial number of grid cells in the x direction, default is 10.')
     parser.add_argument('--ny',
-                        default=10, type=int,
+                        default=40, type=int,
                         help='Initial number of grid cells in the y direction, default is 10.')
     parser.add_argument('--mesh-type',
                             choices=['uniform', 'triangle', 'quadrangle'],
@@ -163,7 +163,7 @@ def main():
 
         linear_elastic_material = LinearElasticMaterial(name='E1nu03', 
                                                     elastic_modulus=1, poisson_ratio=0.3, 
-                                                    hypo='plane_strain', device=bm.get_device(mesh))
+                                                    hypo='plane_stress', device=bm.get_device(mesh))
         tmr.send('material')
 
         integrator_K = LinearElasticIntegrator(material=linear_elastic_material, 
@@ -171,6 +171,8 @@ def main():
         bform = BilinearForm(tensor_space)
         bform.add_integrator(integrator_K)
         K = bform.assembly(format='csr')
+        K_test1 = K.toarray()
+        K_det1 = bm.linalg.det(K_test1)
         tmr.send('stiffness assembly')
 
         integrator_F = VectorSourceIntegrator(source=pde.source, 
@@ -191,7 +193,9 @@ def main():
                                                         threshold=None, method='interp')
         F = F - K.matmul(uh_bd)
         F = bm.set_at(F, isDDof, uh_bd[isDDof])
-        K = dbc.apply_matrix(matrix=K, check=True)
+        # K = dbc.apply_matrix(matrix=K, check=True)
+        # K_test2 = K.toarray()
+        # K_det2 = bm.linalg.det(K_test2)
         tmr.send('boundary')
         
         uh = tensor_space.function()
@@ -202,19 +206,19 @@ def main():
             uh[:] = spsolve(K, F, solver='mumps')
         # t.send('Solving Phase')  # 记录求解阶段时间
 
-        NN = mesh.number_of_nodes()
-        if tensor_space.dof_priority:
-            uh_show = uh.reshape(GD, NN).T
-        else:
-            uh_show = uh.reshape(NN, GD)
-        mesh.nodedata['uh'] = uh_show[:]
+        # NN = mesh.number_of_nodes()
+        # if tensor_space.dof_priority:
+        #     uh_show = uh.reshape(GD, NN).T
+        # else:
+        #     uh_show = uh.reshape(NN, GD)
+        # mesh.nodedata['uh'] = uh_show[:]
         
-        if isinstance(mesh, UniformMesh2d):
-            mesh.to_vtk(
-            '/home/heliang/FEALPy_Development/fealpy/app/soptx/linear_elastic/linear_elastic_examples/results/exp_2d_uh.vts')
-        else:
-            mesh.to_vtk(
-            '/home/heliang/FEALPy_Development/fealpy/app/soptx/linear_elastic/linear_elastic_examples/results/exp_2d_uh.vtk')
+        # if isinstance(mesh, UniformMesh2d):
+        #     mesh.to_vtk(
+        #     '/home/heliang/FEALPy_Development/fealpy/app/soptx/linear_elastic/linear_elastic_examples/results/exp_2d_uh.vts')
+        # else:
+        #     mesh.to_vtk(
+        #     '/home/heliang/FEALPy_Development/fealpy/app/soptx/linear_elastic/linear_elastic_examples/results/exp_2d_uh.vtk')
         tmr.send('solve({})'.format(args.solver))
         
         tmr.send(None)

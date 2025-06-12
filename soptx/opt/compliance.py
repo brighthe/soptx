@@ -18,9 +18,10 @@ class ComplianceObjective(ObjectiveBase):
                 solver: ElasticFEMSolver, 
                 config: Optional[ComplianceConfig] = None):
         """
-        Parameters
-        - solver : 有限元求解器
-        - config : 柔顺度计算的配置参数, 如果为 None 则使用默认配置
+        Parameters:
+        -----------
+        solver : 有限元求解器
+        config : 柔顺度计算的配置参数, 如果为 None 则使用默认配置
         """
         self.solver = solver
         self.materials = solver.materials
@@ -183,14 +184,13 @@ class ComplianceObjective(ObjectiveBase):
     #---------------------------------------------------------------------------
     # 优化相关方法
     #---------------------------------------------------------------------------
-    def fun(self, 
-            rho: TensorLike, u: Optional[TensorLike] = None
-        ) -> float:
+    def fun(self, rho: TensorLike, u: Optional[TensorLike] = None) -> float:
         """计算总柔度值
-        
-        Parameters
-        - rho : 密度场
-        - u : 可选的位移场, 如果为 None 则自动计算或使用缓存的位移场
+
+        Parameters:
+        -----------
+        rho : 密度场
+        u : 可选的位移场, 如果为 None 则自动计算或使用缓存的位移场
         """
         # 获取位移场
         if u is None:
@@ -224,12 +224,13 @@ class ComplianceObjective(ObjectiveBase):
         ) -> TensorLike:
         """计算目标函数梯度
         
-        Parameters
-        - rho : 密度场
-        - u : 可选的位移场，如果为 None 则自动计算或使用缓存的位移场
-        - diff_mode : 梯度计算方式, 如果为 None 则使用配置中的默认值
-            - "manual": 使用解析推导的梯度公式
-            - "auto": 使用自动微分技术
+        Parameters:
+        -----------
+        rho : 密度场
+        u : 可选的位移场，如果为 None 则自动计算或使用缓存的位移场
+        diff_mode : 梯度计算方式, 如果为 None 则使用配置中的默认值
+            "manual": 使用解析推导的梯度公式
+            "auto": 使用自动微分技术
         """
         if diff_mode is None:
             diff_mode = self.config.diff_mode
