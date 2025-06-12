@@ -62,8 +62,8 @@ class ElasticFEMSolver:
         assembly_method : 矩阵组装方法
         solver_type : 求解器类型, 'cg' 或 'direct' 
         solver_params : 求解器参数
-          - cg: maxiter, atol, rtol
-          - direct: solver_type
+            cg: maxiter, atol, rtol
+            direct: solver_type
         """
         self.materials = materials
         self.tensor_space = tensor_space

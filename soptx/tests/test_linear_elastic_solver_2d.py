@@ -202,7 +202,6 @@ def test_elastic_with_linearform_rhs(pde, mesh, p, solver_type):
     print("NDof:", NDof)
     print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
 
-
 def test_uniform_mesh_2d_cell_to_ipoint():
     """
     测试 UniformMesh2d.cell_to_ipoint() 方法的正确性,
@@ -228,7 +227,8 @@ def test_uniform_mesh_2d_cell_to_ipoint():
     cip2 = mesh2.cell_to_ipoint(p=p)
     print(f"cip(nx == ny):\n{cip2}")
 
-    print(f"在 nx != ny 的情况下, cell_to_ipoint 的结果是错误的.")
+    # ! 不要使用 UniformMesh
+    print(f"在 nx != ny 的情况下, cell_to_ipoint 的结果是错误的!")
 
 
 if __name__ == "__main__":

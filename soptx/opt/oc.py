@@ -141,9 +141,10 @@ class OCOptimizer(OptimizerBase):
     def optimize(self, rho: TensorLike, **kwargs) -> TensorLike:
         """运行 OC 优化算法
 
-        Parameters
-        - rho : 初始密度场
-        - **kwargs : 其他参数
+        Parameters:
+        -----------
+        rho : 初始密度场
+        **kwargs : 其他参数
         """
         # 获取优化参数
         max_iters = self.options.max_iterations
