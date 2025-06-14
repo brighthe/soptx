@@ -507,7 +507,7 @@ class ElasticFEMSolver:
     
     def solve_direct(self, 
             solver_type: str = 'mumps', 
-            enable_timing: bool = True,
+            enable_timing: bool = False,
         ) -> DirectSolverResult:
         """使用直接法求解"""
         if self._current_density is None:

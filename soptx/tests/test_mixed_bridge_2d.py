@@ -1,3 +1,4 @@
+"""测试 Hu-Zhang 元在拓扑优化下的应用"""
 from dataclasses import dataclass
 from typing import Literal, Optional, Union, Dict, Any
 from pathlib import Path
@@ -12,7 +13,7 @@ from soptx.material import (
                             DensityBasedMaterialConfig,
                             DensityBasedMaterialInstance,
                         )
-from soptx.pde import HalfMBBBeam2dData1, MBBBeam2dData2, HalfMBBBeam2dData2
+from soptx.pde import HalfSinglePointLoadBridge2D
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
@@ -26,35 +27,24 @@ class TestConfig:
     """Configuration for topology optimization test cases."""
     backend: Literal['numpy', 'pytorch', 'jax']
     device: Literal['cpu', 'cuda']
-    pde_type: Literal['half_mbb_beam_2d_1', 'mbb_beam_2d_2', 'half_mbb_beam_2d_2']
-
-    elastic_modulus: float
-    poisson_ratio: float
-    minimal_modulus: float
-
-    domain_length : float
-    domain_width : float
-
-    load : float
+    pde_type: Literal['half_single_point_load_bridge_2d']
 
     init_volume_fraction: float
     volume_fraction: float
     penalty_factor: float
 
-    mesh_type: Literal['quadrangle_mesh', 'triangle_mesh']
+    mesh_type: Literal['triangle_mesh', 'quadrangle_mesh']
     nx: int
     ny: int
     hx: float
     hy: float
 
     p: int
-    
     assembly_method: AssemblyMethod
     solver_type: Literal['cg', 'direct'] 
     solver_params: Dict[str, Any]
 
     diff_mode: Literal['auto', 'manual'] 
-
     optimizer_type: Literal['oc', 'mma']
     max_iterations: int
     tolerance: float
@@ -74,24 +64,8 @@ def create_base_components(config: TestConfig):
     elif config.backend == 'jax':
         bm.set_backend('jax')
 
-    if config.pde_type == 'half_mbb_beam_2d_1':
-        pde = HalfMBBBeam2dData1(
-                    xmin=0, xmax=config.domain_length,
-                    ymin=0, ymax=config.domain_width,
-                    T = config.load
-                )
-    elif config.pde_type == 'mbb_beam_2d_2':
-        pde = MBBBeam2dData2(
-                    xmin=0, xmax=config.domain_length,
-                    ymin=0, ymax=config.domain_width,
-                    T = config.load
-                )
-    elif config.pde_type == 'half_mbb_beam_2d_2':
-        pde = HalfMBBBeam2dData2(
-                    xmin=0, xmax=config.domain_length,
-                    ymin=0, ymax=config.domain_width,
-                    T = config.load
-                )
+    if config.pde_type == 'half_single_point_load_bridge_2d':
+        pde = HalfSinglePointLoadBridge2D()
 
     if config.mesh_type == 'quadrangle_mesh':
         mesh = QuadrangleMesh.from_box(
@@ -117,11 +91,52 @@ def create_base_components(config: TestConfig):
     print(f"CGDOF: {CGDOF}")
     space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     
+    return pde, mesh, tensor_space_C, space_D
+
+def test_elastic(config: TestConfig):
+    pde, mesh, tensor_space_C, space_D = create_base_components(config)
     material_config = DensityBasedMaterialConfig(
-                            elastic_modulus=config.elastic_modulus,            
-                            minimal_modulus=config.minimal_modulus,         
-                            poisson_ratio=config.poisson_ratio,            
-                            plane_type="plane_stress",
+                            elastic_modulus=pde.E,            
+                            minimal_modulus=1e-9,         
+                            poisson_ratio=pde.nu,            
+                            plane_type=pde.plane_type,    
+                            interpolation_model="SIMP",    
+                            penalty_factor=config.penalty_factor
+                        )
+    materials = DensityBasedMaterialInstance(config=material_config)
+
+    solvers = ElasticFEMSolver(
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=config.assembly_method,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
+
+    node = mesh.entity('node')
+    kwargs = bm.context(node)
+    @cartesian
+    def density_func(x):
+        val = bm.ones(x.shape[0], **kwargs)
+        return val
+    rho = space_D.interpolate(u=density_func)
+
+    KK = solvers.get_base_local_stiffness_matrix()
+
+    solvers.update_status(rho[:])
+    solver_result = solvers.solve()
+    uh = solver_result.displacement
+    print("---------------------")
+
+def run(config: TestConfig) -> Dict[str, Any]:
+    pde, mesh, tensor_space_C, space_D = create_base_components(config)
+
+    material_config = DensityBasedMaterialConfig(
+                            elastic_modulus=pde.E,            
+                            minimal_modulus=1e-9,         
+                            poisson_ratio=pde.nu,            
+                            plane_type=pde.plane_type,
                             device=config.device,      
                             interpolation_model="SIMP",    
                             penalty_factor=config.penalty_factor
@@ -130,13 +145,13 @@ def create_base_components(config: TestConfig):
     materials = DensityBasedMaterialInstance(config=material_config)
 
     solver = ElasticFEMSolver(
-                materials=materials,
-                tensor_space=tensor_space_C,
-                pde=pde,
-                assembly_method=config.assembly_method,
-                solver_type=config.solver_type,
-                solver_params=config.solver_params 
-            )
+                    materials=materials,
+                    tensor_space=tensor_space_C,
+                    pde=pde,
+                    assembly_method=config.assembly_method,
+                    solver_type=config.solver_type,
+                    solver_params=config.solver_params 
+                )
     
     node = mesh.entity('node')
     kwargs = bm.context(node)
@@ -152,15 +167,6 @@ def create_base_components(config: TestConfig):
     constraint = VolumeConstraint(solver=solver, 
                                 volume_fraction=config.volume_fraction,
                                 config=cons_config)
-    
-    return pde, rho, objective, constraint
-
-def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
-    """
-    测试 filter 类不同滤波器的正确性.
-    """
-    pde, rho, objective, constraint = create_base_components(config)
-    mesh = objective.solver.tensor_space.mesh
 
     if config.filter_type == 'None':
         filter = None
@@ -238,32 +244,23 @@ if __name__ == "__main__":
     # backend = 'jax'
     device = 'cpu'
 
-    '''
-    参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
-    '''
-    pde_type = 'half_mbb_beam_2d_1'
-    init_volume_fraction = 1.0
-    volume_fraction = 0.5
+    '''参数来源论文: Topology optimization of incompressible media using mixed finite elements'''
+    pde_type = 'half_single_point_load_bridge_2d'
+    init_volume_fraction = 0.35
+    volume_fraction = 0.35
     mesh_type = 'quadrangle_mesh'
-    # mesh_type = 'triangle_mesh'
-    nx, ny = 60, 20
-    # nx, ny = 150, 50
-    # nx ,ny = 300, 100
-    # optimizer_type = 'oc'
-    optimizer_type = 'mma'
-    filter_type = 'sensitivity'
-    # filter_type = 'density'
+    nx, ny = 32, 32
+    optimizer_type = 'oc'
+    # optimizer_type = 'mma'
+    # filter_type = None
+    # filter_type = 'sensitivity'
+    filter_type = 'density'
     filter_radius = nx * 0.04
-    # filter_type = 'heaviside'
-    # filter_radius = nx * 0.03
     fem_p = 1
     config_basic_filter = TestConfig(
         backend=backend,
         device=device,
         pde_type=pde_type,
-        elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-        domain_length=nx, domain_width=ny,
-        load=1,
         init_volume_fraction=init_volume_fraction,
         volume_fraction=volume_fraction,
         penalty_factor=3.0,
@@ -278,77 +275,6 @@ if __name__ == "__main__":
         filter_type=filter_type, filter_radius=filter_radius,
         save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_p{fem_p}',
         )
-    result = run_basic_filter_test(config_basic_filter)
-    
-    '''
-    参数来源论文: Topology optimization using the p-version of the finite element method
-    '''
-    # pde_type = 'mbb_beam_2d_2'
-    # init_volume_fraction = 1.0
-    # volume_fraction = 0.6
-    # mesh_type = 'quadrangle_mesh'
-    # nx, ny = 60, 10
-    # # optimizer_type = 'oc'
-    # optimizer_type = 'mma'
-    # filter_type = 'density'
-    # filter_radius = 1.2
-    # fem_p = 2
-    # penalty_factor = 3.0
-    # config_basic_filter = TestConfig(
-    #     backend=backend,
-    #     device=device,
-    #     pde_type=pde_type,
-    #     elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-    #     domain_length=nx, domain_width=ny,
-    #     load=1,
-    #     init_volume_fraction=init_volume_fraction,
-    #     volume_fraction=volume_fraction,
-    #     penalty_factor=penalty_factor,
-    #     mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
-    #     p = fem_p,
-    #     assembly_method=AssemblyMethod.FAST,
-    #     solver_type='direct', solver_params={'solver_type': 'mumps'},
-    #     # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
-    #     diff_mode='manual',
-    #     optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-    #     filter_type=filter_type, filter_radius=filter_radius,
-    #     save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}_p{fem_p}',
-    #     )
-    # result = run_basic_filter_test(config_basic_filter)
+    result = run(config_basic_filter)   
 
-    '''
-    参数来源论文: Topology Optimization of Structures Using Higher Order Finite Elements in Analysis
-    '''
-    # pde_type = 'half_mbb_beam_2d_2'
-    # init_volume_fraction = 1.0
-    # volume_fraction = 0.5
-    # mesh_type = 'uniform_mesh_2d'
-    # nx, ny = 120, 40
-    # # nx, ny = 20, 20
-    # domain_length, domain_width = nx, ny
-    # optimizer_type = 'oc'
-    # filter_type = 'density'
-    # filter_radius = 1.2
-    # fem_p = 1
-    # penalty_factor = 3.0
-    # config_basic_filter = TestConfig(
-    #     backend=backend,
-    #     device=device,
-    #     pde_type=pde_type,
-    #     elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
-    #     domain_length=domain_length, domain_width=domain_width,
-    #     load=1,
-    #     init_volume_fraction=init_volume_fraction,
-    #     volume_fraction=volume_fraction,
-    #     penalty_factor=penalty_factor,
-    #     mesh_type=mesh_type, nx=nx, ny=ny, hx=1, hy=1,
-    #     p = fem_p,
-    #     assembly_method=AssemblyMethod.FAST,
-    #     solver_type='direct', solver_params={'solver_type': 'mumps'},
-    #     # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
-    #     diff_mode='manual',
-    #     optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-    #     filter_type=filter_type, filter_radius=filter_radius,
-    #     save_dir=f'{base_dir}/{pde_type}_{optimizer_type}_{filter_type}-{filter_radius}_p{fem_p}',
-    #     )
-    # result = run_basic_filter_test(config_basic_filter)
+    # result = test_elastic(config_basic_filter)

@@ -15,7 +15,7 @@ class BaseElasticMaterialConfig:
     elastic_modulus: float = 1.0
     minimal_modulus: float = 1e-9
     poisson_ratio: float = 0.3
-    plane_assumption: Literal["plane_stress", "plane_strain", "3d"] = "plane_stress"
+    plane_type: Literal["plane_stress", "plane_strain", "3d"] = "plane_stress"
     device: Optional[str] = None
 
 @dataclass
@@ -36,7 +36,7 @@ class BaseElasticMaterialInstance(LinearElasticMaterial):
                     name="BaseElasticMaterial",
                     elastic_modulus=config.elastic_modulus, # 基础值, 实际值由 _E 控制
                     poisson_ratio=config.poisson_ratio,
-                    hypo=config.plane_assumption,
+                    hypo=config.plane_type,
                     device=config.device
                 )
         self._E = E

@@ -7,9 +7,7 @@ from typing import Tuple, Callable
 from builtins import list
 
 class HalfMBBBeam2dData1:
-    '''
-    模型来源论文: Efficient topology optimization in MATLAB using 88 lines of code
-    '''
+    '''模型来源论文: Efficient topology optimization in MATLAB using 88 lines of code'''
     def __init__(
             self, 
             xmin: float=0, xmax: float=60, 
@@ -79,9 +77,7 @@ class HalfMBBBeam2dData1:
     
 
 class MBBBeam2dData2:
-    '''
-    模型来源论文: Topology optimization using the p-version of the finite element method
-    '''
+    '''模型来源论文: Topology optimization using the p-version of the finite element method'''
     def __init__(
             self, 
             xmin: float=0, xmax: float=60, 
@@ -150,9 +146,7 @@ class MBBBeam2dData2:
                 self.is_dirichlet_boundary_dof_y)
     
 class HalfMBBBeam2dData2:
-    '''
-    模型来源论文: Topology Optimization of Structures Using Higher Order Finite Elements in Analysis
-    '''
+    '''模型来源论文: Topology Optimization of Structures Using Higher Order Finite Elements in Analysis'''
     def __init__(
             self, 
             xmin: float=0, xmax: float=120, 
