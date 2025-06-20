@@ -156,9 +156,6 @@ def create_base_components(config: TestConfig):
     return pde, rho, objective, constraint
 
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
-    """
-    测试 filter 类不同滤波器的正确性.
-    """
     pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
@@ -216,7 +213,7 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
     rho_opt, history = optimizer.optimize(rho=rho[:])
     
-    # Save results
+    # 保存结果
     save_path = Path(config.save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
     save_optimization_history(mesh, history, str(save_path))
@@ -238,16 +235,14 @@ if __name__ == "__main__":
     # backend = 'jax'
     device = 'cpu'
 
-    '''
-    参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
-    '''
+    '''参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code'''
     pde_type = 'half_mbb_beam_2d_1'
     init_volume_fraction = 1.0
     volume_fraction = 0.5
     mesh_type = 'quadrangle_mesh'
     # mesh_type = 'triangle_mesh'
-    nx, ny = 60, 20
-    # nx, ny = 150, 50
+    # nx, ny = 60, 20
+    nx, ny = 150, 50
     # nx ,ny = 300, 100
     # optimizer_type = 'oc'
     optimizer_type = 'mma'
@@ -274,7 +269,7 @@ if __name__ == "__main__":
         # solver_type='cg', solver_params={'maxiter': 2000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
         # diff_mode='auto',
-        optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
+        optimizer_type=optimizer_type, max_iterations=600, tolerance=0.01,
         filter_type=filter_type, filter_radius=filter_radius,
         save_dir=f'{base_dir}/{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_p{fem_p}',
         )

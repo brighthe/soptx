@@ -7,7 +7,7 @@ from pathlib import Path
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh, TriangleMesh
+from fealpy.mesh import TriangleMesh, QuadrangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
@@ -79,30 +79,36 @@ def create_base_components(config: TestConfig):
                     ymin=0, ymax=config.domain_width,
                     T = config.load
                 )
-    if config.mesh_type == 'uniform_mesh_2d':
-        extent = [0, config.nx, 0, config.ny]
-        origin = [0.0, 0.0]
-        mesh = UniformMesh(
-                extent=extent, 
-                h=[config.hx, config.hy], 
-                origin=origin, 
-                device=config.device,
-            )
+    if config.mesh_type == 'quadrangle_mesh':
+        mesh = QuadrangleMesh.from_box(
+                                    box=pde.domain(),
+                                    nx=config.nx, ny=config.ny,
+                                    device=config.device
+                                )
+    elif config.mesh_type == 'triangle_mesh':
+        mesh = TriangleMesh.from_box(
+                                box=pde.domain(), 
+                                nx=config.nx, ny=config.ny,
+                                device=config.device
+                            )
 
     GD = mesh.geo_dimension()
     
     p = config.p
     space_C = LagrangeFESpace(mesh=mesh, p=p, ctype='C')
-    tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
-    print(f"CGDOF: {tensor_space_C.number_of_global_dofs()}")
+    #! dof_priority-(GD, -1) 的效率比 gd_prioirty-(-1, GD) 的效率要高
+    # tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
+    tensor_space_C = TensorFunctionSpace(space_C, (GD, -1))
+    CGDOF = tensor_space_C.number_of_global_dofs()
+    print(f"CGDOF: {CGDOF}")
     space_D = LagrangeFESpace(mesh=mesh, p=0, ctype='D')
     
     material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
-                            plane_assumption="plane_stress",    
-                            device=config.device,   
+                            plane_type="plane_stress",
+                            device=config.device,      
                             interpolation_model="SIMP",    
                             penalty_factor=config.penalty_factor
                         )
@@ -136,9 +142,6 @@ def create_base_components(config: TestConfig):
     return pde, rho, objective, constraint
 
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
-    """
-    测试 filter 类不同滤波器的正确性.
-    """
     pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
@@ -195,7 +198,7 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
     rho_opt, history = optimizer.optimize(rho=rho[:])
     
-    # Save results
+    # 保存结果
     save_path = Path(config.save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
     save_optimization_history(mesh, history, str(save_path))
@@ -209,10 +212,16 @@ def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu'
-    # 参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code
+    current_file = Path(__file__)
+    base_dir = current_file.parent.parent / 'vtu'
+    base_dir = str(base_dir)
+
     backend = 'numpy'
+    # backend = 'pytorch'
+    # backend = 'jax'
     device = 'cpu'
+    '''参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code'''
+
     pde_type = 'cantilever_2d_1'
     # init_volume_fraction = 0.4
     init_volume_fraction = 1.0
@@ -231,11 +240,11 @@ if __name__ == "__main__":
             init_volume_fraction=init_volume_fraction,
             volume_fraction=volume_fraction,
             penalty_factor=3.0,
-            mesh_type='uniform_mesh_2d', nx=nx, ny=ny, hx=1, hy=1,
+            mesh_type='quadrangle_mesh', nx=nx, ny=ny, hx=1, hy=1,
             p = 1,
             assembly_method=AssemblyMethod.FAST,
-            # solver_type='direct', solver_params={'solver_type': 'mumps'},
-            solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
+            solver_type='direct', solver_params={'solver_type': 'mumps'},
+            # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
             diff_mode='manual',
             optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
             filter_type=filter_type, filter_radius=filter_radius,

@@ -174,7 +174,7 @@ def test_elastic_with_linearform_rhs(pde, mesh, p, solver_type):
 if __name__ == "__main__":
     from soptx.pde import PolyDisp2dData, TriDisp2dData
     from fealpy.mesh import TriangleMesh, QuadrangleMesh
-    p = 1
+    p = 3
     # pde = PolyDisp2dData()
     pde_linearform_rhs = TriDisp2dData()
     domain_x, domain_y = pde_linearform_rhs.domain()[1], pde_linearform_rhs.domain()[3]
