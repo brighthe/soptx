@@ -230,10 +230,11 @@ if __name__ == "__main__":
     base_dir = current_file.parent.parent / 'vtu'
     base_dir = str(base_dir)
 
-    backend = 'numpy'
-    # backend = 'pytorch'
+    # backend = 'numpy'
+    backend = 'pytorch'
     # backend = 'jax'
-    device = 'cpu'
+    # device = 'cpu'
+    device = 'cuda'
 
     '''参数来源论文: Efficient topology optimization in MATLAB using 88 lines of code'''
     pde_type = 'half_mbb_beam_2d_1'
@@ -244,8 +245,8 @@ if __name__ == "__main__":
     # nx, ny = 60, 20
     nx, ny = 150, 50
     # nx ,ny = 300, 100
-    # optimizer_type = 'oc'
-    optimizer_type = 'mma'
+    optimizer_type = 'oc'
+    # optimizer_type = 'mma'
     filter_type = 'sensitivity'
     # filter_type = 'density'
     filter_radius = nx * 0.04

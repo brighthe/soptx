@@ -1,17 +1,3 @@
-from .basic_filter import (BasicFilter,
-                           SensitivityBasicFilter, 
-                           DensityBasicFilter, 
-                           HeavisideProjectionBasicFilter)
-from .pde_filter import (PDEBasedFilter,
-                         SensitivityPDEBasedFilter,
-                         DensityPDEBasedFilter)
+# 主要导出统一的 Filter 类
+from .filter import Filter
 
-__all__ = [
-    'BasicFilter',
-    'SensitivityBasicFilter',
-    'DensityBasicFilter',
-    'HeavisideProjectionBasicFilter',
-    'PDEBasedFilter',
-    'SensitivityPDEBasedFilter',
-    'DensityPDEBasedFilter',
-]

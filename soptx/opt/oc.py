@@ -80,10 +80,10 @@ class OCOptimizer(OptimizerBase):
     """Optimality Criteria (OC) 优化器"""
     
     def __init__(self,
-                 objective: ObjectiveBase,
-                 constraint: ConstraintBase,
-                 filter: Optional[BasicFilter] = None,
-                 options: Optional[Dict[str, Any]] = None):
+                objective: ObjectiveBase,
+                constraint: ConstraintBase,
+                filter: Optional[BasicFilter] = None,
+                options: Optional[Dict[str, Any]] = None):
         """
         Parameters
         - objective : 目标函数对象

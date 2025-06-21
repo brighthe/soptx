@@ -38,7 +38,7 @@ class HalfMBBBeam2dData1:
         )
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        # val[coord, 1] = self.T
+        # 在 y 方向施加向下的力（负值表示向下）
         val = bm.set_at(val, (coord, 1), -self.T)
 
         return val
