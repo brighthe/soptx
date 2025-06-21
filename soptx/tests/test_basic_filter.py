@@ -7,9 +7,9 @@ from fealpy.backend import backend_manager as bm
 from fealpy.mesh import UniformMesh2d, UniformMesh3d, TriangleMesh, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
-from soptx.filter import (SensitivityBasicFilter, 
-                          DensityBasicFilter, 
-                          HeavisideProjectionBasicFilter)
+from soptx.filter.basic_filter import (SensitivityBasicFilter, 
+                                        DensityBasicFilter, 
+                                        HeavisideProjectionBasicFilter)
 
 @dataclass
 class TestConfig:
@@ -64,7 +64,9 @@ def run_filter_new_2d_test(config: TestConfig):
                 ipoints_ordering='yx', device='cpu'
                 )
 
-    SF = SensitivityBasicFilter(mesh=mesh, rmin=config.filter_radius)
+    SF = SensitivityBasicFilter(mesh=mesh, 
+                                rmin=config.filter_radius, 
+                                domain=[0, config.nx*config.hx, 0, config.ny*config.hy])
     H, HS = SF._compute_filter_2d(nx=config.nx, ny=config.ny,
                                 hx=config.hx, hy=config.hy, 
                                 rmin=config.filter_radius)
@@ -146,5 +148,5 @@ if __name__ == "__main__":
         nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
         filter_radius=nx*0.04,
     )
-    # run_filter_new_2d_test(config_2d)
-    run_filter_new_3d_test(config_3d)
+    run_filter_new_2d_test(config_2d)
+    # run_filter_new_3d_test(config_3d)

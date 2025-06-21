@@ -1,33 +1,57 @@
 from fealpy.backend import backend_manager as bm
 
+from typing import List, Callable, Optional, Tuple
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-
-from typing import Tuple, Callable
-from builtins import list
+from fealpy.mesh import Mesh, QuadrangleMesh, TriangleMesh
 
 class HalfMBBBeam2dData1:
     '''模型来源论文: Efficient topology optimization in MATLAB using 88 lines of code'''
-    def __init__(
-            self, 
-            xmin: float=0, xmax: float=60, 
-            ymin: float=0, ymax: float=20,
-            T: float = 1
-        ) -> None:
-        self.xmin, self.xmax = xmin, xmax
-        self.ymin, self.ymax = ymin, ymax
+    def __init__(self,
+                domain: List[float] = [0, 60, 0, 20],
+                T: float = -1.0, # 负值代表方向向下
+                E: float = 1.0,
+                nu: float = 0.3,
+            ) -> None:
+        self.domain = domain
         self.T = T
+        self.E = E
+        self.nu = nu
         self.eps = 1e-12
+        self.plane_type = 'plane_stress'
+    
+    def create_mesh(self,
+                    mesh_type: str = 'triangle', 
+                    nx: int = 60, ny: int = 20, 
+                    threshold: Optional[Callable] = None, 
+                    device: str = None
+                ) -> Mesh:
+        box = self.domain
 
-    def domain(self) -> list:
+        if mesh_type == 'quadrangle':
+            mesh = QuadrangleMesh.from_box(box=box, nx=nx, ny=ny,
+                                        threshold=threshold, device=device)
+        elif mesh_type == 'triangle':
+            mesh = TriangleMesh.from_box(box=box, nx=nx, ny=ny,
+                                        threshold=threshold, device=device)
+        else:
+            raise ValueError(f"Unsupported mesh type: {mesh_type}")
+
+        hx = (box[1] - box[0]) / nx
+        hy = (box[3] - box[2]) / ny
         
-        box = [self.xmin, self.xmax, self.ymin, self.ymax]
-
-        return box
+        mesh.meshdata['domain'] = box
+        mesh.meshdata['nx'] = nx
+        mesh.meshdata['ny'] = ny
+        mesh.meshdata['hx'] = hx
+        mesh.meshdata['hy'] = hy
+        mesh.meshdata['mesh_type'] = mesh_type
+    
+        return mesh
     
     @cartesian
     def force(self, points: TensorLike) -> TensorLike:
-        domain = self.domain()
+        domain = self.domain
 
         x = points[..., 0]
         y = points[..., 1]
@@ -38,8 +62,7 @@ class HalfMBBBeam2dData1:
         )
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        # 在 y 方向施加向下的力（负值表示向下）
-        val = bm.set_at(val, (coord, 1), -self.T)
+        val = bm.set_at(val, (coord, 1), self.T)
 
         return val
     
@@ -51,7 +74,7 @@ class HalfMBBBeam2dData1:
     
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
-        domain = self.domain()
+        domain = self.domain
 
         x = points[..., 0]
 
@@ -61,13 +84,13 @@ class HalfMBBBeam2dData1:
     
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
-        domain = self.domain()
+        domain = self.domain
 
         x = points[..., 0]
         y = points[..., 1]
 
         coord = ((bm.abs(x - domain[1]) < self.eps) &
-                 (bm.abs(y - domain[0]) < self.eps))
+                 (bm.abs(y - domain[2]) < self.eps))
         
         return coord
     
