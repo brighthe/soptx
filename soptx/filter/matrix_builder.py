@@ -70,9 +70,9 @@ class FilterMatrixBuilder:
             next(t)
 
         # 使用 KD-tree 查询临近点
-        # TODO 目前不支持 GPU
+        # ! 该函数会将目前许需要将变脸 转移到 CPU 上进行计算
         cell_indices, neighbor_indices = bm.query_point(
-                                            x=cell_centers, y=cell_centers, h=rmin, 
+                                            x=cell_centers.to('cpu'), y=cell_centers.to('cpu'), h=rmin, 
                                             box_size=domain, mask_self=False, periodic=periodic
                                         )
         if enable_timing:
