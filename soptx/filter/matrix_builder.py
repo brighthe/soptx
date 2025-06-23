@@ -50,7 +50,7 @@ class FilterMatrixBuilder:
                                 periodic: List[bool]=[False, False, False],
                                 enable_timing: bool = True,
                             ) -> Tuple[COOTensor, TensorLike]:
-        """计算任意网格的过滤矩阵
+        """计算任意网格的过滤矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
         
         Parameters:
         -----------
@@ -61,8 +61,8 @@ class FilterMatrixBuilder:
             
         Returns:
         --------
-        H: 滤波矩阵, 形状为 (NC, NC)
-        Hs: 滤波矩阵行和, 形状为 (NC, )
+        H: 过滤矩阵, 形状为 (NC, NC)
+        Hs: 过滤矩阵行和, 形状为 (NC, )
         """
         t = None
         if enable_timing:
@@ -71,8 +71,9 @@ class FilterMatrixBuilder:
 
         # 使用 KD-tree 查询临近点
         # ! 该函数会将目前许需要将变脸 转移到 CPU 上进行计算
+        cell_centers = bm.device_put(cell_centers, 'cpu')
         cell_indices, neighbor_indices = bm.query_point(
-                                            x=cell_centers.to('cpu'), y=cell_centers.to('cpu'), h=rmin, 
+                                            x=cell_centers, y=cell_centers, h=rmin, 
                                             box_size=domain, mask_self=False, periodic=periodic
                                         )
         if enable_timing:
@@ -124,12 +125,18 @@ class FilterMatrixBuilder:
             values=sH[:nnz],
             spshape=(NC, NC)
         )
+
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
         
-        # 转换为 CSR 格式以便于后续操作
         H = H.tocsr()
+        H = H.device_put(self.device)
+        Hs = bm.device_put(Hs, self.device)
         
-        # 计算滤波矩阵行和
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
+        # # 转换为 CSR 格式以便于后续操作
+        # H = H.tocsr()
+        
+        # # 计算滤波矩阵行和
+        # Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
 
         if enable_timing:
             t.send('稀疏矩阵构建时间')
@@ -142,9 +149,9 @@ class FilterMatrixBuilder:
                         nx: int, ny: int, 
                         hx: float, hy: float,
                         enable_timing: bool = True,
-                    ) -> Tuple[COOTensor, TensorLike]:
+                    ) -> Tuple[CSRTensor, TensorLike]:
         """高性能优化的 2D 滤波矩阵计算 - 分块处理版本
-        及时设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算"""
+        即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算"""
 
         NC = self.mesh.number_of_cells()
         expected_NC = nx * ny
@@ -152,6 +159,7 @@ class FilterMatrixBuilder:
             f"'_compute_filter_2d' is strictly for simple quadrangle grids. "
             f"Expected {expected_NC} cells (nx*ny), but found {NC}."
         )
+        
         
         t = None
         if enable_timing:
@@ -247,9 +255,10 @@ class FilterMatrixBuilder:
             all_rows.extend(batch_rows)
             all_cols.extend(batch_cols)
             all_vals.extend(batch_vals)
+
         
         if enable_timing:
-            t.send('计算距离和滤波')
+            t.send('计算距离和过滤矩阵')
         
         if all_rows:
             iH = bm.tensor(all_rows, dtype=bm.int32, device='cpu')
@@ -265,12 +274,13 @@ class FilterMatrixBuilder:
             values=sH,
             spshape=(nx * ny, nx * ny)
         )
+                
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
         
         H = H.tocsr()
         H = H.device_put(self.device)
-        
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device=self.device)
-        
+        Hs = bm.device_put(Hs, self.device)
+
         if enable_timing:
             t.send('矩阵构建')
             t.send(None)
@@ -283,7 +293,8 @@ class FilterMatrixBuilder:
                                 hx: float, hy: float,
                                 enable_timing: bool = True,
                             ) -> Tuple[COOTensor, TensorLike]:
-        """计算 2D 滤波矩阵 - 数学原理的直接实现版本"""
+        """计算 2D 滤波矩阵 - 数学原理的直接实现版本
+            即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算"""
 
         NC = self.mesh.number_of_cells()
         expected_NC = nx * ny
@@ -337,17 +348,19 @@ class FilterMatrixBuilder:
                             cc += 1
 
         if enable_timing:
-            t.send('计算距离和滤波')
+            t.send('计算距离和过滤矩阵')
 
         H = COOTensor(
                 indices=bm.astype(bm.stack((iH[:cc], jH[:cc]), axis=0), bm.int32),
                 values=sH[:cc],
                 spshape=(nx * ny, nx * ny)
             )
+        
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
+        
         H = H.tocsr()
         H = H.device_put(self.device)
-
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
+        Hs = bm.device_put(Hs, self.device)
 
         if enable_timing:
             t.send('矩阵构建')

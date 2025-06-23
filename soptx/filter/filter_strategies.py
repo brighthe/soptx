@@ -1,3 +1,4 @@
+import math
 from abc import ABC, abstractmethod
 from typing import Tuple
 
@@ -7,13 +8,12 @@ from fealpy.sparse import CSRTensor
 
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
-
     @abstractmethod
-    def get_initial_density(self, x: TensorLike) -> TensorLike:
+    def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
         pass
 
     @abstractmethod
-    def filter_variables(self, x: TensorLike) -> TensorLike:
+    def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
         pass
 
     @abstractmethod
@@ -31,8 +31,10 @@ class _FilterStrategy(ABC):
 
 class NoneStrategy(_FilterStrategy):
     """ '无操作' 策略, 当不需要过滤时使用"""
-    def get_initial_density(self, x: TensorLike) -> TensorLike:
-        return x
+    def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
+        xPhys = bm.set_at(xPhys, slice(None), x)
+        return xPhys
+
 
     def filter_variables(self, x: TensorLike) -> TensorLike:
         return x
@@ -54,7 +56,7 @@ class SensitivityStrategy(_FilterStrategy):
         xPhys = bm.set_at(xPhys, slice(None), x)
         return xPhys
 
-    def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> None:
+    def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
         xPhys = bm.set_at(xPhys, slice(None), x)
         return xPhys
 
@@ -75,14 +77,15 @@ class SensitivityStrategy(_FilterStrategy):
 
 
 class DensityStrategy(_FilterStrategy):
-    """密度滤波策略"""
+    """密度过滤策略"""
     def __init__(self, H: CSRTensor, cell_measure: TensorLike, normalize_factor: TensorLike):
         self._H = H
         self._cell_measure = cell_measure
         self._normalize_factor = normalize_factor
 
-    def get_initial_density(self, x: TensorLike) -> TensorLike:
-        return x
+    def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
+        xPhys = bm.set_at(xPhys, slice(None), x)
+        return xPhys
 
     def filter_variables(self, x: TensorLike) -> TensorLike:
         weighted_x = x * self._cell_measure
@@ -100,10 +103,10 @@ class DensityStrategy(_FilterStrategy):
 # SensitivityStrategy 和 HeavisideStrategy 的实现类似
 # ... 这里为了简洁省略，完整代码将在下面统一给出 ...
 
-class HeavisideStrategy(_FilterStrategy):
-    """Heaviside 投影滤波策略"""
+class HeavisideDensityStrategy(_FilterStrategy):
+    """Heaviside 密度过滤策略"""
     def __init__(self, H: CSRTensor, cell_measure: TensorLike, normalize_factor: TensorLike,
-                 beta: float, max_beta: float, continuation_iter: int):
+                 beta: float = 1.0, max_beta: float = 512, continuation_iter: int = 50):
         self._H = H
         self._cell_measure = cell_measure
         self._normalize_factor = normalize_factor
@@ -114,13 +117,15 @@ class HeavisideStrategy(_FilterStrategy):
         self._xTilde = None
         self._beta_iter = 0
 
-    def _apply_projection(self, x_tilde: TensorLike) -> TensorLike:
-        """应用 Heaviside 投影"""
-        self._xTilde = x_tilde
-        return (bm.tanh(self.beta / 2) + bm.tanh(self.beta * (x_tilde - 0.5))) / (2 * bm.tanh(self.beta / 2))
+    def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
+        self._xTilde = x 
+        projected_values = (1 - bm.exp(-self.beta * self._xTilde) + 
+                    self._xTilde * math.exp(-self.beta)) + 2
+        
+        xPhys = bm.set_at(xPhys, slice(None), projected_values)
 
-    def get_initial_density(self, x: TensorLike) -> TensorLike:
-        return self._apply_projection(x)
+        return xPhys
+
 
     def filter_variables(self, x: TensorLike) -> TensorLike:
         weighted_x = self._cell_measure * x

@@ -153,11 +153,12 @@ class OCOptimizer(OptimizerBase):
         
         tensor_kwargs = bm.context(rho)
         rho_phys = bm.zeros_like(rho, **tensor_kwargs)
+        rho_phys = self.filter.get_initial_density(rho, rho_phys)
         
-        if self.filter is not None:
-            rho_phys = self.filter.get_initial_density(rho, rho_phys)
-        else:
-            rho_phys[:] = rho
+        # if self.filter is not None:
+        #     rho_phys = self.filter.get_initial_density(rho, rho_phys)
+        # else:
+        #     rho_phys[:] = rho
         
         # 初始化历史记录
         history = OptimizationHistory()
