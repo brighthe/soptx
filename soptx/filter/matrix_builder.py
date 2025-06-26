@@ -274,7 +274,8 @@ class FilterMatrixBuilder:
             values=sH,
             spshape=(nx * ny, nx * ny)
         )
-                
+        
+        # ! PyTorch 后端对 COOTensor 的支持更好
         Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
         
         H = H.tocsr()

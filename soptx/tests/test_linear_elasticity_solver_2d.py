@@ -104,29 +104,35 @@ def test_elastic_with_linearform_rhs(pde, mesh, p, solver_type):
     该函数适用于右端项 F 需要通过 LinearForm 进行组装的情况, 
         通常用于问题有精确解, 可以进行误差分析的场景
     """
+    import matplotlib.pyplot as plt
+
     from fealpy.fem.linear_form import LinearForm
     from fealpy.fem.dirichlet_bc import DirichletBC
     from fealpy.fem.linear_elastic_integrator import LinearElasticIntegrator
     from fealpy.fem.vector_source_integrator import VectorSourceIntegrator
+    from fealpy.tools.show import showmultirate
+    from fealpy.tools.show import show_error_table
 
     from pathlib import Path
     current_file = Path(__file__)
     base_dir = current_file.parent.parent / 'vtu'
     base_dir = str(base_dir)
     maxit = 4
-    errorType = ['$|| u  - u_h ||_{l2}$']
+    errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{l2}$']
     errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
     NDof = bm.zeros(maxit, dtype=bm.int32)
+    h = bm.zeros(maxit, dtype=bm.float64)
     print(f"NN:{mesh.number_of_nodes()}")
     for i in range(maxit):
+        N = 2**(i+1)
         space = LagrangeFESpace(mesh, p=p, ctype='C')
-        tensor_space = TensorFunctionSpace(space, shape=(-1, 2))
+        tensor_space = TensorFunctionSpace(space, shape=(-1, mesh.geo_dimension()))
         NDof[i] = tensor_space.number_of_global_dofs()
         print(f"gdof:{NDof[i]}")
 
         linear_elastic_material = LinearElasticMaterial(name='E1nu03', 
-                                                    elastic_modulus=1, poisson_ratio=0.3, 
-                                                    hypo='plane_strain', 
+                                                    elastic_modulus=pde.E, poisson_ratio=pde.nu, 
+                                                    hypo=pde.plane_type, 
                                                     device=bm.get_device(mesh))
 
         integrator_K = LinearElasticIntegrator(
@@ -137,7 +143,7 @@ def test_elastic_with_linearform_rhs(pde, mesh, p, solver_type):
         bform.add_integrator(integrator_K)
         K = bform.assembly(format='csr')
         integrator_F = VectorSourceIntegrator(
-                            source=pde.source, 
+                            source=pde.body_force, 
                             q=tensor_space.p+3
                         )
         lform = LinearForm(tensor_space)    
@@ -145,10 +151,10 @@ def test_elastic_with_linearform_rhs(pde, mesh, p, solver_type):
         F = lform.assembly()
 
         dbc = DirichletBC(space=tensor_space, 
-                    gd=pde.dirichlet, 
+                    gd=pde.dirichlet_bc, 
                     threshold=None, 
                     method='interp')
-        K, F = dbc.apply(A=K, f=F, uh=None, gd=pde.dirichlet, check=True)
+        K, F = dbc.apply(A=K, f=F, uh=None, gd=pde.dirichlet_bc, check=True)
 
         uh = tensor_space.function()
 
@@ -160,8 +166,14 @@ def test_elastic_with_linearform_rhs(pde, mesh, p, solver_type):
                 atol=1e-12, rtol=1e-12, 
                 maxit=5000, returninfo=True)
 
-        u_exact = tensor_space.interpolate(pde.solution)
-        errorMatrix[0, i] = bm.sqrt(bm.sum(bm.abs(uh[:] - u_exact)**2 * (1 / NDof[i])))
+        # L2 误差
+        e0 = mesh.error(uh, pde.disp_solution)
+        errorMatrix[0, i] = e0
+
+        h[i] = 1 / N
+
+        # u_exact = tensor_space.interpolate(pde.solution)
+        # errorMatrix[0, i] = bm.sqrt(bm.sum(bm.abs(uh[:] - u_exact)**2 * (1 / NDof[i])))
 
         if i < maxit-1:
             mesh.uniform_refine()
@@ -169,28 +181,32 @@ def test_elastic_with_linearform_rhs(pde, mesh, p, solver_type):
     print("errorMatrix:\n", errorType, "\n", errorMatrix)
     print("NDof:", NDof)
     print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+    show_error_table(h, errorType, errorMatrix)
+    showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
+    plt.show()
 
 
 if __name__ == "__main__":
-    from soptx.pde import PolyDisp2dData, TriDisp2dData
+    from soptx.pde import PolyDisp2dData, BoxTriData2d
     from fealpy.mesh import TriangleMesh, QuadrangleMesh
-    p = 3
+    bm.set_backend('numpy')
+    p = 1
     # pde = PolyDisp2dData()
-    pde_linearform_rhs = TriDisp2dData()
+    pde_linearform_rhs = BoxTriData2d()
     domain_x, domain_y = pde_linearform_rhs.domain()[1], pde_linearform_rhs.domain()[3]
-    nx, ny = 10, 5
+    nx, ny = 10, 10
     # mesh = UniformMesh2d(extent=[0, nx, 0, ny], h=[domain_x/nx, domain_y/ny], origin=[0.0, 0.0])
     # cip = mesh.cell_to_ipoint(p=p)
-    # mesh = TriangleMesh.from_box(box=[0, domain_x, 0, domain_y], nx=nx, ny=ny)
-    mesh = QuadrangleMesh.from_box(box=[0, domain_x, 0, domain_y], nx=nx, ny=ny)
+    mesh = TriangleMesh.from_box(box=pde_linearform_rhs.domain(), nx=nx, ny=ny, device='cpu')
+    # mesh = QuadrangleMesh.from_box(box=[0, domain_x, 0, domain_y], nx=nx, ny=ny)
 
-    # test_elastic_with_linearform_rhs(pde_linearform_rhs, mesh, p, solver_type='mumps')
+    test_elastic_with_linearform_rhs(pde_linearform_rhs, mesh, p, solver_type='mumps')
 
-    from soptx.pde import HalfMBBBeam2dData1
-    domain_x, domain_y = 60, 20
-    nx, ny = 60, 20
-    pde_interpolated_rhs = HalfMBBBeam2dData1(xmin=0, xmax=domain_x, ymin=0, ymax=domain_y, T=1)
-    mesh = QuadrangleMesh.from_box(box=[0, domain_x, 0, domain_y], nx=nx, ny=ny)
-    uh1 = test_elastic_with_interpolated_rhs(pde_interpolated_rhs, mesh, p, solver_type='mumps')
-    uh2 = test_elastic_with_interpolated_rhs_solver(pde_interpolated_rhs, mesh, p, solver_type='mumps')
-    print(f"error{bm.sum(uh1 - uh2)}")
+    # from soptx.pde import HalfMBBBeam2dData1
+    # domain_x, domain_y = 60, 20
+    # nx, ny = 60, 20
+    # pde_interpolated_rhs = HalfMBBBeam2dData1(xmin=0, xmax=domain_x, ymin=0, ymax=domain_y, T=1)
+    # mesh = QuadrangleMesh.from_box(box=[0, domain_x, 0, domain_y], nx=nx, ny=ny)
+    # uh1 = test_elastic_with_interpolated_rhs(pde_interpolated_rhs, mesh, p, solver_type='mumps')
+    # uh2 = test_elastic_with_interpolated_rhs_solver(pde_interpolated_rhs, mesh, p, solver_type='mumps')
+    # print(f"error{bm.sum(uh1 - uh2)}")

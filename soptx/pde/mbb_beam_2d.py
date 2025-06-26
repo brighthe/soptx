@@ -1,8 +1,8 @@
-from fealpy.backend import backend_manager as bm
-
 from typing import List, Callable, Optional, Tuple
+
+from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-from fealpy.decorator import cartesian
+from fealpy.decorator import cartesian, variantmethod
 from fealpy.mesh import Mesh, QuadrangleMesh, TriangleMesh
 
 class HalfMBBBeam2dData1:
@@ -20,6 +20,7 @@ class HalfMBBBeam2dData1:
         self.eps = 1e-12
         self.plane_type = 'plane_stress'
     
+    @variantmethod('hex')
     def create_mesh(self,
                     mesh_type: str = 'triangle', 
                     nx: int = 60, ny: int = 20, 
