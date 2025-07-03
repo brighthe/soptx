@@ -17,7 +17,7 @@ from soptx.material import (
 from soptx.pde import (MBBBeam2dData1, 
                        Cantilever2dData1, 
                        Cantilever2dData2)
-from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
+from soptx.analysis import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
