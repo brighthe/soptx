@@ -61,119 +61,121 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         mesh = getattr(scalar_space, 'mesh', None)
         cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
 
-        if isinstance(mesh, SimplexMesh):
-            A_xx = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 0], gphi[..., 0], cm)
-            A_yy = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 1], gphi[..., 1], cm)
-            A_xy = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 0], gphi[..., 1], cm)
-            A_yx = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 1], gphi[..., 0], cm)
+        NC = mesh.number_of_cells()
+        NQ = len(ws)
+        D = self.material.elastic_matrix(bcs)
+        if D.shape[0] == 1 and D.shape[1] == 1:
+            # (1, 1, :, :)
+            D = bm.broadcast_to(D, (NC, NQ, D.shape[2], D.shape[3]))
+        if D.shape[1] == 1:
+            # (NC, 1, :, :)
+            D = bm.broadcast_to(D, (NC, NQ, D.shape[2], D.shape[3]))
+        elif D.shape[1] == NQ:
+            # (NC, NQ, :, :)
+            pass
         else:
-            A_xx = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 0], gphi[..., 0], detJ)
-            A_yy = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 1], gphi[..., 1], detJ)
-            A_xy = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 0], gphi[..., 1], detJ)
-            A_yx = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 1], gphi[..., 0], detJ)
-
+            raise ValueError(f"assembly currently only supports elastic matrices "
+                        f"with shape (1, 1, {2*GD}, {2*GD}) or (NC, 1, {2*GD}, {2*GD}) or (NC, {NQ}, {2*GD}, {2*GD}), "
+                        f"got {D.shape}.")
+            
+        if isinstance(mesh, SimplexMesh):
+            A_xx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 0], cm)
+            A_yy = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 1], gphi[..., 1], cm)
+            A_xy = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 1], cm)
+            A_yx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 1], gphi[..., 0], cm)
+        else:
+            A_xx = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 0], gphi[..., 0], detJ)
+            A_yy = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 1], gphi[..., 1], detJ)
+            A_xy = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 0], gphi[..., 1], detJ)
+            A_yx = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 1], gphi[..., 0], detJ)
 
         GD = mesh.geo_dimension()
         if GD == 3:
             if isinstance(mesh, SimplexMesh):
-                A_xz = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 0], gphi[..., 2], cm)
-                A_zx = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 2], gphi[..., 0], cm)
-                A_yz = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 1], gphi[..., 2], cm)
-                A_zy = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 2], gphi[..., 1], cm)
-                A_zz = bm.einsum('q, cqi, cqj, c -> cij', ws, gphi[..., 2], gphi[..., 2], cm)
+                A_xz = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 2], cm)
+                A_zx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 2], gphi[..., 0], cm)
+                A_yz = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 1], gphi[..., 2], cm)
+                A_zy = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 2], gphi[..., 1], cm)
+                A_zz = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 2], gphi[..., 2], cm)
             else:
-                A_xz = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 0], gphi[..., 2], detJ)
-                A_zx = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 2], gphi[..., 0], detJ)
-                A_yz = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 1], gphi[..., 2], detJ)
-                A_zy = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 2], gphi[..., 1], detJ)
-                A_zz = bm.einsum('q, cqi, cqj, cq -> cij', ws, gphi[..., 2], gphi[..., 2], detJ)
+                A_xz = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 0], gphi[..., 2], detJ)
+                A_zx = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 2], gphi[..., 0], detJ)
+                A_yz = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 1], gphi[..., 2], detJ)
+                A_zy = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 2], gphi[..., 1], detJ)
+                A_zz = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 2], gphi[..., 2], detJ)
 
-
-        D = self.material.elastic_matrix(bcs)
         if D.shape[1] != 1:
             raise ValueError("assembly currently only supports elastic matrices "
                             f"with shape (NC, 1, {2*GD}, {2*GD}) or (1, 1, {2*GD}, {2*GD}).")
 
-        NC = mesh.number_of_cells()
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
         if GD == 2:
-            D00 = D[..., 0, 0, None]  # 2D: E/(1-ν²) 或 2μ+λ
-            D01 = D[..., 0, 1, None]  # 2D: νE/(1-ν²) 或 λ
-            D22 = D[..., 2, 2, None]  # 2D: E/2(1+ν) 或 μ
+            # 提取每个高斯点的弹性矩阵系数 (NC, NQ)
+            D00 = D[..., 0, 0]  # E/(1-ν²) 或 2μ+λ
+            D01 = D[..., 0, 1]  # νE/(1-ν²) 或 λ
+            D22 = D[..., 2, 2]  # E/2(1+ν) 或 μ
 
+            KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)
+            KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D22, A_xx)
+            KK_12 = bm.einsum('cq, cqij -> cij', D01, A_xy) + bm.einsum('cq, cqij -> cij', D22, A_yx)
+            KK_21 = bm.einsum('cq, cqij -> cij', D01, A_yx) + bm.einsum('cq, cqij -> cij', D22, A_xy)
+            
             if space.dof_priority:
-                # 填充对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), 
-                            D00 * A_xx + D22 * A_yy)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(ldof, None)), 
-                            D00 * A_yy + D22 * A_xx)
-                
-                # 填充非对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, None)), 
-                            D01 * A_xy + D22 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(0, ldof)), 
-                            D01 * A_yx + D22 * A_xy)
+
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(ldof, None)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, None)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(0, ldof)), KK_21)
+
             else:
-                # 填充对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                            D00 * A_xx + D22 * A_yy)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                            D00 * A_yy + D22 * A_xx)
-                
-                # 填充非对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                            D01 * A_xy + D22 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                            D01 * A_yx + D22 * A_xy)
+
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
+
         else: 
-            D00 = D[..., 0, 0, None]  # 2μ + λ
-            D01 = D[..., 0, 1, None]  # λ
-            D55 = D[..., 5, 5, None]  # μ
+            # 提取每个高斯点的弹性矩阵系数 (NC, NQ)
+            D00 = D[..., 0, 0]  # 2μ + λ
+            D01 = D[..., 0, 1]  # λ
+            D55 = D[..., 5, 5]  # μ
 
+            KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D55, A_yy + A_zz)
+            KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_zz)
+            KK_33 = bm.einsum('cq, cqij -> cij', D00, A_zz) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_yy)
+            KK_12 = bm.einsum('cq, cqij -> cij', D01, A_xy) + bm.einsum('cq, cqij -> cij', D55, A_yx)
+            KK_13 = bm.einsum('cq, cqij -> cij', D01, A_xz) + bm.einsum('cq, cqij -> cij', D55, A_zx)
+            KK_21 = bm.einsum('cq, cqij -> cij', D01, A_yx) + bm.einsum('cq, cqij -> cij', D55, A_xy)
+            KK_23 = bm.einsum('cq, cqij -> cij', D01, A_yz) + bm.einsum('cq, cqij -> cij', D55, A_zy)
+            KK_31 = bm.einsum('cq, cqij -> cij', D01, A_zx) + bm.einsum('cq, cqij -> cij', D55, A_xz)
+            KK_32 = bm.einsum('cq, cqij -> cij', D01, A_zy) + bm.einsum('cq, cqij -> cij', D55, A_yz)
+            
             if space.dof_priority:
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), 
-                            D00 * A_xx + D55 * (A_yy + A_zz))
-                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), 
-                            D00 * A_yy + D55 * (A_xx + A_zz))
-                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), 
-                            D00 * A_zz + D55 * (A_xx + A_yy))
 
-                # 填充非对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), 
-                            D01 * A_xy + D55 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), 
-                            D01 * A_xz + D55 * A_zx)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), 
-                            D01 * A_yx + D55 * A_xy)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(2 * ldof, None)), 
-                            D01 * A_yz + D55 * A_zy)
-                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(0, ldof)), 
-                            D01 * A_zx + D55 * A_xz)
-                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(ldof, 2 * ldof)), 
-                            D01 * A_zy + D55 * A_yz)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), KK_33)
+
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), KK_13)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), KK_21)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(2 * ldof, None)), KK_23)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(0, ldof)), KK_31)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(ldof, 2 * ldof)), KK_32)
+
             else:
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                            (2 * D55 + D01) * A_xx + D55 * (A_yy + A_zz))
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                            (2 * D55 + D01) * A_yy + D55 * (A_xx + A_zz))
-                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-                            (2 * D55 + D01) * A_zz + D55 * (A_xx + A_yy))
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_33)
 
-                # 填充非对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                            D01 * A_xy + D55 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-                            D01 * A_xz + D55 * A_zx)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                            D01 * A_yx + D55 * A_xy)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-                            D01 * A_yz + D55 * A_zy)
-                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                            D01 * A_zx + D55 * A_xz)
-                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                            D01 * A_zy + D55 * A_yz)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_13)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_23)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_31)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_32)
 
         return KK
 
