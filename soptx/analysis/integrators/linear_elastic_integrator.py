@@ -10,9 +10,7 @@ from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 from fealpy.fem.utils import LinearSymbolicIntegration
 
 class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
-    """
-    The linear elastic integrator for function spaces based on homogeneous meshes.
-    """
+    """The linear elastic integrator for function spaces based on homogeneous meshes."""
     def __init__(self, 
                  material,
                  q: Optional[int]=None, *,
