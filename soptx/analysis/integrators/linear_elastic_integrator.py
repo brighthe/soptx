@@ -12,10 +12,11 @@ from fealpy.fem.utils import LinearSymbolicIntegration
 class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     """The linear elastic integrator for function spaces based on homogeneous meshes."""
     def __init__(self, 
-                 material,
-                 q: Optional[int]=None, *,
-                 index: Index=_S,
-                 method: Optional[str]=None) -> None:
+                material,
+                q: Optional[int]=None, *,
+                index: Index=_S,
+                method: Optional[str]=None
+            ) -> None:
         super().__init__()
 
         self.material = material

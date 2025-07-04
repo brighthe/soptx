@@ -1,17 +1,24 @@
 from fealpy.fem import BilinearForm
 
 from .integrators.linear_elastic_integrator import LinearElasticIntegrator
-from ..interpolation.interpolation_scheme import LinearElasticMaterial
+from ..interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
 
 class LagrangeFEMAnalyzer:
     def __init__(self):
         pass
 
-    def linear_sysytem():
-        LEM = LinearElasticMaterial()
-        LEI = LinearElasticIntegrator(material=LEM, q=5)
-        bform = BilinearForm()
-        bform.add_integrator(LEI)
+    def set_pde(self):
+        pass
 
-        A = bform.assembly(format='csr')
+    def set_material_parameters(self):
+        pass
+        
+    def linear_system(self):
+        pass
+    
+    def apply_bc(self):
+        pass
+
+    def solve(self):
+        pass
 
