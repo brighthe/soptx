@@ -3,8 +3,8 @@ from typing import Optional
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Index, _S
 from fealpy.mesh import HomogeneousMesh, SimplexMesh, StructuredMesh
-from fealpy.functionspace.space import FunctionSpace as _FS
-from fealpy.functionspace.tensor_space import TensorFunctionSpace as _TS
+from fealpy.functionspace.space import FunctionSpace
+from fealpy.functionspace.tensor_space import TensorFunctionSpace
 from fealpy.decorator.variantmethod import variantmethod
 from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 from fealpy.fem.utils import LinearSymbolicIntegration
@@ -25,11 +25,11 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         self.assembly.set(method)
 
     @enable_cache
-    def to_global_dof(self, space: _FS) -> TensorLike:
+    def to_global_dof(self, space: FunctionSpace) -> TensorLike:
         return space.cell_to_dof()[self.index]
     
     @enable_cache
-    def fetch_assembly(self, space: _TS):
+    def fetch_assembly(self, space: TensorFunctionSpace):
         index = self.index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
@@ -54,9 +54,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         return cm, bcs, ws, gphi, detJ
     
-    # 标准组装方法
-    @variantmethod
-    def assembly(self, space: _TS) -> TensorLike:
+    @variantmethod('standard')
+    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
         cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
@@ -67,7 +66,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         if D.shape[0] == 1 and D.shape[1] == 1:
             # (1, 1, :, :)
             D = bm.broadcast_to(D, (NC, NQ, D.shape[2], D.shape[3]))
-        if D.shape[1] == 1:
+        elif D.shape[1] == 1:
             # (NC, 1, :, :)
             D = bm.broadcast_to(D, (NC, NQ, D.shape[2], D.shape[3]))
         elif D.shape[1] == NQ:
@@ -75,8 +74,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             pass
         else:
             raise ValueError(f"assembly currently only supports elastic matrices "
-                        f"with shape (1, 1, {2*GD}, {2*GD}) or (NC, 1, {2*GD}, {2*GD}) or (NC, {NQ}, {2*GD}, {2*GD}), "
-                        f"got {D.shape}.")
+                    f"with shape (1, 1, {2*GD}, {2*GD}) or (NC, 1, {2*GD}, {2*GD}) or (NC, {NQ}, {2*GD}, {2*GD}), "
+                    f"got {D.shape}.")
             
         if isinstance(mesh, SimplexMesh):
             A_xx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 0], cm)
@@ -103,10 +102,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 A_yz = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 1], gphi[..., 2], detJ)
                 A_zy = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 2], gphi[..., 1], detJ)
                 A_zz = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 2], gphi[..., 2], detJ)
-
-        if D.shape[1] != 1:
-            raise ValueError("assembly currently only supports elastic matrices "
-                            f"with shape (NC, 1, {2*GD}, {2*GD}) or (1, 1, {2*GD}, {2*GD}).")
 
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
@@ -180,7 +175,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         return KK
 
     @enable_cache
-    def fetch_voigt_assembly(self, space: _TS):
+    def fetch_voigt_assembly(self, space: TensorFunctionSpace):
         index = self.index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
@@ -210,7 +205,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         return cm, ws, detJ, D, B
             
     @assembly.register('voigt')
-    def assembly(self, space: _TS) -> TensorLike:
+    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         mesh = getattr(space, 'mesh', None)
         cm, ws, detJ, D, B = self.fetch_voigt_assembly(space)
 
@@ -224,7 +219,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         return KK
     
     @enable_cache
-    def fetch_fast_assembly(self, space: _TS):
+    def fetch_fast_assembly(self, space: TensorFunctionSpace):
         index = self.index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
@@ -261,7 +256,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             return cm, bcs, detJ, JG, S
 
     @assembly.register('fast')
-    def assembly(self, space: _TS) -> TensorLike:
+    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
 
@@ -396,7 +391,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         return KK
 
     @enable_cache
-    def fetch_symbolic_assembly(self, space: _TS) -> TensorLike:
+    def fetch_symbolic_assembly(self, space: TensorFunctionSpace) -> TensorLike:
         index = self.index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
@@ -429,7 +424,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             raise NotImplementedError("symbolic assembly for general meshes is not implemented yet.")
 
     @assembly.register('symbolic')
-    def assembly(self, space: _TS) -> TensorLike:
+    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
         

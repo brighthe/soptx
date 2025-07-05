@@ -3,7 +3,6 @@ from .mbb_beam_2d import HalfMBBBeam2dData1, MBBBeam2dData2, HalfMBBBeam2dData2
 from .cantilever_2d import Cantilever2dData1, Cantilever2dMultiLoadData1, Cantilever2dData2
 from .cantilever_3d import Cantilever3dData1
 from .bridge_2d import Bridge2dData1, HalfSinglePointLoadBridge2D
-from .linear_elasticity_2d import PolyDisp2dData, BoxTriData2d
 
 # 指定可导出的内容
 __all__ = [

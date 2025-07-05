@@ -3,55 +3,90 @@ from typing import List, Callable, Optional, Tuple
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
-from fealpy.mesh import Mesh, QuadrangleMesh, TriangleMesh
+from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 class HalfMBBBeam2dData1:
-    '''模型来源论文: Efficient topology optimization in MATLAB using 88 lines of code'''
+    '''
+    模型来源:
+    https://wnesm678i4.feishu.cn/wiki/Xi3dw6mzNi6V9ckNcoScfmAXnFg#part-TuQydJUDvojFG6x0NPzcH3stnTh
+    '''
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20],
+                mesh_method:Optional[str] = None,
                 T: float = -1.0, # 负值代表方向向下
                 E: float = 1.0,
                 nu: float = 0.3,
             ) -> None:
+        """
+        1. 实例化时设置默认网格变体方法
+        hmb = HalfMBBBeam2dData1(mesh_method='uniform_quad')
+        2. 直接使用默认方法生成网格
+        mesh1 = hmb.init_mesh(nx=60, ny=20)  # 生成四边形网格
+        3. 切换到其他网格方法
+        hmb.init_mesh.set('uniform_tri')     # 设置变体 (返回 None)
+        mesh2 = hmb.init_mesh(nx=30, ny=10)  # 生成三角形网格
+        注意: 
+        - init_mesh.set() 只设置变体，不执行方法，返回 None
+        - 需要分别调用 set() 和 init_mesh() 来生成网格
+        - 每次 set() 后，后续的 init_mesh() 调用都使用新设置的变体
+        """
         self.domain = domain
+        self.init_mesh.set(mesh_method)
+        
         self.T = T
-        self.E = E
-        self.nu = nu
+        self.E, self.nu = E, nu
+
         self.eps = 1e-12
         self.plane_type = 'plane_stress'
+        self.force_type = 'concentrated'
+        self.boundary_type = 'dirichlet'
     
-    @variantmethod('hex')
-    def create_mesh(self,
-                    mesh_type: str = 'triangle', 
-                    nx: int = 60, ny: int = 20, 
-                    threshold: Optional[Callable] = None, 
-                    device: str = None
-                ) -> Mesh:
-        box = self.domain
+    @variantmethod('uniform_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', None)
 
-        if mesh_type == 'quadrangle':
-            mesh = QuadrangleMesh.from_box(box=box, nx=nx, ny=ny,
-                                        threshold=threshold, device=device)
-        elif mesh_type == 'triangle':
-            mesh = TriangleMesh.from_box(box=box, nx=nx, ny=ny,
-                                        threshold=threshold, device=device)
-        else:
-            raise ValueError(f"Unsupported mesh type: {mesh_type}")
+        mesh = TriangleMesh.from_box(box=self.domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
 
-        hx = (box[1] - box[0]) / nx
-        hy = (box[3] - box[2]) / ny
-        
-        mesh.meshdata['domain'] = box
+        hx = (self.domain[1] - self.domain[0]) / nx
+        hy = (self.domain[3] - self.domain[2]) / ny
+
+        mesh.meshdata['domain'] = self.domain
         mesh.meshdata['nx'] = nx
         mesh.meshdata['ny'] = ny
         mesh.meshdata['hx'] = hx
         mesh.meshdata['hy'] = hy
-        mesh.meshdata['mesh_type'] = mesh_type
+        mesh.meshdata['mesh_type'] = 'uniform_tri'
     
         return mesh
     
+    @init_mesh.register('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', None)
+
+        mesh = QuadrangleMesh.from_box(box=self.domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+
+        hx = (self.domain[1] - self.domain[0]) / nx
+        hy = (self.domain[3] - self.domain[2]) / ny
+
+        mesh.meshdata['domain'] = self.domain
+        mesh.meshdata['nx'] = nx
+        mesh.meshdata['ny'] = ny
+        mesh.meshdata['hx'] = hx
+        mesh.meshdata['hy'] = hy
+        mesh.meshdata['mesh_type'] = 'uniform_quad'
+
+        return mesh
+
     @cartesian
-    def force(self, points: TensorLike) -> TensorLike:
+    def body_force(self, points: TensorLike) -> TensorLike:
         domain = self.domain
 
         x = points[..., 0]
@@ -68,13 +103,13 @@ class HalfMBBBeam2dData1:
         return val
     
     @cartesian
-    def dirichlet(self, points: TensorLike) -> TensorLike:
+    def displacement_solution(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
-    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+    def is_displacement_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self.domain
 
         x = points[..., 0]
@@ -84,7 +119,7 @@ class HalfMBBBeam2dData1:
         return coord
     
     @cartesian
-    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+    def is_displacement_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         domain = self.domain
 
         x = points[..., 0]
@@ -96,9 +131,9 @@ class HalfMBBBeam2dData1:
         return coord
     
     def threshold(self) -> Tuple[Callable, Callable]:
-        return (self.is_dirichlet_boundary_dof_x, 
-                self.is_dirichlet_boundary_dof_y)
-    
+        return (self.is_displacement_boundary_dof_x, 
+                self.is_displacement_boundary_dof_y)
+
 
 class MBBBeam2dData2:
     '''模型来源论文: Topology optimization using the p-version of the finite element method'''

@@ -1,5 +1,6 @@
 from typing import Optional, Dict, Any
 
+from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 
 from .linear_elastic_material import LinearElasticMaterial
@@ -10,6 +11,7 @@ class TopologyOptimizationMaterial(BaseLogged):
     def __init__(self, 
                 base_material: LinearElasticMaterial,
                 interpolation_scheme: MaterialInterpolationScheme,
+                relative_density: Optional[TensorLike] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -18,26 +20,35 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         self.base_material = base_material
         self.interpolation_scheme = interpolation_scheme
+        self.relative_density = relative_density
 
     @property
     def relative_density(self) -> Optional[TensorLike]:
         """获取当前的相对密度"""
-        return self.interpolation_scheme.relative_density
+        return self.relative_density
     
     @property
     def penalty_factor(self) -> float:
-        """获取当前的惩罚因子"""
+        """获取当前的惩罚因子 (代理属性)"""
         return self.interpolation_scheme.penalty_factor
+    
+    def set_relative_density(self, relative_density: TensorLike) -> None:
+        """设置相对密度分布"""
+        if bm.any(relative_density < 0.0) or bm.any(relative_density > 1.0):
+            min_val = bm.min(relative_density)
+            max_val = bm.max(relative_density)
+            error_msg = f"Relative density values must be in [0,1] range, got [{min_val:.6f}, {max_val:.6f}]"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+    
+        self._relative_density = relative_density
+        self._log_info(f"Relative density updated, shape: {relative_density.shape}, "
+                      f"range: [{bm.min(relative_density):.3f}, {bm.max(relative_density):.3f}]")
     
     def set_material_parameters(self, **kwargs) -> None:
         """设置基础材料参数（代理方法）"""
         self.base_material.set_material_parameters(**kwargs)
         self._log_info(f"[TopologyOptimizationMaterial] Material parameters updated via proxy method")
-    
-    def set_relative_density(self, relative_density: TensorLike) -> None:
-        """设置相对密度分布 (代理方法)"""
-        self.interpolation_scheme.set_relative_density(relative_density)
-        self._log_info(f"[TopologyOptimizationMaterial] Relative density updated via proxy method")
 
     def set_penalty_factor(self, penalty_factor: float) -> None:
         """设置惩罚因子 (代理方法)"""
@@ -50,8 +61,8 @@ class TopologyOptimizationMaterial(BaseLogged):
             error_msg = "No relative density set. Please call set_relative_density() first."
             self._log_error(error_msg)
             raise ValueError(error_msg)
-        
-        D = self.interpolation_scheme.interpolate(self.base_material)
+
+        D = self.interpolation_scheme.interpolate(self.base_material, self.relative_density)
 
         self._log_info(f"[TopologyOptimizationMaterial] Elastic matrix computed successfully, "
                    f"shape: {D.shape}")
