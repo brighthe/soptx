@@ -2,7 +2,6 @@ from typing import Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-from fealpy.mesh import Mesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.fem import BilinearForm, LinearForm
 from fealpy.fem import VectorSourceIntegrator
@@ -17,14 +16,14 @@ class LagrangeFEMAnalyzer:
                 pde, 
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
-                integration_method: str = 'standard',
-                solve_method: Optional[str] = None
+                assembly_method: str = 'standard',
+                solve_method: str = 'mumps',
             ) -> None:
         self.pde = pde
         self.mesh =self.pde.mesh
         self.material = material
         self.space_degree = space_degree
-        self.integration_method = integration_method
+        self.assembly_method = assembly_method
         self.solve.set(solve_method)
 
         self.scalar_space = LagrangeFESpace(self.mesh, p=space_degree, ctype='C')
@@ -35,7 +34,7 @@ class LagrangeFEMAnalyzer:
         """组装刚度矩阵"""
         integrator = LinearElasticIntegrator(material=self.material, 
                                             q=self.space_degree+3,
-                                            method=self.integration_method)
+                                            method=self.assembly_method)
         bform = BilinearForm(self.tensor_space)
         bform.add_integrator(integrator)
         K = bform.assembly(format='csr')

@@ -63,16 +63,10 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         NC = mesh.number_of_cells()
         NQ = len(ws)
         D = self.material.elastic_matrix(bcs)
-        if D.shape[0] == 1 and D.shape[1] == 1:
-            # (1, 1, :, :)
-            D = bm.broadcast_to(D, (NC, NQ, D.shape[2], D.shape[3]))
-        elif D.shape[1] == 1:
-            # (NC, 1, :, :)
-            D = bm.broadcast_to(D, (NC, NQ, D.shape[2], D.shape[3]))
-        elif D.shape[1] == NQ:
-            # (NC, NQ, :, :)
-            pass
-        else:
+
+        if not (D.shape[0] == 1 and D.shape[1] == 1) and \
+            not (D.shape[0] == NC and D.shape[1] == 1) and \
+            not (D.shape[0] == NC and D.shape[1] == NQ):
             raise ValueError(f"assembly currently only supports elastic matrices "
                     f"with shape (1, 1, {2*GD}, {2*GD}) or (NC, 1, {2*GD}, {2*GD}) or (NC, {NQ}, {2*GD}, {2*GD}), "
                     f"got {D.shape}.")
@@ -106,17 +100,67 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
-        if GD == 2:
-            # 提取每个高斯点的弹性矩阵系数 (NC, NQ)
-            D00 = D[..., 0, 0]  # E/(1-ν²) 或 2μ+λ
-            D01 = D[..., 0, 1]  # νE/(1-ν²) 或 λ
-            D22 = D[..., 2, 2]  # E/2(1+ν) 或 μ
+        if D.shape[0] == 1 and D.shape[1] == 1:
+            # (1, 1, :, :) - 全局均匀材料
+            if GD == 2:
+                D00, D01, D22 = D[0, 0, 0, 0], D[0, 0, 0, 1], D[0, 0, 2, 2]
+                KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D22 * bm.einsum('cqij -> cij', A_yy)
+                KK_22 = D00 * bm.einsum('cqij -> cij', A_yy) + D22 * bm.einsum('cqij -> cij', A_xx)
+                KK_12 = D01 * bm.einsum('cqij -> cij', A_xy) + D22 * bm.einsum('cqij -> cij', A_yx)
+                KK_21 = D01 * bm.einsum('cqij -> cij', A_yx) + D22 * bm.einsum('cqij -> cij', A_xy)
+            else: 
+                D00, D01, D55 = D[0, 0, 0, 0], D[0, 0, 0, 1], D[0, 0, 5, 5]
+                KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D55 * bm.einsum('cqij -> cij', A_yy + A_zz)
+                KK_22 = D00 * bm.einsum('cqij -> cij', A_yy) + D55 * bm.einsum('cqij -> cij', A_xx + A_zz)
+                KK_33 = D00 * bm.einsum('cqij -> cij', A_zz) + D55 * bm.einsum('cqij -> cij', A_xx + A_yy)
+                KK_12 = D01 * bm.einsum('cqij -> cij', A_xy) + D55 * bm.einsum('cqij -> cij', A_yx)
+                KK_13 = D01 * bm.einsum('cqij -> cij', A_xz) + D55 * bm.einsum('cqij -> cij', A_zx)
+                KK_21 = D01 * bm.einsum('cqij -> cij', A_yx) + D55 * bm.einsum('cqij -> cij', A_xy)
+                KK_23 = D01 * bm.einsum('cqij -> cij', A_yz) + D55 * bm.einsum('cqij -> cij', A_zy)
+                KK_31 = D01 * bm.einsum('cqij -> cij', A_zx) + D55 * bm.einsum('cqij -> cij', A_xz)
+                KK_32 = D01 * bm.einsum('cqij -> cij', A_zy) + D55 * bm.einsum('cqij -> cij', A_yz)
+                
+        elif D.shape[1] == 1:
+            # (NC, 1, :, :) - 单元均匀材料
+            if GD == 2:
+                D00, D01, D22 = D[:, 0, 0, 0], D[:, 0, 0, 1], D[:, 0, 2, 2]
+                KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D22, A_yy)
+                KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D22, A_xx)
+                KK_12 = bm.einsum('c, cqij -> cij', D01, A_xy) + bm.einsum('c, cqij -> cij', D22, A_yx)
+                KK_21 = bm.einsum('c, cqij -> cij', D01, A_yx) + bm.einsum('c, cqij -> cij', D22, A_xy)
+            else:  # GD == 3
+                D00, D01, D55 = D[:, 0, 0, 0], D[:, 0, 0, 1], D[:, 0, 5, 5]
+                KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D55, A_yy + A_zz)
+                KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D55, A_xx + A_zz)
+                KK_33 = bm.einsum('c, cqij -> cij', D00, A_zz) + bm.einsum('c, cqij -> cij', D55, A_xx + A_yy)
+                KK_12 = bm.einsum('c, cqij -> cij', D01, A_xy) + bm.einsum('c, cqij -> cij', D55, A_yx)
+                KK_13 = bm.einsum('c, cqij -> cij', D01, A_xz) + bm.einsum('c, cqij -> cij', D55, A_zx)
+                KK_21 = bm.einsum('c, cqij -> cij', D01, A_yx) + bm.einsum('c, cqij -> cij', D55, A_xy)
+                KK_23 = bm.einsum('c, cqij -> cij', D01, A_yz) + bm.einsum('c, cqij -> cij', D55, A_zy)
+                KK_31 = bm.einsum('c, cqij -> cij', D01, A_zx) + bm.einsum('c, cqij -> cij', D55, A_xz)
+                KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
+                
+        else:
+            # (NC, NQ, :, :) - 单元高斯积分点材料
+            if GD == 2:
+                D00, D01, D22 = D[..., 0, 0], D[..., 0, 1], D[..., 2, 2]
+                KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)
+                KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D22, A_xx)
+                KK_12 = bm.einsum('cq, cqij -> cij', D01, A_xy) + bm.einsum('cq, cqij -> cij', D22, A_yx)
+                KK_21 = bm.einsum('cq, cqij -> cij', D01, A_yx) + bm.einsum('cq, cqij -> cij', D22, A_xy)
+            else:  # GD == 3
+                D00, D01, D55 = D[..., 0, 0], D[..., 0, 1], D[..., 5, 5]
+                KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D55, A_yy + A_zz)
+                KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_zz)
+                KK_33 = bm.einsum('cq, cqij -> cij', D00, A_zz) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_yy)
+                KK_12 = bm.einsum('cq, cqij -> cij', D01, A_xy) + bm.einsum('cq, cqij -> cij', D55, A_yx)
+                KK_13 = bm.einsum('cq, cqij -> cij', D01, A_xz) + bm.einsum('cq, cqij -> cij', D55, A_zx)
+                KK_21 = bm.einsum('cq, cqij -> cij', D01, A_yx) + bm.einsum('cq, cqij -> cij', D55, A_xy)
+                KK_23 = bm.einsum('cq, cqij -> cij', D01, A_yz) + bm.einsum('cq, cqij -> cij', D55, A_zy)
+                KK_31 = bm.einsum('cq, cqij -> cij', D01, A_zx) + bm.einsum('cq, cqij -> cij', D55, A_xz)
+                KK_32 = bm.einsum('cq, cqij -> cij', D01, A_zy) + bm.einsum('cq, cqij -> cij', D55, A_yz)
 
-            KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)
-            KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D22, A_xx)
-            KK_12 = bm.einsum('cq, cqij -> cij', D01, A_xy) + bm.einsum('cq, cqij -> cij', D22, A_yx)
-            KK_21 = bm.einsum('cq, cqij -> cij', D01, A_yx) + bm.einsum('cq, cqij -> cij', D22, A_xy)
-            
+        if GD == 2:
             if space.dof_priority:
 
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
@@ -132,21 +176,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
 
         else: 
-            # 提取每个高斯点的弹性矩阵系数 (NC, NQ)
-            D00 = D[..., 0, 0]  # 2μ + λ
-            D01 = D[..., 0, 1]  # λ
-            D55 = D[..., 5, 5]  # μ
-
-            KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D55, A_yy + A_zz)
-            KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_zz)
-            KK_33 = bm.einsum('cq, cqij -> cij', D00, A_zz) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_yy)
-            KK_12 = bm.einsum('cq, cqij -> cij', D01, A_xy) + bm.einsum('cq, cqij -> cij', D55, A_yx)
-            KK_13 = bm.einsum('cq, cqij -> cij', D01, A_xz) + bm.einsum('cq, cqij -> cij', D55, A_zx)
-            KK_21 = bm.einsum('cq, cqij -> cij', D01, A_yx) + bm.einsum('cq, cqij -> cij', D55, A_xy)
-            KK_23 = bm.einsum('cq, cqij -> cij', D01, A_yz) + bm.einsum('cq, cqij -> cij', D55, A_zy)
-            KK_31 = bm.einsum('cq, cqij -> cij', D01, A_zx) + bm.einsum('cq, cqij -> cij', D55, A_xz)
-            KK_32 = bm.einsum('cq, cqij -> cij', D01, A_zy) + bm.einsum('cq, cqij -> cij', D55, A_yz)
-            
             if space.dof_priority:
 
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)

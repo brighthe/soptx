@@ -72,20 +72,30 @@ p = simpi.penalty_factor
 Emin = simpi.void_youngs_modulus
 im = simpi.interpolation_method
 
-
-# 设置拓扑优化材料
-topm = TopologyOptimizationMaterial(base_material=ilem, 
-                                interpolation_scheme=simpi,
-                                enable_logging=True)
-rd = topm.relative_density
-pf = topm.penalty_factor
-
+D0 = simpi.interpolate(ilem, 0.5)
+D1 = simpi.interpolate(ilem, bm.ones((10, 1)) * 0.5)
 
 # 设置模型
 from soptx.pde.mbb_beam_2d import HalfMBBBeam2dData1
 hmb1 = HalfMBBBeam2dData1(domain=[0, 60, 0, 20],
                         mesh_method='uniform_quad',
                         T=-1.0, E=1.0, nu=0.3)
+
+# 设置拓扑优化材料
+topm = TopologyOptimizationMaterial(
+                                mesh=hmb1.init_mesh(),
+                                base_material=ilem,
+                                interpolation_scheme=simpi,
+                                relative_density=0.5,
+                                density_location='element',
+                                enable_logging=True)
+rd = topm.relative_density
+pf = topm.penalty_factor
+topm.setup_density_distribution.set('element_gauss_integrate_point')
+rrho = topm.setup_density_distribution()  # 获取单元密度分布
+
+
+
 mesh = hmb1.init_mesh()
 nx, ny = mesh.meshdata['nx'], mesh.meshdata['ny']
 hmb1.init_mesh.set('uniform_tri')

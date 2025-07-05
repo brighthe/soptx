@@ -59,7 +59,7 @@ class HalfMBBBeam2dData1:
         mesh.meshdata['ny'] = ny
         mesh.meshdata['hx'] = hx
         mesh.meshdata['hy'] = hy
-        mesh.meshdata['mesh_type'] = 'uniform_tri'
+        mesh.meshdata['mesh_type'] = self.init_mesh.vm.get_key(self)
     
         return mesh
     
@@ -81,7 +81,7 @@ class HalfMBBBeam2dData1:
         mesh.meshdata['ny'] = ny
         mesh.meshdata['hx'] = hx
         mesh.meshdata['hy'] = hy
-        mesh.meshdata['mesh_type'] = 'uniform_quad'
+        mesh.meshdata['mesh_type'] = self.init_mesh.vm.get_key(self)
 
         return mesh
 
