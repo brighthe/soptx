@@ -72,23 +72,65 @@ p = simpi.penalty_factor
 Emin = simpi.void_youngs_modulus
 im = simpi.interpolation_method
 
-D0 = simpi.interpolate(ilem, 0.5)
-D1 = simpi.interpolate(ilem, bm.ones((10, 1)) * 0.5)
 
 # 设置模型
 from soptx.pde.mbb_beam_2d import HalfMBBBeam2dData1
-hmb1 = HalfMBBBeam2dData1(domain=[0, 60, 0, 20],
-                        mesh_method='uniform_quad',
+hmb1 = HalfMBBBeam2dData1(domain=[0, 2, 0, 2],
                         T=-1.0, E=1.0, nu=0.3)
+hmb1.init_mesh.set('uniform_quad')
+mesh = hmb1.init_mesh(nx=2, ny=2)
 
 # 设置拓扑优化材料
+# 方式 1
 topm = TopologyOptimizationMaterial(
-                                mesh=hmb1.init_mesh(),
+    mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
+    relative_density=0.5,
+    density_location='element_gauss_integrate_point',
+    quadrature_order=3)
+
+topm.set_quadrature_order(2)  # 直接更新，简洁明了
+
+# 方式 2
+topm2 = TopologyOptimizationMaterial(
+    mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
+    density_location='element')
+
+# 一步到位：同时设置位置和参数
+topm2.set_density_location('element_gauss_integrate_point', quadrature_order=3)
+
+# 方式 3
+topm3 = TopologyOptimizationMaterial(
+    mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
+    density_location='element')
+
+topm3.set_quadrature_order(3)  # 先设置参数（有警告但允许）
+topm3.set_density_location('element_gauss_integrate_point')  # 切换位置，自动更新
+
+
+topm = TopologyOptimizationMaterial(
+                                mesh=mesh,
                                 base_material=ilem,
                                 interpolation_scheme=simpi,
                                 relative_density=0.5,
-                                density_location='element',
+                                density_location='element_gauss_integrate_point',
+                                quadrature_order=3,
                                 enable_logging=True)
+dd = topm.density_distribution
+topm.set_quadrature_order(quadrature_order=2)  
+dd1 = topm.density_distribution
+
+# 方式2
+topm2 = TopologyOptimizationMaterial(
+                            mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
+                            density_location='element') 
+dd2 = topm2.density_distribution
+topm2.set_quadrature_order(3)  
+topm2.setup_density_distribution.set('element_gauss_integrate_point')  
+dd3 = topm2.setup_density_distribution() 
+dd4 = topm2.density_distribution
+
+
+
 rd = topm.relative_density
 pf = topm.penalty_factor
 topm.setup_density_distribution.set('element_gauss_integrate_point')

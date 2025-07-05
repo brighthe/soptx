@@ -101,7 +101,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
         if D.shape[0] == 1 and D.shape[1] == 1:
-            # (1, 1, :, :) - 全局均匀材料
+            # (1, 1, :, :) - 全局均匀相对密度
             if GD == 2:
                 D00, D01, D22 = D[0, 0, 0, 0], D[0, 0, 0, 1], D[0, 0, 2, 2]
                 KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D22 * bm.einsum('cqij -> cij', A_yy)
@@ -121,7 +121,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_32 = D01 * bm.einsum('cqij -> cij', A_zy) + D55 * bm.einsum('cqij -> cij', A_yz)
                 
         elif D.shape[1] == 1:
-            # (NC, 1, :, :) - 单元均匀材料
+            # (NC, 1, :, :) - 单元均匀相对密度
             if GD == 2:
                 D00, D01, D22 = D[:, 0, 0, 0], D[:, 0, 0, 1], D[:, 0, 2, 2]
                 KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D22, A_yy)
@@ -141,7 +141,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
                 
         else:
-            # (NC, NQ, :, :) - 单元高斯积分点材料
+            # (NC, NQ, :, :) - 单元高斯积分点相对密度
             if GD == 2:
                 D00, D01, D22 = D[..., 0, 0], D[..., 0, 1], D[..., 2, 2]
                 KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)

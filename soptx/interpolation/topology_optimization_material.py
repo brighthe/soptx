@@ -17,30 +17,50 @@ class TopologyOptimizationMaterial(BaseLogged):
                 interpolation_scheme: MaterialInterpolationScheme,
                 relative_density: float = 1,
                 density_location: str = 'element',
+                quadrature_order: Optional[int] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
         """
-        1. 实例化时设置默认密度分布变体方法
-        tom = TopologyOptimizationMaterial(density_location='element')
-        2. 直接使用默认方法生成单元密度分布
-        rrho = tom.setup_density_distribution()  # 获取单元密度分布
-        3. 切换到其他密度分布方法
-        tom.setup_density_distribution.set('element_gauss_integrate_point')     # 设置变体 (返回 None)
-        rrho = tom.setup_density_distribution(quadrature_order=3)
-        注意: 
-        - setup_density_distribution.set() 只设置变体，不执行方法，返回 None
-        - 需要分别调用 set() 和 setup_density_distribution() 来生成获取弹性矩阵
-        - 每次 set() 后，后续的 setup_density_distribution() 调用都使用新设置的变体
+        密度分布变体方法示例:
+        -----------------------------------
+        1. 初始化时完整设置
+        topm = TopologyOptimizationMaterial(
+                            mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
+                            relative_density=0.5,
+                            density_location='element_gauss_integrate_point',
+                            quadrature_order=3)
+
+        topm.set_quadrature_order(2)  # 直接更新
+
+        2. 使用新的统一接口
+        topm2 = TopologyOptimizationMaterial(
+                            mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
+                            density_location='element')
+
+        3. 分步设置
+        topm3 = TopologyOptimizationMaterial(
+                            mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
+                            density_location='element')
+
+        topm3.set_quadrature_order(3)  # 先设置参数（有警告但允许）
+        topm3.set_density_location('element_gauss_integrate_point')  # 切换位置，自动更新
         """
         
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+
+        if density_location == 'element_gauss_integrate_point' and quadrature_order is None:
+            error_msg = ("quadrature_order is required when density_location='element_gauss_integrate_point'. "
+                        "Please provide quadrature_order parameter.")
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
 
         self.mesh = mesh
         self.base_material = base_material
         self.interpolation_scheme = interpolation_scheme
 
         self._relative_density = relative_density
+        self._quadrature_order = quadrature_order
 
         self._setup_function_spaces()
 
@@ -50,6 +70,7 @@ class TopologyOptimizationMaterial(BaseLogged):
         self._log_info(f"Topology optimization material initialized: "
                        f"relative_density={relative_density}, "
                        f"density_location={density_location}, "
+                       f"quadrature_order={quadrature_order}, "
                        f"distribution_shape={self._density_distribution.shape}")
         
     def _setup_function_spaces(self):
@@ -67,8 +88,14 @@ class TopologyOptimizationMaterial(BaseLogged):
         return self.setup_density_distribution.vm.get_key(self)
     
     @property
+    def quadrature_order(self) -> int:
+        """获取当前的高斯积分次数"""
+        return self._quadrature_order
+    
+    @property
     def penalty_factor(self) -> float:
         """获取当前的惩罚因子 (代理属性)"""
+        return self.interpolation_scheme.penalty_factor
 
     @property
     def interpolation_method(self) -> str:
@@ -92,6 +119,8 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         density_dist = self.element_space.function(density_tensor)
 
+        self._density_distribution = density_dist
+
         self._log_info(f"Created element density distribution: ({NC},) "
                        f"with value {self._relative_density}")
 
@@ -100,8 +129,14 @@ class TopologyOptimizationMaterial(BaseLogged):
     @setup_density_distribution.register('element_gauss_integrate_point')
     def setup_density_distribution(self, **kwargs) -> Function:
         """设置单元高斯积分点密度分布 (NC, NQ)"""
-        quadrature_order = kwargs.get('quadrature_order', 3)
-        qf = self.mesh.quadrature_formula(quadrature_order)
+        if self._quadrature_order is None:
+            error_msg = ("Quadrature order not set for 'element_gauss_integrate_point' density location. "
+                        "Please call set_quadrature_order() first.")
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+    
+
+        qf = self.mesh.quadrature_formula(self._quadrature_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
 
         NC = self.mesh.number_of_cells()
@@ -114,19 +149,17 @@ class TopologyOptimizationMaterial(BaseLogged):
         density_dist = self.element_space.function(density_tensor)
         density_dist = density_dist(bcs)
 
-        self._log_info(f"Created Gauss point density distribution: ({NC}, {NQ}) "
-                f"with value {self._relative_density}, q={quadrature_order}")
+        self._density_distribution = density_dist
+
+        self._log_info(f"Created element Gauss point density distribution: {density_dist.shape} "
+                f"with value {self._relative_density}, q={self._quadrature_order}")
 
         return density_dist
     
     def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
         """计算插值后的弹性矩阵"""
-        if self.relative_density is None:
-            error_msg = "No relative density set. Please call set_relative_density() first."
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
 
-        D = self.interpolation_scheme.interpolate(self.base_material, self._density_distribution)
+        D = self.interpolation_scheme.interpolate(self.base_material, self._density_distribution[:])
 
         self._log_info(f"[TopologyOptimizationMaterial] Elastic matrix computed successfully, "
                    f"shape: {D.shape}")
@@ -134,17 +167,59 @@ class TopologyOptimizationMaterial(BaseLogged):
         return D
 
     def set_relative_density(self, relative_density: float) -> None:
-        """设置相对密度值"""
+        """设置相对密度值并自动更新密度分布"""
         if relative_density < 0.0 or relative_density > 1.0:
             error_msg = f"Relative density must be in [0, 1] range, got {relative_density:.3f}"
             self._log_error(error_msg)
             raise ValueError(error_msg)
 
         old_relative_density = self._relative_density
+
         self._relative_density = relative_density
+        self._density_distribution = self.setup_density_distribution()
 
         self._log_info(f"Relative density updated from {old_relative_density:.3f} "
-                       f"to {self._relative_density:.3f}")
+                       f"to {self._relative_density:.3f}, density distribution recalculated")
+        
+    def set_quadrature_order(self, quadrature_order: int) -> None:
+        """设置高斯积分次数并自动更新密度分布"""
+        if self.density_location != 'element_gauss_integrate_point':
+            self._log_warning(f"Quadrature order only affects 'element_gauss_integrate_point' density location, "
+                            f"current location is '{self.density_location}'.")
+            self._quadrature_order = quadrature_order
+            return
+    
+        old_order = self._quadrature_order
+        old_shape = self._density_distribution.shape
+        
+        self._quadrature_order = quadrature_order
+        self._density_distribution = self.setup_density_distribution()
+        
+        new_shape = self._density_distribution.shape
+        self._log_info(f"Quadrature order updated from {old_order} to {quadrature_order}, "
+                       f"density distribution shape: {old_shape} -> {new_shape}")
+        
+    def set_density_location(self, density_location: str, quadrature_order: Optional[int] = None) -> None:
+        """设置密度分布位置并自动更新密度分布"""
+        if density_location == 'element_gauss_integrate_point':
+            if quadrature_order is None and self._quadrature_order is None:
+                error_msg = ("quadrature_order is required when switching to 'element_gauss_integrate_point'. "
+                            "Please provide quadrature_order parameter.")
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+            
+            if quadrature_order is not None:
+                self._quadrature_order = quadrature_order
+
+        old_location = self.density_location
+        old_shape = self._density_distribution.shape
+        
+        self.setup_density_distribution.set(density_location)
+        self._density_distribution = self.setup_density_distribution()
+        
+        new_shape = self._density_distribution.shape
+        self._log_info(f"Density location changed from '{old_location}' to '{density_location}', "
+                    f"density distribution shape: {old_shape} -> {new_shape}")
 
     def set_material_parameters(self, **kwargs) -> None:
         """设置基础材料参数（代理方法）"""

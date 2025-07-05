@@ -20,11 +20,14 @@ class HalfMBBBeam2dData1:
         """
         1. 实例化时设置默认网格变体方法
         hmb = HalfMBBBeam2dData1(mesh_method='uniform_quad')
+
         2. 直接使用默认方法生成网格
         mesh1 = hmb.init_mesh(nx=60, ny=20)  # 生成四边形网格
+
         3. 切换到其他网格方法
         hmb.init_mesh.set('uniform_tri')     # 设置变体 (返回 None)
         mesh2 = hmb.init_mesh(nx=30, ny=10)  # 生成三角形网格
+        
         注意: 
         - init_mesh.set() 只设置变体，不执行方法，返回 None
         - 需要分别调用 set() 和 init_mesh() 来生成网格

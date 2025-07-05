@@ -70,10 +70,10 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         provided_params = sum(p is not None for p in [E, nu, lam, mu])
         if provided_params != 2:
-            raise ValueError(
-                "For Isotropic material, please provide exactly two "
-                f"independent elastic constants. You provided {provided_params}."
-            )
+            error_msg = (f"For Isotropic material, please provide exactly two "
+                        f"independent elastic constants. You provided {provided_params}.")
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
         
         if E is not None and nu is not None:
             self.youngs_modulus = E
@@ -192,13 +192,16 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         
         self._compute_elastic_matrix()
 
-        self._log_info(f"[IsotropicLinearElasticMaterial] Material parameters updated successfully")
+        self._log_info(f"[IsotropicLinearElasticMaterial] Material parameters updated successfully, "
+                       f"elastic_matrix recalculated")
 
     def set_plane_type(self, plane_type: str) -> None:
         if plane_type not in ['3d', 'plane_stress', 'plane_strain']:
-            raise ValueError("Invalid plane type. Choose from '3d', 'plane_stress', or 'plane_strain'.")
+            error_msg = "Invalid plane type. Choose from '3d', 'plane_stress', or 'plane_strain'."
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
         
         self.plane_type = plane_type
         self._compute_elastic_matrix()
 
-        self._log_info(f"Plane type set to {self.plane_type}. Elastic matrix updated.")
+        self._log_info(f"Plane type set to {self.plane_type}. elastic_matrix updated.")

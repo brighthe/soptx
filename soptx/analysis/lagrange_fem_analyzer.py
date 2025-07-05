@@ -19,6 +19,19 @@ class LagrangeFEMAnalyzer:
                 assembly_method: str = 'standard',
                 solve_method: str = 'mumps',
             ) -> None:
+        """
+        1. 实例化时设置默认求解变体方法
+        lfa = LagrangeFEMAnalyzer(pde=pde, material=material, solve_method='mumps')
+        2. 直接使用默认方法求解位移
+        uh = lfa.solve()
+        3. 切换到其他求解方法
+        lfa.solve.set('cg')     # 设置变体 (返回 None)
+        uh = lfa.solve(maxiter=5000, atol=1e-12, rtol=1e-12)
+        注意: 
+        - solve.set() 只设置变体，不执行方法，返回 None
+        - 需要分别调用 set() 和 solve() 来求解位移
+        - 每次 set() 后，后续的 solve() 调用都使用新设置的变体
+        """
         self.pde = pde
         self.mesh =self.pde.mesh
         self.material = material

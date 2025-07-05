@@ -19,11 +19,14 @@ class MaterialInterpolationScheme(BaseLogged):
         """
         1. 实例化时设置默认插值变体方法
         mis = MaterialInterpolationScheme(interpolation_method='simp')
+        
         2. 直接使用默认方法生成弹性矩阵
-        D0 = mis.interpolate(base_material=base_material, relative_density=relative_density)
+        D0 = mis.interpolate(base_material=base_material, density_distribution=density_distribution)
+
         3. 切换到其他插值方法
         mis.interpolate.set('modified_simp')     # 设置变体 (返回 None)
-        D1 = mis.interpolate(base_material=base_material, relative_density=relative_density)
+        D1 = mis.interpolate(base_material=base_material, density_distribution=density_distribution)
+
         注意: 
         - interpolate.set() 只设置变体，不执行方法，返回 None
         - 需要分别调用 set() 和 interpolate() 来生成获取弹性矩阵
@@ -103,89 +106,83 @@ class MaterialInterpolationScheme(BaseLogged):
         self._log_info(f"Interpolation parameters: {params}", force_log=True)
 
     @variantmethod('simp')
-    def interpolate(self, base_material: LinearElasticMaterial, 
-                    relative_density: Union[float, TensorLike]) -> TensorLike:
+    def interpolate(self, 
+                    base_material: LinearElasticMaterial, 
+                    density_distribution: TensorLike
+                ) -> TensorLike:
         """SIMP 插值: E(ρ) = ρ^p * E0"""
-        if bm.any(relative_density < 0.0) or bm.any(relative_density > 1.0):
-            min_val = bm.min(relative_density)
-            max_val = bm.max(relative_density)
-            error_msg = f"Relative density values must be in [0,1] range, got [{min_val:.6f}, {max_val:.6f}]"
+
+        if not bm.is_tensor(density_distribution):
+            error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
+            raise TypeError(error_msg)
         
         D0 = base_material.elastic_matrix() # (1, 1, :, :)
 
-        simp_scaled = relative_density ** self._penalty_factor
+        simp_scaled = density_distribution ** self._penalty_factor
 
-        if isinstance(simp_scaled, float):
-            D = simp_scaled * D0
-            self._log_info(f"SIMP interpolation completed for scalar density "
-                      f"with p = {self._penalty_factor}")
-            
-        elif len(simp_scaled.shape) == 1:
+        if len(simp_scaled.shape) == 1:
             NC = simp_scaled.shape[0]
             D = bm.einsum('c, ijkl -> cjkl', simp_scaled, D0)
             self._log_info(f"SIMP interpolation completed for {NC} elements "
                       f"with p = {self._penalty_factor}")
         
-        elif len(relative_density.shape) == 2:
+        elif len(simp_scaled.shape) == 2:
             NC, NQ = simp_scaled.shape
             D = bm.einsum('cq, ijkl -> cqkl', simp_scaled, D0)
             self._log_info(f"SIMP interpolation completed for {NC} elements "
                       f"with {NQ} quadrature points, p = {self._penalty_factor}")
         else:
-            error_msg = f"Unsupported relative_density shape: {relative_density.shape}. Expected scalar, (NC,) or (NC, NQ)."
+            error_msg = f"Unsupported density_distribution shape: {density_distribution.shape}. " \
+                        f"Expected (NC,) or (NC, NQ)."
             self._log_error(error_msg)
             raise ValueError(error_msg)
         
         return D
     
     @interpolate.register('modified_simp')
-    def interpolate(self, base_material: LinearElasticMaterial, 
-                    relative_density: Union[float, TensorLike]) -> TensorLike:
+    def interpolate(self, 
+                    base_material: LinearElasticMaterial, 
+                    density_distribution: TensorLike
+                ) -> TensorLike:
         """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
-        if bm.any(relative_density < 0.0) or bm.any(relative_density > 1.0):
-            min_val = bm.min(relative_density)
-            max_val = bm.max(relative_density)
-            error_msg = f"Relative density values must be in [0,1] range, got [{min_val:.6f}, {max_val:.6f}]"
+
+        if not bm.is_tensor(density_distribution):
+            error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
+            raise TypeError(error_msg)
 
         E0 = base_material.youngs_modulus
         Emin = self._void_youngs_modulus
         D0 = base_material.elastic_matrix() # (1, 1, :, :)
 
-        msimp_scaled = (Emin + relative_density ** self._penalty_factor * (E0 - Emin)) / E0
+        msimp_scaled = (Emin + density_distribution ** self._penalty_factor * (E0 - Emin)) / E0
 
-        if isinstance(msimp_scaled, float):
-            D = msimp_scaled * D0
-            self._log_info(f"Modified SIMP interpolation completed for scalar density "
-                      f"with p = {self._penalty_factor}, Emin = {Emin}")
-            
-        elif len(msimp_scaled.shape) == 1:
+        if len(msimp_scaled.shape) == 1:
             NC = msimp_scaled.shape[0]
             D = bm.einsum('c, ijkl -> cjkl', msimp_scaled, D0)
             self._log_info(f"Modified SIMP interpolation completed for {NC} elements "
                       f"with p = {self._penalty_factor}, Emin = {Emin}")
-            
-        elif len(relative_density.shape) == 2:
+
+        elif len(msimp_scaled.shape) == 2:
             NC, NQ = msimp_scaled.shape
             D = bm.einsum('cq, ijkl -> cqkl', msimp_scaled, D0)
             self._log_info(f"Modified SIMP interpolation completed for {NC} elements "
                       f"with {NQ} quadrature points, p = {self._penalty_factor}, Emin = {Emin}")
         else:
-            error_msg = f"Unsupported relative_density shape: {relative_density.shape}. Expected scalar, (NC,) or (NC, NQ)."
+            error_msg = f"Unsupported density_distribution shape: {density_distribution.shape}. " \
+                         f"Expected (NC,) or (NC, NQ)."
             self._log_error(error_msg)
             raise ValueError(error_msg)
 
         return D
     
     @interpolate.register('simp_double')
-    def interpolate(self, base_material: LinearElasticMaterial, relative_density: TensorLike) -> TensorLike:
+    def interpolate(self, base_material: LinearElasticMaterial, density_distribution: TensorLike) -> TensorLike:
         """双指数 SIMP 插值"""
         pass
 
     @interpolate.register('ramp')
-    def interpolate(self, base_material: LinearElasticMaterial, relative_density: TensorLike) -> TensorLike:
+    def interpolate(self, base_material: LinearElasticMaterial, density_distribution: TensorLike) -> TensorLike:
         """RAMP 插值"""
         pass
