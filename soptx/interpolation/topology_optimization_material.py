@@ -220,6 +220,11 @@ class TopologyOptimizationMaterial(BaseLogged):
         new_shape = self._density_distribution.shape
         self._log_info(f"Density location changed from '{old_location}' to '{density_location}', "
                     f"density distribution shape: {old_shape} -> {new_shape}")
+        
+    def set_interpolation_method(self, interpolation_method: str) -> None:
+        """设置材料插值方法 (代理方法)"""
+        self.interpolation_scheme.set_interpolation_method(interpolation_method)
+        self._log_info(f"[TopologyOptimizationMaterial] Interpolation method updated via proxy method")
 
     def set_material_parameters(self, **kwargs) -> None:
         """设置基础材料参数（代理方法）"""

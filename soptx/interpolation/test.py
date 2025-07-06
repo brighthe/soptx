@@ -87,6 +87,7 @@ topm = TopologyOptimizationMaterial(
     relative_density=0.5,
     density_location='element_gauss_integrate_point',
     quadrature_order=3)
+topm.set_interpolation_method('modified_simp')  # 代理方法
 
 topm.set_quadrature_order(2)  # 直接更新，简洁明了
 
@@ -105,6 +106,15 @@ topm3 = TopologyOptimizationMaterial(
 
 topm3.set_quadrature_order(3)  # 先设置参数（有警告但允许）
 topm3.set_density_location('element_gauss_integrate_point')  # 切换位置，自动更新
+
+
+
+
+
+
+
+
+
 
 
 topm = TopologyOptimizationMaterial(
