@@ -1,9 +1,14 @@
+from typing import List, Callable, Optional, Tuple
+
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
+from fealpy.mesh import HomogeneousMesh, QuadrangleMesh, TriangleMesh
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.typing import TensorLike, Callable
 
-class BoxTriHuZhangData2d:
+
+from .pde_base import PDEBase
+
+class BoxTriHuZhangData2d():
     """来源论文: A simple conforming mixed finite element for linear elasticity on rectangular grids in any space dimension
     -∇·σ = b    in Ω
       Aσ = ε(u) in Ω
@@ -14,7 +19,7 @@ class BoxTriHuZhangData2d:
     - A is the compliance tensor
     
     Material parameters:
-        lam = 1, mu = 0.3
+        lam = 1.0, mu = 0.5
     
     For isotropic materials:
         Aσ = (1/2μ)σ - (λ/(2μ(dλ+2μ)))tr(σ)I
@@ -117,19 +122,77 @@ class BoxTriHuZhangData2d:
         
         return val
     
-class BoxTriLagrangeData2d:
-    def __init__(self, E: float = 1.0, nu: float = 0.3) -> None:
-        self.E = E
-        self.nu = nu
-        self.eps = 1e-12
-        self.plane_type = 'plane_strain'
-
-    def domain(self) -> list:
-        return [0, 1, 0, 1]
+class BoxTriLagrangeData2d(PDEBase):
+    """
+    -∇·σ = b    in Ω
+       u = 0    on ∂Ω (homogeneous Dirichlet)
+    where:
+    - σ is the stress tensor
+    - ε = (∇u + ∇u^T)/2 is the strain tensor
     
-    @variantmethod('uniform_quad')
-    def init_mesh(self, nx=10, ny=10):
-        mesh = QuadrangleMesh.from_box(box=self.box, nx=nx, ny=ny)
+    Material parameters:
+        E = 1, nu = 0.3
+
+    For isotropic materials:
+        σ = 2με + λtr(ε)I
+    """
+        
+    def __init__(self, 
+                domain: List[float] = [0, 1, 0, 1],
+                mesh_type: str = 'uniform_tri',
+                E: float = 1.0, nu: float = 0.3,
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None 
+            ) -> None:
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                        enable_logging=enable_logging, logger_name=logger_name)
+
+        self._E, self._nu = E, nu
+
+        self._eps = 1e-12
+        self._plane_type = 'plane_strain'
+        self._force_type = 'continuous'
+        self._boundary_type = 'dirichlet'
+
+        self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
+                       f"mesh_type='{mesh_type}', E={E}, nu={nu}, "
+                       f"plane_type='{self._plane_type}', force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
+    @property
+    def E(self) -> float:
+        """获取杨氏模量"""
+        return self._E
+    
+    @property
+    def nu(self) -> float:
+        """获取泊松比"""
+        return self._nu
+
+    @variantmethod('uniform_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 10)
+        ny = kwargs.get('ny', 10)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+        
+        self._save_mesh(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
+
+        return mesh
+    
+    @init_mesh.register('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 10)
+        ny = kwargs.get('ny', 10)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', None)
+
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+
+        self._save_mesh(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
+
         return mesh
 
     @cartesian
@@ -164,20 +227,18 @@ class BoxTriLagrangeData2d:
 
     @cartesian
     def is_dirichlet_boundary(self, points: TensorLike) -> TensorLike:
-        domain = self.domain()
+        domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
-        flag_x0 = bm.abs(x - domain[0]) < self.eps
-        flag_x1 = bm.abs(x - domain[1]) < self.eps
-        flag_y0 = bm.abs(y - domain[2]) < self.eps
-        flag_y1 = bm.abs(y - domain[3]) < self.eps
-        
+        flag_x0 = bm.abs(x - domain[0]) < self._eps
+        flag_x1 = bm.abs(x - domain[1]) < self._eps
+        flag_y0 = bm.abs(y - domain[2]) < self._eps
+        flag_y1 = bm.abs(y - domain[3]) < self._eps
+
         flag = flag_x0 | flag_x1 | flag_y0 | flag_y1
         
         return flag
     
-
-
 
 class PolyDisp2dData:
     """多项式位移算例"""

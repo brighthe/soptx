@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -6,14 +6,15 @@ from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.fem import BilinearForm, LinearForm
 from fealpy.fem import VectorSourceIntegrator
 from fealpy.decorator.variantmethod import variantmethod
-from fealpy.sparse import CSRTensor
+from fealpy.sparse import CSRTensor, COOTensor
 
 from ..interpolation.linear_elastic_material import LinearElasticMaterial
 from .integrators.linear_elastic_integrator import LinearElasticIntegrator
+from ..pde.pde_base import PDEBase
 
 class LagrangeFEMAnalyzer:
     def __init__(self,
-                pde, 
+                pde: PDEBase, 
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
                 assembly_method: str = 'standard',
@@ -43,7 +44,7 @@ class LagrangeFEMAnalyzer:
         GD = self.mesh.geo_dimension()
         self.tensor_space = TensorFunctionSpace(scalar_space=self.scalar_space, shape=(GD, -1))
 
-    def assemble_stiff_matrix(self) -> CSRTensor:
+    def assemble_stiff_matrix(self) -> Union[CSRTensor, COOTensor]:
         """组装刚度矩阵"""
         integrator = LinearElasticIntegrator(material=self.material, 
                                             q=self.space_degree+3,
@@ -53,19 +54,21 @@ class LagrangeFEMAnalyzer:
         K = bform.assembly(format='csr')
 
         return K
-    
-    def assemble_force_vector(self) -> CSRTensor:
+
+    def assemble_force_vector(self) -> Union[TensorLike, COOTensor]:
         """组装载荷向量"""
         body_force = self.pde.body_force
         force_type = self.pde.force_type
 
         if force_type == 'concentrated':
+            # NOTE F.dtype == TensorLike
             F = self.tensor_space.interpolate(body_force)
         elif force_type == 'continuous':
+            # NOTE F.dtype == COOTensor or TensorLike 
             integrator = VectorSourceIntegrator(source=body_force, q=self.space_degree+3)
             lform = LinearForm(self.tensor_space)
             lform.add_integrator(integrator)
-            F = lform.assembly(format='csr')
+            F = lform.assembly(format='dense')
         else:
             raise ValueError(f"Unsupported force type: {force_type}")
 
@@ -109,7 +112,7 @@ class LagrangeFEMAnalyzer:
 
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
 
-    def apply_bc(self, K: CSRTensor, F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
+    def apply_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
         """应用边界条件"""
         boundary_type = self.pde.boundary_type
         gdof = self.tensor_space.number_of_global_dofs()
@@ -117,14 +120,16 @@ class LagrangeFEMAnalyzer:
         if boundary_type == 'dirichlet':
             uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)
             uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
-                                    gd=self.pde.dirichlet, 
-                                    threshold=self.pde.threshold(), 
+                                    gd=self.pde.dirichlet_bc, 
+                                    threshold=self.pde.is_dirichlet_boundary, 
                                     method='interp'
                                 )
             F = F - K.matmul(uh_bd[:])
             F[isBdDof] = uh_bd[isBdDof]
 
             K = self._apply_matrix(A=K, isDDof=isBdDof)
+
+            return K, F
 
         elif boundary_type == 'neumann':
             pass

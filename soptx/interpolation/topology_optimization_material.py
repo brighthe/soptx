@@ -37,6 +37,8 @@ class TopologyOptimizationMaterial(BaseLogged):
         topm2 = TopologyOptimizationMaterial(
                             mesh=mesh, base_material=ilem, interpolation_scheme=simpi,
                             density_location='element')
+        
+        topm2.set_density_location('element_gauss_integrate_point', quadrature_order=3)
 
         3. 分步设置
         topm3 = TopologyOptimizationMaterial(
@@ -242,9 +244,17 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         interpolation_info = self.interpolation_scheme.get_interpolation_params()
 
+        topology_info = {
+                        'relative_density': self.relative_density,
+                        'density_location': self.density_location,
+                        'quadrature_order': self.quadrature_order,
+                        'density_distribution_shape': self.density_distribution.shape
+                    }
+        
         material_info = {
             **base_material_info,
-            **interpolation_info
+            **interpolation_info,
+            **topology_info
         }
 
         return material_info

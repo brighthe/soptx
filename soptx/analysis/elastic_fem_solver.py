@@ -14,7 +14,7 @@ from fealpy.sparse import CSRTensor
 from fealpy.solver import cg, spsolve
 
 # ! 这里调用内部的线弹性积分子
-from soptx.analysis import LinearElasticIntegrator
+# from soptx.analysis import LinearElasticIntegrator
 from soptx.material import BaseElasticMaterialInstance
 from soptx.utils import timer
 
@@ -274,7 +274,7 @@ class ElasticFEMSolver:
     #----------------------------------------------------------------------------------
     # 内部方法：组装和边界条件处理
     #----------------------------------------------------------------------------------
-    def _create_integrator(self) -> LinearElasticIntegrator:
+    # def _create_integrator(self) -> LinearElasticIntegrator:
         """创建适当的积分器实例"""
         method_map = {
             AssemblyMethod.STANDARD: None,
