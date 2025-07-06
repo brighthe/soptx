@@ -1,10 +1,9 @@
 from typing import List, Callable, Optional, Tuple
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import HomogeneousMesh, QuadrangleMesh, TriangleMesh
+from fealpy.mesh import QuadrangleMesh, TriangleMesh
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.typing import TensorLike, Callable
-
 
 from .pde_base import PDEBase
 
@@ -124,6 +123,9 @@ class BoxTriHuZhangData2d():
     
 class BoxTriLagrangeData2d(PDEBase):
     """
+    模型来源:
+    https://wnesm678i4.feishu.cn/wiki/JvPPwCD9niMSTZkztTpcIcLxnne#share-LLcgd9YBAoJlvhxags2cR74Tnnd
+    
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
     where:

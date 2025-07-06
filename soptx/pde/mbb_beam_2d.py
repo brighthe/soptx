@@ -5,36 +5,23 @@ from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
-class HalfMBBBeam2dData1:
+from soptx.pde.pde_base import PDEBase  
+
+class HalfMBBBeam2dData1(PDEBase):
     '''
     模型来源:
     https://wnesm678i4.feishu.cn/wiki/Xi3dw6mzNi6V9ckNcoScfmAXnFg#part-TuQydJUDvojFG6x0NPzcH3stnTh
     '''
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20],
-                mesh_method:Optional[str] = None,
+                mesh_type: str = 'uniform_quad',
                 T: float = -1.0, # 负值代表方向向下
-                E: float = 1.0,
-                nu: float = 0.3,
+                E: float = 1.0, nu: float = 0.3,
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None
             ) -> None:
-        """
-        1. 实例化时设置默认网格变体方法
-        hmb = HalfMBBBeam2dData1(mesh_method='uniform_quad')
-
-        2. 直接使用默认方法生成网格
-        mesh1 = hmb.init_mesh(nx=60, ny=20)  # 生成四边形网格
-
-        3. 切换到其他网格方法
-        hmb.init_mesh.set('uniform_tri')     # 设置变体 (返回 None)
-        mesh2 = hmb.init_mesh(nx=30, ny=10)  # 生成三角形网格
-        
-        注意: 
-        - init_mesh.set() 只设置变体，不执行方法，返回 None
-        - 需要分别调用 set() 和 init_mesh() 来生成网格
-        - 每次 set() 后，后续的 init_mesh() 调用都使用新设置的变体
-        """
-        self.domain = domain
-        self.init_mesh.set(mesh_method)
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                enable_logging=enable_logging, logger_name=logger_name)
         
         self.T = T
         self.E, self.nu = E, nu
@@ -43,48 +30,42 @@ class HalfMBBBeam2dData1:
         self.plane_type = 'plane_stress'
         self.force_type = 'concentrated'
         self.boundary_type = 'dirichlet'
-    
-    @variantmethod('uniform_tri')
-    def init_mesh(self, **kwargs) -> TriangleMesh:
-        nx = kwargs.get('nx', 60)
-        ny = kwargs.get('ny', 20)
-        threshold = kwargs.get('threshold', None)
-        device = kwargs.get('device', None)
 
-        mesh = TriangleMesh.from_box(box=self.domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
-
-        hx = (self.domain[1] - self.domain[0]) / nx
-        hy = (self.domain[3] - self.domain[2]) / ny
-
-        mesh.meshdata['domain'] = self.domain
-        mesh.meshdata['nx'] = nx
-        mesh.meshdata['ny'] = ny
-        mesh.meshdata['hx'] = hx
-        mesh.meshdata['hy'] = hy
-        mesh.meshdata['mesh_type'] = self.init_mesh.vm.get_key(self)
+    @property
+    def E(self) -> float:
+        """获取杨氏模量"""
+        return self._E
     
-        return mesh
+    @property
+    def nu(self) -> float:
+        """获取泊松比"""
+        return self._nu
     
-    @init_mesh.register('uniform_quad')
+    @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         nx = kwargs.get('nx', 60)
         ny = kwargs.get('ny', 20)
         threshold = kwargs.get('threshold', None)
-        device = kwargs.get('device', None)
+        device = kwargs.get('device', 'cpu')
 
-        mesh = QuadrangleMesh.from_box(box=self.domain, nx=nx, ny=ny,
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)
 
-        hx = (self.domain[1] - self.domain[0]) / nx
-        hy = (self.domain[3] - self.domain[2]) / ny
+        self._save_mesh(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
 
-        mesh.meshdata['domain'] = self.domain
-        mesh.meshdata['nx'] = nx
-        mesh.meshdata['ny'] = ny
-        mesh.meshdata['hx'] = hx
-        mesh.meshdata['hy'] = hy
-        mesh.meshdata['mesh_type'] = self.init_mesh.vm.get_key(self)
+        return mesh
+    
+    @init_mesh.register('uniform_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+        
+        self._save_mesh(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
 
         return mesh
 

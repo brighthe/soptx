@@ -38,9 +38,14 @@ class LagrangeFEMAnalyzer:
         self.material = material
         self.space_degree = space_degree
         self.assembly_method = assembly_method
+        
         self.solve.set(solve_method)
 
-        self.scalar_space = LagrangeFESpace(self.mesh, p=space_degree, ctype='C')
+        self._setup_function_spaces()
+
+    def _setup_function_spaces(self):
+        """设置函数空间"""
+        self.scalar_space = LagrangeFESpace(self.mesh, p=self.space_degree, ctype='C')
         GD = self.mesh.geo_dimension()
         self.tensor_space = TensorFunctionSpace(scalar_space=self.scalar_space, shape=(GD, -1))
 
