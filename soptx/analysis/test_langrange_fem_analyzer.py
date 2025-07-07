@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     # # 一、基础线弹性材料求解
     # ## 1.1 创建 pde
-    # from soptx.pde.linear_elasticity_2d import BoxTriLagrangeData2d
+    # from soptx.model.linear_elasticity_2d import BoxTriLagrangeData2d
     # pde = BoxTriLagrangeData2d(
     #                     domain=[0, 1, 0, 1], 
     #                     E=1.0, nu=0.3,
@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
     # 二、拓扑优化材料求解
     ## 2.1 创建 pde 并设置网格
-    from soptx.pde.mbb_beam_2d import HalfMBBBeam2dData1
+    from soptx.model.mbb_beam_2d import HalfMBBBeam2dData1
     pde = HalfMBBBeam2dData1(
                         domain=[0, 60, 0, 20],
                         T=-1.0, E=1.0, nu=0.3,
