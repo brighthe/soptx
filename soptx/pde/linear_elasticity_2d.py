@@ -125,7 +125,7 @@ class BoxTriLagrangeData2d(PDEBase):
     """
     模型来源:
     https://wnesm678i4.feishu.cn/wiki/JvPPwCD9niMSTZkztTpcIcLxnne#share-LLcgd9YBAoJlvhxags2cR74Tnnd
-    
+
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
     where:
@@ -138,7 +138,6 @@ class BoxTriLagrangeData2d(PDEBase):
     For isotropic materials:
         σ = 2με + λtr(ε)I
     """
-        
     def __init__(self, 
                 domain: List[float] = [0, 1, 0, 1],
                 mesh_type: str = 'uniform_tri',
@@ -188,7 +187,7 @@ class BoxTriLagrangeData2d(PDEBase):
         nx = kwargs.get('nx', 10)
         ny = kwargs.get('ny', 10)
         threshold = kwargs.get('threshold', None)
-        device = kwargs.get('device', None)
+        device = kwargs.get('device', 'cpu')
 
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)

@@ -122,11 +122,14 @@ class LagrangeFEMAnalyzer:
         boundary_type = self.pde.boundary_type
         gdof = self.tensor_space.number_of_global_dofs()
 
+        gd = self.pde.dirichlet_bc
+        threshold = self.pde.is_dirichlet_boundary
+
         if boundary_type == 'dirichlet':
             uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)
             uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
-                                    gd=self.pde.dirichlet_bc, 
-                                    threshold=self.pde.is_dirichlet_boundary, 
+                                    gd=gd,
+                                    threshold=threshold,
                                     method='interp'
                                 )
             F = F - K.matmul(uh_bd[:])

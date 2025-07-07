@@ -11,6 +11,18 @@ class HalfMBBBeam2dData1(PDEBase):
     '''
     模型来源:
     https://wnesm678i4.feishu.cn/wiki/Xi3dw6mzNi6V9ckNcoScfmAXnFg#part-TuQydJUDvojFG6x0NPzcH3stnTh
+
+    -∇·σ = b    in Ω
+       u = 0    on ∂Ω (homogeneous Dirichlet)
+    where:
+    - σ is the stress tensor
+    - ε = (∇u + ∇u^T)/2 is the strain tensor
+    
+    Material parameters:
+        E = 1, nu = 0.3
+
+    For isotropic materials:
+        σ = 2με + λtr(ε)I
     '''
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20],
@@ -23,13 +35,18 @@ class HalfMBBBeam2dData1(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
         
-        self.T = T
-        self.E, self.nu = E, nu
+        self._T = T
+        self._E, self._nu = E, nu
 
-        self.eps = 1e-12
-        self.plane_type = 'plane_stress'
-        self.force_type = 'concentrated'
-        self.boundary_type = 'dirichlet'
+        self._eps = 1e-12
+        self._plane_type = 'plane_stress'
+        self._force_type = 'concentrated'
+        self._boundary_type = 'dirichlet'
+
+        self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
+                f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
+                f"plane_type='{self._plane_type}', "
+                f"force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
 
     @property
     def E(self) -> float:
@@ -40,6 +57,11 @@ class HalfMBBBeam2dData1(PDEBase):
     def nu(self) -> float:
         """获取泊松比"""
         return self._nu
+    
+    @property
+    def T(self) -> float:
+        """获取集中力"""
+        return self._T
     
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
@@ -77,46 +99,46 @@ class HalfMBBBeam2dData1(PDEBase):
         y = points[..., 1]
 
         coord = (
-            (bm.abs(x - domain[0]) < self.eps) & 
-            (bm.abs(y - domain[3]) < self.eps)
+            (bm.abs(x - domain[0]) < self._eps) & 
+            (bm.abs(y - domain[3]) < self._eps)
         )
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (coord, 1), self.T)
+        val = bm.set_at(val, (coord, 1), self._T)
 
         return val
     
     @cartesian
-    def displacement_solution(self, points: TensorLike) -> TensorLike:
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
-    def is_displacement_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self.domain
 
         x = points[..., 0]
 
-        coord = bm.abs(x - domain[0]) < self.eps
+        coord = bm.abs(x - domain[0]) < self._eps
         
         return coord
     
     @cartesian
-    def is_displacement_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         domain = self.domain
 
         x = points[..., 0]
         y = points[..., 1]
 
-        coord = ((bm.abs(x - domain[1]) < self.eps) &
-                 (bm.abs(y - domain[2]) < self.eps))
+        coord = ((bm.abs(x - domain[1]) < self._eps) &
+                 (bm.abs(y - domain[2]) < self._eps))
         
         return coord
     
-    def threshold(self) -> Tuple[Callable, Callable]:
-        return (self.is_displacement_boundary_dof_x, 
-                self.is_displacement_boundary_dof_y)
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
 
 
 class MBBBeam2dData2:

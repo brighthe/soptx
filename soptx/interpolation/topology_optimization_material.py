@@ -142,7 +142,6 @@ class TopologyOptimizationMaterial(BaseLogged):
         bcs, ws = qf.get_quadrature_points_and_weights()
 
         NC = self.mesh.number_of_cells()
-        NQ = len(ws)
         density_tensor = bm.full((NC,), 
                                 self._relative_density, 
                                 dtype=bm.float64, 
