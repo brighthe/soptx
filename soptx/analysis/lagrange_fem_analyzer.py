@@ -123,7 +123,7 @@ class LagrangeFEMAnalyzer:
         gdof = self.tensor_space.number_of_global_dofs()
 
         gd = self.pde.dirichlet_bc
-        threshold = self.pde.is_dirichlet_boundary
+        threshold = self.pde.is_dirichlet_boundary()
 
         if boundary_type == 'dirichlet':
             uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)

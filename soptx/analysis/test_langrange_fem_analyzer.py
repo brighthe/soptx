@@ -108,7 +108,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                 f"mesh = {self.mesh}, \n"
                 f"material = {self.material}, \n"
                 f"relative_density = {self.material.relative_density}, "
-                f"interpolation_scheme = {self.material.interpolation_scheme}, "
+                f"interpolation_method = '{self.material.interpolation_method}', "
                 f"density_location = '{self.material.density_location}', \n"
                 f"p = {self.p}, assembly_method = '{self.assembly_method}', "
                 f"solve_method = '{self.solve_method}'")
@@ -186,35 +186,17 @@ if __name__ == "__main__":
                             mesh=mesh,
                             base_material=base_material,
                             interpolation_scheme=interpolation_scheme,
-                            relative_density=0.5,
-                            density_location='element',
+                            relative_density=1.0,
+                            density_location='element_gauss_integrate_point',
+                            quadrature_order=3,
                             enable_logging=False
                         )
     
     test1.set_pde(pde)
     test1.set_material(top_material)
     test1.set_space_degree(1)
-    test1.set_assembly_method('fast')
+    test1.set_assembly_method('standard')
     test1.set_solve_method('mumps')
-
-    uh1 = test1.run(maxit=4)
-
-# # 3. 创建简单网格
-# from soptx.pde.mbb_beam_2d import HalfMBBBeam2dData1
-# pde = HalfMBBBeam2dData1(domain=[0, 2, 0, 1], T=-1.0, E=1.0, nu=0.3)
-# pde.init_mesh.set('uniform_quad')
-# mesh = pde.init_mesh(nx=4, ny=2)
-# print(f"网格信息: {mesh.number_of_cells()} 个单元")
-
-# # 4. 创建拓扑优化材料
-# from soptx.interpolation.topology_optimization_material import TopologyOptimizationMaterial
-# topm = TopologyOptimizationMaterial(
-#                         mesh=mesh,
-#                         base_material=base_material,
-#                         interpolation_scheme=interpolation_scheme,
-#                         relative_density=0.5,
-#                         density_location='element',
-#                         enable_logging=False
-#                     )
-
-# lfa = LagrangeFEMAnalyzer(pde=pde, material=topm, solve_method='mumps')
+    
+    test1.run.set('LFA_top_material')
+    uh1 = test1.run()

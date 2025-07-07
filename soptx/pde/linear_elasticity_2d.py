@@ -225,9 +225,9 @@ class BoxTriLagrangeData2d(PDEBase):
         val = self.disp_solution(points)
         
         return val
-
+    
     @cartesian
-    def is_dirichlet_boundary(self, points: TensorLike) -> TensorLike:
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -237,8 +237,24 @@ class BoxTriLagrangeData2d(PDEBase):
         flag_y1 = bm.abs(y - domain[3]) < self._eps
 
         flag = flag_x0 | flag_x1 | flag_y0 | flag_y1
-        
         return flag
+
+    @cartesian  
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        flag_x0 = bm.abs(x - domain[0]) < self._eps
+        flag_x1 = bm.abs(x - domain[1]) < self._eps
+        flag_y0 = bm.abs(y - domain[2]) < self._eps
+        flag_y1 = bm.abs(y - domain[3]) < self._eps
+
+        flag = flag_x0 | flag_x1 | flag_y0 | flag_y1
+        return flag
+
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
     
 
 class PolyDisp2dData:
