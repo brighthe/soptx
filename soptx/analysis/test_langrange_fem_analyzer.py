@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod

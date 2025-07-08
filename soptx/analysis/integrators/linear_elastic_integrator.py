@@ -61,6 +61,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
 
         NC = mesh.number_of_cells()
+        GD = mesh.geo_dimension()
         NQ = len(ws)
         D = self.material.elastic_matrix(bcs)
 
@@ -68,7 +69,9 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             not (D.shape[0] == NC and D.shape[1] == 1) and \
             not (D.shape[0] == NC and D.shape[1] == NQ):
             raise ValueError(f"assembly currently only supports elastic matrices "
-                    f"with shape (1, 1, {2*GD}, {2*GD}) or (NC, 1, {2*GD}, {2*GD}) or (NC, {NQ}, {2*GD}, {2*GD}), "
+                    f"with shape (1, 1, {GD*(GD+1)//2}, {GD*(GD+1)//2}) or "
+                    f"(NC, 1, {GD*(GD+1)//2}, {GD*(GD+1)//2}) or "
+                    f"(NC, {NQ}, {GD*(GD+1)//2}, {GD*(GD+1)//2}), "
                     f"got {D.shape}.")
             
         if isinstance(mesh, SimplexMesh):

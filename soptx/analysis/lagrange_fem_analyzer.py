@@ -2,7 +2,7 @@ from typing import Optional, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from fealpy.fem import BilinearForm, LinearForm
 from fealpy.fem import VectorSourceIntegrator
 from fealpy.decorator.variantmethod import variantmethod
@@ -11,14 +11,18 @@ from fealpy.sparse import CSRTensor, COOTensor
 from ..interpolation.linear_elastic_material import LinearElasticMaterial
 from .integrators.linear_elastic_integrator import LinearElasticIntegrator
 from ..pde.pde_base import PDEBase
+from ..utils.base_logged import BaseLogged
 
-class LagrangeFEMAnalyzer:
+
+class LagrangeFEMAnalyzer(BaseLogged):
     def __init__(self,
                 pde: PDEBase, 
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
                 assembly_method: str = 'standard',
                 solve_method: str = 'mumps',
+                enable_logging: bool = False,
+                logger_name: Optional[str] = None
             ) -> None:
         """
         1. 实例化时设置默认求解变体方法
@@ -33,49 +37,89 @@ class LagrangeFEMAnalyzer:
         - 需要分别调用 set() 和 solve() 来求解位移
         - 每次 set() 后，后续的 solve() 调用都使用新设置的变体
         """
-        self.pde = pde
-        self.mesh =self.pde.mesh
-        self.material = material
-        self.space_degree = space_degree
-        self.assembly_method = assembly_method
+        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        
+        self._pde = pde
+        self._mesh = self._pde.mesh
+        self._material = material
+        self._space_degree = space_degree
+        self._assembly_method = assembly_method
         
         self.solve.set(solve_method)
 
         self._setup_function_spaces()
 
+        self._K = None
+        self._F = None
+
     def _setup_function_spaces(self):
         """设置函数空间"""
-        self.scalar_space = LagrangeFESpace(self.mesh, p=self.space_degree, ctype='C')
-        GD = self.mesh.geo_dimension()
-        self.tensor_space = TensorFunctionSpace(scalar_space=self.scalar_space, shape=(GD, -1))
+        self._scalar_space = LagrangeFESpace(self._mesh, p=self._space_degree, ctype='C')
+        GD = self._mesh.geo_dimension()
+        self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(GD, -1))
+
+        self._log_info(f"Tensor space DOF ordering: dof_priority")
+        
+    @property
+    def density_distribution(self) -> Function:
+        """获取当前的密度分布 (代理方法)"""
+        return self._material.density_distribution
+
+    @density_distribution.setter
+    def density_distribution(self, new_density_distribution: Function) -> None:
+        """设置新的密度分布 (代理方法)"""
+        self._material.density_distribution = new_density_distribution
+        self._K = None 
+
+    @property
+    def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
+        """获取当前的刚度矩阵"""
+        if self._K is not None:
+            self._K = self.assemble_stiff_matrix()
+
+        return self._K
+    
+    @property
+    def force_vector(self) -> Union[TensorLike, COOTensor]:
+        """获取当前的载荷向量"""
+        if self._F is not None:
+            self._F = self.assemble_force_vector()
+
+        return self._F
 
     def assemble_stiff_matrix(self) -> Union[CSRTensor, COOTensor]:
         """组装刚度矩阵"""
-        integrator = LinearElasticIntegrator(material=self.material, 
-                                            q=self.space_degree+3,
-                                            method=self.assembly_method)
-        bform = BilinearForm(self.tensor_space)
+        integrator = LinearElasticIntegrator(material=self._material, 
+                                            q=self._material.quadrature_order,
+                                            method=self._assembly_method)
+        bform = BilinearForm(self._tensor_space)
         bform.add_integrator(integrator)
         K = bform.assembly(format='csr')
+
+        self._K = K
 
         return K
 
     def assemble_force_vector(self) -> Union[TensorLike, COOTensor]:
         """组装载荷向量"""
-        body_force = self.pde.body_force
-        force_type = self.pde.force_type
+        body_force = self._pde.body_force
+        force_type = self._pde.force_type
 
         if force_type == 'concentrated':
             # NOTE F.dtype == TensorLike
-            F = self.tensor_space.interpolate(body_force)
+            F = self._tensor_space.interpolate(body_force)
         elif force_type == 'continuous':
-            # NOTE F.dtype == COOTensor or TensorLike 
-            integrator = VectorSourceIntegrator(source=body_force, q=self.space_degree+3)
+            # NOTE F.dtype == COOTensor or TensorLike
+            integrator = VectorSourceIntegrator(source=body_force, q=self._space_degree+3)
             lform = LinearForm(self.tensor_space)
             lform.add_integrator(integrator)
             F = lform.assembly(format='dense')
         else:
-            raise ValueError(f"Unsupported force type: {force_type}")
+            error_msg = f"Unsupported force type: {force_type}"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+        
+        self._F = F
 
         return F
     
@@ -119,15 +163,15 @@ class LagrangeFEMAnalyzer:
 
     def apply_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
         """应用边界条件"""
-        boundary_type = self.pde.boundary_type
-        gdof = self.tensor_space.number_of_global_dofs()
+        boundary_type = self._pde.boundary_type
+        gdof = self._tensor_space.number_of_global_dofs()
 
-        gd = self.pde.dirichlet_bc
-        threshold = self.pde.is_dirichlet_boundary()
+        gd = self._pde.dirichlet_bc
+        threshold = self._pde.is_dirichlet_boundary()
 
         if boundary_type == 'dirichlet':
-            uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self.tensor_space.device)
-            uh_bd, isBdDof = self.tensor_space.boundary_interpolate(
+            uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self._tensor_space.device)
+            uh_bd, isBdDof = self._tensor_space.boundary_interpolate(
                                     gd=gd,
                                     threshold=threshold,
                                     method='interp'
@@ -143,23 +187,28 @@ class LagrangeFEMAnalyzer:
             pass
 
         else:
-            raise ValueError(f"Unsupported boundary type: {boundary_type}")
+            error_msg = f"Unsupported boundary type: {boundary_type}"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
 
     @variantmethod('mumps')
-    def solve(self, **kwargs) -> TensorLike:
+    def solve(self, **kwargs) -> Function:
         from fealpy.solver import spsolve
         K0 = self.assemble_stiff_matrix()
         F0 = self.assemble_force_vector()
         K, F = self.apply_bc(K0, F0)
 
         solver_type = kwargs.get('solver', 'mumps')
-        uh = self.tensor_space.function()
+        uh = self._tensor_space.function()
         uh[:] = spsolve(K, F[:], solver=solver_type)
+
+        gdof = self._tensor_space.number_of_global_dofs()
+        self._log_info(f"Solving linear system with {gdof} displacement DOFs with MUMPS solver.")
 
         return uh
     
     @solve.register('cg')
-    def solve(self, **kwargs) -> TensorLike:
+    def solve(self, **kwargs) -> Function:
         from fealpy.solver import cg
         K0 = self.assemble_stiff_matrix()
         F0 = self.assemble_force_vector()
@@ -169,12 +218,25 @@ class LagrangeFEMAnalyzer:
         atol = kwargs.get('atol', 1e-12)
         rtol = kwargs.get('rtol', 1e-12)
         x0 = kwargs.get('x0', None)
-        uh = self.tensor_space.function()
+        uh = self._tensor_space.function()
         uh[:], info = cg(K, F[:], x0=x0,
                         batch_first=True, 
                         atol=atol, rtol=rtol, 
                         maxit=maxiter, returninfo=True)
+        
+        gdof = self._tensor_space.number_of_global_dofs()
+        self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
 
         return uh
 
+    def get_base_local_stiffness_matrix(self) -> Function:
+        """获取基础材料的局部刚度矩阵"""
+        base_material = self._material._base_material
+        integrator = LinearElasticIntegrator(material=base_material, 
+                                    q=self._material.quadrature_order,
+                                    method=self._assembly_method)
+        
+        ke0 = integrator.assembly(space=self.tensor_space)
+
+        return ke0
 

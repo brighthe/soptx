@@ -58,8 +58,8 @@ class TopologyOptimizationMaterial(BaseLogged):
             raise ValueError(error_msg)
 
         self.mesh = mesh
-        self.base_material = base_material
-        self.interpolation_scheme = interpolation_scheme
+        self._base_material = base_material
+        self._interpolation_scheme = interpolation_scheme
 
         self._relative_density = relative_density
         self._quadrature_order = quadrature_order
@@ -97,21 +97,35 @@ class TopologyOptimizationMaterial(BaseLogged):
     @property
     def penalty_factor(self) -> float:
         """获取当前的惩罚因子 (代理属性)"""
-        return self.interpolation_scheme.penalty_factor
+        return self._interpolation_scheme.penalty_factor
 
     @property
     def interpolation_method(self) -> str:
         """获取当前的插值方法 (代理属性)"""
-        return self.interpolation_scheme.interpolation_method
+        return self._interpolation_scheme.interpolation_method
         
     @property
-    def density_distribution(self) -> TensorLike:
+    def density_distribution(self) -> Function:
         """获取当前的密度分布"""
         return self._density_distribution
     
+    @density_distribution.setter
+    def density_distribution(self, new_density_distribution: Function) -> None:
+        """设置新的密度分布"""
+        if new_density_distribution.shape != self._density_distribution.shape:
+            error_msg = f"Shape mismatch: expected {self._density_distribution.shape}, got {new_density_distribution.shape}"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+
+        self._density_distribution[:] = new_density_distribution
+
+        self._log_info(f"Density distribution updated, shape: {new_density_distribution.shape}")
+
+        return new_density_distribution
+
     @variantmethod('element')
     def setup_density_distribution(self, **kwargs) -> Function:
-        """设置单元密度分布 (NC, )"""
+        """初始化单元密度分布 (NC, )"""
         NC = self.mesh.number_of_cells()
         density_tensor = bm.full((NC,), 
                                 self._relative_density, 
@@ -123,14 +137,14 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         self._density_distribution = density_dist
 
-        self._log_info(f"Created element density distribution: ({NC},) "
+        self._log_info(f"Initialized element density distribution: ({NC},) "
                        f"with value {self._relative_density}")
 
         return density_dist
     
     @setup_density_distribution.register('element_gauss_integrate_point')
     def setup_density_distribution(self, **kwargs) -> Function:
-        """设置单元高斯积分点密度分布 (NC, NQ)"""
+        """初始化单元高斯积分点密度分布 (NC, NQ)"""
         if self._quadrature_order is None:
             error_msg = ("Quadrature order not set for 'element_gauss_integrate_point' density location. "
                         "Please call set_quadrature_order() first.")
@@ -152,7 +166,7 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         self._density_distribution = density_dist
 
-        self._log_info(f"Created element Gauss point density distribution: {density_dist.shape} "
+        self._log_info(f"Initialized element Gauss point density distribution: {density_dist.shape} "
                 f"with value {self._relative_density}, q={self._quadrature_order}")
 
         return density_dist
@@ -160,7 +174,7 @@ class TopologyOptimizationMaterial(BaseLogged):
     def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
         """计算插值后的弹性矩阵"""
 
-        D = self.interpolation_scheme.interpolate(self.base_material, self._density_distribution[:])
+        D = self._interpolation_scheme.interpolate(self._base_material, self._density_distribution)
 
         self._log_info(f"[TopologyOptimizationMaterial] Elastic matrix computed successfully, "
                    f"shape: {D.shape}")
@@ -224,7 +238,7 @@ class TopologyOptimizationMaterial(BaseLogged):
         
     def set_interpolation_method(self, interpolation_method: str) -> None:
         """设置材料插值方法 (代理方法)"""
-        self.interpolation_scheme.set_interpolation_method(interpolation_method)
+        self._interpolation_scheme.set_interpolation_method(interpolation_method)
         self._log_info(f"[TopologyOptimizationMaterial] Interpolation method updated via proxy method")
 
     def set_material_parameters(self, **kwargs) -> None:
@@ -234,14 +248,14 @@ class TopologyOptimizationMaterial(BaseLogged):
 
     def set_penalty_factor(self, penalty_factor: float) -> None:
         """设置惩罚因子 (代理方法)"""
-        self.interpolation_scheme.set_penalty_factor(penalty_factor)
+        self._interpolation_scheme.set_penalty_factor(penalty_factor)
         self._log_info(f"[TopologyOptimizationMaterial] Penalty factor updated via proxy method")
 
     def get_material_info(self) -> Dict[str, Any]:
         """获取材料信息, 包括基础材料和插值方案的参数"""
         base_material_info = self.base_material.get_material_params()
 
-        interpolation_info = self.interpolation_scheme.get_interpolation_params()
+        interpolation_info = self._interpolation_scheme.get_interpolation_params()
 
         topology_info = {
                         'relative_density': self.relative_density,

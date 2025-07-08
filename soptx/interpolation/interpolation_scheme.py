@@ -3,6 +3,7 @@ from typing import Optional, Union, Dict, Any
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
+from fealpy.functionspace import Function
 
 from .linear_elastic_material import LinearElasticMaterial
 from ..utils.base_logged import BaseLogged
@@ -126,6 +127,22 @@ class MaterialInterpolationScheme(BaseLogged):
         """显示当前的插值参数"""
         params = self.get_interpolation_params()
         self._log_info(f"Interpolation parameters: {params}", force_log=True)
+
+    def interpolate_derivative(self,
+                            base_material: LinearElasticMaterial, 
+                            density_distribution: Function,
+                        ) -> TensorLike:
+        """获取当前插值方法的导数对应的系数"""
+        method = self.interpolation_method
+        p = self._penalty_factor
+
+        if method == 'simp':
+            return p * density_distribution[:] ** (p - 1)
+
+        elif method == 'modified_simp':
+            E0 = base_material.youngs_modulus
+            Emin = self._void_youngs_modulus
+            return p * density_distribution[:] * (p - 1) * (E0 - Emin) / E0
 
     @variantmethod('simp')
     def interpolate(self, 
