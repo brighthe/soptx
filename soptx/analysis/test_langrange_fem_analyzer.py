@@ -197,6 +197,3 @@ if __name__ == "__main__":
     test1.set_space_degree(1)
     test1.set_assembly_method('standard')
     test1.set_solve_method('mumps')
-    
-    test1.run.set('LFA_top_material')
-    uh1 = test1.run()

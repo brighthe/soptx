@@ -2,9 +2,10 @@ from typing import Optional, Literal
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-from fealpy.functionspace import Function
+from fealpy.functionspace import Function, TensorFunctionSpace
 
 from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+from ..interpolation.topology_optimization_material import TopologyOptimizationMaterial
 from ..utils.base_logged import BaseLogged
 
 class ComplianceObjective(BaseLogged):
@@ -15,10 +16,19 @@ class ComplianceObjective(BaseLogged):
             ) -> None:
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
+        if not isinstance(analyzer.material, TopologyOptimizationMaterial):
+            error_msg = (
+                f"ComplianceObjective requires TopologyOptimizationMaterial, "
+                f"got {type(analyzer.material).__name__}. "
+            )
+            self._log_error(error_msg) 
+            raise TypeError(error_msg)  
+
         self._analyzer = analyzer
-        self._tensor_space = self._analyzer._tensor_space
-        self._top_material = self._analyzer._material
-        self._interpolation_scheme = self._top_material._interpolation_scheme
+        self._tensor_space: TensorFunctionSpace = self._analyzer.tensor_space
+        self._top_material: TopologyOptimizationMaterial = self._analyzer.material
+        self._base_material = self._top_material.base_material
+        self._interpolation_scheme = self._top_material.interpolation_scheme
 
     def fun(self, 
             density_distribution: Function, 
@@ -26,7 +36,7 @@ class ComplianceObjective(BaseLogged):
         ) -> float:
         """计算柔顺度目标函数值"""
 
-        self._analyzer.density_distribution = density_distribution
+        self._top_material.density_distribution = density_distribution
 
         if displacement is None:
             uh = self._analyzer.solve()
@@ -59,14 +69,18 @@ class ComplianceObjective(BaseLogged):
             self._log_error(error_msg)
             raise ValueError(error_msg)
         
+    
+    #####################################################################################################
+    # 内部方法
+    #####################################################################################################
+        
     def _manual_differentiation(self, 
             density_distribution: Function, 
             displacement: Optional[Function] = None
         ) -> Function:
         """手动计算目标函数梯度"""
 
-        # 设置新的密度分布
-        self._analyzer.density_distribution = density_distribution
+        self._top_material.density_distribution = density_distribution
 
         if displacement is None:
             uh = self._analyzer.solve()
@@ -76,17 +90,27 @@ class ComplianceObjective(BaseLogged):
         cell2dof = self._tensor_space.cell_to_dof()
         uhe = uh[cell2dof]
 
-        if density_distribution.shape == (NC, ):
-            interpolate_derivative = self._interpolation_scheme.interpolate_derivative(
-                                            base_material=self._top_material._base_material, 
-                                            density_distribution=density_distribution
-                                        )
-            ke0 = self._analyzer.get_base_local_stiffness_matrix()
-            dc = bm.einsum('c, ci, cik, ck -> c', interpolate_derivative, uhe, ke0, uhe)
+        density_location = self._top_material.density_location
+        diff_ke = self._analyzer.get_stiffness_matrix__derivative()
 
-        elif density_distribution.shape == (NC, NQ):
-            pass
+        if density_location == 'element':
+            dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
+
+            self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
+
+
+        elif density_location == 'element_gauss_integrate_point':
+            dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
+
+            self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")
 
         return dc
+    
+    def _auto_differentiation(self, 
+            density_distribution: Function, 
+            displacement: Optional[Function] = None
+        ) -> Function:
+        # TODO 待实现
+        pass
         
     

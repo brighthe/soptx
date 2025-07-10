@@ -57,7 +57,7 @@ topm2 = TopologyOptimizationMaterial(
     interpolation_scheme=interpolation_scheme,
     relative_density=0.8,
     density_location='element_gauss_integrate_point',
-    quadrature_order=2,
+    quadrature_order=1,
     enable_logging=False
 )
 print(f"  密度分布形状: {topm2.density_distribution.shape}")

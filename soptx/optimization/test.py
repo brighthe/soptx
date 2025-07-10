@@ -9,7 +9,7 @@ pde = HalfMBBBeam2dData1(
                     enable_logging=False
                 )
 pde.init_mesh.set('uniform_quad')
-mesh = pde.init_mesh(nx=60, ny=20)
+mesh = pde.init_mesh(nx=1, ny=1)
 
 ## 2.2 创建基础材料
 from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -38,8 +38,10 @@ top_material = TopologyOptimizationMaterial(
                         relative_density=1.0,
                         density_location='element_gauss_integrate_point',
                         quadrature_order=3,
-                        enable_logging=False
+                        enable_logging=True
                         )
+
+density_distribution = top_material.density_distribution
 
 # 2.5 创建有限元分析器
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -51,6 +53,15 @@ lagrange_fem = LagrangeFEMAnalyzer(
                         solve_method='mumps',
                         enable_logging=True
                     )
+mesh = lagrange_fem.mesh
+ip1 = mesh.interpolation_points(p=3)
+
+
+
+
+scalar_space = lagrange_fem.scalar_space
+
+
 
 # 2.6 创建柔顺度目标函数
 from soptx.optimization.compliance_objective import ComplianceObjective
@@ -59,3 +70,6 @@ compliance_obj = ComplianceObjective(
                         enable_logging=True
                     )
 c = compliance_obj.fun(density_distribution=top_material.density_distribution)
+
+dc = compliance_obj.jac(density_distribution=top_material.density_distribution, 
+                        diff_mode='manual')

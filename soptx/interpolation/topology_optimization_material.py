@@ -1,9 +1,10 @@
-from typing import Optional, Dict, Any
+import warnings
+from typing import Optional, Dict, Any, Literal
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
-from fealpy.mesh import Mesh
+from fealpy.mesh import HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, Function
 
 from .linear_elastic_material import LinearElasticMaterial
@@ -12,11 +13,11 @@ from ..utils.base_logged import BaseLogged
 
 class TopologyOptimizationMaterial(BaseLogged):
     def __init__(self, 
-                mesh: Mesh,
+                mesh: HomogeneousMesh,
                 base_material: LinearElasticMaterial,
                 interpolation_scheme: MaterialInterpolationScheme,
                 relative_density: float = 1,
-                density_location: str = 'element',
+                density_location: Literal['element', 'element_gauss_integrate_point'] = 'element',
                 quadrature_order: Optional[int] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
@@ -56,12 +57,18 @@ class TopologyOptimizationMaterial(BaseLogged):
                         "Please provide quadrature_order parameter.")
             self._log_error(error_msg)
             raise ValueError(error_msg)
+        
+        if density_location == 'element' and quadrature_order is not None:
+            warning_msg = ("quadrature_order is provided but not needed when density_location='element'. ")
+            self._log_warning(warning_msg, force_log=True)
 
-        self.mesh = mesh
+        # 私有属性 (不建议外部直接访问)
+        self._mesh = mesh
         self._base_material = base_material
         self._interpolation_scheme = interpolation_scheme
 
         self._relative_density = relative_density
+        self._density_location = density_location
         self._quadrature_order = quadrature_order
 
         self._setup_function_spaces()
@@ -74,10 +81,26 @@ class TopologyOptimizationMaterial(BaseLogged):
                        f"density_location={density_location}, "
                        f"quadrature_order={quadrature_order}, "
                        f"distribution_shape={self._density_distribution.shape}")
-        
-    def _setup_function_spaces(self):
-        """设置函数空间"""
-        self.element_space = LagrangeFESpace(self.mesh, p=0, ctype='D')
+
+
+    #######################################################################################################################
+    # 属性方法
+    #######################################################################################################################
+
+    @property
+    def mesh(self) -> HomogeneousMesh:
+        """获取当前的网格"""
+        return self._mesh
+
+    @property
+    def base_material(self) -> LinearElasticMaterial:
+        """获取当前的基础材料"""
+        return self._base_material
+    
+    @property
+    def interpolation_scheme(self) -> MaterialInterpolationScheme:
+        """获取当前的材料插值方案"""
+        return self._interpolation_scheme
 
     @property
     def relative_density(self) -> float:
@@ -103,7 +126,7 @@ class TopologyOptimizationMaterial(BaseLogged):
     def interpolation_method(self) -> str:
         """获取当前的插值方法 (代理属性)"""
         return self._interpolation_scheme.interpolation_method
-        
+
     @property
     def density_distribution(self) -> Function:
         """获取当前的密度分布"""
@@ -123,17 +146,22 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         return new_density_distribution
 
+
+    #########################################################################################################################
+    # 核心方法
+    #########################################################################################################################
+
     @variantmethod('element')
     def setup_density_distribution(self, **kwargs) -> Function:
         """初始化单元密度分布 (NC, )"""
-        NC = self.mesh.number_of_cells()
+        NC = self._mesh.number_of_cells()
         density_tensor = bm.full((NC,), 
                                 self._relative_density, 
                                 dtype=bm.float64, 
-                                device=self.mesh.device
-                            )
+                                device=self._mesh.device
+                                )
 
-        density_dist = self.element_space.function(density_tensor)
+        density_dist = self._element_space.function(density_tensor)
 
         self._density_distribution = density_dist
 
@@ -152,16 +180,16 @@ class TopologyOptimizationMaterial(BaseLogged):
             raise ValueError(error_msg)
     
 
-        qf = self.mesh.quadrature_formula(self._quadrature_order)
+        qf = self._mesh.quadrature_formula(self._quadrature_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
 
-        NC = self.mesh.number_of_cells()
+        NC = self._mesh.number_of_cells()
         density_tensor = bm.full((NC,), 
                                 self._relative_density, 
                                 dtype=bm.float64, 
-                                device=self.mesh.device
+                                device=self._mesh.device
                             )
-        density_dist = self.element_space.function(density_tensor)
+        density_dist = self._element_space.function(density_tensor)
         density_dist = density_dist(bcs)
 
         self._density_distribution = density_dist
@@ -174,12 +202,17 @@ class TopologyOptimizationMaterial(BaseLogged):
     def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
         """计算插值后的弹性矩阵"""
 
-        D = self._interpolation_scheme.interpolate(self._base_material, self._density_distribution)
+        D = self._interpolation_scheme.interpolate(self._base_material, self._density_distribution[:])
 
         self._log_info(f"[TopologyOptimizationMaterial] Elastic matrix computed successfully, "
                    f"shape: {D.shape}")
         
         return D
+    
+
+    #########################################################################################################################
+    # 辅助方法
+    #########################################################################################################################
 
     def set_relative_density(self, relative_density: float) -> None:
         """设置相对密度值并自动更新密度分布"""
@@ -235,32 +268,17 @@ class TopologyOptimizationMaterial(BaseLogged):
         new_shape = self._density_distribution.shape
         self._log_info(f"Density location changed from '{old_location}' to '{density_location}', "
                     f"density distribution shape: {old_shape} -> {new_shape}")
-        
-    def set_interpolation_method(self, interpolation_method: str) -> None:
-        """设置材料插值方法 (代理方法)"""
-        self._interpolation_scheme.set_interpolation_method(interpolation_method)
-        self._log_info(f"[TopologyOptimizationMaterial] Interpolation method updated via proxy method")
-
-    def set_material_parameters(self, **kwargs) -> None:
-        """设置基础材料参数（代理方法）"""
-        self.base_material.set_material_parameters(**kwargs)
-        self._log_info(f"[TopologyOptimizationMaterial] Material parameters updated via proxy method")
-
-    def set_penalty_factor(self, penalty_factor: float) -> None:
-        """设置惩罚因子 (代理方法)"""
-        self._interpolation_scheme.set_penalty_factor(penalty_factor)
-        self._log_info(f"[TopologyOptimizationMaterial] Penalty factor updated via proxy method")
 
     def get_material_info(self) -> Dict[str, Any]:
         """获取材料信息, 包括基础材料和插值方案的参数"""
-        base_material_info = self.base_material.get_material_params()
+        base_material_info = self._base_material.get_material_params()
 
         interpolation_info = self._interpolation_scheme.get_interpolation_params()
 
         topology_info = {
-                        'relative_density': self.relative_density,
+                        'relative_density': self._relative_density,
                         'density_location': self.density_location,
-                        'quadrature_order': self.quadrature_order,
+                        'quadrature_order': self._quadrature_order,
                         'density_distribution_shape': self.density_distribution.shape
                     }
         
@@ -277,4 +295,12 @@ class TopologyOptimizationMaterial(BaseLogged):
         info = self.get_material_info()
 
         self._log_info(f"Topology optimization material info: {info}", force_log=True)
-        
+
+
+    ###########################################################################################################################  
+    # 内部方法
+    ###########################################################################################################################
+
+    def _setup_function_spaces(self):
+        """设置函数空间"""
+        self._element_space = LagrangeFESpace(self._mesh, p=0, ctype='D')

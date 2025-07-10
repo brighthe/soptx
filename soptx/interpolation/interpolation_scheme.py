@@ -130,19 +130,25 @@ class MaterialInterpolationScheme(BaseLogged):
 
     def interpolate_derivative(self,
                             base_material: LinearElasticMaterial, 
-                            density_distribution: Function,
+                            density_distribution: TensorLike,
                         ) -> TensorLike:
         """获取当前插值方法的导数对应的系数"""
+
+        if not bm.is_tensor(density_distribution):
+            error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
+            self._log_error(error_msg)
+            raise TypeError(error_msg)
+        
         method = self.interpolation_method
         p = self._penalty_factor
 
         if method == 'simp':
-            return p * density_distribution[:] ** (p - 1)
+            return p * density_distribution ** (p - 1)
 
         elif method == 'modified_simp':
             E0 = base_material.youngs_modulus
             Emin = self._void_youngs_modulus
-            return p * density_distribution[:] * (p - 1) * (E0 - Emin) / E0
+            return p * density_distribution * (p - 1) * (E0 - Emin) / E0
 
     @variantmethod('simp')
     def interpolate(self, 

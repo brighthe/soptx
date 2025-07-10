@@ -1,8 +1,9 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from abc import ABC, abstractmethod
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
+from fealpy.functionspace.utils import flatten_indices
 
 from ..utils.base_logged import BaseLogged
 
@@ -19,6 +20,149 @@ class LinearElasticMaterial(BaseLogged, ABC):
         self.density = density
         self.device = device
 
+    def strain_displacement_matrix(self, 
+                    dof_priority: bool, 
+                    gphi: TensorLike, 
+                    shear_order: List[str]=['yz', 'xz', 'xy'],
+                    # shear_order: List[str]=['xy', 'yz', 'xz'],
+                    # shear_order: List[str]=['xy', 'xz', 'yz'],
+                ) -> TensorLike:
+        '''
+        Constructs the strain-displacement matrix B for the material \n
+            based on the gradient of the shape functions.
+        B = [∂Ni/∂x   0       0    ]
+            [0        ∂Ni/∂y  0    ]
+            [0        0       ∂Ni/∂z]
+            [0        ∂Ni/∂z  ∂Ni/∂y]
+            [∂Ni/∂z   0       ∂Ni/∂x]
+            [∂Ni/∂y   ∂Ni/∂x  0     ]
+
+        B = [∂Ni/∂x   0       0    ]
+            [0        ∂Ni/∂y  0    ]
+            [0        0       ∂Ni/∂z]
+            [∂Ni/∂y   ∂Ni/∂x  0    ]
+            [∂Ni/∂z   0       ∂Ni/∂x]
+            [0        ∂Ni/∂z  ∂Ni/∂y]
+
+        B = [∂Ni/∂x   0       0    ]
+            [0        ∂Ni/∂y  0    ]
+            [0        0       ∂Ni/∂z]
+            [∂Ni/∂y   ∂Ni/∂x  0    ]
+            [0        ∂Ni/∂z  ∂Ni/∂y]
+            [∂Ni/∂z   0       ∂Ni/∂x]
+
+        Parameters:
+        -----------
+        dof_priority: A flag that determines the ordering of DOFs.
+                            If True, the priority is given to the first dimension of degrees of freedom.
+        gphi - (NC, NQ, LDOF, GD).
+        shear_order: Specifies the order of shear strain components for GD=3.
+                                        Valid options are permutations of {'xy', 'yz', 'xz'}.
+        
+        Returns:
+        --------
+        B: The strain-displacement matrix `B`, which is a tensor with shape:
+            - For 2D problems (GD=2): (NC, NQ, 3, TLDOF)
+            - For 3D problems (GD=3): (NC, NQ, 6, TLDOF)
+        '''
+        ldof, GD = gphi.shape[-2:]
+        if dof_priority:
+            indices = flatten_indices((ldof, GD), (1, 0))
+        else:
+            indices = flatten_indices((ldof, GD), (0, 1))
+            
+        normal_B = self._normal_strain(gphi, indices)
+        shear_B = self._shear_strain(gphi, indices, shear_order)
+
+        B = bm.concat([normal_B, shear_B], axis=-2)
+
+        return B
+    
+    def _normal_strain(self,
+                    gphi: TensorLike, 
+                    indices: TensorLike, *, 
+                    out: Optional[TensorLike]=None
+                ) -> TensorLike:
+        """Assembly normal strain tensor.
+
+        Parameters:
+        -----------
+        gphi - (NC, NQ, LDOF, GD).
+        indices - (LDOF, GD): Indices of DoF components in the flattened DoF, shaped .
+        out - (TensorLike | None, optional): Output tensor. Defaults to None.
+
+        Returns:
+        --------
+        out - Normal strain shaped (NC, NQ, GD, GD*LDOF): 
+        """
+        kwargs = bm.context(gphi)
+        ldof, GD = gphi.shape[-2:]
+        new_shape = gphi.shape[:-2] + (GD, GD*ldof) # (NC, NQ, GD, GD*LDOF)
+
+        if out is None:
+            out = bm.zeros(new_shape, **kwargs)
+        else:
+            if out.shape != new_shape:
+                raise ValueError(f'out.shape={out.shape} != {new_shape}')
+
+        for i in range(GD):
+            out = bm.set_at(out, (..., i, indices[:, i]), gphi[..., :, i])
+
+        return out
+
+    def _shear_strain(self, 
+                    gphi: TensorLike, 
+                    indices: TensorLike, 
+                    shear_order: List[str], *,
+                    out: Optional[TensorLike]=None
+                ) -> TensorLike:
+        """Assembly shear strain tensor.
+
+        Parameters:
+        -----------
+        gphi - (NC, NQ, LDOF, GD).
+        indices (bool, optional): Indices of DoF components in the flattened DoF, shaped (LDOF, GD).
+        shear_order: Specifies the order of shear strain components for GD=3.
+                                        Valid options are permutations of {'xy', 'yz', 'xz'}.
+        Returns:
+        --------
+        out - Shear strain shaped (NC, NQ, NNZ, GD*LDOF) where NNZ = (GD + (GD+1))//2: .
+        """
+        kwargs = bm.context(gphi)
+        ldof, GD = gphi.shape[-2:]
+        if GD < 2:
+            raise ValueError(f"The shear strain requires GD >= 2, but GD = {GD}")
+        NNZ = (GD * (GD-1))//2    # 剪切应变分量的数量
+        new_shape = gphi.shape[:-2] + (NNZ, GD*ldof) # (NC, NQ, NNZ, GD*LDOF)
+
+        if GD == 2:
+            shear_indices = [(0, 1)]  # Corresponds to 'xy'
+        elif GD == 3:
+            valid_pairs = {'xy', 'yz', 'xz'}
+            if not set(shear_order).issubset(valid_pairs):
+                raise ValueError(f"Invalid shear_order: {shear_order}. Valid options are {valid_pairs}")
+
+            index_map = {
+                'xy': (0, 1),
+                'yz': (1, 2),
+                'xz': (2, 0),
+            }
+            shear_indices = [index_map[pair] for pair in shear_order]
+        else:
+            raise ValueError(f"GD={GD} is not supported")
+
+        if out is None:
+            out = bm.zeros(new_shape, **kwargs)
+        else:
+            if out.shape != new_shape:
+                raise ValueError(f'out.shape={out.shape} != {new_shape}')
+
+        for cursor, (i, j) in enumerate(shear_indices):
+            out = bm.set_at(out, (..., cursor, indices[:, i]), gphi[..., :, j])
+            out = bm.set_at(out, (..., cursor, indices[:, j]), gphi[..., :, i])
+
+        return out
+    
     @abstractmethod
     def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
         """计算弹性矩阵"""

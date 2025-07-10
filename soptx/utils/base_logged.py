@@ -58,10 +58,13 @@ class BaseLogged(ABC):
             else:
                 self.logger.info(message)
     
-    def _log_warning(self, message: str):
+    def _log_warning(self, message: str, force_log: bool = False):
         """输出警告信息"""
-        if self._enable_logging and self.logger:
-            self.logger.warning(message)
+        if force_log or (self._enable_logging and self.logger):
+            if self.logger:
+                self.logger.warning(message)
+            elif force_log:
+                print(f"WARNING: {message}")
     
     def _log_error(self, message: str):
         """输出错误信息"""
