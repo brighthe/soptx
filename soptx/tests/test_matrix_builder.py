@@ -7,7 +7,7 @@ def test_2d_filter_matrix(device):
     对于 _compute_filter_general 函数: GPU 下的速度和 CPU 相当
     对于 _compute_filter_2d 函数: GPU 下的速度和 CPU 相当
     '''
-    from soptx.filter.matrix_builder import FilterMatrixBuilder
+    from soptx.regularization.matrix_builder import FilterMatrixBuilder
 
     from soptx.pde import HalfMBBBeam2dData1
 
@@ -37,7 +37,7 @@ def test_2d_filter_matrix_three(device):
                  _compute_filter_2d_math 的速度次之, 
                  _compute_filter_general 最慢
     '''
-    from soptx.filter.matrix_builder import FilterMatrixBuilder
+    from soptx.regularization.matrix_builder import FilterMatrixBuilder
 
     from soptx.pde import HalfMBBBeam2dData1
 

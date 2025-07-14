@@ -35,7 +35,6 @@ class NoneStrategy(_FilterStrategy):
         xPhys = bm.set_at(xPhys, slice(None), x)
         return xPhys
 
-
     def filter_variables(self, x: TensorLike) -> TensorLike:
         return x
 
