@@ -70,8 +70,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             not (D.shape[0] == NC and D.shape[1] == NQ):
             raise ValueError(f"assembly currently only supports elastic matrices "
                     f"with shape (1, 1, {GD*(GD+1)//2}, {GD*(GD+1)//2}) or "
-                    f"(NC, 1, {GD*(GD+1)//2}, {GD*(GD+1)//2}) or "
-                    f"(NC, {NQ}, {GD*(GD+1)//2}, {GD*(GD+1)//2}), "
+                    f"({NC}, 1, {GD*(GD+1)//2}, {GD*(GD+1)//2}) or "
+                    f"({NC}, {NQ}, {GD*(GD+1)//2}, {GD*(GD+1)//2}), "
                     f"got {D.shape}.")
             
         if isinstance(mesh, SimplexMesh):

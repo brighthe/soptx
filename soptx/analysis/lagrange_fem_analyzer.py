@@ -2,7 +2,7 @@ from typing import Optional, Union, Literal
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-from fealpy.mesh import SimplexMesh
+from fealpy.mesh import SimplexMesh, HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from fealpy.fem import BilinearForm, LinearForm
 from fealpy.fem import VectorSourceIntegrator
@@ -17,6 +17,7 @@ from ..utils.base_logged import BaseLogged
 
 class LagrangeFEMAnalyzer(BaseLogged):
     def __init__(self,
+                mesh: HomogeneousMesh,
                 pde: PDEBase, 
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
@@ -44,8 +45,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
         # 私有属性 (不建议外部直接访问)
+        self._mesh = mesh
         self._pde = pde
-        self._mesh = self._pde.mesh
         self._material = material
         self._space_degree = space_degree
         self._assembly_method = assembly_method
@@ -59,7 +60,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
 
     ##############################################################################################
-    # 属性方法
+    # 访问器
     ##############################################################################################
     @property
     def mesh(self) -> SimplexMesh:
@@ -157,7 +158,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def assemble_stiff_matrix(self) -> Union[CSRTensor, COOTensor]:
         """组装刚度矩阵"""
         integrator = LinearElasticIntegrator(material=self._material, 
-                                            q=self._material.quadrature_order,
+                                            q=self._space_degree+3,
                                             method=self._assembly_method)
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(integrator)

@@ -158,6 +158,12 @@ class BoxTriLagrangeData2d(PDEBase):
         self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
                        f"mesh_type='{mesh_type}', E={E}, nu={nu}, "
                        f"plane_type='{self._plane_type}', force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
+    
+    
+    #######################################################################################################################
+    # 访问器
+    #######################################################################################################################
+    
     @property
     def E(self) -> float:
         """获取杨氏模量"""
@@ -167,6 +173,11 @@ class BoxTriLagrangeData2d(PDEBase):
     def nu(self) -> float:
         """获取泊松比"""
         return self._nu
+    
+
+    #######################################################################################################################
+    # 变体方法
+    #######################################################################################################################
 
     @variantmethod('uniform_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
@@ -195,6 +206,11 @@ class BoxTriLagrangeData2d(PDEBase):
         self._save_mesh(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
 
         return mesh
+
+
+    #######################################################################################################################
+    # 核心方法
+    #######################################################################################################################
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
