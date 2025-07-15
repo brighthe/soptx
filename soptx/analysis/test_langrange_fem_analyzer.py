@@ -125,44 +125,15 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     test1 = LagrangeFEMAnalyzerTest(enable_logging=True)
 
-    # # 一、基础线弹性材料求解
-    # ## 1.1 创建 pde
-    # from soptx.model.linear_elasticity_2d import BoxTriLagrangeData2d
-    # pde = BoxTriLagrangeData2d(
-    #                     domain=[0, 1, 0, 1], 
-    #                     E=1.0, nu=0.3,
-    #                     enable_logging=False
-    #                 )
-    # ## 1.2 创建基础材料
-    # from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-    # base_material = IsotropicLinearElasticMaterial(
-    #                                     youngs_modulus=pde.E, 
-    #                                     poisson_ratio=pde.nu, 
-    #                                     plane_type=pde.plane_type,
-    #                                     enable_logging=False
-    #                                 )
-
-    # test1.set_pde(pde)
-    # test1.set_init_mesh('uniform_quad', nx=5, ny=5)
-    # test1.set_material(base_material)
-    # test1.set_space_degree(3)
-    # test1.set_assembly_method('fast')
-    # test1.set_solve_method('mumps')
-
-    # uh1 = test1.run(maxit=4)
-
-    # 二、拓扑优化材料求解
-    ## 2.1 创建 pde 并设置网格
-    from soptx.model.mbb_beam_2d import HalfMBBBeam2dData1
-    pde = HalfMBBBeam2dData1(
-                        domain=[0, 60, 0, 20],
-                        T=-1.0, E=1.0, nu=0.3,
+    # 一、基础线弹性材料求解
+    ## 1.1 创建 pde
+    from soptx.model.linear_elasticity_2d import BoxTriLagrangeData2d
+    pde = BoxTriLagrangeData2d(
+                        domain=[0, 1, 0, 1], 
+                        E=1.0, nu=0.3,
                         enable_logging=False
                     )
-    pde.init_mesh.set('uniform_quad')
-    mesh = pde.init_mesh(nx=60, ny=20)
-
-    ## 2.2 创建基础材料
+    ## 1.2 创建基础材料
     from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
     base_material = IsotropicLinearElasticMaterial(
                                         youngs_modulus=pde.E, 
@@ -171,29 +142,58 @@ if __name__ == "__main__":
                                         enable_logging=False
                                     )
 
-    # 2.3 设置材料插值方案
-    from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
-    interpolation_scheme = MaterialInterpolationScheme(
-                                penalty_factor=3.0, 
-                                void_youngs_modulus=1e-12, 
-                                interpolation_method='simp', 
-                                enable_logging=False
-                            )
-    
-    # 2.4. 创建拓扑优化材料
-    from soptx.interpolation.topology_optimization_material import TopologyOptimizationMaterial
-    top_material = TopologyOptimizationMaterial(
-                            mesh=mesh,
-                            base_material=base_material,
-                            interpolation_scheme=interpolation_scheme,
-                            relative_density=1.0,
-                            density_location='element_gauss_integrate_point',
-                            quadrature_order=3,
-                            enable_logging=False
-                        )
-    
     test1.set_pde(pde)
-    test1.set_material(top_material)
-    test1.set_space_degree(1)
-    test1.set_assembly_method('standard')
+    test1.set_init_mesh('uniform_quad', nx=5, ny=5)
+    test1.set_material(base_material)
+    test1.set_space_degree(3)
+    test1.set_assembly_method('fast')
     test1.set_solve_method('mumps')
+
+    uh1 = test1.run(maxit=4)
+
+    # 二、拓扑优化材料求解
+    # ## 2.1 创建 pde 并设置网格
+    # from soptx.model.mbb_beam_2d import HalfMBBBeam2dData1
+    # pde = HalfMBBBeam2dData1(
+    #                     domain=[0, 60, 0, 20],
+    #                     T=-1.0, E=1.0, nu=0.3,
+    #                     enable_logging=False
+    #                 )
+    # pde.init_mesh.set('uniform_quad')
+    # mesh = pde.init_mesh(nx=60, ny=20)
+
+    # ## 2.2 创建基础材料
+    # from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+    # base_material = IsotropicLinearElasticMaterial(
+    #                                     youngs_modulus=pde.E, 
+    #                                     poisson_ratio=pde.nu, 
+    #                                     plane_type=pde.plane_type,
+    #                                     enable_logging=False
+    #                                 )
+
+    # # 2.3 设置材料插值方案
+    # from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+    # interpolation_scheme = MaterialInterpolationScheme(
+    #                             penalty_factor=3.0, 
+    #                             void_youngs_modulus=1e-12, 
+    #                             interpolation_method='simp', 
+    #                             enable_logging=False
+    #                         )
+    
+    # # 2.4. 创建拓扑优化材料
+    # from soptx.interpolation.topology_optimization_material import TopologyOptimizationMaterial
+    # top_material = TopologyOptimizationMaterial(
+    #                         mesh=mesh,
+    #                         base_material=base_material,
+    #                         interpolation_scheme=interpolation_scheme,
+    #                         relative_density=1.0,
+    #                         density_location='element_gauss_integrate_point',
+    #                         quadrature_order=3,
+    #                         enable_logging=False
+    #                     )
+    
+    # test1.set_pde(pde)
+    # test1.set_material(top_material)
+    # test1.set_space_degree(1)
+    # test1.set_assembly_method('standard')
+    # test1.set_solve_method('mumps')

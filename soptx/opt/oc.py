@@ -170,6 +170,7 @@ class OCOptimizer(OptimizerBase):
             # 使用物理密度计算目标函数值和梯度
             obj_val = self.objective.fun(rho_phys)
             obj_grad = self.objective.jac(rho_phys)
+
             if self.filter is not None:
                 obj_grad = self.filter.filter_objective_sensitivities(rho_phys, obj_grad)
 

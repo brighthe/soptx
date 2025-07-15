@@ -4,7 +4,7 @@ from fealpy.decorator import cartesian
 from fealpy.typing import TensorLike
 from fealpy.functionspace import LagrangeFESpace
 
-from soptx.regularization.filter_strategies import (
+from soptx.regularization.filter_strategy import (
                                         NoneStrategy, 
                                         SensitivityStrategy, 
                                         DensityStrategy, 

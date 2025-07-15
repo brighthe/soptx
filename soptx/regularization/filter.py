@@ -1,10 +1,12 @@
-from typing import Literal, Dict, Type, Tuple
+from typing import Literal, Dict, Type, Tuple, Optional
 
-from fealpy.mesh import Mesh
+from fealpy.mesh import HomogeneousMesh
 from fealpy.typing import TensorLike
 
+from ..utils.base_logged import BaseLogged
+
 from .matrix_builder import FilterMatrixBuilder 
-from .filter_strategies import (
+from .filter_strategy import (
                                 _FilterStrategy,
                                 NoneStrategy,
                                 DensityStrategy,
@@ -21,24 +23,30 @@ FILTER_STRATEGY_REGISTRY: Dict[str, Type[_FilterStrategy]] = \
                             'heaviside_density': HeavisideDensityStrategy,
                         }
 
-class Filter:
+class Filter(BaseLogged):
     """统一的过滤方法接口类
 
     该类使用策略模式来动态选择和应用不同的过滤算法
     """
     def __init__(self,
-                mesh: Mesh,
-                rmin: float,
+                mesh: HomogeneousMesh,
                 filter_type: Literal['none', 'sensitivity', 'density', 'heaviside_density'],
-                # Heaviside 投影相关参数
-                beta: float = 1.0,
-                max_beta: float = 512,
-                continuation_iter: int = 50
+                rmin: Optional[float] = None,
+                enable_logging: bool = True,
+                logger_name: Optional[str] = None,
             ) -> None:
+
+        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
         self.mesh = mesh
-        self.rmin = rmin
         self.filter_type = filter_type
+        self.rmin = rmin
+
+        if self.filter_type != 'none' and (self.rmin is None or self.rmin <= 0):
+            error_msg = (f"当 filter_type='{self.filter_type}' 时，必须提供有效的 rmin (> 0). "
+                        f"当前 rmin={self.rmin}")
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
         
         # 1. 构建过滤矩阵
         if self.filter_type != 'none' and self.rmin > 0:
@@ -52,22 +60,24 @@ class Filter:
         # 2. 策略选择和实例化
         strategy_class = FILTER_STRATEGY_REGISTRY.get(self.filter_type)
         if strategy_class is None:
-            raise ValueError(f"未知的过滤方法: '{self.filter_type}'. "
-                             f"可用选项: {list(FILTER_STRATEGY_REGISTRY.keys())}")
+            error_msg = (f"未知的过滤方法: '{self.filter_type}'. "
+                        f"可用选项: {list(FILTER_STRATEGY_REGISTRY.keys())}")
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
 
-        # 准备策略所需的参数
         strategy_params = {}
         if self.filter_type in ['sensitivity', 'density', 'heaviside_density']:
             strategy_params.update({
                 'H': self._H,
+                'Hs': self._Hs,
                 'cell_measure': self._cell_measure,
                 'normalize_factor': self._normalize_factor,
             })
         if self.filter_type == 'heaviside_density':
             strategy_params.update({
-                'beta': beta,
-                'max_beta': max_beta,
-                'continuation_iter': continuation_iter,
+                'beta': 1.0,
+                'max_beta': 512.0,
+                'continuation_iter': 50,
             })
         
         # 实例化策略
@@ -96,38 +106,3 @@ class Filter:
             如果当前策略不支持，则不执行任何操作
         """
         return self._strategy.continuation_step(change)
-
-    
-# # 代理所有方法到内部的过滤器实例
-# def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
-#     """获取初始的物理密度场"""
-#     if self._filter is None:
-#         xPhys[:] = x
-#         return xPhys
-#     return self._filter.get_initial_density(x, xPhys)
-
-# def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
-#     """对设计变量进行滤波得到物理变量"""
-#     if self._filter is None:
-#         xPhys[:] = x
-#         return xPhys
-#     return self._filter.filter_variables(x, xPhys)
-
-# def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> TensorLike:
-#     """过滤目标函数的灵敏度"""
-#     if self._filter is None:
-#         return dobj
-#     return self._filter.filter_objective_sensitivities(xPhys, dobj)
-
-# def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
-#     """过滤约束函数的灵敏度"""
-#     if self._filter is None:
-#         return dcons
-#     return self._filter.filter_constraint_sensitivities(xPhys, dcons)
-
-# # Heaviside 密度过滤特有的方法
-# def continuation_step(self, change: float) -> tuple[float, bool]:
-#     """执行 beta continuation (仅对 Heaviside 密度过滤有效)"""
-#     if hasattr(self._filter, 'continuation_step'):
-#         return self._filter.continuation_step(change)
-#     return change, False
