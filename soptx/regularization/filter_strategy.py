@@ -35,8 +35,10 @@ class NoneStrategy(_FilterStrategy):
 
         return rho_Phys
 
-    def filter_variables(self, x: TensorLike) -> TensorLike:
-        return x
+    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+        rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
+
+        return rho_Phys
 
     def filter_objective_sensitivities(self, 
                                        rho_Phys: TensorLike, 
@@ -49,24 +51,20 @@ class NoneStrategy(_FilterStrategy):
 
 class SensitivityStrategy(_FilterStrategy):
     """灵敏度过滤策略"""
-    def __init__(self, 
-                H: CSRTensor, Hs: TensorLike, 
-                cell_measure: TensorLike, normalize_factor: TensorLike
-            ) -> None:
+    def __init__(self, H: CSRTensor, Hs: TensorLike, cell_measure: TensorLike) -> None:
         self._H = H
         self._Hs = Hs
         self._cell_measure = cell_measure
-        self._normalize_factor = normalize_factor
 
     def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
         
         return rho_Phys
 
-    def filter_variables(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
-        xPhys = bm.set_at(xPhys, slice(None), x)
+    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+        rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
 
-        return xPhys
+        return rho_Phys
 
     def filter_objective_sensitivities(self, 
                                     rho_Phys: TensorLike, 
@@ -80,31 +78,38 @@ class SensitivityStrategy(_FilterStrategy):
         stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
         denominator = (stability_factor / self._cell_measure) * self._Hs
 
-        obj_grad_filtered = numerator / denominator
+        obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
 
-        return obj_grad_filtered
+        return obj_grad
 
-    def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
+    def filter_constraint_sensitivities(self, 
+                                    rho_Phys: TensorLike, 
+                                    cons_grad: TensorLike
+                                ) -> TensorLike:
 
-        return dcons
+        return cons_grad
 
 
 class DensityStrategy(_FilterStrategy):
     """密度过滤策略"""
-    def __init__(self, H: CSRTensor, cell_measure: TensorLike, normalize_factor: TensorLike):
+    def __init__(self, H: CSRTensor, cell_measure: TensorLike):
         self._H = H
         self._cell_measure = cell_measure
-        self._normalize_factor = normalize_factor
 
     def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
         
         return rho_Phys
 
-    def filter_variables(self, rho: TensorLike) -> TensorLike:
+    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
         weighted_rho = rho * self._cell_measure
-        filtered_rho = self._H.matmul(weighted_rho)
-        return filtered_rho / self._normalize_factor
+        numerator = self._H.matmul(weighted_rho)
+        
+        denominator = self._H.matmul(self._cell_measure)
+
+        rho_Phys = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+
+        return rho_Phys
 
     def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> TensorLike:
         weighted_dobj = self._cell_measure * dobj

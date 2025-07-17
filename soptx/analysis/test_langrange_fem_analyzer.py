@@ -4,11 +4,14 @@ from typing import Optional
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-
+# TODO 这里先导入网格再导入空间（这是由于网格的 init 中导入了 RadiusRatioSumObjective, 
+# TODO 而 RadiusRatioSumObjective 里面调用了 solver）
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+from fealpy.mesh import TriangleMesh
+from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from soptx.utils.show import showmultirate, show_error_table
 from soptx.utils.base_logged import BaseLogged
+
 
 class LagrangeFEMAnalyzerTest(BaseLogged):
     def __init__(self,
@@ -187,68 +190,108 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
         return self.uh
     
+
+    def _project_solution_to_finer_mesh(self,
+                                    nx: int, ny: int, 
+                                    uh: Function, 
+                                    lfa: LagrangeFEMAnalyzer, 
+                                    source_refinement_level, 
+                                    target_mesh: TriangleMesh
+                                ) -> Function:
+        # 重新生成源网格
+        mesh = self.pde.init_mesh(nx=nx, ny=ny)
+        for _ in range(source_refinement_level):
+            mesh.bisect(isMarkedCell=None)
+
+        # 只要当前网格的单元数还少于目标网格，就继续加密和插值
+        while mesh.number_of_cells() < target_mesh.number_of_cells():
+            sspace = lfa.get_scalar_space(mesh=mesh)
+            scell2dof = sspace.cell_to_dof()
+            tspace = lfa.get_tensor_space(scalar_space=sspace)
+            nodal_uh = lfa.get_displacement_dof_component(uh=uh, space=tspace)
+
+            uh0c2f = nodal_uh[..., 0][scell2dof]
+            uh1c2f = nodal_uh[..., 1][scell2dof]
+            data = {'uh0c2f': uh0c2f, 'uh1c2f': uh1c2f}
+
+            options = mesh.bisect_options(data=data, disp=False)
+            mesh.bisect(isMarkedCell=None, options=options)
+
+            # 在新的、更细的网格上构建插值解
+            sspace = lfa.get_scalar_space(mesh=mesh)
+            tspace = lfa.get_tensor_space(scalar_space=sspace)
+            uh_new = tspace.function()
+            uh0_new = sspace.function()
+            uh1_new = sspace.function()
+            scell2dof_new = sspace.cell_to_dof()
+            uh0_new[scell2dof_new.reshape(-1)] = options['data']['uh0c2f'].reshape(-1)
+            uh1_new[scell2dof_new.reshape(-1)] = options['data']['uh1c2f'].reshape(-1)
+
+            uh = lfa.scalar_disp_to_tensor_disp(dof_priority=True, 
+                                                uh=uh_new, uh0=uh0_new, uh1=uh1_new)
+        
+        return uh
+
     @run.register('LFA_top_material_analysis_reference_solution')
-    def run_reference_solution_analysis(self, maxit: int, ref_level: int = 1) -> TensorLike:
+    def run(self, 
+            nx: int = 10, ny: int = 10, 
+            maxit: int = 5, ref_level: int = 7
+        ) -> TensorLike:
         if self.pde is None or self.material is None:
             raise ValueError("请先设置 PDE 和拓扑材料参数")
         
-        self._log_info(f"Starting reference solution analysis with maxit={maxit}, ref_level={ref_level}")
+        if not isinstance(self.material, TopologyOptimizationMaterial):
+            error_msg = (f"Expected TopologyOptimizationMaterial, got {type(self.material).__name__}. "
+                        "This analysis method is specifically for topology optimization materials.")
+            self._log_error(error_msg)
+            raise TypeError(error_msg)
         
-        solutions = []
-        meshes = []
+        ref_mesh = self.pde.init_mesh(nx=nx, ny=ny)
+        total_refinement = maxit - 1 + ref_level
+        for _ in range(total_refinement):
+            ref_mesh.bisect(isMarkedCell=None)
+
+        self.material.setup_density_distribution(mesh=ref_mesh)
+        lfa_ref = LagrangeFEMAnalyzer(mesh=ref_mesh, pde=self.pde, 
+                        material=self.material, space_degree=self.p,
+                        assembly_method=self.assembly_method, 
+                        solve_method=self.solve_method)
+        uh_ref = lfa_ref.solve()
+
+        errorType = ['$|| P_h(\\boldsymbol{u}_h) - \\boldsymbol{u}_{ref} ||_{L^2}$']
+        errorMatrix = bm.zeros((2, maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
         h = bm.zeros(maxit, dtype=bm.float64)
-        
-        mesh = self.mesh
 
-        self._log_info("Phase 1: Solving on a sequence of refined meshes...")
         for i in range(maxit):
             print(f"Solving on mesh level {i+1}/{maxit}...")
-            
-            self.material.setup_density_distribution(mesh=mesh)
 
-            lfa = LagrangeFEMAnalyzer(mesh=mesh, pde=self.pde, 
+            mesh_i = self.pde.init_mesh(nx=nx, ny=ny)
+            for _ in range(i):
+                mesh_i.bisect(isMarkedCell=None)
+
+            self.material.setup_density_distribution(mesh=mesh_i)
+            lfa_i = LagrangeFEMAnalyzer(mesh=mesh_i, pde=self.pde, 
                                       material=self.material, space_degree=self.p,
                                       assembly_method=self.assembly_method, 
                                       solve_method=self.solve_method)
-            uh = lfa.solve()
+            uh_i = lfa_i.solve()
+
+            uh_i_projected = self._project_solution_to_finer_mesh(
+                                                nx=nx, ny=ny,
+                                                uh=uh_i, 
+                                                lfa=lfa_i, 
+                                                source_refinement_level=i, 
+                                                target_mesh=ref_mesh
+                                            )
             
-            solutions.append(uh)
-            meshes.append(mesh) 
-            NDof[i] = lfa.tensor_space.number_of_global_dofs()
-            h[i] = (mesh.meshdata.get('hx') / (2**i)) if i > 0 else mesh.meshdata.get('hx')
-
-            if i < maxit - 1:
-                mesh.uniform_refine()
-
-        # --- 阶段二：计算参考解 ---
-        self._log_info("Phase 2: Generating the reference solution on a much finer mesh...")
-        
-        for i in range(ref_level):
-            print(f"Extra refinement for reference solution: {i+1}/{ref_level}...")
-            mesh.uniform_refine()
-            
-        self.material.setup_density_distribution(mesh=mesh)
-        lfa_ref = LagrangeFEMAnalyzer(mesh=mesh, pde=self.pde, 
-                                      material=self.material, space_degree=self.p,
-                                      assembly_method=self.assembly_method, 
-                                      solve_method=self.solve_method)
-        u_ref = lfa_ref.solve()
-        self.uh = u_ref 
-
-        # --- 阶段三：计算误差 ---
-        self._log_info("Phase 3: Computing errors against the reference solution...")
-        errorType = ['$|| \\boldsymbol{u}_h - \\boldsymbol{u}_{ref} ||_{L^2}$']
-        errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
-
-        for i in range(maxit):
-            uh_i = solutions[i]
-            mesh_i = meshes[i]
-
-            uh_i = mesh.interpolation_points()
-            e0 = mesh_i.error(uh_i, u_ref)
-            e1 = mesh_i.error(uh_i, self.pde.disp_solution)
+            e0 = ref_mesh.error(uh_i_projected, uh_ref)
+            e1 = ref_mesh.error(uh_ref, self.pde.disp_solution)
             errorMatrix[0, i] = e0
+            errorMatrix[1, i] = e1
+             
+            NDof[i] = lfa_i.tensor_space.number_of_global_dofs()
+            h[i] = mesh_i.meshdata.get('hx')
             
         print("errorMatrix:\n", errorType, "\n", errorMatrix)
         print("NDof:", NDof)
@@ -257,7 +300,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
         plt.show()
 
-        return self.uh
+        return uh_ref
 
 
 if __name__ == "__main__":
@@ -371,18 +414,18 @@ if __name__ == "__main__":
     top_material = TopologyOptimizationMaterial(
                             base_material=base_material,
                             interpolation_scheme=interpolation_scheme,
-                            relative_density=1.0,
+                            relative_density=0.5,
                             density_location='element',
                             quadrature_order=3,
                             enable_logging=True
                         )
     
     test1.set_pde(pde)
-    test1.set_init_mesh('uniform_quad', nx=10, ny=10)
+    test1.set_init_mesh('uniform_tri', nx=10, ny=10)
     test1.set_material(top_material)
     test1.set_space_degree(2)
     test1.set_assembly_method('standard')
     test1.set_solve_method('mumps')
     test1.run.set('LFA_top_material_analysis_reference_solution')
 
-    uh1 = test1.run(maxit=4)
+    uh1 = test1.run()

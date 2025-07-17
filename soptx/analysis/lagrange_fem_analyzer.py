@@ -53,7 +53,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         self.solve.set(solve_method)
 
-        self._setup_function_spaces()
+        self._GD = self._mesh.geo_dimension()
+        self._setup_function_spaces(mesh=self._mesh, 
+                                    p=self._space_degree, 
+                                    shape=(self._GD, -1))
 
         self._K = None
         self._F = None
@@ -62,6 +65,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##############################################################################################
     # 访问器
     ##############################################################################################
+    
     @property
     def mesh(self) -> SimplexMesh:
         """获取当前的网格对象"""
@@ -103,10 +107,80 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return self._F
     
+    @property
+    def scalar_space(self) -> LagrangeFESpace:
+        """获取标量函数空间"""
+        return self._scalar_space
+    
+    @property
+    def tensor_space(self) -> TensorFunctionSpace: 
+        """获取张量函数空间"""
+        return self._tensor_space
+    
+
+    ##############################################################################################
+    # 修改器
+    ##############################################################################################
+
+    @scalar_space.setter
+    def scalar_space(self, space: LagrangeFESpace) -> None:
+        """设置标量函数空间"""
+        self._scalar_space = space
+
+    @tensor_space.setter
+    def tensor_space(self, space: TensorFunctionSpace) -> None:
+        """设置张量函数空间"""
+        self._tensor_space = space
 
     ######################################################################################################
     # 辅助方法
     ######################################################################################################
+
+    def get_displacement_dof_component(self, uh: Function, space: TensorFunctionSpace) -> TensorLike:
+        """获取位移自由度分量形式"""
+        shape = space.shape
+        scalar_space = space.scalar_space
+        mesh = space.mesh
+        gdof = scalar_space.number_of_global_dofs()
+        GD = mesh.geo_dimension()
+
+        if shape[1] == -1: # dof_priority
+            uh_reshaped = uh.reshape(GD, gdof)  
+            return uh_reshaped.T
+        
+        elif shape[1] == GD: # gd_priority
+            return uh.reshape(GD, gdof)
+
+    def get_scalar_space(self, mesh: HomogeneousMesh) -> LagrangeFESpace:
+        """根据网格获取标量函数空间"""
+        scalar_space = LagrangeFESpace(mesh, p=self._space_degree, ctype='C')
+
+        return scalar_space
+
+    def get_tensor_space(self, scalar_space: LagrangeFESpace) -> TensorFunctionSpace:
+        """根据标量函数空间获取张量函数空间"""
+        tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=(self._GD, -1))
+        
+        return tensor_space
+
+    def scalar_disp_to_tensor_disp(self, 
+                                dof_priority: bool,
+                                uh: Function, 
+                                uh0: Function, uh1: Function, uh2: Function = None
+                            ) -> Function:
+        """将标量位移转换为张量位移"""
+        if uh2 is None:
+            if dof_priority:
+                uh[:] = bm.stack((uh0, uh1), axis=-1).T.flatten()
+            else:
+                uh[:] = bm.stack((uh0, uh1), axis=-1).flatten()
+        else:
+            if dof_priority:
+                uh[:] = bm.stack((uh0, uh1, uh2), axis=-1).T.flatten()
+            else:
+                uh[:] = bm.stack((uh0, uh1, uh2), axis=-1).flatten()
+
+        return uh
 
     def get_stiffness_matrix__derivative(self) -> TensorLike:
         """获取局部刚度矩阵的梯度"""
@@ -151,9 +225,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return diff_ke
 
     
-    ##############################################################################################
+    ##########################################################################################################
     # 核心方法
-    ##############################################################################################
+    ##########################################################################################################
 
     def assemble_stiff_matrix(self) -> Union[CSRTensor, COOTensor]:
         """组装刚度矩阵"""
@@ -264,11 +338,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 内部方法
     ##############################################################################################
 
-    def _setup_function_spaces(self):
+    def _setup_function_spaces(self, 
+                            mesh: HomogeneousMesh, 
+                            p: int, 
+                            shape : tuple[int, int]
+                        ) -> None:
         """设置函数空间"""
-        self._scalar_space = LagrangeFESpace(self._mesh, p=self._space_degree, ctype='C')
-        GD = self._mesh.geo_dimension()
-        self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(GD, -1))
+        scalar_space = LagrangeFESpace(mesh, p=p, ctype='C')
+        self.scalar_space = scalar_space
+
+        tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=shape)
+        self.tensor_space = tensor_space
 
         self._log_info(f"Tensor space DOF ordering: dof_priority")
     

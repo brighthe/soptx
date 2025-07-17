@@ -19,10 +19,13 @@ class PDEBase(BaseLogged, ABC):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._domain = domain
-
-        self._mesh: Optional[HomogeneousMesh] = None
         self._mesh_type = mesh_type
 
+    
+    #######################################################################################################################
+    # 访问器
+    #######################################################################################################################
+    
     @property
     def domain(self) -> List[float]:
         """获取计算域"""
@@ -43,23 +46,13 @@ class PDEBase(BaseLogged, ABC):
         """边界条件类型 (dirichlet, neumann, robin)"""
         return getattr(self, '_boundary_type', 'unknown')
 
-    @property
-    def mesh(self) -> HomogeneousMesh:
-        """获取网格对象"""
-        if self._mesh is None:
-            error_msg = (
-                "Mesh has not been initialized. Please call init_mesh() to generate a mesh first.\n"
-                "Example usage:\n"
-                "  pde.init_mesh.set('uniform_quad')  # Set mesh type\n"
-                "  pde.init_mesh(nx=20, ny=20)        # Generate mesh with parameters"
-            )
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
-        
-        return self._mesh
+
+    #######################################################################################################################
+    # 内部方法
+    #######################################################################################################################
 
     def _save_mesh(self, mesh: HomogeneousMesh, mesh_type: str, **params) -> None:
-        """保存网格"""
+        """保存网格数据"""
         self._mesh = mesh
         self.mesh_type = mesh_type
 

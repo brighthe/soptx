@@ -33,8 +33,8 @@ class OCOptimizer():
             obj_grad = self.objective.jac(rho_phys)
 
             # 过滤目标函数灵敏度 (灵敏度过滤)
-            obj_grad_filtered = self.filter.filter_objective_sensitivities(
-                                            rho_phys=rho_phys, obj_grad=obj_grad)
+            obj_grad = self.filter.filter_objective_sensitivities(
+                                    rho_phys=rho_phys, obj_grad=obj_grad)
             
             # 当前体积分数
             vol_frac = self.constraint.get_volume_fraction(rho_phys)
