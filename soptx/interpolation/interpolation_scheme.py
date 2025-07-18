@@ -1,9 +1,10 @@
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Dict, Any, Literal, List
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
-from fealpy.functionspace import Function
+from fealpy.functionspace import Function, LagrangeFESpace
+from fealpy.mesh import HomogeneousMesh
 
 from .linear_elastic_material import LinearElasticMaterial
 from ..utils.base_logged import BaseLogged
@@ -11,52 +12,157 @@ from ..utils.base_logged import BaseLogged
 class MaterialInterpolationScheme(BaseLogged):
     """材料插值方案类"""
     def __init__(self,
-                penalty_factor: float = 3.0,
-                void_youngs_modulus: float = 1e-12,
-                interpolation_method: str = 'simp',
+                density_location: Literal['element', 'gauss_integration_point', 'continuous'] = 'element',
+                interpolation_method: Literal['simp', 'msimp', 'ramp'] = 'simp',
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
         """
         材料插值方法变体示例
-        -----------------
-        1. 实例化时设置默认插值方法
-        mis = MaterialInterpolationScheme(interpolation_method='simp')
-        
-        2. 直接使用默认方法生成弹性矩阵
-        D0 = mis.interpolate(base_material=base_material, density_distribution=density_distribution)
-
-        3. 切换到其他插值方法 (推荐方式)
-        mis.set_interpolation_method('modified_simp')  # 友好的接口
-        D1 = mis.interpolate(base_material=base_material, density_distribution=density_distribution)
-        
-        4. 或者使用变体方法 (底层方式)
-        mis.interpolate.set('modified_simp')  # 设置变体 (返回 None)
-        D2 = mis.interpolate(base_material=base_material, density_distribution=density_distribution)
-
-        注意: 
-        -----
-        - 推荐使用 set_interpolation_method() 方法切换插值方式，更直观和安全
-        - interpolate.set() 是底层接口，只设置变体不执行方法，返回 None
-        - 每次切换方法后，后续的 interpolate() 调用都使用新设置的插值方式
-
-        Parameters:
-        -----------
-        interpolation_method
-        - 'simp': 标准 SIMP 插值 E(ρ) = ρ^p * E0
-        - 'modified_simp': 修正 SIMP 插值 E(ρ) = Emin + ρ^p * (E0 - Emin)
-        - 'simp_double': 双指数 SIMP 插值
-        - 'ramp': RAMP 插值
         """
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
-        
-        self._penalty_factor = penalty_factor
-        self._void_youngs_modulus = void_youngs_modulus
 
-        self.interpolate.set(interpolation_method)
+        self.setup_density_distribution.set(density_location)
+        self.interpolate_map.set(interpolation_method)
 
         self._log_info(f"Material interpolation scheme initialized: "
-                      f"type={interpolation_method}, p={penalty_factor}")
+                      f"density_location={density_location}, "
+                      f"interpolation_method={interpolation_method}, ")
+        
+    
+    #####################################################################################################################################
+    # 变体方法
+    #####################################################################################################################################
+
+    @variantmethod('element')
+    def setup_density_distribution(self, 
+                                mesh: HomogeneousMesh,
+                                relative_density: float,
+                                integrator_order: int = None,
+                                **kwargs,
+                            ) -> Function:
+        """单元密度分布"""
+        NC = mesh.number_of_cells()
+        density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
+
+        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
+        density_dist = element_space.function(density_tensor)
+
+        self._log_info(f"Element density: shape={density_dist.shape}, value={relative_density}")
+
+        return density_dist
+
+    @setup_density_distribution.register('gauss_integration_point')
+    def setup_density_distribution(self, 
+                                mesh: HomogeneousMesh,
+                                relative_density: float,
+                                integrator_order: int = None,
+                                **kwargs,
+                            ) -> Function:
+        """单元高斯点密度分布"""
+        if integrator_order is None:
+            error_msg = "integrator_order must be specified for 'gauss_integration_point'"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+
+        qf = mesh.quadrature_formula(integrator_order)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        NC = mesh.number_of_cells()
+        density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
+
+        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
+        density_dist = element_space.function(density_tensor)
+        density_dist = density_dist(bcs)
+
+        self._log_info(f"Element-Gauss density: shape={density_dist.shape}, value={relative_density}, q={integrator_order}")
+
+        return density_dist
+    
+    @setup_density_distribution.register('continuous')
+    def setup_density_distribution(self):
+        "连续密度分布"
+        pass
+
+    @variantmethod('simp')
+    def interpolate_map(self, 
+                    material: LinearElasticMaterial, 
+                    density_distribution: Function,
+                    penalty_factor: float = 3.0,
+                    target_variables: List[Literal['E', 'nu', 'lam', 'mu']] = ['E'],
+                    void_youngs_modulus: Optional[float] = None,
+                    **kwargs,
+                ) -> TensorLike:
+        """SIMP 插值: E(ρ) = ρ^p * E0"""
+
+        if target_variables == ['E']:
+            E0 = material.youngs_modulus
+            simp_map = density_distribution[:] ** penalty_factor * E0 / E0
+            
+            return simp_map
+    
+    @interpolate_map.register('msimp')
+    def interpolate_map(self, 
+                    material: LinearElasticMaterial, 
+                    density_distribution: Function,
+                    penalty_factor: float = 3.0,
+                    target_variables: List[Literal['E', 'nu', 'lam', 'mu']] = ['E'],
+                    void_youngs_modulus: Optional[float] = None,
+                    **kwargs,
+                ) -> TensorLike:
+        """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
+        if void_youngs_modulus is None:
+            error_msg = "void_youngs_modulus must be specified for 'msimp'"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+
+        if target_variables == ['E']:
+            E0 = material.youngs_modulus
+            Emin = void_youngs_modulus
+            msimp_map = (Emin + density_distribution[:] ** penalty_factor * (E0 - Emin)) / E0
+
+            return msimp_map
+
+    @interpolate_map.register('simp_double')
+    def interpolate_map(self) -> TensorLike:
+        """双指数 SIMP 插值"""
+        pass
+
+    @interpolate_map.register('ramp')
+    def interpolate_map(self) -> TensorLike:
+        """RAMP 插值"""
+        pass
+
+    #####################################################################################################################################
+    # 变体方法
+    #####################################################################################################################################
+
+    def interpolate_derivative(self,
+                        base_material: LinearElasticMaterial, 
+                        density_distribution: TensorLike,
+                    ) -> TensorLike:
+        """获取当前插值方法的导数对应的系数"""
+
+        if not bm.is_tensor(density_distribution):
+            error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
+            self._log_error(error_msg)
+            raise TypeError(error_msg)
+        
+        method = self.interpolation_method
+        p = self._penalty_factor
+
+        if method == 'simp':
+            return p * density_distribution ** (p - 1)
+
+        elif method == 'modified_simp':
+            E0 = base_material.youngs_modulus
+            Emin = self._void_youngs_modulus
+            return p * density_distribution * (p - 1) * (E0 - Emin) / E0
+
+
+
+
+
+
 
     @property
     def penalty_factor(self) -> Optional[float]:
@@ -128,106 +234,68 @@ class MaterialInterpolationScheme(BaseLogged):
         params = self.get_interpolation_params()
         self._log_info(f"Interpolation parameters: {params}", force_log=True)
 
-    def interpolate_derivative(self,
-                            base_material: LinearElasticMaterial, 
-                            density_distribution: TensorLike,
-                        ) -> TensorLike:
-        """获取当前插值方法的导数对应的系数"""
 
-        if not bm.is_tensor(density_distribution):
-            error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
-            self._log_error(error_msg)
-            raise TypeError(error_msg)
+
         
-        method = self.interpolation_method
-        p = self._penalty_factor
 
-        if method == 'simp':
-            return p * density_distribution ** (p - 1)
+   
 
-        elif method == 'modified_simp':
-            E0 = base_material.youngs_modulus
-            Emin = self._void_youngs_modulus
-            return p * density_distribution * (p - 1) * (E0 - Emin) / E0
-
-    @variantmethod('simp')
-    def interpolate(self, 
-                    base_material: LinearElasticMaterial, 
-                    density_distribution: TensorLike
-                ) -> TensorLike:
-        """SIMP 插值: E(ρ) = ρ^p * E0"""
-
-        if not bm.is_tensor(density_distribution):
-            error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
-            self._log_error(error_msg)
-            raise TypeError(error_msg)
+        # if not bm.is_tensor(density_distribution):
+        #     error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
+        #     self._log_error(error_msg)
+        #     raise TypeError(error_msg)
         
-        D0 = base_material.elastic_matrix() # (1, 1, :, :)
+        # D0 = base_material.elastic_matrix() # (1, 1, :, :)
 
-        simp_scaled = density_distribution ** self._penalty_factor
+        # simp_scaled = density_distribution ** self._penalty_factor
 
-        if len(simp_scaled.shape) == 1:
-            NC = simp_scaled.shape[0]
-            D = bm.einsum('c, ijkl -> cjkl', simp_scaled, D0)
-            self._log_info(f"SIMP interpolation completed for {NC} elements "
-                      f"with p = {self._penalty_factor}")
+        # if len(simp_scaled.shape) == 1:
+        #     NC = simp_scaled.shape[0]
+        #     D = bm.einsum('c, ijkl -> cjkl', simp_scaled, D0)
+        #     self._log_info(f"SIMP interpolation completed for {NC} elements "
+        #               f"with p = {self._penalty_factor}")
         
-        elif len(simp_scaled.shape) == 2:
-            NC, NQ = simp_scaled.shape
-            D = bm.einsum('cq, ijkl -> cqkl', simp_scaled, D0)
-            self._log_info(f"SIMP interpolation completed for {NC} elements "
-                      f"with {NQ} quadrature points, p = {self._penalty_factor}")
-        else:
-            error_msg = f"Unsupported density_distribution shape: {density_distribution.shape}. " \
-                        f"Expected (NC,) or (NC, NQ)."
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
+        # elif len(simp_scaled.shape) == 2:
+        #     NC, NQ = simp_scaled.shape
+        #     D = bm.einsum('cq, ijkl -> cqkl', simp_scaled, D0)
+        #     self._log_info(f"SIMP interpolation completed for {NC} elements "
+        #               f"with {NQ} quadrature points, p = {self._penalty_factor}")
+        # else:
+        #     error_msg = f"Unsupported density_distribution shape: {density_distribution.shape}. " \
+        #                 f"Expected (NC,) or (NC, NQ)."
+        #     self._log_error(error_msg)
+        #     raise ValueError(error_msg)
         
-        return D
+
+
+        # if not bm.is_tensor(density_distribution):
+        #     error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
+        #     self._log_error(error_msg)
+        #     raise TypeError(error_msg)
+
+        # E0 = base_material.youngs_modulus
+        # Emin = self._void_youngs_modulus
+        # D0 = base_material.elastic_matrix() # (1, 1, :, :)
+
+        # msimp_scaled = (Emin + density_distribution ** self._penalty_factor * (E0 - Emin)) / E0
+
+        # if len(msimp_scaled.shape) == 1:
+        #     NC = msimp_scaled.shape[0]
+        #     D = bm.einsum('c, ijkl -> cjkl', msimp_scaled, D0)
+        #     self._log_info(f"Modified SIMP interpolation completed for {NC} elements "
+        #               f"with p = {self._penalty_factor}, Emin = {Emin}")
+
+        # elif len(msimp_scaled.shape) == 2:
+        #     NC, NQ = msimp_scaled.shape
+        #     D = bm.einsum('cq, ijkl -> cqkl', msimp_scaled, D0)
+        #     self._log_info(f"Modified SIMP interpolation completed for {NC} elements "
+        #               f"with {NQ} quadrature points, p = {self._penalty_factor}, Emin = {Emin}")
+        # else:
+        #     error_msg = f"Unsupported density_distribution shape: {density_distribution.shape}. " \
+        #                  f"Expected (NC,) or (NC, NQ)."
+        #     self._log_error(error_msg)
+        #     raise ValueError(error_msg)
+
+        # return D
     
-    @interpolate.register('modified_simp')
-    def interpolate(self, 
-                    base_material: LinearElasticMaterial, 
-                    density_distribution: TensorLike
-                ) -> TensorLike:
-        """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
 
-        if not bm.is_tensor(density_distribution):
-            error_msg = f"density_distribution must be TensorLike, got {type(density_distribution)}"
-            self._log_error(error_msg)
-            raise TypeError(error_msg)
-
-        E0 = base_material.youngs_modulus
-        Emin = self._void_youngs_modulus
-        D0 = base_material.elastic_matrix() # (1, 1, :, :)
-
-        msimp_scaled = (Emin + density_distribution ** self._penalty_factor * (E0 - Emin)) / E0
-
-        if len(msimp_scaled.shape) == 1:
-            NC = msimp_scaled.shape[0]
-            D = bm.einsum('c, ijkl -> cjkl', msimp_scaled, D0)
-            self._log_info(f"Modified SIMP interpolation completed for {NC} elements "
-                      f"with p = {self._penalty_factor}, Emin = {Emin}")
-
-        elif len(msimp_scaled.shape) == 2:
-            NC, NQ = msimp_scaled.shape
-            D = bm.einsum('cq, ijkl -> cqkl', msimp_scaled, D0)
-            self._log_info(f"Modified SIMP interpolation completed for {NC} elements "
-                      f"with {NQ} quadrature points, p = {self._penalty_factor}, Emin = {Emin}")
-        else:
-            error_msg = f"Unsupported density_distribution shape: {density_distribution.shape}. " \
-                         f"Expected (NC,) or (NC, NQ)."
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
-
-        return D
-    
-    @interpolate.register('simp_double')
-    def interpolate(self, base_material: LinearElasticMaterial, density_distribution: TensorLike) -> TensorLike:
-        """双指数 SIMP 插值"""
-        pass
-
-    @interpolate.register('ramp')
-    def interpolate(self, base_material: LinearElasticMaterial, density_distribution: TensorLike) -> TensorLike:
-        """RAMP 插值"""
-        pass

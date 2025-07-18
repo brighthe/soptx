@@ -164,7 +164,7 @@ class LinearElasticMaterial(BaseLogged, ABC):
         return out
     
     @abstractmethod
-    def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
+    def elastic_matrix(self) -> TensorLike:
         """计算弹性矩阵"""
         pass
 
@@ -276,7 +276,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         
         self._log_info(f"Elastic matrix computed for {self.plane_type}, shape: {self.D.shape}")
 
-    def elastic_matrix(self, bcs: Optional[TensorLike] = None) -> TensorLike:
+    def elastic_matrix(self) -> TensorLike:
         """
         Calculate the elastic matrix D based on the defined hypothesis (3D, plane stress, or plane strain).
 

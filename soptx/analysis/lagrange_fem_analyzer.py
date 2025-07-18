@@ -10,6 +10,8 @@ from fealpy.decorator.variantmethod import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
 from ..interpolation.linear_elastic_material import LinearElasticMaterial
+from ..interpolation.interpolation_scheme import MaterialInterpolationScheme
+from ..interpolation.config import DensityBasedConfig, LevelSetConfig
 from .integrators.linear_elastic_integrator import LinearElasticIntegrator
 from ..pde.pde_base import PDEBase
 from ..utils.base_logged import BaseLogged
@@ -21,36 +23,32 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 pde: PDEBase, 
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
+                integrator_order: int = 4,
                 assembly_method: Literal['standard', 'fast'] = 'standard',
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
+                topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
+                topopt_config: Optional[Union[DensityBasedConfig, LevelSetConfig]] = None,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
-        """
-        1. 求解变体方法示例
-        lfa = LagrangeFEMAnalyzer(pde=pde, material=material, solve_method='mumps')
+        """初始化拉格朗日有限元分析器"""
 
-        2. 直接使用默认方法求解位移
-        uh = lfa.solve()
-        
-        3. 切换到其他求解方法
-        lfa.solve.set('cg')     # 设置变体 (返回 None)
-        uh = lfa.solve(maxiter=5000, atol=1e-12, rtol=1e-12)
-        
-        注意: 
-        - solve.set() 只设置变体，不执行方法，返回 None
-        - 需要分别调用 set() 和 solve() 来求解位移
-        - 每次 set() 后，后续的 solve() 调用都使用新设置的变体
-        """
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+
+        # 验证拓扑优化算法与配置的匹配性
+        self._validate_topopt_config(topopt_algorithm, topopt_config)
         
-        # 私有属性 (不建议外部直接访问)
+        # 私有属性（建议通过属性访问器访问，不要直接修改）
         self._mesh = mesh
         self._pde = pde
         self._material = material
+        self._topopt_algorithm = topopt_algorithm
+        self._topopt_config = topopt_config
         self._space_degree = space_degree
+        self._integrator_order = integrator_order
         self._assembly_method = assembly_method
         
+        # 设置默认求解方法
         self.solve.set(solve_method)
 
         self._GD = self._mesh.geo_dimension()
@@ -58,12 +56,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                     p=self._space_degree, 
                                     shape=(self._GD, -1))
 
+        # 缓存的矩阵和向量
         self._K = None
         self._F = None
 
 
     ##############################################################################################
-    # 访问器
+    # 属性访问器 - 获取内部状态
     ##############################################################################################
     
     @property
@@ -119,7 +118,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     
 
     ##############################################################################################
-    # 修改器
+    # 属性修改器 - 修改内部状态
     ##############################################################################################
 
     @scalar_space.setter
@@ -132,55 +131,21 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """设置张量函数空间"""
         self._tensor_space = space
 
-    ######################################################################################################
+    ###############################################################################################
     # 辅助方法
-    ######################################################################################################
+    ###############################################################################################
 
-    def get_displacement_dof_component(self, uh: Function, space: TensorFunctionSpace) -> TensorLike:
-        """获取位移自由度分量形式"""
-        shape = space.shape
-        scalar_space = space.scalar_space
-        mesh = space.mesh
-        gdof = scalar_space.number_of_global_dofs()
-        GD = mesh.geo_dimension()
-
-        if shape[1] == -1: # dof_priority
-            uh_reshaped = uh.reshape(GD, gdof)  
-            return uh_reshaped.T
-        
-        elif shape[1] == GD: # gd_priority
-            return uh.reshape(GD, gdof)
-
-    def get_scalar_space(self, mesh: HomogeneousMesh) -> LagrangeFESpace:
+    def get_scalar_space_from_mesh(self, mesh: HomogeneousMesh) -> LagrangeFESpace:
         """根据网格获取标量函数空间"""
         scalar_space = LagrangeFESpace(mesh, p=self._space_degree, ctype='C')
 
         return scalar_space
 
-    def get_tensor_space(self, scalar_space: LagrangeFESpace) -> TensorFunctionSpace:
+    def get_tensor_space_from_scalar_space(self, scalar_space: LagrangeFESpace) -> TensorFunctionSpace:
         """根据标量函数空间获取张量函数空间"""
         tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=(self._GD, -1))
         
         return tensor_space
-
-    def scalar_disp_to_tensor_disp(self, 
-                                dof_priority: bool,
-                                uh: Function, 
-                                uh0: Function, uh1: Function, uh2: Function = None
-                            ) -> Function:
-        """将标量位移转换为张量位移"""
-        if uh2 is None:
-            if dof_priority:
-                uh[:] = bm.stack((uh0, uh1), axis=-1).T.flatten()
-            else:
-                uh[:] = bm.stack((uh0, uh1), axis=-1).flatten()
-        else:
-            if dof_priority:
-                uh[:] = bm.stack((uh0, uh1, uh2), axis=-1).T.flatten()
-            else:
-                uh[:] = bm.stack((uh0, uh1, uh2), axis=-1).flatten()
-
-        return uh
 
     def get_stiffness_matrix__derivative(self) -> TensorLike:
         """获取局部刚度矩阵的梯度"""
@@ -225,14 +190,55 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return diff_ke
 
     
-    ##########################################################################################################
+    ##################################################################################################
     # 核心方法
-    ##########################################################################################################
+    ##################################################################################################
 
     def assemble_stiff_matrix(self) -> Union[CSRTensor, COOTensor]:
-        """组装刚度矩阵"""
-        integrator = LinearElasticIntegrator(material=self._material, 
-                                            q=self._space_degree+3,
+        """组装全局刚度矩阵"""
+        if self._topopt_algorithm is None:
+        
+            coef = None
+        
+        elif self._topopt_algorithm == 'density_based':
+        
+            initial_density = self._topopt_config.initial_density
+            density_location = self._topopt_config.density_location
+
+            interpolation_method = self._topopt_config.interpolation.method
+            penalty_factor = self._topopt_config.interpolation.penalty_factor
+            target_variables = self._topopt_config.interpolation.target_variables
+            void_youngs_modulus = self._topopt_config.interpolation.void_youngs_modulus
+            
+            interpolation_scheme = MaterialInterpolationScheme(density_location=density_location,
+                                                               interpolation_method=interpolation_method)
+
+            density_distribution = interpolation_scheme.setup_density_distribution(
+                                                        mesh=self._mesh,
+                                                        relative_density=initial_density,
+                                                        integrator_order=self._integrator_order
+                                                    )
+
+            coef = interpolation_scheme.interpolate_map(
+                                            material=self._material,
+                                            density_distribution=density_distribution,
+                                            penalty_factor=penalty_factor,
+                                            target_variables=target_variables,      
+                                            void_youngs_modulus=void_youngs_modulus
+                                        )
+        elif self._topopt_algorithm == 'level_set':
+        
+            pass
+        
+        else:
+        
+            pass
+
+        # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
+        # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
+        integrator = LinearElasticIntegrator(material=self._material,
+                                            coef=coef,
+                                            q=self._integrator_order,
                                             method=self._assembly_method)
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(integrator)
@@ -243,7 +249,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return K
 
     def assemble_force_vector(self) -> Union[TensorLike, COOTensor]:
-        """组装载荷向量"""
+        """组装全局载荷向量"""
         body_force = self._pde.body_force
         force_type = self._pde.force_type
 
@@ -252,7 +258,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             F = self._tensor_space.interpolate(body_force)
         elif force_type == 'continuous':
             # NOTE F.dtype == COOTensor or TensorLike
-            integrator = VectorSourceIntegrator(source=body_force, q=self._space_degree+3)
+            integrator = VectorSourceIntegrator(source=body_force, q=self._integrator_order)
             lform = LinearForm(self.tensor_space)
             lform.add_integrator(integrator)
             F = lform.assembly(format='dense')
@@ -294,6 +300,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
             error_msg = f"Unsupported boundary type: {boundary_type}"
             self._log_error(error_msg)
             raise ValueError(error_msg)
+
+
+    ##########################################################################################################
+    # 变体方法
+    ##########################################################################################################
 
     @variantmethod('mumps')
     def solve(self, **kwargs) -> Function:
@@ -337,6 +348,55 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##############################################################################################
     # 内部方法
     ##############################################################################################
+
+    def _validate_topopt_config(self, 
+                            topopt_algorithm: Literal[None, 'density_based', 'level_set'], 
+                            topopt_config: Optional[Union[DensityBasedConfig, LevelSetConfig]]
+                        ) -> None:
+        """验证拓扑优化算法与配置的匹配性"""
+        if topopt_algorithm is None:
+
+            if topopt_config is not None:
+                error_msg = ("当 topopt_algorithm=None 时， topopt_config 必须为 None"
+                           f"当前 topopt_config 类型: {type(topopt_config).__name__}")
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+                
+        elif topopt_algorithm == 'density_based':
+            
+            if topopt_config is None:
+                error_msg = "当 topopt_algorithm='density_based' 时, 必须提供 DensityBasedConfig 配置"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+            elif not isinstance(topopt_config, DensityBasedConfig):
+                error_msg = (f"当 topopt_algorithm='density_based'时, "
+                           f"topopt_config 必须是 DensityBasedConfig 类型, "
+                           f"当前类型: {type(topopt_config).__name__}")
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+                
+        elif topopt_algorithm == 'level_set':
+
+            if topopt_config is None:
+                error_msg = "当 topopt_algorithm='level_set'时, 必须提供 LevelSetConfig 配置"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+            elif not isinstance(topopt_config, LevelSetConfig):
+                error_msg = (f"当 topopt_algorithm='level_set'时, "
+                           f"topopt_config 必须是 LevelSetConfig 类型, "
+                           f"当前类型: {type(topopt_config).__name__}")
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+                
+        else:
+            error_msg = f"不支持的拓扑优化算法: {topopt_algorithm}"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+            
+        if topopt_algorithm is None:
+            self._log_info("使用标准有限元分析模式")
+        else:
+            self._log_info(f"使用拓扑优化算法: {topopt_algorithm}，配置类型: {type(topopt_config).__name__}")
 
     def _setup_function_spaces(self, 
                             mesh: HomogeneousMesh, 

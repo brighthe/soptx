@@ -9,28 +9,40 @@ from fealpy.decorator.variantmethod import variantmethod
 from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 from fealpy.fem.utils import LinearSymbolicIntegration
 
+from ...interpolation.linear_elastic_material import LinearElasticMaterial
+
 class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     """The linear elastic integrator for function spaces based on homogeneous meshes."""
     def __init__(self, 
-                material,
-                q: Optional[int]=None, *,
+                material: LinearElasticMaterial,
+                coef: TensorLike,
+                q: Optional[int]=None, 
+                *,
                 index: Index=_S,
                 method: Optional[str]=None
             ) -> None:
         super().__init__()
 
-        self.material = material
-        self.q = q
-        self.index = index
+        self._material = material
+        self._coef = coef
+        self._q = q
+        self._index = index
+        
         self.assembly.set(method)
+
 
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
-        return space.cell_to_dof()[self.index]
+        return space.cell_to_dof()[self._index]
     
+
+    ########################################################################################
+    # 变体方法
+    ########################################################################################
+
     @enable_cache
     def fetch_assembly(self, space: TensorFunctionSpace):
-        index = self.index
+        index = self._index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
     
@@ -40,9 +52,10 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                                "not a subclass of HomoMesh.")
     
         cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self.q is None else self.q
+        q = scalar_space.p+3 if self._q is None else self._q
         qf = mesh.quadrature_formula(q)
         bcs, ws = qf.get_quadrature_points_and_weights()
+        
         gphi = scalar_space.grad_basis(bcs, index=index, variable='x')
 
         if isinstance(mesh, SimplexMesh):
@@ -52,18 +65,24 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             J = mesh.jacobi_matrix(bcs)
             detJ = bm.linalg.det(J)
 
-        return cm, bcs, ws, gphi, detJ
-    
+        return cm, ws, gphi, detJ
+
     @variantmethod('standard')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
-        cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
+        cm, ws, gphi, detJ = self.fetch_assembly(space)
 
         NC = mesh.number_of_cells()
         GD = mesh.geo_dimension()
         NQ = len(ws)
-        D = self.material.elastic_matrix(bcs)
+        D0 = self._material.elastic_matrix()
+        coef = self._coef
+
+        if coef.shape == (NC, ):
+            D = bm.einsum('c, ijkl -> cjkl', coef, D0)
+        elif coef.shape == (NC, NQ):
+            D = bm.einsum('cq, ijkl -> cqkl', coef, D0)
 
         if not (D.shape[0] == 1 and D.shape[1] == 1) and \
             not (D.shape[0] == NC and D.shape[1] == 1) and \

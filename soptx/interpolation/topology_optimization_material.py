@@ -106,7 +106,8 @@ class TopologyOptimizationMaterial(BaseLogged):
         if self._density_distribution is None:
             self._log_warning("Density distribution not initialized. " \
                 "Call setup_density_distribution(mesh) first.")
-        return self._density_distribution
+            
+            return self._density_distribution
     
     
     #######################################################################################################################
@@ -126,7 +127,7 @@ class TopologyOptimizationMaterial(BaseLogged):
     #########################################################################################################################
 
     @variantmethod('element')
-    def setup_density_distribution(self, mesh: HomogeneousMesh, **kwargs) -> Function:
+    def setup_density_distribution(self, mesh: HomogeneousMesh, **kwargs) -> None:
         """初始化单元密度分布 (NC, )"""
         NC = mesh.number_of_cells()
         density_tensor = bm.full((NC,), 
@@ -143,11 +144,42 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         self._log_info(f"Initialized element density distribution: ({NC},) "
                        f"with value {self._relative_density}")
-
-        return density_dist
     
     @setup_density_distribution.register('element_gauss_integrate_point')
-    def setup_density_distribution(self, mesh: HomogeneousMesh, **kwargs) -> Function:
+    def setup_density_distribution(self, 
+                                mesh: HomogeneousMesh, 
+                                bcs, 
+                                **kwargs
+                            ) -> None:
+        """设置单元高斯积分点密度分布 (NC, NQ)"""
+
+        if self._quadrature_order is None:
+            error_msg = ("Quadrature order not set for 'element_gauss_integrate_point' density location. "
+                        "Please call set_quadrature_order() first.")
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+
+        # qf = mesh.quadrature_formula(self._quadrature_order)
+        # bcs, ws = qf.get_quadrature_points_and_weights()
+
+        NC = mesh.number_of_cells()
+        density_tensor = bm.full((NC,), 
+                                self._relative_density, 
+                                dtype=bm.float64, 
+                                device=mesh.device
+                            )
+
+        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
+        density_dist = element_space.function(density_tensor)
+        density_dist = density_dist(bcs)
+
+        self.density_distribution = density_dist
+
+        self._log_info(f"Initialized element Gauss point density distribution: {density_dist.shape} "
+                f"with value {self._relative_density}, q={self._quadrature_order}")
+        
+    def setup_element_gauss_intgrator_point_density_distribution(self, 
+                                    mesh: HomogeneousMesh, **kwargs) -> None:
         """初始化单元高斯积分点密度分布 (NC, NQ)"""
         if self._quadrature_order is None:
             error_msg = ("Quadrature order not set for 'element_gauss_integrate_point' density location. "
@@ -173,8 +205,6 @@ class TopologyOptimizationMaterial(BaseLogged):
 
         self._log_info(f"Initialized element Gauss point density distribution: {density_dist.shape} "
                 f"with value {self._relative_density}, q={self._quadrature_order}")
-
-        return density_dist
     
     #########################################################################################################################
     # 核心方法
@@ -187,6 +217,16 @@ class TopologyOptimizationMaterial(BaseLogged):
                         "Call setup_density_distribution(mesh) first.")
             self._log_error(error_msg)
             raise ValueError(error_msg)
+        
+        if self._density_location == 'element_gauss_integrate_point':
+            if self._quadrature_order is None:
+                error_msg = ("Quadrature order not set for 'element_gauss_integrate_point' density location. "
+                            "Please call set_quadrature_order() first.")
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+        
+        denisty_distribution = self.setup_density_distribution(mesh=)
+                        
         
         D = self._interpolation_scheme.interpolate(self._base_material, self._density_distribution[:])
 

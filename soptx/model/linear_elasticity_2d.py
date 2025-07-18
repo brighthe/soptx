@@ -192,6 +192,15 @@ class BoxTriLagrangeData2d(PDEBase):
         self._save_mesh(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
 
         return mesh
+
+    @variantmethod('polygon_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        device = kwargs.get('device', 'cpu')
+        vertices = bm.tensor([[0, 0], [1, 0], [1, 1], [0, 1]], 
+                            dtype=bm.float64, device=device)
+        mesh = TriangleMesh.from_polygon_gmsh(vertices=vertices, h=0.07)
+
+        return mesh
     
     @init_mesh.register('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:

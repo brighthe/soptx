@@ -53,7 +53,6 @@ class PDEBase(BaseLogged, ABC):
 
     def _save_mesh(self, mesh: HomogeneousMesh, mesh_type: str, **params) -> None:
         """保存网格数据"""
-        self._mesh = mesh
         self.mesh_type = mesh_type
 
         nx = params.get('nx', 10)  
