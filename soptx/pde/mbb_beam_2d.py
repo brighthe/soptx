@@ -1,27 +1,223 @@
+from typing import List, Callable, Optional, Tuple
+
 from fealpy.backend import backend_manager as bm
-
 from fealpy.typing import TensorLike
-from fealpy.decorator import cartesian
+from fealpy.decorator import cartesian, variantmethod
+from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
-from typing import Tuple, Callable
-from builtins import list
+from soptx.pde.pde_base import PDEBase  
 
-class MBBBeam2dData1:
+class HalfMBBBeam2dData1(PDEBase):
     '''
-    模型来源论文: Efficient topology optimization in MATLAB using 88 lines of code
+    模型来源:
+    https://wnesm678i4.feishu.cn/wiki/Xi3dw6mzNi6V9ckNcoScfmAXnFg#part-TuQydJUDvojFG6x0NPzcH3stnTh
+
+    -∇·σ = b    in Ω
+       u = 0    on ∂Ω (homogeneous Dirichlet)
+    where:
+    - σ is the stress tensor
+    - ε = (∇u + ∇u^T)/2 is the strain tensor
+    
+    Material parameters:
+        E = 1, nu = 0.3
+
+    For isotropic materials:
+        σ = 2με + λtr(ε)I
     '''
-    def __init__(self, 
-                xmin: float=0, xmax: float=60, 
-                ymin: float=0, ymax: float=20,
-                T: float = -1):
-        """
-        flip_direction = True
-        0 ------- 3 ------- 6 
-        |    0    |    2    |
-        1 ------- 4 ------- 7 
-        |    1    |    3    |
-        2 ------- 5 ------- 8 
-        """
+    def __init__(self,
+                domain: List[float] = [0, 60, 0, 20],
+                mesh_type: str = 'uniform_quad',
+                T: float = -1.0, # 负值代表方向向下
+                E: float = 1.0, nu: float = 0.3,
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None
+            ) -> None:
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                enable_logging=enable_logging, logger_name=logger_name)
+        
+        self._T = T
+        self._E, self._nu = E, nu
+
+        self._eps = 1e-12
+        self._plane_type = 'plane_stress'
+        self._force_type = 'concentrated'
+        self._boundary_type = 'dirichlet'
+
+        self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
+                f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
+                f"plane_type='{self._plane_type}', "
+                f"force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
+
+    @property
+    def E(self) -> float:
+        """获取杨氏模量"""
+        return self._E
+    
+    @property
+    def nu(self) -> float:
+        """获取泊松比"""
+        return self._nu
+    
+    @property
+    def T(self) -> float:
+        """获取集中力"""
+        return self._T
+    
+    @variantmethod('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+
+        self._save_mesh(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
+
+        return mesh
+    
+    @init_mesh.register('uniform_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+        
+        self._save_mesh(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
+
+        return mesh
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+
+        x = points[..., 0]
+        y = points[..., 1]
+
+        coord = (
+            (bm.abs(x - domain[0]) < self._eps) & 
+            (bm.abs(y - domain[3]) < self._eps)
+        )
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (coord, 1), self._T)
+
+        return val
+    
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+
+        x = points[..., 0]
+
+        coord = bm.abs(x - domain[0]) < self._eps
+        
+        return coord
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+
+        x = points[..., 0]
+        y = points[..., 1]
+
+        coord = ((bm.abs(x - domain[1]) < self._eps) &
+                 (bm.abs(y - domain[2]) < self._eps))
+        
+        return coord
+    
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
+
+
+class MBBBeam2dData2:
+    '''模型来源论文: Topology optimization using the p-version of the finite element method'''
+    def __init__(
+            self, 
+            xmin: float=0, xmax: float=60, 
+            ymin: float=0, ymax: float=10,
+            T: float = 1
+        ) -> None:
+        self.xmin, self.xmax = xmin, xmax
+        self.ymin, self.ymax = ymin, ymax
+        self.T = T
+        self.eps = 1e-12
+
+    def domain(self) -> list:
+        
+        box = [self.xmin, self.xmax, self.ymin, self.ymax]
+
+        return box
+    
+    @cartesian
+    def force(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+
+        x = points[..., 0]
+        y = points[..., 1]
+
+        coord = (bm.abs(x - domain[1] / 2) < self.eps) & (bm.abs(y - domain[3]) < self.eps)
+        
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (coord, 1), -self.T)
+
+        return val
+    
+    @cartesian
+    def dirichlet(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+
+        x = points[..., 0]
+        y = points[..., 1]
+
+        coord = (bm.abs(x - domain[0]) < self.eps) & (bm.abs(y - domain[2]) < self.eps)
+        
+        return coord
+
+    @cartesian  
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+
+        x = points[..., 0]
+        y = points[..., 1]
+        
+        left_support = (bm.abs(x - domain[0]) < self.eps) & (bm.abs(y - domain[2]) < self.eps)
+        right_support = (bm.abs(x - domain[1]) < self.eps) & (bm.abs(y - domain[2]) < self.eps)
+        
+        coord = left_support | right_support
+
+        return coord
+    
+    def threshold(self) -> Tuple[Callable, Callable]:
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
+    
+class HalfMBBBeam2dData2:
+    '''模型来源论文: Topology Optimization of Structures Using Higher Order Finite Elements in Analysis'''
+    def __init__(
+            self, 
+            xmin: float=0, xmax: float=120, 
+            ymin: float=0, ymax: float=40,
+            T: float = 1
+        ) -> None:
         self.xmin, self.xmax = xmin, xmax
         self.ymin, self.ymax = ymin, ymax
         self.T = T
@@ -46,14 +242,15 @@ class MBBBeam2dData1:
         )
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val[coord, 1] = self.T
+        # val[coord, 1] = self.T
+        val = bm.set_at(val, (coord, 1), -self.T)
 
         return val
     
     @cartesian
     def dirichlet(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
-        # 这里仍然是固定左边界的位移
+
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
@@ -61,9 +258,11 @@ class MBBBeam2dData1:
         domain = self.domain()
 
         x = points[..., 0]
+        y = points[..., 1]
 
-        coord = bm.abs(x - domain[0]) < self.eps
-        
+        coord = (bm.abs(x - domain[0]) < self.eps) & \
+                (bm.abs(y - domain[2]) < self.eps)
+
         return coord
     
     @cartesian
@@ -73,13 +272,16 @@ class MBBBeam2dData1:
         x = points[..., 0]
         y = points[..., 1]
 
-        coord = ((bm.abs(x - domain[1]) < self.eps) &
-                 (bm.abs(y - domain[0]) < self.eps))
+        coord1 = (bm.abs(x - domain[0]) < self.eps) & \
+                (bm.abs(y - domain[2]) < self.eps)
         
-        return coord
-    
-    def threshold(self) -> Tuple[Callable, Callable]:
+        coord2 = ((bm.abs(x - domain[1]) < self.eps) &
+                 (bm.abs(y - domain[0]) < self.eps))
 
+        return coord1 | coord2
+
+    def threshold(self) -> Tuple[Callable, Callable]:
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
+
     

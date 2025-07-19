@@ -7,7 +7,7 @@ from pathlib import Path
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian
-from fealpy.mesh import UniformMesh3d, TetrahedronMesh
+from fealpy.mesh import UniformMesh, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
@@ -19,14 +19,16 @@ from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
 from soptx.filter import (SensitivityBasicFilter, 
                           DensityBasicFilter, 
                           HeavisideProjectionBasicFilter)
-from soptx.opt import ComplianceObjective, VolumeConstraint
+from soptx.opt import (ComplianceObjective, ComplianceConfig,
+                       VolumeConstraint, VolumeConfig)
 
 from soptx.opt import OCOptimizer, MMAOptimizer, save_optimization_history, plot_optimization_history
 
 @dataclass
 class TestConfig:
     """Configuration for topology optimization test cases."""
-    backend: Literal['numpy', 'pytorch']
+    backend: Literal['numpy', 'pytorch', 'jax']
+    device: Literal['cpu', 'cuda']
     pde_type: Literal['cantilever_3d_1']
 
     elastic_modulus: float
@@ -42,7 +44,7 @@ class TestConfig:
     volume_fraction: float
     penalty_factor: float
 
-    mesh_type: Literal['uniform_mesh_3d', 'tetrahedron_mesh']
+    mesh_type: Literal['uniform_mesh', 'tetrahedron_mesh']
     nx: int
     ny: int
     nz: int
@@ -73,7 +75,9 @@ def create_base_components(config: TestConfig):
         bm.set_backend('numpy')
     elif config.backend == 'pytorch':
         bm.set_backend('pytorch')
-    
+    elif config.backend == 'jax':
+        bm.set_backend('jax')
+
     if config.pde_type == 'cantilever_3d_1':
         pde = Cantilever3dData1(
                     xmin=0, xmax=config.domain_length,
@@ -81,13 +85,15 @@ def create_base_components(config: TestConfig):
                     zmin=0, zmax=config.domain_height,
                     T = config.load
                 )
-        if config.mesh_type == 'uniform_mesh_3d':
+        if config.mesh_type == 'uniform_mesh':
             extent = [0, config.nx, 0, config.ny, 0, config.nz]
+            h = [config.hx, config.hy, config.hz]
             origin = [0.0, 0.0, 0.0]
-            mesh = UniformMesh3d(
-                        extent=extent, h=[config.hx, config.hy, config.hz], origin=origin,
-                        ipoints_ordering='zyx',
-                        device='cpu'
+            mesh = UniformMesh(
+                        extent=extent, 
+                        h=h, 
+                        origin=origin,
+                        device=config.device
                     )
         elif config.mesh_type == 'tetrahedron_mesh':
             mesh = TetrahedronMesh.from_box(box=pde.domain(), 
@@ -106,7 +112,8 @@ def create_base_components(config: TestConfig):
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
-                            plane_assumption="3D",    
+                            plane_assumption="3D",
+                            device=config.device,    
                             interpolation_model="SIMP",    
                             penalty_factor=config.penalty_factor
                         )
@@ -131,16 +138,17 @@ def create_base_components(config: TestConfig):
         return val
     rho = space_D.interpolate(u=density_func)
 
-    objective = ComplianceObjective(solver=solver)
+    obj_config = ComplianceConfig(diff_mode=config.diff_mode)
+    objective = ComplianceObjective(solver=solver, config=obj_config)
+    cons_config = VolumeConfig(diff_mode=config.diff_mode)
     constraint = VolumeConstraint(solver=solver, 
-                                volume_fraction=config.volume_fraction)
+                                volume_fraction=config.volume_fraction,
+                                config=cons_config)
     
     return pde, rho, objective, constraint
 
 def run_basic_filter_test(config: TestConfig) -> Dict[str, Any]:
-    """
-    测试 filter 类不同滤波器的正确性.
-    """
+    """测试 filter 类不同滤波器的正确性."""
     pde, rho, objective, constraint = create_base_components(config)
     mesh = objective.solver.tensor_space.mesh
 
@@ -215,32 +223,44 @@ if __name__ == "__main__":
     参数来源论文: An efficient 3D topology optimization code written in Matlab
     '''
     backend = 'numpy'
+    # backend = 'pytorch'
+    # backend = 'jax'
+    device = 'cpu'
+    # device = 'cuda'
     pde_type = 'cantilever_3d_1'
+    volume_fraction = 0.3
     # mesh_type = 'tetrahedron_mesh'
-    mesh_type = 'uniform_mesh_3d'
+    mesh_type = 'uniform_mesh'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
     nx, ny, nz = 60, 20, 4
+    filter_radius = 1.5
+    # nx, ny, nz = 120, 40, 8
+    # filter_radius = 3.0
     config_basic_filter = TestConfig(
-        backend='numpy',
+        backend=backend,
+        device=device,
         pde_type=pde_type,
         elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
         domain_length=nx, domain_width=ny, domain_height=nz,
         load=-1,
-        volume_fraction=0.3,
+        volume_fraction=volume_fraction,
         penalty_factor=3.0,
         mesh_type=mesh_type, nx=nx, ny=ny, nz=nz, hx=1, hy=1, hz=1,
         p = 1,
-        # assembly_method=AssemblyMethod.FAST,
+        assembly_method=AssemblyMethod.FAST,
         # assembly_method=AssemblyMethod.STANDARD,
-        assembly_method=AssemblyMethod.SYMBOLIC,
-        solver_type='direct', solver_params={'solver_type': 'mumps'},
-        # solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
+        # assembly_method=AssemblyMethod.SYMBOLIC,
+        # solver_type='direct', solver_params={'solver_type': 'mumps'},
+        # solver_type='direct', solver_params={'solver_type': 'cupy'},
+        # solver_type='direct', solver_params={'solver_type': 'scipy'},
+        solver_type='cg', solver_params={'maxiter': 5000, 'atol': 1e-12, 'rtol': 1e-12},
         diff_mode='manual',
+        # diff_mode='auto',
         optimizer_type=optimizer_type, max_iterations=200, tolerance=0.01,
-        filter_type=filter_type, filter_radius=1.5,
-        save_dir=f'{base_dir}/{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
+        filter_type=filter_type, filter_radius=filter_radius,
+        save_dir=f'{base_dir}/{device}_{backend}_{pde_type}_{mesh_type}_{optimizer_type}_{filter_type}_{nx*ny*nz}',
     )
 
-    result1 = run_basic_filter_test(config_basic_filter )
+    result = run_basic_filter_test(config_basic_filter )
     

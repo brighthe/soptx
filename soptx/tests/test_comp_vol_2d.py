@@ -9,8 +9,8 @@ from fealpy.mesh import UniformMesh2d, TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.material import (
-                            ElasticMaterialConfig,
-                            ElasticMaterialInstance,
+                            DensityBasedMaterialConfig,
+                            DensityBasedMaterialInstance,
                         )
 from soptx.pde import Cantilever2dData1, Cantilever2dData2, MBBBeam2dData1
 from soptx.solver import (ElasticFEMSolver, AssemblyMethod)
@@ -99,7 +99,7 @@ def create_base_components(config: TestConfig):
     tensor_space_C = TensorFunctionSpace(space_C, (-1, GD))
     space_D = LagrangeFESpace(mesh=mesh, p=p-1, ctype='D')
     
-    material_config = ElasticMaterialConfig(
+    material_config = DensityBasedMaterialConfig(
                             elastic_modulus=config.elastic_modulus,            
                             minimal_modulus=config.minimal_modulus,         
                             poisson_ratio=config.poisson_ratio,            
@@ -108,7 +108,7 @@ def create_base_components(config: TestConfig):
                             penalty_factor=config.penalty_factor
                         )
     
-    materials = ElasticMaterialInstance(config=material_config)
+    materials = DensityBasedMaterialInstance(config=material_config)
 
     solver = ElasticFEMSolver(
                 materials=materials,
@@ -223,7 +223,7 @@ if __name__ == "__main__":
     pde_type = 'mbb_beam_2d_1'
     optimizer_type = 'oc'
     filter_type = 'sensitivity'
-    nx, ny = 150, 50
+    nx, ny = 15, 5
     hx, hy = 1, 1
     volfrac = 0.5
     config_compliance_volume_exact_test = TestConfig(
@@ -239,8 +239,10 @@ if __name__ == "__main__":
                                 solver_type='direct', solver_params={'solver_type': 'mumps'},
                                 diff_mode="manual",
                             )
+    backend = 'jax'
+    # backend = 'pytorch'
     config_diff_mode_test = TestConfig(
-                                backend='jax',
+                                backend=backend,
                                 pde_type='mbb_beam_2d_1',
                                 elastic_modulus=1, poisson_ratio=0.3, minimal_modulus=1e-9,
                                 domain_length=nx, domain_width=ny,

@@ -18,9 +18,10 @@ class ComplianceObjective(ObjectiveBase):
                 solver: ElasticFEMSolver, 
                 config: Optional[ComplianceConfig] = None):
         """
-        Parameters
-        - solver : 有限元求解器
-        - config : 柔顺度计算的配置参数, 如果为 None 则使用默认配置
+        Parameters:
+        -----------
+        solver : 有限元求解器
+        config : 柔顺度计算的配置参数, 如果为 None 则使用默认配置
         """
         self.solver = solver
         self.materials = solver.materials
@@ -59,19 +60,44 @@ class ComplianceObjective(ObjectiveBase):
         return self._current_u
 
     def _compute_element_compliance(self, u: TensorLike) -> TensorLike:
-        """计算单元柔顺度向量"""
+        """计算单元柔顺度向量
+
+        Parameters:
+        -----------
+        u: 位移向量, 形状可以是 (tgdof, ) 或 (nloads, tgdof)
+        
+        Returns:
+        -----------
+        单载荷: 形状为 (NC,) 的单元柔顺度向量
+        多载荷: 形状为 (nloads, NC) 的单元柔顺度向量
+        """
         ke0 = self.solver.get_base_local_stiffness_matrix()
         cell2dof = self.solver.tensor_space.cell_to_dof()
-        ue = u[cell2dof]
+
+        is_multi_load = len(u.shape) > 1
+
+        if is_multi_load:
+            nloads = u.shape[0]
+            NC = cell2dof.shape[0]
+            kwargs = bm.context(u)
         
-        # 更新缓存
-        self._element_compliance = bm.einsum('ci, cik, ck -> c', ue, ke0, ue)
+            element_compliance = bm.zeros((nloads, NC), **kwargs)
+
+            for i in range(nloads):
+                ue_i = u[i][cell2dof]  
+                element_compliance[i] = bm.einsum('ci, cik, ck -> c', ue_i, ke0, ue_i)
+                
+            self._element_compliance = element_compliance
+        else:
+            ue = u[cell2dof]
+            self._element_compliance = bm.einsum('ci, cik, ck -> c', ue, ke0, ue)
 
         return self._element_compliance
     
-    def _compute_gradient_manual(self, 
-                               rho: TensorLike,
-                               u: Optional[TensorLike] = None) -> TensorLike:
+    def _compute_gradient_manual(
+            self, 
+            rho: TensorLike, u: Optional[TensorLike] = None
+        ) -> TensorLike:
         """使用解析方法计算梯度"""
         if u is None:
             u = self._update_u(rho)
@@ -80,8 +106,16 @@ class ComplianceObjective(ObjectiveBase):
               if self._element_compliance is not None 
               else self._compute_element_compliance(u))
         
+        # TODO : 能否支持批量求解
         dE = self.materials.calculate_elastic_modulus_derivative(rho)
-        dc = -bm.einsum('c, c -> c', dE, ce)
+
+        is_multi_load = len(ce.shape) > 1
+
+        if is_multi_load:
+            ce_sum = bm.sum(ce, axis=0) 
+            dc = -bm.einsum('c, c -> c', dE, ce_sum)
+        else:
+            dc = -bm.einsum('c, c -> c', dE, ce)
 
         return dc
 
@@ -102,10 +136,9 @@ class ComplianceObjective(ObjectiveBase):
             """计算单个单元的柔顺度贡献
             
             Parameters
-            ----------
-            rho_i : 单个单元的密度值
-            ue_i : (tldof, ), 单个单元的位移向量
-            ke0_i : (tldof, tldof), 单个单元的基础刚度矩阵
+            - rho_i : 单个单元的密度值
+            - ue_i : (tldof, ), 单个单元的位移向量
+            - ke0_i : (tldof, tldof), 单个单元的基础刚度矩阵
             """
             # 计算该单元的材料属性
             E = self.materials.calculate_elastic_modulus(rho_i)
@@ -151,38 +184,53 @@ class ComplianceObjective(ObjectiveBase):
     #---------------------------------------------------------------------------
     # 优化相关方法
     #---------------------------------------------------------------------------
-    def fun(self, 
-            rho: TensorLike, u: Optional[TensorLike] = None
-            ) -> float:
+    def fun(self, rho: TensorLike, u: Optional[TensorLike] = None) -> float:
         """计算总柔度值
-        
-        Parameters
-        - rho : 密度场
-        - u : 可选的位移场, 如果为 None 则自动计算或使用缓存的位移场
+
+        Parameters:
+        -----------
+        rho : 密度场
+        u : 可选的位移场, 如果为 None 则自动计算或使用缓存的位移场
         """
         # 获取位移场
         if u is None:
             u = self._update_u(rho)
+
         # 计算单元柔度
         ce = self._compute_element_compliance(u)
-        # 计算总柔度
+        
+        # 获取材料的弹性模量场
         E = self.materials.elastic_modulus_field
-        c = bm.einsum('c, c -> ', E, ce)
+
+        is_multi_load = len(ce.shape) > 1
+
+        if is_multi_load:
+            nloads = ce.shape[0]
+            c_total = 0.0
+            
+            for i in range(nloads):
+                c_i = bm.einsum('c, c -> ', E, ce[i])
+                c_total += c_i
+            
+            c = c_total
+        else:
+            c = bm.einsum('c, c -> ', E, ce)
         
         return c
     
     def jac(self, 
             rho: TensorLike, u: Optional[TensorLike] = None,
             diff_mode: Optional[Literal["auto", "manual"]] = None
-            ) -> TensorLike:
+        ) -> TensorLike:
         """计算目标函数梯度
         
-        Parameters
-        - rho : 密度场
-        - u : 可选的位移场，如果为 None 则自动计算或使用缓存的位移场
-        - diff_mode : 梯度计算方式, 如果为 None 则使用配置中的默认值
-            - "manual": 使用解析推导的梯度公式
-            - "auto": 使用自动微分技术
+        Parameters:
+        -----------
+        rho : 密度场
+        u : 可选的位移场，如果为 None 则自动计算或使用缓存的位移场
+        diff_mode : 梯度计算方式, 如果为 None 则使用配置中的默认值
+            "manual": 使用解析推导的梯度公式
+            "auto": 使用自动微分技术
         """
         if diff_mode is None:
             diff_mode = self.config.diff_mode

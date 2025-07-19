@@ -77,6 +77,95 @@ class Bridge2dData1:
         # 铰支座允许旋转但不允许垂直位移
         return coord_left | coord_right
     
+    @cartesian
+    def threshold(self) -> Tuple[Callable, Callable]:
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
+    
+    @cartesian
+    def is_fixed_point(self, point: TensorLike) -> TensorLike:
+        """判断给定坐标点是否需要保持为固体"""
+        domain = self.domain()
+        x, y = point[..., 0], point[..., 1]
+        
+        is_bottom = bm.abs(y - domain[2]) < self.eps
+        
+        is_left = bm.abs(x - domain[0]) < self.eps
+        is_right = bm.abs(x - domain[1]) < self.eps
+        is_middle = bm.abs(x - (domain[0] + domain[1])/2) < self.eps
+        
+        return (is_bottom & (is_left | is_right | is_middle))
+    
+
+class HalfSinglePointLoadBridge2D:
+    '''
+    模型来源: Topology optimization of incompressible media using mixed finite elements
+    单点载荷桥梁结构(对称)
+    '''
+    def __init__(
+            self, 
+            xmin: float=0, xmax: float=4, 
+            ymin: float=0, ymax: float=4,
+            F: float = 1,
+            E: float = 1.0,   # 杨氏模量
+            nu: float = 0.35,  # 泊松比 (0.5 for incompressible, 0.35 for compressible)
+        ) -> None:
+        self.xmin, self.xmax = xmin, xmax
+        self.ymin, self.ymax = ymin, ymax
+        self.F = F  
+        self.E = E  
+        self.nu = nu  
+        
+        self.eps = 1e-12
+        
+        self.plane_type = 'plane_strain'
+
+    def domain(self) -> list:
+        box = [self.xmin, self.xmax, self.ymin, self.ymax]
+
+        return box
+    
+    @cartesian
+    def force(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+        x = points[..., 0]
+        y = points[..., 1]
+        
+        coord = (
+            (bm.abs(x - domain[0]) < self.eps) & 
+            (bm.abs(y - domain[2]) < self.eps)
+        )
+        
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (coord, 1), -self.F)
+        
+        return val
+    
+    @cartesian
+    def dirichlet(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+        x = points[..., 0]
+        
+        sym_coord = bm.abs(x - domain[0]) < self.eps
+        right_coord = bm.abs(x - domain[1]) < self.eps
+
+        return sym_coord | right_coord
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain()
+        x = points[..., 0]
+    
+        coord = bm.abs(x - domain[1]) < self.eps
+        return coord
+
     def threshold(self) -> Tuple[Callable, Callable]:
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)

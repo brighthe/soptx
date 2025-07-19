@@ -1,25 +1,68 @@
+from pathlib import Path
+from typing import Optional
 from PIL import Image
-"""
-This script converts a series of PNG images into a single GIF animation.
-"""
 
-# 图片文件路径列表
-image_files = []
-# 图片文件的数量
-files_num = 105
-# 图片文件的基础目录
-base_dir = '/home/heliang/FEALPy_Development/soptx/soptx/vtu/gif'
-# 生成图片文件路径列表
-for i in range(files_num):
-    image_files.append(f'{base_dir}/2d_' + str(i) + '.png')
+def png_to_gif(folder_name: str, output_name: str = 'output.gif', duration: int = 100) -> Optional[Path]:
+    """
+    将指定文件夹内的所有 PNG 图片转换为 GIF 动画
+    
+    Parameters:
+    -----------
+    folder_name : str
+        文件夹名称
+    output_name : str
+        输出 GIF 文件名，默认为 'output.gif'
+    duration : int
+        每帧显示时间 (毫秒)，默认为 100
+        
+    Returns:
+    --------
+    Optional[Path]
+        成功时返回生成的 GIF 文件路径，失败时返回 None
+    """
+    # 获取基础路径
+    current_file = Path(__file__)
+    base_dir = current_file.parent.parent / 'vtu' / folder_name
+    
+    # 获取该文件夹下所有的 png 文件
+    png_files = sorted(base_dir.glob('*.png'))
+    
+    if not png_files:
+        print(f"在 {base_dir} 中没有找到任何 PNG 文件")
+        return None
+    
+    print(f"找到 {len(png_files)} 个 PNG 文件")
+    
+    # 打开所有图片
+    images = [Image.open(str(png_file)) for png_file in png_files]
+    
+    # 确保输出文件名以 .gif 结尾
+    if not output_name.endswith('.gif'):
+        output_name += '.gif'
+    
+    # 输出 GIF 文件路径
+    output_path = base_dir / output_name
+    
+    # 创建 GIF
+    images[0].save(
+        str(output_path),
+        save_all=True,
+        append_images=images[1:],
+        duration=duration,
+        loop=0
+    )
+    
+    print(f"GIF 动图已生成: {output_path}")
+    return output_path
 
-# 打开图片并存入一个列表
-images = [Image.open(image_file) for image_file in image_files]
 
-# 每张图片的显示时间（单位是 ms）
-duration = 100 
-
-# 创建 GIF 动图
-images[0].save(f'{base_dir}/output.gif', save_all=True, append_images=images[1:], duration=duration, loop=0)
-
-print("GIF 动图已生成：output.gif")
+# 使用示例
+if __name__ == "__main__":
+    # 转换 test 文件夹中的所有 PNG 为 GIF
+    # png_to_gif('canti_6_17')
+    
+    # 指定输出文件名
+    # png_to_gif('canti_6_17', 'density_animation.gif')
+    
+    # 或者指定不同的文件夹、文件名和播放速度
+    png_to_gif('mbb2d_6_19', 'density_animation.gif', duration=100)

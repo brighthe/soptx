@@ -1,4 +1,3 @@
-
 from .linear_elastic_material import (
                                         BaseElasticMaterialConfig,
                                         DensityBasedMaterialConfig,
@@ -6,6 +5,7 @@ from .linear_elastic_material import (
                                         BaseElasticMaterialInstance,
                                         DensityBasedMaterialInstance,
                                         LevelSetMaterialInstance,
+                                        LevelSetAreaRationMaterialInstance,
                                     )                                       
 from .interpolation_scheme import (
                                     MaterialInterpolation,
@@ -20,6 +20,7 @@ __all__ = [
     'BaseElasticMaterialInstance',
     'DensityBasedMaterialInstance',
     'LevelSetMaterialInstance',
+    'LevelSetAreaRationMaterialInstance',
     'MaterialInterpolation',
     'SIMPInterpolation',
     'RAMPInterpolation'

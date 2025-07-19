@@ -111,7 +111,7 @@ while change > 0.01
 
 	% PRINT RESULTS
 	iter_time = toc;  % Stop timing and get iteration time
-	fprintf(' It.:%5i Obj.:%11.12f Vol.:%8.4jiay jiay f ch.:%7.3f Time:%7.3f sec\n', loop, c, mean(xPhys(:)), change, iter_time);
+	fprintf(' It.:%5i Obj.:%11.12f Vol.:%8.4f ch.:%7.3f Time:%7.3f\n', loop, c, mean(xPhys(:)), change, iter_time);
 
 	% PLOT DENSITIES
 	colormap(gray); imagesc(1-xPhys); caxis([0 1]); axis equal; axis off; drawnow;

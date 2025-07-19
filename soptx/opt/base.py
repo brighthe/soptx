@@ -17,8 +17,8 @@ class ObjectiveBase(ABC):
             u: Optional[TensorLike] = None) -> float:
         """计算目标函数值
         
-        Parameters
-        ----------
+        Parameters:
+        -----------
         rho : 密度场
         u : 可选的位移场, 如果为 None 则由实现类决定如何获取
         

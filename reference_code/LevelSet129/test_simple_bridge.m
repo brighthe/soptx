@@ -1,10 +1,9 @@
-nelx = 6;
-nely = 3;
+nelx = 60;
+nely = 30;
 volReq = 0.3;
 stepLength = 3;
 numReinit = 2;
 topWeight = 2;
-
 
 % Initialization
 struc = ones(nely, nelx);
