@@ -193,7 +193,7 @@ class BoxTriLagrangeData2d(PDEBase):
 
         return mesh
 
-    @variantmethod('polygon_tri')
+    @init_mesh.register('polygon_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
         device = kwargs.get('device', 'cpu')
         vertices = bm.tensor([[0, 0], [1, 0], [1, 1], [0, 1]], 

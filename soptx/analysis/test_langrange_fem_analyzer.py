@@ -114,29 +114,63 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
         return self.uh
     
-    @run.register('LFA_top_material')
+    @run.register('topopt_analysis')
     def run(self):
-        if self.pde is None or self.material is None:
-            raise ValueError("请先设置 PDE 和拓扑材料参数")
+        # 设置 pde
+        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData1
+        pde = HalfMBBBeam2dData1(
+                            domain=[0, 60, 0, 20],
+                            T=-1.0, 
+                            E=1.0, nu=0.3,
+                            enable_logging=False
+                        )
         
-        self._log_info(f"LagrangeFEMAnalyzerTest configuration:\n"
-                f"pde = {self.pde}, \n"
-                f"mesh = {self.mesh}, \n"
-                f"material = {self.material}, \n"
-                f"relative_density = {self.material.relative_density}, "
-                f"interpolation_method = '{self.material.interpolation_method}', "
-                f"density_location = '{self.material.density_location}', \n"
-                f"p = {self.p}, assembly_method = '{self.assembly_method}', "
-                f"solve_method = '{self.solve_method}'")
-        
-        lfa = LagrangeFEMAnalyzer(pde=self.pde, material=self.material, space_degree=self.p,
-                    assembly_method=self.assembly_method, 
-                    solve_method=self.solve_method)
-                    
-        self.uh = lfa.solve()
+        nx, ny = 60, 20
+        pde.init_mesh.set('uniform_quad')
+        mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        return self.uh
-    
+        mesh.to_vtk(f'initial_mesh.vtu')
+
+        # 设置基础材料
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        base_material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False,
+                                        )
+        
+        # 设置拓扑优化配置
+        interpolation_config = InterpolationConfig(
+                                    method='msimp',
+                                    penalty_factor=3,
+                                    target_variables=['E'],
+                                    void_youngs_modulus=1e-12
+                                )
+        density_based_config = DensityBasedConfig(
+                                    density_location='element',
+                                    # density_location='gauss_integration_point',
+                                    initial_density=0.5,
+                                    interpolation=interpolation_config
+                                )
+        self.set_topopt_config(
+                algorithm='density_based',
+                config=density_based_config
+            )
+        
+        lfa_ref = LagrangeFEMAnalyzer(mesh=mesh, 
+                                    pde=pde, 
+                                    material=base_material, 
+                                    space_degree=self.space_degree,
+                                    integrator_order=self.integrator_order,
+                                    assembly_method=self.assembly_method, 
+                                    solve_method=self.solve_method,
+                                    topopt_algorithm=self.topopt_algorithm,
+                                    topopt_config=self.topopt_config)
+        uh = lfa_ref.solve()
+
+        return uh
+
     @run.register('LFA_top_material_analysis_true_solution')
     def run(self, maxit: int) -> TensorLike:
         if self.pde is None or self.material is None:
@@ -202,7 +236,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
     
 
     @run.register('topopt_analysis_exact_solution')
-    def run(self, maxit: int = 5) -> TensorLike:
+    def run(self, maxit: int = 6) -> TensorLike:
         
         # 设置 pde
         from soptx.model.linear_elasticity_2d import BoxTriLagrangeData2d
@@ -211,8 +245,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                             E=1.0, nu=0.3,
                             enable_logging=False
                         )
+        nx, ny = 10, 10
         pde.init_mesh.set('uniform_tri')
-        mesh = pde.init_mesh(nx=10, ny=10)
+        mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        mesh.to_vtk(f'initial_mesh.vtu')
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -231,6 +268,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     void_youngs_modulus=1e-12
                                 )
         density_based_config = DensityBasedConfig(
+                                    # density_location='gauss_integration_point',
                                     density_location='element',
                                     initial_density=1.0,
                                     interpolation=interpolation_config
@@ -240,8 +278,6 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                         config=density_based_config
                     )
         
-        mesh = self.mesh
-
         errorType = ['$|| P_h(\\boldsymbol{u}_h) - \\boldsymbol{u}_{ref} ||_{L^2}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
@@ -272,6 +308,15 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
             
             if i < maxit - 1:
+                if i % 2 == 0:  
+                    nx *= 2
+                    print(f"Next iteration will refine nx: nx={nx}, ny={ny}")
+                else: 
+                    ny *= 2
+                    print(f"Next iteration will refine ny: nx={nx}, ny={ny}")
+
+                # 重新生成网格
+                # mesh = pde.init_mesh(nx=nx, ny=ny)
                 mesh.uniform_refine()
                 # mesh.bisect(isMarkedCell=None, options={'disp': False})
 
@@ -279,7 +324,9 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
         print("errorMatrix:\n", errorType, "\n", errorMatrix)
         print("NDof:", NDof)
-        print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+        order_l2 = bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:])
+        # order_l2 = bm.log2(errorMatrix[0, :-2] / errorMatrix[0, 2:])
+        self._log_info(f"order_l2: {order_l2}")
         show_error_table(h, errorType, errorMatrix)
         showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
         plt.show()
@@ -287,11 +334,38 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         return uh
 
     @run.register('topopt_analysis_reference_solution')
-    def run(self, 
-            nx: int = 10, ny: int = 10, 
-            maxit: int = 6, ref_level: int = 7
-        ) -> TensorLike:
+    def run(self, maxit: int = 6, ref_level: int = 6) -> TensorLike:
+
+        # 设置 pde
+        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData1
+        pde = HalfMBBBeam2dData1(
+                            domain=[0, 30, 0, 10],
+                            T=-1.0, 
+                            E=1.0, nu=0.3,
+                            enable_logging=False
+                        )
+        # from soptx.model.linear_elasticity_2d import BoxTriLagrangeData2d
+        # pde = BoxTriLagrangeData2d(
+        #                     domain=[0, 1, 0, 1], 
+        #                     E=1.0, nu=0.3,
+        #                     enable_logging=False
+        #                 )
         
+        nx, ny = 30, 10
+        pde.init_mesh.set('uniform_tri')
+        mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        mesh.to_vtk(f'initial_mesh.vtu')
+
+        # 设置基础材料
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        base_material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+
         # 设置拓扑优化配置
         interpolation_config = InterpolationConfig(
                                     method='msimp',
@@ -300,7 +374,8 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     void_youngs_modulus=1e-12
                                 )
         density_based_config = DensityBasedConfig(
-                                    density_location='gauss_integration_point',
+                                    density_location='element',
+                                    # density_location='gauss_integration_point',
                                     initial_density=1.0,
                                     interpolation=interpolation_config
                                 )
@@ -334,7 +409,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         uh_ref = lfa_ref.solve()
 
         errorType = ['$|| P_h(\\boldsymbol{u}_h) - \\boldsymbol{u}_{ref} ||_{L^2}$']
-        errorMatrix = bm.zeros((2, maxit), dtype=bm.float64)
+        errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
         h = bm.zeros(maxit, dtype=bm.float64)
 
@@ -344,6 +419,8 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             mesh_i = pde.init_mesh(nx=nx, ny=ny)
             for _ in range(i):
                 mesh_i.bisect(isMarkedCell=None, options={'disp': False})
+
+            mesh_i.to_vtk(f'mesh_level_{i+1}.vtu')
 
             lfa_i = LagrangeFEMAnalyzer(mesh=mesh_i, 
                                     pde=pde, 
@@ -366,16 +443,15 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                             )
             
             e0 = ref_mesh.error(uh_i_projected, uh_ref)
-            e1 = ref_mesh.error(uh_ref, pde.disp_solution)
             errorMatrix[0, i] = e0
-            errorMatrix[1, i] = e1
              
             NDof[i] = lfa_i.tensor_space.number_of_global_dofs()
             h[i] = mesh_i.meshdata.get('hx')
             
         print("errorMatrix:\n", errorType, "\n", errorMatrix)
         print("NDof:", NDof)
-        print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+        order_l2 = bm.log2(errorMatrix[0, :-2] / errorMatrix[0, 2:])
+        self._log_info(f"order_l2: {order_l2}")
         show_error_table(h, errorType, errorMatrix)
         showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
         plt.show()
@@ -384,132 +460,17 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
 
 if __name__ == "__main__":
-    test1 = LagrangeFEMAnalyzerTest(enable_logging=True)
-
-    # 一、基础线弹性材料求解
-    # ## 1.1 创建 pde
-    # from soptx.model.linear_elasticity_2d import BoxTriLagrangeData2d
-    # pde = BoxTriLagrangeData2d(
-    #                     domain=[0, 1, 0, 1], 
-    #                     E=1.0, nu=0.3,
-    #                     enable_logging=False
-    #                 )
-    # ## 1.2 创建基础材料
-    # from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-    # base_material = IsotropicLinearElasticMaterial(
-    #                                     youngs_modulus=pde.E, 
-    #                                     poisson_ratio=pde.nu, 
-    #                                     plane_type=pde.plane_type,
-    #                                     enable_logging=False
-    #                                 )
-
-    # test1.set_pde(pde)
-    # test1.set_init_mesh('uniform_quad', nx=5, ny=5)
-    # test1.set_material(base_material)
-    # test1.set_space_degree(3)
-    # test1.set_assembly_method('fast')
-    # test1.set_solve_method('mumps')
-
-    # uh1 = test1.run(maxit=4)
-
-    # 二、拓扑优化材料求解
-    ## 2.1 创建 pde 并设置网格
-    # from soptx.model.mbb_beam_2d import HalfMBBBeam2dData1
-    # pde = HalfMBBBeam2dData1(
-    #                     domain=[0, 60, 0, 20],
-    #                     T=-1.0, E=1.0, nu=0.3,
-    #                     enable_logging=False
-    #                 )
-    # pde.init_mesh.set('uniform_quad')
-    # mesh = pde.init_mesh(nx=60, ny=20)
-
-    # ## 2.2 创建基础材料
-    # from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-    # base_material = IsotropicLinearElasticMaterial(
-    #                                     youngs_modulus=pde.E, 
-    #                                     poisson_ratio=pde.nu, 
-    #                                     plane_type=pde.plane_type,
-    #                                     enable_logging=False
-    #                                 )
-
-    # # 2.3 设置材料插值方案
-    # from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
-    # interpolation_scheme = MaterialInterpolationScheme(
-    #                             penalty_factor=3.0, 
-    #                             void_youngs_modulus=1e-12, 
-    #                             interpolation_method='simp', 
-    #                             enable_logging=False
-    #                         )
+    test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    # # 2.4. 创建拓扑优化材料
-    # from soptx.interpolation.topology_optimization_material import TopologyOptimizationMaterial
-    # top_material = TopologyOptimizationMaterial(
-    #                         mesh=mesh,
-    #                         base_material=base_material,
-    #                         interpolation_scheme=interpolation_scheme,
-    #                         relative_density=1.0,
-    #                         density_location='element',
-    #                         quadrature_order=3,
-    #                         enable_logging=True
-    #                     )
-    
-    # test1.set_pde(pde)
-    # test1.set_material(top_material)
-    # test1.set_space_degree(1)
-    # test1.set_assembly_method('standard')
-    # test1.set_solve_method('mumps')
-    # test1.run.set('LFA_top_material_analysis')
+    p = 3
+    q = p+3
+    test.set_space_degree(p)
+    test.set_integrator_order(q)
+    test.set_assembly_method('standard')
+    test.set_solve_method('mumps')
 
-    # uh1 = test1.run(maxit=4)
+    # test.run.set('topopt_analysis_reference_solution')
+    # test.run.set('topopt_analysis_exact_solution')
+    test.run.set('topopt_analysis')
 
-    # 三、验证
-    ## 3.1 创建 pde
-    from soptx.model.linear_elasticity_2d import BoxTriLagrangeData2d
-    pde = BoxTriLagrangeData2d(
-                        domain=[0, 1, 0, 1], 
-                        E=1.0, nu=0.3,
-                        enable_logging=False
-                    )
-
-    ## 3.2 创建基础材料
-    from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-    base_material = IsotropicLinearElasticMaterial(
-                                        youngs_modulus=pde.E, 
-                                        poisson_ratio=pde.nu, 
-                                        plane_type=pde.plane_type,
-                                        enable_logging=False
-                                    )
-
-    # # 3.3 设置材料插值方案
-    # from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
-    # interpolation_scheme = MaterialInterpolationScheme(
-    #                             penalty_factor=3.0, 
-    #                             void_youngs_modulus=1e-12, 
-    #                             interpolation_method='simp', 
-    #                             enable_logging=False
-    #                         )
-    
-    # # 2.4. 创建拓扑优化材料
-    # from soptx.interpolation.topology_optimization_material import TopologyOptimizationMaterial
-    # top_material = TopologyOptimizationMaterial(
-    #                         base_material=base_material,
-    #                         interpolation_scheme=interpolation_scheme,
-    #                         relative_density=1.0,
-    #                         density_location='element_gauss_integrate_point',
-    #                         quadrature_order=3,
-    #                         enable_logging=False
-    #                     )
-    
-    # test1.set_pde(pde)
-    # test1.set_init_mesh('uniform_tri', nx=20, ny=20)
-    # test1.set_init_mesh('tri')
-    # test1.set_material(base_material)
-    test1.set_space_degree(1)
-    test1.set_integrator_order(4)
-    test1.set_assembly_method('standard')
-    test1.set_solve_method('mumps')
-
-    # test1.run.set('topopt_analysis_reference_solution')
-    test1.run.set('topopt_analysis_exact_solution')
-
-    uh1 = test1.run()
+    uh1 = test.run()
