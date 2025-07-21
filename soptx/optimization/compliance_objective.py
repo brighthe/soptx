@@ -36,10 +36,8 @@ class ComplianceObjective(BaseLogged):
         ) -> float:
         """计算柔顺度目标函数值"""
 
-        self._top_material.density_distribution = density_distribution
-
         if displacement is None:
-            uh = self._analyzer.solve()
+            uh = self._analyzer.solve_displacement(density_distribution=density_distribution)
         else:
             uh = displacement
 

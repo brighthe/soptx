@@ -73,3 +73,48 @@ c = compliance_obj.fun(density_distribution=top_material.density_distribution)
 
 dc = compliance_obj.jac(density_distribution=top_material.density_distribution, 
                         diff_mode='manual')
+
+
+
+lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                        mesh=mesh,
+                                        pde=pde,
+                                        material=material,
+                                        topopt_algorithm='density_based',
+                                        topopt_config=DensityBasedConfig(
+                                                        density_location='element',
+                                                        initial_density=0.5,
+                                                        interpolation=InterpolationConfig(
+                                                                            method='simp',
+                                                                            penalty_factor=3.0,
+                                                                            target_variables=['E'],
+                                                                            void_youngs_modulus=1e-9),
+                                                                        )
+                                                        )
+uh = lagrange_fem_analyzer.solve_displacement(rho=rho)
+filter_regularization = Filter(
+                            mesh=mesh,
+                            filter_type='sensitivity',
+                            rmin=6.0,
+                        )
+compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
+c = compliance_objective.fun(rho=rho, u=uh)
+dc = compliance_objective.jac(rho=rho, u=uh)
+volume_constraint = VolumeConstraint(volume_fraction=0.4)
+v = volume_constraint.fun(rho=rho)
+dv = volume_constraint.jac(rho=rho)
+
+oc_optimizer = OCOptimizer(
+                    objective=compliance_objective,
+                    constraint=volume_constraint,
+                    regularization=filter_regularization, 
+                    options={
+                        'max_iterations': 100,
+                        'tolerance': 1e-5,
+                        'initial_lambda': 1.0
+                    }
+                )
+
+rho_new, history = oc_optimizer.optimize(rho=rho)
+save_optimization_history(mesh, history, str(save_path))
+plot_optimization_history(history, save_path=str(save_path))
