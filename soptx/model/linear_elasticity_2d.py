@@ -152,7 +152,7 @@ class BoxTriLagrangeData2d(PDEBase):
 
         self._eps = 1e-12
         self._plane_type = 'plane_strain'
-        self._force_type = 'continuous'
+        self._force_type = 'distribution'
         self._boundary_type = 'dirichlet'
 
         self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
