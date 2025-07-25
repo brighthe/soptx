@@ -17,7 +17,7 @@ class OCOptimizer():
 
         Parameters:
         -----------
-        rho : 初始密度场
+        rho : 初始相对密度场
         **kwargs : 其他参数
         """
 

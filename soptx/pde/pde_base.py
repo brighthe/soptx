@@ -49,14 +49,12 @@ class PDEBase(BaseLogged, ABC):
     # 内部方法
     #######################################################################################################################
 
-    def _save_mesh(self, mesh: HomogeneousMesh, mesh_type: str, **params) -> None:
+    def _save_meshdata(self, mesh: HomogeneousMesh, mesh_type: str, **params) -> None:
         """保存网格"""
-        self._mesh = mesh
         self.mesh_type = mesh_type
 
         nx = params.get('nx', 10)  
         ny = params.get('ny', 10)
-        nz = params.get('nz', None)
 
         hx = (self._domain[1] - self._domain[0]) / nx
         hy = (self._domain[3] - self._domain[2]) / ny
@@ -68,10 +66,6 @@ class PDEBase(BaseLogged, ABC):
             'nx': nx, 'ny': ny,
             'hx': hx, 'hy': hy,
         }
-
-        if nz is not None and len(self._domain) >= 6:
-            hz = (self._domain[5] - self._domain[4]) / nz
-            metadata.update({'nz': nz, 'hz': hz})
 
         mesh.meshdata.update(metadata)
 

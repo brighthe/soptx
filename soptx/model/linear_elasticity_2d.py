@@ -121,7 +121,7 @@ class BoxTriHuZhangData2d():
         
         return val
     
-class BoxTriLagrangeData2d(PDEBase):
+class BoxTriLagrange2dData(PDEBase):
     """
     模型来源:
     https://wnesm678i4.feishu.cn/wiki/JvPPwCD9niMSTZkztTpcIcLxnne#share-LLcgd9YBAoJlvhxags2cR74Tnnd
@@ -157,9 +157,11 @@ class BoxTriLagrangeData2d(PDEBase):
 
         self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
                        f"mesh_type='{mesh_type}', E={E}, nu={nu}, "
-                       f"plane_type='{self._plane_type}', force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
-    
-    
+                       f"plane_type='{self._plane_type}', "
+                       f"force_type='{self._force_type}', "
+                       f"boundary_type='{self._boundary_type}'")
+
+
     #######################################################################################################################
     # 访问器
     #######################################################################################################################
@@ -244,6 +246,24 @@ class BoxTriLagrangeData2d(PDEBase):
         u = bm.stack([u_x, u_y], axis=-1)
 
         return u
+    
+    @cartesian
+    def disp_solution_gradient(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+        
+        du_x_dx = pi * bm.cos(pi * x) * bm.sin(pi * y)
+        du_x_dy = pi * bm.sin(pi * x) * bm.cos(pi * y)
+        
+        du_y_dx = bm.zeros_like(x)
+        du_y_dy = bm.zeros_like(x)
+        
+        grad_u = bm.stack([
+            bm.stack([du_x_dx, du_x_dy], axis=-1),  
+            bm.stack([du_y_dx, du_y_dy], axis=-1)   
+        ], axis=-2)
+        
+        return grad_u
 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:

@@ -7,7 +7,7 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.pde.pde_base import PDEBase  
 
-class HalfMBBBeam2dData1(PDEBase):
+class HalfMBBBeam2dData(PDEBase):
     '''
     模型来源:
     https://wnesm678i4.feishu.cn/wiki/Xi3dw6mzNi6V9ckNcoScfmAXnFg#part-TuQydJUDvojFG6x0NPzcH3stnTh
@@ -46,7 +46,8 @@ class HalfMBBBeam2dData1(PDEBase):
         self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
                 f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
                 f"plane_type='{self._plane_type}', "
-                f"force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
+                f"force_type='{self._force_type}', "
+                f"boundary_type='{self._boundary_type}'")
 
 
     #######################################################################################################################
@@ -82,7 +83,7 @@ class HalfMBBBeam2dData1(PDEBase):
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)
 
-        self._save_mesh(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
 
         return mesh
     
@@ -96,7 +97,7 @@ class HalfMBBBeam2dData1(PDEBase):
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)
         
-        self._save_mesh(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny)
 
         return mesh
 
@@ -109,8 +110,7 @@ class HalfMBBBeam2dData1(PDEBase):
     def body_force(self, points: TensorLike) -> TensorLike:
         domain = self.domain
 
-        x = points[..., 0]
-        y = points[..., 1]
+        x, y = points[..., 0], points[..., 1]   
 
         coord = (
             (bm.abs(x - domain[0]) < self._eps) & 

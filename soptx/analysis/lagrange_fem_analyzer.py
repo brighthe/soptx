@@ -27,7 +27,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 assembly_method: Literal['standard', 'fast'] = 'standard',
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
-                topopt_config: Optional[Union[DensityBasedConfig, LevelSetConfig]] = None,
+                interpolation_scheme: Optional[MaterialInterpolationScheme] = None,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -35,19 +35,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-        # 验证拓扑优化算法与配置的匹配性
-        self._validate_topopt_config(topopt_algorithm, topopt_config)
+        # 验证拓扑优化算法与插值方案的匹配性
+        self._validate_topopt_config(topopt_algorithm, interpolation_scheme)
+
         
         # 私有属性（建议通过属性访问器访问，不要直接修改）
         self._mesh = mesh
         self._pde = pde
         self._material = material
-        self._topopt_algorithm = topopt_algorithm
-        self._topopt_config = topopt_config
+        self._interpolation_scheme = interpolation_scheme
+
         self._space_degree = space_degree
         self._integrator_order = integrator_order
         self._assembly_method = assembly_method
-        
+
+        self._topopt_algorithm = topopt_algorithm
+
         # 设置默认求解方法
         self.solve.set(solve_method)
 
@@ -59,6 +62,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 缓存的矩阵和向量
         self._K = None
         self._F = None
+
+        self._log_info(f"Mesh Information: NC: {self._mesh.number_of_cells()}, ")
 
 
     ##############################################################################################
@@ -194,37 +199,25 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 核心方法
     ##################################################################################################
 
-    def assemble_stiff_matrix(self) -> Union[CSRTensor, COOTensor]:
+    def assemble_stiff_matrix(self, 
+                            density_distribution: Optional[Function] = None
+                        ) -> Union[CSRTensor, COOTensor]:
         """组装全局刚度矩阵"""
         if self._topopt_algorithm is None:
-        
+            if density_distribution is not None:
+                self._log_warning("标准有限元分析模式下忽略相对密度分布参数 rho")
+            
             coef = None
         
         elif self._topopt_algorithm == 'density_based':
-        
-            initial_density = self._topopt_config.initial_density
-            density_location = self._topopt_config.density_location
+            if density_distribution is None:
+                error_msg = "基于密度的拓扑优化算法需要提供相对密度分布 rho"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
 
-            interpolation_method = self._topopt_config.interpolation.method
-            penalty_factor = self._topopt_config.interpolation.penalty_factor
-            target_variables = self._topopt_config.interpolation.target_variables
-            void_youngs_modulus = self._topopt_config.interpolation.void_youngs_modulus
-            
-            interpolation_scheme = MaterialInterpolationScheme(density_location=density_location,
-                                                               interpolation_method=interpolation_method)
-
-            density_distribution = interpolation_scheme.setup_density_distribution(
-                                                        mesh=self._mesh,
-                                                        relative_density=initial_density,
-                                                        integrator_order=self._integrator_order
-                                                    )
-
-            coef = interpolation_scheme.interpolate_map(
+            coef = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
                                             density_distribution=density_distribution,
-                                            penalty_factor=penalty_factor,
-                                            target_variables=target_variables,      
-                                            void_youngs_modulus=void_youngs_modulus
                                         )
         elif self._topopt_algorithm == 'level_set':
         
@@ -256,7 +249,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if force_type == 'concentrated':
             # NOTE F.dtype == TensorLike
             F = self._tensor_space.interpolate(body_force)
-        elif force_type == 'continuous':
+        elif force_type == 'distribution':
             # NOTE F.dtype == COOTensor or TensorLike
             integrator = VectorSourceIntegrator(source=body_force, q=self._integrator_order)
             lform = LinearForm(self.tensor_space)
@@ -307,9 +300,23 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##########################################################################################################
 
     @variantmethod('mumps')
-    def solve(self, **kwargs) -> Function:
+    def solve(self, 
+            density_distribution: Optional[Function] = None, 
+            **kwargs
+            ) -> Function:
         from fealpy.solver import spsolve
-        K0 = self.assemble_stiff_matrix()
+
+        if self._topopt_algorithm is None:
+            if density_distribution is not None:
+                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+        
+        elif self._topopt_algorithm in ['density_based', 'level_set']:
+            if density_distribution is None:
+                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+    
+        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
         F0 = self.assemble_force_vector()
         K, F = self.apply_bc(K0, F0)
 
@@ -323,7 +330,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return uh
     
     @solve.register('cg')
-    def solve(self, **kwargs) -> Function:
+    def solve(self, 
+            density_distribution: Optional[Function] = None, 
+            **kwargs
+            ) -> Function:
         from fealpy.solver import cg
         K0 = self.assemble_stiff_matrix()
         F0 = self.assemble_force_vector()
@@ -351,52 +361,37 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def _validate_topopt_config(self, 
                             topopt_algorithm: Literal[None, 'density_based', 'level_set'], 
-                            topopt_config: Optional[Union[DensityBasedConfig, LevelSetConfig]]
+                            interpolation_scheme: Optional[MaterialInterpolationScheme]
                         ) -> None:
-        """验证拓扑优化算法与配置的匹配性"""
+        """验证拓扑优化算法与插值方案的匹配性"""
+        
         if topopt_algorithm is None:
 
-            if topopt_config is not None:
-                error_msg = ("当 topopt_algorithm=None 时， topopt_config 必须为 None"
-                           f"当前 topopt_config 类型: {type(topopt_config).__name__}")
+            if interpolation_scheme is not None:
+                error_msg = ("当 topopt_algorithm=None 时, interpolation_scheme 必须为 None."
+                        "标准有限元分析不需要插值方案.")
                 self._log_error(error_msg)
                 raise ValueError(error_msg)
+            
+            self._log_info("使用标准有限元分析模式（无拓扑优化）")
                 
         elif topopt_algorithm == 'density_based':
+
+            if interpolation_scheme is None:
+                error_msg = "当 topopt_algorithm='density_based' 时，必须提供 MaterialInterpolationScheme"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
             
-            if topopt_config is None:
-                error_msg = "当 topopt_algorithm='density_based' 时, 必须提供 DensityBasedConfig 配置"
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
-            elif not isinstance(topopt_config, DensityBasedConfig):
-                error_msg = (f"当 topopt_algorithm='density_based'时, "
-                           f"topopt_config 必须是 DensityBasedConfig 类型, "
-                           f"当前类型: {type(topopt_config).__name__}")
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
+            self._log_info(f"使用基于密度的拓扑优化, 插值方法：{interpolation_scheme.interpolation_method}")
                 
         elif topopt_algorithm == 'level_set':
-
-            if topopt_config is None:
-                error_msg = "当 topopt_algorithm='level_set'时, 必须提供 LevelSetConfig 配置"
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
-            elif not isinstance(topopt_config, LevelSetConfig):
-                error_msg = (f"当 topopt_algorithm='level_set'时, "
-                           f"topopt_config 必须是 LevelSetConfig 类型, "
-                           f"当前类型: {type(topopt_config).__name__}")
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
+            
+            raise NotImplementedError("Level set topology optimization is not yet implemented.")
                 
         else:
             error_msg = f"不支持的拓扑优化算法: {topopt_algorithm}"
             self._log_error(error_msg)
             raise ValueError(error_msg)
-            
-        if topopt_algorithm is None:
-            self._log_info("使用标准有限元分析模式")
-        else:
-            self._log_info(f"使用拓扑优化算法: {topopt_algorithm}，配置类型: {type(topopt_config).__name__}")
 
     def _setup_function_spaces(self, 
                             mesh: HomogeneousMesh, 

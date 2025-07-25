@@ -79,7 +79,9 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         D0 = self._material.elastic_matrix()
         coef = self._coef
 
-        if coef.shape == (NC, ):
+        if coef is None:
+            D = D0
+        elif coef.shape == (NC, ):
             D = bm.einsum('c, ijkl -> cjkl', coef, D0)
         elif coef.shape == (NC, NQ):
             D = bm.einsum('cq, ijkl -> cqkl', coef, D0)
