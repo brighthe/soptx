@@ -5,7 +5,6 @@ from fealpy.typing import TensorLike
 from fealpy.functionspace import Function, TensorFunctionSpace
 
 from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-from ..interpolation.topology_optimization_material import TopologyOptimizationMaterial
 from ..utils.base_logged import BaseLogged
 
 class ComplianceObjective(BaseLogged):
@@ -16,19 +15,9 @@ class ComplianceObjective(BaseLogged):
             ) -> None:
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-        if not isinstance(analyzer.material, TopologyOptimizationMaterial):
-            error_msg = (
-                f"ComplianceObjective requires TopologyOptimizationMaterial, "
-                f"got {type(analyzer.material).__name__}. "
-            )
-            self._log_error(error_msg) 
-            raise TypeError(error_msg)  
-
         self._analyzer = analyzer
-        self._tensor_space: TensorFunctionSpace = self._analyzer.tensor_space
-        self._top_material: TopologyOptimizationMaterial = self._analyzer.material
-        self._base_material = self._top_material.base_material
-        self._interpolation_scheme = self._top_material.interpolation_scheme
+        self._tensor_space = analyzer._tensor_space
+        self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
             density_distribution: Function, 
@@ -78,18 +67,15 @@ class ComplianceObjective(BaseLogged):
         ) -> Function:
         """手动计算目标函数梯度"""
 
-        self._top_material.density_distribution = density_distribution
-
         if displacement is None:
-            uh = self._analyzer.solve()
+            uh = self._analyzer.solve_displacement(density_distribution=density_distribution)
         else:
             uh = displacement
         
         cell2dof = self._tensor_space.cell_to_dof()
         uhe = uh[cell2dof]
 
-        density_location = self._top_material.density_location
-        diff_ke = self._analyzer.get_stiffness_matrix__derivative()
+        diff_ke = self._analyzer.get_stiffness_matrix__derivative(density_distribution=density_distribution)
 
         if density_location == 'element':
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)

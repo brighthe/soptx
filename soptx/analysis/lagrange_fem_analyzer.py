@@ -52,7 +52,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._topopt_algorithm = topopt_algorithm
 
         # 设置默认求解方法
-        self.solve.set(solve_method)
+        self.solve_displacement.set(solve_method)
 
         self._GD = self._mesh.geo_dimension()
         self._setup_function_spaces(mesh=self._mesh, 
@@ -94,6 +94,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def assembly_method(self) -> str:
         """获取当前的组装方法"""
         return self._assembly_method
+    
+    @property
+    def topopt_algorithm(self) -> Optional[str]:
+        """获取当前的拓扑优化算法"""
+        return self._topopt_algorithm
 
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
@@ -152,36 +157,34 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         return tensor_space
 
-    def get_stiffness_matrix__derivative(self) -> TensorLike:
+    def get_stiffness_matrix__derivative(self, density_distribution: Function) -> TensorLike:
         """获取局部刚度矩阵的梯度"""
         
-        top_material = self._material
-        base_material = top_material.base_material
-        density_location = top_material.density_location
-        interpolation_scheme = top_material.interpolation_scheme
-        density_distribution = top_material.density_distribution
-
-        interpolate_derivative = interpolation_scheme.interpolate_derivative(
-                                                            base_material=base_material, 
-                                                            density_distribution=density_distribution[:]
+        interpolate_derivative = self._interpolation_scheme.interpolate_derivative(
+                                                            material=self._material, 
+                                                            density_distribution=density_distribution
                                                         )
+        
+        density_location = self._interpolation_scheme.density_location
+        
         if density_location == 'element':
-            LEA = LinearElasticIntegrator(material=base_material, 
-                                        q=top_material.quadrature_order,
+            lea = LinearElasticIntegrator(material=self._material,
+                                        coef = None,
+                                        q=self._integrator_order,
                                         method=self._assembly_method)
-            ke0 = LEA.assembly(space=self.tensor_space)
+            ke0 = lea.assembly(space=self.tensor_space)
             diff_ke = bm.einsum('c, cij -> cij', interpolate_derivative, ke0)
 
         elif density_location == 'element_gauss_integrate_point':
             mesh = self._mesh
-            qf = mesh.quadrature_formula(top_material.quadrature_order)
+            qf = mesh.quadrature_formula(self._integrator_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
 
-            D0 = base_material.elastic_matrix()[0, 0]
+            D0 = self._material.elastic_matrix()[0, 0]
             dof_priority = self.tensor_space.dof_priority
             scalar_space = self.tensor_space.scalar_space
             gphi = scalar_space.grad_basis(bcs, variable='x')
-            B = base_material.strain_displacement_matrix(dof_priority=dof_priority, gphi=gphi)
+            B = self._material.strain_displacement_matrix(dof_priority=dof_priority, gphi=gphi)
 
             if isinstance(mesh, SimplexMesh):
                 cm = mesh.entity_measure('cell')
@@ -300,7 +303,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##########################################################################################################
 
     @variantmethod('mumps')
-    def solve(self, 
+    def solve_displacement(self, 
             density_distribution: Optional[Function] = None, 
             **kwargs
             ) -> Function:
@@ -329,13 +332,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return uh
     
-    @solve.register('cg')
-    def solve(self, 
+    @solve_displacement.register('cg')
+    def solve_displacement(self, 
             density_distribution: Optional[Function] = None, 
             **kwargs
             ) -> Function:
         from fealpy.solver import cg
-        K0 = self.assemble_stiff_matrix()
+
+        if self._topopt_algorithm is None:
+            if density_distribution is not None:
+                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+        
+        elif self._topopt_algorithm in ['density_based', 'level_set']:
+            if density_distribution is None:
+                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+            
+        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
         F0 = self.assemble_force_vector()
         K, F = self.apply_bc(K0, F0)
 
@@ -444,4 +458,3 @@ class LagrangeFEMAnalyzer(BaseLogged):
         new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
 
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
-
