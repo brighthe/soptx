@@ -2,7 +2,7 @@ from typing import Optional, Literal
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-from fealpy.functionspace import Function, TensorFunctionSpace
+from fealpy.functionspace import Function
 
 from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from ..utils.base_logged import BaseLogged
@@ -76,6 +76,8 @@ class ComplianceObjective(BaseLogged):
         uhe = uh[cell2dof]
 
         diff_ke = self._analyzer.get_stiffness_matrix__derivative(density_distribution=density_distribution)
+
+        density_location = self._interpolation_scheme.density_location
 
         if density_location == 'element':
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)

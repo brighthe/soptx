@@ -234,7 +234,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                             enable_logging=False
                         )
         
-        uh_ref = lfa_ref.solve(density_distribution=None)
+        uh_ref = lfa_ref.solve_displacement(density_distribution=None)
 
         errorType = ['$|| \\boldsymbol{u}_h - \\boldsymbol{u}_{ref} ||_{L^2}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
@@ -263,7 +263,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     enable_logging=False
                                 )
 
-            uh_i = lfa_i.solve(density_distribution=None)
+            uh_i = lfa_i.solve_displacement(density_distribution=None)
 
             uh_i_projected = project_solution_to_finer_mesh(
                                                 pde=pde,
@@ -537,7 +537,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    p = 3
+    p = 1
     q = p+3
     test.set_space_degree(p)
     test.set_integrator_order(q)
