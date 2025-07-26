@@ -124,7 +124,13 @@ lagrange_fem_analyzer = LagrangeFEMAnalyzer(
                             topopt_algorithm='density_based',
                         )
 
-uh = lagrange_fem_analyzer.solve(density_distribution=rho)
+uh = lagrange_fem_analyzer.solve_displacement(density_distribution=rho)
+
+from soptx.optimization.compliance_objective import ComplianceObjective
+compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
+
+c = compliance_objective.fun(density_distribution=rho, displacement=None)
+dc = compliance_objective.jac(density_distribution=rho, displacement=None, diff_mode='manual')
 
 print("--------------------")
 
@@ -142,9 +148,7 @@ filter_regularization = Filter(
                             filter_type='sensitivity',
                             rmin=6.0,
                         )
-compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
-c = compliance_objective.fun(rho=rho, u=uh)
-dc = compliance_objective.jac(rho=rho, u=uh)
+
 volume_constraint = VolumeConstraint(volume_fraction=0.4)
 v = volume_constraint.fun(rho=rho)
 dv = volume_constraint.jac(rho=rho)

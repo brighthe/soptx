@@ -160,7 +160,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     interpolation_scheme=None
                                 )
 
-            uh = lfa.solve(density_distribution=None)
+            uh = lfa.solve_displacement(density_distribution=None)
 
             e0 = mesh.error(uh, pde.disp_solution)
             e1 = mesh.error(uh.grad_value, pde.disp_solution_gradient)

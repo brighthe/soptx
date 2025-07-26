@@ -64,7 +64,7 @@ class ComplianceObjective(BaseLogged):
     def _manual_differentiation(self, 
             density_distribution: Function, 
             displacement: Optional[Function] = None
-        ) -> Function:
+        ) -> TensorLike:
         """手动计算目标函数梯度"""
 
         if displacement is None:
@@ -90,7 +90,7 @@ class ComplianceObjective(BaseLogged):
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")
 
-        return dc
+        return dc[:]
     
     def _auto_differentiation(self, 
             density_distribution: Function, 
