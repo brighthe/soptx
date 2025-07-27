@@ -195,7 +195,7 @@ class MaterialInterpolationScheme(BaseLogged):
 
             return dval
 
-        elif method == 'modified_simp':
+        elif method == 'msimp':
             E0 = material.youngs_modulus
             Emin = self._options['void_youngs_modulus']
             dval = p * density_distribution[:] ** (p - 1) * (E0 - Emin) / E0

@@ -21,11 +21,14 @@ class _FilterStrategy(ABC):
     def filter_objective_sensitivities(self, 
                                     rho_Phys: TensorLike, 
                                     obj_grad: TensorLike
-                                ) -> TensorLike:
+                                    ) -> TensorLike:
         pass
 
     @abstractmethod
-    def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
+    def filter_constraint_sensitivities(self, 
+                                        rho_Phys: TensorLike, 
+                                        con_grad: TensorLike
+                                    ) -> TensorLike:
         pass
 
 
@@ -85,10 +88,10 @@ class SensitivityStrategy(_FilterStrategy):
 
     def filter_constraint_sensitivities(self, 
                                     rho_Phys: TensorLike, 
-                                    cons_grad: TensorLike
+                                    con_grad: TensorLike
                                 ) -> TensorLike:
 
-        return cons_grad
+        return con_grad
 
 
 class DensityStrategy(_FilterStrategy):
@@ -112,25 +115,25 @@ class DensityStrategy(_FilterStrategy):
 
         return rho_Phys
 
-    def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> TensorLike:
-        weighted_dobj = self._cell_measure * dobj
+    def filter_objective_sensitivities(self, rho_Phys: TensorLike, obj_grad: TensorLike) -> TensorLike:
+        weighted_dobj = self._cell_measure * obj_grad
         numerator = self._H.matmul(weighted_dobj)
 
         denominator = self._H.matmul(self._cell_measure)
 
-        dobj = bm.set_at(dobj, slice(None), numerator / denominator)
+        obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
 
-        return dobj
+        return obj_grad 
 
-    def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
-        weighted_dcons = self._cell_measure * dcons
+    def filter_constraint_sensitivities(self, rho_Phys: TensorLike, con_grad: TensorLike) -> TensorLike:
+        weighted_dcons = self._cell_measure * con_grad
         numerator = self._H.matmul(weighted_dcons)
 
         denominator = self._H.matmul(self._cell_measure)
 
-        dcons = bm.set_at(dcons, slice(None), numerator / denominator)
+        con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 
-        return dcons
+        return con_grad
 
 
 class HeavisideDensityStrategy(_FilterStrategy):
@@ -155,7 +158,6 @@ class HeavisideDensityStrategy(_FilterStrategy):
         rho_Phys = bm.set_at(rho_Phys, slice(None), projected_values)
 
         return rho_Phys
-
 
     def filter_variables(self, x: TensorLike) -> TensorLike:
         weighted_x = self._cell_measure * x

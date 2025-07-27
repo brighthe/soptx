@@ -1,8 +1,10 @@
 from typing import Optional, Union
+from pathlib import Path
 
 from fealpy.decorator import variantmethod
 
 from soptx.utils.base_logged import BaseLogged
+from soptx.optimization.tools import save_optimization_history, plot_optimization_history
 
 
 class DensityTopOptTest(BaseLogged):
@@ -49,6 +51,8 @@ class DensityTopOptTest(BaseLogged):
                             T=-1.0, E=1.0, nu=0.3,
                             enable_logging=False
                         )
+        domain_length = pde.domain[1] - pde.domain[0]
+        domain_height = pde.domain[3] - pde.domain[2]
         pde.init_mesh.set('uniform_quad')
         fe_mesh = pde.init_mesh(nx=60, ny=20)
 
@@ -66,7 +70,7 @@ class DensityTopOptTest(BaseLogged):
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
                                     density_location='element',
-                                    interpolation_method='simp',
+                                    interpolation_method='msimp',
                                     options={
                                         'penalty_factor': 3.0,
                                         'void_youngs_modulus': 1e-12,
@@ -76,8 +80,8 @@ class DensityTopOptTest(BaseLogged):
 
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
-                                                relative_density=0.5,
-                                                integrator_order=4
+                                                relative_density=1.0,
+                                                integrator_order=self.integrator_order,
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -87,7 +91,7 @@ class DensityTopOptTest(BaseLogged):
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
                                     space_degree=1,
-                                    integrator_order=4,
+                                    integrator_order=self.integrator_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
@@ -97,12 +101,14 @@ class DensityTopOptTest(BaseLogged):
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
 
         from soptx.optimization.volume_constraint import VolumeConstraint
-        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=0.5)
+        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=self.volume_fraction)
 
         from soptx.regularization.filter import Filter
+        rmin = 0.04 * domain_length
         filter_regularization = Filter(
                                     mesh=opt_mesh,
-                                    filter_type='none',
+                                    filter_type='sensitivity',
+                                    rmin=rmin
                                 )
 
 
@@ -112,8 +118,8 @@ class DensityTopOptTest(BaseLogged):
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
-                                'max_iterations': 100,
-                                'tolerance': 1e-5,
+                                'max_iterations': 200,
+                                'tolerance': 1e-3,
                             }
                         )
         # 设置高级参数 (可选)
@@ -124,6 +130,15 @@ class DensityTopOptTest(BaseLogged):
                                     bisection_tol=1e-3
                                 )
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
+
+        # 保存结果
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/density_top_opt_results")
+        save_path.mkdir(parents=True, exist_ok=True)
+        save_optimization_history(opt_mesh, history, str(save_path))
+        plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
     

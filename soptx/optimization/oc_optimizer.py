@@ -1,6 +1,7 @@
 import warnings
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from time import time
+from typing import Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -10,6 +11,7 @@ from ..optimization.compliance_objective import ComplianceObjective
 from ..optimization.volume_constraint import VolumeConstraint
 from ..optimization.tools import OptimizationHistory
 from ..regularization.filter import Filter
+from ..utils.base_logged import BaseLogged
 
 
 @dataclass
@@ -17,7 +19,7 @@ class OCOptions:
     """OC 算法的配置选项"""
     # 用户级参数：直接暴露给用户
     max_iterations: int = 100     # 最大迭代次数
-    tolerance: float = 0.01       # 收敛容差
+    tolerance: float = 1e-3       # 收敛容差
 
     # 高级参数：通过专门的方法修改
     @property
@@ -74,12 +76,17 @@ class OCOptions:
             else:
                 raise ValueError(f"Unknown parameter: {key}")
 
-class OCOptimizer():
+class OCOptimizer(BaseLogged):
     def __init__(self,
                 objective: ComplianceObjective,
                 constraint: VolumeConstraint,
                 filter: Filter,
-                options: OCOptions = None):
+                options: OCOptions = None,
+                enable_logging: bool = False,
+                logger_name: Optional[str] = None
+            ) -> None:
+        
+        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
         self._objective = objective
         self._constraint = constraint
@@ -94,8 +101,10 @@ class OCOptimizer():
                 if key in user_params:
                     setattr(self.options, key, value)
                 else:
-                    raise ValueError(f"Invalid parameter in options: {key}. "
-                                   f"Use set_advanced_options() for advanced parameters.")
+                    error_msg = f"Invalid parameter in options: {key}. " \
+                                f"Use set_advanced_options() for advanced parameters."
+                    self._log_error(error_msg)
+                    raise ValueError(error_msg)
 
     def optimize(self, density_distribution: Function, **kwargs) -> TensorLike:
         """运行 OC 优化算法
@@ -113,29 +122,31 @@ class OCOptimizer():
 
         rho = density_distribution[:]
         tensor_kwargs = bm.context(rho)
-        rho_phys = bm.zeros_like(rho, **tensor_kwargs)
-        rho_phys = self._filter.get_initial_density(rho=rho, rho_phys=rho_phys)
+        rho_Phys = bm.zeros_like(rho, **tensor_kwargs)
+        rho_Phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_Phys)
 
         # 初始化历史记录
         history = OptimizationHistory()
 
         # 优化主循环
         for iter_idx in range(max_iters):
+            
+            start_time = time()
 
             # 使用物理密度计算约束函数值梯度
-            obj_val = self._objective.fun(rho_phys)
-            obj_grad = self._objective.jac(rho_phys)
+            obj_val = self._objective.fun(rho_Phys)
+            obj_grad = self._objective.jac(rho_Phys)
 
             # 过滤目标函数灵敏度
-            obj_grad = self._filter.filter_objective_sensitivities(rho_phys=rho_phys, obj_grad=obj_grad)
-            
+            obj_grad = self._filter.filter_objective_sensitivities(rho_Phys=rho_Phys, obj_grad=obj_grad)
+
             # 使用物理密度计算约束函数值梯度
-            con_val = self._constraint.fun(rho_phys)
-            con_grad = self._constraint.jac(rho_phys)
+            con_val = self._constraint.fun(rho_Phys)
+            con_grad = self._constraint.jac(rho_Phys)
 
             # 过滤约束函数灵敏度
-            con_grad = self._filter.filter_constraint_sensitivities(rho_phys=rho_phys, con_grad=con_grad)
-            
+            con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
+
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             while (l2 - l1) / (l2 + l1) > bisection_tol:
@@ -143,10 +154,10 @@ class OCOptimizer():
                 rho_new = self._update_density(rho=rho, dc=obj_grad, dg=con_grad, lmid=lmid)
 
                 # 计算新的物理密度
-                rho_phys = self._filter.filter_variables(rho=rho_new, rho_phys=rho_phys)
+                rho_Phys = self._filter.filter_variables(rho=rho_new, rho_Phys=rho_Phys)
 
                 # 检查约束函数值
-                if self._constraint.fun(rho_phys) > 0:
+                if self._constraint.fun(rho_Phys) > 0:
                     l1 = lmid
                 else:
                     l2 = lmid
@@ -158,11 +169,13 @@ class OCOptimizer():
             rho = rho_new
 
             # 当前体积分数
-            vol_frac = self._constraint.get_volume_fraction(rho_phys)
-            
-            history.log_iteration(iter_idx=iter_idx, obj_val=obj_val, vol_frac=vol_frac, 
-                                change=change, rho_phys=rho_phys)
-                
+            volfrac = self._constraint.get_volume_fraction(rho_Phys)
+
+            iteration_time = time() - start_time
+
+            history.log_iteration(iter_idx=iter_idx, obj_val=obj_val, volfrac=volfrac, 
+                                change=change, time_cost=iteration_time, density=rho_Phys)
+
             # 收敛检查
             if change <= tol:
                 print(f"Converged after {iter_idx + 1} iterations")

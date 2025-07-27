@@ -53,9 +53,8 @@ class Filter(BaseLogged):
             builder = FilterMatrixBuilder(mesh, rmin)
             self._H, self._Hs = builder.build()
             self._cell_measure = self.mesh.entity_measure('cell')
-            self._normalize_factor = self._H.matmul(self._cell_measure)
         else:
-            self._H, self._Hs, self._cell_measure, self._normalize_factor = None, None, None, None
+            self._H, self._Hs, self._cell_measure = None, None, None
 
         # 2. 策略选择和实例化
         strategy_class = FILTER_STRATEGY_REGISTRY.get(self.filter_type)
@@ -71,7 +70,6 @@ class Filter(BaseLogged):
                 'H': self._H,
                 'Hs': self._Hs,
                 'cell_measure': self._cell_measure,
-                'normalize_factor': self._normalize_factor,
             })
         if self.filter_type == 'heaviside_density':
             strategy_params.update({
@@ -84,25 +82,33 @@ class Filter(BaseLogged):
         self._strategy: _FilterStrategy = strategy_class(**strategy_params)
 
     # 3. 委托公共方法到具体策略
-    def get_initial_density(self, x: TensorLike) -> TensorLike:
+    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
         """获取初始物理密度场"""
-        return self._strategy.get_initial_density(x)
 
-    def filter_variables(self, x: TensorLike) -> TensorLike:
+        return self._strategy.get_initial_density(rho=rho, rho_Phys=rho_Phys)
+
+    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
         """对设计变量进行滤波得到物理变量"""
-        return self._strategy.filter_variables(x)
 
-    def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> TensorLike:
+        return self._strategy.filter_variables(rho=rho, rho_Phys=rho_Phys)
+
+    def filter_objective_sensitivities(self, rho_Phys: TensorLike, obj_grad: TensorLike) -> TensorLike:
         """过滤目标函数的灵敏度"""
-        return self._strategy.filter_objective_sensitivities(xPhys, dobj)
 
-    def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
+        return self._strategy.filter_objective_sensitivities(rho_Phys, obj_grad)
+
+    def filter_constraint_sensitivities(self, rho_Phys: TensorLike, con_grad: TensorLike) -> TensorLike:
         """过滤约束函数的灵敏度"""
-        return self._strategy.filter_constraint_sensitivities(xPhys, dcons)
+
+        return self._strategy.filter_constraint_sensitivities(rho_Phys, con_grad)
 
     def continuation_step(self, change: float) -> Tuple[float, bool]:
         """
         为支持 continuation 的策略 (如 Heaviside 密度过滤) 执行一步 beta continuation
             如果当前策略不支持，则不执行任何操作
         """
-        return self._strategy.continuation_step(change)
+
+        if hasattr(self._strategy, 'continuation_step'):
+            return self._strategy.continuation_step(change)
+        else:
+            return change, False

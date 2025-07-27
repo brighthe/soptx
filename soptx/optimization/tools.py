@@ -22,13 +22,13 @@ class OptimizationHistory:
     start_time: float = field(default_factory=time)
     
     def log_iteration(self, 
-                     iter_idx: int, 
-                     obj_val: float, 
-                     volfrac: float, 
-                     change: float, 
-                     time_cost: float, 
-                     density: TensorLike,
-                     verbose: bool = True) -> None:
+                    iter_idx: int, 
+                    obj_val: float, 
+                    volfrac: float, 
+                    change: float, 
+                    time_cost: float, 
+                    density: TensorLike,
+                    verbose: bool = True) -> None:
         """记录一次迭代的信息"""
         self.densities.append(bm.copy(density))
         self.obj_values.append(obj_val)
@@ -110,19 +110,20 @@ def plot_optimization_history(history, save_path=None, show=True, title=None,
     """绘制优化过程中目标函数和约束函数的变化
     
     Parameters
-    - history : OptimizationHistory
+    ----------
+    history : OptimizationHistory
         优化历史记录
-    - save_path : str, optional
+    save_path : str, optional
         保存路径，如不提供则不保存
-    - show : bool, optional
+    show : bool, optional
         是否显示图像，默认为 True
-    - title : str, optional
+    title : str, optional
         图表标题，默认为 None
-    - fontsize : int, optional
+    fontsize : int, optional
         标签和刻度字体大小
-    - figsize : tuple, optional
+    figsize : tuple, optional
         图形大小
-    - linewidth : float, optional
+    linewidth : float, optional
         线条宽度
     """
     import matplotlib.pyplot as plt
