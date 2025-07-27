@@ -57,11 +57,6 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
     def set_solve_method(self, method: str):
         self.solve_method = method
 
-    def set_topopt_config(self, algorithm: str, config: Union[DensityBasedConfig, None]) -> None:
-        """设置拓扑优化配置"""
-        self.topopt_algorithm = algorithm
-        self.topopt_config = config
-        self._log_info(f"Topology optimization set: {algorithm}, config: {type(config).__name__ if config else None}")
 
 
     @variantmethod('LFA_base_material')

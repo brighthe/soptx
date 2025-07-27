@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 
 from fealpy.backend import backend_manager as bm
+from fealpy.functionspace import Function
 from fealpy.typing import TensorLike
 from fealpy.sparse import CSRTensor
 
@@ -13,7 +14,7 @@ class _FilterStrategy(ABC):
         pass
 
     @abstractmethod
-    def filter_variablies(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
+    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
         pass
 
     @abstractmethod
@@ -113,14 +114,24 @@ class DensityStrategy(_FilterStrategy):
 
     def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> TensorLike:
         weighted_dobj = self._cell_measure * dobj
-        return self._H.matmul(weighted_dobj / self._normalize_factor)
+        numerator = self._H.matmul(weighted_dobj)
+
+        denominator = self._H.matmul(self._cell_measure)
+
+        dobj = bm.set_at(dobj, slice(None), numerator / denominator)
+
+        return dobj
 
     def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
         weighted_dcons = self._cell_measure * dcons
-        return self._H.matmul(weighted_dcons / self._normalize_factor)
+        numerator = self._H.matmul(weighted_dcons)
 
-# SensitivityStrategy 和 HeavisideStrategy 的实现类似
-# ... 这里为了简洁省略，完整代码将在下面统一给出 ...
+        denominator = self._H.matmul(self._cell_measure)
+
+        dcons = bm.set_at(dcons, slice(None), numerator / denominator)
+
+        return dcons
+
 
 class HeavisideDensityStrategy(_FilterStrategy):
     """Heaviside 密度过滤策略"""
@@ -133,17 +144,17 @@ class HeavisideDensityStrategy(_FilterStrategy):
         self.beta = beta
         self.max_beta = max_beta
         self.continuation_iter = continuation_iter
-        self._xTilde = None
+        self._rho_Tilde = None
         self._beta_iter = 0
 
-    def get_initial_density(self, x: TensorLike, xPhys: TensorLike) -> TensorLike:
-        self._xTilde = x 
-        projected_values = (1 - bm.exp(-self.beta * self._xTilde) + 
-                    self._xTilde * math.exp(-self.beta)) + 2
-        
-        xPhys = bm.set_at(xPhys, slice(None), projected_values)
+    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+        self._rho_Tilde = rho
+        projected_values = (1 - bm.exp(-self.beta * self._rho_Tilde) + 
+                    self._rho_Tilde * math.exp(-self.beta)) + 2
 
-        return xPhys
+        rho_Phys = bm.set_at(rho_Phys, slice(None), projected_values)
+
+        return rho_Phys
 
 
     def filter_variables(self, x: TensorLike) -> TensorLike:

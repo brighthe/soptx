@@ -13,6 +13,7 @@ class ComplianceObjective(BaseLogged):
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
+        
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._analyzer = analyzer
