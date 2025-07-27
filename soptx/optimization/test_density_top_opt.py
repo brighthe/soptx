@@ -107,7 +107,7 @@ class DensityTopOptTest(BaseLogged):
         rmin = 0.04 * domain_length
         filter_regularization = Filter(
                                     mesh=opt_mesh,
-                                    filter_type='sensitivity',
+                                    filter_type='none',
                                     rmin=rmin
                                 )
 
