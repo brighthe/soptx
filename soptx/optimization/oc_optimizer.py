@@ -147,6 +147,13 @@ class OCOptimizer(BaseLogged):
             # 过滤约束函数灵敏度
             con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
 
+            rho_sum = bm.sum(rho)
+            rho_meah = bm.mean(rho)
+            obj_grad_sum = bm.sum(obj_grad)
+            obj_grad_mean = bm.mean(obj_grad)
+            con_grad_sum = bm.sum(con_grad)
+            con_grad_mean = bm.mean(con_grad)
+                  
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             while (l2 - l1) / (l2 + l1) > bisection_tol:
@@ -198,7 +205,7 @@ class OCOptimizer(BaseLogged):
         kwargs = bm.context(rho)
         
         B_e = -dc / (dg * lmid)
-        B_e_damped = bm.pow(B_e, eta)
+        B_e_damped = bm.pow(bm.abs(B_e), eta) 
 
         rho_new = bm.maximum(
             bm.tensor(0.0, **kwargs), 
@@ -211,7 +218,7 @@ class OCOptimizer(BaseLogged):
                         rho * B_e_damped
                     )
                 )
-            )
+            ) 3
         )
         
         return rho_new

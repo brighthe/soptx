@@ -73,14 +73,14 @@ class DensityTopOptTest(BaseLogged):
                                     interpolation_method='msimp',
                                     options={
                                         'penalty_factor': 3.0,
-                                        'void_youngs_modulus': 1e-12,
+                                        'void_youngs_modulus': 1e-9,
                                         'target_variables': ['E']
                                     },
                                 )
 
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
-                                                relative_density=1.0,
+                                                relative_density=self.volume_fraction,
                                                 integrator_order=self.integrator_order,
                                             )
 
@@ -107,7 +107,7 @@ class DensityTopOptTest(BaseLogged):
         rmin = 0.04 * domain_length
         filter_regularization = Filter(
                                     mesh=opt_mesh,
-                                    filter_type='sensitivity',
+                                    filter_type='none',
                                     rmin=rmin
                                 )
 
