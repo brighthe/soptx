@@ -205,7 +205,7 @@ class OCOptimizer(BaseLogged):
         kwargs = bm.context(rho)
         
         B_e = -dc / (dg * lmid)
-        B_e_damped = bm.pow(bm.abs(B_e), eta) 
+        B_e_damped = bm.pow(bm.abs(B_e), eta)
 
         rho_new = bm.maximum(
             bm.tensor(0.0, **kwargs), 
@@ -218,7 +218,7 @@ class OCOptimizer(BaseLogged):
                         rho * B_e_damped
                     )
                 )
-            ) 3
+            )
         )
         
         return rho_new
