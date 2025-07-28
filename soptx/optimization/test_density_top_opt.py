@@ -107,7 +107,7 @@ class DensityTopOptTest(BaseLogged):
         rmin = 0.04 * domain_length
         filter_regularization = Filter(
                                     mesh=opt_mesh,
-                                    filter_type='none',
+                                    filter_type='sensitivity',
                                     rmin=rmin
                                 )
 
@@ -119,7 +119,7 @@ class DensityTopOptTest(BaseLogged):
                             filter=filter_regularization,
                             options={
                                 'max_iterations': 200,
-                                'tolerance': 1e-3,
+                                'tolerance': 1e-2,
                             }
                         )
         # 设置高级参数 (可选)

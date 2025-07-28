@@ -50,8 +50,11 @@ class NoneStrategy(_FilterStrategy):
                                     ) -> TensorLike:
         return obj_grad
 
-    def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
-        return dcons
+    def filter_constraint_sensitivities(self, 
+                                        rho_Phys: TensorLike, 
+                                        con_grad: TensorLike) -> TensorLike:
+
+        return con_grad
 
 class SensitivityStrategy(_FilterStrategy):
     """灵敏度过滤策略"""

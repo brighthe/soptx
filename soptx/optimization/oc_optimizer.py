@@ -109,8 +109,8 @@ class OCOptimizer(BaseLogged):
     def optimize(self, density_distribution: Function, **kwargs) -> TensorLike:
         """运行 OC 优化算法
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         density_distribution : 初始相对密度场
         **kwargs : 其他参数
         """
@@ -153,7 +153,7 @@ class OCOptimizer(BaseLogged):
                 lmid = 0.5 * (l2 + l1)
                 rho_new = self._update_density(rho=rho, dc=obj_grad, dg=con_grad, lmid=lmid)
 
-                # 计算新的物理密度
+                # 过滤物理密度
                 rho_Phys = self._filter.filter_variables(rho=rho_new, rho_Phys=rho_Phys)
 
                 # 检查约束函数值
@@ -186,7 +186,6 @@ class OCOptimizer(BaseLogged):
                 
         return rho, history
     
-
     def _update_density(self,
                     rho: TensorLike,
                     dc: TensorLike,

@@ -79,8 +79,6 @@ while change > 0.01
 	K = sparse(iK, jK, sK); K = (K + K') / 2;
 	U(freedofs) = K(freedofs,freedofs) \ F(freedofs);
 
-    % fprintf('xPhys: %11.12f U: %11.12f\n', sum(abs(xPhys(:))), mean(U(:)));
-
 	% OBJECTIVE FUNCTION AND SENSITIVITY ANALYSIS
 	Ue = U(edofMat);
 	ce = reshape(sum((U(edofMat)*KE).*U(edofMat),2), nely, nelx);
@@ -99,7 +97,7 @@ while change > 0.01
 	while (l2-l1)/(l1+l2) > 1e-3
 		lmid = 0.5*(l2+l1);
 		xnew = max(0,max(x-move,min(1,min(x+move,x.*sqrt(-dc./dv/lmid)))));
-		if ft == 1
+		if ft == 1 || ft == 0
 			xPhys = xnew;
 		elseif ft == 2
 			xPhys(:) = (H*xnew(:))./Hs;
