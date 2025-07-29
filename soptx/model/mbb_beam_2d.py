@@ -9,9 +9,6 @@ from soptx.pde.pde_base import PDEBase
 
 class HalfMBBBeam2dData(PDEBase):
     '''
-    模型来源:
-    https://wnesm678i4.feishu.cn/wiki/Xi3dw6mzNi6V9ckNcoScfmAXnFg#part-TuQydJUDvojFG6x0NPzcH3stnTh
-
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
     where:
@@ -101,7 +98,7 @@ class HalfMBBBeam2dData(PDEBase):
 
         return mesh
 
-    
+
     #######################################################################################################################
     # 核心方法
     #######################################################################################################################

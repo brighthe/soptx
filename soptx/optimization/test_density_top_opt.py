@@ -2,9 +2,11 @@ from typing import Optional, Union
 from pathlib import Path
 
 from fealpy.decorator import variantmethod
+from fealpy.typing import TensorLike
 
 from soptx.utils.base_logged import BaseLogged
 from soptx.optimization.tools import save_optimization_history, plot_optimization_history
+from soptx.optimization.tools import OptimizationHistory
 
 
 class DensityTopOptTest(BaseLogged):
@@ -43,7 +45,10 @@ class DensityTopOptTest(BaseLogged):
         self.relative_density = relative_density
 
     @variantmethod('OC')
-    def run(self):
+    def run(self, 
+            space_degree: Optional[int] = None, 
+            filter_type: str = 'none'
+        ) -> Union[TensorLike, OptimizationHistory]:
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
         pde = HalfMBBBeam2dData(
@@ -90,7 +95,7 @@ class DensityTopOptTest(BaseLogged):
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
-                                    space_degree=1,
+                                    space_degree=space_degree,
                                     integrator_order=self.integrator_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
@@ -107,7 +112,7 @@ class DensityTopOptTest(BaseLogged):
         rmin = 0.04 * domain_length
         filter_regularization = Filter(
                                     mesh=opt_mesh,
-                                    filter_type='none',
+                                    filter_type=filter_type,
                                     rmin=rmin
                                 )
 
@@ -129,13 +134,14 @@ class DensityTopOptTest(BaseLogged):
                                     initial_lambda=1e9,
                                     bisection_tol=1e-3
                                 )
+        self._log_info(f"开始密度拓扑优化, 空间阶数={space_degree}, 过滤类型={filter_type}")
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
 
         # 保存结果
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/density_top_opt_results_{self.space_degree}")
+        save_path = Path(f"{base_dir}/density_top_opt_results_p{self.space_degree}_filter_{filter_type}")
         save_path.mkdir(parents=True, exist_ok=True)
         save_optimization_history(opt_mesh, history, str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
@@ -145,7 +151,7 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
     
-    p = 2
+    p = 4
     q = p+3
     test.set_space_degree(p)
     test.set_integrator_order(q)
@@ -156,4 +162,4 @@ if __name__ == "__main__":
 
     test.run.set('OC')
 
-    rho_opt, history = test.run()
+    rho_opt, history = test.run(space_degree=p, filter_type='density')

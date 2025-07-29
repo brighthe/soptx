@@ -65,12 +65,20 @@ class Filter(BaseLogged):
             raise ValueError(error_msg)
 
         strategy_params = {}
-        if self.filter_type in ['sensitivity', 'density', 'heaviside_density']:
+        
+        if self.filter_type in ['sensitivity']:
             strategy_params.update({
                 'H': self._H,
                 'Hs': self._Hs,
                 'cell_measure': self._cell_measure,
             })
+
+        if self.filter_type == 'density':
+            strategy_params.update({
+                'H': self._H,
+                'cell_measure': self._cell_measure,
+            })
+
         if self.filter_type == 'heaviside_density':
             strategy_params.update({
                 'beta': 1.0,
