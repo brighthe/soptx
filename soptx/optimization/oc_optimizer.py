@@ -146,13 +146,6 @@ class OCOptimizer(BaseLogged):
 
             # 过滤约束函数灵敏度
             con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
-
-            rho_sum = bm.sum(rho)
-            rho_meah = bm.mean(rho)
-            obj_grad_sum = bm.sum(obj_grad)
-            obj_grad_mean = bm.mean(obj_grad)
-            con_grad_sum = bm.sum(con_grad)
-            con_grad_mean = bm.mean(con_grad)
                   
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
@@ -199,13 +192,23 @@ class OCOptimizer(BaseLogged):
                     dg: TensorLike,
                     lmid: float) -> TensorLike:
         """使用 OC 准则更新密度"""
+
+        # 获取算法内部参数
         m = self.options.move_limit
         eta = self.options.damping_coef
-
         kwargs = bm.context(rho)
         
+        if bm.any(rho < -1e-12) or bm.any(rho > 1 + 1e-12):
+            self._log_warning(f"输入密度超出合理范围 [0, 1]: "
+                            f"min={bm.min(rho):.2e}, max={bm.max(rho):.2e}")
+            
+        if bm.any(dc > 0):
+            self._log_warning(f"目标函数梯度中存在正值, 可能导致目标函数上升")
+
+        # 使用绝对值避免负数开方
         B_e = -dc / (dg * lmid)
-        B_e_damped = bm.pow(bm.abs(B_e), eta)
+        B_e_abs = bm.abs(B_e)
+        B_e_damped = bm.pow(B_e_abs, eta)
 
         rho_new = bm.maximum(
             bm.tensor(0.0, **kwargs), 
@@ -220,6 +223,10 @@ class OCOptimizer(BaseLogged):
                 )
             )
         )
+
+        if bm.any(rho < -1e-12) or bm.any(rho > 1 + 1e-12):
+            self._log_warning(f"输出密度超出合理范围 [0, 1]: "
+                            f"min={bm.min(rho):.2e}, max={bm.max(rho):.2e}")
         
         return rho_new
         

@@ -135,7 +135,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/density_top_opt_results")
+        save_path = Path(f"{base_dir}/density_top_opt_results_{self.space_degree}")
         save_path.mkdir(parents=True, exist_ok=True)
         save_optimization_history(opt_mesh, history, str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
@@ -145,7 +145,7 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
     
-    p = 1
+    p = 2
     q = p+3
     test.set_space_degree(p)
     test.set_integrator_order(q)
