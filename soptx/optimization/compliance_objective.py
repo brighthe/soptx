@@ -76,9 +76,15 @@ class ComplianceObjective(BaseLogged):
         cell2dof = self._tensor_space.cell_to_dof()
         uhe = uh[cell2dof]
 
-        diff_ke = self._analyzer.get_stiffness_matrix__derivative(density_distribution=density_distribution)
+        diff_ke = self._analyzer.get_stiffness_matrix_derivative(density_distribution=density_distribution)
 
         density_location = self._interpolation_scheme.density_location
+
+        valid_locations = {'element', 'gauss_integration_point'}
+        if density_location not in valid_locations:
+            error_msg = f"density_location must be one of {valid_locations}, but got '{density_location}'"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
 
         if density_location == 'element':
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
@@ -86,7 +92,7 @@ class ComplianceObjective(BaseLogged):
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
 
 
-        elif density_location == 'element_gauss_integrate_point':
+        elif density_location == 'gauss_integration_point':
             dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")

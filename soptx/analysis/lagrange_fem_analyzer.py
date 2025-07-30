@@ -157,7 +157,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         return tensor_space
 
-    def get_stiffness_matrix__derivative(self, density_distribution: Function) -> TensorLike:
+    def get_stiffness_matrix_derivative(self, density_distribution: Function) -> TensorLike:
         """获取局部刚度矩阵的梯度"""
         
         interpolate_derivative = self._interpolation_scheme.interpolate_derivative(
@@ -175,7 +175,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             ke0 = lea.assembly(space=self.tensor_space)
             diff_ke = bm.einsum('c, cij -> cij', interpolate_derivative, ke0)
 
-        elif density_location == 'element_gauss_integrate_point':
+        elif density_location == 'gauss_integration_point':
             mesh = self._mesh
             qf = mesh.quadrature_formula(self._integrator_order)
             bcs, ws = qf.get_quadrature_points_and_weights()

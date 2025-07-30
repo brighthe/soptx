@@ -24,13 +24,13 @@ class FilterMatrixBuilder:
         keys_3d: Set[str] = {'nx', 'ny', 'nz', 'hx', 'hy', 'hz'}
         keys_2d: Set[str] = {'nx', 'ny', 'hx', 'hy'}
 
-        if keys_3d.issubset(mesh_keys) and self.mesh.meshdata['mesh_type'] == 'hexahedron':
+        if keys_3d.issubset(mesh_keys) and self.mesh.meshdata['mesh_type'] == 'uniform_hex':
             return self._compute_filter_3d(
                             self.rmin,
                             self.mesh.meshdata['nx'], self.mesh.meshdata['ny'], self.mesh.meshdata['nz'],
                             self.mesh.meshdata['hx'], self.mesh.meshdata['hy'], self.mesh.meshdata['hz'],
                         )
-        elif keys_2d.issubset(mesh_keys) and self.mesh.meshdata['mesh_type'] in {'quadrangle'}:
+        elif keys_2d.issubset(mesh_keys) and self.mesh.meshdata['mesh_type'] in {'uniform_quad'}:
             return self._compute_filter_2d(
                                 self.rmin,
                                 self.mesh.meshdata['nx'], self.mesh.meshdata['ny'],
@@ -48,7 +48,7 @@ class FilterMatrixBuilder:
                                 domain: List[float],
                                 cell_centers: TensorLike,
                                 periodic: List[bool]=[False, False, False],
-                                enable_timing: bool = True,
+                                enable_timing: bool = False,
                             ) -> Tuple[COOTensor, TensorLike]:
         """计算任意网格的过滤矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
         
@@ -148,7 +148,7 @@ class FilterMatrixBuilder:
                         rmin: float,     
                         nx: int, ny: int, 
                         hx: float, hy: float,
-                        enable_timing: bool = True,
+                        enable_timing: bool = False,
                     ) -> Tuple[CSRTensor, TensorLike]:
         """高性能优化的 2D 滤波矩阵计算 - 分块处理版本
         即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算"""
@@ -292,7 +292,7 @@ class FilterMatrixBuilder:
                                 rmin: float, 
                                 nx: int, ny: int, 
                                 hx: float, hy: float,
-                                enable_timing: bool = True,
+                                enable_timing: bool = False,
                             ) -> Tuple[COOTensor, TensorLike]:
         """计算 2D 滤波矩阵 - 数学原理的直接实现版本
             即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算"""
@@ -373,7 +373,7 @@ class FilterMatrixBuilder:
                         rmin: float, 
                         nx: int, ny: int, nz: int, 
                         hx: float, hy: float, hz: float,
-                        enable_timing: bool = True,
+                        enable_timing: bool = False,
                     ) -> Tuple[COOTensor, TensorLike]:
         """高性能优化的 3D 过滤矩阵计算 - 分块处理版本"""
         
@@ -511,7 +511,7 @@ class FilterMatrixBuilder:
                                 rmin: float, 
                                 nx: int, ny: int, nz: int, 
                                 hx: float, hy: float, hz: float,
-                                enable_timing: bool = True,
+                                enable_timing: bool = False,
                             ) -> Tuple[COOTensor, TensorLike]:
         """计算 3D 滤波矩阵 - 数学原理的直接实现版本"""
 

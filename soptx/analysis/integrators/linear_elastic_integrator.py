@@ -126,6 +126,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         if D.shape[0] == 1 and D.shape[1] == 1:
             # (1, 1, :, :) - 全局均匀相对密度
+            # 弹性系数为全局常数，先对积分点求和再乘以常数系数
             if GD == 2:
                 D00, D01, D22 = D[0, 0, 0, 0], D[0, 0, 0, 1], D[0, 0, 2, 2]
                 KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D22 * bm.einsum('cqij -> cij', A_yy)
@@ -146,6 +147,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 
         elif D.shape[1] == 1:
             # (NC, 1, :, :) - 单元均匀相对密度
+            # 每个单元有不同的材料属性，先乘以单元系数再对积分点求和
             if GD == 2:
                 D00, D01, D22 = D[:, 0, 0, 0], D[:, 0, 0, 1], D[:, 0, 2, 2]
                 KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D22, A_yy)

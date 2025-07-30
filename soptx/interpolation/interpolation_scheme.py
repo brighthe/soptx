@@ -98,15 +98,11 @@ class MaterialInterpolationScheme(BaseLogged):
     def setup_density_distribution(self, 
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
-                                integrator_order: int = None,
                                 **kwargs,
                             ) -> Function:
         """单元高斯点密度分布"""
-        if integrator_order is None:
-            error_msg = "integrator_order must be specified for 'gauss_integration_point'"
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
-
+        integrator_order = 3
+        
         qf = mesh.quadrature_formula(integrator_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
         NC = mesh.number_of_cells()
