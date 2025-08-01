@@ -206,7 +206,7 @@ class OCOptimizer(BaseLogged):
             self._log_warning(f"输入密度超出合理范围 [0, 1]: "
                             f"min={bm.min(rho):.2e}, max={bm.max(rho):.2e}")
             
-        if bm.any(dc > 0):
+        if bm.any(dc > 1e-12):
             self._log_warning(f"目标函数梯度中存在正值, 可能导致目标函数上升")
 
         # 使用绝对值避免负数开方

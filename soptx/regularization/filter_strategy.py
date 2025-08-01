@@ -103,18 +103,18 @@ class DensityStrategy(_FilterStrategy):
         self._H = H
         self._cell_measure = cell_measure
 
-    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
         
         return rho_Phys
 
-    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
-        weighted_rho = rho * self._cell_measure
+    def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
+        weighted_rho = rho[:] * self._cell_measure
         numerator = self._H.matmul(weighted_rho)
         
         denominator = self._H.matmul(self._cell_measure)
 
-        rho_Phys = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+        rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
 
         return rho_Phys
 

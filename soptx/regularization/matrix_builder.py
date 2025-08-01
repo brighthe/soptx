@@ -9,45 +9,69 @@ from soptx.utils import timer
 
 class FilterMatrixBuilder:
     """负责构建拓扑优化中使用的稀疏权重矩阵 H"""
-    def __init__(self, mesh: Mesh, rmin: float, density_coords: TensorLike) -> None:
+    def __init__(self, 
+                mesh: Mesh, 
+                rmin: float, 
+                density_location: str, 
+                integrator_order: int = None,
+                interpolation_order: int = None
+            ) -> None:
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
         
         self._mesh = mesh
         self._rmin = rmin
-        self._density_coords = density_coords
+        self._density_location = density_location
+        
+        self._integrator_order = integrator_order
+        self._interpolation_order = interpolation_order
+
         self._device = mesh.device
 
     def build(self) -> Tuple[CSRTensor, TensorLike]:
         """构建并返回权重矩阵 H 和其行和 Hs"""
-        mesh_keys: Set[str] = set(self.mesh.meshdata.keys())
+        mesh_keys: Set[str] = set(self._mesh.meshdata.keys())
         
         keys_3d: Set[str] = {'nx', 'ny', 'nz', 'hx', 'hy', 'hz'}
         keys_2d: Set[str] = {'nx', 'ny', 'hx', 'hy'}
 
-        if keys_3d.issubset(mesh_keys) and self.mesh.meshdata['mesh_type'] == 'uniform_hex':
-            return self._compute_filter_3d(
-                            self.rmin,
-                            self.mesh.meshdata['nx'], self.mesh.meshdata['ny'], self.mesh.meshdata['nz'],
-                            self.mesh.meshdata['hx'], self.mesh.meshdata['hy'], self.mesh.meshdata['hz'],
-                        )
-        elif keys_2d.issubset(mesh_keys) and self.mesh.meshdata['mesh_type'] in {'uniform_quad'}:
-            return self._compute_filter_2d(
-                                self.rmin,
-                                self.mesh.meshdata['nx'], self.mesh.meshdata['ny'],
-                                self.mesh.meshdata['hx'], self.mesh.meshdata['hy'], 
-                            )
-        else:
-            return self._compute_filter_general(
+        if keys_3d.issubset(mesh_keys) and self._mesh.meshdata['mesh_type'] == 'uniform_hex':
+
+            if self._density_location == 'gauss_integration_point':
+                return self._compute_weigthed_matrix_general(
                                 rmin=self._rmin,
                                 domain=self._mesh.meshdata['domain'], 
-                                density_coords=self._density_coords, 
+                            )
+            
+            else:
+                return self._compute_filter_3d(
+                                self._rmin,
+                                self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata['nz'],
+                                self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], self._mesh.meshdata['hz'],
+                            )
+        elif keys_2d.issubset(mesh_keys) and self._mesh.meshdata['mesh_type'] in {'uniform_quad'}:
+            
+            if self._density_location == 'gauss_integration_point':
+
+                return self._compute_weigthed_matrix_general(
+                                rmin=self._rmin,
+                                domain=self._mesh.meshdata['domain'], 
+                            )
+            else:
+                return self._compute_weigthed_matrix_2d(
+                                    self._rmin,
+                                    self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
+                                    self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
+                                )
+        else:
+            return self._compute_weigthed_matrix_general(
+                                rmin=self._rmin,
+                                domain=self._mesh.meshdata['domain'], 
                             )
         
-    def _compute_filter_general(self, 
+    def _compute_weigthed_matrix_general(self, 
                           rmin: float,
                           domain: List[float],
-                          density_coords: TensorLike,  
                           periodic: List[bool]=[False, False, False],
                           enable_timing: bool = False,
                           ) -> Tuple[COOTensor, TensorLike]:
@@ -56,14 +80,31 @@ class FilterMatrixBuilder:
             t = timer(f"Filter_general")
             next(t)
 
+        if self._density_location == 'gauss_integration_point':
+            
+            qf = self._mesh.quadrature_formula(q=self._integrator_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+            density_coords = self._mesh.bc_to_point(bcs) # （NC, NQ, GD)
+            
+            GD = self._mesh.geo_dimension()
+
+            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+            reshaped = density_coords.reshape(nx, ny, 3, 3, GD)
+            # 将列索引提前，实现按列分组
+            transposed = reshaped.transpose(0, 2, 1, 3, 4)
+            density_coords = transposed.reshape(-1, GD)
+
+        elif self._density_location == 'interpolation_point':
+            density_coords = self._mesh.interpolation_points(p=self._interpolation_order)
+
         # 转移到 CPU 进行计算
         density_coords = bm.device_put(density_coords, 'cpu')
         
         # 使用 KD-tree 查询临近点
         density_indices, neighbor_indices = bm.query_point(
-            x=density_coords, y=density_coords, h=rmin, 
-            box_size=domain, mask_self=False, periodic=periodic
-        )
+                                                x=density_coords, y=density_coords, h=rmin, 
+                                                box_size=domain, mask_self=False, periodic=periodic
+                                            )
         
         if enable_timing:
             t.send('KD-tree 查询时间')
@@ -230,31 +271,31 @@ class FilterMatrixBuilder:
                                     rmin: float,     
                                     nx: int, ny: int,  
                                     hx: float, hy: float,
-                                    density_type: str = 'element',
                                     enable_timing: bool = False,
                                 ) -> Tuple[CSRTensor, TensorLike]:
+        """单元密度和节点密度情况下, 计算权重矩阵的方式"""
     
         # 根据密度类型确定参数
-        if density_type == 'element':
+        if self._density_location == 'element':
             n_x = nx
             n_y = ny
             # 单元中心坐标需要偏移半个网格
             coord_offset_x = 0.5 * hx
             coord_offset_y = 0.5 * hy
-        elif density_type == 'node':
+        elif self._density_location == 'node':
             n_x = nx + 1
             n_y = ny + 1
             # 节点坐标不需要偏移
             coord_offset_x = 0.0
             coord_offset_y = 0.0
         else:
-            raise ValueError(f"Unknown density_type: {density_type}")
+            raise ValueError(f"Unknown density_type: {self._density_location}")
         
         N_total = n_x * n_y  # 总自由度数
         
         t = None
         if enable_timing:
-            t = timer(f"Filter_2d_{density_type}")
+            t = timer(f"Filter_2d_{self._density_location}")
             next(t)
         
         search_radius_x = ceil(rmin/hx)
@@ -264,7 +305,7 @@ class FilterMatrixBuilder:
         batch_size = min(10000, N_total) 
         n_batches = (N_total + batch_size - 1) // batch_size 
         
-        # 统一的线性索引到2D坐标映射
+        # 统一的线性索引到 2D 坐标映射
         def linear_to_2d(linear_idx):
             i = linear_idx // n_y
             j = linear_idx % n_y

@@ -101,67 +101,18 @@ def save_optimization_history(mesh: HomogeneousMesh,
         
         # 检查密度数据的维度
         if physical_density.ndim == 2:
+
             # 高斯积分点密度情况：形状为 (NC, NQ)
-            NC, NQ = physical_density.shape
-            
-            if isinstance(mesh, HomogeneousMesh):
-                # 获取新网格（用于可视化）的尺寸
-                nx_new = mesh.meshdata['nx']
-                ny_new = mesh.meshdata['ny']
-                
-                                # 推断高斯积分点的排列：假设是正方形排列（如 3x3=9）
-                sqrt_NQ = int(NQ**0.5)
-                if sqrt_NQ * sqrt_NQ != NQ:
-                    raise ValueError(f"高斯积分点数量 {NQ} 不是完全平方数，无法处理非正方形排列")
-                
-                # 推断原网格的尺寸
-                # 原网格: nx_orig=60, ny_orig=20 → 1200个单元
-                # 新网格: nx_new=180, ny_new=60 → 10800个单元
-                # 每个原单元细分为3×3个新单元
-                nx_orig = nx_new // sqrt_NQ  # 180 // 3 = 60
-                ny_orig = ny_new // sqrt_NQ  # 60 // 3 = 20
-                
-                # 验证尺寸是否匹配
-                if nx_orig * ny_orig != NC:
-                    raise ValueError(f"原网格单元数 {NC} 与推断的网格尺寸 ({nx_orig}, {ny_orig}) 不匹配")
-                
-                # 创建一维密度数组
-                density_1d = bm.zeros(nx_new * ny_new, **bm.context(physical_density))
-                
-                # 转换密度数据：将每个单元的NQ个高斯积分点密度映射到新网格
-                for cell_idx in range(NC):
-                    # 计算原单元在原网格中的位置
-                    # 编号规则：先y后x
-                    i_x = cell_idx // ny_orig  # x方向索引：cell_idx // 20
-                    i_y = cell_idx % ny_orig   # y方向索引：cell_idx % 20
-                    
-                    # 按行优先顺序处理新网格中的3×3子区域
-                    for new_row in range(sqrt_NQ):  # 新网格中的行：0,1,2
-                        for new_col in range(sqrt_NQ):  # 新网格中的列：0,1,2
-                            # 计算在新网格中的全局坐标
-                            global_new_x = sqrt_NQ * i_x + new_row  # 全局行
-                            global_new_y = sqrt_NQ * i_y + new_col  # 全局列
-                            
-                            # 计算新网格编号
-                            new_cell_index = global_new_x * ny_new + global_new_y
-                            
-                            # 找到对应的高斯积分点编号（列优先编号）
-                            # 新网格位置(new_row, new_col)对应原始高斯积分点的哪个编号？
-                            quad_idx = new_col * sqrt_NQ + new_row  # 列优先：列*3+行
-                            
-                            # 确保索引在有效范围内
-                            if 0 <= new_cell_index < len(density_1d):
-                                density_1d[new_cell_index] = physical_density[cell_idx, quad_idx]
-                            else:
-                                raise IndexError(f"新网格索引 {new_cell_index} 超出范围 [0, {len(density_1d)})")
-                
-                # 将转换后的密度数据赋给网格
-                mesh.celldata['density'] = density_1d
-                
-            else:
-                raise NotImplementedError("高斯积分点密度可视化目前只支持 StructuredMesh")
-                
+            nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
+            reshaped = physical_density.reshape(nx, ny, 3, 3)
+            # 将列索引提前，实现按列分组
+            transposed = reshaped.transpose(0, 2, 1, 3)
+            physical_density = transposed.reshape(-1)
+
+            mesh.celldata['density'] = physical_density
+        
         elif physical_density.ndim == 1:
+
             # 单元密度情况：形状为 (NC,)
             mesh.celldata['density'] = physical_density
             

@@ -63,6 +63,7 @@ class MaterialInterpolationScheme(BaseLogged):
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
                                 integrator_order: int = None,
+                                interpolation_order: int = None,
                                 **kwargs,
                             ) -> Function:
         """单元密度分布"""
@@ -96,8 +97,9 @@ class MaterialInterpolationScheme(BaseLogged):
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
                                 integrator_order: int = 3,
+                                interpolation_order: int = None,
                                 **kwargs,
-                            ) -> TensorLike:
+                            ) -> Function:
         """单元高斯点密度分布"""
         qf = mesh.quadrature_formula(integrator_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
@@ -114,10 +116,11 @@ class MaterialInterpolationScheme(BaseLogged):
 
         return density_dist
     
-    @setup_density_distribution.register('continuous')
+    @setup_density_distribution.register('interpolation_point')
     def setup_density_distribution(self,
                                    mesh: HomogeneousMesh,
                                    relative_density: float = 1.0,
+                                   integrator_order: int = None,
                                    interpolation_order: int = 1,
                                    **kwargs,
                                 ) -> Function:

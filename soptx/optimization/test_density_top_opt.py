@@ -155,14 +155,15 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
     
 
-    @run.register('OC_gauss_integration_point')
+    @run.register('test_density_location')
     def run(self, 
-            space_degree: Optional[int] = None,
-            filter_type: str = 'density',
-            density_location: str = 'gauss_integration_point', 
-            nx: int = 60,
-            ny: int = 20,
+            density_location: str = 'element', 
         ) -> Union[TensorLike, OptimizationHistory]:
+        # 参数设置
+        nx, ny = 30, 10
+        space_degree = 2
+        filter_type = 'density'
+
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
         pde = HalfMBBBeam2dData(
@@ -202,6 +203,7 @@ class DensityTopOptTest(BaseLogged):
                                                 mesh=opt_mesh,
                                                 relative_density=self.volume_fraction,
                                                 integrator_order=self.integrator_order,
+                                                interpolation_order=1
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -230,9 +232,10 @@ class DensityTopOptTest(BaseLogged):
         filter_regularization = Filter(
                                     mesh=opt_mesh,
                                     filter_type=filter_type,
-                                    rmin=rmin
+                                    rmin=rmin,
+                                    density_location=density_location,
+                                    integrator_order=self.integrator_order
                                 )
-
 
         from soptx.optimization.oc_optimizer import OCOptimizer
         oc_optimizer = OCOptimizer(
@@ -251,19 +254,20 @@ class DensityTopOptTest(BaseLogged):
                                     initial_lambda=1e9,
                                     bisection_tol=1e-3
                                 )
-        self._log_info(f"开始密度拓扑优化, 网格尺寸={nx}*{ny}, 空间阶数={space_degree}, 物理场自由度={fe_dofs}, " 
-                       f"密度分布位置={density_location}, "
+        self._log_info(f"开始密度拓扑优化, 密度类型={density_location}, 密度场自由度={rho.shape}, " 
+                       f"网格尺寸={nx}*{ny}, 空间阶数={space_degree}, 物理场自由度={fe_dofs}, " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+        
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
 
         # 保存结果
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/gauss_integration_point_p{self.space_degree}_density_{density_location}_({nx},{ny})")
+        save_path = Path(f"{base_dir}/density_type={density_location}")
         save_path.mkdir(parents=True, exist_ok=True)
-        opt_mesh_show = pde.init_mesh(nx=nx*self.integrator_order, ny=ny*self.integrator_order)
-        save_optimization_history(opt_mesh_show, history, str(save_path))
+        # opt_mesh_show = pde.init_mesh(nx=nx*self.integrator_order, ny=ny*self.integrator_order)
+        save_optimization_history(opt_mesh, history, str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
@@ -410,8 +414,8 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
     
-    p = 1
-    q = p+2
+    p = 2
+    q = 3
     test.set_space_degree(p)
     test.set_integrator_order(q)
     test.set_assembly_method('standard')
@@ -419,11 +423,9 @@ if __name__ == "__main__":
     test.set_volume_fraction(0.5)
     test.set_relative_density(0.5)
 
-    test.run.set('OC_gauss_integration_point')
+    
     # test.run.set('OC_continuous')
     # test.run.set('OC_element')
 
-    rho_opt, history = test.run(
-                                space_degree=p,
-                                filter_type='none',
-                            )
+    test.run.set('test_density_location')
+    rho_opt, history = test.run(density_location='element')

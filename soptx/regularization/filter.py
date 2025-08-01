@@ -33,56 +33,89 @@ class Filter(BaseLogged):
                 mesh: HomogeneousMesh,
                 filter_type: Literal['none', 'sensitivity', 'density', 'heaviside_density'],
                 rmin: Optional[float] = None,
-                dof_coords: Optional[TensorLike] = None,
+                density_location: Optional[str] = None,
+                integrator_order: Optional[int] = None,
+                interpolation_order: Optional[int] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
             ) -> None:
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
-        self.mesh = mesh
-        self.filter_type = filter_type
-        self.rmin = rmin
-        self.dof_coords = dof_coords
+        self._mesh = mesh
+        self._filter_type = filter_type
+        self._rmin = rmin
+        self._density_location = density_location
+        self._integrator_order = integrator_order
+        self._interpolation_order = interpolation_order
 
-        if self.filter_type != 'none' and (self.rmin is None or self.rmin <= 0):
-            error_msg = (f"当 filter_type='{self.filter_type}' 时，必须提供有效的 rmin (> 0). "
-                        f"当前 rmin={self.rmin}")
+        # 参数验证
+        if self._filter_type != 'none' and (self._rmin is None or self._rmin <= 0):
+            error_msg = (f"当 filter_type='{self._filter_type}' 时，必须提供有效的 rmin (> 0). "
+                        f"当前 rmin={self._rmin}")
             self._log_error(error_msg)
             raise ValueError(error_msg)
         
+        # 验证密度位置参数
+        if self._filter_type != 'none' and self._density_location is None:
+            error_msg = f"当 filter_type='{self._filter_type}' 时，必须提供 density_location 参数"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+            
+        # 验证积分/插值参数
+        if (self._filter_type != 'none' and 
+            self._density_location == 'gauss_integration_point' and 
+            self._integrator_order is None):
+            error_msg = "当 density_location='gauss_integration_point' 时，必须提供 integrator_order 参数"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+            
+        if (self._filter_type != 'none' and 
+            self._density_location == 'interpolation_point' and 
+            self._interpolation_order is None):
+            error_msg = "当 density_location='interpolation_point' 时，必须提供 interpolation_order 参数"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+        
+        
         # 1. 构建过滤矩阵
-        if self.filter_type != 'none' and self.rmin > 0:
-            builder = FilterMatrixBuilder(mesh, rmin, dof_coords)
+        if self._filter_type != 'none' and self._rmin > 0:
+            builder = FilterMatrixBuilder(
+                mesh=mesh, 
+                rmin=rmin, 
+                density_location=density_location,
+                integrator_order=integrator_order,
+                interpolation_order=interpolation_order
+            )
             self._H, self._Hs = builder.build()
-            self._cell_measure = self.mesh.entity_measure('cell')
+            self._cell_measure = self._mesh.entity_measure('cell')
         else:
             self._H, self._Hs, self._cell_measure = None, None, None
 
         # 2. 策略选择和实例化
-        strategy_class = FILTER_STRATEGY_REGISTRY.get(self.filter_type)
+        strategy_class = FILTER_STRATEGY_REGISTRY.get(self._filter_type)
         if strategy_class is None:
-            error_msg = (f"未知的过滤方法: '{self.filter_type}'. "
+            error_msg = (f"未知的过滤方法: '{self._filter_type}'. "
                         f"可用选项: {list(FILTER_STRATEGY_REGISTRY.keys())}")
             self._log_error(error_msg)
             raise ValueError(error_msg)
 
         strategy_params = {}
         
-        if self.filter_type in ['sensitivity']:
+        if self._filter_type in ['sensitivity']:
             strategy_params.update({
                 'H': self._H,
                 'Hs': self._Hs,
                 'cell_measure': self._cell_measure,
             })
 
-        if self.filter_type == 'density':
+        if self._filter_type == 'density':
             strategy_params.update({
                 'H': self._H,
                 'cell_measure': self._cell_measure,
             })
 
-        if self.filter_type == 'heaviside_density':
+        if self._filter_type == 'heaviside_density':
             strategy_params.update({
                 'beta': 1.0,
                 'max_beta': 512.0,
