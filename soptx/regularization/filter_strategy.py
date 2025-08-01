@@ -10,7 +10,7 @@ from fealpy.sparse import CSRTensor
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
     @abstractmethod
-    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
         pass
 
     @abstractmethod
@@ -34,24 +34,24 @@ class _FilterStrategy(ABC):
 
 class NoneStrategy(_FilterStrategy):
     """ '无操作' 策略, 当不需要过滤时使用"""
-    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
 
         return rho_Phys
 
-    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def filter_variables(self, rho: Function, rho_Phys: Function) -> TensorLike:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
 
         return rho_Phys
 
     def filter_objective_sensitivities(self, 
-                                       rho_Phys: TensorLike, 
+                                       rho_Phys: Function, 
                                        obj_grad: TensorLike
                                     ) -> TensorLike:
         return obj_grad
 
     def filter_constraint_sensitivities(self, 
-                                        rho_Phys: TensorLike, 
+                                        rho_Phys: Function, 
                                         con_grad: TensorLike) -> TensorLike:
 
         return con_grad

@@ -414,10 +414,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
                         ) -> None:
         """设置函数空间"""
         scalar_space = LagrangeFESpace(mesh, p=p, ctype='C')
-        self.scalar_space = scalar_space
+        self._scalar_space = scalar_space
 
         tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=shape)
-        self.tensor_space = tensor_space
+        self._tensor_space = tensor_space
 
         self._log_info(f"Tensor space DOF ordering: dof_priority")
     

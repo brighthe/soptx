@@ -2,6 +2,7 @@ from typing import Optional, Literal
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
+from fealpy.mesh import SimplexMesh, TensorMesh
 from fealpy.functionspace import Function
 
 from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -21,6 +22,7 @@ class VolumeConstraint(BaseLogged):
         self._analyzer = analyzer
         self._volume_fraction = volume_fraction
         self._mesh = self._analyzer._mesh
+        self._scalar_space = self._analyzer._scalar_space
         self._interpolation_scheme = self._analyzer._interpolation_scheme
         self._integrator_order = self._analyzer._integrator_order
 
@@ -30,71 +32,123 @@ class VolumeConstraint(BaseLogged):
     #####################################################################################################
 
     def fun(self, 
-            density_distribution: Function, 
+            physical_density: Function, 
             displacement: Optional[Function] = None,
         ) -> float:
         """计算体积约束函数值"""
 
-        density_location = self._interpolation_scheme.density_location
-
-        cell_measure = self._mesh.entity_measure('cell')
-
-        if density_location == 'element':
-
-            g = bm.einsum('c, c -> ', cell_measure, density_distribution[:])
-            g0 = self._volume_fraction * bm.sum(cell_measure)
-            gneq = g - g0
-            # gneq = bm.einsum('c, c -> ', cell_measure, rho) / \
-            #         (self.volume_fraction * bm.sum(cell_measure)) - 1 # float
-
-        elif density_location == 'element_gauss_integrate_point':
-
-            qf = self._mesh.quadrature_formula(q=self._integrator_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
-
-            g = bm.einsum('c, q, cq -> ', cell_measure, ws, density_distribution[:])
-            g0 = self._volume_fraction * bm.sum(cell_measure)
-            gneq = g - g0
+        g = self._compute_volume(physical_density=physical_density)
+        g0 = self._volume_fraction * self._compute_volume(physical_density=None)
+        gneq = g - g0
 
         return gneq
     
     def jac(self, 
-            density_distribution: Function, 
+            physical_density: Function, 
             displacement: Optional[Function] = None,
             diff_mode: Literal["auto", "manual"] = "manual"
         ) -> TensorLike:
         """计算体积约束函数的梯度 (灵敏度)"""
 
         if diff_mode == "manual":
-            return self._manual_differentiation(density_distribution, displacement)
+            return self._manual_differentiation(physical_density, displacement)
         elif diff_mode == "auto":  
-            return self._auto_differentiation(density_distribution, displacement)
+            return self._auto_differentiation(physical_density, displacement)
         else:
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
             raise ValueError(error_msg)
         
-    def get_volume_fraction(self, density_distribution: Function) -> float:
-        """计算当前设计的体积分数"""
-        cell_measure = self._mesh.entity_measure('cell')
-        current_volume = bm.einsum('c, c -> ', cell_measure, density_distribution[:])
-        total_volume = bm.sum(cell_measure)
-        volume_fraction = current_volume / total_volume
         
+    #####################################################################################################
+    # 外部调用方法
+    #####################################################################################################
+        
+    def get_volume_fraction(self, physical_density: Function) -> float:
+        """计算当前设计的体积分数"""
+
+        current_volume = self._compute_volume(physical_density=physical_density)            
+        total_volume = self._compute_volume(physical_density=None)
+
+        volume_fraction = current_volume / total_volume
+
         return volume_fraction
 
 
     #####################################################################################################
     # 内部方法
     #####################################################################################################
-        
+
+    def _compute_volume(self, physical_density: Optional[Function] = None) -> float:
+        """计算当前设计的体积"""
+
+        if physical_density is None:
+
+            cell_measure = self._mesh.entity_measure('cell')
+            current_volume = bm.sum(cell_measure)
+
+        else:
+
+            NC = self._mesh.number_of_cells()
+            gdof = physical_density.shape[0]
+
+            if physical_density.shape == (NC, ):
+            
+                cell_measure = self._mesh.entity_measure('cell')
+                current_volume = bm.einsum('c, c -> ', cell_measure, physical_density[:])
+
+            elif len(physical_density.shape) == 2:
+
+                qf = self._mesh.quadrature_formula(self._integrator_order)
+                bcs, ws = qf.get_quadrature_points_and_weights()
+
+                if isinstance(self._mesh, SimplexMesh):
+                    cm = self._mesh.entity_measure('cell')
+                    current_volume = bm.einsum('q, cq, c -> ', ws, physical_density, cm)
+                
+                elif isinstance(self._mesh, TensorMesh):
+                    J = self._mesh.jacobi_matrix(bcs)
+                    detJ = bm.linalg.det(J)
+                    current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density, detJ)
+
+            elif physical_density.shape == (gdof, ):
+
+                density_space = physical_density.space
+
+                qf = self._mesh.quadrature_formula(self._integrator_order)
+                bcs, ws = qf.get_quadrature_points_and_weights()
+                
+                phi = density_space.basis(bcs) # (1, NQ, ldof)
+                c2d = density_space.cell_to_dof() # (NC, ldof)
+                physical_density_cell = physical_density[c2d] # (NC, ldof)
+
+                physical_density_gauss = bm.einsum('cl, ql -> cq', physical_density_cell, phi[0])
+
+                if isinstance(self._mesh, SimplexMesh):
+                    cm = self._mesh.entity_measure('cell')
+                    current_volume = bm.einsum('q, cq, c -> ', ws, physical_density_gauss, cm)
+                
+                elif isinstance(self._mesh, TensorMesh):
+                    J = self._mesh.jacobi_matrix(bcs)
+                    detJ = bm.linalg.det(J)
+                    current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density_gauss, detJ)
+            
+        return current_volume
+
+
     def _manual_differentiation(self, 
-            density_distribution: Function, 
+            physical_density: Function, 
             displacement: Optional[Function] = None
         ) -> TensorLike:
         """手动计算目标函数梯度"""
 
         density_location = self._interpolation_scheme.density_location
+
+        valid_locations = {'element', 'gauss_integration_point'}
+        if density_location not in valid_locations:
+            error_msg = f"density_location must be one of {valid_locations}, but got '{density_location}'"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
 
         cell_measure = self._mesh.entity_measure('cell')
 
@@ -102,7 +156,7 @@ class VolumeConstraint(BaseLogged):
         
             dg = bm.copy(cell_measure)
 
-        elif density_location == 'element_gauss_integrate_point':
+        elif density_location == 'gauss_integration_point':
 
             qf = self._mesh.quadrature_formula(q=self._integrator_order)
             bcs, ws = qf.get_quadrature_points_and_weights()

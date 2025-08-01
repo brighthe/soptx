@@ -8,17 +8,18 @@ from fealpy.sparse import COOTensor, CSRTensor
 from soptx.utils import timer
 
 class FilterMatrixBuilder:
-    """负责构建拓扑优化中使用的稀疏过滤矩阵 H"""
-    def __init__(self, mesh: Mesh, rmin: float):
+    """负责构建拓扑优化中使用的稀疏权重矩阵 H"""
+    def __init__(self, mesh: Mesh, rmin: float, density_coords: TensorLike) -> None:
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
         
-        self.mesh = mesh
-        self.rmin = rmin
-        self.device = mesh.device
+        self._mesh = mesh
+        self._rmin = rmin
+        self._density_coords = density_coords
+        self._device = mesh.device
 
     def build(self) -> Tuple[CSRTensor, TensorLike]:
-        """构建并返回过滤矩阵 H 和其行和 Hs"""
+        """构建并返回权重矩阵 H 和其行和 Hs"""
         mesh_keys: Set[str] = set(self.mesh.meshdata.keys())
         
         keys_3d: Set[str] = {'nx', 'ny', 'nz', 'hx', 'hy', 'hz'}
@@ -38,12 +39,92 @@ class FilterMatrixBuilder:
                             )
         else:
             return self._compute_filter_general(
-                                self.rmin,
-                                self.mesh.meshdata['domain'], 
-                                self.mesh.entity_barycenter('cell'), 
+                                rmin=self._rmin,
+                                domain=self._mesh.meshdata['domain'], 
+                                density_coords=self._density_coords, 
                             )
         
     def _compute_filter_general(self, 
+                          rmin: float,
+                          domain: List[float],
+                          density_coords: TensorLike,  
+                          periodic: List[bool]=[False, False, False],
+                          enable_timing: bool = False,
+                          ) -> Tuple[COOTensor, TensorLike]:
+        t = None
+        if enable_timing:
+            t = timer(f"Filter_general")
+            next(t)
+
+        # 转移到 CPU 进行计算
+        density_coords = bm.device_put(density_coords, 'cpu')
+        
+        # 使用 KD-tree 查询临近点
+        density_indices, neighbor_indices = bm.query_point(
+            x=density_coords, y=density_coords, h=rmin, 
+            box_size=domain, mask_self=False, periodic=periodic
+        )
+        
+        if enable_timing:
+            t.send('KD-tree 查询时间')
+
+        # 自由度总数
+        gdof = density_coords.shape[0]
+        
+        # 准备存储过滤器矩阵的数组
+        max_nnz = len(density_indices) + gdof
+        iH = bm.zeros(max_nnz, dtype=bm.int32)
+        jH = bm.zeros(max_nnz, dtype=bm.int32)
+        sH = bm.zeros(max_nnz, dtype=bm.float64)
+        
+        # 首先添加对角线元素
+        for i in range(gdof):
+            iH[i] = i
+            jH[i] = i
+            sH[i] = rmin  # 自身权重为 rmin
+        
+        nnz = gdof
+        
+        # 填充其余非零元素
+        for idx in range(len(density_indices)):
+            i = density_indices[idx]
+            j = neighbor_indices[idx]
+            
+            # 计算物理距离
+            physical_dist = bm.sqrt(bm.sum((density_coords[i] - density_coords[j])**2))
+            
+            # 计算权重因子
+            fac = rmin - physical_dist
+            
+            if fac > 0:
+                iH[nnz] = i
+                jH[nnz] = j
+                sH[nnz] = fac
+                nnz += 1
+
+        if enable_timing:
+            t.send('循环计算时间')
+        
+        # 创建稀疏矩阵
+        H = COOTensor(
+            indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
+            values=sH[:nnz],
+            spshape=(gdof, gdof)
+        )
+        
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
+        
+        H = H.tocsr()
+        H = H.device_put(self._device)
+        Hs = bm.device_put(Hs, self._device)
+        
+        if enable_timing:
+            t.send('稀疏矩阵构建时间')
+            t.send(None)
+
+        return H, Hs
+        
+    def _compute_filter_general_old(self, 
                                 rmin: float,
                                 domain: List[float],
                                 cell_centers: TensorLike,
@@ -52,8 +133,8 @@ class FilterMatrixBuilder:
                             ) -> Tuple[COOTensor, TensorLike]:
         """计算任意网格的过滤矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         rmin: 过滤半径
         cell_centers: 单元中心点坐标, 形状为 (NC, GD)
         domain: 计算域的边界, 
@@ -144,6 +225,156 @@ class FilterMatrixBuilder:
 
         return H, Hs
     
+
+    def _compute_weigthed_matrix_2d(self,
+                                    rmin: float,     
+                                    nx: int, ny: int,  
+                                    hx: float, hy: float,
+                                    density_type: str = 'element',
+                                    enable_timing: bool = False,
+                                ) -> Tuple[CSRTensor, TensorLike]:
+    
+        # 根据密度类型确定参数
+        if density_type == 'element':
+            n_x = nx
+            n_y = ny
+            # 单元中心坐标需要偏移半个网格
+            coord_offset_x = 0.5 * hx
+            coord_offset_y = 0.5 * hy
+        elif density_type == 'node':
+            n_x = nx + 1
+            n_y = ny + 1
+            # 节点坐标不需要偏移
+            coord_offset_x = 0.0
+            coord_offset_y = 0.0
+        else:
+            raise ValueError(f"Unknown density_type: {density_type}")
+        
+        N_total = n_x * n_y  # 总自由度数
+        
+        t = None
+        if enable_timing:
+            t = timer(f"Filter_2d_{density_type}")
+            next(t)
+        
+        search_radius_x = ceil(rmin/hx)
+        search_radius_y = ceil(rmin/hy)
+        
+        # 批处理
+        batch_size = min(10000, N_total) 
+        n_batches = (N_total + batch_size - 1) // batch_size 
+        
+        # 统一的线性索引到2D坐标映射
+        def linear_to_2d(linear_idx):
+            i = linear_idx // n_y
+            j = linear_idx % n_y
+            return i, j
+        
+        # 预计算所有自由度的物理坐标
+        all_coords = bm.zeros((N_total, 2), dtype=bm.float64, device='cpu')
+        
+        for idx in range(N_total):
+            i, j = linear_to_2d(idx)
+            # 使用偏移量来区分单元中心和节点坐标
+            all_coords[idx, 0] = i * hx + coord_offset_x
+            all_coords[idx, 1] = j * hy + coord_offset_y
+        
+        if enable_timing:
+            t.send('预处理')
+        
+        # 初始化存储结果的列表
+        all_rows = [] 
+        all_cols = []  
+        all_vals = []  
+        
+        # 分批处理
+        for batch_idx in range(n_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min((batch_idx + 1) * batch_size, N_total)
+            
+            batch_rows = []
+            batch_cols = []
+            batch_vals = []
+            
+            batch_coords = all_coords[start_idx:end_idx]
+            
+            for local_idx, global_idx in enumerate(range(start_idx, end_idx)):
+                i, j = linear_to_2d(global_idx)
+                row = global_idx
+                
+                # 计算搜索范围
+                ii1 = max(0, i - (search_radius_x - 1))
+                ii2 = min(n_x, i + search_radius_x)
+                jj1 = max(0, j - (search_radius_y - 1))
+                jj2 = min(n_y, j + search_radius_y)
+                
+                # 创建搜索范围内所有自由度的线性索引
+                search_indices = []
+                for ii in range(ii1, ii2):
+                    for jj in range(jj1, jj2):
+                        col = ii * n_y + jj
+                        search_indices.append(col)
+                
+                if not search_indices:
+                    continue
+                
+                # 获取搜索范围内的坐标
+                search_coords = all_coords[search_indices]
+                
+                # 计算距离
+                current_coords = batch_coords[local_idx].reshape(1, 2)
+                diffs = search_coords - current_coords
+                squared_dists = bm.sum(diffs * diffs, axis=1)
+                distances = bm.sqrt(squared_dists)
+                
+                # 计算滤波因子
+                factors = rmin - distances
+                valid_mask = factors > 0
+                
+                if bm.any(valid_mask):
+                    valid_cols = bm.array(search_indices, device='cpu')[valid_mask]
+                    valid_factors = factors[valid_mask]
+                    
+                    batch_rows.extend([row] * len(valid_cols))
+                    batch_cols.extend(valid_cols.tolist())
+                    batch_vals.extend(valid_factors.tolist())
+            
+            all_rows.extend(batch_rows)
+            all_cols.extend(batch_cols)
+            all_vals.extend(batch_vals)
+        
+        if enable_timing:
+            t.send('计算距离和过滤矩阵')
+        
+        # 构建稀疏矩阵
+        if all_rows:
+            iH = bm.tensor(all_rows, dtype=bm.int32, device='cpu')
+            jH = bm.tensor(all_cols, dtype=bm.int32, device='cpu')
+            sH = bm.tensor(all_vals, dtype=bm.float64, device='cpu')
+        else:
+            iH = bm.tensor([], dtype=bm.int32, device='cpu')
+            jH = bm.tensor([], dtype=bm.int32, device='cpu')
+            sH = bm.tensor([], dtype=bm.float64, device='cpu')
+        
+        H = COOTensor(
+            indices=bm.stack((iH, jH), axis=0),
+            values=sH,
+            spshape=(N_total, N_total)
+        )
+        
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
+        
+        H = H.tocsr()
+        H = H.device_put(self._device)
+        Hs = bm.device_put(Hs, self._device)
+        
+        if enable_timing:
+            t.send('矩阵构建')
+            t.send(None)
+        
+        return H, Hs
+
+
     def _compute_filter_2d(self,
                         rmin: float,     
                         nx: int, ny: int, 

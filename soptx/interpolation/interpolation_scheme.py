@@ -69,8 +69,8 @@ class MaterialInterpolationScheme(BaseLogged):
         NC = mesh.number_of_cells()
         density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
 
-        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
-        density_dist = element_space.function(density_tensor)
+        space = LagrangeFESpace(mesh, p=0, ctype='D')
+        density_dist = space.function(density_tensor)
 
         self._log_info(f"Element density: shape={density_dist.shape}, value={relative_density}")
 
@@ -87,9 +87,6 @@ class MaterialInterpolationScheme(BaseLogged):
         element_space = LagrangeFESpace(mesh, p=0, ctype='D')
         density_dist = element_space.interpolate(u=self._density_distribution_coscos)
 
-        # mesh.celldata['rho'] = density_dist[:]
-        # mesh.to_vtk(f'density_distribution_element1.vtu',)
-
         self._log_info(f"此时的密度是分片常数函数, ")
 
         return density_dist
@@ -98,28 +95,45 @@ class MaterialInterpolationScheme(BaseLogged):
     def setup_density_distribution(self, 
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
+                                integrator_order: int = 3,
                                 **kwargs,
-                            ) -> Function:
+                            ) -> TensorLike:
         """单元高斯点密度分布"""
-        integrator_order = 3
-        
         qf = mesh.quadrature_formula(integrator_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
+
         NC = mesh.number_of_cells()
         density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
 
-        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
-        density_dist = element_space.function(density_tensor)
+        space = LagrangeFESpace(mesh, p=0, ctype='D')
+        density_dist = space.function(density_tensor)
         density_dist = density_dist(bcs)
+        density_dist = space.function(density_dist)
 
         self._log_info(f"Element-Gauss density: shape={density_dist.shape}, value={relative_density}, q={integrator_order}")
 
         return density_dist
     
     @setup_density_distribution.register('continuous')
-    def setup_density_distribution(self):
-        "连续密度分布"
-        pass
+    def setup_density_distribution(self,
+                                   mesh: HomogeneousMesh,
+                                   relative_density: float = 1.0,
+                                   interpolation_order: int = 1,
+                                   **kwargs,
+                                ) -> Function:
+        "连续插值点密度分布"
+        def density_func(points: TensorLike) -> TensorLike:
+            NI = points.shape[0] 
+
+            return bm.full((NI,), relative_density, dtype=bm.float64, device=points.device)
+    
+        space = LagrangeFESpace(mesh, p=interpolation_order, ctype='C')
+        density_dist = space.interpolate(u=density_func)
+
+        self._log_info(f"Continuous density: shape={density_dist.shape}, value={relative_density}, p={interpolation_order}")
+        
+        return density_dist
+        
 
     @variantmethod('simp')
     def interpolate_map(self, 

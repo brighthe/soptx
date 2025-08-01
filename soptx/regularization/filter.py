@@ -1,6 +1,7 @@
 from typing import Literal, Dict, Type, Tuple, Optional
 
 from fealpy.mesh import HomogeneousMesh
+from fealpy.functionspace import Function
 from fealpy.typing import TensorLike
 
 from ..utils.base_logged import BaseLogged
@@ -32,6 +33,7 @@ class Filter(BaseLogged):
                 mesh: HomogeneousMesh,
                 filter_type: Literal['none', 'sensitivity', 'density', 'heaviside_density'],
                 rmin: Optional[float] = None,
+                dof_coords: Optional[TensorLike] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
             ) -> None:
@@ -41,6 +43,7 @@ class Filter(BaseLogged):
         self.mesh = mesh
         self.filter_type = filter_type
         self.rmin = rmin
+        self.dof_coords = dof_coords
 
         if self.filter_type != 'none' and (self.rmin is None or self.rmin <= 0):
             error_msg = (f"当 filter_type='{self.filter_type}' 时，必须提供有效的 rmin (> 0). "
@@ -50,7 +53,7 @@ class Filter(BaseLogged):
         
         # 1. 构建过滤矩阵
         if self.filter_type != 'none' and self.rmin > 0:
-            builder = FilterMatrixBuilder(mesh, rmin)
+            builder = FilterMatrixBuilder(mesh, rmin, dof_coords)
             self._H, self._Hs = builder.build()
             self._cell_measure = self.mesh.entity_measure('cell')
         else:
@@ -90,22 +93,22 @@ class Filter(BaseLogged):
         self._strategy: _FilterStrategy = strategy_class(**strategy_params)
 
     # 3. 委托公共方法到具体策略
-    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
         """获取初始物理密度场"""
 
         return self._strategy.get_initial_density(rho=rho, rho_Phys=rho_Phys)
 
-    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
         """对设计变量进行滤波得到物理变量"""
 
         return self._strategy.filter_variables(rho=rho, rho_Phys=rho_Phys)
 
-    def filter_objective_sensitivities(self, rho_Phys: TensorLike, obj_grad: TensorLike) -> TensorLike:
+    def filter_objective_sensitivities(self, rho_Phys: Function, obj_grad: TensorLike) -> TensorLike:
         """过滤目标函数的灵敏度"""
 
         return self._strategy.filter_objective_sensitivities(rho_Phys, obj_grad)
 
-    def filter_constraint_sensitivities(self, rho_Phys: TensorLike, con_grad: TensorLike) -> TensorLike:
+    def filter_constraint_sensitivities(self, rho_Phys: Function, con_grad: TensorLike) -> TensorLike:
         """过滤约束函数的灵敏度"""
 
         return self._strategy.filter_constraint_sensitivities(rho_Phys, con_grad)

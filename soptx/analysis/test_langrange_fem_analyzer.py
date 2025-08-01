@@ -156,6 +156,15 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                 )
 
             uh = lfa.solve_displacement(density_distribution=None)
+            # from soptx.analysis.utils import _get_displacement_dof_component
+            # uh_reshaped = _get_displacement_dof_component(uh=uh, space=lfa.tensor_space)
+            # qf = mesh.quadrature_formula(q, etype='cell')
+            # bcs, ws = qf.get_quadrature_points_and_weights()
+            # ps = mesh.bc_to_point(bcs)
+            # u = pde.disp_solution(points=ps)
+            # u_reshaped = _get_displacement_dof_component(uh=u, space=lfa.tensor_space)
+            # mesh.nodedata['disp'] = uh_reshaped
+            # mesh.to_vtk(f'disp.vtu')
 
             e0 = mesh.error(uh, pde.disp_solution)
             e1 = mesh.error(uh.grad_value, pde.disp_solution_gradient)
@@ -541,7 +550,8 @@ if __name__ == "__main__":
 
     # test.run.set('topopt_analysis_reference_solution')
     # test.run.set('topopt_analysis_exact_solution')
-    test.run.set('lfa_analysis_reference_solution')
+    # test.run.set('lfa_analysis_reference_solution')
+    test.run.set('lfa_analysis_exact_solution')
     # test.run.set('topopt_analysis')
     # test.run.set('test_bisect')
 

@@ -120,9 +120,11 @@ class OCOptimizer(BaseLogged):
         tol = self.options.tolerance
         bisection_tol = self.options.bisection_tol
 
-        rho = density_distribution[:]
-        tensor_kwargs = bm.context(rho)
-        rho_Phys = bm.zeros_like(rho, **tensor_kwargs)
+        rho = density_distribution
+        # rho_Phys = rho.space.function(rho[:])
+        rho_Phys = rho.space.function(bm.copy(rho[:]))
+        # tensor_kwargs = bm.context(rho)
+        # rho_Phys = bm.zeros_like(rho, **tensor_kwargs)
         rho_Phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_Phys)
 
         # 初始化历史记录
@@ -174,7 +176,7 @@ class OCOptimizer(BaseLogged):
             iteration_time = time() - start_time
 
             history.log_iteration(iter_idx=iter_idx, obj_val=obj_val, volfrac=volfrac, 
-                                change=change, time_cost=iteration_time, density=rho_Phys)
+                                change=change, time_cost=iteration_time, physical_density=rho_Phys[:])
 
             # 收敛检查
             if change <= tol:
@@ -187,18 +189,20 @@ class OCOptimizer(BaseLogged):
         return rho, history
     
     def _update_density(self,
-                    rho: TensorLike,
+                    rho: Function,
                     dc: TensorLike,
                     dg: TensorLike,
-                    lmid: float) -> TensorLike:
+                    lmid: float) -> Function:
         """使用 OC 准则更新密度"""
 
         # 获取算法内部参数
         m = self.options.move_limit
         eta = self.options.damping_coef
         kwargs = bm.context(rho)
+        # rho_new = rho.space.function(rho[:])
+        rho_new = rho.space.function(bm.copy(rho[:]))
         
-        if bm.any(rho < -1e-12) or bm.any(rho > 1 + 1e-12):
+        if bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12):
             self._log_warning(f"输入密度超出合理范围 [0, 1]: "
                             f"min={bm.min(rho):.2e}, max={bm.max(rho):.2e}")
             
@@ -210,7 +214,7 @@ class OCOptimizer(BaseLogged):
         B_e_abs = bm.abs(B_e)
         B_e_damped = bm.pow(B_e_abs, eta)
 
-        rho_new = bm.maximum(
+        rho_new[:] = bm.maximum(
             bm.tensor(0.0, **kwargs), 
             bm.maximum(
                 rho - m, 
@@ -224,7 +228,7 @@ class OCOptimizer(BaseLogged):
             )
         )
 
-        if bm.any(rho < -1e-12) or bm.any(rho > 1 + 1e-12):
+        if bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12):
             self._log_warning(f"输出密度超出合理范围 [0, 1]: "
                             f"min={bm.min(rho):.2e}, max={bm.max(rho):.2e}")
         
