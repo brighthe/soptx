@@ -120,6 +120,11 @@ class VolumeConstraint(BaseLogged):
                 
                 phi = density_space.basis(bcs) # (1, NQ, ldof)
                 c2d = density_space.cell_to_dof() # (NC, ldof)
+
+            
+                physical_density_gauss = physical_density(bcs) #  
+
+                
                 physical_density_cell = physical_density[c2d] # (NC, ldof)
 
                 physical_density_gauss = bm.einsum('cl, ql -> cq', physical_density_cell, phi[0])

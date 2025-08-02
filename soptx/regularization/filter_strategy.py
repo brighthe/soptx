@@ -109,22 +109,59 @@ class DensityStrategy(_FilterStrategy):
         return rho_Phys
 
     def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
-        weighted_rho = rho[:] * self._cell_measure
-        numerator = self._H.matmul(weighted_rho)
-        
-        denominator = self._H.matmul(self._cell_measure)
 
-        rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+        # 单元密度情况
+        # weighted_rho = rho[:] * self._cell_measure
+        # numerator = self._H.matmul(weighted_rho)
+        
+        # denominator = self._H.matmul(self._cell_measure)
+
+        # rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+
+
+        # 高斯积分点密度情况：形状为 (NC, NQ)
+        from fealpy.mesh import QuadrangleMesh
+        mesh = QuadrangleMesh.from_box(box=[0, 30, 0, 10], nx=30, ny=10)
+        qf = mesh.quadrature_formula(q=3)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+
+        nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
+        reshaped = rho_Phys.reshape(nx, ny, 3, 3)
+        # 将列索引提前，实现按列分组
+        transposed = reshaped.transpose(0, 2, 1, 3)
+        rho_Phys = transposed.reshape(-1)
+
+        
 
         return rho_Phys
 
     def filter_objective_sensitivities(self, rho_Phys: TensorLike, obj_grad: TensorLike) -> TensorLike:
-        weighted_dobj = self._cell_measure * obj_grad
+        # weighted_dobj = self._cell_measure * obj_grad
+        # numerator = self._H.matmul(weighted_dobj)
+
+        # denominator = self._H.matmul(self._cell_measure)
+
+        # obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
+
+        from fealpy.mesh import QuadrangleMesh
+        mesh = QuadrangleMesh.from_box(box=[0, 30, 0, 10], nx=30, ny=10)
+        NC = mesh.number_of_cells()
+        qf = mesh.quadrature_formula(q=3)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+
+        NQ = ws.shape[0]
+        weighted_dobj = bm.einsum('q, cq -> cq', ws, obj_grad)
+        ws_all = bm.broadcast_to(ws[None, :], (NC, NQ))
+
+        denominator = self._H.matmul(ws_all)
+
+        nx, ny = 30, 10
+        reshaped = weighted_dobj.reshape(nx, ny, 3, 3)
+        # 将列索引提前，实现按列分组
+        transposed = reshaped.transpose(0, 2, 1, 3)
+        weighted_dobj = transposed.reshape(-1)
+
         numerator = self._H.matmul(weighted_dobj)
-
-        denominator = self._H.matmul(self._cell_measure)
-
-        obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
 
         return obj_grad 
 

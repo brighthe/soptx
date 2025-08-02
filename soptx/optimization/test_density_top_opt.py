@@ -428,4 +428,4 @@ if __name__ == "__main__":
     # test.run.set('OC_element')
 
     test.run.set('test_density_location')
-    rho_opt, history = test.run(density_location='element')
+    rho_opt, history = test.run(density_location='gauss_integration_point')

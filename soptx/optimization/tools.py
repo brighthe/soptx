@@ -214,7 +214,7 @@ def plot_optimization_history(history, save_path=None, show=True, title=None,
         plt.close()
 
 
-def plot_intergartor(mesh: HomogeneousMesh, integrator_order=2):
+def plot_intergartor_point(mesh: HomogeneousMesh, integrator_order=2):
 
     import matplotlib.pyplot as plt
 
@@ -233,4 +233,4 @@ if __name__ == "__main__":
     # 示例：如何使用 plot_intergartor 函数
     from fealpy.mesh import QuadrangleMesh
     mesh = QuadrangleMesh.from_box(box=[0, 6, 0, 2], nx=6, ny=2)
-    plot_intergartor(mesh, integrator_order=3)
+    plot_intergartor_point(mesh, integrator_order=3)
