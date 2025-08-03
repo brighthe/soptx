@@ -2,7 +2,7 @@ from typing import Tuple, Set, List
 from math import ceil, sqrt
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import Mesh
+from fealpy.mesh import HomogeneousMesh
 from fealpy.typing import TensorLike
 from fealpy.sparse import COOTensor, CSRTensor
 from soptx.utils import timer
@@ -10,7 +10,7 @@ from soptx.utils import timer
 class FilterMatrixBuilder:
     """负责构建拓扑优化中使用的稀疏权重矩阵 H"""
     def __init__(self, 
-                mesh: Mesh, 
+                mesh: HomogeneousMesh, 
                 rmin: float, 
                 density_location: str, 
                 integrator_order: int = None,
@@ -53,7 +53,7 @@ class FilterMatrixBuilder:
             
             if self._density_location == 'gauss_integration_point':
 
-                return self._compute_weigthed_matrix_general(
+                return self._compute_weighted_matrix_general(
                                 rmin=self._rmin,
                                 domain=self._mesh.meshdata['domain'], 
                             )
@@ -64,12 +64,13 @@ class FilterMatrixBuilder:
                                     self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
                                 )
         else:
-            return self._compute_weigthed_matrix_general(
+            return self._compute_weighted_matrix_general(
                                 rmin=self._rmin,
                                 domain=self._mesh.meshdata['domain'], 
                             )
         
-    def _compute_weigthed_matrix_general(self, 
+        
+    def _compute_weighted_matrix_general(self, 
                           rmin: float,
                           domain: List[float],
                           periodic: List[bool]=[False, False, False],
@@ -81,21 +82,28 @@ class FilterMatrixBuilder:
             next(t)
 
         if self._density_location == 'gauss_integration_point':
+            from soptx.utils.gauss_intergation_point import get_gauss_point_mapping
+            GD = self._mesh.geo_dimension()
+            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+
             
             qf = self._mesh.quadrature_formula(q=self._integrator_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
-            density_coords = self._mesh.bc_to_point(bcs) # （NC, NQ, GD)
-            
-            GD = self._mesh.geo_dimension()
+            density_coords_local = self._mesh.bc_to_point(bcs) # （NC, NQ, GD)
 
-            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-            reshaped = density_coords.reshape(nx, ny, 3, 3, GD)
-            # 将列索引提前，实现按列分组
-            transposed = reshaped.transpose(0, 2, 1, 3, 4)
-            density_coords = transposed.reshape(-1, GD)
+            density_coords_local_flat = density_coords_local.reshape(-1, GD) 
+            local_to_global, _ = get_gauss_point_mapping(nx=nx, ny=ny,
+                                                        nq_per_dim=self._integrator_order)
+            density_coords = density_coords_local_flat[local_to_global]  # (NC*NQ, GD)
+            
+            # nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+            # reshaped = density_coords_local.reshape(nx, ny, 3, 3, GD)
+            # # 将列索引提前，实现按列分组
+            # transposed = reshaped.transpose(0, 2, 1, 3, 4)wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+            # density_coords = transposed.reshape(-1, GD)
 
         elif self._density_location == 'interpolation_point':
-            density_coords = self._mesh.interpolation_points(p=self._interpolation_order)
+            density_coords = self._mesh.interpolation_points(p=self._interpolation_order) # (GDOF, GD)
 
         # 转移到 CPU 进行计算
         density_coords = bm.device_put(density_coords, 'cpu')
@@ -273,25 +281,29 @@ class FilterMatrixBuilder:
                                     hx: float, hy: float,
                                     enable_timing: bool = False,
                                 ) -> Tuple[CSRTensor, TensorLike]:
-        """单元密度和节点密度情况下, 计算权重矩阵的方式"""
+        """单元密度情况下, 计算权重矩阵的方式"""
+
+        # 单元中心坐标需要偏移半个网格
+        coord_offset_x = 0.5 * hx
+        coord_offset_y = 0.5 * hy
     
-        # 根据密度类型确定参数
-        if self._density_location == 'element':
-            n_x = nx
-            n_y = ny
-            # 单元中心坐标需要偏移半个网格
-            coord_offset_x = 0.5 * hx
-            coord_offset_y = 0.5 * hy
-        elif self._density_location == 'node':
-            n_x = nx + 1
-            n_y = ny + 1
-            # 节点坐标不需要偏移
-            coord_offset_x = 0.0
-            coord_offset_y = 0.0
-        else:
-            raise ValueError(f"Unknown density_type: {self._density_location}")
+        # # 根据密度类型确定参数
+        # if self._density_location == 'element':
+        #     n_x = nx
+        #     n_y = ny
+        #     # 单元中心坐标需要偏移半个网格
+        #     coord_offset_x = 0.5 * hx
+        #     coord_offset_y = 0.5 * hy
+        # elif self._density_location == 'interpolation_point':
+        #     n_x = nx + 1
+        #     n_y = ny + 1
+        #     # 节点坐标不需要偏移
+        #     coord_offset_x = 0.0
+        #     coord_offset_y = 0.0
+        # else:
+        #     raise ValueError(f"Unknown density_type: {self._density_location}")
         
-        N_total = n_x * n_y  # 总自由度数
+        N_total = nx * ny  # 总自由度数
         
         t = None
         if enable_timing:
@@ -307,8 +319,8 @@ class FilterMatrixBuilder:
         
         # 统一的线性索引到 2D 坐标映射
         def linear_to_2d(linear_idx):
-            i = linear_idx // n_y
-            j = linear_idx % n_y
+            i = linear_idx // ny
+            j = linear_idx % ny
             return i, j
         
         # 预计算所有自由度的物理坐标
@@ -345,15 +357,15 @@ class FilterMatrixBuilder:
                 
                 # 计算搜索范围
                 ii1 = max(0, i - (search_radius_x - 1))
-                ii2 = min(n_x, i + search_radius_x)
+                ii2 = min(nx, i + search_radius_x)
                 jj1 = max(0, j - (search_radius_y - 1))
-                jj2 = min(n_y, j + search_radius_y)
+                jj2 = min(ny, j + search_radius_y)
                 
                 # 创建搜索范围内所有自由度的线性索引
                 search_indices = []
                 for ii in range(ii1, ii2):
                     for jj in range(jj1, jj2):
-                        col = ii * n_y + jj
+                        col = ii * ny + jj
                         search_indices.append(col)
                 
                 if not search_indices:

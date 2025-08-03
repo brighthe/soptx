@@ -160,9 +160,8 @@ class DensityTopOptTest(BaseLogged):
             density_location: str = 'element', 
         ) -> Union[TensorLike, OptimizationHistory]:
         # 参数设置
-        nx, ny = 30, 10
-        space_degree = 2
-        filter_type = 'density'
+        nx, ny = 60, 20
+        filter_type = 'none'
 
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
@@ -174,6 +173,8 @@ class DensityTopOptTest(BaseLogged):
         domain_length = pde.domain[1] - pde.domain[0]
         domain_height = pde.domain[3] - pde.domain[2]
         pde.init_mesh.set('uniform_quad')
+
+        rmin = (0.04 * nx) / (domain_length / nx)
 
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
 
@@ -203,7 +204,7 @@ class DensityTopOptTest(BaseLogged):
                                                 mesh=opt_mesh,
                                                 relative_density=self.volume_fraction,
                                                 integrator_order=self.integrator_order,
-                                                interpolation_order=1
+                                                interpolation_order=self.space_degree
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -212,7 +213,7 @@ class DensityTopOptTest(BaseLogged):
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
-                                    space_degree=space_degree,
+                                    space_degree=self.space_degree,
                                     integrator_order=self.integrator_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
@@ -228,7 +229,7 @@ class DensityTopOptTest(BaseLogged):
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=self.volume_fraction)
 
         from soptx.regularization.filter import Filter
-        rmin = (0.04 * nx) / (domain_length / nx)
+        
         filter_regularization = Filter(
                                     mesh=opt_mesh,
                                     filter_type=filter_type,
@@ -256,7 +257,7 @@ class DensityTopOptTest(BaseLogged):
                                     bisection_tol=1e-3
                                 )
         self._log_info(f"开始密度拓扑优化, 密度类型={density_location}, 密度场自由度={rho.shape}, " 
-                       f"网格尺寸={nx}*{ny}, 空间阶数={space_degree}, 物理场自由度={fe_dofs}, " 
+                       f"网格尺寸={nx}*{ny}, 空间阶数={self.space_degree}, 物理场自由度={fe_dofs}, " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
@@ -265,9 +266,12 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/density_type={density_location}")
+        save_path = Path(f"{base_dir}/density_type_{density_location}")
         save_path.mkdir(parents=True, exist_ok=True)
-        # opt_mesh_show = pde.init_mesh(nx=nx*self.integrator_order, ny=ny*self.integrator_order)
+
+        if density_location == 'gauss_integration_point':
+            opt_mesh = pde.init_mesh(nx=nx*self.integrator_order, ny=ny*self.integrator_order)
+        
         save_optimization_history(opt_mesh, history, str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
@@ -275,11 +279,10 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_regularization')
     def run(self, 
-            density_location: str = 'continuous', 
+            density_location: str = 'element', 
         ) -> Union[TensorLike, OptimizationHistory]:
         # 参数设置
         nx, ny = 30, 10
-        space_degree = 2
         filter_type = 'density'
 
         # 设置 pde
@@ -291,6 +294,7 @@ class DensityTopOptTest(BaseLogged):
                         )
         domain_length = pde.domain[1] - pde.domain[0]
         domain_height = pde.domain[3] - pde.domain[2]
+        hx, hy = domain_length / nx, domain_height / ny
         pde.init_mesh.set('uniform_quad')
 
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -328,14 +332,13 @@ class DensityTopOptTest(BaseLogged):
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
-                                    space_degree=space_degree,
+                                    space_degree=self.space_degree,
                                     integrator_order=self.integrator_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
                                 )
         fe_tspace = lagrange_fem_analyzer.tensor_space
-        fe_dofs = fe_tspace.number_of_global_dofs()
         
         from soptx.optimization.compliance_objective import ComplianceObjective
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
@@ -344,7 +347,6 @@ class DensityTopOptTest(BaseLogged):
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=self.volume_fraction)
         test = volume_constraint._compute_volume(physical_density=rho)
 
-        from soptx.regularization.filter import Filter
         rmin = (0.04 * nx) / (domain_length / nx)
 
         from soptx.regularization.matrix_builder import FilterMatrixBuilder
@@ -355,56 +357,19 @@ class DensityTopOptTest(BaseLogged):
                                     integrator_order=self.integrator_order,
                                     interpolation_order=1,
                                 )
-        H, Hs = filter_matrix._compute_weigthed_matrix_general(rmin=rmin, domain=pde.domain)
-
-        filter_regularization = Filter(
-                                    mesh=opt_mesh,
-                                    filter_type=filter_type,
-                                    rmin=rmin,
-                                )
-
-
-        from soptx.optimization.oc_optimizer import OCOptimizer
-        oc_optimizer = OCOptimizer(
-                            objective=compliance_objective,
-                            constraint=volume_constraint,
-                            filter=filter_regularization,
-                            options={
-                                'max_iterations': 300,
-                                'tolerance': 1e-2,
-                            }
-                        )
-        # 设置高级参数 (可选)
-        oc_optimizer.options.set_advanced_options(
-                                    move_limit=0.2,
-                                    damping_coef=0.5,
-                                    initial_lambda=1e9,
-                                    bisection_tol=1e-3
-                                )
-        self._log_info(f"开始密度拓扑优化, 网格尺寸={nx}*{ny}, 空间阶数={space_degree}, 物理场自由度={fe_dofs}, " 
-                       f"密度分布位置={density_location}, "
-                       f"过滤类型={filter_type}, 过滤半径={rmin}, ")
-        rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
-
-        # 保存结果
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu'
-        base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/density_topopt_p{self.space_degree}_density_{density_location}_({nx},{ny})")
-        save_path.mkdir(parents=True, exist_ok=True)
-        save_optimization_history(opt_mesh, history, str(save_path))
-        plot_optimization_history(history, save_path=str(save_path))
-
-        return rho_opt, history
+        H, Hs = filter_matrix._compute_weighted_matrix_general(rmin=rmin, domain=pde.domain)
+        H1, Hs1 = filter_matrix._compute_weigthed_matrix_2d(rmin=rmin, nx=nx, ny=ny, hx=hx, hy=hy)
+        error = bm.sum(bm.abs(H.to_dense()-H1.to_dense()))
+        print("---------------------")
     
 
     @run.register('test_optimization')
     def run(self, 
-            density_location: str = 'continuous', 
+            density_location: str = 'element', 
         ) -> Union[TensorLike, OptimizationHistory]:
         # 参数设置
-        nx, ny = 30, 10
-        space_degree = 2
+        nx, ny = 6, 2
+        space_degree = 1
         filter_type = 'density'
 
         # 设置 pde
@@ -480,7 +445,7 @@ class DensityTopOptTest(BaseLogged):
                                     integrator_order=self.integrator_order,
                                     interpolation_order=1,
                                 )
-        H, Hs = filter_matrix._compute_weigthed_matrix_general(rmin=rmin, domain=pde.domain)
+        H, Hs = filter_matrix._compute_weighted_matrix_general(rmin=rmin, domain=pde.domain)
 
         filter_regularization = Filter(
                                     mesh=opt_mesh,
@@ -527,7 +492,7 @@ if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
     
     p = 2
-    q = 3
+    q = p+3
     test.set_space_degree(p)
     test.set_integrator_order(q)
     test.set_assembly_method('standard')
@@ -536,11 +501,11 @@ if __name__ == "__main__":
     test.set_relative_density(0.5)
 
 
-    test.run.set('test_optimization')
-    rho, history = test.run(density_location='gauss_integration_points')
+    # test.run.set('test_optimization')
+    # rho, history = test.run(density_location='gauss_integration_point')
     
-    # test.run.set('test_filter')
-    # rho, history = test.run(density_location='gauss_integration_point',)
+    test.run.set('test_regularization')
+    rho, history = test.run(density_location='interpolation_point')
 
     # test.run.set('test_density_location')
-    # rho_opt, history = test.run(density_location='interpolation_point')
+    # rho_opt, history = test.run(density_location='element')

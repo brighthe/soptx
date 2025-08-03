@@ -101,6 +101,11 @@ class MaterialInterpolationScheme(BaseLogged):
                                 **kwargs,
                             ) -> TensorLike:
         """单元高斯积分点密度分布"""
+
+        if interpolation_order is not None:
+            warn_msg = f"高斯积分点密度不需要提供插值次数"
+            self._log_warning(warn_msg)
+        
         qf = mesh.quadrature_formula(integrator_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
 
@@ -124,6 +129,11 @@ class MaterialInterpolationScheme(BaseLogged):
                                    **kwargs,
                                 ) -> Function:
         "插值点密度分布"
+
+        if integrator_order is not None:
+            warn_msg = f"插值点密度不需要提供积分次数"
+            self._log_warning(warn_msg)
+
         def density_func(points: TensorLike) -> TensorLike:
             NI = points.shape[0] 
 

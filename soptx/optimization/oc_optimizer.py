@@ -1,7 +1,7 @@
 import warnings
 from dataclasses import dataclass
 from time import time
-from typing import Optional
+from typing import Optional, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -106,7 +106,7 @@ class OCOptimizer(BaseLogged):
                     self._log_error(error_msg)
                     raise ValueError(error_msg)
 
-    def optimize(self, density_distribution: Function, **kwargs) -> TensorLike:
+    def optimize(self, density_distribution: Union[Function, TensorLike], **kwargs) -> TensorLike:
         """运行 OC 优化算法
 
         Parameters
@@ -122,7 +122,10 @@ class OCOptimizer(BaseLogged):
 
         rho = density_distribution
         # rho_Phys = rho.space.function(rho[:])
-        rho_Phys = rho.space.function(bm.copy(rho[:]))
+        if isinstance(rho, Function):
+            rho_Phys = rho.space.function(bm.copy(rho[:]))
+        else:
+            rho_Phys = bm.copy(rho[:])
         # tensor_kwargs = bm.context(rho)
         # rho_Phys = bm.zeros_like(rho, **tensor_kwargs)
         rho_Phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_Phys)
@@ -189,7 +192,7 @@ class OCOptimizer(BaseLogged):
         return rho, history
     
     def _update_density(self,
-                    rho: Function,
+                    rho: Union[Function, TensorLike],
                     dc: TensorLike,
                     dg: TensorLike,
                     lmid: float) -> Function:
@@ -200,7 +203,10 @@ class OCOptimizer(BaseLogged):
         eta = self.options.damping_coef
         kwargs = bm.context(rho)
         # rho_new = rho.space.function(rho[:])
-        rho_new = rho.space.function(bm.copy(rho[:]))
+        if isinstance(rho, Function):
+            rho_new = rho.space.function(bm.copy(rho[:]))
+        else:
+            rho_new = bm.copy(rho[:])
         
         if bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12):
             self._log_warning(f"输入密度超出合理范围 [0, 1]: "
