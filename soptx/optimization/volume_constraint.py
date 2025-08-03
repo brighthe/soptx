@@ -1,4 +1,4 @@
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -79,7 +79,7 @@ class VolumeConstraint(BaseLogged):
     # 内部方法
     #####################################################################################################
 
-    def _compute_volume(self, physical_density: Optional[Function] = None) -> float:
+    def _compute_volume(self, physical_density: Union[Function, TensorLike] = None) -> float:
         """计算当前设计的体积"""
 
         if physical_density is None:
@@ -92,12 +92,14 @@ class VolumeConstraint(BaseLogged):
             NC = self._mesh.number_of_cells()
             gdof = physical_density.shape[0]
 
-            if physical_density.shape == (NC, ):
-            
+            if isinstance(physical_density, Function) and physical_density.shape == (NC,):
+                
                 cell_measure = self._mesh.entity_measure('cell')
                 current_volume = bm.einsum('c, c -> ', cell_measure, physical_density[:])
 
-            elif len(physical_density.shape) == 2:
+                return current_volume
+
+            elif isinstance(physical_density, TensorLike) and len(physical_density.shape) == 2:
 
                 qf = self._mesh.quadrature_formula(self._integrator_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
@@ -111,23 +113,12 @@ class VolumeConstraint(BaseLogged):
                     detJ = bm.linalg.det(J)
                     current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density, detJ)
 
-            elif physical_density.shape == (gdof, ):
-
-                density_space = physical_density.space
+            elif isinstance(physical_density, Function) and physical_density.shape == (gdof,):
 
                 qf = self._mesh.quadrature_formula(self._integrator_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
-                
-                phi = density_space.basis(bcs) # (1, NQ, ldof)
-                c2d = density_space.cell_to_dof() # (NC, ldof)
 
-            
-                physical_density_gauss = physical_density(bcs) #  
-
-                
-                physical_density_cell = physical_density[c2d] # (NC, ldof)
-
-                physical_density_gauss = bm.einsum('cl, ql -> cq', physical_density_cell, phi[0])
+                physical_density_gauss = physical_density(bcs) 
 
                 if isinstance(self._mesh, SimplexMesh):
                     cm = self._mesh.entity_measure('cell')
@@ -137,6 +128,9 @@ class VolumeConstraint(BaseLogged):
                     J = self._mesh.jacobi_matrix(bcs)
                     detJ = bm.linalg.det(J)
                     current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density_gauss, detJ)
+
+            else:
+                raise ValueError(f"Unexpected physical_density shape/type: {type(physical_density)}, shape={physical_density.shape}")
             
         return current_volume
 

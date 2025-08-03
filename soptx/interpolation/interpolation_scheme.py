@@ -14,7 +14,7 @@ class MaterialInterpolationScheme(BaseLogged):
     def __init__(self,
                 density_location: Literal['element', 'element_coscos', 
                                           'gauss_integration_point', 
-                                          'continuous'] = 'element',
+                                          'interpolation_point'] = 'element',
                 interpolation_method: Literal['simp', 'msimp', 'ramp'] = 'simp',
                 options: Optional[dict] = None,
                 enable_logging: bool = True,
@@ -99,18 +99,17 @@ class MaterialInterpolationScheme(BaseLogged):
                                 integrator_order: int = 3,
                                 interpolation_order: int = None,
                                 **kwargs,
-                            ) -> Function:
-        """单元高斯点密度分布"""
+                            ) -> TensorLike:
+        """单元高斯积分点密度分布"""
         qf = mesh.quadrature_formula(integrator_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
 
         NC = mesh.number_of_cells()
-        density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
+        density_tensor = bm.full((NC, ), relative_density, dtype=bm.float64, device=mesh.device)
 
         space = LagrangeFESpace(mesh, p=0, ctype='D')
         density_dist = space.function(density_tensor)
         density_dist = density_dist(bcs)
-        density_dist = space.function(density_dist)
 
         self._log_info(f"Element-Gauss density: shape={density_dist.shape}, value={relative_density}, q={integrator_order}")
 
@@ -124,7 +123,7 @@ class MaterialInterpolationScheme(BaseLogged):
                                    interpolation_order: int = 1,
                                    **kwargs,
                                 ) -> Function:
-        "连续插值点密度分布"
+        "插值点密度分布"
         def density_func(points: TensorLike) -> TensorLike:
             NI = points.shape[0] 
 

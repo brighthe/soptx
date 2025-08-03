@@ -74,7 +74,7 @@ class FilterMatrixBuilder:
                           domain: List[float],
                           periodic: List[bool]=[False, False, False],
                           enable_timing: bool = False,
-                          ) -> Tuple[COOTensor, TensorLike]:
+                        ) -> Tuple[COOTensor, TensorLike]:
         t = None
         if enable_timing:
             t = timer(f"Filter_general")
