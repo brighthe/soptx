@@ -11,7 +11,6 @@ from fealpy.sparse import CSRTensor, COOTensor
 
 from ..interpolation.linear_elastic_material import LinearElasticMaterial
 from ..interpolation.interpolation_scheme import MaterialInterpolationScheme
-from ..interpolation.config import DensityBasedConfig, LevelSetConfig
 from .integrators.linear_elastic_integrator import LinearElasticIntegrator
 from ..pde.pde_base import PDEBase
 from ..utils.base_logged import BaseLogged

@@ -137,14 +137,6 @@ class MaterialInterpolationScheme(BaseLogged):
             warn_msg = f"Interpolation point density distribution does not require 'integrator_order', provided integrator_order={integrator_order} will be ignored"
             self._log_warning(warn_msg)
 
-        # def density_func(points: TensorLike) -> TensorLike:
-        #     NI = points.shape[0] 
-
-        #     return bm.full((NI,), relative_density, dtype=bm.float64, device=points.device)
-    
-        # space = LagrangeFESpace(mesh, p=interpolation_order, ctype='C')
-        # density_dist = space.interpolate(u=density_func)
-
         space = LagrangeFESpace(mesh, p=interpolation_order, ctype='C')
         gdof = space.number_of_global_dofs()
         density_tensor = bm.full((gdof, ), relative_density, dtype=bm.float64, device=mesh.device)
