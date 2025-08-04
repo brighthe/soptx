@@ -141,8 +141,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """设置张量函数空间"""
         self._tensor_space = space
 
+
     ###############################################################################################
-    # 辅助方法
+    # 外部方法
     ###############################################################################################
 
     def get_scalar_space_from_mesh(self, mesh: HomogeneousMesh) -> LagrangeFESpace:
@@ -179,6 +180,33 @@ class LagrangeFEMAnalyzer(BaseLogged):
             mesh = self._mesh
             qf = mesh.quadrature_formula(self._integrator_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
+
+            D0 = self._material.elastic_matrix()[0, 0]
+            dof_priority = self.tensor_space.dof_priority
+            scalar_space = self.tensor_space.scalar_space
+            gphi = scalar_space.grad_basis(bcs, variable='x')
+            B = self._material.strain_displacement_matrix(dof_priority=dof_priority, gphi=gphi)
+
+            if isinstance(mesh, SimplexMesh):
+                cm = mesh.entity_measure('cell')
+                diff_ke = bm.einsum('q, c, cq, cqki, kl, cqlj -> cqij', ws, cm, interpolate_derivative, B, D0, B)
+
+            else:
+                J = mesh.jacobi_matrix(bcs)
+                detJ = bm.linalg.det(J)
+                diff_ke = bm.einsum('q, cq, cq, cqki, kl, cqlj -> cqij', ws, detJ, interpolate_derivative, B, D0, B)
+
+        elif density_location == 'interpolation_point':
+            # 如果是插值点密度分布, 则需要将结果转换为 Function
+            density_space = density_distribution.space
+            interpolate_derivative = density_space.function(interpolate_derivative)
+
+            mesh = self._mesh
+            qf = mesh.quadrature_formula(self._integrator_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+
+            # 将插值点密度插值为单元 Gauss 积分点上
+            interpolate_derivative = interpolate_derivative(bcs)  
 
             D0 = self._material.elastic_matrix()[0, 0]
             dof_priority = self.tensor_space.dof_priority

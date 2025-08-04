@@ -3,7 +3,7 @@ from typing import Optional
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Index, _S
 from fealpy.mesh import HomogeneousMesh, SimplexMesh, StructuredMesh
-from fealpy.functionspace.space import FunctionSpace
+from fealpy.functionspace.space import FunctionSpace, Function
 from fealpy.functionspace.tensor_space import TensorFunctionSpace
 from fealpy.decorator.variantmethod import variantmethod
 from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
@@ -65,13 +65,13 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             J = mesh.jacobi_matrix(bcs)
             detJ = bm.linalg.det(J)
 
-        return cm, ws, gphi, detJ
+        return cm, bcs, ws, gphi, detJ
 
     @variantmethod('standard')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
-        cm, ws, gphi, detJ = self.fetch_assembly(space)
+        cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
 
         NC = mesh.number_of_cells()
         GD = mesh.geo_dimension()
@@ -82,18 +82,14 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         if coef is None:
             D = D0
         elif coef.shape == (NC, ):
-            D = bm.einsum('c, ijkl -> cjkl', coef, D0)
+            D = bm.einsum('c, ijkl -> cjkl', coef, D0)  # (NC, 1, :, :)
         elif coef.shape == (NC, NQ):
-            D = bm.einsum('cq, ijkl -> cqkl', coef, D0)
-
-        if not (D.shape[0] == 1 and D.shape[1] == 1) and \
-            not (D.shape[0] == NC and D.shape[1] == 1) and \
-            not (D.shape[0] == NC and D.shape[1] == NQ):
-            raise ValueError(f"assembly currently only supports elastic matrices "
-                    f"with shape (1, 1, {GD*(GD+1)//2}, {GD*(GD+1)//2}) or "
-                    f"({NC}, 1, {GD*(GD+1)//2}, {GD*(GD+1)//2}) or "
-                    f"({NC}, {NQ}, {GD*(GD+1)//2}, {GD*(GD+1)//2}), "
-                    f"got {D.shape}.")
+            D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
+        elif isinstance(coef, Function):
+            coef = coef(bcs)
+            D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
+        else:
+            raise ValueError(f"Unsupported coefficient shape: {coef.shape}")
             
         if isinstance(mesh, SimplexMesh):
             A_xx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 0], cm)
@@ -154,7 +150,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D22, A_xx)
                 KK_12 = bm.einsum('c, cqij -> cij', D01, A_xy) + bm.einsum('c, cqij -> cij', D22, A_yx)
                 KK_21 = bm.einsum('c, cqij -> cij', D01, A_yx) + bm.einsum('c, cqij -> cij', D22, A_xy)
-            else:  # GD == 3
+            else:
                 D00, D01, D55 = D[:, 0, 0, 0], D[:, 0, 0, 1], D[:, 0, 5, 5]
                 KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D55, A_yy + A_zz)
                 KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D55, A_xx + A_zz)
@@ -167,7 +163,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
                 
         else:
-            # (NC, NQ, :, :) - 单元高斯积分点相对密度
+            # (NC, NQ, :, :) - 单元高斯积分点相对密度 / 拉格朗日插值点相对密度插值到单元高斯积分点上
             if GD == 2:
                 D00, D01, D22 = D[..., 0, 0], D[..., 0, 1], D[..., 2, 2]
                 KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)
@@ -254,8 +250,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             detJ = bm.linalg.det(J)
 
         D = self.material.elastic_matrix(bcs)
-        B = self.material.strain_matrix(dof_priority=space.dof_priority, 
-                                        gphi=gphi)
+        B = self.material.strain_displacement_matrix(dof_priority=space.dof_priority, gphi=gphi)
 
         return cm, ws, detJ, D, B
             

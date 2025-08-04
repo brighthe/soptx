@@ -538,10 +538,84 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         return uh_ref
 
 
+    @run.register('test_topopt_analysis_density_location')
+    def run(self, 
+            density_location: str = 'element'
+        ) -> Function:
+        """测试拓扑优化分析阶段 (不同密度分布下), 位移求解的正确性"""
+        # 参数设置
+        nx, ny = 120, 60
+        init_relative_density = 0.5
+        interpolation_order = 1
+        
+        # 设置 pde
+        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
+        pde = HalfMBBBeam2dData(
+                            domain=[0, nx, 0, ny],
+                            T=-1.0, E=1.0, nu=0.3,
+                            enable_logging=False
+                        )
+        domain_length = pde.domain[1] - pde.domain[0]
+        domain_height = pde.domain[3] - pde.domain[2]
+        pde.init_mesh.set('uniform_quad')
+
+        # 设置过滤类型和半径
+        filter_type = 'none'
+        rmin = (0.04 * nx) / (domain_length / nx)
+
+        fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        # 设置基础材料
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        # 设置插值方案
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method='msimp',
+                                    options={
+                                        'penalty_factor': 3.0,
+                                        'void_youngs_modulus': 1e-12,
+                                        'target_variables': ['E']
+                                    },
+                                )
+        
+        # 设置密度
+        opt_mesh = pde.init_mesh(nx=nx, ny=ny)
+        rho = interpolation_scheme.setup_density_distribution(
+                                        mesh=opt_mesh,
+                                        relative_density=init_relative_density,
+                                        integrator_order=self.integrator_order,
+                                        interpolation_order=interpolation_order
+                                    )
+        
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                    mesh=fe_mesh,
+                                    pde=pde,
+                                    material=material,
+                                    interpolation_scheme=interpolation_scheme,
+                                    space_degree=self.space_degree,
+                                    integrator_order=self.integrator_order,
+                                    assembly_method='standard',
+                                    solve_method='mumps',
+                                    topopt_algorithm='density_based',
+                                )
+        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=rho)
+        
+        print('-----------------------')
+
+
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    p = 1
+    p = 2
     q = p+3
     test.set_space_degree(p)
     test.set_integrator_order(q)
@@ -555,4 +629,5 @@ if __name__ == "__main__":
     # test.run.set('topopt_analysis')
     # test.run.set('test_bisect')
 
-    uh1 = test.run()
+    test.run.set('test_topopt_analysis_density_location')
+    uh1 = test.run(density_location='element')

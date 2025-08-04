@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, Literal, List
+from typing import Optional, Dict, Any, Literal, List, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod, cartesian
@@ -67,6 +67,14 @@ class MaterialInterpolationScheme(BaseLogged):
                                 **kwargs,
                             ) -> Function:
         """单元密度分布"""
+        if integrator_order is not None:
+            warn_msg = f"'element' density distribution does not require 'integrator_order', provided integrator_order={integrator_order} will be ignored"
+            self._log_warning(warn_msg)
+        
+        if interpolation_order is not None:
+            warn_msg = f"'element' density distribution does not require 'interpolation_order', provided interpolation_order={interpolation_order} will be ignored"
+            self._log_warning(warn_msg)
+
         NC = mesh.number_of_cells()
         density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
 
@@ -77,21 +85,6 @@ class MaterialInterpolationScheme(BaseLogged):
 
         return density_dist
     
-    @setup_density_distribution.register('element_coscos')
-    def setup_density_distribution(self, 
-                                mesh: HomogeneousMesh,
-                                relative_density: float = None,
-                                integrator_order: int = None,
-                                **kwargs,
-                            ) -> Function:
-        """单元密度分布 (变体1)"""
-        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
-        density_dist = element_space.interpolate(u=self._density_distribution_coscos)
-
-        self._log_info(f"此时的密度是分片常数函数, ")
-
-        return density_dist
-
     @setup_density_distribution.register('gauss_integration_point')
     def setup_density_distribution(self, 
                                 mesh: HomogeneousMesh,
@@ -102,8 +95,13 @@ class MaterialInterpolationScheme(BaseLogged):
                             ) -> TensorLike:
         """单元高斯积分点密度分布"""
 
+        if integrator_order is None:
+            error_msg = "'gauss_integration_point' density distribution requires 'integrator_order' parameter"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+        
         if interpolation_order is not None:
-            warn_msg = f"高斯积分点密度不需要提供插值次数"
+            warn_msg = f"'gauss_integration_point' density distribution does not require 'interpolation_order', provided interpolation_order={interpolation_order} will be ignored"
             self._log_warning(warn_msg)
         
         qf = mesh.quadrature_formula(integrator_order)
@@ -128,29 +126,54 @@ class MaterialInterpolationScheme(BaseLogged):
                                    interpolation_order: int = 1,
                                    **kwargs,
                                 ) -> Function:
-        "插值点密度分布"
+        "拉格朗日插值点密度分布"
 
+        if interpolation_order is None:
+            error_msg = "'interpolation_point' density distribution requires 'interpolation_order' parameter"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+        
         if integrator_order is not None:
-            warn_msg = f"插值点密度不需要提供积分次数"
+            warn_msg = f"Interpolation point density distribution does not require 'integrator_order', provided integrator_order={integrator_order} will be ignored"
             self._log_warning(warn_msg)
 
-        def density_func(points: TensorLike) -> TensorLike:
-            NI = points.shape[0] 
+        # def density_func(points: TensorLike) -> TensorLike:
+        #     NI = points.shape[0] 
 
-            return bm.full((NI,), relative_density, dtype=bm.float64, device=points.device)
+        #     return bm.full((NI,), relative_density, dtype=bm.float64, device=points.device)
     
+        # space = LagrangeFESpace(mesh, p=interpolation_order, ctype='C')
+        # density_dist = space.interpolate(u=density_func)
+
         space = LagrangeFESpace(mesh, p=interpolation_order, ctype='C')
-        density_dist = space.interpolate(u=density_func)
+        gdof = space.number_of_global_dofs()
+        density_tensor = bm.full((gdof, ), relative_density, dtype=bm.float64, device=mesh.device)
+
+        density_dist = space.function(density_tensor)
 
         self._log_info(f"Continuous density: shape={density_dist.shape}, value={relative_density}, p={interpolation_order}")
         
         return density_dist
-        
+
+    @setup_density_distribution.register('element_coscos')
+    def setup_density_distribution(self, 
+                                mesh: HomogeneousMesh,
+                                relative_density: float = None,
+                                integrator_order: int = None,
+                                **kwargs,
+                            ) -> Function:
+        """单元密度分布 (变体1)"""
+        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
+        density_dist = element_space.interpolate(u=self._density_distribution_coscos)
+
+        self._log_info(f"此时的密度是分片常数函数, ")
+
+        return density_dist    
 
     @variantmethod('simp')
     def interpolate_map(self, 
                     material: LinearElasticMaterial, 
-                    density_distribution: Function,
+                    density_distribution: Union[Function, TensorLike],
                 ) -> TensorLike:
         """SIMP 插值: E(ρ) = ρ^p * E0"""
 
@@ -160,13 +183,18 @@ class MaterialInterpolationScheme(BaseLogged):
         if target_variables == ['E']:
             E0 = material.youngs_modulus
             simp_map = density_distribution[:] ** penalty_factor * E0 / E0
+
+            if self._density_location == 'interpolation_point':
+                # 如果是插值点密度分布, 则需要将结果转换为 Function
+                density_space = density_distribution.space
+                msimp_map = density_space.function(msimp_map)
             
             return simp_map
     
     @interpolate_map.register('msimp')
-    def interpolate_map(self, 
+    def interpolate_map(self,
                     material: LinearElasticMaterial, 
-                    density_distribution: Function,
+                    density_distribution: Union[Function, TensorLike],
                 ) -> TensorLike:
         """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
 
@@ -185,6 +213,11 @@ class MaterialInterpolationScheme(BaseLogged):
             E0 = material.youngs_modulus
             Emin = void_youngs_modulus
             msimp_map = (Emin + density_distribution[:] ** penalty_factor * (E0 - Emin)) / E0
+
+            if self._density_location == 'interpolation_point':
+                # 如果是插值点密度分布, 则需要将结果转换为 Function
+                density_space = density_distribution.space
+                msimp_map = density_space.function(msimp_map)
 
             return msimp_map
 

@@ -1,4 +1,4 @@
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -63,7 +63,7 @@ class ComplianceObjective(BaseLogged):
     #####################################################################################################
         
     def _manual_differentiation(self, 
-            density_distribution: Function, 
+            density_distribution: Union[Function, TensorLike], 
             displacement: Optional[Function] = None
         ) -> TensorLike:
         """手动计算目标函数梯度"""
@@ -80,22 +80,21 @@ class ComplianceObjective(BaseLogged):
 
         density_location = self._interpolation_scheme.density_location
 
-        valid_locations = {'element', 'gauss_integration_point'}
-        if density_location not in valid_locations:
-            error_msg = f"density_location must be one of {valid_locations}, but got '{density_location}'"
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
-
         if density_location == 'element':
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
 
-
-        elif density_location == 'gauss_integration_point':
+        elif density_location == 'gauss_integration_point' or density_location == 'interpolation_point':
             dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")
+        
+        else:
+            valid_locations = {'element', 'gauss_integration_point', 'interpolation_point'}
+            error_msg = f"density_location must be one of {valid_locations}, but got '{density_location}'"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
 
         return dc[:]
     
