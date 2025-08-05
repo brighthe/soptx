@@ -14,7 +14,7 @@ class MaterialInterpolationScheme(BaseLogged):
     def __init__(self,
                 density_location: Literal['element', 'element_coscos', 
                                           'gauss_integration_point', 
-                                          'interpolation_point'] = 'element',
+                                          'lagrange_interpolation_point'] = 'element',
                 interpolation_method: Literal['simp', 'msimp', 'ramp'] = 'simp',
                 options: Optional[dict] = None,
                 enable_logging: bool = True,
@@ -62,13 +62,13 @@ class MaterialInterpolationScheme(BaseLogged):
     def setup_density_distribution(self, 
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
-                                integrator_order: int = None,
+                                integration_order : int = None,
                                 interpolation_order: int = None,
                                 **kwargs,
                             ) -> Function:
         """单元密度分布"""
-        if integrator_order is not None:
-            warn_msg = f"'element' density distribution does not require 'integrator_order', provided integrator_order={integrator_order} will be ignored"
+        if integration_order is not None:
+            warn_msg = f"'element' density distribution does not require 'integration_order', provided integration_order={integration_order} will be ignored"
             self._log_warning(warn_msg)
         
         if interpolation_order is not None:
@@ -118,11 +118,11 @@ class MaterialInterpolationScheme(BaseLogged):
 
         return density_dist
     
-    @setup_density_distribution.register('interpolation_point')
+    @setup_density_distribution.register('lagrange_interpolation_point')
     def setup_density_distribution(self,
                                    mesh: HomogeneousMesh,
                                    relative_density: float = 1.0,
-                                   integrator_order: int = None,
+                                   integration_order: int = None,
                                    interpolation_order: int = 1,
                                    **kwargs,
                                 ) -> Function:
@@ -133,8 +133,8 @@ class MaterialInterpolationScheme(BaseLogged):
             self._log_error(error_msg)
             raise ValueError(error_msg)
         
-        if integrator_order is not None:
-            warn_msg = f"Interpolation point density distribution does not require 'integrator_order', provided integrator_order={integrator_order} will be ignored"
+        if integration_order is not None:
+            warn_msg = f"Interpolation point density distribution does not require 'integration_order', provided integration_order={integration_order} will be ignored"
             self._log_warning(warn_msg)
 
         space = LagrangeFESpace(mesh, p=interpolation_order, ctype='C')

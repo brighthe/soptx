@@ -1,5 +1,6 @@
-from typing import Literal, Dict, Type, Tuple, Optional
+from typing import Literal, Dict, Type, Tuple, Optional, Union
 
+from fealpy.backend import backend_manager as bm
 from fealpy.mesh import HomogeneousMesh
 from fealpy.functionspace import Function
 from fealpy.typing import TensorLike
@@ -34,7 +35,7 @@ class Filter(BaseLogged):
                 filter_type: Literal['none', 'sensitivity', 'density', 'heaviside_density'],
                 rmin: Optional[float] = None,
                 density_location: Optional[str] = None,
-                integrator_order: Optional[int] = None,
+                integration_order: Optional[int] = None,
                 interpolation_order: Optional[int] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
@@ -46,7 +47,7 @@ class Filter(BaseLogged):
         self._filter_type = filter_type
         self._rmin = rmin
         self._density_location = density_location
-        self._integrator_order = integrator_order
+        self._integration_order = integration_order
         self._interpolation_order = interpolation_order
 
         # 参数验证
@@ -65,7 +66,7 @@ class Filter(BaseLogged):
         # 验证积分/插值参数
         if (self._filter_type != 'none' and 
             self._density_location == 'gauss_integration_point' and 
-            self._integrator_order is None):
+            self._integration_order is None):
             error_msg = "当 density_location='gauss_integration_point' 时，必须提供 integrator_order 参数"
             self._log_error(error_msg)
             raise ValueError(error_msg)
@@ -84,13 +85,14 @@ class Filter(BaseLogged):
                 mesh=mesh, 
                 rmin=rmin, 
                 density_location=density_location,
-                integrator_order=integrator_order,
+                integration_order=integration_order,
                 interpolation_order=interpolation_order
             )
             self._H, self._Hs = builder.build()
+            self._integration_weights = self._compute_integration_weights()
             self._cell_measure = self._mesh.entity_measure('cell')
         else:
-            self._H, self._Hs, self._cell_measure = None, None, None
+            self._H, self._Hs, self._integration_weights = None, None, None
 
         # 2. 策略选择和实例化
         strategy_class = FILTER_STRATEGY_REGISTRY.get(self._filter_type)
@@ -100,19 +102,21 @@ class Filter(BaseLogged):
             self._log_error(error_msg)
             raise ValueError(error_msg)
 
-        strategy_params = {}
+        strategy_params = {
+                            'H': self._H,
+                            'integration_weights': self._integration_weights,
+                            'density_location': self._density_location,
+                            'mesh': self._mesh,
+                            'integration_order': self._integration_order,
+                        }
         
         if self._filter_type in ['sensitivity']:
             strategy_params.update({
-                'H': self._H,
                 'Hs': self._Hs,
-                'cell_measure': self._cell_measure,
             })
 
         if self._filter_type == 'density':
             strategy_params.update({
-                'H': self._H,
-                'cell_measure': self._cell_measure,
             })
 
         if self._filter_type == 'heaviside_density':
@@ -136,10 +140,10 @@ class Filter(BaseLogged):
 
         return self._strategy.filter_variables(rho=rho, rho_Phys=rho_Phys)
 
-    def filter_objective_sensitivities(self, rho_Phys: Function, obj_grad: TensorLike) -> TensorLike:
+    def filter_objective_sensitivities(self, rho_Phys: Union[TensorLike, Function], obj_grad: TensorLike) -> TensorLike:
         """过滤目标函数的灵敏度"""
-
-        return self._strategy.filter_objective_sensitivities(rho_Phys, obj_grad)
+        
+        return self._strategy.filter_objective_sensitivities(rho_Phys=rho_Phys, obj_grad=obj_grad)
 
     def filter_constraint_sensitivities(self, rho_Phys: Function, con_grad: TensorLike) -> TensorLike:
         """过滤约束函数的灵敏度"""
@@ -156,3 +160,27 @@ class Filter(BaseLogged):
             return self._strategy.continuation_step(change)
         else:
             return change, False
+        
+    def _compute_integration_weights(self) -> TensorLike:
+        """根据密度位置类型计算积分权重"""
+
+        if self._density_location == 'element':
+            integration_weights = self._mesh.entity_measure('cell')
+            return integration_weights
+            
+        elif self._density_location == 'gauss_integration_point':
+            qf = self._mesh.quadrature_formula(q=self._integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+            
+            J = self._mesh.jacobi_matrix(bcs)
+            detJ = bm.linalg.det(J)
+
+            integration_weights = bm.einsum('q, cq -> cq', ws, detJ)
+
+            return integration_weights
+            
+        elif self._density_location == 'lagrange_interpolation_point':
+           pass
+            
+        else:
+            raise ValueError(f"不支持的密度位置类型: {self._density_location}")

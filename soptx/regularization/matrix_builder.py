@@ -13,7 +13,7 @@ class FilterMatrixBuilder:
                 mesh: HomogeneousMesh, 
                 rmin: float, 
                 density_location: str, 
-                integrator_order: int = None,
+                integration_order: int = None,
                 interpolation_order: int = None
             ) -> None:
         if rmin <= 0:
@@ -23,7 +23,7 @@ class FilterMatrixBuilder:
         self._rmin = rmin
         self._density_location = density_location
         
-        self._integrator_order = integrator_order
+        self._integration_order = integration_order
         self._interpolation_order = interpolation_order
 
         self._device = mesh.device
@@ -82,24 +82,28 @@ class FilterMatrixBuilder:
             next(t)
 
         if self._density_location == 'gauss_integration_point':
-            from soptx.utils.gauss_intergation_point import get_gauss_point_mapping
+            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
             GD = self._mesh.geo_dimension()
             nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
 
-            
-            qf = self._mesh.quadrature_formula(q=self._integrator_order)
+            qf = self._mesh.quadrature_formula(q=self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
             density_coords_local = self._mesh.bc_to_point(bcs) # （NC, NQ, GD)
 
-            density_coords_local_flat = density_coords_local.reshape(-1, GD) 
-            local_to_global, _ = get_gauss_point_mapping(nx=nx, ny=ny,
-                                                        nq_per_dim=self._integrator_order)
-            density_coords = density_coords_local_flat[local_to_global]  # (NC*NQ, GD)
+            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+                                                                    nq_per_dim=self._integration_order)
+            
+            density_coords = density_coords_local[local_to_global]  # (NC*NQ, GD)
+
+            # density_coords_local_flat = density_coords_local.reshape(-1, GD) 
+            # local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+            #                                                         nq_per_dim=self._integration_order)
+            # density_coords = density_coords_local_flat[global_to_local]  # (NC*NQ, GD)
             
             # nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
             # reshaped = density_coords_local.reshape(nx, ny, 3, 3, GD)
             # # 将列索引提前，实现按列分组
-            # transposed = reshaped.transpose(0, 2, 1, 3, 4)wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+            # transposed = reshaped.transpose(0, 2, 1, 3, 4)
             # density_coords = transposed.reshape(-1, GD)
 
         elif self._density_location == 'interpolation_point':

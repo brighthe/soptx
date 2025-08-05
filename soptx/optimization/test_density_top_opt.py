@@ -30,8 +30,8 @@ class DensityTopOptTest(BaseLogged):
     def set_space_degree(self, space_degree: int):
         self.space_degree = space_degree
 
-    def set_integrator_order(self, integrator_order: int):
-        self.integrator_order = integrator_order
+    def set_integrator_order(self, integration_order: int):
+        self.integration_order = integration_order
 
     def set_assembly_method(self, method: str):
         self.assembly_method = method
@@ -161,8 +161,12 @@ class DensityTopOptTest(BaseLogged):
         ) -> Union[TensorLike, OptimizationHistory]:
 
         # 参数设置
-        nx, ny = 120, 60
-        rho_interpolation_order = 1
+        nx, ny = 30, 10
+        space_degree = 2
+        density_location = 'gauss_integration_point'
+        integration_order = 3
+        penalty_factor = 3.0
+        filter_type = 'density'
         
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
@@ -176,7 +180,6 @@ class DensityTopOptTest(BaseLogged):
         pde.init_mesh.set('uniform_quad')
 
         # 设置过滤类型和半径
-        filter_type = 'none'
         rmin = (0.04 * nx) / (domain_length / nx)
 
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -197,7 +200,7 @@ class DensityTopOptTest(BaseLogged):
                                     density_location=density_location,
                                     interpolation_method='msimp',
                                     options={
-                                        'penalty_factor': 3.0,
+                                        'penalty_factor': penalty_factor,
                                         'void_youngs_modulus': 1e-9,
                                         'target_variables': ['E']
                                     },
@@ -206,8 +209,7 @@ class DensityTopOptTest(BaseLogged):
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
                                                 relative_density=self.relative_density,
-                                                integrator_order=self.integrator_order,
-                                                interpolation_order=rho_interpolation_order,
+                                                integration_order=integration_order,
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -216,8 +218,8 @@ class DensityTopOptTest(BaseLogged):
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
-                                    space_degree=self.space_degree,
-                                    integrator_order=self.integrator_order,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
@@ -238,7 +240,7 @@ class DensityTopOptTest(BaseLogged):
                                     filter_type=filter_type,
                                     rmin=rmin,
                                     density_location=density_location,
-                                    integrator_order=self.integrator_order,
+                                    integration_order=integration_order,
                                     interpolation_order=1,
                                 )
 
@@ -260,7 +262,7 @@ class DensityTopOptTest(BaseLogged):
                                     bisection_tol=1e-3
                                 )
         self._log_info(f"开始密度拓扑优化, 密度类型={density_location}, 密度场自由度={rho.shape}, " 
-                       f"网格尺寸={nx}*{ny}, 空间阶数={self.space_degree}, 物理场自由度={fe_dofs}, " 
+                       f"网格尺寸={nx}*{ny}, 位移有限元空间阶数={space_degree}, 物理场自由度={fe_dofs}, " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
@@ -273,7 +275,7 @@ class DensityTopOptTest(BaseLogged):
         save_path.mkdir(parents=True, exist_ok=True)
 
         if density_location == 'gauss_integration_point':
-            opt_mesh = pde.init_mesh(nx=nx*self.integrator_order, ny=ny*self.integrator_order)
+            opt_mesh = pde.init_mesh(nx=nx*integration_order, ny=ny*integration_order)
         
         save_optimization_history(opt_mesh, history, str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
@@ -511,4 +513,4 @@ if __name__ == "__main__":
     # rho, history = test.run(density_location='interpolation_point')
 
     test.run.set('test_density_location')
-    rho_opt, history = test.run(density_location='interpolation_point')
+    rho_opt, history = test.run(density_location='element')

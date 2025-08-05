@@ -85,7 +85,7 @@ class ComplianceObjective(BaseLogged):
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
 
-        elif density_location == 'gauss_integration_point' or density_location == 'interpolation_point':
+        elif density_location == 'gauss_integration_point':
             dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")

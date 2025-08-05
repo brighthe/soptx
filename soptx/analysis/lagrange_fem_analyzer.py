@@ -22,7 +22,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 pde: PDEBase, 
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
-                integrator_order: int = 4,
+                integration_order: int = 4,
                 assembly_method: Literal['standard', 'fast'] = 'standard',
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
@@ -45,7 +45,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._interpolation_scheme = interpolation_scheme
 
         self._space_degree = space_degree
-        self._integrator_order = integrator_order
+        self._integration_order = integration_order
         self._assembly_method = assembly_method
 
         self._topopt_algorithm = topopt_algorithm
@@ -170,14 +170,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if density_location == 'element':
             lea = LinearElasticIntegrator(material=self._material,
                                         coef = None,
-                                        q=self._integrator_order,
+                                        q=self._integration_order,
                                         method=self._assembly_method)
             ke0 = lea.assembly(space=self.tensor_space)
             diff_ke = bm.einsum('c, cij -> cij', interpolate_derivative, ke0)
 
         elif density_location == 'gauss_integration_point':
             mesh = self._mesh
-            qf = mesh.quadrature_formula(self._integrator_order)
+            qf = mesh.quadrature_formula(self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
 
             D0 = self._material.elastic_matrix()[0, 0]
@@ -195,13 +195,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 detJ = bm.linalg.det(J)
                 diff_ke = bm.einsum('q, cq, cq, cqki, kl, cqlj -> cqij', ws, detJ, interpolate_derivative, B, D0, B)
 
-        elif density_location == 'interpolation_point':
+        elif density_location == 'lagrange_interpolation_point':
             # 如果是插值点密度分布, 则需要将结果转换为 Function
             density_space = density_distribution.space
             interpolate_derivative = density_space.function(interpolate_derivative)
 
             mesh = self._mesh
-            qf = mesh.quadrature_formula(self._integrator_order)
+            qf = mesh.quadrature_formula(self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
 
             # 将插值点密度插值为单元 Gauss 积分点上
@@ -261,7 +261,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
         integrator = LinearElasticIntegrator(material=self._material,
                                             coef=coef,
-                                            q=self._integrator_order,
+                                            q=self._integration_order,
                                             method=self._assembly_method)
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(integrator)
@@ -281,7 +281,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             F = self._tensor_space.interpolate(body_force)
         elif force_type == 'distribution':
             # NOTE F.dtype == COOTensor or TensorLike
-            integrator = VectorSourceIntegrator(source=body_force, q=self._integrator_order)
+            integrator = VectorSourceIntegrator(source=body_force, q=self._integration_order)
             lform = LinearForm(self.tensor_space)
             lform.add_integrator(integrator)
             F = lform.assembly(format='dense')

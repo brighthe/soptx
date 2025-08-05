@@ -1,9 +1,10 @@
 import math
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Union, Literal
 
 from fealpy.backend import backend_manager as bm
 from fealpy.functionspace import Function
+from fealpy.mesh import HomogeneousMesh
 from fealpy.typing import TensorLike
 from fealpy.sparse import CSRTensor
 
@@ -99,9 +100,18 @@ class SensitivityStrategy(_FilterStrategy):
 
 class DensityStrategy(_FilterStrategy):
     """密度过滤策略"""
-    def __init__(self, H: CSRTensor, cell_measure: TensorLike):
+    def __init__(self, 
+                H: CSRTensor, 
+                integration_weights: TensorLike, 
+                density_location: Literal['element', 'gauss_integration_point'], 
+                mesh: HomogeneousMesh, 
+                integration_order: int
+            ) -> None:
         self._H = H
-        self._cell_measure = cell_measure
+        self._integration_weights = integration_weights
+        self._density_location = density_location
+        self._mesh = mesh
+        self._integration_order = integration_order
 
     def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
@@ -111,65 +121,51 @@ class DensityStrategy(_FilterStrategy):
     def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
 
         # 单元密度情况
-        # weighted_rho = rho[:] * self._cell_measure
-        # numerator = self._H.matmul(weighted_rho)
+        weighted_rho = rho[:] * self._integration_weights
+        numerator = self._H.matmul(weighted_rho)
         
-        # denominator = self._H.matmul(self._cell_measure)
+        denominator = self._H.matmul(self._integration_weights)
 
-        # rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
-
-
-        # 高斯积分点密度情况：形状为 (NC, NQ)
-        from fealpy.mesh import QuadrangleMesh
-        mesh = QuadrangleMesh.from_box(box=[0, 30, 0, 10], nx=30, ny=10)
-        qf = mesh.quadrature_formula(q=3)
-        bcs, ws = qf.get_quadrature_points_and_weights()
-
-        nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
-        reshaped = rho_Phys.reshape(nx, ny, 3, 3)
-        # 将列索引提前，实现按列分组
-        transposed = reshaped.transpose(0, 2, 1, 3)
-        rho_Phys = transposed.reshape(-1)
-
-        
+        rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
 
         return rho_Phys
 
-    def filter_objective_sensitivities(self, rho_Phys: TensorLike, obj_grad: TensorLike) -> TensorLike:
-        # weighted_dobj = self._cell_measure * obj_grad
-        # numerator = self._H.matmul(weighted_dobj)
+    def filter_objective_sensitivities(self, rho_Phys: Union[TensorLike, Function], obj_grad: TensorLike) -> TensorLike:
+        
+        if self._density_location == 'element':
+            weighted_dobj = self._integration_weights * obj_grad # (NC, )
 
-        # denominator = self._H.matmul(self._cell_measure)
+            numerator = self._H.matmul(weighted_dobj)
+            denominator = self._H.matmul(self._integration_weights)
 
-        # obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
+        elif self._density_location == 'gauss_integration_point':
+            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-        from fealpy.mesh import QuadrangleMesh
-        mesh = QuadrangleMesh.from_box(box=[0, 30, 0, 10], nx=30, ny=10)
-        NC = mesh.number_of_cells()
-        qf = mesh.quadrature_formula(q=3)
-        bcs, ws = qf.get_quadrature_points_and_weights()
+            weighted_dobj_local = bm.einsum('cq, cq -> cq', obj_grad, self._integration_weights) # (NC, NQ)
 
-        NQ = ws.shape[0]
-        weighted_dobj = bm.einsum('q, cq -> cq', ws, obj_grad)
-        ws_all = bm.broadcast_to(ws[None, :], (NC, NQ))
+            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+                                                                    nq_per_dim=self._integration_order)
+            
+            weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
 
-        denominator = self._H.matmul(ws_all)
+            integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
 
-        nx, ny = 30, 10
-        reshaped = weighted_dobj.reshape(nx, ny, 3, 3)
-        # 将列索引提前，实现按列分组
-        transposed = reshaped.transpose(0, 2, 1, 3)
-        weighted_dobj = transposed.reshape(-1)
+            numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
+            numerator = numerator_global[global_to_local] # (NC, NQ)
+            
+            denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
+            denominator = denominator_global[global_to_local] # (NC, NQ)
 
-        numerator = self._H.matmul(weighted_dobj)
+        obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
 
         return obj_grad 
 
     def filter_constraint_sensitivities(self, rho_Phys: TensorLike, con_grad: TensorLike) -> TensorLike:
-        weighted_dcons = self._cell_measure * con_grad
+        weighted_dcons = self._integration_order * con_grad
         numerator = self._H.matmul(weighted_dcons)
 
-        denominator = self._H.matmul(self._cell_measure)
+        denominator = self._H.matmul(self._integration_order)
 
         con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 

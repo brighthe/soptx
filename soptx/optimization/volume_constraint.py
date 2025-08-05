@@ -24,7 +24,8 @@ class VolumeConstraint(BaseLogged):
         self._mesh = self._analyzer._mesh
         self._scalar_space = self._analyzer._scalar_space
         self._interpolation_scheme = self._analyzer._interpolation_scheme
-        self._integrator_order = self._analyzer._integrator_order
+        self._density_location = self._interpolation_scheme._density_location
+        self._integration_order = self._analyzer._integration_order
 
 
     #####################################################################################################
@@ -92,16 +93,16 @@ class VolumeConstraint(BaseLogged):
             NC = self._mesh.number_of_cells()
             gdof = physical_density.shape[0]
 
-            if isinstance(physical_density, Function) and physical_density.shape == (NC,):
-                
+            if self._density_location == 'element':
+
                 cell_measure = self._mesh.entity_measure('cell')
                 current_volume = bm.einsum('c, c -> ', cell_measure, physical_density[:])
 
                 return current_volume
 
-            elif isinstance(physical_density, TensorLike) and len(physical_density.shape) == 2:
+            elif self._density_location == 'gauss_integration_point':
 
-                qf = self._mesh.quadrature_formula(self._integrator_order)
+                qf = self._mesh.quadrature_formula(self._integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
 
                 if isinstance(self._mesh, SimplexMesh):
@@ -113,9 +114,9 @@ class VolumeConstraint(BaseLogged):
                     detJ = bm.linalg.det(J)
                     current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density, detJ)
 
-            elif isinstance(physical_density, Function) and physical_density.shape == (gdof,):
+            elif self._density_location == 'lagrange_interpolation_point':
 
-                qf = self._mesh.quadrature_formula(self._integrator_order)
+                qf = self._mesh.quadrature_formula(self._integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
 
                 physical_density_gauss = physical_density(bcs) 
@@ -141,25 +142,20 @@ class VolumeConstraint(BaseLogged):
         ) -> TensorLike:
         """手动计算目标函数梯度"""
 
-        density_location = self._interpolation_scheme.density_location
-
-        valid_locations = {'element', 'gauss_integration_point'}
-        if density_location not in valid_locations:
-            error_msg = f"density_location must be one of {valid_locations}, but got '{density_location}'"
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
-
         cell_measure = self._mesh.entity_measure('cell')
 
-        if density_location == 'element':
+        if self._density_location == 'element':
         
             dg = bm.copy(cell_measure)
 
-        elif density_location == 'gauss_integration_point':
+        elif self._density_location == 'gauss_integration_point':
 
-            qf = self._mesh.quadrature_formula(q=self._integrator_order)
+            qf = self._mesh.quadrature_formula(q=self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
 
             dg = bm.einsum('c, q -> cq', cell_measure, ws)
+
+        else:
+            raise ValueError(f"Unsupported density_location: {self._density_location}")
 
         return dg
