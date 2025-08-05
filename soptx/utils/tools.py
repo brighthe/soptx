@@ -55,6 +55,7 @@ def plot_gauss_gauss_integration_point_density(mesh: HomogeneousMesh,
     mesh.find_cell(axes, showindex=True, markersize=16, fontsize=20, fontcolor='b')
     plt.show()
 
+
 def plot_interpolation_point_density(mesh: HomogeneousMesh, interpolation_order=2):
 
     ip = mesh.interpolation_points(p=interpolation_order)

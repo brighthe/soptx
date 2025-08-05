@@ -1,14 +1,23 @@
+from typing import Tuple
+
 from fealpy.backend import backend_manager as bm
+from fealpy.typing import TensorLike
 from fealpy.decorator import variantmethod
+from fealpy.mesh import QuadrangleMesh
 
 class InterpolationSchemeTest():
     def __init__(self) -> None:
         pass
 
-    def get_barycentric_coordinates(self, node):
+    def get_barycentric_coordinates(self, nx: int, ny: int) -> Tuple[Tuple[TensorLike, TensorLike], TensorLike]:
+        """获取可视化插值点的重心坐标"""
+
+        mesh = QuadrangleMesh.from_box(box=[-1, 1, -1, 1], nx=nx, ny=ny)
+        node_cartesian = mesh.entity('node')
+
         # 提取唯一的坐标值
-        xi_unique = bm.unique(node[:, 0])  # shape (nx+1,)
-        eta_unique = bm.unique(node[:, 1])  # shape (ny+1,)
+        xi_unique = bm.unique(node_cartesian[:, 0])  # shape (nx+1,)
+        eta_unique = bm.unique(node_cartesian[:, 1])  # shape (ny+1,)
         
         # 分别计算重心坐标
         xi_barycentric = bm.concatenate([
@@ -20,30 +29,32 @@ class InterpolationSchemeTest():
             ((1 - eta_unique) / 2).reshape(-1, 1),
             ((1 + eta_unique) / 2).reshape(-1, 1)
         ], axis=1)  # shape (ny+1, 2)
+
+        node_barycentric = (xi_barycentric, eta_barycentric)
+
+        return node_barycentric, node_cartesian
+    
+    def compute_density_derivative(self, interpolation_scheme, opt_mesh, interpolation_order, 
+                                node_barycentric, target_node_index):
+        """计算密度关于特定节点的导数"""
+        rho_derivative = interpolation_scheme.setup_density_distribution(
+                                                mesh=opt_mesh,
+                                                relative_density=0,
+                                                interpolation_order=interpolation_order,
+                                            )
         
-        return (xi_barycentric, eta_barycentric)
-
-    @variantmethod('test')
-    def run(self, 
-            interpolation_order: int, 
-        ) -> None:
-
-        # 参数设置
-        nx, ny = 1, 1
+        # 只设置目标节点为1
+        rho_derivative[target_node_index] = 1.0
         
-        # 设置 pde 和网格
-        from fealpy.mesh import QuadrangleMesh
-
-
-        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
-        pde = HalfMBBBeam2dData(
-                            domain=[0, nx, 0, ny],
-                            T=-1.0, E=1.0, nu=0.3,
-                            enable_logging=False
-                        )
-        pde.init_mesh.set('uniform_quad')
-
-        opt_mesh = QuadrangleMesh.from_box(box=[0, nx, 0, ny], nx=nx, ny=ny)
+        # 计算插值，这就是该节点对应的"形函数"分布，即导数
+        derivative = rho_derivative(node_barycentric)
+        
+        return derivative
+    
+    @variantmethod('test_lagrange_interpolation_point_density')
+    def run(self, interpolation_order: int) -> None:
+        
+        opt_mesh = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=1, ny=1)
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -56,23 +67,32 @@ class InterpolationSchemeTest():
                                     },
                                 )
 
-        rho_nodes = interpolation_scheme.setup_density_distribution(
+        rho_interpolation_points = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
                                                 relative_density=0,
                                                 interpolation_order=interpolation_order,
                                             )
         
-        rho_nodes[1] = 1.0  # 左上角节点
-        rho_nodes[2] = 1.0  # 右下角节点
+        rho_interpolation_points[1] = 1.0  # 左上角节点
+        rho_interpolation_points[2] = 1.0  # 右下角节点
 
         nx, ny = 49, 49
-        show_mesh = QuadrangleMesh.from_box(box=[-1, 1, -1, 1], nx=nx, ny=ny)
-        node_cartesian = show_mesh.entity('node')
-        node_barycentric = self.get_barycentric_coordinates(node=node_cartesian)
+        node_barycentric, node_cartesian = self.get_barycentric_coordinates(nx=nx, ny=ny)
 
-        rho = rho_nodes(node_barycentric)
+        rho = rho_interpolation_points(node_barycentric) # ((nx+1)*(ny+1), )
+
+        derivative_rho = self.compute_density_derivative(
+                                                    interpolation_scheme=interpolation_scheme,
+                                                    opt_mesh=opt_mesh,
+                                                    interpolation_order=interpolation_order,
+                                                    node_barycentric=node_barycentric,
+                                                    target_node_index=1  # 左上角节点
+                                                ) # ((nx+1)*(ny+1), )
+
 
         RHO = rho.reshape((nx+1, ny+1))
+        DERIVATIVE_RHO = derivative_rho.reshape((nx+1, ny+1))
+
         XI, ETA = node_cartesian[:, 0].reshape((nx+1, ny+1)), node_cartesian[:, 1].reshape((nx+1, ny+1))
 
         import matplotlib.pyplot as plt
@@ -87,33 +107,33 @@ class InterpolationSchemeTest():
         ax1 = fig.add_subplot(1, 2, 1, projection='3d')
         # 使用'coolwarm'色图: 蓝色表示负值, 红色表示正值, 白色接近零
         surf1 = ax1.plot_surface(XI, ETA, RHO, cmap='coolwarm', edgecolor='none')
-        ax1.set_title('图(a): 插值后的密度分布 $\\rho(\\xi, \\eta)$', fontsize=16)
-        ax1.set_xlabel('$\\xi$')
-        ax1.set_ylabel('$\\eta$')
-        ax1.set_zlabel('密度 $\\rho$')
+        ax1.set_title('(a) Interpolated Density Distribution $\\rho(\\xi, \\eta)$', fontsize=16)
+        # ax1.set_xlabel('$\\xi$')
+        # ax1.set_ylabel('$\\eta$')
+        ax1.set_zlabel('Density Value')
         ax1.view_init(elev=30, azim=-120) # 调整视角以更好地观察负值区域
-        fig.colorbar(surf1, shrink=0.5, aspect=10, label='密度值')
+        fig.colorbar(surf1, shrink=0.5, aspect=10, label='Density Value')
         ax1.plot_surface(XI, ETA, np.zeros_like(RHO), alpha=0.2, color='gray') # 标示z=0平面
 
-        # # 图b: 密度对节点3密度的导数分布
-        # ax2 = fig.add_subplot(1, 2, 2, projection='3d')
-        # # 同样使用'coolwarm'色图
-        # surf2 = ax2.plot_surface(XI, ETA, DERIVATIVE_RHO_1, cmap='coolwarm', edgecolor='none')
-        # ax2.set_title('图(b): 密度对左上角节点的导数 $\\partial\\rho/\\partial\\rho_3$', fontsize=16)
+        # 图b: 密度对某个节点密度的导数分布
+        ax2 = fig.add_subplot(1, 2, 2, projection='3d')
+        # 同样使用'coolwarm'色图
+        surf2 = ax2.plot_surface(XI, ETA, DERIVATIVE_RHO, cmap='coolwarm', edgecolor='none')
+        ax2.set_title('(b) Density Derivative w.r.t. Top-left Node $\\partial\\rho/\\partial\\rho_1$', fontsize=16)
         # ax2.set_xlabel('$\\xi$')
         # ax2.set_ylabel('$\\eta$')
-        # ax2.set_zlabel('导数值')
-        # ax2.view_init(elev=30, azim=-60) # 调整视角
-        # fig.colorbar(surf2, shrink=0.5, aspect=10, label='导数值')
-        # ax2.plot_surface(XI, ETA, np.zeros_like(DERIVATIVE_RHO_1), alpha=0.2, color='gray') # 标示z=0平面
+        ax2.set_zlabel('Derivative Value')
+        ax2.view_init(elev=30, azim=-60) # 调整视角
+        fig.colorbar(surf2, shrink=0.5, aspect=10, label='Derivative Value')
+        ax2.plot_surface(XI, ETA, np.zeros_like(DERIVATIVE_RHO), alpha=0.2, color='gray') # 标示z=0平面
 
-        plt.suptitle('使用9节点二次拉格朗日形函数插值密度的测试 (增强可视化)', fontsize=20)
+        plt.suptitle('Density Interpolation Test using 9-node Quadratic Lagrangian Shape Functions', fontsize=20)
         plt.tight_layout(rect=[0, 0, 1, 0.95])
         plt.show()
 
         # --- 6. 打印出最小值以供验证 ---
         print(f"插值密度的最小值: {np.min(RHO):.4f}")
-        # print(f"密度对节点3导数的最小值: {np.min(DERIVATIVE_RHO_1):.4f}")
+        print(f"密度对节点3导数的最小值: {np.min(DERIVATIVE_RHO):.4f}")
 
         print("------------")
         
@@ -122,5 +142,5 @@ class InterpolationSchemeTest():
         
 if __name__ == "__main__":
     test = InterpolationSchemeTest()
-    test.run.set('test')
+    test.run.set('test_lagrange_interpolation_point_density')
     test.run(interpolation_order=2)
