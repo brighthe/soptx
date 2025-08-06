@@ -162,11 +162,11 @@ class DensityTopOptTest(BaseLogged):
 
         # 参数设置
         nx, ny = 30, 10
-        space_degree = 2
-        density_location = 'gauss_integration_point'
+        space_degree = 1
+        density_location = 'element'
         integration_order = 3
         penalty_factor = 3.0
-        filter_type = 'density'
+        filter_type = 'none'
         
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData

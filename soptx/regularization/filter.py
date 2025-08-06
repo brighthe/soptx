@@ -102,21 +102,25 @@ class Filter(BaseLogged):
             self._log_error(error_msg)
             raise ValueError(error_msg)
 
-        strategy_params = {
-                            'H': self._H,
-                            'integration_weights': self._integration_weights,
-                            'density_location': self._density_location,
-                            'mesh': self._mesh,
-                            'integration_order': self._integration_order,
-                        }
+        strategy_params = {}
         
         if self._filter_type in ['sensitivity']:
             strategy_params.update({
+                'H': self._H,
                 'Hs': self._Hs,
+                'integration_weights': self._integration_weights,
+                'density_location': self._density_location,
+                'mesh': self._mesh,
+                'integration_order': self._integration_order,
             })
 
         if self._filter_type == 'density':
             strategy_params.update({
+                'H': self._H,
+                'integration_weights': self._integration_weights,
+                'density_location': self._density_location,
+                'mesh': self._mesh,
+                'integration_order': self._integration_order,
             })
 
         if self._filter_type == 'heaviside_density':

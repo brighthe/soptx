@@ -35,6 +35,9 @@ class _FilterStrategy(ABC):
 
 class NoneStrategy(_FilterStrategy):
     """ '无操作' 策略, 当不需要过滤时使用"""
+    def __init__(self) -> None:
+        pass
+    
     def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
 

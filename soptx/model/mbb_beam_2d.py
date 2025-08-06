@@ -116,7 +116,7 @@ class HalfMBBBeam2dData(PDEBase):
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (coord, 1), self._T)
-
+# 
         return val
     
     @cartesian

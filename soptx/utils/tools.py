@@ -33,7 +33,7 @@ def plot_gauss_gauss_integration_point_density_old(mesh: HomogeneousMesh,
     plt.show()
 
 
-def plot_gauss_gauss_integration_point_density(mesh: HomogeneousMesh, 
+def plot_gauss_integration_point_density(mesh: HomogeneousMesh, 
                                             nx: int, ny: int,
                                             integration_order=3):
 
@@ -50,13 +50,14 @@ def plot_gauss_gauss_integration_point_density(mesh: HomogeneousMesh,
     fig = plt.figure()
     axes = fig.gca()
     mesh.add_plot(axes)
-    mesh.find_node(axes, node=ps_local_test.reshape(-1, GD), showindex=True, 
-                color='k', marker='o', markersize=10, fontsize=12, fontcolor='r')
-    mesh.find_cell(axes, showindex=True, markersize=16, fontsize=20, fontcolor='b')
+    # mesh.find_node(axes, node=ps_local_test.reshape(-1, GD), showindex=False, 
+    #             color='k', marker='o', markersize=20, fontsize=12, fontcolor='r')
+    # mesh.find_cell(axes, showindex=False, color='k', marker='o', markersize=20, fontsize=20, fontcolor='b')
     plt.show()
 
 
-def plot_interpolation_point_density(mesh: HomogeneousMesh, interpolation_order=2):
+def plot_langrange_interpolation_point_density(mesh: HomogeneousMesh, 
+                                            interpolation_order=2):
 
     ip = mesh.interpolation_points(p=interpolation_order)
 
@@ -64,16 +65,17 @@ def plot_interpolation_point_density(mesh: HomogeneousMesh, interpolation_order=
     axes = fig.gca()
     mesh.add_plot(axes)
     mesh.find_node(axes, node=ip.reshape(-1, 2), showindex=True, 
-                color='k', marker='o', markersize=16, fontsize=20, fontcolor='r')
+                color='k', marker='o', markersize=20, fontsize=20, fontcolor='k')
     
     plt.show()
 
 
 
 if __name__ == "__main__":
-    # 示例：如何使用 plot_intergartor 函数
-    from fealpy.mesh import QuadrangleMesh
+    from fealpy.mesh import TriangleMesh, QuadrangleMesh
 
-    nx, ny = 6, 2
+    nx, ny = 1, 1
+    # mesh = TriangleMesh.from_box(box=[0, nx, 0, ny], nx=nx, ny=ny)
     mesh = QuadrangleMesh.from_box(box=[0, nx, 0, ny], nx=nx, ny=ny)
-    plot_gauss_gauss_integration_point_density(mesh, nx, ny, integration_order=3)
+    # plot_gauss_integration_point_density(mesh, nx, ny, integration_order=3)
+    plot_langrange_interpolation_point_density(mesh, interpolation_order=2)
