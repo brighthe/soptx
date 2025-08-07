@@ -126,8 +126,7 @@ class MaterialInterpolationScheme(BaseLogged):
                                    interpolation_order: int = 1,
                                    **kwargs,
                                 ) -> Function:
-        "拉格朗日插值点密度分布"
-
+        "节点密度 (Lagrange 插值)"
         if interpolation_order is None:
             error_msg = "'interpolation_point' density distribution requires 'interpolation_order' parameter"
             self._log_error(error_msg)
@@ -144,6 +143,34 @@ class MaterialInterpolationScheme(BaseLogged):
         density_dist = space.function(density_tensor)
 
         self._log_info(f"Continuous density: shape={density_dist.shape}, value={relative_density}, p={interpolation_order}")
+        
+        return density_dist
+    
+    @setup_density_distribution.register('shepard_interpolation_point')
+    def setup_density_distribution(self,
+                                   mesh: HomogeneousMesh,
+                                   relative_density: float = 1.0,
+                                   integration_order: int = None,
+                                   interpolation_order: int = 1,
+                                   **kwargs,
+                                ) -> Function:
+        "节点密度 (Shepard 插值)"
+        if interpolation_order is None:
+            error_msg = "'interpolation_point' density distribution requires 'interpolation_order' parameter"
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
+        
+        if integration_order is not None:
+            warn_msg = f"Interpolation point density distribution does not require 'integration_order', provided integration_order={integration_order} will be ignored"
+            self._log_warning(warn_msg)
+
+        from soptx.interpolation.space import ShepardFESpace
+        shepard_space = ShepardFESpace(mesh, p=interpolation_order, power=2.0)
+
+        gdof = shepard_space.number_of_global_dofs()
+        density_values = bm.full((gdof, ), relative_density, dtype=bm.float64, device=mesh.device)
+
+        density_dist = shepard_space.function(density_values)
         
         return density_dist
 
