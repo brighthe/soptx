@@ -102,24 +102,21 @@ def save_optimization_history(mesh: HomogeneousMesh,
         # 检查密度数据的维度
         if physical_density.ndim == 2:
 
-            from soptx.utils.gauss_intergation_point import get_gauss_point_mapping
+            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-            # 高斯积分点密度情况：形状为 (NC, NQ)
+            # 高斯点密度情况：形状为 (NC, NQ)
             nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
-            physical_density_flat = physical_density.reshape(-1)
-            local_to_global, _ = get_gauss_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
-            physical_density_global = physical_density_flat[local_to_global] # (NC*NQ, )
+            local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
+            physical_density_global = physical_density[local_to_global] # (NC*NQ, )
 
+            # nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
 
+            # reshaped = physical_density.reshape(nx, ny, 3, 3)
+            # # 将列索引提前，实现按列分组
+            # transposed = reshaped.transpose(0, 2, 1, 3)
+            # physical_density = transposed.reshape(-1)
 
-            nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
-
-            reshaped = physical_density.reshape(nx, ny, 3, 3)
-            # 将列索引提前，实现按列分组
-            transposed = reshaped.transpose(0, 2, 1, 3)
-            physical_density = transposed.reshape(-1)
-
-            mesh.celldata['density'] = physical_density
+            mesh.celldata['density'] = physical_density_global
         
         elif physical_density.ndim == 1:
 

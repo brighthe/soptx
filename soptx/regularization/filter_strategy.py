@@ -8,6 +8,9 @@ from fealpy.mesh import HomogeneousMesh
 from fealpy.typing import TensorLike
 from fealpy.sparse import CSRTensor
 
+from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+
+
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
     @abstractmethod
@@ -121,13 +124,34 @@ class DensityStrategy(_FilterStrategy):
         
         return rho_Phys
 
-    def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
+    def filter_variables(self, 
+                        rho: Union[TensorLike, Function], 
+                        rho_Phys: Union[TensorLike, Function]
+                    ) -> Union[TensorLike, Function]:
 
-        # 单元密度情况
-        weighted_rho = rho[:] * self._integration_weights
-        numerator = self._H.matmul(weighted_rho)
+        if self._density_location == 'element':
+            weighted_rho = rho[:] * self._integration_weights
         
-        denominator = self._H.matmul(self._integration_weights)
+            numerator = self._H.matmul(weighted_rho)
+            denominator = self._H.matmul(self._integration_weights)
+
+        elif self._density_location == 'gauss_integration_point':
+
+            weighted_rho_local = bm.einsum('cq, cq -> cq', rho, self._integration_weights) # (NC, NQ)
+
+            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+                                                                    nq_per_dim=self._integration_order)
+            
+            weighted_rho = weighted_rho_local[local_to_global] # (NC*NQ, )
+
+            integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
+
+            numerator_global = self._H.matmul(weighted_rho) # (NC*NQ, )
+            numerator = numerator_global[global_to_local] # (NC, NQ)
+            
+            denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
+            denominator = denominator_global[global_to_local] # (NC, NQ)
 
         rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
 
@@ -164,11 +188,32 @@ class DensityStrategy(_FilterStrategy):
 
         return obj_grad 
 
-    def filter_constraint_sensitivities(self, rho_Phys: TensorLike, con_grad: TensorLike) -> TensorLike:
-        weighted_dcons = self._integration_order * con_grad
-        numerator = self._H.matmul(weighted_dcons)
+    def filter_constraint_sensitivities(self, rho_Phys: Union[TensorLike, Function], con_grad: TensorLike) -> TensorLike:
 
-        denominator = self._H.matmul(self._integration_order)
+        if self._density_location == 'element':
+            weighted_dobj = self._integration_weights * con_grad # (NC, )
+
+            numerator = self._H.matmul(weighted_dobj)
+            denominator = self._H.matmul(self._integration_weights)
+
+        elif self._density_location == 'gauss_integration_point':
+            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+
+            weighted_dobj_local = bm.einsum('cq, cq -> cq', con_grad, self._integration_weights) # (NC, NQ)
+
+            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+                                                                    nq_per_dim=self._integration_order)
+            
+            weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
+
+            integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
+
+            numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
+            numerator = numerator_global[global_to_local] # (NC, NQ)
+            
+            denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
+            denominator = denominator_global[global_to_local] # (NC, NQ)
 
         con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 

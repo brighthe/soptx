@@ -95,7 +95,7 @@ class ComplianceObjective(BaseLogged):
             error_msg = f"density_location must be one of {valid_locations}, but got '{density_location}'"
             self._log_error(error_msg)
             raise ValueError(error_msg)
-
+        
         return dc[:]
     
     def _auto_differentiation(self, 

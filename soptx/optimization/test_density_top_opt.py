@@ -156,15 +156,13 @@ class DensityTopOptTest(BaseLogged):
     
 
     @run.register('test_density_location')
-    def run(self, 
-            density_location: str = 'element', 
-        ) -> Union[TensorLike, OptimizationHistory]:
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
 
         # 参数设置
         nx, ny = 30, 10
-        space_degree = 1
         density_location = 'element'
-        integration_order = 3
+        space_degree = 2
+        integration_order = 2+1
         penalty_factor = 3.0
         filter_type = 'none'
         
@@ -179,8 +177,7 @@ class DensityTopOptTest(BaseLogged):
         domain_height = pde.domain[3] - pde.domain[2]
         pde.init_mesh.set('uniform_quad')
 
-        # 设置过滤类型和半径
-        rmin = (0.04 * nx) / (domain_length / nx)
+
 
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
 
@@ -194,6 +191,9 @@ class DensityTopOptTest(BaseLogged):
                                         )
         
         opt_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        hx, hy = domain_length / nx, domain_height / ny
+        rmin = (0.04 * nx) / (domain_length / nx)
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -250,7 +250,7 @@ class DensityTopOptTest(BaseLogged):
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
-                                'max_iterations': 300,
+                                'max_iterations': 40,
                                 'tolerance': 1e-2,
                             }
                         )
@@ -266,6 +266,14 @@ class DensityTopOptTest(BaseLogged):
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
+    
+        # if density_location == 'gauss_integration_point':
+        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+
+        #     # 高斯点密度情况：形状为 (NC, NQ)
+        #     nx, ny = opt_mesh.meshdata['nx'], opt_mesh.meshdata['ny']
+        #     local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
+        #     rho_opt_global = rho_opt[local_to_global] # (NC*NQ, )
 
         # 保存结果
         current_file = Path(__file__)
@@ -496,8 +504,8 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
     
-    p = 1
-    q = p+3
+    p = 2
+    q = p+1
     test.set_space_degree(p)
     test.set_integrator_order(q)
     test.set_assembly_method('standard')
@@ -513,4 +521,4 @@ if __name__ == "__main__":
     # rho, history = test.run(density_location='interpolation_point')
 
     test.run.set('test_density_location')
-    rho_opt, history = test.run(density_location='element')
+    rho_opt, history = test.run()

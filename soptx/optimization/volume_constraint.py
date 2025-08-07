@@ -153,7 +153,12 @@ class VolumeConstraint(BaseLogged):
             qf = self._mesh.quadrature_formula(q=self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
 
-            dg = bm.einsum('c, q -> cq', cell_measure, ws)
+            if isinstance(self._mesh, SimplexMesh):
+                dg = bm.einsum('q, c -> cq', ws, cell_measure)
+            elif isinstance(self._mesh, TensorMesh):
+                J = self._mesh.jacobi_matrix(bcs)
+                detJ = bm.linalg.det(J)
+                dg = bm.einsum('q, cq -> cq', ws, detJ)
 
         else:
             raise ValueError(f"Unsupported density_location: {self._density_location}")
