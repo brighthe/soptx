@@ -15,7 +15,6 @@ from .integrators.linear_elastic_integrator import LinearElasticIntegrator
 from ..pde.pde_base import PDEBase
 from ..utils.base_logged import BaseLogged
 
-
 class LagrangeFEMAnalyzer(BaseLogged):
     def __init__(self,
                 mesh: HomogeneousMesh,

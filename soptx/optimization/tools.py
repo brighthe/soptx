@@ -84,23 +84,16 @@ class OptimizationHistory:
 
 def save_optimization_history(mesh: HomogeneousMesh, 
                             history: OptimizationHistory, 
+                            density_location: str,
                             save_path: Optional[str]=None) -> None:
-    """保存优化过程的所有迭代结果
-    
-    Parameters
-    ----------
-    mesh : 有限元网格对象
-    history : 优化历史记录，包含每次迭代的物理密度场
-    save_path : str, optional
-        保存路径，如不提供则不保存，默认为 None
-    """
+    """保存优化过程的所有迭代结果"""
     if save_path is None:
         return
         
     for i, physical_density in enumerate(history.physical_densities):
         
         # 检查密度数据的维度
-        if physical_density.ndim == 2:
+        if density_location == 'gauss_integration_point':
 
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
@@ -108,6 +101,13 @@ def save_optimization_history(mesh: HomogeneousMesh,
             nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
             local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
             physical_density_global = physical_density[local_to_global] # (NC*NQ, )
+
+            # qf = mesh.quadrature_formula(3)
+            # bcs, ws = qf.get_quadrature_points_and_weights()
+            # ip = mesh.bc_to_point(bcs)
+            # element_density = bm.einsum('q, cq -> c', ws, physical_density)
+            # bm.sum(gauss_density * weight_matrix[None, :], axis=1)
+
 
             # nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
 

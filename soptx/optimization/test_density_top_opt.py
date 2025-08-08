@@ -160,7 +160,7 @@ class DensityTopOptTest(BaseLogged):
 
         # 参数设置
         nx, ny = 30, 10
-        density_location = 'element'  # 'lagrange_interpolation_point', 'shepard_interpolation_point', 'element'
+        density_location = 'gauss_integration_point'  # 'lagrange_interpolation_point', 'gauss_integration_point', 'element'
         space_degree = 2
         integration_order = space_degree+1
         penalty_factor = 3.0
@@ -250,7 +250,7 @@ class DensityTopOptTest(BaseLogged):
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
-                                'max_iterations': 40,
+                                'max_iterations': 100,
                                 'tolerance': 1e-2,
                             }
                         )
@@ -285,7 +285,10 @@ class DensityTopOptTest(BaseLogged):
         if density_location == 'gauss_integration_point':
             opt_mesh = pde.init_mesh(nx=nx*integration_order, ny=ny*integration_order)
         
-        save_optimization_history(opt_mesh, history, str(save_path))
+        save_optimization_history(opt_mesh, 
+                                history, 
+                                density_location=density_location, 
+                                save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
