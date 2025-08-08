@@ -160,9 +160,9 @@ class DensityTopOptTest(BaseLogged):
 
         # 参数设置
         nx, ny = 30, 10
-        density_location = 'element'
+        density_location = 'element'  # 'lagrange_interpolation_point', 'shepard_interpolation_point', 'element'
         space_degree = 2
-        integration_order = 2+1
+        integration_order = space_degree+1
         penalty_factor = 3.0
         filter_type = 'none'
         
@@ -290,6 +290,7 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
+
     @run.register('test_regularization')
     def run(self, 
             density_location: str = 'element', 

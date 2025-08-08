@@ -93,7 +93,7 @@ class MaterialInterpolationScheme(BaseLogged):
                                 interpolation_order: int = None,
                                 **kwargs,
                             ) -> TensorLike:
-        """单元高斯积分点密度分布"""
+        """高斯积分点密度分布"""
 
         if integrator_order is None:
             error_msg = "'gauss_integration_point' density distribution requires 'integrator_order' parameter"
@@ -117,6 +117,71 @@ class MaterialInterpolationScheme(BaseLogged):
         self._log_info(f"Element-Gauss density: shape={density_dist.shape}, value={relative_density}, q={integrator_order}")
 
         return density_dist
+    
+    @setup_density_distribution.register('dual_mesh')
+    def setup_density_distribution(self,
+                                mesh: HomogeneousMesh,
+                                relative_density: float = 1.0,
+                                integrator_order: int = 3,
+                                subcells: tuple = (3, 3),   # (nsx, nsy)
+                                design_density: TensorLike = None,
+                                **kwargs) -> TensorLike:
+        """双网格（对齐细分）下的密度分布:
+        - 设计变量定义在每个分析单元内的等分子单元上 (NC, Ns)
+        - 返回在高斯点采样得到的密度 (NC, NQ)
+        """
+        if integrator_order is None:
+            msg = "'dual_mesh' density distribution requires 'integrator_order'"
+            self._log_error(msg); raise ValueError(msg)
+
+        nsx, nsy = subcells
+        Ns = nsx * nsy
+
+        # 高斯点（参考单元坐标）与权重
+        qf = mesh.quadrature_formula(integrator_order)
+        bcs, ws = qf.get_quadrature_points_and_weights()   # bcs: (NQ, 2) for quad
+        ws = ws.shape[0]
+
+        NC = mesh.number_of_cells()
+
+        # 设计变量 d: (NC, Ns)
+        if design_density is None:
+            d = bm.full((NC, Ns), relative_density, dtype=bm.float64, device=mesh.device)
+        else:
+            d = design_density
+            if d.shape != (NC, Ns):
+                msg = f"'design_density' must have shape {(NC, Ns)}, got {d.shape}"
+                self._log_error(msg); raise ValueError(msg)
+
+        # 将参考区间 [-1,1] 映射到子单元索引 [0..nsx-1], [0..nsy-1]
+        # 对齐细分: 子单元边界在参考坐标均匀划分
+        xi  = bcs[:, 0]           # (-1, 1)
+        eta = bcs[:, 1]           # (-1, 1)
+        ui  = 0.5 * (xi  + 1.0)   # (0, 1)
+        vj  = 0.5 * (eta + 1.0)   # (0, 1)
+
+        ii = bm.floor(ui * nsx).astype(bm.int32)
+        jj = bm.floor(vj * nsy).astype(bm.int32)
+        ii = bm.minimum(ii, nsx - 1)
+        jj = bm.minimum(jj, nsy - 1)
+
+        s_idx_local = jj * nsx + ii            # (NQ,) in [0, Ns-1]
+
+        # 采样: ρ_{e,g} = d_{e, s_idx_local[g]}
+        # 利用广播/按轴gather得到 (NC, NQ)
+        row = bm.arange(NC).reshape(-1, 1)
+        col = s_idx_local.reshape(1, -1)
+        density_dist = d[row, col]             # (NC, NQ)
+
+        # 可选：把映射保存起来，供灵敏度回传用（segment-sum）
+        self._dualmesh_subcell_index = s_idx_local  # (NQ,)
+        self._dualmesh_subcells = subcells
+
+        self._log_info(f"Dual-mesh density: shape={density_dist.shape}, "
+                    f"design_shape={d.shape}, q={integrator_order}, subcells={subcells}")
+
+        return density_dist
+
     
     @setup_density_distribution.register('lagrange_interpolation_point')
     def setup_density_distribution(self,

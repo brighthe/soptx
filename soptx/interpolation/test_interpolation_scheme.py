@@ -83,11 +83,34 @@ class InterpolationSchemeTest():
         print("------------")
         
     
-    @run.register('test_shepard_interpolation_point_density')
-    def run(self, interpolation_order: int) -> None:
-        pass
+    @run.register('test_dual_mesh')
+    def run(self, density_location: str) -> None:
+
+        relative_density = 1.0
+
+        domain_physical = [0, 1, 0, 1]
+        opt_mesh = QuadrangleMesh.from_box(box=domain_physical, nx=10, ny=10)
+
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method='msimp',
+                                    options={
+                                        'penalty_factor': 3.0,
+                                        'void_youngs_modulus': 1e-9,
+                                        'target_variables': ['E']
+                                    },
+                                )
+
+        rho_ipoints = interpolation_scheme.setup_density_distribution(
+                                                mesh=opt_mesh,
+                                                relative_density=relative_density,
+                                            )
         
 if __name__ == "__main__":
     test = InterpolationSchemeTest()
-    test.run.set('test_point_density')
-    test.run(density_location='lagrange_interpolation_point', interpolation_order=2)
+    # test.run.set('test_point_density')
+    # test.run(density_location='lagrange_interpolation_point', interpolation_order=2)
+
+    test.run.set('test_dual_mesh')
+    test.run(density_location='dual_mesh')
