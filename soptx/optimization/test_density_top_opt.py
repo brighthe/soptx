@@ -161,10 +161,10 @@ class DensityTopOptTest(BaseLogged):
         # 参数设置
         nx, ny = 30, 10
         density_location = 'gauss_integration_point'  # 'lagrange_interpolation_point', 'gauss_integration_point', 'element'
-        space_degree = 2
-        integration_order = space_degree+1
+        space_degree = 1
+        integration_order = space_degree + 1
         penalty_factor = 3.0
-        filter_type = 'none'
+        filter_type = 'density'
         
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
@@ -193,7 +193,8 @@ class DensityTopOptTest(BaseLogged):
         opt_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         hx, hy = domain_length / nx, domain_height / ny
-        rmin = (0.04 * nx) / (domain_length / nx)
+        # rmin = (0.04 * nx) / (domain_length / nx)
+        rmin = 0.00001
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -250,7 +251,7 @@ class DensityTopOptTest(BaseLogged):
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
-                                'max_iterations': 100,
+                                'max_iterations': 64,
                                 'tolerance': 1e-2,
                             }
                         )
@@ -266,14 +267,13 @@ class DensityTopOptTest(BaseLogged):
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
-    
-        # if density_location == 'gauss_integration_point':
-        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-        #     # 高斯点密度情况：形状为 (NC, NQ)
-        #     nx, ny = opt_mesh.meshdata['nx'], opt_mesh.meshdata['ny']
-        #     local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
-        #     rho_opt_global = rho_opt[local_to_global] # (NC*NQ, )
+        if density_location == 'gauss_integration_point':
+            # 直接绘制高斯点密度
+            # from soptx.interpolation.tools import plot_gauss_integration_point_density
+            # plot_gauss_integration_point_density(mesh=opt_mesh, rho_gip=rho_opt)
+
+            opt_mesh = pde.init_mesh(nx=nx*integration_order, ny=ny*integration_order)
 
         # 保存结果
         current_file = Path(__file__)
@@ -282,12 +282,10 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/density_type_{density_location}")
         save_path.mkdir(parents=True, exist_ok=True)
 
-        if density_location == 'gauss_integration_point':
-            opt_mesh = pde.init_mesh(nx=nx*integration_order, ny=ny*integration_order)
         
         save_optimization_history(opt_mesh, 
                                 history, 
-                                density_location=density_location, 
+                                density_location=density_location,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
@@ -387,7 +385,8 @@ class DensityTopOptTest(BaseLogged):
         # 参数设置
         nx, ny = 6, 2
         space_degree = 1
-        filter_type = 'density'
+        integration_order = space_degree + 1
+        filter_type = 'none'
 
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
@@ -436,7 +435,7 @@ class DensityTopOptTest(BaseLogged):
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
                                     space_degree=space_degree,
-                                    integrator_order=self.integrator_order,
+                                    integration_order=integration_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',

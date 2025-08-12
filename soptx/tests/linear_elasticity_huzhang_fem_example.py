@@ -57,9 +57,9 @@ def solve(pde, N, p):
     space = LagrangeFESpace(mesh, p=p-1, ctype='D')
     space1 = TensorFunctionSpace(space, shape=(-1, GD))
 
-    lambda0 = pde.lambda0
-    lambda1 = pde.lambda1
-    # lambda0, lambda1 = pde.stress_matrix_coefficient()
+    # lambda0 = pde.lambda0
+    # lambda1 = pde.lambda1
+    lambda0, lambda1 = pde.stress_matrix_coefficient()
 
     gdof0 = space0.number_of_global_dofs()
     gdof = space.number_of_global_dofs()
@@ -79,8 +79,8 @@ def solve(pde, N, p):
     @cartesian
     def source(x, index=None):
         return pde.source(x)
-    lform1.add_integrator(VectorSourceIntegrator(source=source))
-    # lform1.add_integrator(VectorSourceIntegrator(source=pde.body_force))
+    # lform1.add_integrator(VectorSourceIntegrator(source=source))
+    lform1.add_integrator(VectorSourceIntegrator(source=pde.body_force))
 
     b = lform1.assembly()
 
@@ -122,18 +122,18 @@ if __name__ == "__main__":
     # u1 = cos(5*x)*cos(4*y)
 
     u = [u0, u1]
-    pde = LinearElasticPDE(u, lambda0, lambda1)
-    # pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
+    # pde = LinearElasticPDE(u, lambda0, lambda1)
+    pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
 
     for i in range(maxit):
         N = 2**(i+1) 
         sigmah, uh = solve(pde, N, p)
         mesh = sigmah.space.mesh
 
-        e0 = mesh.error(uh, pde.displacement) 
-        e1 = mesh.error(sigmah, pde.stress)
-        # e0 = mesh.error(uh, pde.displacement_solution) 
-        # e1 = mesh.error(sigmah, pde.stress_solution)
+        # e0 = mesh.error(uh, pde.displacement) 
+        # e1 = mesh.error(sigmah, pde.stress)
+        e0 = mesh.error(uh, pde.displacement_solution) 
+        e1 = mesh.error(sigmah, pde.stress_solution)
 
         h[i] = 1/N
         errorMatrix[0, i] = e1

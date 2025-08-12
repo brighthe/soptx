@@ -89,14 +89,14 @@ class MaterialInterpolationScheme(BaseLogged):
     def setup_density_distribution(self, 
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
-                                integrator_order: int = 3,
+                                integration_order: int = 3,
                                 interpolation_order: int = None,
                                 **kwargs,
                             ) -> TensorLike:
         """高斯积分点密度分布"""
 
-        if integrator_order is None:
-            error_msg = "'gauss_integration_point' density distribution requires 'integrator_order' parameter"
+        if integration_order is None:
+            error_msg = "'gauss_integration_point' density distribution requires 'integration_order' parameter"
             self._log_error(error_msg)
             raise ValueError(error_msg)
         
@@ -104,7 +104,7 @@ class MaterialInterpolationScheme(BaseLogged):
             warn_msg = f"'gauss_integration_point' density distribution does not require 'interpolation_order', provided interpolation_order={interpolation_order} will be ignored"
             self._log_warning(warn_msg)
 
-        qf = mesh.quadrature_formula(integrator_order)
+        qf = mesh.quadrature_formula(integration_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
 
         NC = mesh.number_of_cells()
@@ -113,13 +113,7 @@ class MaterialInterpolationScheme(BaseLogged):
         density_dist = bm.full((NC, NQ), relative_density, 
                             dtype=bm.float64, device=mesh.device)
 
-        # density_tensor = bm.full((NC, ), relative_density, dtype=bm.float64, device=mesh.device)
-
-        # space = LagrangeFESpace(mesh, p=0, ctype='D')
-        # density_dist = space.function(density_tensor)
-        # density_dist = density_dist(bcs)
-
-        self._log_info(f"Element-Gauss density: shape={density_dist.shape}, value={relative_density}, q={integrator_order}")
+        self._log_info(f"Element-Gauss density: shape={density_dist.shape}, value={relative_density}, q={integration_order}")
 
         return density_dist
     
@@ -127,7 +121,7 @@ class MaterialInterpolationScheme(BaseLogged):
     def setup_density_distribution(self,
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
-                                integrator_order: int = 3,
+                                integration_order: int = 3,
                                 subcells: tuple = (3, 3),   # (nsx, nsy)
                                 design_density: TensorLike = None,
                                 **kwargs) -> TensorLike:
@@ -135,7 +129,7 @@ class MaterialInterpolationScheme(BaseLogged):
         - 设计变量定义在每个分析单元内的等分子单元上 (NC, Ns)
         - 返回在高斯点采样得到的密度 (NC, NQ)
         """
-        if integrator_order is None:
+        if integration_order is None:
             msg = "'dual_mesh' density distribution requires 'integrator_order'"
             self._log_error(msg); raise ValueError(msg)
 

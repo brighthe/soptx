@@ -1,5 +1,3 @@
-from typing import Tuple
-
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Literal
 from fealpy.decorator import variantmethod, barycentric, cartesian
@@ -86,7 +84,8 @@ class InterpolationSchemeTest():
     @run.register('test_dual_mesh')
     def run(self, density_location: str) -> None:
 
-        relative_density = 1.0
+        relative_density = 0.5
+        integrator_order = 2
 
         domain_physical = [0, 1, 0, 1]
         opt_mesh = QuadrangleMesh.from_box(box=domain_physical, nx=10, ny=10)
@@ -105,7 +104,16 @@ class InterpolationSchemeTest():
         rho_ipoints = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
                                                 relative_density=relative_density,
+                                                integrator_order=integrator_order
                                             )
+        rho_ipoints[4] = 1.0  # 左上角节点
+
+        from soptx.interpolation.tools import plot_gauss_integration_point_density
+        plot_gauss_integration_point_density(opt_mesh, rho_ipoints)
+
+
+
+        print("-------------")
         
 if __name__ == "__main__":
     test = InterpolationSchemeTest()
@@ -113,4 +121,4 @@ if __name__ == "__main__":
     # test.run(density_location='lagrange_interpolation_point', interpolation_order=2)
 
     test.run.set('test_dual_mesh')
-    test.run(density_location='dual_mesh')
+    test.run(density_location='gauss_integration_point')

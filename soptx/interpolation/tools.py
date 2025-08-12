@@ -95,3 +95,65 @@ def plot_density_and_derivative(XI, ETA, RHO, DERIVATIVE_RHO, title_suffix=''):
     plt.suptitle('Density Interpolation Test using 9-node Quadratic Lagrangian Shape Functions', fontsize=20)
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
+
+# import numpy as np
+
+def plot_gauss_integration_point_density(mesh, rho_gip):
+    """可视化四边形网格上高斯点密度 (底部画网格，点云按 rho 上色)"""
+
+    from matplotlib.collections import LineCollection
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+
+    NC, NQ = rho_gip.shape
+
+    # 1) 推断 1D 点数 & 求积
+    n = int(round(bm.sqrt(NQ)))
+    if n * n != NQ:
+        raise ValueError(f"NQ={NQ} 不是平方数，无法推断 tensor-product Gauss 点。")
+    integrator_order = n  # 与你当前接口匹配：order=2 -> 3x3
+
+    qf = mesh.quadrature_formula(integrator_order)
+    bcs, _ = qf.get_quadrature_points_and_weights()  # 这里只需要 bcs
+
+    # 2) 形函数与物理坐标（按顶点顺序修正列置换）
+    N = mesh.shape_function(bcs)              # (NQ, 4)
+    node = mesh.entity('node')                # (NN, 2)
+    cell = mesh.entity('cell')                # (NC, 4)
+    xy   = node[cell]                         # (NC, 4, 2)
+
+    perm = [0, 1, 3, 2]                       # [BL, BR, TR, TL] -> [BL, BR, TL, TR]
+    ps = bm.einsum('qj, cjd -> cqd', N[:, perm], xy)   # (NC, NQ, 2)
+
+    # 3) 生成网格边线（去重），构造 LineCollection
+    e01 = cell[:, [0, 1]]
+    e12 = cell[:, [1, 2]]
+    e23 = cell[:, [2, 3]]
+    e30 = cell[:, [3, 0]]
+    edges = bm.concatenate([e01, e12, e23, e30], axis=0)
+    edges_sorted = bm.sort(edges, axis=1)
+    uniq_idx = bm.unique(edges_sorted, axis=0, return_index=True)[1]
+    edges_unique = edges[uniq_idx]
+    segments = node[edges_unique]             # (NE, 2, 2)
+
+    # 4) 画图
+    xy_pts = ps.reshape(-1, 2)                # (NC*NQ, 2)
+    c_vals = rho_gip.reshape(-1)          # (NC*NQ,)
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+
+    # 4.1) 先画网格（浅灰色）
+    lc = LineCollection(segments, linewidths=0.6, colors=(0, 0, 0, 0.25), zorder=0)
+    ax.add_collection(lc)
+
+    # 4.2) 再画点云 (按 rho 上色, 0=白, 1=黑，中间灰)
+    norm = mpl.colors.Normalize(vmin=0.0, vmax=1.0, clip=True)
+    sc = ax.scatter(xy_pts[:, 0], xy_pts[:, 1], c=c_vals, s=14,
+                    edgecolors='none', zorder=2, cmap='gray_r', norm=norm)
+    ax.set_aspect('equal', adjustable='datalim')
+    ax.set_xlabel('x'); ax.set_ylabel('y')
+    fig.colorbar(sc, ax=ax, label=r'$\rho$')
+
+    plt.tight_layout()
+    plt.show()
+

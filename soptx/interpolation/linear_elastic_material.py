@@ -251,24 +251,27 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         mu_val = self.shear_modulus
 
         if self.plane_type == "3d":
-            self.D = bm.tensor([[2 * mu_val + lam_val, lam_val, lam_val, 0, 0, 0],
-                                [lam_val, 2 * mu_val + lam_val, lam_val, 0, 0, 0],
-                                [lam_val, lam_val, 2 * mu_val + lam_val, 0, 0, 0],
-                                [0, 0, 0, mu_val, 0, 0],
-                                [0, 0, 0, 0, mu_val, 0],
-                                [0, 0, 0, 0, 0, mu_val]], 
+            self.D = bm.tensor([[2 * mu_val + lam_val, lam_val,              lam_val,              0,      0,           0],
+                                [lam_val,              2 * mu_val + lam_val, lam_val,              0,      0,           0],
+                                [lam_val,              lam_val,              2 * mu_val + lam_val, 0,      0,           0],
+                                [0,                    0,                    0,                    mu_val, 0,           0],
+                                [0,                    0,                    0,                    0,      mu_val,      0],
+                                [0,                    0,                    0,                    0,      0,      mu_val]], 
                                 dtype=bm.float64, device=self.device)
+            
         elif self.plane_type == "plane_stress":
             self.D = E_val / (1 - nu_val ** 2) * \
-                    bm.array([[1, nu_val, 0],
-                              [nu_val, 1, 0],
-                              [0, 0, (1 - nu_val) / 2]],    
+                    bm.array([[1,      nu_val, 0],
+                              [nu_val, 1,      0],
+                              [0,      0,     (1 - nu_val) / 2]],    
                             dtype=bm.float64, device=self.device)
+        
         elif self.plane_type == "plane_strain":
-            self.D = bm.tensor([[2 * mu_val + lam_val, lam_val, 0],
-                                [lam_val, 2 * mu_val + lam_val, 0],
-                                [0, 0, mu_val]], 
+            self.D = bm.tensor([[2 * mu_val + lam_val, lam_val,                   0],
+                                [lam_val,              2 * mu_val + lam_val,      0],
+                                [0,                    0,                    mu_val]], 
                                 dtype=bm.float64, device=self.device)
+        
         else:
             error_msg = "Only 3d, plane_stress, and plane_strain are supported."
             self._log_error(error_msg)

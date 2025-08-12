@@ -84,37 +84,24 @@ class OptimizationHistory:
 
 def save_optimization_history(mesh: HomogeneousMesh, 
                             history: OptimizationHistory, 
-                            density_location: str,
-                            save_path: Optional[str]=None) -> None:
+                            density_location: str, 
+                            save_path: Optional[str]=None
+                        ) -> None:
     """保存优化过程的所有迭代结果"""
     if save_path is None:
         return
+    
         
     for i, physical_density in enumerate(history.physical_densities):
         
-        # 检查密度数据的维度
         if density_location == 'gauss_integration_point':
-
+            # 
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
             # 高斯点密度情况：形状为 (NC, NQ)
             nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
             local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
             physical_density_global = physical_density[local_to_global] # (NC*NQ, )
-
-            # qf = mesh.quadrature_formula(3)
-            # bcs, ws = qf.get_quadrature_points_and_weights()
-            # ip = mesh.bc_to_point(bcs)
-            # element_density = bm.einsum('q, cq -> c', ws, physical_density)
-            # bm.sum(gauss_density * weight_matrix[None, :], axis=1)
-
-
-            # nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
-
-            # reshaped = physical_density.reshape(nx, ny, 3, 3)
-            # # 将列索引提前，实现按列分组
-            # transposed = reshaped.transpose(0, 2, 1, 3)
-            # physical_density = transposed.reshape(-1)
 
             mesh.celldata['density'] = physical_density_global
         
@@ -130,6 +117,7 @@ def save_optimization_history(mesh: HomogeneousMesh,
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
         else:  
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
+
 
 def plot_optimization_history(history, save_path=None, show=True, title=None, 
                             fontsize=20, figsize=(14, 10), linewidth=2.5,

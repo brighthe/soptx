@@ -11,7 +11,6 @@ from fealpy.mesh import TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from soptx.utils.show import showmultirate, show_error_table
 from soptx.utils.base_logged import BaseLogged
-from soptx.interpolation.config import DensityBasedConfig, LevelSetConfig, InterpolationConfig
 from soptx.analysis.utils import project_solution_to_finer_mesh
 
 
@@ -111,80 +110,73 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
     
 
     @run.register('lfa_analysis_exact_solution')
-    def run(self, maxit: int = 5) -> TensorLike:
-        
-        # 设置 pde
-        from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
-        pde = BoxTriLagrange2dData(
-                            domain=[0, 1, 0, 1], 
-                            E=1.0, nu=0.3,
-                            enable_logging=False
-                        )
-        nx, ny = 10, 10
-        pde.init_mesh.set('uniform_tri')
-        mesh = pde.init_mesh(nx=nx, ny=ny)
+    def run(self) -> TensorLike:
+        """使用 lfa 验证 HuZhang 算例的精确解"""
 
-        mesh.to_vtk(f'initial_mesh.vtu')
+        from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d, BoxPolyLagrange3dData
+        # pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
+        pde = BoxPolyLagrange3dData(lam=1, mu=1)
+        # TODO 支持六面体网格
+        pde.init_mesh.set('uniform_tet')
+        nx, ny, nz = 2, 2, 2
+        analysis_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+        # TODO 支持 3 次以下
+        space_degree = 1
+
+        integration_order = space_degree + 3
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
-                                            youngs_modulus=pde.E, 
-                                            poisson_ratio=pde.nu, 
+                                            lame_lambda=pde.lam, 
+                                            shear_modulus=pde.mu, 
                                             plane_type=pde.plane_type,
                                             enable_logging=False
                                         )
-
-        errorType = ['$|| \\boldsymbol{u}_h - \\boldsymbol{u} ||_{L^2}$', '$ || \\boldsymbol{u}_h - \\boldsymbol{u} ||_{H^1}$']
+        
+        maxit = 6
+        errorType = ['$|| \\boldsymbol{u}_h - \\boldsymbol{u} ||_{L^2}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
         h = bm.zeros(maxit, dtype=bm.float64)
 
         for i in range(maxit):
-            print(f"Solving on mesh level {i+1}/{maxit}...")
+            N = 2**(i+1) 
 
             lfa = LagrangeFEMAnalyzer(
-                                    mesh=mesh, 
+                                    mesh=analysis_mesh, 
                                     pde=pde, 
                                     material=material, 
-                                    space_degree=self.space_degree,
-                                    integrator_order=self.integrator_order,
-                                    assembly_method=self.assembly_method, 
-                                    solve_method=self.solve_method,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method='standard', 
+                                    solve_method='mumps',
                                     topopt_algorithm=None,
                                     interpolation_scheme=None
                                 )
 
             uh = lfa.solve_displacement(density_distribution=None)
-            # from soptx.analysis.utils import _get_displacement_dof_component
-            # uh_reshaped = _get_displacement_dof_component(uh=uh, space=lfa.tensor_space)
-            # qf = mesh.quadrature_formula(q, etype='cell')
-            # bcs, ws = qf.get_quadrature_points_and_weights()
-            # ps = mesh.bc_to_point(bcs)
-            # u = pde.disp_solution(points=ps)
-            # u_reshaped = _get_displacement_dof_component(uh=u, space=lfa.tensor_space)
-            # mesh.nodedata['disp'] = uh_reshaped
-            # mesh.to_vtk(f'disp.vtu')
 
-            e0 = mesh.error(uh, pde.disp_solution)
-            e1 = mesh.error(uh.grad_value, pde.disp_solution_gradient)
+            # isbddof = lfa.tensor_space.is_bounded_dof()
+
+            e0 = analysis_mesh.error(uh, pde.disp_solution)
+            # e1 = analysis_mesh.error(uh, pde.disp_solution)
+
+            h[i] = 1/N
+
             errorMatrix[0, i] = e0
-            errorMatrix[1, i] = e1
 
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
-            # h[i] = mesh.meshdata.get('hx')
 
-            mesh.uniform_refine()
+            analysis_mesh.uniform_refine()
 
-        print("errorMatrix:\n", errorType, "\n", errorMatrix)
-        print("NDof:", NDof)
-        order_l2 = bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:])
-        self._log_info(f"order_l2: {order_l2}")
-        order_h1 = bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:])
-        self._log_info(f"order_h1: {order_h1}")
+        import matplotlib.pyplot as plt
+        from soptx.utils.show import showmultirate, show_error_table
+
         show_error_table(h, errorType, errorMatrix)
         showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
         plt.show()
+        print('------------------')
 
         return uh
     
@@ -625,9 +617,12 @@ if __name__ == "__main__":
     # test.run.set('topopt_analysis_reference_solution')
     # test.run.set('topopt_analysis_exact_solution')
     # test.run.set('lfa_analysis_reference_solution')
-    test.run.set('lfa_analysis_exact_solution')
+    
     # test.run.set('topopt_analysis')
     # test.run.set('test_bisect')
 
-    test.run.set('test_topopt_analysis_density_location')
-    uh1 = test.run(density_location='element')
+    test.run.set('lfa_analysis_exact_solution')
+    uh = test.run()
+
+    # test.run.set('test_topopt_analysis_density_location')
+    # uh1 = test.run(density_location='element')

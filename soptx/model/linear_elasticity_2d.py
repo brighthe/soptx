@@ -5,10 +5,12 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.typing import TensorLike, Callable
 
-from .pde_base import PDEBase
+from soptx.model.pde_base import PDEBase
 
-class BoxTriHuZhangData2d():
-    """来源论文: A simple conforming mixed finite element for linear elasticity on rectangular grids in any space dimension
+class BoxTriHuZhangData2d(PDEBase):
+    """
+    模型来源: 
+
     -∇·σ = b    in Ω
       Aσ = ε(u) in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
@@ -23,27 +25,70 @@ class BoxTriHuZhangData2d():
     For isotropic materials:
         Aσ = (1/2μ)σ - (λ/(2μ(dλ+2μ)))tr(σ)I
     """
-    def __init__(self, lam: float = 1.0, mu: float = 0.5) -> None:
-        self.lam = lam
-        self.mu = mu
-        self.eps = 1e-12
-        self.plane_type = 'plane_strain'
+    def __init__(self, 
+                domain: List[float] = [0, 1, 0, 1],
+                mesh_type: str = 'uniform_tri', 
+                lam: float = 1.0, mu: float = 0.5,                
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None 
+            ) -> None:
+        
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                enable_logging=enable_logging, logger_name=logger_name)
+        
+        self._lam, self._mu = lam, mu
+        self._eps = 1e-12
+        self._plane_type = 'plane_strain'
+        self._force_type = 'distribution'
+        self._boundary_type = 'dirichlet'
 
-    def domain(self) -> list:
-        return [0, 1, 0, 1]
+        self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
+                f"mesh_type='{mesh_type}', lam={lam}, mu={mu}, "
+                f"plane_type='{self._plane_type}', force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
+
+
+    #######################################################################################################################
+    # 访问器
+    #######################################################################################################################
     
+    @property
+    def lam(self) -> float:
+        """获取拉梅常数 λ"""
+        return self._lam
+    
+    @property
+    def mu(self) -> float:
+        """获取剪切模量 μ"""
+        return self._mu
+    
+
+    @variantmethod('uniform_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 10)
+        ny = kwargs.get('ny', 10)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+        
+        self._save_mesh(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
+
+        return mesh
+    
+
     def stress_matrix_coefficient(self) -> tuple[float, float]:
         """
         材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1
         
-        Returns:
-        --------
+        Returns
+        -------
         lambda0: 1/(2μ)
         lambda1: λ/(2μ(dλ+2μ)), 其中 d=2 为空间维数
         """
         d = 2 
-        lambda0 = 1.0 / (2 * self.mu)
-        lambda1 = self.lam / (2 * self.mu * (d * self.lam + 2 * self.mu))
+        lambda0 = 1.0 / (2 * self._mu)
+        lambda1 = self._lam / (2 * self._mu * (d * self._lam + 2 * self._mu))
         
         return lambda0, lambda1
     
@@ -66,7 +111,7 @@ class BoxTriHuZhangData2d():
         return  val
 
     @cartesian
-    def displacement_solution(self, points: TensorLike) -> TensorLike:
+    def disp_solution(self, points: TensorLike) -> TensorLike:
         x, y = points[..., 0], points[..., 1]
         exp_xy = bm.exp(x - y)
 
@@ -78,23 +123,42 @@ class BoxTriHuZhangData2d():
         return val
 
     @cartesian
-    def displacement_bc(self, points: TensorLike) -> TensorLike:
-        return self.displacement_solution(points)
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        val = self.disp_solution(points)
+        
+        return val
     
     @cartesian
-    def is_dirichlet_boundary(self, points: TensorLike) -> TensorLike:
-        domain = self.domain()
-        x = points[..., 0]
-        y = points[..., 1]
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
 
-        flag_x0 = bm.abs(x - domain[0]) < self.eps
-        flag_x1 = bm.abs(x - domain[1]) < self.eps
-        flag_y0 = bm.abs(y - domain[2]) < self.eps
-        flag_y1 = bm.abs(y - domain[3]) < self.eps
-        
+        flag_x0 = bm.abs(x - domain[0]) < self._eps
+        flag_x1 = bm.abs(x - domain[1]) < self._eps
+        flag_y0 = bm.abs(y - domain[2]) < self._eps
+        flag_y1 = bm.abs(y - domain[3]) < self._eps
+
+        flag = flag_x0 | flag_x1 | flag_y0 | flag_y1
+
+        return flag
+
+    @cartesian  
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        flag_x0 = bm.abs(x - domain[0]) < self._eps
+        flag_x1 = bm.abs(x - domain[1]) < self._eps
+        flag_y0 = bm.abs(y - domain[2]) < self._eps
+        flag_y1 = bm.abs(y - domain[3]) < self._eps
+
         flag = flag_x0 | flag_x1 | flag_y0 | flag_y1
         
         return flag
+
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
     
     @cartesian
     def stress_solution(self, points: TensorLike) -> TensorLike:
@@ -124,7 +188,6 @@ class BoxTriHuZhangData2d():
 class BoxTriLagrange2dData(PDEBase):
     """
     模型来源:
-    https://wnesm678i4.feishu.cn/wiki/JvPPwCD9niMSTZkztTpcIcLxnne#share-LLcgd9YBAoJlvhxags2cR74Tnnd
 
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
@@ -282,6 +345,7 @@ class BoxTriLagrange2dData(PDEBase):
         flag_y1 = bm.abs(y - domain[3]) < self._eps
 
         flag = flag_x0 | flag_x1 | flag_y0 | flag_y1
+        
         return flag
 
     @cartesian  
@@ -295,8 +359,10 @@ class BoxTriLagrange2dData(PDEBase):
         flag_y1 = bm.abs(y - domain[3]) < self._eps
 
         flag = flag_x0 | flag_x1 | flag_y0 | flag_y1
+
         return flag
 
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
