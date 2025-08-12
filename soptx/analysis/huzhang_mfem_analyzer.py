@@ -196,6 +196,96 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return sigmah, uh
     
+    @variantmethod('scipy')
+    def solve_displacement(self, 
+            density_distribution: Optional[Function] = None, 
+            **kwargs
+            ) -> Tuple[Function, Function]:
+        from fealpy.solver import spsolve
+
+        if self._topopt_algorithm is None:
+            if density_distribution is not None:
+                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+        
+        elif self._topopt_algorithm in ['density_based', 'level_set']:
+            if density_distribution is None:
+                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+    
+        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
+        F0 = self.assemble_force_vector()
+        K, F = self.apply_bc(K0, F0)
+
+        solver_type = kwargs.get('solver', 'scipy')
+
+        X = spsolve(K, F, solver=solver_type)
+
+        space0 = self._huzhang_space
+        space1 = self._tensor_space
+        gdof0 = space0.number_of_global_dofs()
+
+        sigmaval = X[:gdof0]
+        uval = X[gdof0:]
+
+        sigmah = space0.function()
+        sigmah[:] = sigmaval
+
+        uh = space1.function()
+        uh[:] = uval
+
+        return sigmah, uh
+    
+    @solve_displacement.register('cg')
+    def solve_displacement(self, 
+            density_distribution: Optional[Function] = None, 
+            **kwargs
+            ) -> Function:
+        from fealpy.solver import cg
+
+        if self._topopt_algorithm is None:
+            if density_distribution is not None:
+                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+        
+        elif self._topopt_algorithm in ['density_based', 'level_set']:
+            if density_distribution is None:
+                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+                self._log_error(error_msg)
+                raise ValueError(error_msg)
+            
+        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
+        F0 = self.assemble_force_vector()
+        K, F = self.apply_bc(K0, F0)
+
+        maxiter = kwargs.get('maxiter', 5000)
+        atol = kwargs.get('atol', 1e-12)
+        rtol = kwargs.get('rtol', 1e-12)
+        x0 = kwargs.get('x0', None)
+
+        X, info = cg(K, F[:], x0=x0,
+            batch_first=True, 
+            atol=atol, rtol=rtol, 
+            maxit=maxiter, returninfo=True)
+        
+        space0 = self._huzhang_space
+        space1 = self._tensor_space
+        gdof0 = space0.number_of_global_dofs()
+
+        sigmaval = X[:gdof0]
+        uval = X[gdof0:]
+
+        sigmah = space0.function()
+        sigmah[:] = sigmaval
+
+        uh = space1.function()
+        uh[:] = uval
+        
+        
+        gdof = self._tensor_space.number_of_global_dofs()
+        self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
+
+        return uh
+    
 
     ##############################################################################################
     # 内部方法
@@ -255,23 +345,29 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
 if __name__ == "__main__":
 
-    from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
-    pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
-    # TODO 支持四边形网格
-    pde.init_mesh.set('uniform_tri')
-    analysis_mesh = pde.init_mesh(nx=2, ny=2)
-    # TODO 支持 3 次以下
-    space_degree = 3
+    # from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d, BoxTriLagrange2dData
+    # pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
+    # pde = BoxTriHuZhangData2d(lam=1, mu=1.0)
 
-    # from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d
-    # pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
-    # # TODO 支持六面体网格
-    # pde.init_mesh.set('uniform_tet')
-    # analysis_mesh = pde.init_mesh(nx=2, ny=2, nz=2)
+    # # TODO 支持四边形网格
+    # pde.init_mesh.set('uniform_tri')
+    # nx, ny = 4, 4
+    # analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
     # # TODO 支持 3 次以下
-    # space_degree = 4
+    # space_degree = 3
 
-    integration_order = space_degree+3
+    from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d, BoxPolyLagrange3dData
+    # pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
+    pde = BoxPolyLagrange3dData(lam=1, mu=1.0)
+
+    # # TODO 支持六面体网格
+    pde.init_mesh.set('uniform_tet')
+    nx, ny, nz = 2, 2, 2
+    analysis_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+    # # TODO 支持 3 次以下
+    space_degree = 4
+
+    integration_order = space_degree + 3
 
     from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
     material = IsotropicLinearElasticMaterial(
@@ -280,7 +376,7 @@ if __name__ == "__main__":
                                         plane_type=pde.plane_type,
                                         enable_logging=False
                                     )
-    maxit = 5
+    maxit = 3
     errorType = [
                 '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$',
                 '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega,0}$',
@@ -299,23 +395,25 @@ if __name__ == "__main__":
                             space_degree=space_degree,
                             integration_order=integration_order,
                             assembly_method='standard',
-                            solve_method='mumps',
+                            solve_method='scipy',
                             topopt_algorithm=None,
                             interpolation_scheme=None,
                         )
         
-        sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
-        
-        e0 = analysis_mesh.error(uh, pde.disp_solution) 
-        e1 = analysis_mesh.error(sigmah, pde.stress_solution)
-
-        h[i] = 1/N
-        errorMatrix[0, i] = e0
-        errorMatrix[1, i] = e1 
-
         uh_dof = huzhang_mfem_analyzer._tensor_space.number_of_global_dofs()
         sigma_dof = huzhang_mfem_analyzer._huzhang_space.number_of_global_dofs()
         NDof[i] = uh_dof + sigma_dof
+
+        sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
+        
+        e0 = analysis_mesh.error(uh, pde.disp_solution) 
+        # e1 = analysis_mesh.error(sigmah, pde.stress_solution)
+
+        h[i] = 1/N
+        errorMatrix[0, i] = e0
+        # errorMatrix[1, i] = e1 
+
+
 
         analysis_mesh.uniform_refine()
 
