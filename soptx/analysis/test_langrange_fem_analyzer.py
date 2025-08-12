@@ -116,12 +116,10 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d, BoxPolyLagrange3dData
         # pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
         pde = BoxPolyLagrange3dData(lam=1, mu=1)
-        # TODO 支持六面体网格
         pde.init_mesh.set('uniform_tet')
-        nx, ny, nz = 4, 4, 4
+        nx, ny, nz = 2, 2, 2
         analysis_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
-        # TODO 支持 3 次以下
-        space_degree = 2
+        space_degree = 4
 
         integration_order = space_degree + 3
 
@@ -134,7 +132,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        maxit = 4
+        maxit = 2
         errorType = ['$|| \\boldsymbol{u}_h - \\boldsymbol{u} ||_{L^2}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)

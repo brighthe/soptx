@@ -388,24 +388,20 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
 
 if __name__ == "__main__":
-    bm.set_backend('torch')
-    bm.set_default_device('cuda')
+    bm.set_backend('numpy')
+    # bm.set_default_device('cpu')
 
-    # from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d, BoxTriLagrange2dData
+    # from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
     # pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
-    # pde = BoxTriHuZhangData2d(lam=1, mu=1.0)
-
     # # TODO 支持四边形网格
     # pde.init_mesh.set('uniform_tri')
-    # nx, ny = 4, 4
+    # nx, ny = 2, 2
     # analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
     # # TODO 支持 3 次以下
     # space_degree = 3
 
-    from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d, BoxPolyLagrange3dData
-    # pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
-    pde = BoxPolyLagrange3dData(lam=1, mu=1.0)
-
+    from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d
+    pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
     # # TODO 支持六面体网格
     pde.init_mesh.set('uniform_tet')
     nx, ny, nz = 2, 2, 2
@@ -424,8 +420,8 @@ if __name__ == "__main__":
                                     )
     maxit = 3
     errorType = [
-                '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$',
                 '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega,0}$',
+                '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$'
                 ]
     errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
     NDof = bm.zeros(maxit, dtype=bm.int32)
@@ -452,11 +448,11 @@ if __name__ == "__main__":
         sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
         
         e0 = analysis_mesh.error(uh, pde.disp_solution) 
-        # e1 = analysis_mesh.error(sigmah, pde.stress_solution)
+        e1 = analysis_mesh.error(sigmah, pde.stress_solution)
 
         h[i] = 1/N
         errorMatrix[0, i] = e0
-        # errorMatrix[1, i] = e1 
+        errorMatrix[1, i] = e1 
 
         if i < maxit - 1:
             analysis_mesh.uniform_refine()

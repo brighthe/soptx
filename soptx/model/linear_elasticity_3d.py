@@ -9,8 +9,6 @@ from soptx.model.pde_base import PDEBase
 
 class BoxPolyHuZhangData3d(PDEBase):
     """
-    模型来源: 
-
     -∇·σ = b    in Ω
       Aσ = ε(u) in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
@@ -120,19 +118,20 @@ class BoxPolyHuZhangData3d(PDEBase):
         
         # 体力分量 b2
         b2_term1 = c2 * (yz + 4*xz + xy)
-        b2_term2 = -1.5 * c2 * dx2_xy * z * (1 - z)
-        b2_term3 = -6 * c2 * dy2_yz * x * (1 - x)
+        b2_term2 = -0.75 * c2 * dx2_xy * z * (1 - z)
+        b2_term3 = -3 * c2 * dy2_yz * x * (1 - x)
         b2 = b2_term1 + b2_term2 + b2_term3
         
         # 体力分量 b3
         b3_term1 = c3 * (yz + xz + 4*xy)
-        b3_term2 = -1.5 * c3 * dx2_xz * y * (1 - y)
-        b3_term3 = -3 * c3 * dy2_yz * x * (1 - x)
+        b3_term2 = -0.375 * c3 * dx2_xz * y * (1 - y)
+        b3_term3 = -0.75 * c3 * dy2_yz * x * (1 - x)
         b3 = b3_term1 + b3_term2 + b3_term3
         
         val = bm.stack([b1, b2, b3], axis=-1)
         
         return val
+    
     @cartesian
     def disp_solution(self, points: TensorLike) -> TensorLike:
         x, y, z = points[..., 0], points[..., 1], points[..., 2]
@@ -254,10 +253,9 @@ class BoxPolyHuZhangData3d(PDEBase):
         sigma_yz = 2 * mu * eps_yz
         sigma_xz = 2 * mu * eps_xz
         
-        # 按照 3D 对称张量的 Voigt 记号存储顺序返回
-        # 常见顺序: (σ_xx, σ_yy, σ_zz, σ_xy, σ_yz, σ_xz)
-        val = bm.stack([sigma_xx, sigma_yy, sigma_zz, sigma_xy, sigma_yz, sigma_xz], axis=-1)
-        
+        # 目前顺序: (σ_xx, σ_xz, σ_xy, σ_yy, σ_yz, σ_zz) - 与 HuzhangSpace 保持一致
+        val = bm.stack([sigma_xx, sigma_xy, sigma_xz, sigma_yy, sigma_yz, sigma_zz], axis=-1)
+
         return val
     
 
@@ -430,7 +428,6 @@ class BoxPolyLagrange3dData(PDEBase):
                         ], axis=-2)
 
         return grad_u
-
 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
