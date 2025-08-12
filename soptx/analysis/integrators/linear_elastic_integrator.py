@@ -163,7 +163,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
                 
         else:
-            # (NC, NQ, :, :) - 单元高斯积分点相对密度 / 拉格朗日插值点相对密度插值到单元高斯积分点上
+            # (NC, NQ, :, :) - 单元高斯积分点相对密度 / 节点相对密度插值到单元高斯积分点上
             if GD == 2:
                 D00, D01, D22 = D[..., 0, 0], D[..., 0, 1], D[..., 2, 2]
                 KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)
@@ -289,6 +289,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             glambda_x = mesh.grad_lambda()   # (NC, LDOF, GD)
             S = bm.einsum('q, qik, qjl -> ijkl', ws, gphi_lambda, gphi_lambda)  # (LDOF, LDOF, BC, BC)
             return cm, bcs, glambda_x, S
+        
         elif isinstance(mesh, StructuredMesh):
             J = mesh.jacobi_matrix(bcs)[:, 0, ...]         # (NC, GD, GD)
             G = mesh.first_fundamental_form(J)             # (NC, GD, GD)
@@ -296,6 +297,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             JG = bm.einsum('ckm, cmn -> ckn', J, G)        # (NC, GD, GD)
             S = bm.einsum('qim, qjn, q -> ijmn', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, BC, BC)
             return cm, bcs, JG, S
+        
         else:
             J = mesh.jacobi_matrix(bcs)                   # (NC, NQ, GD, GD)
             detJ = bm.linalg.det(J)                       # (NC, NQ)
@@ -303,6 +305,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             G = bm.linalg.inv(G)                          # (NC, NQ, GD, GD)
             JG = bm.einsum('cqkm, cqmn -> cqkn', J, G)    # (NC, NQ, GD, GD)
             S = bm.einsum('qim, qjn, q -> ijmnq', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, GD, GD, NQ)
+        
             return cm, bcs, detJ, JG, S
 
     @assembly.register('fast')
@@ -310,20 +313,32 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
 
+        D = self.material.elastic_matrix(bcs)
+        if D.shape[1] != 1:
+            raise ValueError("assembly currently only supports elastic matrices "
+                            f"with shape (NC, 1, {2*GD}, {2*GD}) or (1, 1, {2*GD}, {2*GD}).")
+                
+        NC = mesh.number_of_cells()
+
         if isinstance(mesh, SimplexMesh):
             cm, bcs, glambda_x, S = self.fetch_fast_assembly(space)
+
             A_xx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 0], cm) # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 1], cm)
             A_xy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 1], cm)
             A_yx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 0], cm)
+
         elif isinstance(mesh, StructuredMesh):
             cm, bcs, JG, S = self.fetch_fast_assembly(space)
+
             A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 0], cm)  # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 1], cm) 
             A_xy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 1], cm)  
             A_yx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 0], cm)  
+        
         else:
             cm, bcs, detJ, JG, S = self.fetch_fast_assembly(space)
+
             A_xx = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 0, :], detJ) # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 1, :], JG[..., 1, :], detJ) 
             A_xy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 1, :], detJ) 
@@ -331,18 +346,21 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         
         GD = mesh.geo_dimension()
         if GD == 3:
+
             if isinstance(mesh, SimplexMesh):
                 A_zz = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 2], cm)
                 A_xz = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 2], cm)
                 A_yz = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 2], cm)
                 A_zx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 0], cm)
                 A_zy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 1], cm)
+            
             elif isinstance(mesh, StructuredMesh):
                 A_zz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 2], cm)
                 A_xz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 2], cm)
                 A_yz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 2], cm)
                 A_zx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 0], cm)
                 A_zy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 1], cm)
+            
             else:
                 A_zz = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 2, :], JG[..., 2, :], detJ)
                 A_xz = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 2, :], detJ)
@@ -350,12 +368,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 A_zx = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 2, :], JG[..., 0, :], detJ)
                 A_zy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 2, :], JG[..., 1, :], detJ)
 
-        D = self.material.elastic_matrix(bcs)
-        if D.shape[1] != 1:
-            raise ValueError("assembly currently only supports elastic matrices "
-                            f"with shape (NC, 1, {2*GD}, {2*GD}) or (1, 1, {2*GD}, {2*GD}).")
-                
-        NC = mesh.number_of_cells()
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 

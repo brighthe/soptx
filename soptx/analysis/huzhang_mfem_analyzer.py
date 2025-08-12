@@ -14,6 +14,7 @@ from soptx.model.pde_base import PDEBase
 from soptx.material.linear_elastic_material import LinearElasticMaterial
 from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
 from soptx.utils.base_logged import BaseLogged
+from soptx.utils import timer
 
 class HuZhangMFEMAnalyzer(BaseLogged):
     def __init__(self,
@@ -22,7 +23,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
                 integration_order: int = 4,
-                assembly_method: Literal['standard', 'fast'] = 'standard',
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 interpolation_scheme: Optional[MaterialInterpolationScheme] = None,
@@ -45,7 +45,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         self._space_degree = space_degree
         self._integration_order = integration_order
-        self._assembly_method = assembly_method
 
         self._topopt_algorithm = topopt_algorithm
 
@@ -64,9 +63,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._log_info(f"Mesh Information: NC: {self._mesh.number_of_cells()}, ")
 
     def assemble_stiff_matrix(self, 
-                        density_distribution: Optional[Function] = None
+                        density_distribution: Optional[Function] = None,
+                        enable_timing: bool = False,
                     ) -> Union[CSRTensor, COOTensor]:
-        
+        t = None
+        if enable_timing:
+            t = timer(f"组装刚度矩阵")
+
         if self._topopt_algorithm is None:
             if density_distribution is not None:
                 self._log_warning("标准有限元分析模式下忽略相对密度分布参数 rho")
@@ -85,12 +88,24 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             bform = BlockForm([[bform1,   bform2],
                                [bform2.T, None]])
             
+            if enable_timing:
+                t.send('准备时间')
+
             K = bform.assembly(format='csr')
+
+            if enable_timing:
+                t.send('组装时间')
+                t.send(None)
 
         return K
 
-    def assemble_force_vector(self) -> Union[TensorLike, COOTensor]:
-        """组装全局载荷向量"""
+    def assemble_force_vector(self,
+                            enable_timing: bool = False,
+                        ) -> Union[TensorLike, COOTensor]:
+        t = None
+        if enable_timing:
+            t = timer(f"组装载荷向量")
+
         body_force = self._pde.body_force
         force_type = self._pde.force_type
 
@@ -118,6 +133,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         F = bm.zeros(gdof0 + gdof1, dtype=F_u.dtype)
         F[gdof0:] = -F_u
+
+        if enable_timing:
+            t.send('组装时间')
+            t.send(None)
         
         return F
     
@@ -158,9 +177,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     @variantmethod('mumps')
     def solve_displacement(self, 
-            density_distribution: Optional[Function] = None, 
-            **kwargs
-            ) -> Tuple[Function, Function]:
+                        density_distribution: Optional[Function] = None,
+                        enable_timing: bool = True, 
+                        **kwargs
+                    ) -> Tuple[Function, Function]:
+        
+        t = None
+        if enable_timing:
+            t = timer(f"分析阶段时间")
+            next(t)
+        
         from fealpy.solver import spsolve
 
         if self._topopt_algorithm is None:
@@ -174,12 +200,26 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 raise ValueError(error_msg)
     
         K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
+
+        if enable_timing:
+            t.send('刚度矩阵组装时间')
+
         F0 = self.assemble_force_vector()
+        
+        if enable_timing:
+            t.send('载荷向量组装时间')
+
         K, F = self.apply_bc(K0, F0)
 
+        if enable_timing:
+            t.send('应用边界条件时间')
+            
         solver_type = kwargs.get('solver', 'mumps')
 
         X = spsolve(K, F, solver=solver_type)
+
+        if enable_timing:
+            t.send('求解线性系统时间')
 
         space0 = self._huzhang_space
         space1 = self._tensor_space
@@ -194,9 +234,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         uh = space1.function()
         uh[:] = uval
 
+        if enable_timing:
+            t.send('结果赋值时间')
+            t.send(None)
+
         return sigmah, uh
     
-    @variantmethod('scipy')
+    @solve_displacement.register('scipy')
     def solve_displacement(self, 
             density_distribution: Optional[Function] = None, 
             **kwargs
@@ -344,6 +388,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
 
 if __name__ == "__main__":
+    bm.set_backend('torch')
+    bm.set_default_device('cuda')
 
     # from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d, BoxTriLagrange2dData
     # pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
@@ -394,8 +440,7 @@ if __name__ == "__main__":
                             material=material,
                             space_degree=space_degree,
                             integration_order=integration_order,
-                            assembly_method='standard',
-                            solve_method='scipy',
+                            solve_method='mumps',
                             topopt_algorithm=None,
                             interpolation_scheme=None,
                         )
@@ -413,9 +458,8 @@ if __name__ == "__main__":
         errorMatrix[0, i] = e0
         # errorMatrix[1, i] = e1 
 
-
-
-        analysis_mesh.uniform_refine()
+        if i < maxit - 1:
+            analysis_mesh.uniform_refine()
 
     import matplotlib.pyplot as plt
     from soptx.utils.show import showmultirate, show_error_table

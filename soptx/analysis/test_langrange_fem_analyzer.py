@@ -114,14 +114,14 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         """使用 lfa 验证 HuZhang 算例的精确解"""
 
         from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d, BoxPolyLagrange3dData
-        pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
-        # pde = BoxPolyLagrange3dData(lam=1, mu=1)
+        # pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
+        pde = BoxPolyLagrange3dData(lam=1, mu=1)
         # TODO 支持六面体网格
         pde.init_mesh.set('uniform_tet')
         nx, ny, nz = 4, 4, 4
         analysis_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
         # TODO 支持 3 次以下
-        space_degree = 1
+        space_degree = 2
 
         integration_order = space_degree + 3
 
@@ -158,15 +158,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
             uh = lfa.solve_displacement(density_distribution=None)
 
-            # isbddof = lfa.tensor_space.is_bounded_dof()
-
             e0 = analysis_mesh.error(uh, pde.disp_solution)
-            # e1 = analysis_mesh.error(uh, pde.disp_solution)
 
             h[i] = 1/N
 
             errorMatrix[0, i] = e0
-
 
             analysis_mesh.uniform_refine()
 
