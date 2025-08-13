@@ -117,54 +117,40 @@ class MaterialInterpolationScheme(BaseLogged):
 
         return density_dist
     
-    @setup_density_distribution.register('dual_mesh')
-    def setup_density_distribution(self,
+    @setup_density_distribution.register('density_subelement_gauss_point')
+    def setup_density_distribution(self, 
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
                                 integration_order: int = 3,
-                                subcells: tuple = (3, 3),   # (nsx, nsy)
-                                design_density: TensorLike = None,
-                                **kwargs) -> TensorLike:
-        """双网格（对齐细分）下的密度分布:
-        - 设计变量定义在每个分析单元内的等分子单元上 (NC, Ns)
-        - 返回在高斯点采样得到的密度 (NC, NQ)
-        """
-        if integration_order is None:
-            msg = "'dual_mesh' density distribution requires 'integrator_order'"
-            self._log_error(msg); raise ValueError(msg)
-
-        # 确保subdivision与integrator_order匹配
-        subdivision = integrator_order  # 强制匹配
+                                subcells: int = None,
+                                **kwargs,
+                            ) -> TensorLike:
+        """密度子单元（高斯点采样）分布"""
         
-        qf = mesh.quadrature_formula(integrator_order)
+        qf = mesh.quadrature_formula(integration_order)
         bcs, ws = qf.get_quadrature_points_and_weights()
+        NQ_gauss = ws.shape[0]
         
-        xi_1d, eta_1d = bcs[0], bcs[1]
-        n_gauss_1d = len(xi_1d)
-        
-        # 验证是否真的匹配
-        assert n_gauss_1d == subdivision, \
-            f"高斯点网格({n_gauss_1d}×{n_gauss_1d})应与子单元网格({subdivision}×{subdivision})匹配"
-        
-        # 创建一对一映射
-        NQ = n_gauss_1d * n_gauss_1d
-        subcell_idx = bm.arange(NQ)  # [0, 1, 2, ..., NQ-1]
+        # 检查子单元数量
+        if subcells is None:
+            subcells = NQ_gauss
+            self._log_info(f"subcells not specified, using {subcells} (= number of Gauss points)")
+        elif subcells != NQ_gauss:
+            error_msg = (f"Currently only support subcells = number of Gauss points. "
+                        f"Got subcells={subcells}, but integration_order={integration_order} "
+                        f"has {NQ_gauss} Gauss points")
+            self._log_error(error_msg)
+            raise ValueError(error_msg)
         
         NC = mesh.number_of_cells()
-        n_subcells = NQ  # 相等
         
-        # 初始化密度变量
-        density_vars = bm.full((NC, n_subcells), relative_density, 
-                            dtype=bm.float64)
+        # 初始化密度分布：每个单元有 subcells 个子单元
+        density_dist = bm.full((NC, subcells), relative_density, 
+                            dtype=bm.float64, device=mesh.device)
         
-        # 直接映射（一对一）
-        density_dist = density_vars  # (NC, NQ) 直接相等
+        self._log_info(f"Density subelement (Gauss sampled): shape={density_dist.shape}, "
+                    f"value={relative_density}, subcells={subcells}, q={integration_order}")
         
-        self._log_info(
-            f"Dual mesh (matched): cells={NC}, "
-            f"gauss/subcells={NQ} ({n_gauss_1d}×{n_gauss_1d})"
-        )
-
         return density_dist
 
     

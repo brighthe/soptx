@@ -10,7 +10,6 @@ from fealpy.sparse import CSRTensor
 
 from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
     @abstractmethod
@@ -135,7 +134,7 @@ class DensityStrategy(_FilterStrategy):
             numerator = self._H.matmul(weighted_rho)
             denominator = self._H.matmul(self._integration_weights)
 
-        elif self._density_location == 'gauss_integration_point':
+        elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
 
             weighted_rho_local = bm.einsum('cq, cq -> cq', rho, self._integration_weights) # (NC, NQ)
 
@@ -165,7 +164,7 @@ class DensityStrategy(_FilterStrategy):
             numerator = self._H.matmul(weighted_dobj)
             denominator = self._H.matmul(self._integration_weights)
 
-        elif self._density_location == 'gauss_integration_point':
+        elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
             weighted_dobj_local = bm.einsum('cq, cq -> cq', obj_grad, self._integration_weights) # (NC, NQ)
@@ -190,13 +189,15 @@ class DensityStrategy(_FilterStrategy):
 
     def filter_constraint_sensitivities(self, rho_Phys: Union[TensorLike, Function], con_grad: TensorLike) -> TensorLike:
 
+        con_grad = bm.copy(con_grad)
+
         if self._density_location == 'element':
             weighted_dobj = self._integration_weights * con_grad # (NC, )
 
             numerator = self._H.matmul(weighted_dobj)
             denominator = self._H.matmul(self._integration_weights)
 
-        elif self._density_location == 'gauss_integration_point':
+        elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
             weighted_dobj_local = bm.einsum('cq, cq -> cq', con_grad, self._integration_weights) # (NC, NQ)

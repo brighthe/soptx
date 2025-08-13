@@ -88,10 +88,9 @@ class VolumeConstraint(BaseLogged):
             cell_measure = self._mesh.entity_measure('cell')
             current_volume = bm.sum(cell_measure)
 
-        else:
+            return current_volume
 
-            NC = self._mesh.number_of_cells()
-            gdof = physical_density.shape[0]
+        else:
 
             if self._density_location == 'element':
 
@@ -114,6 +113,20 @@ class VolumeConstraint(BaseLogged):
                     detJ = bm.linalg.det(J)
                     current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density, detJ)
 
+                return current_volume
+
+            elif self._density_location == 'density_subelement_gauss_point':
+
+                NC = self._mesh.number_of_cells()
+                NQ = physical_density.shape[1]  # 子单元数量
+
+                cell_measure = self._mesh.entity_measure('cell')
+                subcell_measure = cell_measure[:, None] / NQ
+                subcell_measure = bm.broadcast_to(subcell_measure, (NC, NQ))
+                current_volume = bm.einsum('cq, cq -> ', subcell_measure, physical_density[:])
+                
+                return current_volume
+
             elif self._density_location == 'lagrange_interpolation_point':
 
                 qf = self._mesh.quadrature_formula(self._integration_order)
@@ -132,9 +145,6 @@ class VolumeConstraint(BaseLogged):
 
             else:
                 raise ValueError(f"Unexpected physical_density shape/type: {type(physical_density)}, shape={physical_density.shape}")
-            
-        return current_volume
-
 
     def _manual_differentiation(self, 
             physical_density: Function, 
@@ -148,6 +158,8 @@ class VolumeConstraint(BaseLogged):
         
             dg = bm.copy(cell_measure)
 
+            return dg
+
         elif self._density_location == 'gauss_integration_point':
 
             qf = self._mesh.quadrature_formula(q=self._integration_order)
@@ -155,12 +167,24 @@ class VolumeConstraint(BaseLogged):
 
             if isinstance(self._mesh, SimplexMesh):
                 dg = bm.einsum('q, c -> cq', ws, cell_measure)
+
             elif isinstance(self._mesh, TensorMesh):
                 J = self._mesh.jacobi_matrix(bcs)
                 detJ = bm.linalg.det(J)
                 dg = bm.einsum('q, cq -> cq', ws, detJ)
 
+            return dg
+
+        elif self._density_location == 'density_subelement_gauss_point':
+            
+            NC = self._mesh.number_of_cells()
+            NQ = physical_density.shape[1]  # 子单元数量
+            
+            subcell_measure = cell_measure[:, None] / NQ
+            dg = bm.broadcast_to(subcell_measure, (NC, NQ))
+
+            return dg
+
         else:
             raise ValueError(f"Unsupported density_location: {self._density_location}")
 
-        return dg

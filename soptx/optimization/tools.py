@@ -94,7 +94,7 @@ def save_optimization_history(mesh: HomogeneousMesh,
         
     for i, physical_density in enumerate(history.physical_densities):
         
-        if density_location == 'gauss_integration_point':
+        if density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
             # 
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
@@ -117,6 +117,8 @@ def save_optimization_history(mesh: HomogeneousMesh,
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
         else:  
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
+
+    print("------------------------------")
 
 
 def plot_optimization_history(history, save_path=None, show=True, title=None, 

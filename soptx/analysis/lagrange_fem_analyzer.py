@@ -166,6 +166,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         density_location = self._interpolation_scheme.density_location
         
         if density_location == 'element':
+
             lea = LinearElasticIntegrator(material=self._material,
                                         coef = None,
                                         q=self._integration_order,
@@ -173,7 +174,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
             ke0 = lea.assembly(space=self.tensor_space)
             diff_ke = bm.einsum('c, cij -> cij', interpolate_derivative, ke0)
 
-        elif density_location == 'gauss_integration_point':
+        elif density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
+            
             mesh = self._mesh
             qf = mesh.quadrature_formula(self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
@@ -231,6 +233,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                             density_distribution: Optional[Function] = None
                         ) -> Union[CSRTensor, COOTensor]:
         """组装全局刚度矩阵"""
+
         if self._topopt_algorithm is None:
             if density_distribution is not None:
                 self._log_warning("标准有限元分析模式下忽略相对密度分布参数 rho")

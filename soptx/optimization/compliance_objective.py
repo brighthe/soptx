@@ -85,18 +85,14 @@ class ComplianceObjective(BaseLogged):
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
 
-        elif density_location == 'gauss_integration_point':
+            return dc[:]
+
+        elif density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
             dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")
         
-        else:
-            valid_locations = {'element', 'gauss_integration_point', 'interpolation_point'}
-            error_msg = f"density_location must be one of {valid_locations}, but got '{density_location}'"
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
-        
-        return dc[:]
+            return dc[:]
     
     def _auto_differentiation(self, 
             density_distribution: Function, 

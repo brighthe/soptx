@@ -85,6 +85,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             D = bm.einsum('c, ijkl -> cjkl', coef, D0)  # (NC, 1, :, :)
         elif coef.shape == (NC, NQ):
             D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
+        # 如果是函数, 需要将其插值到积分点处
         elif isinstance(coef, Function):
             coef = coef(bcs)
             D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)

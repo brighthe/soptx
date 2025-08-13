@@ -169,10 +169,13 @@ class Filter(BaseLogged):
         """根据密度位置类型计算积分权重"""
 
         if self._density_location == 'element':
+            
             integration_weights = self._mesh.entity_measure('cell')
+
             return integration_weights
             
         elif self._density_location == 'gauss_integration_point':
+            
             qf = self._mesh.quadrature_formula(q=self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
             
@@ -183,8 +186,22 @@ class Filter(BaseLogged):
 
             return integration_weights
             
-        elif self._density_location == 'lagrange_interpolation_point':
-           pass
+        elif self._density_location == 'density_subelement_gauss_point':
+
+            # 获取单元测度
+            cell_measure = self._mesh.entity_measure('cell')  # (NC,)
+            
+            # 获取子单元数量（等于高斯点数量）
+            qf = self._mesh.quadrature_formula(q=self._integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+            NQ = ws.shape[0]
+            
+            # 每个子单元的测度 = 单元测度 / 子单元数量
+            NC = self._mesh.number_of_cells()
+            subcell_measure = cell_measure[:, None] / NQ
+            integration_weights = bm.broadcast_to(subcell_measure, (NC, NQ))
+
+            return integration_weights
             
         else:
             raise ValueError(f"不支持的密度位置类型: {self._density_location}")

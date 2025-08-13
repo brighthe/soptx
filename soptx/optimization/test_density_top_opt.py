@@ -160,11 +160,11 @@ class DensityTopOptTest(BaseLogged):
 
         # 参数设置
         nx, ny = 30, 10
-        density_location = 'gauss_integration_point'  # 'lagrange_interpolation_point', 'gauss_integration_point', 'element'
-        space_degree = 1
+        density_location = 'element'  # 'density_subelement_gauss_point', 'gauss_integration_point', 'element'
+        space_degree = 2
         integration_order = space_degree + 1
         penalty_factor = 3.0
-        filter_type = 'density'
+        filter_type = 'none' # density
         
         # 设置 pde
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
@@ -173,13 +173,13 @@ class DensityTopOptTest(BaseLogged):
                             T=-1.0, E=1.0, nu=0.3,
                             enable_logging=False
                         )
-        domain_length = pde.domain[1] - pde.domain[0]
-        domain_height = pde.domain[3] - pde.domain[2]
+
         pde.init_mesh.set('uniform_quad')
 
-
-
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        domain_length = pde.domain[1] - pde.domain[0]
+        rmin = (0.04 * nx) / (domain_length / nx)
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -191,10 +191,6 @@ class DensityTopOptTest(BaseLogged):
                                         )
         
         opt_mesh = pde.init_mesh(nx=nx, ny=ny)
-
-        hx, hy = domain_length / nx, domain_height / ny
-        # rmin = (0.04 * nx) / (domain_length / nx)
-        rmin = 0.00001
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -251,7 +247,7 @@ class DensityTopOptTest(BaseLogged):
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
-                                'max_iterations': 64,
+                                'max_iterations': 43,
                                 'tolerance': 1e-2,
                             }
                         )
@@ -268,7 +264,7 @@ class DensityTopOptTest(BaseLogged):
         
         rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
 
-        if density_location == 'gauss_integration_point':
+        if density_location == 'density_subelement_gauss_point':
             # 直接绘制高斯点密度
             # from soptx.interpolation.tools import plot_gauss_integration_point_density
             # plot_gauss_integration_point_density(mesh=opt_mesh, rho_gip=rho_opt)
@@ -291,30 +287,99 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
+    @run.register('test_volume_constraint')
+    def run(self) -> None:
+        density_location = 'density_subelement_gauss_point'  # 'lagrange_interpolation_point', 'gauss_integration_point', 'element'
+        volume_fraction = 0.5
 
-    @run.register('test_regularization')
-    def run(self, 
-            density_location: str = 'element', 
-        ) -> Union[TensorLike, OptimizationHistory]:
-        # 参数设置
         nx, ny = 30, 10
-        filter_type = 'density'
 
-        # 设置 pde
+        space_degree = 2
+        integration_order = space_degree + 1
+
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
         pde = HalfMBBBeam2dData(
                             domain=[0, nx, 0, ny],
                             T=-1.0, E=1.0, nu=0.3,
                             enable_logging=False
                         )
-        domain_length = pde.domain[1] - pde.domain[0]
-        domain_height = pde.domain[3] - pde.domain[2]
-        hx, hy = domain_length / nx, domain_height / ny
-        pde.init_mesh.set('uniform_quad')
 
+        pde.init_mesh.set('uniform_quad')
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        # 设置基础材料
+        pde.init_mesh.set('uniform_quad')
+        opt_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method='msimp',
+                                    options={
+                                        'penalty_factor': 3.0,
+                                        'void_youngs_modulus': 1e-9,
+                                        'target_variables': ['E']
+                                    },
+                                )
+        
+        rho = interpolation_scheme.setup_density_distribution(
+                                        mesh=opt_mesh,
+                                        relative_density=volume_fraction,
+                                    )
+    
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                    mesh=fe_mesh,
+                                    pde=pde,
+                                    material=material,
+                                    interpolation_scheme=interpolation_scheme,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method='standard',
+                                    solve_method='mumps',
+                                    topopt_algorithm='density_based',
+                                )
+        
+        from soptx.optimization.volume_constraint import VolumeConstraint
+        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
+        test = volume_constraint._compute_volume(physical_density=rho)
+        test1 = volume_constraint._manual_differentiation(physical_density=rho)
+
+        print("---------------")
+
+
+    @run.register('test_regularization')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        
+        density_location = 'density_subelement_gauss_point'  # 'lagrange_interpolation_point', 'gauss_integration_point', 'element'
+        volume_fraction = 0.5
+
+        nx, ny = 30, 10
+        filter_type = 'density'
+
+        space_degree = 2
+        integration_order = space_degree + 1
+
+        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
+        pde = HalfMBBBeam2dData(
+                            domain=[0, nx, 0, ny],
+                            T=-1.0, E=1.0, nu=0.3,
+                            enable_logging=False
+                        )
+        
+        pde.init_mesh.set('uniform_quad')
+        fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        pde.init_mesh.set('uniform_quad')
+        opt_mesh = pde.init_mesh(nx=nx, ny=ny)
+
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
@@ -338,7 +403,7 @@ class DensityTopOptTest(BaseLogged):
 
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
-                                                relative_density=self.volume_fraction,
+                                                relative_density=volume_fraction,
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -347,21 +412,21 @@ class DensityTopOptTest(BaseLogged):
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
-                                    space_degree=self.space_degree,
-                                    integrator_order=self.integrator_order,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
                                 )
-        fe_tspace = lagrange_fem_analyzer.tensor_space
         
         from soptx.optimization.compliance_objective import ComplianceObjective
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
 
         from soptx.optimization.volume_constraint import VolumeConstraint
-        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=self.volume_fraction)
-        test = volume_constraint._compute_volume(physical_density=rho)
+        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
+        domain_length = pde.domain[1] - pde.domain[0]
+        domain_height = pde.domain[3] - pde.domain[2]
         rmin = (0.04 * nx) / (domain_length / nx)
 
         from soptx.regularization.matrix_builder import FilterMatrixBuilder
@@ -369,12 +434,24 @@ class DensityTopOptTest(BaseLogged):
                                     mesh=opt_mesh,
                                     rmin=rmin,
                                     density_location=density_location,
-                                    integrator_order=self.integrator_order,
+                                    integration_order=integration_order,
                                     interpolation_order=1,
                                 )
+        
+        hx, hy = domain_length / nx, domain_height / ny
         H, Hs = filter_matrix._compute_weighted_matrix_general(rmin=rmin, domain=pde.domain)
-        H1, Hs1 = filter_matrix._compute_weigthed_matrix_2d(rmin=rmin, nx=nx, ny=ny, hx=hx, hy=hy)
-        error = bm.sum(bm.abs(H.to_dense()-H1.to_dense()))
+
+
+        from soptx.regularization.filter import Filter
+        Filter = Filter(
+                        mesh=opt_mesh,
+                        filter_type=filter_type,
+                        rmin=rmin,
+                        density_location=density_location,
+                        integration_order=integration_order,
+                        interpolation_order=1,
+                    )
+        iw = Filter._compute_integration_weights()
         print("---------------------")
     
 
@@ -520,8 +597,12 @@ if __name__ == "__main__":
     # test.run.set('test_optimization')
     # rho, history = test.run(density_location='gauss_integration_point')
     
+    # test.run.set('test_volume_constraint')
+    # test.run()
+
     # test.run.set('test_regularization')
-    # rho, history = test.run(density_location='interpolation_point')
+    # rho, history = test.run()
 
     test.run.set('test_density_location')
     rho_opt, history = test.run()
+

@@ -253,7 +253,7 @@ class BoxPolyHuZhangData3d(PDEBase):
         sigma_yz = 2 * mu * eps_yz
         sigma_xz = 2 * mu * eps_xz
         
-        # 目前顺序: (σ_xx, σ_xz, σ_xy, σ_yy, σ_yz, σ_zz) - 与 HuzhangSpace 保持一致
+        # 目前顺序: (σ_xx, σ_xy, σ_xz, σ_yy, σ_yz, σ_zz) - 与 HuzhangSpace 保持一致
         val = bm.stack([sigma_xx, sigma_xy, sigma_xz, sigma_yy, sigma_yz, sigma_zz], axis=-1)
 
         return val
