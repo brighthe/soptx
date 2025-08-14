@@ -269,7 +269,7 @@ class MaterialInterpolationScheme(BaseLogged):
             Emin = void_youngs_modulus
             msimp_map = (Emin + density_distribution[:] ** penalty_factor * (E0 - Emin)) / E0
 
-            if self._density_location == 'interpolation_point':
+            if self._density_location == 'lagrange_interpolation_point':
                 # 如果是插值点密度分布, 则需要将结果转换为 Function
                 density_space = density_distribution.space
                 msimp_map = density_space.function(msimp_map)

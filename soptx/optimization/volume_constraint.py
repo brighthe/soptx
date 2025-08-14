@@ -143,6 +143,8 @@ class VolumeConstraint(BaseLogged):
                     detJ = bm.linalg.det(J)
                     current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density_gauss, detJ)
 
+                return current_volume
+
             else:
                 raise ValueError(f"Unexpected physical_density shape/type: {type(physical_density)}, shape={physical_density.shape}")
 

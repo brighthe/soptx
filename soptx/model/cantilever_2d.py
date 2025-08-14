@@ -160,10 +160,10 @@ class CantileverBeamMiddle2dData(PDEBase):
     This model applies concentrated force at the middle of the right boundary.
     '''
     def __init__(self,
-                domain: List[float] = [0, 60, 0, 20],
+                domain: List[float] = [0, 120, 0, 60],
                 mesh_type: str = 'uniform_quad',
                 T: float = -1.0, # 负值代表方向向下
-                E: float = 1.0, nu: float = 0.3,
+                E: float = 1000.0, nu: float = 0.3,
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -242,42 +242,48 @@ class CantileverBeamMiddle2dData(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+
         x, y = points[..., 0], points[..., 1]
 
         # 力作用在右边界的中间位置: (domain[1], (domain[2]+domain[3])/2)
-        middle_y = (self._domain[2] + self._domain[3]) / 2.0
+        middle_y = (domain[2] + domain[3]) / 2.0
         coord = (
-            (bm.abs(x - self._domain[1]) < self._eps) & 
+            (bm.abs(x - domain[1]) < self._eps) & 
             (bm.abs(y - middle_y) < self._eps)
         )
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val[coord, 1] = self.T
+        val = bm.set_at(val, (coord, 1), self._T)
 
         return val
 
     @cartesian
-    def dirichlet(self, points: TensorLike) -> TensorLike:
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
+
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+
         x = points[..., 0]
 
-        coord = bm.abs(x - self._domain[0]) < self._eps
+        coord = bm.abs(x - domain[0]) < self._eps
         
         return coord
     
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+
         x = points[..., 0]
 
-        coord = bm.abs(x - self._domain[0]) < self._eps
-        
-        return coord    
-    
-    def threshold(self) -> Tuple[Callable, Callable]:
+        coord = bm.abs(x - domain[0]) < self._eps
 
+        return coord
+    
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
