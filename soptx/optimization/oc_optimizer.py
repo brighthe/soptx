@@ -1,7 +1,7 @@
 import warnings
 from dataclasses import dataclass
 from time import time
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -106,11 +106,13 @@ class OCOptimizer(BaseLogged):
                     self._log_error(error_msg)
                     raise ValueError(error_msg)
 
-    def optimize(self, density_distribution: Union[Function, TensorLike], **kwargs) -> TensorLike:
+    def optimize(self, 
+                density_distribution: Union[Function, TensorLike], **kwargs
+            ) -> Tuple[TensorLike, OptimizationHistory]:
         """运行 OC 优化算法
 
-        Parameters
-        ----------
+        Parameters:
+        -----------
         density_distribution : 初始相对密度场
         **kwargs : 其他参数
         """
@@ -121,13 +123,12 @@ class OCOptimizer(BaseLogged):
         bisection_tol = self.options.bisection_tol
 
         rho = density_distribution
-        # rho_Phys = rho.space.function(rho[:])
+        
         if isinstance(rho, Function):
             rho_Phys = rho.space.function(bm.copy(rho[:]))
         else:
             rho_Phys = bm.copy(rho[:])
-        # tensor_kwargs = bm.context(rho)
-        # rho_Phys = bm.zeros_like(rho, **tensor_kwargs)
+
         rho_Phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_Phys)
 
         # 初始化历史记录

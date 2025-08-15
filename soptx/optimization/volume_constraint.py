@@ -27,6 +27,15 @@ class VolumeConstraint(BaseLogged):
         self._density_location = self._interpolation_scheme._density_location
         self._integration_order = self._analyzer._integration_order
 
+    #####################################################################################################
+    # 属性访问器
+    #####################################################################################################
+
+    @property
+    def volume_fraction(self) -> float:
+        """获取体积分数"""
+        return self._volume_fraction
+
 
     #####################################################################################################
     # 核心方法

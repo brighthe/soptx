@@ -61,6 +61,7 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
         # 3D: num = [1, 1, 1, 2, 2, 2]
         _, num = symmetry_index(d=TD, r=2)
 
+        # TODO 慢
         A  = lambda0*bm.einsum('q, c, cqld, cqmd, d -> clm', ws, cm, phi, phi, num)
         A -= lambda1*bm.einsum('q, c, cql, cqm -> clm', ws, cm, trphi, trphi)
         
