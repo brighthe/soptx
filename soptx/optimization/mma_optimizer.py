@@ -238,9 +238,11 @@ class MMAOptimizer(BaseLogged):
         self._low = None
         self._upp = None
         
-    def _initialize_problem_dependent_params(self):
+    def _initialize_problem_dependent_params(self, n: int = None) -> None:
         """初始化依赖于问题规模的参数"""
-        n = self._filter.mesh.number_of_cells()
+        if n is None:
+            n = self._filter.mesh.number_of_cells()
+        
         advanced_params = {}
         
         if self.options.n is None:
@@ -259,7 +261,7 @@ class MMAOptimizer(BaseLogged):
     def optimize(self, 
                 density_distribution: Union[Function, TensorLike], 
                 **kwargs
-            ) -> Tuple[TensorLike, OptimizationHistory]:
+            ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
         """运行 MMA 优化算法
         
         Parameters:
@@ -279,6 +281,8 @@ class MMAOptimizer(BaseLogged):
         tol = self.options.tolerance
 
         rho = density_distribution
+
+        self._initialize_problem_dependent_params(n=rho.shape[0])
         
         # 初始化物理密度
         if isinstance(rho, Function):

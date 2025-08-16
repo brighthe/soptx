@@ -183,7 +183,7 @@ class OCOptimizer(BaseLogged):
             iteration_time = time() - start_time
 
             history.log_iteration(iter_idx=iter_idx, obj_val=obj_val, volfrac=volfrac, 
-                                change=change, time_cost=iteration_time, physical_density=rho_Phys[:])
+                                change=change, time_cost=iteration_time, physical_density=rho_Phys)
 
             # 收敛检查
             if change <= tol:

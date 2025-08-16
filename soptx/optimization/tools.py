@@ -5,7 +5,8 @@ from time import time
 from typing import List, Optional
 
 from fealpy.typing import TensorLike
-from fealpy.mesh import StructuredMesh, HomogeneousMesh
+from fealpy.mesh import StructuredMesh, HomogeneousMesh, SimplexMesh, TensorMesh
+from fealpy.functionspace import Function
 
 @dataclass
 class OptimizationHistory:
@@ -28,9 +29,15 @@ class OptimizationHistory:
                     change: float, 
                     time_cost: float, 
                     physical_density: TensorLike,
-                    verbose: bool = True) -> None:
+                    verbose: bool = True
+                ) -> None:
         """记录一次迭代的信息"""
-        self.physical_densities.append(bm.copy(physical_density))
+        if isinstance(physical_density, Function):
+            rho_Phys = physical_density.space.function(bm.copy(physical_density[:]))
+        else:
+            rho_Phys = bm.copy(physical_density[:])
+
+        self.physical_densities.append(rho_Phys)
         self.obj_values.append(obj_val)
         self.con_values.append(volfrac)
         self.iteration_times.append(time_cost)
@@ -105,10 +112,32 @@ def save_optimization_history(mesh: HomogeneousMesh,
 
             mesh.celldata['density'] = physical_density_global
         
-        elif physical_density.ndim == 1:
+        elif density_location == 'element':
 
-            # 单元密度情况：形状为 (NC,)
+            # 单元密度情况：形状为 (NC, )
             mesh.celldata['density'] = physical_density
+
+        elif density_location == 'lagrange_interpolation_point':
+            # 节点密度情况：形状为 (GDOF_rho, )
+            rho = physical_density  # (GDOF_rho, )
+            qf = mesh.quadrature_formula(2)
+            bcs, ws = qf.get_quadrature_points_and_weights()       
+            rho_gauss = rho(bcs)    # (NC, NQ)
+
+            if isinstance(mesh, SimplexMesh):
+                cm = mesh.entity_measure('cell')
+                num = bm.einsum('q, c, cq -> c', ws, cm, rho_gauss)
+                den = cm
+            
+            elif isinstance(mesh, TensorMesh):
+                J = mesh.jacobi_matrix(bcs)
+                detJ = bm.abs(bm.linalg.det(J))
+                num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_gauss)
+                den = bm.einsum('q, cq -> c', ws, detJ)
+                
+            rho_e = num / den  # (NC, )
+
+            mesh.celldata['density'] = rho_e
             
         else:
             raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")

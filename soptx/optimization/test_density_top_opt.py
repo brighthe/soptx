@@ -202,8 +202,8 @@ class DensityTopOptTest(BaseLogged):
         save_path.mkdir(parents=True, exist_ok=True)
 
         
-        save_optimization_history(opt_mesh, 
-                                history, 
+        save_optimization_history(mesh=opt_mesh, 
+                                history=history, 
                                 density_location=density_location,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
