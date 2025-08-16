@@ -152,7 +152,10 @@ class OCOptimizer(BaseLogged):
 
             # 过滤约束函数灵敏度
             con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
-                  
+            
+            if iter_idx == 17:
+                print("----------------------------")
+
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             while (l2 - l1) / (l2 + l1) > bisection_tol:
@@ -184,7 +187,8 @@ class OCOptimizer(BaseLogged):
 
             # 收敛检查
             if change <= tol:
-                print(f"Converged after {iter_idx + 1} iterations")
+                msg = f"Converged after {iter_idx + 1} iterations"
+                self._log_info(msg)
                 break
 
         # 打印时间统计信息
@@ -193,28 +197,30 @@ class OCOptimizer(BaseLogged):
         return rho, history
     
     def _update_density(self,
-                    rho: Union[Function, TensorLike],
-                    dc: TensorLike,
-                    dg: TensorLike,
-                    lmid: float) -> Function:
+                        rho: Union[Function, TensorLike],
+                        dc: TensorLike,
+                        dg: TensorLike,
+                        lmid: float
+                    ) -> Union[Function, TensorLike]:
         """使用 OC 准则更新密度"""
 
         # 获取算法内部参数
         m = self.options.move_limit
         eta = self.options.damping_coef
         kwargs = bm.context(rho)
-        # rho_new = rho.space.function(rho[:])
+
         if isinstance(rho, Function):
             rho_new = rho.space.function(bm.copy(rho[:]))
         else:
             rho_new = bm.copy(rho[:])
         
-        if bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12):
-            self._log_warning(f"输入密度超出合理范围 [0, 1]: "
-                            f"min={bm.min(rho):.2e}, max={bm.max(rho):.2e}")
+        if (bm.any(bm.isnan(rho[:])) or bm.any(bm.isinf(rho[:])) or 
+            bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12)):
+            self._log_error(f"输入密度超出合理范围 [0, 1]: "
+                            f"range=[{bm.min(rho):.2e}, {bm.max(rho):.2e}]")
             
         if bm.any(dc > 1e-12):
-            self._log_warning(f"目标函数梯度中存在正值, 可能导致目标函数上升")
+            self._log_error(f"目标函数梯度中存在正值, 可能导致目标函数上升")
 
         # 使用绝对值避免负数开方
         B_e = -dc / (dg * lmid)
@@ -235,9 +241,10 @@ class OCOptimizer(BaseLogged):
             )
         )
 
-        if bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12):
-            self._log_warning(f"输出密度超出合理范围 [0, 1]: "
-                            f"min={bm.min(rho):.2e}, max={bm.max(rho):.2e}")
+        if (bm.any(bm.isnan(rho_new[:])) or bm.any(bm.isinf(rho_new[:])) or 
+            bm.any(rho_new[:] < -1e-12) or bm.any(rho_new[:] > 1 + 1e-12)):
+            self._log_error(f"输入密度超出合理范围 [0, 1]: "
+                            f"range=[{bm.min(rho_new):.2e}, {bm.max(rho_new):.2e}]")
         
         return rho_new
         

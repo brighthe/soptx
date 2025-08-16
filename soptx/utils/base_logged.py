@@ -58,7 +58,7 @@ class BaseLogged(ABC):
             else:
                 self.logger.info(message)
     
-    def _log_warning(self, message: str, force_log: bool = False):
+    def _log_warning(self, message: str, force_log: bool = True):
         """输出警告信息"""
         if force_log or (self._enable_logging and self.logger):
             if self.logger:
@@ -66,11 +66,18 @@ class BaseLogged(ABC):
             elif force_log:
                 print(f"WARNING: {message}")
     
-    def _log_error(self, message: str):
-        """输出错误信息"""
-        if self._enable_logging and self.logger:
-            self.logger.error(message)
-    
+    def _log_error(self, message: str, force_log: bool = True):
+        """输出错误信息并终止程序"""
+
+        if force_log or (self._enable_logging and self.logger):
+            if self.logger:
+                self.logger.error(message)
+            elif force_log:
+                print(f"ERROR: {message}")
+
+        raise RuntimeError(message)
+
+
     def _log_critical(self, message: str):
         """输出严重错误信息"""
         if self._enable_logging and self.logger:

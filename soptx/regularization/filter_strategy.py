@@ -62,43 +62,61 @@ class NoneStrategy(_FilterStrategy):
 
         return con_grad
 
+
 class SensitivityStrategy(_FilterStrategy):
     """灵敏度过滤策略"""
-    def __init__(self, H: CSRTensor, Hs: TensorLike, cell_measure: TensorLike) -> None:
+    def __init__(self, 
+                H: CSRTensor, 
+                Hs: TensorLike, 
+                density_location: Literal['element'], 
+                integration_weights: TensorLike,
+                mesh: HomogeneousMesh, 
+                integration_order: int
+            ) -> None:
+        
         self._H = H
         self._Hs = Hs
-        self._cell_measure = cell_measure
+        self._integration_weights = integration_weights
 
-    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
         
         return rho_Phys
 
-    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
         rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
 
         return rho_Phys
 
     def filter_objective_sensitivities(self, 
-                                    rho_Phys: TensorLike, 
+                                    rho_Phys: Union[TensorLike, Function], 
                                     obj_grad: TensorLike
                                 ) -> TensorLike:
 
-        weighted_obj_grad = rho_Phys * obj_grad / self._cell_measure
+        weighted_obj_grad = rho_Phys[:] * obj_grad / self._integration_weights
         numerator = self._H.matmul(weighted_obj_grad)
 
         epsilon = 1e-3
         stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
-        denominator = (stability_factor / self._cell_measure) * self._Hs
+        denominator = (stability_factor / self._integration_weights) * self._Hs
 
         obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
 
         return obj_grad
 
     def filter_constraint_sensitivities(self, 
-                                    rho_Phys: TensorLike, 
+                                    rho_Phys: Union[TensorLike, Function], 
                                     con_grad: TensorLike
                                 ) -> TensorLike:
+
+        weighted_con_grad = rho_Phys[:] * con_grad / self._integration_weights
+        numerator = self._H.matmul(weighted_con_grad)
+
+        epsilon = 1e-3
+        stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
+        denominator = (stability_factor / self._integration_weights) * self._Hs
+
+        con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 
         return con_grad
 
@@ -107,14 +125,14 @@ class DensityStrategy(_FilterStrategy):
     """密度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
-                integration_weights: TensorLike, 
                 density_location: Literal['element', 'gauss_integration_point'], 
+                integration_weights: TensorLike, 
                 mesh: HomogeneousMesh, 
                 integration_order: int
             ) -> None:
         self._H = H
-        self._integration_weights = integration_weights
         self._density_location = density_location
+        self._integration_weights = integration_weights
         self._mesh = mesh
         self._integration_order = integration_order
 

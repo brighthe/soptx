@@ -250,7 +250,7 @@ class MaterialInterpolationScheme(BaseLogged):
     def interpolate_map(self,
                     material: LinearElasticMaterial, 
                     density_distribution: Union[Function, TensorLike],
-                ) -> TensorLike:
+                ) -> Union[Function, TensorLike]:
         """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
 
         required_options = ['penalty_factor', 'target_variables', 'void_youngs_modulus']

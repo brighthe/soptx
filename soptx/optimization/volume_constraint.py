@@ -107,6 +107,26 @@ class VolumeConstraint(BaseLogged):
                 current_volume = bm.einsum('c, c -> ', cell_measure, physical_density[:])
 
                 return current_volume
+            
+            elif self._density_location == 'lagrange_interpolation_point':
+
+                space = physical_density.space
+
+                qf = self._mesh.quadrature_formula(self._integration_order)
+                bcs, ws = qf.get_quadrature_points_and_weights()
+
+                rho_q = physical_density(bcs) 
+
+                if isinstance(self._mesh, SimplexMesh):
+                    cm = self._mesh.entity_measure('cell')
+                    current_volume = bm.einsum('q, cq, c -> ', ws, rho_q, cm)
+                
+                elif isinstance(self._mesh, TensorMesh):
+                    J = self._mesh.jacobi_matrix(bcs)
+                    detJ = bm.linalg.det(J)
+                    current_volume = bm.einsum('q, cq, cq -> ', ws, rho_q, detJ)
+
+                return current_volume
 
             elif self._density_location == 'gauss_integration_point':
 
@@ -136,24 +156,6 @@ class VolumeConstraint(BaseLogged):
                 
                 return current_volume
 
-            elif self._density_location == 'lagrange_interpolation_point':
-
-                qf = self._mesh.quadrature_formula(self._integration_order)
-                bcs, ws = qf.get_quadrature_points_and_weights()
-
-                physical_density_gauss = physical_density(bcs) 
-
-                if isinstance(self._mesh, SimplexMesh):
-                    cm = self._mesh.entity_measure('cell')
-                    current_volume = bm.einsum('q, cq, c -> ', ws, physical_density_gauss, cm)
-                
-                elif isinstance(self._mesh, TensorMesh):
-                    J = self._mesh.jacobi_matrix(bcs)
-                    detJ = bm.linalg.det(J)
-                    current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density_gauss, detJ)
-
-                return current_volume
-
             else:
                 raise ValueError(f"Unexpected physical_density shape/type: {type(physical_density)}, shape={physical_density.shape}")
 
@@ -168,6 +170,31 @@ class VolumeConstraint(BaseLogged):
         if self._density_location == 'element':
         
             dg = bm.copy(cell_measure)
+
+            return dg
+        
+        elif self._density_location == 'lagrange_interpolation_point':
+
+            qf = self._mesh.quadrature_formula(self._integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()      
+
+            N = self._mesh.shape_function(bcs)                    # (NQ, LDOF)
+
+            if isinstance(self._mesh, SimplexMesh):
+                dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, N) # (NC, LDOF)
+
+            elif isinstance(self._mesh, TensorMesh):
+
+                J = self._mesh.jacobi_matrix(bcs)                     # (NC, NQ, GD, GD)
+                detJ = bm.linalg.det(J)                               # (NC, NQ)
+                dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, N)      # (NC, LDOF)
+            
+            lagrange_space = physical_density.space
+            gdof = lagrange_space.number_of_global_dofs()  
+            cell2dof = lagrange_space.cell_to_dof() # (NC, LDOF)
+
+            dg = bm.zeros((gdof,), dtype=bm.float64, device=self._mesh.device)
+            dg = bm.add_at(dg, cell2dof.reshape(-1), dg_e.reshape(-1)) # (GDOF,)
 
             return dg
 

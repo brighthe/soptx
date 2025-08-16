@@ -190,6 +190,7 @@ class FilterMatrixBuilder:
 
         return H, Hs
         
+
     def _compute_filter_general_old(self, 
                                 rmin: float,
                                 domain: List[float],
@@ -436,6 +437,7 @@ class FilterMatrixBuilder:
         
         return H, Hs
 
+
     def _compute_filter_2d_math(self,
                                 rmin: float, 
                                 nx: int, ny: int, 
@@ -516,6 +518,7 @@ class FilterMatrixBuilder:
             t.send(None)
         
         return H, Hs
+
 
     def _compute_filter_3d(self,
                         rmin: float, 
@@ -655,6 +658,7 @@ class FilterMatrixBuilder:
         
         return H, Hs
     
+
     def _compute_filter_3d_math(self,
                                 rmin: float, 
                                 nx: int, ny: int, nz: int, 

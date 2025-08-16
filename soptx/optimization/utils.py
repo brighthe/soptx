@@ -28,7 +28,8 @@ def solve_mma_subproblem(m: int, n: int,
                         a: TensorLike = None,
                         b: TensorLike = None,
                         c: TensorLike = None,
-                        d: TensorLike = None) -> Tuple[TensorLike, ...]:
+                        d: TensorLike = None
+                    ) -> Tuple[TensorLike, ...]:
     """求解 MMA 子问题
     
     使用 primal-dual Newton method 求解由 MMA 算法产生的凸近似子问题.

@@ -47,21 +47,32 @@ class DensityTopOptTest(BaseLogged):
 
     @variantmethod('test_point_density')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        # 参数设置
+        domain = [0, 4, 0, 2]
+
+        T = -1.0
+        E, nu = 1000.0, 0.3
+
         nx, ny = 120, 60
-        density_location = 'element'  # 'lagrange_interpolation_point', 'gauss_integration_point', 'element'
+
         space_degree = 1
         integration_order = space_degree + 1
+        
+        density_location = 'lagrange_interpolation_point'  # 'lagrange_interpolation_point', 'element'
+        relative_density = 0.5
 
         volume_fraction = 0.5
         penalty_factor = 3.0
-        filter_type = 'none' # 'none', 'density'
+
+        optimizer_algorithm = 'mma'  # 'oc', 'mma'
+        max_iterations = 500
+
+        filter_type = 'none' # 'none', 'sensitivity', 'density'
 
         # 设置 pde
         from soptx.model.cantilever_2d import CantileverBeamMiddle2dData
         pde = CantileverBeamMiddle2dData(
-                            domain=[0, 4, 0, 2],
-                            T=-1.0, E=1000.0, nu=0.3,
+                            domain=domain,
+                            T=T, E=E, nu=nu,
                             enable_logging=False
                         )
 
@@ -70,7 +81,7 @@ class DensityTopOptTest(BaseLogged):
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         domain_length = pde.domain[1] - pde.domain[0]
-        rmin = (0.04 * nx) / (domain_length / nx)
+        rmin = 1.5 * (domain_length / nx)
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -96,8 +107,7 @@ class DensityTopOptTest(BaseLogged):
 
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
-                                                relative_density=self.relative_density,
-                                                integration_order=integration_order,
+                                                relative_density=relative_density,
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -132,38 +142,59 @@ class DensityTopOptTest(BaseLogged):
                                     interpolation_order=1,
                                 )
 
+        if optimizer_algorithm == 'mma': 
 
-        from soptx.optimization.oc_optimizer import OCOptimizer
-        oc_optimizer = OCOptimizer(
+            from soptx.optimization.mma_optimizer import MMAOptimizer
+            optimizer = MMAOptimizer(
                             objective=compliance_objective,
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
-                                'max_iterations': 200,
+                                'max_iterations': max_iterations,
                                 'tolerance': 1e-2,
                             }
                         )
-        # 设置高级参数 (可选)
-        oc_optimizer.options.set_advanced_options(
-                                    move_limit=0.2,
-                                    damping_coef=0.5,
-                                    initial_lambda=1e9,
-                                    bisection_tol=1e-3
+
+            # 设置高级参数 (可选)
+            NC = opt_mesh.number_of_cells()
+            optimizer.options.set_advanced_options(
+                                    m=1,
+                                    n=NC,
+                                    xmin=bm.zeros((NC, 1)),
+                                    xmax=bm.ones((NC, 1)),
+                                    a0=1,
+                                    a=bm.zeros((1, 1)),
+                                    c=1e4 * bm.ones((1, 1)),
+                                    d=bm.zeros((1, 1)),
                                 )
+        
+        elif optimizer_algorithm == 'oc':
+
+            from soptx.optimization.oc_optimizer import OCOptimizer
+            optimizer = OCOptimizer(
+                                objective=compliance_objective,
+                                constraint=volume_constraint,
+                                filter=filter_regularization,
+                                options={
+                                    'max_iterations': max_iterations,
+                                    'tolerance': 1e-2,
+                                }
+                            )
+            # 设置高级参数 (可选)
+            optimizer.options.set_advanced_options(
+                                        move_limit=0.2,
+                                        damping_coef=0.5,
+                                        initial_lambda=1e9,
+                                        bisection_tol=1e-3
+                                    )
+
         self._log_info(f"开始密度拓扑优化, 密度类型={density_location}, 密度场自由度={rho.shape}, " 
-                       f"网格尺寸={nx}*{ny}, 位移有限元空间阶数={space_degree}, 物理场自由度={fe_dofs}, " 
+                       f"位移网格尺寸={fe_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 物理场自由度={fe_dofs}, "
+                       f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
-        rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
+        rho_opt, history = optimizer.optimize(density_distribution=rho)
 
-        if density_location == 'density_subelement_gauss_point':
-            # 直接绘制高斯点密度
-            # from soptx.interpolation.tools import plot_gauss_integration_point_density
-            # plot_gauss_integration_point_density(mesh=opt_mesh, rho_gip=rho_opt)
-
-            opt_mesh = pde.init_mesh(nx=nx*integration_order, ny=ny*integration_order)
-
-        # 保存结果
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
@@ -316,6 +347,7 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
+
     @run.register('test_volume_constraint')
     def run(self) -> None:
         density_location = 'density_subelement_gauss_point'  # 'lagrange_interpolation_point', 'gauss_integration_point', 'element'
@@ -484,28 +516,65 @@ class DensityTopOptTest(BaseLogged):
         print("---------------------")
     
 
-    @run.register('test_optimization')
-    def run(self, 
-            density_location: str = 'element', 
-        ) -> Union[TensorLike, OptimizationHistory]:
-        # 参数设置
-        nx, ny = 6, 2
-        space_degree = 1
-        integration_order = space_degree + 1
-        filter_type = 'none'
+    @run.register('test_matlab_code')
+    def run(self, paramter_type: int = 1) -> Union[TensorLike, OptimizationHistory]:
+        """ 测试与 matlab 代码是否一致 """
 
-        # 设置 pde
-        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
-        pde = HalfMBBBeam2dData(
-                            domain=[0, nx, 0, ny],
-                            T=-1.0, E=1.0, nu=0.3,
-                            enable_logging=False
-                        )
-        domain_length = pde.domain[1] - pde.domain[0]
-        domain_height = pde.domain[3] - pde.domain[2]
-        pde.init_mesh.set('uniform_quad')
+        if paramter_type == 0:
+            domain = [0, 60, 0, 20, 0, 4]
+            nx, ny, nz = 60, 20, 4
+            density_location = 'element'  
+            space_degree = 1
+            integration_order = space_degree + 1
 
-        fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+            relative_density = 0.3
+            volume_fraction = 0.3
+            penalty_factor = 3.0
+            filter_type = 'sen' # 'none', 'density'
+            
+            # 设置 pde
+            from soptx.model.cantilever_3d import CantileverBeam3dData
+            pde = CantileverBeam3dData(
+                                domain=domain,
+                                T=-1.0, E=1.0, nu=0.3,
+                                enable_logging=False
+                            )
+
+            pde.init_mesh.set('uniform_hex')
+
+            fe_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+            opt_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+
+            rmin = 1.5
+        
+        elif paramter_type == 1:
+            domain = [0, 60, 0, 20]
+            nx, ny = 60, 20
+            density_location = 'element'  
+            space_degree = 1
+            integration_order = space_degree + 1
+
+            relative_density = 0.5
+            volume_fraction = 0.5
+            penalty_factor = 3.0
+            filter_type = 'sensitivity' # 'none', 'density', 'sensitivity'
+            optimizer_algorithm = 'oc'  # 'oc', 'mma'
+            
+            # 设置 pde
+            from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
+            pde = HalfMBBBeam2dData(
+                                domain=domain,
+                                T=-1.0, E=1.0, nu=0.3,
+                                enable_logging=False
+                            )
+
+            pde.init_mesh.set('uniform_quad')
+
+            fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+            opt_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+            domain_length = pde.domain[1] - pde.domain[0]
+            rmin = (0.04 * nx) / (domain_length / nx)
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -516,14 +585,12 @@ class DensityTopOptTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        opt_mesh = pde.init_mesh(nx=nx, ny=ny)
-
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
                                     density_location=density_location,
                                     interpolation_method='msimp',
                                     options={
-                                        'penalty_factor': 3.0,
+                                        'penalty_factor': penalty_factor,
                                         'void_youngs_modulus': 1e-9,
                                         'target_variables': ['E']
                                     },
@@ -531,21 +598,21 @@ class DensityTopOptTest(BaseLogged):
 
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
-                                                relative_density=self.volume_fraction,
+                                                relative_density=relative_density,
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                    mesh=fe_mesh,
-                                    pde=pde,
-                                    material=material,
-                                    interpolation_scheme=interpolation_scheme,
-                                    space_degree=space_degree,
-                                    integration_order=integration_order,
-                                    assembly_method='standard',
-                                    solve_method='mumps',
-                                    topopt_algorithm='density_based',
-                                )
+                                        mesh=fe_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        interpolation_scheme=interpolation_scheme,
+                                        space_degree=space_degree,
+                                        integration_order=integration_order,
+                                        assembly_method='standard',
+                                        solve_method='mumps',
+                                        topopt_algorithm='density_based',
+                                    )
         fe_tspace = lagrange_fem_analyzer.tensor_space
         fe_dofs = fe_tspace.number_of_global_dofs()
         
@@ -553,58 +620,83 @@ class DensityTopOptTest(BaseLogged):
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
 
         from soptx.optimization.volume_constraint import VolumeConstraint
-        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=self.volume_fraction)
-        test = volume_constraint._compute_volume(physical_density=rho)
+        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, 
+                                            volume_fraction=volume_fraction)
 
         from soptx.regularization.filter import Filter
-        rmin = (0.04 * nx) / (domain_length / nx)
-
-        from soptx.regularization.matrix_builder import FilterMatrixBuilder
-        filter_matrix = FilterMatrixBuilder(
-                                    mesh=opt_mesh,
-                                    rmin=rmin,
-                                    density_location=density_location,
-                                    integrator_order=self.integrator_order,
-                                    interpolation_order=1,
-                                )
-        H, Hs = filter_matrix._compute_weighted_matrix_general(rmin=rmin, domain=pde.domain)
-
+        
         filter_regularization = Filter(
                                     mesh=opt_mesh,
                                     filter_type=filter_type,
                                     rmin=rmin,
+                                    density_location=density_location,
+                                    integration_order=integration_order,
+                                    interpolation_order=1,
                                 )
-
-
-        from soptx.optimization.oc_optimizer import OCOptimizer
-        oc_optimizer = OCOptimizer(
+        
+        if optimizer_algorithm == 'oc':
+            from soptx.optimization.oc_optimizer import OCOptimizer
+            optimizer = OCOptimizer(
+                                objective=compliance_objective,
+                                constraint=volume_constraint,
+                                filter=filter_regularization,
+                                options={
+                                    'max_iterations': 200,
+                                    'tolerance': 1e-2,
+                                }
+                            )
+            # 设置高级参数 (可选)
+            optimizer.options.set_advanced_options(
+                                        move_limit=0.2,
+                                        damping_coef=0.5,
+                                        initial_lambda=1e9,
+                                        bisection_tol=1e-3
+                                    )
+        elif optimizer_algorithm == 'mma':
+            from soptx.optimization.mma_optimizer import MMAOptimizer
+            optimizer = MMAOptimizer(
                             objective=compliance_objective,
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
-                                'max_iterations': 300,
+                                'max_iterations': 200,
                                 'tolerance': 1e-2,
                             }
                         )
-        # 设置高级参数 (可选)
-        oc_optimizer.options.set_advanced_options(
-                                    move_limit=0.2,
-                                    damping_coef=0.5,
-                                    initial_lambda=1e9,
-                                    bisection_tol=1e-3
+
+            # 设置高级参数 (可选)
+            NC = opt_mesh.number_of_cells()
+            optimizer.options.set_advanced_options(
+                                    m=1,
+                                    n=NC,
+                                    xmin=bm.zeros((NC, 1)),
+                                    xmax=bm.ones((NC, 1)),
+                                    a0=1,
+                                    a=bm.zeros((1, 1)),
+                                    c=1e4 * bm.ones((1, 1)),
+                                    d=bm.zeros((1, 1)),
                                 )
-        self._log_info(f"开始密度拓扑优化, 网格尺寸={nx}*{ny}, 空间阶数={space_degree}, 物理场自由度={fe_dofs}, " 
-                       f"密度分布位置={density_location}, "
+        
+        self._log_info(f"开始密度拓扑优化, 密度类型={density_location}, 密度场自由度={rho.shape}, "
+                       f"体积分数={volume_fraction}, " 
+                       f"网格尺寸={nx}*{ny}, 位移有限元空间阶数={space_degree}, 物理场自由度={fe_dofs}, "
+                       f"优化算法={optimizer_algorithm}, "
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
-        rho_opt, history = oc_optimizer.optimize(density_distribution=rho)
+        
+        rho_opt, history = optimizer.optimize(density_distribution=rho)
 
         # 保存结果
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/density_topopt_p{self.space_degree}_density_{density_location}_({nx},{ny})")
+        save_path = Path(f"{base_dir}/density_type_{density_location}")
         save_path.mkdir(parents=True, exist_ok=True)
-        save_optimization_history(opt_mesh, history, str(save_path))
+
+        
+        save_optimization_history(opt_mesh, 
+                                history, 
+                                density_location=density_location,
+                                save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
@@ -625,8 +717,8 @@ if __name__ == "__main__":
     test.run.set('test_point_density')
     rho_opt, history = test.run()
 
-    # test.run.set('test_optimization')
-    # rho, history = test.run(density_location='gauss_integration_point')
+    # test.run.set('test_matlab_code')
+    # rho, history = test.run()
     
     # test.run.set('test_volume_constraint')
     # test.run()

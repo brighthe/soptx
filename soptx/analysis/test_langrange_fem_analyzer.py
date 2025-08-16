@@ -598,6 +598,92 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         print('-----------------------')
 
 
+    @run.register('test_topopt_analysis_assembly_method')
+    def run(self):
+        domain = [0, 4, 0, 2]
+
+        T = -1.0
+        E, nu = 1000.0, 0.3
+
+        nx, ny = 120, 60
+
+        space_degree = 1
+        integration_order = space_degree + 1
+        
+        density_location = 'lagrange_interpolation_point'  # 'lagrange_interpolation_point', 'element'
+        interpolation_order = 1 
+        relative_density = 0.5
+        penalty_factor = 3.0
+
+        assembly_method = 'standard'  # 'standard', 'voigt', 'sparse_optimized'
+
+        from soptx.model.cantilever_2d import CantileverBeamMiddle2dData
+        pde = CantileverBeamMiddle2dData(
+                            domain=domain,
+                            T=T, E=E, nu=nu,
+                            enable_logging=False
+                        )
+
+        pde.init_mesh.set('uniform_quad')
+
+        fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        opt_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method='msimp',
+                                    options={
+                                        'penalty_factor': penalty_factor,
+                                        'void_youngs_modulus': 1e-9,
+                                        'target_variables': ['E']
+                                    },
+                                )
+
+        rho = interpolation_scheme.setup_density_distribution(
+                                                mesh=opt_mesh,
+                                                relative_density=relative_density,
+                                                interpolation_order=interpolation_order
+                                            )
+
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        lagrange_fem_analyzer_standrad = LagrangeFEMAnalyzer(
+                                                mesh=fe_mesh,
+                                                pde=pde,
+                                                material=material,
+                                                interpolation_scheme=interpolation_scheme,
+                                                space_degree=space_degree,
+                                                integration_order=integration_order,
+                                                assembly_method='standard',
+                                                solve_method='mumps',
+                                                topopt_algorithm='density_based',
+                                            )
+        
+        lagrange_fem_analyzer_standrad = LagrangeFEMAnalyzer(
+                                        mesh=fe_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        interpolation_scheme=interpolation_scheme,
+                                        space_degree=space_degree,
+                                        integration_order=integration_order,
+                                        assembly_method='voigt',
+                                        solve_method='mumps',
+                                        topopt_algorithm='density_based',
+                                    )
+        
+        uh_standard = lagrange_fem_analyzer_standrad.solve_displacement(density_distribution=rho)
+        uh_voigt = lagrange_fem_analyzer_standrad.solve_displacement(density_distribution=rho)
+        print('-----------------------')
+
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
@@ -615,8 +701,11 @@ if __name__ == "__main__":
     # test.run.set('topopt_analysis')
     # test.run.set('test_bisect')
 
-    test.run.set('lfa_analysis_exact_solution')
-    uh = test.run()
+    # test.run.set('lfa_analysis_exact_solution')
+    # uh = test.run()
 
     # test.run.set('test_topopt_analysis_density_location')
     # uh1 = test.run(density_location='element')
+
+    test.run.set('test_topopt_analysis_assembly_method')
+    test.run()

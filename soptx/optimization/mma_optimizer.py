@@ -282,18 +282,18 @@ class MMAOptimizer(BaseLogged):
         
         # 初始化物理密度
         if isinstance(rho, Function):
-            rho_phys = rho.space.function(bm.copy(rho[:]))
+            rho_Phys = rho.space.function(bm.copy(rho[:]))
         else:
-            rho_phys = bm.copy(rho[:])
+            rho_Phys = bm.copy(rho[:])
 
-        rho_phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_phys)
+        rho_Phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_Phys)
 
         # 初始化历史记录
         history = OptimizationHistory()
 
         # 初始化历史变量
-        xold1 = bm.copy(rho[:] if isinstance(rho, Function) else rho)
-        xold2 = bm.copy(xold1)
+        xold1 = bm.copy(rho[:])
+        xold2 = bm.copy(xold1[:])
         
         # 初始化渐近线
         low = bm.ones_like(xold1)
@@ -307,32 +307,27 @@ class MMAOptimizer(BaseLogged):
             self._epoch = iter_idx + 1
             
             # 使用物理密度计算目标函数值和梯度
-            obj_val = self._objective.fun(rho_phys)
-            obj_grad = self._objective.jac(rho_phys)
+            obj_val = self._objective.fun(rho_Phys)
+            obj_grad = self._objective.jac(rho_Phys)
             
             # 过滤目标函数灵敏度
-            obj_grad = self._filter.filter_objective_sensitivities(rho_Phys=rho_phys, obj_grad=obj_grad)
+            obj_grad = self._filter.filter_objective_sensitivities(rho_Phys=rho_Phys, obj_grad=obj_grad)
         
             # 使用物理密度计算约束值和梯度
-            con_val = self._constraint.fun(rho_phys)
-            con_grad = self._constraint.jac(rho_phys)
+            con_val = self._constraint.fun(rho_Phys)
+            con_grad = self._constraint.jac(rho_Phys)
             
             # 过滤约束函数灵敏度
-            con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_phys, con_grad=con_grad)
-
-            # 当前体积分数
-            vol_frac = self._constraint.get_volume_fraction(rho_phys)
+            con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
             
             # MMA 方法求解
             # 标准化约束函数
             cm = self._filter.mesh.entity_measure('cell')
             fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
-            
             # 标准化约束梯度
-            dfdx = con_grad[:, None].T / (self._constraint.volume_fraction * con_grad.shape[0])
-            
+            dfdx = con_grad[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
             # 求解子问题
-            rho_new, low, upp = self._solve_subproblem(
+            xmma, low, upp = self._solve_subproblem(
                                                 xval=rho[:, None],
                                                 fval=fval,
                                                 df0dx=obj_grad[:, None],
@@ -342,13 +337,18 @@ class MMAOptimizer(BaseLogged):
                                                 xold1=xold1[:, None],
                                                 xold2=xold2[:, None]
                                             )
+            
+            if isinstance(rho, Function):
+                rho_new = rho.space.function(bm.copy(xmma[:]))
+            else:
+                rho_new = bm.copy(xmma[:])
 
             # 过滤物理密度
             rho_Phys = self._filter.filter_variables(rho=rho_new, rho_Phys=rho_Phys)
             
             # 更新历史变量
             xold2 = xold1
-            xold1 = rho
+            xold1 = rho[:]
             
             # 计算收敛性
             change = bm.max(bm.abs(rho_new - rho))
@@ -356,15 +356,18 @@ class MMAOptimizer(BaseLogged):
             # 更新设计变量，确保目标函数内部状态同步
             rho = rho_new
                 
+            # 当前体积分数
+            volfrac = self._constraint.get_volume_fraction(rho_Phys)
+            
             # 记录当前迭代信息
             iteration_time = time() - start_time
-            
-            history.log_iteration(iter_idx, obj_val, vol_frac, 
-                                change, iteration_time, rho_phys)
-            
-            # 日志记录
-            self._log_info(f"Iteration {iter_idx + 1}: obj={obj_val:.4f}, "
-                          f"vol_frac={vol_frac:.4f}, change={change:.6f}")
+
+            history.log_iteration(iter_idx=iter_idx, 
+                                obj_val=obj_val, 
+                                volfrac=volfrac, 
+                                change=change, 
+                                time_cost=iteration_time, 
+                                physical_density=rho_Phys[:])
             
             # 收敛检查
             if change <= tol:
@@ -539,18 +542,18 @@ class MMAOptimizer(BaseLogged):
         b = bm.dot(P, uxinv) + bm.dot(Q, xlinv) - fval
         
         # 求解子问题
-        try:
-            xmma, ymma, zmma, lam, xsi, eta, mu, zet, s = solve_mma_subproblem(
-                m=m, n=n, 
-                epsimin=epsimin, 
-                low=low, upp=upp, 
-                alfa=alfa, beta=beta,
-                p0=p0, q0=q0, P=P, Q=Q,
-                a0=a0, a=a, b=b, c=c, d=d
-            )
-        except Exception as e:
-            error_msg = f"Failed to solve MMA subproblem: {str(e)}"
-            self._log_error(error_msg)
-            raise RuntimeError(error_msg)
+        xmma, ymma, zmma, lam, xsi, eta, mu, zet, s = solve_mma_subproblem(
+                                                                    m=m, n=n, 
+                                                                    epsimin=epsimin, 
+                                                                    low=low, upp=upp, 
+                                                                    alfa=alfa, beta=beta,
+                                                                    p0=p0, q0=q0, P=P, Q=Q,
+                                                                    a0=a0, a=a, b=b, c=c, d=d
+                                                                )
         
-        return xmma.reshape(-1, 1), low, upp
+        if (bm.any(bm.isnan(xmma[:])) or bm.any(bm.isinf(xmma[:])) or 
+            bm.any(xmma[:] < -1e-12) or bm.any(xmma[:] > 1 + 1e-12)):
+            self._log_error(f"输出密度超出合理范围 [0, 1]: "
+                            f"range=[{bm.min(xmma):.2e}, {bm.max(xmma):.2e}]")
+        
+        return xmma.reshape(-1), low, upp

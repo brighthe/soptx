@@ -158,7 +158,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def get_stiffness_matrix_derivative(self, density_distribution: Function) -> TensorLike:
         """获取局部刚度矩阵的梯度"""
         
-        interpolate_derivative = self._interpolation_scheme.interpolate_derivative(
+        interpolate_diff_coef = self._interpolation_scheme.interpolate_derivative(
                                                             material=self._material, 
                                                             density_distribution=density_distribution
                                                         )
@@ -172,7 +172,44 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                         q=self._integration_order,
                                         method=self._assembly_method)
             ke0 = lea.assembly(space=self.tensor_space)
-            diff_ke = bm.einsum('c, cij -> cij', interpolate_derivative, ke0)
+            diff_ke = bm.einsum('c, cij -> cij', interpolate_diff_coef, ke0)
+
+            return diff_ke
+
+        elif density_location == 'lagrange_interpolation_point':
+            
+            # 如果是插值点密度分布, 则需要将结果转换为 Function
+            density_space = density_distribution.space
+            interpolate_diff_coef = density_space.function(interpolate_diff_coef)
+
+            mesh = self._mesh
+            qf = mesh.quadrature_formula(self._integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+
+            rho_phi = density_space.basis(bcs)[0] # (NQ, NI)
+
+            # 将插值点密度插值为单元 Gauss 积分点上
+            interpolate_diff_coef_q = interpolate_diff_coef(bcs) # (NC, NQ) 
+
+            D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3), 3D: (6, 6)
+            dof_priority = self.tensor_space.dof_priority
+            scalar_space = self.tensor_space.scalar_space
+            gphi = scalar_space.grad_basis(bcs, variable='x')
+            B = self._material.strain_displacement_matrix(dof_priority=dof_priority, gphi=gphi) # 2D: (NC, NQ, 3, LDOF_u), 3D: (NC, NQ, 6, LDOF_u)
+
+            BDB = bm.einsum('cqki, kl, cqlj -> cqij', B, D0, B)
+
+            if isinstance(mesh, SimplexMesh):
+                cm = mesh.entity_measure('cell')
+                kernel = bm.einsum('q, c, cq, cqij -> cqij', ws, cm, interpolate_diff_coef_q, BDB)
+            else:
+                J = mesh.jacobi_matrix(bcs)
+                detJ = bm.abs(bm.linalg.det(J))
+                kernel = bm.einsum('q, cq, cq, cqij -> cqij', ws, detJ, interpolate_diff_coef_q, BDB)
+
+            diff_ke = bm.einsum('cqij, ql -> clij', kernel, rho_phi) # (NC, NI, LDOF, LDOF)
+
+            return diff_ke
 
         elif density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
             
@@ -195,32 +232,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 detJ = bm.linalg.det(J)
                 diff_ke = bm.einsum('q, cq, cq, cqki, kl, cqlj -> cqij', ws, detJ, interpolate_derivative, B, D0, B)
 
-        elif density_location == 'lagrange_interpolation_point':
-            # 如果是插值点密度分布, 则需要将结果转换为 Function
-            density_space = density_distribution.space
-            interpolate_derivative = density_space.function(interpolate_derivative)
 
-            mesh = self._mesh
-            qf = mesh.quadrature_formula(self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
-
-            # 将插值点密度插值为单元 Gauss 积分点上
-            interpolate_derivative = interpolate_derivative(bcs)  
-
-            D0 = self._material.elastic_matrix()[0, 0]
-            dof_priority = self.tensor_space.dof_priority
-            scalar_space = self.tensor_space.scalar_space
-            gphi = scalar_space.grad_basis(bcs, variable='x')
-            B = self._material.strain_displacement_matrix(dof_priority=dof_priority, gphi=gphi)
-
-            if isinstance(mesh, SimplexMesh):
-                cm = mesh.entity_measure('cell')
-                diff_ke = bm.einsum('q, c, cq, cqki, kl, cqlj -> cqij', ws, cm, interpolate_derivative, B, D0, B)
-
-            else:
-                J = mesh.jacobi_matrix(bcs)
-                detJ = bm.linalg.det(J)
-                diff_ke = bm.einsum('q, cq, cq, cqki, kl, cqlj -> cqij', ws, detJ, interpolate_derivative, B, D0, B)
 
         return diff_ke
 

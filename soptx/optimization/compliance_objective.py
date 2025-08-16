@@ -63,9 +63,9 @@ class ComplianceObjective(BaseLogged):
     #####################################################################################################
         
     def _manual_differentiation(self, 
-            density_distribution: Union[Function, TensorLike], 
-            displacement: Optional[Function] = None
-        ) -> TensorLike:
+                                density_distribution: Union[Function, TensorLike], 
+                                displacement: Optional[Function] = None
+                            ) -> TensorLike:
         """手动计算目标函数梯度"""
 
         if displacement is None:
@@ -84,6 +84,20 @@ class ComplianceObjective(BaseLogged):
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
+
+            return dc[:]
+        
+        elif density_location == 'lagrange_interpolation_point':
+            dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_ke, uhe)
+
+            density_space = density_distribution.space
+            cell2dof = density_space.cell_to_dof()   # (NC, LDOF_rho)
+            gdof_rho = density_space.number_of_global_dofs()
+
+            dc = bm.zeros((gdof_rho,), dtype=uhe.dtype, device=uhe.device)
+            dc = bm.add_at(dc, cell2dof.reshape(-1), dc_e.reshape(-1))
+
+            self._log_info(f"ComplianceObjective derivative: dc shape is (GDOF_rho, ) = {dc.shape}")
 
             return dc[:]
 

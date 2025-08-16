@@ -76,7 +76,9 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         NC = mesh.number_of_cells()
         GD = mesh.geo_dimension()
         NQ = len(ws)
-        D0 = self._material.elastic_matrix()
+        D0 = self._material.elastic_matrix()  # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        
+        # 单元密度: (NC, ); 节点密度: (GDOF, )      
         coef = self._coef
 
         if coef is None:
@@ -228,7 +230,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def fetch_voigt_assembly(self, space: TensorFunctionSpace):
-        index = self.index
+        index = self._index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
     
