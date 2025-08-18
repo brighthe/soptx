@@ -57,7 +57,7 @@ class DensityTopOptTest(BaseLogged):
         space_degree = 1
         integration_order = space_degree + 1
         
-        density_location = 'lagrange_interpolation_point'  # 'lagrange_interpolation_point', 'element'
+        density_location = 'element'  # 'lagrange_interpolation_point', 'element'
         relative_density = 0.5
 
         volume_fraction = 0.5
@@ -558,7 +558,7 @@ class DensityTopOptTest(BaseLogged):
             volume_fraction = 0.5
             penalty_factor = 3.0
             filter_type = 'sensitivity' # 'none', 'density', 'sensitivity'
-            optimizer_algorithm = 'oc'  # 'oc', 'mma'
+            optimizer_algorithm = 'mma'  # 'oc', 'mma'
             
             # 设置 pde
             from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
@@ -689,7 +689,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/density_type_{density_location}")
+        save_path = Path(f"{base_dir}/matlab_{density_location}")
         save_path.mkdir(parents=True, exist_ok=True)
 
         
@@ -714,11 +714,11 @@ if __name__ == "__main__":
     test.set_volume_fraction(0.5)
     test.set_relative_density(0.5)
 
-    test.run.set('test_point_density')
-    rho_opt, history = test.run()
+    # test.run.set('test_point_density')
+    # rho_opt, history = test.run()
 
-    # test.run.set('test_matlab_code')
-    # rho, history = test.run()
+    test.run.set('test_matlab_code')
+    rho, history = test.run()
     
     # test.run.set('test_volume_constraint')
     # test.run()

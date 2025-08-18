@@ -76,6 +76,7 @@ class SensitivityStrategy(_FilterStrategy):
         
         self._H = H
         self._Hs = Hs
+        self._density_location = density_location
         self._integration_weights = integration_weights
 
     def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
@@ -93,30 +94,28 @@ class SensitivityStrategy(_FilterStrategy):
                                     obj_grad: TensorLike
                                 ) -> TensorLike:
 
-        weighted_obj_grad = rho_Phys[:] * obj_grad / self._integration_weights
-        numerator = self._H.matmul(weighted_obj_grad)
+        if self._density_location == 'element':
 
-        epsilon = 1e-3
-        stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
-        denominator = (stability_factor / self._integration_weights) * self._Hs
+            cell_measure = self._integration_weights
 
-        obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
+            weighted_obj_grad = rho_Phys[:] * obj_grad / cell_measure
+            numerator = self._H.matmul(weighted_obj_grad)
 
-        return obj_grad
+            epsilon = 1e-3
+            stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
+            denominator = (stability_factor / cell_measure) * self._Hs
+
+            obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
+
+            return obj_grad
+        
+        else:
+            raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
 
     def filter_constraint_sensitivities(self, 
                                     rho_Phys: Union[TensorLike, Function], 
                                     con_grad: TensorLike
                                 ) -> TensorLike:
-
-        weighted_con_grad = rho_Phys[:] * con_grad / self._integration_weights
-        numerator = self._H.matmul(weighted_con_grad)
-
-        epsilon = 1e-3
-        stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
-        denominator = (stability_factor / self._integration_weights) * self._Hs
-
-        con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 
         return con_grad
 
