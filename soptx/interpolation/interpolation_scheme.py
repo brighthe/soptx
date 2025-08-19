@@ -159,14 +159,13 @@ class MaterialInterpolationScheme(BaseLogged):
                                    mesh: HomogeneousMesh,
                                    relative_density: float = 1.0,
                                    integration_order: int = None,
-                                   interpolation_order: int = 1,
+                                   interpolation_order: int = None,
                                    **kwargs,
                                 ) -> Function:
         "节点密度 (Lagrange 插值)"
         if interpolation_order is None:
             error_msg = "'interpolation_point' density distribution requires 'interpolation_order' parameter"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
         if integration_order is not None:
             warn_msg = f"Interpolation point density distribution does not require 'integration_order', provided integration_order={integration_order} will be ignored"

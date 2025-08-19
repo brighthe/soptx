@@ -13,34 +13,12 @@ from ..optimization.tools import OptimizationHistory
 from ..regularization.filter import Filter
 from ..utils.base_logged import BaseLogged
 
-
 @dataclass
 class OCOptions:
     """OC 算法的配置选项"""
     # 用户级参数：直接暴露给用户
     max_iterations: int = 100     # 最大迭代次数
     tolerance: float = 1e-3       # 收敛容差
-
-    # 高级参数：通过专门的方法修改
-    @property
-    def move_limit(self) -> float:
-        """正向移动限制 m"""
-        return self._move_limit
-        
-    @property
-    def damping_coef(self) -> float:
-        """阻尼系数 η"""
-        return self._damping_coef
-        
-    @property
-    def initial_lambda(self) -> float:
-        """初始 lambda 值"""
-        return self._initial_lambda
-        
-    @property
-    def bisection_tol(self) -> float:
-        """二分法收敛容差"""
-        return self._bisection_tol
 
     def __init__(self):
         """初始化高级参数的默认值"""
@@ -75,6 +53,26 @@ class OCOptions:
                 setattr(self, valid_params[key], value)
             else:
                 raise ValueError(f"Unknown parameter: {key}")
+
+    @property
+    def move_limit(self) -> float:
+        """正向移动限制 m"""
+        return self._move_limit
+        
+    @property
+    def damping_coef(self) -> float:
+        """阻尼系数 η"""
+        return self._damping_coef
+        
+    @property
+    def initial_lambda(self) -> float:
+        """初始 lambda 值"""
+        return self._initial_lambda
+        
+    @property
+    def bisection_tol(self) -> float:
+        """二分法收敛容差"""
+        return self._bisection_tol
 
 class OCOptimizer(BaseLogged):
     def __init__(self,

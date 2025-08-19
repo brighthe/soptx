@@ -54,10 +54,11 @@ class DensityTopOptTest(BaseLogged):
 
         nx, ny = 120, 60
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 1
         
-        density_location = 'element'  # 'lagrange_interpolation_point', 'element'
+        density_location = 'lagrange_interpolation_point'  # 'lagrange_interpolation_point', 'element'
+        interpolation_order = 1
         relative_density = 0.5
 
         volume_fraction = 0.5
@@ -108,6 +109,7 @@ class DensityTopOptTest(BaseLogged):
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
                                                 relative_density=relative_density,
+                                                interpolation_order=interpolation_order,
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -156,12 +158,12 @@ class DensityTopOptTest(BaseLogged):
                         )
 
             # 设置高级参数 (可选)
-            NC = opt_mesh.number_of_cells()
+            design_vars = rho.shape[0]
             optimizer.options.set_advanced_options(
                                     m=1,
-                                    n=NC,
-                                    xmin=bm.zeros((NC, 1)),
-                                    xmax=bm.ones((NC, 1)),
+                                    n=design_vars,
+                                    xmin=bm.zeros((design_vars, 1)),
+                                    xmax=bm.ones((design_vars, 1)),
                                     a0=1,
                                     a=bm.zeros((1, 1)),
                                     c=1e4 * bm.ones((1, 1)),
@@ -198,7 +200,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/density_type_{density_location}")
+        save_path = Path(f"{base_dir}/nodal_variable_{density_location}")
         save_path.mkdir(parents=True, exist_ok=True)
 
         
@@ -714,11 +716,11 @@ if __name__ == "__main__":
     test.set_volume_fraction(0.5)
     test.set_relative_density(0.5)
 
-    # test.run.set('test_point_density')
-    # rho_opt, history = test.run()
+    test.run.set('test_point_density')
+    rho_opt, history = test.run()
 
-    test.run.set('test_matlab_code')
-    rho, history = test.run()
+    # test.run.set('test_matlab_code')
+    # rho, history = test.run()
     
     # test.run.set('test_volume_constraint')
     # test.run()

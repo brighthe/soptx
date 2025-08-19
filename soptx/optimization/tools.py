@@ -120,24 +120,25 @@ def save_optimization_history(mesh: HomogeneousMesh,
         elif density_location == 'lagrange_interpolation_point':
             # 节点密度情况：形状为 (GDOF_rho, )
             rho = physical_density  # (GDOF_rho, )
-            qf = mesh.quadrature_formula(2)
-            bcs, ws = qf.get_quadrature_points_and_weights()       
-            rho_gauss = rho(bcs)    # (NC, NQ)
+            # qf = mesh.quadrature_formula(2)
+            # bcs, ws = qf.get_quadrature_points_and_weights()       
+            # rho_gauss = rho(bcs)    # (NC, NQ)
 
-            if isinstance(mesh, SimplexMesh):
-                cm = mesh.entity_measure('cell')
-                num = bm.einsum('q, c, cq -> c', ws, cm, rho_gauss)
-                den = cm
+            # if isinstance(mesh, SimplexMesh):
+            #     cm = mesh.entity_measure('cell')
+            #     num = bm.einsum('q, c, cq -> c', ws, cm, rho_gauss)
+            #     den = cm
             
-            elif isinstance(mesh, TensorMesh):
-                J = mesh.jacobi_matrix(bcs)
-                detJ = bm.abs(bm.linalg.det(J))
-                num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_gauss)
-                den = bm.einsum('q, cq -> c', ws, detJ)
+            # elif isinstance(mesh, TensorMesh):
+            #     J = mesh.jacobi_matrix(bcs)
+            #     detJ = bm.abs(bm.linalg.det(J))
+            #     num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_gauss)
+            #     den = bm.einsum('q, cq -> c', ws, detJ)
                 
-            rho_e = num / den  # (NC, )
+            # rho_e = num / den  # (NC, )
 
-            mesh.celldata['density'] = rho_e
+            # mesh.celldata['density'] = rho_e
+            mesh.nodedata['density'] = rho
             
         else:
             raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")

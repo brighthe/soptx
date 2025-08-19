@@ -116,8 +116,26 @@ class SensitivityStrategy(_FilterStrategy):
                                     rho_Phys: Union[TensorLike, Function], 
                                     con_grad: TensorLike
                                 ) -> TensorLike:
+        
+        if self._density_location == 'element':
 
-        return con_grad
+            # 对于通用的 MMA 算法，体积约束越需要过滤
+            cell_measure = self._integration_weights
+
+            weighted_con_grad = rho_Phys[:] * con_grad / cell_measure
+            numerator = self._H.matmul(weighted_con_grad)
+
+            epsilon = 1e-3
+            stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
+            denominator = (stability_factor / cell_measure) * self._Hs
+
+            con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
+
+            # 对于简单的 OC 算法，体积约束不需要过滤
+            return con_grad
+        
+        else:
+            raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
 
 
 class DensityStrategy(_FilterStrategy):
@@ -176,6 +194,7 @@ class DensityStrategy(_FilterStrategy):
     def filter_objective_sensitivities(self, rho_Phys: Union[TensorLike, Function], obj_grad: TensorLike) -> TensorLike:
         
         if self._density_location == 'element':
+
             weighted_dobj = self._integration_weights * obj_grad # (NC, )
 
             numerator = self._H.matmul(weighted_dobj)
@@ -209,6 +228,7 @@ class DensityStrategy(_FilterStrategy):
         con_grad = bm.copy(con_grad)
 
         if self._density_location == 'element':
+            
             weighted_dobj = self._integration_weights * con_grad # (NC, )
 
             numerator = self._H.matmul(weighted_dobj)
