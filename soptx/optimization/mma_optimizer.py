@@ -1,5 +1,4 @@
 import warnings
-from dataclasses import dataclass
 from time import time
 from typing import Optional, Tuple, Union
 
@@ -11,20 +10,19 @@ from soptx.optimization.compliance_objective import ComplianceObjective
 from soptx.optimization.volume_constraint import VolumeConstraint
 from soptx.optimization.tools import OptimizationHistory
 from soptx.optimization.utils import solve_mma_subproblem
-
-from ..regularization.filter import Filter
-
+from soptx.regularization.filter import Filter
 from soptx.utils.base_logged import BaseLogged
 
-@dataclass
 class MMAOptions:
     """MMA 算法的配置选项"""
-    # 用户级参数：直接暴露给用户
-    max_iterations: int = 200       # 最大迭代次数
-    tolerance: float = 0.001        # 收敛容差
 
     def __init__(self):
-        """初始化高级参数的默认值"""
+        """初始化参数的默认值"""
+        # MMA 算法的用户级参数
+        self.max_iterations = 200     # 最大迭代次数
+        self.tolerance = 0.001        # 收敛容差
+
+        # MMA 算法的高级参数
         self._m = 1
         self._n = None
         self._xmin = None
@@ -91,16 +89,6 @@ class MMAOptions:
                 setattr(self, valid_params[key], value)
             else:
                 raise ValueError(f"Unknown parameter: {key}")
-            
-        # 如果设置了 m，且相关参数为 None，则初始化它们
-        if 'm' in kwargs:
-            m = kwargs['m']
-            if self._a is None:
-                self._a = bm.zeros((m, 1))
-            if self._c is None:
-                self._c = 1e4 * bm.ones((m, 1))
-            if self._d is None:
-                self._d = bm.zeros((m, 1))
 
     @property
     def m(self) -> int:
@@ -227,32 +215,28 @@ class MMAOptimizer(BaseLogged):
                     error_msg = f"Invalid parameter in options: {key}. " \
                                 f"Use set_advanced_options() for advanced parameters."
                     self._log_error(error_msg)
-                    raise ValueError(error_msg)
                     
         # MMA 内部状态
         self._epoch = 0
         self._low = None
         self._upp = None
         
-    def _initialize_problem_dependent_params(self, n: int = None) -> None:
+    def _initialize_problem_dependent_params(self, n: int) -> None:
         """初始化依赖于问题规模的参数"""
-        if n is None:
-            n = self._filter.mesh.number_of_cells()
-        
-        advanced_params = {}
-        
+
+        # 只在参数未设置时初始化默认值
         if self.options.n is None:
-            advanced_params['n'] = n
-        if self.options.xmin is None:
-            advanced_params['xmin'] = bm.zeros((n, 1))
-        if self.options.xmax is None:
-            advanced_params['xmax'] = bm.ones((n, 1))
-            
-        if advanced_params:  # 只有当有参数需要设置时才调用
-            # 暂时禁用警告
+            # 设置所有默认值
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                self.options.set_advanced_options(**advanced_params)
+                self.options.set_advanced_options(
+                                                n=n,
+                                                xmin=bm.zeros((n, 1)),
+                                                xmax=bm.ones((n, 1)),
+                                                a=bm.zeros((self.options.m, 1)),
+                                                c=1e4 * bm.ones((self.options.m, 1)),
+                                                d=bm.zeros((self.options.m, 1))
+                                            )
     
     def optimize(self, 
                 density_distribution: Union[Function, TensorLike], 
@@ -277,8 +261,18 @@ class MMAOptimizer(BaseLogged):
         tol = self.options.tolerance
 
         rho = density_distribution
-
-        self._initialize_problem_dependent_params(n=rho.shape[0])
+        
+        # 检查或初始化问题相关参数
+        if self.options.n is None:
+            # 未设置高级参数，使用默认值
+            self._initialize_problem_dependent_params(n=rho.shape[0])
+        else:
+            # 已设置高级参数，检查一致性
+            if self.options.n != rho.shape[0]:
+                error_msg = (f"设计变量数量不匹配: "
+                            f"设置的 n={self.options.n}, "
+                            f"实际的 n={rho.shape[0]}")
+                self._log_error(error_msg)
         
         # 初始化物理密度
         if isinstance(rho, Function):

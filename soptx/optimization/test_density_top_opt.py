@@ -58,14 +58,14 @@ class DensityTopOptTest(BaseLogged):
         integration_order = space_degree + 1
         
         density_location = 'lagrange_interpolation_point'  # 'lagrange_interpolation_point', 'element'
-        interpolation_order = 1
+        density_interpolation_order = 1
         relative_density = 0.5
 
         volume_fraction = 0.5
         penalty_factor = 3.0
 
-        optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 500
+        optimizer_algorithm = 'oc'  # 'oc', 'mma'
+        max_iterations = 20
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
 
@@ -109,7 +109,7 @@ class DensityTopOptTest(BaseLogged):
         rho = interpolation_scheme.setup_density_distribution(
                                                 mesh=opt_mesh,
                                                 relative_density=relative_density,
-                                                interpolation_order=interpolation_order,
+                                                interpolation_order=density_interpolation_order,
                                             )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -158,16 +158,17 @@ class DensityTopOptTest(BaseLogged):
                         )
 
             # 设置高级参数 (可选)
-            design_vars = rho.shape[0]
+            design_variables_num = rho.shape[0]
+            constraints_num = 1
             optimizer.options.set_advanced_options(
-                                    m=1,
-                                    n=design_vars,
-                                    xmin=bm.zeros((design_vars, 1)),
-                                    xmax=bm.ones((design_vars, 1)),
+                                    m=constraints_num,
+                                    n=design_variables_num,
+                                    xmin=bm.zeros((design_variables_num, 1)),
+                                    xmax=bm.ones((design_variables_num, 1)),
                                     a0=1,
-                                    a=bm.zeros((1, 1)),
-                                    c=1e4 * bm.ones((1, 1)),
-                                    d=bm.zeros((1, 1)),
+                                    a=bm.zeros((constraints_num, 1)),
+                                    c=1e4 * bm.ones((constraints_num, 1)),
+                                    d=bm.zeros((constraints_num, 1)),
                                 )
         
         elif optimizer_algorithm == 'oc':

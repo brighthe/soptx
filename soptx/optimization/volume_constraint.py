@@ -24,8 +24,8 @@ class VolumeConstraint(BaseLogged):
         self._mesh = self._analyzer._mesh
         self._scalar_space = self._analyzer._scalar_space
         self._interpolation_scheme = self._analyzer._interpolation_scheme
-        self._density_location = self._interpolation_scheme._density_location
         self._integration_order = self._analyzer._integration_order
+        self._density_location = self._interpolation_scheme._density_location        
 
     #####################################################################################################
     # 属性访问器
@@ -176,9 +176,12 @@ class VolumeConstraint(BaseLogged):
         elif self._density_location == 'lagrange_interpolation_point':
 
             qf = self._mesh.quadrature_formula(self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()      
+            bcs, ws = qf.get_quadrature_points_and_weights()
 
-            N = self._mesh.shape_function(bcs)                    # (NQ, LDOF)
+            density_space = physical_density.space
+            space_degree = density_space.p
+      
+            N = self._mesh.shape_function(bcs=bcs, p=space_degree)          # (NQ, LDOF)
 
             if isinstance(self._mesh, SimplexMesh):
                 dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, N) # (NC, LDOF)
@@ -189,11 +192,10 @@ class VolumeConstraint(BaseLogged):
                 detJ = bm.linalg.det(J)                               # (NC, NQ)
                 dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, N)      # (NC, LDOF)
             
-            lagrange_space = physical_density.space
-            gdof = lagrange_space.number_of_global_dofs()  
-            cell2dof = lagrange_space.cell_to_dof() # (NC, LDOF)
+            gdof = density_space.number_of_global_dofs()  
+            cell2dof = density_space.cell_to_dof() # (NC, LDOF)
 
-            dg = bm.zeros((gdof,), dtype=bm.float64, device=self._mesh.device)
+            dg = bm.zeros((gdof, ), dtype=bm.float64, device=self._mesh.device)
             dg = bm.add_at(dg, cell2dof.reshape(-1), dg_e.reshape(-1)) # (GDOF,)
 
             return dg

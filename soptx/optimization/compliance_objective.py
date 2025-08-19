@@ -97,6 +97,9 @@ class ComplianceObjective(BaseLogged):
             dc = bm.zeros((gdof_rho,), dtype=uhe.dtype, device=uhe.device)
             dc = bm.add_at(dc, cell2dof.reshape(-1), dc_e.reshape(-1))
 
+            if bm.any(dc > 1e-12):
+                self._log_error(f"目标函数梯度中存在正值, 可能导致目标函数上升")
+
             self._log_info(f"ComplianceObjective derivative: dc shape is (GDOF_rho, ) = {dc.shape}")
 
             return dc[:]

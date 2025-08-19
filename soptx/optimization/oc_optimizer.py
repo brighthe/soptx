@@ -1,5 +1,4 @@
 import warnings
-from dataclasses import dataclass
 from time import time
 from typing import Optional, Union, Tuple
 
@@ -13,15 +12,16 @@ from ..optimization.tools import OptimizationHistory
 from ..regularization.filter import Filter
 from ..utils.base_logged import BaseLogged
 
-@dataclass
 class OCOptions:
     """OC 算法的配置选项"""
-    # 用户级参数：直接暴露给用户
-    max_iterations: int = 100     # 最大迭代次数
-    tolerance: float = 1e-3       # 收敛容差
 
     def __init__(self):
-        """初始化高级参数的默认值"""
+        """初始化参数的默认值"""
+        # OC 算法的用户级参数
+        self.max_iterations = 200     # 最大迭代次数
+        self.tolerance = 0.001        # 收敛容差
+
+        # OC 算法的高级参数
         self._move_limit = 0.2
         self._damping_coef = 0.5
         self._initial_lambda = 1e9
@@ -102,7 +102,6 @@ class OCOptimizer(BaseLogged):
                     error_msg = f"Invalid parameter in options: {key}. " \
                                 f"Use set_advanced_options() for advanced parameters."
                     self._log_error(error_msg)
-                    raise ValueError(error_msg)
 
     def optimize(self, 
                 density_distribution: Union[Function, TensorLike], **kwargs
@@ -216,9 +215,6 @@ class OCOptimizer(BaseLogged):
             bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12)):
             self._log_error(f"输入密度超出合理范围 [0, 1]: "
                             f"range=[{bm.min(rho):.2e}, {bm.max(rho):.2e}]")
-            
-        if bm.any(dc > 1e-12):
-            self._log_error(f"目标函数梯度中存在正值, 可能导致目标函数上升")
 
         # 使用绝对值避免负数开方
         B_e = -dc / (dg * lmid)
