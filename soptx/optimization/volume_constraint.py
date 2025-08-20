@@ -108,9 +108,9 @@ class VolumeConstraint(BaseLogged):
 
                 return current_volume
             
-            elif self._density_location == 'lagrange_interpolation_point':
-
-                space = physical_density.space
+            elif self._density_location in ['lagrange_interpolation_point', 
+                                            'berstein_interpolation_point', 
+                                            'shepard_interpolation_point']:
 
                 qf = self._mesh.quadrature_formula(self._integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
@@ -173,7 +173,9 @@ class VolumeConstraint(BaseLogged):
 
             return dg
         
-        elif self._density_location == 'lagrange_interpolation_point':
+        elif self._density_location in ['lagrange_interpolation_point', 
+                                        'berstein_interpolation_point', 
+                                        'shepard_interpolation_point']:
 
             qf = self._mesh.quadrature_formula(self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()

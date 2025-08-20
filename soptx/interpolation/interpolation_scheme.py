@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any, Literal, List, Union
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod, cartesian
 from fealpy.typing import TensorLike
-from fealpy.functionspace import Function, LagrangeFESpace
+from fealpy.functionspace import Function, LagrangeFESpace, BernsteinFESpace
 from fealpy.mesh import HomogeneousMesh
 
 from .linear_elastic_material import LinearElasticMaterial
@@ -181,6 +181,33 @@ class MaterialInterpolationScheme(BaseLogged):
         
         return density_dist
     
+    @setup_density_distribution.register('berstein_interpolation_point')
+    def setup_density_distribution(self,
+                                   mesh: HomogeneousMesh,
+                                   relative_density: float = 1.0,
+                                   integration_order: int = None,
+                                   interpolation_order: int = None,
+                                   **kwargs,
+                                ) -> Function:
+        "节点密度 (Berstein 插值)"
+        if interpolation_order is None:
+            error_msg = "'interpolation_point' density distribution requires 'interpolation_order' parameter"
+            self._log_error(error_msg)
+        
+        if integration_order is not None:
+            warn_msg = f"Interpolation point density distribution does not require 'integration_order', provided integration_order={integration_order} will be ignored"
+            self._log_warning(warn_msg)
+
+        space = BernsteinFESpace(mesh, p=interpolation_order, ctype='C')
+        gdof = space.number_of_global_dofs()
+        density_tensor = bm.full((gdof, ), relative_density, dtype=bm.float64, device=mesh.device)
+
+        density_dist = space.function(density_tensor)
+
+        self._log_info(f"Continuous density: shape={density_dist.shape}, value={relative_density}, p={interpolation_order}")
+        
+        return density_dist
+    
     @setup_density_distribution.register('shepard_interpolation_point')
     def setup_density_distribution(self,
                                    mesh: HomogeneousMesh,
@@ -238,7 +265,9 @@ class MaterialInterpolationScheme(BaseLogged):
             E0 = material.youngs_modulus
             simp_map = density_distribution[:] ** penalty_factor * E0 / E0
 
-            if self._density_location == 'interpolation_point':
+            if self._density_location in ['lagrange_interpolation_point', 
+                                           'berstein_interpolation_point', 
+                                           'shepard_interpolation_point']:
                 # 如果是插值点密度分布, 则需要将结果转换为 Function
                 density_space = density_distribution.space
                 msimp_map = density_space.function(msimp_map)
@@ -268,7 +297,9 @@ class MaterialInterpolationScheme(BaseLogged):
             Emin = void_youngs_modulus
             msimp_map = (Emin + density_distribution[:] ** penalty_factor * (E0 - Emin)) / E0
 
-            if self._density_location == 'lagrange_interpolation_point':
+            if self._density_location in ['lagrange_interpolation_point', 
+                                          'berstein_interpolation_point', 
+                                          'shepard_interpolation_point']:
                 # 如果是插值点密度分布, 则需要将结果转换为 Function
                 density_space = density_distribution.space
                 msimp_map = density_space.function(msimp_map)
@@ -292,24 +323,38 @@ class MaterialInterpolationScheme(BaseLogged):
 
     def interpolate_derivative(self,
                         material: LinearElasticMaterial, 
-                        density_distribution: Function,
+                        density_distribution: Union[Function, TensorLike],
                     ) -> TensorLike:
         """获取当前插值方法的导数对应的系数"""
 
         method = self.interpolation_method
-        p = self._options['penalty_factor'] 
+        p = self._options['penalty_factor']
 
-        if method == 'simp':
-            dval = p * density_distribution[:] ** (p - 1)
-
-            return dval
-
-        elif method == 'msimp':
-            E0 = material.youngs_modulus
-            Emin = self._options['void_youngs_modulus']
-            dval = p * density_distribution[:] ** (p - 1) * (E0 - Emin) / E0
+        if self._density_location == 'element':
             
-            return dval
+            rho_element = density_distribution[:]
+            if method == 'simp':
+                dval = p * rho_element[:] ** (p - 1)
+                return dval
+            elif method == 'msimp':
+                E0 = material.youngs_modulus
+                Emin = self._options['void_youngs_modulus']
+                dval = p * rho_element[:] ** (p - 1) * (E0 - Emin) / E0
+                return dval
+            
+        elif self._density_location in ['lagrange_interpolation_point', 
+                                        'berstein_interpolation_point', 
+                                        'shepard_interpolation_point']:
+
+            rho_q = density_distribution[:]
+            if method == 'simp':
+                dval = p * rho_q[:] ** (p - 1)
+                return dval
+            elif method == 'msimp':
+                E0 = material.youngs_modulus
+                Emin = self._options['void_youngs_modulus']
+                dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
+                return dval
 
 
     ###########################################################################################################

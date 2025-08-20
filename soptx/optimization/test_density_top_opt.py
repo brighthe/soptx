@@ -45,31 +45,34 @@ class DensityTopOptTest(BaseLogged):
     def set_relative_density(self, relative_density: float):
         self.relative_density = relative_density
 
-    @variantmethod('test_point_density')
+    @variantmethod('test_nodal_variable')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 4, 0, 2]
 
         T = -1.0
         E, nu = 1000.0, 0.3
 
+        # 'uniform_tri', 'uniform_quad', 'uniform_hex'
         nx, ny = 120, 60
+        mesh_type = 'uniform_quad'
+        # mesh_type = 'uniform_tri'
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 1
         
-        density_location = 'lagrange_interpolation_point'  # 'lagrange_interpolation_point', 'element'
+        # 'lagrange_interpolation_point', 'berstein_interpolation_point', shepard_interpolation_point, 'element'
+        density_location = 'lagrange_interpolation_point'  
         density_interpolation_order = 1
         relative_density = 0.5
 
         volume_fraction = 0.5
         penalty_factor = 3.0
 
-        optimizer_algorithm = 'oc'  # 'oc', 'mma'
-        max_iterations = 20
+        optimizer_algorithm = 'mma'  # 'oc', 'mma'
+        max_iterations = 200
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
 
-        # 设置 pde
         from soptx.model.cantilever_2d import CantileverBeamMiddle2dData
         pde = CantileverBeamMiddle2dData(
                             domain=domain,
@@ -77,7 +80,7 @@ class DensityTopOptTest(BaseLogged):
                             enable_logging=False
                         )
 
-        pde.init_mesh.set('uniform_quad')
+        pde.init_mesh.set(mesh_type)
 
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
 
@@ -191,8 +194,10 @@ class DensityTopOptTest(BaseLogged):
                                         bisection_tol=1e-3
                                     )
 
-        self._log_info(f"开始密度拓扑优化, 密度类型={density_location}, 密度场自由度={rho.shape}, " 
-                       f"位移网格尺寸={fe_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 物理场自由度={fe_dofs}, "
+        self._log_info(f"开始密度拓扑优化, "
+                       f"网格类型={mesh_type}, 密度类型={density_location}, " 
+                       f"密度网格尺寸={opt_mesh.number_of_cells()}, 密度插值次数={density_interpolation_order}, 密度场自由度={rho.shape}, " 
+                       f"位移网格尺寸={fe_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
                        f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
@@ -520,12 +525,14 @@ class DensityTopOptTest(BaseLogged):
     
 
     @run.register('test_matlab_code')
-    def run(self, paramter_type: int = 1) -> Union[TensorLike, OptimizationHistory]:
+    def run(self, paramter_type: int = 0) -> Union[TensorLike, OptimizationHistory]:
         """ 测试与 matlab 代码是否一致 """
 
         if paramter_type == 0:
             domain = [0, 60, 0, 20, 0, 4]
             nx, ny, nz = 60, 20, 4
+            mesh_type = 'uniform_hex'
+
             density_location = 'element'  
             space_degree = 1
             integration_order = space_degree + 1
@@ -533,7 +540,10 @@ class DensityTopOptTest(BaseLogged):
             relative_density = 0.3
             volume_fraction = 0.3
             penalty_factor = 3.0
-            filter_type = 'sen' # 'none', 'density'
+    
+            optimizer_algorithm = 'oc'  # 'oc', 'mma'
+    
+            filter_type = 'sensitivity' # 'none', 'density', 'sensitivity'
             
             # 设置 pde
             from soptx.model.cantilever_3d import CantileverBeam3dData
@@ -543,7 +553,7 @@ class DensityTopOptTest(BaseLogged):
                                 enable_logging=False
                             )
 
-            pde.init_mesh.set('uniform_hex')
+            pde.init_mesh.set(mesh_type)
 
             fe_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
             opt_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
@@ -666,24 +676,25 @@ class DensityTopOptTest(BaseLogged):
                                 'tolerance': 1e-2,
                             }
                         )
-
             # 设置高级参数 (可选)
-            NC = opt_mesh.number_of_cells()
+            design_variables_num = rho.shape[0]
+            constraints_num = 1
             optimizer.options.set_advanced_options(
-                                    m=1,
-                                    n=NC,
-                                    xmin=bm.zeros((NC, 1)),
-                                    xmax=bm.ones((NC, 1)),
+                                    m=constraints_num,
+                                    n=design_variables_num,
+                                    xmin=bm.zeros((design_variables_num, 1)),
+                                    xmax=bm.ones((design_variables_num, 1)),
                                     a0=1,
-                                    a=bm.zeros((1, 1)),
-                                    c=1e4 * bm.ones((1, 1)),
-                                    d=bm.zeros((1, 1)),
+                                    a=bm.zeros((constraints_num, 1)),
+                                    c=1e4 * bm.ones((constraints_num, 1)),
+                                    d=bm.zeros((constraints_num, 1)),
                                 )
         
-        self._log_info(f"开始密度拓扑优化, 密度类型={density_location}, 密度场自由度={rho.shape}, "
-                       f"体积分数={volume_fraction}, " 
-                       f"网格尺寸={nx}*{ny}, 位移有限元空间阶数={space_degree}, 物理场自由度={fe_dofs}, "
-                       f"优化算法={optimizer_algorithm}, "
+        self._log_info(f"开始密度拓扑优化, "
+                       f"网格类型={mesh_type}, 密度类型={density_location}, " 
+                       f"密度网格尺寸={opt_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+                       f"位移网格尺寸={fe_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
+                       f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = optimizer.optimize(density_distribution=rho)
@@ -717,11 +728,11 @@ if __name__ == "__main__":
     test.set_volume_fraction(0.5)
     test.set_relative_density(0.5)
 
-    test.run.set('test_point_density')
-    rho_opt, history = test.run()
+    # test.run.set('test_nodal_variable')
+    # rho_opt, history = test.run()
 
-    # test.run.set('test_matlab_code')
-    # rho, history = test.run()
+    test.run.set('test_matlab_code')
+    rho, history = test.run()
     
     # test.run.set('test_volume_constraint')
     # test.run()

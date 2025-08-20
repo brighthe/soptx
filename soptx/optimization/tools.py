@@ -117,7 +117,10 @@ def save_optimization_history(mesh: HomogeneousMesh,
             # 单元密度情况：形状为 (NC, )
             mesh.celldata['density'] = physical_density
 
-        elif density_location == 'lagrange_interpolation_point':
+        elif density_location in ['lagrange_interpolation_point', 
+                                'berstein_interpolation_point', 
+                                'shepard_interpolation_point']:
+            
             # 节点密度情况：形状为 (GDOF_rho, )
             rho = physical_density  # (GDOF_rho, )
             qf = mesh.quadrature_formula(2)

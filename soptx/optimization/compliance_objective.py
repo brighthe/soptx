@@ -81,13 +81,17 @@ class ComplianceObjective(BaseLogged):
         density_location = self._interpolation_scheme.density_location
 
         if density_location == 'element':
+            
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
 
             return dc[:]
         
-        elif density_location == 'lagrange_interpolation_point':
+        elif density_location in ['lagrange_interpolation_point', 
+                                  'berstein_interpolation_point', 
+                                   'shepard_interpolation_point']:
+            
             dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_ke, uhe)
 
             density_space = density_distribution.space
@@ -110,6 +114,10 @@ class ComplianceObjective(BaseLogged):
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")
         
             return dc[:]
+        
+        else:
+            error_msg = f"Unknown density location: {density_location}"
+            self._log_error(error_msg)
     
     def _auto_differentiation(self, 
             density_distribution: Function, 

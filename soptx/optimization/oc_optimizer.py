@@ -149,9 +149,6 @@ class OCOptimizer(BaseLogged):
 
             # 过滤约束函数灵敏度
             con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
-            
-            if iter_idx == 17:
-                print("----------------------------")
 
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda

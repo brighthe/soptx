@@ -12,8 +12,12 @@ class InterpolationSchemeTest():
     def __init__(self) -> None:
         pass
     
-    @variantmethod('test_point_density')
-    def run(self, density_location: str, interpolation_order: int) -> None:
+    @variantmethod('test_nodal_variable')
+    def run(self) -> None:
+        """测试不同插值下, 节点密度和灵敏度的性质"""
+
+        density_location = 'lagrange_interpolation_point'  # 'lagrange_interpolation_point' or 'shepard_interpolation_point'
+        interpolation_order = 2  # 1 or 2
         
         domain_physical = [0, 1, 0, 1]
         opt_mesh = QuadrangleMesh.from_box(box=domain_physical, nx=1, ny=1)
@@ -117,8 +121,8 @@ class InterpolationSchemeTest():
         
 if __name__ == "__main__":
     test = InterpolationSchemeTest()
-    # test.run.set('test_point_density')
-    # test.run(density_location='lagrange_interpolation_point', interpolation_order=2)
+    test.run.set('test_nodal_variable')
+    test.run()
 
-    test.run.set('test_dual_mesh')
-    test.run(density_location='gauss_integration_point')
+    # test.run.set('test_dual_mesh')
+    # test.run(density_location='gauss_integration_point')
