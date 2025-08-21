@@ -54,22 +54,22 @@ class DensityTopOptTest(BaseLogged):
 
         # 'uniform_tri', 'uniform_quad', 'uniform_hex'
         nx, ny = 120, 60
-        mesh_type = 'uniform_quad'
-        # mesh_type = 'uniform_tri'
+        # mesh_type = 'uniform_quad'
+        mesh_type = 'uniform_tri'
 
         space_degree = 2
         integration_order = space_degree + 1
         
         # 'lagrange_interpolation_point', 'berstein_interpolation_point', shepard_interpolation_point, 'element'
-        density_location = 'lagrange_interpolation_point'  
-        density_interpolation_order = 1
+        density_location = 'berstein_interpolation_point'  
+        density_interpolation_order = 2
         relative_density = 0.5
 
         volume_fraction = 0.5
         penalty_factor = 3.0
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 200
+        max_iterations = 300
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
 
