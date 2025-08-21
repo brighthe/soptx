@@ -5,6 +5,8 @@ nelz = 4;
 volfrac = 0.3;
 penal = 3;
 rmin = 1.5;
+
+% ft = 0;  % 无滤波器
 % ft = 1;     % 密度滤波器
 ft = 2;   % 灵敏度滤波器
 
@@ -80,7 +82,6 @@ change = 1;
 
 %% START ITERATION
 while change > tolx && loop < maxloop
-    tic;  % Start timing the iteration
     loop = loop + 1;
 
     % FE-ANALYSIS
@@ -111,7 +112,7 @@ while change > tolx && loop < maxloop
         xnewshow = xnew(:);
         if ft == 1
             xPhys(:) = (H*xnew(:))./Hs;
-        elseif ft == 2
+        elseif ft == 0 || ft == 2
             xPhys = xnew;
         end
         if sum(xPhys(:)) > volfrac*nele, l1 = lmid; else l2 = lmid; end
@@ -120,15 +121,11 @@ while change > tolx && loop < maxloop
     change = max(abs(xnew(:) - x(:)));
     x = xnew;
 
-	% PRINT RESULTS
-	iter_time = toc;  % Stop timing and get iteration time
-	fprintf(' It.:%5i Obj.:%11.12f Vol.:%8.4f ch.:%7.3f Time:%7.3f sec\n', loop, c, mean(xPhys(:)), change, iter_time);
+    % PRINT RESULTS
+    fprintf(' It.:%5i Obj.:%11.6f Vol.:%11.6f ch.:%11.6f\n', loop, c, mean(xPhys(:)), change);
 
-    % PLOT DENSITIES
-    if displayflag, clf; display_3D(xPhys); end
 end
 
 % 显示最终结果
 clf;
 display_3D(xPhys);
-title('Final Optimized Design');

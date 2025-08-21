@@ -6,9 +6,9 @@ volfrac = 0.3;
 penal = 3;
 rmin = 1.5;
 
-ft = 0;  % 无滤波器
+% ft = 0;  % 无滤波器
 % ft = 1;     % 密度滤波器
-% ft = 2;   % 灵敏度滤波器
+ft = 2;   % 灵敏度滤波器
 
 % USER-DEFINED LOOP PARAMETERS
 maxloop = 500;    % Maximum number of iterations
@@ -104,10 +104,6 @@ while change > tolx && loop < maxloop
     K = (K+K')/2;
     U(freedofs,:) = K(freedofs,freedofs) \ F(freedofs,:);
 
-    % fprintf('xPhys: %11.10f\n', mean(xPhys(:)));
-    % fprintf('K: %11.10f\n', sum(sum(abs(KFULL))));
-    % fprintf('u: %11.10f\n', mean(U(:)));
-
     % OBJECTIVE FUNCTION AND SENSITIVITY ANALYSIS
     ce = reshape(sum((U(edofMat)*KE).*U(edofMat),2), [nely, nelx, nelz]);
     c = sum(sum(sum((Emin + xPhys .^ penal * (E0 - Emin)) .* ce)));
@@ -130,28 +126,10 @@ while change > tolx && loop < maxloop
     dfdx  = dv(:)' / (volfrac*nele);
     [xmma, ~, ~, ~, ~, ~, ~, ~, ~, low, upp] = ...
             mmasub(m, n, loop, xval, xmin, xmax, xold1, xold2, f0val, df0dx, fval, dfdx, low, upp, a0, a, c_MMA, d);
+    
     % Update MMA Variables
     xnew     = reshape(xmma, nely, nelx, nelz);
-    % if loop == 1 || loop == 2
-    % % if loop == 14 || loop == 11 || loop == 12 || loop == 13 || loop == 36 || loop == 37 || loop == 38
-    %     fprintf('x: %11.10f\n', mean(x(:)))
-    %     fprintf('xPhys: %11.10f\n', mean(xPhys(:)))
-    %     fprintf('xval: %11.10f\n', mean(xval(:)));
-    %     fprintf('df0dx: %11.10f\n', mean(df0dx(:)));
-    %     fprintf('fval: %11.10f\n', mean(fval(:)))
-    %     fprintf('dfdx: %11.10f\n', mean(dfdx(:)));
-    %     fprintf('low: %11.10f\n', mean(low(:)));
-    %     fprintf('upp: %11.10f\n', mean(upp(:)));
-    %     fprintf('xnew: %11.10f\n', mean(xnew(:)))
-    %     fprintf('------------------')
-    % end
-    % if loop == 106 || loop == 107 || loop == 108 || loop == 109
-    %     fprintf('xPhys: %11.10f\n', mean(xPhys(:)));
-    %     fprintf('u: %11.10f\n', mean(U(:)));
-    %     fprintf('fval: %11.10f\n', mean(fval(:)))
-    %     fprintf('xnew: %11.10f\n', mean(xnew(:)))
-    %     fprintf('------------------')
-    % end
+
     if ft == 1
         xPhys(:) = (H*xnew(:))./Hs;
     elseif ft == 0 || ft == 2
