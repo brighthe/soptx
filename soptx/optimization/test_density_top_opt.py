@@ -57,7 +57,7 @@ class DensityTopOptTest(BaseLogged):
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_tri'
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 1
         
         # 'lagrange_interpolation_point', 'berstein_interpolation_point', shepard_interpolation_point, 'element'
@@ -541,7 +541,7 @@ class DensityTopOptTest(BaseLogged):
             volume_fraction = 0.3
             penalty_factor = 3.0
     
-            optimizer_algorithm = 'oc'  # 'oc', 'mma'
+            optimizer_algorithm = 'mma'  # 'oc', 'mma'
     
             filter_type = 'sensitivity' # 'none', 'density', 'sensitivity'
             
@@ -728,11 +728,11 @@ if __name__ == "__main__":
     test.set_volume_fraction(0.5)
     test.set_relative_density(0.5)
 
-    # test.run.set('test_nodal_variable')
-    # rho_opt, history = test.run()
+    test.run.set('test_nodal_variable')
+    rho_opt, history = test.run()
 
-    test.run.set('test_matlab_code')
-    rho, history = test.run()
+    # test.run.set('test_matlab_code')
+    # rho, history = test.run()
     
     # test.run.set('test_volume_constraint')
     # test.run()

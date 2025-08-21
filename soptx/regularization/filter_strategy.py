@@ -120,16 +120,16 @@ class SensitivityStrategy(_FilterStrategy):
         if self._density_location == 'element':
 
             # 对于通用的 MMA 算法，体积约束越需要过滤
-            cell_measure = self._integration_weights
+            # cell_measure = self._integration_weights
 
-            weighted_con_grad = rho_Phys[:] * con_grad / cell_measure
-            numerator = self._H.matmul(weighted_con_grad)
+            # weighted_con_grad = rho_Phys[:] * con_grad / cell_measure
+            # numerator = self._H.matmul(weighted_con_grad)
 
-            epsilon = 1e-3
-            stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
-            denominator = (stability_factor / cell_measure) * self._Hs
+            # epsilon = 1e-3
+            # stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
+            # denominator = (stability_factor / cell_measure) * self._Hs
 
-            con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
+            # con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 
             # 对于简单的 OC 算法，体积约束不需要过滤
             return con_grad
