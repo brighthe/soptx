@@ -212,6 +212,8 @@ def plot_optimization_history(history, save_path=None, show=True, title=None,
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     leg = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=fontsize+6)
+
+    plt.tight_layout()
     
     # 创建放大子图
     # 找到适合放大的范围
@@ -232,8 +234,6 @@ def plot_optimization_history(history, save_path=None, show=True, title=None,
                     sub_ax.set_ylim(y_min, y_max)
                 sub_ax.grid(True, linestyle='--', alpha=0.4)
                 sub_ax.tick_params(labelsize=fontsize-2)
-    
-    plt.tight_layout()
     
     if save_path is not None:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')

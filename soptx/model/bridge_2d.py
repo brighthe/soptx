@@ -82,7 +82,7 @@ class Bridge2dData(PDEBase):
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         # 论文中使用约4100个JM单元（对于半域）
         nx = kwargs.get('nx', 64)  # 可调整以匹配论文的网格密度
-        ny = kwargs.get('ny', 32)
+        ny = kwargs.get('n y', 32)
         threshold = kwargs.get('threshold', None)
         device = kwargs.get('device', 'cpu')
 
