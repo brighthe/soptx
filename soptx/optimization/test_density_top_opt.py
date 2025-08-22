@@ -226,23 +226,25 @@ class DensityTopOptTest(BaseLogged):
         T = -1.0
         E, nu = 1.0, 0.3
 
-        nx, ny = 30, 10
+        # nx, ny = 30, 10
         # nx, ny = 60, 20
-        # nx, ny = 90, 30
+        nx, ny = 90, 30
         # mesh_type = 'uniform_quad'
-        mesh_type = 'uniform_tri'
+        # mesh_type = 'uniform_aligned_tri'
+        mesh_type = 'uniform_crisscross_tri'
 
-        space_degree = 1
+        space_degree = 5
         integration_order = space_degree + 1
-        
-        density_location = 'element'  
+
+        # 'lagrange_interpolation_point', 'element'
+        density_location = 'element'
         relative_density = 0.5
 
         volume_fraction = 0.5
         penalty_factor = 3.0
 
         optimizer_algorithm = 'oc'  # 'oc', 'mma'
-        max_iterations = 300
+        max_iterations = 500
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
 
@@ -259,6 +261,8 @@ class DensityTopOptTest(BaseLogged):
         
         pde.init_mesh.set(mesh_type)
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        # fe_mesh.to_vtk('fe_mesh.vtu')
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(

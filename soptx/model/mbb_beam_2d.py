@@ -84,7 +84,7 @@ class HalfMBBBeam2dData(PDEBase):
 
         return mesh
     
-    @init_mesh.register('uniform_tri')
+    @init_mesh.register('uniform_aligned_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
         nx = kwargs.get('nx', 60)
         ny = kwargs.get('ny', 20)
@@ -92,9 +92,89 @@ class HalfMBBBeam2dData(PDEBase):
         device = kwargs.get('device', 'cpu')
 
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
+                                threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+    
+    # @init_mesh.register('uniform_crisscross_tri')
+    # def init_mesh(self, **kwargs) -> TriangleMesh:
+    #     nx = kwargs.get('nx', 60)
+    #     ny = kwargs.get('ny', 20)
+    #     device = kwargs.get('device', 'cpu')
+
+    #     node = bm.array([[0.0, 0.0],
+    #                     [1.0, 0.0],
+    #                     [1.0, 1.0],
+    #                     [0.0, 1.0]], dtype=bm.float64, device=device) 
+
+    #     cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device) 
+
+    #     qmesh = QuadrangleMesh(node, cell)
+    #     qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+    #     node = qmesh.entity('node')
+    #     cell = qmesh.entity('cell')
+    #     NN = qmesh.number_of_nodes()
+    #     NC = qmesh.number_of_cells()
+    #     bc = qmesh.entity_barycenter('cell') 
+    #     newNode = bm.concatenate([node, bc], axis=0)
+
+    #     newCell = bm.zeros((4*NC, 3), dtype=bm.int32, device=device) 
+    #     newCell[0:NC, 0] = range(NN, NN+NC)
+    #     newCell[0:NC, 1:3] = cell[:, 0:2]
+
+    #     newCell[NC:2*NC, 0] = range(NN, NN+NC)
+    #     newCell[NC:2*NC, 1:3] = cell[:, 1:3]
+
+    #     newCell[2*NC:3*NC, 0] = range(NN, NN+NC)
+    #     newCell[2*NC:3*NC, 1:3] = cell[:, 2:4]
+
+    #     newCell[3*NC:4*NC, 0] = range(NN, NN+NC)
+    #     newCell[3*NC:4*NC, 1:3] = cell[:, [3, 0]] 
+
+    #     mesh = TriangleMesh(newNode, newCell)
+
+    #     self._save_meshdata(mesh, 'uniform_cross_tri', nx=nx, ny=ny)
+
+    #     return mesh
+    
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        device = kwargs.get('device', 'cpu')
+        node = bm.array([[0.0, 0.0],
+                        [1.0, 0.0],
+                        [1.0, 1.0],
+                        [0.0, 1.0]], dtype=bm.float64, device=device) 
         
-        self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny)
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)     
+        
+        qmesh = QuadrangleMesh(node, cell)
+        qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+        import numpy as np
+        newCell = np.r_['0', 
+                lcell[:, [1, 2, 0]], 
+                lcell[:, [3, 0, 2]],
+                rcell[:, [0, 1, 3]],
+                rcell[:, [2, 3, 1]]]
+        
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return mesh
 
