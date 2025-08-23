@@ -19,14 +19,15 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
     @variantmethod('test_huzhang')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 8, 0, 4]
+        domain = [-4, 4, 0, 4]
 
-        T = -2.0
+        T = -1.0
         E, nu = 1.0, 0.35
 
         # 'uniform_tri', 'uniform_quad', 'uniform_hex'
-        nx, ny = 80, 40
+        nx, ny = 128, 64
         mesh_type = 'uniform_quad'
+        
         # mesh_type = 'uniform_tri'
 
         space_degree = 1
@@ -35,9 +36,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # 'lagrange_interpolation_point', 'berstein_interpolation_point', shepard_interpolation_point, 'element'
         density_location = 'lagrange_interpolation_point'  
         density_interpolation_order = 1
-        relative_density = 0.5
+        relative_density = 0.35
 
-        volume_fraction = 0.5
+        volume_fraction = 0.35
         penalty_factor = 3.0
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
@@ -179,7 +180,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/nodal_variable_{density_location}")
+        save_path = Path(f"{base_dir}/HuZhang_nu")
         save_path.mkdir(parents=True, exist_ok=True)
 
         

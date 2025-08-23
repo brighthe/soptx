@@ -266,7 +266,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             interpolate_diff_coef = self._interpolation_scheme.interpolate_derivative(
                                                     material=self._material, 
                                                     density_distribution=density_distribution
-                                                )
+                                                ) # (NC, )
 
             lea = LinearElasticIntegrator(material=self._material,
                                         coef = None,

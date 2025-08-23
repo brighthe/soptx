@@ -89,7 +89,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
         # 如果是函数, 需要将其插值到积分点处
         elif isinstance(coef, Function):
-            coef = coef(bcs)
+            coef = coef(bcs) # (MC, NQ)
             D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
         else:
             raise ValueError(f"Unsupported coefficient shape: {coef.shape}")

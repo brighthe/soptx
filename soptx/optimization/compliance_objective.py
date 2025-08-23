@@ -84,6 +84,9 @@ class ComplianceObjective(BaseLogged):
             
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
 
+            if bm.any(dc > 1e-12):
+                self._log_error(f"目标函数梯度中存在正值, 可能导致目标函数上升")
+
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
 
             return dc[:]
@@ -109,6 +112,7 @@ class ComplianceObjective(BaseLogged):
             return dc[:]
 
         elif density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
+
             dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
 
             self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")
@@ -116,6 +120,7 @@ class ComplianceObjective(BaseLogged):
             return dc[:]
         
         else:
+            
             error_msg = f"Unknown density location: {density_location}"
             self._log_error(error_msg)
     
