@@ -53,19 +53,19 @@ class DensityTopOptTest(BaseLogged):
             T = -1.0
             E, nu = 1.0, 0.3
 
-            nx, ny = 30, 10
+            # nx, ny = 30, 10
             # nx, ny = 60, 20
-            # nx, ny = 90, 30
-            # mesh_type = 'uniform_quad'
+            nx, ny = 90, 30
+            mesh_type = 'uniform_quad'
             # mesh_type = 'uniform_aligned_tri'
-            mesh_type = 'uniform_crisscross_tri'
+            # mesh_type = 'uniform_crisscross_tri'
 
-            space_degree = 3
+            space_degree = 2
             integration_order = space_degree + 1
 
             # 'lagrange_interpolation_point', 'berstein_interpolation_point',
-            density_location = 'berstein_interpolation_point'
-            density_interpolation_order = 2
+            density_location = 'lagrange_interpolation_point'
+            density_interpolation_order = 1
             relative_density = 0.5
 
             volume_fraction = 0.5
