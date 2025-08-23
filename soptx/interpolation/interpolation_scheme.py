@@ -236,21 +236,6 @@ class MaterialInterpolationScheme(BaseLogged):
         
         return density_dist
 
-    @setup_density_distribution.register('element_coscos')
-    def setup_density_distribution(self, 
-                                mesh: HomogeneousMesh,
-                                relative_density: float = None,
-                                integrator_order: int = None,
-                                **kwargs,
-                            ) -> Function:
-        """单元密度分布 (变体1)"""
-        element_space = LagrangeFESpace(mesh, p=0, ctype='D')
-        density_dist = element_space.interpolate(u=self._density_distribution_coscos)
-
-        self._log_info(f"此时的密度是分片常数函数, ")
-
-        return density_dist    
-
     @variantmethod('simp')
     def interpolate_map(self, 
                     material: LinearElasticMaterial, 

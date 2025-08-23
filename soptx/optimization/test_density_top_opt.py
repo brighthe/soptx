@@ -46,48 +46,86 @@ class DensityTopOptTest(BaseLogged):
         self.relative_density = relative_density
 
     @variantmethod('test_nodal_variable')
-    def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 4, 0, 2]
+    def run(self, parameter_type: str = 'element') -> Union[TensorLike, OptimizationHistory]:
 
-        T = -1.0
-        E, nu = 1000.0, 0.3
+        if parameter_type == "element":
+            domain = [0, 30, 0, 10]
+            T = -1.0
+            E, nu = 1.0, 0.3
 
-        # 'uniform_tri', 'uniform_quad', 'uniform_hex'
-        nx, ny = 120, 60
-        # mesh_type = 'uniform_quad'
-        mesh_type = 'uniform_tri'
+            nx, ny = 30, 10
+            # nx, ny = 60, 20
+            # nx, ny = 90, 30
+            # mesh_type = 'uniform_quad'
+            # mesh_type = 'uniform_aligned_tri'
+            mesh_type = 'uniform_crisscross_tri'
 
-        space_degree = 2
-        integration_order = space_degree + 1
-        
-        # 'lagrange_interpolation_point', 'berstein_interpolation_point', shepard_interpolation_point, 'element'
-        density_location = 'berstein_interpolation_point'  
-        density_interpolation_order = 2
-        relative_density = 0.5
+            space_degree = 3
+            integration_order = space_degree + 1
 
-        volume_fraction = 0.5
-        penalty_factor = 3.0
+            # 'lagrange_interpolation_point', 'berstein_interpolation_point',
+            density_location = 'berstein_interpolation_point'
+            density_interpolation_order = 2
+            relative_density = 0.5
 
-        optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 300
+            volume_fraction = 0.5
+            penalty_factor = 3.0
 
-        filter_type = 'none' # 'none', 'sensitivity', 'density'
+            optimizer_algorithm = 'mma'  # 'mma', 'mma'
+            max_iterations = 500
 
-        from soptx.model.cantilever_2d import CantileverBeamMiddle2dData
-        pde = CantileverBeamMiddle2dData(
-                            domain=domain,
-                            T=T, E=E, nu=nu,
-                            enable_logging=False
-                        )
+            filter_type = 'none' # 'none', 'sensitivity', 'density'
+
+            domain_length = domain[1] - domain[0]
+            rmin = 1.5 * (domain_length / nx)
+
+            from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
+            pde = HalfMBBBeam2dData(
+                                domain=domain,
+                                T=T, E=E, nu=nu,
+                                enable_logging=False
+                            )
+
+        elif parameter_type == "nodal":
+            domain = [0, 4, 0, 2]
+
+            T = -1.0
+            E, nu = 1000.0, 0.3
+
+            # 'uniform_tri', 'uniform_quad', 'uniform_hex'
+            nx, ny = 120, 60
+            # mesh_type = 'uniform_quad'
+            mesh_type = 'uniform_tri'
+
+            space_degree = 2
+            integration_order = space_degree + 1
+            
+            # 'lagrange_interpolation_point', 'berstein_interpolation_point', shepard_interpolation_point, 'element'
+            density_location = 'berstein_interpolation_point'  
+            density_interpolation_order = 2
+            relative_density = 0.5
+
+            volume_fraction = 0.5
+            penalty_factor = 3.0
+
+            optimizer_algorithm = 'mma'  # 'oc', 'mma'
+            max_iterations = 300
+
+            filter_type = 'none' # 'none', 'sensitivity', 'density'
+
+            domain_length = pde.domain[1] - pde.domain[0]
+            rmin = 1.5 * (domain_length / nx)
+
+            from soptx.model.cantilever_2d import CantileverBeamMiddle2dData
+            pde = CantileverBeamMiddle2dData(
+                                domain=domain,
+                                T=T, E=E, nu=nu,
+                                enable_logging=False
+                            )
 
         pde.init_mesh.set(mesh_type)
-
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        domain_length = pde.domain[1] - pde.domain[0]
-        rmin = 1.5 * (domain_length / nx)
-
-        # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
@@ -902,11 +940,11 @@ if __name__ == "__main__":
     test.set_volume_fraction(0.5)
     test.set_relative_density(0.5)
 
-    # test.run.set('test_nodal_variable')
-    # rho_opt, history = test.run()
-
-    test.run.set('test_element_variable')
+    test.run.set('test_nodal_variable')
     rho_opt, history = test.run()
+
+    # test.run.set('test_element_variable')
+    # rho_opt, history = test.run()
 
 
     # test.run.set('test_matlab_code')
