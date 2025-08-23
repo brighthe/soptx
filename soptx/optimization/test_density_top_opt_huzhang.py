@@ -22,7 +22,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         domain = [-4, 4, 0, 4]
 
         T = -1.0
-        E, nu = 1.0, 0.35
+        E, nu = 1.0, 0.49
 
         # 'uniform_tri', 'uniform_quad', 'uniform_hex'
         nx, ny = 128, 64
@@ -168,7 +168,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     )
 
         self._log_info(f"开始密度拓扑优化, "
-                       f"模型名称={pde.__class__.__name__}, "
+                       f"模型名称={pde.__class__.__name__}, 泊松比={pde.nu}, "
                        f"网格类型={mesh_type}, 密度类型={density_location}, " 
                        f"密度网格尺寸={opt_mesh.number_of_cells()}, 密度插值次数={density_interpolation_order}, 密度场自由度={rho.shape}, " 
                        f"位移网格尺寸={fe_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
@@ -180,7 +180,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/HuZhang_nu")
+        save_path = Path(f"{base_dir}/HuZhang_")
         save_path.mkdir(parents=True, exist_ok=True)
 
         
