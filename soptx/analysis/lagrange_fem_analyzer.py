@@ -290,7 +290,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if (bm.any(bm.isnan(rho_q[:])) or bm.any(bm.isinf(rho_q[:])) or 
                 bm.any(rho_q[:] < -1e-12) or bm.any(rho_q[:] > 1 + 1e-12)):
                 self._log_error(f"节点密度在高斯点处的值超出范围 [0, 1]: "
-                                f"range=[{bm.min(phi_rho):.2e}, {bm.max(phi_rho):.2e}]")
+                                f"range=[{bm.min(rho_q):.2e}, {bm.max(rho_q):.2e}]")
 
             # 材料插值的导数系数在高斯点处的值
             interpolate_diff_coef_q = self._interpolation_scheme.interpolate_derivative(
@@ -330,28 +330,43 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             return diff_ke
 
-        elif density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
+        elif density_location in ['gauss_integration_point']:
             
             mesh = self._mesh
             qf = mesh.quadrature_formula(self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
 
+            rho_q = density_distribution # (NC, NQ)
+
+            if (bm.any(bm.isnan(rho_q[:])) or bm.any(bm.isinf(rho_q[:])) or 
+                bm.any(rho_q[:] < -1e-12) or bm.any(rho_q[:] > 1 + 1e-12)):
+                self._log_error(f"高斯点处的密度值超出范围 [0, 1]: "
+                                f"range=[{bm.min(rho_q):.2e}, {bm.max(rho_q):.2e}]")
+
+            # 材料插值的导数系数在高斯点处的值
+            interpolate_diff_coef_q = self._interpolation_scheme.interpolate_derivative(
+                                                                material=self._material, 
+                                                                density_distribution=rho_q
+                                                            ) # (NC, NQ) 
+
             D0 = self._material.elastic_matrix()[0, 0]
             dof_priority = self.tensor_space.dof_priority
             scalar_space = self.tensor_space.scalar_space
             gphi = scalar_space.grad_basis(bcs, variable='x')
-            B = self._material.strain_displacement_matrix(dof_priority=dof_priority, gphi=gphi)
+            B = self._material.strain_displacement_matrix(dof_priority=dof_priority, gphi=gphi) # 2D: (NC, NQ, 3, LDOF_u), 3D: (NC, NQ, 6, LDOF_u)
+
+            BDB = bm.einsum('cqki, kl, cqlj -> cqij', B, D0, B)
 
             if isinstance(mesh, SimplexMesh):
                 cm = mesh.entity_measure('cell')
-                diff_ke = bm.einsum('q, c, cq, cqki, kl, cqlj -> cqij', ws, cm, interpolate_derivative, B, D0, B)
+                diff_ke = bm.einsum('q, c, cq, cqij -> cqij', ws, cm, interpolate_diff_coef_q, BDB)
 
             else:
                 J = mesh.jacobi_matrix(bcs)
-                detJ = bm.linalg.det(J)
-                diff_ke = bm.einsum('q, cq, cq, cqki, kl, cqlj -> cqij', ws, detJ, interpolate_derivative, B, D0, B)
+                detJ = bm.abs(bm.linalg.det(J))
+                diff_ke = bm.einsum('q, cq, cq, cqij -> cqij', ws, detJ, interpolate_diff_coef_q, BDB)
 
-        return diff_ke
+        return diff_ke # (NC, NQ, LDOF_u, LDOF_u)
 
 
     ##########################################################################################################

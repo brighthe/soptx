@@ -98,7 +98,6 @@ class MaterialInterpolationScheme(BaseLogged):
         if integration_order is None:
             error_msg = "'gauss_integration_point' density distribution requires 'integration_order' parameter"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
         if interpolation_order is not None:
             warn_msg = f"'gauss_integration_point' density distribution does not require 'interpolation_order', provided interpolation_order={interpolation_order} will be ignored"
@@ -330,6 +329,18 @@ class MaterialInterpolationScheme(BaseLogged):
         elif self._density_location in ['lagrange_interpolation_point', 
                                         'berstein_interpolation_point', 
                                         'shepard_interpolation_point']:
+
+            rho_q = density_distribution[:]
+            if method == 'simp':
+                dval = p * rho_q[:] ** (p - 1)
+                return dval
+            elif method == 'msimp':
+                E0 = material.youngs_modulus
+                Emin = self._options['void_youngs_modulus']
+                dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
+                return dval
+            
+        elif self._density_location in ['gauss_integration_point',]:
 
             rho_q = density_distribution[:]
             if method == 'simp':

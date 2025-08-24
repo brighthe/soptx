@@ -111,7 +111,7 @@ class ComplianceObjective(BaseLogged):
 
             return dc[:]
 
-        elif density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
+        elif density_location in ['gauss_integration_point']:
 
             dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
 

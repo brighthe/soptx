@@ -125,17 +125,17 @@ def save_optimization_history(mesh: HomogeneousMesh,
             rho = physical_density  # (GDOF_rho, )
             qf = mesh.quadrature_formula(2)
             bcs, ws = qf.get_quadrature_points_and_weights()       
-            rho_gauss = rho(bcs)    # (NC, NQ)
+            rho_q = rho(bcs)    # (NC, NQ)
 
             if isinstance(mesh, SimplexMesh):
                 cm = mesh.entity_measure('cell')
-                num = bm.einsum('q, c, cq -> c', ws, cm, rho_gauss)
+                num = bm.einsum('q, c, cq -> c', ws, cm, rho_q)
                 den = cm
             
             elif isinstance(mesh, TensorMesh):
                 J = mesh.jacobi_matrix(bcs)
                 detJ = bm.abs(bm.linalg.det(J))
-                num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_gauss)
+                num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_q)
                 den = bm.einsum('q, cq -> c', ws, detJ)
                 
             rho_e = num / den  # (NC, )
@@ -143,7 +143,27 @@ def save_optimization_history(mesh: HomogeneousMesh,
             mesh.celldata['density'] = rho_e
             # mesh.nodedata['density'] = rho
             
+        elif density_location in ['gauss_integration_point', ]:
+            # 高斯积分点密度情况: 形状为 (NC, NQ)
+            rho_q = physical_density  # (NC, NQ)
+
+            if isinstance(mesh, SimplexMesh):
+                cm = mesh.entity_measure('cell')
+                num = bm.einsum('q, c, cq -> c', ws, cm, rho_q)
+                den = cm
+            
+            elif isinstance(mesh, TensorMesh):
+                J = mesh.jacobi_matrix(bcs)
+                detJ = bm.abs(bm.linalg.det(J))
+                num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_q)
+                den = bm.einsum('q, cq -> c', ws, detJ)
+                
+            rho_e = num / den  # (NC, )
+
+            mesh.celldata['density'] = rho_e
+
         else:
+
             raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
 
         if isinstance(mesh, StructuredMesh):

@@ -78,7 +78,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         NQ = len(ws)
         D0 = self._material.elastic_matrix()  # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
         
-        # 单元密度: (NC, ); 节点密度: (GDOF, )      
+        # 单元密度: (NC, ); 节点密度: (GDOF, ); 高斯点密度: (NC, NQ)      
         coef = self._coef
 
         if coef is None:

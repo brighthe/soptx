@@ -115,7 +115,7 @@ class VolumeConstraint(BaseLogged):
                 qf = self._mesh.quadrature_formula(self._integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
 
-                rho_q = physical_density(bcs) 
+                rho_q = physical_density(bcs) # (NC, NQ)
 
                 if isinstance(self._mesh, SimplexMesh):
                     cm = self._mesh.entity_measure('cell')
@@ -123,24 +123,26 @@ class VolumeConstraint(BaseLogged):
                 
                 elif isinstance(self._mesh, TensorMesh):
                     J = self._mesh.jacobi_matrix(bcs)
-                    detJ = bm.linalg.det(J)
+                    detJ = bm.abs(bm.linalg.det(J))
                     current_volume = bm.einsum('q, cq, cq -> ', ws, rho_q, detJ)
 
                 return current_volume
 
-            elif self._density_location == 'gauss_integration_point':
+            elif self._density_location in ['gauss_integration_point']:
 
                 qf = self._mesh.quadrature_formula(self._integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
 
+                rho_q = physical_density  # (NC, NQ)
+
                 if isinstance(self._mesh, SimplexMesh):
                     cm = self._mesh.entity_measure('cell')
-                    current_volume = bm.einsum('q, cq, c -> ', ws, physical_density, cm)
+                    current_volume = bm.einsum('q, cq, c -> ', ws, rho_q, cm)
                 
                 elif isinstance(self._mesh, TensorMesh):
                     J = self._mesh.jacobi_matrix(bcs)
-                    detJ = bm.linalg.det(J)
-                    current_volume = bm.einsum('q, cq, cq -> ', ws, physical_density, detJ)
+                    detJ = bm.abs(bm.linalg.det(J))
+                    current_volume = bm.einsum('q, cq, cq -> ', ws, rho_q, detJ)
 
                 return current_volume
 
@@ -181,18 +183,20 @@ class VolumeConstraint(BaseLogged):
             bcs, ws = qf.get_quadrature_points_and_weights()
 
             density_space = physical_density.space
-            space_degree = density_space.p
-      
-            N = self._mesh.shape_function(bcs=bcs, p=space_degree)          # (NQ, LDOF)
+
+            # space_degree = density_space.p
+            # N = self._mesh.shape_function(bcs=bcs, p=space_degree)          # (NQ, LDOF)
+            
+            phi_rho = density_space.basis(bcs)[0] # (NQ, LDOF_rho)
 
             if isinstance(self._mesh, SimplexMesh):
-                dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, N) # (NC, LDOF)
+                dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, phi_rho) # (NC, LDOF_rho)
 
             elif isinstance(self._mesh, TensorMesh):
 
-                J = self._mesh.jacobi_matrix(bcs)                     # (NC, NQ, GD, GD)
-                detJ = bm.linalg.det(J)                               # (NC, NQ)
-                dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, N)      # (NC, LDOF)
+                J = self._mesh.jacobi_matrix(bcs)                           # (NC, NQ, GD, GD)
+                detJ = bm.abs(bm.linalg.det(J))                             # (NC, NQ)
+                dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, phi_rho)      # (NC, LDOF_rho)
             
             gdof = density_space.number_of_global_dofs()  
             cell2dof = density_space.cell_to_dof() # (NC, LDOF)
@@ -202,7 +206,7 @@ class VolumeConstraint(BaseLogged):
 
             return dg
 
-        elif self._density_location == 'gauss_integration_point':
+        elif self._density_location in ['gauss_integration_point']:
 
             qf = self._mesh.quadrature_formula(q=self._integration_order)
             bcs, ws = qf.get_quadrature_points_and_weights()
@@ -212,10 +216,10 @@ class VolumeConstraint(BaseLogged):
 
             elif isinstance(self._mesh, TensorMesh):
                 J = self._mesh.jacobi_matrix(bcs)
-                detJ = bm.linalg.det(J)
-                dg = bm.einsum('q, cq -> cq', ws, detJ)
+                detJ = bm.abs(bm.linalg.det(J)) 
+                dg = bm.einsum('q, cq -> cq', ws, detJ)  
 
-            return dg
+            return dg # (NC, NQ)
 
         elif self._density_location == 'density_subelement_gauss_point':
             
