@@ -101,18 +101,18 @@ def save_optimization_history(mesh: HomogeneousMesh,
         
     for i, physical_density in enumerate(history.physical_densities):
         
-        if density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
-            # 
-            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+        # if density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
+        #     # 
+        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-            # 高斯点密度情况：形状为 (NC, NQ)
-            nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
-            local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
-            physical_density_global = physical_density[local_to_global] # (NC*NQ, )
+        #     # 高斯点密度情况：形状为 (NC, NQ)
+        #     nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
+        #     local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
+        #     physical_density_global = physical_density[local_to_global] # (NC*NQ, )
 
-            mesh.celldata['density'] = physical_density_global
+        #     mesh.celldata['density'] = physical_density_global
         
-        elif density_location == 'element':
+        if density_location == 'element':
 
             # 单元密度情况：形状为 (NC, )
             mesh.celldata['density'] = physical_density
@@ -146,7 +146,10 @@ def save_optimization_history(mesh: HomogeneousMesh,
         elif density_location in ['gauss_integration_point', ]:
             # 高斯积分点密度情况: 形状为 (NC, NQ)
             rho_q = physical_density  # (NC, NQ)
-
+            NQ = rho_q.shape[1]
+            qf = mesh.quadrature_formula(int(bm.sqrt(NQ)))
+            bcs, ws = qf.get_quadrature_points_and_weights()       
+            
             if isinstance(mesh, SimplexMesh):
                 cm = mesh.entity_measure('cell')
                 num = bm.einsum('q, c, cq -> c', ws, cm, rho_q)
