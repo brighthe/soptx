@@ -1,7 +1,19 @@
-nelx = 60;
-nely = 20;
-rmin = 2.4;
- 
+% nelx = 30;
+% nely = 10;
+% rmin = 1.2;
+
+% nelx = 60;
+% nely = 20;
+% rmin = 2.4;
+
+% nelx = 90;
+% nely = 30;
+% rmin = 3.6;
+
+nelx = 120;
+nely = 40;
+rmin = 4.8;
+
 % nelx = 150;
 % nely = 50;
 % rmin = 6;
@@ -14,8 +26,8 @@ volfrac = 0.5;
 penal = 3;
 
 % ft = 0;  % 无滤波器
-ft = 1;   % 灵敏度滤波器
-% ft = 2;   % 密度滤波器
+% ft = 1;   % 灵敏度滤波器
+ft = 2;   % 密度滤波器
 
 % MATERIAL PROPERTIES
 E0 = 1;
@@ -85,7 +97,13 @@ while change > 0.01
 	ce = reshape(sum((U(edofMat)*KE).*U(edofMat),2), nely, nelx);
 	c = sum(sum((Emin + xPhys.^penal * (E0 - Emin)).*ce));
 	dc = -penal*(E0-Emin)*xPhys.^(penal-1).*ce;
-	dv = ones(nely, nelx);	
+	dv = ones(nely, nelx);
+
+    % dc_sum = sum(dc(:));
+    % fprintf('dc_sum:%5f\n', dc_sum);
+    % dc_mean = mean(dc(:));
+    % fprintf('dc_mean:%5f\n', dc_mean);
+
 	% FILTERING/MODIFICATION OF SENSITIVITIES
 	if ft == 1
 		dc(:) = H*(x(:).*dc(:))./Hs./max(1e-3, x(:));
@@ -93,12 +111,17 @@ while change > 0.01
 		dc(:) = H*(dc(:)./Hs);
 		dv(:) = H*(dv(:)./Hs);
     end
-    x_sum = sum(x(:));
-    x_mean = mean(x(:));
-    dc_sum = sum(dc(:));
-    dc_mean = mean(dc(:));
-    dv_sum = sum(dv(:));
-    dv_mean = mean(dv(:));
+
+    % dc_sum = sum(dc(:));
+    % fprintf('after_dc_sum:%5f\n', dc_sum);
+    % dc_mean = mean(dc(:));
+    % fprintf('after_dc_mean:%5f\n', dc_mean);
+
+    % x_sum = sum(x(:));
+    % x_mean = mean(x(:));
+    % dv_sum = sum(dv(:));
+    % dv_mean = mean(dv(:));
+
 	% OPTIMALITY CRITERIA UPDATE OF DESIGN VARIABLES AND PHYSICAL DENSITIES
 	l1 = 0; l2 = 1e9; move = 0.2;
 	while (l2-l1)/(l1+l2) > 1e-3

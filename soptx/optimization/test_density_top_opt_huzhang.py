@@ -17,32 +17,23 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
-    @variantmethod('test_huzhang')
-    def run(self) -> Union[TensorLike, OptimizationHistory]:
+    @variantmethod('test_bridge_2d')
+    def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
         domain = [-4, 4, 0, 4]
 
         T = -1.0
-        E, nu = 1.0, 0.49
-
-        # 'uniform_tri', 'uniform_quad', 'uniform_hex'
-        nx, ny = 128, 64
-        mesh_type = 'uniform_quad'
-        
-        # mesh_type = 'uniform_tri'
-
-        space_degree = 1
-        integration_order = space_degree + 1
-        
-        # 'lagrange_interpolation_point', 'berstein_interpolation_point', shepard_interpolation_point, 'element'
-        density_location = 'lagrange_interpolation_point'  
-        density_interpolation_order = 1
-        relative_density = 0.35
+        E, nu = 1.0, 0.35
 
         volume_fraction = 0.35
         penalty_factor = 3.0
+        
+        # 'lagrange_interpolation_point', 'element'
+        density_location = 'lagrange_interpolation_point'  
+        density_interpolation_order = 1
+        relative_density = volume_fraction
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 200
+        max_iterations = 500
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
 
@@ -53,12 +44,16 @@ class DensityTopOptHuZhangTest(BaseLogged):
                             enable_logging=False
                         )
 
+        # 'uniform_tri', 'uniform_quad', 'uniform_hex'
+        nx, ny = 120, 60
+        mesh_type = 'uniform_quad'
+        # mesh_type = 'uniform_tri'
         pde.init_mesh.set(mesh_type)
 
-        fe_mesh = pde.init_mesh(nx=nx, ny=ny)
+        analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         domain_length = pde.domain[1] - pde.domain[0]
-        rmin = 1.5 * (domain_length / nx)
+        rmin = 0.0
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -88,26 +83,52 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                                 interpolation_order=density_interpolation_order,
                                             )
 
-        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-        lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                    mesh=fe_mesh,
-                                    pde=pde,
-                                    material=material,
-                                    interpolation_scheme=interpolation_scheme,
-                                    space_degree=space_degree,
-                                    integration_order=integration_order,
-                                    assembly_method='standard',
-                                    solve_method='mumps',
-                                    topopt_algorithm='density_based',
-                                )
+        if analysis_method == 'lfem':
+            space_degree = 1
+            integration_order = space_degree + 3
+            
+            from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+            lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                        mesh=analysis_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        space_degree=space_degree,
+                                        integration_order=integration_order,
+                                        assembly_method='standard',
+                                        solve_method='mumps',
+                                        topopt_algorithm='density_based',
+                                        interpolation_scheme=interpolation_scheme,
+                                    )
+            
+            analyzer = lagrange_fem_analyzer
+
+        elif analysis_method == 'huzhangfem':
+            # TODO 支持低阶 p < d+1
+            huzhang_space_degree = 3
+            integration_order = huzhang_space_degree + 3
+            from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
+            huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                        mesh=analysis_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        space_degree=huzhang_space_degree,
+                                        integration_order=integration_order,
+                                        solve_method='mumps',
+                                        topopt_algorithm='density_based',
+                                        interpolation_scheme=interpolation_scheme,
+                                    )
+            
+            analyzer = huzhang_mfem_analyzer
+        
+
         fe_tspace = lagrange_fem_analyzer.tensor_space
         fe_dofs = fe_tspace.number_of_global_dofs()
         
         from soptx.optimization.compliance_objective import ComplianceObjective
-        compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
+        compliance_objective = ComplianceObjective(analyzer=analyzer)
 
         from soptx.optimization.volume_constraint import VolumeConstraint
-        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
+        volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
 
         from soptx.regularization.filter import Filter
 
@@ -168,10 +189,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     )
 
         self._log_info(f"开始密度拓扑优化, "
+                       f"分析数值方法={analyzer.__class__.__name__}, "
                        f"模型名称={pde.__class__.__name__}, 泊松比={pde.nu}, "
                        f"网格类型={mesh_type}, 密度类型={density_location}, " 
                        f"密度网格尺寸={opt_mesh.number_of_cells()}, 密度插值次数={density_interpolation_order}, 密度场自由度={rho.shape}, " 
-                       f"位移网格尺寸={fe_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
+                       f"位移网格尺寸={analysis_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
                        f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
@@ -192,7 +214,12 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
 
         return rho_opt, history
-    
+
+
+
+
+
+
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
     
