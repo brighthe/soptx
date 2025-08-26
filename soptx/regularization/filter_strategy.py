@@ -195,12 +195,18 @@ class DensityStrategy(_FilterStrategy):
         
         if self._density_location == 'element':
 
-            weighted_dobj = self._integration_weights * obj_grad # (NC, )
+            cell_measure = self._integration_weights
+            Hs = self._H.matmul(cell_measure) 
 
-            numerator = self._H.matmul(weighted_dobj)
-            denominator = self._H.matmul(self._integration_weights)
+            scaled_dobj = obj_grad / Hs
+            temp = self._H.matmul(scaled_dobj)
+
+            obj_grad = bm.set_at(obj_grad, slice(None), cell_measure * temp)
+
+            return obj_grad 
 
         elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
+            
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
             weighted_dobj_local = bm.einsum('cq, cq -> cq', obj_grad, self._integration_weights) # (NC, NQ)
@@ -219,9 +225,9 @@ class DensityStrategy(_FilterStrategy):
             denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
             denominator = denominator_global[global_to_local] # (NC, NQ)
 
-        obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
+            obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
 
-        return obj_grad 
+            return obj_grad 
 
     def filter_constraint_sensitivities(self, rho_Phys: Union[TensorLike, Function], con_grad: TensorLike) -> TensorLike:
 
@@ -229,10 +235,15 @@ class DensityStrategy(_FilterStrategy):
 
         if self._density_location == 'element':
             
-            weighted_dobj = self._integration_weights * con_grad # (NC, )
+            cell_measure = self._integration_weights
+            Hs = self._H.matmul(cell_measure)
 
-            numerator = self._H.matmul(weighted_dobj)
-            denominator = self._H.matmul(self._integration_weights)
+            scaled_dcon = con_grad / Hs
+            temp = self._H.matmul(scaled_dcon)
+
+            con_grad = bm.set_at(con_grad, slice(None), cell_measure * temp)
+
+            return con_grad 
 
         elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping

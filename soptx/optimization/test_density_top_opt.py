@@ -271,7 +271,7 @@ class DensityTopOptTest(BaseLogged):
         # mesh_type = 'uniform_aligned_tri'
         # mesh_type = 'uniform_crisscross_tri'
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 1
 
         # 'gauss_integration_point', 'element'
@@ -435,43 +435,88 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
 
     @run.register('test_element_variable')
-    def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 30, 0, 10]
-        T = -1.0
-        E, nu = 1.0, 0.3
+    def run(self, parameter_type: str = 'half_mbb') -> Union[TensorLike, OptimizationHistory]:
+        
+        if parameter_type == 'half_mbb':
+            domain = [0, 60, 0, 20]
+            T = -1.0
+            E, nu = 1.0, 0.3
 
-        # nx, ny = 30, 10
-        # nx, ny = 60, 20
-        nx, ny = 90, 30
-        # mesh_type = 'uniform_quad'
-        # mesh_type = 'uniform_aligned_tri'
-        mesh_type = 'uniform_crisscross_tri'
+            # nx, ny = 60, 20
+            # nx, ny = 90, 30
+            # nx, ny = 120, 40
+            nx, ny = 240, 80
+            mesh_type = 'uniform_quad'
+            # mesh_type = 'uniform_aligned_tri'
+            # mesh_type = 'uniform_crisscross_tri'
 
-        space_degree = 5
-        integration_order = space_degree + 1
+            space_degree = 1
+            integration_order = space_degree + 1
 
-        # 'lagrange_interpolation_point', 'element'
-        density_location = 'element'
-        relative_density = 0.5
+            # 'lagrange_interpolation_point', 'element'
+            density_location = 'element'
+            relative_density = 0.5
 
-        volume_fraction = 0.5
-        penalty_factor = 3.0
+            volume_fraction = 0.5
+            penalty_factor = 3.0
 
-        optimizer_algorithm = 'oc'  # 'oc', 'mma'
-        max_iterations = 500
+            optimizer_algorithm = 'oc'  # 'oc', 'mma'
+            max_iterations = 500
 
-        filter_type = 'none' # 'none', 'sensitivity', 'density'
+            filter_type = 'density' # 'none', 'sensitivity', 'density'
 
-        domain_length = domain[1] - domain[0]
-        rmin = 1.5 * (domain_length / nx)
+            domain_length = domain[1] - domain[0]
+            # rmin = (nx * 0.04) * (domain_length / nx)
+            rmin = 0.8
 
+            from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
+            pde = HalfMBBBeam2dData(
+                                domain=domain,
+                                T=T, E=E, nu=nu,
+                                enable_logging=False
+                            )
+            
+        elif parameter_type == 'mbb':
+            domain = [0, 60, 0, 10]
+            T = -2.0
+            E, nu = 1.0, 0.3
 
-        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
-        pde = HalfMBBBeam2dData(
-                            domain=domain,
-                            T=T, E=E, nu=nu,
-                            enable_logging=False
-                        )
+            nx, ny = 60, 10
+            # nx, ny = 120, 20
+            # nx, ny = 240, 40
+            # nx, ny = 480, 80
+            mesh_type = 'uniform_quad'
+            # mesh_type = 'uniform_aligned_tri'
+            # mesh_type = 'uniform_crisscross_tri'
+
+            space_degree = 8
+            integration_order = space_degree + 1
+
+            volume_fraction = 0.6
+            penalty_factor = 3.0
+
+            # 'lagrange_interpolation_point', 'element'
+            density_location = 'element'
+            relative_density = volume_fraction
+
+            optimizer_algorithm = 'mma'  # 'oc', 'mma'
+            max_iterations = 500
+
+            filter_type = 'density' # 'none', 'sensitivity', 'density'
+
+            domain_length = domain[1] - domain[0]
+            # rmin = (nx * 0.04) * (domain_length / nx)
+            rmin = 1.2            
+            # rmin = 0.75
+            # rmin = 0.5
+            # rmin = 0.25
+
+            from soptx.model.mbb_beam_2d import MBBBeam2dData
+            pde = MBBBeam2dData(
+                                domain=domain,
+                                T=T, E=E, nu=nu,
+                                enable_logging=False
+                            )
         
         pde.init_mesh.set(mesh_type)
         fe_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -595,7 +640,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_821")
+        save_path = Path(f"{base_dir}/test_element_825")
         save_path.mkdir(parents=True, exist_ok=True)
 
         
@@ -1119,11 +1164,11 @@ if __name__ == "__main__":
     # test.run.set('test_nodal_variable')
     # rho_opt, history = test.run()
 
-    # test.run.set('test_element_variable')
-    # rho_opt, history = test.run()
+    test.run.set('test_element_variable')
+    rho_opt, history = test.run(parameter_type='mbb')
     
-    test.run.set('test_gauss_variable')
-    rho_opt, history = test.run()
+    # test.run.set('test_gauss_variable')
+    # rho_opt, history = test.run()
 
 
     # test.run.set('test_matlab_code')

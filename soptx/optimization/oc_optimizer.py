@@ -140,8 +140,13 @@ class OCOptimizer(BaseLogged):
             obj_val = self._objective.fun(rho_Phys)
             obj_grad = self._objective.jac(rho_Phys)
 
+            # print(f"{bm.mean(obj_grad)}")
+            # print(f"{bm.sum(obj_grad)}")
+
             # 过滤目标函数灵敏度
             obj_grad = self._filter.filter_objective_sensitivities(rho_Phys=rho_Phys, obj_grad=obj_grad)
+            # print(f"{bm.mean(obj_grad)}")
+            # print(f"{bm.sum(obj_grad)}")
 
             # 使用物理密度计算约束函数值梯度
             con_val = self._constraint.fun(rho_Phys)
@@ -149,6 +154,8 @@ class OCOptimizer(BaseLogged):
 
             # 过滤约束函数灵敏度
             con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
+            # print(f"{bm.mean(con_grad)}")
+            # print(f"{bm.sum(con_grad)}")
 
             # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda

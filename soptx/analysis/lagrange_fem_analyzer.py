@@ -192,18 +192,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
         force_type = self._pde.force_type
 
         if force_type == 'concentrated':
+            
             # NOTE F.dtype == TensorLike
             F = self._tensor_space.interpolate(body_force)
+
         elif force_type == 'distribution':
+            
             # NOTE F.dtype == COOTensor or TensorLike
             integrator = VectorSourceIntegrator(source=body_force, q=self._integration_order)
             lform = LinearForm(self.tensor_space)
             lform.add_integrator(integrator)
             F = lform.assembly(format='dense')
+        
         else:
+            
             error_msg = f"Unsupported force type: {force_type}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
         self._F = F
 
