@@ -62,18 +62,9 @@ class MaterialInterpolationScheme(BaseLogged):
     def setup_density_distribution(self, 
                                 mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
-                                integration_order : int = None,
-                                interpolation_order: int = None,
                                 **kwargs,
                             ) -> Function:
-        """单元密度分布"""
-        if integration_order is not None:
-            warn_msg = f"'element' density distribution does not require 'integration_order', provided integration_order={integration_order} will be ignored"
-            self._log_warning(warn_msg)
-        
-        if interpolation_order is not None:
-            warn_msg = f"'element' density distribution does not require 'interpolation_order', provided interpolation_order={interpolation_order} will be ignored"
-            self._log_warning(warn_msg)
+        """单元密度分布, 设计变量就是单元密度"""
 
         NC = mesh.number_of_cells()
         density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
@@ -84,6 +75,45 @@ class MaterialInterpolationScheme(BaseLogged):
         self._log_info(f"Element density: shape={density_dist.shape}, value={relative_density}")
 
         return density_dist
+    
+    @setup_density_distribution.register('element_multiresolution')
+    def setup_density_distribution(self, 
+                            mesh_density_filed: HomogeneousMesh,
+                            mesh_design_vars: HomogeneousMesh,
+                            design_vars: float = 1.0,
+                            multi_resolution: int = 2,
+                            **kwargs,
+                        ) -> Function:
+        """多分辨率单元密度分布 (设计变量独立于有限元网格)"""
+
+        convolution_strategy = DensityStrategy()
+
+        density_field = MultiResolutionDensityField(design_vars, convolution_strategy) # (NC_density_field, )
+
+        return density_field
+
+    
+    @setup_density_distribution.register('element_multi_resolution')
+    def setup_density_distribution(self, 
+                            mesh: HomogeneousMesh,
+                            relative_density: float = 1.0,
+                            multi_resolution: int = 2,
+                            **kwargs,
+                        ) -> Function:
+        """单元密度分布 (多分辨率, 单元内部是连续函数)"""
+
+        space = LagrangeFESpace(mesh, p=multi_resolution-1, ctype='D')
+
+        num_density_cells = space.number_of_global_dofs()
+
+        density_tensor = bm.full((num_density_cells, ), relative_density, dtype=bm.float64, device=mesh.device)
+
+        density_dist = space.function(density_tensor)
+
+        self._log_info(f"Element density: shape={density_dist.shape}, value={relative_density}")
+
+        return density_dist
+
     
     @setup_density_distribution.register('gauss_integration_point')
     def setup_density_distribution(self, 

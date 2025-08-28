@@ -82,23 +82,23 @@ class FilterMatrixBuilder:
                                     ) -> Tuple[COOTensor, TensorLike]:
         """计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
         
-        Parameters
-        ----------
+        Parameters:
+        -----------
         rmin: 过滤半径
         domain: 计算域的边界, 
         periodic: 各方向是否周期性, 默认为 [False, False, False]
             
         Returns:
         --------
-        H: 过滤矩阵, 形状为 (NC, NC)
-        Hs: 过滤矩阵行和, 形状为 (NC, )
+        H: 过滤矩阵
+        Hs: 过滤矩阵行和
         """
         t = None
         if enable_timing:
             t = timer(f"Filter_general")
             next(t)
 
-        if self._density_location == 'element':
+        if self._density_location in ['element']:
 
             density_coords = self._mesh.entity_barycenter('cell') # (NC, GD)
 

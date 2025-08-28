@@ -142,11 +142,12 @@ class DensityStrategy(_FilterStrategy):
     """密度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
-                density_location: Literal['element', 'gauss_integration_point'], 
+                density_location: Literal['element', 'node'], 
                 integration_weights: TensorLike, 
                 mesh: HomogeneousMesh, 
                 integration_order: int
             ) -> None:
+        
         self._H = H
         self._density_location = density_location
         self._integration_weights = integration_weights
@@ -164,10 +165,16 @@ class DensityStrategy(_FilterStrategy):
                     ) -> Union[TensorLike, Function]:
 
         if self._density_location == 'element':
-            weighted_rho = rho[:] * self._integration_weights
+            
+            cell_measure = self._integration_weights
+            weighted_rho = rho[:] * cell_measure
         
             numerator = self._H.matmul(weighted_rho)
-            denominator = self._H.matmul(self._integration_weights)
+            denominator = self._H.matmul(cell_measure)
+
+            rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+
+            return rho_Phys
 
         elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
 
@@ -187,9 +194,9 @@ class DensityStrategy(_FilterStrategy):
             denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
             denominator = denominator_global[global_to_local] # (NC, NQ)
 
-        rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+            rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
 
-        return rho_Phys
+            return rho_Phys
 
     def filter_objective_sensitivities(self, rho_Phys: Union[TensorLike, Function], obj_grad: TensorLike) -> TensorLike:
         

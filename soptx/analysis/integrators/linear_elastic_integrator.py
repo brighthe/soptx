@@ -63,7 +63,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             detJ = None
         else:
             J = mesh.jacobi_matrix(bcs)
-            detJ = bm.linalg.det(J)
+            detJ = bm.abs(bm.linalg.det(J))
 
         return cm, bcs, ws, gphi, detJ
 
@@ -250,24 +250,37 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             detJ = None
         else:
             J = mesh.jacobi_matrix(bcs)
-            detJ = bm.linalg.det(J)
+            detJ = bm.abs(bm.linalg.det(J))
 
-        D = self.material.elastic_matrix(bcs)
-        B = self.material.strain_displacement_matrix(dof_priority=space.dof_priority, gphi=gphi)
+        return cm, ws, gphi, detJ
 
-        return cm, ws, detJ, D, B
-            
     @assembly.register('voigt')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         mesh = getattr(space, 'mesh', None)
-        cm, ws, detJ, D, B = self.fetch_voigt_assembly(space)
+        cm, ws, gphi, detJ = self.fetch_voigt_assembly(space)
+
+        NC = mesh.number_of_cells()
+
+        D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        B = self._material.strain_displacement_matrix(dof_priority=space.dof_priority, 
+                                                    gphi=gphi) # 2D: (NC, NQ, 3, LDOF), 3D: (NC, NQ, 6, LDOF)
+
+        # 单元密度: (NC_analysis, ); 节点密度: (GDOF); 单元密度多分辨率: (NC_opt)
+        coef = self._coef
+
+        if coef is None:
+            D = D0 # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        elif coef.shape == (NC, ):
+            D = bm.einsum('c, ijkl -> cjkl', coef, D0) # 2D: (NC, 1, 3, 3); 3D: (NC, 1, 6, 6)
+        
+
 
         if isinstance(mesh, SimplexMesh):
             KK = bm.einsum('q, c, cqki, cqkl, cqlj -> cij',
-                            ws, cm, B, D, B)
+                            ws, cm, B, D0, B)
         else:
             KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij',
-                            ws, detJ, B, D, B)
+                            ws, detJ, B, D0, B)
             
         return KK
     
