@@ -26,15 +26,15 @@ class DensityTopOptTest(BaseLogged):
             E, nu = 1.0, 0.3
 
             # nx, ny = 60, 10
-            nx, ny = 120, 20
-            # nx, ny = 240, 40
+            # nx, ny = 120, 20
+            nx, ny = 240, 40
             # nx, ny = 480, 80
             # nx, ny = 300, 50
             mesh_type = 'uniform_quad'
             # mesh_type = 'uniform_aligned_tri'
             # mesh_type = 'uniform_crisscross_tri'
 
-            space_degree = 4
+            space_degree = 2
             integration_order = space_degree + 3
 
             volume_fraction = 0.6
@@ -52,8 +52,8 @@ class DensityTopOptTest(BaseLogged):
             # rmin = 1.5
             # rmin = 1.25
             # rmin = 1.0
-            rmin = 0.75
-            # rmin = 0.5
+            # rmin = 0.75
+            rmin = 0.5
             # rmin = 0.25
 
             from soptx.model.mbb_beam_2d import MBBBeam2dData
@@ -182,7 +182,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_p")
+        save_path = Path(f"{base_dir}/test_p_rmin")
         save_path.mkdir(parents=True, exist_ok=True)
 
         
