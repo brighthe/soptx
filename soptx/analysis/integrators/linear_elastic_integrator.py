@@ -303,74 +303,43 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         index = self._index
         
         from fealpy.mesh import QuadrangleMesh
-        nx, ny = 60, 10
-        multi_resolution = 2
+        nx, ny = 2, 2
+        n_sub = 4
+        n_sub_x = int(bm.sqrt(n_sub))
+        n_sub_y = int(bm.sqrt(n_sub))
         mesh_disp = QuadrangleMesh.from_box(box=[0, nx, 0, ny], nx=nx, ny=ny)
-        mesh_density = QuadrangleMesh.from_box(box=[0, nx, 0, ny], nx=nx*multi_resolution, ny=ny*multi_resolution)
+        mesh_density = QuadrangleMesh.from_box(box=[0, nx, 0, ny], nx=nx*n_sub_x, ny=ny*n_sub_y)
+
+        GD = mesh_disp.geo_dimension()
 
         from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
         scalar_space = LagrangeFESpace(mesh=mesh_disp, p=1)
         tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=(-1, 2))
 
         # 计算位移单元积分点处的重心坐标
-        q = 3
+        q = 2
         qf_e = mesh_disp.quadrature_formula(q)
         # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
         bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
         NQ = ws_e.shape[0]
-        ps_e = mesh_disp.bc_to_point(bcs_e)
 
         # 把位移单元积分处的重心坐标转移到子密度单元处的重心坐标
-        bcs_xi, bcs_eta = bcs_e  # (NQ, 2) each
-        n_sub_x = multi_resolution
-        n_sub_y = multi_resolution
-
-        n_sub = n_sub_x * n_sub_y
-        p_1d = bm.unique(bcs_e[0][:, 0])
-        NQ_x = len(p_1d)
-        NQ_y = len(p_1d)
-        GD = 2
-
-        # 初始化最终的数组
-        bcs_g_x = bm.zeros((n_sub, NQ_x, GD))
-        bcs_g_y = bm.zeros((n_sub, NQ_y, GD))
-
-        # 遍历所有密度单元
-        sub_element_idx = 0
-        for i in range(n_sub_y):  # 遍历行
-            for j in range(n_sub_x):  # 遍历列
-                # 计算当前密度单元的区间范围
-                xi_start, xi_end = j / n_sub_x, (j + 1) / n_sub_x
-                eta_start, eta_end = i / n_sub_y, (i + 1) / n_sub_y
-                
-                # 线性映射
-                mapped_xi = xi_start + p_1d * (xi_end - xi_start)
-                mapped_eta = eta_start + p_1d * (eta_end - eta_start)
-                
-                # 填充 bcs_g_x，将一维坐标扩展为 (val, 0)
-                bcs_g_x[sub_element_idx, :, 0] = mapped_xi
-                
-                # 填充 bcs_g_y，将一维坐标扩展为 (0, val)
-                bcs_g_y[sub_element_idx, :, 1] = mapped_eta
-                
-                sub_element_idx += 1
-
-        # bcs_g.shape = ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) )
-        bcs_g = (bcs_g_x, bcs_g_y)
+        from soptx.analysis.utils import map_bcs_to_sub_elements
+        bcs_g = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+        bcs_g_x, bcs_g_y = bcs_g[0], bcs_g[1]
 
         NC = mesh_disp.number_of_cells()
         LDOF = scalar_space.number_of_local_dofs()
         TLDOF = tensor_space.number_of_local_dofs()
-        gphi = scalar_space.grad_basis(bcs_e, index=index, variable='x') # (NC, NQ, LDOF, GD) 
         gphi_g = bm.zeros((NC, n_sub, NQ, LDOF, GD)) # (NC, n_sub, NQ, LDOF, GD)
         J_eg = bm.zeros((NC, n_sub, NQ, GD, GD)) # (NC, n_sub, NQ, GD, GD)
         # 遍历当前位移单元内的所有密度单元 (n_sub)
         for s_idx in range(n_sub):
             sub_bcs_x = bcs_g_x[s_idx, :, :]
             sub_bcs_y = bcs_g_y[s_idx, :, :]
-            bcs_for_single_sub_element = (sub_bcs_x, sub_bcs_y)
+            bcs_for_single_sub_element = (sub_bcs_x, sub_bcs_y) # ( (NQ, GD), (NQ, GD) )
 
-            gphi_for_single_sub = scalar_space.grad_basis(bcs_for_single_sub_element)
+            gphi_for_single_sub = scalar_space.grad_basis(bcs_for_single_sub_element, index=index, variable='x') # (NC, NQ, LDOF, GD)
 
             J_for_single_sub = mesh_disp.jacobi_matrix(bcs_for_single_sub_element) # (NC, NQ, GD, GD)
             
@@ -387,7 +356,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         D_g = bm.einsum('ijkl, cn -> cnjkl', D0, coef) # 2D: (NC, n_sub, 1, 3, 3); 3D: (NC, n_sub, 1, 6, 6)
 
         # 密度单元缩放因子
-        J_g = 1 / (multi_resolution ** GD)
+        J_g = 1 / n_sub
 
         ws_g = ws_e
         cm_eg = mesh_density.entity_measure('cell', index=index).reshape(NC, n_sub)
@@ -400,11 +369,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             KK = J_g * bm.einsum('q, cnq, cnqki, cnjkl, cnqlj -> cij',
                                 ws_g, detJ_eg, B_g, D_g, B_g)
 
-        print("-------------------")
-
-
-
-            
+        return KK
     
     @enable_cache
     def fetch_fast_assembly(self, space: TensorFunctionSpace):
