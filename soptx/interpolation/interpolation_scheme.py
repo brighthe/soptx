@@ -60,16 +60,16 @@ class MaterialInterpolationScheme(BaseLogged):
 
     @variantmethod('element')
     def setup_density_distribution(self, 
-                                mesh: HomogeneousMesh,
+                                mesh_density: HomogeneousMesh,
                                 relative_density: float = 1.0,
                                 **kwargs,
                             ) -> Function:
-        """单元密度分布, 设计变量就是单元密度"""
+        """但分辨率单元密度分布, 设计变量就是单元密度"""
 
-        NC = mesh.number_of_cells()
-        density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh.device)
+        NC = mesh_density.number_of_cells()
+        density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh_density.device)
 
-        space = LagrangeFESpace(mesh, p=0, ctype='D')
+        space = LagrangeFESpace(mesh_density, p=0, ctype='D')
         density_dist = space.function(density_tensor)
 
         self._log_info(f"Element density: shape={density_dist.shape}, value={relative_density}")
@@ -78,21 +78,24 @@ class MaterialInterpolationScheme(BaseLogged):
     
     @setup_density_distribution.register('element_multiresolution')
     def setup_density_distribution(self, 
-                            mesh_density_filed: HomogeneousMesh,
-                            mesh_design_vars: HomogeneousMesh,
-                            design_vars: float = 1.0,
-                            multi_resolution: int = 2,
+                            mesh_design_variable: HomogeneousMesh,
+                            mesh_density: HomogeneousMesh,
+                            relative_density: float = 1.0,
+                            integration_order: int = 2,
                             **kwargs,
                         ) -> Function:
-        """多分辨率单元密度分布 (设计变量独立于有限元网格)"""
-
-        convolution_strategy = DensityStrategy()
-
-        density_field = MultiResolutionDensityField(design_vars, convolution_strategy) # (NC_density_field, )
-
-        return density_field
-
+        """多分辨率单元密度分布, 设计变量独立于有限元网格"""
     
+        NN_mesh_design_variable = mesh_design_variable.number_of_nodes()
+        design_variable_node = bm.full((NN_mesh_design_variable, ), relative_density, 
+                                dtype=bm.float64, device=mesh_design_variable.device)
+        
+        NC_mesh_density = mesh_density.number_of_cells()
+        density_element = bm.full((NC_mesh_density, integration_order), relative_density, 
+                                dtype=bm.float64, device=mesh_density.device)
+
+        return design_variable_node, density_element
+
     @setup_density_distribution.register('element_multi_resolution')
     def setup_density_distribution(self, 
                             mesh: HomogeneousMesh,

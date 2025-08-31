@@ -150,15 +150,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         if self._topopt_algorithm is None:
             if density_distribution is not None:
-                self._log_warning("标准有限元分析模式下忽略相对密度分布参数 rho")
+                self._log_warning("标准有限元分析模式下忽略相对密度 rho")
             
             coef = None
         
         elif self._topopt_algorithm == 'density_based':
             if density_distribution is None:
-                error_msg = "基于密度的拓扑优化算法需要提供相对密度分布 rho"
+                error_msg = "基于密度的拓扑优化算法需要提供相对密度 rho"
                 self._log_error(error_msg)
-                raise ValueError(error_msg)
 
             coef = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
@@ -241,7 +240,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         else:
             error_msg = f"Unsupported boundary type: {boundary_type}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
     
     ###############################################################################################
@@ -494,8 +492,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=shape)
         self._tensor_space = tensor_space
 
-        self._log_info(f"Tensor space DOF ordering: dof_priority")
-    
     def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike) -> CSRTensor:
         """
         FEALPy 中的 apply_matrix 使用了 D0@A@D0, 

@@ -252,12 +252,12 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             J = mesh.jacobi_matrix(bcs)
             detJ = bm.abs(bm.linalg.det(J))
 
-        return cm, ws, gphi, detJ
+        return cm, ws, bcs, gphi, detJ
 
-    @assembly.register('voigt')
+    @assembly.register('voigt_single_resolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         mesh = getattr(space, 'mesh', None)
-        cm, ws, gphi, detJ = self.fetch_voigt_assembly(space)
+        cm, ws, bcs, gphi, detJ = self.fetch_voigt_assembly(space)
 
         NC = mesh.number_of_cells()
 
@@ -265,24 +265,146 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         B = self._material.strain_displacement_matrix(dof_priority=space.dof_priority, 
                                                     gphi=gphi) # 2D: (NC, NQ, 3, LDOF), 3D: (NC, NQ, 6, LDOF)
 
-        # 单元密度: (NC_analysis, ); 节点密度: (GDOF); 单元密度多分辨率: (NC_opt)
+        # 单元密度: (NC, ); 节点密度: (NN, )
         coef = self._coef
 
         if coef is None:
             D = D0 # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+
         elif coef.shape == (NC, ):
+
             D = bm.einsum('c, ijkl -> cjkl', coef, D0) # 2D: (NC, 1, 3, 3); 3D: (NC, 1, 6, 6)
-        
-
-
-        if isinstance(mesh, SimplexMesh):
-            KK = bm.einsum('q, c, cqki, cqkl, cqlj -> cij',
-                            ws, cm, B, D0, B)
-        else:
-            KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij',
-                            ws, detJ, B, D0, B)
             
-        return KK
+            if isinstance(mesh, SimplexMesh):
+                KK = bm.einsum('q, c, cqki, cjkl, cqlj -> cij',
+                                ws, cm, B, D, B)
+            else:
+                KK = bm.einsum('q, cq, cqki, cjkl, cqlj -> cij',
+                                ws, detJ, B, D, B)
+            
+            return KK
+        
+        elif isinstance(coef, Function):
+            
+            coef = coef(bcs) # (NC, NQ)
+            D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
+            
+            if isinstance(mesh, SimplexMesh):
+                KK = bm.einsum('q, c, cqki, cqkl, cqlj -> cij',
+                                ws, cm, B, D, B)
+            else:
+                KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij',
+                                ws, detJ, B, D, B)
+        else:
+            pass
+
+    @assembly.register('voigt_multi_resolution')
+    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+        index = self._index
+        
+        from fealpy.mesh import QuadrangleMesh
+        nx, ny = 60, 10
+        multi_resolution = 2
+        mesh_disp = QuadrangleMesh.from_box(box=[0, nx, 0, ny], nx=nx, ny=ny)
+        mesh_density = QuadrangleMesh.from_box(box=[0, nx, 0, ny], nx=nx*multi_resolution, ny=ny*multi_resolution)
+
+        from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+        scalar_space = LagrangeFESpace(mesh=mesh_disp, p=1)
+        tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=(-1, 2))
+
+        # 计算位移单元积分点处的重心坐标
+        q = 3
+        qf_e = mesh_disp.quadrature_formula(q)
+        # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+        bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+        NQ = ws_e.shape[0]
+        ps_e = mesh_disp.bc_to_point(bcs_e)
+
+        # 把位移单元积分处的重心坐标转移到子密度单元处的重心坐标
+        bcs_xi, bcs_eta = bcs_e  # (NQ, 2) each
+        n_sub_x = multi_resolution
+        n_sub_y = multi_resolution
+
+        n_sub = n_sub_x * n_sub_y
+        p_1d = bm.unique(bcs_e[0][:, 0])
+        NQ_x = len(p_1d)
+        NQ_y = len(p_1d)
+        GD = 2
+
+        # 初始化最终的数组
+        bcs_g_x = bm.zeros((n_sub, NQ_x, GD))
+        bcs_g_y = bm.zeros((n_sub, NQ_y, GD))
+
+        # 遍历所有密度单元
+        sub_element_idx = 0
+        for i in range(n_sub_y):  # 遍历行
+            for j in range(n_sub_x):  # 遍历列
+                # 计算当前密度单元的区间范围
+                xi_start, xi_end = j / n_sub_x, (j + 1) / n_sub_x
+                eta_start, eta_end = i / n_sub_y, (i + 1) / n_sub_y
+                
+                # 线性映射
+                mapped_xi = xi_start + p_1d * (xi_end - xi_start)
+                mapped_eta = eta_start + p_1d * (eta_end - eta_start)
+                
+                # 填充 bcs_g_x，将一维坐标扩展为 (val, 0)
+                bcs_g_x[sub_element_idx, :, 0] = mapped_xi
+                
+                # 填充 bcs_g_y，将一维坐标扩展为 (0, val)
+                bcs_g_y[sub_element_idx, :, 1] = mapped_eta
+                
+                sub_element_idx += 1
+
+        # bcs_g.shape = ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) )
+        bcs_g = (bcs_g_x, bcs_g_y)
+
+        NC = mesh_disp.number_of_cells()
+        LDOF = scalar_space.number_of_local_dofs()
+        TLDOF = tensor_space.number_of_local_dofs()
+        gphi = scalar_space.grad_basis(bcs_e, index=index, variable='x') # (NC, NQ, LDOF, GD) 
+        gphi_g = bm.zeros((NC, n_sub, NQ, LDOF, GD)) # (NC, n_sub, NQ, LDOF, GD)
+        J_eg = bm.zeros((NC, n_sub, NQ, GD, GD)) # (NC, n_sub, NQ, GD, GD)
+        # 遍历当前位移单元内的所有密度单元 (n_sub)
+        for s_idx in range(n_sub):
+            sub_bcs_x = bcs_g_x[s_idx, :, :]
+            sub_bcs_y = bcs_g_y[s_idx, :, :]
+            bcs_for_single_sub_element = (sub_bcs_x, sub_bcs_y)
+
+            gphi_for_single_sub = scalar_space.grad_basis(bcs_for_single_sub_element)
+
+            J_for_single_sub = mesh_disp.jacobi_matrix(bcs_for_single_sub_element) # (NC, NQ, GD, GD)
+            
+            gphi_g[:, s_idx, :, :, :] = gphi_for_single_sub
+            J_eg[:, s_idx, :, :, :] = J_for_single_sub
+
+        gphi_g_reshaped = gphi_g.reshape(NC * n_sub, NQ, LDOF, GD)
+        B_g_reshaped = self._material.strain_displacement_matrix(dof_priority=space.dof_priority, 
+                                                        gphi=gphi_g_reshaped) # 2D: (NC, n_sub, NQ, 3, TLDOF), 3D: (NC, n_sub, NQ, 6, TLDOF)
+        B_g = B_g_reshaped.reshape(NC, n_sub, NQ, 3, TLDOF)
+        
+        D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        coef = bm.ones((NC, n_sub)) # (NC, n_sub)
+        D_g = bm.einsum('ijkl, cn -> cnjkl', D0, coef) # 2D: (NC, n_sub, 1, 3, 3); 3D: (NC, n_sub, 1, 6, 6)
+
+        # 密度单元缩放因子
+        J_g = 1 / (multi_resolution ** GD)
+
+        ws_g = ws_e
+        cm_eg = mesh_density.entity_measure('cell', index=index).reshape(NC, n_sub)
+
+        if isinstance(mesh_density, SimplexMesh):
+            KK = J_g * bm.einsum('q, cn, cnqki, cnjkl, cnqlj -> cij',
+                            ws_g, cm_eg, B_g, D_g, B_g)
+        else:
+            detJ_eg = bm.abs(bm.linalg.det(J_eg)) # (NC, n_sub, NQ)  
+            KK = J_g * bm.einsum('q, cnq, cnqki, cnjkl, cnqlj -> cij',
+                                ws_g, detJ_eg, B_g, D_g, B_g)
+
+        print("-------------------")
+
+
+
+            
     
     @enable_cache
     def fetch_fast_assembly(self, space: TensorFunctionSpace):
