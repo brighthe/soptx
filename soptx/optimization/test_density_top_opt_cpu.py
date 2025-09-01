@@ -40,7 +40,7 @@ class DensityTopOptTest(BaseLogged):
             volume_fraction = 0.6
             penalty_factor = 3.0
 
-            # 'element', 'element_multiresolution'
+            # 'element', 'element_multiresolution', 'node_multiresolution'
             density_location = 'element_multiresolution'
             relative_density = volume_fraction
 
@@ -66,7 +66,7 @@ class DensityTopOptTest(BaseLogged):
                             )
 
         pde.init_mesh.set(mesh_type)
-        mesh_displacement = pde.init_mesh(nx=nx, ny=ny)
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -89,35 +89,35 @@ class DensityTopOptTest(BaseLogged):
 
 
         if density_location == 'element':
-            mesh_density = mesh_displacement
-            mesh_design_variable = mesh_density
             d, rho = interpolation_scheme.setup_density_distribution(
-                                                    mesh_density=mesh_density,
+                                                    mesh=displacement_mesh,
                                                     relative_density=relative_density,
                                                 ) 
-        elif density_location == 'element_multiresolution':
-            multi_resolution = 2
-            mesh_density = pde.init_mesh(nx=nx*multi_resolution, ny=ny*multi_resolution)
-            mesh_design_variable = pde.init_mesh(nx=nx*multi_resolution, ny=ny*multi_resolution)
+        elif density_location in ['element_multiresolution', 'node_multiresolution']:
+            sub_density_element = 4
+            sub_x, sub_y = int(bm.sqrt(sub_density_element)), int(bm.sqrt(sub_density_element))
+            pde.init_mesh.set(mesh_type)
+            design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
             d, rho = interpolation_scheme.setup_density_distribution(
-                                                    mesh_design_variable=mesh_design_variable,
-                                                    mesh_density=mesh_density,
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
                                                     relative_density=relative_density,
-                                                    integration_order=integration_order,
+                                                    sub_density_element=sub_density_element,
                                                 )
             
-        NC_density = mesh_density.number_of_cells()
-    
-        # 简单的映射：假设密度单元按顺序排列
-        density_to_disp_map = bm.zeros(NC_density, dtype=bm.int32)
-        
-        for i in range(NC_density):
-            disp_element_idx = i // 4
-            density_to_disp_map[i] = disp_element_idx
+        from soptx.regularization.filter import Filter
+        filter_regularization = Filter(
+                                    mesh=design_variable_mesh,
+                                    filter_type=filter_type,
+                                    rmin=rmin,
+                                    density_location=density_location,
+                                )
+        H = filter_regularization._H
+
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                    mesh=mesh_displacement,
+                                    mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
@@ -127,7 +127,7 @@ class DensityTopOptTest(BaseLogged):
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
                                 )
-        K = lagrange_fem_analyzer.assemble_stiff_matrix(density_distribution=rho)    
+        K = lagrange_fem_analyzer.assemble_stiff_matrix(rho_val=rho, sub_density_element=sub_density_element)    
 
         analysis_tspace = lagrange_fem_analyzer.tensor_space
         analysis_tgdofs = analysis_tspace.number_of_global_dofs()
@@ -138,16 +138,6 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
-        from soptx.regularization.filter import Filter
-
-        filter_regularization = Filter(
-                                    mesh=mesh_design_variable,
-                                    filter_type=filter_type,
-                                    rmin=rmin,
-                                    density_location=density_location,
-                                    integration_order=integration_order,
-                                    interpolation_order=1,
-                                )
 
         if optimizer_algorithm == 'mma': 
 

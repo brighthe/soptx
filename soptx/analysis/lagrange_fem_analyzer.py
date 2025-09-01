@@ -144,24 +144,37 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##################################################################################################
 
     def assemble_stiff_matrix(self, 
-                            density_distribution: Optional[Function] = None
+                            rho_val: Function = None,
+                            sub_density_element: int = None
                         ) -> Union[CSRTensor, COOTensor]:
-        """组装全局刚度矩阵"""
+        """组装全局刚度矩阵
+
+        Parameters
+        ----------
+        rho_val : 密度值
+            单元密度 
+            - 单分辨率 - (NC, )
+            - 多分辨率 - (NC*sub_density_element, )
+
+        Returns
+        -------
+        Union[CSRTensor, COOTensor]
+            组装后的刚度矩阵
+        """
 
         if self._topopt_algorithm is None:
-            if density_distribution is not None:
+            if rho_val is not None:
                 self._log_warning("标准有限元分析模式下忽略相对密度 rho")
             
             coef = None
         
         elif self._topopt_algorithm == 'density_based':
-            if density_distribution is None:
-                error_msg = "基于密度的拓扑优化算法需要提供相对密度 rho"
-                self._log_error(error_msg)
+            if rho_val is None:
+                self._log_error("基于密度的拓扑优化算法需要提供相对密度 rho")
 
             coef = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
-                                            density_distribution=density_distribution,
+                                            rho_val=rho_val,
                                         )
         elif self._topopt_algorithm == 'level_set':
         
@@ -175,6 +188,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
         integrator = LinearElasticIntegrator(material=self._material,
                                             coef=coef,
+                                            sub_density_element=sub_density_element,
                                             q=self._integration_order,
                                             method=self._assembly_method)
         bform = BilinearForm(self._tensor_space)

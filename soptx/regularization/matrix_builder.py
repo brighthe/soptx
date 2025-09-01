@@ -53,15 +53,15 @@ class FilterMatrixBuilder:
                             )
             
         elif keys_2d.issubset(mesh_keys) and self._mesh.meshdata['mesh_type'] in {'uniform_quad'}:
-            
-            if self._density_location == 'element':
-                return self._compute_weigthed_matrix_2d(
+
+            if self._density_location in ['element', 'element_multiresolution']:
+                return self._compute_weighted_matrix_2d(
                                     self._rmin,
                                     self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
                                     self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
                                 )
             
-            elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
+            elif self._density_location in ['node', 'node_multiresolution']:
                 return self._compute_weighted_matrix_general(
                                 rmin=self._rmin,
                                 domain=self._mesh.meshdata['domain'], 
@@ -80,7 +80,11 @@ class FilterMatrixBuilder:
                                         periodic: List[bool]=[False, False, False],
                                         enable_timing: bool = False,
                                     ) -> Tuple[COOTensor, TensorLike]:
-        """计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
+        """
+        计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
+
+        SRTO - 设计变量 = 单元密度中心点 / 节点密度
+        MRTO - 设计变量 = 子单元密度中心点 / 节点密度  - 要求设计变量网格 = 子单元密度网格
         
         Parameters:
         -----------
@@ -99,27 +103,38 @@ class FilterMatrixBuilder:
             next(t)
 
         if self._density_location in ['element']:
-
-            density_coords = self._mesh.entity_barycenter('cell') # (NC, GD)
-
-        elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
-
-            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
-            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-
-            qf = self._mesh.quadrature_formula(q=self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
-            density_coords_local = self._mesh.bc_to_point(bcs) # （NC, NQ, GD)
-
-            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-                                                                    nq_per_dim=self._integration_order)
             
-            density_coords = density_coords_local[local_to_global]  # (NC*NQ, GD)
+            density_mesh = self._mesh
+            density_coords = density_mesh.entity_barycenter('cell') # (NC, GD)
 
+        elif self._density_location in ['element_multiresolution']:
 
-        elif self._density_location == 'interpolation_point':
+            sub_density_mesh = self._mesh
+            density_coords = sub_density_mesh.entity_barycenter('cell') # (NC*n_sub, GD)
 
-            density_coords = self._mesh.interpolation_points(p=self._interpolation_order) # (GDOF, GD)
+        elif self._density_location in ['node']:
+
+            density_mesh = self._mesh
+            density_coords = sub_density_mesh.entity_barycenter('node') # (NN, GD)
+
+        elif self._density_location in ['node_multiresolution']:
+
+            sub_density_mesh = self._mesh
+            density_coords = sub_density_mesh.entity_barycenter('node') # (NN*, GD)
+
+        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
+
+        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+
+        #     qf = self._mesh.quadrature_formula(q=self._integration_order)
+        #     bcs, ws = qf.get_quadrature_points_and_weights()
+        #     density_coords_local = self._mesh.bc_to_point(bcs) # （NC, NQ, GD)
+
+        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+        #                                                             nq_per_dim=self._integration_order)
+            
+        #     density_coords = density_coords_local[local_to_global]  # (NC*NQ, GD)
 
         # 使用 KD-tree 查询临近点
         # ! 该函数会将目前许需要将变脸 转移到 CPU 上进行计算
@@ -191,116 +206,30 @@ class FilterMatrixBuilder:
         return H, Hs
         
 
-    def _compute_filter_general_old(self, 
-                                rmin: float,
-                                domain: List[float],
-                                cell_centers: TensorLike,
-                                periodic: List[bool]=[False, False, False],
-                                enable_timing: bool = False,
-                            ) -> Tuple[COOTensor, TensorLike]:
-        """计算任意网格的过滤矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
-        
-        Parameters
-        ----------
-        rmin: 过滤半径
-        cell_centers: 单元中心点坐标, 形状为 (NC, GD)
-        domain: 计算域的边界, 
-        periodic: 各方向是否周期性, 默认为 [False, False, False]
-            
-        Returns:
-        --------
-        H: 过滤矩阵, 形状为 (NC, NC)
-        Hs: 过滤矩阵行和, 形状为 (NC, )
-        """
-        t = None
-        if enable_timing:
-            t = timer(f"Filter_general")
-            next(t)
-
-        # 使用 KD-tree 查询临近点
-        # ! 该函数会将目前许需要将变脸 转移到 CPU 上进行计算
-        cell_centers = bm.device_put(cell_centers, 'cpu')
-        cell_indices, neighbor_indices = bm.query_point(
-                                            x=cell_centers, y=cell_centers, h=rmin, 
-                                            box_size=domain, mask_self=False, periodic=periodic
-                                        )
-        if enable_timing:
-            t.send('KD-tree 查询时间')
-
-        # 计算节点总数
-        NC = cell_centers.shape[0]
-        
-        # 准备存储过滤器矩阵的数组
-        # 预估非零元素的数量（包括对角线元素）
-        max_nnz = len(cell_indices) + NC
-        iH = bm.zeros(max_nnz, dtype=bm.int32)
-        jH = bm.zeros(max_nnz, dtype=bm.int32)
-        sH = bm.zeros(max_nnz, dtype=bm.float64)
-        
-        # 首先添加对角线元素（自身单元）
-        for i in range(NC):
-            iH[i] = i
-            jH[i] = i
-            # 自身权重为 rmin（最大权重）
-            sH[i] = rmin
-        
-        # 当前非零元素计数
-        nnz = NC
-        
-        # 填充其余非零元素（邻居点）
-        for idx in range(len(cell_indices)):
-            i = cell_indices[idx]
-            j = neighbor_indices[idx]
-            
-            # 计算节点间的物理距离
-            physical_dist = bm.sqrt(bm.sum((cell_centers[i] - cell_centers[j])**2))
-            
-            # 计算权重因子
-            fac = rmin - physical_dist
-            
-            if fac > 0:
-                iH[nnz] = i
-                jH[nnz] = j
-                sH[nnz] = fac
-                nnz += 1
-
-        if enable_timing:
-            t.send('循环计算时间')
-        
-        # 创建稀疏矩阵（只使用有效的非零元素）
-        H = COOTensor(
-            indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
-            values=sH[:nnz],
-            spshape=(NC, NC)
-        )
-
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
-        
-        H = H.tocsr()
-        H = H.device_put(self.device)
-        Hs = bm.device_put(Hs, self.device)
-        
-        # # 转换为 CSR 格式以便于后续操作
-        # H = H.tocsr()
-        
-        # # 计算滤波矩阵行和
-        # Hs = H @ bm.ones(H.shape[1], dtype=bm.float64)
-
-        if enable_timing:
-            t.send('稀疏矩阵构建时间')
-            t.send(None)
-
-        return H, Hs
-    
-
-    def _compute_weigthed_matrix_2d(self,
-                                    rmin: float,     
-                                    nx: int, ny: int,  
+    def _compute_weighted_matrix_2d(self,
+                                    rmin: float,
+                                    nx: int, ny: int,
                                     hx: float, hy: float,
                                     enable_timing: bool = False,
                                 ) -> Tuple[CSRTensor, TensorLike]:
-        """单元密度情况下, 计算权重矩阵的方式 - 分块处理版本
-        即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算"""
+        """
+        计算四边形网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
+
+        SRTO - 设计变量 = 单元密度中心点
+        MRTO - 设计变量 = 密度子单元中心点 - 要求设计变量网格 = 密度子单元网格
+
+        Parameters:
+        -----------
+        rmin: 过滤半径
+        nx, ny : 设计变量网格剖分数
+        hx, hy : 设计变量网格单元大小 
+            
+        Returns:
+        --------
+        H: 过滤矩阵
+        Hs: 过滤矩阵行和
+
+        """
 
         # 单元中心坐标需要偏移半个网格
         coord_offset_x = 0.5 * hx
@@ -419,10 +348,10 @@ class FilterMatrixBuilder:
             sH = bm.tensor([], dtype=bm.float64, device='cpu')
         
         H = COOTensor(
-            indices=bm.stack((iH, jH), axis=0),
-            values=sH,
-            spshape=(N_total, N_total)
-        )
+                    indices=bm.stack((iH, jH), axis=0),
+                    values=sH,
+                    spshape=(N_total, N_total)
+                )
         
         # ! PyTorch 后端对 COOTensor 的支持更好
         Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
@@ -438,7 +367,7 @@ class FilterMatrixBuilder:
         return H, Hs
 
 
-    def _compute_filter_2d_math(self,
+    def _compute_weighted_matrix_2d_math(self,
                                 rmin: float, 
                                 nx: int, ny: int, 
                                 hx: float, hy: float,

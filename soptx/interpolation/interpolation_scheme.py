@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any, Literal, List, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod, cartesian
-from fealpy.typing import TensorLike
+from fealpy.typing import TensorLike, Tuple
 from fealpy.functionspace import Function, LagrangeFESpace, BernsteinFESpace
 from fealpy.mesh import HomogeneousMesh
 
@@ -60,63 +60,84 @@ class MaterialInterpolationScheme(BaseLogged):
 
     @variantmethod('element')
     def setup_density_distribution(self, 
-                                mesh_density: HomogeneousMesh,
+                                mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
                                 **kwargs,
-                            ) -> Function:
-        """但分辨率单元密度分布, 设计变量就是单元密度"""
+                            ) -> Tuple[Function, Function]:
+        """单元密度-单分辨率 (SRTO), 设计变量就是单元密度, 自由度位于密度单元中心"""
 
-        NC = mesh_density.number_of_cells()
-        density_tensor = bm.full((NC,), relative_density, dtype=bm.float64, device=mesh_density.device)
+        Ne = mesh.number_of_cells()
+        space = LagrangeFESpace(mesh, p=0, ctype='D')
+        d0 = bm.full((Ne, ), relative_density, dtype=bm.float64, device=mesh.device)
+        design_variable = space.function(d0)
 
-        space = LagrangeFESpace(mesh_density, p=0, ctype='D')
-        density_dist = space.function(density_tensor)
+        rho_eval = space.function(bm.copy(d0))
 
-        self._log_info(f"Element density: shape={density_dist.shape}, value={relative_density}")
-
-        return density_dist
+        return design_variable, rho_eval
     
     @setup_density_distribution.register('element_multiresolution')
     def setup_density_distribution(self, 
-                            mesh_design_variable: HomogeneousMesh,
-                            mesh_density: HomogeneousMesh,
+                            design_variable_mesh: HomogeneousMesh,
+                            displacement_mesh: HomogeneousMesh,
                             relative_density: float = 1.0,
-                            integration_order: int = 2,
+                            sub_density_element: int = 4,
                             **kwargs,
-                        ) -> Function:
-        """多分辨率单元密度分布, 设计变量独立于有限元网格"""
+                        ) -> Tuple[Function, TensorLike]:
+        """单元密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元中心"""
+
+        Ned = design_variable_mesh.number_of_cells()
+        Ne = displacement_mesh.number_of_cells()
+
+        if Ned != Ne * sub_density_element:
+            error_msg = (f"Currently only support Nd = Ne * sub_density_element. "
+                          f"Got Nd={Ned}, Ne={Ne}, sub_density_element={sub_density_element}")
+            self._log_error(error_msg)
+
+        space = LagrangeFESpace(design_variable_mesh, p=0, ctype='D')
+        d0 = bm.full((Ned, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        design_variable = space.function(d0)
+
+        rho_eval = space.function(bm.copy(d0))
+
+        return design_variable, rho_eval
+
+    @setup_density_distribution.register('node')
+    def setup_density_distribution(self,
+                                   mesh: HomogeneousMesh,
+                                   relative_density: float = 1.0,
+                                   **kwargs,
+                                ) -> Tuple[Function, Function]:
+        "节点密度-单分辨率 (SRTO), 设计变量就是节点密度, 自由度位于密度节点"
+
+        Nn = mesh.number_of_nodes()
+        space = LagrangeFESpace(mesh, p=1, ctype='C')
+        d0 = bm.full((Nn, ), relative_density, dtype=bm.float64, device=mesh.device)
+        design_variable = space.function(d0)
+
+        rho_eval = space.function(bm.copy(d0))
+
+        return design_variable, rho_eval
     
-        NN_mesh_design_variable = mesh_design_variable.number_of_nodes()
-        design_variable_node = bm.full((NN_mesh_design_variable, ), relative_density, 
-                                dtype=bm.float64, device=mesh_design_variable.device)
-        
-        NC_mesh_density = mesh_density.number_of_cells()
-        density_element = bm.full((NC_mesh_density, integration_order), relative_density, 
-                                dtype=bm.float64, device=mesh_density.device)
-
-        return design_variable_node, density_element
-
-    @setup_density_distribution.register('element_multi_resolution')
+    @setup_density_distribution.register('node_multiresolution')
     def setup_density_distribution(self, 
-                            mesh: HomogeneousMesh,
+                            design_variable_mesh: HomogeneousMesh,
+                            displacement_mesh: HomogeneousMesh,
                             relative_density: float = 1.0,
-                            multi_resolution: int = 2,
+                            sub_density_element: int = 4,
                             **kwargs,
-                        ) -> Function:
-        """单元密度分布 (多分辨率, 单元内部是连续函数)"""
+                        ) -> Tuple[Function, Function]:
+        """节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元节点处"""
 
-        space = LagrangeFESpace(mesh, p=multi_resolution-1, ctype='D')
+        Nnd = design_variable_mesh.number_of_nodes()
+        Ne = displacement_mesh.number_of_cells()
 
-        num_density_cells = space.number_of_global_dofs()
+        space = LagrangeFESpace(design_variable_mesh, p=1, ctype='C')
+        d0 = bm.full((Nnd, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        design_variable = space.function(d0)
 
-        density_tensor = bm.full((num_density_cells, ), relative_density, dtype=bm.float64, device=mesh.device)
+        rho_eval = space.function(bm.copy(d0))
 
-        density_dist = space.function(density_tensor)
-
-        self._log_info(f"Element density: shape={density_dist.shape}, value={relative_density}")
-
-        return density_dist
-
+        return design_variable, rho_eval
     
     @setup_density_distribution.register('gauss_integration_point')
     def setup_density_distribution(self, 
@@ -294,7 +315,7 @@ class MaterialInterpolationScheme(BaseLogged):
     @interpolate_map.register('msimp')
     def interpolate_map(self,
                     material: LinearElasticMaterial, 
-                    density_distribution: Union[Function, TensorLike],
+                    rho_val: Union[Function, TensorLike],
                 ) -> Union[Function, TensorLike]:
         """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
 
@@ -303,23 +324,26 @@ class MaterialInterpolationScheme(BaseLogged):
             if option not in self._options:
                 error_msg = f"Missing required option '{option}' for msimp interpolation"
                 self._log_error(error_msg)
-                raise ValueError(error_msg)
 
         penalty_factor = self._options['penalty_factor']
         target_variables = self._options['target_variables']
         void_youngs_modulus = self._options['void_youngs_modulus']
 
         if target_variables == ['E']:
+
             E0 = material.youngs_modulus
             Emin = void_youngs_modulus
-            msimp_map = (Emin + density_distribution[:] ** penalty_factor * (E0 - Emin)) / E0
+            msimp_map = (Emin + rho_val[:] ** penalty_factor * (E0 - Emin)) / E0
 
-            if self._density_location in ['lagrange_interpolation_point', 
-                                          'berstein_interpolation_point', 
-                                          'shepard_interpolation_point']:
-                # 如果是插值点密度分布, 则需要将结果转换为 Function
-                density_space = density_distribution.space
-                msimp_map = density_space.function(msimp_map)
+            density_space = rho_val.space
+            msimp_map = density_space.function(msimp_map)
+
+            # if self._density_location in ['lagrange_interpolation_point', 
+            #                               'berstein_interpolation_point', 
+            #                               'shepard_interpolation_point']:
+            #     # 如果是插值点密度分布, 则需要将结果转换为 Function
+            #     density_space = rho_val.space
+            #     msimp_map = density_space.function(msimp_map)
 
             return msimp_map
 

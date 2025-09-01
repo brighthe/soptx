@@ -55,13 +55,11 @@ class Filter(BaseLogged):
             error_msg = (f"当 filter_type='{self._filter_type}' 时，必须提供有效的 rmin (> 0). "
                         f"当前 rmin={self._rmin}")
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
         # 验证密度位置参数
         if self._filter_type != 'none' and self._density_location is None:
             error_msg = f"当 filter_type='{self._filter_type}' 时，必须提供 density_location 参数"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
             
         # 验证积分/插值参数
         if (self._filter_type != 'none' and 
@@ -69,25 +67,23 @@ class Filter(BaseLogged):
             self._integration_order is None):
             error_msg = "当 density_location='gauss_integration_point' 时，必须提供 integrator_order 参数"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
             
         if (self._filter_type != 'none' and 
             self._density_location == 'interpolation_point' and 
             self._interpolation_order is None):
             error_msg = "当 density_location='interpolation_point' 时，必须提供 interpolation_order 参数"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
         
         # 1. 构建过滤矩阵
         if self._filter_type != 'none' and self._rmin > 0:
             builder = FilterMatrixBuilder(
-                mesh=mesh, 
-                rmin=rmin, 
-                density_location=density_location,
-                integration_order=integration_order,
-                interpolation_order=interpolation_order
-            )
+                                    mesh=mesh, 
+                                    rmin=rmin, 
+                                    density_location=density_location,
+                                    integration_order=integration_order,
+                                    interpolation_order=interpolation_order
+                                )
             self._H, self._Hs = builder.build()
             self._integration_weights = self._compute_integration_weights()
             self._cell_measure = self._mesh.entity_measure('cell')
@@ -100,7 +96,6 @@ class Filter(BaseLogged):
             error_msg = (f"未知的过滤方法: '{self._filter_type}'. "
                         f"可用选项: {list(FILTER_STRATEGY_REGISTRY.keys())}")
             self._log_error(error_msg)
-            raise ValueError(error_msg)
 
         strategy_params = {}
         
@@ -188,9 +183,15 @@ class Filter(BaseLogged):
     def _compute_integration_weights(self) -> TensorLike:
         """根据密度位置类型计算积分权重"""
 
-        if self._density_location == 'element':
-            
+        if self._density_location in ['element', 'element_multiresolution']:
+
             integration_weights = self._mesh.entity_measure('cell')
+
+            return integration_weights
+        
+        elif self._density_location in ['node', 'node_multiresolution']:
+
+            integration_weights = 1
 
             return integration_weights
             
