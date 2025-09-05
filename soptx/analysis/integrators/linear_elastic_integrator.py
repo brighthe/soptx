@@ -16,7 +16,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     def __init__(self, 
                 material: LinearElasticMaterial,
                 coef: TensorLike,
-                sub_density_element: Optional[int]=None,
                 q: Optional[int]=None, 
                 *,
                 index: Index=_S,
@@ -26,7 +25,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         self._material = material
         self._coef = coef
-        self._sub_density_element = sub_density_element
         self._q = q
         self._index = index
         
@@ -242,7 +240,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                                "not a subclass of HomoMesh.")
     
         cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self.q is None else self.q
+        q = scalar_space.p+3 if self._q is None else self._q
         qf = mesh.quadrature_formula(q)
         bcs, ws = qf.get_quadrature_points_and_weights()
         gphi = scalar_space.grad_basis(bcs, index=index, variable='x')
@@ -256,24 +254,32 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         return cm, ws, bcs, gphi, detJ
 
-    @assembly.register('voigt_single_resolution')
+    @assembly.register('voigt')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         mesh = getattr(space, 'mesh', None)
         cm, ws, bcs, gphi, detJ = self.fetch_voigt_assembly(space)
 
         NC = mesh.number_of_cells()
-        NN = mesh.number_of_nodes()
-
+        NQ = gphi.shape[1]
         D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
         B = self._material.strain_displacement_matrix(dof_priority=space.dof_priority, 
                                                     gphi=gphi) # 2D: (NC, NQ, 3, LDOF), 3D: (NC, NQ, 6, LDOF)
 
-        # 单元密度: (NC, ); 节点密度: (NN, )
+        # 单元密度: (NC, ); 节点密度: (NC, NQ)
         coef = self._coef
 
         if coef is None:
 
-            D = D0 # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+            D = D0[0, 0] # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+
+            if isinstance(mesh, SimplexMesh):
+                KK = bm.einsum('q, c, cqki, kl, cqlj -> cij',
+                                ws, cm, B, D, B)
+            else:
+                KK = bm.einsum('q, cq, cqki, kl, cqlj -> cij',
+                                ws, detJ, B, D, B)
+            
+            return KK
         
         # 单元密度的情况
         elif coef.shape == (NC, ):
@@ -290,9 +296,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             return KK
         
         # 节点密度的情况
-        elif coef.shape == (NN, ):
+        elif coef.shape == (NC, NQ):
             
-            coef = coef(bcs) # (NC, NQ)
             D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
             
             if isinstance(mesh, SimplexMesh):
@@ -302,96 +307,95 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij',
                                 ws, detJ, B, D, B)
         else:
+
             pass
 
     @assembly.register('voigt_multi_resolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         index = self._index
-
-        scalar_space = space.scalar_space
-        q = scalar_space.p+3 if self._q is None else self._q
+        mesh_u = getattr(space, 'mesh', None)
+        s_space_u = space.scalar_space
+        GD = mesh_u.geo_dimension()
+        q = s_space_u.p+3 if self._q is None else self._q
        
-        # 单元密度: (NC*n_sub, ); 节点密度: (NC*n_sub, NCN)
+        # 单元密度多分辨率: (NC, n_sub); 节点密度多分辨率: (NC, n_sub, NQ)
         coef = self._coef
-        n_sub = self._sub_density_element
-
-        mesh_density = coef.space.mesh
-        NC_density = mesh_density.number_of_cells()
-        NCN_density = int(mesh_density.number_of_nodes_of_cells())
-
-        mesh_displacement = getattr(scalar_space, 'mesh', None)
+        NC, n_sub = coef.shape[0], coef.shape[1]
         
         # 计算位移单元积分点处的重心坐标
-        qf_e = mesh_displacement.quadrature_formula(q)
+        qf_e = mesh_u.quadrature_formula(q)
         # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
         bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
         NQ = ws_e.shape[0]
 
-        # 把位移单元积分处的重心坐标转移到子密度单元处的重心坐标
+        # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
         from soptx.analysis.utils import map_bcs_to_sub_elements
         # bcs_eg.shape = ( (n_sub, NQ, GD), (n_sub, NQ, GD) ), ws_e.shape = (NQ, )
         bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
         bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
 
-        NC = mesh_displacement.number_of_cells()
-        GD = mesh_displacement.geo_dimension()
-        LDOF = scalar_space.number_of_local_dofs()
-        gphi_g = bm.zeros((NC, n_sub, NQ, LDOF, GD)) # (NC, n_sub, NQ, LDOF, GD)
-        J_eg = bm.zeros((NC, n_sub, NQ, GD, GD)) # (NC, n_sub, NQ, GD, GD)
-        
-        # 遍历当前位移单元内的所有密度单元 (n_sub)
-        for s_idx in range(n_sub):
-            sub_bcs_x = bcs_eg_x[s_idx, :, :]
-            sub_bcs_y = bcs_eg_y[s_idx, :, :]
-            bcs_for_single_sub_element = (sub_bcs_x, sub_bcs_y) # ( (NQ, GD), (NQ, GD) )
+        # 计算子密度单元内高斯积分点处的基函数梯度和 jacobi 矩阵
+        LDOF = s_space_u.number_of_local_dofs()
+        gphi_eg = bm.zeros((NC, n_sub, NQ, LDOF, GD)) # (NC, n_sub, NQ, LDOF, GD)
+        detJ_eg = None
 
-            gphi_for_single_sub = scalar_space.grad_basis(bcs_for_single_sub_element, index=index, variable='x') # (NC, NQ, LDOF, GD)
+        if isinstance(mesh_u, SimplexMesh):
+            for s_idx in range(n_sub):
+                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ, GD), (NQ, GD))
+                gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x')  # (NC, NQ, LDOF, GD)
+                gphi_eg[:, s_idx, :, :, :] = gphi_sub
 
-            J_for_single_sub = mesh_displacement.jacobi_matrix(bcs_for_single_sub_element) # (NC, NQ, GD, GD)
-            
-            gphi_g[:, s_idx, :, :, :] = gphi_for_single_sub
-            J_eg[:, s_idx, :, :, :] = J_for_single_sub
+        else:
+            detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+            for s_idx in range(n_sub):
+                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ, GD), (NQ, GD))
+                gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x') # (NC, NQ, LDOF, GD)
 
-        gphi_g_reshaped = gphi_g.reshape(NC * n_sub, NQ, LDOF, GD)
-        B_g_reshaped = self._material.strain_displacement_matrix(dof_priority=space.dof_priority, 
-                                                        gphi=gphi_g_reshaped) # 2D: (NC*n_sub, NQ, 3, TLDOF), 3D: (NC*n_sub, NQ, 6, TLDOF)
-        TLDOF = B_g_reshaped.shape[-1]
-        B_g = B_g_reshaped.reshape(NC, n_sub, NQ, 3, TLDOF)
-        
-        # 子密度单元缩放因子
+                J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+
+                gphi_eg[:, s_idx, :, :, :] = gphi_sub
+                detJ_eg[:, s_idx, :] = detJ_sub
+
+        # 计算 B 矩阵
+        gphi_eg_reshaped = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
+        B_eg_reshaped = self._material.strain_displacement_matrix(
+                                            dof_priority=space.dof_priority, 
+                                            gphi=gphi_eg_reshaped
+                                        ) # 2D: (NC*n_sub, NQ, 3, TLDOF), 3D: (NC*n_sub, NQ, 6, TLDOF)
+        B_eg = B_eg_reshaped.reshape(NC, n_sub, NQ, B_eg_reshaped.shape[-2], B_eg_reshaped.shape[-1])
+
+        # 位移单元 → 子密度单元的缩放
         J_g = 1 / n_sub
 
-        cm_eg = mesh_density.entity_measure('cell', index=index).reshape(NC, n_sub)
-
+        # 基础材料的弹性矩阵
         D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
 
-        if coef.shape == (NC_density, ):
+        # 单元密度
+        if coef.shape == (NC, n_sub):
 
-            coef = self._coef.reshape(-1, n_sub) # (NC, n_sub)
             D_g = bm.einsum('ijkl, cn -> cnjkl', D0, coef) # 2D: (NC, n_sub, 1, 3, 3); 3D: (NC, n_sub, 1, 6, 6)
-
-            if isinstance(mesh_density, SimplexMesh):
+            if isinstance(mesh_u, SimplexMesh):
+                cm = mesh_u.entity_measure('cell')
+                cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) / n_sub # (NC, n_sub)
                 KK = J_g * bm.einsum('q, cn, cnqki, cnjkl, cnqlj -> cij',
-                                    ws_e, cm_eg, B_g, D_g, B_g)
+                                    ws_e, cm_eg, B_eg, D_g, B_eg)
             else:
-                detJ_eg = bm.abs(bm.linalg.det(J_eg)) # (NC, n_sub, NQ)  
                 KK = J_g * bm.einsum('q, cnq, cnqki, cnjkl, cnqlj -> cij',
-                                    ws_e, detJ_eg, B_g, D_g, B_g)
+                                    ws_e, detJ_eg, B_eg, D_g, B_eg)
                 
             return KK
 
-        elif coef.shape == (NC_density, NCN_density):
+        # 节点密度
+        elif coef.shape == (NC, n_sub, NQ):
 
-            coef = self._coef(bcs_e) # (NC, n_sub, NQ)
             D_g = bm.einsum('ijkl, cnq -> cnqkl', D0, coef) # 2D: (NC, n_sub, NQ, 3, 3); 3D: (NC, n_sub, NQ, 6, 6)
-
-            if isinstance(mesh_density, SimplexMesh):
+            if isinstance(mesh_u, SimplexMesh):
                 KK = J_g * bm.einsum('q, cn, cnqki, cnqkl, cnqlj -> cij',
-                                    ws_e, cm_eg, B_g, D_g, B_g)
+                                    ws_e, cm_eg, B_eg, D_g, B_eg)
             else:
-                detJ_eg = bm.abs(bm.linalg.det(J_eg)) # (NC, n_sub, NQ)  
                 KK = J_g * bm.einsum('q, cnq, cnqki, cnqkl, cnqlj -> cij',
-                                    ws_e, detJ_eg, B_g, D_g, B_g)
+                                    ws_e, detJ_eg, B_eg, D_g, B_eg)
                 
             return KK
 

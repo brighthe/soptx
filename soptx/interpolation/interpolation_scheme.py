@@ -60,21 +60,30 @@ class MaterialInterpolationScheme(BaseLogged):
 
     @variantmethod('element')
     def setup_density_distribution(self, 
-                                mesh: HomogeneousMesh,
+                                design_variable_mesh: HomogeneousMesh,
+                                displacement_mesh: HomogeneousMesh,
                                 relative_density: float = 1.0,
                                 **kwargs,
-                            ) -> Tuple[Function, Function]:
-        """单元密度-单分辨率 (SRTO), 设计变量就是单元密度, 自由度位于密度单元中心"""
+                            ) -> Tuple[TensorLike, Function]:
+        """
+        单元密度-单分辨率 (SRTO), 设计变量就是单元密度, 自由度位于密度单元中心
+        
+        Returns:
+        --------
+        design_variable : (NC, )
+        density_distribution : (NC, )
+        """
 
-        Ne = mesh.number_of_cells()
-        space = LagrangeFESpace(mesh, p=0, ctype='D')
-        d0 = bm.full((Ne, ), relative_density, dtype=bm.float64, device=mesh.device)
-        design_variable = space.function(d0)
+        NC_design_variable = design_variable_mesh.number_of_cells()
+        design_variable = bm.full((NC_design_variable, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
 
-        rho_eval = space.function(bm.copy(d0))
+        NC = displacement_mesh.number_of_cells()
+        density_val = bm.full((NC, ), relative_density, dtype=bm.float64, device=displacement_mesh.device)
+        space = LagrangeFESpace(displacement_mesh, p=0, ctype='D')
+        density_distribution = space.function(density_val)
 
-        return design_variable, rho_eval
-    
+        return design_variable, density_distribution
+
     @setup_density_distribution.register('element_multiresolution')
     def setup_density_distribution(self, 
                             design_variable_mesh: HomogeneousMesh,
@@ -82,62 +91,127 @@ class MaterialInterpolationScheme(BaseLogged):
                             relative_density: float = 1.0,
                             sub_density_element: int = 4,
                             **kwargs,
-                        ) -> Tuple[Function, TensorLike]:
-        """单元密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元中心"""
+                        ) -> Tuple[TensorLike, Function]:
+        """
+        单元密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元中心
+        
+        Returns:
+        --------
+        design_variable : (NC_design_variable, )
+        density_distribution : (NC, n_sub)
+        """
 
-        Ned = design_variable_mesh.number_of_cells()
-        Ne = displacement_mesh.number_of_cells()
+        NC_design_variable = design_variable_mesh.number_of_cells()
+        NC = displacement_mesh.number_of_cells()
+        n_sub = sub_density_element
 
-        if Ned != Ne * sub_density_element:
+        if NC_design_variable != NC * n_sub:
             error_msg = (f"Currently only support Nd = Ne * sub_density_element. "
-                          f"Got Nd={Ned}, Ne={Ne}, sub_density_element={sub_density_element}")
+                          f"Got Nd={NC_design_variable}, Ne={NC}, sub_density_element={n_sub}")
             self._log_error(error_msg)
 
-        space = LagrangeFESpace(design_variable_mesh, p=0, ctype='D')
-        d0 = bm.full((Ned, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
-        design_variable = space.function(d0)
+        design_variable = bm.full((NC_design_variable, ), relative_density, 
+                                dtype=bm.float64, device=design_variable_mesh.device)
+        
+        density_val = bm.full((NC, n_sub), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        space = LagrangeFESpace(displacement_mesh, p=0, ctype='D')
+        density_distribution = space.function(density_val)
 
-        rho_eval = space.function(bm.copy(d0))
-
-        return design_variable, rho_eval
+        return design_variable, density_distribution
 
     @setup_density_distribution.register('node')
     def setup_density_distribution(self,
-                                   mesh: HomogeneousMesh,
+                                   design_variable_mesh: HomogeneousMesh,
+                                   displacement_mesh: HomogeneousMesh,
                                    relative_density: float = 1.0,
+                                   integration_order: int = 3,
                                    **kwargs,
-                                ) -> Tuple[Function, Function]:
-        "节点密度-单分辨率 (SRTO), 设计变量就是节点密度, 自由度位于密度节点"
+                                ) -> Tuple[TensorLike, TensorLike]:
+        """
+        节点密度-单分辨率 (SRTO), 设计变量就是节点密度, 自由度位于密度节点处
+        
+        Returns:
+        --------
+        design_variable : (NN, )
+        density_distribution : (NC, NQ)
+        """
 
-        Nn = mesh.number_of_nodes()
-        space = LagrangeFESpace(mesh, p=1, ctype='C')
-        d0 = bm.full((Nn, ), relative_density, dtype=bm.float64, device=mesh.device)
-        design_variable = space.function(d0)
+        NN_design_variable = design_variable_mesh.number_of_nodes()
+        design_variable = bm.full((NN_design_variable, ), relative_density, 
+                                dtype=bm.float64, device=design_variable_mesh.device)
 
-        rho_eval = space.function(bm.copy(d0))
+        NN = displacement_mesh.number_of_nodes()
+        qf = displacement_mesh.quadrature_formula(q=integration_order)
+        # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+        bcs, ws = qf.get_quadrature_points_and_weights()
 
-        return design_variable, rho_eval
-    
+        density_val = bm.full((NN, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        space = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
+        density = space.function(density_val)
+        density_distribution = density(bcs) # (NC, NQ)
+
+        return design_variable, density_distribution
+
     @setup_density_distribution.register('node_multiresolution')
     def setup_density_distribution(self, 
                             design_variable_mesh: HomogeneousMesh,
                             displacement_mesh: HomogeneousMesh,
                             relative_density: float = 1.0,
                             sub_density_element: int = 4,
+                            integration_order: int = 3,
                             **kwargs,
-                        ) -> Tuple[Function, Function]:
-        """节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元节点处"""
+                        ) -> Tuple[TensorLike, TensorLike]:
+        """
+        节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元节点处
+        
+        Returns:
+        --------
+        design_variable : (NN_design_variable, )
+        density_distribution : (NC, n_sub, NQ)
+        """
 
-        Nnd = design_variable_mesh.number_of_nodes()
-        Ne = displacement_mesh.number_of_cells()
+        NN_design_variable = design_variable_mesh.number_of_nodes()
+        design_variable = bm.full((NN_design_variable, ), relative_density, 
+                                dtype=bm.float64, device=design_variable_mesh.device)
+        
+        # NC = displacement_mesh.number_of_cells()
+        # n_sub = sub_density_element
+        # qf_e = displacement_mesh.quadrature_formula(q=integration_order)
+        # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+        # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+        # NQ = ws_e.shape[0]
+        # density_distribution = bm.full((NC, n_sub, NQ), 
+        #                                relative_density, 
+        #                                dtype=bm.float64, 
+        #                                device=design_variable_mesh.device)
 
-        space = LagrangeFESpace(design_variable_mesh, p=1, ctype='C')
-        d0 = bm.full((Nnd, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
-        design_variable = space.function(d0)
+        # return design_variable, density_distribution
 
-        rho_eval = space.function(bm.copy(d0))
+        s_space_u = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
+        NC = displacement_mesh.number_of_cells()
+        qf_e = displacement_mesh.quadrature_formula(q=integration_order)
+        # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+        bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
 
-        return design_variable, rho_eval
+        NN = displacement_mesh.number_of_nodes()
+        density_val = bm.full((NN, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        density = s_space_u.function(density_val)
+        n_sub = sub_density_element
+
+        # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
+        from soptx.analysis.utils import map_bcs_to_sub_elements
+        # bcs_eg.shape = ( (n_sub, NQ, GD), (n_sub, NQ, GD) ), ws_e.shape = (NQ, )
+        bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+        bcs_eg_x, bcs_eg_y = bcs_eg
+
+        NQ = ws_e.shape[0]
+        density_distribution = bm.full((NC, n_sub, NQ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        for s_idx in range(n_sub):
+            sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
+            density_q_sub = density(sub_bcs) # (NC, NQ)
+            density_distribution[:, s_idx, :] = density_q_sub
+
+        return design_variable, density_distribution
     
     @setup_density_distribution.register('gauss_integration_point')
     def setup_density_distribution(self, 
@@ -316,7 +390,7 @@ class MaterialInterpolationScheme(BaseLogged):
     def interpolate_map(self,
                     material: LinearElasticMaterial, 
                     rho_val: Union[Function, TensorLike],
-                ) -> Union[Function, TensorLike]:
+                ) -> TensorLike:
         """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
 
         required_options = ['penalty_factor', 'target_variables', 'void_youngs_modulus']
@@ -335,8 +409,8 @@ class MaterialInterpolationScheme(BaseLogged):
             Emin = void_youngs_modulus
             msimp_map = (Emin + rho_val[:] ** penalty_factor * (E0 - Emin)) / E0
 
-            density_space = rho_val.space
-            msimp_map = density_space.function(msimp_map)
+            # density_space = rho_val.space
+            # msimp_map = density_space.function(msimp_map)
 
             # if self._density_location in ['lagrange_interpolation_point', 
             #                               'berstein_interpolation_point', 
@@ -366,21 +440,61 @@ class MaterialInterpolationScheme(BaseLogged):
                         material: LinearElasticMaterial, 
                         density_distribution: Union[Function, TensorLike],
                     ) -> TensorLike:
-        """获取当前插值方法的导数对应的系数"""
+        """获取当前插值方法的标量系数相对于物理密度的导数"""
 
         method = self.interpolation_method
         p = self._options['penalty_factor']
 
-        if self._density_location == 'element':
+        if self._density_location in ['element']:
+
+            rho_element = density_distribution[:] # (NC, )
             
-            rho_element = density_distribution[:]
-            if method == 'simp':
+            if method == 'simp':    
                 dval = p * rho_element[:] ** (p - 1)
                 return dval
             elif method == 'msimp':
                 E0 = material.youngs_modulus
                 Emin = self._options['void_youngs_modulus']
                 dval = p * rho_element[:] ** (p - 1) * (E0 - Emin) / E0
+                return dval
+            
+        elif self._density_location in ['element_multiresolution']:
+            
+            rho_sub_element = density_distribution[:] # (NC, n_sub)
+
+            if method == 'simp':
+                dval = p * rho_sub_element[:] ** (p - 1)
+                return dval
+            elif method == 'msimp':
+                E0 = material.youngs_modulus
+                Emin = self._options['void_youngs_modulus']
+                dval = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin) / E0
+                return dval
+            
+        elif self._density_location in ['node']:
+        
+            rho_q = density_distribution[:] # (NC, NQ)
+
+            if method == 'simp':
+                dval = p * rho_q[:] ** (p - 1)
+                return dval
+            elif method == 'msimp':
+                E0 = material.youngs_modulus
+                Emin = self._options['void_youngs_modulus']
+                dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
+                return dval
+        
+        elif self._density_location in ['node_multiresolution']:
+            
+            rho_sub_q = density_distribution[:] # (NC, n_sub, NQ)
+
+            if method == 'simp':
+                dval = p * rho_sub_q[:] ** (p - 1)
+                return dval
+            elif method == 'msimp':
+                E0 = material.youngs_modulus
+                Emin = self._options['void_youngs_modulus']
+                dval = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin) / E0
                 return dval
             
         elif self._density_location in ['lagrange_interpolation_point', 

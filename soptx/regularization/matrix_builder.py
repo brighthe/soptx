@@ -115,7 +115,7 @@ class FilterMatrixBuilder:
         elif self._density_location in ['node']:
 
             density_mesh = self._mesh
-            density_coords = sub_density_mesh.entity_barycenter('node') # (NN, GD)
+            density_coords = density_mesh.entity_barycenter('node') # (NN, GD)
 
         elif self._density_location in ['node_multiresolution']:
 

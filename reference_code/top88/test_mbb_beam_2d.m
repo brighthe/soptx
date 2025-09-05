@@ -2,17 +2,17 @@
 % nely = 10;
 % rmin = 1.2;
 
-% nelx = 60;
-% nely = 20;
-% rmin = 2.4;
+nelx = 60;
+nely = 20;
+rmin = 2.4;
 
 % nelx = 90;
 % nely = 30;
 % rmin = 3.6;
 
-nelx = 120;
-nely = 40;
-rmin = 4.8;
+% nelx = 120;
+% nely = 40;
+% rmin = 4.8;
 
 % nelx = 150;
 % nely = 50;

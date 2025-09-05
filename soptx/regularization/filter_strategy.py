@@ -13,23 +13,28 @@ from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_po
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
     @abstractmethod
-    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
+    def get_initial_density(self, 
+                        density:  Union[TensorLike, Function]
+                    ) ->  Union[TensorLike, Function]:
         pass
 
     @abstractmethod
-    def filter_variables(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
+    def filter_design_variable(self,
+                            design_variable: Union[TensorLike, Function], 
+                            physical_density: Union[TensorLike, Function]
+                        ) -> Union[TensorLike, Function]:
         pass
 
     @abstractmethod
     def filter_objective_sensitivities(self, 
-                                    rho_Phys: TensorLike, 
+                                    design_variable: TensorLike, 
                                     obj_grad: TensorLike
                                     ) -> TensorLike:
         pass
 
     @abstractmethod
     def filter_constraint_sensitivities(self, 
-                                        rho_Phys: TensorLike, 
+                                        design_variable: TensorLike, 
                                         con_grad: TensorLike
                                     ) -> TensorLike:
         pass
@@ -142,39 +147,62 @@ class DensityStrategy(_FilterStrategy):
     """密度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
-                density_location: Literal['element', 'node'], 
-                integration_weights: TensorLike, 
                 mesh: HomogeneousMesh, 
-                integration_order: int
+                density_location: Literal['element', 'node'], 
             ) -> None:
         
         self._H = H
-        self._density_location = density_location
-        self._integration_weights = integration_weights
         self._mesh = mesh
-        self._integration_order = integration_order
-
-    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
-        rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
+        self._density_location = density_location
         
-        return rho_Phys
+    def get_initial_density(self, 
+                        density:  Union[TensorLike, Function]
+                    ) ->  Union[TensorLike, Function]:
 
-    def filter_variables(self, 
-                        rho: Union[TensorLike, Function], 
-                        rho_Phys: Union[TensorLike, Function]
-                    ) -> Union[TensorLike, Function]:
+        rho_phys = bm.copy(density)
 
-        if self._density_location == 'element':
-            
-            cell_measure = self._integration_weights
-            weighted_rho = rho[:] * cell_measure
-        
-            numerator = self._H.matmul(weighted_rho)
+        return rho_phys
+
+    def filter_design_variable(self,
+                            design_variable: Union[TensorLike, Function], 
+                            physical_density: Union[TensorLike, Function]
+                        ) -> Union[TensorLike, Function]:
+
+        if self._density_location in ['element']:
+            # design_variable.shape = (NC, )
+            cell_measure = self._mesh.entity_measure('cell')
+            weighted_dv = design_variable * cell_measure
+
+            numerator = self._H.matmul(weighted_dv)
             denominator = self._H.matmul(cell_measure)
 
-            rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+            physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator) # (NC, )
+            
+            return physical_density
+        
+        elif self._density_location in ['element_multiresolution']:
+            # design_variable.shape = (NC*n_sub, )
+            cell_measure = self._mesh.entity_measure('cell')
+            weighted_dv = design_variable * cell_measure
 
-            return rho_Phys
+            numerator = self._H.matmul(weighted_dv)
+            denominator = self._H.matmul(cell_measure)
+
+            data_flat = numerator / denominator
+
+            from soptx.analysis.utils import reshape_multiresolution_data_inverse
+            n_sub = physical_density.shape[-1]
+            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+            physical_density_sub = reshape_multiresolution_data_inverse(nx=nx_displacement,
+                                                                ny=ny_displacement,
+                                                                data_flat=data_flat,
+                                                                n_sub=n_sub) # (NC, n_sub)
+
+            physical_density[:] = bm.set_at(physical_density, slice(None), physical_density_sub) # (NC*n_sub, )
+            
+            return physical_density_sub
+
 
         elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
 
@@ -198,19 +226,51 @@ class DensityStrategy(_FilterStrategy):
 
             return rho_Phys
 
-    def filter_objective_sensitivities(self, rho_Phys: Union[TensorLike, Function], obj_grad: TensorLike) -> TensorLike:
+    def filter_objective_sensitivities(self, 
+                                    design_variable: TensorLike, 
+                                    obj_grad_rho: TensorLike
+                                ) -> TensorLike:
         
-        if self._density_location == 'element':
-
-            cell_measure = self._integration_weights
-            Hs = self._H.matmul(cell_measure) 
-
-            scaled_dobj = obj_grad / Hs
+        if self._density_location in ['element']:
+            # obj_grad_rho.shape = (NC, )
+            cm = self._mesh.entity_measure('cell')
+            
+            Hs = self._H.matmul(cm)
+            
+            scaled_dobj = obj_grad_rho / Hs
             temp = self._H.matmul(scaled_dobj)
 
-            obj_grad = bm.set_at(obj_grad, slice(None), cell_measure * temp)
+            obj_grad_dv = cm * temp # (NC, )
 
-            return obj_grad 
+            return obj_grad_dv
+
+        elif self._density_location in ['element_multiresolution']:
+            # obj_grad_rho.shape = (NC, n_sub)
+            n_sub = obj_grad_rho.shape[-1]
+            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+
+            from soptx.analysis.utils import reshape_multiresolution_data
+            obj_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
+                                                                ny=ny_displacement, 
+                                                                data=obj_grad_rho) # (NC*n_sub, )
+
+            cm = self._mesh.entity_measure('cell')
+            
+            Hs = self._H.matmul(cm)
+
+            scaled_dobj = obj_grad_rho_reshaped / Hs
+            temp = self._H.matmul(scaled_dobj)
+
+            obj_grad_dv = cm * temp # (NC*n_sub, )
+
+            return obj_grad_dv
+
+        elif self._density_location in ['node']:
+            pass
+
+        elif self._density_location in ['node_multiresolution']:
+            pass 
 
         elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
             
@@ -236,21 +296,49 @@ class DensityStrategy(_FilterStrategy):
 
             return obj_grad 
 
-    def filter_constraint_sensitivities(self, rho_Phys: Union[TensorLike, Function], con_grad: TensorLike) -> TensorLike:
+    def filter_constraint_sensitivities(self, 
+                                    design_variable: TensorLike, 
+                                    con_grad_rho: TensorLike
+                                ) -> TensorLike:
 
-        con_grad = bm.copy(con_grad)
-
-        if self._density_location == 'element':
+        if self._density_location in ['element']:
+            # con_grad_rho.shape = (NC, )
+            cm = self._mesh.entity_measure('cell')
+            Hs = self._H.matmul(cm)
             
-            cell_measure = self._integration_weights
-            Hs = self._H.matmul(cell_measure)
-
-            scaled_dcon = con_grad / Hs
+            scaled_dcon = con_grad_rho / Hs
             temp = self._H.matmul(scaled_dcon)
 
-            con_grad = bm.set_at(con_grad, slice(None), cell_measure * temp)
+            con_grad_dv = cm * temp # (NC, )
 
-            return con_grad 
+            return con_grad_dv
+
+        elif self._density_location in ['element_multiresolution']:
+            # con_grad_rho.shape = (NC, n_sub)
+            n_sub = con_grad_rho.shape[-1]
+            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+
+            from soptx.analysis.utils import reshape_multiresolution_data
+            con_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
+                                                                ny=ny_displacement, 
+                                                                data=con_grad_rho) # (NC*n_sub, )
+
+            cm = self._mesh.entity_measure('cell')
+            Hs = self._H.matmul(cm)
+
+            scaled_dobj = con_grad_rho_reshaped / Hs
+            temp = self._H.matmul(scaled_dobj)
+
+            con_grad_dv = cm * temp # (NC*n_sub, )
+
+            return con_grad_dv
+        
+        elif self._density_location in ['node']:
+            pass
+
+        elif self._density_location in ['node_multiresolution']:
+            pass 
 
         elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
             from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
@@ -277,33 +365,56 @@ class DensityStrategy(_FilterStrategy):
 
 
 class HeavisideDensityStrategy(_FilterStrategy):
-    """Heaviside 密度过滤策略"""
-    def __init__(self, H: CSRTensor, cell_measure: TensorLike, normalize_factor: TensorLike,
-                 beta: float = 1.0, max_beta: float = 512, continuation_iter: int = 50):
-        self._H = H
-        self._cell_measure = cell_measure
-        self._normalize_factor = normalize_factor
+    """密度过滤 + Heaviside 投影"""
+    def __init__(self, 
+                H: CSRTensor, 
+                density_location: Literal['element', 'node'], 
+                integration_weights: TensorLike, 
+                mesh: HomogeneousMesh, 
+                beta: float = 1.0, max_beta: float = 512, continuation_iter: int = 50
+            ):
         
-        self.beta = beta
-        self.max_beta = max_beta
-        self.continuation_iter = continuation_iter
+        self._H = H
+        self._density_location = density_location
+        self._integration_weights = integration_weights
+        self._mesh = mesh
+        
+        self._beta = beta
+        self._max_beta = max_beta
+        self._continuation_iter = continuation_iter
         self._rho_Tilde = None
         self._beta_iter = 0
 
-    def get_initial_density(self, rho: TensorLike, rho_Phys: TensorLike) -> TensorLike:
-        self._rho_Tilde = rho
-        projected_values = (1 - bm.exp(-self.beta * self._rho_Tilde) + 
-                    self._rho_Tilde * math.exp(-self.beta)) + 2
+    def get_initial_density(self, density: Function, physical_density: Function) -> Function:
 
-        rho_Phys = bm.set_at(rho_Phys, slice(None), projected_values)
+        self._rho_Tilde = density
+        projected_values = 1 - bm.exp(-self._beta * self._rho_Tilde) + self._rho_Tilde * bm.exp(-self._beta)
+
+        physical_density = bm.set_at(physical_density, slice(None), projected_values)
+
+        return physical_density
+
+    def filter_variables(self, 
+                        design_variable: Union[TensorLike, Function], 
+                        rho_Phys: Union[TensorLike, Function]
+                    ) -> Union[TensorLike, Function]:
+        
+        if self._density_location in ['element', 'element_multiresolution']:
+
+            dv = design_variable
+            cell_measure = self._integration_weights
+            weighted_rho = dv[:] * cell_measure
+        
+            numerator = self._H.matmul(weighted_rho)
+            denominator = self._H.matmul(cell_measure)
+
+            self._rho_Tilde[:] = bm.set_at(self._rho_Tilde, slice(None), numerator / denominator)
+
+            projected_values = 1 - bm.exp(-self._beta * self._rho_Tilde) + self._rho_Tilde * bm.exp(-self._beta)
+
+            rho_Phys[:] = bm.set_at(rho_Phys, slice(None), projected_values)
 
         return rho_Phys
-
-    def filter_variables(self, x: TensorLike) -> TensorLike:
-        weighted_x = self._cell_measure * x
-        filtered_x = self._H.matmul(weighted_x)
-        x_tilde = filtered_x / self._normalize_factor
-        return self._apply_projection(x_tilde)
 
     def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> TensorLike:
         # Heaviside 投影的导数

@@ -25,8 +25,8 @@ class DensityTopOptTest(BaseLogged):
             T = -2.0
             E, nu = 1.0, 0.3
 
-            # nx, ny = 60, 10
-            nx, ny = 120, 20
+            nx, ny = 60, 10
+            # nx, ny = 120, 20
             # nx, ny = 240, 40
             # nx, ny = 480, 80
             # nx, ny = 300, 50
@@ -37,16 +37,17 @@ class DensityTopOptTest(BaseLogged):
             space_degree = 1
             integration_order = space_degree + 3
 
-            volume_fraction = 0.6
+            volume_fraction = 0.5
             penalty_factor = 3.0
 
-            # 'element', 'element_multiresolution', 'node_multiresolution'
+            # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
             density_location = 'element_multiresolution'
             relative_density = volume_fraction
 
+            # 'voigt', 'voigt_multi_resolution'
             assembly_method = 'voigt_multi_resolution'
 
-            optimizer_algorithm = 'mma'  # 'oc', 'mma'
+            optimizer_algorithm = 'oc'  # 'oc', 'mma'
             max_iterations = 500
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
@@ -54,12 +55,51 @@ class DensityTopOptTest(BaseLogged):
             # rmin = 1.5
             # rmin = 1.25
             # rmin = 1.0
-            rmin = 0.75
-            # rmin = 0.5
+            # rmin = 0.75
+            rmin = 0.5
             # rmin = 0.25
 
             from soptx.model.mbb_beam_2d import MBBBeam2dData
             pde = MBBBeam2dData(
+                                domain=domain,
+                                T=T, E=E, nu=nu,
+                                enable_logging=False
+                            )
+            
+        elif parameter_type == 'half_mbb':
+            domain = [0, 60, 0, 20]
+            T = -1.0
+            E, nu = 1.0, 0.3
+
+            nx, ny = 60, 20
+            # nx, ny = 90, 30
+            # nx, ny = 120, 40
+            # nx, ny = 240, 80
+            mesh_type = 'uniform_quad'
+            # mesh_type = 'uniform_aligned_tri'
+            # mesh_type = 'uniform_crisscross_tri'
+
+            space_degree = 1
+            integration_order = space_degree + 3
+
+            volume_fraction = 0.5
+            penalty_factor = 3.0
+
+            density_location = 'element'
+            relative_density = 0.5
+
+            # 'voigt', 'voigt_multi_resolution'
+            assembly_method = 'voigt'
+
+            optimizer_algorithm = 'oc'  # 'oc', 'mma'
+            max_iterations = 500
+
+            filter_type = 'density' # 'none', 'sensitivity', 'density'
+
+            rmin = 2.4
+
+            from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
+            pde = HalfMBBBeam2dData(
                                 domain=domain,
                                 T=T, E=E, nu=nu,
                                 enable_logging=False
@@ -88,12 +128,14 @@ class DensityTopOptTest(BaseLogged):
                                 )
 
 
-        if density_location == 'element':
+        if density_location in ['element']:
+            design_variable_mesh = displacement_mesh
             d, rho = interpolation_scheme.setup_density_distribution(
-                                                    mesh=displacement_mesh,
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
                                                     relative_density=relative_density,
                                                 ) 
-        elif density_location in ['element_multiresolution', 'node_multiresolution']:
+        elif density_location in ['element_multiresolution']:
             sub_density_element = 4
             sub_x, sub_y = int(bm.sqrt(sub_density_element)), int(bm.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
@@ -104,6 +146,26 @@ class DensityTopOptTest(BaseLogged):
                                                     relative_density=relative_density,
                                                     sub_density_element=sub_density_element,
                                                 )
+        elif density_location in ['node']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                    integration_order=integration_order,
+                                                )
+        elif density_location in ['node_multiresolution']:
+            sub_density_element = 4
+            sub_x, sub_y = int(bm.sqrt(sub_density_element)), int(bm.sqrt(sub_density_element))
+            pde.init_mesh.set(mesh_type)
+            design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                    sub_density_element=sub_density_element,
+                                                    integration_order=integration_order,
+                                                )
             
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
@@ -112,8 +174,7 @@ class DensityTopOptTest(BaseLogged):
                                     rmin=rmin,
                                     density_location=density_location,
                                 )
-        H = filter_regularization._H
-
+        # H = filter_regularization._H
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
@@ -127,7 +188,7 @@ class DensityTopOptTest(BaseLogged):
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
                                 )
-        K = lagrange_fem_analyzer.assemble_stiff_matrix(rho_val=rho, sub_density_element=sub_density_element)    
+        # K = lagrange_fem_analyzer.assemble_stiff_matrix(rho_val=rho, sub_density_element=sub_density_element)    
 
         analysis_tspace = lagrange_fem_analyzer.tensor_space
         analysis_tgdofs = analysis_tspace.number_of_global_dofs()
@@ -151,7 +212,7 @@ class DensityTopOptTest(BaseLogged):
                                 'tolerance': 1e-2,
                             }
                         )
-            design_variables_num = rho.shape[0]
+            design_variables_num = d.shape[0]
             constraints_num = 1
             optimizer.options.set_advanced_options(
                                     m=constraints_num,
@@ -166,7 +227,7 @@ class DensityTopOptTest(BaseLogged):
 
         elif optimizer_algorithm == 'oc':
 
-            from soptx.optimization.oc_optimizer import OCOptimizer
+            from soptx.optimization.oc_optimizer_new import OCOptimizer
             optimizer = OCOptimizer(
                                 objective=compliance_objective,
                                 constraint=volume_constraint,
@@ -187,13 +248,12 @@ class DensityTopOptTest(BaseLogged):
                        f"模型名称={pde.__class__.__name__}, "
                        f"网格类型={mesh_type},  " 
                        f"密度类型={density_location}, " 
-                       f"密度网格尺寸={mesh_design_variable.number_of_cells()}, 密度场自由度={rho.shape}, " 
-                       f"位移网格尺寸={mesh_displacement.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, "
+                       f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+                       f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, "
                        f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
-
-        rho_opt, history = optimizer.optimize(design_variable=design_variable, density_distribution=rho)
+        d_opt, rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
@@ -201,8 +261,7 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_p")
         save_path.mkdir(parents=True, exist_ok=True)
 
-
-        save_optimization_history(mesh=mesh_density, 
+        save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
                                 save_path=str(save_path))

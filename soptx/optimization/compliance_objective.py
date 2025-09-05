@@ -21,13 +21,13 @@ class ComplianceObjective(BaseLogged):
         self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
-            density_distribution: Function, 
+            density: Union[Function, TensorLike], 
             displacement: Optional[Function] = None,
         ) -> float:
         """计算柔顺度目标函数值"""
 
         if displacement is None:
-            uh = self._analyzer.solve_displacement(density_distribution=density_distribution)
+            uh = self._analyzer.solve_displacement(rho_val=density)
         else:
             uh = displacement
 
@@ -42,20 +42,24 @@ class ComplianceObjective(BaseLogged):
         return c
     
     def jac(self, 
-            density_distribution: Function, 
+            density: Union[Function, TensorLike], 
             displacement: Optional[Function] = None,
             diff_mode: Literal["auto", "manual"] = "manual"
         ) -> TensorLike:
-        """计算柔顺度目标函数的梯度 (灵敏度)"""
+        """计算柔顺度目标函数相对于物理密度的灵敏度"""
 
         if diff_mode == "manual":
-            return self._manual_differentiation(density_distribution, displacement)
-        elif diff_mode == "auto":  
-            return self._auto_differentiation(density_distribution, displacement)
+
+            return self._manual_differentiation(density=density, displacement=displacement)
+
+        elif diff_mode == "auto": 
+
+            return self._auto_differentiation(density=density, displacement=displacement)
+
         else:
+        
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
     
     #####################################################################################################
@@ -63,60 +67,71 @@ class ComplianceObjective(BaseLogged):
     #####################################################################################################
         
     def _manual_differentiation(self, 
-                                density_distribution: Union[Function, TensorLike], 
+                                density: Union[Function, TensorLike], 
                                 displacement: Optional[Function] = None
                             ) -> TensorLike:
-        """手动计算目标函数梯度"""
+        """手动计算柔顺度目标函数相对于物理密度的灵敏度"""
 
         if displacement is None:
-            uh = self._analyzer.solve_displacement(density_distribution=density_distribution)
+            uh = self._analyzer.solve_displacement(rho_val=density)
         else:
             uh = displacement
         
         cell2dof = self._tensor_space.cell_to_dof()
         uhe = uh[cell2dof]
 
-        diff_ke = self._analyzer.get_stiffness_matrix_derivative(density_distribution=density_distribution)
+        diff_ke = self._analyzer.get_stiffness_matrix_derivative(rho_val=density)
 
         density_location = self._interpolation_scheme.density_location
 
-        if density_location == 'element':
+        if density_location in ['element']:
             
-            dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
+            dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe) # (NC, )
 
             if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数梯度中存在正值, 可能导致目标函数上升")
-
-            self._log_info(f"ComplianceObjective derivative: dc shape is (NC, ) = {dc.shape}")
+                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
 
             return dc[:]
         
-        elif density_location in ['lagrange_interpolation_point', 
-                                  'berstein_interpolation_point', 
-                                   'shepard_interpolation_point']:
-            
-            dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_ke, uhe)
+        elif density_location in ['element_multiresolution']:
 
-            density_space = density_distribution.space
-            cell2dof = density_space.cell_to_dof()   # (NC, LDOF_rho)
-            gdof_rho = density_space.number_of_global_dofs()
-
-            dc = bm.zeros((gdof_rho,), dtype=uhe.dtype, device=uhe.device)
-            dc = bm.add_at(dc, cell2dof.reshape(-1), dc_e.reshape(-1))
+            dc = -bm.einsum('ci, cnij, cj -> cn', uhe, diff_ke, uhe) # (NC, n_sub)
 
             if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数梯度中存在正值, 可能导致目标函数上升")
-
-            self._log_info(f"ComplianceObjective derivative: dc shape is (GDOF_rho, ) = {dc.shape}")
+                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
 
             return dc[:]
-
-        elif density_location in ['gauss_integration_point']:
-
-            dc = -bm.einsum('ci, cqij, cj -> cq', uhe, diff_ke, uhe)
-
-            self._log_info(f"ComplianceObjective derivative: dc shape is (NC, NQ) = {dc.shape}")
         
+        elif density_location in ['node']:
+
+            dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_ke, uhe) # (NC, NCN)
+
+            mesh = self._tensor_space.mesh
+            cell2node = mesh.cell_to_node() # (NC, NCN)
+            NN = mesh.number_of_nodes()
+
+            dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
+            dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
+
+            if bm.any(dc > 1e-12):
+                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
+
+            return dc[:]
+        
+        elif density_location in ['node_multiresolution']:
+
+            dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_ke, uhe) # (NC, NCN)
+
+            density_mesh = density.space.mesh
+            cell2node = density_mesh.cell_to_node() # (NC, NCN)
+            NN = density_mesh.number_of_nodes()
+
+            dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
+            dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
+
+            if bm.any(dc > 1e-12):
+                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
+
             return dc[:]
         
         else:

@@ -112,10 +112,8 @@ class Filter(BaseLogged):
         if self._filter_type == 'density':
             strategy_params.update({
                 'H': self._H,
-                'integration_weights': self._integration_weights,
-                'density_location': self._density_location,
                 'mesh': self._mesh,
-                'integration_order': self._integration_order,
+                'density_location': self._density_location,
             })
 
         if self._filter_type == 'heaviside_density':
@@ -144,25 +142,32 @@ class Filter(BaseLogged):
     ###########################################################################################################
 
     # 3. 委托公共方法到具体策略
-    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
-        """获取初始物理密度场"""
+    def get_initial_density(self, 
+                        density:  Union[TensorLike, Function], 
+                    ) ->  Union[TensorLike, Function]:
 
-        return self._strategy.get_initial_density(rho=rho, rho_Phys=rho_Phys)
+        return self._strategy.get_initial_density(density=density)
 
-    def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
-        """对设计变量进行滤波得到物理变量"""
+    def filter_design_variable(self,
+                        design_variable: Union[TensorLike, Function], 
+                        physical_density: Union[TensorLike, Function]
+                    ) -> Union[TensorLike, Function]:
 
-        return self._strategy.filter_variables(rho=rho, rho_Phys=rho_Phys)
+        return self._strategy.filter_design_variable(design_variable=design_variable, physical_density=physical_density)
 
-    def filter_objective_sensitivities(self, rho_Phys: Union[TensorLike, Function], obj_grad: TensorLike) -> TensorLike:
-        """过滤目标函数的灵敏度"""
-        
-        return self._strategy.filter_objective_sensitivities(rho_Phys=rho_Phys, obj_grad=obj_grad)
+    def filter_objective_sensitivities(self, 
+                                    design_variable: Union[TensorLike, Function], 
+                                    obj_grad_rho: TensorLike
+                                ) -> TensorLike:
 
-    def filter_constraint_sensitivities(self, rho_Phys: Function, con_grad: TensorLike) -> TensorLike:
-        """过滤约束函数的灵敏度"""
+        return self._strategy.filter_objective_sensitivities(design_variable=design_variable, obj_grad_rho=obj_grad_rho)
 
-        return self._strategy.filter_constraint_sensitivities(rho_Phys, con_grad)
+    def filter_constraint_sensitivities(self, 
+                                    design_variable: Union[TensorLike, Function], 
+                                    con_grad_rho: TensorLike
+                                ) -> TensorLike:
+
+        return self._strategy.filter_constraint_sensitivities(design_variable=design_variable, con_grad_rho=con_grad_rho)
 
     def continuation_step(self, change: float) -> Tuple[float, bool]:
         """
@@ -181,7 +186,7 @@ class Filter(BaseLogged):
     ###########################################################################################################
         
     def _compute_integration_weights(self) -> TensorLike:
-        """根据密度位置类型计算积分权重"""
+        """根据物理密度位置类型计算积分权重"""
 
         if self._density_location in ['element', 'element_multiresolution']:
 

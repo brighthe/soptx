@@ -3,8 +3,8 @@ from fealpy.typing import TensorLike, Tuple
 from fealpy.functionspace import TensorFunctionSpace, Function
 from fealpy.mesh import TriangleMesh
 
-from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-from ..model.pde_base import PDEBase 
+from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+from soptx.model.pde_base import PDEBase 
 
 def _get_displacement_dof_component(uh: Function, space: TensorFunctionSpace) -> TensorLike:
     """获取位移自由度分量形式"""
@@ -88,9 +88,12 @@ def map_bcs_to_sub_elements(bcs_e: Tuple[TensorLike, TensorLike], n_sub: int):
     -----------
     bcs_e : 位移单元积分点的重心坐标, 结构为 ( (NQ, GD), (NQ, GD) )
     n_sub : 子密度单元的总数
-    子密度的顺序 (先行后列)
-    | 3 | 2 | 
-    | 0 | 1 |
+    子密度的顺序 (先列后行)
+    +-------+-------+
+    |   1   |   3   |  
+    +-------+-------+
+    |   0   |   2   |  
+    +-------+-------+
 
     Returns:
     --------
@@ -119,13 +122,13 @@ def map_bcs_to_sub_elements(bcs_e: Tuple[TensorLike, TensorLike], n_sub: int):
     bcs_g_xi = bm.zeros((n_sub, NQ_x, GD))
     bcs_g_eta = bm.zeros((n_sub, NQ_y, GD))
 
-    for i in range(n_sub_y): # 遍历行 
-        for j in range(n_sub_x): # 遍历列
+    for i in range(n_sub_y):  
+        for j in range(n_sub_x): 
             
             # 先列后行
-            # sub_element_idx = j * n_sub_y + i
-            # 先行后列
-            sub_element_idx = i * n_sub_x + j
+            sub_element_idx = j * n_sub_y + i
+            # # 先行后列
+            # sub_element_idx = i * n_sub_x + j
 
             # 计算当前密度单元的区间范围 (假设父单元为 [0, 1] x [0, 1])
             xi_start, xi_end = j / n_sub_x, (j + 1) / n_sub_x
@@ -140,8 +143,110 @@ def map_bcs_to_sub_elements(bcs_e: Tuple[TensorLike, TensorLike], n_sub: int):
 
             bcs_g_eta[sub_element_idx, :, 0] = mapped_eta[::-1] # 降序
             bcs_g_eta[sub_element_idx, :, 1] = mapped_eta       # 升序
+
+            # 添加归一化：保持重心坐标性质
+            for q in range(NQ_x):
+                coord_sum_xi = bcs_g_xi[sub_element_idx, q, :].sum()
+                if coord_sum_xi > 0:  # 避免除零
+                    bcs_g_xi[sub_element_idx, q, :] = bcs_g_xi[sub_element_idx, q, :] / coord_sum_xi
             
-    bcs_g = (bcs_g_xi, bcs_g_eta)
+            for q in range(NQ_y):
+                coord_sum_eta = bcs_g_eta[sub_element_idx, q, :].sum()
+                if coord_sum_eta > 0:  # 避免除零
+                    bcs_g_eta[sub_element_idx, q, :] = bcs_g_eta[sub_element_idx, q, :] / coord_sum_eta
+    
+    return (bcs_g_xi, bcs_g_eta)
 
-    return bcs_g
+def reshape_multiresolution_data(nx: int, ny: int, data: TensorLike) -> TensorLike:
+    """
+    将多分辨率数据从位移单元布局映射到密度单元布局
+    
+    将 (NC, n_sub) 形状的数据重新排列为 (NC*n_sub,) 形状，
+    其中数据按照空间位置顺序重新排列。
 
+    Parameters:
+    -----------
+    nx: 位移单元在 x 方向的数量
+    ny: 位移单元在 y 方向的数量  
+    data : (NC, n_sub) 
+
+    Returns:
+    --------
+    data_reordered : (NC * n_sub, )
+    """
+    NC, n_sub = data.shape
+
+    sub_dim = int(bm.sqrt(n_sub))
+    
+    # 获取重排索引
+    reorder_indices = []
+    
+    for u_row in range(ny):  
+        for sub_row in range(sub_dim):   
+            for u_col in range(nx):  
+                for sub_col in range(sub_dim):  
+                    c = u_row * nx + u_col
+                    s = sub_row * sub_dim + sub_col
+                    data_idx = c * n_sub + s
+                    reorder_indices.append(data_idx)
+    
+    reorder_indices = bm.array(reorder_indices)
+        
+    # 展开并重排
+    data_flat = data.reshape(-1)
+    data_reordered = data_flat[reorder_indices]
+    
+    return data_reordered
+
+def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike, n_sub: int) -> TensorLike:
+    """
+    将多分辨率数据从密度单元布局映射到位移单元布局
+    """
+    NC = nx * ny
+    sub_dim = int(bm.sqrt(n_sub))
+    
+    # 重新计算 reorder_indices（和第一个函数中的逻辑一样）
+    reorder_indices = []
+    for u_row in range(ny):  
+        for sub_row in range(sub_dim):   
+            for u_col in range(nx):  
+                for sub_col in range(sub_dim):  
+                    c = u_row * nx + u_col
+                    s = sub_row * sub_dim + sub_col
+                    data_idx = c * n_sub + s
+                    reorder_indices.append(data_idx)
+    
+    reorder_indices = bm.array(reorder_indices)
+    
+    # 创建逆映射索引
+    inverse_indices = bm.zeros(NC * n_sub, dtype=bm.int32)
+    for new_pos, old_pos in enumerate(reorder_indices):
+        inverse_indices[old_pos] = new_pos
+    
+    # 应用逆映射
+    data_reordered = data_flat[inverse_indices]
+    
+    return data_reordered.reshape(NC, n_sub)
+
+
+if __name__ == "__main__":
+    # 测试代码
+    # from fealpy.mesh import QuadrangleMesh
+    # mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=2, ny=2)
+    # q = 4
+    # # 计算位移单元积分点处的重心坐标
+    # qf_e = mesh_u.quadrature_formula(q)
+    # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+    # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+
+    # n_sub = 4
+    # bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+
+    nx, ny = 3, 2
+    NC, n_sub = nx*ny,  9
+    test_grad = bm.arange(NC * n_sub).reshape(NC, n_sub)
+    reshaped = reshape_multiresolution_data(nx=nx, ny=ny, data=test_grad)
+    reshaped2 = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=reshaped, n_sub=n_sub)
+
+
+    print("--------------")
