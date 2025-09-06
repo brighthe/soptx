@@ -104,16 +104,13 @@ class OCOptimizer(BaseLogged):
                     self._log_error(error_msg)
 
     def optimize(self, 
-                design_variable: Union[Function, TensorLike],
-                density_distribution: Union[Function, TensorLike], 
-                **kwargs
+                density_distribution: Union[Function, TensorLike], **kwargs
             ) -> Tuple[TensorLike, OptimizationHistory]:
         """运行 OC 优化算法
 
         Parameters:
         -----------
-        design_variable : 设计变量
-        density_distribution : 密度分布
+        density_distribution : 初始相对密度场
         **kwargs : 其他参数
         """
 
@@ -122,17 +119,14 @@ class OCOptimizer(BaseLogged):
         tol = self.options.tolerance
         bisection_tol = self.options.bisection_tol
 
-        if isinstance(design_variable, Function):
-            dv = design_variable.space.function(bm.copy(design_variable[:]))
-        else:
-            dv = bm.copy(design_variable[:])
+        rho = density_distribution
         
-        if isinstance(density_distribution, Function):
-            rho = density_distribution.space.function(bm.copy(density_distribution[:]))
+        if isinstance(rho, Function):
+            rho_Phys = rho.space.function(bm.copy(rho[:]))
         else:
-            rho = bm.copy(density_distribution[:])
+            rho_Phys = bm.copy(rho[:])
 
-        rho_phys = self._filter.get_initial_density(density=rho)
+        rho_Phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_Phys)
 
         # 初始化历史记录
         history = OptimizationHistory()
@@ -142,54 +136,48 @@ class OCOptimizer(BaseLogged):
             
             start_time = time()
 
-            # 使用物理密度计算目标函数
-            obj_val = self._objective.fun(rho_phys)
+            # 使用物理密度计算约束函数值梯度
+            obj_val = self._objective.fun(rho_Phys)
+            obj_grad = self._objective.jac(rho_Phys)
 
-            # 计算目标函数相对于物理密度的灵敏度
-            obj_grad_rho = self._objective.jac(rho_phys)
+            # 过滤目标函数灵敏度
+            obj_grad = self._filter.filter_objective_sensitivities(rho_Phys=rho_Phys, obj_grad=obj_grad)
 
-            # 计算目标函数相对于设计变量的灵敏度
-            obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
+            # 使用物理密度计算约束函数值梯度
+            con_val = self._constraint.fun(rho_Phys)
+            con_grad = self._constraint.jac(rho_Phys)
 
-            # 使用物理密度计算约束函数
-            con_val = self._constraint.fun(rho_phys)
+            # 过滤约束函数灵敏度
+            con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
 
-            # 计算约束函数相对于物理密度的灵敏度
-            con_grad_rho = self._constraint.jac(rho_phys)
-
-            # 计算约束函数相对于设计变量的灵敏度
-            con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
-
-            # OC 算法: 二分法求解拉格朗日乘子
+            # 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             while (l2 - l1) / (l2 + l1) > bisection_tol:
                 lmid = 0.5 * (l2 + l1)
-                dv_new = self._update_density(design_variable=dv, dc=obj_grad_dv, dg=con_grad_dv, lmid=lmid)
+                rho_new = self._update_density(rho=rho, dc=obj_grad, dg=con_grad, lmid=lmid)
 
-                # 过滤后得到的物理密度
-                rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
+                # 过滤物理密度
+                rho_Phys = self._filter.filter_variables(rho=rho_new, rho_Phys=rho_Phys)
 
                 # 检查约束函数值
-                if self._constraint.fun(rho_phys) > 0:
+                if self._constraint.fun(rho_Phys) > 0:
                     l1 = lmid
                 else:
                     l2 = lmid
 
             # 计算收敛性
-            change = bm.max(bm.abs(dv_new - dv))
+            change = bm.max(bm.abs(rho_new - rho))
 
-            # 更新设计变量
-            dv = dv_new
+            # 更新设计变量，确保目标函数内部状态同步
+            rho = rho_new
 
             # 当前体积分数
-            volfrac = self._constraint.get_volume_fraction(rho_phys)
+            volfrac = self._constraint.get_volume_fraction(rho_Phys)
 
             iteration_time = time() - start_time
 
-            history.log_iteration(iter_idx=iter_idx, 
-                                obj_val=obj_val, volfrac=volfrac, 
-                                change=change, time_cost=iteration_time, 
-                                physical_density=rho_phys)
+            history.log_iteration(iter_idx=iter_idx, obj_val=obj_val, volfrac=volfrac, 
+                                change=change, time_cost=iteration_time, physical_density=rho_Phys)
 
             # 收敛检查
             if change <= tol:
@@ -200,57 +188,54 @@ class OCOptimizer(BaseLogged):
         # 打印时间统计信息
         history.print_time_statistics()
                 
-        return rho_phys, history
+        return rho, history
     
     def _update_density(self,
-                        design_variable: Union[Function, TensorLike],
+                        rho: Union[Function, TensorLike],
                         dc: TensorLike,
                         dg: TensorLike,
                         lmid: float
                     ) -> Union[Function, TensorLike]:
-        """使用 OC 准则更新设计变量"""
+        """使用 OC 准则更新密度"""
 
         # 获取算法内部参数
         m = self.options.move_limit
         eta = self.options.damping_coef
-        kwargs = bm.context(design_variable)
+        kwargs = bm.context(rho)
 
-        dv = design_variable
-
-        if (bm.any(bm.isnan(dv[:])) or bm.any(bm.isinf(dv[:])) or
-            bm.any(dv[:] < -1e-12) or bm.any(dv[:] > 1 + 1e-12)):
-            self._log_error(f"输入设计变量超出合理范围 [0, 1]: "
-                            f"range=[{bm.min(dv):.2e}, {bm.max(dv):.2e}]")
-
-        if isinstance(dv, Function):
-            dv_new = dv.space.function(bm.copy(dv[:]))
+        if isinstance(rho, Function):
+            rho_new = rho.space.function(bm.copy(rho[:]))
         else:
-            dv_new = bm.copy(dv[:])
-    
+            rho_new = bm.copy(rho[:])
+        
+        if (bm.any(bm.isnan(rho[:])) or bm.any(bm.isinf(rho[:])) or 
+            bm.any(rho[:] < -1e-12) or bm.any(rho[:] > 1 + 1e-12)):
+            self._log_error(f"输入密度超出合理范围 [0, 1]: "
+                            f"range=[{bm.min(rho):.2e}, {bm.max(rho):.2e}]")
 
         # 使用绝对值避免负数开方
         B_e = -dc / (dg * lmid)
         B_e_abs = bm.abs(B_e)
         B_e_damped = bm.pow(B_e_abs, eta)
 
-        dv_new[:] = bm.maximum(
+        rho_new[:] = bm.maximum(
             bm.tensor(0.0, **kwargs), 
             bm.maximum(
-                dv - m, 
+                rho - m, 
                 bm.minimum(
                     bm.tensor(1.0, **kwargs), 
                     bm.minimum(
-                        dv + m, 
-                        dv * B_e_damped
+                        rho + m, 
+                        rho * B_e_damped
                     )
                 )
             )
         )
 
-        if (bm.any(bm.isnan(dv_new[:])) or bm.any(bm.isinf(dv_new[:])) or
-            bm.any(dv_new[:] < -1e-12) or bm.any(dv_new[:] > 1 + 1e-12)):
-            self._log_error(f"输出设计变量超出合理范围 [0, 1]: "
-                            f"range=[{bm.min(dv_new):.2e}, {bm.max(dv_new):.2e}]")
-
-        return dv_new
+        if (bm.any(bm.isnan(rho_new[:])) or bm.any(bm.isinf(rho_new[:])) or 
+            bm.any(rho_new[:] < -1e-12) or bm.any(rho_new[:] > 1 + 1e-12)):
+            self._log_error(f"输入密度超出合理范围 [0, 1]: "
+                            f"range=[{bm.min(rho_new):.2e}, {bm.max(rho_new):.2e}]")
+        
+        return rho_new
         

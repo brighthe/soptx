@@ -442,10 +442,10 @@ class DensityTopOptTest(BaseLogged):
             T = -1.0
             E, nu = 1.0, 0.3
 
-            # nx, ny = 60, 20
+            nx, ny = 60, 20
             # nx, ny = 90, 30
             # nx, ny = 120, 40
-            nx, ny = 240, 80
+            # nx, ny = 240, 80
             mesh_type = 'uniform_quad'
             # mesh_type = 'uniform_aligned_tri'
             # mesh_type = 'uniform_crisscross_tri'

@@ -238,8 +238,7 @@ class MMAOptimizer(BaseLogged):
                                                 d=bm.zeros((self.options.m, 1))
                                             )
     
-    def optimize(self,
-                design_variable: Union[Function, TensorLike], 
+    def optimize(self, 
                 density_distribution: Union[Function, TensorLike], 
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
@@ -247,47 +246,47 @@ class MMAOptimizer(BaseLogged):
         
         Parameters:
         -----------
-        design_variable : 设计变量
-        density_distribution : 密度分布
-        **kwargs : 其他参数
+        density_distribution : Union[Function, TensorLike]
+            初始密度场
+        **kwargs : 
+            其他参数
             
         Returns:
         --------
-        优化后的密度场和优化历史记录
+        Tuple[TensorLike, OptimizationHistory]
+            优化后的密度场和优化历史记录
         """
         # 获取优化参数
         max_iters = self.options.max_iterations
         tol = self.options.tolerance
 
+        rho = density_distribution
+        
         # 检查或初始化问题相关参数
         if self.options.n is None:
             # 未设置高级参数，使用默认值
-            self._initialize_problem_dependent_params(n=design_variable.shape[0])
+            self._initialize_problem_dependent_params(n=rho.shape[0])
         else:
             # 已设置高级参数，检查一致性
-            if self.options.n != design_variable.shape[0]:
+            if self.options.n != rho.shape[0]:
                 error_msg = (f"设计变量数量不匹配: "
                             f"设置的 n={self.options.n}, "
-                            f"实际的 n={design_variable.shape[0]}")
+                            f"实际的 n={rho.shape[0]}")
                 self._log_error(error_msg)
-
-        if isinstance(design_variable, Function):
-            dv = design_variable.space.function(bm.copy(design_variable[:]))
-        else:
-            dv = bm.copy(design_variable[:])
         
-        if isinstance(density_distribution, Function):
-            rho = density_distribution.space.function(bm.copy(density_distribution[:]))
+        # 初始化物理密度
+        if isinstance(rho, Function):
+            rho_Phys = rho.space.function(bm.copy(rho[:]))
         else:
-            rho = bm.copy(density_distribution[:])
+            rho_Phys = bm.copy(rho[:])
 
-        rho_phys = self._filter.get_initial_density(density=rho)
+        rho_Phys = self._filter.get_initial_density(rho=rho, rho_Phys=rho_Phys)
 
         # 初始化历史记录
         history = OptimizationHistory()
 
-        # 初始化历史设计变量
-        xold1 = bm.copy(dv[:])
+        # 初始化历史变量
+        xold1 = bm.copy(rho[:])
         xold2 = bm.copy(xold1[:])
         
         # 初始化渐近线
@@ -301,58 +300,59 @@ class MMAOptimizer(BaseLogged):
             # 更新迭代计数
             self._epoch = iter_idx + 1
             
-            # 使用物理密度计算目标函数
-            obj_val = self._objective.fun(rho_phys)
-
-            # 计算目标函数相对于物理密度的灵敏度
-            obj_grad_rho = self._objective.jac(rho_phys)
-
-            # 计算目标函数关于设计变量的灵敏度
-            obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
-
-            # 使用物理密度计算约束函数
-            con_val = self._constraint.fun(rho_phys)
-
-            # 计算约束函数相对于物理密度的灵敏度
-            con_grad_rho = self._constraint.jac(rho_phys)
-
-            # 计算约束函数相对于设计变量的灵敏度
-            con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
+            # 使用物理密度计算目标函数值和梯度
+            obj_val = self._objective.fun(rho_Phys)
+            obj_grad = self._objective.jac(rho_Phys)
             
-            # MMA 算法: 
+            # 过滤目标函数灵敏度
+            obj_grad = self._filter.filter_objective_sensitivities(rho_Phys=rho_Phys, obj_grad=obj_grad)
+        
+            # 使用物理密度计算约束值和梯度
+            con_val = self._constraint.fun(rho_Phys)
+            con_grad = self._constraint.jac(rho_Phys)
+            
+            # 过滤约束函数灵敏度
+            con_grad = self._filter.filter_constraint_sensitivities(rho_Phys=rho_Phys, con_grad=con_grad)
+            
+            # MMA 方法求解
             # 标准化约束函数
             cm = self._filter.mesh.entity_measure('cell')
             fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
             # 标准化约束梯度
-            dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
+            dfdx = con_grad[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
             # 求解子问题
-            dv_new, low, upp = self._solve_subproblem(
-                                                xval=dv[:, None],
+            xmma, low, upp = self._solve_subproblem(
+                                                xval=rho[:, None],
                                                 fval=fval,
-                                                df0dx=obj_grad_dv[:, None],
+                                                df0dx=obj_grad[:, None],
                                                 dfdx=dfdx,
                                                 low=low[:, None],
                                                 upp=upp[:, None],
                                                 xold1=xold1[:, None],
                                                 xold2=xold2[:, None]
                                             )
-
-            # 过滤后得到的物理密度
-            rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
             
-            # 更新历史设计变量
+            if isinstance(rho, Function):
+                rho_new = rho.space.function(bm.copy(xmma[:]))
+            else:
+                rho_new = bm.copy(xmma[:])
+
+            # 过滤物理密度
+            rho_Phys = self._filter.filter_variables(rho=rho_new, rho_Phys=rho_Phys)
+            
+            # 更新历史变量
             xold2 = xold1
-            xold1 = dv[:]
+            xold1 = rho[:]
             
             # 计算收敛性
-            change = bm.max(bm.abs(dv_new - rho))
+            change = bm.max(bm.abs(rho_new - rho))
             
-            # 更新设计变量
-            dv = dv_new
+            # 更新设计变量，确保目标函数内部状态同步
+            rho = rho_new
                 
             # 当前体积分数
-            volfrac = self._constraint.get_volume_fraction(rho_phys)
-
+            volfrac = self._constraint.get_volume_fraction(rho_Phys)
+            
             # 记录当前迭代信息
             iteration_time = time() - start_time
 
@@ -361,18 +361,18 @@ class MMAOptimizer(BaseLogged):
                                 volfrac=volfrac, 
                                 change=change, 
                                 time_cost=iteration_time, 
-                                physical_density=rho_phys)
-
+                                physical_density=rho_Phys)
+            
             # 收敛检查
             if change <= tol:
-                msg = f"Converged after {self._epoch} iterations"
+                msg = f"Converged after {iter_idx + 1} iterations"
                 self._log_info(msg)
                 break
                 
         # 打印时间统计信息
         history.print_time_statistics()
         
-        return rho_phys, history
+        return rho, history
         
     def _update_asymptotes(self, 
                           xval: TensorLike, 

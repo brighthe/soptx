@@ -7,8 +7,8 @@ penal = 3;
 rmin = 1.5;
 
 % ft = 0;  % 无滤波器
-% ft = 1;     % 密度滤波器
-ft = 2;   % 灵敏度滤波器
+ft = 1;     % 密度滤波器
+% ft = 2;   % 灵敏度滤波器
 
 % USER-DEFINED LOOP PARAMETERS
 maxloop = 500;    % Maximum number of iterations
@@ -122,6 +122,7 @@ while change > tolx && loop < maxloop
     xval  = x(:);
     f0val = c;
     df0dx = dc(:);
+    temp1 = sum(xPhys(:));
     fval  = sum(xPhys(:)) / (volfrac*nele) - 1;
     dfdx  = dv(:)' / (volfrac*nele);
     [xmma, ~, ~, ~, ~, ~, ~, ~, ~, low, upp] = ...
