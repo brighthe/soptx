@@ -100,22 +100,24 @@ def save_optimization_history(mesh: HomogeneousMesh,
     
         
     for i, physical_density in enumerate(history.physical_densities):
-        
-        # if density_location == 'gauss_integration_point' or density_location == 'density_subelement_gauss_point':
-        #     # 
-        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-        #     # 高斯点密度情况：形状为 (NC, NQ)
-        #     nx, ny = int(mesh.meshdata['nx']/3), int(mesh.meshdata['ny']/3)
-        #     local_to_global, _ = get_gauss_integration_point_mapping(nx=nx, ny=ny, nq_per_dim=3)
-        #     physical_density_global = physical_density[local_to_global] # (NC*NQ, )
-
-        #     mesh.celldata['density'] = physical_density_global
-        
-        if density_location == 'element':
-
-            # 单元密度情况：形状为 (NC, )
+        if density_location in ['element']:
+            # 单分辨率单元密度情况：形状为 (NC, )
             mesh.celldata['density'] = physical_density
+
+        elif density_location in ['element_multiresolution']:
+            # 多分辨率单元密度情况：形状为 (NC, n_sub)
+            from soptx.analysis.utils import reshape_multiresolution_data
+            n_sub = physical_density.shape[-1]
+            n_sub_x, n_sub_y = int(bm.sqrt(n_sub)), int(bm.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(mesh.meshdata['nx'] / n_sub_x), int(mesh.meshdata['ny'] / n_sub_y)
+
+            rho_phys = reshape_multiresolution_data(nx=nx_displacement, 
+                                                    ny=ny_displacement, 
+                                                    data=physical_density) # (NC*n_sub, )
+
+            mesh.celldata['density'] = rho_phys
+
 
         elif density_location in ['lagrange_interpolation_point', 
                                 'berstein_interpolation_point', 

@@ -199,9 +199,9 @@ class DensityStrategy(_FilterStrategy):
                                                                 data_flat=data_flat,
                                                                 n_sub=n_sub) # (NC, n_sub)
 
-            physical_density[:] = bm.set_at(physical_density, slice(None), physical_density_sub) # (NC*n_sub, )
+            physical_density[:] = bm.set_at(physical_density, slice(None), physical_density_sub) # (NC, n_sub)
             
-            return physical_density_sub
+            return physical_density
 
 
         elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':

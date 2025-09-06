@@ -25,8 +25,8 @@ class DensityTopOptTest(BaseLogged):
             T = -2.0
             E, nu = 1.0, 0.3
 
-            # nx, ny = 60, 10
-            nx, ny = 120, 20
+            nx, ny = 60, 10
+            # nx, ny = 120, 20
             # nx, ny = 240, 40
             # nx, ny = 480, 80
             # nx, ny = 300, 50
@@ -41,21 +41,22 @@ class DensityTopOptTest(BaseLogged):
             penalty_factor = 3.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-            density_location = 'element_multiresolution'
+            density_location = 'element'
+            sub_density_element = 4
             relative_density = volume_fraction
 
             # 'voigt', 'voigt_multi_resolution'
-            assembly_method = 'voigt_multi_resolution'
+            assembly_method = 'voigt'
 
             optimizer_algorithm = 'oc'  # 'oc', 'mma'
-            max_iterations = 500
+            max_iterations = 100
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
 
-            # rmin = 1.5
+            rmin = 1.2
             # rmin = 1.25
             # rmin = 1.0
-            rmin = 0.75
+            # rmin = 0.75
             # rmin = 0.5
             # rmin = 0.25
 
@@ -136,7 +137,6 @@ class DensityTopOptTest(BaseLogged):
                                                     relative_density=relative_density,
                                                 ) 
         elif density_location in ['element_multiresolution']:
-            sub_density_element = 4
             sub_x, sub_y = int(bm.sqrt(sub_density_element)), int(bm.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
             design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
@@ -155,7 +155,6 @@ class DensityTopOptTest(BaseLogged):
                                                     integration_order=integration_order,
                                                 )
         elif density_location in ['node_multiresolution']:
-            sub_density_element = 4
             sub_x, sub_y = int(bm.sqrt(sub_density_element)), int(bm.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
             design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
