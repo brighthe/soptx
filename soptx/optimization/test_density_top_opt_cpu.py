@@ -25,8 +25,8 @@ class DensityTopOptTest(BaseLogged):
             T = -2.0
             E, nu = 1.0, 0.3
 
-            nx, ny = 60, 10
-            # nx, ny = 120, 20
+            # nx, ny = 60, 10
+            nx, ny = 120, 20
             # nx, ny = 240, 40
             # nx, ny = 480, 80
             # nx, ny = 300, 50
@@ -55,8 +55,8 @@ class DensityTopOptTest(BaseLogged):
             # rmin = 1.5
             # rmin = 1.25
             # rmin = 1.0
-            # rmin = 0.75
-            rmin = 0.5
+            rmin = 0.75
+            # rmin = 0.5
             # rmin = 0.25
 
             from soptx.model.mbb_beam_2d import MBBBeam2dData
@@ -253,7 +253,7 @@ class DensityTopOptTest(BaseLogged):
                        f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
-        d_opt, rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'

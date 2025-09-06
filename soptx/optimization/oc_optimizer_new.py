@@ -200,7 +200,7 @@ class OCOptimizer(BaseLogged):
         # 打印时间统计信息
         history.print_time_statistics()
                 
-        return dv, rho_phys, history
+        return rho_phys, history
     
     def _update_density(self,
                         design_variable: Union[Function, TensorLike],
