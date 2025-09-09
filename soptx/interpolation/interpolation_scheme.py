@@ -497,31 +497,31 @@ class MaterialInterpolationScheme(BaseLogged):
                 dval = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin) / E0
                 return dval
             
-        elif self._density_location in ['lagrange_interpolation_point', 
-                                        'berstein_interpolation_point', 
-                                        'shepard_interpolation_point']:
+        # elif self._density_location in ['lagrange_interpolation_point', 
+        #                                 'berstein_interpolation_point', 
+        #                                 'shepard_interpolation_point']:
 
-            rho_q = density_distribution[:]
-            if method == 'simp':
-                dval = p * rho_q[:] ** (p - 1)
-                return dval
-            elif method == 'msimp':
-                E0 = material.youngs_modulus
-                Emin = self._options['void_youngs_modulus']
-                dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
-                return dval
+        #     rho_q = density_distribution[:]
+        #     if method == 'simp':
+        #         dval = p * rho_q[:] ** (p - 1)
+        #         return dval
+        #     elif method == 'msimp':
+        #         E0 = material.youngs_modulus
+        #         Emin = self._options['void_youngs_modulus']
+        #         dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
+        #         return dval
             
-        elif self._density_location in ['gauss_integration_point',]:
+        # elif self._density_location in ['gauss_integration_point',]:
 
-            rho_q = density_distribution[:]
-            if method == 'simp':
-                dval = p * rho_q[:] ** (p - 1)
-                return dval
-            elif method == 'msimp':
-                E0 = material.youngs_modulus
-                Emin = self._options['void_youngs_modulus']
-                dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
-                return dval
+        #     rho_q = density_distribution[:]
+        #     if method == 'simp':
+        #         dval = p * rho_q[:] ** (p - 1)
+        #         return dval
+        #     elif method == 'msimp':
+        #         E0 = material.youngs_modulus
+        #         Emin = self._options['void_youngs_modulus']
+        #         dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
+        #         return dval
 
 
     ###########################################################################################################

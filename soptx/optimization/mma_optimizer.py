@@ -345,7 +345,7 @@ class MMAOptimizer(BaseLogged):
             xold1 = dv[:]
             
             # 计算收敛性
-            change = bm.max(bm.abs(dv_new - rho))
+            change = bm.max(bm.abs(dv_new - dv))
             
             # 更新设计变量
             dv = dv_new
