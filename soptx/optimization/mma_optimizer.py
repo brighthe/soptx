@@ -378,7 +378,8 @@ class MMAOptimizer(BaseLogged):
             history.log_iteration(iter_idx=iter_idx, 
                                 obj_val=obj_val, 
                                 volfrac=volfrac, 
-                                change=change, 
+                                change=change,
+                                penalty_factor=current_penalty, 
                                 time_cost=iteration_time, 
                                 physical_density=rho_phys)
 

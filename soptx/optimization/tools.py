@@ -27,6 +27,7 @@ class OptimizationHistory:
                     obj_val: float, 
                     volfrac: float, 
                     change: float, 
+                    penalty_factor: float, 
                     time_cost: float, 
                     physical_density: TensorLike,
                     verbose: bool = True
@@ -47,6 +48,7 @@ class OptimizationHistory:
                   f"Objective: {obj_val:.4f}, "
                   f"Volfrac: {volfrac:.4f}, "
                   f"Change: {change:.4f}, "
+                  f"Penalty: {penalty_factor:.4f}, "
                   f"Time: {time_cost:.3f} sec")
     
     def get_total_time(self) -> float:

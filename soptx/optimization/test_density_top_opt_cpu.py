@@ -22,12 +22,12 @@ class DensityTopOptTest(BaseLogged):
 
         if parameter_type == 'mbb_2d':
             domain = [0, 60.0, 0, 10.0]
-            T = -2.0
+            T = -1.0
             E, nu = 1.0, 0.3
 
-            nx, ny = 60, 10
+            # nx, ny = 60, 10
             # nx, ny = 120, 20
-            # nx, ny = 240, 40
+            nx, ny = 240, 40
             # nx, ny = 480, 80
             # nx, ny = 300, 50
             mesh_type = 'uniform_quad'
@@ -37,7 +37,7 @@ class DensityTopOptTest(BaseLogged):
             space_degree = 1
             integration_order = space_degree + 3
 
-            volume_fraction = 0.5
+            volume_fraction = 0.6
             penalty_factor = 3.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
@@ -48,16 +48,17 @@ class DensityTopOptTest(BaseLogged):
             # 'voigt', 'voigt_multi_resolution'
             assembly_method = 'voigt'
 
-            optimizer_algorithm = 'oc'  # 'oc', 'mma'
-            max_iterations = 100
+            optimizer_algorithm = 'mma'  # 'oc', 'mma'
+            max_iterations = 300
+            tolerance = 1e-3
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
 
-            rmin = 1.2
+            # rmin = 1.2
             # rmin = 1.25
             # rmin = 1.0
             # rmin = 0.75
-            # rmin = 0.5
+            rmin = 0.5
             # rmin = 0.25
 
             from soptx.model.mbb_beam_2d import MBBBeam2dData
@@ -175,7 +176,7 @@ class DensityTopOptTest(BaseLogged):
                                     rmin=rmin,
                                     density_location=density_location,
                                 )
-        H = filter_regularization._H
+        # H = filter_regularization._H
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
@@ -210,8 +211,8 @@ class DensityTopOptTest(BaseLogged):
                             filter=filter_regularization,
                             options={
                                 'max_iterations': max_iterations,
-                                'tolerance': 1e-2,
-                                # 'use_penalty_continuation': True,
+                                'tolerance': tolerance,
+                                'use_penalty_continuation': True,
                             }
                         )
             design_variables_num = d.shape[0]
@@ -248,11 +249,12 @@ class DensityTopOptTest(BaseLogged):
 
         self._log_info(f"开始密度拓扑优化, "
                        f"模型名称={pde.__class__.__name__}, "
+                       f"体积约束={volume_fraction}, "
                        f"网格类型={mesh_type},  " 
                        f"密度类型={density_location}, " 
                        f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
                        f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, "
-                       f"优化算法={optimizer_algorithm} , " 
+                       f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, 收敛容差={tolerance}, " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
@@ -260,7 +262,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_p")
+        save_path = Path(f"{base_dir}/test_p2")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_optimization_history(mesh=design_variable_mesh, 
