@@ -52,8 +52,25 @@ class MaterialInterpolationScheme(BaseLogged):
     def interpolation_method(self) -> Optional[str]:
         """获取当前的插值方法"""
         return self._interpolation_method
-
     
+    @property
+    def penalty_factor(self) -> float:
+        """获取当前的惩罚因子"""
+        return self._options['penalty_factor']
+    
+
+    #########################################################################################
+    # 属性修改器
+    #########################################################################################
+    @penalty_factor.setter
+    def penalty_factor(self, penalty_factor: float) -> None:
+        """更新惩罚因子"""
+        if penalty_factor <= 0:
+            self._log_error(f"penalty_factor must be positive, got {penalty_factor}")
+            
+        self._options['penalty_factor'] = penalty_factor
+    
+
     #########################################################################################
     # 变体方法
     #########################################################################################
@@ -408,16 +425,6 @@ class MaterialInterpolationScheme(BaseLogged):
             E0 = material.youngs_modulus
             Emin = void_youngs_modulus
             msimp_map = (Emin + rho_val[:] ** penalty_factor * (E0 - Emin)) / E0
-
-            # density_space = rho_val.space
-            # msimp_map = density_space.function(msimp_map)
-
-            # if self._density_location in ['lagrange_interpolation_point', 
-            #                               'berstein_interpolation_point', 
-            #                               'shepard_interpolation_point']:
-            #     # 如果是插值点密度分布, 则需要将结果转换为 Function
-            #     density_space = rho_val.space
-            #     msimp_map = density_space.function(msimp_map)
 
             return msimp_map
 

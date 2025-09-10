@@ -18,10 +18,10 @@ class DensityTopOptTest(BaseLogged):
 
 
     @variantmethod('test_mbb_2d')
-    def run(self, parameter_type: str = 'half_mbb_2d') -> Union[TensorLike, OptimizationHistory]:
+    def run(self, parameter_type: str = 'mbb_2d') -> Union[TensorLike, OptimizationHistory]:
 
         if parameter_type == 'mbb_2d':
-            domain = [0, 60, 0, 10]
+            domain = [0, 60.0, 0, 10.0]
             T = -2.0
             E, nu = 1.0, 0.3
 
@@ -68,7 +68,7 @@ class DensityTopOptTest(BaseLogged):
                             )
             
         elif parameter_type == 'half_mbb_2d':
-            domain = [0, 60, 0, 20]
+            domain = [0, 60.0, 0, 10.0]
             T = -1.0
             E, nu = 1.0, 0.3
 
@@ -137,7 +137,8 @@ class DensityTopOptTest(BaseLogged):
                                                     relative_density=relative_density,
                                                 ) 
         elif density_location in ['element_multiresolution']:
-            sub_x, sub_y = int(bm.sqrt(sub_density_element)), int(bm.sqrt(sub_density_element))
+            import math
+            sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
             design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
             d, rho = interpolation_scheme.setup_density_distribution(
@@ -155,7 +156,8 @@ class DensityTopOptTest(BaseLogged):
                                                     integration_order=integration_order,
                                                 )
         elif density_location in ['node_multiresolution']:
-            sub_x, sub_y = int(bm.sqrt(sub_density_element)), int(bm.sqrt(sub_density_element))
+            import math
+            sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
             design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
             d, rho = interpolation_scheme.setup_density_distribution(
@@ -173,7 +175,7 @@ class DensityTopOptTest(BaseLogged):
                                     rmin=rmin,
                                     density_location=density_location,
                                 )
-        # H = filter_regularization._H
+        H = filter_regularization._H
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
@@ -201,7 +203,7 @@ class DensityTopOptTest(BaseLogged):
 
         if optimizer_algorithm == 'mma': 
 
-            from soptx.optimization.mma_optimizer_new import MMAOptimizer
+            from soptx.optimization.mma_optimizer import MMAOptimizer
             optimizer = MMAOptimizer(
                             objective=compliance_objective,
                             constraint=volume_constraint,
@@ -209,6 +211,7 @@ class DensityTopOptTest(BaseLogged):
                             options={
                                 'max_iterations': max_iterations,
                                 'tolerance': 1e-2,
+                                # 'use_penalty_continuation': True,
                             }
                         )
             design_variables_num = d.shape[0]
@@ -226,7 +229,7 @@ class DensityTopOptTest(BaseLogged):
 
         elif optimizer_algorithm == 'oc':
 
-            from soptx.optimization.oc_optimizer_new import OCOptimizer
+            from soptx.optimization.oc_optimizer import OCOptimizer
             optimizer = OCOptimizer(
                                 objective=compliance_objective,
                                 constraint=volume_constraint,
@@ -284,7 +287,7 @@ class DensityTopOptTest(BaseLogged):
             integration_order = space_degree + 3
 
             volume_fraction = 0.3
-            penalty_factor = 3.0
+            penalty_factor = 1.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
             density_location = 'element'
@@ -412,6 +415,7 @@ class DensityTopOptTest(BaseLogged):
                             options={
                                 'max_iterations': max_iterations,
                                 'tolerance': 1e-2,
+                                # 'use_penalty_continuation': True,
                             }
                         )
             design_variables_num = d.shape[0]
@@ -476,6 +480,6 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    # test.run.set('test_mbb_2d')
-    test.run.set('test_cantilever_3d')
+    test.run.set('test_mbb_2d')
+    # test.run.set('test_cantilever_3d')
     test.run()

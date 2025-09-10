@@ -145,7 +145,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def assemble_stiff_matrix(self, 
                             rho_val: Function = None,
-                            sub_density_element: int = None
                         ) -> Union[CSRTensor, COOTensor]:
         """组装全局刚度矩阵
 
@@ -154,7 +153,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         rho_val : 密度值
             单元密度 
             - 单分辨率 - (NC, )
-            - 多分辨率 - (NC*sub_density_element, )
+            - 多分辨率 - (NC, sub_density_element)
 
         Returns
         -------

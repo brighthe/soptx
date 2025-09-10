@@ -186,7 +186,7 @@ class DensityTopOptTest(BaseLogged):
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
                                 )
-        # K = lagrange_fem_analyzer.assemble_stiff_matrix(rho_val=rho, sub_density_element=sub_density_element)    
+        K = lagrange_fem_analyzer.assemble_stiff_matrix(rho_val=rho, sub_density_element=sub_density_element)    
 
         analysis_tspace = lagrange_fem_analyzer.tensor_space
         analysis_tgdofs = analysis_tspace.number_of_global_dofs()

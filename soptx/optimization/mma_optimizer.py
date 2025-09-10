@@ -19,8 +19,9 @@ class MMAOptions:
     def __init__(self):
         """初始化参数的默认值"""
         # MMA 算法的用户级参数
-        self.max_iterations = 200     # 最大迭代次数
-        self.tolerance = 0.001        # 收敛容差
+        self.max_iterations = 200        # 最大迭代次数
+        self.tolerance = 0.001           # 收敛容差
+        self.use_penalty_continuation = True
 
         # MMA 算法的高级参数
         self._m = 1
@@ -207,12 +208,12 @@ class MMAOptimizer(BaseLogged):
         self.options = MMAOptions()
         if options is not None:
             # 只允许设置用户级参数
-            user_params = ['max_iterations', 'tolerance']
+            user_params = ['max_iterations', 'tolerance', 'use_penalty_continuation']
             for key, value in options.items():
                 if key in user_params:
                     setattr(self.options, key, value)
                 else:
-                    error_msg = f"Invalid parameter in options: {key}. " \
+                    error_msg = f"Invalid parameter in options111: {key}. " \
                                 f"Use set_advanced_options() for advanced parameters."
                     self._log_error(error_msg)
                     
@@ -237,7 +238,22 @@ class MMAOptimizer(BaseLogged):
                                                 c=1e4 * bm.ones((self.options.m, 1)),
                                                 d=bm.zeros((self.options.m, 1))
                                             )
-    
+                
+    def _update_penalty(self, iter_idx: int) -> None:
+        """连续化技术对幂指数惩罚因子进行更新, 初始 1, 每 30 次迭代增加 0.5, 最终 3"""
+        if not self.options.use_penalty_continuation:
+            return
+        
+        interpolation_scheme = self._objective._analyzer._interpolation_scheme
+        
+        # 计算当前迭代的惩罚因子
+        penalty_update = iter_idx // 30
+        current_penalty = min(1.0 + penalty_update * 0.5, 3.0)
+
+        # 更新插值方案中的惩罚因子
+        if current_penalty != interpolation_scheme.penalty_factor:
+            interpolation_scheme.penalty_factor = current_penalty
+
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
@@ -297,6 +313,9 @@ class MMAOptimizer(BaseLogged):
         # 优化主循环
         for iter_idx in range(max_iters):
             start_time = time()
+
+            self._update_penalty(iter_idx=iter_idx)
+            current_penalty = self._objective._analyzer._interpolation_scheme.penalty_factor
             
             # 更新迭代计数
             self._epoch = iter_idx + 1
