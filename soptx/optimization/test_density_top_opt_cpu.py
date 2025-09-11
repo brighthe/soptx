@@ -26,8 +26,8 @@ class DensityTopOptTest(BaseLogged):
             E, nu = 1.0, 0.3
 
             # nx, ny = 60, 10
-            # nx, ny = 120, 20
-            nx, ny = 240, 40
+            nx, ny = 120, 20
+            # nx, ny = 240, 40
             # nx, ny = 480, 80
             # nx, ny = 300, 50
             mesh_type = 'uniform_quad'
@@ -41,15 +41,15 @@ class DensityTopOptTest(BaseLogged):
             penalty_factor = 3.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-            density_location = 'element'
+            density_location = 'element_multiresolution'
             sub_density_element = 4
             relative_density = volume_fraction
 
             # 'voigt', 'voigt_multi_resolution'
-            assembly_method = 'voigt'
+            assembly_method = 'voigt_multi_resolution'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 300
+            max_iterations = 200
             tolerance = 1e-3
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
@@ -58,7 +58,8 @@ class DensityTopOptTest(BaseLogged):
             # rmin = 1.25
             # rmin = 1.0
             # rmin = 0.75
-            rmin = 0.5
+            rmin = 0.625
+            # rmin = 0.5
             # rmin = 0.25
 
             from soptx.model.mbb_beam_2d import MBBBeam2dData
@@ -262,7 +263,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_p2")
+        save_path = Path(f"{base_dir}/test_mtop")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_optimization_history(mesh=design_variable_mesh, 

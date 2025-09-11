@@ -231,22 +231,22 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike
 
 if __name__ == "__main__":
     # 测试代码
-    # from fealpy.mesh import QuadrangleMesh
-    # mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=2, ny=2)
-    # q = 4
-    # # 计算位移单元积分点处的重心坐标
-    # qf_e = mesh_u.quadrature_formula(q)
-    # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-    # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+    from fealpy.mesh import QuadrangleMesh
+    mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=2, ny=2)
+    q = 4
+    # 计算位移单元积分点处的重心坐标
+    qf_e = mesh_u.quadrature_formula(q)
+    # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+    bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
 
-    # n_sub = 4
-    # bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+    n_sub = 4
+    bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
 
-    nx, ny = 3, 2
-    NC, n_sub = nx*ny,  9
-    test_grad = bm.arange(NC * n_sub).reshape(NC, n_sub)
-    reshaped = reshape_multiresolution_data(nx=nx, ny=ny, data=test_grad)
-    reshaped2 = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=reshaped, n_sub=n_sub)
+    # nx, ny = 3, 2
+    # NC, n_sub = nx*ny,  9
+    # test_grad = bm.arange(NC * n_sub).reshape(NC, n_sub)
+    # reshaped = reshape_multiresolution_data(nx=nx, ny=ny, data=test_grad)
+    # reshaped2 = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=reshaped, n_sub=n_sub)
 
 
     print("--------------")
