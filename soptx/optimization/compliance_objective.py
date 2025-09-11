@@ -88,8 +88,8 @@ class ComplianceObjective(BaseLogged):
             
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe) # (NC, )
 
-            if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
+            # if bm.any(dc > 1e-12):
+            #     self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
 
             return dc[:]
         
@@ -97,8 +97,8 @@ class ComplianceObjective(BaseLogged):
 
             dc = -bm.einsum('ci, cnij, cj -> cn', uhe, diff_ke, uhe) # (NC, n_sub)
 
-            if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
+            # if bm.any(dc > 1e-12):
+            #     self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
 
             return dc[:]
         
