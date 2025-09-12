@@ -259,6 +259,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         mesh = getattr(space, 'mesh', None)
         cm, ws, bcs, gphi, detJ = self.fetch_voigt_assembly(space)
 
+        gphi00 = gphi[0, 0, :, :]  # (LDOF, GD)
         NC = mesh.number_of_cells()
         NQ = gphi.shape[1]
         D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
@@ -283,14 +284,15 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         
         # 单元密度的情况
         elif coef.shape == (NC, ):
-
-            D = bm.einsum('c, ijkl -> cjkl', coef, D0) # 2D: (NC, 1, 3, 3); 3D: (NC, 1, 6, 6)
+            
+            D_base = D0[0, 0] # 2D: (3, 3); 3D: (6, 6)
+            D = bm.einsum('c, kl -> ckl', coef, D_base) # 2D: (NC, 3, 3); 3D: (NC, 6, 6)
             
             if isinstance(mesh, SimplexMesh):
-                KK = bm.einsum('q, c, cqki, cjkl, cqlj -> cij',
+                KK = bm.einsum('q, c, cqki, ckl, cqlj -> cij',
                                 ws, cm, B, D, B)
             else:
-                KK = bm.einsum('q, cq, cqki, cjkl, cqlj -> cij',
+                KK = bm.einsum('q, cq, cqki, ckl, cqlj -> cij',
                                 ws, detJ, B, D, B)
             
             return KK
