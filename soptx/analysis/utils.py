@@ -244,60 +244,60 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike
 
 if __name__ == "__main__":
     # 测试代码
-    # from fealpy.mesh import QuadrangleMesh
-    # mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=1, ny=1)
-    # q = 2
-    # # 计算位移单元积分点处的重心坐标
-    # qf_e = mesh_u.quadrature_formula(q)
-    # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-    # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+    from fealpy.mesh import QuadrangleMesh
+    mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=1, ny=1)
+    q = 2
+    # 计算位移单元积分点处的重心坐标
+    qf_e = mesh_u.quadrature_formula(q)
+    # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+    bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
 
-    # n_sub = 4
-    # bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-    # bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+    n_sub = 4
+    bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+    bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
 
-    # from fealpy.decorator import  cartesian
-    # @cartesian
-    # def test_func(points):
-    #     x = points[:, 0]
-    #     y = points[:, 1]
-    #     return x**2 + y**2
+    from fealpy.decorator import  cartesian
+    @cartesian
+    def test_func(points):
+        x = points[:, 0]
+        y = points[:, 1]
+        return x**2 + y
     
-    # from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-    # s_space = LagrangeFESpace(mesh=mesh_u, p=1)
-    # t_space = TensorFunctionSpace(scalar_space=s_space, shape=(-1, 2))
+    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+    s_space = LagrangeFESpace(mesh=mesh_u, p=1)
+    t_space = TensorFunctionSpace(scalar_space=s_space, shape=(-1, 2))
 
-    # ps_e = mesh_u.bc_to_point(bcs_e)
-    # f_e = test_func(ps_e[0])
-    # J = mesh_u.jacobi_matrix(bcs_e)
-    # detJ = bm.abs(bm.linalg.det(J))
+    ps_e = mesh_u.bc_to_point(bcs_e)
+    f_e = test_func(ps_e[0])
+    J = mesh_u.jacobi_matrix(bcs_e)
+    detJ = bm.abs(bm.linalg.det(J))
 
-    # K1 = bm.einsum('q, q, cq -> c', f_e, ws_e, detJ)
+    K1 = bm.einsum('q, q, cq -> c', f_e, ws_e, detJ)
 
-    # NC = 1
-    # NQ = ws_e.shape[0]
-    # f_eg = bm.zeros((n_sub, NQ)) # (n_sub, NQ)
-    # detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
-    # for s_idx in range(n_sub):
-    #     sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((q, GD), (q, GD))
-    #     # J_q = 1/4
-    #     J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
-    #     detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
-    #     detJ_eg[:, s_idx, :] = detJ_sub
+    NC = 1
+    NQ = ws_e.shape[0]
+    f_eg = bm.zeros((n_sub, NQ)) # (n_sub, NQ)
+    detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+    for s_idx in range(n_sub):
+        sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((q, GD), (q, GD))
+        # J_q = 1/4
+        J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+        detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+        detJ_eg[:, s_idx, :] = detJ_sub
 
-    #     sub_ps = mesh_u.bc_to_point(sub_bcs) # (NC, NQ, GD)
-    #     f_eg[s_idx, :] = test_func(sub_ps[0])  # (NQ, )
+        sub_ps = mesh_u.bc_to_point(sub_bcs) # (NC, NQ, GD)
+        f_eg[s_idx, :] = test_func(sub_ps[0])  # (NQ, )
 
-    # KK1 = bm.einsum('nq, q, cnq -> cn', f_eg, ws_e, detJ_eg / 4)
-    # KK1sum = KK1.sum()
+    KK1 = bm.einsum('nq, q, cnq -> cn', f_eg, ws_e, detJ_eg / 4)
+    KK1sum = KK1.sum()
 
 
-    nx, ny = 3, 2
-    NC, n_sub = nx*ny,  9
-    test_grad = bm.arange(NC * n_sub).reshape(NC, n_sub)
-    reshaped = reshape_multiresolution_data(nx=nx, ny=ny, data=test_grad)
-    reshaped_test = test_grad.reshape(NC, n_sub)
-    reshaped2 = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=reshaped, n_sub=n_sub)
+    # nx, ny = 3, 2
+    # NC, n_sub = nx*ny,  9
+    # test_grad = bm.arange(NC * n_sub).reshape(NC, n_sub)
+    # reshaped = reshape_multiresolution_data(nx=nx, ny=ny, data=test_grad)
+    # reshaped_test = test_grad.reshape(NC, n_sub)
+    # reshaped2 = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=reshaped, n_sub=n_sub)
 
 
     print("--------------")

@@ -360,6 +360,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         # 计算 B 矩阵
         from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
         nx_u, ny_u = mesh_u.meshdata['nx'], mesh_u.meshdata['ny']
+        gphi_eg00 = gphi_eg[0, 0, 0, :, :]
         gphi_eg_reshaped = reshape_multiresolution_data(nx=nx_u, ny=ny_u, data=gphi_eg) # (NC*n_sub, NQ, LDOF, GD)
         # gphi_eg_reshaped_old = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
         B_eg_reshaped = self._material.strain_displacement_matrix(
@@ -384,7 +385,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             D_g = bm.einsum('kl, cn -> cnkl', D0, coef) # 2D: (NC, n_sub, 3, 3); 3D: (NC, n_sub, 6, 6)
             if isinstance(mesh_u, SimplexMesh):
                 cm = mesh_u.entity_measure('cell')
-                cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) / n_sub # (NC, n_sub)
+                cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) # (NC, n_sub)
                 KK = J_g * bm.einsum('q, cn, cnqki, cnkl, cnqlj -> cij',
                                     ws_e, cm_eg, B_eg, D_g, B_eg)
             else:

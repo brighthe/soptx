@@ -25,8 +25,8 @@ class DensityTopOptTest(BaseLogged):
             T = -1.0
             E, nu = 1.0, 0.3
 
-            # nx, ny = 60, 10
-            nx, ny = 120, 20
+            nx, ny = 60, 10
+            # nx, ny = 120, 20
             # nx, ny = 240, 40
             # nx, ny = 480, 80
             # nx, ny = 300, 50
@@ -41,15 +41,15 @@ class DensityTopOptTest(BaseLogged):
             penalty_factor = 3.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-            density_location = 'element'
+            density_location = 'element_multiresolution'
             sub_density_element = 4
             relative_density = volume_fraction
 
-            # 'standard', 'voigt', 'voigt_multi_resolution'
-            assembly_method = 'voigt'
+            # 'standard', 'voigt', 'voigt_multiresolution'
+            assembly_method = 'voigt_multiresolution'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 50
+            max_iterations = 30
             tolerance = 1e-3
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
@@ -262,7 +262,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_480p2")
+        save_path = Path(f"{base_dir}/test_mtop2")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_optimization_history(mesh=design_variable_mesh, 
@@ -621,13 +621,15 @@ class DensityTopOptTest(BaseLogged):
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
                                 )
-        K_stop = lagrange_fem_analyzer_stop.assemble_stiff_matrix(rho_val=rho_stop)
-        K_mtop = lagrange_fem_analyzer_mtop.assemble_stiff_matrix(rho_val=rho_mtop)
+        K_stop, KE_stop = lagrange_fem_analyzer_stop.assemble_stiff_matrix(rho_val=rho_stop)
+        K_mtop, KE_mtop = lagrange_fem_analyzer_mtop.assemble_stiff_matrix(rho_val=rho_mtop)
+        error_K = bm.sum(bm.abs(K_stop.toarray() - K_mtop.toarray()))
+        error_KE = bm.sum(bm.abs(KE_stop[0] - KE_mtop[0]))
         uh_stop = lagrange_fem_analyzer_stop.solve_displacement(rho_val=rho_stop)
         uh_mtop = lagrange_fem_analyzer_mtop.solve_displacement(rho_val=rho_mtop)
         diff_K_stop = lagrange_fem_analyzer_stop.get_stiffness_matrix_derivative(rho_val=rho_stop)
         diff_K_mtop = lagrange_fem_analyzer_mtop.get_stiffness_matrix_derivative(rho_val=rho_mtop)
-        error_K = bm.linalg.norm(K_stop.toarray() - K_mtop.toarray())
+        
         error_uh = bm.linalg.norm(uh_stop[:] - uh_mtop[:])
         from soptx.optimization.compliance_objective import ComplianceObjective
         compliance_objective_stop = ComplianceObjective(analyzer=lagrange_fem_analyzer_stop)
@@ -724,7 +726,7 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    # test.run.set('test_mbb_2d')
+    test.run.set('test_mbb_2d')
     # test.run.set('test_cantilever_3d')
-    test.run.set('test_stop_mtop')
+    # test.run.set('test_stop_mtop')
     test.run()
