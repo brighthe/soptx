@@ -306,13 +306,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             # 计算位移单元 (父参考单元) 高斯积分点处的重心坐标
             qf_e = mesh_u.quadrature_formula(q)
-            # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+            # bcs_e.shape = ( (q, GD), (q, GD) ), ws_e.shape = (NQ, )
             bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
             NQ = ws_e.shape[0]
 
             # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
             from soptx.analysis.utils import map_bcs_to_sub_elements
-            # bcs_eg.shape = ( (n_sub, NQ, GD), (n_sub, NQ, GD) ), ws_e.shape = (NQ, )
+            # bcs_eg.shape = ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) ), ws_e.shape = (NQ, )
             bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
             bcs_eg_x, bcs_eg_y = bcs_eg
 

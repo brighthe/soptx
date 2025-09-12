@@ -34,7 +34,7 @@ class DensityTopOptTest(BaseLogged):
             # mesh_type = 'uniform_aligned_tri'
             # mesh_type = 'uniform_crisscross_tri'
 
-            space_degree = 1
+            space_degree = 2
             integration_order = space_degree + 3
 
             volume_fraction = 0.6
@@ -49,7 +49,7 @@ class DensityTopOptTest(BaseLogged):
             assembly_method = 'voigt_multi_resolution'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 200
+            max_iterations = 500
             tolerance = 1e-3
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
@@ -263,7 +263,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_mtop")
+        save_path = Path(f"{base_dir}/test_mtop1")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_optimization_history(mesh=design_variable_mesh, 

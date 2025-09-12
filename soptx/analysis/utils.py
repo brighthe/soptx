@@ -138,24 +138,16 @@ def map_bcs_to_sub_elements(bcs_e: Tuple[TensorLike, TensorLike], n_sub: int):
             mapped_xi = xi_start + p_1d * (xi_end - xi_start)
             mapped_eta = eta_start + p_1d * (eta_end - eta_start)
             
-            bcs_g_xi[sub_element_idx, :, 0] = mapped_xi[::-1] # 降序
-            bcs_g_xi[sub_element_idx, :, 1] = mapped_xi       # 升序
-
-            bcs_g_eta[sub_element_idx, :, 0] = mapped_eta[::-1] # 降序
-            bcs_g_eta[sub_element_idx, :, 1] = mapped_eta       # 升序
-
-            # 添加归一化：保持重心坐标性质
-            for q in range(NQ_x):
-                coord_sum_xi = bcs_g_xi[sub_element_idx, q, :].sum()
-                if coord_sum_xi > 0:  # 避免除零
-                    bcs_g_xi[sub_element_idx, q, :] = bcs_g_xi[sub_element_idx, q, :] / coord_sum_xi
+            # 构造重心坐标：对于一维单纯形，位置t的重心坐标是[1-t, t]
+            bcs_g_xi[sub_element_idx, :, 0] = 1.0 - mapped_xi  # xi方向的重心坐标
+            bcs_g_xi[sub_element_idx, :, 1] = mapped_xi
             
-            for q in range(NQ_y):
-                coord_sum_eta = bcs_g_eta[sub_element_idx, q, :].sum()
-                if coord_sum_eta > 0:  # 避免除零
-                    bcs_g_eta[sub_element_idx, q, :] = bcs_g_eta[sub_element_idx, q, :] / coord_sum_eta
+            bcs_g_eta[sub_element_idx, :, 0] = 1.0 - mapped_eta  # eta方向的重心坐标  
+            bcs_g_eta[sub_element_idx, :, 1] = mapped_eta
+
     
     return (bcs_g_xi, bcs_g_eta)
+
 
 def reshape_multiresolution_data(nx: int, ny: int, data: TensorLike) -> TensorLike:
     """
@@ -232,8 +224,8 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike
 if __name__ == "__main__":
     # 测试代码
     from fealpy.mesh import QuadrangleMesh
-    mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=2, ny=2)
-    q = 4
+    mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=1, ny=1)
+    q = 2
     # 计算位移单元积分点处的重心坐标
     qf_e = mesh_u.quadrature_formula(q)
     # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
@@ -241,6 +233,43 @@ if __name__ == "__main__":
 
     n_sub = 4
     bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+    bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+
+    from fealpy.decorator import  cartesian
+    @cartesian
+    def test_func(points):
+        x = points[:, 0]
+        y = points[:, 1]
+        return x**2 + y**2
+    
+    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+    s_space = LagrangeFESpace(mesh=mesh_u, p=1)
+    t_space = TensorFunctionSpace(scalar_space=s_space, shape=(-1, 2))
+
+    ps_e = mesh_u.bc_to_point(bcs_e)
+    f_e = test_func(ps_e[0])
+    J = mesh_u.jacobi_matrix(bcs_e)
+    detJ = bm.abs(bm.linalg.det(J))
+
+    K1 = bm.einsum('q, q, cq -> c', f_e, ws_e, detJ)
+
+    NC = 1
+    NQ = ws_e.shape[0]
+    f_eg = bm.zeros((n_sub, NQ)) # (n_sub, NQ)
+    detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+    for s_idx in range(n_sub):
+        sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((q, GD), (q, GD))
+        # J_q = 1/4
+        J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+        detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+        detJ_eg[:, s_idx, :] = detJ_sub
+
+        sub_ps = mesh_u.bc_to_point(sub_bcs) # (NC, NQ, GD)
+        f_eg[s_idx, :] = test_func(sub_ps[0])  # (NQ, )
+
+    KK1 = bm.einsum('nq, q, cnq -> cn', f_eg, ws_e, detJ_eg / 4)
+    KK1sum = KK1.sum()
+
 
     # nx, ny = 3, 2
     # NC, n_sub = nx*ny,  9
