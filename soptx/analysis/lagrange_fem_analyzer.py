@@ -338,10 +338,19 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     detJ_eg[:, s_idx, :] = detJ_sub
 
             # 计算 B 矩阵
-            gphi_eg_reshaped = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
-            B_eg_reshaped = self._material.strain_displacement_matrix(dof_priority=self.tensor_space.dof_priority, 
-                                                            gphi=gphi_eg_reshaped) # 2D: (NC*n_sub, NQ, 3, TLDOF), 3D: (NC*n_sub, NQ, 6, TLDOF)
-            B_eg = B_eg_reshaped.reshape(NC, n_sub, NQ, B_eg_reshaped.shape[-2], B_eg_reshaped.shape[-1])
+            from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
+            nx_u, ny_u = mesh_u.meshdata['nx'], mesh_u.meshdata['ny']
+            gphi_eg_reshaped = reshape_multiresolution_data(nx=nx_u, ny=ny_u, data=gphi_eg) # (NC*n_sub, NQ, LDOF, GD)
+            # gphi_eg_reshaped_old = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
+            B_eg_reshaped = self._material.strain_displacement_matrix(
+                                                dof_priority=self._tensor_space.dof_priority, 
+                                                gphi=gphi_eg_reshaped
+                                            ) # 2D: (NC*n_sub, NQ, 3, TLDOF), 3D: (NC*n_sub, NQ, 6, TLDOF)
+            B_eg = reshape_multiresolution_data_inverse(nx=nx_u, 
+                                                        ny=ny_u, 
+                                                        data_flat=B_eg_reshaped, 
+                                                        n_sub=n_sub) # (NC, n_sub, NQ, 3, TLDOF) or (NC, n_sub, NQ, 6, TLDOF)
+            # B_eg = B_eg_reshaped.reshape(NC, n_sub, NQ, B_eg_reshaped.shape[-2], B_eg_reshaped.shape[-1])
 
             # 位移单元 → 子密度单元的缩放
             J_g = 1 / n_sub

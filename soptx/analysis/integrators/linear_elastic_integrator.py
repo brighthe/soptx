@@ -310,7 +310,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
             pass
 
-    @assembly.register('voigt_multi_resolution')
+    @assembly.register('voigt_multiresolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         index = self._index
         mesh_u = getattr(space, 'mesh', None)
@@ -358,30 +358,37 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 detJ_eg[:, s_idx, :] = detJ_sub
 
         # 计算 B 矩阵
-        gphi_eg_reshaped = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
+        from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
+        nx_u, ny_u = mesh_u.meshdata['nx'], mesh_u.meshdata['ny']
+        gphi_eg_reshaped = reshape_multiresolution_data(nx=nx_u, ny=ny_u, data=gphi_eg) # (NC*n_sub, NQ, LDOF, GD)
+        # gphi_eg_reshaped_old = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
         B_eg_reshaped = self._material.strain_displacement_matrix(
                                             dof_priority=space.dof_priority, 
                                             gphi=gphi_eg_reshaped
                                         ) # 2D: (NC*n_sub, NQ, 3, TLDOF), 3D: (NC*n_sub, NQ, 6, TLDOF)
-        B_eg = B_eg_reshaped.reshape(NC, n_sub, NQ, B_eg_reshaped.shape[-2], B_eg_reshaped.shape[-1])
+        B_eg = reshape_multiresolution_data_inverse(nx=nx_u, 
+                                                    ny=ny_u, 
+                                                    data_flat=B_eg_reshaped, 
+                                                    n_sub=n_sub) # (NC, n_sub, NQ, 3, TLDOF) or (NC, n_sub, NQ, 6, TLDOF)
+        # B_eg = B_eg_reshaped.reshape(NC, n_sub, NQ, B_eg_reshaped.shape[-2], B_eg_reshaped.shape[-1])
 
         # 位移单元 → 子密度单元的缩放
         J_g = 1 / n_sub
 
         # 基础材料的弹性矩阵
-        D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3); 3D: (6, 6)
 
         # 单元密度
         if coef.shape == (NC, n_sub):
 
-            D_g = bm.einsum('ijkl, cn -> cnjkl', D0, coef) # 2D: (NC, n_sub, 1, 3, 3); 3D: (NC, n_sub, 1, 6, 6)
+            D_g = bm.einsum('kl, cn -> cnkl', D0, coef) # 2D: (NC, n_sub, 3, 3); 3D: (NC, n_sub, 6, 6)
             if isinstance(mesh_u, SimplexMesh):
                 cm = mesh_u.entity_measure('cell')
                 cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) / n_sub # (NC, n_sub)
-                KK = J_g * bm.einsum('q, cn, cnqki, cnjkl, cnqlj -> cij',
+                KK = J_g * bm.einsum('q, cn, cnqki, cnkl, cnqlj -> cij',
                                     ws_e, cm_eg, B_eg, D_g, B_eg)
             else:
-                KK = J_g * bm.einsum('q, cnq, cnqki, cnjkl, cnqlj -> cij',
+                KK = J_g * bm.einsum('q, cnq, cnqki, cnkl, cnqlj -> cij',
                                     ws_e, detJ_eg, B_eg, D_g, B_eg)
                 
             return KK
