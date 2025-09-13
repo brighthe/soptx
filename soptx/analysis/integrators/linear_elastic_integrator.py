@@ -475,6 +475,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.einsum('q, c, cqki, ckl, cqlj -> cij',
                                 ws, cm, B, D, B)
             else:
+                test = bm.einsum('q, cq, cqid, cqjd -> cij', ws, detJ, gphi, gphi)
                 KK = bm.einsum('q, cq, cqki, ckl, cqlj -> cij',
                                 ws, detJ, B, D, B)
             

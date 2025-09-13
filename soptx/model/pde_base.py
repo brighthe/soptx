@@ -51,7 +51,7 @@ class PDEBase(BaseLogged, ABC):
     # 内部方法
     #######################################################################################################################
 
-    def _save_mesh(self, mesh: HomogeneousMesh, mesh_type: str, **params) -> None:
+    def _save_meshdata(self, mesh: HomogeneousMesh, mesh_type: str, **params) -> None:
         """保存网格数据"""
         self.mesh_type = mesh_type
 

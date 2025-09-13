@@ -5,7 +5,7 @@ from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
-from soptx.pde.pde_base import PDEBase  
+from soptx.model.pde_base import PDEBase  
 
 class HalfMBBBeam2dData(PDEBase):
     '''

@@ -27,8 +27,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         volume_fraction = 0.35
         penalty_factor = 3.0
         
-        # 'lagrange_interpolation_point', 'element'
-        density_location = 'lagrange_interpolation_point'  
+        # 'point', 'element'
+        density_location = 'point'
         density_interpolation_order = 1
         relative_density = volume_fraction
 
