@@ -174,12 +174,17 @@ def reshape_multiresolution_data(nx: int, ny: int, data: TensorLike) -> TensorLi
     
     # 获取重排索引
     reorder_indices = []
-    for u_row in range(ny):  
-        for sub_row in range(sub_dim):   
-            for u_col in range(nx):  
-                for sub_col in range(sub_dim):  
-                    c = u_row * nx + u_col
+
+    # 按列优先遍历位移单元，对于每列的位移单元，按子单元行优先排列
+    for pos_col in range(nx):  # 对于每一列的位移单元
+        for sub_row in range(sub_dim):  # 对于子单元的每一行
+            for pos_row in range(ny):  # 对于该列中的每个位移单元
+                for sub_col in range(sub_dim):  # 对于子单元的每一列
+                    # 计算位移单元索引（按列优先编号）
+                    c = pos_col * ny + pos_row
+                    # 计算子单元索引
                     s = sub_row * sub_dim + sub_col
+                    # 计算在展平数据中的索引
                     data_idx = c * n_sub + s
                     reorder_indices.append(data_idx)
     
@@ -212,92 +217,96 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike
     data_reordered : (NC, n_sub, ...)
     """
     NC = nx * ny
-    sub_dim = int(bm.sqrt(n_sub))
-
-    flat_shape = data_flat.shape
-    extra_dims = flat_shape[1:] 
-
-    # 重新计算 reorder_indices（与正向函数完全相同的逻辑）
-    reorder_indices = []
-    for u_row in range(ny):  
-        for sub_row in range(sub_dim):   
-            for u_col in range(nx):  
-                for sub_col in range(sub_dim):  
-                    c = u_row * nx + u_col
-                    s = sub_row * sub_dim + sub_col
-                    data_idx = c * n_sub + s
-                    reorder_indices.append(data_idx)
+    original_shape = data_flat.shape
+    extra_dims = original_shape[1:]
     
-    reorder_indices = bm.array(reorder_indices)
+    sub_dim = int(bm.sqrt(n_sub))
     
     # 创建逆映射索引
     inverse_indices = bm.zeros(NC * n_sub, dtype=bm.int32)
-    for new_pos, old_pos in enumerate(reorder_indices):
-        inverse_indices[old_pos] = new_pos
     
-    # 应用逆映射
-    data_reordered = data_flat[inverse_indices]
+    idx = 0
+    for pos_col in range(nx):  # 对于每一列的位移单元
+        for sub_row in range(sub_dim):  # 对于子单元的每一行
+            for pos_row in range(ny):  # 对于该列中的每个位移单元
+                for sub_col in range(sub_dim):  # 对于子单元的每一列
+                    # 计算位移单元索引（按列优先编号）
+                    c = pos_col * ny + pos_row
+                    # 计算子单元索引
+                    s = sub_row * sub_dim + sub_col
+                    # 计算在原始数据中的索引
+                    data_idx = c * n_sub + s
+                    inverse_indices[data_idx] = idx
+                    idx += 1
     
-    # 重塑为多分辨率格式：(NC*n_sub, ...) -> (NC, n_sub, ...)
-    return data_reordered.reshape(NC, n_sub, *extra_dims)
+    # 按逆映射重排数据
+    data_restored_flat = data_flat[inverse_indices]
+    
+    # 重塑为 (NC, n_sub, ...)
+    data_restored = data_restored_flat.reshape(NC, n_sub, *extra_dims)
+    
+    return data_restored
 
 
 if __name__ == "__main__":
     # 测试代码
-    from fealpy.mesh import QuadrangleMesh
-    mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=1, ny=1)
-    q = 2
-    # 计算位移单元积分点处的重心坐标
-    qf_e = mesh_u.quadrature_formula(q)
-    # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-    bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+    # from fealpy.mesh import QuadrangleMesh
+    # mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=1, ny=1)
+    # q = 2
+    # # 计算位移单元积分点处的重心坐标
+    # qf_e = mesh_u.quadrature_formula(q)
+    # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+    # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
 
-    n_sub = 4
-    bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-    bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+    # n_sub = 4
+    # bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+    # bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
 
-    from fealpy.decorator import  cartesian
-    @cartesian
-    def test_func(points):
-        x = points[:, 0]
-        y = points[:, 1]
-        return x**2 + y
+    # from fealpy.decorator import  cartesian
+    # @cartesian
+    # def test_func(points):
+    #     x = points[:, 0]
+    #     y = points[:, 1]
+    #     return x**2 + y
     
-    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-    s_space = LagrangeFESpace(mesh=mesh_u, p=1)
-    t_space = TensorFunctionSpace(scalar_space=s_space, shape=(-1, 2))
+    # from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+    # s_space = LagrangeFESpace(mesh=mesh_u, p=1)
+    # t_space = TensorFunctionSpace(scalar_space=s_space, shape=(-1, 2))
 
-    ps_e = mesh_u.bc_to_point(bcs_e)
-    f_e = test_func(ps_e[0])
-    J = mesh_u.jacobi_matrix(bcs_e)
-    detJ = bm.abs(bm.linalg.det(J))
+    # ps_e = mesh_u.bc_to_point(bcs_e)
+    # f_e = test_func(ps_e[0])
+    # J = mesh_u.jacobi_matrix(bcs_e)
+    # detJ = bm.abs(bm.linalg.det(J))
 
-    K1 = bm.einsum('q, q, cq -> c', f_e, ws_e, detJ)
+    # K1 = bm.einsum('q, q, cq -> c', f_e, ws_e, detJ)
 
-    NC = 1
-    NQ = ws_e.shape[0]
-    f_eg = bm.zeros((n_sub, NQ)) # (n_sub, NQ)
-    detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
-    for s_idx in range(n_sub):
-        sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((q, GD), (q, GD))
-        # J_q = 1/4
-        J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
-        detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
-        detJ_eg[:, s_idx, :] = detJ_sub
+    # NC = 1
+    # NQ = ws_e.shape[0]
+    # f_eg = bm.zeros((n_sub, NQ)) # (n_sub, NQ)
+    # detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+    # for s_idx in range(n_sub):
+    #     sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((q, GD), (q, GD))
+    #     # J_q = 1/4
+    #     J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+    #     detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+    #     detJ_eg[:, s_idx, :] = detJ_sub
 
-        sub_ps = mesh_u.bc_to_point(sub_bcs) # (NC, NQ, GD)
-        f_eg[s_idx, :] = test_func(sub_ps[0])  # (NQ, )
+    #     sub_ps = mesh_u.bc_to_point(sub_bcs) # (NC, NQ, GD)
+    #     f_eg[s_idx, :] = test_func(sub_ps[0])  # (NQ, )
 
-    KK1 = bm.einsum('nq, q, cnq -> cn', f_eg, ws_e, detJ_eg / 4)
-    KK1sum = KK1.sum()
+    # KK1 = bm.einsum('nq, q, cnq -> cn', f_eg, ws_e, detJ_eg / 4)
+    # KK1sum = KK1.sum()
 
 
-    # nx, ny = 3, 2
-    # NC, n_sub = nx*ny,  9
-    # test_grad = bm.arange(NC * n_sub).reshape(NC, n_sub)
-    # reshaped = reshape_multiresolution_data(nx=nx, ny=ny, data=test_grad)
-    # reshaped_test = test_grad.reshape(NC, n_sub)
-    # reshaped2 = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=reshaped, n_sub=n_sub)
+    nx, ny = 3, 2
+    NC, n_sub = nx*ny,  4
+    from fealpy.mesh import QuadrangleMesh
+    mesh = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=nx, ny=ny)
+    density = bm.arange(0, 24, 1, dtype=bm.float64).reshape(NC, n_sub)
+
+    density_flat = reshape_multiresolution_data(nx=nx, ny=ny, data=density)
+
+    density_test = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=density_flat, n_sub=n_sub)
 
 
     print("--------------")

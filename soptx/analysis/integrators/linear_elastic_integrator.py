@@ -78,21 +78,15 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         NQ = len(ws)
         D0 = self._material.elastic_matrix()  # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
         
-        # 单元密度: (NC, ); 节点密度: (GDOF, ); 高斯点密度: (NC, NQ)      
+        # 单元密度: (NC, ); 节点密度: (NC, NQ)      
         coef = self._coef
 
         if coef is None:
-            D = D0
+            D = D0[0, 0] # 2D: (3, 3); 3D: (6, 6)
         elif coef.shape == (NC, ):
-            D = bm.einsum('c, ijkl -> cjkl', coef, D0)  # (NC, 1, :, :)
+            D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # 2D: (NC, 1, 3, 3); 3D: (NC, 1, 6, 6)
         elif coef.shape == (NC, NQ):
-            D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
-        # 如果是函数, 需要将其插值到积分点处
-        elif isinstance(coef, Function):
-            coef = coef(bcs) # (MC, NQ)
-            D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
-        else:
-            raise ValueError(f"Unsupported coefficient shape: {coef.shape}")
+            D = bm.einsum('cq, cqkl -> cqkl', coef, D0) # 2D: (NC, NQ, 3, 3); 3D: (NC, NQ, 6, 6)
             
         if isinstance(mesh, SimplexMesh):
             A_xx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 0], cm)
@@ -123,17 +117,17 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
-        if D.shape[0] == 1 and D.shape[1] == 1:
-            # (1, 1, :, :) - 全局均匀相对密度
+        if coef is None:
+            # (:, :) - 全局均匀相对密度
             # 弹性系数为全局常数，先对积分点求和再乘以常数系数
             if GD == 2:
-                D00, D01, D22 = D[0, 0, 0, 0], D[0, 0, 0, 1], D[0, 0, 2, 2]
+                D00, D01, D22 = D[0, 0], D[0, 1], D[2, 2]
                 KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D22 * bm.einsum('cqij -> cij', A_yy)
                 KK_22 = D00 * bm.einsum('cqij -> cij', A_yy) + D22 * bm.einsum('cqij -> cij', A_xx)
                 KK_12 = D01 * bm.einsum('cqij -> cij', A_xy) + D22 * bm.einsum('cqij -> cij', A_yx)
                 KK_21 = D01 * bm.einsum('cqij -> cij', A_yx) + D22 * bm.einsum('cqij -> cij', A_xy)
             else: 
-                D00, D01, D55 = D[0, 0, 0, 0], D[0, 0, 0, 1], D[0, 0, 5, 5]
+                D00, D01, D55 = D[0, 0], D[0, 1], D[5, 5]
                 KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D55 * bm.einsum('cqij -> cij', A_yy + A_zz)
                 KK_22 = D00 * bm.einsum('cqij -> cij', A_yy) + D55 * bm.einsum('cqij -> cij', A_xx + A_zz)
                 KK_33 = D00 * bm.einsum('cqij -> cij', A_zz) + D55 * bm.einsum('cqij -> cij', A_xx + A_yy)
@@ -144,17 +138,17 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_31 = D01 * bm.einsum('cqij -> cij', A_zx) + D55 * bm.einsum('cqij -> cij', A_xz)
                 KK_32 = D01 * bm.einsum('cqij -> cij', A_zy) + D55 * bm.einsum('cqij -> cij', A_yz)
                 
-        elif D.shape[1] == 1:
-            # (NC, 1, :, :) - 单元均匀相对密度
+        elif  coef.shape == (NC, ):
+            # (NC, :, :) - 单元均匀相对密度
             # 每个单元有不同的材料属性，先乘以单元系数再对积分点求和
             if GD == 2:
-                D00, D01, D22 = D[:, 0, 0, 0], D[:, 0, 0, 1], D[:, 0, 2, 2]
+                D00, D01, D22 = D[:, 0, 0], D[:, 0, 1], D[:, 2, 2]
                 KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D22, A_yy)
                 KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D22, A_xx)
                 KK_12 = bm.einsum('c, cqij -> cij', D01, A_xy) + bm.einsum('c, cqij -> cij', D22, A_yx)
                 KK_21 = bm.einsum('c, cqij -> cij', D01, A_yx) + bm.einsum('c, cqij -> cij', D22, A_xy)
             else:
-                D00, D01, D55 = D[:, 0, 0, 0], D[:, 0, 0, 1], D[:, 0, 5, 5]
+                D00, D01, D55 = D[:, 0, 0], D[:, 0, 1], D[:, 5, 5]
                 KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D55, A_yy + A_zz)
                 KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D55, A_xx + A_zz)
                 KK_33 = bm.einsum('c, cqij -> cij', D00, A_zz) + bm.einsum('c, cqij -> cij', D55, A_xx + A_yy)
@@ -165,8 +159,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_31 = bm.einsum('c, cqij -> cij', D01, A_zx) + bm.einsum('c, cqij -> cij', D55, A_xz)
                 KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
                 
-        else:
-            # (NC, NQ, :, :) - 单元高斯积分点相对密度 / 节点相对密度插值到单元高斯积分点上
+        elif coef.shape == (NC, NQ):
+            # (NC, NQ, :, :) - 节点相对密度
             if GD == 2:
                 D00, D01, D22 = D[..., 0, 0], D[..., 0, 1], D[..., 2, 2]
                 KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)
@@ -187,22 +181,17 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         if GD == 2:
             if space.dof_priority:
-
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(ldof, None)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, None)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(0, ldof)), KK_21)
 
-            else:
-
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
-
         else: 
             if space.dof_priority:
-
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), KK_33)
@@ -213,7 +202,201 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(2 * ldof, None)), KK_23)
                 KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(0, ldof)), KK_31)
                 KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(ldof, 2 * ldof)), KK_32)
+            else:
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_33)
 
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_13)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_23)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_31)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_32)
+
+        return KK
+    
+    @assembly.register('standard_multiresolution')
+    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+        index = self._index
+        mesh_u = getattr(space, 'mesh', None)
+        s_space_u = space.scalar_space
+        GD = mesh_u.geo_dimension()
+        q = s_space_u.p+3 if self._q is None else self._q
+    
+        # 单元密度多分辨率: (NC, n_sub); 节点密度多分辨率: (NC, n_sub, NQ)
+        coef = self._coef
+        NC, n_sub = coef.shape[0], coef.shape[1]
+        
+        # 计算位移单元积分点处的重心坐标
+        qf_e = mesh_u.quadrature_formula(q)
+        # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
+        bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+        NQ = ws_e.shape[0]
+
+        # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
+        from soptx.analysis.utils import map_bcs_to_sub_elements
+        # bcs_eg.shape = ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) ), ws_e.shape = (NQ, )
+        bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+        bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+
+        # 计算子密度单元内高斯积分点处的基函数梯度和 jacobi 矩阵
+        LDOF = s_space_u.number_of_local_dofs()
+        gphi_eg = bm.zeros((NC, n_sub, NQ, LDOF, GD)) # (NC, n_sub, NQ, LDOF, GD)
+        detJ_eg = None
+
+        if isinstance(mesh_u, SimplexMesh):
+            cm = mesh_u.entity_measure('cell')
+            cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) # (NC, n_sub)
+            
+            for s_idx in range(n_sub):
+                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
+                gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x')  # (NC, NQ, LDOF, GD)
+                gphi_eg[:, s_idx, :, :, :] = gphi_sub
+
+        else:
+            detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+            for s_idx in range(n_sub):
+                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
+                gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x') # (NC, NQ, LDOF, GD)
+
+                J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+
+                gphi_eg[:, s_idx, :, :, :] = gphi_sub
+                detJ_eg[:, s_idx, :] = detJ_sub
+
+        if isinstance(mesh_u, SimplexMesh):
+            A_xx_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 0], gphi_eg[..., 0], cm_eg)
+            A_yy_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 1], gphi_eg[..., 1], cm_eg)
+            A_xy_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 0], gphi_eg[..., 1], cm_eg)
+            A_yx_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 1], gphi_eg[..., 0], cm_eg)
+        else:
+            A_xx_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 0], gphi_eg[..., 0], detJ_eg)
+            A_yy_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 1], gphi_eg[..., 1], detJ_eg)
+            A_xy_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 0], gphi_eg[..., 1], detJ_eg)
+            A_yx_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 1], gphi_eg[..., 0], detJ_eg)
+
+        if GD == 3:
+            if isinstance(mesh_u, SimplexMesh):
+                A_xz_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 0], gphi_eg[..., 2], cm_eg)
+                A_zx_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 2], gphi_eg[..., 0], cm_eg)
+                A_yz_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 1], gphi_eg[..., 2], cm_eg)
+                A_zy_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 2], gphi_eg[..., 1], cm_eg)
+                A_zz_eg = bm.einsum('q, cnqi, cnqj, cn -> cnqij', ws_e, gphi_eg[..., 2], gphi_eg[..., 2], cm_eg)
+            else:
+                A_xz_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 0], gphi_eg[..., 2], detJ_eg)
+                A_zx_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 2], gphi_eg[..., 0], detJ_eg)
+                A_yz_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 1], gphi_eg[..., 2], detJ_eg)
+                A_zy_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 2], gphi_eg[..., 1], detJ_eg)
+                A_zz_eg = bm.einsum('q, cnqi, cnqj, cnq -> cnqij', ws_e, gphi_eg[..., 2], gphi_eg[..., 2], detJ_eg)
+
+        # 位移单元 → 子密度单元的缩放
+        J_g = 1 / n_sub
+
+        # 基础材料的弹性矩阵
+        D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3); 3D: (6, 6)
+
+        ldof = s_space_u.number_of_local_dofs()
+        KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh_u.device)
+
+        # 全局均匀密度情况
+        if coef is None:
+            raise NotImplementedError("The global uniform density case is not implemented yet.")
+
+        # 单元密度情况
+        elif coef.shape == (NC, n_sub):
+            if GD == 2:
+                D00, D01, D22 = D0[0, 0], D0[0, 1], D0[2, 2]
+                
+                KK_11 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_xx_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D22, A_yy_eg)
+                KK_22 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_yy_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D22, A_xx_eg)
+                KK_12 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_xy_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D22, A_yx_eg)
+                KK_21 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_yx_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D22, A_xy_eg)
+            else: 
+                D00, D01, D55 = D0[0, 0], D0[0, 1], D0[5, 5]
+                
+                KK_11 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_xx_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_yy_eg + A_zz_eg)
+                KK_22 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_yy_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_xx_eg + A_zz_eg)
+                KK_33 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_zz_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_xx_eg + A_yy_eg)
+                KK_12 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_xy_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_yx_eg)
+                KK_13 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_xz_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_zx_eg)
+                KK_21 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_yx_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_xy_eg)
+                KK_23 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_yz_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_zy_eg)
+                KK_31 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_zx_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_xz_eg)
+                KK_32 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_zy_eg) + \
+                        J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_yz_eg)
+                    
+        # 节点密度情况
+        elif coef.shape == (NC, n_sub, NQ):
+            if GD == 2:
+                D00, D01, D22 = D0[0, 0], D0[0, 1], D0[2, 2]
+                
+                KK_11 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_xx_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D22, A_yy_eg)
+                KK_22 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_yy_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D22, A_xx_eg)
+                KK_12 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_xy_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D22, A_yx_eg)
+                KK_21 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_yx_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D22, A_xy_eg)
+            else: 
+                D00, D01, D55 = D0[0, 0], D0[0, 1], D0[5, 5]
+                
+                KK_11 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_xx_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_yy_eg + A_zz_eg)
+                KK_22 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_yy_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_xx_eg + A_zz_eg)
+                KK_33 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_zz_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_xx_eg + A_yy_eg)
+                KK_12 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_xy_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_yx_eg)
+                KK_13 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_xz_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_zx_eg)
+                KK_21 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_yx_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_xy_eg)
+                KK_23 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_yz_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_zy_eg)
+                KK_31 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_zx_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_xz_eg)
+                KK_32 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D01, A_zy_eg) + \
+                        J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_yz_eg)
+
+        if GD == 2:
+            if space.dof_priority:
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(ldof, None)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, None)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(0, ldof)), KK_21)
+            else:
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
+        else:  
+            if space.dof_priority:
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), KK_33)
+
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), KK_13)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), KK_21)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(2 * ldof, None)), KK_23)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(0, ldof)), KK_31)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(ldof, 2 * ldof)), KK_32)
             else:
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
@@ -362,9 +545,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         # 计算 B 矩阵
         from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
         nx_u, ny_u = mesh_u.meshdata['nx'], mesh_u.meshdata['ny']
-        gphi_eg00 = gphi_eg[0, 0, 0, :, :]
         gphi_eg_reshaped = reshape_multiresolution_data(nx=nx_u, ny=ny_u, data=gphi_eg) # (NC*n_sub, NQ, LDOF, GD)
-        # gphi_eg_reshaped_old = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
         B_eg_reshaped = self._material.strain_displacement_matrix(
                                             dof_priority=space.dof_priority, 
                                             gphi=gphi_eg_reshaped
@@ -373,13 +554,16 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                                                     ny=ny_u, 
                                                     data_flat=B_eg_reshaped, 
                                                     n_sub=n_sub) # (NC, n_sub, NQ, 3, TLDOF) or (NC, n_sub, NQ, 6, TLDOF)
-        # B_eg = B_eg_reshaped.reshape(NC, n_sub, NQ, B_eg_reshaped.shape[-2], B_eg_reshaped.shape[-1])
 
         # 位移单元 → 子密度单元的缩放
         J_g = 1 / n_sub
 
         # 基础材料的弹性矩阵
         D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3); 3D: (6, 6)
+
+        if coef is None:
+            raise NotImplementedError("The global constant density is not implemented"
+                                      " in the multiresolution assembly.")
 
         # 单元密度
         if coef.shape == (NC, n_sub):
@@ -391,6 +575,9 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = J_g * bm.einsum('q, cn, cnqki, cnkl, cnqlj -> cij',
                                     ws_e, cm_eg, B_eg, D_g, B_eg)
             else:
+                test = J_g * bm.einsum('q, cnq, cnqid, cnqjd -> cij',
+                                 ws_e, detJ_eg, gphi_eg, gphi_eg)
+                
                 KK = J_g * bm.einsum('q, cnq, cnqki, cnkl, cnqlj -> cij',
                                     ws_e, detJ_eg, B_eg, D_g, B_eg)
                 

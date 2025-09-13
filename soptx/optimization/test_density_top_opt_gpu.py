@@ -25,7 +25,8 @@ class DensityTopOptTest(BaseLogged):
             T = -1.0
             E, nu = 1.0, 0.3
 
-            nx, ny = 60, 10
+            nx, ny = 3, 2
+            # nx, ny = 60, 10
             # nx, ny = 120, 20
             # nx, ny = 240, 40
             # nx, ny = 480, 80
@@ -35,7 +36,7 @@ class DensityTopOptTest(BaseLogged):
             # mesh_type = 'uniform_crisscross_tri'
 
             space_degree = 1
-            integration_order = space_degree + 1
+            integration_order = space_degree + 4
 
             volume_fraction = 0.6
             penalty_factor = 3.0
