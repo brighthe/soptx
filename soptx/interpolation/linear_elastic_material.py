@@ -177,7 +177,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                 plane_type: str = 'plane_stress',
                 density: Optional[float] = None,
                 device: Optional[str] = None,
-                enable_logging: bool = True,
+                enable_logging: bool = False,
                 logger_name: Optional[str] = None,
             ):
         super().__init__(

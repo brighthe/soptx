@@ -58,18 +58,53 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
 
 
-    @variantmethod('LFA_base_material')
-    def run(self, maxit: int):
-        if self.pde is None or self.material is None:
-            raise ValueError("请先设置 PDE 和基本材料参数")
-        
-        self._log_info(f"LagrangeFEMAnalyzerTest configuration:\n"
-                f"pde = {self.pde}, \n"
-                f"mesh = {self.mesh}, \n"
-                f"material = {self.material}, \n"
-                f"p = {self.p}, assembly_method = '{self.assembly_method}', "
-                f"solve_method = '{self.solve_method}'")
+    @variantmethod('lfa_exact_solution')
+    def run(self):
 
+        from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
+        domain = [0, 1, 0, 1]
+        E, nu = 1.0, 0.3
+        pde = BoxTriLagrange2dData(domain=domain, E=E, nu=nu)
+        nx, ny = 4, 4
+        mesh_type = 'uniform_quad'
+        pde.init_mesh.set(mesh_type)
+        mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                        )
+
+        space_degree = 1
+        integration_order = space_degree + 3
+        # 'standard', 'voigt', 'voigt_multiresolution'
+        assembly_method = 'standard'
+
+        s_space = LagrangeFESpace(mesh=mesh, p=space_degree, ctype='C')
+        t_space = TensorFunctionSpace(scalar_space=s_space, shape=(2, -1))
+        from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
+        lei_standard = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='standard')
+        KE_standard = lei_standard.assembly(space=t_space)
+
+        lei_voigt = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='voigt')
+        KE_voigt = lei_voigt.assembly(space=t_space)
+        
+
+        from fealpy.material.elastic_material import LinearElasticMaterial
+        material_fealpy = LinearElasticMaterial(name='test', elastic_modulus=E, poisson_ratio=nu, hypo=pde.plane_type)
+        
+        from fealpy.fem.linear_elasticity_integrator import LinearElasticityIntegrator
+        lei_standard_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='standard')
+        KE_standard_fealpy = lei_standard_fealpy.assembly(space=t_space)
+
+        lei_voigt_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='voigt')
+        KE_voigt_fealpy = lei_voigt_fealpy.assembly(space=t_space)
+
+        error = bm.sum(bm.abs(KE_standard - KE_voigt))
+
+        maxit = 6
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{L^2}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
@@ -78,14 +113,19 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         for i in range(maxit):
             print(f"第 {i+1}/{maxit} 次迭代...")
 
-            lfa = LagrangeFEMAnalyzer(pde=self.pde, material=self.material, space_degree=self.p,
-                                assembly_method=self.assembly_method, 
-                                solve_method=self.solve_method)
+            lfa = LagrangeFEMAnalyzer(
+                                    mesh=mesh,
+                                    pde=pde, 
+                                    material=material, 
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method=assembly_method,
+                                    solve_method='mumps')
                     
-            self.uh = lfa.solve()
+            uh = lfa.solve_displacement()
 
             mesh = lfa.mesh
-            e0 = self.mesh.error(self.uh, self.pde.disp_solution)
+            e0 = mesh.error(uh, pde.disp_solution)
             errorMatrix[0, i] = e0
 
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
@@ -95,9 +135,6 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
             if i < maxit - 1:
                 mesh.uniform_refine()
-                # NOTE 内部操作接受现有网格并设置到 PDE 中和拓扑优化材料中
-                self.pde.mesh = mesh
-                self.material.mesh = mesh
 
         print("errorMatrix:\n", errorType, "\n", errorMatrix)
         print("NDof:", NDof)
@@ -687,12 +724,12 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    p = 2
-    q = p+3
-    test.set_space_degree(p)
-    test.set_integrator_order(q)
-    test.set_assembly_method('standard')
-    test.set_solve_method('mumps')
+    # p = 2
+    # q = p+3
+    # test.set_space_degree(p)
+    # test.set_integrator_order(q)
+    # test.set_assembly_method('standard')
+    # test.set_solve_method('mumps')
 
     # test.run.set('topopt_analysis_reference_solution')
     # test.run.set('topopt_analysis_exact_solution')
@@ -707,5 +744,5 @@ if __name__ == "__main__":
     # test.run.set('test_topopt_analysis_density_location')
     # uh1 = test.run(density_location='element')
 
-    test.run.set('test_topopt_analysis_assembly_method')
+    test.run.set('lfa_exact_solution')
     test.run()

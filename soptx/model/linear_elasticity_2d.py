@@ -187,8 +187,6 @@ class BoxTriHuZhangData2d(PDEBase):
     
 class BoxTriLagrange2dData(PDEBase):
     """
-    模型来源:
-
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
     where:
@@ -253,8 +251,8 @@ class BoxTriLagrange2dData(PDEBase):
 
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)
-        
-        self._save_mesh(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
 
         return mesh
 
@@ -277,7 +275,7 @@ class BoxTriLagrange2dData(PDEBase):
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)
 
-        self._save_mesh(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
 
         return mesh
 

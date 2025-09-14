@@ -189,14 +189,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                             coef=coef,
                                             q=self._integration_order,
                                             method=self._assembly_method)
-        KE = integrator.assembly(space=self._tensor_space)
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(integrator)
         K = bform.assembly(format='csr')
 
         self._K = K
 
-        return K, KE
+        return K
 
     def assemble_force_vector(self) -> Union[TensorLike, COOTensor]:
         """组装全局载荷向量"""

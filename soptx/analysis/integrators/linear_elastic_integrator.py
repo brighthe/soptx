@@ -15,7 +15,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     """The linear elastic integrator for function spaces based on homogeneous meshes."""
     def __init__(self, 
                 material: LinearElasticMaterial,
-                coef: TensorLike,
+                coef: Optional[TensorLike]=None,
                 q: Optional[int]=None, 
                 *,
                 index: Index=_S,
@@ -78,13 +78,13 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         NQ = len(ws)
         D0 = self._material.elastic_matrix()  # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
         
-        # 单元密度: (NC, ); 节点密度: (NC, NQ)      
+        # 不考虑相对密度: None; 相对单元密度: (NC, ); 相对节点密度: (NC, NQ)      
         coef = self._coef
 
         if coef is None:
             D = D0[0, 0] # 2D: (3, 3); 3D: (6, 6)
         elif coef.shape == (NC, ):
-            D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # 2D: (NC, 1, 3, 3); 3D: (NC, 1, 6, 6)
+            D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # 2D: (NC, 3, 3); 3D: (NC, 6, 6)
         elif coef.shape == (NC, NQ):
             D = bm.einsum('cq, cqkl -> cqkl', coef, D0) # 2D: (NC, NQ, 3, 3); 3D: (NC, NQ, 6, 6)
             
@@ -117,17 +117,20 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
+        # 区域内的相对密度恒定都为 1, D 为全局常数矩阵
         if coef is None:
-            # (:, :) - 全局均匀相对密度
-            # 弹性系数为全局常数，先对积分点求和再乘以常数系数
             if GD == 2:
-                D00, D01, D22 = D[0, 0], D[0, 1], D[2, 2]
+                D00 = D[0, 0] # 2D: E/(1-ν²) 或 2μ+λ
+                D01 = D[0, 1] # 2D: νE/(1-ν²) 或 λ
+                D22 = D[2, 2] # 2D: E/2(1+ν) 或 μ
                 KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D22 * bm.einsum('cqij -> cij', A_yy)
                 KK_22 = D00 * bm.einsum('cqij -> cij', A_yy) + D22 * bm.einsum('cqij -> cij', A_xx)
                 KK_12 = D01 * bm.einsum('cqij -> cij', A_xy) + D22 * bm.einsum('cqij -> cij', A_yx)
                 KK_21 = D01 * bm.einsum('cqij -> cij', A_yx) + D22 * bm.einsum('cqij -> cij', A_xy)
             else: 
-                D00, D01, D55 = D[0, 0], D[0, 1], D[5, 5]
+                D00 = D[0, 0]  # 2μ + λ
+                D01 = D[0, 1]  # λ
+                D55 = D[5, 5]  # μ
                 KK_11 = D00 * bm.einsum('cqij -> cij', A_xx) + D55 * bm.einsum('cqij -> cij', A_yy + A_zz)
                 KK_22 = D00 * bm.einsum('cqij -> cij', A_yy) + D55 * bm.einsum('cqij -> cij', A_xx + A_zz)
                 KK_33 = D00 * bm.einsum('cqij -> cij', A_zz) + D55 * bm.einsum('cqij -> cij', A_xx + A_yy)
@@ -137,18 +140,20 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_23 = D01 * bm.einsum('cqij -> cij', A_yz) + D55 * bm.einsum('cqij -> cij', A_zy)
                 KK_31 = D01 * bm.einsum('cqij -> cij', A_zx) + D55 * bm.einsum('cqij -> cij', A_xz)
                 KK_32 = D01 * bm.einsum('cqij -> cij', A_zy) + D55 * bm.einsum('cqij -> cij', A_yz)
-                
-        elif  coef.shape == (NC, ):
-            # (NC, :, :) - 单元均匀相对密度
-            # 每个单元有不同的材料属性，先乘以单元系数再对积分点求和
+        # 单元密度情况, D 为单元均匀矩阵
+        elif coef.shape == (NC, ):
             if GD == 2:
-                D00, D01, D22 = D[:, 0, 0], D[:, 0, 1], D[:, 2, 2]
+                D00 = D[:, 0, 0] # 2D: E/(1-ν²) 或 2μ+λ
+                D01 = D[:, 0, 1] # 2D: νE/(1-ν²) 或 λ
+                D22 = D[:, 2, 2] # 2D: E/2(1+ν) 或 μ
                 KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D22, A_yy)
                 KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D22, A_xx)
                 KK_12 = bm.einsum('c, cqij -> cij', D01, A_xy) + bm.einsum('c, cqij -> cij', D22, A_yx)
                 KK_21 = bm.einsum('c, cqij -> cij', D01, A_yx) + bm.einsum('c, cqij -> cij', D22, A_xy)
             else:
-                D00, D01, D55 = D[:, 0, 0], D[:, 0, 1], D[:, 5, 5]
+                D00 = D[:, 0, 0] # 2μ + λ
+                D01 = D[:, 0, 1] # λ
+                D55 = D[:, 5, 5] # μ
                 KK_11 = bm.einsum('c, cqij -> cij', D00, A_xx) + bm.einsum('c, cqij -> cij', D55, A_yy + A_zz)
                 KK_22 = bm.einsum('c, cqij -> cij', D00, A_yy) + bm.einsum('c, cqij -> cij', D55, A_xx + A_zz)
                 KK_33 = bm.einsum('c, cqij -> cij', D00, A_zz) + bm.einsum('c, cqij -> cij', D55, A_xx + A_yy)
@@ -158,17 +163,20 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_23 = bm.einsum('c, cqij -> cij', D01, A_yz) + bm.einsum('c, cqij -> cij', D55, A_zy)
                 KK_31 = bm.einsum('c, cqij -> cij', D01, A_zx) + bm.einsum('c, cqij -> cij', D55, A_xz)
                 KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
-                
+        # 区域内的相对密度在单元内变化, D 为节点变化矩阵
         elif coef.shape == (NC, NQ):
-            # (NC, NQ, :, :) - 节点相对密度
             if GD == 2:
-                D00, D01, D22 = D[..., 0, 0], D[..., 0, 1], D[..., 2, 2]
+                D00 = D[..., 0, 0] # 2D: E/(1-ν²) 或 2μ+λ
+                D01 = D[..., 0, 1] # 2D: νE/(1-ν²) 或 λ
+                D22 = D[..., 2, 2] # 2D: E/2(1+ν) 或 μ
                 KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D22, A_yy)
                 KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D22, A_xx)
                 KK_12 = bm.einsum('cq, cqij -> cij', D01, A_xy) + bm.einsum('cq, cqij -> cij', D22, A_yx)
                 KK_21 = bm.einsum('cq, cqij -> cij', D01, A_yx) + bm.einsum('cq, cqij -> cij', D22, A_xy)
-            else:  # GD == 3
-                D00, D01, D55 = D[..., 0, 0], D[..., 0, 1], D[..., 5, 5]
+            else:
+                D00 = D[..., 0, 0] # 2μ + λ
+                D01 = D[..., 0, 1] # λ
+                D22 = D[..., 2, 2] # μ
                 KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D55, A_yy + A_zz)
                 KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_zz)
                 KK_33 = bm.einsum('cq, cqij -> cij', D00, A_zz) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_yy)
@@ -185,7 +193,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(ldof, None)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, None)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(0, ldof)), KK_21)
-
+            else:
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
@@ -195,7 +203,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), KK_33)
-
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), KK_13)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), KK_21)
@@ -206,7 +213,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_33)
-
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_13)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
@@ -300,15 +306,16 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         ldof = s_space_u.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh_u.device)
 
-        # 全局均匀密度情况
+        # 区域内的相对密度恒定都为 1, D 为全局常数矩阵
         if coef is None:
             raise NotImplementedError("The global uniform density case is not implemented yet.")
 
         # 单元密度情况
         elif coef.shape == (NC, n_sub):
             if GD == 2:
-                D00, D01, D22 = D0[0, 0], D0[0, 1], D0[2, 2]
-                
+                D00 = D0[0, 0] # 2D: E/(1-ν²) 或 2μ+λ
+                D01 = D0[0, 1] # 2D: νE/(1-ν²) 或 λ
+                D22 = D0[2, 2] # 2D: E/2(1+ν) 或 μ
                 KK_11 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_xx_eg) + \
                         J_g * bm.einsum('cn, cnqij -> cij', coef * D22, A_yy_eg)
                 KK_22 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_yy_eg) + \
@@ -318,8 +325,9 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_21 = J_g * bm.einsum('cn, cnqij -> cij', coef * D01, A_yx_eg) + \
                         J_g * bm.einsum('cn, cnqij -> cij', coef * D22, A_xy_eg)
             else: 
-                D00, D01, D55 = D0[0, 0], D0[0, 1], D0[5, 5]
-                
+                D00 = D0[0, 0] # 2μ + λ
+                D01 = D0[0, 1] # λ
+                D55 = D0[5, 5] # μ
                 KK_11 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_xx_eg) + \
                         J_g * bm.einsum('cn, cnqij -> cij', coef * D55, A_yy_eg + A_zz_eg)
                 KK_22 = J_g * bm.einsum('cn, cnqij -> cij', coef * D00, A_yy_eg) + \
@@ -343,7 +351,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         elif coef.shape == (NC, n_sub, NQ):
             if GD == 2:
                 D00, D01, D22 = D0[0, 0], D0[0, 1], D0[2, 2]
-                
                 KK_11 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_xx_eg) + \
                         J_g * bm.einsum('cnq, cnqij -> cij', coef * D22, A_yy_eg)
                 KK_22 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_yy_eg) + \
@@ -354,7 +361,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                         J_g * bm.einsum('cnq, cnqij -> cij', coef * D22, A_xy_eg)
             else: 
                 D00, D01, D55 = D0[0, 0], D0[0, 1], D0[5, 5]
-                
                 KK_11 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_xx_eg) + \
                         J_g * bm.einsum('cnq, cnqij -> cij', coef * D55, A_yy_eg + A_zz_eg)
                 KK_22 = J_g * bm.einsum('cnq, cnqij -> cij', coef * D00, A_yy_eg) + \
@@ -390,7 +396,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), KK_33)
-
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), KK_13)
                 KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), KK_21)
@@ -401,7 +406,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_33)
-
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_13)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
@@ -442,7 +446,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         mesh = getattr(space, 'mesh', None)
         cm, ws, bcs, gphi, detJ = self.fetch_voigt_assembly(space)
 
-        gphi00 = gphi[0, 0, :, :]  # (LDOF, GD)
         NC = mesh.number_of_cells()
         NQ = gphi.shape[1]
         D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
@@ -475,7 +478,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.einsum('q, c, cqki, ckl, cqlj -> cij',
                                 ws, cm, B, D, B)
             else:
-                test = bm.einsum('q, cq, cqid, cqjd -> cij', ws, detJ, gphi, gphi)
+                # test = bm.einsum('q, cq, cqid, cqjd -> cij', ws, detJ, gphi, gphi)
                 KK = bm.einsum('q, cq, cqki, ckl, cqlj -> cij',
                                 ws, detJ, B, D, B)
             
