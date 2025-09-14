@@ -25,8 +25,8 @@ class DensityTopOptTest(BaseLogged):
             T = -1.0
             E, nu = 1.0, 0.3
 
-            nx, ny = 3, 2
-            # nx, ny = 60, 10
+            # nx, ny = 3, 2
+            nx, ny = 60, 10
             # nx, ny = 120, 20
             # nx, ny = 240, 40
             # nx, ny = 480, 80
@@ -43,22 +43,22 @@ class DensityTopOptTest(BaseLogged):
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
             density_location = 'element_multiresolution'
-            sub_density_element = 4
+            sub_density_element = 25
             relative_density = volume_fraction
 
             # 'standard', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 30
+            max_iterations = 1000
             tolerance = 1e-3
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
 
             # rmin = 1.2
             # rmin = 1.25
-            # rmin = 1.0
-            rmin = 0.625
+            rmin = 1.0
+            # rmin = 0.625
             # rmin = 0.5
             # rmin = 0.3125
             # rmin = 0.25
@@ -263,7 +263,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_mtop2")
+        save_path = Path(f"{base_dir}/mtop_p1_hd25")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_optimization_history(mesh=design_variable_mesh, 
