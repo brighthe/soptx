@@ -120,6 +120,10 @@ def save_optimization_history(mesh: HomogeneousMesh,
 
             mesh.celldata['density'] = rho_phys
 
+        elif density_location in ['node']:
+            # 单分辨率节点密度情况：形状为 (NN, )
+            mesh.nodedata['density'] = physical_density
+
 
         elif density_location in ['lagrange_interpolation_point', 
                                 'berstein_interpolation_point', 

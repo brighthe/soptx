@@ -42,30 +42,58 @@ class _FilterStrategy(ABC):
 
 class NoneStrategy(_FilterStrategy):
     """ '无操作' 策略, 当不需要过滤时使用"""
-    def __init__(self) -> None:
-        pass
+    def __init__(self,
+                mesh: HomogeneousMesh,
+                density_location: Literal['element', 'node'],
+                integration_order: int = 4,
+            ) -> None:
+        self._mesh = mesh
+        self._density_location = density_location
+        self._integration_order = integration_order
+
+    def get_initial_density(self, 
+                        density:  Union[TensorLike, Function]
+                    ) ->  Union[TensorLike, Function]:
+
+        rho_phys = bm.copy(density)
+
+        return rho_phys
     
-    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
-        rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
+    def filter_design_variable(self,
+                            design_variable: TensorLike, 
+                            physical_density: Union[TensorLike, Function]
+                        ) -> Union[TensorLike, Function]:
+        
+        from fealpy.functionspace import LagrangeFESpace
+        mesh_design_variable = self._mesh
+        space_design_variable = LagrangeFESpace(mesh=mesh_design_variable, p=1, ctype='C')
 
-        return rho_Phys
+        if self._density_location in ['node']:
 
-    def filter_variables(self, rho: Function, rho_Phys: Function) -> TensorLike:
-        rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
+            design_variable = space_design_variable.function(design_variable)
+            qf = mesh_design_variable.quadrature_formula(q=self._integration_order)
+            # bcs_e.shape = ( (NQ_x, GD), (NQ_x, GD) ), ws_e.shape = (NQ, )
+            bcs, ws = qf.get_quadrature_points_and_weights()
+            design_variable_val = design_variable(bcs)
+            physical_density[:] = bm.set_at(physical_density, slice(None), design_variable_val)
 
-        return rho_Phys
-
+        return physical_density
+    
     def filter_objective_sensitivities(self, 
-                                       rho_Phys: Function, 
-                                       obj_grad: TensorLike
-                                    ) -> TensorLike:
-        return obj_grad
+                                    design_variable: TensorLike, 
+                                    obj_grad_rho: TensorLike
+                                ) -> TensorLike:
+        obj_grad_dv = bm.copy(obj_grad_rho)
 
+        return obj_grad_dv
+    
     def filter_constraint_sensitivities(self, 
-                                        rho_Phys: Function, 
-                                        con_grad: TensorLike) -> TensorLike:
+                                design_variable: TensorLike, 
+                                con_grad_rho: TensorLike
+                            ) -> TensorLike:
+        con_grad_dv = bm.copy(con_grad_rho)
 
-        return con_grad
+        return con_grad_dv
 
 
 class SensitivityStrategy(_FilterStrategy):

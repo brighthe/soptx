@@ -151,9 +151,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Parameters
         ----------
         rho_val : 密度值
-            单元密度 
-            - 单分辨率 - (NC, )
-            - 多分辨率 - (NC, sub_density_element)
+            - 单元密度 
+                - 单分辨率 - (NC, )
+                - 多分辨率 - (NC, n_sub)
+            - 节点密度 
+                - 单分辨率 - (NC, NQ)
+                - 多分辨率 - (NC, n_sub, NQ)
 
         Returns
         -------

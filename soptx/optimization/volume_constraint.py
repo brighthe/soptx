@@ -130,7 +130,7 @@ class VolumeConstraint(BaseLogged):
 
                 # 计算单元积分点处的重心坐标
                 qf = self._mesh.quadrature_formula(q=self._integration_order)
-                # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+                # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
                 bcs, ws = qf.get_quadrature_points_and_weights()
 
                 rho_q = density # (NC, NQ)

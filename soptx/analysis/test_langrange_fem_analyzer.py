@@ -59,52 +59,69 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
 
     @variantmethod('lfa_exact_solution')
-    def run(self):
+    def run(self, model_type: str = 'BoxPoly3d') -> TensorLike:
 
-        from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
-        domain = [0, 1, 0, 1]
-        E, nu = 1.0, 0.3
-        pde = BoxTriLagrange2dData(domain=domain, E=E, nu=nu)
-        nx, ny = 4, 4
-        mesh_type = 'uniform_quad'
-        pde.init_mesh.set(mesh_type)
-        mesh = pde.init_mesh(nx=nx, ny=ny)
+        if model_type == 'BoxTri2d':
+            from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
+            domain = [0, 1, 0, 1]
+            E, nu = 1.0, 0.3
+            pde = BoxTriLagrange2dData(domain=domain, E=E, nu=nu)
+            nx, ny = 4, 4
+            mesh_type = 'uniform_quad'
+            pde.init_mesh.set(mesh_type)
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                youngs_modulus=pde.E, 
+                                                poisson_ratio=pde.nu, 
+                                                plane_type=pde.plane_type,
+                                            )
 
-        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-        material = IsotropicLinearElasticMaterial(
-                                            youngs_modulus=pde.E, 
-                                            poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
-                                        )
+        elif model_type == 'BoxPoly3d':
+            from soptx.model.linear_elasticity_3d import BoxPolyLagrange3dData
+            domain = [0, 1, 0, 1, 0, 1]
+            lam, mu = 1.0, 1.0
+            nx, ny, nz = 4, 4, 4
+            pde = BoxPolyLagrange3dData(domain=domain, lam=lam, mu=mu)
+            mesh_type = 'uniform_tet'
+            pde.init_mesh.set(mesh_type)
+            mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam,
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                            )
 
         space_degree = 1
         integration_order = space_degree + 3
         # 'standard', 'voigt', 'voigt_multiresolution'
         assembly_method = 'standard'
 
-        s_space = LagrangeFESpace(mesh=mesh, p=space_degree, ctype='C')
-        t_space = TensorFunctionSpace(scalar_space=s_space, shape=(2, -1))
-        from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
-        lei_standard = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='standard')
-        KE_standard = lei_standard.assembly(space=t_space)
+        # s_space = LagrangeFESpace(mesh=mesh, p=space_degree, ctype='C')
+        # GD = mesh.geo_dimension()
+        # t_space = TensorFunctionSpace(scalar_space=s_space, shape=(GD, -1))
+        # from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
+        # lei_standard = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='standard')
+        # KE_standard = lei_standard.assembly(space=t_space)
 
-        lei_voigt = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='voigt')
-        KE_voigt = lei_voigt.assembly(space=t_space)
+        # lei_voigt = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='voigt')
+        # KE_voigt = lei_voigt.assembly(space=t_space)
         
 
-        from fealpy.material.elastic_material import LinearElasticMaterial
-        material_fealpy = LinearElasticMaterial(name='test', elastic_modulus=E, poisson_ratio=nu, hypo=pde.plane_type)
+        # from fealpy.material.elastic_material import LinearElasticMaterial
+        # material_fealpy = LinearElasticMaterial(name='test', elastic_modulus=E, poisson_ratio=nu, hypo=pde.plane_type)
         
-        from fealpy.fem.linear_elasticity_integrator import LinearElasticityIntegrator
-        lei_standard_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='standard')
-        KE_standard_fealpy = lei_standard_fealpy.assembly(space=t_space)
+        # from fealpy.fem.linear_elasticity_integrator import LinearElasticityIntegrator
+        # lei_standard_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='standard')
+        # KE_standard_fealpy = lei_standard_fealpy.assembly(space=t_space)
 
-        lei_voigt_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='voigt')
-        KE_voigt_fealpy = lei_voigt_fealpy.assembly(space=t_space)
+        # lei_voigt_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='voigt')
+        # KE_voigt_fealpy = lei_voigt_fealpy.assembly(space=t_space)
 
-        error = bm.sum(bm.abs(KE_standard - KE_voigt))
+        # error = bm.sum(bm.abs(KE_standard - KE_voigt))
 
-        maxit = 6
+        maxit = 5
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{L^2}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
@@ -145,6 +162,68 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
         return self.uh
     
+
+    @run.register('lfa_test_assembly')
+    def run(self):
+        if model_type == 'BoxTri2d':
+            from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
+            domain = [0, 1, 0, 1]
+            E, nu = 1.0, 0.3
+            pde = BoxTriLagrange2dData(domain=domain, E=E, nu=nu)
+            nx, ny = 4, 4
+            mesh_type = 'uniform_quad'
+            pde.init_mesh.set(mesh_type)
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                youngs_modulus=pde.E, 
+                                                poisson_ratio=pde.nu, 
+                                                plane_type=pde.plane_type,
+                                            )
+
+        elif model_type == 'BoxPoly3d':
+            from soptx.model.linear_elasticity_3d import BoxPolyLagrange3dData
+            domain = [0, 1, 0, 1, 0, 1]
+            lam, mu = 1.0, 1.0
+            nx, ny, nz = 4, 4, 4
+            pde = BoxPolyLagrange3dData(domain=domain, lam=lam, mu=mu)
+            mesh_type = 'uniform_tet'
+            pde.init_mesh.set(mesh_type)
+            mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam,
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                            )
+
+        space_degree = 1
+        integration_order = space_degree + 3
+        # 'standard', 'voigt', 'voigt_multiresolution'
+        assembly_method = 'standard'
+
+        # s_space = LagrangeFESpace(mesh=mesh, p=space_degree, ctype='C')
+        # GD = mesh.geo_dimension()
+        # t_space = TensorFunctionSpace(scalar_space=s_space, shape=(GD, -1))
+        # from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
+        # lei_standard = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='standard')
+        # KE_standard = lei_standard.assembly(space=t_space)
+
+        # lei_voigt = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='voigt')
+        # KE_voigt = lei_voigt.assembly(space=t_space)
+        
+
+        # from fealpy.material.elastic_material import LinearElasticMaterial
+        # material_fealpy = LinearElasticMaterial(name='test', elastic_modulus=E, poisson_ratio=nu, hypo=pde.plane_type)
+        
+        # from fealpy.fem.linear_elasticity_integrator import LinearElasticityIntegrator
+        # lei_standard_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='standard')
+        # KE_standard_fealpy = lei_standard_fealpy.assembly(space=t_space)
+
+        # lei_voigt_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='voigt')
+        # KE_voigt_fealpy = lei_voigt_fealpy.assembly(space=t_space)
+
+        # error = bm.sum(bm.abs(KE_standard - KE_voigt))
 
     @run.register('lfa_analysis_exact_solution')
     def run(self) -> TensorLike:

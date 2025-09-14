@@ -310,21 +310,6 @@ class BoxPolyLagrange3dData(PDEBase):
         """获取剪切模量 μ"""
         return self._mu
     
-
-    def stress_matrix_coefficient(self) -> tuple[float, float]:
-        """
-        材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1
-        
-        Returns:
-        --------
-        lambda0: 1/(2μ)
-        lambda1: λ/(2μ(dλ+2μ)), 其中 d=3 为空间维数
-        """
-        d = 3
-        lambda0 = 1.0 / (2 * self._mu)
-        lambda1 = self._lam / (2 * self._mu * (d * self._lam + 2 * self._mu))
-        
-        return lambda0, lambda1
     
     #######################################################################################################################
     # 变体方法
@@ -345,7 +330,7 @@ class BoxPolyLagrange3dData(PDEBase):
                                     device=device
                                 )
         
-        self._save_mesh(mesh, 'uniform_tet', nx=nx, ny=ny, nz=nz, threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_tet', nx=nx, ny=ny, nz=nz, threshold=threshold, device=device)
 
         return mesh
 

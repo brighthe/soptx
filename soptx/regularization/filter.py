@@ -97,7 +97,14 @@ class Filter(BaseLogged):
                         f"可用选项: {list(FILTER_STRATEGY_REGISTRY.keys())}")
             self._log_error(error_msg)
 
-        strategy_params = {}
+        strategy_params = {
+                            'mesh': self._mesh,
+                            'density_location': self._density_location,
+                        }
+        if self._filter_type == 'none':
+            strategy_params.update({
+                                    'integration_order': self._integration_order,
+                                })
         
         if self._filter_type in ['sensitivity']:
             strategy_params.update({
@@ -112,8 +119,8 @@ class Filter(BaseLogged):
         if self._filter_type == 'density':
             strategy_params.update({
                 'H': self._H,
-                'mesh': self._mesh,
-                'density_location': self._density_location,
+                # 'mesh': self._mesh,
+                # 'density_location': self._density_location,
             })
 
         if self._filter_type == 'heaviside_density':

@@ -12,9 +12,8 @@ from ..utils.base_logged import BaseLogged
 class MaterialInterpolationScheme(BaseLogged):
     """材料插值方案类"""
     def __init__(self,
-                density_location: Literal['element', 'element_coscos', 
-                                          'gauss_integration_point', 
-                                          'lagrange_interpolation_point'] = 'element',
+                density_location: Literal['element', 'element_multiresolution', 
+                                          'node', 'node_multiresolution'] = 'element',
                 interpolation_method: Literal['simp', 'msimp', 'ramp'] = 'simp',
                 options: Optional[dict] = None,
                 enable_logging: bool = True,
@@ -115,7 +114,7 @@ class MaterialInterpolationScheme(BaseLogged):
         Returns:
         --------
         design_variable : (NC_design_variable, )
-        density_distribution : (NC, n_sub)
+        density_distribution : (NC_density, n_sub)
         """
 
         NC_design_variable = design_variable_mesh.number_of_cells()
