@@ -93,35 +93,12 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 3
         # 'standard', 'voigt', 'voigt_multiresolution'
         assembly_method = 'standard'
 
-        # s_space = LagrangeFESpace(mesh=mesh, p=space_degree, ctype='C')
-        # GD = mesh.geo_dimension()
-        # t_space = TensorFunctionSpace(scalar_space=s_space, shape=(GD, -1))
-        # from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
-        # lei_standard = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='standard')
-        # KE_standard = lei_standard.assembly(space=t_space)
-
-        # lei_voigt = LinearElasticIntegrator(material=material, coef=None, q=integration_order, method='voigt')
-        # KE_voigt = lei_voigt.assembly(space=t_space)
-        
-
-        # from fealpy.material.elastic_material import LinearElasticMaterial
-        # material_fealpy = LinearElasticMaterial(name='test', elastic_modulus=E, poisson_ratio=nu, hypo=pde.plane_type)
-        
-        # from fealpy.fem.linear_elasticity_integrator import LinearElasticityIntegrator
-        # lei_standard_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='standard')
-        # KE_standard_fealpy = lei_standard_fealpy.assembly(space=t_space)
-
-        # lei_voigt_fealpy = LinearElasticityIntegrator(material=material_fealpy, q=integration_order, method='voigt')
-        # KE_voigt_fealpy = lei_voigt_fealpy.assembly(space=t_space)
-
-        # error = bm.sum(bm.abs(KE_standard - KE_voigt))
-
-        maxit = 5
+        maxit = 4
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{L^2}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
