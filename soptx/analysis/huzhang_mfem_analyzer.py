@@ -3,15 +3,16 @@ from typing import Optional, Union, Literal, Tuple
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.mesh import HomogeneousMesh
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function, HuZhangFESpace
+from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from fealpy.fem import BlockForm, BilinearForm, LinearForm, VectorSourceIntegrator
 from fealpy.decorator.variantmethod import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
+from soptx.functionspace.huzhang_fe_space import HuZhangFESpace
 from soptx.analysis.integrators.huzhang_stress_integrator import HuZhangStressIntegrator
 from soptx.analysis.integrators.huzhang_mix_integrator import HuZhangMixIntegrator
 from soptx.model.pde_base import PDEBase
-from soptx.material.linear_elastic_material import LinearElasticMaterial
+from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
 from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
@@ -29,7 +30,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
-        """初始化拉格朗日有限元分析器"""
+        """初始化胡张混合有限元分析器"""
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
@@ -47,6 +48,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._integration_order = integration_order
 
         self._topopt_algorithm = topopt_algorithm
+        self._interpolation_scheme = interpolation_scheme
 
         # 设置默认求解方法
         self.solve_displacement.set(solve_method)
@@ -62,17 +64,121 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         self._log_info(f"Mesh Information: NC: {self._mesh.number_of_cells()}, ")
 
+    
+    ##############################################################################################
+    # 属性访问器 - 获取内部状态
+    ##############################################################################################
+    
+    @property
+    def mesh(self) -> HomogeneousMesh:
+        """获取当前的网格对象"""
+        return self._mesh
+    
+    @property
+    def huzhang_space(self) -> HuZhangFESpace:
+        """获取当前的 Hu-Zhang 混合有限元空间"""
+        return self._huzhang_space
+    
+    @property
+    def scalar_space(self) -> LagrangeFESpace:
+        """获取当前的标量函数空间"""
+        return self._scalar_space
+    
+    @property
+    def tensor_space(self) -> TensorFunctionSpace:
+        """获取当前的张量函数空间"""
+        return self._tensor_space
+    
+    @property
+    def material(self) -> LinearElasticMaterial:
+        """获取当前的材料类"""
+        return self._material
+    
+    @property
+    def topopt_algorithm(self) -> Optional[str]:
+        """获取当前的拓扑优化算法"""
+        return self._topopt_algorithm
+
+    @property
+    def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
+        """获取当前的刚度矩阵"""
+        if self._K is None:
+            self._K = self.assemble_stiff_matrix()
+
+        return self._K
+    
+    @property
+    def force_vector(self) -> Union[TensorLike, COOTensor]:
+        """获取当前的载荷向量"""
+        if self._F is None:
+            self._F = self.assemble_force_vector()
+
+        return self._F
+    
+    @property
+    def scalar_space(self) -> LagrangeFESpace:
+        """获取标量函数空间"""
+        return self._scalar_space
+    
+    @property
+    def tensor_space(self) -> TensorFunctionSpace: 
+        """获取张量函数空间"""
+        return self._tensor_space
+    
+
+    ##############################################################################################
+    # 属性修改器 - 修改内部状态
+    ##############################################################################################
+
+    @huzhang_space.setter
+    def huzhang_space(self, space: HuZhangFESpace) -> None:
+        """设置 Hu-Zhang 混合有限元空间"""
+        self._huzhang_space = space
+
+    @scalar_space.setter
+    def scalar_space(self, space: LagrangeFESpace) -> None:
+        """设置标量函数空间"""
+        self._scalar_space = space
+
+    @tensor_space.setter
+    def tensor_space(self, space: TensorFunctionSpace) -> None:
+        """设置张量函数空间"""
+        self._tensor_space = space
+
+    
+    ##################################################################################################
+    # 核心方法
+    ##################################################################################################
+
     def assemble_stiff_matrix(self, 
-                        density_distribution: Optional[Function] = None,
+                        rho_val: Optional[Union[Function, TensorLike]] = None,
                         enable_timing: bool = False,
                     ) -> Union[CSRTensor, COOTensor]:
+        """组装全局刚度矩阵
+
+        Parameters
+        ----------
+        rho_val : 密度值
+            - 单元密度 
+                - 单分辨率 - (NC, )
+                - 多分辨率 - (NC, n_sub)
+            - 节点密度 
+                - 单分辨率 - (NC, NQ)
+                - 多分辨率 - (NC, n_sub, NQ)
+
+        Returns
+        -------
+        Union[CSRTensor, COOTensor]
+            组装后的刚度矩阵
+        """
+                
         t = None
         if enable_timing:
             t = timer(f"组装刚度矩阵")
 
         if self._topopt_algorithm is None:
-            if density_distribution is not None:
-                self._log_warning("标准有限元分析模式下忽略相对密度分布参数 rho")
+            if rho_val is not None:
+                self._log_warning("标准混合有限元分析模式下忽略相对密度分布参数 rho")
             
             space0 = self._huzhang_space
             space1 = self._tensor_space
@@ -129,7 +235,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         else:
             error_msg = f"Unsupported force type: {force_type}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
         F = bm.zeros(gdof0 + gdof1, dtype=F_u.dtype)
         F[gdof0:] = -F_u
@@ -168,7 +273,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         else:
             error_msg = f"Unsupported boundary type: {boundary_type}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
     
 
     ##########################################################################################################
@@ -177,7 +281,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     @variantmethod('mumps')
     def solve_displacement(self, 
-                        density_distribution: Optional[Function] = None,
+                        rho_val: Optional[Union[TensorLike, Function]] = None, 
                         enable_timing: bool = True, 
                         **kwargs
                     ) -> Tuple[Function, Function]:
@@ -190,16 +294,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         from fealpy.solver import spsolve
 
         if self._topopt_algorithm is None:
-            if density_distribution is not None:
-                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+            if rho_val is not None:
+                self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
         
         elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if density_distribution is None:
+            if rho_val is None:
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
-                raise ValueError(error_msg)
     
-        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
+        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
         if enable_timing:
             t.send('刚度矩阵组装时间')
@@ -295,7 +398,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             if density_distribution is None:
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
-                raise ValueError(error_msg)
             
         K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
         F0 = self.assemble_force_vector()

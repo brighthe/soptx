@@ -117,6 +117,12 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
+        if isinstance(mesh, SimplexMesh):
+            total_area_std = bm.sum(ws * cm)  # 标准方法
+        else:
+            total_area_std = bm.sum(ws * detJ)  # 标准方法  
+        print(f"标准方法总面积: {total_area_std}")
+
         # 区域内的相对密度恒定都为 1, D 为全局常数矩阵
         if coef is None:
             if GD == 2:
@@ -224,6 +230,40 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     
     @assembly.register('standard_multiresolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+
+        # ====================================================================================== # 
+        scalar_space = space.scalar_space
+        mesh = getattr(scalar_space, 'mesh', None)
+        cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
+
+        NC = mesh.number_of_cells()
+        GD = mesh.geo_dimension()
+        NQ = len(ws)
+        D0 = self._material.elastic_matrix()  # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        
+        # 不考虑相对密度: None; 相对单元密度: (NC, ); 相对节点密度: (NC, NQ)      
+        coef = self._coef
+
+        if coef is None:
+            D = D0[0, 0] # 2D: (3, 3); 3D: (6, 6)
+        elif coef.shape == (NC, ):
+            D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # 2D: (NC, 3, 3); 3D: (NC, 6, 6)
+        elif coef.shape == (NC, NQ):
+            D = bm.einsum('cq, cqkl -> cqkl', coef, D0) # 2D: (NC, NQ, 3, 3); 3D: (NC, NQ, 6, 6)
+            
+        if isinstance(mesh, SimplexMesh):
+            A_xx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 0], cm)
+            A_yy = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 1], gphi[..., 1], cm)
+            A_xy = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 1], cm)
+            A_yx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 1], gphi[..., 0], cm)
+        else:
+            A_xx = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 0], gphi[..., 0], detJ)
+            A_yy = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 1], gphi[..., 1], detJ)
+            A_xy = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 0], gphi[..., 1], detJ)
+            A_yx = bm.einsum('q, cqi, cqj, cq -> cqij', ws, gphi[..., 1], gphi[..., 0], detJ)
+        # ====================================================================================== # 
+
+
         index = self._index
         mesh_u = getattr(space, 'mesh', None)
         s_space_u = space.scalar_space
@@ -300,11 +340,39 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         # 位移单元 → 子密度单元的缩放
         J_g = 1 / n_sub
 
+        # ====================================================================================== # 
+        print("=== A矩阵分量对比 ===")
+        print(f"A_xx 总和: 标准={bm.sum(A_xx)}, 多分辨率={bm.sum(A_xx_eg)*J_g}")
+        print(f"A_yy 总和: 标准={bm.sum(A_yy)}, 多分辨率={bm.sum(A_yy_eg)*J_g}")
+        print(f"A_xy 总和: 标准={bm.sum(A_xy)}, 多分辨率={bm.sum(A_xy_eg)*J_g}")
+        print(f"A_yx 总和: 标准={bm.sum(A_yx)}, 多分辨率={bm.sum(A_yx_eg)*J_g}")
+
+        stop = bm.einsum('q, cq, cqid, cqjd-> cij', ws, detJ, gphi, gphi)
+        mtop = J_g * bm.einsum('q, cnq, cnqid, cnqjd -> cij', ws_e, detJ_eg, gphi_eg, gphi_eg)
+        error = bm.sum(bm.abs(stop - mtop))
+        
+        # 计算相对差异
+        diff_xy = abs(bm.sum(A_xy) - bm.sum(A_xy_eg)*J_g) / abs(bm.sum(A_xy))
+        diff_yx = abs(bm.sum(A_yx) - bm.sum(A_yx_eg)*J_g) / abs(bm.sum(A_yx))
+        
+        print(f"A_xy 相对差异: {diff_xy}")  
+        print(f"A_yx 相对差异: {diff_yx}")
+        # ====================================================================================== # 
+
         # 基础材料的弹性矩阵
         D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3); 3D: (6, 6)
 
         ldof = s_space_u.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh_u.device)
+
+        # ====================================================================================== # 
+        if isinstance(mesh_u, SimplexMesh):
+            total_area_multi = J_g * bm.sum(ws_e * cm_eg)  # 多分辨率方法
+        else:
+            total_area_multi = J_g * bm.sum(ws_e * detJ_eg)  # 多分辨率方法
+        
+        print(f"多分辨率总面积: {total_area_multi}")
+        # ====================================================================================== # 
 
         # 区域内的相对密度恒定都为 1, D 为全局常数矩阵
         if coef is None:
@@ -582,9 +650,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = J_g * bm.einsum('q, cn, cnqki, cnkl, cnqlj -> cij',
                                     ws_e, cm_eg, B_eg, D_g, B_eg)
             else:
-                test = J_g * bm.einsum('q, cnq, cnqid, cnqjd -> cij',
-                                 ws_e, detJ_eg, gphi_eg, gphi_eg)
-                
                 KK = J_g * bm.einsum('q, cnq, cnqki, cnkl, cnqlj -> cij',
                                     ws_e, detJ_eg, B_eg, D_g, B_eg)
                 

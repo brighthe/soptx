@@ -71,7 +71,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##############################################################################################
     
     @property
-    def mesh(self) -> SimplexMesh:
+    def mesh(self) -> HomogeneousMesh:
         """获取当前的网格对象"""
         return self._mesh
     
@@ -147,7 +147,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##################################################################################################
 
     def assemble_stiff_matrix(self, 
-                            rho_val: Function = None,
+                            rho_val: Optional[Union[Function, TensorLike]] = None,
                         ) -> Union[CSRTensor, COOTensor]:
         """组装全局刚度矩阵
 

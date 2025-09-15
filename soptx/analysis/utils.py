@@ -247,66 +247,154 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike
     
     return data_restored
 
+def test_map_bcs_to_sub_elements(test_demo='poly2'):
+    from fealpy.mesh import QuadrangleMesh
+    domain = [0, 1, 0, 1]
+    nx, ny = 1, 1
+    mesh_u = QuadrangleMesh.from_box(box=domain, nx=nx, ny=ny)
+    GD = mesh_u.geo_dimension()
+    p = 2
+    q = p**2 + 2
+
+    # 计算位移单元积分点处的重心坐标
+    qf_e = mesh_u.quadrature_formula(q)
+    # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
+    bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+
+    n_sub = 25
+    bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+    bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+
+    if test_demo == 'poly2':
+        from fealpy.decorator import  cartesian
+        @cartesian
+        def test_func(points):
+            x = points[:, 0]
+            y = points[:, 1]
+            return x**2 + y**2
+    elif test_demo == 'poly3':
+        from fealpy.decorator import  cartesian
+        @cartesian
+        def test_func(points):
+            x = points[:, 0]
+            y = points[:, 1]
+            return x**3 + y**3
+    elif test_demo == 'sincos':
+        from fealpy.decorator import  cartesian
+        @cartesian
+        def test_func(points):
+            x = points[:, 0]
+            y = points[:, 1]
+            return bm.sin(bm.pi * x) * bm.cos(bm.pi * y)
+        
+    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+    s_space = LagrangeFESpace(mesh=mesh_u, p=p)
+    t_space = TensorFunctionSpace(scalar_space=s_space, shape=(GD, -1))
+
+    ps_e = mesh_u.bc_to_point(bcs_e)
+    f_e = test_func(ps_e[0])
+    J = mesh_u.jacobi_matrix(bcs_e)
+    detJ = bm.abs(bm.linalg.det(J))
+
+    K1_stop = bm.einsum('q, q, cq -> c', f_e, ws_e, detJ)
+
+    NC = mesh_u.number_of_cells()
+    NQ = ws_e.shape[0]
+    f_eg = bm.zeros((n_sub, NQ)) # (n_sub, NQ)
+    detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+    for s_idx in range(n_sub):
+        sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
+        J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+        detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+        detJ_eg[:, s_idx, :] = detJ_sub
+
+        sub_ps = mesh_u.bc_to_point(sub_bcs) # (NC, NQ, GD)
+        f_eg[s_idx, :] = test_func(sub_ps[0])  # (NQ, )
+
+    # 位移单元 → 子密度单元的缩放
+    J_g = 1 / n_sub
+
+    KK1 = J_g * bm.einsum('nq, q, cnq -> cn', f_eg, ws_e, detJ_eg)
+    K1_mtop = bm.sum(KK1, axis=1)
+
+    error_K1 = bm.sum(bm.abs(K1_stop - K1_mtop))
+    print(f"error_K1 = {error_K1}")
+    print('----------------')
+
+def test_map_bcs_to_sub_elements_advance():
+    from fealpy.mesh import QuadrangleMesh
+    domain = [0, 1, 0, 1]
+    nx, ny = 2, 2
+    mesh_u = QuadrangleMesh.from_box(box=domain, nx=nx, ny=ny)
+    GD = mesh_u.geo_dimension()
+    p = 2
+    q = p**2 + 2
+
+    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+    s_space = LagrangeFESpace(mesh=mesh_u, p=p)
+    t_space = TensorFunctionSpace(scalar_space=s_space, shape=(GD, -1))
+
+    # STOP: 直接位移单元上积分
+    qf_e = mesh_u.quadrature_formula(q)
+    # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
+    bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+
+    gphi_e = s_space.grad_basis(bcs_e, variable='x')
+
+    n_sub = 4
+
+    J = mesh_u.jacobi_matrix(bcs_e)
+    detJ = bm.abs(bm.linalg.det(J))
+
+    gphigphi_exact = bm.einsum('q, cq, cqid, cqjd -> cij', ws_e, detJ, gphi_e, gphi_e)
+
+    # MTOP: 子密度单元上积分所用的积分点也是高斯积分点 (位移单元一致)
+    bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+    bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+
+    NC = mesh_u.number_of_cells()
+    NQ = ws_e.shape[0]
+    LDOF = s_space.number_of_local_dofs()
+    ws_eg = bm.zeros((n_sub, NQ))  # (n_sub, NQ)
+    gphi_eg = bm.zeros((NC, n_sub, NQ, LDOF, GD)) # (NC, n_sub, NQ, GD)
+    detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+
+    for s_idx in range(n_sub):
+        sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
+
+        ws_sub = ws_e
+        gphi_sub = s_space.grad_basis(sub_bcs, variable='x') # (NC, NQ, LDOF, GD)
+        J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+        detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+        
+        ws_eg[s_idx, :] = ws_sub
+        gphi_eg[:, s_idx, :, :, :] = gphi_sub
+        detJ_eg[:, s_idx, :] = detJ_sub
+
+    # 位移单元 → 子密度单元的缩放
+    J_g = 1 / n_sub
+
+    gphi_eggphi_eg = J_g * bm.einsum('nq, cnq, cnqid, cnqjd -> cij', ws_eg, detJ_eg, gphi_eg, gphi_eg)
+
+    # MTOP: 子密度单元上积分所用的积分点就是子密度单元的重心, 权重就是子密度单元面积
+    mesh_d = QuadrangleMesh.from_box(box=domain, nx=nx*5, ny=ny*5)
+    s_space_d = LagrangeFESpace(mesh=mesh_d, p=p)
+
+    cm = mesh_u.entity_measure('cell')
+    cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) # (NC, n_sub)
+
+    qf_d = mesh_d.quadrature_formula(1)
+    bcs_d, ws_d = qf_d.get_quadrature_points_and_weights()
+    gphi_d_flat = s_space_d.grad_basis(bcs_d, variable='x') # (NC*n_sub, NQ, LDOF, GD)
+    gphi_d = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=gphi_d_flat, n_sub=n_sub) # (NC, n_sub, NQ, LDOF, GD)
+
+    gphi_dgphi_d = J_g * bm.einsum('q, cn, cnqid, cnqjd -> cij', ws_d, cm_eg, gphi_d, gphi_d) 
+
+    error1_gphigphi = bm.sum(bm.abs(gphigphi_exact - gphi_eggphi_eg))
+    error2_gphigphi = bm.sum(bm.abs(gphigphi_exact - gphi_dgphi_d))
+    print('----------------')
 
 if __name__ == "__main__":
     # 测试代码
-    # from fealpy.mesh import QuadrangleMesh
-    # mesh_u = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=1, ny=1)
-    # q = 2
-    # # 计算位移单元积分点处的重心坐标
-    # qf_e = mesh_u.quadrature_formula(q)
-    # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-    # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
-
-    # n_sub = 4
-    # bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-    # bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
-
-    # from fealpy.decorator import  cartesian
-    # @cartesian
-    # def test_func(points):
-    #     x = points[:, 0]
-    #     y = points[:, 1]
-    #     return x**2 + y
-    
-    # from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-    # s_space = LagrangeFESpace(mesh=mesh_u, p=1)
-    # t_space = TensorFunctionSpace(scalar_space=s_space, shape=(-1, 2))
-
-    # ps_e = mesh_u.bc_to_point(bcs_e)
-    # f_e = test_func(ps_e[0])
-    # J = mesh_u.jacobi_matrix(bcs_e)
-    # detJ = bm.abs(bm.linalg.det(J))
-
-    # K1 = bm.einsum('q, q, cq -> c', f_e, ws_e, detJ)
-
-    # NC = 1
-    # NQ = ws_e.shape[0]
-    # f_eg = bm.zeros((n_sub, NQ)) # (n_sub, NQ)
-    # detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
-    # for s_idx in range(n_sub):
-    #     sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((q, GD), (q, GD))
-    #     # J_q = 1/4
-    #     J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
-    #     detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
-    #     detJ_eg[:, s_idx, :] = detJ_sub
-
-    #     sub_ps = mesh_u.bc_to_point(sub_bcs) # (NC, NQ, GD)
-    #     f_eg[s_idx, :] = test_func(sub_ps[0])  # (NQ, )
-
-    # KK1 = bm.einsum('nq, q, cnq -> cn', f_eg, ws_e, detJ_eg / 4)
-    # KK1sum = KK1.sum()
-
-
-    nx, ny = 3, 2
-    NC, n_sub = nx*ny,  4
-    from fealpy.mesh import QuadrangleMesh
-    mesh = QuadrangleMesh.from_box(box=[0, 1, 0, 1], nx=nx, ny=ny)
-    density = bm.arange(0, 24, 1, dtype=bm.float64).reshape(NC, n_sub)
-
-    density_flat = reshape_multiresolution_data(nx=nx, ny=ny, data=density)
-
-    density_test = reshape_multiresolution_data_inverse(nx=nx, ny=ny, data_flat=density_flat, n_sub=n_sub)
-
-
-    print("--------------")
+    # test_map_bcs_to_sub_elements(test_demo='poly2')
+    test_map_bcs_to_sub_elements_advance()
