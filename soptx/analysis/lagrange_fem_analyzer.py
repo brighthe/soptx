@@ -55,6 +55,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._setup_function_spaces(mesh=self._mesh, 
                                     p=self._space_degree, 
                                     shape=(self._GD, -1))
+        # self._setup_function_spaces(mesh=self._mesh, 
+        #                     p=self._space_degree, 
+        #                     shape=(-1, self._GD))
 
         # 缓存的矩阵和向量
         self._K = None

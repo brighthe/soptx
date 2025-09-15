@@ -359,7 +359,9 @@ class MBBBeam2dData(PDEBase):
 
         x, y = points[..., 0], points[..., 1]
 
-        return (bm.abs(x - domain[0]) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
+        temp = (bm.abs(x - domain[0]) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
+
+        return temp
 
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
@@ -369,8 +371,10 @@ class MBBBeam2dData(PDEBase):
 
         left = (bm.abs(x - domain[0]) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
         right = (bm.abs(x - domain[1]) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
-        
-        return left | right
+
+        temp = left | right
+    
+        return temp
 
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
 

@@ -25,7 +25,6 @@ class DensityTopOptTest(BaseLogged):
             T = -1.0
             E, nu = 1.0, 0.3
 
-            # nx, ny = 3, 2
             nx, ny = 60, 10
             # nx, ny = 120, 20
             # nx, ny = 240, 40
@@ -36,28 +35,31 @@ class DensityTopOptTest(BaseLogged):
             # mesh_type = 'uniform_crisscross_tri'
 
             space_degree = 1
-            integration_order = space_degree + 4
+            integration_order = space_degree + 3
 
             volume_fraction = 0.6
             penalty_factor = 3.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-            density_location = 'element_multiresolution'
+            density_location = 'element'
             sub_density_element = 25
             relative_density = volume_fraction
 
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
-            assembly_method = 'voigt_multiresolution'
+            assembly_method = 'voigt'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 200
-            tolerance = 1e-3
+            max_iterations = 300
+            # tolerance = 1e-3
+            use_penalty_continuation = False
+            tolerance = 1e-2
+            # use_penalty_continuation = True
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
 
-            # rmin = 1.2
-            # rmin = 1.25
-            rmin = 1.0
+            # rmin = 1.5
+            rmin = 1.4
+            # rmin = 1.1
             # rmin = 0.75
             # rmin = 0.625
             # rmin = 0.5
@@ -213,7 +215,7 @@ class DensityTopOptTest(BaseLogged):
                             options={
                                 'max_iterations': max_iterations,
                                 'tolerance': tolerance,
-                                'use_penalty_continuation': True,
+                                'use_penalty_continuation': use_penalty_continuation,
                             }
                         )
             design_variables_num = d.shape[0]
@@ -255,7 +257,7 @@ class DensityTopOptTest(BaseLogged):
                        f"密度类型={density_location}, " 
                        f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
                        f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, "
-                       f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, 收敛容差={tolerance}, " 
+                       f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, 收敛容差={tolerance}, 惩罚因子连续化={use_penalty_continuation}, " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
@@ -263,7 +265,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_mtop_p1_hd25")
+        save_path = Path(f"{base_dir}/stop_hu60-10_p1_r1-4")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_optimization_history(mesh=design_variable_mesh, 
