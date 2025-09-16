@@ -123,6 +123,7 @@ class HuZhangFECellDof2d():
                     boundary_dofs[i].append(TensorDofsOnSubsimplex(dof_cotinuous, fs[j]))
                 if len(dof_discontinuous) > 0:
                     internal_dofs[i].append(TensorDofsOnSubsimplex(dof_discontinuous, fs[j]))
+
         return boundary_dofs, internal_dofs 
 
     def get_boundary_dof_from_dim(self, d):
@@ -440,7 +441,7 @@ class HuZhangFESpace2d(FunctionSpace):
             phi[..., idx:idx+N, :] = scalar_part * tensor_part
             idx += N
 
-        # 边基函数
+        # 边界边基函数
         for e, edof in enumerate(edofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -449,7 +450,7 @@ class HuZhangFESpace2d(FunctionSpace):
             phi[..., idx:idx+N, :] = scalar_part * tensor_part
             idx += N
 
-        # 单元基函数
+        # 边内部基函数
         for e, edof in enumerate(iedofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -457,10 +458,16 @@ class HuZhangFESpace2d(FunctionSpace):
             tensor_part = esframe[c2e[:, e]][:, None, edof.dof_tensor, :]
             phi[..., idx:idx+N, :] = scalar_part * tensor_part
             idx += N
-        scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-        scalar_part = phi_s[None, :, scalar_phi_idx, None]
-        tensor_part = csframe[:, None, icdofs[0].dof_tensor, :]
-        phi[..., idx:, :] = scalar_part * tensor_part
+        
+        # 单元气泡基函数 - 只有当 p >= n+1 时才存在单元内部自由度
+        n = mesh.geo_dimension()
+        if p >= n + 1:
+            scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
+            scalar_part = phi_s[None, :, scalar_phi_idx, None]
+            tensor_part = csframe[:, None, icdofs[0].dof_tensor, :]
+
+            phi[..., idx:, :] = scalar_part * tensor_part
+
         return phi
 
     def div_basis(self, bc: TensorLike): 
@@ -501,7 +508,7 @@ class HuZhangFESpace2d(FunctionSpace):
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
             idx += N
 
-        # 边基函数
+        # 边界边基函数
         for e, edof in enumerate(edofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -511,7 +518,7 @@ class HuZhangFESpace2d(FunctionSpace):
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
             idx += N
 
-        # 单元基函数
+        # 边内部基函数
         for e, edof in enumerate(iedofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -521,11 +528,16 @@ class HuZhangFESpace2d(FunctionSpace):
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
             idx += N
 
-        scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-        grad_scalar = gphi_s[..., scalar_phi_idx, :]
-        frame = csframe[:, None, icdofs[0].dof_tensor]
-        dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
-        dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
+        # 单元气泡基函数 - 只有当 p >= n+1 时才存在单元内部自由度
+        n = mesh.geo_dimension()
+        if p >= n + 1:
+            scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
+            grad_scalar = gphi_s[..., scalar_phi_idx, :]
+            frame = csframe[:, None, icdofs[0].dof_tensor]
+
+            dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
+            dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
+
         return dphi
 
     def hess_basis(self, bc: TensorLike, index: Index=_S, variable='x'):

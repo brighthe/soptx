@@ -11,6 +11,7 @@ from fealpy.sparse import CSRTensor, COOTensor
 from soptx.functionspace.huzhang_fe_space import HuZhangFESpace
 from soptx.analysis.integrators.huzhang_stress_integrator import HuZhangStressIntegrator
 from soptx.analysis.integrators.huzhang_mix_integrator import HuZhangMixIntegrator
+from soptx.analysis.integrators.jump_penalty_integrator import JumpPenaltyIntegrator
 from soptx.model.pde_base import PDEBase
 from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
 from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
@@ -179,7 +180,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if self._topopt_algorithm is None:
             if rho_val is not None:
                 self._log_warning("标准混合有限元分析模式下忽略相对密度分布参数 rho")
-            
+
+            p = self._space_degree
+            mesh = self._mesh
+            GD = mesh.geo_dimension()
+
+            # huzhang_space = HuZhangFESpace(mesh, p=p)
+            # space0 = huzhang_space
+            # scalar_space = LagrangeFESpace(mesh, p=p-1, ctype='D')
+            # tensor_space = TensorFunctionSpace(scalar_space, shape=(GD, -1))
+            # space1 = tensor_space
             space0 = self._huzhang_space
             space1 = self._tensor_space
 
@@ -191,9 +201,19 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             bform2 = BilinearForm((space1, space0))
             bform2.add_integrator(HuZhangMixIntegrator())
 
-            bform = BlockForm([[bform1,   bform2],
-                               [bform2.T, None]])
+            if p >= GD + 1:
             
+                bform = BlockForm([[bform1,   bform2],
+                                   [bform2.T, None]])
+
+            elif p <= GD:
+
+                bform3 = BilinearForm(space1)
+                bform3.add_integrator(JumpPenaltyIntegrator())
+
+                bform = BlockForm([[bform1,   bform2],
+                                   [bform2.T, bform3]])
+
             if enable_timing:
                 t.send('准备时间')
 

@@ -1,7 +1,8 @@
 from fealpy.backend import backend_manager as bm
 
 from fealpy.typing import TensorLike
-from fealpy.functionspace import (FunctionSpace, 
+from fealpy.functionspace import (FunctionSpace,
+                                HuZhangFESpace, 
                                 HuZhangFESpace2d, HuZhangFESpace3d, 
                                 TensorFunctionSpace
                             )
@@ -23,11 +24,6 @@ class HuZhangMixIntegrator(LinearInt, OpInt, CellInt):
     def fetch(self, space: FunctionSpace):
         space0 = space[0]
         space1 = space[1]
-
-        assert isinstance(space0, TensorFunctionSpace), \
-            "space[0] should be TensorFunctionSpace for displacement"
-        assert isinstance(space1, (HuZhangFESpace2d, HuZhangFESpace3d)), \
-            "space[1] should be HuZhangFESpace for stress"
 
         p = space0.p
         q = self.q if self.q else p+3

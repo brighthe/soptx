@@ -95,8 +95,44 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             plt.show()
             print('------------------')
 
+    @run.register('test_jump_penalty')
+    def run(self):
+        from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
+        pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
+        # TODO 支持四边形网格
+        pde.init_mesh.set('uniform_tri')
+        nx, ny = 2, 2
+        mesh = pde.init_mesh(nx=nx, ny=ny)
+        GD = mesh.geo_dimension()
+        # TODO 支持 3 次以下
+        p = 2
+        q = p**2 + 2
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            lame_lambda=pde.lam, 
+                                            shear_modulus=pde.mu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+
+        scalar_space = LagrangeFESpace(mesh, p=p-1, ctype='D')
+        tensor_space = TensorFunctionSpace(scalar_space, shape=(GD, -1))
+        gdof = tensor_space.number_of_global_dofs()
+        from soptx.analysis.integrators.jump_penalty_integrator import JumpPenaltyIntegrator
+        # jpi = JumpPenaltyIntegrator(q=q)
+        # test = jpi.to_global_dof(tensor_space)
+        # KE_jump = jpi.assembly(tensor_space)
+        from fealpy.fem import BilinearForm
+        bform = BilinearForm(tensor_space)
+        bform.add_integrator(JumpPenaltyIntegrator(q=q))
+        K = bform.assembly()
+        print("--------------")
+
+
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    huzhang_analyzer.run.set('test')
-    huzhang_analyzer.run(test_demo='2d_simplex')
+    # huzhang_analyzer.run.set('test')
+    huzhang_analyzer.run.set('test_jump_penalty')
+    huzhang_analyzer.run()
