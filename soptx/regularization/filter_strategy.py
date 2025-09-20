@@ -54,8 +54,11 @@ class NoneStrategy(_FilterStrategy):
     def get_initial_density(self, 
                         density:  Union[TensorLike, Function]
                     ) ->  Union[TensorLike, Function]:
-
-        rho_phys = bm.copy(density)
+        
+        if isinstance(density, Function):
+            rho_phys = density.space.function(bm.copy(density[:]))
+        else:
+            rho_phys = bm.copy(density)
 
         return rho_phys
     
@@ -63,19 +66,10 @@ class NoneStrategy(_FilterStrategy):
                             design_variable: TensorLike, 
                             physical_density: Union[TensorLike, Function]
                         ) -> Union[TensorLike, Function]:
-        
-        from fealpy.functionspace import LagrangeFESpace
-        mesh_design_variable = self._mesh
-        space_design_variable = LagrangeFESpace(mesh=mesh_design_variable, p=1, ctype='C')
 
         if self._density_location in ['node']:
 
-            design_variable = space_design_variable.function(design_variable)
-            qf = mesh_design_variable.quadrature_formula(q=self._integration_order)
-            # bcs_e.shape = ( (NQ_x, GD), (NQ_x, GD) ), ws_e.shape = (NQ, )
-            bcs, ws = qf.get_quadrature_points_and_weights()
-            design_variable_val = design_variable(bcs)
-            physical_density[:] = bm.set_at(physical_density, slice(None), design_variable_val)
+            physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
 
         return physical_density
     

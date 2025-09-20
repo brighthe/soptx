@@ -5,7 +5,7 @@ from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
-from soptx.pde.pde_base import PDEBase  
+from soptx.model.pde_base import PDEBase  
 
 class CantileverBeamCorner2dData(PDEBase):
     '''
@@ -246,7 +246,7 @@ class CantileverBeamMiddle2dData(PDEBase):
 
         x, y = points[..., 0], points[..., 1]
 
-        # 力作用在右边界的中间位置: (domain[1], (domain[2]+domain[3])/2)
+        # 力作用在右边界的中间位置:
         middle_y = (domain[2] + domain[3]) / 2.0
         coord = (
             (bm.abs(x - domain[1]) < self._eps) & 

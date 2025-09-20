@@ -156,12 +156,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Parameters
         ----------
         rho_val : 密度值
-            - 单元密度 
+            - 单元密度 - TensorLike
                 - 单分辨率 - (NC, )
                 - 多分辨率 - (NC, n_sub)
-            - 节点密度 
-                - 单分辨率 - (NC, NQ)
-                - 多分辨率 - (NC, n_sub, NQ)
+            - 节点密度 - Fucntion
+                - 单分辨率 - (NN, )
+                - 多分辨率 - (NN, )
 
         Returns
         -------
@@ -182,6 +182,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             coef = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
                                             rho_val=rho_val,
+                                            integration_order=self._integration_order
                                         )
         elif self._topopt_algorithm == 'level_set':
         
@@ -381,8 +382,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
             return diff_ke
 
         elif density_location in ['node']:
+            
+            mesh = self._mesh
+            s_space = self._scalar_space
+            qf = mesh.quadrature_formula(q=self._integration_order)
+            # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+            bcs, ws = qf.get_quadrature_points_and_weights()
 
-            rho_q = rho_val # (NC, NQ)
+            rho_q = rho_val(bcs) # (NC, NQ)
             if (bm.any(bm.isnan(rho_q[:])) or bm.any(bm.isinf(rho_q[:])) or 
                 bm.any(rho_q[:] < -1e-12) or bm.any(rho_q[:] > 1 + 1e-12)):
                 self._log_error(f"节点密度在高斯点处的值超出范围 [0, 1]: "
@@ -392,12 +399,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                     material=self._material, 
                                                     density_distribution=rho_q
                                                 ) # (NC, NQ) 
-            
-            mesh = self._mesh
-            s_space = self._scalar_space
-            qf = mesh.quadrature_formula(q=self._integration_order)
-            # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-            bcs, ws = qf.get_quadrature_points_and_weights()
 
             # 高斯积分点处的基函数
             phi = s_space.basis(bcs)[0] # (NQ, NCN)

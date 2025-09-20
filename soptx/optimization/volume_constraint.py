@@ -133,7 +133,7 @@ class VolumeConstraint(BaseLogged):
                 # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
                 bcs, ws = qf.get_quadrature_points_and_weights()
 
-                rho_q = density # (NC, NQ)
+                rho_q = density(bcs) # (NC, NQ)
 
                 if isinstance(self._mesh, SimplexMesh):
                     cm = self._mesh.entity_measure('cell')
@@ -185,7 +185,7 @@ class VolumeConstraint(BaseLogged):
                 self._log_error(error_msg)
 
     def _manual_differentiation(self, 
-                                density: Function, 
+                                density: Union[Function, TensorLike], 
                                 displacement: Optional[Function] = None
                             ) -> TensorLike:
         """手动计算体积约束函数相对于物理密度的灵敏度"""
