@@ -36,21 +36,21 @@ class DensityTopOptTest(BaseLogged):
             # mesh_type = 'uniform_crisscross_tri'
 
             space_degree = 2
-            integration_order = space_degree + 4
+            integration_order = space_degree + 1
 
             volume_fraction = 0.6
             penalty_factor = 3.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
             density_location = 'element_multiresolution'
-            sub_density_element = 25
+            sub_density_element = 4
             relative_density = volume_fraction
 
             # 'standard', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 1000
+            max_iterations = 500
             tolerance = 1e-3
 
             filter_type = 'density' # 'none', 'sensitivity', 'density'
@@ -61,9 +61,6 @@ class DensityTopOptTest(BaseLogged):
             rmin = 0.75
             # rmin = 0.625
             # rmin = 0.5
-            # rmin = 0.3125
-            # rmin = 0.25
-            # rmin = 0.15625
 
             from soptx.model.mbb_beam_2d import MBBBeam2dData
             pde = MBBBeam2dData(
@@ -73,11 +70,11 @@ class DensityTopOptTest(BaseLogged):
                             )
             
         elif parameter_type == 'half_mbb_2d':
-            domain = [0, 60.0, 0, 10.0]
+            domain = [0, 30.0, 0, 10.0]
             T = -1.0
             E, nu = 1.0, 0.3
 
-            nx, ny = 60, 20
+            nx, ny = 30, 20
             # nx, ny = 90, 30
             # nx, ny = 120, 40
             # nx, ny = 240, 80
@@ -85,8 +82,8 @@ class DensityTopOptTest(BaseLogged):
             # mesh_type = 'uniform_aligned_tri'
             # mesh_type = 'uniform_crisscross_tri'
 
-            space_degree = 1
-            integration_order = space_degree + 3
+            space_degree = 2
+            integration_order = space_degree + 1
 
             volume_fraction = 0.5
             penalty_factor = 3.0
@@ -264,7 +261,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/mtop_p2_hd25_r075")
+        save_path = Path(f"{base_dir}/mtop_p2_hd4_r075")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_optimization_history(mesh=design_variable_mesh, 
