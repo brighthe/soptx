@@ -121,6 +121,35 @@ class BoxTriHuZhangData2d(PDEBase):
         val = bm.stack([u1, u2], axis=-1)
 
         return val
+    
+    @cartesian
+    def grad_disp_solution(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        exp_xy = bm.exp(x - y)
+        pi = bm.pi
+        
+        # u1 = exp(x-y) * x * (1-x) * y * (1-y)
+        # ∂u1/∂x = exp(x-y) * y * (1-y) * [x*(1-x) + (1-2x)]
+        #        = exp(x-y) * y * (1-y) * (1 - x - x²)
+        du1_dx = exp_xy * y * (1 - y) * (1 - x - x**2)
+        
+        # ∂u1/∂y = exp(x-y) * x * (1-x) * [-y*(1-y) + (1-2y)]  
+        #        = exp(x-y) * x * (1-x) * (1 - 3y + y²)
+        du1_dy = exp_xy * x * (1 - x) * (1 - 3*y + y**2)
+        
+        # u2 = sin(πx) * sin(πy)
+        # ∂u2/∂x = π * cos(πx) * sin(πy)
+        du2_dx = pi * bm.cos(pi * x) * bm.sin(pi * y)
+        
+        # ∂u2/∂y = π * sin(πx) * cos(πy)
+        du2_dy = pi * bm.sin(pi * x) * bm.cos(pi * y)
+        
+        grad = bm.stack([
+            bm.stack([du1_dx, du1_dy], axis=-1),  # [∂u1/∂x, ∂u1/∂y]
+            bm.stack([du2_dx, du2_dy], axis=-1)   # [∂u2/∂x, ∂u2/∂y]
+        ], axis=-2)
+        
+        return grad
 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:

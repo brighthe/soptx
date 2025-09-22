@@ -30,12 +30,12 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
             # TODO 支持四边形网格
             pde.init_mesh.set('uniform_tri')
-            nx, ny = 2, 2
+            nx, ny = 4, 4
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
             # TODO 支持 3 次以下
             space_degree = 2
 
-            integration_order = space_degree + 3
+            integration_order = space_degree**2 + 2
 
             from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
             material = IsotropicLinearElasticMaterial(
@@ -47,6 +47,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             maxit = 5
             errorType = [
                         '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega,0}$',
+                        # '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\Omega,1}$',
                         '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$'
                         ]
             errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
@@ -73,19 +74,30 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
                 sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
                 
-                e0 = analysis_mesh.error(uh, pde.disp_solution) 
-                e1 = analysis_mesh.error(sigmah, pde.stress_solution)
+                e0 = analysis_mesh.error(uh, 
+                                        pde.disp_solution,
+                                        q=integration_order) # 位移 L2 范数误差
+                # e1 = analysis_mesh.error(uh.grad_value, 
+                #                         pde.grad_disp_solution, 
+                #                         q=integration_order) # 位移 H1 半范数误差
+                e1 = analysis_mesh.error(sigmah, 
+                                        pde.stress_solution, 
+                                        q=integration_order) # 应力 L2 范数误差
 
                 h[i] = 1/N
                 errorMatrix[0, i] = e0
                 errorMatrix[1, i] = e1 
+                # errorMatrix[2, i] = e2
 
                 if i < maxit - 1:
                     analysis_mesh.uniform_refine()
 
             print("errorMatrix:\n", errorType, "\n", errorMatrix)   
             print("NDof:", NDof)
-            print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+            print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+            # print("order_uh_h1:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+            print("order_sigma_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+
 
             import matplotlib.pyplot as plt
             from soptx.utils.show import showmultirate, show_error_table
@@ -95,7 +107,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             plt.show()
             print('------------------')
 
-    @run.register('test_jump_penalty')
+    @run.register('test_jump_penalty_integrator')
     def run(self):
         from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
         pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
@@ -133,6 +145,6 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    # huzhang_analyzer.run.set('test')
-    huzhang_analyzer.run.set('test_jump_penalty')
+    huzhang_analyzer.run.set('test')
+    # huzhang_analyzer.run.set('test_jump_penalty')
     huzhang_analyzer.run()

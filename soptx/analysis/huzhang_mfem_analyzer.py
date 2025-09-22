@@ -185,11 +185,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             mesh = self._mesh
             GD = mesh.geo_dimension()
 
-            # huzhang_space = HuZhangFESpace(mesh, p=p)
-            # space0 = huzhang_space
-            # scalar_space = LagrangeFESpace(mesh, p=p-1, ctype='D')
-            # tensor_space = TensorFunctionSpace(scalar_space, shape=(GD, -1))
-            # space1 = tensor_space
             space0 = self._huzhang_space
             space1 = self._tensor_space
 
@@ -257,7 +252,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             self._log_error(error_msg)
         
         F = bm.zeros(gdof0 + gdof1, dtype=F_u.dtype)
-        F[gdof0:] = -F_u
+        F[gdof0:] = -F_u # 负号不能少 !!!
 
         if enable_timing:
             t.send('组装时间')
