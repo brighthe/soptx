@@ -30,7 +30,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
             # TODO 支持四边形网格
             pde.init_mesh.set('uniform_tri')
-            nx, ny = 4, 4
+            nx, ny = 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
             # TODO 支持 3 次以下
             space_degree = 2
@@ -48,8 +48,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             maxit = 5
             errorType = [
                         '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega,0}$',
-                        # '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\Omega,1}$',
-                        '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$'
+                        '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$',
+                        '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,H(div)}$'
                         ]
             errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
             NDof = bm.zeros(maxit, dtype=bm.int32)
@@ -75,20 +75,21 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
                 sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
                 
-                e0 = analysis_mesh.error(uh, 
-                                        pde.disp_solution,
+                e_uh_l2 = analysis_mesh.error(u=uh, 
+                                        v=pde.disp_solution,
                                         q=integration_order) # 位移 L2 范数误差
-                # e1 = analysis_mesh.error(uh.grad_value, 
-                #                         pde.grad_disp_solution, 
-                #                         q=integration_order) # 位移 H1 半范数误差
-                e1 = analysis_mesh.error(sigmah, 
-                                        pde.stress_solution, 
-                                        q=integration_order) # 应力 L2 范数误差
+                e_sigmah_l2 = analysis_mesh.error(u=sigmah, 
+                                                v=pde.stress_solution, 
+                                                q=integration_order) # 应力 L2 范数误差
+                e_div_sigmah_l2 = analysis_mesh.error(u=sigmah.div_value, 
+                                                    v=pde.div_stress_solution, 
+                                                    q=integration_order) # 应力散度 L2 范数误差
+                e_sigmah_hdiv = bm.sqrt(e_sigmah_l2**2 + e_div_sigmah_l2**2) # 应力 H(div) 范数误差
 
                 h[i] = 1/N
-                errorMatrix[0, i] = e0
-                errorMatrix[1, i] = e1 
-                # errorMatrix[2, i] = e2
+                errorMatrix[0, i] = e_uh_l2
+                errorMatrix[1, i] = e_sigmah_l2
+                errorMatrix[2, i] = e_sigmah_hdiv
 
                 if i < maxit - 1:
                     analysis_mesh.uniform_refine()
@@ -96,8 +97,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             print("errorMatrix:\n", errorType, "\n", errorMatrix)   
             print("NDof:", NDof)
             print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
-            # print("order_uh_h1:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
-            print("order_sigma_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+            print("order_sigmah_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+            print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
 
 
             import matplotlib.pyplot as plt

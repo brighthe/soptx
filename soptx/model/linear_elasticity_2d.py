@@ -214,6 +214,65 @@ class BoxTriHuZhangData2d(PDEBase):
         
         return val
     
+    @cartesian
+    def div_stress_solution(self, points: TensorLike) -> TensorLike:
+        """
+        计算应力张量的散度: div(σ) = [∂σ_xx/∂x + ∂σ_xy/∂y, ∂σ_xy/∂x + ∂σ_yy/∂y]
+        也可以根据平衡方程: -∇·σ = b, 所以 ∇·σ = -b
+        """
+        x, y = points[..., 0], points[..., 1]
+        exp_xy = bm.exp(x - y)
+        pi = bm.pi
+        lam, mu = self.lam, self.mu
+        
+        # 计算应变分量的导数
+        # ε_xx = exp(x-y) * y * (1-y) * (1 - x - x²)
+        # ∂ε_xx/∂x = exp(x-y) * y * (1-y) * [(1 - x - x²) + (-1 - 2x)]
+        deps_xx_dx = exp_xy * y * (1 - y) * (-x**2 - 3*x)
+        
+        # ∂ε_xx/∂y = exp(x-y) * (1 - x - x²) * [-y*(1-y) + (1-2y)]
+        deps_xx_dy = exp_xy * (1 - x - x**2) * (1 - 3*y + y**2)
+        
+        # ε_yy = π * sin(πx) * cos(πy)
+        # ∂ε_yy/∂x = π² * cos(πx) * cos(πy)
+        deps_yy_dx = pi**2 * bm.cos(pi * x) * bm.cos(pi * y)
+        
+        # ∂ε_yy/∂y = -π² * sin(πx) * sin(πy)
+        deps_yy_dy = -pi**2 * bm.sin(pi * x) * bm.sin(pi * y)
+        
+        # ε_xy = 0.5 * [exp(x-y)*x*(1-x)*(1-3y+y²) + π*cos(πx)*sin(πy)]
+        # ∂ε_xy/∂x = 0.5 * [exp(x-y)*(1-3y+y²)*(1-x-x²) - π²*sin(πx)*sin(πy)]
+        deps_xy_dx = 0.5 * (exp_xy * (1 - 3*y + y**2) * (1 - x - x**2) 
+                            - pi**2 * bm.sin(pi * x) * bm.sin(pi * y))
+        
+        # ∂ε_xy/∂y = 0.5 * [exp(x-y)*x*(1-x)*(-4+5y-y²) + π²*cos(πx)*cos(πy)]
+        deps_xy_dy = 0.5 * (exp_xy * x * (1 - x) * (-4 + 5*y - y**2) 
+                            + pi**2 * bm.cos(pi * x) * bm.cos(pi * y))
+        
+        # 计算应力分量的导数
+        # σ_xx = (λ + 2μ) * ε_xx + λ * ε_yy
+        # ∂σ_xx/∂x = (λ + 2μ) * ∂ε_xx/∂x + λ * ∂ε_yy/∂x
+        dsigma_xx_dx = (lam + 2*mu) * deps_xx_dx + lam * deps_yy_dx
+        
+        # σ_xy = 2μ * ε_xy  
+        # ∂σ_xy/∂y = 2μ * ∂ε_xy/∂y
+        dsigma_xy_dy = 2 * mu * deps_xy_dy
+        
+        # ∂σ_xy/∂x = 2μ * ∂ε_xy/∂x
+        dsigma_xy_dx = 2 * mu * deps_xy_dx
+        
+        # σ_yy = λ * ε_xx + (λ + 2μ) * ε_yy
+        # ∂σ_yy/∂y = λ * ∂ε_xx/∂y + (λ + 2μ) * ∂ε_yy/∂y
+        dsigma_yy_dy = lam * deps_xx_dy + (lam + 2*mu) * deps_yy_dy
+        
+        # 计算散度的两个分量
+        div_x = dsigma_xx_dx + dsigma_xy_dy
+        div_y = dsigma_xy_dx + dsigma_yy_dy
+        
+        val = bm.stack([div_x, div_y], axis=-1)
+        
+        return val
+    
 class BoxTriLagrange2dData(PDEBase):
     """
     -∇·σ = b    in Ω

@@ -560,8 +560,9 @@ class HuZhangFESpace2d(FunctionSpace):
             TD = len(bc)
         else :
             TD = bc.shape[-1] - 1
-        gphi = self.grad_basis(bc, index=index)
-        e2dof = self.dof.entity_to_dof(TD, index=index)
+        gphi = self.div_basis(bc)
+        # TODO 目前只考虑散度值在单元上计算的情形
+        e2dof = self.dof.cell_to_dof(index=index)
         val = bm.einsum('cilm, cl -> cim', gphi, uh[e2dof])
         return val
     
