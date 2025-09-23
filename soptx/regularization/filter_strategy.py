@@ -67,7 +67,7 @@ class NoneStrategy(_FilterStrategy):
                             physical_density: Union[TensorLike, Function]
                         ) -> Union[TensorLike, Function]:
 
-        if self._density_location in ['node']:
+        if self._density_location in ['element', 'node']:
 
             physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
 

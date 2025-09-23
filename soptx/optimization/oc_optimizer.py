@@ -187,8 +187,11 @@ class OCOptimizer(BaseLogged):
             iteration_time = time() - start_time
 
             history.log_iteration(iter_idx=iter_idx, 
-                                obj_val=obj_val, volfrac=volfrac, 
-                                change=change, time_cost=iteration_time, 
+                                obj_val=obj_val, 
+                                volfrac=volfrac, 
+                                change=change,
+                                penalty_factor=self._objective._analyzer._interpolation_scheme.penalty_factor, 
+                                time_cost=iteration_time, 
                                 physical_density=rho_phys)
 
             # 收敛检查

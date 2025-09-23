@@ -117,12 +117,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
-        if isinstance(mesh, SimplexMesh):
-            total_area_std = bm.sum(ws * cm)  # 标准方法
-        else:
-            total_area_std = bm.sum(ws * detJ)  # 标准方法  
-        print(f"标准方法总面积: {total_area_std}")
-
         # 区域内的相对密度恒定都为 1, D 为全局常数矩阵
         if coef is None:
             if GD == 2:

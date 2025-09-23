@@ -20,47 +20,51 @@ class DensityTopOptTest(BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
 
-    @variantmethod('test_mbb_2d')
-    def run(self, parameter_type: str = 'half_mbb_2d') -> Union[TensorLike, OptimizationHistory]:
+    @variantmethod('test_half_mbb_2d')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
 
-        if parameter_type == 'half_mbb_2d':
-            domain = [0, 60.0, 0, 20.0]
-            T = -1.0
-            E, nu = 1.0, 0.3
+        ## 固定参数 ##
+        domain = [0, 60.0, 0, 20.0]
+        T = -1.0
+        E, nu = 1.0, 0.3
 
-            nx, ny = 60, 20
-            # nx, ny = 90, 30
-            # nx, ny = 120, 40
-            # nx, ny = 240, 80
-            mesh_type = 'uniform_quad'
+        ## 测试参数 ##
+        nx, ny = 60, 20
+        # nx, ny = 90, 30
+        # nx, ny = 120, 40
+        # nx, ny = 150, 50
+        # mesh_type = 'uniform_quad'
+        # mesh_type = 'uniform_aligned_tri'
+        mesh_type = 'uniform_crisscross_tri'
 
-            space_degree = 1
-            integration_order = space_degree + 3
+        space_degree = 6
+        # integration_order = space_degree + 1 # 张量网格
+        integration_order = space_degree**2 + 2  # 单纯形网格
 
-            volume_fraction = 0.5
-            penalty_factor = 3.0
+        volume_fraction = 0.5
+        penalty_factor = 3.0
 
-            # 'element', 'node'
-            density_location = 'node'
-            relative_density = 0.5
+        # 'element', 'node'
+        density_location = 'element'
+        relative_density = 0.5
 
-            # 'standard', 'voigt'
-            assembly_method = 'voigt'
+        # 'standard', 'voigt'
+        assembly_method = 'standard'
 
-            optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 500
-            tolerance = 1e-2
-            use_penalty_continuation = True
+        optimizer_algorithm = 'oc'  # 'oc', 'mma'
+        max_iterations = 500
+        tolerance = 1e-2
+        use_penalty_continuation = False
 
-            filter_type = 'none' # 'none', 'sensitivity', 'density'
-            rmin = 2.4
+        filter_type = 'none' # 'none', 'sensitivity', 'density'
+        rmin = 2.4
 
-            from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
-            pde = HalfMBBBeam2dData(
-                                domain=domain,
-                                T=T, E=E, nu=nu,
-                                enable_logging=False
-                            )
+        from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
+        pde = HalfMBBBeam2dData(
+                            domain=domain,
+                            T=T, E=E, nu=nu,
+                            enable_logging=False
+                        )
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -193,8 +197,8 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/section3_half_mbb_node_stop")
-        save_path.mkdir(parents=True, exist_ok=True)
+        save_path = Path(f"{base_dir}/section3_half_mbb_element")
+        save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
@@ -205,6 +209,12 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
+    @run.register('test_element_node')
+    def run(self, density_type: str = 'element') -> Union[TensorLike, OptimizationHistory]:
+        pass
+
+
+
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
