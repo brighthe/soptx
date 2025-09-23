@@ -35,6 +35,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             # TODO 支持 3 次以下
             space_degree = 2
 
+            # 单纯性网格
             integration_order = space_degree**2 + 2
 
             from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial

@@ -18,8 +18,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
     @variantmethod('test_bridge_2d')
-    def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
-        domain = [-4, 4, 0, 4]
+    def run(self, analysis_method: str = 'huzhangfem') -> Union[TensorLike, OptimizationHistory]:
+        domain = [0, 80, 0, 40]
 
         T = -1.0
         E, nu = 1.0, 0.35
@@ -28,7 +28,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         penalty_factor = 3.0
         
         # 'node', 'element'
-        density_location = 'node'
+        density_location = 'element'
         relative_density = volume_fraction
 
         # 'standard', , 'voigt', 
@@ -38,7 +38,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         max_iterations = 200
         tolerance = 1e-2
 
-        filter_type = 'none' # 'none', 'sensitivity', 'density'
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        rmin = 1.25
 
         from soptx.model.bridge_2d import Bridge2dData
         pde = Bridge2dData(
@@ -48,12 +49,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
                         )
 
         # 'uniform_tri', 'uniform_quad', 'uniform_hex'
-        nx, ny = 120, 60
+        nx, ny = 80, 40
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_tri'
-
-        domain_length = pde.domain[1] - pde.domain[0]
-        rmin = 0.0
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -78,19 +76,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     },
                                 )
         
-        if density_location in ['node']:
-            design_variable_mesh = displacement_mesh
-            integration_order = 4
-            d, rho = interpolation_scheme.setup_density_distribution(
-                                                    design_variable_mesh=design_variable_mesh,
-                                                    displacement_mesh=displacement_mesh,
-                                                    relative_density=relative_density,
-                                                    integration_order=integration_order,
-                                                )
-
         if analysis_method == 'lfem':
             space_degree = 1
-            
+            # 张量网格
+            integration_order = space_degree + 1
             from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
             lagrange_fem_analyzer = LagrangeFEMAnalyzer(
                                         mesh=displacement_mesh,
@@ -107,9 +96,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
             analyzer = lagrange_fem_analyzer
 
         elif analysis_method == 'huzhangfem':
-            # TODO 支持低阶 p < d+1
+            # TODO 支持低阶 1 <=p <= d
             huzhang_space_degree = 3
-            integration_order = huzhang_space_degree + 3
+            integration_order = huzhang_space_degree**2 + 2
             from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
             huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
                                         mesh=displacement_mesh,
@@ -124,6 +113,24 @@ class DensityTopOptHuZhangTest(BaseLogged):
             
             analyzer = huzhang_mfem_analyzer
         
+        if density_location in ['element']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                ) 
+        
+        elif density_location in ['node']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                    integration_order=integration_order,
+                                                )
+        else:
+            raise ValueError(f"不支持的密度位置类型: {density_location}")
 
         fe_tspace = lagrange_fem_analyzer.tensor_space
         fe_dofs = fe_tspace.number_of_global_dofs()
