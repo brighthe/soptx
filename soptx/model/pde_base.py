@@ -33,7 +33,7 @@ class PDEBase(BaseLogged, ABC):
     
     @property
     def plane_type(self) -> str:
-        """平面类型 (plane_stress, plane_strain, 3d)"""
+        """平面类型 (plane_stress, plane_strain, 3D)"""
         return getattr(self, '_plane_type', 'unknown')
     
     @property

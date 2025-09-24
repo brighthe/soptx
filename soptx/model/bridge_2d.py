@@ -7,19 +7,19 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
-class Bridge2dData(PDEBase):
+class Bridge2dSingleLoadData(PDEBase):
     '''
     Example 1 from Bruggi & Venini (2007) paper
-    Single-point load bridge structure (完整域版本)
+    Single-point load bridge structure
     
     -∇·σ = b    in Ω
-       u = 0    on ∂Ω_D (左右两端固支)
+       u = 0    on ∂Ω_D (左右两端下半部分固支)
     where:
     - σ is the stress tensor
     - ε = (∇u + ∇u^T)/2 is the strain tensor
     
     几何参数:
-        矩形域，左右两端固支，底部中点施加向下集中载荷
+        矩形域, 左右两端下半部分固支, 底部中点施加向下集中载荷
         考虑完整域（不利用对称性）
     
     Material parameters:
@@ -29,12 +29,13 @@ class Bridge2dData(PDEBase):
         σ = 2με + λtr(ε)I
     '''
     def __init__(self,
-                domain: List[float] = [-4, 4, 0, 4], 
+                domain: List[float] = [0, 80, 0, 40], 
                 mesh_type: str = 'uniform_quad',
                 T: float = -2.0,  # 向下的集中载荷
                 E: float = 1.0, 
                 nu: float = 0.35,  # 默认使用可压缩材料
                 support_height_ratio: float = 0.5,  # 支撑高度比例（0.5表示下半部分）
+                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -44,9 +45,9 @@ class Bridge2dData(PDEBase):
         self._T = T
         self._E, self._nu = E, nu
         self._support_height_ratio = support_height_ratio  # 支撑高度比例
+        self._plane_type = plane_type
 
         self._eps = 1e-12
-        self._plane_type = 'plane_strain'  # 平面应变
         self._force_type = 'concentrated'
         self._boundary_type = 'dirichlet'
 
@@ -101,6 +102,201 @@ class Bridge2dData(PDEBase):
 
         return mesh
     
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        device = kwargs.get('device', 'cpu')
+        node = bm.array([[0.0, 0.0],
+                        [1.0, 0.0],
+                        [1.0, 1.0],
+                        [0.0, 1.0]], dtype=bm.float64, device=device) 
+        
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)     
+        
+        qmesh = QuadrangleMesh(node, cell)
+        qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+        import numpy as np
+        newCell = np.r_['0', 
+                lcell[:, [1, 2, 0]], 
+                lcell[:, [3, 0, 2]],
+                rcell[:, [0, 1, 3]],
+                rcell[:, [2, 3, 1]]]
+        
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
+
+        return mesh
+
+
+    #######################################################################################################################
+    # 核心方法
+    #######################################################################################################################
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        """
+        定义体力（集中载荷）
+        在底部中点施加向下的集中载荷 F = -2
+        """
+        domain = self.domain
+
+        x, y = points[..., 0], points[..., 1]   
+
+        mid_x = (domain[0] + domain[1]) / 2  
+        coord = (
+            (bm.abs(x - mid_x) < self._eps) & 
+            (bm.abs(y - domain[2]) < self._eps)
+        )
+        
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (coord, 1), self._T)
+        
+        return val
+    
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+        return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        
+        # 计算支撑的最大高度
+        height = domain[3] - domain[2]
+        y_max_support = domain[2] + height * self._support_height_ratio
+        
+        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
+        
+        return coord
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        
+        # 计算支撑的最大高度
+        height = domain[3] - domain[2]
+        y_max_support = domain[2] + height * self._support_height_ratio
+        
+        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
+        
+        return coord
+    
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
+    
+class Bridge2dDoubleLoadData(PDEBase):
+    '''
+    Example 2 from Bruggi & Venini (2007) paper
+    Double-point load bridge structure
+    
+    -∇·σ = b    in Ω
+       u = 0    on ∂Ω_D (左右两端下半部分固支)
+    where:
+    - σ is the stress tensor
+    - ε = (∇u + ∇u^T)/2 is the strain tensor
+    
+    几何参数:
+        矩形域, 左右两端下半部分固支, 底部中点施加向下集中载荷
+    
+    Material parameters:
+        E = 1, nu = 0.35 (compressible) or 0.5 (incompressible)
+
+    For isotropic materials:
+        σ = 2με + λtr(ε)I
+    '''
+    def __init__(self,
+                domain: List[float] = [0, 80, 0, 40], 
+                mesh_type: str = 'uniform_quad',
+                T1: float = -2.0,  # 向下的集中载荷
+                T2: float = -2.0,  # 向下的集中载荷
+                E: float = 1.0, 
+                nu: float = 0.35,  # 默认使用可压缩材料
+                support_height_ratio: float = 0.5,  # 支撑高度比例（0.5 表示下半部分）
+                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None
+            ) -> None:
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                enable_logging=enable_logging, logger_name=logger_name)
+
+        self._T1 = T1
+        self._T2 = T2
+        self._E, self._nu = E, nu
+        self._support_height_ratio = support_height_ratio  # 支撑高度比例
+        self._plane_type = plane_type
+
+        self._eps = 1e-12
+        self._force_type = 'concentrated'
+        self._boundary_type = 'dirichlet'
+
+
+    #######################################################################################################################
+    # 访问器
+    #######################################################################################################################
+
+    @property
+    def E(self) -> float:
+        """获取杨氏模量"""
+        return self._E
+    
+    @property
+    def nu(self) -> float:
+        """获取泊松比"""
+        return self._nu
+    
+    @property
+    def T1(self) -> float:
+        """获取集中力 1"""
+        return self._T1
+
+    @property
+    def T2(self) -> float:
+        """获取集中力 2"""
+        return self._T2
+
+    @property
+    def support_height_ratio(self) -> float:
+        """获取支撑高度比例"""
+        return self._support_height_ratio
+    
+    #######################################################################################################################
+    # 变体方法
+    #######################################################################################################################
+    
+    @variantmethod('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 128) 
+        ny = kwargs.get('ny', 32)   
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
+
+        return mesh
+    
     @init_mesh.register('uniform_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
         nx = kwargs.get('nx', 128)
@@ -123,24 +319,33 @@ class Bridge2dData(PDEBase):
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
         """
-        定义体力（集中载荷）
-        在底部中点施加向下的集中载荷 F = -2
+        定义体力（两点集中载荷）
+        底部中点和顶部中点各施加向下的集中载荷 F = -2
         """
         domain = self.domain
-
         x, y = points[..., 0], points[..., 1]   
 
-        # 底部中点：x = 0（域的中心）, y = 0（底部）
+        # 域的中点x坐标
         mid_x = (domain[0] + domain[1]) / 2  
-        coord = (
+        
+        # 底部中点载荷
+        coord_bottom = (
             (bm.abs(x - mid_x) < self._eps) & 
             (bm.abs(y - domain[2]) < self._eps)
         )
         
+        # 顶部中点载荷  
+        coord_top = (
+            (bm.abs(x - mid_x) < self._eps) & 
+            (bm.abs(y - domain[3]) < self._eps)
+        )
+        
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        # 在y方向施加向下的力
-        val = bm.set_at(val, (coord, 1), self._T)
+        
+        # 两个载荷点都施加 -2 的向下力
+        val = bm.set_at(val, (coord_bottom, 1), self._T1)  # -2
+        val = bm.set_at(val, (coord_top, 1), self._T2)     # -2
         
         return val
     
@@ -158,7 +363,6 @@ class Bridge2dData(PDEBase):
         height = domain[3] - domain[2]
         y_max_support = domain[2] + height * self._support_height_ratio
         
-        # 左边界（x = -4）和右边界（x = 4）的部分高度
         coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
         
         return coord
@@ -172,7 +376,6 @@ class Bridge2dData(PDEBase):
         height = domain[3] - domain[2]
         y_max_support = domain[2] + height * self._support_height_ratio
         
-        # 左边界（x = -4）和右边界（x = 4）的部分高度
         coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
         
         return coord

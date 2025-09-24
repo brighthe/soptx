@@ -187,7 +187,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                     logger_name=logger_name
                 )
 
-        self.plane_type = plane_type
+        self._plane_type = plane_type
 
         self._log_info("Initializing isotropic linear elastic material")
         
@@ -201,13 +201,52 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         self._compute_elastic_matrix()
 
         self._log_info("Isotropic linear elastic material initialized successfully")
+
+
+    #########################################################################################
+    # 属性访问器
+    #########################################################################################
+
+    @property
+    def youngs_modulus(self) -> float:
+        """杨氏模量"""
+        return self._youngs_modulus
+    
+    @property
+    def poisson_ratio(self) -> float:
+        """泊松比"""
+        return self._poisson_ratio
+    
+    @property
+    def lame_lambda(self) -> float:
+        """拉梅常数 λ"""
+        return self._lame_lambda
+    
+    @property
+    def shear_modulus(self) -> float:
+        """剪切模量 μ"""
+        return self._shear_modulus
+    
+    @property
+    def bulk_modulus(self) -> float:
+        """体积模量 K"""
+        return self._bulk_modulus
+    
+    @property
+    def plane_type(self) -> str:
+        """平面类型"""
+        return self._plane_type
+    
+
+    #########################################################################################
+    # 内部方法
+    #########################################################################################
         
     def _compute_elastic_constants(self, 
                             youngs_modulus: Optional[float] = None, 
                             poisson_ratio: Optional[float] = None, 
                             lame_lambda: Optional[float] = None, 
                             shear_modulus: Optional[float] = None,
-                            bulk_modulus: Optional[float] = None,
                         ) -> None:
         E, nu = youngs_modulus, poisson_ratio
         lam, mu = lame_lambda, shear_modulus
@@ -217,40 +256,49 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             error_msg = (f"For Isotropic material, please provide exactly two "
                         f"independent elastic constants. You provided {provided_params}.")
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
         if E is not None and nu is not None:
-            self.youngs_modulus = E
-            self.poisson_ratio = nu
-            self.lame_lambda = E * nu / ((1 + nu) * (1 - 2 * nu))
-            self.shear_modulus = E / (2 * (1 + nu))
-            self.bulk_modulus = E / (3 * (1 - 2 * nu))
-            
-            self._log_info(f"Set elastic constants from E={E:.2e}, ν={nu:.3f}")
+            self._youngs_modulus = E
+            self._poisson_ratio = nu
+
+            self._shear_modulus = E / (2 * (1 + nu))
+
+            if self._plane_type =='plane_stress':
+                self._lame_lambda = nu * E / (1 - nu**2)
+                self._bulk_modulus = E / (3 * (1 - nu))
+            elif self._plane_type in ["plane_strain", "3D"]:
+                self._lame_lambda = E * nu / ((1 + nu) * (1 - 2 * nu))
+                self._bulk_modulus = E / (3 * (1 - 2 * nu))
+
+            self._log_info(f"Set elastic constants from E={E:.2e}, nu={nu:.3f}")
 
         elif lam is not None and mu is not None:
-            self.lame_lambda = lam
-            self.shear_modulus = mu
-            self.youngs_modulus = mu * (3 * lam + 2 * mu) / (lam + mu)
-            self.poisson_ratio = lam / (2 * (lam + mu))
-            self.bulk_modulus = (3 * lam + 2 * mu) / 3
+            self._lame_lambda = lam
+            self._shear_modulus = mu
+            self._youngs_modulus = mu * (3 * lam + 2 * mu) / (lam + mu)
+            self._poisson_ratio = lam / (2 * (lam + mu))
 
-            
-            self._log_info(f"Set elastic constants from λ={lam:.2e}, G={mu:.2e}")
+            if self._plane_type == "plane_stress":
+                self._bulk_modulus = E / (3 * (1 - nu))
+            elif self._plane_type in ["plane_strain", "3D"]:
+                self._bulk_modulus = (3 * lam + 2 * mu) / 3
+
+            self._bulk_modulus = (3 * lam + 2 * mu) / 3
+
+            self._log_info(f"Set elastic constants from λ={lam:.2e}, μ={mu:.2e}")
 
         else:
             error_msg = ("Unsupported combination of parameters. "
-                        "Please provide (E, ν) or (λ, G).")
+                        "Please provide (E, nu) or (λ, μ).")
             self._log_error(error_msg)
-            raise ValueError(error_msg)
         
     def _compute_elastic_matrix(self):
-        E_val = self.youngs_modulus
-        nu_val = self.poisson_ratio
-        lam_val = self.lame_lambda
-        mu_val = self.shear_modulus
+        E_val = self._youngs_modulus
+        nu_val = self._poisson_ratio
+        lam_val = self._lame_lambda
+        mu_val = self._shear_modulus
 
-        if self.plane_type == "3d":
+        if self._plane_type == "3D":
             self.D = bm.tensor([[2 * mu_val + lam_val, lam_val,              lam_val,              0,      0,           0],
                                 [lam_val,              2 * mu_val + lam_val, lam_val,              0,      0,           0],
                                 [lam_val,              lam_val,              2 * mu_val + lam_val, 0,      0,           0],
@@ -259,25 +307,24 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                                 [0,                    0,                    0,                    0,      0,      mu_val]], 
                                 dtype=bm.float64, device=self.device)
             
-        elif self.plane_type == "plane_stress":
+        elif self._plane_type == "plane_stress":
             self.D = E_val / (1 - nu_val ** 2) * \
                     bm.array([[1,      nu_val, 0],
                               [nu_val, 1,      0],
                               [0,      0,     (1 - nu_val) / 2]],    
                             dtype=bm.float64, device=self.device)
         
-        elif self.plane_type == "plane_strain":
+        elif self._plane_type == "plane_strain":
             self.D = bm.tensor([[2 * mu_val + lam_val, lam_val,                   0],
                                 [lam_val,              2 * mu_val + lam_val,      0],
                                 [0,                    0,                    mu_val]], 
                                 dtype=bm.float64, device=self.device)
         
         else:
-            error_msg = "Only 3d, plane_stress, and plane_strain are supported."
+            error_msg = "Only '3D', 'plane_stress', and 'plane_strain' are supported."
             self._log_error(error_msg)
-            raise NotImplementedError(error_msg)
         
-        self._log_info(f"Elastic matrix computed for {self.plane_type}, shape: {self.D.shape}")
+        self._log_info(f"Elastic matrix computed for {self._plane_type}, shape: {self.D.shape}")
 
     def elastic_matrix(self) -> TensorLike:
         """
@@ -304,51 +351,50 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         return D
 
-    def get_material_params(self) -> Dict[str, Any]:
+    # def get_material_params(self) -> Dict[str, Any]:
 
-        params = {
-            'youngs_modulus': self.youngs_modulus,
-            'poisson_ratio': self.poisson_ratio,
-            'lame_lambda': self.lame_lambda,
-            'shear_modulus': self.shear_modulus,
-            'bulk_modulus': self.bulk_modulus,
-            'density': self.density,
-        }
+    #     params = {
+    #         'youngs_modulus': self.youngs_modulus,
+    #         'poisson_ratio': self.poisson_ratio,
+    #         'lame_lambda': self.lame_lambda,
+    #         'shear_modulus': self.shear_modulus,
+    #         'bulk_modulus': self.bulk_modulus,
+    #         'density': self.density,
+    #     }
 
-        return params
+    #     return params
 
-    def display_material_params(self) -> None:
+    # def display_material_params(self) -> None:
 
-        params = self.get_material_params()
-        self._log_info(f"Material parameters: {params}", force_log=True)
+    #     params = self.get_material_params()
+    #     self._log_info(f"Material parameters: {params}", force_log=True)
 
-    def set_material_parameters(self, 
-                            youngs_modulus: Optional[float] = None, 
-                            poisson_ratio: Optional[float] = None, 
-                            lame_lambda: Optional[float] = None, 
-                            shear_modulus: Optional[float] = None,
-                            bulk_modulus: Optional[float] = None,
-                            density: Optional[float] = None
-                        ) -> None:
-        self._log_info("Updating material parameters")
+    # def set_material_parameters(self, 
+    #                         youngs_modulus: Optional[float] = None, 
+    #                         poisson_ratio: Optional[float] = None, 
+    #                         lame_lambda: Optional[float] = None, 
+    #                         shear_modulus: Optional[float] = None,
+    #                         bulk_modulus: Optional[float] = None,
+    #                         density: Optional[float] = None
+    #                     ) -> None:
+    #     self._log_info("Updating material parameters")
 
-        self._compute_elastic_constants(youngs_modulus, poisson_ratio, lame_lambda, shear_modulus, bulk_modulus)
+    #     self._compute_elastic_constants(youngs_modulus, poisson_ratio, lame_lambda, shear_modulus, bulk_modulus)
 
-        if density is not None:
-            self.density = density
+    #     if density is not None:
+    #         self.density = density
         
-        self._compute_elastic_matrix()
+    #     self._compute_elastic_matrix()
 
-        self._log_info(f"[IsotropicLinearElasticMaterial] Material parameters updated successfully, "
-                       f"elastic_matrix recalculated")
+    #     self._log_info(f"[IsotropicLinearElasticMaterial] Material parameters updated successfully, "
+    #                    f"elastic_matrix recalculated")
 
-    def set_plane_type(self, plane_type: str) -> None:
-        if plane_type not in ['3d', 'plane_stress', 'plane_strain']:
-            error_msg = "Invalid plane type. Choose from '3d', 'plane_stress', or 'plane_strain'."
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
+    # def set_plane_type(self, plane_type: str) -> None:
+    #     if plane_type not in ['3d', 'plane_stress', 'plane_strain']:
+    #         error_msg = "Invalid plane type. Choose from '3d', 'plane_stress', or 'plane_strain'."
+    #         self._log_error(error_msg)
         
-        self.plane_type = plane_type
-        self._compute_elastic_matrix()
+    #     self.plane_type = plane_type
+    #     self._compute_elastic_matrix()
 
-        self._log_info(f"Plane type set to {self.plane_type}. elastic_matrix updated.")
+    #     self._log_info(f"Plane type set to {self.plane_type}. elastic_matrix updated.")

@@ -88,17 +88,11 @@ class ComplianceObjective(BaseLogged):
             
             dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe) # (NC, )
 
-            if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
-
             return dc[:]
         
         elif density_location in ['element_multiresolution']:
 
             dc = -bm.einsum('ci, cnij, cj -> cn', uhe, diff_ke, uhe) # (NC, n_sub)
-
-            if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
 
             return dc[:]
         
@@ -113,9 +107,6 @@ class ComplianceObjective(BaseLogged):
             dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
             dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
 
-            if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
-
             return dc[:]
         
         elif density_location in ['node_multiresolution']:
@@ -128,9 +119,6 @@ class ComplianceObjective(BaseLogged):
 
             dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
             dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
-
-            if bm.any(dc > 1e-12):
-                self._log_error(f"目标函数关于物理密度的灵敏度中存在正值, 可能导致目标函数上升")
 
             return dc[:]
         

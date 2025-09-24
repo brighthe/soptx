@@ -181,10 +181,13 @@ class DensityStrategy(_FilterStrategy):
                         density:  Union[TensorLike, Function]
                     ) ->  Union[TensorLike, Function]:
 
-        rho_phys = bm.copy(density)
+        if isinstance(density, Function):
+            rho_phys = density.space.function(bm.copy(density[:]))
+        else:
+            rho_phys = bm.copy(density)
 
         return rho_phys
-
+    
     def filter_design_variable(self,
                             design_variable: Union[TensorLike, Function], 
                             physical_density: Union[TensorLike, Function]
