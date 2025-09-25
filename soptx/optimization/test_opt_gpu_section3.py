@@ -29,10 +29,10 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
 
         ## 测试参数 ##
-        nx, ny = 60, 20
+        # nx, ny = 60, 20
         # nx, ny = 90, 30
         # nx, ny = 120, 40
-        # nx, ny = 150, 50
+        nx, ny = 150, 50
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_crisscross_tri'
 
@@ -219,4 +219,4 @@ if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
     test.run.set('half_mbb_2d')
-    rho_opt, history = test.run()
+    rho_opt, history = test.run() 
