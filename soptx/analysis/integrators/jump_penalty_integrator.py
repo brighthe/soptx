@@ -16,99 +16,125 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
                 threshold: Optional[Threshold]=None
             ) -> None:
         super().__init__()
+
         self.q = q
         self.threshold = threshold
 
     def make_index(self, space: _FS):
+        """生成所有内部面的全局整数索引"""
+        mesh = space.mesh
+        NF = mesh.number_of_faces()
         threshold = self.threshold
-        if isinstance(threshold, TensorLike):
+
+        if threshold is None:
+            index = bm.arange(NF, dtype=bm.int64)
+        
+        elif isinstance(threshold, TensorLike):
             index = threshold
-        else:
+        
+        elif callable(threshold):
             mesh = space.mesh
             face2cell = mesh.face_to_cell()
-            index = face2cell[:, 0] != face2cell[:, 1]
+            index_bool = face2cell[:, 0] != face2cell[:, 1]
             if callable(threshold):
-                bc = mesh.entity_barycenter('face', index=index)
-                index = index[threshold(bc)]
-        NF = mesh.number_of_faces()
-        index = bm.arange(NF)
+                bc = mesh.entity_barycenter('face', index=index_bool)
+                index_bool = index_bool[threshold(bc)]
+            index = bm.nonzero(index_bool)[0]
 
         return index
-
+    
     @enable_cache
     def to_global_dof(self, space: _FS) -> TensorLike:
-        index = self.make_index(space)
+        index = self.make_index(space) # (NFs, )
         mesh = space.mesh
         TD = mesh.top_dimension()
         NF = mesh.number_of_faces()
+        ldof = space.number_of_local_dofs()
+
         cell2face = mesh.cell_to_face()
         cell2facesign = mesh.cell_to_face_sign()
-        ldof = space.number_of_local_dofs()
-        face2dof = bm.full((NF, 2*ldof), -1, dtype=bm.int64)
         cell2dof = space.cell_to_dof()
+
+        face2dof = bm.full((NF, 2*ldof), -1, dtype=bm.int64)
+
         for i in range(TD+1):
-            lidx, = bm.nonzero(cell2facesign[:, i]) 
-            ridx, = bm.nonzero(~cell2facesign[:, i]) 
-            fidx = cell2face[:, i]   
-            face2dof[fidx[lidx], 0:ldof] = cell2dof[lidx] 
-            face2dof[fidx[ridx], ldof:2*ldof] = cell2dof[ridx]
-        # 处理边界面：把未赋值的一侧复制为已有的一侧
-        bc_faces = mesh.boundary_face_index()   # 你已有的边界索引
-        for f in bc_faces:
-            left = face2dof[f, 0:ldof]
-            right = face2dof[f, ldof:2*ldof]
-            # 若左侧未赋值（全为 -1），复制右侧；反之亦然
-            if bm.all(left == -1):
-                face2dof[f, 0:ldof] = right
-            if bm.all(right == -1):
-                face2dof[f, ldof:2*ldof] = left
-        # print(face2dof)
+            fidx = cell2face[:, i]
+            pos  = cell2facesign[:, i]
+            L = bm.nonzero(pos)[0]
+            R = bm.nonzero(~pos)[0]
+            
+            if R.size>0:
+                face2dof[fidx[R], 0:ldof]    = cell2dof[R]
+            if L.size>0:
+                face2dof[fidx[L], ldof:2*ldof] = cell2dof[L]
+
+        left  = face2dof[:, :ldof]
+        right = face2dof[:, ldof:]
+        # 用对侧 DOF 填补缺失侧（对应的矩阵块列/行乘以 jump 中的 0，不改变数值）
+        left_missing  = (left  < 0) & (right >= 0)
+        right_missing = (right < 0) & (left  >= 0)
+        left  = bm.where(left_missing,  right, left)
+        right = bm.where(right_missing, left,  right)
+        face2dof = bm.concatenate([left, right], axis=1)
+
         return face2dof[index]
 
     @enable_cache
     def fetch(self, space: _FS):
-        q = self.q
-        index = self.make_index(space)
         mesh = getattr(space, 'mesh', None)
-        p = getattr(space, 'p', None)
-        cm = mesh.entity_measure('face', index=index)
-        q = space.p+3 if self.q is None else self.q
+        index = self.make_index(space)
+        
+        q = space.p + 3 if self.q is None else self.q
         qf = mesh.quadrature_formula(q, 'face')
         bcs, ws = qf.get_quadrature_points_and_weights()
+
+        NC = mesh.number_of_cells()
         NF = mesh.number_of_faces()
         TD = mesh.top_dimension()
         GD = mesh.geo_dimension()
         NQ = len(ws)
-        NC = mesh.number_of_cells()
-        cell2face = mesh.cell_to_face()
-        cell2facesign = mesh.cell_to_face_sign()
-        ldof = space.number_of_local_dofs() # 单元上的所有的自由度的个数
-        face2dof = bm.zeros((NF, 2*ldof),dtype=bm.int32)
-        cell2dof = space.cell_to_dof()
-        val = bm.zeros((NF, NQ, 2*ldof,GD),dtype=bm.float64) 
-        n = mesh.face_unit_normal()
-        for i in range(TD+1): # 循环单元每个面
-            lidx, = bm.nonzero(cell2facesign[:, i]) # 单元是全局面的左边单元
-            ridx, = bm.nonzero(~cell2facesign[:, i]) # 单元是全局面的右边单元
-            fidx = cell2face[:, i] # 第 i 个面的全局编号)
-            face2dof[fidx[lidx], 0:ldof] = cell2dof[lidx] 
-            face2dof[fidx[ridx], ldof:2*ldof] = cell2dof[ridx]
-            b = bm.insert(bcs, i, 0, axis=1)
-            cval = space.basis(b)
-            cval = bm.broadcast_to(cval, (NF, cval.shape[1], cval.shape[2], GD))
-            # cval = bm.einsum('cql->cql', space.basis(b))
-            val[fidx[ridx, None],:, 0:ldof,:] = +cval[ridx[:, None],:, :,:]
-            val[fidx[lidx, None],:, ldof:2*ldof,:] = -cval[lidx[:, None],:, :,:]
-        bc_faces = mesh.boundary_face_index()
-        val[bc_faces] = -val[bc_faces]
-        val = val[index]
-        return bcs, ws, val, cm, index
+
+        fm = mesh.entity_measure('face', index=index)  # (NFs, )
+
+        cell2face = mesh.cell_to_face()               # (NC, TD+1)
+        # 单元内局部面的局部取向是否与该全局面的全局取向一致
+        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: “右/正”侧
+        ldof = space.number_of_local_dofs()
+
+        val_all = bm.zeros((NF, NQ, 2*ldof, GD), dtype=bm.float64) 
+
+        for i in range(TD+1):
+            # 每个单元的第 i 个局部面对应的全局面号
+            fidx = cell2face[:, i]                          # (NC,)
+            pos  = cell2facesign[:, i]                      # (NC,)  True/False
+
+            # 哪几个单元第 i 个局部面与全局面的取向一致
+            L = bm.nonzero(pos)[0]                          
+            # 哪几个单元第 i 个局部面与全局面的取向相反
+            R = bm.nonzero(~pos)[0]                         
+
+            # 面上的积分点是定义在“面参考域”里，而基函数评估需要“单元参考域”的重心坐标
+            b = bm.insert(bcs, i, 0, axis=1)                # (NQ, TD+1)
+
+            phi_ref = space.basis(b)                        # (1, NQ, ldof, GD)
+            phi = bm.broadcast_to(phi_ref, (NC, NQ, ldof, GD))
+
+            # 前半部分自由度是 R 侧, 后半部分自由度是 L 侧
+            if R.size > 0:
+                val_all[fidx[R], :, 0:ldof, :]   =  - phi[R, :, :, :]
+            if L.size > 0:
+                val_all[fidx[L], :, ldof:,  :]   =  + phi[L, :, :, :]
+
+        val = val_all[index] # (NFs, NQ, 2*ldof, GD)
+
+        return ws, val, fm
 
     @variantmethod
     def assembly(self, space: _FS) -> TensorLike:
-        mesh = getattr(space, 'mesh', None)
-        bcs, ws, phi, cm, index = self.fetch(space)
 
-        KE = -bm.einsum('q, f, fqid, fqjd -> fij', ws, cm, phi, phi)
+        ws, phi_jump, fm = self.fetch(space)
+        hF = fm
+
+        KE = -bm.einsum('q, f, fqid, fqjd -> fij', ws, fm / hF, phi_jump, phi_jump)
 
         return KE

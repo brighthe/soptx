@@ -59,7 +59,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
 
     @variantmethod('lfa_exact_solution')
-    def run(self, model_type: str = 'BoxPoly3d') -> TensorLike:
+    def run(self, model_type: str = 'BoxTri2d') -> TensorLike:
 
         if model_type == 'BoxTri2d':
             from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
@@ -137,7 +137,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
         plt.show()
 
-        return self.uh
+        return uh
     
 
     @run.register('lfa_test_assembly')

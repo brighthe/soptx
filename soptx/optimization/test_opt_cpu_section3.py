@@ -37,7 +37,7 @@ class DensityTopOptTest(BaseLogged):
         # mesh_type = 'uniform_aligned_tri'
         mesh_type = 'uniform_crisscross_tri'
 
-        space_degree = 6
+        space_degree = 1
         # integration_order = space_degree + 1 # 张量网格
         integration_order = space_degree**2 + 2  # 单纯形网格
 

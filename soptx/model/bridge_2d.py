@@ -48,15 +48,8 @@ class Bridge2dSingleLoadData(PDEBase):
         self._plane_type = plane_type
 
         self._eps = 1e-12
-        self._force_type = 'concentrated'
+        self._load_type = 'concentrated'
         self._boundary_type = 'dirichlet'
-
-        self._log_info(f"Initialized Bridge2dData (Full Domain) with domain={self._domain}, "
-                f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
-                f"support_height_ratio={support_height_ratio}, "
-                f"plane_type='{self._plane_type}', "
-                f"force_type='{self._force_type}', "
-                f"boundary_type='{self._boundary_type}'")
 
 
     #######################################################################################################################
@@ -171,6 +164,7 @@ class Bridge2dSingleLoadData(PDEBase):
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
+
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
@@ -216,7 +210,7 @@ class Bridge2dDoubleLoadData(PDEBase):
     - ε = (∇u + ∇u^T)/2 is the strain tensor
     
     几何参数:
-        矩形域, 左右两端下半部分固支, 底部中点施加向下集中载荷
+        矩形域, 左右两端下半部分固支, 顶部和底部中点各施加向下集中载荷
     
     Material parameters:
         E = 1, nu = 0.35 (compressible) or 0.5 (incompressible)
@@ -246,8 +240,8 @@ class Bridge2dDoubleLoadData(PDEBase):
         self._plane_type = plane_type
 
         self._eps = 1e-12
-        self._force_type = 'concentrated'
-        self._boundary_type = 'dirichlet'
+        self._load_type = 'concentrated'
+        self._boundary_type = 'mixed'
 
 
     #######################################################################################################################
@@ -318,40 +312,97 @@ class Bridge2dDoubleLoadData(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        """
-        定义体力（两点集中载荷）
-        底部中点和顶部中点各施加向下的集中载荷 F = -2
-        """
-        domain = self.domain
-        x, y = points[..., 0], points[..., 1]   
+        kwargs = bm.context(points)
 
-        # 域的中点x坐标
+        return bm.zeros(points.shape, **kwargs)
+    
+    def get_neumann_loads(self):
+       """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
+       if self._load_type == 'concentrated':
+            
+            @cartesian
+            def concentrated_force(points: TensorLike) -> TensorLike:
+                """
+                定义集中载荷（两点载荷）
+                底部中点和顶部中点各施加向下的集中载荷 F = -2
+                """
+                domain = self.domain
+                x, y = points[..., 0], points[..., 1]   
+
+                # 域的中点x坐标
+                mid_x = (domain[0] + domain[1]) / 2  
+                
+                # 底部中点载荷
+                coord_bottom = (
+                    (bm.abs(x - mid_x) < self._eps) & 
+                    (bm.abs(y - domain[2]) < self._eps)
+                )
+                
+                # 顶部中点载荷  
+                coord_top = (
+                    (bm.abs(x - mid_x) < self._eps) & 
+                    (bm.abs(y - domain[3]) < self._eps)
+                )
+                
+                kwargs = bm.context(points)
+                val = bm.zeros(points.shape, **kwargs)
+                
+                # 两个载荷点都施加 -2 的向下力
+                val = bm.set_at(val, (coord_bottom, 1), self._T1)  # -2
+                val = bm.set_at(val, (coord_top, 1), self._T2)     # -2
+                
+                return val
+            
+            return concentrated_force
+       
+       elif self._load_type == 'distributed':
+           
+           pass
+       
+       else:
+                raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
+       
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """
+        Neumann 边界条件: 表面力向量 t = (t_x, t_y) = (0, -2)
+        在底部和顶部中点都施加向下的力
+        """
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (..., 1), self._T1) 
+        
+        return val
+    
+    @cartesian
+    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
         mid_x = (domain[0] + domain[1]) / 2  
         
-        # 底部中点载荷
         coord_bottom = (
             (bm.abs(x - mid_x) < self._eps) & 
             (bm.abs(y - domain[2]) < self._eps)
         )
         
-        # 顶部中点载荷  
         coord_top = (
             (bm.abs(x - mid_x) < self._eps) & 
             (bm.abs(y - domain[3]) < self._eps)
         )
         
-        kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
+        coord = (coord_bottom | coord_top)
         
-        # 两个载荷点都施加 -2 的向下力
-        val = bm.set_at(val, (coord_bottom, 1), self._T1)  # -2
-        val = bm.set_at(val, (coord_top, 1), self._T2)     # -2
-        
-        return val
+        return coord
     
+    def is_neumann_boundary(self) -> Callable:
+        
+        return self.is_neumann_boundary_dof
+ 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
+
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian

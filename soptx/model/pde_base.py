@@ -37,13 +37,13 @@ class PDEBase(BaseLogged, ABC):
         return getattr(self, '_plane_type', 'unknown')
     
     @property
-    def force_type(self) -> str:
-        """载荷类型 (continuous, concentrated)"""
-        return getattr(self, '_force_type', 'unknown')
+    def load_type(self) -> str:
+        """载荷类型 (concentrated, distributed)"""
+        return getattr(self, '_load_type', 'unknown')
     
     @property
     def boundary_type(self) -> str:
-        """边界条件类型 (dirichlet, neumann, robin)"""
+        """边界条件类型 (dirichlet, neumann, mixed)"""
         return getattr(self, '_boundary_type', 'unknown')
 
 

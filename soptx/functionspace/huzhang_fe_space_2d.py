@@ -160,6 +160,7 @@ class HuZhangFEDof2d():
         p = self.p
         TD = self.mesh.top_dimension()
         NS = TD*(TD+1)//2 # 对称矩阵的自由度个数
+        
         return NS*(p+1)*(p+2)//2 
 
     def number_of_internal_local_dofs(self, doftype : str='cell') -> int:
@@ -248,10 +249,17 @@ class HuZhangFEDof2d():
         mesh = self.mesh
         ldof = self.number_of_local_dofs()
 
-        NC = mesh.number_of_cells()
-        cell = mesh.entity('cell')
+        if index is _S:
+            cell_indices = bm.arange(mesh.number_of_cells(), dtype=self.itype)
+        else:
+            cell_indices = index
+        
+        NC = len(cell_indices)
+
         edge = mesh.entity('edge')
-        c2e  = mesh.cell_to_edge()
+
+        cell = mesh.entity('cell')[cell_indices]
+        c2e  = mesh.cell_to_edge()[cell_indices]
 
         ndofs = self.cell_dofs.get_boundary_dof_from_dim(0)
         edofs = self.cell_dofs.get_boundary_dof_from_dim(1)
@@ -284,19 +292,92 @@ class HuZhangFEDof2d():
             idx += n
 
         # 单元自由度
-        c2d[:, idx:] = cell2idof
+        c2d[:, idx:] = cell2idof[cell_indices]
+
         return c2d
 
-    def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
+    def is_boundary_dof(self, threshold: Optional[Threshold]=None, method='barycenter') -> TensorLike:
         """
-        Get the bool array of the boundary dofs.
+        获取边界自由度的布尔数组
+        
+        Parameters
+        ----------
+        threshold : callable, optional
+            边界判断函数，接受点坐标返回布尔数组
+            如果为 None，返回全 False
+        method : str, optional
+            判断边/单元是否在边界的方法：
+            - 'barycenter': 使用边中点/单元中心判断（默认）
+            - 'node': 使用端点判断（边的任一端点在边界则边在边界）
+        
+        Returns
+        -------
+        isDDof : TensorLike
+            边界自由度的布尔数组，长度为全局自由度数
         """
-        pass
+        mesh = self.mesh
+        gdof = self.number_of_global_dofs()
+        
+        # 如果没有提供 threshold，返回全 False
+        if threshold is None:
+            return bm.zeros(gdof, dtype=bm.bool, device=self.device)
+        
+        # threshold 必须是函数
+        if not callable(threshold):
+            raise NotImplementedError("threshold must be a callable function")
+        
+        # 初始化边界自由度数组
+        isDDof = bm.zeros(gdof, dtype=bm.bool, device=self.device)
+        
+        # 获取自由度映射
+        node2idof = self.node_to_internal_dof()
+        edge2idof = self.edge_to_internal_dof()
+        cell2idof = self.cell_to_internal_dof()
+        
+        # 1. 处理节点自由度
+        nodes = mesh.entity('node')
+        is_bd_node = threshold(nodes)
+        
+        bd_node_indices = bm.where(is_bd_node)[0]
+        for node_idx in bd_node_indices:
+            isDDof[node2idof[node_idx]] = True
+        
+        # 2. 处理边自由度
+        if method == 'barycenter':
+            # 使用边的重心（中点）判断
+            edge_centers = mesh.entity_barycenter('edge')
+            is_bd_edge = threshold(edge_centers)
+        elif method == 'node':
+            # 使用边的端点判断：任一端点在边界则边在边界
+            edge = mesh.entity('edge')
+            is_bd_edge = is_bd_node[edge[:, 0]] | is_bd_node[edge[:, 1]]
+        else:
+            raise ValueError(f"Unknown method: {method}, must be 'barycenter' or 'node'")
+        
+        bd_edge_indices = bm.where(is_bd_edge)[0]
+        for edge_idx in bd_edge_indices:
+            isDDof[edge2idof[edge_idx]] = True
+        
+        # 3. 处理单元自由度
+        if method == 'barycenter':
+            cell_centers = mesh.entity_barycenter('cell')
+            is_bd_cell = threshold(cell_centers)
+            
+            bd_cell_indices = bm.where(is_bd_cell)[0]
+            for cell_idx in bd_cell_indices:
+                isDDof[cell2idof[cell_idx]] = True
+        
+        return isDDof
 
 class HuZhangFESpace2d(FunctionSpace):
     def __init__(self, mesh, p: int=1, ctype='C'):
         self.mesh = mesh
         self.p = p
+
+        cell_type = mesh.entity('cell').shape[1]
+        if cell_type != 3:
+            raise ValueError("HuZhangFESpace only support the simplicial mesh in 2D, "
+                             "but the cell type of the mesh is {}".format(cell_type))
 
         self.dof = HuZhangFEDof2d(mesh, p)
 
@@ -348,8 +429,9 @@ class HuZhangFESpace2d(FunctionSpace):
             gd: Union[Callable, int, float, TensorLike],
             uh: Optional[TensorLike] = None,
             *, threshold: Optional[Threshold]=None, method=None) -> TensorLike:
-        #return self.function(uh), isDDof
-        pass
+        isDDof = self.is_boundary_dof(threshold=threshold, method=method)
+
+        print("--------------")
 
     set_dirichlet_bc = boundary_interpolate
 
@@ -426,7 +508,7 @@ class HuZhangFESpace2d(FunctionSpace):
 
         nsframe, esframe, csframe = self.basis_frame_of_S()
 
-        phi_s = self.mesh.shape_function(bc, self.p, index=index) # (NC, NQ, ldof)
+        phi_s = self.mesh.shape_function(bc, self.p, index=index) # (NQ, LDOF)
 
         NQ = bc.shape[0]
         phi = bm.zeros((NC, NQ, ldof, 3), dtype=self.ftype)
@@ -469,6 +551,114 @@ class HuZhangFESpace2d(FunctionSpace):
             phi[..., idx:, :] = scalar_part * tensor_part
 
         return phi
+
+    # face_basis = basis
+    # edge_basis = basis
+
+    @barycentric
+    def cell_basis_on_face(self, bc: TensorLike, index: Index=_S) -> TensorLike:
+        """
+        在面的积分点上计算所属单元的基函数
+        
+        这个函数专门用于边界积分, 例如计算 <u_D, τ·n>_Γ
+        
+        Parameters
+        ----------
+        bc: 边上的重心坐标 (NQ, 2)
+        index: 边的索引（边界边的全局索引）
+        
+        Returns
+        -------
+        phi: 单元基函数在边上的值 (NF, NQ, LDOF, 3)
+            其中 LDOF 是单元的全部局部自由度数
+        """
+        p = self.p
+        mesh = self.mesh
+        dof = self.dof
+        
+        NF = len(index) if isinstance(index, TensorLike) else mesh.number_of_edges()
+        NQ = bc.shape[0]
+        ldof = dof.number_of_local_dofs()  # 单元的全部局部自由度
+        
+        # 获取边与单元的拓扑关系
+        face2cell = mesh.face_to_cell(index)
+        cell_index = face2cell[:, 0]  # 左侧单元（边界边只有左侧单元）
+        local_face_idx = face2cell[:, 2]  # 边在单元中的局部编号
+        
+        # 将边的重心坐标转换为单元的重心坐标
+        # bc 是边的重心坐标 (NQ, 2)，需要转换为三角形的重心坐标 (NQ, 3)
+        NLF = mesh.number_of_faces_of_cells()  # 三角形有3条边
+        cbcs = mesh.update_bcs(bc, 'cell')  # 转换后的单元重心坐标列表
+        
+        # 初始化结果
+        result = bm.zeros((NF, NQ, ldof, 3), dtype=self.ftype, device=self.device)
+        
+        # 获取所需的自由度信息
+        ndofs = dof.cell_dofs.get_boundary_dof_from_dim(0)
+        edofs = dof.cell_dofs.get_boundary_dof_from_dim(1)
+        iedofs = dof.cell_dofs.get_internal_dof_from_dim(1)
+        icdofs = dof.cell_dofs.get_internal_dof_from_dim(2)
+        
+        cell = mesh.entity('cell')[cell_index]
+        c2e = mesh.cell_to_edge()[cell_index]
+        
+        nsframe, esframe, csframe = self.basis_frame_of_S()
+        
+        # 对每条边，根据其在单元中的局部位置计算基函数
+        for i in range(NLF):
+            # 找到局部编号为 i 的边
+            tag = bm.where(local_face_idx == i)[0]
+            if len(tag) == 0:
+                continue
+            
+            # 在对应的单元重心坐标下计算标量基函数
+            phi_s = mesh.shape_function(cbcs[i], p)  # (NQ, ldof_scalar)
+            phi_s = phi_s[None, :, :, None]  # (1, NQ, ldof_scalar, 1)
+            
+            # 当前批次的单元索引
+            curr_cells = cell_index[tag]
+            curr_cell = cell[tag]
+            curr_c2e = c2e[tag]
+            
+            # 计算基函数的每个部分
+            idx = 0
+            
+            # 节点基函数
+            for v, vdof in enumerate(ndofs):
+                N = len(vdof)
+                scalar_phi_idx = multiindex_to_number(vdof.dof_scalar)
+                scalar_part = phi_s[:, :, scalar_phi_idx, :]  # (1, NQ, N, 1)
+                tensor_part = nsframe[curr_cell[:, v]][:, None, vdof.dof_tensor, :]  # (NF_i, 1, N, 3)
+                result[tag, :, idx:idx+N, :] = scalar_part * tensor_part
+                idx += N
+            
+            # 边界边基函数
+            for e, edof in enumerate(edofs):
+                N = len(edof)
+                scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
+                scalar_part = phi_s[:, :, scalar_phi_idx, :]
+                tensor_part = esframe[curr_c2e[:, e]][:, None, edof.dof_tensor, :]
+                result[tag, :, idx:idx+N, :] = scalar_part * tensor_part
+                idx += N
+            
+            # 边内部基函数
+            for e, edof in enumerate(iedofs):
+                N = len(edof)
+                scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
+                scalar_part = phi_s[:, :, scalar_phi_idx, :]
+                tensor_part = esframe[curr_c2e[:, e]][:, None, edof.dof_tensor, :]
+                result[tag, :, idx:idx+N, :] = scalar_part * tensor_part
+                idx += N
+            
+            # 单元内部基函数（气泡函数）
+            n = mesh.geo_dimension()
+            if p >= n + 1:
+                scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
+                scalar_part = phi_s[:, :, scalar_phi_idx, :]
+                tensor_part = csframe[curr_cells][:, None, icdofs[0].dof_tensor, :]
+                result[tag, :, idx:, :] = scalar_part * tensor_part
+        
+        return result
 
     def div_basis(self, bc: TensorLike): 
         p = self.p

@@ -34,17 +34,11 @@ class HalfMBBBeam2dData(PDEBase):
         
         self._T = T
         self._E, self._nu = E, nu
-
         self._eps = 1e-12
+        
         self._plane_type = 'plane_stress'
-        self._force_type = 'concentrated'
-        self._boundary_type = 'dirichlet'
-
-        self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
-                f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
-                f"plane_type='{self._plane_type}', "
-                f"force_type='{self._force_type}', "
-                f"boundary_type='{self._boundary_type}'")
+        self._load_type = 'concentrated'
+        self._boundary_type = 'mixed'
 
 
     #######################################################################################################################
@@ -144,19 +138,38 @@ class HalfMBBBeam2dData(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        domain = self._domain
-
-        x, y = points[..., 0], points[..., 1]   
-
-        coord = (
-            (bm.abs(x - domain[0]) < self._eps) & 
-            (bm.abs(y - domain[3]) < self._eps)
-        )
         kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (coord, 1), self._T)
-# 
-        return val
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    def get_neumann_loads(self):
+       
+       if self._load_type == 'concentrated':
+            
+            @cartesian
+            def concentrated_force(points: TensorLike) -> TensorLike:
+                domain = self._domain
+                x, y = points[..., 0], points[..., 1]   
+
+                coord = (
+                    (bm.abs(x - domain[0]) < self._eps) & 
+                    (bm.abs(y - domain[3]) < self._eps)
+                )
+                kwargs = bm.context(points)
+                val = bm.zeros(points.shape, **kwargs)
+
+                val = bm.set_at(val, (coord, 1), self._T)
+        
+                return val
+            
+            return concentrated_force
+       
+       elif self._load_type == 'distributed':
+           
+           pass
+       
+       else:
+                raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
     
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:

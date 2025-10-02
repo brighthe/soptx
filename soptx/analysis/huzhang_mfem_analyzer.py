@@ -4,7 +4,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.mesh import HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from fealpy.fem import BlockForm, BilinearForm, LinearForm, VectorSourceIntegrator
+from fealpy.fem import BlockForm, BilinearForm, LinearForm
 from fealpy.decorator.variantmethod import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
@@ -12,6 +12,8 @@ from soptx.functionspace.huzhang_fe_space import HuZhangFESpace
 from soptx.analysis.integrators.huzhang_stress_integrator import HuZhangStressIntegrator
 from soptx.analysis.integrators.huzhang_mix_integrator import HuZhangMixIntegrator
 from soptx.analysis.integrators.jump_penalty_integrator import JumpPenaltyIntegrator
+from soptx.analysis.integrators.source_integrator import SourceIntegrator
+from soptx.analysis.integrators.face_source_integrator import BoundaryFaceSourceIntegrator
 from soptx.model.pde_base import PDEBase
 from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
 from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
@@ -103,28 +105,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
         """获取当前的刚度矩阵"""
-        if self._K is None:
-            self._K = self.assemble_stiff_matrix()
-
         return self._K
     
     @property
     def force_vector(self) -> Union[TensorLike, COOTensor]:
         """获取当前的载荷向量"""
-        if self._F is None:
-            self._F = self.assemble_force_vector()
-
         return self._F
-    
-    @property
-    def scalar_space(self) -> LagrangeFESpace:
-        """获取标量函数空间"""
-        return self._scalar_space
-    
-    @property
-    def tensor_space(self) -> TensorFunctionSpace: 
-        """获取张量函数空间"""
-        return self._tensor_space
     
 
     ##############################################################################################
@@ -188,7 +174,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             space0 = self._huzhang_space
             space1 = self._tensor_space
 
-            lambda0, lambda1 = self._pde.stress_matrix_coefficient()
+            lambda0, lambda1 = self._stress_matrix_coefficient()
 
             bform1 = BilinearForm(space0)
             bform1.add_integrator(HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1))
@@ -219,40 +205,45 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 t.send(None)
 
         return K
+    
+    def _initialize_force_vector(self) -> TensorLike:
+        """初始化力向量
+        
+        在混合空间中, 力向量的结构为:
+        F = [F_sigma; F_u]
+        其中 F_sigma 对应应力空间, F_u 对应位移空间
+        """
+        gdof_sigma = self._huzhang_space.number_of_global_dofs()
+        gdof_u = self._tensor_space.number_of_global_dofs()
+        gdof_total = gdof_sigma + gdof_u
+        
+        F = bm.zeros(gdof_total, dtype=bm.float64, device=self._tensor_space.device)
 
-    def assemble_force_vector(self,
+        return F
+
+    def assemble_body_force_vector(self,
                             enable_timing: bool = False,
                         ) -> Union[TensorLike, COOTensor]:
+        """组装体力对应的体积分"""
         t = None
         if enable_timing:
             t = timer(f"组装载荷向量")
 
         body_force = self._pde.body_force
-        force_type = self._pde.force_type
 
-        space0 = self._huzhang_space
-        space1 = self._tensor_space
+        space_sigmah = self._huzhang_space
+        space_uh = self._tensor_space
 
-        gdof0 = space0.number_of_global_dofs()
-        gdof1 = space1.number_of_global_dofs()
+        gdof_sigmah = space_sigmah.number_of_global_dofs()
 
-        if force_type == 'concentrated':
-            # NOTE F.dtype == TensorLike
-            F_u = self._tensor_space.interpolate(body_force)
-        
-        elif force_type == 'distribution':
-            # NOTE F.dtype == COOTensor or TensorLike
-            integrator = VectorSourceIntegrator(source=body_force, q=self._integration_order)
-            lform = LinearForm(space1)
-            lform.add_integrator(integrator)
-            F_u = lform.assembly(format='dense')
-        
-        else:
-            error_msg = f"Unsupported force type: {force_type}"
-            self._log_error(error_msg)
-        
-        F = bm.zeros(gdof0 + gdof1, dtype=F_u.dtype)
-        F[gdof0:] = -F_u # 负号不能少 !!!
+        # NOTE F.dtype == COOTensor or TensorLike
+        integrator = SourceIntegrator(source=body_force, q=self._integration_order)
+        lform = LinearForm(space_uh)
+        lform.add_integrator(integrator)
+        F_u = lform.assembly(format='dense')
+
+        F = self._initialize_force_vector()
+        F[gdof_sigmah:] = -F_u # 负号不能少 !!!
 
         if enable_timing:
             t.send('组装时间')
@@ -263,22 +254,63 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     def apply_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
         """应用边界条件"""
         boundary_type = self._pde.boundary_type
-        gdof = self._tensor_space.number_of_global_dofs()
 
-        gd = self._pde.dirichlet_bc
-        threshold = self._pde.is_dirichlet_boundary()
+        space_sigmah = self._huzhang_space
+        space_uh = self._tensor_space
 
-        if boundary_type == 'dirichlet':
-            # uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self._tensor_space.device)
-            # uh_bd, isBdDof = self._tensor_space.boundary_interpolate(
-            #                         gd=gd,
-            #                         threshold=threshold,
-            #                         method='interp'
-            #                     )
-            # F = F - K.matmul(uh_bd[:])
-            # F[isBdDof] = uh_bd[isBdDof]
+        gdof_sigmah = space_sigmah.number_of_global_dofs()
+        gdof_uh = space_uh.number_of_global_dofs()
 
-            # K = self._apply_matrix(A=K, isDDof=isBdDof)
+        if boundary_type == 'mixed':
+            # 1. Dirichlet 边界条件处理 - 弱形式施加
+            gd_uh = self._pde.dirichlet_bc
+            threshold_uh = self._pde.is_dirichlet_boundary()
+
+            integrator = BoundaryFaceSourceIntegrator(source=gd_uh, q=self._integration_order, threshold=threshold_uh)
+            lform = LinearForm(space_sigmah)
+            lform.add_integrator(integrator)
+            F_sigma = lform.assembly(format='dense')
+
+            F[:gdof_sigmah] += F_sigma
+
+            self._F = F
+
+            # 2. Neumann 边界条件处理 - 强形式施加
+            gd_sigmah = self._pde.neumann_bc
+            threshold_sigmah = self._pde.is_neumann_boundary()
+
+            sigmah_bd = bm.zeros(gdof_sigmah, dtype=bm.float64, device=space_sigmah.device)
+            sigmah_bd, isBdDof_sigmah = space_sigmah.boundary_interpolate(gd=gd_sigmah, threshold=threshold_sigmah, method='barycenter')
+
+            source_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
+            source_bd[:gdof_sigmah] = sigmah_bd
+
+            F = F - K.matmul(source_bd[:])
+            F[:gdof_sigmah][isBdDof_sigmah] = sigmah_bd[isBdDof_sigmah]
+
+            isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
+            isBdDof[:gdof_sigmah] = isBdDof_sigmah 
+
+            K = self._apply_matrix(A=K, isDDof=isBdDof)
+
+            return K, F
+
+        elif boundary_type == 'dirichlet':
+            # 弱形式施加
+            gd_uh = self._pde.dirichlet_bc
+            threshold_uh = self._pde.is_dirichlet_boundary()
+
+            integrator = BoundaryFaceSourceIntegrator(source=gd_uh, 
+                                                    q=self._integration_order, 
+                                                    threshold=threshold_uh,
+                                                    use_cell_basis=True)
+            lform = LinearForm(space_sigmah)
+            lform.add_integrator(integrator)
+            F_sigma = lform.assembly(format='dense')
+
+            F[:gdof_sigmah] += F_sigma
+
+            self._F = F
 
             return K, F
 
@@ -322,7 +354,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('刚度矩阵组装时间')
 
-        F0 = self.assemble_force_vector()
+        F0 = self.assemble_body_force_vector()
         
         if enable_timing:
             t.send('载荷向量组装时间')
@@ -484,7 +516,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         else:
             error_msg = f"不支持的拓扑优化算法: {topopt_algorithm}"
             self._log_error(error_msg)
-            raise ValueError(error_msg)
     
     def _setup_function_spaces(self, 
                             mesh: HomogeneousMesh, 
@@ -503,81 +534,62 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         self._log_info(f"Tensor space DOF ordering: dof_priority")
 
-
-if __name__ == "__main__":
-    bm.set_backend('numpy')
-    # bm.set_default_device('cpu')
-
-    # from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
-    # pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
-    # # TODO 支持四边形网格
-    # pde.init_mesh.set('uniform_tri')
-    # nx, ny = 2, 2
-    # analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
-    # # TODO 支持 3 次以下
-    # space_degree = 3
-
-    from soptx.model.linear_elasticity_3d import BoxPolyHuZhangData3d
-    pde = BoxPolyHuZhangData3d(lam=1, mu=0.5)
-    # # TODO 支持六面体网格
-    pde.init_mesh.set('uniform_tet')
-    nx, ny, nz = 2, 2, 2
-    analysis_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
-    # # TODO 支持 3 次以下
-    space_degree = 4
-
-    integration_order = space_degree + 3
-
-    from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-    material = IsotropicLinearElasticMaterial(
-                                        lame_lambda=pde.lam, 
-                                        shear_modulus=pde.mu, 
-                                        plane_type=pde.plane_type,
-                                        enable_logging=False
-                                    )
-    maxit = 3
-    errorType = [
-                '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega,0}$',
-                '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$'
-                ]
-    errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
-    NDof = bm.zeros(maxit, dtype=bm.int32)
-    h = bm.zeros(maxit, dtype=bm.float64)
-
-    for i in range(maxit):
-        N = 2**(i+1) 
-
-        huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
-                            mesh=analysis_mesh,
-                            pde=pde,
-                            material=material,
-                            space_degree=space_degree,
-                            integration_order=integration_order,
-                            solve_method='mumps',
-                            topopt_algorithm=None,
-                            interpolation_scheme=None,
-                        )
+    def _stress_matrix_coefficient(self) -> tuple[float, float]:
+        """
+        材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1
         
-        uh_dof = huzhang_mfem_analyzer._tensor_space.number_of_global_dofs()
-        sigma_dof = huzhang_mfem_analyzer._huzhang_space.number_of_global_dofs()
-        NDof[i] = uh_dof + sigma_dof
-
-        sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
+        Returns
+        -------
+        lambda0: float
+            1/(2μ)
+        lambda1: float
+            λ/(2μ(dλ+2μ)), 其中 d=2 为空间维数
+        """
+        d = self._GD  # 使用类中已有的几何维度
         
-        e0 = analysis_mesh.error(uh, pde.disp_solution) 
-        e1 = analysis_mesh.error(sigmah, pde.stress_solution)
+        # 从材料对象获取 Lamé 参数
+        lam = self._material.lame_lambda
+        mu = self._material.shear_modulus
+        
+        lambda0 = 1.0 / (2 * mu)
+        lambda1 = lam / (2 * mu * (d * lam + 2 * mu))
+        
+        return lambda0, lambda1
 
-        h[i] = 1/N
-        errorMatrix[0, i] = e0
-        errorMatrix[1, i] = e1 
+    def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike) -> CSRTensor:
+        """
+        FEALPy 中的 apply_matrix 使用了 D0@A@D0, 
+        不同后端下 @ 会使用大量的 for 循环, 这在 GPU 下非常缓慢 
+        """
+        isIDof = bm.logical_not(isDDof)
+        crow = A.crow
+        col = A.col
+        indices_context = bm.context(col)
+        ZERO = bm.array([0], **indices_context)
 
-        if i < maxit - 1:
-            analysis_mesh.uniform_refine()
+        nnz_per_row = crow[1:] - crow[:-1]
+        remain_flag = bm.repeat(isIDof, nnz_per_row) & isIDof[col] # 保留行列均为内部自由度的非零元素
+        rm_cumsum = bm.concat([ZERO, bm.cumsum(remain_flag, axis=0)], axis=0) # 被保留的非零元素数量累积
+        nnz_per_row = rm_cumsum[crow[1:]] - rm_cumsum[crow[:-1]] + isDDof # 计算每行的非零元素数量
 
-    import matplotlib.pyplot as plt
-    from soptx.utils.show import showmultirate, show_error_table
+        new_crow = bm.cumsum(bm.concat([ZERO, nnz_per_row], axis=0), axis=0)
 
-    show_error_table(h, errorType, errorMatrix)
-    showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
-    plt.show()
-    print('------------------')
+        NNZ = new_crow[-1]
+        non_diag = bm.ones((NNZ,), dtype=bm.bool, device=bm.get_device(isDDof)) # Field: non-zero elements
+        loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
+        non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
+
+        # 修复：只选取适当数量的值对应设置
+        # 找出所有边界DOF对应的行索引
+        bd_rows = bm.where(loc_flag)[0]
+        new_col = bm.empty((NNZ,), **indices_context)
+        # 设置为相应行的边界 DOF 位置
+        new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)
+        # 设置非对角元素的列索引
+        new_col = bm.set_at(new_col, non_diag, col[remain_flag])
+
+        new_values = bm.empty((NNZ,), **A.values_context())
+        new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], 1.)
+        new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
+
+        return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)

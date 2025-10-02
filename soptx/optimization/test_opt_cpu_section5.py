@@ -244,10 +244,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_clamped_beam_2d')
     def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
         E = 30.0
-        # nu = 0.4   # 可压缩
+        nu = 0.4   # 可压缩
         # nu = 0.5    # 不可压缩
         # nu = 0.49    # 近不可压缩
-        nu = 0.4999 # 近不可压缩
+        # nu = 0.4999 # 近不可压缩
         plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
         
         from soptx.model.clamped_beam_2d import ClampedBeam2D, HalfClampedBeam2D
@@ -331,7 +331,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         elif analysis_method == 'huzhangfem':
             # TODO 支持低阶 1 <=p <= d
             huzhang_space_degree = 3
-            integration_order = huzhang_space_degree**2 + 2
+            integration_order = huzhang_space_degree + 4
             from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
             huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
                                         mesh=displacement_mesh,

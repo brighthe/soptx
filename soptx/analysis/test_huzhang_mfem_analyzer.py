@@ -24,19 +24,19 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
     @variantmethod('test')
     def run(self, test_demo: str = '2d_simplex') -> None:
-
+        """基于有真解的算例验证胡张混合有限元的正确性"""
         if test_demo == '2d_simplex':
             from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
-            pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
+            pde = BoxTriHuZhangData2d(domain=[0, 1, 0, 1], lam=1, mu=0.5)
             # TODO 支持四边形网格
             pde.init_mesh.set('uniform_tri')
             nx, ny = 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
             # TODO 支持 3 次以下
-            space_degree = 2
+            space_degree = 3
 
-            # 单纯性网格
-            integration_order = space_degree**2 + 2
+            # 单纯形网格
+            integration_order = space_degree + 4
 
             from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
             material = IsotropicLinearElasticMaterial(
@@ -109,6 +109,69 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             plt.show()
             print('------------------')
 
+    @run.register('test_huzhang')
+    def run(self, test_demo: str = 'bridge_2d_double_load') -> None:
+        """对于无真解的算例, 基于位移有限元的结果验证胡张混合有限元的结果的正确性"""
+        if test_demo == 'bridge_2d_double_load':
+
+            E = 1.0
+            nu = 0.35
+            from soptx.model.bridge_2d import Bridge2dDoubleLoadData
+            pde = Bridge2dDoubleLoadData(domain=[0, 1, 0, 1], 
+                                        T1 = -2.0, T2=-2.0,
+                                        E=E, nu=nu)
+            # TODO 支持四边形网格
+            pde.init_mesh.set('uniform_tri')
+            nx, ny = 2, 2
+            displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                youngs_modulus=pde.E,
+                                                poisson_ratio=pde.nu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
+            
+            ## 位移 Lagrange 有限元
+            space_degree = 3
+            # 单纯形网格
+            integration_order = space_degree + 4
+            from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+            lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                        mesh=displacement_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        space_degree=space_degree,
+                                        integration_order=integration_order,
+                                        assembly_method='standard',
+                                        solve_method='mumps',
+                                        topopt_algorithm=None,
+                                        interpolation_scheme=None,
+                                    )
+            uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
+
+            ## 位移应力混合 HuZhang 有限元
+            huzhang_space_degree = 3
+            integration_order = huzhang_space_degree + 4
+            from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
+            huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                        mesh=displacement_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        space_degree=huzhang_space_degree,
+                                        integration_order=integration_order,
+                                        solve_method='mumps',
+                                        topopt_algorithm=None,
+                                        interpolation_scheme=None,
+                                    )
+            sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
+            
+            print('------------------')
+
+        else:
+            raise NotImplementedError(f"The test_demo '{test_demo}' has not been implemented yet.")
+
     @run.register('test_jump_penalty_integrator')
     def run(self):
         from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
@@ -118,8 +181,18 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         nx, ny = 2, 2
         mesh = pde.init_mesh(nx=nx, ny=ny)
         GD = mesh.geo_dimension()
+
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.gca()
+        # mesh.add_plot(axes)
+        # mesh.find_node(axes, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
+        # mesh.find_face(axes, showindex=True, color='r', markersize=14, fontsize=18, fontcolor='r')
+        # mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
+        # plt.show()
+
         # TODO 支持 3 次以下
-        p = 2
+        p = 1
         q = p**2 + 2
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -132,14 +205,21 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
         scalar_space = LagrangeFESpace(mesh, p=p-1, ctype='D')
         tensor_space = TensorFunctionSpace(scalar_space, shape=(GD, -1))
+        ldof = tensor_space.number_of_local_dofs()
         gdof = tensor_space.number_of_global_dofs()
         from soptx.analysis.integrators.jump_penalty_integrator import JumpPenaltyIntegrator
-        # jpi = JumpPenaltyIntegrator(q=q)
-        # test = jpi.to_global_dof(tensor_space)
-        # KE_jump = jpi.assembly(tensor_space)
+        from soptx.analysis.integrators.jump_penalty_integrator_2 import JumpPenaltyIntergrator2
+        JPI = JumpPenaltyIntegrator(q=q)
+        JP12 = JumpPenaltyIntergrator2(q=q)
+
+        index = JPI.make_index(space=tensor_space)
+        test = JPI.to_global_dof(tensor_space)
+        KE_jump = JPI.assembly(tensor_space)
+
+        KE_jump2 = JP12.assembly(tensor_space)
         from fealpy.fem import BilinearForm
         bform = BilinearForm(tensor_space)
-        bform.add_integrator(JumpPenaltyIntegrator(q=q))
+        bform.add_integrator(JPI)
         K = bform.assembly()
         print("--------------")
 
@@ -147,6 +227,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    huzhang_analyzer.run.set('test')
-    # huzhang_analyzer.run.set('test_jump_penalty')
+    # huzhang_analyzer.run.set('test')
+    huzhang_analyzer.run.set('test_huzhang')
+    # huzhang_analyzer.run.set('test_jump_penalty_integrator')
     huzhang_analyzer.run()

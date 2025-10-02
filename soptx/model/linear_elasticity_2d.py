@@ -38,13 +38,10 @@ class BoxTriHuZhangData2d(PDEBase):
         
         self._lam, self._mu = lam, mu
         self._eps = 1e-12
-        self._plane_type = 'plane_strain'
-        self._force_type = 'distribution'
-        self._boundary_type = 'dirichlet'
 
-        self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
-                f"mesh_type='{mesh_type}', lam={lam}, mu={mu}, "
-                f"plane_type='{self._plane_type}', force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
+        self._plane_type = 'plane_strain'
+        self._load_type = None
+        self._boundary_type = 'dirichlet'
 
 
     #######################################################################################################################
@@ -73,6 +70,20 @@ class BoxTriHuZhangData2d(PDEBase):
                                     threshold=threshold, device=device)
         
         self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
+
+        return mesh
+    
+    @init_mesh.register('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 10)
+        ny = kwargs.get('ny', 10)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
 
         return mesh
     
@@ -301,14 +312,8 @@ class BoxTriLagrange2dData(PDEBase):
 
         self._eps = 1e-12
         self._plane_type = 'plane_strain'
-        self._force_type = 'distribution'
+        self._load_type = None
         self._boundary_type = 'dirichlet'
-
-        self._log_info(f"Initialized BoxTriLagrangeData2d with domain={self._domain}, "
-                       f"mesh_type='{mesh_type}', E={E}, nu={nu}, "
-                       f"plane_type='{self._plane_type}', "
-                       f"force_type='{self._force_type}', "
-                       f"boundary_type='{self._boundary_type}'")
 
 
     #######################################################################################################################

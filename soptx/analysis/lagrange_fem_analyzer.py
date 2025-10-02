@@ -6,7 +6,7 @@ from fealpy.mesh import SimplexMesh, HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from fealpy.fem import BilinearForm, LinearForm
 from fealpy.fem import VectorSourceIntegrator
-from fealpy.decorator.variantmethod import variantmethod
+from fealpy.decorator import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
 from ..interpolation.linear_elastic_material import LinearElasticMaterial
@@ -105,17 +105,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
         """获取当前的刚度矩阵"""
-        if self._K is None:
-            self._K = self.assemble_stiff_matrix()
-
         return self._K
     
     @property
     def force_vector(self) -> Union[TensorLike, COOTensor]:
         """获取当前的载荷向量"""
-        if self._F is None:
-            self._F = self.assemble_force_vector()
-
         return self._F
     
     @property
@@ -185,12 +179,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                             integration_order=self._integration_order
                                         )
         elif self._topopt_algorithm == 'level_set':
-        
             pass
         
         else:
-        
-            pass
+            raise NotImplementedError(f"未知的拓扑优化算法: {self._topopt_algorithm}")
 
         # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
@@ -206,42 +198,61 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return K
 
-    def assemble_force_vector(self) -> Union[TensorLike, COOTensor]:
-        """组装全局载荷向量"""
+    def assemble_body_force_vector(self) -> Union[TensorLike, COOTensor]:
+        """组装体力对应的体积分"""
         body_force = self._pde.body_force
-        force_type = self._pde.force_type
 
-        if force_type == 'concentrated':
-            
-            # NOTE F.dtype == TensorLike
-            F = self._tensor_space.interpolate(body_force)
-
-        elif force_type == 'distribution':
-            
-            # NOTE F.dtype == COOTensor or TensorLike
-            integrator = VectorSourceIntegrator(source=body_force, q=self._integration_order)
-            lform = LinearForm(self.tensor_space)
-            lform.add_integrator(integrator)
-            F = lform.assembly(format='dense')
+        # NOTE F.dtype == COOTensor or TensorLike
+        integrator = VectorSourceIntegrator(source=body_force, q=self._integration_order)
+        lform = LinearForm(self.tensor_space)
+        lform.add_integrator(integrator)
+        F = lform.assembly(format='dense')
         
-        else:
-            
-            error_msg = f"Unsupported force type: {force_type}"
-            self._log_error(error_msg)
-        
-        self._F = F
-
         return F
 
     def apply_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
         """应用边界条件"""
-        boundary_type = self._pde.boundary_type
         gdof = self._tensor_space.number_of_global_dofs()
+        
+        boundary_type = self._pde.boundary_type
+        load_type = self._pde.load_type
 
-        gd = self._pde.dirichlet_bc
-        threshold = self._pde.is_dirichlet_boundary()
+        if boundary_type == 'mixed':
+            # 1. Neumann 边界条件处理 - 弱形式施加
+            neumann_loads_func = self._pde.get_neumann_loads()
 
-        if boundary_type == 'dirichlet':
+            if load_type == 'concentrated':
+                F_concentrated = self._tensor_space.interpolate(neumann_loads_func)
+                F += F_concentrated
+            elif load_type == 'distributed':
+                pass
+            else:
+                raise NotImplementedError(f"不支持的载荷类型: {load_type}")
+            
+            self._F = F
+
+            # 2. Dirichlet 边界条件处理 - 强形式施加
+            gd = self._pde.dirichlet_bc
+            threshold = self._pde.is_dirichlet_boundary()
+
+            uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self._tensor_space.device)
+            uh_bd, isBdDof = self._tensor_space.boundary_interpolate(
+                                                                    gd=gd,
+                                                                    threshold=threshold,
+                                                                    method='interp'
+                                                                )
+            F = F - K.matmul(uh_bd[:])
+            F[isBdDof] = uh_bd[isBdDof]
+
+            K = self._apply_matrix(A=K, isDDof=isBdDof)
+
+            return K, F
+
+        elif boundary_type == 'dirichlet':
+            # 强形式施加
+            gd = self._pde.dirichlet_bc
+            threshold = self._pde.is_dirichlet_boundary()
+        
             uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self._tensor_space.device)
             uh_bd, isBdDof = self._tensor_space.boundary_interpolate(
                                     gd=gd,
@@ -359,7 +370,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                         ny=ny_u, 
                                                         data_flat=B_eg_reshaped, 
                                                         n_sub=n_sub) # (NC, n_sub, NQ, 3, TLDOF) or (NC, n_sub, NQ, 6, TLDOF)
-            # B_eg = B_eg_reshaped.reshape(NC, n_sub, NQ, B_eg_reshaped.shape[-2], B_eg_reshaped.shape[-1])
 
             # 位移单元 → 子密度单元的缩放
             J_g = 1 / n_sub
@@ -558,7 +568,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 self._log_error(error_msg)
     
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-        F0 = self.assemble_force_vector()
+        F0 = self.assemble_body_force_vector()
         K, F = self.apply_bc(K0, F0)
 
         solver_type = kwargs.get('solver', 'mumps')
@@ -588,7 +598,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 raise ValueError(error_msg)
             
         K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
-        F0 = self.assemble_force_vector()
+        F0 = self.assemble_body_force_vector()
         K, F = self.apply_bc(K0, F0)
 
         maxiter = kwargs.get('maxiter', 5000)
