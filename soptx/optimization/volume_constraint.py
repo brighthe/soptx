@@ -208,14 +208,14 @@ class VolumeConstraint(BaseLogged):
             return dg
         
         elif self._density_location in ['node']:
-        
-            qf = self._mesh.quadrature_formula(self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
 
             mesh = self._mesh
-            s_space = self._scalar_space
+            density_space = density.space
 
-            phi = s_space.basis(bcs)[0] # (NQ, NCN)
+            qf = mesh.quadrature_formula(self._integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+
+            phi = density_space.basis(bcs)[0] # (NQ, NCN)
 
             if isinstance(mesh, SimplexMesh):
                 cell_measure = self._mesh.entity_measure('cell')
@@ -229,7 +229,7 @@ class VolumeConstraint(BaseLogged):
             cell2node = mesh.cell_to_node() # (NC, NCN)
 
             dg = bm.zeros((NN, ), dtype=bm.float64, device=self._mesh.device) # (NN, )
-            dg = bm.add_at(dg, cell2node.reshape(-1), dg_e.reshape(-1)) # (NN,)
+            dg = bm.add_at(dg, cell2node.reshape(-1), dg_e.reshape(-1)) # (NN, )
 
             return dg
 

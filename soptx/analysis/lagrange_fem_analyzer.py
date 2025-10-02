@@ -384,7 +384,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         elif density_location in ['node']:
             
             mesh = self._mesh
-            s_space = self._scalar_space
             qf = mesh.quadrature_formula(q=self._integration_order)
             # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
             bcs, ws = qf.get_quadrature_points_and_weights()
@@ -398,10 +397,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
             diff_coef_q = self._interpolation_scheme.interpolate_derivative(
                                                     material=self._material, 
                                                     density_distribution=rho_q
-                                                ) # (NC, NQ) 
+                                                ) # (NC, NQ)
+            
+            rho_space = rho_val.space
+            u_space = self._scalar_space
 
             # 高斯积分点处的基函数
-            phi = s_space.basis(bcs)[0] # (NQ, NCN)
+            phi = rho_space.basis(bcs)[0] # (NQ, NCN)
             if (bm.any(bm.isnan(phi[:])) or bm.any(bm.isinf(phi[:])) or 
                 bm.any(phi[:] < -1e-12) or bm.any(phi[:] > 1 + 1e-12)):
                 self._log_error(f"密度的形函数超出范围 [0, 1]: "
@@ -410,7 +412,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3), 3D: (6, 6)
             dof_priority = self._tensor_space.dof_priority
-            gphi = s_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
+            gphi = u_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
             B = self._material.strain_displacement_matrix(
                                     dof_priority=dof_priority, 
                                     gphi=gphi
