@@ -39,7 +39,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         # 验证拓扑优化算法与插值方案的匹配性
         self._validate_topopt_config(topopt_algorithm, interpolation_scheme)
-
         
         # 私有属性（建议通过属性访问器访问，不要直接修改）
         self._mesh = mesh

@@ -38,8 +38,8 @@ class DensityTopOptTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri'
 
         space_degree = 1
-        # integration_order = space_degree + 1 # 张量网格
-        integration_order = space_degree**2 + 2  # 单纯形网格
+        integration_order = space_degree + 1 # 张量网格
+        # integration_order = space_degree**2 + 2  # 单纯形网格
 
         volume_fraction = 0.5
         penalty_factor = 3.0
@@ -51,12 +51,12 @@ class DensityTopOptTest(BaseLogged):
         # 'standard', 'voigt'
         assembly_method = 'standard'
 
-        optimizer_algorithm = 'oc'  # 'oc', 'mma'
+        optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 500
         tolerance = 1e-2
         use_penalty_continuation = False
 
-        filter_type = 'none' # 'none', 'sensitivity', 'density'
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 2.4
 
         from soptx.model.mbb_beam_2d import HalfMBBBeam2dData
@@ -209,9 +209,6 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
-    @run.register('test_element_node')
-    def run(self, density_type: str = 'element') -> Union[TensorLike, OptimizationHistory]:
-        pass
 
 
 

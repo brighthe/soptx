@@ -204,7 +204,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         # NOTE F.dtype == COOTensor or TensorLike
         integrator = VectorSourceIntegrator(source=body_force, q=self._integration_order)
-        lform = LinearForm(self.tensor_space)
+        lform = LinearForm(self._tensor_space)
         lform.add_integrator(integrator)
         F = lform.assembly(format='dense')
         
@@ -219,16 +219,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         if boundary_type == 'mixed':
             # 1. Neumann 边界条件处理 - 弱形式施加
-            neumann_loads_func = self._pde.get_neumann_loads()
 
             if load_type == 'concentrated':
-                F_concentrated = self._tensor_space.interpolate(neumann_loads_func)
-                F += F_concentrated
+                neumann_loads_func = self._pde.get_neumann_loads()
+                F_sigmah = self._tensor_space.interpolate(neumann_loads_func)
+
             elif load_type == 'distributed':
-                pass
+                gd_sigmah = self._pde.neumann_bc
+                threshold_sigmah = self._pde.is_neumann_boundary()
+                from soptx.analysis.integrators.face_source_integrator_lfem import BoundaryFaceSourceIntegrator_lfem
+                integrator = BoundaryFaceSourceIntegrator_lfem(source=gd_sigmah, q=self._integration_order, threshold=threshold_sigmah)
+                lform = LinearForm(self._tensor_space)
+                lform.add_integrator(integrator)
+                F_sigmah = lform.assembly(format='dense')
+                
             else:
                 raise NotImplementedError(f"不支持的载荷类型: {load_type}")
             
+            F += F_sigmah
             self._F = F
 
             # 2. Dirichlet 边界条件处理 - 强形式施加

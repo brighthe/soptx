@@ -211,20 +211,20 @@ class Bridge2dDoubleLoadData(PDEBase):
     
     几何参数:
         矩形域, 左右两端下半部分固支, 顶部和底部中点各施加向下集中载荷
-    
-    Material parameters:
-        E = 1, nu = 0.35 (compressible) or 0.5 (incompressible)
 
-    For isotropic materials:
-        σ = 2με + λtr(ε)I
+    载荷类型:
+        集中载荷(点力) (单位 - N)
+    
+    材料参数:
+        E_s = 1, nu_s = 0.35 (compressible) or 0.5 (incompressible)
     '''
     def __init__(self,
                 domain: List[float] = [0, 80, 0, 40], 
                 mesh_type: str = 'uniform_quad',
-                T1: float = -2.0,  # 向下的集中载荷
-                T2: float = -2.0,  # 向下的集中载荷
+                p1: float = -2.0,  
+                p2: float = -2.0,  
                 E: float = 1.0, 
-                nu: float = 0.35,  # 默认使用可压缩材料
+                nu: float = 0.35,  
                 support_height_ratio: float = 0.5,  # 支撑高度比例（0.5 表示下半部分）
                 plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
@@ -233,10 +233,10 @@ class Bridge2dDoubleLoadData(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
 
-        self._T1 = T1
-        self._T2 = T2
+        self._p1 = p1
+        self._p2 = p2
         self._E, self._nu = E, nu
-        self._support_height_ratio = support_height_ratio  # 支撑高度比例
+        self._support_height_ratio = support_height_ratio 
         self._plane_type = plane_type
 
         self._eps = 1e-12
@@ -259,14 +259,14 @@ class Bridge2dDoubleLoadData(PDEBase):
         return self._nu
     
     @property
-    def T1(self) -> float:
+    def p1(self) -> float:
         """获取集中力 1"""
-        return self._T1
+        return self._p1
 
     @property
-    def T2(self) -> float:
+    def p2(self) -> float:
         """获取集中力 2"""
-        return self._T2
+        return self._p2
 
     @property
     def support_height_ratio(self) -> float:
@@ -291,17 +291,56 @@ class Bridge2dDoubleLoadData(PDEBase):
 
         return mesh
     
-    @init_mesh.register('uniform_tri')
+    @init_mesh.register('uniform_aligned_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
-        nx = kwargs.get('nx', 128)
-        ny = kwargs.get('ny', 32)
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
         threshold = kwargs.get('threshold', None)
         device = kwargs.get('device', 'cpu')
 
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
+                                threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+    
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        device = kwargs.get('device', 'cpu')
+        node = bm.array([[0.0, 0.0],
+                        [1.0, 0.0],
+                        [1.0, 1.0],
+                        [0.0, 1.0]], dtype=bm.float64, device=device) 
         
-        self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny)
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)     
+        
+        qmesh = QuadrangleMesh(node, cell)
+        qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+        import numpy as np
+        newCell = np.r_['0', 
+                lcell[:, [1, 2, 0]], 
+                lcell[:, [3, 0, 2]],
+                rcell[:, [0, 1, 3]],
+                rcell[:, [2, 3, 1]]]
+        
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return mesh
 
@@ -323,22 +362,18 @@ class Bridge2dDoubleLoadData(PDEBase):
             @cartesian
             def concentrated_force(points: TensorLike) -> TensorLike:
                 """
-                定义集中载荷（两点载荷）
-                底部中点和顶部中点各施加向下的集中载荷 F = -2
+                定义集中载荷 (两点载荷), 点力恰好在节点上
+                底部中点和顶部中点各施加方向向下, 相同大小的集中载荷 F = -2
                 """
                 domain = self.domain
                 x, y = points[..., 0], points[..., 1]   
 
-                # 域的中点x坐标
                 mid_x = (domain[0] + domain[1]) / 2  
                 
-                # 底部中点载荷
                 coord_bottom = (
                     (bm.abs(x - mid_x) < self._eps) & 
                     (bm.abs(y - domain[2]) < self._eps)
                 )
-                
-                # 顶部中点载荷  
                 coord_top = (
                     (bm.abs(x - mid_x) < self._eps) & 
                     (bm.abs(y - domain[3]) < self._eps)
@@ -347,9 +382,8 @@ class Bridge2dDoubleLoadData(PDEBase):
                 kwargs = bm.context(points)
                 val = bm.zeros(points.shape, **kwargs)
                 
-                # 两个载荷点都施加 -2 的向下力
-                val = bm.set_at(val, (coord_bottom, 1), self._T1)  # -2
-                val = bm.set_at(val, (coord_top, 1), self._T2)     # -2
+                val = bm.set_at(val, (coord_bottom, 1), self._p1) 
+                val = bm.set_at(val, (coord_top, 1), self._p2)    
                 
                 return val
             
@@ -366,11 +400,11 @@ class Bridge2dDoubleLoadData(PDEBase):
     def neumann_bc(self, points: TensorLike) -> TensorLike:
         """
         Neumann 边界条件: 表面力向量 t = (t_x, t_y) = (0, -2)
-        在底部和顶部中点都施加向下的力
+        在底部和顶部中点都施加相同大小的向下的力
         """
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._T1) 
+        val = bm.set_at(val, (..., 1), self._p1) 
         
         return val
     

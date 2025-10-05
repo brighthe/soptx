@@ -14,7 +14,7 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
                 source: Optional[SourceLike] = None, 
                 q: Optional[int] = None, *,
                 threshold: Optional[Threshold] = None,
-                use_cell_basis: bool = True,
+                use_cell_basis: bool = False,
                 batched: bool = False):
         super().__init__()
         self.source = source 
@@ -61,31 +61,51 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         bcs, ws = qf.get_quadrature_points_and_weights()
 
         if self.use_cell_basis:
-            phi = space.cell_basis_on_face(bcs, index=index) # (NFb, NQ, LDOF, 3)
+            phi = space.cell_basis_on_face(bcs, index=index) # (NF_bd, NQ, LDOF, 3)
         else:
-            # TODO 删除
-            phi = space.face_basis(bcs, index=index)
+            phi = space.face_basis(bcs, index=index) # (1, NQ_face, LDOF, GD)
 
         return bcs, ws, phi, facemeasure, index, n
 
+    # def assembly(self, space):
+    #     source = self.source
+    #     bcs, ws, phi, fm, index, n = self.fetch(space) 
+    #     mesh = getattr(space, 'mesh', None)
+
+    #     NFb, NQ, LDOF, _ = phi.shape
+    #     GD = mesh.geo_dimension()
+    #     tau = bm.zeros((NFb, NQ, LDOF, GD, GD), dtype=phi.dtype)
+    #     tau[..., 0, 0] = phi[..., 0] # σ_xx
+    #     tau[..., 0, 1] = phi[..., 1] # σ_xy
+    #     tau[..., 1, 0] = phi[..., 1] # σ_yx
+    #     tau[..., 1, 1] = phi[..., 2] # σ_yy
+    #     tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NFb, NQ, LDOF, GD)
+
+    #     ps = mesh.bc_to_point(bcs, index=index)
+    #     val = source(ps) # (NFb, NQ, GD)
+
+    #     F = linear_integral(tau_n, ws, fm, val, self.batched) # (NFb, LDOF)
+
+    #     return F
+    
     def assembly(self, space):
         source = self.source
         bcs, ws, phi, fm, index, n = self.fetch(space) 
         mesh = getattr(space, 'mesh', None)
 
-        NFb, NQ, LDOF, _ = phi.shape
-        GD = mesh.geo_dimension()
-        tau = bm.zeros((NFb, NQ, LDOF, GD, GD), dtype=phi.dtype)
-        tau[..., 0, 0] = phi[..., 0] # σ_xx
-        tau[..., 0, 1] = phi[..., 1] # σ_xy
-        tau[..., 1, 0] = phi[..., 1] # σ_yx
-        tau[..., 1, 1] = phi[..., 2] # σ_yy
-        tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NFb, NQ, LDOF, GD)
+        # NFb, NQ, LDOF, _ = phi.shape
+        # GD = mesh.geo_dimension()
+        # tau = bm.zeros((NFb, NQ, LDOF, GD, GD), dtype=phi.dtype)
+        # tau[..., 0, 0] = phi[..., 0] # σ_xx
+        # tau[..., 0, 1] = phi[..., 1] # σ_xy
+        # tau[..., 1, 0] = phi[..., 1] # σ_yx
+        # tau[..., 1, 1] = phi[..., 2] # σ_yy
+        # tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NFb, NQ, LDOF, GD)
 
         ps = mesh.bc_to_point(bcs, index=index)
         val = source(ps) # (NFb, NQ, GD)
 
-        F = linear_integral(tau_n, ws, fm, val, self.batched) # (NFb, LDOF)
+        F = linear_integral(phi, ws, fm, val, self.batched) # (NFb, LDOF)
 
         return F
     

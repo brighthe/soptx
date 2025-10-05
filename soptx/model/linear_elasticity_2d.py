@@ -335,40 +335,71 @@ class BoxTriLagrange2dData(PDEBase):
     # 变体方法
     #######################################################################################################################
 
-    @variantmethod('uniform_tri')
-    def init_mesh(self, **kwargs) -> TriangleMesh:
-        nx = kwargs.get('nx', 10)
-        ny = kwargs.get('ny', 10)
-        threshold = kwargs.get('threshold', None)
-        device = kwargs.get('device', 'cpu')
-
-        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
-
-        self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
-
-        return mesh
-
-    @init_mesh.register('polygon_tri')
-    def init_mesh(self, **kwargs) -> TriangleMesh:
-        device = kwargs.get('device', 'cpu')
-        vertices = bm.tensor([[0, 0], [1, 0], [1, 1], [0, 1]], 
-                            dtype=bm.float64, device=device)
-        mesh = TriangleMesh.from_polygon_gmsh(vertices=vertices, h=0.07)
-
-        return mesh
-    
-    @init_mesh.register('uniform_quad')
+    @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
-        nx = kwargs.get('nx', 10)
-        ny = kwargs.get('ny', 10)
+        # 根据几何调整默认单元数
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
         threshold = kwargs.get('threshold', None)
         device = kwargs.get('device', 'cpu')
 
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
+                                       threshold=threshold, device=device)
 
-        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny, threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
+
+        return mesh
+    
+    @init_mesh.register('uniform_aligned_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        device = kwargs.get('device', 'cpu')
+        node = bm.array([[0.0, 0.0],
+                        [1.0, 0.0],
+                        [1.0, 1.0],
+                        [0.0, 1.0]], dtype=bm.float64, device=device) 
+        
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)     
+        
+        qmesh = QuadrangleMesh(node, cell)
+        qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+        import numpy as np
+        newCell = np.r_['0', 
+                lcell[:, [1, 2, 0]], 
+                lcell[:, [3, 0, 2]],
+                rcell[:, [0, 1, 3]],
+                rcell[:, [2, 3, 1]]]
+        
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return mesh
 
@@ -457,3 +488,286 @@ class BoxTriLagrange2dData(PDEBase):
 
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
+    
+
+class BoxTriMixedLagrange2dData(PDEBase):
+    """
+    混合边界条件的线弹性问题
+    
+    控制方程：
+        -∇·σ = f    in Ω
+    
+    边界条件：
+        u = 0       on Γ_D = {x=0} ∪ {y=0} (Dirichlet)
+        σ·n = g     on Γ_N = {x=1} ∪ {y=1} (Neumann)
+    
+    其中：
+        - σ is the stress tensor
+        - ε = (∇u + ∇u^T)/2 is the strain tensor
+    
+    材料参数：
+        E = 1, nu = 0.3 (平面应变)
+    
+    精确解：
+        u(x, y) = [sin(πx)sin(πy), 0]^T
+    """
+    def __init__(self, 
+                domain: List[float] = [0, 1, 0, 1],
+                mesh_type: str = 'uniform_tri',
+                E: float = 1.0, 
+                nu: float = 0.3,
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None 
+            ) -> None:
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                        enable_logging=enable_logging, logger_name=logger_name)
+
+        self._E = E
+        self._nu = nu
+
+        self._eps = 1e-12
+        self._plane_type = 'plane_strain'
+        self._load_type = 'distributed'  # 分布载荷
+        self._boundary_type = 'mixed'     # 混合边界条件
+
+        # 计算 Lamé 常数 (平面应变)
+        self._mu = E / (2 * (1 + nu))
+        self._lambda = E * nu / ((1 + nu) * (1 - 2 * nu)) 
+
+    #######################################################################################################################
+    # 访问器
+    #######################################################################################################################
+    
+    @property
+    def E(self) -> float:
+        """获取杨氏模量"""
+        return self._E
+    
+    @property
+    def nu(self) -> float:
+        """获取泊松比"""
+        return self._nu
+    
+    @property
+    def mu(self) -> float:
+        """获取第一 Lamé 常数 (剪切模量)"""
+        return self._mu
+    
+    @property
+    def lam(self) -> float:
+        """获取第二 Lamé 常数"""
+        return self._lambda
+
+    #######################################################################################################################
+    # 变体方法
+    #######################################################################################################################
+
+    @variantmethod('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                       threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
+
+        return mesh
+    
+    @init_mesh.register('uniform_aligned_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        device = kwargs.get('device', 'cpu')
+        node = bm.array([[0.0, 0.0],
+                        [1.0, 0.0],
+                        [1.0, 1.0],
+                        [0.0, 1.0]], dtype=bm.float64, device=device) 
+        
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)     
+        
+        qmesh = QuadrangleMesh(node, cell)
+        qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+        import numpy as np
+        newCell = np.r_['0', 
+                lcell[:, [1, 2, 0]], 
+                lcell[:, [3, 0, 2]],
+                rcell[:, [0, 1, 3]],
+                rcell[:, [2, 3, 1]]]
+        
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
+
+        return mesh
+
+    #######################################################################################################################
+    # 核心方法
+    #######################################################################################################################
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        """体力密度向量"""
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+
+        f_x = 22.5 * pi**2 / 13 * bm.sin(pi * x) * bm.sin(pi * y)
+        f_y = -12.5 * pi**2 / 13 * bm.cos(pi * x) * bm.cos(pi * y)
+
+        f = bm.stack([f_x, f_y], axis=-1)
+        
+        return f
+
+    @cartesian
+    def disp_solution(self, points: TensorLike) -> TensorLike:
+        """精确位移解"""
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+
+        u_x = bm.sin(pi * x) * bm.sin(pi * y)
+        u_y = bm.zeros_like(x) 
+
+        u = bm.stack([u_x, u_y], axis=-1)
+
+        return u
+    
+    @cartesian
+    def disp_solution_gradient(self, points: TensorLike) -> TensorLike:
+        """精确位移梯度"""
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+        
+        du_x_dx = pi * bm.cos(pi * x) * bm.sin(pi * y)
+        du_x_dy = pi * bm.sin(pi * x) * bm.cos(pi * y)
+        
+        du_y_dx = bm.zeros_like(x)
+        du_y_dy = bm.zeros_like(x)
+        
+        grad_u = bm.stack([
+            bm.stack([du_x_dx, du_x_dy], axis=-1),  
+            bm.stack([du_y_dx, du_y_dy], axis=-1)   
+        ], axis=-2)
+        
+        return grad_u
+
+    #######################################################################################################################
+    # Dirichlet 边界条件（左边和底边）
+    #######################################################################################################################
+
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        val = self.disp_solution(points)
+        
+        return val
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        """判断 x 方向位移是否在 Dirichlet 边界上（左边和底边）"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  # 左边 x=0
+        flag_y0 = bm.abs(y - domain[2]) < self._eps  # 底边 y=0
+
+        flag = flag_x0 | flag_y0
+        
+        return flag
+
+    @cartesian  
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        """判断 y 方向位移是否在 Dirichlet 边界上（左边和底边）"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  # 左边 x=0
+        flag_y0 = bm.abs(y - domain[2]) < self._eps  # 底边 y=0
+
+        flag = flag_x0 | flag_y0
+
+        return flag
+
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
+
+    #######################################################################################################################
+    # Neumann 边界条件（右边和顶边）
+    #######################################################################################################################
+
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """
+        Neumann 边界条件: σ·n = g on Γ_N
+        
+        右边界 x=1, n=(1,0):
+            g(1,y) = [-(2μ+λ)π sin(πy), 0]^T
+        
+        顶边界 y=1, n=(0,1):
+            g(x,1) = [-μπ sin(πx), 0]^T = [-(5/13)π sin(πx), 0]^T
+        """
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+        
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        
+        # 右边界 x=1
+        flag_right = bm.abs(x - domain[1]) < self._eps
+        coef_right = -(2 * self._mu + self._lambda) * pi
+        g_x_right = coef_right * bm.sin(pi * y)
+        val = bm.set_at(val, (flag_right, 0), g_x_right[flag_right])
+        
+        # 顶边界 y=1
+        flag_top = bm.abs(y - domain[3]) < self._eps
+        coef_top = -self._mu * pi  # -5/13 * π
+        g_x_top = coef_top * bm.sin(pi * x)
+        val = bm.set_at(val, (flag_top, 0), g_x_top[flag_top])
+        
+        return val
+
+    @cartesian
+    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+        """判断是否在 Neumann 边界上（右边和顶边）"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        flag_x1 = bm.abs(x - domain[1]) < self._eps  # 右边 x=1
+        flag_y1 = bm.abs(y - domain[3]) < self._eps  # 顶边 y=1
+
+        flag = flag_x1 | flag_y1
+        
+        return flag
+    
+    def is_neumann_boundary(self) -> Callable:
+        
+        return self.is_neumann_boundary_dof

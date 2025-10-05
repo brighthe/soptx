@@ -160,6 +160,9 @@ class OCOptimizer(BaseLogged):
             # 计算约束函数相对于设计变量的灵敏度
             con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
 
+            # TODO
+            temp = bm.max(bm.abs(obj_grad_dv)) / bm.max(bm.abs(con_grad_dv))
+
             # OC 算法: 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             while (l2 - l1) / (l2 + l1) > bisection_tol:

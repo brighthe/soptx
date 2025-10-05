@@ -31,10 +31,10 @@ class ClampedBeam2D(PDEBase):
         σ = 2με + λtr(ε)I
     '''
     def __init__(self,
-                domain: List[float] = [0, 160, 0, 20], 
+                domain: List[float] = [0, 1.2, 0, 0.4], 
                 mesh_type: str = 'uniform_tri', 
-                T: float = -3.0,  # 负值代表方向向下 (单位 - N)
-                E: float = 30.0,  # 杨氏模量 ( 单位 - Pa / N/m^2 )
+                T: float = 1.2,   # 分布载荷 ( 单位 - N/m)
+                E: float = 30.0,  # 杨氏模量 ( 单位 - Pa(N/m^2) )
                 nu: float = 0.4,  
                 plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain' 
                 enable_logging: bool = False, 
@@ -48,12 +48,8 @@ class ClampedBeam2D(PDEBase):
         self._plane_type = plane_type
 
         self._eps = 1e-12
-        self._force_type = 'concentrated'
+        self._load_type = 'distributed'
         self._boundary_type = 'dirichlet'
-
-        self._log_info(f"Initialized ClampedBeam2DSingleLoad (from Castañar et al. 2022) with domain={self._domain}, "
-                     f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
-                     f"plane_type='{self._plane_type}', boundary='fully clamped'.")
 
 
     #######################################################################################################################
@@ -114,26 +110,46 @@ class ClampedBeam2D(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        """
-        定义体力 (以集中载荷形式施加)
-        在底部中点施加向下的集中载荷 F = -3 (N)
-        """
-        domain = self.domain
-
-        x, y = points[..., 0], points[..., 1]  
-
-        mid_x = (domain[0] + domain[1]) / 2  
-        coord = (
-            (bm.abs(x - mid_x) < self._eps) & 
-            (bm.abs(y - domain[2]) < self._eps)
-        )
-        
         kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-        # 集中力施加在y方向
-        val = bm.set_at(val, (coord, 1), self._T)
-        
-        return val
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    def get_neumann_loads(self):
+       """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
+       if self._load_type == 'concentrated':
+            
+            @cartesian
+            def concentrated_force(points: TensorLike) -> TensorLike:
+                """
+                定义集中载荷（单点载荷）
+                在底部中点施加向下的集中载荷 F = -3 (N)
+                """
+                domain = self.domain
+
+                x, y = points[..., 0], points[..., 1]  
+
+                mid_x = (domain[0] + domain[1]) / 2  
+                coord = (
+                    (bm.abs(x - mid_x) < self._eps) & 
+                    (bm.abs(y - domain[2]) < self._eps)
+                )
+                
+                kwargs = bm.context(points)
+                val = bm.zeros(points.shape, **kwargs)
+
+                val = bm.set_at(val, (coord, 1), self._T)
+                
+                return val
+            
+            return concentrated_force
+       
+       elif self._load_type == 'distributed':
+           
+           pass
+       
+       else:
+                raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
+
     
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
@@ -176,39 +192,39 @@ class HalfClampedBeam2D(PDEBase):
     
     PDEs:
     -∇·σ = b   in Ω (left half-domain)
-      u = 0    on ∂Ω_D (fully clamped on the left side, x=0)
-      u_x = 0  on ∂Ω_S (symmetry boundary, x=80)
+      u = 0     on ∂Ω_D (fully clamped on the left side, x=0)
+      u_x = 0   on ∂Ω_S (symmetry boundary, x=80)
       
     几何参数:
-        左半部分矩形域, 左端完全固支, 右端为对称边界, 右下角施加向下的集中载荷。
+        左半部分矩形域, 左端完全固支, 右端为对称边界, 右下角施加向下的集中载荷
     
-    Material parameters from paper:
+    载荷类型:
+        集中载荷(点力) (单位 - N)
+    
+    材料参数:
         E_s = 30 Pa, nu is varied (e.g., 0.4 for compressible, 0.5 for incompressible)
     '''
     def __init__(self,
-                 domain: List[float] = [0, 80, 0, 20],  # 几何尺寸为原始域的左半部分
-                 mesh_type: str = 'uniform_tri', 
-                 T: float = -1.5,  # 载荷为原始载荷的一半
-                 E: float = 30.0, 
-                 nu: float = 0.4, 
-                 plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
-                 enable_logging: bool = False, 
-                 logger_name: Optional[str] = None
-                 ) -> None:
+                domain: List[float] = [0, 80, 0, 20],  
+                mesh_type: str = 'uniform_tri', 
+                p: float = -1.5,                      
+                E: float = 30.0, 
+                nu: float = 0.4, 
+                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None
+            ) -> None:
         super().__init__(domain=domain, mesh_type=mesh_type, 
                          enable_logging=enable_logging, logger_name=logger_name)
-        
-        self._T = T
+
+        self._p = p
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
         self._eps = 1e-12
-        self._force_type = 'concentrated'
-        self._boundary_type = 'dirichlet'
+        self._load_type = 'concentrated'
+        self._boundary_type = 'mixed'
 
-        self._log_info(f"Initialized HalfClampedBeam2D (Symmetric model from Castañar et al. 2022) with domain={self._domain}, "
-                     f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
-                     f"plane_type='{self._plane_type}', boundary='clamped-left, symmetric-right'.")
 
     #######################################################################################################################
     # 访问器 (Accessors)
@@ -225,9 +241,10 @@ class HalfClampedBeam2D(PDEBase):
         return self._nu
     
     @property
-    def T(self) -> float:
-        """获取集中力"""
-        return self._T
+    def p(self) -> float:
+        """获取点力"""
+        return self._p
+    
     
     #######################################################################################################################
     # 变体方法 (Variant Methods)
@@ -235,9 +252,8 @@ class HalfClampedBeam2D(PDEBase):
     
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
-        # 保持单元密度，x方向单元数为全模型一半
-        nx = kwargs.get('nx', 160)
-        ny = kwargs.get('ny', 40)
+        nx = kwargs.get('nx', 80)
+        ny = kwargs.get('ny', 20)
         threshold = kwargs.get('threshold', None)
         device = kwargs.get('device', 'cpu')
 
@@ -248,9 +264,23 @@ class HalfClampedBeam2D(PDEBase):
 
         return mesh
     
-    @init_mesh.register('uniform_crisscross_tri')
+    @init_mesh.register('uniform_aligned_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
         nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+    
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 80)
         ny = kwargs.get('ny', 20)
         device = kwargs.get('device', 'cpu')
         node = bm.array([[0.0, 0.0],
@@ -288,42 +318,60 @@ class HalfClampedBeam2D(PDEBase):
         return mesh
 
     #######################################################################################################################
-    # 核心方法 (Core Methods)
+    # 核心方法
     #######################################################################################################################
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        """
-        定义体力 (以集中载荷形式施加)
-        在右下角顶点施加向下的集中载荷 F = -1.5 (N)
-        """
-        domain = self.domain
-
-        x, y = points[..., 0], points[..., 1]  
-
-        # 载荷点位于右下角
-        coord = (
-            (bm.abs(x - domain[1]) < self._eps) & 
-            (bm.abs(y - domain[2]) < self._eps)
-        )
-        
         kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-        # 集中力施加在y方向
-        val = bm.set_at(val, (coord, 1), self._T)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    def get_neumann_loads(self):
+       """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
+       if self._load_type == 'concentrated':
+            
+            @cartesian
+            def concentrated_load(points: TensorLike) -> TensorLike:
+                """
+                定义点力
+                在右下角 (对称轴与底边的交点) 施加向下的集中载荷 F = -1.5 (N)
+                """
+                domain = self.domain
+
+                x, y = points[..., 0], points[..., 1]  
+
+                coord = (
+                    (bm.abs(x - domain[1]) < self._eps) & 
+                    (bm.abs(y - domain[2]) < self._eps)
+                )
+                
+                kwargs = bm.context(points)
+                val = bm.zeros(points.shape, **kwargs)
+
+                val = bm.set_at(val, (coord, 1), self._p)
         
-        return val
+                return val
+            
+            return concentrated_load
+       
+       elif self._load_type == 'distributed':
+           
+           pass
+       
+       else:
+                raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
     
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
-        """Dirichlet边界值为0"""
         kwargs = bm.context(points)
+
         return bm.zeros(points.shape, **kwargs)
 
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         """
-        判断x方向的Dirichlet边界自由度。
+        判断 x 方向的 Dirichlet 边界自由度
         左边界(x=0)完全固支 -> u_x = 0
         右边界(x=80)对称 -> u_x = 0
         """
@@ -338,9 +386,9 @@ class HalfClampedBeam2D(PDEBase):
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         """
-        判断y方向的Dirichlet边界自由度。
+        判断 y 方向的 Dirichlet 边界自由度
         左边界(x=0)完全固支 -> u_y = 0
-        右边界(x=80)为自然边界条件，非Dirichlet
+        右边界(x=80)为自然边界条件, 非Dirichlet
         """
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
@@ -350,6 +398,6 @@ class HalfClampedBeam2D(PDEBase):
         return on_left_boundary
     
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
-        """返回判断x和y方向Dirichlet边界的函数元组"""
+
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)

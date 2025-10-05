@@ -339,11 +339,14 @@ class MMAOptimizer(BaseLogged):
             con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
             
             # MMA 算法: 
-            # 标准化约束函数
+            # 标准化约束函数及其梯度 (物理上必须)
             cm = self._filter.mesh.entity_measure('cell')
             fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
-            # 标准化约束梯度
             dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
+
+            # TODO
+            temp = bm.max(bm.abs(obj_grad_dv)) / bm.max(bm.abs(dfdx)) 
+
             # 求解子问题
             dv_new, low, upp = self._solve_subproblem(
                                                 xval=dv[:, None],
@@ -362,7 +365,8 @@ class MMAOptimizer(BaseLogged):
             # 更新历史设计变量
             xold2 = xold1
             xold1 = dv[:]
-            
+
+
             # 计算收敛性
             change = bm.max(bm.abs(dv_new - dv))
             

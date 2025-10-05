@@ -30,55 +30,36 @@ class FilterMatrixBuilder:
 
     def build(self) -> Tuple[CSRTensor, TensorLike]:
         """构建并返回权重矩阵 H 和其行和 Hs"""
-        mesh_keys: Set[str] = set(self._mesh.meshdata.keys())
-        
-        keys_3d: Set[str] = {'nx', 'ny', 'nz', 'hx', 'hy', 'hz'}
-        keys_2d: Set[str] = {'nx', 'ny', 'hx', 'hy'}
 
-        if keys_3d.issubset(mesh_keys) and self._mesh.meshdata['mesh_type'] == 'uniform_hex':
-
-            if self._density_location == 'gauss_integration_point':
-            
-                return self._compute_weigthed_matrix_general(
-                                rmin=self._rmin,
-                                domain=self._mesh.meshdata['domain'], 
-                            )
-            
-            else:
-            
-                return self._compute_filter_3d(
-                                self._rmin,
-                                self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata['nz'],
-                                self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], self._mesh.meshdata['hz'],
-                            )
-            
-        elif keys_2d.issubset(mesh_keys) and self._mesh.meshdata['mesh_type'] in {'uniform_quad'}:
+        if self._mesh.meshdata['mesh_type'] == 'uniform_quad':
 
             if self._density_location in ['element', 'element_multiresolution']:
-                return self._compute_weighted_matrix_2d(
-                                    self._rmin,
-                                    self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
-                                    self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
-                                )
+                H, Hs = self._compute_weighted_matrix_2d(
+                                            self._rmin,
+                                            self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
+                                            self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
+                                        )
+                return H, Hs
             
             elif self._density_location in ['node', 'node_multiresolution']:
-                return self._compute_weighted_matrix_general(
-                                rmin=self._rmin,
-                                domain=self._mesh.meshdata['domain'], 
-                            )
-            
-        else:
-            return self._compute_weighted_matrix_general(
-                                rmin=self._rmin,
-                                domain=self._mesh.meshdata['domain'], 
-                            )
-        
+                H, Hs = self._compute_weighted_matrix_general(
+                                                rmin=self._rmin,
+                                                domain=self._mesh.meshdata['domain'], 
+                                            )
+                return H, Hs
+
+        elif self._mesh.meshdata['mesh_type'] in ['uniform_aligned_tri', 'uniform_crisscross_tri']:
+            H, Hs = self._compute_weighted_matrix_general(
+                                            rmin=self._rmin,
+                                            domain=self._mesh.meshdata['domain'], 
+                                        )
+            return H, Hs
         
     def _compute_weighted_matrix_general(self, 
                                         rmin: float,
                                         domain: List[float],
                                         periodic: List[bool]=[False, False, False],
-                                        enable_timing: bool = False,
+                                        enable_timing: bool = True,
                                     ) -> Tuple[COOTensor, TensorLike]:
         """
         计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
@@ -122,22 +103,7 @@ class FilterMatrixBuilder:
             sub_density_mesh = self._mesh
             density_coords = sub_density_mesh.entity_barycenter('node') # (NN*, GD)
 
-        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
-
-        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
-        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-
-        #     qf = self._mesh.quadrature_formula(q=self._integration_order)
-        #     bcs, ws = qf.get_quadrature_points_and_weights()
-        #     density_coords_local = self._mesh.bc_to_point(bcs) # （NC, NQ, GD)
-
-        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-        #                                                             nq_per_dim=self._integration_order)
-            
-        #     density_coords = density_coords_local[local_to_global]  # (NC*NQ, GD)
-
         # 使用 KD-tree 查询临近点
-        # ! 该函数会将目前许需要将变脸 转移到 CPU 上进行计算
         density_coords = bm.device_put(density_coords, 'cpu')        
         density_indices, neighbor_indices = bm.query_point(
                                                 x=density_coords, y=density_coords, h=rmin, 
@@ -165,8 +131,12 @@ class FilterMatrixBuilder:
         
         # 当前非零元素计数
         nnz = gdof
+
+        if enable_timing:
+            t.send('对角线循环计算时间')
         
         # 填充其余非零元素 (邻居点)
+        # TODO 耗时非常久, 需要修改
         for idx in range(len(density_indices)):
             i = density_indices[idx]
             j = neighbor_indices[idx]
@@ -184,14 +154,14 @@ class FilterMatrixBuilder:
                 nnz += 1
 
         if enable_timing:
-            t.send('循环计算时间')
+            t.send('非对角线循环计算时间')
         
         # 创建稀疏矩阵
         H = COOTensor(
-            indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
-            values=sH[:nnz],
-            spshape=(gdof, gdof)
-        )
+                indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
+                values=sH[:nnz],
+                spshape=(gdof, gdof)
+            )
         
         Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
         
