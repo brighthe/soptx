@@ -29,10 +29,10 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
 
         ## 测试参数 ##
-        # nx, ny = 60, 20
+        nx, ny = 60, 20
         # nx, ny = 90, 30
         # nx, ny = 120, 40
-        nx, ny = 150, 50
+        # nx, ny = 150, 50
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_crisscross_tri'
 
@@ -55,7 +55,7 @@ class DensityTopOptTest(BaseLogged):
         tolerance = 1e-2
         use_penalty_continuation = False
 
-        filter_type = 'none' # 'none', 'sensitivity', 'density'
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 2.4
         # rmin = 1.25
 
@@ -197,7 +197,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/sec3_half_mbb")
+        save_path = Path(f"{base_dir}/test_half_mbb")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 
@@ -402,6 +402,6 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    # test.run.set('half_mbb_2d')
-    test.run.set('test_element_node')
+    test.run.set('half_mbb_2d')
+    # test.run.set('test_element_node')
     rho_opt, history = test.run() 

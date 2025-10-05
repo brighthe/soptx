@@ -163,7 +163,7 @@ class SensitivityStrategy(_FilterStrategy):
         
         else:
             raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
-
+ 
 
 class DensityStrategy(_FilterStrategy):
     """密度过滤策略"""
@@ -195,23 +195,46 @@ class DensityStrategy(_FilterStrategy):
 
         if self._density_location in ['element']:
             # design_variable.shape = (NC, )
-            cell_measure = self._mesh.entity_measure('cell')
-            weighted_dv = design_variable * cell_measure
+            cm = self._mesh.entity_measure('cell')
+            
+            weighted_dv = design_variable * cm
 
             numerator = self._H.matmul(weighted_dv)
-            denominator = self._H.matmul(cell_measure)
+            denominator = self._H.matmul(cm)
 
             physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator) # (NC, )
             
             return physical_density
         
-        elif self._density_location in ['element_multiresolution']:
-            # design_variable.shape = (NC*n_sub, )
-            cell_measure = self._mesh.entity_measure('cell')
-            weighted_dv = design_variable * cell_measure
+        elif self._density_location in ['node']:
+            # design_variable.shape = (NN, )
+            cm = self._mesh.entity_measure('cell')
+            NN = self._mesh.number_of_nodes()
+            cell2node = self._mesh.cell_to_node()
+            NNE = cell2node.shape[1]
+
+            # 计算节点测度
+            val = bm.repeat(cm / NNE, NNE)
+            nm = bm.zeros(NN, dtype=bm.float64)
+            nm = bm.add_at(nm, cell2node.reshape(-1), val)
+
+            # 过滤设计变量
+            weighted_dv = design_variable * nm
 
             numerator = self._H.matmul(weighted_dv)
-            denominator = self._H.matmul(cell_measure)
+            denominator = self._H.matmul(nm)
+
+            physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator)  # (NN, )
+            
+            return physical_density
+        
+        elif self._density_location in ['element_multiresolution']:
+            # design_variable.shape = (NC*n_sub, )
+            cm = self._mesh.entity_measure('cell')
+            weighted_dv = design_variable * cm
+
+            numerator = self._H.matmul(weighted_dv)
+            denominator = self._H.matmul(cm)
 
             data_flat = numerator / denominator
 
@@ -229,27 +252,27 @@ class DensityStrategy(_FilterStrategy):
             return physical_density
 
 
-        elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
+        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
 
-            weighted_rho_local = bm.einsum('cq, cq -> cq', rho, self._integration_weights) # (NC, NQ)
+        #     weighted_rho_local = bm.einsum('cq, cq -> cq', rho, self._integration_weights) # (NC, NQ)
 
-            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-                                                                    nq_per_dim=self._integration_order)
+        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+        #                                                             nq_per_dim=self._integration_order)
             
-            weighted_rho = weighted_rho_local[local_to_global] # (NC*NQ, )
+        #     weighted_rho = weighted_rho_local[local_to_global] # (NC*NQ, )
 
-            integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
+        #     integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
 
-            numerator_global = self._H.matmul(weighted_rho) # (NC*NQ, )
-            numerator = numerator_global[global_to_local] # (NC, NQ)
+        #     numerator_global = self._H.matmul(weighted_rho) # (NC*NQ, )
+        #     numerator = numerator_global[global_to_local] # (NC, NQ)
             
-            denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
-            denominator = denominator_global[global_to_local] # (NC, NQ)
+        #     denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
+        #     denominator = denominator_global[global_to_local] # (NC, NQ)
 
-            rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
+        #     rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
 
-            return rho_Phys
+        #     return rho_Phys
 
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
@@ -266,6 +289,28 @@ class DensityStrategy(_FilterStrategy):
             temp = self._H.matmul(scaled_dobj)
 
             obj_grad_dv = cm * temp # (NC, )
+
+            return obj_grad_dv
+        
+        elif self._density_location in ['node']:
+            # obj_grad_rho.shape = (NN, )
+            cm = self._mesh.entity_measure('cell')
+            NN = self._mesh.number_of_nodes()
+            cell2node = self._mesh.cell_to_node()
+            NNE = cell2node.shape[1]
+
+            # 计算节点测度
+            val = bm.repeat(cm / NNE, NNE)
+            nm = bm.zeros(NN, dtype=bm.float64)
+            nm = bm.add_at(nm, cell2node.reshape(-1), val)
+
+            # 灵敏度过滤
+            Hs = self._H.matmul(nm)
+            
+            scaled_dobj = obj_grad_rho / Hs
+            temp = self._H.matmul(scaled_dobj)
+
+            obj_grad_dv = nm * temp # (NN, )
 
             return obj_grad_dv
 
@@ -291,35 +336,32 @@ class DensityStrategy(_FilterStrategy):
 
             return obj_grad_dv
 
-        elif self._density_location in ['node']:
-            pass
-
         elif self._density_location in ['node_multiresolution']:
             pass 
 
-        elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
+        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
             
-            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-            weighted_dobj_local = bm.einsum('cq, cq -> cq', obj_grad, self._integration_weights) # (NC, NQ)
+        #     weighted_dobj_local = bm.einsum('cq, cq -> cq', obj_grad, self._integration_weights) # (NC, NQ)
 
-            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-                                                                    nq_per_dim=self._integration_order)
+        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+        #                                                             nq_per_dim=self._integration_order)
             
-            weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
+        #     weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
 
-            integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
+        #     integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
 
-            numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
-            numerator = numerator_global[global_to_local] # (NC, NQ)
+        #     numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
+        #     numerator = numerator_global[global_to_local] # (NC, NQ)
             
-            denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
-            denominator = denominator_global[global_to_local] # (NC, NQ)
+        #     denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
+        #     denominator = denominator_global[global_to_local] # (NC, NQ)
 
-            obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
+        #     obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
 
-            return obj_grad 
+            # return obj_grad 
 
     def filter_constraint_sensitivities(self, 
                                     design_variable: TensorLike, 
@@ -335,6 +377,28 @@ class DensityStrategy(_FilterStrategy):
             temp = self._H.matmul(scaled_dcon)
 
             con_grad_dv = cm * temp # (NC, )
+
+            return con_grad_dv
+        
+        elif self._density_location in ['node']:
+            # con_grad_rho.shape = (NN, )
+            cm = self._mesh.entity_measure('cell')
+            NN = self._mesh.number_of_nodes()
+            cell2node = self._mesh.cell_to_node()
+            NNE = cell2node.shape[1]
+
+            # 计算节点测度
+            val = bm.repeat(cm / NNE, NNE)
+            nm = bm.zeros(NN, dtype=bm.float64)
+            nm = bm.add_at(nm, cell2node.reshape(-1), val)
+
+            # 灵敏度过滤
+            Hs = self._H.matmul(nm)
+            
+            scaled_dcon = con_grad_rho / Hs
+            temp = self._H.matmul(scaled_dcon)
+
+            con_grad_dv = nm * temp  # (NN, )
 
             return con_grad_dv
 
@@ -358,35 +422,32 @@ class DensityStrategy(_FilterStrategy):
             con_grad_dv = cm * temp # (NC*n_sub, )
 
             return con_grad_dv
-        
-        elif self._density_location in ['node']:
-            pass
 
         elif self._density_location in ['node_multiresolution']:
             pass 
 
-        elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
-            from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
+        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
-            weighted_dobj_local = bm.einsum('cq, cq -> cq', con_grad, self._integration_weights) # (NC, NQ)
+        #     weighted_dobj_local = bm.einsum('cq, cq -> cq', con_grad, self._integration_weights) # (NC, NQ)
 
-            nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-            local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-                                                                    nq_per_dim=self._integration_order)
+        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
+        #                                                             nq_pcer_dim=self._integration_order)
             
-            weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
+        #     weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
 
-            integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
+        #     integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
 
-            numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
-            numerator = numerator_global[global_to_local] # (NC, NQ)
+        #     numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
+        #     numerator = numerator_global[global_to_local] # (NC, NQ)
             
-            denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
-            denominator = denominator_global[global_to_local] # (NC, NQ)
+        #     denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
+        #     denominator = denominator_global[global_to_local] # (NC, NQ)
 
-        con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
+        # con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 
-        return con_grad
+        # return con_grad
 
 
 class HeavisideDensityStrategy(_FilterStrategy):
