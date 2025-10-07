@@ -6,8 +6,11 @@ from fealpy.typing import TensorLike
 
 from soptx.utils.base_logged import BaseLogged
 from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
-
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
+
+
+
 from fealpy.mesh import TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from soptx.utils.show import showmultirate, show_error_table
@@ -129,8 +132,126 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
         return uh
 
+
+    @run.register('test_none_exact_solution')
+    def run(self, model_type) -> TensorLike:
+        if model_type == 'bearing_device_2d':
+            E = 100.0
+            nu = 0.4   # 可压缩
+            plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
+            
+            from soptx.model.bearing_device_2d import HalfBearingDevice2D
+            pde = HalfBearingDevice2D(
+                                domain=[0, 0.6, 0, 0.4],
+                                t=-1.8,
+                                E=E, nu=nu,
+                                plane_type=plane_type,
+                            )
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 60, 40
+            
+        elif model_type == 'clamped_beam_2d':
+            E = 30.0
+            nu = 0.4  # 可压缩
+            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
+
+            from soptx.model.clamped_beam_2d import HalfClampedBeam2D
+            pde = HalfClampedBeam2D(
+                    domain=[0, 80, 0, 20],
+                    p=-1.5,
+                    E=E, nu=nu,
+                    plane_type=plane_type,
+                )
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 80, 20
+
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}")
+
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E,
+                                            poisson_ratio=pde.nu,
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        space_degree = 1
+        # 单纯形网格
+        integration_order = space_degree + 4
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                    mesh=displacement_mesh,
+                                    pde=pde,
+                                    material=material,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method='standard',
+                                    solve_method='mumps',
+                                    topopt_algorithm=None,
+                                    interpolation_scheme=None,
+                                )
+        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None) # (GDOF, )
+
+        s_space = lagrange_fem_analyzer.scalar_space
+        t_space = lagrange_fem_analyzer.tensor_space
+        q = lagrange_fem_analyzer._integration_order
+        qf = displacement_mesh.quadrature_formula(q)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        gphi = s_space.grad_basis(bc=bcs, variable='x')
+        cell2dof = t_space.cell_to_dof()
+        cuh = uh[cell2dof]
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        B = material.strain_displacement_matrix(dof_priority=t_space.dof_priority, 
+                                                            gphi=gphi)
+        D = material.elastic_matrix()
+        strain_quadrature = bm.einsum('cqil, cl -> cqi', B, cuh) # (NC, NQ, 3)
+        stress_quadrature = bm.einsum('cqij, cqjl, cl -> cqi', D, B, cuh) # (NC, NQ, 3)
+
+        # 计算单元加权平均应变和应力
+        cell_measure = displacement_mesh.entity_measure('cell')  # (NC,)
+        strain_cell = bm.mean(strain_quadrature, axis=1) # (NC, 3)
+        stress_cell = bm.mean(stress_quadrature, axis=1) # (NC, 3)
+        weighted_strain_cell = strain_cell * cell_measure[:, None] # (NC, 3)
+        weighted_stress_cell = stress_cell * cell_measure[:, None] # (NC, 3)
+
+        # 计算每个节点相邻的单元数
+        GDOF = s_space.number_of_global_dofs()
+        cell2dof = s_space.cell_to_dof()  # (NC, LDOF)
+        node_weight = bm.zeros(GDOF, dtype=bm.float64)
+        node_weight[:] = bm.add_at(node_weight, cell2dof.reshape(-1), bm.repeat(cell_measure, cell2dof.shape[1]))
+
+        # 计算节点应变分量和节点应力分量
+        strain_node = bm.zeros((GDOF, 3), dtype=bm.float64)
+        stress_node = bm.zeros((GDOF, 3), dtype=bm.float64)
+        for i in range(3):
+            strain_node[:, i] = bm.add_at(strain_node[..., i], cell2dof.reshape(-1), bm.repeat(weighted_strain_cell[:, i], cell2dof.shape[1]))
+            stress_node[:, i] = bm.add_at(stress_node[..., i], cell2dof.reshape(-1), bm.repeat(weighted_stress_cell[:, i], cell2dof.shape[1]))
+
+        strain_node /= node_weight[:, None]
+        stress_node /= node_weight[:, None]
+
+        from soptx.analysis.utils import _get_val_tensor_to_component
+        uh_component = _get_val_tensor_to_component(val=uh, space=t_space) # (GDOF, GD)
+        displacement_mesh.nodedata['uh'] = uh_component
+        displacement_mesh.nodedata['stress'] = stress_node
+
+        displacement_mesh.to_vtk(f"uh_lfem_{model_type}.vtu")
+
+        return uh
+
+
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    test.run.set('lfa_exact_solution')
-    test.run()
+    # test.run.set('lfa_exact_solution')
+    test.run.set('test_none_exact_solution')
+    test.run(model_type='clamped_beam_2d')

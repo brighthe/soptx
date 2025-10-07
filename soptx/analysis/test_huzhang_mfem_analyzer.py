@@ -172,6 +172,78 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         else:
             raise NotImplementedError(f"The test_demo '{test_demo}' has not been implemented yet.")
 
+
+    @run.register('test_none_exact_solution')
+    def run(self, model_type) -> TensorLike:
+        if model_type == 'bearing_device_2d':
+            E = 100.0
+            nu = 0.4   # 可压缩
+            plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
+            
+            from soptx.model.bearing_device_2d import HalfBearingDevice2D
+            pde = HalfBearingDevice2D(
+                                domain=[0, 0.6, 0, 0.4],
+                                t=-1.8,
+                                E=E, nu=nu,
+                                plane_type=plane_type,
+                            )
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 60, 40
+
+        elif model_type == 'clamped_beam_2d':
+            E = 30.0
+            nu = 0.4  # 可压缩
+            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
+
+            from soptx.model.clamped_beam_2d import HalfClampedBeam2D
+            pde = HalfClampedBeam2D(
+                    domain=[0, 80, 0, 20],
+                    p=-1.5,
+                    E=E, nu=nu,
+                    plane_type=plane_type,
+                )
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 80, 20
+
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}")
+
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E,
+                                            poisson_ratio=pde.nu,
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        ## 位移应力混合 HuZhang 有限元
+        huzhang_space_degree = 3
+        integration_order = huzhang_space_degree + 4
+        from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
+        huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                    mesh=displacement_mesh,
+                                      pde=pde,
+                                    material=material,
+                                    space_degree=huzhang_space_degree,
+                                    integration_order=integration_order,
+                                    solve_method='mumps',
+                                    topopt_algorithm=None,
+                                    interpolation_scheme=None,
+                                )
+        sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
+
+        from soptx.analysis.utils import _get_val_tensor_to_component, _get_val_component_to_tensor
+        uh_component = _get_val_tensor_to_component(val=uh, space=huzhang_mfem_analyzer.tensor_space) # (NN, GD)
+        # TODO HuZhang 空间的自由度排序方式是什么
+        sigmah_component = _get_val_tensor_to_component(val=sigmah, space=huzhang_mfem_analyzer.huzhang_space) # (NN, 3)
+        displacement_mesh.nodedata['uh'] = uh_component
+        displacement_mesh.nodedata['stress'] = sigmah_component
+
+        displacement_mesh.to_vtk(f"uh_hzmfem_{model_type}.vtu")
+
+        return uh
+
     @run.register('test_jump_penalty_integrator')
     def run(self):
         from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
@@ -228,6 +300,8 @@ if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
     # huzhang_analyzer.run.set('test')
-    huzhang_analyzer.run.set('test_huzhang')
+    # huzhang_analyzer.run.set('test_huzhang')
+    huzhang_analyzer.run.set('test_none_exact_solution')
     # huzhang_analyzer.run.set('test_jump_penalty_integrator')
-    huzhang_analyzer.run()
+
+    huzhang_analyzer.run(model_type='clamped_beam_2d')

@@ -7,20 +7,43 @@ from fealpy.mesh import TriangleMesh, QuadrangleMesh
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.model.pde_base import PDEBase 
 
-def _get_displacement_dof_component(uh: Function, space: TensorFunctionSpace) -> TensorLike:
-    """获取位移自由度分量形式"""
+def _get_val_tensor_to_component(val: Function, space: TensorFunctionSpace) -> TensorLike:
+    """将向量形式转换为分量形式
+    
+    适用于：
+    - 位移场: GD 个分量 (2D/3D)
+    - 应变/应力场: 3 个分量 (2D Voigt) 或 6 个分量 (3D Voigt)
+    """
     shape = space.shape
     scalar_space = space.scalar_space
-    mesh = space.mesh
     gdof = scalar_space.number_of_global_dofs()
-    GD = mesh.geo_dimension()
+    num_components = len(val[:]) // gdof
 
     if shape[1] == -1: # dof_priority
-        uh_reshaped = uh.reshape(GD, gdof)  
-        return uh_reshaped.T
+        # val 的形状是 (gdof * num_components, )
+        val_reshaped = val.reshape(num_components, gdof)  
+        return val_reshaped.T
+
+    elif shape[0] == -1: # gd_priority
+        # val 的形状是 (num_components * gdof, )
+        return val.reshape(num_components, gdof)
+
+def _get_val_component_to_tensor(val_component: TensorLike, space: TensorFunctionSpace) -> TensorLike:
+    """将分量形式转换为向量形式
+
+    适用于：
+    - 位移场: GD 个分量 (2D/3D)
+    - 应变/应力场: 3 个分量 (2D Voigt) 或 6 个分量 (3D Voigt)
+    """
+    shape = space.shape
+
+    if shape[1] == -1:  # dof_priority
+        # val_component 的形状是 (gdof, num_components)
+        return val_component.T.reshape(-1)
     
-    elif shape[1] == GD: # gd_priority
-        return uh.reshape(GD, gdof)
+    elif shape[0] == -1:  # gd_priority
+        # val_component 的形状是 (num_components, gdof)
+        return val_component.reshape(-1)
 
 def _scalar_disp_to_tensor_disp(dof_priority: bool,
                             uh: Function, 

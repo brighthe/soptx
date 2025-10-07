@@ -112,16 +112,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """获取当前的载荷向量"""
         return self._F
     
-    @property
-    def scalar_space(self) -> LagrangeFESpace:
-        """获取标量函数空间"""
-        return self._scalar_space
-    
-    @property
-    def tensor_space(self) -> TensorFunctionSpace: 
-        """获取张量函数空间"""
-        return self._tensor_space
-    
 
     ##############################################################################################
     # 属性修改器 - 修改内部状态
@@ -221,6 +211,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             # 1. Neumann 边界条件处理 - 弱形式施加
 
             if load_type == 'concentrated':
+                # TODO 点力必须在网格节点上
                 neumann_loads_func = self._pde.get_neumann_loads()
                 F_sigmah = self._tensor_space.interpolate(neumann_loads_func)
 

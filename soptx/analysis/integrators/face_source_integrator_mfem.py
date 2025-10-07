@@ -14,13 +14,11 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
                 source: Optional[SourceLike] = None, 
                 q: Optional[int] = None, *,
                 threshold: Optional[Threshold] = None,
-                use_cell_basis: bool = False,
                 batched: bool = False):
         super().__init__()
         self.source = source 
         self.q = q
         self.threshold = threshold
-        self.use_cell_basis = use_cell_basis
         self.batched = batched
 
 
@@ -29,19 +27,14 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         # 边界面的全局索引
         index = self.make_index(space)
 
-        if self.use_cell_basis:
-            mesh = space.mesh
-            face2cell = mesh.face_to_cell(index)
-            # 每个边界面所邻接的单元的全局索引
-            cell_index = face2cell[:, 0] # (NFb, ) 
-            # 单元到全局自由度的映射
-            result = space.cell_to_dof(index=cell_index) # (NFb, LDOF)
+        mesh = space.mesh
+        face2cell = mesh.face_to_cell(index)
+        # 每个边界面所邻接的单元的全局索引
+        cell_index = face2cell[:, 0] # (NFb, ) 
+        # 单元到全局自由度的映射
+        result = space.cell_to_dof(index=cell_index) # (NFb, LDOF)
 
-            return result
-        
-        else:
-            # TODO 删除
-            return space.face_to_dof(index=index)
+        return result
 
     @enable_cache
     def fetch(self, space: _FS) -> TensorLike:
@@ -60,52 +53,28 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         qf = mesh.quadrature_formula(q, 'face')
         bcs, ws = qf.get_quadrature_points_and_weights()
 
-        if self.use_cell_basis:
-            phi = space.cell_basis_on_face(bcs, index=index) # (NF_bd, NQ, LDOF, 3)
-        else:
-            phi = space.face_basis(bcs, index=index) # (1, NQ_face, LDOF, GD)
+        phi = space.cell_basis_on_face(bcs, index=index) # (NF_bd, NQ, LDOF, 3)
 
         return bcs, ws, phi, facemeasure, index, n
 
-    # def assembly(self, space):
-    #     source = self.source
-    #     bcs, ws, phi, fm, index, n = self.fetch(space) 
-    #     mesh = getattr(space, 'mesh', None)
-
-    #     NFb, NQ, LDOF, _ = phi.shape
-    #     GD = mesh.geo_dimension()
-    #     tau = bm.zeros((NFb, NQ, LDOF, GD, GD), dtype=phi.dtype)
-    #     tau[..., 0, 0] = phi[..., 0] # σ_xx
-    #     tau[..., 0, 1] = phi[..., 1] # σ_xy
-    #     tau[..., 1, 0] = phi[..., 1] # σ_yx
-    #     tau[..., 1, 1] = phi[..., 2] # σ_yy
-    #     tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NFb, NQ, LDOF, GD)
-
-    #     ps = mesh.bc_to_point(bcs, index=index)
-    #     val = source(ps) # (NFb, NQ, GD)
-
-    #     F = linear_integral(tau_n, ws, fm, val, self.batched) # (NFb, LDOF)
-
-    #     return F
-    
     def assembly(self, space):
         source = self.source
         bcs, ws, phi, fm, index, n = self.fetch(space) 
         mesh = getattr(space, 'mesh', None)
 
-        # NFb, NQ, LDOF, _ = phi.shape
-        # GD = mesh.geo_dimension()
-        # tau = bm.zeros((NFb, NQ, LDOF, GD, GD), dtype=phi.dtype)
-        # tau[..., 0, 0] = phi[..., 0] # σ_xx
-        # tau[..., 0, 1] = phi[..., 1] # σ_xy
-        # tau[..., 1, 0] = phi[..., 1] # σ_yx
-        # tau[..., 1, 1] = phi[..., 2] # σ_yy
-        # tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NFb, NQ, LDOF, GD)
+        NFb, NQ, LDOF, _ = phi.shape
+        GD = mesh.geo_dimension()
+        tau = bm.zeros((NFb, NQ, LDOF, GD, GD), dtype=phi.dtype)
+        tau[..., 0, 0] = phi[..., 0] # σ_xx
+        tau[..., 0, 1] = phi[..., 1] # σ_xy
+        tau[..., 1, 0] = phi[..., 1] # σ_yx
+        tau[..., 1, 1] = phi[..., 2] # σ_yy
+        tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NFb, NQ, LDOF, GD)
 
         ps = mesh.bc_to_point(bcs, index=index)
         val = source(ps) # (NFb, NQ, GD)
 
-        F = linear_integral(phi, ws, fm, val, self.batched) # (NFb, LDOF)
+        F = bm.einsum('f, q, fqli, fqd -> fl', fm, ws, tau_n, val) # (NFb, LDOF)
 
         return F
     
@@ -115,7 +84,7 @@ class InterFaceSourceIntegrator(_FaceSourceIntegrator):
         index = self.threshold
         return index
 
-class BoundaryFaceSourceIntegrator(_FaceSourceIntegrator): 
+class BoundaryFaceSourceIntegrator_mfem(_FaceSourceIntegrator): 
     def make_index(self, space: _FS):
         threshold = self.threshold
 
