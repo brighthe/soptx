@@ -97,6 +97,12 @@ class HuZhangFECellDof3d():
 
     def _dof_classfication(self):
         """
+        张量自由度顺序: (6, -1): gd_priority 
+        (σ0_xx, σ0_xy, σ0_xz, σ0_yy, σ0_yz, σ0_zz, 
+         σ1_xx, σ1_xy, σ1_xz, σ1_yy, σ1_yz, σ1_zz, 
+         ...,
+         σn_xx, σn_xy, σn_xz, σn_yy, σn_yz, σn_zz)
+
         Classify the dofs by the the entities.
         """
         p = self.p

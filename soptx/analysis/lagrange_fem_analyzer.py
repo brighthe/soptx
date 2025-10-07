@@ -163,16 +163,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if rho_val is None:
                 self._log_error("基于密度的拓扑优化算法需要提供相对密度 rho")
 
-            coef = self._interpolation_scheme.interpolate_map(
+            # TODO 目前仅支持插值杨氏模量 E 
+            E_rho = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
                                             rho_val=rho_val,
                                             integration_order=self._integration_order
                                         )
-        elif self._topopt_algorithm == 'level_set':
-            pass
+            E0 = self._material.youngs_modulus
+            coef = E_rho / E0
+
+            # coef = self._interpolation_scheme.interpolate_map(
+            #                                 material=self._material,
+            #                                 rho_val=rho_val,
+            #                                 integration_order=self._integration_order
+            #                             )
         
         else:
-            raise NotImplementedError(f"未知的拓扑优化算法: {self._topopt_algorithm}")
+            error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
+            self._log_error(error_msg)
 
         # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
@@ -310,6 +318,56 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             return diff_ke
         
+        elif density_location in ['node']:
+            
+            mesh = self._mesh
+            qf = mesh.quadrature_formula(q=self._integration_order)
+            # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+            bcs, ws = qf.get_quadrature_points_and_weights()
+
+            rho_q = rho_val(bcs) # (NC, NQ)
+            if (bm.any(bm.isnan(rho_q[:])) or bm.any(bm.isinf(rho_q[:])) or 
+                bm.any(rho_q[:] < -1e-12) or bm.any(rho_q[:] > 1 + 1e-12)):
+                self._log_error(f"节点密度在高斯点处的值超出范围 [0, 1]: "
+                                f"range=[{bm.min(rho_q):.2e}, {bm.max(rho_q):.2e}]")
+                
+            diff_coef_q = self._interpolation_scheme.interpolate_derivative(
+                                                    material=self._material, 
+                                                    density_distribution=rho_q
+                                                ) # (NC, NQ)
+            
+            rho_space = rho_val.space
+            u_space = self._scalar_space
+
+            # 高斯积分点处的基函数
+            phi = rho_space.basis(bcs)[0] # (NQ, NCN)
+            if (bm.any(bm.isnan(phi[:])) or bm.any(bm.isinf(phi[:])) or 
+                bm.any(phi[:] < -1e-12) or bm.any(phi[:] > 1 + 1e-12)):
+                self._log_error(f"密度的形函数超出范围 [0, 1]: "
+                                f"range=[{bm.min(phi):.2e}, {bm.max(phi):.2e}]")
+
+
+            D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3), 3D: (6, 6)
+            dof_priority = self._tensor_space.dof_priority
+            gphi = u_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
+            B = self._material.strain_displacement_matrix(
+                                    dof_priority=dof_priority, 
+                                    gphi=gphi
+                                ) # 2D: (NC, NQ, 3, TLDOF), 3D: (NC, NQ, 6, TLDOF)
+            BDB = bm.einsum('cqki, kl, cqlj -> cqij', B, D0, B) # (NC, NQ, TLDOF, TLDOF)
+
+            if isinstance(mesh, SimplexMesh):
+                cm = mesh.entity_measure('cell')
+                kernel = bm.einsum('q, c, cq, cqij -> cqij', ws, cm, diff_coef_q, BDB)
+            else:
+                J = mesh.jacobi_matrix(bcs)
+                detJ = bm.abs(bm.linalg.det(J))
+                kernel = bm.einsum('q, cq, cq, cqij -> cqij', ws, detJ, diff_coef_q, BDB)
+
+            diff_ke = bm.einsum('cqij, ql -> clij', kernel, phi) # (NC, NCN, TLDOF, TLDOF)
+
+            return diff_ke
+        
         elif density_location in ['element_multiresolution']:
 
             diff_coef = self._interpolation_scheme.interpolate_derivative(
@@ -387,56 +445,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
             else:
                 diff_ke = J_g * bm.einsum('q, cnq, cnqki, cnkl, cnqlj -> cnij',
                                     ws_e, detJ_eg, B_eg, diff_D_g, B_eg)
-
-            return diff_ke
-
-        elif density_location in ['node']:
-            
-            mesh = self._mesh
-            qf = mesh.quadrature_formula(q=self._integration_order)
-            # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-            bcs, ws = qf.get_quadrature_points_and_weights()
-
-            rho_q = rho_val(bcs) # (NC, NQ)
-            if (bm.any(bm.isnan(rho_q[:])) or bm.any(bm.isinf(rho_q[:])) or 
-                bm.any(rho_q[:] < -1e-12) or bm.any(rho_q[:] > 1 + 1e-12)):
-                self._log_error(f"节点密度在高斯点处的值超出范围 [0, 1]: "
-                                f"range=[{bm.min(rho_q):.2e}, {bm.max(rho_q):.2e}]")
-                
-            diff_coef_q = self._interpolation_scheme.interpolate_derivative(
-                                                    material=self._material, 
-                                                    density_distribution=rho_q
-                                                ) # (NC, NQ)
-            
-            rho_space = rho_val.space
-            u_space = self._scalar_space
-
-            # 高斯积分点处的基函数
-            phi = rho_space.basis(bcs)[0] # (NQ, NCN)
-            if (bm.any(bm.isnan(phi[:])) or bm.any(bm.isinf(phi[:])) or 
-                bm.any(phi[:] < -1e-12) or bm.any(phi[:] > 1 + 1e-12)):
-                self._log_error(f"密度的形函数超出范围 [0, 1]: "
-                                f"range=[{bm.min(phi):.2e}, {bm.max(phi):.2e}]")
-
-
-            D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3), 3D: (6, 6)
-            dof_priority = self._tensor_space.dof_priority
-            gphi = u_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
-            B = self._material.strain_displacement_matrix(
-                                    dof_priority=dof_priority, 
-                                    gphi=gphi
-                                ) # 2D: (NC, NQ, 3, TLDOF), 3D: (NC, NQ, 6, TLDOF)
-            BDB = bm.einsum('cqki, kl, cqlj -> cqij', B, D0, B) # (NC, NQ, TLDOF, TLDOF)
-
-            if isinstance(mesh, SimplexMesh):
-                cm = mesh.entity_measure('cell')
-                kernel = bm.einsum('q, c, cq, cqij -> cqij', ws, cm, diff_coef_q, BDB)
-            else:
-                J = mesh.jacobi_matrix(bcs)
-                detJ = bm.abs(bm.linalg.det(J))
-                kernel = bm.einsum('q, cq, cq, cqij -> cqij', ws, detJ, diff_coef_q, BDB)
-
-            diff_ke = bm.einsum('cqij, ql -> clij', kernel, phi) # (NC, NCN, TLDOF, TLDOF)
 
             return diff_ke
         

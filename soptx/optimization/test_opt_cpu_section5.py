@@ -243,7 +243,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
 
     @run.register('test_clamped_beam_2d')
-    def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
+    def run(self, analysis_method: str = 'huzhangfem') -> Union[TensorLike, OptimizationHistory]:
         E = 30.0
         nu = 0.4   # 可压缩
         # nu = 0.5    # 不可压缩
@@ -283,8 +283,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         rmin = 1.25
 
         nx, ny = 80, 20
-        mesh_type = 'uniform_quad'
-        # mesh_type = 'uniform_crisscross_tri'
+        # mesh_type = 'uniform_quad'
+        mesh_type = 'uniform_crisscross_tri'
 
         # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -333,7 +333,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
             huzhang_space_degree = 3
             integration_order = huzhang_space_degree + 4
             from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
-            huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+            analyzer = HuZhangMFEMAnalyzer(
                                         mesh=displacement_mesh,
                                         pde=pde,
                                         material=material,
@@ -343,8 +343,14 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                         topopt_algorithm='density_based',
                                         interpolation_scheme=interpolation_scheme,
                                     )
-            
-            analyzer = huzhang_mfem_analyzer
+            space_sigmah = analyzer.huzhang_space
+            space_uh = analyzer.tensor_space
+            TGDOF_uh = space_uh.number_of_global_dofs()
+            TGDOF_sigmah = space_sigmah.number_of_global_dofs()
+            self._log_info(f"分析阶段参数, "
+                           f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                           f"位移空间={space_uh.__class__.__name__}, 次数={space_uh.p}, 总自由度={TGDOF_uh}, "
+                           f"应力空间={space_sigmah.__class__.__name__}, 次数={space_sigmah.p}, 总自由度={TGDOF_sigmah}")
         
         if density_location in ['element']:
             design_variable_mesh = displacement_mesh
@@ -353,7 +359,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                                     displacement_mesh=displacement_mesh,
                                                     relative_density=relative_density,
                                                 ) 
-        
         elif density_location in ['node']:
             design_variable_mesh = displacement_mesh
             d, rho = interpolation_scheme.setup_density_distribution(
@@ -365,8 +370,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         else:
             raise ValueError(f"不支持的密度位置类型: {density_location}")
 
-        fe_tspace = lagrange_fem_analyzer.tensor_space
-        fe_dofs = fe_tspace.number_of_global_dofs()
         
         from soptx.optimization.compliance_objective import ComplianceObjective
         compliance_objective = ComplianceObjective(analyzer=analyzer)
@@ -432,13 +435,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     )
             
         self._log_info(f"开始密度拓扑优化, "
-                       f"分析数值方法={analyzer.__class__.__name__}, "
-                       f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
                        f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
                        f"离散方法={analysis_method}, "
                        f"网格类型={mesh_type}, 密度类型={density_location}, " 
                        f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-                       f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
                        f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
@@ -676,8 +676,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
     
-    test.run.set('test_bridge_2d')
-    # test.run.set('test_clamped_beam_2d')
+    # test.run.set('test_bridge_2d')
+    test.run.set('test_clamped_beam_2d')
     # test.run.set('test_bearing_device_2d')
     rho_opt, history = test.run()
     

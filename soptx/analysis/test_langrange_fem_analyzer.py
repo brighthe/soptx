@@ -165,9 +165,8 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 80, 20
 
-        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}")
-
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+        NN = displacement_mesh.number_of_nodes()
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -192,10 +191,19 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     topopt_algorithm=None,
                                     interpolation_scheme=None,
                                 )
+        
+        s_space = lagrange_fem_analyzer.scalar_space
+        SGDOF = s_space.number_of_global_dofs()
+        t_space = lagrange_fem_analyzer.tensor_space
+        TGDOF = t_space.number_of_global_dofs()
+
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                       f"网格={displacement_mesh.__class__.__name__}, 节点数={NN}, "
+                       f"空间={t_space.__class__.__name__}, 次数={t_space.p}, 标量自由度={SGDOF}, 总自由度={TGDOF}")
+
         uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None) # (GDOF, )
 
-        s_space = lagrange_fem_analyzer.scalar_space
-        t_space = lagrange_fem_analyzer.tensor_space
+        # 计算应变和应力
         q = lagrange_fem_analyzer._integration_order
         qf = displacement_mesh.quadrature_formula(q)
         bcs, ws = qf.get_quadrature_points_and_weights()
@@ -224,14 +232,13 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         weighted_stress_cell = stress_cell * cell_measure[:, None] # (NC, 3)
 
         # 计算每个节点相邻的单元数
-        GDOF = s_space.number_of_global_dofs()
         cell2dof = s_space.cell_to_dof()  # (NC, LDOF)
-        node_weight = bm.zeros(GDOF, dtype=bm.float64)
+        node_weight = bm.zeros(SGDOF, dtype=bm.float64)
         node_weight[:] = bm.add_at(node_weight, cell2dof.reshape(-1), bm.repeat(cell_measure, cell2dof.shape[1]))
 
         # 计算节点应变分量和节点应力分量
-        strain_node = bm.zeros((GDOF, 3), dtype=bm.float64)
-        stress_node = bm.zeros((GDOF, 3), dtype=bm.float64)
+        strain_node = bm.zeros((SGDOF, 3), dtype=bm.float64)
+        stress_node = bm.zeros((SGDOF, 3), dtype=bm.float64)
         for i in range(3):
             strain_node[:, i] = bm.add_at(strain_node[..., i], cell2dof.reshape(-1), bm.repeat(weighted_strain_cell[:, i], cell2dof.shape[1]))
             stress_node[:, i] = bm.add_at(stress_node[..., i], cell2dof.reshape(-1), bm.repeat(weighted_stress_cell[:, i], cell2dof.shape[1]))
@@ -240,11 +247,15 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         stress_node /= node_weight[:, None]
 
         from soptx.analysis.utils import _get_val_tensor_to_component
-        uh_component = _get_val_tensor_to_component(val=uh, space=t_space) # (GDOF, GD)
+        uh_component = _get_val_tensor_to_component(val=uh, space=t_space) # (SGDOF, GD)
         displacement_mesh.nodedata['uh'] = uh_component
         displacement_mesh.nodedata['stress'] = stress_node
 
-        displacement_mesh.to_vtk(f"uh_lfem_{model_type}.vtu")
+        from pathlib import Path
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        displacement_mesh.to_vtk(f"{base_dir}/uh_lfem.vtu")
 
         return uh
 
@@ -254,4 +265,4 @@ if __name__ == "__main__":
     
     # test.run.set('lfa_exact_solution')
     test.run.set('test_none_exact_solution')
-    test.run(model_type='clamped_beam_2d')
+    test.run(model_type='bearing_device_2d')

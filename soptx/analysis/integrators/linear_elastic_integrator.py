@@ -448,59 +448,49 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         NC = mesh.number_of_cells()
         NQ = gphi.shape[1]
-        D0 = self._material.elastic_matrix() # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        D0 = self._material.elastic_matrix() # 2D: (1, 1, NS, NS)
         B = self._material.strain_displacement_matrix(dof_priority=space.dof_priority, 
-                                                    gphi=gphi) # 2D: (NC, NQ, 3, LDOF), 3D: (NC, NQ, 6, LDOF)
+                                                    gphi=gphi) # (NC, NQ, NS, LDOF)
 
         # 单元密度: (NC, ); 节点密度: (NC, NQ)
         coef = self._coef
 
         if coef is None:
 
-            D = D0[0, 0] # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+            D = D0[0, 0] # (NS, NS)
 
             if isinstance(mesh, SimplexMesh):
-                KK = bm.einsum('q, c, cqki, kl, cqlj -> cij',
-                                ws, cm, B, D, B)
+                KK = bm.einsum('q, c, cqki, kl, cqlj -> cij', ws, cm, B, D, B)
             else:
-                KK = bm.einsum('q, cq, cqki, kl, cqlj -> cij',
-                                ws, detJ, B, D, B)
-            
-            return KK
+                KK = bm.einsum('q, cq, cqki, kl, cqlj -> cij', ws, detJ, B, D, B)
         
         # 单元密度的情况
         elif coef.shape == (NC, ):
             
-            D_base = D0[0, 0] # 2D: (3, 3); 3D: (6, 6)
-            D = bm.einsum('c, kl -> ckl', coef, D_base) # 2D: (NC, 3, 3); 3D: (NC, 6, 6)
+            D_base = D0[0, 0] # (NS, NS)
+            D = bm.einsum('c, kl -> ckl', coef, D_base) # (NC, NS, NS)
             
             if isinstance(mesh, SimplexMesh):
-                KK = bm.einsum('q, c, cqki, ckl, cqlj -> cij',
-                                ws, cm, B, D, B)
+                KK = bm.einsum('q, c, cqki, ckl, cqlj -> cij', ws, cm, B, D, B)
             else:
-                # test = bm.einsum('q, cq, cqid, cqjd -> cij', ws, detJ, gphi, gphi)
-                KK = bm.einsum('q, cq, cqki, ckl, cqlj -> cij',
-                                ws, detJ, B, D, B)
-            
-            return KK
-        
+                KK = bm.einsum('q, cq, cqki, ckl, cqlj -> cij', ws, detJ, B, D, B)
+                    
         # 节点密度的情况
         elif coef.shape == (NC, NQ):
             
-            D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, :, :)
+            D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, NS, NS)
             
             if isinstance(mesh, SimplexMesh):
-                KK = bm.einsum('q, c, cqki, cqkl, cqlj -> cij',
-                                ws, cm, B, D, B)
+                KK = bm.einsum('q, c, cqki, cqkl, cqlj -> cij', ws, cm, B, D, B)
             else:
-                KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij',
-                                ws, detJ, B, D, B)
-                
-            return KK
+                KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij', ws, detJ, B, D, B)
         
         else:
 
-            pass
+
+            raise NotImplementedError
+
+        return KK
 
     @assembly.register('voigt_multiresolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:

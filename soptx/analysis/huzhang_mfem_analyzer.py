@@ -161,46 +161,61 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t = timer(f"组装刚度矩阵")
 
+        p = self._space_degree
+        mesh = self._mesh
+        GD = mesh.geo_dimension()
+
+        space0 = self._huzhang_space
+        space1 = self._tensor_space
+
         if self._topopt_algorithm is None:
             if rho_val is not None:
                 self._log_warning("标准混合有限元分析模式下忽略相对密度分布参数 rho")
+            coef = None
+        elif self._topopt_algorithm in ['density_based']:
+            E_rho = self._interpolation_scheme.interpolate_map(
+                                            material=self._material,
+                                            rho_val=rho_val,
+                                            integration_order=self._integration_order
+                                        )
+            E0 = self.material.youngs_modulus
+            coef = E0 / E_rho
+        else:
+            error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
+            self._log_error(error_msg)
 
-            p = self._space_degree
-            mesh = self._mesh
-            GD = mesh.geo_dimension()
+        lambda0, lambda1 = self._stress_matrix_coefficient()
 
-            space0 = self._huzhang_space
-            space1 = self._tensor_space
+        bform1 = BilinearForm(space0)
+        hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
+                                                q=self._integration_order, coef=coef)
+        bform1.add_integrator(hzs_integrator)
 
-            lambda0, lambda1 = self._stress_matrix_coefficient()
+        bform2 = BilinearForm((space1, space0))
+        hzm_integrator = HuZhangMixIntegrator()
+        bform2.add_integrator(hzm_integrator)
 
-            bform1 = BilinearForm(space0)
-            bform1.add_integrator(HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1))
+        if p >= GD + 1:
+        
+            bform = BlockForm([[bform1,   bform2],
+                                [bform2.T, None]])
 
-            bform2 = BilinearForm((space1, space0))
-            bform2.add_integrator(HuZhangMixIntegrator())
+        elif p <= GD:
 
-            if p >= GD + 1:
-            
-                bform = BlockForm([[bform1,   bform2],
-                                   [bform2.T, None]])
+            bform3 = BilinearForm(space1)
+            bform3.add_integrator(JumpPenaltyIntegrator())
 
-            elif p <= GD:
+            bform = BlockForm([[bform1,   bform2],
+                                [bform2.T, bform3]])
 
-                bform3 = BilinearForm(space1)
-                bform3.add_integrator(JumpPenaltyIntegrator())
+        if enable_timing:
+            t.send('准备时间')
 
-                bform = BlockForm([[bform1,   bform2],
-                                   [bform2.T, bform3]])
+        K = bform.assembly(format='csr')
 
-            if enable_timing:
-                t.send('准备时间')
-
-            K = bform.assembly(format='csr')
-
-            if enable_timing:
-                t.send('组装时间')
-                t.send(None)
+        if enable_timing:
+            t.send('组装时间')
+            t.send(None)
 
         return K
     

@@ -95,6 +95,11 @@ class HuZhangFECellDof2d():
 
     def dof_classfication(self):
         """
+        张量自由度顺序: (3, -1): gd_priority 
+        (σ0_xx, σ0_xy, σ0_yy, 
+         σ1_xx, σ1_xy, σ1_yy, 
+         ...,
+         σn_xx, σn_xy, σn_yy)
         Classify the dofs by the the entities.
         """
         p = self.p
@@ -171,10 +176,13 @@ class HuZhangFEDof2d():
         TD = self.mesh.top_dimension()
         NS = TD*(TD+1)//2
         ldof = self.number_of_local_dofs()
+
         if doftype == 'cell':
             return ldof - NS*3 - 2*(p-1)*3
+        
         elif doftype == 'face' or doftype == 'edge':
             return 2*(p-1) 
+        
         elif doftype == 'node':
             return NS
         else:
@@ -192,6 +200,7 @@ class HuZhangFEDof2d():
         cldof = self.number_of_internal_local_dofs('cell')
         eldof = self.number_of_internal_local_dofs('edge')
         nldof = self.number_of_internal_local_dofs('node')
+        
         return NC*cldof + NE*eldof + NN*nldof
 
     def node_to_internal_dof(self) -> TensorLike:
@@ -243,6 +252,7 @@ class HuZhangFEDof2d():
 
     def cell_to_dof(self, index: Index=_S) -> TensorLike:
         """
+        自由度顺序: 顶点 → 边 → 单元
         Get the cell to dof map of the finite element space.
         """
         p = self.p
@@ -388,8 +398,33 @@ class HuZhangFESpace2d(FunctionSpace):
         self.TD = mesh.top_dimension()
         self.GD = mesh.geo_dimension()
 
-    def __str__(self):
-        return "HuZhangFESpace on {} with p={}".format(self.mesh, self.p)
+    # def __str__(self):
+    #     return "HuZhangFESpace on {} with p={}".format(self.mesh, self.p)
+    
+    @property
+    def NS(self):
+        """
+        对称矩阵/张量的独立分量数
+        
+        对于 2D: NS = 3 (σ_xx, σ_xy, σ_yy)
+        对于 3D: NS = 6 (σ_xx, σ_xy, σ_xz, σ_yy, σ_yz, σ_zz)
+        
+        Returns
+        -------
+        独立分量的数量 = TD*(TD+1)//2
+        """
+        return self.TD * (self.TD + 1) // 2
+    
+    @property
+    def shape(self):
+        """
+        自由度的形状，表示排序方式
+        (-1, NS): gd_priority, 先排每个位置的所有应力分量
+        
+        对于2D: (-1, 3) 表示 (σ0_xx, σ0_xy, σ0_yy, σ1_xx, σ1_xy, σ1_yy, ...)
+        对于3D: (-1, 6) 表示 (σ0_xx, σ0_xy, σ0_xz, σ0_yy, σ0_yz, σ0_zz, ...)
+        """
+        return (-1, self.NS)
 
     ## 自由度接口
     def number_of_local_dofs(self, doftype='cell') -> int:

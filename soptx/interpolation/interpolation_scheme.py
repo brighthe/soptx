@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any, Literal, List, Union
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod, cartesian
 from fealpy.typing import TensorLike, Tuple
-from fealpy.functionspace import Function, LagrangeFESpace, BernsteinFESpace
+from fealpy.functionspace import Function, LagrangeFESpace
 from fealpy.mesh import HomogeneousMesh
 
 from .linear_elastic_material import LinearElasticMaterial
@@ -33,10 +33,6 @@ class MaterialInterpolationScheme(BaseLogged):
         self.setup_density_distribution.set(density_location)
         self.interpolate_map.set(interpolation_method)
 
-        self._log_info(f"Material interpolation scheme initialized: "
-                      f"density_location={density_location}, "
-                      f"interpolation_method={interpolation_method}, ")
-        
     
     #########################################################################################
     # 属性访问器
@@ -174,8 +170,8 @@ class MaterialInterpolationScheme(BaseLogged):
         """
         节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元节点处
         
-        Returns:
-        --------
+        Returns
+        -------
         design_variable : (NN_design_variable, )
         density_distribution : (NC, n_sub, NQ)
         """
@@ -183,19 +179,6 @@ class MaterialInterpolationScheme(BaseLogged):
         NN_design_variable = design_variable_mesh.number_of_nodes()
         design_variable = bm.full((NN_design_variable, ), relative_density, 
                                 dtype=bm.float64, device=design_variable_mesh.device)
-        
-        # NC = displacement_mesh.number_of_cells()
-        # n_sub = sub_density_element
-        # qf_e = displacement_mesh.quadrature_formula(q=integration_order)
-        # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-        # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
-        # NQ = ws_e.shape[0]
-        # density_distribution = bm.full((NC, n_sub, NQ), 
-        #                                relative_density, 
-        #                                dtype=bm.float64, 
-        #                                device=design_variable_mesh.device)
-
-        # return design_variable, density_distribution
 
         s_space_u = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
         NC = displacement_mesh.number_of_cells()
@@ -223,33 +206,6 @@ class MaterialInterpolationScheme(BaseLogged):
 
         return design_variable, density_distribution
     
-    @setup_density_distribution.register('shepard_interpolation_point')
-    def setup_density_distribution(self,
-                                   mesh: HomogeneousMesh,
-                                   relative_density: float = 1.0,
-                                   integration_order: int = None,
-                                   interpolation_order: int = 1,
-                                   **kwargs,
-                                ) -> Function:
-        "节点密度 (Shepard 插值)"
-        if interpolation_order is None:
-            error_msg = "'interpolation_point' density distribution requires 'interpolation_order' parameter"
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
-        
-        if integration_order is not None:
-            warn_msg = f"Interpolation point density distribution does not require 'integration_order', provided integration_order={integration_order} will be ignored"
-            self._log_warning(warn_msg)
-
-        from soptx.interpolation.space import ShepardFESpace
-        shepard_space = ShepardFESpace(mesh, p=interpolation_order, power=2.0)
-
-        gdof = shepard_space.number_of_global_dofs()
-        density_values = bm.full((gdof, ), relative_density, dtype=bm.float64, device=mesh.device)
-
-        density_dist = shepard_space.function(density_values)
-        
-        return density_dist
 
     @variantmethod('simp')
     def interpolate_map(self, 
@@ -268,23 +224,23 @@ class MaterialInterpolationScheme(BaseLogged):
 
             if self._density_location in ['element']:
                 rho_element = rho_val[:] # (NC, )
-                simp_map = rho_element[:] ** penalty_factor * E0 / E0
-
-            elif self._density_location in ['element_multiresolution']:
-                rho_sub_element = rho_val[:] # (NC, n_sub)
-                simp_map = rho_sub_element[:] ** penalty_factor * E0 / E0
+                E_rho = rho_element[:] ** penalty_factor * E0
 
             elif self._density_location in ['node']:
                 qf = self._mesh.quadrature_formula(q=integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
                 rho_q = rho_val(bcs) # (NC, NQ)
-                simp_map = rho_q[:] ** penalty_factor * E0 / E0
+                E_rho = rho_q[:] ** penalty_factor * E0
+
+            elif self._density_location in ['element_multiresolution']:
+                rho_sub_element = rho_val[:] # (NC, n_sub)
+                E_rho = rho_sub_element[:] ** penalty_factor * E0
 
             elif self._density_location in ['node_multiresolution']:
                 pass
 
-            return simp_map
-    
+            return E_rho
+        
     @interpolate_map.register('msimp')
     def interpolate_map(self,
                     material: LinearElasticMaterial, 
@@ -309,24 +265,27 @@ class MaterialInterpolationScheme(BaseLogged):
             Emin = void_youngs_modulus
 
             if self._density_location in ['element']:
+                # rho_val.shape = (NC, )
                 rho_element = rho_val[:] # (NC, )
-                msimp_map = (Emin + rho_element[:] ** penalty_factor * (E0 - Emin)) / E0
-
-            elif self._density_location in ['element_multiresolution']:
-                rho_sub_element = rho_val[:] # (NC, n_sub)
-                msimp_map = (Emin + rho_sub_element[:] ** penalty_factor * (E0 - Emin)) / E0
+                E_rho = Emin + rho_element[:] ** penalty_factor * (E0 - Emin)
 
             elif self._density_location in ['node']:
+                # rho_val.shape = (NN, )
                 density_mesh = rho_val.space.mesh
                 qf = density_mesh.quadrature_formula(q=integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
                 rho_q = rho_val(bcs) # (NC, NQ)
-                msimp_map = (Emin + rho_q[:] ** penalty_factor * (E0 - Emin)) / E0
+                E_rho = Emin + rho_q[:] ** penalty_factor * (E0 - Emin)
+
+            elif self._density_location in ['element_multiresolution']:
+                # rho_val.shape = (NC, n_sub)
+                rho_sub_element = rho_val[:] # (NC, n_sub)
+                E_rho = Emin + rho_sub_element[:] ** penalty_factor * (E0 - Emin)
 
             elif self._density_location in ['node_multiresolution']:
                 pass
 
-            return msimp_map
+            return E_rho
 
     @interpolate_map.register('simp_double')
     def interpolate_map(self) -> TensorLike:
@@ -403,32 +362,6 @@ class MaterialInterpolationScheme(BaseLogged):
                 Emin = self._options['void_youngs_modulus']
                 dval = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin) / E0
                 return dval
-            
-        # elif self._density_location in ['lagrange_interpolation_point', 
-        #                                 'berstein_interpolation_point', 
-        #                                 'shepard_interpolation_point']:
-
-        #     rho_q = density_distribution[:]
-        #     if method == 'simp':
-        #         dval = p * rho_q[:] ** (p - 1)
-        #         return dval
-        #     elif method == 'msimp':
-        #         E0 = material.youngs_modulus
-        #         Emin = self._options['void_youngs_modulus']
-        #         dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
-        #         return dval
-            
-        # elif self._density_location in ['gauss_integration_point',]:
-
-        #     rho_q = density_distribution[:]
-        #     if method == 'simp':
-        #         dval = p * rho_q[:] ** (p - 1)
-        #         return dval
-        #     elif method == 'msimp':
-        #         E0 = material.youngs_modulus
-        #         Emin = self._options['void_youngs_modulus']
-        #         dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
-        #         return dval
 
 
     ###########################################################################################################
@@ -446,23 +379,3 @@ class MaterialInterpolationScheme(BaseLogged):
         for key, default_value in defaults.items():
             if key not in self._options:
                 self._options[key] = default_value
-    
-    @cartesian
-    def _density_distribution_coscos(self, points: TensorLike) -> TensorLike:
-        """
-        周期性密度函数, 基于二维余弦函数和双曲正切变换
-
-        数学表达式：
-            base = bm.cos(scale * x) * bm.cos(scale * y)
-            density = 0.5 * (1 + bm.tanh(s * (base + 2 * r - 1)))
-        """
-        x, y = points[..., 0], points[..., 1]
-
-        scale = 2
-        base_pattern = bm.cos(scale * x) * bm.cos(scale * y)
-
-        r = 0.5
-        smoothness = 2.0 
-        val = 0.5 * (1 + bm.tanh(smoothness * (base_pattern + 2 * r - 1)))
-
-        return val

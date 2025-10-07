@@ -205,9 +205,10 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 80, 20
 
-        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}")
-
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+        NN = displacement_mesh.number_of_nodes()
+        NE = displacement_mesh.number_of_edges()
+        NC = displacement_mesh.number_of_cells()
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -223,7 +224,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
                                     mesh=displacement_mesh,
-                                      pde=pde,
+                                    pde=pde,
                                     material=material,
                                     space_degree=huzhang_space_degree,
                                     integration_order=integration_order,
@@ -231,16 +232,39 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                     topopt_algorithm=None,
                                     interpolation_scheme=None,
                                 )
+        
+        space_sigmah = huzhang_mfem_analyzer.huzhang_space
+        space_uh = huzhang_mfem_analyzer.tensor_space
+
+        SGDOF_uh = space_uh.scalar_space.number_of_global_dofs()
+        TGDOF_uh = space_uh.number_of_global_dofs()
+        TGDOF_sigmah = space_sigmah.number_of_global_dofs()
+        TLDOF_sigmah_n = space_sigmah.dof.number_of_internal_local_dofs('node')
+        TLDOF_sigmah_e = space_sigmah.dof.number_of_internal_local_dofs('edge')
+        TLDOF_sigmah_c = space_sigmah.dof.number_of_internal_local_dofs('cell')
+        TGDOF_sigmah_n = TLDOF_sigmah_n * NN
+        TGDOF_sigmah_e = TLDOF_sigmah_e * NE
+        TGDOF_sigmah_c = TLDOF_sigmah_c * NC
+
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                       f"位移空间={space_uh.__class__.__name__}, 次数={space_uh.p}, 总自由度={TGDOF_uh}, "
+                       f"应力空间={space_sigmah.__class__.__name__}, 次数={space_sigmah.p}, "
+                        f"总自由度={TGDOF_sigmah}, 节点自由度={TGDOF_sigmah_n}, 边自由度={TGDOF_sigmah_e}, 单元自由度={TGDOF_sigmah_c}")
+
         sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
+
 
         from soptx.analysis.utils import _get_val_tensor_to_component, _get_val_component_to_tensor
         uh_component = _get_val_tensor_to_component(val=uh, space=huzhang_mfem_analyzer.tensor_space) # (NN, GD)
-        # TODO HuZhang 空间的自由度排序方式是什么
-        sigmah_component = _get_val_tensor_to_component(val=sigmah, space=huzhang_mfem_analyzer.huzhang_space) # (NN, 3)
+        # sigmah_component = _get_val_tensor_to_component(val=sigmah, space=huzhang_mfem_analyzer.huzhang_space) # (NN, 3)
         displacement_mesh.nodedata['uh'] = uh_component
-        displacement_mesh.nodedata['stress'] = sigmah_component
+        # displacement_mesh.nodedata['stress'] = sigmah_component
 
-        displacement_mesh.to_vtk(f"uh_hzmfem_{model_type}.vtu")
+        from pathlib import Path
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        displacement_mesh.to_vtk(f"{base_dir}/uh_hzmfem.vtu")
 
         return uh
 
@@ -304,4 +328,4 @@ if __name__ == "__main__":
     huzhang_analyzer.run.set('test_none_exact_solution')
     # huzhang_analyzer.run.set('test_jump_penalty_integrator')
 
-    huzhang_analyzer.run(model_type='clamped_beam_2d')
+    huzhang_analyzer.run(model_type='bearing_device_2d')
