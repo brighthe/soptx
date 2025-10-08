@@ -59,49 +59,67 @@ class BoxTriHuZhangData2d(PDEBase):
         return self._mu
     
 
-    @variantmethod('uniform_tri')
-    def init_mesh(self, **kwargs) -> TriangleMesh:
-        nx = kwargs.get('nx', 10)
-        ny = kwargs.get('ny', 10)
-        threshold = kwargs.get('threshold', None)
-        device = kwargs.get('device', 'cpu')
-
-        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
-        
-        self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny, threshold=threshold, device=device)
-
-        return mesh
-    
-    @init_mesh.register('uniform_quad')
+    @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
-        nx = kwargs.get('nx', 10)
+        nx = kwargs.get('nx', 60)
         ny = kwargs.get('ny', 10)
         threshold = kwargs.get('threshold', None)
         device = kwargs.get('device', 'cpu')
 
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
-
+                                       threshold=threshold, device=device)
         self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
-
         return mesh
-    
 
-    def stress_matrix_coefficient(self) -> tuple[float, float]:
-        """
-        材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1
-        
-        Returns
-        -------
-        lambda0: 1/(2μ)
-        lambda1: λ/(2μ(dλ+2μ)), 其中 d=2 为空间维数
-        """
-        d = 2 
-        lambda0 = 1.0 / (2 * self._mu)
-        lambda1 = self._lam / (2 * self._mu * (d * self._lam + 2 * self._mu))
-        
-        return lambda0, lambda1
+    @init_mesh.register('uniform_aligned_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 10)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                     threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+        return mesh
+
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 10)
+        device = kwargs.get('device', 'cpu')
+
+        node = bm.array([[0.0, 0.0],
+                         [1.0, 0.0],
+                         [1.0, 1.0],
+                         [0.0, 1.0]], dtype=bm.float64, device=device)
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)
+        qmesh = QuadrangleMesh(node, cell).from_box(box=self._domain, nx=nx, ny=ny)
+
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+
+        import numpy as np
+        newCell = np.r_['0',
+                        lcell[:, [1, 2, 0]],
+                        lcell[:, [3, 0, 2]],
+                        rcell[:, [0, 1, 3]],
+                        rcell[:, [2, 3, 1]]]
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
+        return mesh
     
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:

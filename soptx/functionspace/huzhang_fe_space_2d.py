@@ -421,8 +421,8 @@ class HuZhangFESpace2d(FunctionSpace):
         自由度的形状，表示排序方式
         (-1, NS): gd_priority, 先排每个位置的所有应力分量
         
-        对于2D: (-1, 3) 表示 (σ0_xx, σ0_xy, σ0_yy, σ1_xx, σ1_xy, σ1_yy, ...)
-        对于3D: (-1, 6) 表示 (σ0_xx, σ0_xy, σ0_xz, σ0_yy, σ0_yz, σ0_zz, ...)
+        对于 2D: (-1, 3) 表示 (σ0_xx, σ0_xy, σ0_yy, σ1_xx, σ1_xy, σ1_yy, ...)
+        对于 3D: (-1, 6) 表示 (σ0_xx, σ0_xy, σ0_xz, σ0_yy, σ0_yz, σ0_zz, ...)
         """
         return (-1, self.NS)
 

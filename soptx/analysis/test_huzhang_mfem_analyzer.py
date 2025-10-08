@@ -270,9 +270,9 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
     @run.register('test_jump_penalty_integrator')
     def run(self):
+        """测试稳定化项积分子 JumpPenaltyIntegrator 的正确性"""
         from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
         pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
-        # TODO 支持四边形网格
         pde.init_mesh.set('uniform_tri')
         nx, ny = 2, 2
         mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -300,7 +300,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                         )
 
         scalar_space = LagrangeFESpace(mesh, p=p-1, ctype='D')
-        tensor_space = TensorFunctionSpace(scalar_space, shape=(GD, -1))
+        tensor_space = TensorFunctionSpace(scalar_space, shape=(-1, GD))
         ldof = tensor_space.number_of_local_dofs()
         gdof = tensor_space.number_of_global_dofs()
         from soptx.analysis.integrators.jump_penalty_integrator import JumpPenaltyIntegrator
@@ -325,7 +325,8 @@ if __name__ == "__main__":
 
     # huzhang_analyzer.run.set('test')
     # huzhang_analyzer.run.set('test_huzhang')
-    huzhang_analyzer.run.set('test_none_exact_solution')
-    # huzhang_analyzer.run.set('test_jump_penalty_integrator')
+    # huzhang_analyzer.run.set('test_none_exact_solution')
+    # huzhang_analyzer.run(model_type='bearing_device_2d')
 
-    huzhang_analyzer.run(model_type='bearing_device_2d')
+    huzhang_analyzer.run.set('test_jump_penalty_integrator')
+    huzhang_analyzer.run()
