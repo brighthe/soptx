@@ -237,9 +237,10 @@ class Bridge2dDoubleLoadData(PDEBase):
         self._p2 = p2
         self._E, self._nu = E, nu
         self._support_height_ratio = support_height_ratio 
-        self._plane_type = plane_type
-
+        
         self._eps = 1e-12
+        
+        self._plane_type = plane_type
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 

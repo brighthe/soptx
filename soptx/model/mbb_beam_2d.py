@@ -226,7 +226,7 @@ class MBBBeam2dData(PDEBase):
     def __init__(self,
                 domain: List[float] = [0.0, 60.0, 0.0, 10.0],
                 mesh_type: str = 'uniform_quad',
-                T: float = -2.0,
+                p: float = -2.0,
                 E: float = 1.0,
                 nu: float = 0.3,
                 enable_logging: bool = False,
@@ -236,20 +236,14 @@ class MBBBeam2dData(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type,
                          enable_logging=enable_logging, logger_name=logger_name)
 
-        self._T = T
+        self._p = p
         self._E, self._nu = E, nu
 
         self._eps = 1e-12
-        self._plane_type = 'plane_stress'
-        self._force_type = 'concentrated'
-        self._boundary_type = 'dirichlet'
 
-        self._log_info(
-            f"Initialized MBBBeam2dData with domain={self._domain}, "
-            f"mesh_type='{mesh_type}', T={T}, E={E}, nu={nu}, "
-            f"plane_type='{self._plane_type}', force_type='{self._force_type}', "
-            f"boundary_type='{self._boundary_type}'"
-        )
+        self._plane_type = 'plane_stress'
+        self._load_type = 'concentrated'
+        self._boundary_type = 'mixed'
 
 
     #######################################################################################################################
@@ -258,18 +252,18 @@ class MBBBeam2dData(PDEBase):
 
     @property
     def E(self) -> float:
-        """Return Young's modulus."""
+        """获取杨氏模量"""
         return self._E
-
+    
     @property
     def nu(self) -> float:
-        """Return Poisson's ratio."""
+        """获取泊松比"""
         return self._nu
 
     @property
-    def T(self) -> float:
-        """Return the vertical point load magnitude."""
-        return self._T
+    def p(self) -> float:
+        """获取集中力"""
+        return self._p
 
 
     #######################################################################################################################
@@ -345,20 +339,34 @@ class MBBBeam2dData(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        """Downward concentrated load at the mid-point of top edge."""
-        domain = self._domain
-
-        xm = 0.5 * (domain[0] + domain[1])
-
-        x, y = points[..., 0], points[..., 1]
-
-        coord = (bm.abs(x - xm) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
-
         kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (coord, 1), self._T)
 
-        return val
+        return bm.zeros(points.shape, **kwargs)
+    
+    def get_neumann_loads(self):
+        """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
+        if self._load_type == 'concentrated':
+            @cartesian
+            def concentrated_force(points: TensorLike) -> TensorLike:
+                domain = self._domain
+                xm = 0.5 * (domain[0] + domain[1])
+                x, y = points[..., 0], points[..., 1]   
+
+                coord = (bm.abs(x - xm) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
+
+                kwargs = bm.context(points)
+                val = bm.zeros(points.shape, **kwargs)
+                val = bm.set_at(val, (coord, 1), self._p)
+        
+                return val
+            
+            return concentrated_force
+
+        elif self._load_type == 'distributed':
+            pass
+        
+        else:
+            raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:

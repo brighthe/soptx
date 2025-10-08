@@ -546,17 +546,17 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         B_eg_reshaped = self._material.strain_displacement_matrix(
                                             dof_priority=space.dof_priority, 
                                             gphi=gphi_eg_reshaped
-                                        ) # 2D: (NC*n_sub, NQ, 3, TLDOF), 3D: (NC*n_sub, NQ, 6, TLDOF)
+                                        ) # (NC*n_sub, NQ, NS, TLDOF)
         B_eg = reshape_multiresolution_data_inverse(nx=nx_u, 
                                                     ny=ny_u, 
                                                     data_flat=B_eg_reshaped, 
-                                                    n_sub=n_sub) # (NC, n_sub, NQ, 3, TLDOF) or (NC, n_sub, NQ, 6, TLDOF)
+                                                    n_sub=n_sub) # (NC, n_sub, NQ, NS, TLDOF)
 
         # 位移单元 → 子密度单元的缩放
         J_g = 1 / n_sub
 
         # 基础材料的弹性矩阵
-        D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3); 3D: (6, 6)
+        D0 = self._material.elastic_matrix()[0, 0] # (NS, NS)
 
         if coef is None:
             raise NotImplementedError("The global constant density is not implemented"
@@ -565,7 +565,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         # 单元密度
         if coef.shape == (NC, n_sub):
 
-            D_g = bm.einsum('kl, cn -> cnkl', D0, coef) # 2D: (NC, n_sub, 3, 3); 3D: (NC, n_sub, 6, 6)
+            D_g = bm.einsum('kl, cn -> cnkl', D0, coef) # (NC, n_sub, NS, NS)
             if isinstance(mesh_u, SimplexMesh):
                 cm = mesh_u.entity_measure('cell')
                 cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) # (NC, n_sub)
@@ -580,7 +580,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         # 节点密度
         elif coef.shape == (NC, n_sub, NQ):
 
-            D_g = bm.einsum('ijkl, cnq -> cnqkl', D0, coef) # 2D: (NC, n_sub, NQ, 3, 3); 3D: (NC, n_sub, NQ, 6, 6)
+            D_g = bm.einsum('ijkl, cnq -> cnqkl', D0, coef) # (NC, n_sub, NQ, NS, NS)
             if isinstance(mesh_u, SimplexMesh):
                 KK = J_g * bm.einsum('q, cn, cnqki, cnqkl, cnqlj -> cij',
                                     ws_e, cm_eg, B_eg, D_g, B_eg)
