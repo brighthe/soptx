@@ -292,8 +292,12 @@ class MMAOptimizer(BaseLogged):
         else:
             dv = bm.copy(design_variable[:])
         
+        from soptx.interpolation.interpolation_scheme import DensityDistribution
+
         if isinstance(density_distribution, Function):
             rho = density_distribution.space.function(bm.copy(density_distribution[:]))
+        elif isinstance(density_distribution, DensityDistribution):
+            rho = density_distribution
         else:
             rho = bm.copy(density_distribution[:])
 

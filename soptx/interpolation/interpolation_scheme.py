@@ -9,6 +9,48 @@ from fealpy.mesh import HomogeneousMesh
 from .linear_elastic_material import LinearElasticMaterial
 from ..utils.base_logged import BaseLogged
 
+from dataclasses import dataclass
+@dataclass
+class DensityDistribution:
+    """
+    密度分布信息容器
+    
+    Attributes
+    ----------
+    function : Function
+        密度有限元函数
+    sub_density_element : int
+        子密度单元数
+    """
+    function: Function
+    sub_density_element: int
+    
+    def __call__(self, points):
+        """在给定点处插值密度"""
+        return self.function(points)
+    
+    def update(self, design_variable):
+        """更新密度值"""
+        self.function[:] = design_variable
+
+    def __getitem__(self, key):
+        """支持下标访问"""
+        return self.function[key]
+    
+    def __setitem__(self, key, value):
+        """支持下标赋值"""
+        self.function[key] = value
+    
+    @property
+    def array(self):
+        """返回密度数组"""
+        return self.function.array
+
+    @property
+    def shape(self):
+        """返回形状"""
+        return self.function.shape
+
 class MaterialInterpolationScheme(BaseLogged):
     """材料插值方案类"""
     def __init__(self,
@@ -166,45 +208,58 @@ class MaterialInterpolationScheme(BaseLogged):
                             sub_density_element: int = 4,
                             integration_order: int = 3,
                             **kwargs,
-                        ) -> Tuple[TensorLike, TensorLike]:
+                        ) -> Tuple[TensorLike, DensityDistribution]:
         """
-        节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度单元节点处
+        节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度节点处
         
         Returns
         -------
-        design_variable : (NN_design_variable, )
-        density_distribution : (NC, n_sub, NQ)
+        design_variable : TensorLike (NN_design_variable, )
+        density_distribution : Function (NN_density, )
         """
 
         NN_design_variable = design_variable_mesh.number_of_nodes()
         design_variable = bm.full((NN_design_variable, ), relative_density, 
-                                dtype=bm.float64, device=design_variable_mesh.device)
+                                dtype=bm.float64, device=design_variable_mesh.device) # (NN_design_variable, )
 
-        s_space_u = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
-        NC = displacement_mesh.number_of_cells()
-        qf_e = displacement_mesh.quadrature_formula(q=integration_order)
-        # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-        bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+        NN_density = displacement_mesh.number_of_nodes()
+        density_val = bm.full((NN_density, ), relative_density, dtype=bm.float64, device=displacement_mesh.device)
+        space = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
+        density_func = space.function(density_val) # (NN_density, )
 
-        NN = displacement_mesh.number_of_nodes()
-        density_val = bm.full((NN, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
-        density = s_space_u.function(density_val)
-        n_sub = sub_density_element
-
-        # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
-        from soptx.analysis.utils import map_bcs_to_sub_elements
-        # bcs_eg.shape = ( (n_sub, NQ, GD), (n_sub, NQ, GD) ), ws_e.shape = (NQ, )
-        bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-        bcs_eg_x, bcs_eg_y = bcs_eg
-
-        NQ = ws_e.shape[0]
-        density_distribution = bm.full((NC, n_sub, NQ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
-        for s_idx in range(n_sub):
-            sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
-            density_q_sub = density(sub_bcs) # (NC, NQ)
-            density_distribution[:, s_idx, :] = density_q_sub
+        density_distribution = DensityDistribution(function=density_func, sub_density_element=sub_density_element)
 
         return design_variable, density_distribution
+
+        # NN_design_variable = design_variable_mesh.number_of_nodes()
+        # design_variable = bm.full((NN_design_variable, ), relative_density, 
+        #                         dtype=bm.float64, device=design_variable_mesh.device)
+
+        # s_space_u = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
+        # NC = displacement_mesh.number_of_cells()
+        # qf_e = displacement_mesh.quadrature_formula(q=integration_order)
+        # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+        # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+
+        # NN = displacement_mesh.number_of_nodes()
+        # density_val = bm.full((NN, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        # density = s_space_u.function(density_val)
+        # n_sub = sub_density_element
+
+        # # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
+        # from soptx.analysis.utils import map_bcs_to_sub_elements
+        # # bcs_eg.shape = ( (n_sub, NQ, GD), (n_sub, NQ, GD) ), ws_e.shape = (NQ, )
+        # bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+        # bcs_eg_x, bcs_eg_y = bcs_eg
+
+        # NQ = ws_e.shape[0]
+        # density_distribution = bm.full((NC, n_sub, NQ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
+        # for s_idx in range(n_sub):
+        #     sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
+        #     density_q_sub = density(sub_bcs) # (NC, NQ)
+        #     density_distribution[:, s_idx, :] = density_q_sub
+
+        # return design_variable, density_distribution
     
 
     @variantmethod('simp')
@@ -244,8 +299,9 @@ class MaterialInterpolationScheme(BaseLogged):
     @interpolate_map.register('msimp')
     def interpolate_map(self,
                     material: LinearElasticMaterial, 
-                    rho_val: Union[Function, TensorLike],
+                    rho_val: Union[Function, TensorLike, DensityDistribution],
                     integration_order: Optional[int] = None,
+                    displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
         """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
 
@@ -283,8 +339,29 @@ class MaterialInterpolationScheme(BaseLogged):
                 E_rho = Emin + rho_sub_element[:] ** penalty_factor * (E0 - Emin)
 
             elif self._density_location in ['node_multiresolution']:
-                pass
+                # rho_val.shape = (NN, )
+                NC = displacement_mesh.number_of_cells()
+                qf_e = displacement_mesh.quadrature_formula(q=integration_order)
+                # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
+                bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
 
+                n_sub = rho_val.sub_density_element
+
+                # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
+                from soptx.analysis.utils import map_bcs_to_sub_elements
+                # bcs_eg.shape = ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) ), ws_e.shape = (NQ, )
+                bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+                bcs_eg_x, bcs_eg_y = bcs_eg
+
+                NQ = ws_e.shape[0]
+                rho_q = bm.zeros((NC, n_sub, NQ), dtype=bm.float64  , device=displacement_mesh.device)
+                for s_idx in range(n_sub):
+                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
+                    rho_q_sub = rho_val(sub_bcs) # (NC, NQ)
+                    rho_q[:, s_idx, :] = rho_q_sub
+
+                E_rho = Emin + rho_q[:] ** penalty_factor * (E0 - Emin)
+            
             return E_rho
 
     @interpolate_map.register('simp_double')

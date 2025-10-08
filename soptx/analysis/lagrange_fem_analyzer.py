@@ -167,7 +167,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
             E_rho = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
                                             rho_val=rho_val,
-                                            integration_order=self._integration_order
+                                            integration_order=self._integration_order,
+                                            displacement_mesh=self._mesh,
                                         )
             E0 = self._material.youngs_modulus
             coef = E_rho / E0
