@@ -172,12 +172,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                         )
             E0 = self._material.youngs_modulus
             coef = E_rho / E0
-
-            # coef = self._interpolation_scheme.interpolate_map(
-            #                                 material=self._material,
-            #                                 rho_val=rho_val,
-            #                                 integration_order=self._integration_order
-            #                             )
         
         else:
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
@@ -302,59 +296,48 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """计算局部刚度矩阵关于物理密度的导数（灵敏度）"""
         
         density_location = self._interpolation_scheme.density_location
+
+        # TODO 目前仅支持插值杨氏模量 E 
+        dE_rho = self._interpolation_scheme.interpolate_map_derivative(
+                                                material=self._material, 
+                                                rho_val=rho_val,
+                                                integration_order=self._integration_order,
+                                            ) 
         
         if density_location in ['element']:
-
-            diff_coef = self._interpolation_scheme.interpolate_derivative(
-                                                    material=self._material, 
-                                                    density_distribution=rho_val
-                                                ) # (NC, )
+            # rho_val.shape = (NC, )
+            diff_coef_element = dE_rho / self._material.youngs_modulus # (NC, )
 
             lea = LinearElasticIntegrator(material=self._material,
                                         coef=None,
                                         q=self._integration_order,
                                         method=self._assembly_method)
             ke0 = lea.assembly(space=self.tensor_space)
-            diff_ke = bm.einsum('c, cij -> cij', diff_coef, ke0) # (NC, TLDOF, TLDOF)
-
+            diff_ke = bm.einsum('c, cij -> cij', diff_coef_element, ke0) # (NC, TLDOF, TLDOF)
+ 
             return diff_ke
         
         elif density_location in ['node']:
-            
+            # rho_val.shape = (NN, )
+            diff_coef_q = dE_rho / self._material.youngs_modulus # (NC, NQ)
             mesh = self._mesh
             qf = mesh.quadrature_formula(q=self._integration_order)
-            # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+            # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
             bcs, ws = qf.get_quadrature_points_and_weights()
-
-            rho_q = rho_val(bcs) # (NC, NQ)
-            if (bm.any(bm.isnan(rho_q[:])) or bm.any(bm.isinf(rho_q[:])) or 
-                bm.any(rho_q[:] < -1e-12) or bm.any(rho_q[:] > 1 + 1e-12)):
-                self._log_error(f"节点密度在高斯点处的值超出范围 [0, 1]: "
-                                f"range=[{bm.min(rho_q):.2e}, {bm.max(rho_q):.2e}]")
-                
-            diff_coef_q = self._interpolation_scheme.interpolate_derivative(
-                                                    material=self._material, 
-                                                    density_distribution=rho_q
-                                                ) # (NC, NQ)
             
             rho_space = rho_val.space
             u_space = self._scalar_space
 
             # 高斯积分点处的基函数
             phi = rho_space.basis(bcs)[0] # (NQ, NCN)
-            if (bm.any(bm.isnan(phi[:])) or bm.any(bm.isinf(phi[:])) or 
-                bm.any(phi[:] < -1e-12) or bm.any(phi[:] > 1 + 1e-12)):
-                self._log_error(f"密度的形函数超出范围 [0, 1]: "
-                                f"range=[{bm.min(phi):.2e}, {bm.max(phi):.2e}]")
 
-
-            D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3), 3D: (6, 6)
+            D0 = self._material.elastic_matrix()[0, 0] # (NS, NS)
             dof_priority = self._tensor_space.dof_priority
             gphi = u_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
             B = self._material.strain_displacement_matrix(
                                     dof_priority=dof_priority, 
                                     gphi=gphi
-                                ) # 2D: (NC, NQ, 3, TLDOF), 3D: (NC, NQ, 6, TLDOF)
+                                ) # (NC, NQ, NS, TLDOF)
             BDB = bm.einsum('cqki, kl, cqlj -> cqij', B, D0, B) # (NC, NQ, TLDOF, TLDOF)
 
             if isinstance(mesh, SimplexMesh):
@@ -370,11 +353,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
             return diff_ke
         
         elif density_location in ['element_multiresolution']:
-
-            diff_coef = self._interpolation_scheme.interpolate_derivative(
-                                                            material=self._material, 
-                                                            density_distribution=rho_val
-                                                        ) # (NC, n_sub)
+            # rho_val.shape = (NC, n_sub)
+            diff_coef_sub_element = dE_rho / self._material.youngs_modulus # (NC, n_sub)
 
             mesh_u = self._mesh
             s_space_u = self._scalar_space
@@ -384,7 +364,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             # 计算位移单元 (父参考单元) 高斯积分点处的重心坐标
             qf_e = mesh_u.quadrature_formula(q)
-            # bcs_e.shape = ( (q, GD), (q, GD) ), ws_e.shape = (NQ, )
+            # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
             bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
             NQ = ws_e.shape[0]
 
@@ -401,14 +381,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             if isinstance(mesh_u, SimplexMesh):
                 for s_idx in range(n_sub):
-                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ, GD), (NQ, GD))
-                    gphi_sub = s_space_u.grad_basis(sub_bcs, variable='x')      # (NC, NQ, LDOF, GD)
+                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
+                    gphi_sub = s_space_u.grad_basis(sub_bcs, variable='x')    # (NC, NQ, LDOF, GD)
                     gphi_eg[:, s_idx, :, :, :] = gphi_sub
 
             else:
                 detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
                 for s_idx in range(n_sub):
-                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ, GD), (NQ, GD))
+                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
                     gphi_sub = s_space_u.grad_basis(sub_bcs, variable='x') # (NC, NQ, LDOF, GD)
                     J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
                     detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
@@ -419,22 +399,21 @@ class LagrangeFEMAnalyzer(BaseLogged):
             from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
             nx_u, ny_u = mesh_u.meshdata['nx'], mesh_u.meshdata['ny']
             gphi_eg_reshaped = reshape_multiresolution_data(nx=nx_u, ny=ny_u, data=gphi_eg) # (NC*n_sub, NQ, LDOF, GD)
-            # gphi_eg_reshaped_old = gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD)
             B_eg_reshaped = self._material.strain_displacement_matrix(
                                                 dof_priority=self._tensor_space.dof_priority, 
                                                 gphi=gphi_eg_reshaped
-                                            ) # 2D: (NC*n_sub, NQ, 3, TLDOF), 3D: (NC*n_sub, NQ, 6, TLDOF)
+                                            ) # (NC*n_sub, NQ, NS, TLDOF)
             B_eg = reshape_multiresolution_data_inverse(nx=nx_u, 
                                                         ny=ny_u, 
                                                         data_flat=B_eg_reshaped, 
-                                                        n_sub=n_sub) # (NC, n_sub, NQ, 3, TLDOF) or (NC, n_sub, NQ, 6, TLDOF)
+                                                        n_sub=n_sub) # (NC, n_sub, NQ, NS, TLDOF)
 
             # 位移单元 → 子密度单元的缩放
             J_g = 1 / n_sub
 
             # 计算 D 矩阵的导数
-            D0 = self._material.elastic_matrix()[0, 0] # 2D: (3, 3); 3D: (6, 6)
-            diff_D_g = bm.einsum('kl, cn -> cnkl', D0, diff_coef) # 2D: (NC, n_sub, 3, 3); 3D: (NC, n_sub, 6, 6)
+            D0 = self._material.elastic_matrix()[0, 0] # (NS, NS)
+            diff_D_g = bm.einsum('kl, cn -> cnkl', D0, diff_coef_sub_element) # (NC, n_sub, NS, NS)
 
             # 数值积分
             # diff_ke - (NC, n_sub, TLDOF, TLDOF)

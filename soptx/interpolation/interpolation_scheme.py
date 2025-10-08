@@ -74,6 +74,7 @@ class MaterialInterpolationScheme(BaseLogged):
 
         self.setup_density_distribution.set(density_location)
         self.interpolate_map.set(interpolation_method)
+        self.interpolate_map_derivative.set(interpolation_method)
 
     
     #########################################################################################
@@ -230,36 +231,6 @@ class MaterialInterpolationScheme(BaseLogged):
         density_distribution = DensityDistribution(function=density_func, sub_density_element=sub_density_element)
 
         return design_variable, density_distribution
-
-        # NN_design_variable = design_variable_mesh.number_of_nodes()
-        # design_variable = bm.full((NN_design_variable, ), relative_density, 
-        #                         dtype=bm.float64, device=design_variable_mesh.device)
-
-        # s_space_u = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
-        # NC = displacement_mesh.number_of_cells()
-        # qf_e = displacement_mesh.quadrature_formula(q=integration_order)
-        # # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
-        # bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
-
-        # NN = displacement_mesh.number_of_nodes()
-        # density_val = bm.full((NN, ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
-        # density = s_space_u.function(density_val)
-        # n_sub = sub_density_element
-
-        # # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
-        # from soptx.analysis.utils import map_bcs_to_sub_elements
-        # # bcs_eg.shape = ( (n_sub, NQ, GD), (n_sub, NQ, GD) ), ws_e.shape = (NQ, )
-        # bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-        # bcs_eg_x, bcs_eg_y = bcs_eg
-
-        # NQ = ws_e.shape[0]
-        # density_distribution = bm.full((NC, n_sub, NQ), relative_density, dtype=bm.float64, device=design_variable_mesh.device)
-        # for s_idx in range(n_sub):
-        #     sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
-        #     density_q_sub = density(sub_bcs) # (NC, NQ)
-        #     density_distribution[:, s_idx, :] = density_q_sub
-
-        # return design_variable, density_distribution
     
 
     @variantmethod('simp')
@@ -304,12 +275,6 @@ class MaterialInterpolationScheme(BaseLogged):
                     displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
         """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
-
-        required_options = ['penalty_factor', 'target_variables', 'void_youngs_modulus']
-        for option in required_options:
-            if option not in self._options:
-                error_msg = f"Missing required option '{option}' for msimp interpolation"
-                self._log_error(error_msg)
 
         penalty_factor = self._options['penalty_factor']
         target_variables = self._options['target_variables']
@@ -374,75 +339,153 @@ class MaterialInterpolationScheme(BaseLogged):
         """RAMP 插值"""
         pass
 
-
-    ###########################################################################################################
-    # 核心方法
-    ###########################################################################################################
-
-    def interpolate_derivative(self,
+    @variantmethod('simp')
+    def interpolate_map_derivative(self, 
                         material: LinearElasticMaterial, 
-                        density_distribution: Union[Function, TensorLike],
+                        rho_val: Union[Function, TensorLike],
+                        integration_order: Optional[int] = None,
                     ) -> TensorLike:
-        """获取当前插值方法的标量系数相对于物理密度的导数"""
-
-        method = self.interpolation_method
+        """SIMP 插值求导: dE(ρ) = pρ^{p-1} * E0"""
         p = self._options['penalty_factor']
+        target_variables = self._options['target_variables']
+        
+        if target_variables == ['E']:
 
-        if self._density_location in ['element']:
-
-            rho_element = density_distribution[:] # (NC, )
-            
-            if method == 'simp':    
-                E0 = material.youngs_modulus
+            E0 = material.youngs_modulus
+            if self._density_location in ['element']:
+                rho_element = rho_val[:] # (NC, )
                 dE_rho = p * rho_element[:] ** (p - 1) * E0
-                return dE_rho
-            elif method == 'msimp':
-                E0 = material.youngs_modulus
-                Emin = self._options['void_youngs_modulus']
-                dE_rho = p * rho_element[:] ** (p - 1) * (E0 - Emin)
-                return dE_rho
-            
-        elif self._density_location in ['element_multiresolution']:
-            
-            rho_sub_element = density_distribution[:] # (NC, n_sub)
 
-            if method == 'simp':
-                E0 = material.youngs_modulus
-                dE_rho = p * rho_sub_element[:] ** (p - 1) * E0
-                return dE_rho
-            elif method == 'msimp':
-                E0 = material.youngs_modulus
-                Emin = self._options['void_youngs_modulus']
-                dE_rho = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin)
-                return dE_rho
-            
-        elif self._density_location in ['node']:
-        
-            rho_q = density_distribution[:] # (NC, NQ)
-
-            if method == 'simp':
-                E0 = material.youngs_modulus
+            elif self._density_location in ['node']:
+                rho_q = rho_val[:] # (NC, NQ)
                 dE_rho = p * rho_q[:] ** (p - 1) * E0
-                return dE_rho
-            elif method == 'msimp':
-                E0 = material.youngs_modulus
-                Emin = self._options['void_youngs_modulus']
-                dE_rho = p * rho_q[:] ** (p - 1) * (E0 - Emin)
-                return dE_rho
-        
-        elif self._density_location in ['node_multiresolution']:
             
-            rho_sub_q = density_distribution[:] # (NC, n_sub, NQ)
+            elif self._density_location in ['element_multiresolution']:
+                rho_sub_element = rho_val[:] # (NC, n_sub)
+                dE_rho = p * rho_sub_element[:] ** (p - 1) * E0
 
-            if method == 'simp':
-                E0 = material.youngs_modulus
+            elif self._density_location in ['node_multiresolution']:
+                rho_sub_q = rho_val[:] # (NC, n_sub, NQ)
                 dE_rho = p * rho_sub_q[:] ** (p - 1) * E0
-                return dE_rho
-            elif method == 'msimp':
-                E0 = material.youngs_modulus
-                Emin = self._options['void_youngs_modulus']
+            
+            return dE_rho
+        
+        else:
+            error_msg = f"Unknown target_variables: {target_variables}"
+            self._log_error(error_msg)
+
+    @interpolate_map_derivative.register('msimp')
+    def interpolate_map_derivative(self, 
+                        material: LinearElasticMaterial, 
+                        rho_val: Union[Function, TensorLike],
+                        integration_order: Optional[int] = None,
+                    ) -> TensorLike:
+        """修正 SIMP 插值求导: dE(ρ) = pρ^{p-1} * (E0 - Emin)"""
+        p = self._options['penalty_factor']
+        target_variables = self._options['target_variables']
+
+        if target_variables == ['E']:
+
+            E0 = material.youngs_modulus
+            Emin = self._options['void_youngs_modulus']
+
+            if self._density_location in ['element']:
+                rho_element = rho_val[:] # (NC, )
+                dE_rho = p * rho_element[:] ** (p - 1) * (E0 - Emin)
+
+            elif self._density_location in ['node']:
+                # rho_val.shape = (NN, )
+                density_mesh = rho_val.space.mesh
+                qf = density_mesh.quadrature_formula(q=integration_order)
+                bcs, ws = qf.get_quadrature_points_and_weights()
+                rho_q = rho_val(bcs) # (NC, NQ)
+                dE_rho = p * rho_q[:] ** (p - 1) * (E0 - Emin)
+
+            elif self._density_location in ['element_multiresolution']:
+                rho_sub_element = rho_val[:] # (NC, n_sub)
+                dE_rho = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin)
+
+            elif self._density_location in ['node_multiresolution']:
+                rho_sub_q = rho_val[:] # (NC, n_sub, NQ)
                 dE_rho = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin)
-                return dE_rho
+            
+            return dE_rho
+
+        else:
+
+            error_msg = f"Unknown target_variables: {target_variables}"
+            self._log_error(error_msg)
+
+
+
+    # ###########################################################################################################
+    # # 核心方法
+    # ###########################################################################################################
+
+    # def interpolate_derivative(self,
+    #                     material: LinearElasticMaterial, 
+    #                     density_distribution: Union[Function, TensorLike],
+    #                 ) -> TensorLike:
+    #     """获取当前插值方法的标量系数相对于物理密度的导数"""
+
+    #     method = self.interpolation_method
+    #     p = self._options['penalty_factor']
+
+    #     if self._density_location in ['element']:
+
+    #         rho_element = density_distribution[:] # (NC, )
+            
+    #         if method == 'simp':    
+    #             E0 = material.youngs_modulus
+    #             dE_rho = p * rho_element[:] ** (p - 1) * E0
+    #             return dE_rho
+    #         elif method == 'msimp':
+    #             E0 = material.youngs_modulus
+    #             Emin = self._options['void_youngs_modulus']
+    #             dE_rho = p * rho_element[:] ** (p - 1) * (E0 - Emin)
+    #             return dE_rho
+            
+    #     elif self._density_location in ['element_multiresolution']:
+            
+    #         rho_sub_element = density_distribution[:] # (NC, n_sub)
+
+    #         if method == 'simp':
+    #             E0 = material.youngs_modulus
+    #             dE_rho = p * rho_sub_element[:] ** (p - 1) * E0
+    #             return dE_rho
+    #         elif method == 'msimp':
+    #             E0 = material.youngs_modulus
+    #             Emin = self._options['void_youngs_modulus']
+    #             dE_rho = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin)
+    #             return dE_rho
+            
+    #     elif self._density_location in ['node']:
+        
+    #         rho_q = density_distribution[:] # (NC, NQ)
+
+    #         if method == 'simp':
+    #             E0 = material.youngs_modulus
+    #             dE_rho = p * rho_q[:] ** (p - 1) * E0
+    #             return dE_rho
+    #         elif method == 'msimp':
+    #             E0 = material.youngs_modulus
+    #             Emin = self._options['void_youngs_modulus']
+    #             dE_rho = p * rho_q[:] ** (p - 1) * (E0 - Emin)
+    #             return dE_rho
+        
+    #     elif self._density_location in ['node_multiresolution']:
+            
+    #         rho_sub_q = density_distribution[:] # (NC, n_sub, NQ)
+
+    #         if method == 'simp':
+    #             E0 = material.youngs_modulus
+    #             dE_rho = p * rho_sub_q[:] ** (p - 1) * E0
+    #             return dE_rho
+    #         elif method == 'msimp':
+    #             E0 = material.youngs_modulus
+    #             Emin = self._options['void_youngs_modulus']
+    #             dE_rho = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin)
+    #             return dE_rho
 
 
     ###########################################################################################################
