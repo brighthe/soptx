@@ -59,7 +59,7 @@ class FilterMatrixBuilder:
                                         rmin: float,
                                         domain: List[float],
                                         periodic: List[bool]=[False, False, False],
-                                        enable_timing: bool = True,
+                                        enable_timing: bool = False,
                                     ) -> Tuple[COOTensor, TensorLike]:
         """
         计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算

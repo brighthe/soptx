@@ -198,7 +198,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if p >= GD + 1:
         
             bform = BlockForm([[bform1,   bform2],
-                                [bform2.T, None]])
+                               [bform2.T, None]])
 
         elif p <= GD:
 
@@ -206,7 +206,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             bform3.add_integrator(JumpPenaltyIntegrator())
 
             bform = BlockForm([[bform1,   bform2],
-                                [bform2.T, bform3]])
+                               [bform2.T, bform3]])
 
         if enable_timing:
             t.send('准备时间')
@@ -218,6 +218,38 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return K
+    
+    def get_A_sigma_sigma(self, 
+                      rho_val: Optional[Union[Function, TensorLike]] = None
+                     ) -> Union[CSRTensor, COOTensor]:
+        """获取 A_σσ 矩阵块"""
+        
+        space0 = self._huzhang_space
+        
+        if self._topopt_algorithm is None:
+            coef = None
+        elif self._topopt_algorithm in ['density_based']:
+            E_rho = self._interpolation_scheme.interpolate_map(
+                                            material=self._material,
+                                            rho_val=rho_val,
+                                            integration_order=self._integration_order
+                                        )
+            E0 = self.material.youngs_modulus
+            coef = E0 / E_rho
+        else:
+            error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
+            self._log_error(error_msg)
+        
+        lambda0, lambda1 = self._stress_matrix_coefficient()
+        
+        bform = BilinearForm(space0)
+        hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
+                                                q=self._integration_order, coef=coef)
+        bform.add_integrator(hzs_integrator)
+        
+        A_sigma_sigma = bform.assembly(format='csr')
+        
+        return A_sigma_sigma
     
     def _initialize_force_vector(self) -> TensorLike:
         """初始化力向量

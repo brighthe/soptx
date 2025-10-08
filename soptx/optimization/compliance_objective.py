@@ -4,12 +4,14 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
-from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-from ..utils.base_logged import BaseLogged
+from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
+from soptx.utils.base_logged import BaseLogged
 
 class ComplianceObjective(BaseLogged):
     def __init__(self,
-                analyzer: LagrangeFEMAnalyzer,
+                analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
+                state_variable: Literal['u', 'sigma'] = 'u',
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -17,27 +19,60 @@ class ComplianceObjective(BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._analyzer = analyzer
+        self._state_variable = state_variable
         self._tensor_space = analyzer._tensor_space
         self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
             density: Union[Function, TensorLike], 
             displacement: Optional[Function] = None,
+            stress: Optional[Function] = None
         ) -> float:
         """计算柔顺度目标函数值"""
 
-        if displacement is None:
-            uh = self._analyzer.solve_displacement(rho_val=density)
-        else:
-            uh = displacement
+        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+            # 拉格朗日位移有限元
+            if displacement is None:
+                uh = self._analyzer.solve_displacement(rho_val=density)
+            else:
+                uh = displacement
+        
+            F = self._analyzer.force_vector
+            c = bm.einsum('i, i ->', uh[:], F)
 
-        F = self._analyzer.force_vector
-        c = bm.einsum('i, i ->', uh[:], F)
+            # K = self._analyzer.stiffness_matrix
+            # Ku = K.matmul(uh[:])
+            # c = bm.einsum('i, i ->', uh[:], Ku)
 
-        # NOTE uKu 更低效
-        # K = self._analyzer.stiffness_matrix
-        # Ku = K.matmul(uh[:])
-        # c = bm.einsum('i, i ->', uh[:], Ku)
+        elif self._analyzer.__class__ in [HuZhangMFEMAnalyzer]:
+            # 胡张应力位移混合有限元
+            if displacement is None and stress is None:
+                sigmah, uh = self._analyzer.solve_displacement(rho_val=density)
+            else:
+                sigmah, uh = displacement, stress
+                
+            if self._state_variable == 'u':
+                B_u_sigma = self._analyzer.get_B_u_sigma()
+                A_inv = self._analyzer.get_A_sigma_sigma_inverse(rho_val=density)
+                f_sigma = self._analyzer.get_f_sigma()
+                f_u = self._analyzer.get_f_u()
+
+                F = B_u_sigma @ A_inv @ f_sigma - f_u
+                c = bm.einsum('i, i ->', uh[:], F)
+
+                # B_sigma_u = self._analyzer.get_B_sigma_u()
+                # K = B_u_sigma @ A_inv @ B_sigma_u
+                # Ku = K.matmul(uh[:])
+                # c = bm.einsum('i, i ->', uh[:], Ku)
+
+            elif self._state_variable == 'sigma':
+                A = self._analyzer.get_A_sigma_sigma(rho_val=density)
+                Au = A.matmul(sigmah[:])
+                c = bm.einsum('i, i ->', sigmah[:], Au)
+
+            else:
+                error_msg = f"Unknown state_variable: {self._state_variable}"
+                self._log_error(error_msg)
 
         return c
     

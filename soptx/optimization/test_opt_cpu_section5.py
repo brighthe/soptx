@@ -278,6 +278,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 200
         tolerance = 1e-2
+        state_variable = 'sigma'  # 'u', 'sigma'
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
@@ -349,6 +350,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
             TGDOF_sigmah = space_sigmah.number_of_global_dofs()
             self._log_info(f"分析阶段参数, "
                            f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                           f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
+                           f"离散方法={analysis_method}, 网格类型={mesh_type}, "
+                           f"状态变量={state_variable}, "
                            f"位移空间={space_uh.__class__.__name__}, 次数={space_uh.p}, 总自由度={TGDOF_uh}, "
                            f"应力空间={space_sigmah.__class__.__name__}, 次数={space_sigmah.p}, 总自由度={TGDOF_sigmah}")
         
@@ -372,7 +376,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         
         from soptx.optimization.compliance_objective import ComplianceObjective
-        compliance_objective = ComplianceObjective(analyzer=analyzer)
+        compliance_objective = ComplianceObjective(analyzer=analyzer, state_variable=state_variable)
 
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
@@ -434,11 +438,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                         bisection_tol=1e-3
                                     )
             
-        self._log_info(f"开始密度拓扑优化, "
-                       f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
-                       f"离散方法={analysis_method}, "
-                       f"网格类型={mesh_type}, 密度类型={density_location}, " 
-                       f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+        self._log_info(f"优化阶段参数, "
+                       f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
                        f"优化算法={optimizer_algorithm} , " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
@@ -490,6 +491,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 200
         tolerance = 1e-2
+        state_variable = 'u'  # 'u', 'sigma'
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
@@ -581,7 +583,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         fe_dofs = fe_tspace.number_of_global_dofs()
         
         from soptx.optimization.compliance_objective import ComplianceObjective
-        compliance_objective = ComplianceObjective(analyzer=analyzer)
+        compliance_objective = ComplianceObjective(analyzer=analyzer, state_variable=state_variable)
 
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)

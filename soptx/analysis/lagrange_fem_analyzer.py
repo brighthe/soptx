@@ -311,7 +311,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                 ) # (NC, )
 
             lea = LinearElasticIntegrator(material=self._material,
-                                        coef = None,
+                                        coef=None,
                                         q=self._integration_order,
                                         method=self._assembly_method)
             ke0 = lea.assembly(space=self.tensor_space)

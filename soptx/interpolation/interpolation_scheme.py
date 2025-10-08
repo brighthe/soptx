@@ -393,52 +393,56 @@ class MaterialInterpolationScheme(BaseLogged):
             rho_element = density_distribution[:] # (NC, )
             
             if method == 'simp':    
-                dval = p * rho_element[:] ** (p - 1)
-                return dval
+                E0 = material.youngs_modulus
+                dE_rho = p * rho_element[:] ** (p - 1) * E0
+                return dE_rho
             elif method == 'msimp':
                 E0 = material.youngs_modulus
                 Emin = self._options['void_youngs_modulus']
-                dval = p * rho_element[:] ** (p - 1) * (E0 - Emin) / E0
-                return dval
+                dE_rho = p * rho_element[:] ** (p - 1) * (E0 - Emin)
+                return dE_rho
             
         elif self._density_location in ['element_multiresolution']:
             
             rho_sub_element = density_distribution[:] # (NC, n_sub)
 
             if method == 'simp':
-                dval = p * rho_sub_element[:] ** (p - 1)
-                return dval
+                E0 = material.youngs_modulus
+                dE_rho = p * rho_sub_element[:] ** (p - 1) * E0
+                return dE_rho
             elif method == 'msimp':
                 E0 = material.youngs_modulus
                 Emin = self._options['void_youngs_modulus']
-                dval = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin) / E0
-                return dval
+                dE_rho = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin)
+                return dE_rho
             
         elif self._density_location in ['node']:
         
             rho_q = density_distribution[:] # (NC, NQ)
 
             if method == 'simp':
-                dval = p * rho_q[:] ** (p - 1)
-                return dval
+                E0 = material.youngs_modulus
+                dE_rho = p * rho_q[:] ** (p - 1) * E0
+                return dE_rho
             elif method == 'msimp':
                 E0 = material.youngs_modulus
                 Emin = self._options['void_youngs_modulus']
-                dval = p * rho_q[:] ** (p - 1) * (E0 - Emin) / E0
-                return dval
+                dE_rho = p * rho_q[:] ** (p - 1) * (E0 - Emin)
+                return dE_rho
         
         elif self._density_location in ['node_multiresolution']:
             
             rho_sub_q = density_distribution[:] # (NC, n_sub, NQ)
 
             if method == 'simp':
-                dval = p * rho_sub_q[:] ** (p - 1)
-                return dval
+                E0 = material.youngs_modulus
+                dE_rho = p * rho_sub_q[:] ** (p - 1) * E0
+                return dE_rho
             elif method == 'msimp':
                 E0 = material.youngs_modulus
                 Emin = self._options['void_youngs_modulus']
-                dval = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin) / E0
-                return dval
+                dE_rho = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin)
+                return dE_rho
 
 
     ###########################################################################################################
