@@ -207,8 +207,8 @@ class HalfClampedBeam2D(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 80, 0, 20],  
                 mesh_type: str = 'uniform_tri', 
-                p: float = -1.5,                      
-                E: float = 30.0, 
+                p: float = -1.5, # N                     
+                E: float = 30.0, # Pa (N/m^2)
                 nu: float = 0.4, 
                 plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
