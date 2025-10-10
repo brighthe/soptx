@@ -219,10 +219,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return K
     
-    def get_A_sigma_sigma(self, 
+    def get_stress_matrix(self, 
                       rho_val: Optional[Union[Function, TensorLike]] = None
                      ) -> Union[CSRTensor, COOTensor]:
-        """获取 A_σσ 矩阵块"""
+        """获取应力矩阵 A_σσ """
         
         space0 = self._huzhang_space
         
@@ -247,10 +247,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                                 q=self._integration_order, coef=coef)
         bform.add_integrator(hzs_integrator)
         
-        A_sigma_sigma = bform.assembly(format='csr')
-        
-        return A_sigma_sigma
-    
+        stress_matrix = bform.assembly(format='csr')
+
+        return stress_matrix
+
     def _initialize_force_vector(self) -> TensorLike:
         """初始化力向量
         
@@ -362,8 +362,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             from soptx.analysis.integrators.face_source_integrator_mfem import BoundaryFaceSourceIntegrator_mfem
             integrator = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
                                                     q=self._integration_order, 
-                                                    threshold=threshold_uh,
-                                                    use_cell_basis=True)
+                                                    threshold=threshold_uh)
             lform = LinearForm(space_sigmah)
             lform.add_integrator(integrator)
             F_sigma = lform.assembly(format='dense')
@@ -389,7 +388,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     @variantmethod('mumps')
     def solve_displacement(self, 
                         rho_val: Optional[Union[TensorLike, Function]] = None, 
-                        enable_timing: bool = True, 
+                        enable_timing: bool = False, 
                         **kwargs
                     ) -> Tuple[Function, Function]:
         
@@ -450,46 +449,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return sigmah, uh
     
-    @solve_displacement.register('scipy')
-    def solve_displacement(self, 
-            density_distribution: Optional[Function] = None, 
-            **kwargs
-            ) -> Tuple[Function, Function]:
-        from fealpy.solver import spsolve
-
-        if self._topopt_algorithm is None:
-            if density_distribution is not None:
-                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
-        
-        elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if density_distribution is None:
-                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
-    
-        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
-        F0 = self.assemble_force_vector()
-        K, F = self.apply_bc(K0, F0)
-
-        solver_type = kwargs.get('solver', 'scipy')
-
-        X = spsolve(K, F, solver=solver_type)
-
-        space0 = self._huzhang_space
-        space1 = self._tensor_space
-        gdof0 = space0.number_of_global_dofs()
-
-        sigmaval = X[:gdof0]
-        uval = X[gdof0:]
-
-        sigmah = space0.function()
-        sigmah[:] = sigmaval
-
-        uh = space1.function()
-        uh[:] = uval
-
-        return sigmah, uh
-    
     @solve_displacement.register('cg')
     def solve_displacement(self, 
             density_distribution: Optional[Function] = None, 
@@ -538,7 +497,56 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
 
         return uh
-    
+
+
+    ###############################################################################################
+    # 外部方法
+    ###############################################################################################
+    def get_local_stress_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
+        """计算局部应力矩阵 A 关于物理密度的导数（灵敏度）"""
+        
+        density_location = self._interpolation_scheme.density_location
+
+        # TODO 目前仅支持插值杨氏模量 E
+        E0 = self._material.youngs_modulus
+        E_rho =  self._interpolation_scheme.interpolate_map(
+                                                material=self._material, 
+                                                rho_val=rho_val,
+                                                integration_order=self._integration_order,
+                                            )
+        dE_rho = self._interpolation_scheme.interpolate_map_derivative(
+                                                material=self._material, 
+                                                rho_val=rho_val,
+                                                integration_order=self._integration_order,
+                                            ) 
+        space0 = self._huzhang_space
+
+        if density_location in ['element']:
+            # rho_val: (NC, )
+            diff_coef_element = - E0 * dE_rho / (E_rho**2) # (NC, )
+
+            # TODO A0 的计算可以缓存下来
+            lambda0, lambda1 = self._stress_matrix_coefficient()
+            hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
+                                                    q=self._integration_order, coef=None)
+            AE0 = hzs_integrator.assembly(space=space0)
+
+            diff_AE = bm.einsum('c, cij -> cij', diff_coef_element, AE0) # (NC, TLDOF, TLDOF)
+
+        elif density_location in ['node']:
+            # rho_val: (NN, )
+            diff_coef_q = - E0 * dE_rho / (E_rho**2) # (NC, NQ)
+
+            raise NotImplementedError("节点密度尚未实现")
+        
+        elif density_location in ['element_multiresolution']:
+            raise NotImplementedError("多分辨率单元密度尚未实现")
+        
+        elif density_location in ['node_multiresolution']:
+            raise NotImplementedError("多分辨率节点密度尚未实现")
+
+        return diff_AE
+
 
     ##############################################################################################
     # 内部方法

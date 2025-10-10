@@ -370,7 +370,6 @@ class MMAOptimizer(BaseLogged):
             xold2 = xold1
             xold1 = dv[:]
 
-
             # 计算收敛性
             change = bm.max(bm.abs(dv_new - dv))
             

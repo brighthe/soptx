@@ -251,20 +251,14 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # nu = 0.4999 # 近不可压缩
         plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
         
-        from soptx.model.clamped_beam_2d import ClampedBeam2D, HalfClampedBeam2D
+        from soptx.model.clamped_beam_2d import HalfClampedBeam2D
         pde = HalfClampedBeam2D(
                             domain=[0, 80, 0, 20],
                             p=-1.5,
                             E=E, nu=nu,
                             plane_type=plane_type,
                         )
-        # pde = ClampedBeam2D(
-        #                     domain=[0, 160, 0, 20],
-        #                     T=-3.0,
-        #                     E=E, nu=nu,
-        #                     plane_type=plane_type,
-        #                 )
-
+        
         volume_fraction = 0.4
         penalty_factor = 3.0
         

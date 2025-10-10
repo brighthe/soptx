@@ -20,7 +20,7 @@ class ComplianceObjective(BaseLogged):
 
         self._analyzer = analyzer
         self._state_variable = state_variable
-        self._tensor_space = analyzer._tensor_space
+        # self._tensor_space = analyzer._tensor_space
         self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
@@ -66,7 +66,7 @@ class ComplianceObjective(BaseLogged):
                 # c = bm.einsum('i, i ->', uh[:], Ku)
 
             elif self._state_variable == 'sigma':
-                A = self._analyzer.get_A_sigma_sigma(rho_val=density)
+                A = self._analyzer.get_stress_matrix(rho_val=density)
                 Au = A.matmul(sigmah[:])
                 c = bm.einsum('i, i ->', sigmah[:], Au)
 
@@ -107,60 +107,86 @@ class ComplianceObjective(BaseLogged):
                             ) -> TensorLike:
         """手动计算柔顺度目标函数相对于物理密度的灵敏度"""
 
-        if displacement is None:
-            uh = self._analyzer.solve_displacement(rho_val=density)
-        else:
-            uh = displacement
-        
-        cell2dof = self._tensor_space.cell_to_dof()
-        uhe = uh[cell2dof]
-
-        diff_ke = self._analyzer.get_stiffness_matrix_derivative(rho_val=density)
-
         density_location = self._interpolation_scheme.density_location
 
-        if density_location in ['element']:
+        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+            # 拉格朗日位移有限元
+            if displacement is None:
+                uh = self._analyzer.solve_displacement(rho_val=density)
+            else:
+                uh = displacement
             
-            dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe) # (NC, )
+            space_uh = self._analyzer._tensor_space
+            cell2dof = space_uh.cell_to_dof()
+            uhe = uh[cell2dof]
 
-            return dc[:]
-        
-        elif density_location in ['element_multiresolution']:
+            diff_KE = self._analyzer.get_stiffness_matrix_derivative(rho_val=density)
 
-            dc = -bm.einsum('ci, cnij, cj -> cn', uhe, diff_ke, uhe) # (NC, n_sub)
+            if density_location in ['element']:
+                dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_KE, uhe) # (NC, )
 
-            return dc[:]
-        
-        elif density_location in ['node']:
-
-            dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_ke, uhe) # (NC, NCN)
-
-            mesh = self._tensor_space.mesh
-            cell2node = mesh.cell_to_node() # (NC, NCN)
-            NN = mesh.number_of_nodes()
-
-            dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
-            dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
-
-            return dc[:]
-        
-        elif density_location in ['node_multiresolution']:
-
-            dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_ke, uhe) # (NC, NCN)
-
-            density_mesh = density.space.mesh
-            cell2node = density_mesh.cell_to_node() # (NC, NCN)
-            NN = density_mesh.number_of_nodes()
-
-            dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
-            dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
-
-            return dc[:]
-        
-        else:
+                return dc[:]
             
-            error_msg = f"Unknown density location: {density_location}"
-            self._log_error(error_msg)
+            elif density_location in ['element_multiresolution']:
+                dc = -bm.einsum('ci, cnij, cj -> cn', uhe, diff_KE, uhe) # (NC, n_sub)
+
+                return dc[:]
+            
+            elif density_location in ['node']:
+                dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_KE, uhe) # (NC, NCN)
+
+                mesh = space_uh.mesh
+                cell2node = mesh.cell_to_node() # (NC, NCN)
+                NN = mesh.number_of_nodes()
+
+                dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
+                dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
+
+                return dc[:]
+            
+            elif density_location in ['node_multiresolution']:
+                dc_e = -bm.einsum('ci, clij, cj -> cl', uhe, diff_KE, uhe) # (NC, NCN)
+
+                density_mesh = density.space.mesh
+                cell2node = density_mesh.cell_to_node() # (NC, NCN)
+                NN = density_mesh.number_of_nodes()
+
+                dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
+                dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
+
+                return dc[:]
+            
+            else:
+                error_msg = f"Unknown density location: {density_location}"
+                self._log_error(error_msg)
+
+        elif self._analyzer.__class__ in [HuZhangMFEMAnalyzer]:
+            # 胡张应力位移混合有限元
+            if displacement is None:
+                sigmah, uh = self._analyzer.solve_displacement(rho_val=density)
+            else:
+                sigmah, uh = displacement, None
+            
+            space_sigmah = self._analyzer._huzhang_space
+            cell2dof = space_sigmah.cell_to_dof()
+            sigmahe = sigmah[cell2dof] # (NC, TLDOF_sigma)
+
+            diff_AE = self._analyzer.get_local_stress_matrix_derivative(rho_val=density) # (NC, TLDOF_sigma, TLDOF_sigma)
+
+            if density_location in ['element']:
+                dc = -bm.einsum('ci, cij, cj -> c', sigmahe, diff_AE, sigmahe) # (NC, )
+
+                return dc[:]
+            
+            elif density_location in ['node']:
+                raise NotImplementedError("节点密度尚未实现")
+            
+            elif density_location in ['element_multiresolution']:
+                raise NotImplementedError("多分辨率单元密度尚未实现")
+            
+            elif density_location in ['node_multiresolution']:
+                raise NotImplementedError("多分辨率节点密度尚未实现")
+
     
     def _auto_differentiation(self, 
             density_distribution: Function, 

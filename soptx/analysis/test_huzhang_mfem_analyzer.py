@@ -22,18 +22,18 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test')
-    def run(self, test_demo: str = '2d_simplex') -> None:
+    @variantmethod('test_exact_solution')
+    def run(self, test_demo: str = 'box_tri_huzhang') -> None:
         """基于有真解的算例验证胡张混合有限元的正确性"""
-        if test_demo == '2d_simplex':
+        if test_demo == 'box_tri_huzhang':
             from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
             pde = BoxTriHuZhangData2d(domain=[0, 1, 0, 1], lam=1, mu=0.5)
             # TODO 支持四边形网格
-            pde.init_mesh.set('uniform_tri')
+            pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
             # TODO 支持 3 次以下
-            space_degree = 3
+            space_degree = 2
 
             # 单纯形网格
             integration_order = space_degree + 4
@@ -99,7 +99,6 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
             print("order_sigmah_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
             print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
-
 
             import matplotlib.pyplot as plt
             from soptx.utils.show import showmultirate, show_error_table
@@ -273,7 +272,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         """测试稳定化项积分子 JumpPenaltyIntegrator 的正确性"""
         from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
         pde = BoxTriHuZhangData2d(lam=1, mu=0.5)
-        pde.init_mesh.set('uniform_tri')
+        pde.init_mesh.set('uniform_aligned_tri')
         nx, ny = 2, 2
         mesh = pde.init_mesh(nx=nx, ny=ny)
         GD = mesh.geo_dimension()
@@ -288,8 +287,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         # plt.show()
 
         # TODO 支持 3 次以下
-        p = 1
-        q = p**2 + 2
+        p = 2
+        q = p + 4
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -308,7 +307,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         JPI = JumpPenaltyIntegrator(q=q)
         JP12 = JumpPenaltyIntergrator2(q=q)
 
-        index = JPI.make_index(space=tensor_space)
+        index, is_internal_flag = JPI.make_index(space=tensor_space)
         test = JPI.to_global_dof(tensor_space)
         KE_jump = JPI.assembly(tensor_space)
 
@@ -323,10 +322,10 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    # huzhang_analyzer.run.set('test')
+    huzhang_analyzer.run.set('test_exact_solution')
     # huzhang_analyzer.run.set('test_huzhang')
     # huzhang_analyzer.run.set('test_none_exact_solution')
     # huzhang_analyzer.run(model_type='bearing_device_2d')
+    # huzhang_analyzer.run.set('test_jump_penalty_integrator')
 
-    huzhang_analyzer.run.set('test_jump_penalty_integrator')
     huzhang_analyzer.run()
