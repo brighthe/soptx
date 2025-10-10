@@ -303,9 +303,9 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         ldof = tensor_space.number_of_local_dofs()
         gdof = tensor_space.number_of_global_dofs()
         from soptx.analysis.integrators.jump_penalty_integrator import JumpPenaltyIntegrator
-        from soptx.analysis.integrators.jump_penalty_integrator_2 import JumpPenaltyIntergrator2
-        JPI = JumpPenaltyIntegrator(q=q)
-        JP12 = JumpPenaltyIntergrator2(q=q)
+        # from soptx.analysis.integrators.jump_penalty_integrator_2 import JumpPenaltyIntergrator2
+        JPI = JumpPenaltyIntegrator(q=q, method='matrix_jump')
+        # JP12 = JumpPenaltyIntergrator2(q=q)
 
         index, is_internal_flag = JPI.make_index(space=tensor_space)
         test = JPI.to_global_dof(tensor_space)
@@ -322,10 +322,10 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    huzhang_analyzer.run.set('test_exact_solution')
+    # huzhang_analyzer.run.set('test_exact_solution')
     # huzhang_analyzer.run.set('test_huzhang')
     # huzhang_analyzer.run.set('test_none_exact_solution')
     # huzhang_analyzer.run(model_type='bearing_device_2d')
-    # huzhang_analyzer.run.set('test_jump_penalty_integrator')
+    huzhang_analyzer.run.set('test_jump_penalty_integrator')
 
     huzhang_analyzer.run()

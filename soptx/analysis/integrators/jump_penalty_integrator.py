@@ -117,7 +117,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         cell2face = mesh.cell_to_face()               # (NC, TD+1)
         # 单元内局部面的局部取向是否与该全局面的全局取向一致
-        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: “右/正”侧
+        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
         ldof = space.number_of_local_dofs()
 
         val_all = bm.zeros((NF, NQ, 2*ldof, GD), dtype=bm.float64) 
@@ -186,10 +186,11 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         hF = fm
 
         # 获取面的单位法向量
-        fn = mesh.face_unit_normal(index=index)  # (len(index), GD)
+        fn = mesh.face_unit_normal(index=index)  # (NF(index), GD)
 
         cell2face = mesh.cell_to_face()
-        cell2facesign = mesh.cell_to_face_sign()
+        # 单元内局部面的局部取向是否与该全局面的全局取向一致
+        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
         ldof = space.number_of_local_dofs()
 
         # 分别存储两侧的基函数值（不带符号）
@@ -214,52 +215,52 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
                 w_minus[fidx[R]] = phi[R]   # w^-
         
         # 只取需要的面
-        w_plus  = w_plus[index]   # (len(index), NQ, ldof, GD)
-        w_minus = w_minus[index]  # (len(index), NQ, ldof, GD)
-        
-        NF_actual = len(index)
+        w_plus  = w_plus[index]   # (NF[index], NQ, ldof, GD)
+        w_minus = w_minus[index]  # (NF[index], NQ, ldof, GD)
         
         # 构造矩阵跳量
-        matrix_jump = bm.zeros((NF_actual, NQ, 2*ldof, GD, GD), dtype=bm.float64)
+        matrix_jump = bm.zeros((NF, NQ, 2*ldof, GD, GD), dtype=bm.float64)
         
-        for f in range(NF_actual):
-            nu = fn[f]  # (GD,) 全局法向量
+        # ============ 内部面 ============
+        internal_idx = bm.nonzero(is_internal_flag)[0]
+        if len(internal_idx) > 0:
+            w_p = w_plus[internal_idx]
+            w_m = w_minus[internal_idx]
+            nu = fn[internal_idx]
             
-            if is_internal_flag[f]:  # 内部面
-                # ν^+ = nu, ν^- = -nu
-                for q in range(NQ):
-                    for d in range(ldof):
-                        w_p = w_plus[f, q, d]   # (GD,) w^+
-                        w_m = w_minus[f, q, d]  # (GD,) w^-
-                        
-                        # R侧基函数（w^- 非零）：
-                        # [[φ_R]] = 1/2(0⊗ν + ν⊗0 + φ_R⊗(-ν) + (-ν)⊗φ_R)
-                        #         = 1/2(-φ_R⊗ν - ν⊗φ_R)
-                        M_R = 0.5 * (bm.outer(w_m, -nu) + bm.outer(-nu, w_m))
-                        matrix_jump[f, q, d, :, :] = M_R
-                        
-                        # L侧基函数（w^+ 非零）：
-                        # [[φ_L]] = 1/2(φ_L⊗ν + ν⊗φ_L + 0⊗(-ν) + (-ν)⊗0)
-                        #         = 1/2(φ_L⊗ν + ν⊗φ_L)
-                        M_L = 0.5 * (bm.outer(w_p, nu) + bm.outer(nu, w_p))
-                        matrix_jump[f, q, d + ldof, :, :] = M_L
-                        
-            else:  # 边界面
-                # [[w]] = 1/2(w⊗ν + ν⊗w)
-                # 判断哪一侧非零
-                w = w_plus[f] if bm.any(w_plus[f] != 0) else w_minus[f]
-                is_left = bm.any(w_plus[f] != 0)
-                
-                for q in range(NQ):
-                    for d in range(ldof):
-                        w_val = w[q, d]  # (GD,)
-                        M = 0.5 * (bm.outer(w_val, nu) + bm.outer(nu, w_val))
-                        
-                        if is_left:
-                            matrix_jump[f, q, d + ldof, :, :] = M
-                        else:
-                            matrix_jump[f, q, d, :, :] = M
+            # R侧
+            M_R = 0.5 * (bm.einsum('fqdi,fj->fqdij', w_m, -nu) + bm.einsum('fi,fqdj->fqdij', -nu, w_m))
+            matrix_jump[internal_idx, :, :ldof, :, :] = M_R
+            
+            # L侧
+            M_L = 0.5 * (bm.einsum('fqdi,fj->fqdij', w_p, nu) + 
+                        bm.einsum('fi,fqdj->fqdij', nu, w_p))
+            matrix_jump[internal_idx, :, ldof:, :, :] = M_L
         
+        # ============ 边界面 ============
+        boundary_idx = bm.nonzero(~is_internal_flag)[0]
+        if len(boundary_idx) > 0:
+            w_p = w_plus[boundary_idx]
+            w_m = w_minus[boundary_idx]
+            nu = fn[boundary_idx]
+            
+            # 判断并选择非零侧
+            is_left = bm.any(w_p != 0, axis=(1, 2, 3))
+            w = bm.where(is_left[:, None, None, None], w_p, w_m)
+            
+            # 计算矩阵跳量
+            M = 0.5 * (bm.einsum('fqdi,fj->fqdij', w, nu) + 
+                    bm.einsum('fi,fqdj->fqdij', nu, w))
+            
+            # 分别存储 L 侧和 R 侧
+            left_idx = boundary_idx[is_left]
+            right_idx = boundary_idx[~is_left]
+            
+            if len(left_idx) > 0:
+                matrix_jump[left_idx, :, ldof:, :, :] = M[is_left]
+            if len(right_idx) > 0:
+                matrix_jump[right_idx, :, :ldof, :, :] = M[~is_left]
+                
         return ws, matrix_jump, hF, fm
 
     @assembly.register('matrix_jump')
