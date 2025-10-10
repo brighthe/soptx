@@ -229,12 +229,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if self._topopt_algorithm is None:
             coef = None
         elif self._topopt_algorithm in ['density_based']:
+            # 目前仅支持插值杨氏模量 E 
             E_rho = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
                                             rho_val=rho_val,
                                             integration_order=self._integration_order
                                         )
-            E0 = self.material.youngs_modulus
+            E0 = self._material.youngs_modulus
             coef = E0 / E_rho
         else:
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
