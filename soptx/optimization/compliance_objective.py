@@ -67,8 +67,8 @@ class ComplianceObjective(BaseLogged):
 
             elif self._state_variable == 'sigma':
                 A = self._analyzer.get_stress_matrix(rho_val=density)
-                Au = A.matmul(sigmah[:])
-                c = bm.einsum('i, i ->', sigmah[:], Au)
+                Asigmah = A.matmul(sigmah[:])
+                c = bm.einsum('i, i ->', sigmah[:], Asigmah)
 
             else:
                 error_msg = f"Unknown state_variable: {self._state_variable}"

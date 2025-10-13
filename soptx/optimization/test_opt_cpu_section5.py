@@ -281,7 +281,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # mesh_type = 'uniform_quad'
         mesh_type = 'uniform_crisscross_tri'
 
-        # 设置基础材料
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
@@ -292,6 +291,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        displacement_mesh.to_vtk(f"displacement_mesh.vtu")
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -344,7 +345,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
             TGDOF_sigmah = space_sigmah.number_of_global_dofs()
             self._log_info(f"分析阶段参数, "
                            f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                           f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
+                           f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
                            f"离散方法={analysis_method}, 网格类型={mesh_type}, "
                            f"状态变量={state_variable}, "
                            f"位移空间={space_uh.__class__.__name__}, 次数={space_uh.p}, 总自由度={TGDOF_uh}, "
@@ -445,7 +446,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_clamped_beam_2d")
         save_path.mkdir(parents=True, exist_ok=True)
 
-        
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
@@ -454,6 +454,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
 
         return rho_opt, history
+
 
     @run.register('test_bearing_device_2d')
     def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:

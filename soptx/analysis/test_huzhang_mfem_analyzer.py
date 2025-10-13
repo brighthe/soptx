@@ -22,10 +22,10 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_exact_solution')
-    def run(self, test_demo: str = 'box_tri_huzhang') -> None:
+    @variantmethod('test_exact_solution_mfem')
+    def run(self, model) -> None:
         """基于有真解的算例验证胡张混合有限元的正确性"""
-        if test_demo == 'box_tri_huzhang':
+        if model == 'box_tri_huzhang':
             from soptx.model.linear_elasticity_2d import BoxTriHuZhangData2d
             pde = BoxTriHuZhangData2d(domain=[0, 1, 0, 1], lam=1, mu=0.5)
             # TODO 支持四边形网格
@@ -45,131 +45,144 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                                 enable_logging=False
                                             )
-            maxit = 5
-            errorType = [
-                        '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega,0}$',
-                        '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$',
-                        '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,H(div)}$'
-                        ]
-            errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
-            NDof = bm.zeros(maxit, dtype=bm.int32)
-            h = bm.zeros(maxit, dtype=bm.float64)
 
-            for i in range(maxit):
-                N = 2**(i+1) 
+        elif model == 'tri_sol_mix_huzhang':
+            from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
+            lam = 1.0
+            mu = 0.5
+            pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-                huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
-                                                        mesh=analysis_mesh,
-                                                        pde=pde,
-                                                        material=material,
-                                                        space_degree=space_degree,
-                                                        integration_order=integration_order,
-                                                        solve_method='mumps',
-                                                        topopt_algorithm=None,
-                                                        interpolation_scheme=None,
-                                                    )
-                
-                uh_dof = huzhang_mfem_analyzer._tensor_space.number_of_global_dofs()
-                sigma_dof = huzhang_mfem_analyzer._huzhang_space.number_of_global_dofs()
-                NDof[i] = uh_dof + sigma_dof
+        space_degree = 3
+        integration_order = space_degree + 4
 
-                sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
-                
-                e_uh_l2 = analysis_mesh.error(u=uh, 
-                                        v=pde.disp_solution,
-                                        q=integration_order) # 位移 L2 范数误差
-                e_sigmah_l2 = analysis_mesh.error(u=sigmah, 
-                                                v=pde.stress_solution, 
-                                                q=integration_order) # 应力 L2 范数误差
-                e_div_sigmah_l2 = analysis_mesh.error(u=sigmah.div_value, 
-                                                    v=pde.div_stress_solution, 
-                                                    q=integration_order) # 应力散度 L2 范数误差
-                e_sigmah_hdiv = bm.sqrt(e_sigmah_l2**2 + e_div_sigmah_l2**2) # 应力 H(div) 范数误差
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            lame_lambda=pde.lam, 
+                                            shear_modulus=pde.mu,
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        maxit = 5
+        errorType = [
+                    '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega,0}$',
+                    '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,0}$',
+                    '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega,H(div)}$'
+                    ]
+        errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
+        NDof = bm.zeros(maxit, dtype=bm.int32)
+        h = bm.zeros(maxit, dtype=bm.float64)
 
-                h[i] = 1/N
-                errorMatrix[0, i] = e_uh_l2
-                errorMatrix[1, i] = e_sigmah_l2
-                errorMatrix[2, i] = e_sigmah_hdiv
+        for i in range(maxit):
+            N = 2**(i+1) 
 
-                if i < maxit - 1:
-                    analysis_mesh.uniform_refine()
+            huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                                    mesh=analysis_mesh,
+                                                    pde=pde,
+                                                    material=material,
+                                                    space_degree=space_degree,
+                                                    integration_order=integration_order,
+                                                    solve_method='mumps',
+                                                    topopt_algorithm=None,
+                                                    interpolation_scheme=None,
+                                                )
+            
+            uh_dof = huzhang_mfem_analyzer._tensor_space.number_of_global_dofs()
+            sigma_dof = huzhang_mfem_analyzer._huzhang_space.number_of_global_dofs()
+            NDof[i] = uh_dof + sigma_dof
 
-            print("errorMatrix:\n", errorType, "\n", errorMatrix)   
-            print("NDof:", NDof)
-            print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
-            print("order_sigmah_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
-            print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
+            sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
+            
+            e_uh_l2 = analysis_mesh.error(u=uh, 
+                                    v=pde.disp_solution,
+                                    q=integration_order) # 位移 L2 范数误差
+            e_sigmah_l2 = analysis_mesh.error(u=sigmah, 
+                                            v=pde.stress_solution, 
+                                            q=integration_order) # 应力 L2 范数误差
+            e_div_sigmah_l2 = analysis_mesh.error(u=sigmah.div_value, 
+                                                v=pde.div_stress_solution, 
+                                                q=integration_order) # 应力散度 L2 范数误差
+            e_sigmah_hdiv = bm.sqrt(e_sigmah_l2**2 + e_div_sigmah_l2**2) # 应力 H(div) 范数误差
 
-            import matplotlib.pyplot as plt
-            from soptx.utils.show import showmultirate, show_error_table
+            h[i] = 1/N
+            errorMatrix[0, i] = e_uh_l2
+            errorMatrix[1, i] = e_sigmah_l2
+            errorMatrix[2, i] = e_sigmah_hdiv
 
-            show_error_table(h, errorType, errorMatrix)
-            showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
-            plt.show()
-            print('------------------')
+            if i < maxit - 1:
+                analysis_mesh.uniform_refine()
 
-    @run.register('test_huzhang')
-    def run(self, test_demo: str = 'bridge_2d_double_load') -> None:
-        """对于无真解的算例, 基于位移有限元的结果验证胡张混合有限元的结果的正确性"""
-        if test_demo == 'bridge_2d_double_load':
+        print("errorMatrix:\n", errorType, "\n", errorMatrix)   
+        print("NDof:", NDof)
+        print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+        print("order_sigmah_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+        print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
 
-            E = 1.0
-            nu = 0.35
-            from soptx.model.bridge_2d import Bridge2dDoubleLoadData
-            pde = Bridge2dDoubleLoadData(domain=[0, 1, 0, 1], 
-                                        T1 = -2.0, T2=-2.0,
-                                        E=E, nu=nu)
-            # TODO 支持四边形网格
+        import matplotlib.pyplot as plt
+        from soptx.utils.show import showmultirate, show_error_table
+
+        show_error_table(h, errorType, errorMatrix)
+        showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
+        plt.show()
+        print('------------------')
+
+    @run.register('test_exact_solution_lfem_hzmfem')
+    def run(self, model: str) -> None:
+        """对于有真解的算例, 分别采用位移法和混合元方法求解"""
+        if model == 'tri_sol_mix_huzhang':
+            lam = 1.0
+            mu = 0.5
+            from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
+            pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_tri')
             nx, ny = 2, 2
             displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-            material = IsotropicLinearElasticMaterial(
-                                                youngs_modulus=pde.E,
-                                                poisson_ratio=pde.nu,
-                                                plane_type=pde.plane_type,
-                                                enable_logging=False
-                                            )
-            
-            ## 位移 Lagrange 有限元
-            space_degree = 3
-            # 单纯形网格
-            integration_order = space_degree + 4
-            from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-            lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                        mesh=displacement_mesh,
-                                        pde=pde,
-                                        material=material,
-                                        space_degree=space_degree,
-                                        integration_order=integration_order,
-                                        assembly_method='standard',
-                                        solve_method='mumps',
-                                        topopt_algorithm=None,
-                                        interpolation_scheme=None,
-                                    )
-            uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            lame_lambda=pde.lam, 
+                                            shear_modulus=pde.mu,
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        ## 位移 Lagrange 有限元
+        space_degree = 3
+        # 单纯形网格
+        integration_order = space_degree + 4
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                    mesh=displacement_mesh,
+                                    pde=pde,
+                                    material=material,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method='standard',
+                                    solve_method='mumps',
+                                    topopt_algorithm=None,
+                                    interpolation_scheme=None,
+                                )
+        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
 
-            ## 位移应力混合 HuZhang 有限元
-            huzhang_space_degree = 3
-            integration_order = huzhang_space_degree + 4
-            from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
-            huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
-                                        mesh=displacement_mesh,
-                                        pde=pde,
-                                        material=material,
-                                        space_degree=huzhang_space_degree,
-                                        integration_order=integration_order,
-                                        solve_method='mumps',
-                                        topopt_algorithm=None,
-                                        interpolation_scheme=None,
-                                    )
-            sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
-            
-            print('------------------')
-
-        else:
-            raise NotImplementedError(f"The test_demo '{test_demo}' has not been implemented yet.")
+        ## 位移应力混合 HuZhang 有限元
+        huzhang_space_degree = 3
+        integration_order = huzhang_space_degree + 4
+        from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
+        huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                    mesh=displacement_mesh,
+                                    pde=pde,
+                                    material=material,
+                                    space_degree=huzhang_space_degree,
+                                    integration_order=integration_order,
+                                    solve_method='mumps',
+                                    topopt_algorithm=None,
+                                    interpolation_scheme=None,
+                                )
+        sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
+        
+        print('------------------')
 
 
     @run.register('test_none_exact_solution')
@@ -322,10 +335,10 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    # huzhang_analyzer.run.set('test_exact_solution')
-    # huzhang_analyzer.run.set('test_huzhang')
+    huzhang_analyzer.run.set('test_exact_solution_mfem')
+    # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run.set('test_none_exact_solution')
     # huzhang_analyzer.run(model_type='bearing_device_2d')
-    huzhang_analyzer.run.set('test_jump_penalty_integrator')
+    # huzhang_analyzer.run.set('test_jump_penalty_integrator')
 
-    huzhang_analyzer.run()
+    huzhang_analyzer.run(model='tri_sol_mix_huzhang')

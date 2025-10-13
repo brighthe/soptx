@@ -7,9 +7,10 @@ from fealpy.typing import TensorLike, Callable
 
 from soptx.model.pde_base import PDEBase
 
-class BoxTriHuZhangData2d(PDEBase):
+class TriSolDirHuZhangData(PDEBase):
     """
-    模型来源: 
+    胡张混合有限元
+        带真解的二维线弹性算例 (纯齐次 Dirichlet 边界条件)
 
     -∇·σ = b    in Ω
       Aσ = ε(u) in Ω
@@ -301,7 +302,267 @@ class BoxTriHuZhangData2d(PDEBase):
         val = bm.stack([div_x, div_y], axis=-1)
         
         return val
-    
+
+
+class TriSolMixHuZhangData(PDEBase):
+    r"""
+    胡张混合有限元
+        二维线弹性（平面应变）—— 解析解 + 混合边界条件 (左/下 Dirichlet, 右/上 Neumann)
+
+    方程：
+        Aσ = ε(u)                     in Ω
+       -∇·σ = b                       in Ω
+            u = 0                    on Γ_D = {x=0} ∪ {y=0}
+          σ·n = t                    on Γ_N = {x=1} ∪ {y=1}
+
+    材料参数：
+        λ = 1.0, μ = 0.5  (⇒ 2μ = 1)
+
+    本构（平面应变）：
+        σ = 2μ ε + λ tr(ε) I
+      ⇔  Aσ = ε,   A 为柔度算子 (与 λ, μ 对偶)
+
+    解析位移 (三角函数):
+        u(x,y) = [ sin(πx/2)·sin(πy),
+                  -2 sin(πx) ·sin(πy/2) ]^T
+
+      体力密度: 
+        b(x,y) =
+            [  π^2 ( sin(πx/2) sin(πy) + (3/2) cos(πx) cos(πy/2) ),
+            - π^2 ( 2 sin(πx) sin(πy/2) + (3/4) cos(πx/2) cos(πy) ) ]^T
+
+      Neumann:
+        右边界 x=1, n=(1,0):  t(1,y) = [ 0,
+                                         (π/2) cos(πy) + π sin(πy/2) ]^T
+        上边界 y=1, n=(0,1):  t(x,1) = [ - (π/2) sin(πx/2) - π cos(πx),
+                                          0 ]^T
+    """
+    def __init__(self, 
+                 domain: List[float] = [0, 1, 0, 1],
+                 mesh_type: str = 'uniform_tri', 
+                 lam: float = 1.0, mu: float = 0.5,                
+                 enable_logging: bool = False, 
+                 logger_name: Optional[str] = None) -> None:
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                         enable_logging=enable_logging, logger_name=logger_name)
+        self._lam, self._mu = lam, mu
+        self._eps = 1e-12
+
+        self._plane_type = 'plane_strain'
+        self._load_type = 'distributed'   
+        self._boundary_type = 'mixed'     
+
+    # ----------------------------
+    # 访问器
+    # ----------------------------
+    @property
+    def lam(self) -> float:
+        return self._lam
+
+    @property
+    def mu(self) -> float:
+        return self._mu
+
+    # ----------------------------
+    # 网格变体
+    # ----------------------------
+    @variantmethod('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                       threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
+        return mesh
+
+    @init_mesh.register('uniform_aligned_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                     threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+        return mesh
+
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 40)
+        device = kwargs.get('device', 'cpu')
+
+        node = bm.array([[0.0, 0.0],
+                         [1.0, 0.0],
+                         [1.0, 1.0],
+                         [0.0, 1.0]], dtype=bm.float64, device=device)
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)
+        qmesh = QuadrangleMesh(node, cell).from_box(box=self._domain, nx=nx, ny=ny)
+
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+
+        import numpy as np
+        newCell = np.r_['0',
+                        lcell[:, [1, 2, 0]],
+                        lcell[:, [3, 0, 2]],
+                        rcell[:, [0, 1, 3]],
+                        rcell[:, [2, 3, 1]]]
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
+        return mesh
+
+    @cartesian
+    def disp_solution(self, points: TensorLike) -> TensorLike:
+        """解析解 u(x, y)"""
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+        u1 = bm.sin(0.5 * pi * x) * bm.sin(pi * y)
+        u2 = -2.0 * bm.sin(pi * x) * bm.sin(0.5 * pi * y)
+
+        return bm.stack([u1, u2], axis=-1)
+
+    @cartesian
+    def disp_solution_gradient(self, points: TensorLike) -> TensorLike:
+        """解析解梯度 ∇u"""
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+        du1_dx = 0.5 * pi * bm.cos(0.5 * pi * x) * bm.sin(pi * y)
+        du1_dy =        pi * bm.sin(0.5 * pi * x) * bm.cos(pi * y)
+        du2_dx = -2.0 * pi * bm.cos(pi * x) * bm.sin(0.5 * pi * y)
+        du2_dy = -      pi * bm.sin(pi * x) * bm.cos(0.5 * pi * y)
+        
+        return bm.stack([
+                            bm.stack([du1_dx, du1_dy], axis=-1),
+                            bm.stack([du2_dx, du2_dy], axis=-1)
+                        ], axis=-2)
+
+    @cartesian
+    def stress_solution(self, points: TensorLike) -> TensorLike:
+        """σ=2μ ε + λ tr(ε) I, 返回顺序 (σ_xx, σ_xy, σ_yy)"""
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+        lam, mu = self.lam, self.mu
+
+        # 梯度
+        du1_dx = 0.5 * pi * bm.cos(0.5 * pi * x) * bm.sin(pi * y)
+        du1_dy =        pi * bm.sin(0.5 * pi * x) * bm.cos(pi * y)
+        du2_dx = -2.0 * pi * bm.cos(pi * x) * bm.sin(0.5 * pi * y)
+        du2_dy = -      pi * bm.sin(pi * x) * bm.cos(0.5 * pi * y)
+
+        # 应变
+        eps_xx = du1_dx
+        eps_yy = du2_dy
+        eps_xy = 0.5 * (du1_dy + du2_dx)
+        tr_eps = eps_xx + eps_yy
+
+        # 应力（2μ=1，便于数值核对；但仍按通式写）
+        sigma_xx = 2 * mu * eps_xx + lam * tr_eps
+        sigma_yy = 2 * mu * eps_yy + lam * tr_eps
+        sigma_xy = 2 * mu * eps_xy
+
+        return bm.stack([sigma_xx, sigma_xy, sigma_yy], axis=-1)
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        """体力密度 b=-div σ"""
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+        b1 =  (pi**2) * ( bm.sin(0.5 * pi * x) * bm.sin(pi * y)
+                        + 1.5 * bm.cos(pi * x) * bm.cos(0.5 * pi * y) )
+        b2 = -(pi**2) * ( 2.0 * bm.sin(pi * x) * bm.sin(0.5 * pi * y)
+                        + 0.75 * bm.cos(0.5 * pi * x) * bm.cos(pi * y) )
+        return bm.stack([b1, b2], axis=-1)
+
+    # ----------------------------
+    # Dirichlet: 左边 x=0 与 下边 y=0
+    # ----------------------------
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        return self.disp_solution(points)
+
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  # x=0
+        flag_y0 = bm.abs(y - domain[2]) < self._eps  # y=0
+
+        return flag_x0 | flag_y0
+
+    @cartesian
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  # x=0
+        flag_y0 = bm.abs(y - domain[2]) < self._eps  # y=0
+        
+        return flag_x0 | flag_y0
+
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        
+        return (self.is_dirichlet_boundary_dof_x,
+                self.is_dirichlet_boundary_dof_y)
+
+    # ----------------------------
+    # Neumann：右边 x=1 与 上边 y=1
+    # ----------------------------
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """
+        σ·n = t on Γ_N
+        右边 x=1, n=(1,0): t(1,y) = [0, (π/2)cos(πy) + π sin(πy/2)]^T
+        上边 y=1, n=(0,1): t(x,1) = [-(π/2)sin(πx/2) - π cos(πx), 0]^T
+        """
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        pi = bm.pi
+
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+
+        # 右边界：设置 t_y
+        flag_right = bm.abs(x - domain[1]) < self._eps
+        t_y_right = 0.5 * pi * bm.cos(pi * y) + pi * bm.sin(0.5 * pi * y)
+        val = bm.set_at(val, (flag_right, 1), t_y_right[flag_right])
+
+        # 上边界：设置 t_x
+        flag_top = bm.abs(y - domain[3]) < self._eps
+        t_x_top = -0.5 * pi * bm.sin(0.5 * pi * x) - pi * bm.cos(pi * x)
+        val = bm.set_at(val, (flag_top, 0), t_x_top[flag_top])
+
+        return val
+
+    @cartesian
+    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        flag_x1 = bm.abs(x - domain[1]) < self._eps  # 右边 x=1
+        flag_y1 = bm.abs(y - domain[3]) < self._eps  # 上边 y=1
+        
+        return flag_x1 | flag_y1
+
+    def is_neumann_boundary(self) -> Callable:
+        
+        return self.is_neumann_boundary_dof
+
+
 class BoxTriLagrange2dData(PDEBase):
     """
     -∇·σ = b    in Ω

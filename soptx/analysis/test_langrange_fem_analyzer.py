@@ -11,6 +11,7 @@ from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
 
 
 
+
 from fealpy.mesh import TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from soptx.utils.show import showmultirate, show_error_table
@@ -26,10 +27,10 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
 
-    @variantmethod('lfa_exact_solution')
-    def run(self, model_type: str = 'BoxTriMixed2d') -> TensorLike:
+    @variantmethod('test_exact_solution_lfem')
+    def run(self, model: str) -> TensorLike:
 
-        if model_type == 'BoxTrDirichleti2d':
+        if model == 'BoxTrDirichleti2d':
             from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
             domain = [0, 1, 0, 1]
             E, nu = 1.0, 0.3
@@ -45,7 +46,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
         
-        elif model_type == 'BoxTriMixed2d':
+        elif model == 'BoxTriMixed2d':
             from soptx.model.linear_elasticity_2d import BoxTriMixedLagrange2dData
             domain = [0, 1, 0, 1]
             E, nu = 1.0, 0.3
@@ -61,7 +62,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        elif model_type == 'BoxPoly3d':
+        elif model == 'BoxPoly3d':
             from soptx.model.linear_elasticity_3d import BoxPolyLagrange3dData
             domain = [0, 1, 0, 1, 0, 1]
             lam, mu = 1.0, 1.0
@@ -77,9 +78,27 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
+        elif model == 'tri_sol_mix_huzhang':
+            lam = 1.0
+            mu = 0.5
+            from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
+            pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
+            
+        self._log_info(f"模型: {type(pde).__name__}")
+            
         space_degree = 2
         integration_order = space_degree + 3
-        # 'standard', 'voigt', 'voigt_multiresolution'
         assembly_method = 'standard'
 
         maxit = 4
@@ -89,13 +108,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         NDof = bm.zeros(maxit, dtype=bm.int32)
         h = bm.zeros(maxit, dtype=bm.float64)
 
-        self._log_info(f"模型: {type(pde).__name__}, 网格: {type(mesh).__name__}, ")
-
         for i in range(maxit):
             N = 2**(i+1)
 
             lfa = LagrangeFEMAnalyzer(
-                                    mesh=mesh,
+                                    mesh=displacement_mesh,
                                     pde=pde, 
                                     material=material, 
                                     space_degree=space_degree,
@@ -106,18 +123,18 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     interpolation_scheme=None
                                 )
                     
-            uh = lfa.solve_displacement()
+            uh = lfa.solve_displacement(rho_val=None)
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
 
-            e_l2 = mesh.error(uh, pde.disp_solution)
-            e_h1 = mesh.error(uh.grad_value, pde.disp_solution_gradient)
+            e_l2 = displacement_mesh.error(uh, pde.disp_solution)
+            e_h1 = displacement_mesh.error(uh.grad_value, pde.disp_solution_gradient)
 
             h[i] = 1/N
             errorMatrix[0, i] = e_l2
             errorMatrix[1, i] = e_h1
 
             if i < maxit - 1:
-                mesh.uniform_refine()
+                displacement_mesh.uniform_refine()
 
         print("errorMatrix:\n", errorType, "\n", errorMatrix)
         print("NDof:", NDof)
@@ -263,6 +280,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    # test.run.set('lfa_exact_solution')
-    test.run.set('test_none_exact_solution')
-    test.run(model_type='bearing_device_2d')
+    test.run.set('test_exact_solution_lfem')
+    # test.run.set('test_none_exact_solution')
+
+    test.run(model='tri_sol_mix_huzhang')

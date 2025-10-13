@@ -30,9 +30,9 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         mesh = space.mesh
         face2cell = mesh.face_to_cell(index)
         # 每个边界面所邻接的单元的全局索引
-        cell_index = face2cell[:, 0] # (NFb, ) 
+        cell_index = face2cell[:, 0] # (NF_bd, ) 
         # 单元到全局自由度的映射
-        result = space.cell_to_dof(index=cell_index) # (NFb, LDOF)
+        result = space.cell_to_dof(index=cell_index) # (NF_bd, LDOF)
 
         return result
 
@@ -62,19 +62,19 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         bcs, ws, phi, fm, index, n = self.fetch(space) 
         mesh = getattr(space, 'mesh', None)
 
-        NFb, NQ, LDOF, _ = phi.shape
+        NF_bd, NQ, LDOF, _ = phi.shape
         GD = mesh.geo_dimension()
-        tau = bm.zeros((NFb, NQ, LDOF, GD, GD), dtype=phi.dtype)
+        tau = bm.zeros((NF_bd, NQ, LDOF, GD, GD), dtype=phi.dtype)
         tau[..., 0, 0] = phi[..., 0] # σ_xx
         tau[..., 0, 1] = phi[..., 1] # σ_xy
         tau[..., 1, 0] = phi[..., 1] # σ_yx
         tau[..., 1, 1] = phi[..., 2] # σ_yy
-        tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NFb, NQ, LDOF, GD)
+        tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NF_bd, NQ, LDOF, GD)
 
         ps = mesh.bc_to_point(bcs, index=index)
-        val = source(ps) # (NFb, NQ, GD)
+        val = source(ps) # (NF_bd, NQ, GD)
 
-        F = bm.einsum('f, q, fqli, fqd -> fl', fm, ws, tau_n, val) # (NFb, LDOF)
+        F = bm.einsum('f, q, fqli, fqd -> fl', fm, ws, tau_n, val) # (NF_bd, LDOF)
 
         return F
     
@@ -96,4 +96,5 @@ class BoundaryFaceSourceIntegrator_mfem(_FaceSourceIntegrator):
             if callable(threshold):
                 bc = mesh.entity_barycenter('face', index=index)
                 index = index[threshold(bc)]
+
         return index

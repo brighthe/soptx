@@ -4,9 +4,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, SourceLike, Threshold
 from fealpy.mesh import HomogeneousMesh
 from fealpy.functionspace.space import FunctionSpace as _FS
-from fealpy.functional import linear_integral
 from fealpy.fem.integrator import LinearInt, SrcInt, FaceInt, enable_cache
-from fealpy.utils import process_coef_func
 
 
 class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
@@ -60,6 +58,7 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
 class InterFaceSourceIntegrator(_FaceSourceIntegrator):
     def make_index(self, space: _FS):
         index = self.threshold
+
         return index
 
 class BoundaryFaceSourceIntegrator_lfem(_FaceSourceIntegrator): 
@@ -74,4 +73,5 @@ class BoundaryFaceSourceIntegrator_lfem(_FaceSourceIntegrator):
             if callable(threshold):
                 bc = mesh.entity_barycenter('face', index=index)
                 index = index[threshold(bc)]
+
         return index
