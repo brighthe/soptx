@@ -327,40 +327,40 @@ class HalfClampedBeam2D(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
-    def get_neumann_loads(self):
-       """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
-       if self._load_type == 'concentrated':
+    # def get_neumann_loads(self):
+    #    """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
+    #    if self._load_type == 'concentrated':
             
-            @cartesian
-            def concentrated_load(points: TensorLike) -> TensorLike:
-                """
-                定义点力
-                在右下角 (对称轴与底边的交点) 施加向下的集中载荷 F = -1.5 (N)
-                """
-                domain = self.domain
+    #         @cartesian
+    #         def concentrated_load(points: TensorLike) -> TensorLike:
+    #             """
+    #             定义点力
+    #             在右下角 (对称轴与底边的交点) 施加向下的集中载荷 p = -1.5 (N)
+    #             """
+    #             domain = self.domain
 
-                x, y = points[..., 0], points[..., 1]  
+    #             x, y = points[..., 0], points[..., 1]  
 
-                coord = (
-                    (bm.abs(x - domain[1]) < self._eps) & 
-                    (bm.abs(y - domain[2]) < self._eps)
-                )
+    #             coord = (
+    #                 (bm.abs(x - domain[1]) < self._eps) & 
+    #                 (bm.abs(y - domain[2]) < self._eps)
+    #             )
                 
-                kwargs = bm.context(points)
-                val = bm.zeros(points.shape, **kwargs)
+    #             kwargs = bm.context(points)
+    #             val = bm.zeros(points.shape, **kwargs)
 
-                val = bm.set_at(val, (coord, 1), self._p)
+    #             val = bm.set_at(val, (coord, 1), self._p)
         
-                return val
+    #             return val
             
-            return concentrated_load
+    #         return concentrated_load
        
-       elif self._load_type == 'distributed':
+    #    elif self._load_type == 'distributed':
            
-           pass
+    #        pass
        
-       else:
-                raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
+    #    else:
+    #             raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
     
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
@@ -401,3 +401,25 @@ class HalfClampedBeam2D(PDEBase):
 
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
+    
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (..., 1), self._p) 
+        
+        return val
+    
+    @cartesian
+    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]  
+
+        on_buttom_boundary = bm.abs(y - domain[2]) < self._eps
+        on_right_boundary = bm.abs(x - domain[1]) < self._eps
+
+        return on_buttom_boundary & on_right_boundary
+
+    def is_neumann_boundary(self) -> Callable:
+        
+        return self.is_neumann_boundary_dof

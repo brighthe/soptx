@@ -20,7 +20,6 @@ class ComplianceObjective(BaseLogged):
 
         self._analyzer = analyzer
         self._state_variable = state_variable
-        # self._tensor_space = analyzer._tensor_space
         self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
@@ -52,18 +51,14 @@ class ComplianceObjective(BaseLogged):
                 sigmah, uh = displacement, stress
                 
             if self._state_variable == 'u':
-                B_u_sigma = self._analyzer.get_B_u_sigma()
-                A_inv = self._analyzer.get_A_sigma_sigma_inverse(rho_val=density)
-                f_sigma = self._analyzer.get_f_sigma()
-                f_u = self._analyzer.get_f_u()
+                from fealpy.solver import spsolve
 
-                F = B_u_sigma @ A_inv @ f_sigma - f_u
-                c = bm.einsum('i, i ->', uh[:], F)
-
-                # B_sigma_u = self._analyzer.get_B_sigma_u()
-                # K = B_u_sigma @ A_inv @ B_sigma_u
-                # Ku = K.matmul(uh[:])
-                # c = bm.einsum('i, i ->', uh[:], Ku)
+                B_sigma_u = self._analyzer.get_mix_matrix()
+                B_u_sigma = B_sigma_u.T
+                A = self._analyzer.get_stress_matrix(rho_val=density)
+                x = spsolve(A, B_sigma_u @ uh[:], solver='mumps')
+                Ku = B_u_sigma @ x
+                c = bm.einsum('i, i ->', uh[:], Ku)
 
             elif self._state_variable == 'sigma':
                 A = self._analyzer.get_stress_matrix(rho_val=density)

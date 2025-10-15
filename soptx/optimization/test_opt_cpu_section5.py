@@ -243,7 +243,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
 
     @run.register('test_clamped_beam_2d')
-    def run(self, analysis_method: str = 'huzhangfem') -> Union[TensorLike, OptimizationHistory]:
+    def run(self, analysis_method) -> Union[TensorLike, OptimizationHistory]:
         E = 30.0
         nu = 0.4   # 可压缩
         # nu = 0.5    # 不可压缩
@@ -272,7 +272,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 200
         tolerance = 1e-2
-        state_variable = 'sigma'  # 'u', 'sigma'
+        state_variable = 'u'  # 'u', 'sigma'
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
@@ -292,8 +292,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        displacement_mesh.to_vtk(f"displacement_mesh.vtu")
-
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
                                     density_location=density_location,
@@ -307,10 +305,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         if analysis_method == 'lfem':
             space_degree = 3
-            # 张量网格
-            integration_order = space_degree + 1
+            integration_order = space_degree + 4
             from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-            lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+            analyzer = LagrangeFEMAnalyzer(
                                         mesh=displacement_mesh,
                                         pde=pde,
                                         material=material,
@@ -321,12 +318,17 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                         topopt_algorithm='density_based',
                                         interpolation_scheme=interpolation_scheme,
                                     )
+            space = analyzer.tensor_space
+            TGDOF_uh = space.number_of_global_dofs()
+            self._log_info(f"分析阶段参数, "
+                f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
+                f"离散方法={analysis_method}, 网格类型={mesh_type}, "
+                f"状态变量={state_variable}, "
+                f"位移空间={space.__class__.__name__}, 次数={space.p}, 总自由度={TGDOF_uh}")
             
-            analyzer = lagrange_fem_analyzer
-
-        elif analysis_method == 'huzhangfem':
-            # TODO 支持低阶 1 <=p <= d
-            huzhang_space_degree = 3
+        elif analysis_method == 'hzmfem':
+            huzhang_space_degree = 1
             integration_order = huzhang_space_degree + 4
             from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
             analyzer = HuZhangMFEMAnalyzer(
@@ -676,5 +678,6 @@ if __name__ == "__main__":
     # test.run.set('test_bridge_2d')
     test.run.set('test_clamped_beam_2d')
     # test.run.set('test_bearing_device_2d')
-    rho_opt, history = test.run()
+
+    rho_opt, history = test.run(analysis_method='hzmfem')
     

@@ -10,14 +10,6 @@ from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
 
 
-
-
-from fealpy.mesh import TriangleMesh
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from soptx.utils.show import showmultirate, show_error_table
-from soptx.analysis.utils import project_solution_to_finer_mesh
-
-
 class LagrangeFEMAnalyzerTest(BaseLogged):
     def __init__(self,
                 enable_logging: bool = True,
@@ -29,8 +21,23 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
     @variantmethod('test_exact_solution_lfem')
     def run(self, model: str) -> TensorLike:
-
-        if model == 'BoxTrDirichleti2d':
+        """基于有真解的算例验证拉格朗日位移有限元的正确性"""
+        if model == 'tri_sol_dir_huzhang':
+            from soptx.model.linear_elasticity_2d import TriSolDirHuZhangData
+            lam, mu = 1.0, 0.5
+            pde = TriSolDirHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                    lame_lambda=pde.lam, 
+                                    shear_modulus=pde.mu,
+                                    plane_type=pde.plane_type,
+                                    enable_logging=False
+                                )
+        
+        elif model == 'BoxTrDirichleti2d':
             from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
             domain = [0, 1, 0, 1]
             E, nu = 1.0, 0.3
@@ -95,11 +102,12 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 enable_logging=False
                                             )
             
-        self._log_info(f"模型: {type(pde).__name__}")
             
-        space_degree = 2
-        integration_order = space_degree + 3
-        assembly_method = 'standard'
+        space_degree = 1
+        integration_order = space_degree + 4
+
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                          f"空间次数={space_degree}, 积分阶数={integration_order}")
 
         maxit = 4
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 0}$', 
@@ -112,12 +120,12 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             N = 2**(i+1)
 
             lfa = LagrangeFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    mesh=mesh,
                                     pde=pde, 
                                     material=material, 
                                     space_degree=space_degree,
                                     integration_order=integration_order,
-                                    assembly_method=assembly_method,
+                                    assembly_method='standard',
                                     solve_method='mumps',
                                     topopt_algorithm=None,
                                     interpolation_scheme=None
@@ -126,15 +134,15 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             uh = lfa.solve_displacement(rho_val=None)
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
 
-            e_l2 = displacement_mesh.error(uh, pde.disp_solution)
-            e_h1 = displacement_mesh.error(uh.grad_value, pde.disp_solution_gradient)
+            e_l2 = mesh.error(uh, pde.disp_solution)
+            e_h1 = mesh.error(uh.grad_value, pde.grad_disp_solution)
 
             h[i] = 1/N
             errorMatrix[0, i] = e_l2
             errorMatrix[1, i] = e_h1
 
             if i < maxit - 1:
-                displacement_mesh.uniform_refine()
+                mesh.uniform_refine()
 
         print("errorMatrix:\n", errorType, "\n", errorMatrix)
         print("NDof:", NDof)
@@ -150,9 +158,9 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         return uh
 
 
-    @run.register('test_none_exact_solution')
-    def run(self, model_type) -> TensorLike:
-        if model_type == 'bearing_device_2d':
+    @run.register('test_none_exact_solution_lfem')
+    def run(self, model) -> TensorLike:
+        if model == 'bearing_device_2d':
             E = 100.0
             nu = 0.4   # 可压缩
             plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
@@ -166,8 +174,8 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                             )
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 60, 40
-            
-        elif model_type == 'clamped_beam_2d':
+
+        elif model == 'clamped_beam_2d':
             E = 30.0
             nu = 0.4  # 可压缩
             plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
@@ -214,7 +222,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         t_space = lagrange_fem_analyzer.tensor_space
         TGDOF = t_space.number_of_global_dofs()
 
-        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
                        f"网格={displacement_mesh.__class__.__name__}, 节点数={NN}, "
                        f"空间={t_space.__class__.__name__}, 次数={t_space.p}, 标量自由度={SGDOF}, 总自由度={TGDOF}")
 
@@ -281,6 +289,8 @@ if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
     test.run.set('test_exact_solution_lfem')
-    # test.run.set('test_none_exact_solution')
+    test.run(model='tri_sol_dir_huzhang')
 
-    test.run(model='tri_sol_mix_huzhang')
+
+    # test.run.set('test_none_exact_solution_lfem')
+    # test.run(model='clamped_beam_2d')

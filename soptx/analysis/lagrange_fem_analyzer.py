@@ -204,23 +204,33 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return F
 
     def apply_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
-        """应用边界条件"""
-        gdof = self._tensor_space.number_of_global_dofs()
-        
+        """应用边界条件"""        
         boundary_type = self._pde.boundary_type
         load_type = self._pde.load_type
 
+        space_uh = self._tensor_space
+        gdof = space_uh.number_of_global_dofs()
+
         if boundary_type == 'mixed':
             # 1. Neumann 边界条件处理 - 弱形式施加
+            gd_sigmah = self._pde.neumann_bc
+            threshold_sigmah = self._pde.is_neumann_boundary()
 
             if load_type == 'concentrated':
-                # TODO 点力必须在网格节点上
-                neumann_loads_func = self._pde.get_neumann_loads()
-                F_sigmah = self._tensor_space.interpolate(neumann_loads_func)
+                # 集中载荷 (点力) - 等效节点力方法 - 转换为弱形式施加
+                #! 点力必须定义在网格节点上
+                isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+                isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+                ipoints_uh = space_uh.interpolation_points()
+                gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
+
+                F_sigmah = space_uh.function()
+                if space_uh.dof_priority:
+                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
+                else:
+                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
 
             elif load_type == 'distributed':
-                gd_sigmah = self._pde.neumann_bc
-                threshold_sigmah = self._pde.is_neumann_boundary()
                 from soptx.analysis.integrators.face_source_integrator_lfem import BoundaryFaceSourceIntegrator_lfem
                 integrator = BoundaryFaceSourceIntegrator_lfem(source=gd_sigmah, q=self._integration_order, threshold=threshold_sigmah)
                 lform = LinearForm(self._tensor_space)
@@ -234,13 +244,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
             self._F = F
 
             # 2. Dirichlet 边界条件处理 - 强形式施加
-            gd = self._pde.dirichlet_bc
-            threshold = self._pde.is_dirichlet_boundary()
+            gd_uh = self._pde.dirichlet_bc
+            threshold_uh = self._pde.is_dirichlet_boundary()
 
             uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self._tensor_space.device)
             uh_bd, isBdDof = self._tensor_space.boundary_interpolate(
-                                                                    gd=gd,
-                                                                    threshold=threshold,
+                                                                    gd=gd_uh,
+                                                                    threshold=threshold_uh,
                                                                     method='interp'
                                                                 )
             F = F - K.matmul(uh_bd[:])
@@ -252,6 +262,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         elif boundary_type == 'dirichlet':
             # 强形式施加
+            self._F = F
+
             gd = self._pde.dirichlet_bc
             threshold = self._pde.is_dirichlet_boundary()
         

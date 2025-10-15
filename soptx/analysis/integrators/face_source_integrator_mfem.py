@@ -2,11 +2,9 @@ from typing import Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, SourceLike, Threshold
-from fealpy.mesh import HomogeneousMesh
 from fealpy.functionspace.space import FunctionSpace as _FS
-from fealpy.functional import linear_integral
+from fealpy.decorator import variantmethod
 from fealpy.fem.integrator import LinearInt, SrcInt, FaceInt, enable_cache
-from fealpy.utils import process_coef_func
 
 
 class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
@@ -14,12 +12,14 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
                 source: Optional[SourceLike] = None, 
                 q: Optional[int] = None, *,
                 threshold: Optional[Threshold] = None,
-                batched: bool = False):
+                method: Optional[str]=None
+            ) -> None:
         super().__init__()
         self.source = source 
         self.q = q
         self.threshold = threshold
-        self.batched = batched
+
+        self.assembly.set(method)
 
 
     @enable_cache
@@ -37,14 +37,9 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         return result
 
     @enable_cache
-    def fetch(self, space: _FS) -> TensorLike:
+    def fetch_dirichlet(self, space: _FS) -> TensorLike:
         index = self.make_index(space)
         mesh = space.mesh
-
-        if not isinstance(mesh, HomogeneousMesh):
-            raise RuntimeError("The ScalarSourceIntegrator only support spaces on"
-                               f"homogeneous meshes, but {type(mesh).__name__} is"
-                               "not a subclass of HomoMesh.")
 
         facemeasure = mesh.entity_measure('face', index=index)
         n = mesh.face_unit_normal(index=index)
@@ -53,13 +48,14 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         qf = mesh.quadrature_formula(q, 'face')
         bcs, ws = qf.get_quadrature_points_and_weights()
 
-        phi = space.cell_basis_on_face(bcs, index=index) # (NF_bd, NQ, LDOF, 3)
+        phi = space.cell_basis_on_face(bcs, index) # (NF_bd, NQ, LDOF, 3)
 
         return bcs, ws, phi, facemeasure, index, n
 
-    def assembly(self, space):
+    @variantmethod('dirichlet')
+    def assembly(self, space: _FS) -> TensorLike:
         source = self.source
-        bcs, ws, phi, fm, index, n = self.fetch(space) 
+        bcs, ws, phi, fm, index, n = self.fetch_dirichlet(space) 
         mesh = getattr(space, 'mesh', None)
 
         NF_bd, NQ, LDOF, _ = phi.shape
@@ -78,6 +74,33 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
 
         return F
     
+    @enable_cache
+    def fetch_neumann(self, space: _FS) -> TensorLike:
+        index = self.make_index(space)
+        mesh = space.mesh
+
+        facemeasure = mesh.entity_measure('face', index=index)
+
+        q = space.p+3 if self.q is None else self.q
+        qf = mesh.quadrature_formula(q, 'face')
+        bcs, ws = qf.get_quadrature_points_and_weights()
+
+        phi = space.cell_basis_on_face(bcs, index) # (NF_bd, NQ, LDOF, GD)
+
+        return bcs, ws, phi, facemeasure, index
+
+    @assembly.register('neumann')
+    def assembly(self, space: _FS) -> TensorLike:
+        source = self.source
+        bcs, ws, phi, fm, index = self.fetch_neumann(space)
+        mesh = getattr(space, 'mesh', None)
+
+        ps = mesh.bc_to_point(bcs, index=index)
+        val = source(ps) # (NF_bd, NQ, GD)
+
+        F = bm.einsum('f, q, fqld, fqd -> fl', fm, ws, phi, val) # (NF_bd, LDOF)
+
+        return F
 
 class InterFaceSourceIntegrator(_FaceSourceIntegrator):
     def make_index(self, space: _FS):

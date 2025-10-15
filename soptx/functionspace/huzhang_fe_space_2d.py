@@ -95,7 +95,7 @@ class HuZhangFECellDof2d():
 
     def dof_classfication(self):
         """
-        张量自由度顺序: (3, -1): gd_priority 
+        张量自由度顺序: (-1, NS): gd_priority 
         (σ0_xx, σ0_xy, σ0_yy, 
          σ1_xx, σ1_xy, σ1_yy, 
          ...,
@@ -218,7 +218,7 @@ class HuZhangFEDof2d():
 
     def edge_to_internal_dof(self) -> TensorLike:
         """
-        Get the index array of the dofs defined on the edges of the mesh.
+        得到每条边的 2(p-1) 个牵引迹矩 DOFs
         """
         mesh = self.mesh
         NN = mesh.number_of_nodes()
@@ -228,6 +228,7 @@ class HuZhangFEDof2d():
 
         N = NN*nldof
         edge2dof = bm.arange(N, N+NE*eldof, dtype=self.itype, device=self.device)
+
         return edge2dof.reshape(NE, eldof)
 
     def edge_to_dof(self, index: Index=_S) -> TensorLike:
@@ -308,17 +309,17 @@ class HuZhangFEDof2d():
 
     def is_boundary_dof(self, threshold: Optional[Threshold]=None, method='barycenter') -> TensorLike:
         """
-        获取边界自由度的布尔数组
+        获取边界 DOFs 的布尔数组
         
         Parameters
         ----------
         threshold : callable, optional
             边界判断函数，接受点坐标返回布尔数组
-            如果为 None，返回全 False
+            如果为 None, 返回全 False
         method : str, optional
             判断边/单元是否在边界的方法：
             - 'barycenter': 使用边中点/单元中心判断（默认）
-            - 'node': 使用端点判断（边的任一端点在边界则边在边界）
+            - 'endpoint': 使用端点判断（边的任一端点在边界则边在边界）
         
         Returns
         -------
@@ -349,35 +350,75 @@ class HuZhangFEDof2d():
         is_bd_node = threshold(nodes)
         
         bd_node_indices = bm.where(is_bd_node)[0]
-        for node_idx in bd_node_indices:
-            isDDof[node2idof[node_idx]] = True
+        # for node_idx in bd_node_indices:
+        #     isDDof[node2idof[node_idx]] = True
+        idx_node = node2idof[bd_node_indices].reshape(-1)
+        isDDof = bm.set_at(isDDof, idx_node, True)
         
         # 2. 处理边自由度
         if method == 'barycenter':
-            # 使用边的重心（中点）判断
+            # 使用边的重心 (中点) 判断
             edge_centers = mesh.entity_barycenter('edge')
             is_bd_edge = threshold(edge_centers)
-        elif method == 'node':
+        elif method == 'endpoint':
             # 使用边的端点判断：任一端点在边界则边在边界
             edge = mesh.entity('edge')
             is_bd_edge = is_bd_node[edge[:, 0]] | is_bd_node[edge[:, 1]]
         else:
-            raise ValueError(f"Unknown method: {method}, must be 'barycenter' or 'node'")
+            raise ValueError(f"Unknown method: {method}, must be 'barycenter' or 'endpoint'")
         
         bd_edge_indices = bm.where(is_bd_edge)[0]
-        for edge_idx in bd_edge_indices:
-            isDDof[edge2idof[edge_idx]] = True
-        
+        # for edge_idx in bd_edge_indices:
+        #     isDDof[edge2idof[edge_idx]] = True
+        idx_edge = edge2idof[bd_edge_indices].reshape(-1)
+        isDDof = bm.set_at(isDDof, idx_edge, True)
+
         # 3. 处理单元自由度
         if method == 'barycenter':
             cell_centers = mesh.entity_barycenter('cell')
             is_bd_cell = threshold(cell_centers)
             
             bd_cell_indices = bm.where(is_bd_cell)[0]
-            for cell_idx in bd_cell_indices:
-                isDDof[cell2idof[cell_idx]] = True
-        
+            # for cell_idx in bd_cell_indices:
+            # isDDof[cell2idof[cell_idx]] = True
+            idx_cell = cell2idof[bd_cell_indices].reshape(-1)
+            isDDof = bm.set_at(isDDof, idx_cell, True)
+
         return isDDof
+
+    def is_boundary_edge_dof(self, threshold: Optional[Threshold]=None, method='barycenter'):
+        """
+        获取边界边上的牵引迹矩 DOFs
+        """
+        mesh = self.mesh
+        gdof = self.number_of_global_dofs()
+
+        # 如果没有提供 threshold，返回全 False
+        if threshold is None:
+            return bm.zeros(gdof, dtype=bm.bool, device=self.device)
+
+        # 判定哪些边在边界上
+        if method == 'barycenter':
+            edge_centers = mesh.entity_barycenter('edge')
+            is_bd_edge   = threshold(edge_centers)          # (NE,)
+        elif method == 'endpoint':
+            nodes       = mesh.entity('node')
+            is_bd_node  = threshold(nodes)                  # (NN,)
+            edge        = mesh.entity('edge')               # (NE, 2)
+            is_bd_edge  = is_bd_node[edge[:,0]] | is_bd_node[edge[:,1]]
+        else:
+            raise ValueError("method must be 'barycenter' or 'endpoint'")
+
+        # 取出这些边上的牵引迹矩 DOF 全局索引，并置位
+        isDDof     = bm.zeros(gdof, dtype=bm.bool, device=self.device)
+        edge2idof  = self.edge_to_internal_dof()           # (NE, 2*(p-1)) —— 仅牵引迹矩
+        bd_edges   = bm.where(is_bd_edge)[0]               # (n_bd_edges,)
+        if bd_edges.size > 0:
+            idx = edge2idof[bd_edges].reshape(-1)          # (n_bd_edges * 2*(p-1),)
+            isDDof = bm.set_at(isDDof, idx, True)
+
+        return isDDof
+
 
 class HuZhangFESpace2d(FunctionSpace):
     def __init__(self, mesh, p: int=1, ctype='C'):
@@ -447,28 +488,15 @@ class HuZhangFESpace2d(FunctionSpace):
 
     def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
         return self.dof.is_boundary_dof(threshold, method=method)
+    
+    def is_boundary_edge_dof(self, threshold=None, method=None) -> TensorLike:
+        return self.dof.is_boundary_edge_dof(threshold, method=method)
 
     def geo_dimension(self):
         return self.GD
 
     def top_dimension(self):
         return self.TD
-
-    def project(self, u: Union[Callable[..., TensorLike], TensorLike],) -> TensorLike:
-        pass
-
-    def interpolate(self, u: Union[Callable[..., TensorLike], TensorLike],) -> TensorLike:
-        pass
-
-    def boundary_interpolate(self,
-            gd: Union[Callable, int, float, TensorLike],
-            uh: Optional[TensorLike] = None,
-            *, threshold: Optional[Threshold]=None, method=None) -> TensorLike:
-        isDDof = self.is_boundary_dof(threshold=threshold, method=method)
-
-        print("--------------")
-
-    set_dirichlet_bc = boundary_interpolate
 
     def dof_frame(self) -> TensorLike:
         mesh = self.mesh
@@ -534,7 +562,6 @@ class HuZhangFESpace2d(FunctionSpace):
         iedofs = dof.cell_dofs.get_internal_dof_from_dim(1)
         icdofs = dof.cell_dofs.get_internal_dof_from_dim(2)
 
-
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
         NC = mesh.number_of_cells()
@@ -586,9 +613,6 @@ class HuZhangFESpace2d(FunctionSpace):
             phi[..., idx:, :] = scalar_part * tensor_part
 
         return phi
-
-    # face_basis = basis
-    # edge_basis = basis
 
     @barycentric
     def cell_basis_on_face(self, bc: TensorLike, index: Index=_S) -> TensorLike:

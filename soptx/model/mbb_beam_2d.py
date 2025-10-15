@@ -24,19 +24,21 @@ class HalfMBBBeam2dData(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20],
                 mesh_type: str = 'uniform_quad',
-                T: float = -1.0, # 负值代表方向向下
-                E: float = 1.0, nu: float = 0.3,
+                p: float = -1.0, # N
+                E: float = 1.0,  # Pa (N/m^2)
+                nu: float = 0.3,
+                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
         
-        self._T = T
+        self._p = p
         self._E, self._nu = E, nu
+        self._plane_type = plane_type   
+
         self._eps = 1e-12
-        
-        self._plane_type = 'plane_stress'
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
@@ -56,9 +58,9 @@ class HalfMBBBeam2dData(PDEBase):
         return self._nu
     
     @property
-    def T(self) -> float:
-        """获取集中力"""
-        return self._T
+    def p(self) -> float:
+        """获取点力"""
+        return self._p
     
     #######################################################################################################################
     # 变体方法

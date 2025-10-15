@@ -1,10 +1,8 @@
 from typing import Optional
 
 from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike, CoefLike, Threshold
+from fealpy.typing import TensorLike, Threshold
 from fealpy.functionspace import FunctionSpace as _FS
-from fealpy.utils import process_coef_func
-from fealpy.functional import bilinear_integral
 from fealpy.decorator import variantmethod
 from fealpy.fem.integrator import LinearInt, OpInt, FaceInt, enable_cache
 
@@ -151,17 +149,17 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             # 对于边界边, 跳量是迹, 基函数贡献应为 +φ, 直接取绝对值, 可以将 [-φ, 0] 变为 [+φ, 0], 而 [0, +φ] 保持不变
             val[boundary_indices_in_val] = bm.abs(val[boundary_indices_in_val])
 
-        return hF, ws, fm, val
+        return ws, val, hF, fm
 
     @variantmethod('vector_jump')
     def assembly(self, space: _FS) -> TensorLike:
-        hF, ws, fm, phi_jump = self.fetch_vector_jump(space)
+        ws, vector_jump, hF, fm = self.fetch_vector_jump(space)
         # hF: (NF, )
         # ws: (NQ, )
         # fm: (NF, )
-        # phi_jump: (NF, NQ, 2*LDOF, GD)
+        # vector_jump: (NF, NQ, 2*LDOF, GD)
 
-        integrand = bm.einsum('q, f, fqid, fqjd -> fij', ws, fm, phi_jump, phi_jump)
+        integrand = bm.einsum('q, f, fqid, fqjd -> fij', ws, fm, vector_jump, vector_jump)
         KE = - bm.einsum('f, fij -> fij', 1 / hF, integrand)
 
         return KE
@@ -193,9 +191,9 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
         ldof = space.number_of_local_dofs()
 
-        # 分别存储两侧的基函数值（不带符号）
-        w_plus  = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  # w^+
-        w_minus = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  # w^-
+        # 内部面 F 上, 基函数 w^+ 来自 L 侧单元, w^- 来自 R 侧单元
+        w_plus  = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  
+        w_minus = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  
         
         for i in range(TD+1):
             fidx = cell2face[:, i]
@@ -214,7 +212,6 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             if R.size > 0:
                 w_minus[fidx[R]] = phi[R]   # w^-
         
-        # 只取需要的面
         w_plus  = w_plus[index]   # (NF[index], NQ, ldof, GD)
         w_minus = w_minus[index]  # (NF[index], NQ, ldof, GD)
         
@@ -228,13 +225,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             w_m = w_minus[internal_idx]
             nu = fn[internal_idx]
             
-            # R侧
-            M_R = 0.5 * (bm.einsum('fqdi,fj->fqdij', w_m, -nu) + bm.einsum('fi,fqdj->fqdij', -nu, w_m))
+            # R 侧
+            M_R = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_m, -nu) + bm.einsum('fi, fqdj -> fqdij', -nu, w_m))
             matrix_jump[internal_idx, :, :ldof, :, :] = M_R
             
-            # L侧
-            M_L = 0.5 * (bm.einsum('fqdi,fj->fqdij', w_p, nu) + 
-                        bm.einsum('fi,fqdj->fqdij', nu, w_p))
+            # L 侧
+            M_L = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_p, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w_p))
             matrix_jump[internal_idx, :, ldof:, :, :] = M_L
         
         # ============ 边界面 ============
@@ -249,8 +245,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             w = bm.where(is_left[:, None, None, None], w_p, w_m)
             
             # 计算矩阵跳量
-            M = 0.5 * (bm.einsum('fqdi,fj->fqdij', w, nu) + 
-                    bm.einsum('fi,fqdj->fqdij', nu, w))
+            M = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w))
             
             # 分别存储 L 侧和 R 侧
             left_idx = boundary_idx[is_left]
@@ -265,13 +260,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
     @assembly.register('matrix_jump')
     def assembly(self, space: _FS) -> TensorLike:
-        hF, ws, fm, phi_jump = self.fetch_matrix_jump(space)
+        ws, matrix_jump, hF, fm = self.fetch_matrix_jump(space)
         # hF: (NF, )
         # ws: (NQ, )
         # fm: (NF, )
-        # phi_jump: (NF, NQ, 2*LDOF, GD, GD)
-
-        integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, phi_jump, phi_jump)
+        # matrix_jump: (NF, NQ, 2*LDOF, GD, GD)
+        integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
         KE = - bm.einsum('f, fij -> fij', hF, integrand)
 
         return KE
