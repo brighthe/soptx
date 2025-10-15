@@ -604,7 +604,8 @@ class TriSolMixHuZhangData(PDEBase):
     def __init__(self, 
                 domain: List[float] = [0, 1, 0, 1],
                 mesh_type: str = 'uniform_aligned_tri', 
-                lam: float = 1.0, mu: float = 0.5,                
+                lam: float = 1.0, mu: float = 0.5,
+                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'                     
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None) -> None:
         super().__init__(domain=domain, mesh_type=mesh_type, 
@@ -612,7 +613,7 @@ class TriSolMixHuZhangData(PDEBase):
         self._lam, self._mu = lam, mu
         self._eps = 1e-12
 
-        self._plane_type = 'plane_strain'
+        self._plane_type = plane_type
         self._load_type = 'distributed'   
         self._boundary_type = 'mixed'     
 
@@ -703,7 +704,7 @@ class TriSolMixHuZhangData(PDEBase):
         return bm.stack([u1, u2], axis=-1)
 
     @cartesian
-    def disp_solution_gradient(self, points: TensorLike) -> TensorLike:
+    def grad_disp_solution(self, points: TensorLike) -> TensorLike:
         """解析解梯度 ∇u"""
         x, y = points[..., 0], points[..., 1]
         pi = bm.pi

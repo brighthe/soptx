@@ -36,6 +36,22 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     plane_type=pde.plane_type,
                                     enable_logging=False
                                 )
+            
+        elif model == 'tri_sol_mix_huzhang':
+            lam = 1.0
+            mu = 0.5
+            from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
+            pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
         
         elif model == 'BoxTrDirichleti2d':
             from soptx.model.linear_elasticity_2d import BoxTriLagrange2dData
@@ -85,31 +101,14 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        elif model == 'tri_sol_mix_huzhang':
-            lam = 1.0
-            mu = 0.5
-            from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
-            pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
-            pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 2, 2
-            displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
-
-            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-            material = IsotropicLinearElasticMaterial(
-                                                lame_lambda=pde.lam, 
-                                                shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
-                                                enable_logging=False
-                                            )
             
-            
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                          f"空间次数={space_degree}, 积分阶数={integration_order}")
+                    f"空间次数={space_degree}, 积分阶数={integration_order}")
 
-        maxit = 4
+        maxit = 5
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 0}$', 
                      '$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 1}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
@@ -289,7 +288,7 @@ if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
     test.run.set('test_exact_solution_lfem')
-    test.run(model='tri_sol_dir_huzhang')
+    test.run(model='tri_sol_mix_huzhang')
 
 
     # test.run.set('test_none_exact_solution_lfem')

@@ -42,6 +42,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         elif model == 'tri_sol_mix_huzhang':
+            # 面力外载荷 + 混合边界条件
             from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
             lam, mu = 1.0, 0.5
             pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
@@ -49,7 +50,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             nx, ny = 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -513,7 +514,7 @@ if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
     huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    huzhang_analyzer.run(model='tri_sol_dir_huzhang')
+    huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='tri_sol_dir_huzhang')

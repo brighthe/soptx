@@ -360,17 +360,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 F[gdof_sigmah:] += F_uh
                 self._F = F
 
-                # isBdDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-                # neumann_loads_func = self._pde.get_neumann_loads()
-                # F_uh = space_uh.interpolate(neumann_loads_func)
-
             elif load_type == 'distributed':
                 # 分布载荷 (面力) - 强形式施加
                 p = space_sigmah.p
-
-                # gd_sigmah = self._pde.neumann_bc
-                # threshold_sigmah = self._pde.is_neumann_boundary()
-
                 if p == 1:
                     #TODO 检查正确性
                     integrator_sigmah = BoundaryFaceSourceIntegrator_mfem(source=gd_sigmah, 
@@ -390,7 +382,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                     isBdEDof_sigmah = space_sigmah.is_boundary_edge_dof(threshold=threshold_sigmah, method='barycenter')
 
                     # ? 边界上的精确解 gd_sigmah_val 如何计算 ?
-                    ipoints = self._mesh.interpolation_points(p=p)
+                    ipoints = space_sigmah.interpolation_points()
                     gd_sigmah_val = gd_sigmah(ipoints)
 
                     sigmah_bde = bm.zeros(gdof_sigmah, dtype=bm.float64, device=space_sigmah.device)
