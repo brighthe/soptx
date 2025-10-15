@@ -33,10 +33,10 @@ class HalfMBBBeam2dData(PDEBase):
             ) -> None:
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
-        
+
         self._p = p
         self._E, self._nu = E, nu
-        self._plane_type = plane_type   
+        self._plane_type = plane_type
 
         self._eps = 1e-12
         self._load_type = 'concentrated'
