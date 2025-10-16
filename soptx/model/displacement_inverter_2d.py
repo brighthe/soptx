@@ -7,7 +7,7 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
-class DispInverter2d(PDEBase):
+class DisplacementInverter2d(PDEBase):
     '''
     位移反向器柔顺机械的 PDE 模型定义
 
@@ -31,6 +31,7 @@ class DispInverter2d(PDEBase):
                 domain: List[float] = [0, 40, 0, 20],
                 mesh_type: str = 'uniform_quad',
                 f_in: float = 1.0,   # N, 输入力 (集中载荷)
+                f_out: float = -1.0, # N, 伴随力 (集中载荷)
                 k_in: float = 1.0,   # N/m, 输入弹簧刚度
                 k_out: float = 1.0,  # N/m, 输出弹簧刚度
                 E: float = 1.0,      # Pa (N/m^2)
@@ -43,14 +44,12 @@ class DispInverter2d(PDEBase):
                          enable_logging=enable_logging, logger_name=logger_name)
 
         self._f_in = f_in
+        self._f_out = f_out
         self._k_in = k_in
         self._k_out = k_out
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-        # 定义输入和输出点的坐标
-        self._input_coord = (domain[0], domain[3])  # 左上角
-        self._output_coord = (domain[1], domain[3]) # 右上角
 
         self._eps = 1e-12
         self._load_type = 'concentrated'
@@ -77,6 +76,11 @@ class DispInverter2d(PDEBase):
         return self._f_in
 
     @property
+    def f_out(self) -> float:
+        """获取伴随力"""
+        return self._f_out
+
+    @property
     def k_in(self) -> float:
         """获取输入弹簧刚度"""
         return self._k_in
@@ -86,15 +90,6 @@ class DispInverter2d(PDEBase):
         """获取输出弹簧刚度"""
         return self._k_out
         
-    @property
-    def input_coord(self) -> Tuple[float, float]:
-        """获取输入点坐标"""
-        return self._input_coord
-        
-    @property
-    def output_coord(self) -> Tuple[float, float]:
-        """获取输出点坐标"""
-        return self._output_coord
 
     #######################################################################################################################
     # 变体方法
@@ -230,9 +225,54 @@ class DispInverter2d(PDEBase):
     def is_neumann_boundary(self) -> Callable:
         
         return self.is_neumann_boundary_dof
+    
+    @cartesian
+    def adjoint_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        # 力作用在 x 方向
+        val = bm.set_at(val, (..., 0), self._f_out) 
+        
+        return val
+    
+    @cartesian
+    def is_adjoint_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        on_top_boundary = (bm.abs(y - domain[3]) < self._eps)
+        on_right_boundary = (bm.abs(x - domain[1]) < self._eps)
+
+        return on_top_boundary & on_right_boundary
+    
+    def is_adjoint_boundary(self) -> Callable:
+        
+        return self.is_adjoint_boundary_dof 
+    
+    @cartesian
+    def is_dout_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        """输出点的边界自由度的 x 分量"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        # 输出点在右上角
+        coord = (bm.abs(x - domain[1]) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
+
+        return coord
+
+    @cartesian
+    def is_dout_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        """对于任何输入点都返回 False, 用于明确指定某个方向上没有边界条件"""
+        # points.shape[:-1] 获取输入点的数量, 创建一个形状匹配的全 False 布尔数组
+        return bm.zeros(points.shape[:-1], dtype=bm.bool, device=bm.get_device(points))
+    
+    @cartesian
+    def is_dout_boundary(self) -> Callable:
+
+        return (self.is_dout_boundary_dof_x, self.is_dout_boundary_dof_y)
 
     @cartesian
     def is_spring_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        """"""
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -243,15 +283,7 @@ class DispInverter2d(PDEBase):
     
     @cartesian
     def is_spring_boundary_dof_y(self, points: TensorLike) -> TensorLike:
-        # x, y = points[..., 0], points[..., 1]
-
-        # coord_kin = (bm.abs(x - 1e9) < self._eps) & (bm.abs(y - 1e9) < self._eps)
-        # coord_kout = (bm.abs(x - 1e9) < self._eps) & (bm.abs(y - 1e9) < self._eps)
-
-        # return coord_kin | coord_kout
-        """
-        对于任何输入点都返回 False, 用于明确指定某个方向上没有边界条件
-        """
+        """对于任何输入点都返回 False, 用于明确指定某个方向上没有边界条件"""
         # points.shape[:-1] 获取输入点的数量, 创建一个形状匹配的全 False 布尔数组
         return bm.zeros(points.shape[:-1], dtype=bm.bool, device=bm.get_device(points))
     

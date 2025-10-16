@@ -5,17 +5,10 @@ from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
 
 from soptx.utils.base_logged import BaseLogged
-from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
-
-from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-
-from soptx.optimization.compliance_objective import ComplianceObjective
-
-from fealpy.mesh import TriangleMesh
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
+from soptx.optimization.compliant_mechanism_objective import CompliantMechanismObjective
 
 
-class ComplianceObjectiveTester(BaseLogged):
+class CompliantMechanismObjectiveTester(BaseLogged):
     def __init__(self,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
@@ -23,42 +16,13 @@ class ComplianceObjectiveTester(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-        self.compliance_objective = None
+        self.compliant_mechanism_objective = None
 
-    @variantmethod('test_compliance_none_exact_solution_lfem_hzmfem')
+    @variantmethod('test_compliant_mechanism_none_exact_solution_lfem_hzmfem')
     def run(self, model: str) -> None:
         """对于无真解的算例, 分别采用位移法和混合元方法的结果计算目标函数"""
-        if model == 'half_clamped_beam_2d':
-            # 集中载荷的算例            
-            E = 30.0
-            nu = 0.4  # 可压缩
-            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
-            from soptx.model.clamped_beam_2d import HalfClampedBeam2D
-            pde = HalfClampedBeam2D(
-                    domain=[0, 80, 0, 20],
-                    p=-1.5,
-                    E=E, nu=nu,
-                    plane_type=plane_type,
-                )
-            nx, ny = 80, 20
-            pde.init_mesh.set('uniform_aligned_tri')
 
-        elif model == 'bearing_device_2d':
-            # 分布载荷的算例
-            E = 100.0
-            nu = 0.4 # 可压缩
-            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
-            from soptx.model.bearing_device_2d import HalfBearingDevice2D
-            pde = HalfBearingDevice2D(
-                                domain=[0, 0.6, 0, 0.4],
-                                t=-1.8,
-                                E=E, nu=nu,
-                                plane_type=plane_type,
-                            )
-            nx, ny = 60, 40
-            pde.init_mesh.set('uniform_aligned_tri')
-        
-        elif model == 'disp_inverter_2d':
+        if model == 'disp_inverter_2d':
             E = 1.0
             nu = 0.3  
             plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
@@ -75,8 +39,6 @@ class ComplianceObjectiveTester(BaseLogged):
                     )
             nx, ny = 4, 2
             pde.init_mesh.set('uniform_quad')
-            
-
         
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
@@ -114,11 +76,11 @@ class ComplianceObjectiveTester(BaseLogged):
                     f"离散方法={lagrange_fem_analyzer.__class__.__name__}, "
                     f"空间={space.__class__.__name__}, 次数={space.p}, 总自由度={TGDOF_uh}")
         
-        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
+        # uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
 
         state_variable = 'u'
-        co_lfem = ComplianceObjective(analyzer=lagrange_fem_analyzer, state_variable=state_variable)
-        c_lfem = co_lfem.fun(density=None)
+        cmo_lfem = CompliantMechanismObjective(analyzer=lagrange_fem_analyzer)
+        c_lfem = cmo_lfem.fun(density=None)
 
         from pathlib import Path
         current_file = Path(__file__)
@@ -293,10 +255,10 @@ class ComplianceObjectiveTester(BaseLogged):
 
 if __name__ == '__main__':
 
-    compliance_objective = ComplianceObjectiveTester(enable_logging=True)
+    compliant_mechanism_objective = CompliantMechanismObjectiveTester(enable_logging=True)
 
-    compliance_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
-    compliance_objective.run(model='disp_inverter_2d')
+    compliant_mechanism_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
+    compliant_mechanism_objective.run(model='disp_inverter_2d')
 
-    # compliance_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
-    # compliance_objective.run(model='tri_sol_dir_huzhang')
+    # compliant_mechanism_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
+    # compliant_mechanism_objective.run(model='tri_sol_dir_huzhang')

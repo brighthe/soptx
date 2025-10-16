@@ -78,6 +78,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._mesh
     
     @property
+    def pde(self) -> PDEBase:
+        """获取当前的 PDE 对象"""
+        return self._pde
+    
+    @property
     def scalar_space(self) -> LagrangeFESpace:
         """获取当前的标量函数空间"""
         return self._scalar_space
@@ -222,7 +227,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         return F
 
-    def apply_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
+    def apply_bc(self, 
+                K: Union[CSRTensor, COOTensor], 
+                F: CSRTensor,
+                adjoint: str = False
+            ) -> tuple[CSRTensor, CSRTensor]:
         """应用边界条件"""        
         boundary_type = self._pde.boundary_type
         load_type = self._pde.load_type
@@ -260,21 +269,46 @@ class LagrangeFEMAnalyzer(BaseLogged):
             else:
                 raise NotImplementedError(f"不支持的载荷类型: {load_type}")
             
-            F += F_sigmah
+            if adjoint:
+                gd_adjoint = self._pde.adjoint_bc
+                threshold_adjoint = self._pde.is_adjoint_boundary()
+
+                isBdTDof = space_uh.is_boundary_dof(threshold=threshold_adjoint, method='interp')
+                isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_adjoint, method='interp')
+                ipoints_uh = space_uh.interpolation_points()
+                gd_adjoint_val = gd_adjoint(ipoints_uh[isBdSDof])
+
+                F_adjoint = space_uh.function()
+                if space_uh.dof_priority:
+                    F_adjoint[:] = bm.set_at(F_adjoint[:], isBdTDof, gd_adjoint_val.T.reshape(-1))
+                else:
+                    F_adjoint[:] = bm.set_at(F_adjoint[:], isBdTDof, gd_adjoint_val.reshape(-1))
+
+                F += bm.stack([F_sigmah, F_adjoint], axis=1)
+            else:
+                F += F_sigmah
+
             self._F = F
 
             # 2. Dirichlet 边界条件处理 - 强形式施加
             gd_uh = self._pde.dirichlet_bc
             threshold_uh = self._pde.is_dirichlet_boundary()
 
-            uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self._tensor_space.device)
-            uh_bd, isBdDof = self._tensor_space.boundary_interpolate(
-                                                                    gd=gd_uh,
-                                                                    threshold=threshold_uh,
-                                                                    method='interp'
-                                                                )
-            F = F - K.matmul(uh_bd[:])
-            F[isBdDof] = uh_bd[isBdDof]
+            uh_bd = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
+            uh_bd, isBdDof = space_uh.boundary_interpolate(
+                                                        gd=gd_uh,
+                                                        threshold=threshold_uh,
+                                                        method='interp'
+                                                    )
+            
+            if adjoint:
+                uh_bd = bm.repeat(uh_bd.reshape(-1, 1), 2, axis=1)
+                F = F - K.matmul(uh_bd[:])
+                F[isBdDof, :] = uh_bd[isBdDof, :]
+
+            else: 
+                F = F - K.matmul(uh_bd[:])
+                F[isBdDof] = uh_bd[isBdDof]
 
             K = self._apply_matrix(A=K, isDDof=isBdDof)
 
@@ -559,9 +593,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     @variantmethod('mumps')
     def solve_displacement(self, 
-            rho_val: Optional[Union[TensorLike, Function]] = None, 
-            **kwargs
-            ) -> Function:
+                        rho_val: Optional[Union[TensorLike, Function]] = None,
+                        adjoint: bool = False, 
+                        **kwargs
+                    ) -> Function:
         
         from fealpy.solver import spsolve
 
@@ -573,14 +608,27 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if rho_val is None:
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
-    
-        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-        F0 = self.assemble_body_force_vector()
-        K, F = self.apply_bc(K0, F0)
+
+        if adjoint:
+            K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
+            K_spring = self.assemble_spring_stiff_matrix()
+            K0 = K_struct + K_spring
+            F0_struct = self.assemble_body_force_vector()
+            F0_spring = bm.zeros_like(F0_struct)
+            F0 = bm.stack([F0_struct, F0_spring], axis=1)
+
+            K, F = self.apply_bc(K0, F0, adjoint)
+        
+        else:
+            K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+            F0 = self.assemble_body_force_vector()
+            K, F = self.apply_bc(K0, F0)
 
         solver_type = kwargs.get('solver', 'mumps')
-        uh = self._tensor_space.function()
-        uh[:] = spsolve(K, F[:], solver=solver_type)
+        uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
+        # uh[:] = spsolve(K, F, solver=solver_type)
+        for i in range(F.shape[1]): # 循环两次
+            uh[:, i] = spsolve(K, F[:, i], solver=solver_type)
 
         gdof = self._tensor_space.number_of_global_dofs()
         self._log_info(f"Solving linear system with {gdof} displacement DOFs with MUMPS solver.")
@@ -589,31 +637,44 @@ class LagrangeFEMAnalyzer(BaseLogged):
     
     @solve_displacement.register('cg')
     def solve_displacement(self, 
-            density_distribution: Optional[Function] = None, 
-            **kwargs
-            ) -> Function:
+                        rho_val: Optional[Union[TensorLike, Function]] = None,
+                        adjoint: bool = False, 
+                        **kwargs
+                    ) -> Function:
+        
         from fealpy.solver import cg
 
         if self._topopt_algorithm is None:
-            if density_distribution is not None:
+            if rho_val is not None:
                 self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
         
         elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if density_distribution is None:
+            if rho_val is None:
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
-                raise ValueError(error_msg)
-            
-        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
-        F0 = self.assemble_body_force_vector()
-        K, F = self.apply_bc(K0, F0)
+
+        if adjoint:
+            K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
+            K_spring = self.assemble_spring_stiff_matrix()
+            K0 = K_struct + K_spring
+            F0_struct = self.assemble_body_force_vector()
+            F0_spring = bm.zeros_like(F0_struct)
+            F0 = bm.stack([F0_struct, F0_spring], axis=1)
+
+            K, F = self.apply_bc(K0, F0, adjoint)
+        
+        else:
+            K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+            F0 = self.assemble_body_force_vector()
+            K, F = self.apply_bc(K0, F0)
 
         maxiter = kwargs.get('maxiter', 5000)
         atol = kwargs.get('atol', 1e-12)
         rtol = kwargs.get('rtol', 1e-12)
         x0 = kwargs.get('x0', None)
-        uh = self._tensor_space.function()
-        uh[:], info = cg(K, F[:], x0=x0,
+        # uh = self._tensor_space.function()
+        uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
+        uh[:], info = cg(K, F, x0=x0,
                         batch_first=True, 
                         atol=atol, rtol=rtol, 
                         maxit=maxiter, returninfo=True)

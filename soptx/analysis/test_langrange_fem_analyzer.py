@@ -193,10 +193,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             nu = 0.3  # 可压缩
             plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
 
-            from soptx.model.compliance_mechanism_design_2d import DispInverter2d
-            pde = DispInverter2d(
+            from soptx.model.displacement_inverter_2d import DisplacementInverter2d
+            pde = DisplacementInverter2d(
                         domain=[0, 40, 0, 20],
                         f_in=1.0,
+                        f_out=-1.0,
                         k_in=1.0,
                         k_out=1.0,
                         E=E, nu=nu,
@@ -237,13 +238,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         t_space = lagrange_fem_analyzer.tensor_space
         TGDOF = t_space.number_of_global_dofs()
 
-        K_spring = lagrange_fem_analyzer.assemble_spring_stiff_matrix()
-
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
                        f"网格={displacement_mesh.__class__.__name__}, 节点数={NN}, "
                        f"空间={t_space.__class__.__name__}, 次数={t_space.p}, 标量自由度={SGDOF}, 总自由度={TGDOF}")
 
-        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None) # (GDOF, )
+        uh = lagrange_fem_analyzer.solve_displacement(rho_val=None, adjoint=True) # (GDOF, )
 
         # 计算应变和应力
         q = lagrange_fem_analyzer._integration_order
