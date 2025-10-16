@@ -19,7 +19,7 @@ class DispInverter2d(PDEBase):
     - σ 是应力张量
     - ε = (∇u + ∇u^T)/2 是应变张量
     - u_D 在底边为 0
-    - t 是在输入点施加的集中力 f_in
+    - t 是在输入点施加的集中力 f_in (发现向右)
     
     材料参数:
         E = 1, nu = 0.3
@@ -28,7 +28,7 @@ class DispInverter2d(PDEBase):
         σ = 2με + λtr(ε)I
     '''
     def __init__(self,
-                domain: List[float] = [0, 100, 0, 50],
+                domain: List[float] = [0, 40, 0, 20],
                 mesh_type: str = 'uniform_quad',
                 f_in: float = 1.0,   # N, 输入力 (集中载荷)
                 k_in: float = 1.0,   # N/m, 输入弹簧刚度
@@ -173,32 +173,6 @@ class DispInverter2d(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
-    def get_neumann_loads(self) -> Callable:
-        """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
-        if self._load_type == 'concentrated':
-            
-            @cartesian
-            def concentrated_force(points: TensorLike) -> TensorLike:
-                x, y = points[..., 0], points[..., 1]  
-
-                # 在输入点施加水平向右的力
-                coord = (
-                    (bm.abs(x - self._input_coord[0]) < self._eps) & 
-                    (bm.abs(y - self._input_coord[1]) < self._eps)
-                )
-                kwargs = bm.context(points)
-                val = bm.zeros(points.shape, **kwargs)
-
-                # 力作用在 x 方向
-                val = bm.set_at(val, (coord, 0), self._f_in)
-        
-                return val
-            
-            return concentrated_force
-        
-        else:
-            raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
-    
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
@@ -213,8 +187,8 @@ class DispInverter2d(PDEBase):
         """
         domain = self._domain
         y = points[..., 1]
-        # 固定底边
         coord = bm.abs(y - domain[2]) < self._eps
+
         return coord
     
     @cartesian
@@ -225,11 +199,62 @@ class DispInverter2d(PDEBase):
         """
         domain = self._domain
         y = points[..., 1]
-        # 固定底边
         coord = bm.abs(y - domain[2]) < self._eps
+
         return coord
     
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
           
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
+    
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        # 力作用在 x 方向
+        val = bm.set_at(val, (..., 0), self._f_in) 
+        
+        return val
+    
+    @cartesian
+    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        on_top_boundary = (bm.abs(y - domain[3]) < self._eps)
+        on_left_boundary = (bm.abs(x - domain[0]) < self._eps)
+
+        return on_top_boundary & on_left_boundary
+
+    def is_neumann_boundary(self) -> Callable:
+        
+        return self.is_neumann_boundary_dof
+
+    @cartesian
+    def is_spring_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        coord_kin = (bm.abs(x - domain[0]) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
+        coord_kout = (bm.abs(x - domain[1]) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
+
+        return coord_kin | coord_kout
+    
+    @cartesian
+    def is_spring_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        # x, y = points[..., 0], points[..., 1]
+
+        # coord_kin = (bm.abs(x - 1e9) < self._eps) & (bm.abs(y - 1e9) < self._eps)
+        # coord_kout = (bm.abs(x - 1e9) < self._eps) & (bm.abs(y - 1e9) < self._eps)
+
+        # return coord_kin | coord_kout
+        """
+        对于任何输入点都返回 False, 用于明确指定某个方向上没有边界条件
+        """
+        # points.shape[:-1] 获取输入点的数量, 创建一个形状匹配的全 False 布尔数组
+        return bm.zeros(points.shape[:-1], dtype=bm.bool, device=bm.get_device(points))
+    
+    def is_spring_boundary(self) -> Callable:
+
+        return (self.is_spring_boundary_dof_x, self.is_spring_boundary_dof_y)

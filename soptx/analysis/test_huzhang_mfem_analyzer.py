@@ -50,7 +50,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             nx, ny = 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -186,9 +186,18 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         e_uh_l2 = displacement_mesh.error(u=uh, 
                                         v=pde.disp_solution,
                                         q=integration_order) # 位移 L2 范数误差
+        
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.gca()
+        # displacement_mesh.add_plot(axes)
+        # displacement_mesh.find_node(axes, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
+        # displacement_mesh.find_edge(axes, showindex=True, color='r', markersize=14, fontsize=18, fontcolor='r')
+        # displacement_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
+        # plt.show()
 
         ## 位移应力混合 HuZhang 有限元
-        huzhang_space_degree = 1
+        huzhang_space_degree = 2
         integration_order = huzhang_space_degree + 4
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
@@ -202,6 +211,10 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                     interpolation_scheme=None,
                                 )
         space_sigmah = huzhang_mfem_analyzer.huzhang_space
+
+        isBdDof = space_sigmah.is_boundary_dof(threshold=None, method='barycenter')
+
+
         space_uh = huzhang_mfem_analyzer.tensor_space
         TGDOF_uh = space_uh.number_of_global_dofs()
         TLDOF_uh = space_uh.number_of_local_dofs()
@@ -360,7 +373,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                 plane_type=plane_type,
                             )
             pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 60, 40
+            nx, ny = 6, 4
 
         elif model == 'clamped_beam_2d':
             E = 30.0
@@ -434,6 +447,9 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                 )
         space_sigmah = huzhang_mfem_analyzer.huzhang_space
         space_uh = huzhang_mfem_analyzer.tensor_space
+
+        isBdDof = space_sigmah.is_boundary_dof(threshold=pde.is_neumann_boundary(), method='barycenter')
+
 
         TGDOF_uh = space_uh.number_of_global_dofs()
         TLDOF_uh = space_uh.number_of_local_dofs()
@@ -513,21 +529,17 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    huzhang_analyzer.run(model='tri_sol_mix_huzhang')
+    # huzhang_analyzer.run.set('test_exact_solution_hzmfem')
+    # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
-    # huzhang_analyzer.run(model='tri_sol_dir_huzhang')
+    # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
     # huzhang_analyzer.run.set('test_none_exact_solution_mfem')
     # huzhang_analyzer.run(model='clamped_beam_2d')
 
-    # huzhang_analyzer.run(model_type='bearing_device_2d')
-
-
-
-    # huzhang_analyzer.run.set('test_none_exact_solution_lfem_hzmfem')
-    # huzhang_analyzer.run(model='clamped_beam_2d')
+    huzhang_analyzer.run.set('test_none_exact_solution_lfem_hzmfem')
+    huzhang_analyzer.run(model='bearing_device_2d')
 
     # huzhang_analyzer.run.set('test_jump_penalty_integrator')
     # huzhang_analyzer.run()

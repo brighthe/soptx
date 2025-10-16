@@ -198,13 +198,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if p >= GD + 1:
             bform = BlockForm([[bform1,   bform2],
                                [bform2.T, None]])
-            # bform = BlockForm([[bform1,   bform2.T],
-            #                    [bform2, None]])
 
         elif p <= GD:
             bform3 = BilinearForm(space_u)
-            # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, method='vector_jump')
-            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, method='matrix_jump')
+            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, method='vector_jump')
+            # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, method='matrix_jump')
             bform3.add_integrator(jpi_integrator)
 
             bform = BlockForm([[bform1,   bform2],

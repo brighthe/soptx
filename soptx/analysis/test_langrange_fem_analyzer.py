@@ -101,7 +101,6 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-            
         space_degree = 2
         integration_order = space_degree + 4
 
@@ -189,6 +188,23 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 80, 20
 
+        elif model == 'disp_inverter_2d':
+            E = 1.0
+            nu = 0.3  # 可压缩
+            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
+
+            from soptx.model.compliance_mechanism_design_2d import DispInverter2d
+            pde = DispInverter2d(
+                        domain=[0, 40, 0, 20],
+                        f_in=1.0,
+                        k_in=1.0,
+                        k_out=1.0,
+                        E=E, nu=nu,
+                        plane_type=plane_type,
+                    )
+            pde.init_mesh.set('uniform_quad')
+            nx, ny = 4, 2
+
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
 
@@ -220,6 +236,8 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         SGDOF = s_space.number_of_global_dofs()
         t_space = lagrange_fem_analyzer.tensor_space
         TGDOF = t_space.number_of_global_dofs()
+
+        K_spring = lagrange_fem_analyzer.assemble_spring_stiff_matrix()
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
                        f"网格={displacement_mesh.__class__.__name__}, 节点数={NN}, "
@@ -287,9 +305,9 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    test.run.set('test_exact_solution_lfem')
-    test.run(model='tri_sol_mix_huzhang')
+    # test.run.set('test_exact_solution_lfem')
+    # test.run(model='tri_sol_mix_huzhang')
 
 
-    # test.run.set('test_none_exact_solution_lfem')
-    # test.run(model='clamped_beam_2d')
+    test.run.set('test_none_exact_solution_lfem')
+    test.run(model='disp_inverter_2d')

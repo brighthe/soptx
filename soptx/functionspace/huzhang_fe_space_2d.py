@@ -307,84 +307,92 @@ class HuZhangFEDof2d():
 
         return c2d
 
-    def is_boundary_dof(self, threshold: Optional[Threshold]=None, method='barycenter') -> TensorLike:
+    def is_boundary_dof(self, threshold=None, method=None):
         """
-        获取边界 DOFs 的布尔数组
-        
+        获取边界 DOFs 的布尔数组（节点边界 DOF + 边界边牵引迹矩 DOF）
+
         Parameters
         ----------
-        threshold : callable, optional
-            边界判断函数，接受点坐标返回布尔数组
-            如果为 None, 返回全 False
-        method : str, optional
-            判断边/单元是否在边界的方法：
-            - 'barycenter': 使用边中点/单元中心判断（默认）
-            - 'endpoint': 使用端点判断（边的任一端点在边界则边在边界）
-        
+        threshold :
+            - bm.bool 张量且长度为 gdof: 直接作为结果返回
+            - None: 返回所有边界 DOF
+            - callable(x) -> bool array: 在边界 DOF 中依据 method 进一步筛选
+        method : {'barycenter', 'endpoint', None}
+            - None/'barycenter': 通过边的重心判断是否在选定边界上
+            - 'endpoint': 通过端点判断（任一端点满足 threshold 即选中该边）
+
         Returns
         -------
-        isDDof : TensorLike
-            边界自由度的布尔数组，长度为全局自由度数
+        isBdDof : (gdof,) 的 bool 张量
         """
         mesh = self.mesh
         gdof = self.number_of_global_dofs()
-        
-        # 如果没有提供 threshold，返回全 False
+        device = bm.get_device(mesh)
+
+        # 1) 布尔掩码直通（与拉格朗日空间一致）
+        if bm.is_tensor(threshold):
+            idx = threshold
+            if (idx.dtype == bm.bool) and (len(idx) == gdof):
+                return idx
+            raise ValueError(f"Unknown threshold: {threshold}")
+
+        # 2) 规范化 method
+        if method is None:
+            method = 'barycenter'
+        if method not in ('barycenter', 'endpoint'):
+            raise ValueError(f"Unknown method: {method}. Use 'barycenter', 'endpoint', or None.")
+
+        # 3) 基础边界实体
+        bd_edge_idx = mesh.boundary_face_index()   # (n_bd_edges,)
+        edge = mesh.entity('edge')                 # (NE, 2)
+
+        # 4) 选择边界边子集
         if threshold is None:
-            return bm.zeros(gdof, dtype=bm.bool, device=self.device)
-        
-        # threshold 必须是函数
-        if not callable(threshold):
-            raise NotImplementedError("threshold must be a callable function")
-        
-        # 初始化边界自由度数组
-        isDDof = bm.zeros(gdof, dtype=bm.bool, device=self.device)
-        
-        # 获取自由度映射
-        node2idof = self.node_to_internal_dof()
-        edge2idof = self.edge_to_internal_dof()
-        cell2idof = self.cell_to_internal_dof()
-        
-        # 1. 处理节点自由度
-        nodes = mesh.entity('node')
-        is_bd_node = threshold(nodes)
-        
-        bd_node_indices = bm.where(is_bd_node)[0]
-        # for node_idx in bd_node_indices:
-        #     isDDof[node2idof[node_idx]] = True
-        idx_node = node2idof[bd_node_indices].reshape(-1)
-        isDDof = bm.set_at(isDDof, idx_node, True)
-        
-        # 2. 处理边自由度
-        if method == 'barycenter':
-            # 使用边的重心 (中点) 判断
-            edge_centers = mesh.entity_barycenter('edge')
-            is_bd_edge = threshold(edge_centers)
-        elif method == 'endpoint':
-            # 使用边的端点判断：任一端点在边界则边在边界
-            edge = mesh.entity('edge')
-            is_bd_edge = is_bd_node[edge[:, 0]] | is_bd_node[edge[:, 1]]
+            sel_edge_idx = bd_edge_idx
         else:
-            raise ValueError(f"Unknown method: {method}, must be 'barycenter' or 'endpoint'")
-        
-        bd_edge_indices = bm.where(is_bd_edge)[0]
-        # for edge_idx in bd_edge_indices:
-        #     isDDof[edge2idof[edge_idx]] = True
-        idx_edge = edge2idof[bd_edge_indices].reshape(-1)
-        isDDof = bm.set_at(isDDof, idx_edge, True)
+            if not callable(threshold):
+                raise ValueError("threshold must be callable, a bool mask of length gdof, or None")
 
-        # 3. 处理单元自由度
-        if method == 'barycenter':
-            cell_centers = mesh.entity_barycenter('cell')
-            is_bd_cell = threshold(cell_centers)
-            
-            bd_cell_indices = bm.where(is_bd_cell)[0]
-            # for cell_idx in bd_cell_indices:
-            # isDDof[cell2idof[cell_idx]] = True
-            idx_cell = cell2idof[bd_cell_indices].reshape(-1)
-            isDDof = bm.set_at(isDDof, idx_cell, True)
+            if method == 'barycenter':
+                # 按边重心筛选
+                edge_bc_all = mesh.entity_barycenter('edge')  # (NE, GD)
+                edge_bc = edge_bc_all[bd_edge_idx]            # (n_bd_edges, GD)
+                flag = threshold(edge_bc)                     # (n_bd_edges,)
+                sel_edge_idx = bd_edge_idx[flag]
+            else:  # 'endpoint'
+                # 任一端点满足阈值则选中该边
+                nodes = mesh.entity('node')                   # (NN, GD)
+                node_flag = threshold(nodes)                  # (NN,)
+                e_bd = edge[bd_edge_idx]                      # (n_bd_edges, 2)
+                flag = node_flag[e_bd[:, 0]] | node_flag[e_bd[:, 1]]
+                sel_edge_idx = bd_edge_idx[flag]
 
-        return isDDof
+        # 5) 由选中边得到边界节点集合
+        sel_edges = edge[sel_edge_idx]                        # (n_sel_edges, 2)
+        if len(sel_edges) > 0:
+            sel_nodes = bm.unique(sel_edges.reshape(-1))
+        else:
+            sel_nodes = bm.array([], dtype=self.itype, device=device)
+
+        # 6) 索引映射：节点 DOF 与边 DOF
+        node2idof = self.node_to_internal_dof()               # (NN, n_node_ldof)
+        edge2idof = self.edge_to_internal_dof()               # (NE, 2*(p-1))
+
+        # 7) 组装边界 DOF 掩码
+        isBdDof = bm.zeros(gdof, dtype=bm.bool, device=device)
+
+        # 节点上的 DOF（p=1 时也存在）
+        if len(sel_nodes) > 0:
+            idx_node = node2idof[sel_nodes].reshape(-1)
+            isBdDof = bm.set_at(isBdDof, idx_node, True)
+
+        # 边界边上的牵引迹矩 DOF（p=1 时此项为空）
+        if len(sel_edge_idx) > 0:
+            idx_edge = edge2idof[sel_edge_idx].reshape(-1)
+            isBdDof = bm.set_at(isBdDof, idx_edge, True)
+
+        return isBdDof
+
 
     def is_boundary_edge_dof(self, threshold: Optional[Threshold]=None, method='barycenter'):
         """

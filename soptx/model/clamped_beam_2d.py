@@ -327,41 +327,6 @@ class HalfClampedBeam2D(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
-    # def get_neumann_loads(self):
-    #    """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
-    #    if self._load_type == 'concentrated':
-            
-    #         @cartesian
-    #         def concentrated_load(points: TensorLike) -> TensorLike:
-    #             """
-    #             定义点力
-    #             在右下角 (对称轴与底边的交点) 施加向下的集中载荷 p = -1.5 (N)
-    #             """
-    #             domain = self.domain
-
-    #             x, y = points[..., 0], points[..., 1]  
-
-    #             coord = (
-    #                 (bm.abs(x - domain[1]) < self._eps) & 
-    #                 (bm.abs(y - domain[2]) < self._eps)
-    #             )
-                
-    #             kwargs = bm.context(points)
-    #             val = bm.zeros(points.shape, **kwargs)
-
-    #             val = bm.set_at(val, (coord, 1), self._p)
-        
-    #             return val
-            
-    #         return concentrated_load
-       
-    #    elif self._load_type == 'distributed':
-           
-    #        pass
-       
-    #    else:
-    #             raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
-    
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
@@ -388,7 +353,7 @@ class HalfClampedBeam2D(PDEBase):
         """
         判断 y 方向的 Dirichlet 边界自由度
         左边界(x=0)完全固支 -> u_y = 0
-        右边界(x=80)为自然边界条件, 非Dirichlet
+        右边界(x=80)为自然边界条件, 非 Dirichlet
         """
         domain = self.domain
         x, y = points[..., 0], points[..., 1]

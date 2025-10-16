@@ -73,20 +73,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             pos  = cell2facesign[:, i]
             L = bm.nonzero(pos)[0]
             R = bm.nonzero(~pos)[0]
-            
-            if R.size>0:
-                face2dof[fidx[R], 0:ldof]    = cell2dof[R]
-            if L.size>0:
-                face2dof[fidx[L], ldof:2*ldof] = cell2dof[L]
 
-        # left  = face2dof[:, :ldof]
-        # right = face2dof[:, ldof:]
-        # # 用对侧 DOF 填补缺失侧（对应的矩阵块列/行乘以 jump 中的 0，不改变数值）
-        # left_missing  = (left  < 0) & (right >= 0)
-        # right_missing = (right < 0) & (left  >= 0)
-        # left  = bm.where(left_missing,  right, left)
-        # right = bm.where(right_missing, left,  right)
-        # face2dof = bm.concatenate([left, right], axis=1)
+            if R.size > 0:
+                face2dof[fidx[R], 0:ldof] = cell2dof[R]
+
+            if L.size > 0:
+                face2dof[fidx[L], ldof:2*ldof] = cell2dof[L]
 
         return face2dof[index]
     
@@ -119,15 +111,14 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         ldof = space.number_of_local_dofs()
 
         val_all = bm.zeros((NF, NQ, 2*ldof, GD), dtype=bm.float64) 
-        # 内部面构建 [ -φ_R, +φ_L ]; 边界面 [ -φ_R, 0 ] 或 [ 0, +φ_L ]
+        # 内部面构建 [ -φ_R, +φ_L ]
         for i in range(TD+1):
             # 每个单元的第 i 个局部面对应的全局面号
             fidx = cell2face[:, i]                          # (NC,)
             pos  = cell2facesign[:, i]                      # (NC,)  True/False
 
-            # 哪几个单元第 i 个局部面与全局面的取向一致
+            # 根据 cell2facesign 识别左侧单元(L, 对应 w^+)和右侧单元(R, 对应 w^-)
             L = bm.nonzero(pos)[0]                          
-            # 哪几个单元第 i 个局部面与全局面的取向相反
             R = bm.nonzero(~pos)[0]                         
 
             # 面上的积分点是定义在 "面参考域" 里，而基函数评估需要 "单元参考域" 的重心坐标
@@ -136,17 +127,17 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             phi_ref = space.basis(b)                           # (1, NQ, LDOF, GD)
             phi = bm.broadcast_to(phi_ref, (NC, NQ, ldof, GD)) # (NC, NQ, LDOF, GD)
 
-            # 前半部分自由度是 R 侧, 后半部分自由度是 L 侧
+            # [w] = w^+ - w^-，构建算子 [ -φ_R, +φ_L ]
             if R.size > 0:
                 val_all[fidx[R], :, 0:ldof, :]   =  - phi[R, :, :, :]
             if L.size > 0:
                 val_all[fidx[L], :, ldof:,  :]   =  + phi[L, :, :, :]
 
-        val = val_all[index] # (NF, NQ, 2*LDOF, GD)
+        val = val_all[index] # (NF[index], NQ, 2*LDOF, GD)
 
         boundary_indices_in_val = bm.nonzero(~is_internal_flag)[0]
+        # 对于边界面, 跳量是迹本身即 [w] = w, 边界面值为 [-φ, 0] 或 [0, +φ]
         if len(boundary_indices_in_val) > 0:
-            # 对于边界边, 跳量是迹, 基函数贡献应为 +φ, 直接取绝对值, 可以将 [-φ, 0] 变为 [+φ, 0], 而 [0, +φ] 保持不变
             val[boundary_indices_in_val] = bm.abs(val[boundary_indices_in_val])
 
         return ws, val, hF, fm
@@ -160,7 +151,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         # vector_jump: (NF, NQ, 2*LDOF, GD)
 
         integrand = bm.einsum('q, f, fqid, fqjd -> fij', ws, fm, vector_jump, vector_jump)
-        KE = - bm.einsum('f, fij -> fij', 1 / hF, integrand)
+        # KE = - bm.einsum('f, fij -> fij', 1 / hF, integrand)
+        KE = - bm.einsum('f, fij -> fij', hF, integrand)
 
         return KE
     
@@ -228,7 +220,6 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             # R 侧
             M_R = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_m, -nu) + bm.einsum('fi, fqdj -> fqdij', -nu, w_m))
             matrix_jump[internal_idx, :, :ldof, :, :] = M_R
-            
             # L 侧
             M_L = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_p, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w_p))
             matrix_jump[internal_idx, :, ldof:, :, :] = M_L

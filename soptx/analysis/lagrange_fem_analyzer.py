@@ -128,9 +128,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._tensor_space = space
 
     
-    ##################################################################################################
+    ##############################################################################################
     # 核心方法
-    ##################################################################################################
+    ##############################################################################################
 
     def assemble_stiff_matrix(self, 
                             rho_val: Optional[Union[Function, TensorLike]] = None,
@@ -188,6 +188,25 @@ class LagrangeFEMAnalyzer(BaseLogged):
         K = bform.assembly(format='csr')
 
         self._K = K
+
+        return K
+    
+    def assemble_spring_stiff_matrix(self):
+        """组装弹簧刚度矩阵"""
+        tspace = self._tensor_space
+        TGDOF = tspace.number_of_global_dofs()
+
+        k_in = self._pde.k_in
+        k_out = self._pde.k_out
+
+        isBdDof = tspace.is_boundary_dof(threshold=self._pde.is_spring_boundary(), method='interp')
+        spring_dofs = bm.where(isBdDof)[0]
+        indices = bm.stack([spring_dofs, spring_dofs], axis=0)
+        values = bm.tensor([k_in, k_out], dtype=bm.float64, device=tspace.device)
+        spshape = (TGDOF, TGDOF)
+
+        K_coo = COOTensor(indices=indices, values=values, spshape=spshape)
+        K = K_coo.tocsr()
 
         return K
 
@@ -292,18 +311,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ###############################################################################################
     # 外部方法
     ###############################################################################################
-
-    def get_scalar_space_from_mesh(self, mesh: HomogeneousMesh) -> LagrangeFESpace:
-        """根据网格获取标量函数空间"""
-        scalar_space = LagrangeFESpace(mesh, p=self._space_degree, ctype='C')
-
-        return scalar_space
-
-    def get_tensor_space_from_scalar_space(self, scalar_space: LagrangeFESpace) -> TensorFunctionSpace:
-        """根据标量函数空间获取张量函数空间"""
-        tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=(self._GD, -1))
-        
-        return tensor_space
 
     def get_stiffness_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部刚度矩阵关于物理密度的导数（灵敏度）"""
@@ -546,9 +553,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
             return diff_ke
 
 
-    ##########################################################################################################
+    ###############################################################################################
     # 变体方法
-    ##########################################################################################################
+    ###############################################################################################
 
     @variantmethod('mumps')
     def solve_displacement(self, 
