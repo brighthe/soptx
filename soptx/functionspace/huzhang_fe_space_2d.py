@@ -307,6 +307,9 @@ class HuZhangFEDof2d():
 
         return c2d
 
+    def interpolation_points(self) -> TensorLike:
+        pass
+
     def is_boundary_dof(self, threshold=None, method=None):
         """
         获取边界 DOFs 的布尔数组（节点边界 DOF + 边界边牵引迹矩 DOF）
@@ -392,7 +395,6 @@ class HuZhangFEDof2d():
             isBdDof = bm.set_at(isBdDof, idx_edge, True)
 
         return isBdDof
-
 
     def is_boundary_edge_dof(self, threshold: Optional[Threshold]=None, method='barycenter'):
         """

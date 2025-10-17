@@ -58,6 +58,15 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         bcs, ws, phi, fm, index, n = self.fetch_dirichlet(space) 
         mesh = getattr(space, 'mesh', None)
 
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.gca()
+        # mesh.add_plot(axes)
+        # mesh.find_node(axes, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
+        # mesh.find_edge(axes, showindex=True, color='r', markersize=14, fontsize=18, fontcolor='r')
+        # mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
+        # plt.show()
+
         NF_bd, NQ, LDOF, _ = phi.shape
         GD = mesh.geo_dimension()
         tau = bm.zeros((NF_bd, NQ, LDOF, GD, GD), dtype=phi.dtype)
@@ -116,7 +125,20 @@ class BoundaryFaceSourceIntegrator_mfem(_FaceSourceIntegrator):
         else:
             mesh = space.mesh
             index = mesh.boundary_face_index()
-            if callable(threshold):
+            if isinstance(threshold, (tuple, list)):
+                # threshold 是元组或列表, 包含多个边界判断函数
+                bc = mesh.entity_barycenter('face', index=index)
+                flags = []
+                for thresh_func in threshold:
+                    if callable(thresh_func):
+                        flags.append(thresh_func(bc))
+                if flags:
+                    combined_flag = flags[0]
+                    for flag in flags[1:]:
+                        combined_flag = combined_flag | flag
+                    index = index[combined_flag]
+            elif callable(threshold):
+                # threshold 是单个 callable 函数
                 bc = mesh.entity_barycenter('face', index=index)
                 index = index[threshold(bc)]
 

@@ -70,8 +70,22 @@ class BoundaryFaceSourceIntegrator_lfem(_FaceSourceIntegrator):
         else:
             mesh = space.mesh
             index = mesh.boundary_face_index()
-            if callable(threshold):
+            if isinstance(threshold, (tuple, list)):
+                # threshold 是元组或列表, 包含多个边界判断函数
+                bc = mesh.entity_barycenter('face', index=index)
+                flags = []
+                for thresh_func in threshold:
+                    if callable(thresh_func):
+                        flags.append(thresh_func(bc))
+                if flags:
+                    combined_flag = flags[0]
+                    for flag in flags[1:]:
+                        combined_flag = combined_flag | flag
+                    index = index[combined_flag]
+            elif callable(threshold):
+                # threshold 是单个 callable 函数
                 bc = mesh.entity_barycenter('face', index=index)
                 index = index[threshold(bc)]
+
 
         return index

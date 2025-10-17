@@ -76,7 +76,7 @@ class CompliantMechanismObjectiveTester(BaseLogged):
                     f"离散方法={lagrange_fem_analyzer.__class__.__name__}, "
                     f"空间={space.__class__.__name__}, 次数={space.p}, 总自由度={TGDOF_uh}")
         
-        # uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
+        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None, adjoint=False)
 
         state_variable = 'u'
         cmo_lfem = CompliantMechanismObjective(analyzer=lagrange_fem_analyzer)

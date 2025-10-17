@@ -604,7 +604,8 @@ class TriSolMixHuZhangData(PDEBase):
     def __init__(self, 
                 domain: List[float] = [0, 1, 0, 1],
                 mesh_type: str = 'uniform_aligned_tri', 
-                lam: float = 1.0, mu: float = 0.5,
+                lam: float = 1.0, 
+                mu: float = 0.5,
                 plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'                     
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None) -> None:
@@ -819,7 +820,9 @@ class TriSolMixHuZhangData(PDEBase):
     # ----------------------------
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
-        return self.disp_solution(points)
+        val = self.disp_solution(points)
+
+        return val
 
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:

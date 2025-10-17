@@ -50,7 +50,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             nx, ny = 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -267,8 +267,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
 
             from soptx.model.clamped_beam_2d import HalfClampedBeam2D
-            domain = [0, 80, 0, 20]
-            # domain = [0, 8, 0, 2]
+            # domain = [0, 80, 0, 20]
+            domain = [0, 8, 0, 2]
             pde = HalfClampedBeam2D(
                     domain=domain,
                     p=-1.5,
@@ -276,8 +276,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                     plane_type=plane_type,
                 )
             pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 80, 20
-            # nx, ny = 8, 2
+            # nx, ny = 80, 20
+            nx, ny = 8, 2
 
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
@@ -529,17 +529,17 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    # huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
+    huzhang_analyzer.run.set('test_exact_solution_hzmfem')
+    huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
-    # huzhang_analyzer.run.set('test_none_exact_solution_mfem')
+    # huzhang_analyzer.run.set('test_none_exact_solution_hzmfem')
     # huzhang_analyzer.run(model='clamped_beam_2d')
 
-    huzhang_analyzer.run.set('test_none_exact_solution_lfem_hzmfem')
-    huzhang_analyzer.run(model='bearing_device_2d')
+    # huzhang_analyzer.run.set('test_none_exact_solution_lfem_hzmfem')
+    # huzhang_analyzer.run(model='bearing_device_2d')
 
     # huzhang_analyzer.run.set('test_jump_penalty_integrator')
     # huzhang_analyzer.run()

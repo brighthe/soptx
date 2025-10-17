@@ -304,9 +304,8 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
-    # test.run.set('test_exact_solution_lfem')
-    # test.run(model='tri_sol_mix_huzhang')
+    test.run.set('test_exact_solution_lfem')
+    test.run(model='tri_sol_mix_huzhang')
 
-
-    test.run.set('test_none_exact_solution_lfem')
-    test.run(model='disp_inverter_2d')
+    # test.run.set('test_none_exact_solution_lfem')
+    # test.run(model='disp_inverter_2d')

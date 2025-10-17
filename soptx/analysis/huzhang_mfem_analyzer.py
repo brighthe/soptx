@@ -102,12 +102,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
-        """获取当前的刚度矩阵"""
+        """刚度矩阵"""
         return self._K
     
     @property
-    def force_vector(self) -> Union[TensorLike, COOTensor]:
-        """获取当前的载荷向量"""
+    def load_vector(self) -> Union[TensorLike, COOTensor]:
+        """载荷向量"""
         return self._F
     
 
@@ -266,53 +266,89 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return B_sigma_u
 
-    def _initialize_force_vector(self) -> TensorLike:
-        """初始化力向量
-        
-        在混合空间中, 力向量的结构为:
-        F = [F_sigma; F_u]
-        其中 F_sigma 对应应力空间, F_u 对应位移空间
-        """
-        gdof_sigma = self._huzhang_space.number_of_global_dofs()
-        gdof_u = self._tensor_space.number_of_global_dofs()
-        gdof_total = gdof_sigma + gdof_u
-        
-        F = bm.zeros(gdof_total, dtype=bm.float64, device=self._tensor_space.device)
-
-        return F
-
-    def assemble_body_force_vector(self,
-                            enable_timing: bool = False,
-                        ) -> Union[TensorLike, COOTensor]:
-        """组装体力对应的体积分"""
+    def assemble_displacement_load_vector(self,
+                                        enable_timing: bool = False,
+                                    ) -> Union[TensorLike, COOTensor]:
+        """组装载荷向量的位移分量 f_u"""
         t = None
         if enable_timing:
-            t = timer(f"组装载荷向量")
+            t = timer(f"组装 f_u")
 
         body_force = self._pde.body_force
-
-        space_sigmah = self._huzhang_space
         space_uh = self._tensor_space
-
-        gdof_sigmah = space_sigmah.number_of_global_dofs()
 
         # NOTE F.dtype == COOTensor or TensorLike
         integrator = SourceIntegrator(source=body_force, q=self._integration_order)
         lform = LinearForm(space_uh)
         lform.add_integrator(integrator)
-        F_u = lform.assembly(format='dense')
+        F_v = lform.assembly(format='dense')
 
-        F = self._initialize_force_vector()
-        F[gdof_sigmah:] = -F_u # 负号不能少 !!!
+        load_type = self._pde.load_type
+
+        if load_type == 'concentrated':
+            # Neumann 边界条件处理
+            gd_sigmah = self._pde.neumann_bc
+            threshold_sigmah = self._pde.is_neumann_boundary()
+            # 集中载荷 (点力) - 等效节点力方法 - 弱形式施加
+            #! 点力必须定义在网格节点上
+            isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+            isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+            ipoints_uh = space_uh.interpolation_points()
+            gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
+
+            F_uh = space_uh.function()
+            if space_uh.dof_priority:
+                F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
+            else:
+                F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.reshape(-1))
+
+            F_u = -F_v + F_uh
+
+        else:
+            F_u = -F_v
 
         if enable_timing:
             t.send('组装时间')
             t.send(None)
+
+        return F_u
+
+    def assemble_stress_load_vector(self, 
+                                enable_timing: bool = False
+                            ) -> Union[TensorLike, COOTensor]:
+        """组装载荷向量的应力分量 f_sigma"""
+        t = None
+        if enable_timing:
+            t = timer(f"组装 f_sigma")
+
+        space_sigmah = self._huzhang_space
+        boundary_type = self._pde.boundary_type
+
+        if boundary_type == 'neumann':
+            F_sigma = space_sigmah.function()
         
-        return F
-    
-    def apply_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
-        """应用边界条件"""
+        else:
+            # Dirichlet 边界条件处理 - 弱形式施加
+            gd_uh = self._pde.dirichlet_bc
+            threshold_uh = self._pde.is_dirichlet_boundary()
+            
+            from soptx.analysis.integrators.face_source_integrator_mfem import BoundaryFaceSourceIntegrator_mfem
+            integrator_uh = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
+                                                            q=self._integration_order, 
+                                                            threshold=threshold_uh,
+                                                            method='dirichlet')
+            lform_sigmah = LinearForm(space_sigmah)
+            lform_sigmah.add_integrator(integrator_uh)
+            F_sigma = lform_sigmah.assembly(format='dense')
+
+        if enable_timing:
+            t.send('组装时间')
+            t.send(None)
+
+        return F_sigma
+
+    def apply_neumann_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
+        """应用 Neumann 边界条件"""
         boundary_type = self._pde.boundary_type
         load_type = self._pde.load_type
 
@@ -322,106 +358,134 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         gdof_sigmah = space_sigmah.number_of_global_dofs()
         gdof_uh = space_uh.number_of_global_dofs()
         
-        from soptx.analysis.integrators.face_source_integrator_mfem import BoundaryFaceSourceIntegrator_mfem
+        gd_sigmah = self._pde.neumann_bc
+        threshold_sigmah = self._pde.is_neumann_boundary()
 
-        if boundary_type == 'mixed':
-            # 1. Dirichlet 边界条件处理 - 弱形式施加
-            gd_uh = self._pde.dirichlet_bc
-            threshold_uh = self._pde.is_dirichlet_boundary()
-            integrator_uh = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
-                                                            q=self._integration_order, 
-                                                            threshold=threshold_uh,
-                                                            method='dirichlet')
-            lform_sigmah = LinearForm(space_sigmah)
-            lform_sigmah.add_integrator(integrator_uh)
-            F_sigmah = lform_sigmah.assembly(format='dense')
+        # Neumann 边界条件处理
+        # 分布载荷 (面力) - 强形式施加
+        if load_type == 'distributed':
+            A = K[:gdof_sigmah, :gdof_sigmah]
 
-            F[:gdof_sigmah] += F_sigmah
 
-            # 2. Neumann 边界条件处理 - 强形式施加
-            gd_sigmah = self._pde.neumann_bc
-            threshold_sigmah = self._pde.is_neumann_boundary()
-            if load_type == 'concentrated':
-                # 集中载荷 (点力) - 等效节点力方法 - 转换为弱形式施加
-                #! 点力必须定义在网格节点上
-                isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-                isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-                ipoints_uh = space_uh.interpolation_points()
-                gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
+            isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_sigmah, method='barycenter')
+            ipoints = space_sigmah.interpolation_points()
+            gd_sigmah_val = gd_sigmah(ipoints)
 
-                F_uh = space_uh.function()
-                if space_uh.dof_priority:
-                    F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
-                else:
-                    F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.reshape(-1))
+            sigmah_bd = bm.zeros(gdof_sigmah, dtype=bm.float64, device=space_sigmah.device)
+            sigmah_bd[:] = bm.set_at(sigmah_bd[:], isBdDof_sigmah, gd_sigmah_val.reshape(-1)[isBdDof_sigmah])
 
-                F[gdof_sigmah:] += F_uh
-                self._F = F
+            load_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
+            load_bd[:gdof_sigmah] = sigmah_bd
 
-            elif load_type == 'distributed':
-                # 分布载荷 (面力) - 强形式施加
-                p = space_sigmah.p
-                if p == 1:
-                    #TODO 检查正确性
-                    integrator_sigmah = BoundaryFaceSourceIntegrator_mfem(source=gd_sigmah, 
-                                                                        q=self._integration_order, 
-                                                                        threshold=threshold_sigmah,
-                                                                        method='neumann')
-                    lform_uh = LinearForm(space_uh)
-                    lform_uh.add_integrator(integrator_sigmah)
-                    F_u = lform_uh.assembly(format='dense')
+            F = F - K.matmul(load_bd[:])
+            F[:gdof_sigmah][isBdDof_sigmah] = sigmah_bd[isBdDof_sigmah]
 
-                    F[gdof_sigmah:] += F_u       
-                    self._F = F
+            isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
+            isBdDof[:gdof_sigmah] = isBdDof_sigmah 
+            
+            A = K[:gdof_sigmah, :gdof_sigmah]
+            K = self._apply_matrix(A=A, isDDof=isBdDof)
+            print("---------------------")
 
-                elif p >= 2:
-                    #TODO 如何实现
-                    self._F = F
-                    isBdEDof_sigmah = space_sigmah.is_boundary_edge_dof(threshold=threshold_sigmah, method='barycenter')
+        # if boundary_type == 'mixed':
+        #     # 1. Dirichlet 边界条件处理 - 弱形式施加
+        #     gd_uh = self._pde.dirichlet_bc
+        #     threshold_uh = self._pde.is_dirichlet_boundary()
+        #     integrator_uh = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
+        #                                                     q=self._integration_order, 
+        #                                                     threshold=threshold_uh,
+        #                                                     method='dirichlet')
+        #     lform_sigmah = LinearForm(space_sigmah)
+        #     lform_sigmah.add_integrator(integrator_uh)
+        #     F_sigmah = lform_sigmah.assembly(format='dense')
 
-                    # ? 边界上的精确解 gd_sigmah_val 如何计算 ?
-                    ipoints = space_sigmah.interpolation_points()
-                    gd_sigmah_val = gd_sigmah(ipoints)
+        #     F[:gdof_sigmah] += F_sigmah
 
-                    sigmah_bde = bm.zeros(gdof_sigmah, dtype=bm.float64, device=space_sigmah.device)
-                    sigmah_bde[:] = bm.set_at(sigmah_bde[:], isBdEDof_sigmah, gd_sigmah_val.reshape(-1)[isBdEDof_sigmah])
+        #     # 2. Neumann 边界条件处理 - 强形式施加
+        #     gd_sigmah = self._pde.neumann_bc
+        #     threshold_sigmah = self._pde.is_neumann_boundary()
+        #     # if load_type == 'concentrated':
+        #     #     # 集中载荷 (点力) - 等效节点力方法 - 转换为弱形式施加
+        #     #     #! 点力必须定义在网格节点上
+        #     #     isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+        #     #     isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+        #     #     ipoints_uh = space_uh.interpolation_points()
+        #     #     gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
+
+        #     #     F_uh = space_uh.function()
+        #     #     if space_uh.dof_priority:
+        #     #         F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
+        #     #     else:
+        #     #         F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.reshape(-1))
+
+        #     #     F[gdof_sigmah:] += F_uh
+        #     #     self._F = F
+
+        #     if load_type == 'distributed':
+        #         # 分布载荷 (面力) - 强形式施加
+        #         p = space_sigmah.p
+        #         isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_sigmah, method='barycenter')
+        #         # if p == 1:
+        #         #     #TODO 检查正确性
+        #         #     integrator_sigmah = BoundaryFaceSourceIntegrator_mfem(source=gd_sigmah, 
+        #         #                                                         q=self._integration_order, 
+        #         #                                                         threshold=threshold_sigmah,
+        #         #                                                         method='neumann')
+        #         #     lform_uh = LinearForm(space_uh)
+        #         #     lform_uh.add_integrator(integrator_sigmah)
+        #         #     F_u = lform_uh.assembly(format='dense')
+
+        #         #     F[gdof_sigmah:] += F_u       
+        #         #     self._F = F
+
+        #         # elif p >= 2:
+        #         #     #TODO 如何实现
+        #         #     self._F = F
+        #         #     isBdEDof_sigmah = space_sigmah.is_boundary_edge_dof(threshold=threshold_sigmah, method='barycenter')
+
+        #         #     # ? 边界上的精确解 gd_sigmah_val 如何计算 ?
+        #         #     ipoints = space_sigmah.interpolation_points()
+        #         #     gd_sigmah_val = gd_sigmah(ipoints)
+
+        #         #     sigmah_bde = bm.zeros(gdof_sigmah, dtype=bm.float64, device=space_sigmah.device)
+        #         #     sigmah_bde[:] = bm.set_at(sigmah_bde[:], isBdEDof_sigmah, gd_sigmah_val.reshape(-1)[isBdEDof_sigmah])
     
-                    source_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
-                    source_bd[:gdof_sigmah] = sigmah_bde
+        #         #     source_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
+        #         #     source_bd[:gdof_sigmah] = sigmah_bde
 
-                    F = F - K.matmul(source_bd[:])
-                    F[:gdof_sigmah][isBdEDof_sigmah] = sigmah_bde[isBdEDof_sigmah]
+        #         #     F = F - K.matmul(source_bd[:])
+        #         #     F[:gdof_sigmah][isBdEDof_sigmah] = sigmah_bde[isBdEDof_sigmah]
 
-                    isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
-                    isBdDof[:gdof_sigmah] = isBdEDof_sigmah 
+        #         #     isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
+        #         #     isBdDof[:gdof_sigmah] = isBdEDof_sigmah 
 
-                    K = self._apply_matrix(A=K, isDDof=isBdDof)
+        #             # K = self._apply_matrix(A=K, isDDof=isBdDof)
 
-            else:
-                raise NotImplementedError(f"不支持的载荷类型: {load_type}")
+        #     else:
+        #         raise NotImplementedError(f"不支持的载荷类型: {load_type}")
 
-            return K, F
+        #     return K, F
 
-        elif boundary_type == 'dirichlet':
-            # 弱形式施加
-            gd_uh = self._pde.dirichlet_bc
-            threshold_uh = self._pde.is_dirichlet_boundary()
-            integrator = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
-                                                    q=self._integration_order, 
-                                                    threshold=threshold_uh,
-                                                    method='dirichlet')
-            lform = LinearForm(space_sigmah)
-            lform.add_integrator(integrator)
-            F_sigma = lform.assembly(format='dense')
+        # elif boundary_type == 'dirichlet':
+        #     # 弱形式施加
+        #     gd_uh = self._pde.dirichlet_bc
+        #     threshold_uh = self._pde.is_dirichlet_boundary()
+        #     integrator = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
+        #                                             q=self._integration_order, 
+        #                                             threshold=threshold_uh,
+        #                                             method='dirichlet')
+        #     lform = LinearForm(space_sigmah)
+        #     lform.add_integrator(integrator)
+        #     F_sigma = lform.assembly(format='dense')
 
-            F[:gdof_sigmah] += F_sigma
+        #     F[:gdof_sigmah] += F_sigma
 
-            self._F = F
+        #     self._F = F
 
-            return K, F
+        #     return K, F
 
-        elif boundary_type == 'neumann':
-            pass
+        # elif boundary_type == 'neumann':
+        #     pass
 
         else:
             error_msg = f"Unsupported boundary type: {boundary_type}"
@@ -460,12 +524,27 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('刚度矩阵组装时间')
 
-        F0 = self.assemble_body_force_vector()
+        space_sigmah = self._huzhang_space
+        space_uh = self._tensor_space
+        gdof_sigmah = space_sigmah.number_of_global_dofs()
+        gdof_uh = space_uh.number_of_global_dofs()
+        gdof = gdof_sigmah + gdof_uh
+        F0 = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
+
+        F_uh = self.assemble_displacement_load_vector()
+        F0[gdof_sigmah:] = F_uh
+
+        F_sigmah = self.assemble_stress_load_vector()
+        F0[:gdof_sigmah] = F_sigmah
         
         if enable_timing:
             t.send('载荷向量组装时间')
 
-        K, F = self.apply_bc(K0, F0)
+        boundary_type = self._pde.boundary_type
+        if boundary_type == 'dirichlet':
+            K, F = K0, F0
+        else:
+            K, F = self.apply_neumann_bc(K0, F0)
 
         if enable_timing:
             t.send('应用边界条件时间')

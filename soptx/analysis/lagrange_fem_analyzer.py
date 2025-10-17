@@ -609,6 +609,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
 
+        solver_type = kwargs.get('solver', 'mumps')
+
         if adjoint:
             K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
             K_spring = self.assemble_spring_stiff_matrix()
@@ -618,17 +620,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
             F0 = bm.stack([F0_struct, F0_spring], axis=1)
 
             K, F = self.apply_bc(K0, F0, adjoint)
+
+            uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
         
         else:
             K0 = self.assemble_stiff_matrix(rho_val=rho_val)
             F0 = self.assemble_body_force_vector()
             K, F = self.apply_bc(K0, F0)
 
-        solver_type = kwargs.get('solver', 'mumps')
-        uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
-        # uh[:] = spsolve(K, F, solver=solver_type)
-        for i in range(F.shape[1]): # 循环两次
-            uh[:, i] = spsolve(K, F[:, i], solver=solver_type)
+            uh = self._tensor_space.function()
+        
+        uh[:] = spsolve(K, F, solver=solver_type)
 
         gdof = self._tensor_space.number_of_global_dofs()
         self._log_info(f"Solving linear system with {gdof} displacement DOFs with MUMPS solver.")
@@ -662,20 +664,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
             F0 = bm.stack([F0_struct, F0_spring], axis=1)
 
             K, F = self.apply_bc(K0, F0, adjoint)
+
+            uh = self._tensor_space.function()
         
         else:
             K0 = self.assemble_stiff_matrix(rho_val=rho_val)
             F0 = self.assemble_body_force_vector()
             K, F = self.apply_bc(K0, F0)
 
+            uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
+
         maxiter = kwargs.get('maxiter', 5000)
         atol = kwargs.get('atol', 1e-12)
         rtol = kwargs.get('rtol', 1e-12)
         x0 = kwargs.get('x0', None)
-        # uh = self._tensor_space.function()
-        uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
+        
+        #! cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
         uh[:], info = cg(K, F, x0=x0,
-                        batch_first=True, 
+                        batch_first=False, 
                         atol=atol, rtol=rtol, 
                         maxit=maxiter, returninfo=True)
         
