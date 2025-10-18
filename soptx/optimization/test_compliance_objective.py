@@ -47,10 +47,11 @@ class ComplianceObjectiveTester(BaseLogged):
             # 分布载荷的算例
             E = 100.0
             nu = 0.4 # 可压缩
-            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
+            plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
             from soptx.model.bearing_device_2d import HalfBearingDevice2D
+            domain = [0, 60, 0, 40]
             pde = HalfBearingDevice2D(
-                                domain=[0, 0.6, 0, 0.4],
+                                domain=domain,
                                 t=-1.8,
                                 E=E, nu=nu,
                                 plane_type=plane_type,
@@ -77,7 +78,6 @@ class ComplianceObjectiveTester(BaseLogged):
             pde.init_mesh.set('uniform_quad')
             
 
-        
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
         NE = displacement_mesh.number_of_edges()
@@ -114,7 +114,7 @@ class ComplianceObjectiveTester(BaseLogged):
                     f"离散方法={lagrange_fem_analyzer.__class__.__name__}, "
                     f"空间={space.__class__.__name__}, 次数={space.p}, 总自由度={TGDOF_uh}")
         
-        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
+        # uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
 
         state_variable = 'u'
         co_lfem = ComplianceObjective(analyzer=lagrange_fem_analyzer, state_variable=state_variable)
@@ -181,7 +181,6 @@ class ComplianceObjectiveTester(BaseLogged):
             pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
-            displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         elif model == 'tri_sol_dir_huzhang':
             lam = 1.0
@@ -191,7 +190,16 @@ class ComplianceObjectiveTester(BaseLogged):
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 64, 64
             # nx, ny = 128, 128
-            displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+            
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.gca()
+        # displacement_mesh.add_plot(axes)
+        # displacement_mesh.find_node(axes, showindex=True, markersize=10, fontsize=12, fontcolor='r')
+        # displacement_mesh.find_cell(axes, showindex=True, markersize=16, fontsize=20, fontcolor='b')
+        # plt.show()
 
         NN = displacement_mesh.number_of_nodes()
         NE = displacement_mesh.number_of_edges()
@@ -296,7 +304,7 @@ if __name__ == '__main__':
     compliance_objective = ComplianceObjectiveTester(enable_logging=True)
 
     compliance_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
-    compliance_objective.run(model='disp_inverter_2d')
+    compliance_objective.run(model='bearing_device_2d')
 
     # compliance_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
     # compliance_objective.run(model='tri_sol_dir_huzhang')

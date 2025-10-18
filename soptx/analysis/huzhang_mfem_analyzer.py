@@ -364,11 +364,80 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # Neumann 边界条件处理
         # 分布载荷 (面力) - 强形式施加
         if load_type == 'distributed':
-            A = K[:gdof_sigmah, :gdof_sigmah]
+            mesh = space_sigmah.mesh
+            ipoints = mesh.entity('node')
 
             isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_sigmah, method='barycenter')
-            ipoints = space_sigmah.interpolation_points()
-            gd_sigmah_val = gd_sigmah(ipoints)
+            neumann_nodes_idx = bm.where(threshold_sigmah(ipoints))[0]
+            neumann_nodes_coords = ipoints[neumann_nodes_idx]
+
+            gd_sigmah_val = gd_sigmah(neumann_nodes_coords)
+
+            NN = mesh.number_of_nodes()
+            NS = space_sigmah.NS # 应该是 3
+            target_sigma_vals = bm.full((NN, NS), bm.nan, dtype=space_sigmah.ftype)
+
+            is_right_func = self._pde.is_neumann_right_boundary_dof
+            right_nodes_idx = bm.where(is_right_func(ipoints))[0]
+
+            if len(right_nodes_idx) > 0:
+                # **只计算右边界上节点的牵引力**
+                traction_on_right = self._pde.neumann_bc(ipoints[right_nodes_idx])
+                
+                # 应用右边界物理约束: (σ_xx, σ_xy) = (t_x, t_y)
+                target_sigma_vals[right_nodes_idx, 0] = traction_on_right[:, 0]
+                target_sigma_vals[right_nodes_idx, 1] = traction_on_right[:, 1]
+
+            # 3. **独立处理上边界**
+            is_top_func = self._pde.is_neumann_top_boundary_dof
+            top_nodes_idx = bm.where(is_top_func(ipoints))[0]
+
+            if len(top_nodes_idx) > 0:
+                # **只计算上边界上节点的牵引力**
+                traction_on_top = self._pde.neumann_bc(ipoints[top_nodes_idx])
+                
+                # 应用上边界物理约束: (σ_xy, σ_yy) = (t_x, t_y)
+                # σ_xy (这将正确地覆盖角点的值)
+                target_sigma_vals[top_nodes_idx, 1] = traction_on_top[:, 0]
+                # σ_yy
+                target_sigma_vals[top_nodes_idx, 2] = traction_on_top[:, 1]
+
+            # 4. **安全地将已确定的边界值赋给全局向量**
+            sigmah_bd = bm.zeros(gdof_sigmah, dtype=space_sigmah.ftype, device=space_sigmah.device)
+            node2dof = space_sigmah.dof.node_to_dof()
+
+            # 找出所有需要处理的节点 (去重)
+            all_neumann_nodes_idx = bm.unique(bm.concatenate([right_nodes_idx, top_nodes_idx]))
+
+            for node_idx in all_neumann_nodes_idx:
+                dofs = node2dof[node_idx]  # 获取该节点的3个DOF索引
+                vals = target_sigma_vals[node_idx] # 获取该节点的3个目标应力值
+                
+                for j in range(NS):
+                    # **只赋值那些不是 NaN 的值**
+                    if not bm.isnan(vals[j]):
+                        sigmah_bd[dofs[j]] = vals[j]
+
+            sigma_bd = bm.zeros(gdof_sigmah, dtype=space_sigmah.ftype)
+
+
+
+
+
+
+            n = mesh.face_unit_normal()
+
+            node2dof = space_sigmah.dof.node_to_dof()
+
+            right_nodes_idx = bm.where(self._pde.is_neumann_right_boundary_dof(ipoints))[0]
+            dof_idx_xx = node2dof[right_nodes_idx, 0]
+
+
+
+            isBdEdge = mesh.boundary_edge_flag()
+
+
+
 
             sigmah_bd = bm.zeros(gdof_sigmah, dtype=bm.float64, device=space_sigmah.device)
             sigmah_bd[:] = bm.set_at(sigmah_bd[:], isBdDof_sigmah, gd_sigmah_val.reshape(-1)[isBdDof_sigmah])

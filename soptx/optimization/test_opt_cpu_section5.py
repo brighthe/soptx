@@ -459,21 +459,32 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
 
     @run.register('test_bearing_device_2d')
-    def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
+    def run(self, analysis_method, model: str = 'half') -> Union[TensorLike, OptimizationHistory]:
         E = 100.0
-        nu = 0.4   # 可压缩
+        # nu = 0.4   # 可压缩
         # nu = 0.5    # 不可压缩
-        # nu = 0.49    # 近不可压缩
-        # nu = 0.4999 # 近不可压缩
+        nu = 0.4999 # 近不可压缩
         plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
         
-        from soptx.model.bearing_device_2d import HalfBearingDevice2D
-        pde = HalfBearingDevice2D(
-                            domain=[0, 0.6, 0, 0.4],
-                            t=-1.8,
-                            E=E, nu=nu,
-                            plane_type=plane_type,
-                        )
+        from soptx.model.bearing_device_2d import HalfBearingDevice2D, BearingDevice2D
+        if model == 'half':
+            domain = [0, 60, 0, 40]
+            pde = HalfBearingDevice2D(
+                                domain=domain,
+                                t=-1.8,
+                                E=E, nu=nu,
+                                plane_type=plane_type,
+                            )
+            nx, ny = 60, 40
+        elif model == 'full':
+            domain = [0, 120, 0, 40]
+            pde = BearingDevice2D(
+                                domain=domain,
+                                t=-1.8,
+                                E=E, nu=nu,
+                                plane_type=plane_type,
+                            )
+            nx, ny = 120, 40
 
         volume_fraction = 0.35
         penalty_factor = 3.0
@@ -486,14 +497,13 @@ class DensityTopOptHuZhangTest(BaseLogged):
         assembly_method = 'voigt'
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 200
+        max_iterations = 500
         tolerance = 1e-2
-        state_variable = 'u'  # 'u', 'sigma'
+        state_variable = 'sigma'  # 'u', 'sigma'
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
 
-        nx, ny = 60, 40
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_crisscross_tri'
         # mesh_type = 'uniform_aligned_tri'
@@ -509,7 +519,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
-        # displacement_mesh.to_vtk(f"displacement_mesh.vtu")
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -645,7 +654,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         self._log_info(f"开始密度拓扑优化, "
                        f"分析数值方法={analyzer.__class__.__name__}, "
                        f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                       f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
+                       f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
                        f"离散方法={analysis_method}, "
                        f"网格类型={mesh_type}, 密度类型={density_location}, " 
                        f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
@@ -676,8 +685,8 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
     
     # test.run.set('test_bridge_2d')
-    test.run.set('test_clamped_beam_2d')
-    # test.run.set('test_bearing_device_2d')
+    # test.run.set('test_clamped_beam_2d')
+    test.run.set('test_bearing_device_2d')
 
-    rho_opt, history = test.run(analysis_method='hzmfem')
+    rho_opt, history = test.run(analysis_method='lfem')
     

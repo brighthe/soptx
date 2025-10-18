@@ -101,7 +101,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -147,6 +147,17 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
         print("order_h1:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
 
+        GD = mesh.geo_dimension()
+        NN = mesh.number_of_nodes()
+        uh_component = uh.reshape(GD, NN).T  # (NN, GD)
+        mesh.nodedata['uh'] = uh_component
+
+        from pathlib import Path
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        mesh.to_vtk(f"{base_dir}/{model}_uh_lfem.vtu") 
+
         import matplotlib.pyplot as plt
         from soptx.utils.show import showmultirate, show_error_table
         show_error_table(h, errorType, errorMatrix)
@@ -165,7 +176,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             
             from soptx.model.bearing_device_2d import HalfBearingDevice2D
             pde = HalfBearingDevice2D(
-                                domain=[0, 0.6, 0, 0.4],
+                                domain=[0, 60, 0, 40],
                                 t=-1.8,
                                 E=E, nu=nu,
                                 plane_type=plane_type,
@@ -208,6 +219,16 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
 
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
+        GD = displacement_mesh.geo_dimension()
+
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.gca()
+        # displacement_mesh.add_plot(axes)
+        # displacement_mesh.find_node(axes, showindex=True, markersize=10, fontsize=12, fontcolor='r')
+        # displacement_mesh.find_edge(axes, showindex=True, markersize=14, fontsize=16, fontcolor='g')
+        # displacement_mesh.find_cell(axes, showindex=True, markersize=16, fontsize=20, fontcolor='b')
+        # plt.show()
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -242,7 +263,16 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                        f"网格={displacement_mesh.__class__.__name__}, 节点数={NN}, "
                        f"空间={t_space.__class__.__name__}, 次数={t_space.p}, 标量自由度={SGDOF}, 总自由度={TGDOF}")
 
-        uh = lagrange_fem_analyzer.solve_displacement(rho_val=None, adjoint=True) # (GDOF, )
+        uh = lagrange_fem_analyzer.solve_displacement(rho_val=None, adjoint=False)
+
+        uh_component = uh.reshape(GD, NN).T  # (NN, GD)
+        displacement_mesh.nodedata['uh'] = uh_component
+
+        from pathlib import Path
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        displacement_mesh.to_vtk(f"{base_dir}/{model}_uh_lfem.vtu") 
 
         # 计算应变和应力
         q = lagrange_fem_analyzer._integration_order
@@ -308,4 +338,4 @@ if __name__ == "__main__":
     test.run(model='tri_sol_mix_huzhang')
 
     # test.run.set('test_none_exact_solution_lfem')
-    # test.run(model='disp_inverter_2d')
+    # test.run(model='bearing_device_2d')

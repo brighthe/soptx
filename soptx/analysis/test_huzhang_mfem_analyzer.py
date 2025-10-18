@@ -10,8 +10,6 @@ from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from fealpy.mesh import TriangleMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from soptx.utils.show import showmultirate, show_error_table
-from soptx.analysis.utils import project_solution_to_finer_mesh
 
 
 class HuZhangMFEMAnalyzerTest(BaseLogged):
@@ -31,7 +29,6 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde = TriSolDirHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
-            analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         elif model == 'poly_sol_dir_huzhang':
             from soptx.model.linear_elasticity_2d import PolySolDirHuZhangData
@@ -39,7 +36,6 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde = PolySolDirHuZhangData(domain=[-1, 1, -1, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 4, 4
-            analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         elif model == 'tri_sol_mix_huzhang':
             # 面力外载荷 + 混合边界条件
@@ -48,7 +44,16 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
-            analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+        
+        analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.gca()
+        # analysis_mesh.add_plot(axes)
+        # analysis_mesh.find_node(axes, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
+        # analysis_mesh.find_edge(axes, showindex=True, color='r', markersize=14, fontsize=18, fontcolor='r')
+        # analysis_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
+        # plt.show()
 
         space_degree = 1
         integration_order = space_degree + 4

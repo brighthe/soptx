@@ -854,8 +854,8 @@ class TriSolMixHuZhangData(PDEBase):
     def neumann_bc(self, points: TensorLike) -> TensorLike:
         """
         σ·n = t on Γ_N
-        右边 x=1, n=(1,0): t(1,y) = [0, (π/2)cos(πy) + π sin(πy/2)]^T
-        上边 y=1, n=(0,1): t(x,1) = [-(π/2)sin(πx/2) - π cos(πx), 0]^T
+        右边 x=1, n=(1, 0): t(1, y) = [0, (π/2)cos(πy) + π sin(πy/2)]^T
+        上边 y=1, n=(0, 1): t(x, 1) = [-(π/2)sin(πx/2) - π cos(πx), 0]^T
         """
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
@@ -888,6 +888,22 @@ class TriSolMixHuZhangData(PDEBase):
     def is_neumann_boundary(self) -> Callable:
         
         return self.is_neumann_boundary_dof
+
+    @cartesian
+    def is_neumann_right_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x = points[..., 0]
+        flag_x1 = bm.abs(x - domain[1]) < self._eps  # 右边 x=1
+        
+        return flag_x1
+    
+    @cartesian
+    def is_neumann_top_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        y = points[..., 1]
+        flag_y1 = bm.abs(y - domain[3]) < self._eps  # 上边 y=1
+        
+        return flag_y1
 
 
 class BoxTriLagrange2dData(PDEBase):

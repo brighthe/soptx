@@ -462,6 +462,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         return rho_opt, history
 
+
     @run.register('test_bearing_device_2d')
     def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
         E = 100.0
@@ -492,7 +493,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 200
         tolerance = 1e-2
-        state_variable = 'u'  # 'u', 'sigma'
+        state_variable = 'sigma'  # 'u', 'sigma'
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
@@ -513,7 +514,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
-        # displacement_mesh.to_vtk(f"displacement_mesh.vtu")
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -599,7 +599,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                 )
 
         if optimizer_algorithm == 'mma': 
-
             from soptx.optimization.mma_optimizer import MMAOptimizer
             optimizer = MMAOptimizer(
                             objective=compliance_objective,
@@ -649,7 +648,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         self._log_info(f"开始密度拓扑优化, "
                        f"分析数值方法={analyzer.__class__.__name__}, "
                        f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                       f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
+                       f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
                        f"离散方法={analysis_method}, "
                        f"网格类型={mesh_type}, 密度类型={density_location}, " 
                        f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
@@ -680,7 +679,7 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
     
     # test.run.set('test_bridge_2d')
-    test.run.set('test_clamped_beam_2d')
-    # test.run.set('test_bearing_device_2d')
+    # test.run.set('test_clamped_beam_2d')
+    test.run.set('test_bearing_device_2d')
     rho_opt, history = test.run()
     
