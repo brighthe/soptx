@@ -95,57 +95,69 @@ class SensitivityStrategy(_FilterStrategy):
     def __init__(self, 
                 H: CSRTensor, 
                 Hs: TensorLike, 
-                density_location: Literal['element'], 
-                integration_weights: TensorLike,
                 mesh: HomogeneousMesh, 
-                integration_order: int
+                density_location: Literal['element'], 
             ) -> None:
         
         self._H = H
         self._Hs = Hs
+        self._mesh = mesh
         self._density_location = density_location
-        self._integration_weights = integration_weights
 
-    def get_initial_density(self, rho: Function, rho_Phys: Function) -> Function:
-        rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
-        
-        return rho_Phys
+    def get_initial_density(self, 
+                        density:  Union[TensorLike, Function]
+                    ) ->  Union[TensorLike, Function]:
 
-    def filter_variables(self, rho: Function, rho_Phys: Function) -> Function:
-        rho_Phys = bm.set_at(rho_Phys, slice(None), rho)
+        from soptx.interpolation.interpolation_scheme import DensityDistribution
+        if isinstance(density, Function):
+            rho_phys = density.space.function(bm.copy(density[:]))
+        elif isinstance(density, DensityDistribution):
+            rho_phys = density
+        else:
+            rho_phys = bm.copy(density)
 
-        return rho_Phys
+        return rho_phys
 
+    def filter_design_variable(self,
+                            design_variable: TensorLike, 
+                            physical_density: Union[TensorLike, Function]
+                        ) -> Union[TensorLike, Function]:
+
+        if self._density_location in ['element', 'node']:
+
+            physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
+
+        return physical_density
+    
     def filter_objective_sensitivities(self, 
-                                    rho_Phys: Union[TensorLike, Function], 
-                                    obj_grad: TensorLike
+                                    design_variable: TensorLike, 
+                                    obj_grad_rho: TensorLike
                                 ) -> TensorLike:
 
-        if self._density_location == 'element':
+        if self._density_location in ['element']:
+            # obj_grad_rho.shape = (NC, )
+            cm = self._mesh.entity_measure('cell')
 
-            cell_measure = self._integration_weights
-
-            weighted_obj_grad = rho_Phys[:] * obj_grad / cell_measure
-            numerator = self._H.matmul(weighted_obj_grad)
+            weighted_obj_grad_rho = design_variable[:] * obj_grad_rho / cm
+            numerator = self._H.matmul(weighted_obj_grad_rho)
 
             epsilon = 1e-3
-            stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
-            denominator = (stability_factor / cell_measure) * self._Hs
+            stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), design_variable)
+            denominator = (stability_factor / cm) * self._Hs
 
-            obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
+            obj_grad_dv = numerator / denominator
 
-            return obj_grad
+            return obj_grad_dv
         
         else:
             raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
 
     def filter_constraint_sensitivities(self, 
-                                    rho_Phys: Union[TensorLike, Function], 
-                                    con_grad: TensorLike
+                                    design_variable: Union[TensorLike, Function],
+                                    con_grad_rho: TensorLike
                                 ) -> TensorLike:
         
         if self._density_location == 'element':
-
             # 对于通用的 MMA 算法，体积约束越需要过滤
             # cell_measure = self._integration_weights
 
@@ -159,8 +171,10 @@ class SensitivityStrategy(_FilterStrategy):
             # con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 
             # 对于简单的 OC 算法，体积约束不需要过滤
-            return con_grad
-        
+            con_grad_dv = bm.copy(con_grad_rho)
+
+            return con_grad_dv
+
         else:
             raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
  

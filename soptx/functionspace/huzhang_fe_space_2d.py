@@ -159,9 +159,7 @@ class HuZhangFEDof2d():
         self.cell_dofs = HuZhangFECellDof2d(mesh, p)
 
     def number_of_local_dofs(self) -> int:
-        """
-        Get the number of local dofs on cell 
-        """
+        """Get the number of local dofs on cell """
         p = self.p
         TD = self.mesh.top_dimension()
         NS = TD*(TD+1)//2 # 对称矩阵的自由度个数
@@ -169,9 +167,7 @@ class HuZhangFEDof2d():
         return NS*(p+1)*(p+2)//2 
 
     def number_of_internal_local_dofs(self, doftype : str='cell') -> int:
-        """
-        Get the number of internal local dofs of the finite element space.
-        """
+        """Get the number of internal local dofs of the finite element space."""
         p = self.p
         TD = self.mesh.top_dimension()
         NS = TD*(TD+1)//2
@@ -189,9 +185,7 @@ class HuZhangFEDof2d():
             raise ValueError("Unknown doftype: {}".format(doftype))
 
     def number_of_global_dofs(self) -> int:
-        """
-        Get the number of global dofs of the finite element space.
-        """
+        """Get the number of global dofs of the finite element space."""
         mesh = self.mesh
         NC = mesh.number_of_cells()
         NE = mesh.number_of_edges()
@@ -204,9 +198,7 @@ class HuZhangFEDof2d():
         return NC*cldof + NE*eldof + NN*nldof
 
     def node_to_internal_dof(self) -> TensorLike:
-        """
-        Get the index array of the dofs defined on the nodes of the mesh.
-        """
+        """Get the index array of the dofs defined on the nodes of the mesh."""
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         nldof = self.number_of_internal_local_dofs('node')
@@ -217,9 +209,7 @@ class HuZhangFEDof2d():
     node_to_dof = node_to_internal_dof
 
     def edge_to_internal_dof(self) -> TensorLike:
-        """
-        得到每条边的 2(p-1) 个牵引迹矩 DOFs
-        """
+        """得到每条边的 2(p-1) 个牵引迹矩 DOFs"""
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -235,9 +225,7 @@ class HuZhangFEDof2d():
         pass
 
     def cell_to_internal_dof(self) -> TensorLike:
-        """
-        Get the index array of the dofs defined on the cells of the mesh.
-        """
+        """Get the index array of the dofs defined on the cells of the mesh."""
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -308,7 +296,76 @@ class HuZhangFEDof2d():
         return c2d
 
     def interpolation_points(self) -> TensorLike:
-        pass
+            """
+            返回参考单元上插值点的重心坐标。
+
+            胡张元的自由度是张量函数对多项式基的矩。这些自由度由函数在 p 次主格点（拉格朗日节点）
+            处的值唯一确定。
+
+            此函数返回这些点的坐标，并按照局部自由度的顺序（顶点 -> 边 -> 单元内部）进行排列，
+            以确保与 cell_to_dof 和 basis 函数的顺序一致。
+            """
+            p = self.p
+            mesh = self.mesh
+            TD = mesh.top_dimension()
+
+            # 1. 生成 p 次标量拉格朗日节点的重心坐标
+            # multi_index_matrix 返回的数组包含度 p 在第一列，形如 (p, p1, p2, ...)
+            multi_indices_with_p = bm.multi_index_matrix(p, TD)
+
+            # 提取真正的多重指标 (p1, p2, ...)
+            scalar_multi_indices = multi_indices_with_p[:, 1:]
+
+            # 计算第一个重心坐标分量 p0 = p - sum(pi)
+            p0 = p - bm.sum(scalar_multi_indices, axis=-1)
+
+            # 拼接成完整的重心坐标多重指标 (p0, p1, p2, ...)
+            bary_multi_indices = bm.concatenate([p0[:, None], scalar_multi_indices], axis=-1)
+            
+            # 归一化后即为重心坐标点
+            # 对于 p=0 的情况，直接返回单元重心
+            if p == 0:
+                return bm.array([[1/3, 1/3, 1/3]], dtype=self.ftype, device=self.device)
+                
+            scalar_points = bary_multi_indices / p  # (ldof_scalar, TD+1)
+
+            # 2. 按照与 basis 和 cell_to_dof 函数一致的顺序，收集所有自由度对应的标量部分的索引
+            scalar_phi_indices_list = []
+
+            # 顶点自由度 (边界)
+            for dof_obj in self.cell_dofs.get_boundary_dof_from_dim(0):
+                scalar_phi_indices_list.append(multiindex_to_number(dof_obj.dof_scalar))
+
+            # 边自由度 (边界)
+            for dof_obj in self.cell_dofs.get_boundary_dof_from_dim(1):
+                scalar_phi_indices_list.append(multiindex_to_number(dof_obj.dof_scalar))
+            
+            # 边自由度 (内部)
+            for dof_obj in self.cell_dofs.get_internal_dof_from_dim(1):
+                scalar_phi_indices_list.append(multiindex_to_number(dof_obj.dof_scalar))
+                
+            # 单元自由度 (内部)
+            for dof_obj in self.cell_dofs.get_internal_dof_from_dim(2):
+                scalar_phi_indices_list.append(multiindex_to_number(dof_obj.dof_scalar))
+            
+            ldof = self.number_of_local_dofs()
+            if not scalar_phi_indices_list:
+                # 对于 p=0 且没有自由度的特殊情况
+                return bm.zeros((ldof, TD + 1), dtype=self.ftype, device=self.device)
+
+            # 将所有标量索引合并为一个长数组
+            final_scalar_indices = bm.concatenate(scalar_phi_indices_list)
+
+            # 3. 使用这些标量索引来从 `scalar_points` 中选取并排列插值点
+            # multiindex_to_number 函数将多重指标映射到标量基函数的唯一索引，
+            # 这些索引正对应 `scalar_points` 数组的行号。
+            ipoints = scalar_points[final_scalar_indices]
+            
+            # 确保最终生成的插值点数量与局部自由度总数一致
+            assert ipoints.shape[0] == ldof, \
+                f"Shape mismatch: expected {ldof} points, but got {ipoints.shape[0]}"
+            
+            return ipoints
 
     def is_boundary_dof(self, threshold=None, method=None):
         """

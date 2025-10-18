@@ -106,22 +106,16 @@ class Filter(BaseLogged):
                                     'integration_order': self._integration_order,
                                 })
         
-        if self._filter_type in ['sensitivity']:
+        if self._filter_type == 'sensitivity':
             strategy_params.update({
-                'H': self._H,
-                'Hs': self._Hs,
-                'integration_weights': self._integration_weights,
-                'density_location': self._density_location,
-                'mesh': self._mesh,
-                'integration_order': self._integration_order,
-            })
+                                'H': self._H,
+                                'Hs': self._Hs,
+                            })
 
         if self._filter_type == 'density':
             strategy_params.update({
-                'H': self._H,
-                # 'mesh': self._mesh,
-                # 'density_location': self._density_location,
-            })
+                                'H': self._H,
+                            })
 
         if self._filter_type == 'heaviside_density':
             strategy_params.update({

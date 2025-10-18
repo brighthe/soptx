@@ -366,7 +366,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if load_type == 'distributed':
             A = K[:gdof_sigmah, :gdof_sigmah]
 
-
             isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_sigmah, method='barycenter')
             ipoints = space_sigmah.interpolation_points()
             gd_sigmah_val = gd_sigmah(ipoints)
@@ -383,7 +382,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
             isBdDof[:gdof_sigmah] = isBdDof_sigmah 
             
-            A = K[:gdof_sigmah, :gdof_sigmah]
             K = self._apply_matrix(A=A, isDDof=isBdDof)
             print("---------------------")
 
