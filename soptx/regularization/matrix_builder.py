@@ -32,7 +32,6 @@ class FilterMatrixBuilder:
         """构建并返回权重矩阵 H 和其行和 Hs"""
 
         if self._mesh.meshdata['mesh_type'] == 'uniform_quad':
-
             if self._density_location in ['element', 'element_multiresolution']:
                 H, Hs = self._compute_weighted_matrix_2d(
                                             self._rmin,
@@ -40,7 +39,6 @@ class FilterMatrixBuilder:
                                             self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
                                         )
                 return H, Hs
-            
             elif self._density_location in ['node', 'node_multiresolution']:
                 H, Hs = self._compute_weighted_matrix_general(
                                                 rmin=self._rmin,
@@ -54,6 +52,22 @@ class FilterMatrixBuilder:
                                             domain=self._mesh.meshdata['domain'], 
                                         )
             return H, Hs
+        
+        elif self._mesh.meshdata['mesh_type'] == 'uniform_hex':
+            if self._density_location in ['element', 'element_multiresolution']:
+                H, Hs = self._compute_weighted_matrix_3d(
+                                            self._rmin,
+                                            self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata['nz'],
+                                            self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], self._mesh.meshdata['hz'], 
+                                        )
+                return H, Hs
+            
+            elif self._density_location in ['node', 'node_multiresolution']:
+                H, Hs = self._compute_weighted_matrix_general(
+                                                rmin=self._rmin,
+                                                domain=self._mesh.meshdata['domain'], 
+                                            )
+                return H, Hs
         
     def _compute_weighted_matrix_general(self, 
                                         rmin: float,
@@ -198,9 +212,7 @@ class FilterMatrixBuilder:
         --------
         H: 过滤矩阵
         Hs: 过滤矩阵行和
-
         """
-
         # 单元中心坐标需要偏移半个网格
         coord_offset_x = 0.5 * hx
         coord_offset_y = 0.5 * hy
@@ -323,7 +335,7 @@ class FilterMatrixBuilder:
                     spshape=(N_total, N_total)
                 )
         
-        # ! PyTorch 后端对 COOTensor 的支持更好
+        #! PyTorch 后端对 COOTensor 的支持更好
         Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
         
         H = H.tocsr()
@@ -419,17 +431,33 @@ class FilterMatrixBuilder:
         return H, Hs
 
 
-    def _compute_filter_3d(self,
-                        rmin: float, 
-                        nx: int, ny: int, nz: int, 
-                        hx: float, hy: float, hz: float,
-                        enable_timing: bool = False,
-                    ) -> Tuple[COOTensor, TensorLike]:
-        """高性能优化的 3D 过滤矩阵计算 - 分块处理版本"""
+    def _compute_weighted_matrix_3d(self,
+                                    rmin: float, 
+                                    nx: int, ny: int, nz: int, 
+                                    hx: float, hy: float, hz: float,
+                                    enable_timing: bool = False,
+                                ) -> Tuple[COOTensor, TensorLike]:
+        """
+        计算六面体网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
+
+        SRTO - 设计变量 = 单元密度中心点
+        MRTO - 设计变量 = 密度子单元中心点 - 要求设计变量网格 = 密度子单元网格
+
+        Parameters:
+        -----------
+        rmin: 过滤半径
+        nx, ny, nz : 设计变量网格剖分数
+        hx, hy, hz : 设计变量网格单元大小 
+            
+        Returns:
+        --------
+        H: 过滤矩阵
+        Hs: 过滤矩阵行和
+        """
         
         t = None
         if enable_timing:
-            t = timer(f"Filter_3d")
+            t = timer(f"Filter_3d_{self._density_location}")
             next(t)
         
         search_radius_x = ceil(rmin/hx)
@@ -535,21 +563,22 @@ class FilterMatrixBuilder:
             jH = bm.tensor(all_cols, dtype=bm.int32, device='cpu')
             sH = bm.tensor(all_vals, dtype=bm.float64, device='cpu')
         else:
-            # 处理边缘情况
             iH = bm.tensor([], dtype=bm.int32, device='cpu')
             jH = bm.tensor([], dtype=bm.int32, device='cpu')
             sH = bm.tensor([], dtype=bm.float64, device='cpu')
         
         H = COOTensor(
-            indices=bm.stack((iH, jH), axis=0),
-            values=sH,
-            spshape=(nx * ny * nz, nx * ny * nz)
-        )
+                    indices=bm.stack((iH, jH), axis=0),
+                    values=sH,
+                    spshape=(nx * ny * nz, nx * ny * nz)
+                )
+        
+        #! PyTorch 后端对 COOTensor 的支持更好
+        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
         
         H = H.tocsr()
-        H = H.device_put(self.device)
-        
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device=self.device)
+        H = H.device_put(self._device)
+        Hs = bm.device_put(Hs, self._device)
 
         if enable_timing:
             t.send('矩阵构建')

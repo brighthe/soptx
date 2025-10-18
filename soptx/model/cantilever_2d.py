@@ -27,7 +27,7 @@ class CantileverCorner2d(PDEBase):
                 p: float = -1.0, # N
                 E: float = 1.0,  # Pa (N/m^2)
                 nu: float = 0.3,
-                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
+                plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -146,23 +146,10 @@ class CantileverCorner2d(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
 
-    # @cartesian
-    # def body_force(self, points: TensorLike) -> TensorLike:
-    #     x, y = points[..., 0], points[..., 1]
-
-    #     coord = (
-    #         (bm.abs(x - self._domain[1]) < self._eps) & 
-    #         (bm.abs(y - self._domain[2]) < self._eps)
-    #     )
-    #     kwargs = bm.context(points)
-    #     val = bm.zeros(points.shape, **kwargs)
-    #     val[coord, 1] = self.T
-
-    #     return val
-
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
+        
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian

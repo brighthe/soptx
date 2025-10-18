@@ -20,7 +20,7 @@ class HalfMBBBeam2dData(PDEBase):
 
     For isotropic materials:
         σ = 2με + λtr(ε)I
-    '''
+    ''' 
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20],
                 mesh_type: str = 'uniform_quad',

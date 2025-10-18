@@ -5,9 +5,9 @@ from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.mesh import HexahedronMesh, TetrahedronMesh
 
-from soptx.pde.pde_base import PDEBase
+from soptx.model.pde_base import PDEBase
 
-class CantileverBeam3dData(PDEBase):
+class CantileverBeam3d(PDEBase):
     '''
     3D Cantilever Beam Problem
     
@@ -35,9 +35,10 @@ class CantileverBeam3dData(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20, 0, 4],
                 mesh_type: str = 'uniform_hex',
-                T: float = -1.0,  # 负值代表方向向下
-                E: float = 1.0, 
+                p: float = -1.0,  # N
+                E: float = 1.0,   # Pa (N/m^2)
                 nu: float = 0.3,
+                plane_type: str = '3d',
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -45,19 +46,14 @@ class CantileverBeam3dData(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type, 
                         enable_logging=enable_logging, logger_name=logger_name)
         
-        self._T = T
+        self._p = p
         self._E = E
         self._nu = nu
+        self._plane_type = plane_type
         
         self._eps = 1e-12
-        self._plane_type = '3d'
-        self._force_type = 'concentrated'
-        self._boundary_type = 'dirichlet'
-
-        self._log_info(f"Initialized CantileverBeam3dData with domain={self._domain}, "
-                f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
-                f"force_type='{self._force_type}', "
-                f"boundary_type='{self._boundary_type}'")
+        self._load_type = 'concentrated'
+        self._boundary_type = 'mixed'
     
 
     #######################################################################################################################
@@ -75,9 +71,9 @@ class CantileverBeam3dData(PDEBase):
         return self._nu
     
     @property
-    def T(self) -> float:
-        """获取集中力"""
-        return self._T
+    def p(self) -> float:
+        """获取点力"""
+        return self._p
     
     #######################################################################################################################
     # 变体方法
@@ -116,23 +112,29 @@ class CantileverBeam3dData(PDEBase):
     ###############################################################################################
     # 核心方法
     ###############################################################################################
-    
+
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        x = points[..., 0]
-        y = points[..., 1]
-        z = points[..., 2]
-        
-        coord = (
-            (bm.abs(x - self._domain[1]) < self._eps) & 
-            (bm.abs(y - self._domain[0]) < self._eps)
-        )
         kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-        # 在 y 方向施加载荷
-        val = bm.set_at(val, (coord, 1), self._T)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    # @cartesian
+    # def body_force(self, points: TensorLike) -> TensorLike:
+    #     x = points[..., 0]
+    #     y = points[..., 1]
+    #     z = points[..., 2]
         
-        return val
+    #     coord = (
+    #         (bm.abs(x - self._domain[1]) < self._eps) & 
+    #         (bm.abs(y - self._domain[0]) < self._eps)
+    #     )
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     # 在 y 方向施加载荷
+    #     val = bm.set_at(val, (coord, 1), self._T)
+        
+    #     return val
     
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
@@ -143,7 +145,6 @@ class CantileverBeam3dData(PDEBase):
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self.domain
-
         x = points[..., 0]
         
         coord = bm.abs(x - domain[0]) < self._eps
@@ -153,7 +154,6 @@ class CantileverBeam3dData(PDEBase):
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         domain = self.domain
-
         x = points[..., 0]
         
         coord = bm.abs(x - domain[0]) < self._eps
@@ -163,7 +163,6 @@ class CantileverBeam3dData(PDEBase):
     @cartesian
     def is_dirichlet_boundary_dof_z(self, points: TensorLike) -> TensorLike:
         domain = self.domain
-
         x = points[..., 0]
         
         coord = bm.abs(x - domain[0]) < self._eps
@@ -175,3 +174,26 @@ class CantileverBeam3dData(PDEBase):
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y,
                 self.is_dirichlet_boundary_dof_z)
+    
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (..., 1), self._p)
+
+        return val
+    
+    @cartesian
+    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x = points[..., 0]
+        y = points[..., 1]
+
+        on_right_boundary = bm.abs(x - domain[1]) < self._eps
+        on_bottom_boundary = bm.abs(y - domain[0]) < self._eps
+        
+        return on_right_boundary & on_bottom_boundary
+    
+    def is_neumann_boundary(self) -> Callable:
+
+        return self.is_neumann_boundary_dof

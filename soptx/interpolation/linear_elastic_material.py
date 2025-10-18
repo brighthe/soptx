@@ -266,7 +266,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             if self._plane_type =='plane_stress':
                 self._lame_lambda = nu * E / (1 - nu**2)
                 self._bulk_modulus = E / (3 * (1 - nu))
-            elif self._plane_type in ["plane_strain", "3D"]:
+            elif self._plane_type in ["plane_strain", "3d"]:
                 self._lame_lambda = E * nu / ((1 + nu) * (1 - 2 * nu))
                 self._bulk_modulus = E / (3 * (1 - 2 * nu))
 
@@ -280,7 +280,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
             if self._plane_type == "plane_stress":
                 self._bulk_modulus = E / (3 * (1 - nu))
-            elif self._plane_type in ["plane_strain", "3D"]:
+            elif self._plane_type in ["plane_strain", "3d"]:
                 self._bulk_modulus = (3 * lam + 2 * mu) / 3
 
             self._bulk_modulus = (3 * lam + 2 * mu) / 3
@@ -298,7 +298,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         lam_val = self._lame_lambda
         mu_val = self._shear_modulus
 
-        if self._plane_type == "3D":
+        if self._plane_type == "3d":
             self.D = bm.tensor([[2 * mu_val + lam_val, lam_val,              lam_val,              0,      0,           0],
                                 [lam_val,              2 * mu_val + lam_val, lam_val,              0,      0,           0],
                                 [lam_val,              lam_val,              2 * mu_val + lam_val, 0,      0,           0],
@@ -321,7 +321,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                                 dtype=bm.float64, device=self.device)
         
         else:
-            error_msg = "Only '3D', 'plane_stress', and 'plane_strain' are supported."
+            error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
             self._log_error(error_msg)
         
         self._log_info(f"Elastic matrix computed for {self._plane_type}, shape: {self.D.shape}")
