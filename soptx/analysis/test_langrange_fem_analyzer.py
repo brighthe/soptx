@@ -239,7 +239,6 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                         )
         
         space_degree = 1
-        # 单纯形网格
         integration_order = space_degree + 4
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(

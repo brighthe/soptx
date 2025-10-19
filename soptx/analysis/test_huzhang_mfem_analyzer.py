@@ -126,6 +126,28 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         print("order_div_sigmah_l2:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
         print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[3, :-1] / errorMatrix[3, 1:]))
 
+        space_sigmah = huzhang_mfem_analyzer.huzhang_space
+        space_uh = huzhang_mfem_analyzer.tensor_space
+        TLDOF_uh = space_uh.number_of_local_dofs()
+        TLDOF_sigmah_n = space_sigmah.dof.number_of_internal_local_dofs('node')
+    
+        mesh = space_uh.mesh
+        NN = mesh.number_of_nodes()
+        NE = mesh.number_of_edges()
+        NC = mesh.number_of_cells()
+
+        uh_component = uh.reshape(TLDOF_uh, NC).T 
+        sigmah_component = sigmah.reshape(TLDOF_sigmah_n, NN).T
+
+        analysis_mesh.celldata['uh'] = uh_component
+        analysis_mesh.nodedata['stress'] = sigmah_component
+
+        from pathlib import Path
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        analysis_mesh.to_vtk(f"{base_dir}/uh_hzmfem.vtu")
+
         import matplotlib.pyplot as plt
         from soptx.utils.show import showmultirate, show_error_table
 

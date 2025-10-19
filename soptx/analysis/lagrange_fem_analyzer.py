@@ -237,13 +237,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
         gdof = space_uh.number_of_global_dofs()
 
         if boundary_type == 'mixed':
-            # 1. Neumann 边界条件处理 - 弱形式施加
-            gd_sigmah = self._pde.neumann_bc
-            threshold_sigmah = self._pde.is_neumann_boundary()
-
+            #* 1. Neumann 边界条件处理 - 弱形式施加 *#
+            # 集中载荷 (点力) - 等效节点力方法
             if load_type == 'concentrated':
-                # 集中载荷 (点力) - 等效节点力方法
-                #! 点力必须定义在网格节点上
+                gd_sigmah = self._pde.concentrate_load_bc
+                threshold_sigmah = self._pde.is_concentrate_load_boundary()
+        
+                # 点力必须定义在网格节点上
                 isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
                 isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
                 ipoints_uh = space_uh.interpolation_points()
@@ -254,9 +254,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
                 else:
                     F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
-
+            # 分布载荷 (面力)
             elif load_type == 'distributed':
-                # 分布载荷 (面力)
+                gd_sigmah = self._pde.neumann_bc
+                threshold_sigmah = self._pde.is_neumann_boundary()
+
                 from soptx.analysis.integrators.face_source_integrator_lfem import BoundaryFaceSourceIntegrator_lfem
                 integrator = BoundaryFaceSourceIntegrator_lfem(source=gd_sigmah, q=self._integration_order, threshold=threshold_sigmah)
                 lform = LinearForm(self._tensor_space)

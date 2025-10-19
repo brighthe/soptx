@@ -816,7 +816,7 @@ class TriSolMixHuZhangData(PDEBase):
         return bm.stack([b1, b2], axis=-1)
 
     # ----------------------------
-    # Dirichlet: 左边 x=0 与 下边 y=0
+    # Dirichlet: 下边界 y=0 与上边界 y=1
     # ----------------------------
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
@@ -828,19 +828,19 @@ class TriSolMixHuZhangData(PDEBase):
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
-        flag_x0 = bm.abs(x - domain[0]) < self._eps  # x=0
         flag_y0 = bm.abs(y - domain[2]) < self._eps  # y=0
+        flag_y1 = bm.abs(y - domain[3]) < self._eps  # y=1
 
-        return flag_x0 | flag_y0
+        return flag_y0 | flag_y1
 
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
-        flag_x0 = bm.abs(x - domain[0]) < self._eps  # x=0
         flag_y0 = bm.abs(y - domain[2]) < self._eps  # y=0
-        
-        return flag_x0 | flag_y0
+        flag_y1 = bm.abs(y - domain[3]) < self._eps  # y=1
+
+        return flag_y0 | flag_y1
 
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
         
@@ -848,14 +848,14 @@ class TriSolMixHuZhangData(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
 
     # ----------------------------
-    # Neumann：右边 x=1 与 上边 y=1
+    # Neumann：左边界 x=0 与右边界 x=1
     # ----------------------------
     @cartesian
     def neumann_bc(self, points: TensorLike) -> TensorLike:
         """
         σ·n = t on Γ_N
-        右边 x=1, n=(1, 0): t(1, y) = [0, (π/2)cos(πy) + π sin(πy/2)]^T
-        上边 y=1, n=(0, 1): t(x, 1) = [-(π/2)sin(πx/2) - π cos(πx), 0]^T
+        左边 x=0, n=(-1, 0): t(0, y) = [-π sin(πy), π sin(πy/2)]^T
+        右边 x=1, n=(1, 0):  t(1, y) = [0, (π/2)cos(πy) + π sin(πy/2)]^T
         """
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
@@ -864,15 +864,19 @@ class TriSolMixHuZhangData(PDEBase):
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
 
-        # 右边界：设置 t_y
-        flag_right = bm.abs(x - domain[1]) < self._eps
-        t_y_right = 0.5 * pi * bm.cos(pi * y) + pi * bm.sin(0.5 * pi * y)
-        val = bm.set_at(val, (flag_right, 1), t_y_right[flag_right])
+        # 左边界 x=0：设置 t_x 和 t_y
+        flag_left = bm.abs(x - domain[0]) < self._eps
+        t_x_left = -pi * bm.sin(pi * y)
+        t_y_left = pi * bm.sin(0.5 * pi * y)
+        val = bm.set_at(val, (flag_left, 0), t_x_left[flag_left])
+        val = bm.set_at(val, (flag_left, 1), t_y_left[flag_left])
 
-        # 上边界：设置 t_x
-        flag_top = bm.abs(y - domain[3]) < self._eps
-        t_x_top = -0.5 * pi * bm.sin(0.5 * pi * x) - pi * bm.cos(pi * x)
-        val = bm.set_at(val, (flag_top, 0), t_x_top[flag_top])
+        # 右边界 x=1：设置 t_x 和 t_y
+        flag_right = bm.abs(x - domain[1]) < self._eps
+        t_x_right = bm.zeros_like(x)  # t_x = 0
+        t_y_right = 0.5 * pi * bm.cos(pi * y) + pi * bm.sin(0.5 * pi * y)
+        val = bm.set_at(val, (flag_right, 0), t_x_right[flag_right])
+        val = bm.set_at(val, (flag_right, 1), t_y_right[flag_right])
 
         return val
 
@@ -880,30 +884,30 @@ class TriSolMixHuZhangData(PDEBase):
     def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  # 左边 x=0
         flag_x1 = bm.abs(x - domain[1]) < self._eps  # 右边 x=1
-        flag_y1 = bm.abs(y - domain[3]) < self._eps  # 上边 y=1
         
-        return flag_x1 | flag_y1
+        return flag_x0 | flag_x1
 
     def is_neumann_boundary(self) -> Callable:
         
         return self.is_neumann_boundary_dof
 
     @cartesian
+    def is_neumann_left_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x = points[..., 0]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  # 左边 x=0
+
+        return flag_x0
+    
+    @cartesian
     def is_neumann_right_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x = points[..., 0]
         flag_x1 = bm.abs(x - domain[1]) < self._eps  # 右边 x=1
-        
+
         return flag_x1
-    
-    @cartesian
-    def is_neumann_top_boundary_dof(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-        y = points[..., 1]
-        flag_y1 = bm.abs(y - domain[3]) < self._eps  # 上边 y=1
-        
-        return flag_y1
 
 
 class BoxTriLagrange2dData(PDEBase):

@@ -368,7 +368,7 @@ class HalfClampedBeam2D(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
     
     @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p) 
@@ -376,7 +376,7 @@ class HalfClampedBeam2D(PDEBase):
         return val
     
     @cartesian
-    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]  
 
@@ -385,6 +385,29 @@ class HalfClampedBeam2D(PDEBase):
 
         return on_buttom_boundary & on_right_boundary
 
-    def is_neumann_boundary(self) -> Callable:
-        
-        return self.is_neumann_boundary_dof
+    def is_concentrate_load_boundary(self) -> Callable:
+
+        return self.is_concentrate_load_boundary_dof
+
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def is_neumann_top_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]  
+
+        on_top_boundary = bm.abs(y - domain[3]) < self._eps
+
+        return on_top_boundary
+
+    def is_neumann_buttom_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        on_buttom_boundary = bm.abs(y - domain[2]) < self._eps
+
+        return on_buttom_boundary
