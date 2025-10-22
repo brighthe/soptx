@@ -53,10 +53,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._GD = self._mesh.geo_dimension()
 
-        # (GD, -1): gd_priority (x0, y0, ..., xn, yn); (-1, GD): dof_priority (x0, ..., xn, y0, ..., yn)
+        #* (GD, -1): dof_priority (x0, ..., xn, y0, ..., yn)
+        # self._setup_function_spaces(mesh=self._mesh, 
+        #                             p=self._space_degree, 
+        #                             shape=(self._GD, -1))
+        #* (-1, GD): gd_priority (x0, y0, ..., xn, yn)
         self._setup_function_spaces(mesh=self._mesh, 
                                     p=self._space_degree, 
-                                    shape=(self._GD, -1))
+                                    shape=(-1, self._GD))
 
         # 缓存的矩阵和向量
         self._K = None

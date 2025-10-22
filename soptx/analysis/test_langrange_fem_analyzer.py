@@ -130,6 +130,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                 )
                     
             uh = lfa.solve_displacement(rho_val=None)
+
+            GD = mesh.geo_dimension()
+            NN = mesh.number_of_nodes()
+            uh_component = uh.reshape(NN, GD)
+
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
 
             e_l2 = mesh.error(uh, pde.disp_solution)

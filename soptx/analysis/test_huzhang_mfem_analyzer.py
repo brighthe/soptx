@@ -98,7 +98,28 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             NDof[i] = uh_dof + sigma_dof
 
             sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
-            
+
+            # space_sigmah = huzhang_mfem_analyzer.huzhang_space
+            # space_uh = huzhang_mfem_analyzer.tensor_space
+            # TLDOF_uh = space_uh.number_of_local_dofs()
+            # TLDOF_sigmah_n = space_sigmah.dof.number_of_internal_local_dofs('node')
+        
+            # mesh = space_uh.mesh
+            # NN = mesh.number_of_nodes()
+            # NC = mesh.number_of_cells()
+
+            # uh_component = uh.reshape(NC, TLDOF_uh) 
+            # sigmah_component = sigmah.reshape(NN, TLDOF_sigmah_n)
+
+            # analysis_mesh.celldata['uh'] = uh_component
+            # analysis_mesh.nodedata['stress'] = sigmah_component
+
+            # from pathlib import Path
+            # current_file = Path(__file__)
+            # base_dir = current_file.parent.parent / 'vtu'
+            # base_dir = str(base_dir)
+            # analysis_mesh.to_vtk(f"{base_dir}/uh_hzmfem.vtu") 
+
             e_uh_l2 = analysis_mesh.error(u=uh, 
                                     v=pde.disp_solution,
                                     q=integration_order) # 位移 L2 范数误差
@@ -126,27 +147,6 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         print("order_div_sigmah_l2:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
         print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[3, :-1] / errorMatrix[3, 1:]))
 
-        space_sigmah = huzhang_mfem_analyzer.huzhang_space
-        space_uh = huzhang_mfem_analyzer.tensor_space
-        TLDOF_uh = space_uh.number_of_local_dofs()
-        TLDOF_sigmah_n = space_sigmah.dof.number_of_internal_local_dofs('node')
-    
-        mesh = space_uh.mesh
-        NN = mesh.number_of_nodes()
-        NE = mesh.number_of_edges()
-        NC = mesh.number_of_cells()
-
-        uh_component = uh.reshape(TLDOF_uh, NC).T 
-        sigmah_component = sigmah.reshape(TLDOF_sigmah_n, NN).T
-
-        analysis_mesh.celldata['uh'] = uh_component
-        analysis_mesh.nodedata['stress'] = sigmah_component
-
-        from pathlib import Path
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu'
-        base_dir = str(base_dir)
-        analysis_mesh.to_vtk(f"{base_dir}/uh_hzmfem.vtu")
 
         import matplotlib.pyplot as plt
         from soptx.utils.show import showmultirate, show_error_table
@@ -276,7 +276,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         if model == 'bearing_device_2d':
             E = 100.0
             nu = 0.4   # 可压缩
-            plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
+            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
             
             from soptx.model.bearing_device_2d import HalfBearingDevice2D
             pde = HalfBearingDevice2D(
@@ -286,7 +286,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                 plane_type=plane_type,
                             )
             pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 60, 40
+            # nx, ny = 60, 40
+            nx, ny = 6, 4
 
         elif model == 'clamped_beam_2d':
             E = 30.0
@@ -303,8 +304,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                     plane_type=plane_type,
                 )
             pde.init_mesh.set('uniform_aligned_tri')
-            # nx, ny = 80, 20
-            nx, ny = 8, 2
+            nx, ny = 80, 20
+            # nx, ny = 8, 2
 
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
@@ -352,13 +353,12 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                        f"应力空间={space_sigmah.__class__.__name__}, 次数={space_sigmah.p}, "
                        f"应力总自由度={TGDOF_sigmah}, 节点自由度={TGDOF_sigmah_n}, 边自由度={TGDOF_sigmah_e}, 单元自由度={TGDOF_sigmah_c}")
 
-        # ipoints_uh = space_uh.interpolation_points()
         # import matplotlib.pyplot as plt
         # fig = plt.figure()
         # axes = fig.gca()
         # displacement_mesh.add_plot(axes)
-        # displacement_mesh.find_node(axes, node=ipoints_uh, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
-        # # displacement_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
+        # displacement_mesh.find_node(axes, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
+        # displacement_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
         # plt.show()
         
         # uh.shape = (NC*LDOF, );
@@ -369,8 +369,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             # p = 2: (NN*3 + NE*2 + NC*3, )
         sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
 
-        uh_component = uh.reshape(TLDOF_uh, NC).T 
-        sigmah_component = sigmah.reshape(TLDOF_sigmah_n, NN).T
+        uh_component = uh.reshape(NC, TLDOF_uh) 
+        sigmah_component = sigmah.reshape(NN, TLDOF_sigmah_n)
 
         displacement_mesh.celldata['uh'] = uh_component
         displacement_mesh.nodedata['stress'] = sigmah_component
@@ -556,14 +556,14 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    huzhang_analyzer.run(model='tri_sol_mix_huzhang')
+    # huzhang_analyzer.run.set('test_exact_solution_hzmfem')
+    # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
-    # huzhang_analyzer.run.set('test_none_exact_solution_hzmfem')
-    # huzhang_analyzer.run(model='clamped_beam_2d')
+    huzhang_analyzer.run.set('test_none_exact_solution_hzmfem')
+    huzhang_analyzer.run(model='clamped_beam_2d')
 
     # huzhang_analyzer.run.set('test_none_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='bearing_device_2d')

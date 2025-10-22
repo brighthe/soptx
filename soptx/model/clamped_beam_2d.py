@@ -369,6 +369,7 @@ class HalfClampedBeam2D(PDEBase):
     
     @cartesian
     def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷点"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p) 
@@ -391,23 +392,84 @@ class HalfClampedBeam2D(PDEBase):
 
     @cartesian
     def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """
+        σ·n = 0 on Γ_N
+        上边界 y=1, n=(0, 1):  t(x, 1) = [0, 0]^T
+        下边界 y=0, n=(0, -1): t(x, 0) = [0, 0]^T
+        """
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
-    def is_neumann_top_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def neumann_bc_normal(self, points: TensorLike) -> TensorLike:
+        """获取 Neumann 边界上的单位外法向量"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        
+        kwargs = bm.context(points)
+        normals = bm.zeros((points.shape[0], 2), **kwargs)
+
+        # 上边界 y=1, n=(0, 1)
+        flag_top = bm.abs(y - domain[3]) < self._eps
+        normals = bm.set_at(normals, (flag_top, 1), 1.0)
+
+        # 下边界 y=0, n=(0, -1)
+        flag_bottom = bm.abs(y - domain[2]) < self._eps
+        normals = bm.set_at(normals, (flag_bottom, 1), -1.0)
+
+        return normals
+    
+    @cartesian
+    def is_neumann_boundary_dof_xx(self, points: TensorLike) -> TensorLike:
+
+        return bm.zeros(points.shape[:-1], dtype=bm.bool, device=points.device)
+
+    @cartesian
+    def is_neumann_boundary_dof_xy(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]  
 
         on_top_boundary = bm.abs(y - domain[3]) < self._eps
-
-        return on_top_boundary
-
-    def is_neumann_buttom_boundary_dof(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-        x, y = points[..., 0], points[..., 1]
-
         on_buttom_boundary = bm.abs(y - domain[2]) < self._eps
 
-        return on_buttom_boundary
+        # 排除集中载荷点
+        is_load_point = self.is_concentrate_load_boundary_dof(points)
+
+        return (on_top_boundary | on_buttom_boundary) & (~is_load_point)
+    
+    @cartesian
+    def is_neumann_boundary_dof_yy(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]  
+
+        on_top_boundary = bm.abs(y - domain[3]) < self._eps
+        on_buttom_boundary = bm.abs(y - domain[2]) < self._eps
+
+        # 排除集中载荷点
+        is_load_point = self.is_concentrate_load_boundary_dof(points)
+
+        return (on_top_boundary | on_buttom_boundary) & (~is_load_point)
+
+    def is_neumann_boundary(self) -> Tuple[Callable, Callable, Callable]:
+        
+        return (self.is_neumann_boundary_dof_xx,
+                self.is_neumann_boundary_dof_xy,
+                self.is_neumann_boundary_dof_yy)
+    
+    # @cartesian
+    # def is_neumann_top_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]  
+
+    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
+
+    #     return on_top_boundary
+
+    # def is_neumann_buttom_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     on_buttom_boundary = bm.abs(y - domain[2]) < self._eps
+
+    #     return on_buttom_boundary

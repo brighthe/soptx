@@ -18,7 +18,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
     @variantmethod('test_bridge_2d')
-    def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
+    def run(self, analysis_method) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 80, 0, 40]
 
         E = 1.0
@@ -249,7 +249,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # nu = 0.5    # 不可压缩
         # nu = 0.49    # 近不可压缩
         # nu = 0.4999 # 近不可压缩
-        plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
+        plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
         
         from soptx.model.clamped_beam_2d import HalfClampedBeam2D
         pde = HalfClampedBeam2D(
@@ -270,9 +270,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         assembly_method = 'voigt'
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 200
+        max_iterations = 500
         tolerance = 1e-2
-        state_variable = 'u'  # 'u', 'sigma'
+        state_variable = 'sigma'  # 'u', 'sigma'
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
@@ -304,7 +304,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                 )
         
         if analysis_method == 'lfem':
-            space_degree = 3
+            space_degree = 1
             integration_order = space_degree + 4
             from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
             analyzer = LagrangeFEMAnalyzer(
@@ -388,7 +388,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                 )
 
         if optimizer_algorithm == 'mma': 
-
             from soptx.optimization.mma_optimizer import MMAOptimizer
             optimizer = MMAOptimizer(
                             objective=compliance_objective,
@@ -416,7 +415,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                 )
         
         elif optimizer_algorithm == 'oc':
-
             from soptx.optimization.oc_optimizer import OCOptimizer
             optimizer = OCOptimizer(
                                 objective=compliance_objective,
@@ -685,8 +683,8 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
     
     # test.run.set('test_bridge_2d')
-    # test.run.set('test_clamped_beam_2d')
-    test.run.set('test_bearing_device_2d')
+    test.run.set('test_clamped_beam_2d')
+    # test.run.set('test_bearing_device_2d')
 
-    rho_opt, history = test.run(analysis_method='lfem')
+    rho_opt, history = test.run(analysis_method='hzmfem')
     

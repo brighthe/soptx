@@ -153,24 +153,126 @@ class HalfBearingDevice2D(PDEBase):
     
     @cartesian
     def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """
+        σ·n = 0 on Γ_N1
+        σ·n = t on Γ_N2
+        上边界 y=1, n=(0, 1):  t(x, 1) = [0, -1.8]^T
+        左边界 x=0, n=(-1, 0): t(0, y) = [0, 0]^T
+        """
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._t) 
-        
+
+        # 优先处理非齐次边界(上边界)
+        flag_top = bm.abs(y - domain[3]) < self._eps
+        val = bm.set_at(val, (flag_top, 0), 0.0)  
+        val = bm.set_at(val, (flag_top, 1), self._t) 
+
+        # 处理齐次边界(左边界), 但要排除已作为上边界处理的角点
+        flag_left = (bm.abs(x - domain[0]) < self._eps) & (~flag_top)
+        val = bm.set_at(val, (flag_left, 0), 0.0)
+        val = bm.set_at(val, (flag_left, 1), 0.0)
+
+        # # 上边界 y = 1
+        # flag_top = bm.abs(y - domain[3]) < self._eps
+        # val = bm.set_at(val, (flag_top, 0), 0.0)  
+        # val = bm.set_at(val, (flag_top, 1), self._t)
+
+        # # 左边界 x = 0
+        # flag_left = bm.abs(x - domain[0]) < self._eps
+        # val = bm.set_at(val, (flag_left, 0), 0.0)
+        # val = bm.set_at(val, (flag_left, 1), 0.0)
+
         return val
     
     @cartesian
-    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def neumann_bc_normal(self, points: TensorLike) -> TensorLike:
+        """获取 Neumann 边界上的单位外法向量"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        
+        kwargs = bm.context(points)
+        normals = bm.zeros((points.shape[0], 2), **kwargs)
+
+        # 优先处理非齐次边界(上边界)
+        flag_top = bm.abs(y - domain[3]) < self._eps
+        normals = bm.set_at(normals, (flag_top, 1), 1.0)
+        
+        # 处理齐次边界(左边界), 但要排除已作为上边界处理的角点
+        flag_left = (bm.abs(x - domain[0]) < self._eps) & (~flag_top)
+        normals = bm.set_at(normals, (flag_left, 0), -1.0)
+
+        # # 左边界 x = 0, n = (-1, 0)
+        # flag_left = bm.abs(x - domain[0]) < self._eps
+        # normals = bm.set_at(normals, (flag_left, 0), -1.0)
+        
+        # # 上边界 y = 1, n = (0, 1)
+        # flag_top = bm.abs(y - domain[3]) < self._eps
+        # normals = bm.set_at(normals, (flag_top, 1), 1.0)
+
+        return normals
+    
+    @cartesian
+    def is_neumann_boundary_dof_xx(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x = points[..., 0]
+
+        # 左边界 σ_xx = 0
+        on_left_boundary = bm.abs(x - domain[0]) < self._eps
+
+        return on_left_boundary
+    
+    @cartesian
+    def is_neumann_boundary_dof_xy(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x = points[..., 0]
+        y = points[..., 1]
+
+        # 左边界和上边界 σ_xy = 0
+        on_left_boundary = bm.abs(x - domain[0]) < self._eps
+        on_top_boundary = bm.abs(y - domain[3]) < self._eps
+
+        return on_left_boundary | on_top_boundary
+    
+    @cartesian
+    def is_neumann_boundary_dof_yy(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         y = points[..., 1]
 
+        # 上边界 σ_yy = 0
         on_top_boundary = bm.abs(y - domain[3]) < self._eps
 
         return on_top_boundary
-
-    def is_neumann_boundary(self) -> Callable:
+    
+    def is_neumann_boundary(self) -> Tuple[Callable, Callable, Callable]:
         
-        return self.is_neumann_boundary_dof
+        return (self.is_neumann_boundary_dof_xx,
+                self.is_neumann_boundary_dof_xy,
+                self.is_neumann_boundary_dof_yy)
+
+    
+    # @cartesian
+    # def neumann_bc(self, points: TensorLike) -> TensorLike:
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     val = bm.set_at(val, (..., 1), self._t) 
+        
+    #     return val
+    
+    # @cartesian
+    # def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     y = points[..., 1]
+
+    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
+
+    #     return on_top_boundary
+
+    # def is_neumann_boundary(self) -> Callable:
+        
+    #     return self.is_neumann_boundary_dof
 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
@@ -359,14 +461,89 @@ class BearingDevice2D(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
-    @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
-        """Neumann 边界条件：顶部施加向下的分布载荷"""
-        kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._t)  # y 方向的载荷
+    # @cartesian
+    # def neumann_bc(self, points: TensorLike) -> TensorLike:
+    #     """
+    #     σ·n = 0 on Γ_N1
+    #     σ·n = t on Γ_N2
+    #     上边界 y=1, n=(0, 1):  t(x, 1) = [0, -1.8]^T
+    #     左边界 x=0, n=(-1, 0): t(0, y) = [0, 0]^T
+    #     """
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+
+    #     # 上边界 y = 1
+    #     flag_top = bm.abs(y - domain[3]) < self._eps
+    #     val = bm.set_at(val, (flag_top, 0), 0.0)  
+    #     val = bm.set_at(val, (flag_top, 1), self._t)
+
+    #     # 左边界 x = 0
+    #     flag_left = bm.abs(x - domain[0]) < self._eps
+    #     val = bm.set_at(val, (flag_left, 0), 0.0)
+    #     val = bm.set_at(val, (flag_left, 1), 0.0)
+
+    #     return val
+    
+    # @cartesian
+    # def neumann_bc_normal(self, points: TensorLike) -> TensorLike:
+    #     """获取 Neumann 边界上的单位外法向量"""
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
         
-        return val
+    #     kwargs = bm.context(points)
+    #     normals = bm.zeros((points.shape[0], 2), **kwargs)
+
+    #     # 左边界 x = 0, n = (-1, 0)
+    #     flag_left = bm.abs(x - domain[0]) < self._eps
+    #     normals = bm.set_at(normals, (flag_left, 0), -1.0)
+        
+    #     # 上边界 y = 1, n = (0, 1)
+    #     flag_top = bm.abs(y - domain[3]) < self._eps
+    #     normals = bm.set_at(normals, (flag_top, 1), 1.0)
+
+    #     return normals
+    
+    # @cartesian
+    # def is_neumann_boundary_dof_xx(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x = points[..., 0]
+
+    #     # 左边界 σ_xx = 0
+    #     on_left_boundary = bm.abs(x - domain[0]) < self._eps
+
+    #     return on_left_boundary
+    
+    # @cartesian
+    # def is_neumann_boundary_dof_xy(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x = points[..., 0]
+    #     y = points[..., 1]
+
+    #     # 左边界和上边界 σ_xy = 0
+    #     on_left_boundary = bm.abs(x - domain[0]) < self._eps
+    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
+
+    #     return on_left_boundary | on_top_boundary
+    
+    # @cartesian
+    # def is_neumann_boundary_dof_yy(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     y = points[..., 1]
+
+    #     # 上边界 σ_yy = 0
+    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
+
+    #     return on_top_boundary
+    
+    # def is_neumann_boundary(self) -> Tuple[Callable, Callable, Callable]:
+        
+    #     return (self.is_neumann_boundary_dof_xx,
+    #             self.is_neumann_boundary_dof_xy,
+    #             self.is_neumann_boundary_dof_yy)
+
     
     @cartesian
     def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:

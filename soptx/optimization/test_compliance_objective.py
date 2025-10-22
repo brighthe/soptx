@@ -120,13 +120,13 @@ class ComplianceObjectiveTester(BaseLogged):
         co_lfem = ComplianceObjective(analyzer=lagrange_fem_analyzer, state_variable=state_variable)
         c_lfem = co_lfem.fun(density=None)
 
-        from pathlib import Path
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu'
-        base_dir = str(base_dir)
+        # from pathlib import Path
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu'
+        # base_dir = str(base_dir)
 
-        uh_component = uh.reshape(GD, NN).T
-        displacement_mesh.nodedata['uh'] = uh_component
+        # uh_component = uh.reshape(GD, NN).T
+        # displacement_mesh.nodedata['uh'] = uh_component
 
         ## 位移应力混合 HuZhang 有限元
         huzhang_space_degree = 1
@@ -161,13 +161,13 @@ class ComplianceObjectiveTester(BaseLogged):
         
         sigmah_hz, uh_hz = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
 
-        state_variable = 'u'
+        state_variable = 'sigma'
         co_hzmfem = ComplianceObjective(analyzer=huzhang_mfem_analyzer, state_variable=state_variable)
         c_hzmfem = co_hzmfem.fun(density=None)
 
-        uh_hz_component = uh_hz.reshape(TLDOF_uh, NC).T 
-        displacement_mesh.celldata['uh_hzmfem'] = uh_hz_component
-        displacement_mesh.to_vtk(f"{base_dir}/test_uh_none_exact_solution_concentrated_lfem_hzmfem.vtu")
+        # uh_hz_component = uh_hz.reshape(TLDOF_uh, NC).T 
+        # displacement_mesh.celldata['uh_hzmfem'] = uh_hz_component
+        # displacement_mesh.to_vtk(f"{base_dir}/test_uh_none_exact_solution_concentrated_lfem_hzmfem.vtu")
 
         print(f"--------------")
 
@@ -236,22 +236,22 @@ class ComplianceObjectiveTester(BaseLogged):
                     f"离散方法={lagrange_fem_analyzer.__class__.__name__}, "
                     f"空间={space.__class__.__name__}, 次数={space.p}, 总自由度={TGDOF_uh}")
         
-        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
-        e_uh_l2 = displacement_mesh.error(u=uh, 
-                                        v=pde.disp_solution,
-                                        q=integration_order) # 位移 L2 范数误差
+        # uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
+        # e_uh_l2 = displacement_mesh.error(u=uh, 
+        #                                 v=pde.disp_solution,
+        #                                 q=integration_order) # 位移 L2 范数误差
         
         state_variable = 'u'
         co_lfem = ComplianceObjective(analyzer=lagrange_fem_analyzer, state_variable=state_variable)
         c_lfem = co_lfem.fun(density=None)
 
-        from pathlib import Path
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu'
-        base_dir = str(base_dir)
+        # from pathlib import Path
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu'
+        # base_dir = str(base_dir)
 
-        uh_component = uh.reshape(GD, NN).T
-        displacement_mesh.nodedata['uh'] = uh_component
+        # uh_component = uh.reshape(GD, NN).T
+        # displacement_mesh.nodedata['uh'] = uh_component
 
         ## 位移应力混合 HuZhang 有限元
         huzhang_space_degree = 1
@@ -285,16 +285,16 @@ class ComplianceObjectiveTester(BaseLogged):
                     f"应力总自由度={TGDOF_sigmah}, 节点自由度={TGDOF_sigmah_n}, 边自由度={TGDOF_sigmah_e}, 单元自由度={TGDOF_sigmah_c}")
         
         sigmah_hz, uh_hz = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
-        e_uh_hz_l2 = displacement_mesh.error(u=uh_hz, 
-                                v=pde.disp_solution,
-                                q=integration_order) # 位移 L2 范数误差
-        state_variable = 'u'
+        # e_uh_hz_l2 = displacement_mesh.error(u=uh_hz, 
+        #                         v=pde.disp_solution,
+        #                         q=integration_order) # 位移 L2 范数误差
+        state_variable = 'sigma'
         co_hzmfem = ComplianceObjective(analyzer=huzhang_mfem_analyzer, state_variable=state_variable)
         c_hzmfem = co_hzmfem.fun(density=None)
 
-        uh_hz_component = uh_hz.reshape(TLDOF_uh, NC).T 
-        displacement_mesh.celldata['uh_hzmfem'] = uh_hz_component
-        displacement_mesh.to_vtk(f"{base_dir}/test_uh_exact_solution_dir_lfem_hzmfem.vtu")
+        # uh_hz_component = uh_hz.reshape(TLDOF_uh, NC).T 
+        # displacement_mesh.celldata['uh_hzmfem'] = uh_hz_component
+        # displacement_mesh.to_vtk(f"{base_dir}/test_uh_exact_solution_dir_lfem_hzmfem.vtu")
 
         print('------------------')
 
@@ -303,8 +303,8 @@ if __name__ == '__main__':
 
     compliance_objective = ComplianceObjectiveTester(enable_logging=True)
 
-    compliance_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
-    compliance_objective.run(model='bearing_device_2d')
+    # compliance_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
+    # compliance_objective.run(model='bearing_device_2d')
 
-    # compliance_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
-    # compliance_objective.run(model='tri_sol_dir_huzhang')
+    compliance_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
+    compliance_objective.run(model='tri_sol_mix_huzhang')

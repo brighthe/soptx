@@ -285,7 +285,7 @@ class DisplacementInverter2d(PDEBase):
     def is_spring_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         """对于任何输入点都返回 False, 用于明确指定某个方向上没有边界条件"""
         # points.shape[:-1] 获取输入点的数量, 创建一个形状匹配的全 False 布尔数组
-        return bm.zeros(points.shape[:-1], dtype=bm.bool, device=bm.get_device(points))
+        return bm.zeros(points.shape[:-1], dtype=bm.bool, device=points.device)
     
     def is_spring_boundary(self) -> Callable:
 

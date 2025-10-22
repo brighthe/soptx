@@ -289,8 +289,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             # Neumann 边界条件处理
             gd_sigmah = self._pde.concentrate_load_bc
             threshold_sigmah = self._pde.is_concentrate_load_boundary()
-            # gd_sigmah = self._pde.neumann_bc
-            # threshold_sigmah = self._pde.is_neumann_boundary()
             # 集中载荷 (点力) - 等效节点力方法 - 弱形式施加
             #! 点力必须定义在网格节点上
             isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
@@ -356,62 +354,85 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         gdof_sigmah = space_sigmah.number_of_global_dofs()
         gdof_uh = space_uh.number_of_global_dofs()
-        
-        gd_sigmah = self._pde.neumann_bc
-        threshold_sigmah = self._pde.is_neumann_boundary()
+
+        mesh = space_sigmah.mesh
+        NN = mesh.number_of_nodes()
+        NS = space_sigmah.NS
+        node = mesh.entity('node')
 
         #* Neumann 边界条件处理 - σ·n 强形式施加 *#
-        mesh = space_sigmah.mesh
-        ipoints = mesh.entity('node')
+        # 1. 使用 is_boundary_dof 确定所有被约束的 DOF
+        threshold_sigmah = self._pde.is_neumann_boundary()
+        isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_sigmah, method='barycenter')
 
-        # isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_sigmah, method='barycenter')
-        neumann_nodes_idx = bm.where(threshold_sigmah(ipoints))[0]
-        neumann_nodes_coords = ipoints[neumann_nodes_idx]
+        # 2. 准备计算应力值
+        is_xx_func = threshold_sigmah[0]
+        is_xy_func = threshold_sigmah[1]
+        is_yy_func = threshold_sigmah[2]
 
-        gd_sigmah_val = gd_sigmah(neumann_nodes_coords)
+        is_neumann_node = (is_xx_func(node) | 
+                           is_xy_func(node) | 
+                           is_yy_func(node))
+        neumann_nodes_idx = bm.where(is_neumann_node)[0]
+        neumann_nodes_coords = node[neumann_nodes_idx]
 
-        NN = mesh.number_of_nodes()
-        NS = space_sigmah.NS # 应该是 3
+        # 3. 获取牵引力 t 和 法向量 n
+        t_values = self._pde.neumann_bc(neumann_nodes_coords)    
+        n_values = self._pde.neumann_bc_normal(neumann_nodes_coords) 
+
+        t_x, t_y = t_values[..., 0], t_values[..., 1]
+        n_x, n_y = n_values[..., 0], n_values[..., 1]
+
+        # 4. 通用映射：(t, n) -> (sigma_xx, sigma_xy, sigma_yy)
+        #    初始化所有节点的 sigma 值为 NaN
         target_sigma_vals = bm.full((NN, NS), bm.nan, dtype=space_sigmah.ftype)
 
-        is_right_func = self._pde.is_neumann_right_boundary_dof
-        right_nodes_idx = bm.where(is_right_func(ipoints))[0]
+        # 查找 n_x 主导的节点 (左右边界)
+        is_nx_dominant = (bm.abs(n_x) > 1.0 - 1e-12)
+        # 查找 n_y 主导的节点 (上下边界)
+        is_ny_dominant = (bm.abs(n_y) > 1.0 - 1e-12)
 
-        if len(right_nodes_idx) > 0:
-            # **只计算右边界上节点的牵引力**
-            traction_on_right = self._pde.neumann_bc(ipoints[right_nodes_idx])
+        # 4a. 处理 n_x 主导的节点 (左右边界)
+        idx_nx_global = neumann_nodes_idx[is_nx_dominant]
+        if len(idx_nx_global) > 0:
+            n_x_sub = n_x[is_nx_dominant]
+            t_x_sub = t_x[is_nx_dominant]
+            t_y_sub = t_y[is_nx_dominant]
             
-            # 应用右边界物理约束: (σ_xx, σ_xy) = (t_x, t_y)
-            target_sigma_vals[right_nodes_idx, 0] = traction_on_right[:, 0]
-            target_sigma_vals[right_nodes_idx, 1] = traction_on_right[:, 1]
+            # σ_xx = t_x / n_x
+            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_nx_global, 0), t_x_sub / n_x_sub)
+            # σ_xy = t_y / n_x
+            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_nx_global, 1), t_y_sub / n_x_sub)
+            # σ_yy 保持 NaN
 
-        is_left_func = self._pde.is_neumann_left_boundary_dof
-        left_nodes_idx = bm.where(is_left_func(ipoints))[0]
-
-        if len(left_nodes_idx) > 0:
-            # **只计算左边界上节点的牵引力**
-            traction_on_left = self._pde.neumann_bc(ipoints[left_nodes_idx])
+        # 4b. 处理 n_y 主导的节点 (上下边界)
+        idx_ny_global = neumann_nodes_idx[is_ny_dominant]
+        if len(idx_ny_global) > 0:
+            n_y_sub = n_y[is_ny_dominant]
+            t_x_sub = t_x[is_ny_dominant]
+            t_y_sub = t_y[is_ny_dominant]
             
-            target_sigma_vals[left_nodes_idx, 0] = traction_on_left[:, 0]
-            # σ_yy
-            target_sigma_vals[left_nodes_idx, 1] = traction_on_left[:, 1]
+            # σ_xy = t_x / n_y
+            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_ny_global, 1), t_x_sub / n_y_sub)
+            # σ_yy = t_y / n_y
+            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_ny_global, 2), t_y_sub / n_y_sub)
+            # σ_xx 保持 NaN
 
+        # 5. 构建 sigmah_bd 向量
         sigmah_bd = bm.zeros(gdof_sigmah, dtype=space_sigmah.ftype, device=space_sigmah.device)
-        isBdDof_sigmah = bm.zeros(gdof_sigmah, dtype=bm.bool, device=space_sigmah.device)
-        node2dof = space_sigmah.dof.node_to_dof()
+        node2dof = space_sigmah.dof.node_to_dof() # (NN, 3)
 
-        all_neumann_nodes_idx = bm.unique(bm.concatenate([right_nodes_idx, left_nodes_idx]))
-
-        for node_idx in all_neumann_nodes_idx:
-            dofs = node2dof[node_idx]  # 获取该节点的3个DOF索引
-            vals = target_sigma_vals[node_idx] # 获取该节点的3个目标应力值
+        # 遍历所有 Neumann 节点，填充 sigmah_bd
+        for node_idx in neumann_nodes_idx:
+            dofs = node2dof[node_idx]        # (3,)
+            vals = target_sigma_vals[node_idx] # (3,)
             
             for j in range(NS):
-                # **只赋值那些不是 NaN 的值**
+                # 只有当值不是 NaN 时才填充 (即该分量被约束)
                 if not bm.isnan(vals[j]):
                     sigmah_bd[dofs[j]] = vals[j]
-                    isBdDof_sigmah[dofs[j]] = True    # 标记为边界 DOF
 
+        # 6. 标准的施加边界条件流程
         load_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
         load_bd[:gdof_sigmah] = sigmah_bd
 
@@ -465,12 +486,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         gdof = gdof_sigmah + gdof_uh
         F0 = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
 
-        F_uh = self.assemble_displacement_load_vector()
-        F0[gdof_sigmah:] = F_uh
-
         F_sigmah = self.assemble_stress_load_vector()
         F0[:gdof_sigmah] = F_sigmah
         
+        F_uh = self.assemble_displacement_load_vector()
+        F0[gdof_sigmah:] = F_uh
+
         if enable_timing:
             t.send('载荷向量组装时间')
 
