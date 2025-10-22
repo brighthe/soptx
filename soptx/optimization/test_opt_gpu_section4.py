@@ -40,20 +40,20 @@ class DensityTopOptTest(BaseLogged):
             # mesh_type = 'uniform_aligned_tri'
             # mesh_type = 'uniform_crisscross_tri'
 
-            space_degree = 2
-            integration_order = space_degree + 1
+            space_degree = 4
+            integration_order = space_degree + 4
 
             volume_fraction = 0.6
             penalty_factor = 3.0
 
             # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-            density_location = 'node_multiresolution'
-            sub_density_element = 4
-            # sub_density_element = 16
+            density_location = 'element'
+            # sub_density_element = 4
+            sub_density_element = 16
             relative_density = volume_fraction
 
             # 'standard', 'voigt', 'voigt_multiresolution'
-            assembly_method = 'voigt_multiresolution'
+            assembly_method = 'voigt'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
             max_iterations = 500
@@ -64,9 +64,9 @@ class DensityTopOptTest(BaseLogged):
             # rmin = 1.2
             # rmin = 1.25
             # rmin = 1.0
-            rmin = 0.75
+            # rmin = 0.75
             # rmin = 0.625
-            # rmin = 0.5
+            rmin = 0.5
             
         elif parameter_type == 'half_mbb_2d':
             domain = [0, 30.0, 0, 10.0]
@@ -201,7 +201,6 @@ class DensityTopOptTest(BaseLogged):
 
 
         if optimizer_algorithm == 'mma': 
-
             from soptx.optimization.mma_optimizer import MMAOptimizer
             optimizer = MMAOptimizer(
                             objective=compliance_objective,
@@ -227,7 +226,6 @@ class DensityTopOptTest(BaseLogged):
                                 )
 
         elif optimizer_algorithm == 'oc':
-
             from soptx.optimization.oc_optimizer import OCOptimizer
             optimizer = OCOptimizer(
                                 objective=compliance_objective,
@@ -246,7 +244,7 @@ class DensityTopOptTest(BaseLogged):
                                     )
 
         self._log_info(f"开始密度拓扑优化, "
-                       f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.plane_type}, 边界类型={pde.boundary_type}, "
+                       f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, "
                        f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
                        f"体积约束={volume_fraction}, "
                        f"网格类型={mesh_type},  " 
