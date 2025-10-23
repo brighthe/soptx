@@ -43,11 +43,11 @@ class ComplianceObjectiveTester(BaseLogged):
             nx, ny = 80, 20
             pde.init_mesh.set('uniform_aligned_tri')
 
-        elif model == 'bearing_device_2d':
+        elif model == 'half_bearing_device_2d':
             # 分布载荷的算例
             E = 100.0
             nu = 0.4 # 可压缩
-            plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
+            plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
             from soptx.model.bearing_device_2d import HalfBearingDevice2D
             domain = [0, 60, 0, 40]
             pde = HalfBearingDevice2D(
@@ -77,7 +77,6 @@ class ComplianceObjectiveTester(BaseLogged):
             nx, ny = 4, 2
             pde.init_mesh.set('uniform_quad')
             
-
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
         NE = displacement_mesh.number_of_edges()
@@ -114,7 +113,7 @@ class ComplianceObjectiveTester(BaseLogged):
                     f"离散方法={lagrange_fem_analyzer.__class__.__name__}, "
                     f"空间={space.__class__.__name__}, 次数={space.p}, 总自由度={TGDOF_uh}")
         
-        # uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
+        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None)
 
         state_variable = 'u'
         co_lfem = ComplianceObjective(analyzer=lagrange_fem_analyzer, state_variable=state_variable)
@@ -303,8 +302,8 @@ if __name__ == '__main__':
 
     compliance_objective = ComplianceObjectiveTester(enable_logging=True)
 
-    # compliance_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
-    # compliance_objective.run(model='bearing_device_2d')
+    compliance_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
+    compliance_objective.run(model='half_bearing_device_2d')
 
-    compliance_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
-    compliance_objective.run(model='tri_sol_mix_huzhang')
+    # compliance_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
+    # compliance_objective.run(model='tri_sol_mix_huzhang')

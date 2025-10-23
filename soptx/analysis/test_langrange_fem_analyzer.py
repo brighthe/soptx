@@ -37,11 +37,27 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     enable_logging=False
                                 )
             
-        elif model == 'tri_sol_mix_huzhang':
-            lam = 1.0
-            mu = 0.5
-            from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
-            pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+        elif model == 'tri_sol_mix_homo_dir_huzhang':
+            # 齐次 Dirichlet + 非齐次 Neumann
+            lam, mu = 1.0, 0.5
+            from soptx.model.linear_elasticity_2d import TriSolMixHomoDirHuZhang
+            pde = TriSolMixHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
+        
+        elif model == 'tri_sol_mix_nhomo_dir_huzhang':
+            # 非齐次 Dirichlet + 非齐次 Neumann
+            lam, mu = 1.0, 0.5
+            from soptx.model.linear_elasticity_2d import TriSolMixNHomoDirHuZhang
+            pde = TriSolMixNHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
             mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -101,7 +117,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -130,10 +146,6 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                 )
                     
             uh = lfa.solve_displacement(rho_val=None)
-
-            GD = mesh.geo_dimension()
-            NN = mesh.number_of_nodes()
-            uh_component = uh.reshape(NN, GD)
 
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
 
@@ -339,7 +351,7 @@ if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
     test.run.set('test_exact_solution_lfem')
-    test.run(model='tri_sol_mix_huzhang')
+    test.run(model='tri_sol_mix_homo_dir_huzhang')
 
     # test.run.set('test_none_exact_solution_lfem')
     # test.run(model='bearing_device_2d')

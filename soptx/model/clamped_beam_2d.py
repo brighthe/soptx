@@ -367,6 +367,10 @@ class HalfClampedBeam2D(PDEBase):
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
     
+    #######################################################################################################################
+    # 应力边界条件处理方式 1: 集中载荷视作等效节点力
+    #######################################################################################################################
+    
     @cartesian
     def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
         """集中载荷点"""
@@ -457,19 +461,85 @@ class HalfClampedBeam2D(PDEBase):
                 self.is_neumann_boundary_dof_xy,
                 self.is_neumann_boundary_dof_yy)
     
+
+    #######################################################################################################################
+    # 应力边界条件处理方式 2: 集中载荷近似为分布载荷
+    #######################################################################################################################
+
     # @cartesian
-    # def is_neumann_top_boundary_dof(self, points: TensorLike) -> TensorLike:
+    # def neumann_bc(self, points: TensorLike) -> TensorLike:
+    #     """
+    #     σ·n = t
+    #     上边界 y=1:          t = [0, 0]
+    #     下边界 y=0 (非载荷点): t = [0, 0]
+    #     下边界 y=0 (载荷点 x=1): t = [0, -P / fm]
+    #     """
     #     domain = self.domain
-    #     x, y = points[..., 0], points[..., 1]  
+    #     x, y = points[..., 0], points[..., 1]
+    #     kwargs = bm.context(points)
+        
+    #     # 默认所有 Neumann 边界牵引力为 0（齐次）
+    #     val = bm.zeros(points.shape, **kwargs)
 
-    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
+    #     fm = 1
 
-    #     return on_top_boundary
+    #     # 识别载荷点 (右下角)
+    #     on_bottom = bm.abs(y - domain[2]) < self._eps
+    #     on_right = bm.abs(x - domain[1]) < self._eps
+    #     is_load_point = on_bottom & on_right
 
-    # def is_neumann_buttom_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     # 计算等效牵引力 t = [t_x, t_y]
+    #     traction_y = -self._p / fm
+        
+    #     val = bm.set_at(val, (is_load_point, 1), traction_y)
+
+    #     return val
+    
+    # @cartesian
+    # def neumann_bc_normal(self, points: TensorLike) -> TensorLike:
+    #     """获取 Neumann 边界上的单位外法向量"""
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+        
+    #     kwargs = bm.context(points)
+    #     normals = bm.zeros((points.shape[0], 2), **kwargs)
+
+    #     # 上边界 y=1, n=(0, 1)
+    #     flag_top = bm.abs(y - domain[3]) < self._eps
+    #     normals = bm.set_at(normals, (flag_top, 1), 1.0)
+
+    #     # 下边界 y=0, n=(0, -1)
+    #     flag_bottom = bm.abs(y - domain[2]) < self._eps
+    #     normals = bm.set_at(normals, (flag_bottom, 1), -1.0)
+
+    #     return normals
+    
+    # @cartesian
+    # def is_neumann_boundary_dof_xx(self, points: TensorLike) -> TensorLike:
+    #     return bm.zeros(points.shape[:-1], dtype=bm.bool, device=points.device)
+
+    # @cartesian
+    # def is_neumann_boundary_dof_xy(self, points: TensorLike) -> TensorLike:
     #     domain = self.domain
     #     x, y = points[..., 0], points[..., 1]
 
+    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
     #     on_buttom_boundary = bm.abs(y - domain[2]) < self._eps
+        
+    #     return on_top_boundary | on_buttom_boundary
+    
+    # @cartesian
+    # def is_neumann_boundary_dof_yy(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
 
-    #     return on_buttom_boundary
+    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
+    #     on_buttom_boundary = bm.abs(y - domain[2]) < self._eps
+        
+    #     return on_top_boundary | on_buttom_boundary
+
+    # def is_neumann_boundary(self) -> Tuple[Callable, Callable, Callable]:
+        
+    #     return (self.is_neumann_boundary_dof_xx,
+    #             self.is_neumann_boundary_dof_xy,
+    #             self.is_neumann_boundary_dof_yy)

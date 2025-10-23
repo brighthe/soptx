@@ -37,14 +37,22 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 4, 4
 
-        elif model == 'tri_sol_mix_huzhang':
-            # 面力外载荷 + 混合边界条件
-            from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
+        elif model == 'tri_sol_mix_homo_dir_huzhang':
+            # 齐次 Dirichlet + 非齐次 Neumann
+            from soptx.model.linear_elasticity_2d import TriSolMixHomoDirHuZhang
             lam, mu = 1.0, 0.5
-            pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde = TriSolMixHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
-        
+
+        elif model == 'tri_sol_mix_nhomo_dir_huzhang':
+            # 非齐次 Dirichlet + 非齐次 Neumann
+            from soptx.model.linear_elasticity_2d import TriSolMixNHomoDirHuZhang            
+            lam, mu = 1.0, 0.5
+            pde = TriSolMixNHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+
         analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
         # import matplotlib.pyplot as plt
         # fig = plt.figure()
@@ -304,8 +312,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                     plane_type=plane_type,
                 )
             pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 80, 20
-            # nx, ny = 8, 2
+            # nx, ny = 80, 20
+            nx, ny = 8, 2
 
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
         NN = displacement_mesh.number_of_nodes()
@@ -556,14 +564,14 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
-    # huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
+    huzhang_analyzer.run.set('test_exact_solution_hzmfem')
+    huzhang_analyzer.run(model='tri_sol_mix_homo_dir_huzhang')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
 
-    huzhang_analyzer.run.set('test_none_exact_solution_hzmfem')
-    huzhang_analyzer.run(model='clamped_beam_2d')
+    # huzhang_analyzer.run.set('test_none_exact_solution_hzmfem')
+    # huzhang_analyzer.run(model='clamped_beam_2d')
 
     # huzhang_analyzer.run.set('test_none_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='bearing_device_2d')

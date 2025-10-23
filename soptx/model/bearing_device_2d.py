@@ -175,16 +175,6 @@ class HalfBearingDevice2D(PDEBase):
         val = bm.set_at(val, (flag_left, 0), 0.0)
         val = bm.set_at(val, (flag_left, 1), 0.0)
 
-        # # 上边界 y = 1
-        # flag_top = bm.abs(y - domain[3]) < self._eps
-        # val = bm.set_at(val, (flag_top, 0), 0.0)  
-        # val = bm.set_at(val, (flag_top, 1), self._t)
-
-        # # 左边界 x = 0
-        # flag_left = bm.abs(x - domain[0]) < self._eps
-        # val = bm.set_at(val, (flag_left, 0), 0.0)
-        # val = bm.set_at(val, (flag_left, 1), 0.0)
-
         return val
     
     @cartesian

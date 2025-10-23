@@ -283,8 +283,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         lform.add_integrator(integrator)
         F_v = lform.assembly(format='dense')
 
-        load_type = self._pde.load_type
+        #######################################################################################################################
+        # 应力边界条件处理方式 1: 集中载荷视作等效节点力
+        #######################################################################################################################
 
+        load_type = self._pde.load_type
+        
         if load_type == 'concentrated':
             # Neumann 边界条件处理
             gd_sigmah = self._pde.concentrate_load_bc
@@ -307,6 +311,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         else:
             F_u = -F_v
 
+        #######################################################################################################################
+        # 应力边界条件处理方式 2: 集中载荷近似为分布载荷
+        #######################################################################################################################
+
+        # F_u = -F_v
+        
         if enable_timing:
             t.send('组装时间')
             t.send(None)
@@ -333,12 +343,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             threshold_uh = self._pde.is_dirichlet_boundary()
             
             from soptx.analysis.integrators.face_source_integrator_mfem import BoundaryFaceSourceIntegrator_mfem
-            integrator_uh = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
+            integrator_sigmah = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
                                                             q=self._integration_order, 
                                                             threshold=threshold_uh,
                                                             method='dirichlet')
             lform_sigmah = LinearForm(space_sigmah)
-            lform_sigmah.add_integrator(integrator_uh)
+            lform_sigmah.add_integrator(integrator_sigmah)
             F_sigma = lform_sigmah.assembly(format='dense')
 
         if enable_timing:
