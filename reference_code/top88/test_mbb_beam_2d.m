@@ -126,7 +126,7 @@ while change > 0.01
 	l1 = 0; l2 = 1e9; move = 0.2;
 	while (l2-l1)/(l1+l2) > 1e-3
 		lmid = 0.5*(l2+l1);
-		xnew = max(0,max(x-move,min(1,min(x+move,x.*sqrt(-dc./dv/lmid)))));
+		xnew = max(0,max(x-move,min(1,min(x+move, x.*sqrt(-dc./dv/lmid)))));
 		if ft == 1 || ft == 0
 			xPhys = xnew;
 		elseif ft == 2

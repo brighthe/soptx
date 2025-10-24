@@ -1,5 +1,5 @@
-nelx = 4;
-nely = 2;
+nelx = 40;
+nely = 20;
 volfrac = 0.3;
 penal = 3.0;
 rmin = 1.2;

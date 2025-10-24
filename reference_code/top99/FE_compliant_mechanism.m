@@ -10,6 +10,7 @@ function [U, Uout] = FE_compliant_mechanism(nelx, nely, x, penal)
             K(edof, edof) = K(edof, edof) + x(ely, elx)^penal*KE;
         end
     end
+    K1_dense = full(K);
     % Define Loads And Suppotrs (Half-Force Inverter)
     din = 1;
     dout = 2*nelx*(nely+1)+1;
@@ -17,6 +18,7 @@ function [U, Uout] = FE_compliant_mechanism(nelx, nely, x, penal)
     F(dout, 2) = -1;
     K(din, din) = K(din, din) + 0.1;
     K(dout, dout) = K(dout, dout) + 0.1;
+    K2_dense = full(K);
     fixeddofs = union([2:2*(nely+1):2*(nely+1)*(nelx+1)], [2*(nely+1):-1:2*(nely+1)-3]);
     alldofs = [1:2*(nely+1)*(nelx+1)];
     freedofs = setdiff(alldofs, fixeddofs);
