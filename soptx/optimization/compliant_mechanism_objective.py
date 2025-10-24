@@ -17,54 +17,89 @@ class CompliantMechanismObjective(BaseLogged):
 
         self._analyzer = analyzer
         self._pde = analyzer.pde
-        self._space = analyzer.tensor_space
+        self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
             density: Union[Function, TensorLike], 
             displacement: Optional[TensorLike] = None,
            ) -> float:
         """
-        计算柔顺机构的目标函数值 (即输出点的位移 u_out).
+        计算柔顺机械的目标函数值 (即输出点的位移 u_out).
         """
-        if displacement is None:
-            U = self._analyzer.solve_displacement(rho_val=density, adjoint=True) 
+        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+            #* 拉格朗日位移有限元 *#
+            if displacement is None:
+                U = self._analyzer.solve_displacement(rho_val=density, adjoint=True) 
+            else:
+                U = displacement
+            
+            space_uh = self._analyzer.tensor_space
+
+            threshold_dout = self._pde.is_dout_boundary()
+            isBdTDof = space_uh.is_boundary_dof(threshold=threshold_dout, method='interp')
+
+            uh_real = U[:, 0]
+            u_out = uh_real[isBdTDof]
+
+        elif self._analyzer.__class__ in [HuZhangMFEMAnalyzer]:
+            #* 胡张应力位移混合有限元 *#
+            pass
+        
+        return u_out.item()
+    
+    def jac(self, 
+            density: Union[Function, TensorLike], 
+            displacement: Optional[Function] = None,
+            diff_mode: Literal["auto", "manual"] = "manual"
+        ) -> TensorLike:
+        """计算柔顺机械相对于物理密度的灵敏度"""
+
+        if diff_mode == "manual":
+            return self._manual_differentiation(density=density, displacement=displacement)
+
+        elif diff_mode == "auto": 
+            return self._auto_differentiation(density=density, displacement=displacement)
+
         else:
-            U = displacement
+            error_msg = f"Unknown diff_mode: {diff_mode}"
+            self._log_error(error_msg)
 
-        threshold_dout = self._pde.is_dout_boundary()
-        isBdTDof = self._space.is_boundary_dof(threshold=threshold_dout, method='interp')
+    def _manual_differentiation(self, 
+                                density: Union[Function, TensorLike], 
+                                displacement: Optional[Function] = None
+                            ) -> TensorLike:
+        """手动计算柔顺机械相对于物理密度的灵敏度"""
 
-        uh_real = U[:, 0]
-        u_out = uh_real[isBdTDof]
-        
+        density_location = self._interpolation_scheme.density_location
 
-        
-        # 目标函数只关心真实物理载荷下的位移，即第一列
-        uh_real = U[:, 0]
+        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+            #* 拉格朗日位移有限元 *#
+            if displacement is None:
+                uh = self._analyzer.solve_displacement(rho_val=density, adjoint=True)
+            else:
+                uh = displacement
+            
+            space_uh = self._analyzer._tensor_space
+            cell2dof = space_uh.cell_to_dof()
+            uhe = uh[cell2dof, 0]
+            lambdahe = uh[cell2dof, 1]
+            
+            diff_KE = self._analyzer.get_stiffness_matrix_derivative(rho_val=density)
 
-        # 2. 定位输出点的自由度 (DOF)
-        pde = self._analyzer._pde
-        tspace = self._analyzer.tensor_space
+            if density_location in ['element']:
+                dc = bm.einsum('ci, cij, cj -> c', lambdahe, diff_KE, uhe) # (NC, )
 
-        # 从 PDE 定义中获取输出点的边界条件函数
-        # is_output_boundary() 应该返回 (callable_for_x, None)
-        output_boundary_func = pde.is_output_boundary()
-        
-        # 找到对应的自由度布尔掩码
-        is_output_dof_mask = tspace.is_boundary_dof(threshold=output_boundary_func)
-        
-        # 将布尔掩码转换为索引
-        output_dof_idx = bm.where(is_output_dof_mask)[0]
-
-        if output_dof_idx.shape[0] != 1:
-            raise ValueError("未能精确定位到唯一的输出自由度。")
-        
-        output_dof_idx = output_dof_idx[0]
-
-        # 3. 提取目标函数值
-        # 目标函数值就是真实位移向量在输出自由度上的分量
-        u_out = uh_real[output_dof_idx]
-
-        # 优化器将最小化这个值。由于 u_out 是负数，
-        # 最小化它就等同于最大化其绝对值。
-        return u_out
+                return dc[:]
+            
+            elif density_location in ['element_multiresolution']:
+                pass
+            
+            elif density_location in ['node']:
+                pass
+            
+            elif density_location in ['node_multiresolution']:
+                pass
+            
+            else:
+                error_msg = f"Unknown density location: {density_location}"
+                self._log_error(error_msg)

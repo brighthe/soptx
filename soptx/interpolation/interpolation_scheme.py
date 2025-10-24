@@ -238,6 +238,7 @@ class MaterialInterpolationScheme(BaseLogged):
                     material: LinearElasticMaterial, 
                     rho_val: Union[Function, TensorLike],
                     integration_order: Optional[int] = None,
+                    displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
         """SIMP 插值: E(ρ) = ρ^p * E0"""
 

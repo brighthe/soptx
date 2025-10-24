@@ -28,9 +28,8 @@ class ComplianceObjective(BaseLogged):
             stress: Optional[Function] = None
         ) -> float:
         """计算柔顺度目标函数值"""
-
         if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
-            # 拉格朗日位移有限元
+            #* 拉格朗日位移有限元 *#
             if displacement is None:
                 uh = self._analyzer.solve_displacement(rho_val=density)
             else:
@@ -90,11 +89,6 @@ class ComplianceObjective(BaseLogged):
         
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
-        
-    
-    #####################################################################################################
-    # 内部方法
-    #####################################################################################################
         
     def _manual_differentiation(self, 
                                 density: Union[Function, TensorLike], 

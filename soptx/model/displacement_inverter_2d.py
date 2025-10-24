@@ -32,8 +32,8 @@ class DisplacementInverter2d(PDEBase):
                 mesh_type: str = 'uniform_quad',
                 f_in: float = 1.0,   # N, 输入力 (集中载荷)
                 f_out: float = -1.0, # N, 伴随力 (集中载荷)
-                k_in: float = 1.0,   # N/m, 输入弹簧刚度
-                k_out: float = 1.0,  # N/m, 输出弹簧刚度
+                k_in: float = 0.1,   # N/m, 输入弹簧刚度
+                k_out: float = 0.1,  # N/m, 输出弹簧刚度
                 E: float = 1.0,      # Pa (N/m^2)
                 nu: float = 0.3,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
@@ -158,6 +158,7 @@ class DisplacementInverter2d(PDEBase):
 
         return mesh
     
+
     #######################################################################################################################
     # 核心方法
     #######################################################################################################################
@@ -174,37 +175,96 @@ class DisplacementInverter2d(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
+    # @cartesian
+    # def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+    #     """
+    #     判断 x 方向的 Dirichlet 边界自由度
+    #     左下角完全固支 -> u_x = 0, u_y = 0
+    #     """
+    #     domain = self._domain
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     is_left = bm.abs(x - domain[0]) < self._eps
+    #     is_bottom = bm.abs(y - domain[2]) < self._eps 
+
+    #     return is_left & is_bottom
+    
+    # @cartesian
+    # def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+    #     """
+    #     判断 y 方向的 Dirichlet 边界自由度
+    #     左下角完全固支 -> u_x = 0, u_y = 0
+    #     顶部边界滑移支座 -> u_y = 0
+    #     """
+    #     domain = self._domain
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     is_left = bm.abs(x - domain[0]) < self._eps
+    #     is_bottom = bm.abs(y - domain[2]) < self._eps
+    #     is_bottom_left_corner = is_left & is_bottom 
+
+    #     is_top = bm.abs(y - domain[3]) < self._eps
+
+    #     return is_bottom_left_corner | is_top
+    
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         """
         判断 x 方向的 Dirichlet 边界自由度
-        底边完全固支 -> u_x = 0, u_y = 0
+        左边界下半部分完全固定 (u_x = 0)
         """
         domain = self._domain
-        y = points[..., 1]
-        coord = bm.abs(y - domain[2]) < self._eps
+        x, y = points[..., 0], points[..., 1]
+        
+        # 这里仅适用于单元长度为 1 的情况
+        y_max_support = domain[2] + 1.0
+        
+        # 检查是否在左边 (x == x_min)
+        is_left = bm.abs(x - domain[0]) < self._eps
+        # 检查是否在支撑高度以下 (y <= y_max_support)
+        is_below_support = (y <= y_max_support + self._eps)
 
-        return coord
+        is_bottom_left_segment = is_left & is_below_support
+
+        return is_bottom_left_segment
     
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         """
         判断 y 方向的 Dirichlet 边界自由度
-        底边完全固支 -> u_x = 0, u_y = 0
+        左边界下半部分完全固定 (u_y = 0)
+        顶部边界施加滑移支座 (u_y = 0)
         """
         domain = self._domain
-        y = points[..., 1]
-        coord = bm.abs(y - domain[2]) < self._eps
+        x, y = points[..., 0], points[..., 1]
+                
+        # TODO 这里仅适用于单元长度为 1 的情况, 如何作为参数指定
+        y_max_support = domain[2] + 1.0
 
-        return coord
+        # 检查是否在左边 (x == x_min)
+        is_left = bm.abs(x - domain[0]) < self._eps
+        # 检查是否在支撑高度以下 (y <= y_max_support)
+        is_below_support = y <= y_max_support + self._eps
+        
+        is_bottom_left_segment = is_left & is_below_support
+        
+        # 检查是否在顶边 (y == y_max)
+        is_top = bm.abs(y - domain[3]) < self._eps
+
+        return is_bottom_left_segment | is_top
     
+
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
           
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
     
+    #######################################################################################################################
+    # 应力边界条件(集中载荷)处理方式
+    #######################################################################################################################
     @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷点"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         # 力作用在 x 方向
@@ -213,7 +273,7 @@ class DisplacementInverter2d(PDEBase):
         return val
     
     @cartesian
-    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -222,12 +282,13 @@ class DisplacementInverter2d(PDEBase):
 
         return on_top_boundary & on_left_boundary
 
-    def is_neumann_boundary(self) -> Callable:
+    def is_concentrate_load_boundary(self) -> Callable:
         
-        return self.is_neumann_boundary_dof
+        return self.is_concentrate_load_boundary_dof
     
     @cartesian
-    def adjoint_bc(self, points: TensorLike) -> TensorLike:
+    def adjoint_load_bc(self, points: TensorLike) -> TensorLike:
+        """伴随载荷点"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         # 力作用在 x 方向
@@ -236,7 +297,7 @@ class DisplacementInverter2d(PDEBase):
         return val
     
     @cartesian
-    def is_adjoint_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def is_adjoint_load_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -244,11 +305,11 @@ class DisplacementInverter2d(PDEBase):
         on_right_boundary = (bm.abs(x - domain[1]) < self._eps)
 
         return on_top_boundary & on_right_boundary
-    
-    def is_adjoint_boundary(self) -> Callable:
-        
-        return self.is_adjoint_boundary_dof 
-    
+
+    def is_adjoint_load_boundary(self) -> Callable:
+
+        return self.is_adjoint_load_boundary_dof
+
     @cartesian
     def is_dout_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         """输出点的边界自由度的 x 分量"""

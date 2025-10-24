@@ -204,8 +204,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         k_in = self._pde.k_in
         k_out = self._pde.k_out
-
-        isBdDof = tspace.is_boundary_dof(threshold=self._pde.is_spring_boundary(), method='interp')
+        threshold_spring = self._pde.is_spring_boundary()
+        isBdDof = tspace.is_boundary_dof(threshold=threshold_spring, method='interp')
         spring_dofs = bm.where(isBdDof)[0]
         indices = bm.stack([spring_dofs, spring_dofs], axis=0)
         values = bm.tensor([k_in, k_out], dtype=bm.float64, device=tspace.device)
@@ -273,8 +273,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 raise NotImplementedError(f"不支持的载荷类型: {load_type}")
             
             if adjoint:
-                gd_adjoint = self._pde.adjoint_bc
-                threshold_adjoint = self._pde.is_adjoint_boundary()
+                gd_adjoint = self._pde.adjoint_load_bc
+                threshold_adjoint = self._pde.is_adjoint_load_boundary()
 
                 isBdTDof = space_uh.is_boundary_dof(threshold=threshold_adjoint, method='interp')
                 isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_adjoint, method='interp')
@@ -312,7 +312,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             else: 
                 F = F - K.matmul(uh_bd[:])
                 F[isBdDof] = uh_bd[isBdDof]
-
+            
             K = self._apply_matrix(A=K, isDDof=isBdDof)
 
             return K, F
@@ -632,7 +632,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             K, F = self.apply_bc(K0, F0)
 
             uh = self._tensor_space.function()
-        
+
         uh[:] = spsolve(K, F, solver=solver_type)
 
         gdof = self._tensor_space.number_of_global_dofs()

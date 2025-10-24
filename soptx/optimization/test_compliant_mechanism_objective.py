@@ -22,7 +22,7 @@ class CompliantMechanismObjectiveTester(BaseLogged):
     def run(self, model: str) -> None:
         """对于无真解的算例, 分别采用位移法和混合元方法的结果计算目标函数"""
 
-        if model == 'disp_inverter_2d':
+        if model == 'displacement_inverter_2d':
             E = 1.0
             nu = 0.3  
             plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
@@ -32,12 +32,12 @@ class CompliantMechanismObjectiveTester(BaseLogged):
                         domain=[0, 40, 0, 20],
                         f_in=1.0,
                         f_out=-1.0,
-                        k_in=1.0,
-                        k_out=1.0,
+                        k_in=0.1,
+                        k_out=0.1,
                         E=E, nu=nu,
                         plane_type=plane_type,
                     )
-            nx, ny = 4, 2
+            nx, ny = 40, 20
             pde.init_mesh.set('uniform_quad')
         
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -45,6 +45,16 @@ class CompliantMechanismObjectiveTester(BaseLogged):
         NE = displacement_mesh.number_of_edges()
         NC = displacement_mesh.number_of_cells()
         GD = displacement_mesh.geo_dimension()
+
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.gca()
+        # displacement_mesh.add_plot(axes)
+        # displacement_mesh.find_node(axes, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
+        # displacement_mesh.find_edge(axes, showindex=True, color='r', markersize=14, fontsize=18, fontcolor='r')
+        # displacement_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
+        # plt.show()
+
     
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -53,7 +63,19 @@ class CompliantMechanismObjectiveTester(BaseLogged):
                                             plane_type=pde.plane_type,
                                             enable_logging=False
                                         )
-
+        # 'element', 'node'
+        density_location = 'element'
+        penalty_factor = 3.0
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method='simp',
+                                    options={
+                                        'penalty_factor': penalty_factor,
+                                        'void_youngs_modulus': 1e-9,
+                                        'target_variables': ['E']
+                                    },
+                                )
         ## 位移 Lagrange 有限元
         space_degree = 1
         integration_order = space_degree + 4
@@ -66,8 +88,8 @@ class CompliantMechanismObjectiveTester(BaseLogged):
                                     integration_order=integration_order,
                                     assembly_method='standard',
                                     solve_method='mumps',
-                                    topopt_algorithm=None,
-                                    interpolation_scheme=None,
+                                    topopt_algorithm='density_based',
+                                    interpolation_scheme=interpolation_scheme,
                                 )
         space = lagrange_fem_analyzer.tensor_space
         TGDOF_uh = space.number_of_global_dofs()
@@ -75,12 +97,23 @@ class CompliantMechanismObjectiveTester(BaseLogged):
                     f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
                     f"离散方法={lagrange_fem_analyzer.__class__.__name__}, "
                     f"空间={space.__class__.__name__}, 次数={space.p}, 总自由度={TGDOF_uh}")
-        
-        uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None, adjoint=False)
+
+        # uh = lagrange_fem_analyzer.solve_displacement(density_distribution=None, adjoint=True)
+
+        relative_density = 0.3
+        if density_location in ['element']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                ) 
 
         state_variable = 'u'
         cmo_lfem = CompliantMechanismObjective(analyzer=lagrange_fem_analyzer)
-        c_lfem = cmo_lfem.fun(density=None)
+        c_lfem = cmo_lfem.fun(density=rho)
+
+        dc_lfem = cmo_lfem.jac(density=rho, diff_mode='manual')
 
         from pathlib import Path
         current_file = Path(__file__)
@@ -258,7 +291,7 @@ if __name__ == '__main__':
     compliant_mechanism_objective = CompliantMechanismObjectiveTester(enable_logging=True)
 
     compliant_mechanism_objective.run.set('test_compliance_none_exact_solution_lfem_hzmfem')
-    compliant_mechanism_objective.run(model='disp_inverter_2d')
+    compliant_mechanism_objective.run(model='displacement_inverter_2d')
 
     # compliant_mechanism_objective.run.set('test_compliance_exact_solution_lfem_hzmfem')
     # compliant_mechanism_objective.run(model='tri_sol_dir_huzhang')

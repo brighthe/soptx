@@ -6,6 +6,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
+from soptx.optimization.compliant_mechanism_objective import CompliantMechanismObjective
 from ..optimization.compliance_objective import ComplianceObjective
 from ..optimization.volume_constraint import VolumeConstraint
 from ..optimization.tools import OptimizationHistory
@@ -22,16 +23,18 @@ class OCOptions:
         self.tolerance = 0.001        # 收敛容差
 
         # OC 算法的高级参数
+        # 柔顺度最小化参数组合: m = 0.2, η = 0.5, λ = 1e9, btol = 1e-3
+        # 柔顺机械设计参数组合: m = 0.1, η = 0.3, λ = 1e6, btol = 1e-4
         self._move_limit = 0.2
         self._damping_coef = 0.5
         self._initial_lambda = 1e9
-        self._bisection_tol = 1e-3
+        self._bisection_tol = 1e-4
         
     def set_advanced_options(self, **kwargs):
         """设置高级选项，仅供专业用户使用
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         - **kwargs : 高级参数设置，可包含：
             - move_limit : 移动限制
             - damping_coef : 阻尼系数
@@ -76,7 +79,7 @@ class OCOptions:
 
 class OCOptimizer(BaseLogged):
     def __init__(self,
-                objective: ComplianceObjective,
+                objective: Union[ComplianceObjective, CompliantMechanismObjective],
                 constraint: VolumeConstraint,
                 filter: Filter,
                 options: OCOptions = None,
@@ -110,8 +113,8 @@ class OCOptimizer(BaseLogged):
             ) -> Tuple[TensorLike, OptimizationHistory]:
         """运行 OC 优化算法
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         design_variable : 设计变量
         density_distribution : 密度分布
         **kwargs : 其他参数
@@ -160,12 +163,9 @@ class OCOptimizer(BaseLogged):
             # 计算约束函数相对于设计变量的灵敏度
             con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
 
-            # TODO
-            temp = bm.max(bm.abs(obj_grad_dv)) / bm.max(bm.abs(con_grad_dv))
-
             # OC 算法: 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
-            while (l2 - l1) / (l2 + l1) > bisection_tol:
+            while (l2 - l1) / (l2 + l1) > bisection_tol and l2 > 1e-40:
                 lmid = 0.5 * (l2 + l1)
                 dv_new = self._update_density(design_variable=dv, dc=obj_grad_dv, dg=con_grad_dv, lmid=lmid)
 
@@ -232,26 +232,41 @@ class OCOptimizer(BaseLogged):
             dv_new = dv.space.function(bm.copy(dv[:]))
         else:
             dv_new = bm.copy(dv[:])
-    
 
         # 使用绝对值避免负数开方
-        B_e = -dc / (dg * lmid)
-        B_e_abs = bm.abs(B_e)
-        B_e_damped = bm.pow(B_e_abs, eta)
+        # B_e = -dc / (dg * lmid)
+        # B_e_abs = bm.abs(B_e)
+        # B_e_damped = bm.pow(B_e_abs, eta)
 
+        # dv_new[:] = bm.maximum(
+        #                 bm.tensor(1e-12, **kwargs), 
+        #                 bm.maximum(
+        #                     dv - m, 
+        #                     bm.minimum(
+        #                         bm.tensor(1.0, **kwargs), 
+        #                         bm.minimum(
+        #                             dv + m, 
+        #                             dv * B_e_damped
+        #                         )
+        #                     )
+        #                 )
+        #             )
+        B_e = -dc / (dg * lmid)
+        B_e_clipped = bm.maximum(bm.tensor(1e-12, **kwargs), B_e)
+        B_e_damped = bm.pow(B_e_clipped, eta)
         dv_new[:] = bm.maximum(
-            bm.tensor(0.0, **kwargs), 
-            bm.maximum(
-                dv - m, 
-                bm.minimum(
-                    bm.tensor(1.0, **kwargs), 
+                bm.tensor(1e-3, **kwargs), 
+                bm.maximum(
+                    dv - m, 
                     bm.minimum(
-                        dv + m, 
-                        dv * B_e_damped
+                        bm.tensor(1.0, **kwargs), 
+                        bm.minimum(
+                            dv + m,
+                            dv * B_e_damped
+                        )
                     )
                 )
             )
-        )
 
         if (bm.any(bm.isnan(dv_new[:])) or bm.any(bm.isinf(dv_new[:])) or
             bm.any(dv_new[:] < -1e-12) or bm.any(dv_new[:] > 1 + 1e-12)):
