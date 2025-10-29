@@ -14,6 +14,7 @@ from ..interpolation.interpolation_scheme import MaterialInterpolationScheme
 from .integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.model.pde_base import PDEBase
 from ..utils.base_logged import BaseLogged
+from soptx.utils import timer
 
 class LagrangeFEMAnalyzer(BaseLogged):
     def __init__(self,
@@ -350,7 +351,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ###############################################################################################
 
     def get_stiffness_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
-        """计算局部刚度矩阵关于物理密度的导数（灵敏度）"""
+        """计算局部刚度矩阵关于物理密度的导数 (灵敏度)"""
         
         density_location = self._interpolation_scheme.density_location
 
@@ -597,10 +598,15 @@ class LagrangeFEMAnalyzer(BaseLogged):
     @variantmethod('mumps')
     def solve_displacement(self, 
                         rho_val: Optional[Union[TensorLike, Function]] = None,
-                        adjoint: bool = False, 
+                        adjoint: bool = False,
+                        enable_timing: bool = True, 
                         **kwargs
                     ) -> Function:
-        
+        t = None
+        if enable_timing:
+            t = timer(f"分析阶段")
+            next(t)
+
         from fealpy.solver import spsolve
 
         if self._topopt_algorithm is None:
@@ -628,15 +634,25 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         else:
             K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+            if enable_timing:
+                t.send('双线性型组装')
+
             F0 = self.assemble_body_force_vector()
+            if enable_timing:
+                t.send('线性型组装')
+
             K, F = self.apply_bc(K0, F0)
+            if enable_timing:
+                t.send('边界条件处理')
 
             uh = self._tensor_space.function()
 
         uh[:] = spsolve(K, F, solver=solver_type)
+        if enable_timing:
+            t.send('求解')
 
-        gdof = self._tensor_space.number_of_global_dofs()
-        self._log_info(f"Solving linear system with {gdof} displacement DOFs with MUMPS solver.")
+        if enable_timing:
+            t.send(None)
 
         return uh
     

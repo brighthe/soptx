@@ -12,6 +12,7 @@ from ..optimization.volume_constraint import VolumeConstraint
 from ..optimization.tools import OptimizationHistory
 from ..regularization.filter import Filter
 from ..utils.base_logged import BaseLogged
+from soptx.utils import timer
 
 class OCOptions:
     """OC 算法的配置选项"""
@@ -84,7 +85,7 @@ class OCOptimizer(BaseLogged):
                 filter: Filter,
                 options: OCOptions = None,
                 enable_logging: bool = True,
-                logger_name: Optional[str] = None
+                logger_name: Optional[str] = None,
             ) -> None:
         
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
@@ -108,7 +109,8 @@ class OCOptimizer(BaseLogged):
 
     def optimize(self, 
                 design_variable: Union[Function, TensorLike],
-                density_distribution: Union[Function, TensorLike], 
+                density_distribution: Union[Function, TensorLike],
+                enable_timing: bool = True,
                 **kwargs
             ) -> Tuple[TensorLike, OptimizationHistory]:
         """运行 OC 优化算法
@@ -142,26 +144,48 @@ class OCOptimizer(BaseLogged):
 
         # 优化主循环
         for iter_idx in range(max_iters):
-            
+
+            t = None
+            if enable_timing:
+                t = timer(f"拓扑优化单次迭代")
+                next(t)
+
             start_time = time()
 
-            # 使用物理密度计算目标函数
-            obj_val = self._objective.fun(rho_phys)
+            # 使用物理密度求解位移场
+            uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
+            if enable_timing:
+                t.send('位移场求解')
+
+            # 使用物理密度和位移计算目标函数
+            obj_val = self._objective.fun(rho_phys, displacement=uh)
+            if enable_timing:
+                t.send('目标函数计算')
 
             # 计算目标函数相对于物理密度的灵敏度
-            obj_grad_rho = self._objective.jac(rho_phys)
+            obj_grad_rho = self._objective.jac(rho_phys, displacement=uh)
+            if enable_timing:
+                t.send('目标函数灵敏度分析 1')
 
             # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
-
+            if enable_timing:
+                t.send('目标函数灵敏度分析 2')
+            
             # 使用物理密度计算约束函数
             con_val = self._constraint.fun(rho_phys)
+            if enable_timing:
+                t.send('约束函数计算')
 
             # 计算约束函数相对于物理密度的灵敏度
             con_grad_rho = self._constraint.jac(rho_phys)
+            if enable_timing:
+                t.send('约束函数灵敏度分析 1')
 
             # 计算约束函数相对于设计变量的灵敏度
             con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
+            if enable_timing:
+                t.send('约束函数灵敏度分析 2')
 
             # OC 算法: 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
@@ -177,6 +201,8 @@ class OCOptimizer(BaseLogged):
                     l1 = lmid
                 else:
                     l2 = lmid
+            if enable_timing:
+                t.send('OC 优化')
 
             # 计算收敛性
             change = bm.max(bm.abs(dv_new - dv))
@@ -196,6 +222,9 @@ class OCOptimizer(BaseLogged):
                                 penalty_factor=self._objective._analyzer._interpolation_scheme.penalty_factor, 
                                 time_cost=iteration_time, 
                                 physical_density=rho_phys)
+            
+            if enable_timing:
+                t.send(None)
 
             # 收敛检查
             if change <= tol:

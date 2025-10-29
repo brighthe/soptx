@@ -30,7 +30,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         
         self.assembly.set(method)
 
-
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
         return space.cell_to_dof()[self._index]
@@ -76,18 +75,18 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         NC = mesh.number_of_cells()
         GD = mesh.geo_dimension()
         NQ = len(ws)
-        D0 = self._material.elastic_matrix()  # 2D: (1, 1, 3, 3); 3D: (1, 1, 6, 6)
+        D0 = self._material.elastic_matrix()  # (1, 1, NS, NS)
         
         # 不考虑相对密度: None; 相对单元密度: (NC, ); 相对节点密度: (NC, NQ)      
         coef = self._coef
 
         if coef is None:
-            D = D0[0, 0] # 2D: (3, 3); 3D: (6, 6)
+            D = D0[0, 0] # (NS, NS)
         elif coef.shape == (NC, ):
-            D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # 2D: (NC, 3, 3); 3D: (NC, 6, 6)
+            D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # (NC, NS, NS)
         elif coef.shape == (NC, NQ):
-            D = bm.einsum('cq, cqkl -> cqkl', coef, D0) # 2D: (NC, NQ, 3, 3); 3D: (NC, NQ, 6, 6)
-            
+            D = bm.einsum('cq, cqkl -> cqkl', coef, D0)    # (NC, NQ, NS, NS)
+
         if isinstance(mesh, SimplexMesh):
             A_xx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 0], cm)
             A_yy = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 1], gphi[..., 1], cm)
@@ -630,6 +629,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             S = bm.einsum('qim, qjn, q -> ijmnq', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, GD, GD, NQ)
         
             return cm, bcs, detJ, JG, S
+
 
     @assembly.register('fast')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:

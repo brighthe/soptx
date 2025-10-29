@@ -78,15 +78,12 @@ class ComplianceObjective(BaseLogged):
         """计算柔顺度目标函数相对于物理密度的灵敏度"""
 
         if diff_mode == "manual":
-
             return self._manual_differentiation(density=density, displacement=displacement)
 
         elif diff_mode == "auto": 
-
             return self._auto_differentiation(density=density, displacement=displacement)
 
         else:
-        
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
         

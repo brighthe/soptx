@@ -1,23 +1,32 @@
 clear all
 clc
-sigmay=8.25;
-nelx=100;
-nely=50;
-nc=100;
-volfrac=0.5;
-penal=3;
-x(1:nely,1:nelx)=volfrac;
-l=100;
-b=50;
-unit_size_x=l/nelx;
-unit_size_y=b/nely;
+% 屈服应力限制
+sigmay = 8.25;
+% p-norm 聚合参数
+p = 6;
+% 应力约束数量
+nc = 100;
+% 网格参数
+nelx = 100;
+nely = 50;
+% 几何参数
+l = 100;
+b = 50;
+M = l*b;
+unit_size_x = l / nelx;
+unit_size_y = b / nely;
+rmin = 1.5 * (unit_size_x + unit_size_y) / 2;
+% 材料参数
+E = 100;
 nu = 0.3;
-rmin=1.5*(unit_size_x+unit_size_y)/2;
-M=l*b;
-E=100;
-p=6;
-k=[ 1/2-nu/6   1/8+nu/8 -1/4-nu/12 -1/8+3*nu/8 ... 
-   -1/4+nu/12 -1/8-nu/8  nu/6       1/8-3*nu/8];
+% 优化参数
+volfrac = 0.5;
+penal = 3;
+x(1:nely, 1:nelx) = volfrac;
+
+% 单元刚度矩阵
+k = [ 1/2-nu/6   1/8+nu/8 -1/4-nu/12 -1/8+3*nu/8 ... 
+     -1/4+nu/12 -1/8-nu/8  nu/6       1/8-3*nu/8];
 KE = 1/(1-nu^2)*[ k(1) k(2) k(3) k(4) k(5) k(6) k(7) k(8)
                   k(2) k(1) k(8) k(7) k(6) k(5) k(4) k(3)
                   k(3) k(8) k(1) k(6) k(7) k(4) k(5) k(2)
@@ -25,23 +34,21 @@ KE = 1/(1-nu^2)*[ k(1) k(2) k(3) k(4) k(5) k(6) k(7) k(8)
                   k(5) k(6) k(7) k(8) k(1) k(2) k(3) k(4)
                   k(6) k(5) k(4) k(3) k(2) k(1) k(8) k(7)
                   k(7) k(4) k(5) k(2) k(3) k(8) k(1) k(6)
-                  k(8) k(3) k(2) k(5) k(4) k(7) k(6) k(1)];
-              
-              %Stress Analysis Properties
-B = (1/2/l)*[-1 0 1 0 1 0 -1 0; 0 -1 0 -1 0 1 0 1; -1 -1 -1 1 1 1 1 -1];
-C = E/(1-nu^2)*[1 nu 0; nu 1 0; 0 0 (1-nu)/2];
-
-              
-              
-              
-              %%%xval Calculation 
-count=1;
-          for g=1:nely
+                  k(8) k(3) k(2) k(5) k(4) k(7) k(6) k(1)]; 
+% 应变位移矩阵
+B = (1/2/l) * [-1  0  1  0  1  0 -1  0; 
+                0 -1  0 -1  0  1  0  1; 
+               -1 -1 -1  1  1  1  1 -1];
+% 本构矩阵
+C = E/(1-nu^2)*[1 nu 0; nu 1 0; 0 0 (1-nu)/2];           
+% 设计变量按行展开
+count = 1;
+for g=1:nely
     for h=1:nelx
-        xval(count,1)=x(g,h);
+        xval(count, 1) = x(g, h);
         count=count+1;
     end
-    end
+end
 
    
 %%Algorithm Initialization

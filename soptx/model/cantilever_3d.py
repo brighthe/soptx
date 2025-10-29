@@ -119,23 +119,6 @@ class CantileverBeam3d(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
-    # @cartesian
-    # def body_force(self, points: TensorLike) -> TensorLike:
-    #     x = points[..., 0]
-    #     y = points[..., 1]
-    #     z = points[..., 2]
-        
-    #     coord = (
-    #         (bm.abs(x - self._domain[1]) < self._eps) & 
-    #         (bm.abs(y - self._domain[0]) < self._eps)
-    #     )
-    #     kwargs = bm.context(points)
-    #     val = bm.zeros(points.shape, **kwargs)
-    #     # 在 y 方向施加载荷
-    #     val = bm.set_at(val, (coord, 1), self._T)
-        
-    #     return val
-    
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
