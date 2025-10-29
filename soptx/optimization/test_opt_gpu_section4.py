@@ -32,15 +32,15 @@ class DensityTopOptTest(BaseLogged):
                                 enable_logging=False
                             )
 
-            nx, ny = 60, 10
+            # nx, ny = 60, 10
             # nx, ny = 120, 20
-            # nx, ny = 240, 40
+            nx, ny = 240, 40
             # nx, ny = 300, 50
             mesh_type = 'uniform_quad'
             # mesh_type = 'uniform_aligned_tri'
             # mesh_type = 'uniform_crisscross_tri'
 
-            space_degree = 4
+            space_degree = 1
             integration_order = space_degree + 4
 
             volume_fraction = 0.6
@@ -53,10 +53,10 @@ class DensityTopOptTest(BaseLogged):
             relative_density = volume_fraction
 
             # 'standard', 'voigt', 'voigt_multiresolution'
-            assembly_method = 'voigt'
+            assembly_method = 'standard'
 
             optimizer_algorithm = 'mma'  # 'oc', 'mma'
-            max_iterations = 500
+            max_iterations = 1000
             tolerance = 1e-3
             use_penalty_continuation = True
 
