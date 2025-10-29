@@ -356,93 +356,340 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return F_sigma
+    
+    import functools
 
+    @functools.lru_cache(maxsize=None)
+    def _build_gdof_maps(self):
+        """
+        构建全局 DOF 到坐标和类型的映射。
+        
+        此函数被缓存 (@functools.lru_cache)，因此只在首次调用时运行。
+
+        返回:
+        - gdof_coords (gdof, GD): 每个 DOF 的物理坐标
+        - gdof_type_map (gdof,): 每个 DOF 的类型 (0-8)
+        """
+        space_sigmah = self._huzhang_space
+        mesh = space_sigmah.mesh
+        dof = space_sigmah.dof
+        
+        gdof_sigmah = space_sigmah.number_of_global_dofs()
+        ldof = space_sigmah.number_of_local_dofs()
+        NC = mesh.number_of_cells()
+        GD = mesh.geo_dimension()
+        NS = space_sigmah.NS # 3
+
+        # 1. 构建 local_type_map (ldof,)
+        #    标记局部自由度的类型
+        #    -1=UNKNOWN
+        #     0=NODE_XX, 1=NODE_XY, 2=NODE_YY
+        #     3=EDGE_NN (连续), 4=EDGE_NT (连续)
+        #     5=EDGE_TT (不连续)
+        #     6=CELL_XX (内部), 7=CELL_XY (内部), 8=CELL_YY (内部)
+        local_type_map = bm.full(ldof, -1, dtype=bm.int32)
+        idx = 0
+        
+        # 1a. 节点自由度 (NS*3 个)
+        # 顺序: (V0_xx, V0_xy, V0_yy), (V1_xx, V1_xy, V1_yy), (V2_...)
+        # 对应类型: [0, 1, 2, 0, 1, 2, 0, 1, 2]
+        n_node_dof_per_v = len(dof.cell_dofs.get_boundary_dof_from_dim(0)[0]) # 3
+        node_types = bm.array([0, 1, 2], dtype=bm.int32) # [NODE_XX, NODE_XY, NODE_YY]
+        local_type_map[idx : idx + n_node_dof_per_v * 3] = bm.tile(node_types, 3)
+        idx += n_node_dof_per_v * 3
+
+        # 1b. 边连续自由度 ( 2*(p-1) * 3 个 )
+        # 顺序: (E0_nn0, E0_nt0, E0_nn1, E0_nt1, ...), (E1_...), (E2_...)
+        # 对应类型: [3, 4, 3, 4, ...] 重复 3 次
+        edge_dofs_cont = dof.cell_dofs.get_boundary_dof_from_dim(1) # [E0_dofs, E1_dofs, E2_dofs]
+        edge_nn_nt_types = bm.array([3, 4], dtype=bm.int32) # [EDGE_NN, EDGE_NT]
+        
+        if len(edge_dofs_cont) > 0:
+            n_ldof_on_edge = len(edge_dofs_cont[0]) # 2*(p-1)
+            p_m1 = n_ldof_on_edge // 2 # (p-1)
+            if p_m1 > 0:
+                # [3, 4, 3, 4, ...] (p-1) pairs
+                edge_types_on_one_edge = bm.tile(edge_nn_nt_types, p_m1) 
+                local_type_map[idx : idx + n_ldof_on_edge * 3] = bm.tile(edge_types_on_one_edge, 3)
+                idx += n_ldof_on_edge * 3
+        
+        # 1c. 边不连续自由度 ( (p-1) * 3 个 )
+        # 顺序: (E0_tt0, E0_tt1, ...), (E1_...), (E2_...)
+        # 对应类型: [5, 5, ...] 重复 3 次
+        edge_dofs_int = dof.cell_dofs.get_internal_dof_from_dim(1) # [E0_dofs, E1_dofs, E2_dofs]
+        
+        if len(edge_dofs_int) > 0:
+            n_ldof_on_edge_int = len(edge_dofs_int[0]) # (p-1)
+            if n_ldof_on_edge_int > 0:
+                edge_int_types = bm.full(n_ldof_on_edge_int, 5, dtype=bm.int32) # [EDGE_TT, EDGE_TT, ...]
+                local_type_map[idx : idx + n_ldof_on_edge_int * 3] = bm.tile(edge_int_types, 3)
+                idx += n_ldof_on_edge_int * 3
+
+        # 1d. 单元内部自由度 ( NS * (p-1)*(p-2)/2 个 )
+        # 顺序: (C_xx0, C_xy0, C_yy0, C_xx1, C_xy1, C_yy1, ...)
+        # 对应类型: [6, 7, 8, 6, 7, 8, ...]
+        if idx < ldof:
+            n_cell_int_scalar_dofs = (ldof - idx) // NS # (p-1)*(p-2)/2
+            cell_types = bm.array([6, 7, 8], dtype=bm.int32) # [CELL_XX, CELL_XY, CELL_YY]
+            local_type_map[idx:] = bm.tile(cell_types, n_cell_int_scalar_dofs)
+
+        # 2. 获取局部坐标
+        # (ldof, 3) 数组, 顺序与 local_type_map 一一对应
+        local_ips_bc = space_sigmah.interpolation_points() #
+        
+        # 3. 映射到物理坐标
+        # physical_ips_all_cells[i, j, :] 是 cell i, local dof j 的物理坐标
+        physical_ips_all_cells = mesh.bc_to_point(local_ips_bc, index=bm.arange(NC)) # (NC, ldof, GD)
+
+        # 4. 构建全局映射
+        cell2dof = space_sigmah.cell_to_dof() # (NC, ldof)
+        
+        # 初始化为 NaN 和 -1, 以便调试时发现未被单元覆盖的 DOF
+        gdof_coords = bm.full((gdof_sigmah, GD), bm.nan, dtype=space_sigmah.ftype, device=space_sigmah.device)
+        gdof_type_map = bm.full(gdof_sigmah, -1, dtype=bm.int32, device=space_sigmah.device)
+
+        # 遍历所有单元，填充映射表
+        # 对于共享自由度 (节点/边), 后续单元会覆盖先前单元的写入，
+        # 这是正确的, 因为共享 DOF 的坐标和类型在所有共享单元中是一致的。
+        for i in range(NC):
+            gdofs_i = cell2dof[i] # (ldof,)
+            gdof_coords = bm.set_at(gdof_coords, gdofs_i, physical_ips_all_cells[i])
+            gdof_type_map = bm.set_at(gdof_type_map, gdofs_i, local_type_map)
+            
+        return gdof_coords, gdof_type_map
+    
     def apply_neumann_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
-        """应用 Neumann 边界条件"""
+        """
+        应用 Neumann 边界条件 (强施加)
+        使用 interpolation_points 的精确坐标，支持任意阶 p
+        """
         space_sigmah = self._huzhang_space
         space_uh = self._tensor_space
 
         gdof_sigmah = space_sigmah.number_of_global_dofs()
         gdof_uh = space_uh.number_of_global_dofs()
+        
+        # 1. 确定所有被约束的 DOF (包含节点和边)
+        threshold_sigmah_node = self._pde.is_neumann_boundary()
+        threshold_sigmah_edge = self._pde.is_neumann_boundary_edge()
+        
+        threshold_dict = {
+            'node': threshold_sigmah_node,
+            'edge': threshold_sigmah_edge
+        }
+        
+        isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_dict, method='barycenter')
 
+        bd_dof_idx = bm.where(isBdDof_sigmah)[0]
+        
+        # 如果没有 Neumann DOFs, 直接返回
+        if len(bd_dof_idx) == 0:
+            return K, F
+
+        # 2. 获取全局 DOF 映射
+        # (self._build_gdof_maps 会被缓存，只在首次调用时计算)
+        gdof_coords, gdof_type_map = self._build_gdof_maps()
+
+        # 3. 获取边界 DOF 的坐标和类型
+        bd_dof_coords = gdof_coords[bd_dof_idx]
+        bd_dof_types = gdof_type_map[bd_dof_idx] 
+
+        # 4. 在精确坐标处计算 PDE 值
+        g_values = self._pde.neumann_bc(bd_dof_coords)         # (N_bd, 2)
+        n_values = self._pde.neumann_bc_normal(bd_dof_coords)  # (N_bd, 2)
+        t_values = self._pde.neumann_bc_tangent(bd_dof_coords) # (N_bd, 2)
+        
+        g_x, g_y = g_values[..., 0], g_values[..., 1]
+        n_x, n_y = n_values[..., 0], n_values[..., 1]
+
+        # 5. 计算所有可能的边界值
+        sigmah_bd_values = bm.zeros(len(bd_dof_idx), dtype=space_sigmah.ftype, device=space_sigmah.device)
+
+        # 5a. 计算 nn 和 nt (用于边 DOF)
+        sigma_nn_values = bm.einsum('...i,...i->...', g_values, n_values)
+        sigma_nt_values = bm.einsum('...i,...i->...', g_values, t_values)
+
+        # 5b. 计算 xx, xy, yy (用于节点 DOF)
+        sigma_xx_values = bm.full_like(g_x, bm.nan)
+        sigma_xy_values = bm.full_like(g_x, bm.nan)
+        sigma_yy_values = bm.full_like(g_x, bm.nan)
+
+        is_nx_dominant = (bm.abs(n_x) > 1.0 - 1e-12)
+        is_ny_dominant = (bm.abs(n_y) > 1.0 - 1e-12)
+
+        if bm.any(is_nx_dominant):
+            sigma_xx_values = bm.set_at(sigma_xx_values, is_nx_dominant, g_x[is_nx_dominant] / n_x[is_nx_dominant])
+            sigma_xy_values = bm.set_at(sigma_xy_values, is_nx_dominant, g_y[is_nx_dominant] / n_x[is_nx_dominant])
+        
+        if bm.any(is_ny_dominant):
+            sigma_xy_values = bm.set_at(sigma_xy_values, is_ny_dominant, g_x[is_ny_dominant] / n_y[is_ny_dominant])
+            sigma_yy_values = bm.set_at(sigma_yy_values, is_ny_dominant, g_y[is_ny_dominant] / n_y[is_ny_dominant])
+
+        # 6. 根据 DOF 类型，从计算好的值中选择
+        is_xx = (bd_dof_types == 0)
+        is_xy = (bd_dof_types == 1)
+        is_yy = (bd_dof_types == 2)
+        is_nn = (bd_dof_types == 3)
+        is_nt = (bd_dof_types == 4)
+        
+        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_xx, sigma_xx_values[is_xx])
+        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_xy, sigma_xy_values[is_xy])
+        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_yy, sigma_yy_values[is_yy]) 
+        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_nn, sigma_nn_values[is_nn])
+        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_nt, sigma_nt_values[is_nt])
+
+        # 7. 构建完整的 sigmah_bd 向量
+        sigmah_bd = bm.zeros(gdof_sigmah, dtype=space_sigmah.ftype, device=space_sigmah.device)
+        sigmah_bd = bm.set_at(sigmah_bd, bd_dof_idx, sigmah_bd_values)
+
+        # 8. 标准的施加边界条件流程
+        load_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
+        load_bd[:gdof_sigmah] = sigmah_bd
+
+        F = F - K.matmul(load_bd[:])
+        F[:gdof_sigmah][isBdDof_sigmah] = sigmah_bd[isBdDof_sigmah]
+
+        isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
+        isBdDof[:gdof_sigmah] = isBdDof_sigmah  
+        
+        K = self._apply_matrix(A=K, isDDof=isBdDof)
+
+        return K, F
+
+    def apply_neumann_bc_old(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
+        """应用 Neumann 边界条件"""
+        space_sigmah = self._huzhang_space
+        space_uh = self._tensor_space
+        
         mesh = space_sigmah.mesh
-        NN = mesh.number_of_nodes()
-        NS = space_sigmah.NS
-        node = mesh.entity('node')
+        p = space_sigmah.p
+
+        gdof_sigmah = space_sigmah.number_of_global_dofs()
+        gdof_uh = space_uh.number_of_global_dofs()
 
         #* Neumann 边界条件处理 - σ·n 强形式施加 *#
         # 1. 使用 is_boundary_dof 确定所有被约束的 DOF
-        threshold_sigmah = self._pde.is_neumann_boundary()
-        isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_sigmah, method='barycenter')
-
-        # 2. 准备计算应力值
-        is_xx_func = threshold_sigmah[0]
-        is_xy_func = threshold_sigmah[1]
-        is_yy_func = threshold_sigmah[2]
-
-        is_neumann_node = (is_xx_func(node) | 
-                           is_xy_func(node) | 
-                           is_yy_func(node))
-        neumann_nodes_idx = bm.where(is_neumann_node)[0]
-        neumann_nodes_coords = node[neumann_nodes_idx]
-
-        # 3. 获取牵引力 t 和 法向量 n
-        t_values = self._pde.neumann_bc(neumann_nodes_coords)    
-        n_values = self._pde.neumann_bc_normal(neumann_nodes_coords) 
-
-        t_x, t_y = t_values[..., 0], t_values[..., 1]
-        n_x, n_y = n_values[..., 0], n_values[..., 1]
-
-        # 4. 通用映射：(t, n) -> (sigma_xx, sigma_xy, sigma_yy)
-        #    初始化所有节点的 sigma 值为 NaN
-        target_sigma_vals = bm.full((NN, NS), bm.nan, dtype=space_sigmah.ftype)
-
-        # 查找 n_x 主导的节点 (左右边界)
-        is_nx_dominant = (bm.abs(n_x) > 1.0 - 1e-12)
-        # 查找 n_y 主导的节点 (上下边界)
-        is_ny_dominant = (bm.abs(n_y) > 1.0 - 1e-12)
-
-        # 4a. 处理 n_x 主导的节点 (左右边界)
-        idx_nx_global = neumann_nodes_idx[is_nx_dominant]
-        if len(idx_nx_global) > 0:
-            n_x_sub = n_x[is_nx_dominant]
-            t_x_sub = t_x[is_nx_dominant]
-            t_y_sub = t_y[is_nx_dominant]
-            
-            # σ_xx = t_x / n_x
-            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_nx_global, 0), t_x_sub / n_x_sub)
-            # σ_xy = t_y / n_x
-            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_nx_global, 1), t_y_sub / n_x_sub)
-            # σ_yy 保持 NaN
-
-        # 4b. 处理 n_y 主导的节点 (上下边界)
-        idx_ny_global = neumann_nodes_idx[is_ny_dominant]
-        if len(idx_ny_global) > 0:
-            n_y_sub = n_y[is_ny_dominant]
-            t_x_sub = t_x[is_ny_dominant]
-            t_y_sub = t_y[is_ny_dominant]
-            
-            # σ_xy = t_x / n_y
-            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_ny_global, 1), t_x_sub / n_y_sub)
-            # σ_yy = t_y / n_y
-            target_sigma_vals = bm.set_at(target_sigma_vals, (idx_ny_global, 2), t_y_sub / n_y_sub)
-            # σ_xx 保持 NaN
-
-        # 5. 构建 sigmah_bd 向量
+        threshold_sigmah_node = self._pde.is_neumann_boundary()
+        threshold_sigmah_edge = self._pde.is_neumann_boundary_edge()
+        isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold={'node': threshold_sigmah_node, 'edge': threshold_sigmah_edge}, 
+                                                    method='barycenter')
+        
+        ip = space_sigmah.interpolation_points()
+        
+        # 2. 构建 sigmah_bd 向量
         sigmah_bd = bm.zeros(gdof_sigmah, dtype=space_sigmah.ftype, device=space_sigmah.device)
+        
+        # --------------------------------------------------
+        # Part A: 处理节点自由度
+        # --------------------------------------------------
+        NS = space_sigmah.NS
+        node = mesh.entity('node')
+        NN = mesh.number_of_nodes()
         node2dof = space_sigmah.dof.node_to_dof() # (NN, 3)
 
-        # 遍历所有 Neumann 节点，填充 sigmah_bd
-        for node_idx in neumann_nodes_idx:
-            dofs = node2dof[node_idx]        # (3,)
-            vals = target_sigma_vals[node_idx] # (3,)
-            
-            for j in range(NS):
-                # 只有当值不是 NaN 时才填充 (即该分量被约束)
-                if not bm.isnan(vals[j]):
-                    sigmah_bd[dofs[j]] = vals[j]
+        is_xx_func, is_xy_func, is_yy_func = threshold_sigmah_node
+        is_neumann_node = (is_xx_func(node) | is_xy_func(node) | is_yy_func(node))
+        
+        neumann_nodes_idx = bm.where(is_neumann_node)[0]
 
+        if len(neumann_nodes_idx) > 0:
+            neumann_nodes_coords = node[neumann_nodes_idx]
+
+            # 获取牵引力 t 和 法向量 n
+            t_values = self._pde.neumann_bc(neumann_nodes_coords)         # (N_nodes, 2)
+            n_values = self._pde.neumann_bc_normal(neumann_nodes_coords)  # (N_nodes, 2)
+
+            t_x, t_y = t_values[..., 0], t_values[..., 1]
+            n_x, n_y = n_values[..., 0], n_values[..., 1]
+
+            # 通用映射：(t, n) -> (sigma_xx, sigma_xy, sigma_yy)
+            target_sigma_vals = bm.full((NN, NS), bm.nan, dtype=space_sigmah.ftype)
+
+            is_nx_dominant = (bm.abs(n_x) > 1.0 - 1e-12)
+            is_ny_dominant = (bm.abs(n_y) > 1.0 - 1e-12)
+
+            # 4a. 处理 n_x 主导的节点 (左右边界)
+            idx_nx_global = neumann_nodes_idx[is_nx_dominant]
+            if len(idx_nx_global) > 0:
+                n_x_sub = n_x[is_nx_dominant]
+                t_x_sub = t_x[is_nx_dominant]
+                t_y_sub = t_y[is_nx_dominant]
+                
+                # σ_xx = t_x / n_x
+                target_sigma_vals = bm.set_at(target_sigma_vals, (idx_nx_global, 0), t_x_sub / n_x_sub)
+                # σ_xy = t_y / n_x
+                target_sigma_vals = bm.set_at(target_sigma_vals, (idx_nx_global, 1), t_y_sub / n_x_sub)
+                # σ_yy 保持 NaN
+
+            # 4b. 处理 n_y 主导的节点 (上下边界)
+            idx_ny_global = neumann_nodes_idx[is_ny_dominant]
+            if len(idx_ny_global) > 0:
+                n_y_sub = n_y[is_ny_dominant]
+                t_x_sub = t_x[is_ny_dominant]
+                t_y_sub = t_y[is_ny_dominant]
+                
+                # σ_xy = t_x / n_y
+                target_sigma_vals = bm.set_at(target_sigma_vals, (idx_ny_global, 1), t_x_sub / n_y_sub)
+                # σ_yy = t_y / n_y
+                target_sigma_vals = bm.set_at(target_sigma_vals, (idx_ny_global, 2), t_y_sub / n_y_sub)
+                # σ_xx 保持 NaN
+
+            # 5. 遍历所有 Neumann 节点, 填充 sigmah_bd
+            for node_idx in neumann_nodes_idx:
+                dofs = node2dof[node_idx]          # (3,)
+                vals = target_sigma_vals[node_idx] # (3,)
+                
+                for j in range(NS):
+                    # 只有当值不是 NaN 时才填充 (即该分量被约束)
+                    if not bm.isnan(vals[j]):
+                        sigmah_bd[dofs[j]] = vals[j]
+
+        # --------------------------------------------------
+        # Part B: 处理边自由度 (p >= 2)
+        # --------------------------------------------------
+        n_edge_ldof = space_sigmah.dof.number_of_internal_local_dofs('edge')
+        if n_edge_ldof > 0:
+            n_comp_per_group = p - 1
+            edge2idof = space_sigmah.dof.edge_to_internal_dof() # (NE, 2*(p-1))
+            edge_centers = mesh.entity_barycenter('edge')
+
+            is_nn_func, is_nt_func = threshold_sigmah_edge
+
+            # --- 5a. 处理 σ_nn 边自由度 ---
+            sigma_nn_bc = self._pde.sigma_nn_bc
+            
+            is_nn_edge_flag = is_nn_func(edge_centers) # (NE, )
+            nn_edges_idx = bm.where(is_nn_edge_flag)[0]
+
+            if len(nn_edges_idx) > 0:
+                nn_edge_coords = edge_centers[nn_edges_idx]
+                nn_values = sigma_nn_bc(nn_edge_coords)  # (N_nn_edges, )
+
+                # 获取这些边对应的所有 nn 自由度 (偶数索引)
+                nn_dofs_global = edge2idof[nn_edges_idx, ::n_comp_per_group] # (N_nn_edges, p-1)
+
+                nn_values_expanded = nn_values[:, None] # (N_nn_edges, 1) -> 广播到 (N_nn_edges, p-1)
+                sigmah_bd = bm.set_at(sigmah_bd, nn_dofs_global, nn_values_expanded)
+
+            # --- 5b. 处理 σ_nt 边自由度 ---
+            sigma_nt_bc = self._pde.sigma_nt_bc
+
+            is_nt_edge_flag = is_nt_func(edge_centers) # (NE, )
+            nt_edges_idx = bm.where(is_nt_edge_flag)[0]
+
+            if len(nt_edges_idx) > 0:
+                nt_edge_coords = edge_centers[nt_edges_idx]
+                nt_values = sigma_nt_bc(nt_edge_coords)  # (N_nt_edges, )
+
+                # 获取这些边对应的所有 nt 自由度 (奇数索引)
+                nt_dofs_global = edge2idof[nt_edges_idx, 1::n_comp_per_group] # (N_nt_edges, p-1)
+
+                nt_values_expanded = nt_values[:, None] # (N_nt_edges, 1) -> 广播到 (N_nt_edges, p-1)
+                sigmah_bd = bm.set_at(sigmah_bd, nt_dofs_global, nt_values_expanded)
+
+        # --------------------------------------------------
         # 6. 标准的施加边界条件流程
+        # --------------------------------------------------
         load_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
         load_bd[:gdof_sigmah] = sigmah_bd
 
@@ -514,7 +761,87 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('应用边界条件时间')
             
-        solver_type = kwargs.get('solver', 'mumps')
+        # solver_type = kwargs.get('solver', 'mumps')
+        solver_type = kwargs.get('solver', 'scipy')
+
+        X = spsolve(K, F, solver=solver_type)
+
+        if enable_timing:
+            t.send('求解线性系统时间')
+
+        space0 = self._huzhang_space
+        space1 = self._tensor_space
+        gdof0 = space0.number_of_global_dofs()
+
+        sigmaval = X[:gdof0]
+        uval = X[gdof0:]
+
+        sigmah = space0.function()
+        sigmah[:] = sigmaval
+
+        uh = space1.function()
+        uh[:] = uval
+
+        if enable_timing:
+            t.send('结果赋值时间')
+            t.send(None)
+
+        return sigmah, uh
+    
+    @variantmethod('scipy')
+    def solve_displacement(self, 
+                        rho_val: Optional[Union[TensorLike, Function]] = None, 
+                        enable_timing: bool = False, 
+                        **kwargs
+                    ) -> Tuple[Function, Function]:
+        
+        t = None
+        if enable_timing:
+            t = timer(f"分析阶段时间")
+            next(t)
+        
+        from fealpy.solver import spsolve
+
+        if self._topopt_algorithm is None:
+            if rho_val is not None:
+                self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
+        
+        elif self._topopt_algorithm in ['density_based', 'level_set']:
+            if rho_val is None:
+                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+                self._log_error(error_msg)
+    
+        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+
+        if enable_timing:
+            t.send('刚度矩阵组装时间')
+
+        space_sigmah = self._huzhang_space
+        space_uh = self._tensor_space
+        gdof_sigmah = space_sigmah.number_of_global_dofs()
+        gdof_uh = space_uh.number_of_global_dofs()
+        gdof = gdof_sigmah + gdof_uh
+        F0 = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
+
+        F_sigmah = self.assemble_stress_load_vector()
+        F0[:gdof_sigmah] = F_sigmah
+        
+        F_uh = self.assemble_displacement_load_vector()
+        F0[gdof_sigmah:] = F_uh
+
+        if enable_timing:
+            t.send('载荷向量组装时间')
+
+        boundary_type = self._pde.boundary_type
+        if boundary_type == 'dirichlet':
+            K, F = K0, F0
+        else:
+            K, F = self.apply_neumann_bc(K0, F0)
+
+        if enable_timing:
+            t.send('应用边界条件时间')
+            
+        solver_type = kwargs.get('solver', 'scipy')
 
         X = spsolve(K, F, solver=solver_type)
 

@@ -211,11 +211,20 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_cantilever_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 100.0, 0, 60.0]
+
+        #* 矩形悬臂梁 (rectangle) */
+        # domain = [0, 100.0, 0, 60.0]
+        # nx, ny = 100, 60
+        volume_fraction = 0.4
+
+        #* 方形悬臂梁 (square) */
+        domain = [0, 40.0, 0, 40.0]
+        nx, ny = 40, 40
+        volume_fraction = 0.35
+
         p = -1.0
         E, nu = 1.0, 0.3
 
-        nx, ny = 100, 60
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_aligned_tri'
         # mesh_type = 'uniform_crisscross_tri'
@@ -223,11 +232,10 @@ class DensityTopOptTest(BaseLogged):
         space_degree = 1
         integration_order = space_degree + 4 
 
-        volume_fraction = 0.4
         penalty_factor = 3.0
 
         # 'element', 'node'
-        density_location = 'element'
+        density_location = 'node'
         relative_density = volume_fraction
 
         # 'standard', 'voigt'
@@ -238,7 +246,7 @@ class DensityTopOptTest(BaseLogged):
         tolerance = 1e-2
         use_penalty_continuation = False
 
-        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
+        filter_type = 'none' # 'none', 'sensitivity', 'density'
         rmin = 6.0
 
         from soptx.model.cantilever_2d import CantileverCorner2d
@@ -580,7 +588,7 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    # test.run.set('test_cantilever_2d')
+    test.run.set('test_cantilever_2d')
 
-    test.run.set('test_displacement_inverter_2d')
+    # test.run.set('test_displacement_inverter_2d')
     rho_opt, history = test.run()

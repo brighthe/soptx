@@ -43,7 +43,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             lam, mu = 1.0, 0.5
             pde = TriSolMixHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 2, 2
+            nx, ny = 2, 2 
 
         elif model == 'tri_sol_mix_nhomo_dir_huzhang':
             # 非齐次 Dirichlet + 非齐次 Neumann
@@ -54,6 +54,9 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             nx, ny = 2, 2
 
         analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        # n = analysis_mesh.edge_unit_normal()
+        # t = analysis_mesh.edge_tangent(unit=True)
         # import matplotlib.pyplot as plt
         # fig = plt.figure()
         # axes = fig.gca()
@@ -63,7 +66,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         # analysis_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
         # plt.show()
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -96,7 +99,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                                     material=material,
                                                     space_degree=space_degree,
                                                     integration_order=integration_order,
-                                                    solve_method='mumps',
+                                                    solve_method='scipy',
                                                     topopt_algorithm=None,
                                                     interpolation_scheme=None,
                                                 )
@@ -107,26 +110,11 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
             sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
 
-            # space_sigmah = huzhang_mfem_analyzer.huzhang_space
-            # space_uh = huzhang_mfem_analyzer.tensor_space
-            # TLDOF_uh = space_uh.number_of_local_dofs()
-            # TLDOF_sigmah_n = space_sigmah.dof.number_of_internal_local_dofs('node')
-        
-            # mesh = space_uh.mesh
-            # NN = mesh.number_of_nodes()
-            # NC = mesh.number_of_cells()
-
-            # uh_component = uh.reshape(NC, TLDOF_uh) 
-            # sigmah_component = sigmah.reshape(NN, TLDOF_sigmah_n)
-
-            # analysis_mesh.celldata['uh'] = uh_component
-            # analysis_mesh.nodedata['stress'] = sigmah_component
-
-            # from pathlib import Path
-            # current_file = Path(__file__)
-            # base_dir = current_file.parent.parent / 'vtu'
-            # base_dir = str(base_dir)
-            # analysis_mesh.to_vtk(f"{base_dir}/uh_hzmfem.vtu") 
+            gdof_coords, gdof_type_map = huzhang_mfem_analyzer._build_gdof_maps()
+            sigma_values = pde.stress_solution(gdof_coords)
+            component_idx = gdof_type_map % 3
+            gdof = len(gdof_type_map)
+            exact_vals = sigma_values[bm.arange(gdof), component_idx]
 
             e_uh_l2 = analysis_mesh.error(u=uh, 
                                     v=pde.disp_solution,
@@ -174,7 +162,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             from soptx.model.linear_elasticity_2d import TriSolMixHuZhangData
             pde = TriSolMixHuZhangData(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 2, 2
+            nx, ny = 5, 5
             displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         elif model == 'tri_sol_dir_huzhang':

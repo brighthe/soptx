@@ -175,37 +175,6 @@ class DisplacementInverter2d(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
-    # @cartesian
-    # def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
-    #     """
-    #     判断 x 方向的 Dirichlet 边界自由度
-    #     左下角完全固支 -> u_x = 0, u_y = 0
-    #     """
-    #     domain = self._domain
-    #     x, y = points[..., 0], points[..., 1]
-
-    #     is_left = bm.abs(x - domain[0]) < self._eps
-    #     is_bottom = bm.abs(y - domain[2]) < self._eps 
-
-    #     return is_left & is_bottom
-    
-    # @cartesian
-    # def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
-    #     """
-    #     判断 y 方向的 Dirichlet 边界自由度
-    #     左下角完全固支 -> u_x = 0, u_y = 0
-    #     顶部边界滑移支座 -> u_y = 0
-    #     """
-    #     domain = self._domain
-    #     x, y = points[..., 0], points[..., 1]
-
-    #     is_left = bm.abs(x - domain[0]) < self._eps
-    #     is_bottom = bm.abs(y - domain[2]) < self._eps
-    #     is_bottom_left_corner = is_left & is_bottom 
-
-    #     is_top = bm.abs(y - domain[3]) < self._eps
-
-    #     return is_bottom_left_corner | is_top
     
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:

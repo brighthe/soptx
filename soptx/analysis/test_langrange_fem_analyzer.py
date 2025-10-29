@@ -36,6 +36,22 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     plane_type=pde.plane_type,
                                     enable_logging=False
                                 )
+
+        elif model == 'tri_sol_neumann_huzhang':
+            # 纯 Neumann
+            from soptx.model.linear_elasticity_2d import TriSolPureNeumannHuZhang
+            lam, mu = 1.0, 0.5
+            pde = TriSolPureNeumannHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
             
         elif model == 'tri_sol_mix_homo_dir_huzhang':
             # 齐次 Dirichlet + 非齐次 Neumann
@@ -117,7 +133,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "

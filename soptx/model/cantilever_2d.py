@@ -174,7 +174,8 @@ class CantileverCorner2d(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
     
     @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p) 
@@ -182,7 +183,7 @@ class CantileverCorner2d(PDEBase):
         return val
     
     @cartesian
-    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -190,10 +191,10 @@ class CantileverCorner2d(PDEBase):
         on_bottom_boundary = bm.abs(y - domain[2]) < self._eps
 
         return on_right_boundary & on_bottom_boundary
-    
-    def is_neumann_boundary(self) -> Callable:
-        
-        return self.is_neumann_boundary_dof
+
+    def is_concentrate_load_boundary(self) -> Callable:
+
+        return self.is_concentrate_load_boundary_dof
 
 class CantileverBeamMiddle2dData(PDEBase):
     '''

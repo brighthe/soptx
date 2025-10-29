@@ -261,8 +261,8 @@ class MMAOptimizer(BaseLogged):
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
         """运行 MMA 优化算法
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         design_variable : 设计变量
         density_distribution : 密度分布
         **kwargs : 其他参数
@@ -343,13 +343,10 @@ class MMAOptimizer(BaseLogged):
             con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
             
             # MMA 算法: 
-            # 标准化约束函数及其梯度 (物理上必须)
+            # 标准化约束函数及其梯度
             cm = self._filter.mesh.entity_measure('cell')
             fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
             dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
-
-            # TODO
-            temp = bm.max(bm.abs(obj_grad_dv)) / bm.max(bm.abs(dfdx)) 
 
             # 求解子问题
             dv_new, low, upp = self._solve_subproblem(
@@ -410,8 +407,8 @@ class MMAOptimizer(BaseLogged):
                         ) -> Tuple[TensorLike, TensorLike]:
         """更新渐近线位置
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         xval : TensorLike (n, 1)
             当前设计变量
         xmin : TensorLike (n, 1)
@@ -423,8 +420,8 @@ class MMAOptimizer(BaseLogged):
         xold2 : TensorLike (n, 1)
             前两步设计变量
             
-        Returns:
-        --------
+        Returns
+        -------
         Tuple[TensorLike, TensorLike]
             更新后的下渐近线和上渐近线
         """
@@ -471,8 +468,8 @@ class MMAOptimizer(BaseLogged):
                     ) -> Tuple[TensorLike, TensorLike, TensorLike]:
         """求解 MMA 子问题
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         xval : TensorLike (n, 1)
             当前设计变量
         fval : TensorLike
@@ -490,8 +487,8 @@ class MMAOptimizer(BaseLogged):
         xold2 : TensorLike (n, 1)
             前两步设计变量
 
-        Returns:
-        --------
+        Returns
+        -------
         Tuple[TensorLike, TensorLike, TensorLike]
             MMA 子问题的最优解、下渐近线、上渐近线
         """

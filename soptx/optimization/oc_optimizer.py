@@ -83,7 +83,7 @@ class OCOptimizer(BaseLogged):
                 constraint: VolumeConstraint,
                 filter: Filter,
                 options: OCOptions = None,
-                enable_logging: bool = False,
+                enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
         
@@ -233,40 +233,43 @@ class OCOptimizer(BaseLogged):
         else:
             dv_new = bm.copy(dv[:])
 
-        # 使用绝对值避免负数开方
-        # B_e = -dc / (dg * lmid)
-        # B_e_abs = bm.abs(B_e)
-        # B_e_damped = bm.pow(B_e_abs, eta)
-
-        # dv_new[:] = bm.maximum(
-        #                 bm.tensor(1e-12, **kwargs), 
-        #                 bm.maximum(
-        #                     dv - m, 
-        #                     bm.minimum(
-        #                         bm.tensor(1.0, **kwargs), 
-        #                         bm.minimum(
-        #                             dv + m, 
-        #                             dv * B_e_damped
-        #                         )
-        #                     )
-        #                 )
-        #             )
         B_e = -dc / (dg * lmid)
+
+        # 柔顺机械设计: 必须截断保证非负
+        # 柔顺度最小化: 防止数值噪声
         B_e_clipped = bm.maximum(bm.tensor(1e-12, **kwargs), B_e)
         B_e_damped = bm.pow(B_e_clipped, eta)
+
         dv_new[:] = bm.maximum(
-                bm.tensor(1e-3, **kwargs), 
-                bm.maximum(
-                    dv - m, 
-                    bm.minimum(
-                        bm.tensor(1.0, **kwargs), 
-                        bm.minimum(
-                            dv + m,
-                            dv * B_e_damped
+                        bm.tensor(1e-3, **kwargs), 
+                        bm.maximum(
+                            dv - m, 
+                            bm.minimum(
+                                bm.tensor(1.0, **kwargs), 
+                                bm.minimum(
+                                    dv + m, 
+                                    dv * B_e_damped
+                                )
+                            )
                         )
                     )
-                )
-            )
+
+        # B_e = -dc / (dg * lmid)
+        # B_e_clipped = bm.maximum(bm.tensor(1e-12, **kwargs), B_e)
+        # B_e_damped = bm.pow(B_e_clipped, eta)
+        # dv_new[:] = bm.maximum(
+        #         bm.tensor(1e-3, **kwargs), 
+        #         bm.maximum(
+        #             dv - m, 
+        #             bm.minimum(
+        #                 bm.tensor(1.0, **kwargs), 
+        #                 bm.minimum(
+        #                     dv + m,
+        #                     dv * B_e_damped
+        #                 )
+        #             )
+        #         )
+        #     )
 
         if (bm.any(bm.isnan(dv_new[:])) or bm.any(bm.isinf(dv_new[:])) or
             bm.any(dv_new[:] < -1e-12) or bm.any(dv_new[:] > 1 + 1e-12)):
