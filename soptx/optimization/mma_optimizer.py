@@ -240,18 +240,26 @@ class MMAOptimizer(BaseLogged):
                                                 c=1e4 * bm.ones((self.options.m, 1)),
                                                 d=bm.zeros((self.options.m, 1))
                                             )
-                
+
     def _update_penalty(self, iter_idx: int) -> None:
-        """连续化技术对幂指数惩罚因子进行更新, 初始 1, 每 30 次迭代增加 0.5, 最终 3"""
+        """连续化技术对幂指数惩罚因子进行更新
+        
+        两种方式:
+        方式1: 初始 1, 每 30 次迭代增加 0.5, 最终 3
+        方式2: 初始 1, 每步增加 0.04, 第 50 步增至 3
+        """
         if not self.options.use_penalty_continuation:
             return
         
         interpolation_scheme = self._objective._analyzer._interpolation_scheme
         
-        # 计算当前迭代的惩罚因子
+        # 方式 1: 每30次迭代增加0.5
         penalty_update = iter_idx // 30
         current_penalty = min(1.0 + penalty_update * 0.5, 3.0)
-
+        
+        # 方式 2: 每步增加 0.04，第 50 步达到3
+        # current_penalty = min(1.0 + iter_idx * 0.04, 3.0)
+        
         # 更新插值方案中的惩罚因子
         if current_penalty != interpolation_scheme.penalty_factor:
             interpolation_scheme.penalty_factor = current_penalty

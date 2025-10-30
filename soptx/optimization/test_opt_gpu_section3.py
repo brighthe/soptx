@@ -241,7 +241,7 @@ class DensityTopOptTest(BaseLogged):
         # mesh_type = 'uniform_crisscross_tri'
 
         space_degree = 1
-        integration_order = space_degree + 4 
+        integration_order = space_degree + 1
 
         penalty_factor = 3.0
 
@@ -255,10 +255,10 @@ class DensityTopOptTest(BaseLogged):
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 500
         tolerance = 1e-2
-        use_penalty_continuation = True
+        use_penalty_continuation = False
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
-        rmin = 6.0
+        rmin = 1.5
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -380,6 +380,7 @@ class DensityTopOptTest(BaseLogged):
                        f"网格类型={mesh_type}, 密度类型={density_location}, " 
                        f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
                        f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, \n"
+                       f"体积约束分数={volume_fraction}, "
                        f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, 收敛容差={tolerance}, 惩罚因子连续化={use_penalty_continuation}, " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
