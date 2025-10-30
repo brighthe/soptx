@@ -12,6 +12,8 @@ from soptx.optimization.tools import OptimizationHistory
 from soptx.optimization.utils import solve_mma_subproblem
 from soptx.regularization.filter import Filter
 from soptx.utils.base_logged import BaseLogged
+from soptx.utils import timer
+
 
 class MMAOptions:
     """MMA 算法的配置选项"""
@@ -257,6 +259,7 @@ class MMAOptimizer(BaseLogged):
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
+                enable_timing: bool = False,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
         """运行 MMA 优化算法
@@ -316,6 +319,12 @@ class MMAOptimizer(BaseLogged):
         
         # 优化主循环
         for iter_idx in range(max_iters):
+
+            t = None
+            if enable_timing:
+                t = timer(f"拓扑优化单次迭代")
+                next(t)
+
             start_time = time()
 
             self._update_penalty(iter_idx=iter_idx)
@@ -323,24 +332,41 @@ class MMAOptimizer(BaseLogged):
             
             # 更新迭代计数
             self._epoch = iter_idx + 1
+
+            # 使用物理密度求解位移场
+            uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
+            if enable_timing:
+                t.send('位移场求解')
             
             # 使用物理密度计算目标函数
-            obj_val = self._objective.fun(rho_phys)
+            obj_val = self._objective.fun(rho_phys, displacement=uh)
+            if enable_timing:
+                t.send('位移场求解')
 
             # 计算目标函数相对于物理密度的灵敏度
-            obj_grad_rho = self._objective.jac(rho_phys)
+            obj_grad_rho = self._objective.jac(rho_phys, displacement=uh)
+            if enable_timing:
+                t.send('目标函数灵敏度分析 1')
 
-            # 计算目标函数关于设计变量的灵敏度
+            # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
+            if enable_timing:
+                t.send('目标函数灵敏度分析 2')
 
             # 使用物理密度计算约束函数
             con_val = self._constraint.fun(rho_phys)
+            if enable_timing:
+                t.send('约束函数计算')
 
             # 计算约束函数相对于物理密度的灵敏度
             con_grad_rho = self._constraint.jac(rho_phys)
+            if enable_timing:
+                t.send('约束函数灵敏度分析 1')
 
             # 计算约束函数相对于设计变量的灵敏度
             con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
+            if enable_timing:
+                t.send('约束函数灵敏度分析 2')
             
             # MMA 算法: 
             # 标准化约束函数及其梯度
@@ -359,9 +385,13 @@ class MMAOptimizer(BaseLogged):
                                                 xold1=xold1[:, None],
                                                 xold2=xold2[:, None]
                                             )
+            if enable_timing:
+                t.send('MMA 优化')
 
             # 过滤后得到的物理密度
             rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
+            if enable_timing:
+                t.send('密度过滤')
             
             # 更新历史设计变量
             xold2 = xold1
@@ -386,6 +416,9 @@ class MMAOptimizer(BaseLogged):
                                 penalty_factor=current_penalty, 
                                 time_cost=iteration_time, 
                                 physical_density=rho_phys)
+            
+            if enable_timing:
+                t.send(None)
 
             # 收敛检查
             if change <= tol:

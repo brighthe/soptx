@@ -211,11 +211,31 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_cantilever_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 160.0, 0, 100.0]
-        p = -1.0
-        E, nu = 1.0, 0.3
+        #* 矩形悬臂梁 (rectangle) */
+        # domain = [0, 100.0, 0, 60.0]
+        # nx, ny = 100, 60
+        # volume_fraction = 0.4
+        #* 方形悬臂梁 (square) */
+        # domain = [0, 40.0, 0, 40.0]
+        # nx, ny = 40, 40
+        # volume_fraction = 0.35
+        # from soptx.model.cantilever_2d import CantileverCorner2d
+        # pde = CantileverCorner2d(
+        #                     domain=domain,
+        #                     p=-1.0, E=1.0, nu=0.3,
+        #                     enable_logging=False
+        #                 )
+        #* 右端中点载荷悬臂梁 */
+        domain = [0, 120.0, 0, 60.0]
+        nx, ny = 120, 60
+        volume_fraction = 0.5
+        from soptx.model.cantilever_2d import CantileverRightMiddle2d
+        pde = CantileverRightMiddle2d(
+                            domain=domain,
+                            p=-1.0, E=1.0, nu=0.3,
+                            enable_logging=False
+                        )
 
-        nx, ny = 160, 100
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_aligned_tri'
         # mesh_type = 'uniform_crisscross_tri'
@@ -223,30 +243,22 @@ class DensityTopOptTest(BaseLogged):
         space_degree = 1
         integration_order = space_degree + 4 
 
-        volume_fraction = 0.4
         penalty_factor = 3.0
 
         # 'element', 'node'
-        density_location = 'element'
+        density_location = 'node'
         relative_density = volume_fraction
 
         # 'standard', 'voigt'
         assembly_method = 'standard'
 
-        optimizer_algorithm = 'oc'  # 'oc', 'mma'
+        optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 500
         tolerance = 1e-2
-        use_penalty_continuation = False
+        use_penalty_continuation = True
 
-        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
+        filter_type = 'none' # 'none', 'sensitivity', 'density'
         rmin = 6.0
-
-        from soptx.model.cantilever_2d import CantileverCorner2d
-        pde = CantileverCorner2d(
-                            domain=domain,
-                            p=p, E=E, nu=nu,
-                            enable_logging=False
-                        )
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -270,13 +282,15 @@ class DensityTopOptTest(BaseLogged):
                                     },
                                 )
 
+
         if density_location in ['element']:
             design_variable_mesh = displacement_mesh
             d, rho = interpolation_scheme.setup_density_distribution(
                                                     design_variable_mesh=design_variable_mesh,
                                                     displacement_mesh=displacement_mesh,
                                                     relative_density=relative_density,
-                                                )                                           
+                                                ) 
+                                                
         elif density_location in ['node']:
             design_variable_mesh = displacement_mesh
             d, rho = interpolation_scheme.setup_density_distribution(
@@ -382,6 +396,7 @@ class DensityTopOptTest(BaseLogged):
                                 density_location=density_location,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
+
 
         return rho_opt, history
 
@@ -563,5 +578,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_cantilever_3d')
+    test.run.set('test_cantilever_2d')
     rho_opt, history = test.run()
