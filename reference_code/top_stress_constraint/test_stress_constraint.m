@@ -36,9 +36,12 @@ KE = 1/(1-nu^2)*[ k(1) k(2) k(3) k(4) k(5) k(6) k(7) k(8)
                   k(7) k(4) k(5) k(2) k(3) k(8) k(1) k(6)
                   k(8) k(3) k(2) k(5) k(4) k(7) k(6) k(1)]; 
 % 应变位移矩阵
-B = (1/2/l) * [-1  0  1  0  1  0 -1  0; 
-                0 -1  0 -1  0  1  0  1; 
-               -1 -1 -1  1  1  1  1 -1];
+% B = (1/2/l) * [-1  0  1  0  1  0 -1  0; 
+%                 0 -1  0 -1  0  1  0  1; 
+%                -1 -1 -1  1  1  1  1 -1];
+B = (1/2) * [-1  0  1  0  1  0 -1  0; 
+              0 -1  0 -1  0  1  0  1; 
+             -1 -1 -1  1  1  1  1 -1];
 % 本构矩阵
 C = E/(1-nu^2)*[1 nu 0; nu 1 0; 0 0 (1-nu)/2];           
 % 设计变量按行展开
@@ -50,31 +53,45 @@ for g=1:nely
     end
 end
 
-   
-%%Algorithm Initialization
-%m=nc+1;
-m=nc;
-n=nelx*nely;
-xold1=zeros(n,1);
-xold2=zeros(n,1);
-low=zeros(n,1);
-upp=zeros(n,1);
-xmin=10e-3*ones(n,1);
-xmax=ones(n,1);
-c=1000*ones(m,1);
-d=0;
-a=zeros(m,1);
-a0=1;
-%dfdx_1(1,1:n)=unit_size_x*unit_size_y;
-df0dx2=zeros(n,1);
-dfdx2=zeros(m,n);
-iter=0;
-itte=0;
-maxite=120;
-x=reshape(xval,[nelx,nely])';
-[F,U]=FEA(nelx,nely,x,penal,KE);
-[f0val,df0dx,fval]=load(F,U,x,M,KE,m,n,nelx,nely,penal,unit_size_x,unit_size_y,rmin);
-[von_mises,derivative]=stress_func(C,B,U,nelx,nely,x,p);
+% nc 个应力约束 + 1 个体积约束
+m = nc + 1;
+% nc 个应力约束
+% m = nc;
+% 设计变量数量
+n = nelx*nely;
+% MMA 历史信息
+xold1 = zeros(n, 1);
+xold2 = zeros(n, 1);
+% 移动渐近线
+low = zeros(n, 1);
+upp = zeros(n, 1);
+% 设计变量界限
+xmin = 10e-3 * ones(n, 1);
+xmax = ones(n, 1);
+% MMA 子问题参数
+c = 1000 * ones(m, 1); % 松弛变量 yi 的惩罚系数
+d = 0;                 % 二次惩罚项
+a = zeros(m, 1);       % 约束中 z 的系数
+a0 = 1;                % 目标函数中 z 的系数
+% 二阶导数
+df0dx2 = zeros(n, 1);
+dfdx2 = zeros(m, n);
+% 迭代计数器
+iter = 0;
+itte = 0;
+maxite = 120;
+x = reshape(xval, [nelx, nely])';
+
+[F, U] = FEA(nelx, nely, x, penal, KE);
+
+% f0val-目标函数; df0dx-目标函数灵敏度; fval-约束函数
+[f0val, df0dx, fval] = Load(F,U,x,M,KE,m,n,nelx,nely,penal,unit_size_x,unit_size_y,rmin, volfrac);
+
+
+[von_mises, derivative] = stress_func(C, B, U, nelx, nely, x, p);
+
+
+
 [sigmapn,derivative0]=pnorm(p,von_mises,nc,nelx,nely,sigmay);
 %fval(2:m,1)=sigmapn(1:nc,1);
 fval=sigmapn;
@@ -146,31 +163,7 @@ fval_1=0;
 end
 
 
-function [F,U]=FEA(nelx,nely,x,penal,KE)
-K = sparse(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
-F = sparse(2*(nely+1)*(nelx+1),1); U = zeros(2*(nely+1)*(nelx+1),1);
 
-for elx = 1:nelx
-  for ely = 1:nely
-    n1 = (nely+1)*(elx-1)+ely; 
-    n2 = (nely+1)* elx   +ely;
-    edof = [2*n1-1; 2*n1; 2*n2-1; 2*n2; 2*n2+1; 2*n2+2; 2*n1+1; 2*n1+2];
-    K(edof,edof) = K(edof,edof) + x(ely,elx)^penal*KE;
-  end
-end
-
-% DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-F(2*(nelx+1)*(nely+1),1) = -10;
-F(2*(nelx)*(nely+1),1) = -10;
-F(2*(nelx-1)*(nely+1),1) = -10;
-F(2*(nelx-2)*(nely+1),1) = -10;
-fixeddofs   = [1:2*(nely+1)];
-alldofs     = [1:2*(nely+1)*(nelx+1)];
-freedofs    = setdiff(alldofs,fixeddofs);
-% SOLVING
-U(freedofs,:) = K(freedofs,freedofs) \ F(freedofs,:);      
-U(fixeddofs,:)= 0;
-end
 
 %    This is the file mmasub.m 
 % 
@@ -553,25 +546,7 @@ zetmma =  zet;
 smma   =   s; 
 end
 
-function [von_mises,derivative]=stress_func(C,B,U,nelx,nely,x,p)
-stress_counter=1;
 
-for ely = 1:nely
-    for elx = 1:nelx
-      n1 = (nely+1)*(elx-1)+ely; 
-      n2 = (nely+1)* elx   +ely;
-      Ue = U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],1);
-      stress=C*B*Ue;
-      stress_val=(x(ely,elx)^0.5)*stress;
-      von_mises(stress_counter,1)=sqrt((stress_val(1,1)^2)+(stress_val(2,1)^2)+(3*stress_val(3,1)^2)-stress_val(1,1)*stress_val(2,1));
-      derivative_1=von_mises(stress_counter,1)^(p-1);
-      derivative_2=[2*stress_val(1,1)-stress_val(2,1);2*stress_val(2,1)-stress_val(1,1);6*stress_val(3,1)]./von_mises(stress_counter,1);
-      derivative_3=0.5*x(ely,elx)^(-0.5)*stress;
-      derivative(stress_counter,1)=derivative_1*derivative_2'*derivative_3;
-      stress_counter=stress_counter+1;              
-    end
-end
-end
 
 function [sigmapn,derivative0]=pnorm(p,von_mises,nc,nelx,nely,sigmay)
 [von_mises_desc,sort_index]=sort(von_mises,'descend');

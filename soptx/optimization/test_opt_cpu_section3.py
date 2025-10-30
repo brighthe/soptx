@@ -211,50 +211,54 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_cantilever_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-
         #* 矩形悬臂梁 (rectangle) */
-        domain = [0, 100.0, 0, 60.0]
-        nx, ny = 100, 60
-        volume_fraction = 0.4
-
+        # domain = [0, 100.0, 0, 60.0]
+        # nx, ny = 100, 60
+        # volume_fraction = 0.4
         #* 方形悬臂梁 (square) */
         # domain = [0, 40.0, 0, 40.0]
         # nx, ny = 40, 40
         # volume_fraction = 0.35
-
-        p = -1.0
-        E, nu = 1.0, 0.3
+        # from soptx.model.cantilever_2d import CantileverCorner2d
+        # pde = CantileverCorner2d(
+        #                     domain=domain,
+        #                     p=-1.0, E=1.0, nu=0.3,
+        #                     enable_logging=False
+        #                 )
+        #* 右端中点载荷悬臂梁 */
+        domain = [0, 120.0, 0, 60.0]
+        nx, ny = 120, 60
+        volume_fraction = 0.5
+        from soptx.model.cantilever_2d import CantileverRightMiddle2d
+        pde = CantileverRightMiddle2d(
+                            domain=domain,
+                            p=-1.0, E=1.0, nu=0.3,
+                            enable_logging=False
+                        )
 
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_aligned_tri'
         # mesh_type = 'uniform_crisscross_tri'
 
-        space_degree = 3
+        space_degree = 1
         integration_order = space_degree + 4 
 
         penalty_factor = 3.0
 
         # 'element', 'node'
-        density_location = 'element'
+        density_location = 'node'
         relative_density = volume_fraction
 
         # 'standard', 'voigt'
         assembly_method = 'standard'
 
-        optimizer_algorithm = 'oc'  # 'oc', 'mma'
-        max_iterations = 3
+        optimizer_algorithm = 'mma'  # 'oc', 'mma'
+        max_iterations = 500
         tolerance = 1e-2
         use_penalty_continuation = False
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
         rmin = 6.0
-
-        from soptx.model.cantilever_2d import CantileverCorner2d
-        pde = CantileverCorner2d(
-                            domain=domain,
-                            p=p, E=E, nu=nu,
-                            enable_logging=False
-                        )
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)

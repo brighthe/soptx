@@ -599,7 +599,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def solve_displacement(self, 
                         rho_val: Optional[Union[TensorLike, Function]] = None,
                         adjoint: bool = False,
-                        enable_timing: bool = True, 
+                        enable_timing: bool = False, 
                         **kwargs
                     ) -> Function:
         t = None

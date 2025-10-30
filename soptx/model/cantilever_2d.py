@@ -38,7 +38,6 @@ class CantileverCorner2d(PDEBase):
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-
         self._eps = 1e-12
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
@@ -196,7 +195,7 @@ class CantileverCorner2d(PDEBase):
 
         return self.is_concentrate_load_boundary_dof
 
-class CantileverBeamMiddle2dData(PDEBase):
+class CantileverRightMiddle2d(PDEBase):
     '''
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
@@ -215,27 +214,23 @@ class CantileverBeamMiddle2dData(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 120, 0, 60],
                 mesh_type: str = 'uniform_quad',
-                T: float = -1.0, # 负值代表方向向下
-                E: float = 1000.0, nu: float = 0.3,
+                p: float = -1.0, # N
+                E: float = 1.0,  # Pa (N/m^2)
+                nu: float = 0.3,
+                plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
         
-        self._T = T
+        self._p = p
         self._E, self._nu = E, nu
+        self._plane_type = plane_type
 
         self._eps = 1e-12
-        self._plane_type = 'plane_stress'
-        self._force_type = 'concentrated'
-        self._boundary_type = 'dirichlet'
-
-        self._log_info(f"Initialized CantileverBeamMiddle2dData with domain={self._domain}, "
-                f"mesh_type='{mesh_type}', force={T}, E={E}, nu={nu}, "
-                f"plane_type='{self._plane_type}', "
-                f"force_type='{self._force_type}', "
-                f"boundary_type='{self._boundary_type}'")
+        self._load_type = 'concentrated'
+        self._boundary_type = 'mixed'
         
     #######################################################################################################################
     # 访问器
@@ -252,9 +247,9 @@ class CantileverBeamMiddle2dData(PDEBase):
         return self._nu
     
     @property
-    def T(self) -> float:
-        """获取集中力"""
-        return self._T
+    def p(self) -> float:
+        """获取点力"""
+        return self._p
     
 
     #######################################################################################################################
@@ -275,7 +270,7 @@ class CantileverBeamMiddle2dData(PDEBase):
 
         return mesh
     
-    @init_mesh.register('uniform_tri')
+    @init_mesh.register('uniform_aligned_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
         nx = kwargs.get('nx', 60)
         ny = kwargs.get('ny', 20)
@@ -283,9 +278,48 @@ class CantileverBeamMiddle2dData(PDEBase):
         device = kwargs.get('device', 'cpu')
 
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                    threshold=threshold, device=device)
+                                threshold=threshold, device=device)
+
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+    
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        device = kwargs.get('device', 'cpu')
+        node = bm.array([[0.0, 0.0],
+                        [1.0, 0.0],
+                        [1.0, 1.0],
+                        [0.0, 1.0]], dtype=bm.float64, device=device) 
         
-        self._save_meshdata(mesh, 'uniform_tri', nx=nx, ny=ny)
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)     
+        
+        qmesh = QuadrangleMesh(node, cell)
+        qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+        import numpy as np
+        newCell = np.r_['0', 
+                lcell[:, [1, 2, 0]], 
+                lcell[:, [3, 0, 2]],
+                rcell[:, [0, 1, 3]],
+                rcell[:, [2, 3, 1]]]
+        
+        mesh = TriangleMesh(node, newCell)
+
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return mesh
     
@@ -295,21 +329,27 @@ class CantileverBeamMiddle2dData(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-
-        x, y = points[..., 0], points[..., 1]
-
-        # 力作用在右边界的中间位置:
-        middle_y = (domain[2] + domain[3]) / 2.0
-        coord = (
-            (bm.abs(x - domain[1]) < self._eps) & 
-            (bm.abs(y - middle_y) < self._eps)
-        )
         kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (coord, 1), self._T)
 
-        return val
+        return bm.zeros(points.shape, **kwargs)
+
+    # @cartesian
+    # def body_force(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     # 力作用在右边界的中间位置:
+    #     middle_y = (domain[2] + domain[3]) / 2.0
+    #     coord = (
+    #         (bm.abs(x - domain[1]) < self._eps) & 
+    #         (bm.abs(y - middle_y) < self._eps)
+    #     )
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     val = bm.set_at(val, (coord, 1), self._T)
+
+    #     return val
 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
@@ -338,5 +378,32 @@ class CantileverBeamMiddle2dData(PDEBase):
         return coord
     
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
+    
+    @cartesian
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷 (点力)"""
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (..., 1), self._p) 
+        
+        return val
+    
+    @cartesian
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        middle_y = (domain[2] + domain[3]) / 2.0
+        coord = (
+            (bm.abs(x - domain[1]) < self._eps) & 
+            (bm.abs(y - middle_y) < self._eps)
+        )
+
+        return coord
+
+    def is_concentrate_load_boundary(self) -> Callable:
+
+        return self.is_concentrate_load_boundary_dof
