@@ -226,8 +226,10 @@ class DensityTopOptTest(BaseLogged):
         #                     enable_logging=False
         #                 )
         #* 右端中点载荷悬臂梁 */
-        domain = [0, 120.0, 0, 60.0]
-        nx, ny = 120, 60
+        # domain = [0, 120.0, 0, 60.0]
+        # nx, ny = 120, 60
+        domain = [0, 150.0, 0, 50.0]
+        nx, ny = 150, 50
         volume_fraction = 0.5
         from soptx.model.cantilever_2d import CantileverRightMiddle2d
         pde = CantileverRightMiddle2d(
@@ -252,7 +254,7 @@ class DensityTopOptTest(BaseLogged):
         # 'standard', 'voigt'
         assembly_method = 'standard'
 
-        optimizer_algorithm = 'mma'  # 'oc', 'mma'
+        optimizer_algorithm = 'oc'  # 'oc', 'mma'
         max_iterations = 500
         tolerance = 1e-2
         use_penalty_continuation = False

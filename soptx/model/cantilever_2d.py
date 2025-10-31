@@ -333,24 +333,6 @@ class CantileverRightMiddle2d(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
 
-    # @cartesian
-    # def body_force(self, points: TensorLike) -> TensorLike:
-    #     domain = self.domain
-
-    #     x, y = points[..., 0], points[..., 1]
-
-    #     # 力作用在右边界的中间位置:
-    #     middle_y = (domain[2] + domain[3]) / 2.0
-    #     coord = (
-    #         (bm.abs(x - domain[1]) < self._eps) & 
-    #         (bm.abs(y - middle_y) < self._eps)
-    #     )
-    #     kwargs = bm.context(points)
-    #     val = bm.zeros(points.shape, **kwargs)
-    #     val = bm.set_at(val, (coord, 1), self._T)
-
-    #     return val
-
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
