@@ -88,7 +88,7 @@ class ComplianceObjective(BaseLogged):
             self._log_error(error_msg)
         
     def _manual_differentiation(self, 
-                                density: Union[Function, TensorLike], 
+                                density: Union[Function, TensorLike],  
                                 displacement: Optional[Function] = None
                             ) -> TensorLike:
         """手动计算柔顺度目标函数相对于物理密度的灵敏度"""

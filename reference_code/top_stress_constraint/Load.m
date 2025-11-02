@@ -1,4 +1,5 @@
-function[f0val,df0dx,fval] = Load(F,U,x,M,KE,m,n,nelx,nely,penal,unit_size_x,unit_size_y,rmin, volfrac)
+function[f0val, df0dx, fval] = Load(F, U, x, M, KE, m, n, nelx, nely, penal, ...
+                                unit_size_x, unit_size_y, rmin, volfrac)
     f0val = 0.;
     fval_1=0;
     for ely = 1:nely
@@ -9,7 +10,7 @@ function[f0val,df0dx,fval] = Load(F,U,x,M,KE,m,n,nelx,nely,penal,unit_size_x,uni
             % 目标函数
             f0val = f0val + x(ely, elx)^penal*Ue'*KE*Ue;
             % 目标函数灵敏度
-            dc(ely,elx) = -penal*x(ely, elx)^(penal-1)*Ue'*KE*Ue;
+            dc(ely, elx) = -penal*x(ely, elx)^(penal-1)*Ue'*KE*Ue;
             fval_1 = fval_1 + unit_size_x*unit_size_y*x(ely,elx);
         end
     end

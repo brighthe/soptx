@@ -1,4 +1,4 @@
-function [F,U] = FEA(nelx,nely,x,penal,KE)
+function [F,U] = FEA(nelx, nely, x, penal, KE)
     K = sparse(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
     F = sparse(2*(nely+1)*(nelx+1),1); U = zeros(2*(nely+1)*(nelx+1),1);
     

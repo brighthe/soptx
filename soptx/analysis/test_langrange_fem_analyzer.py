@@ -37,11 +37,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     enable_logging=False
                                 )
 
-        elif model == 'tri_sol_neumann_huzhang':
+        elif model == 'tri_sol_pure_neu_huzhang':
             # 纯 Neumann
-            from soptx.model.linear_elasticity_2d import TriSolPureNeumannHuZhang
+            from soptx.model.linear_elasticity_2d import TriSolPureHomoNeuHuZhang
             lam, mu = 1.0, 0.5
-            pde = TriSolPureNeumannHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde = TriSolPureHomoNeuHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
             mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -117,12 +117,12 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        elif model == 'BoxPoly3d':
-            from soptx.model.linear_elasticity_3d import BoxPolyLagrange3dData
+        elif model == 'poly_sol_pure_dir_lagrange3d':
+            from soptx.model.linear_elasticity_3d import PolySolPureDirLagrange3d
             domain = [0, 1, 0, 1, 0, 1]
             lam, mu = 1.0, 1.0
-            nx, ny, nz = 4, 4, 4
-            pde = BoxPolyLagrange3dData(domain=domain, lam=lam, mu=mu)
+            nx, ny, nz = 2, 2, 2
+            pde = PolySolPureDirLagrange3d(domain=domain, lam=lam, mu=mu)
             mesh_type = 'uniform_tet'
             pde.init_mesh.set(mesh_type)
             mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
@@ -367,7 +367,7 @@ if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
     test.run.set('test_exact_solution_lfem')
-    test.run(model='tri_sol_mix_homo_dir_huzhang')
+    test.run(model='poly_sol_pure_dir_lagrange3d')
 
     # test.run.set('test_none_exact_solution_lfem')
     # test.run(model='bearing_device_2d')

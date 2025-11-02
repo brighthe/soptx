@@ -259,7 +259,7 @@ class BoxPolyHuZhangData3d(PDEBase):
         return val
     
 
-class BoxPolyLagrange3dData(PDEBase):
+class PolySolPureDirLagrange3d(PDEBase):
     """    
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
@@ -277,6 +277,7 @@ class BoxPolyLagrange3dData(PDEBase):
                 domain: List[float] = [0, 1, 0, 1, 0, 1],
                 mesh_type: str = 'uniform_tet',
                 lam: float = 1.0, mu: float = 1.0,
+                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'                
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None 
             ) -> None:
@@ -286,14 +287,9 @@ class BoxPolyLagrange3dData(PDEBase):
         self._lam, self._mu = lam, mu
 
         self._eps = 1e-12
-        self._plane_type = '3d'
+        self._plane_type = plane_type
+        self._load_type = None
         self._boundary_type = 'dirichlet'
-        self._force_type = 'distribution'
-
-        self._log_info(f"Initialized BoxHexLagrange3dData with domain={self._domain}, "
-                       f"mesh_type='{mesh_type}', λ={lam}, μ={mu}, "
-                       f"force_type='{self._force_type}', "
-                       f"boundary_type='{self._boundary_type}'")
 
 
     #######################################################################################################################
@@ -376,7 +372,7 @@ class BoxPolyLagrange3dData(PDEBase):
         return u
 
     @cartesian
-    def disp_solution_gradient(self, points: TensorLike) -> TensorLike:
+    def grad_disp_solution(self, points: TensorLike) -> TensorLike:
         x, y, z = points[..., 0], points[..., 1], points[..., 2]
         mu = self._mu
 

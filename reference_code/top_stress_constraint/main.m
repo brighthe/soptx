@@ -1,5 +1,4 @@
-clear all
-clc
+clc; clear;
 % 屈服应力限制
 sigmay = 0.028;
 % 体积约束
@@ -7,10 +6,10 @@ volfrac = 0.35;
 % p-norm 聚合参数
 p = 6;
 % 应力约束数量
-nc = 100;
+nc = 16;
 % 网格参数
-nelx = 400;
-nely = 400;
+nelx = 40;
+nely = 40;
 % 几何参数
 l = 400;
 b = 400;
@@ -24,6 +23,7 @@ nu = 0.3;
 % 优化参数
 penal = 3;
 x(1:nely, 1:nelx) = volfrac;
+% x(1:nely, 1:nelx) = 0.8;
 
 % 单元刚度矩阵
 k = [ 1/2-nu/6   1/8+nu/8 -1/4-nu/12 -1/8+3*nu/8 ... 
@@ -67,7 +67,7 @@ xold2 = zeros(n, 1);
 low = zeros(n, 1);
 upp = zeros(n, 1);
 % 设计变量界限
-xmin = 10e-3 * ones(n, 1);
+xmin = 1e-3 * ones(n, 1);
 xmax = ones(n, 1);
 % MMA 子问题参数
 c = 1000 * ones(m, 1); % 松弛变量 yi 的惩罚系数
@@ -80,14 +80,14 @@ df0dx2 = zeros(n, 1);
 dfdx2 = zeros(m, n);
 % 迭代计数器
 iter = 0;
-itte = 0;
 maxite = 120;
 x = reshape(xval, [nelx, nely])';
 
+% 位移求解
 [F, U] = FEA(nelx, nely, x, penal, KE);
 
 % f0val-目标函数; df0dx-目标函数灵敏度; fval-约束函数
-[f0val, df0dx, fval] = Load(F,U,x,M,KE,m,n,nelx,nely,penal,unit_size_x,unit_size_y,rmin, volfrac);
+[f0val, df0dx, fval] = Load(F, U, x, M, KE, m, n, nelx, nely, penal, unit_size_x, unit_size_y, rmin, volfrac);
 
 % von Mises 应力及其对密度的导数
 [von_mises, derivative] = stress_func(C, B, U, nelx, nely, x, p);
@@ -114,8 +114,8 @@ while iter < maxite
 
     ploty(:, iter) = fval;
     
-    [xmma,ymma,zmma,lam,xsi,eta,mu,zet,s,low,upp] = mmasub(m, n, iter, xval, xmin, xmax, xold1, xold2, ... 
-                                                        f0val, df0dx, df0dx2, fval, dfdx, dfdx2, low, upp, a0, a, c, d); 
+    [xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, low, upp] = mmasub(m, n, iter, xval, xmin, xmax, xold1, xold2, ... 
+                                                                f0val, df0dx, df0dx2, fval, dfdx, dfdx2, low, upp, a0, a, c, d); 
      
     xold2 = xold1;
     xold1 = xval;

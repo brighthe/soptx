@@ -47,9 +47,17 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
         elif model == 'tri_sol_mix_nhomo_dir_huzhang':
             # 非齐次 Dirichlet + 非齐次 Neumann
-            from soptx.model.linear_elasticity_2d import TriSolMixNHomoDirHuZhang            
+            from soptx.model.linear_elasticity_2d import TriSolMixNoneHomoDirHuZhang            
             lam, mu = 1.0, 0.5
-            pde = TriSolMixNHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde = TriSolMixNoneHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+
+        elif model == 'tri_sol_pure_homo_neu_huzhang':
+            # 纯齐次 Neumann
+            from soptx.model.linear_elasticity_2d import TriSolPureHomoNeuHuZhang
+            lam, mu = 1.0, 0.5
+            pde = TriSolPureHomoNeuHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
 
@@ -66,7 +74,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         # analysis_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
         # plt.show()
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -99,7 +107,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                                     material=material,
                                                     space_degree=space_degree,
                                                     integration_order=integration_order,
-                                                    solve_method='scipy',
+                                                    solve_method='mumps',
                                                     topopt_algorithm=None,
                                                     interpolation_scheme=None,
                                                 )
@@ -110,11 +118,11 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
             sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
 
-            gdof_coords, gdof_type_map = huzhang_mfem_analyzer._build_gdof_maps()
-            sigma_values = pde.stress_solution(gdof_coords)
-            component_idx = gdof_type_map % 3
-            gdof = len(gdof_type_map)
-            exact_vals = sigma_values[bm.arange(gdof), component_idx]
+            # gdof_coords, gdof_type_map = huzhang_mfem_analyzer._build_gdof_maps()
+            # sigma_values = pde.stress_solution(gdof_coords)
+            # component_idx = gdof_type_map % 3
+            # gdof = len(gdof_type_map)
+            # exact_vals = sigma_values[bm.arange(gdof), component_idx]
 
             e_uh_l2 = analysis_mesh.error(u=uh, 
                                     v=pde.disp_solution,
@@ -553,7 +561,7 @@ if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
     huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    huzhang_analyzer.run(model='tri_sol_mix_homo_dir_huzhang')
+    huzhang_analyzer.run(model='tri_sol_pure_homo_neu_huzhang')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='tri_sol_mix_huzhang')

@@ -1269,7 +1269,7 @@ class TriSolMixHomoDirHuZhang(PDEBase):
         return bm.einsum('...i, ...i -> ...', g_values, t_values)
 
 
-class TriSolPureNeumannHuZhang(PDEBase):
+class TriSolPureHomoNeuHuZhang(PDEBase):
     """
     解析位移 (三角函数):
         u(x,y) = [ sin(pi x) sin(pi y),
