@@ -8,10 +8,10 @@ function [dcn] = check(nelx, nely, rmin, x, dc)
                 for l = max(j-floor(rmin), 1):min(j+floor(rmin), nely)
                     fac = rmin - sqrt((i-k)^2 + (j-l)^2);
                     sum = sum + max(0, fac);
-                    dcn(j,i) = dcn(j,i) + max(0,fac)*x(l,k)*dc(l,k);
+                    dcn(j, i) = dcn(j, i) + max(0, fac)*dc(l, k);
                 end
             end
-            dcn(j,i) = dcn(j, i) / (x(j, i) * sum);
+            dcn(j,i) = dcn(j, i) / sum;
         end
     end
 end

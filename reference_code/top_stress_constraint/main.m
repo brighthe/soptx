@@ -114,8 +114,10 @@ while iter < maxite
 
     ploty(:, iter) = fval;
     
-    [xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, low, upp] = mmasub(m, n, iter, xval, xmin, xmax, xold1, xold2, ... 
-                                                                f0val, df0dx, df0dx2, fval, dfdx, dfdx2, low, upp, a0, a, c, d); 
+    [xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, low, upp] = mmasub(m, n, iter, ...
+                                                xval, xmin, xmax, xold1, xold2, ... 
+                                                f0val, df0dx, df0dx2, fval, dfdx, dfdx2, ...
+                                                low, upp, a0, a, c, d); 
      
     xold2 = xold1;
     xold1 = xval;
@@ -125,7 +127,8 @@ while iter < maxite
     
     [F, U] = FEA(nelx, nely, x, penal, KE);
     
-    [f0val, df0dx, fval] = Load(F, U, x, M, KE, m, n, nelx, nely, penal, unit_size_x, unit_size_y, rmin, volfrac);
+    [f0val, df0dx, fval] = Load(F, U, x, M, KE, m, n, nelx, nely, penal, ...
+                            unit_size_x, unit_size_y, rmin, volfrac);
     
     [von_mises, derivative] = stress_func(C, B, U, nelx, nely, x, p);
     

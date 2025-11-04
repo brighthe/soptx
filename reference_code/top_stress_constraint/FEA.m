@@ -7,7 +7,7 @@ function [F,U] = FEA(nelx, nely, x, penal, KE)
         n1 = (nely+1)*(elx-1)+ely; 
         n2 = (nely+1)* elx   +ely;
         edof = [2*n1-1; 2*n1; 2*n2-1; 2*n2; 2*n2+1; 2*n2+2; 2*n1+1; 2*n1+2];
-        K(edof,edof) = K(edof,edof) + x(ely,elx)^penal*KE;
+        K(edof, edof) = K(edof, edof) + x(ely,elx)^penal*KE;
       end
     end
     
