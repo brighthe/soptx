@@ -6,7 +6,6 @@ from fealpy.functionspace.space import FunctionSpace as _FS
 from fealpy.decorator import variantmethod
 from fealpy.fem.integrator import LinearInt, SrcInt, FaceInt, enable_cache
 
-
 class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
     def __init__(self, 
                 source: Optional[SourceLike] = None, 
@@ -20,7 +19,6 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         self.threshold = threshold
 
         self.assembly.set(method)
-
 
     @enable_cache
     def to_global_dof(self, space) -> TensorLike:
@@ -48,7 +46,7 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         qf = mesh.quadrature_formula(q, 'face')
         bcs, ws = qf.get_quadrature_points_and_weights()
 
-        phi = space.cell_basis_on_face(bcs, index) # (NF_bd, NQ, LDOF, 3)
+        phi = space.cell_basis_on_face(bcs, index) # (NF_bd, NQ, LDOF_face, NS)
 
         return bcs, ws, phi, facemeasure, index, n
 
@@ -58,22 +56,29 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         bcs, ws, phi, fm, index, n = self.fetch_dirichlet(space) 
         mesh = getattr(space, 'mesh', None)
 
-        # import matplotlib.pyplot as plt
-        # fig = plt.figure()
-        # axes = fig.gca()
-        # mesh.add_plot(axes)
-        # mesh.find_node(axes, showindex=True, color='g', markersize=12, fontsize=16, fontcolor='g')
-        # mesh.find_edge(axes, showindex=True, color='r', markersize=14, fontsize=18, fontcolor='r')
-        # mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
-        # plt.show()
-
-        NF_bd, NQ, LDOF, _ = phi.shape
+        NF_bd, NQ, LDOF, NS = phi.shape
         GD = mesh.geo_dimension()
+        assert NS == GD*(GD+1)//2, f"phi last dim {NS} != GD(GD+1)/2 for GD={GD}"
+
+        # 构造对称应力张量 (NF_bd, NQ, LDOF, GD, GD)
         tau = bm.zeros((NF_bd, NQ, LDOF, GD, GD), dtype=phi.dtype)
-        tau[..., 0, 0] = phi[..., 0] # σ_xx
-        tau[..., 0, 1] = phi[..., 1] # σ_xy
-        tau[..., 1, 0] = phi[..., 1] # σ_yx
-        tau[..., 1, 1] = phi[..., 2] # σ_yy
+
+        if GD == 2:
+            tau[..., 0, 0] = phi[..., 0] # σ_xx
+            tau[..., 0, 1] = phi[..., 1] # σ_xy
+            tau[..., 1, 0] = phi[..., 1] # σ_yx
+            tau[..., 1, 1] = phi[..., 2] # σ_yy
+        elif GD == 3:
+            tau[..., 0, 0] = phi[..., 0] # σ_xx
+            tau[..., 0, 1] = phi[..., 1] # σ_xy
+            tau[..., 0, 2] = phi[..., 2] # σ_xz
+            tau[..., 1, 0] = phi[..., 1] # σ_yx
+            tau[..., 1, 1] = phi[..., 3] # σ_yy
+            tau[..., 1, 2] = phi[..., 4] # σ_yz
+            tau[..., 2, 0] = phi[..., 2] # σ_zx
+            tau[..., 2, 1] = phi[..., 4] # σ_zy
+            tau[..., 2, 2] = phi[..., 5] # σ_zz
+
         tau_n = bm.einsum('fqlij, fj -> fqli', tau, n) # (NF_bd, NQ, LDOF, GD)
 
         ps = mesh.bc_to_point(bcs, index=index)
@@ -94,7 +99,7 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
         qf = mesh.quadrature_formula(q, 'face')
         bcs, ws = qf.get_quadrature_points_and_weights()
 
-        phi = space.cell_basis_on_face(bcs, index) # (NF_bd, NQ, LDOF, GD)
+        phi = space.cell_basis_on_face(bcs, index) # (NF_bd, NQ, LDOF, NS)
 
         return bcs, ws, phi, facemeasure, index
 

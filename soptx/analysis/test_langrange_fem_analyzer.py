@@ -132,6 +132,23 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 shear_modulus=pde.mu,
                                                 plane_type=pde.plane_type,
                                             )
+            
+        elif model == 'poly_sol_pure_homo_dir_huzhang_3d':
+            # 纯齐次 Dirichlet
+            from soptx.model.linear_elasticity_3d import PolySolPureHomoDirHuZhang3d
+            domain = [0, 1, 0, 1, 0, 1]
+            lam, mu = 1.0, 0.5
+            nx, ny, nz = 2, 2, 2
+            pde = PolySolPureHomoDirHuZhang3d(domain=domain, lam=lam, mu=mu)
+            mesh_type = 'uniform_tri'
+            pde.init_mesh.set(mesh_type)
+            mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam,
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                            )
 
         space_degree = 1
         integration_order = space_degree + 4
@@ -139,7 +156,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
                     f"空间次数={space_degree}, 积分阶数={integration_order}")
 
-        maxit = 5
+        maxit = 3
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 0}$', 
                      '$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 1}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
@@ -367,7 +384,7 @@ if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
     test.run.set('test_exact_solution_lfem')
-    test.run(model='poly_sol_pure_dir_lagrange3d')
+    test.run(model='poly_sol_pure_homo_dir_huzhang_3d')
 
     # test.run.set('test_none_exact_solution_lfem')
     # test.run(model='bearing_device_2d')

@@ -1,7 +1,7 @@
 function[f0val, df0dx, fval] = Load(F, U, x, M, KE, m, n, nelx, nely, penal, ...
                                 unit_size_x, unit_size_y, rmin, volfrac)
     f0val = 0.;
-    fval_1=0;
+    fval_1 = 0;
     for ely = 1:nely
         for elx = 1:nelx
             n1 = (nely+1)*(elx-1)+ely; 

@@ -63,12 +63,19 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         
         elif model == 'poly_sol_pure_homo_dir_huzhang_3d':
             # 纯齐次 Dirichlet
-            from soptx.model.linear_elasticity_3d import PolySolPureDirHuZhang3d
+            from soptx.model.linear_elasticity_3d import PolySolPureHomoDirHuZhang3d
             lam, mu = 1.0, 0.5
-            pde = PolySolPureDirHuZhang3d(domain=[0, 1, 0, 1, 0, 1], lam=lam, mu=mu)
+            pde = PolySolPureHomoDirHuZhang3d(domain=[0, 1, 0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_tet')
             nx, ny, nz = 2, 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
 
         # n = analysis_mesh.edge_unit_normal()
         # t = analysis_mesh.edge_tangent(unit=True)
@@ -87,14 +94,8 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
                           f"空间次数={space_degree}, 积分阶数={integration_order}")
         
-        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-        material = IsotropicLinearElasticMaterial(
-                                            lame_lambda=pde.lam, 
-                                            shear_modulus=pde.mu,
-                                            plane_type=pde.plane_type,
-                                            enable_logging=False
-                                        )
-        maxit = 5
+
+        maxit = 3
         errorType = [
                     '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega, 0}$',
                     '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega, 0}$',
@@ -123,13 +124,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             sigma_dof = huzhang_mfem_analyzer._huzhang_space.number_of_global_dofs()
             NDof[i] = uh_dof + sigma_dof
 
-            sigmah, uh = huzhang_mfem_analyzer.solve_displacement(density_distribution=None)
-
-            # gdof_coords, gdof_type_map = huzhang_mfem_analyzer._build_gdof_maps()
-            # sigma_values = pde.stress_solution(gdof_coords)
-            # component_idx = gdof_type_map % 3
-            # gdof = len(gdof_type_map)
-            # exact_vals = sigma_values[bm.arange(gdof), component_idx]
+            sigmah, uh = huzhang_mfem_analyzer.solve_displacement(rho_val=None)
 
             e_uh_l2 = analysis_mesh.error(u=uh, 
                                     v=pde.disp_solution,

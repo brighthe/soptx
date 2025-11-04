@@ -326,7 +326,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     def assemble_stress_load_vector(self, 
                                 enable_timing: bool = False
                             ) -> Union[TensorLike, COOTensor]:
-        """组装载荷向量的应力分量 f_sigma"""
+        """组装载荷向量的应力分量 f_sigma =  <u_D, (τ·n)>_Γ_D"""
         t = None
         if enable_timing:
             t = timer(f"组装 f_sigma")
@@ -341,15 +341,19 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             # Dirichlet 边界条件处理 - 弱形式施加
             gd_uh = self._pde.dirichlet_bc
             threshold_uh = self._pde.is_dirichlet_boundary()
-            
-            from soptx.analysis.integrators.face_source_integrator_mfem import BoundaryFaceSourceIntegrator_mfem
-            integrator_sigmah = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
-                                                            q=self._integration_order, 
-                                                            threshold=threshold_uh,
-                                                            method='dirichlet')
-            lform_sigmah = LinearForm(space_sigmah)
-            lform_sigmah.add_integrator(integrator_sigmah)
-            F_sigma = lform_sigmah.assembly(format='dense')
+
+            # 齐次 Dirichlet
+            F_sigma = space_sigmah.function()
+            # 非齐次 Dirichlet
+            # TODO 胡张元空间中的边界积分不好做
+            # from soptx.analysis.integrators.face_source_integrator_mfem import BoundaryFaceSourceIntegrator_mfem
+            # integrator_sigmah = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
+            #                                                 q=self._integration_order, 
+            #                                                 threshold=threshold_uh,
+            #                                                 method='dirichlet')
+            # lform_sigmah = LinearForm(space_sigmah)
+            # lform_sigmah.add_integrator(integrator_sigmah)
+            # F_sigma = lform_sigmah.assembly(format='dense')
 
         if enable_timing:
             t.send('组装时间')

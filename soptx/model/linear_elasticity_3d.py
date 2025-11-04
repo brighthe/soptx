@@ -7,7 +7,7 @@ from fealpy.typing import TensorLike, Callable
 
 from soptx.model.pde_base import PDEBase
 
-class PolySolPureDirHuZhang3d(PDEBase):
+class PolySolPureHomoDirHuZhang3d(PDEBase):
     """
     -∇·σ = b    in Ω
       Aσ = ε(u) in Ω
@@ -279,6 +279,11 @@ class PolySolPureDirHuZhang3d(PDEBase):
         val = bm.stack([sigma_xx, sigma_xy, sigma_xz, sigma_yy, sigma_yz, sigma_zz], axis=-1)
 
         return val
+    
+    @cartesian
+    def div_stress_solution(self, points: TensorLike) -> TensorLike:
+        """根据平衡方程: -∇·σ = b, 所以 ∇·σ = -b"""
+        return -self.body_force(points)
     
 
 class PolySolPureDirLagrange3d(PDEBase):

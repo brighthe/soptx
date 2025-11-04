@@ -96,7 +96,7 @@ class HuZhangFECellDof3d():
 
     def _dof_classfication(self):
         """
-        张量自由度顺序: (6, -1): gd_priority 
+        张量自由度顺序: (-1, NS): gd_priority 
         (σ0_xx, σ0_xy, σ0_xz, σ0_yy, σ0_yz, σ0_zz, 
          σ1_xx, σ1_xy, σ1_xz, σ1_yy, σ1_yz, σ1_zz, 
          ...,
@@ -514,6 +514,7 @@ class HuZhangFESpace3d(FunctionSpace):
         for i, alpha in enumerate(multiindex): 
             a = bm.prod(factorial(alpha))
             csframe[:, i] = a*symmetry_span_array(cframe, alpha).reshape(NC, -1)[:, idx]
+
         return nsframe, esframe, fsframe, csframe
 
     def basis(self, bc: TensorLike, index: Index=_S):
@@ -530,7 +531,6 @@ class HuZhangFESpace3d(FunctionSpace):
         iedofs = dof.cell_dofs.get_internal_dof_from_dim(1)
         ifdofs = dof.cell_dofs.get_internal_dof_from_dim(2)
         icdofs = dof.cell_dofs.get_internal_dof_from_dim(3)
-
 
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -591,10 +591,14 @@ class HuZhangFESpace3d(FunctionSpace):
             phi[..., idx:idx+N, :] = scalar_part * tensor_part
             idx += N
 
-        scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-        scalar_part = phi_s[None, :, scalar_phi_idx, None]
-        tensor_part = csframe[:, None, icdofs[0].dof_tensor, :]
-        phi[..., idx:, :] = scalar_part * tensor_part
+        # 单元气泡基函数 - 只有当 p >= n+1 时才存在单元内部自由度
+        n = mesh.geo_dimension()
+        if p >= n + 1:
+            scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
+            scalar_part = phi_s[None, :, scalar_phi_idx, None]
+            tensor_part = csframe[:, None, icdofs[0].dof_tensor, :]
+            phi[..., idx:, :] = scalar_part * tensor_part
+
         return phi
 
     def div_basis(self, bc: TensorLike): 
@@ -611,7 +615,6 @@ class HuZhangFESpace3d(FunctionSpace):
         iedofs = dof.cell_dofs.get_internal_dof_from_dim(1)
         ifdofs = dof.cell_dofs.get_internal_dof_from_dim(2)
         icdofs = dof.cell_dofs.get_internal_dof_from_dim(3)
-
 
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -683,12 +686,16 @@ class HuZhangFESpace3d(FunctionSpace):
             dphi[..., idx:idx+N, 2] = bm.sum(grad_scalar * frame[..., symidx[2]], axis=-1)
             idx += N
 
-        scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-        grad_scalar = gphi_s[..., scalar_phi_idx, :]
-        frame = csframe[:, None, icdofs[0].dof_tensor]
-        dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., symidx[0]], axis=-1)
-        dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., symidx[1]], axis=-1)
-        dphi[..., idx:, 2] = bm.sum(grad_scalar * frame[..., symidx[2]], axis=-1)
+        # 单元气泡基函数 - 只有当 p >= n+1 时才存在单元内部自由度
+        n = mesh.geo_dimension()
+        if p >= n + 1:
+            scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
+            grad_scalar = gphi_s[..., scalar_phi_idx, :]
+            frame = csframe[:, None, icdofs[0].dof_tensor]
+            dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., symidx[0]], axis=-1)
+            dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., symidx[1]], axis=-1)
+            dphi[..., idx:, 2] = bm.sum(grad_scalar * frame[..., symidx[2]], axis=-1)
+
         return dphi
 
     @barycentric
@@ -700,6 +707,7 @@ class HuZhangFESpace3d(FunctionSpace):
         phi = self.basis(bc, index=index)
         e2dof = self.dof.cell_to_dof()
         val = bm.einsum('cqld, ...cl -> ...cqd', phi, uh[..., e2dof])
+
         return val
 
     @barycentric
@@ -708,8 +716,9 @@ class HuZhangFESpace3d(FunctionSpace):
             TD = len(bc)
         else :
             TD = bc.shape[-1] - 1
-        gphi = self.grad_basis(bc, index=index)
-        e2dof = self.dof.entity_to_dof(TD, index=index)
+        gphi = self.div_basis(bc)
+        # TODO 目前只考虑散度值在单元上计算的情形
+        e2dof = self.dof.cell_to_dof(index=index)
         val = bm.einsum('cilm, cl -> cim', gphi, uh[e2dof])
         
         return val

@@ -755,7 +755,6 @@ class HuZhangFESpace2d(FunctionSpace):
             scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
             scalar_part = phi_s[None, :, scalar_phi_idx, None]
             tensor_part = csframe[:, None, icdofs[0].dof_tensor, :]
-
             phi[..., idx:, :] = scalar_part * tensor_part
 
         return phi
@@ -792,7 +791,7 @@ class HuZhangFESpace2d(FunctionSpace):
         
         # 将边的重心坐标转换为单元的重心坐标
         # bc 是边的重心坐标 (NQ, 2)，需要转换为三角形的重心坐标 (NQ, 3)
-        NLF = mesh.number_of_faces_of_cells()  # 三角形有3条边
+        NLF = mesh.number_of_faces_of_cells()  # 三角形有 3 条边
         cbcs = mesh.update_bcs(bc, 'cell')  # 转换后的单元重心坐标列表
         
         # 初始化结果
@@ -929,7 +928,6 @@ class HuZhangFESpace2d(FunctionSpace):
             scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
             grad_scalar = gphi_s[..., scalar_phi_idx, :]
             frame = csframe[:, None, icdofs[0].dof_tensor]
-
             dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
 
@@ -947,6 +945,7 @@ class HuZhangFESpace2d(FunctionSpace):
         phi = self.basis(bc, index=index)
         e2dof = self.dof.cell_to_dof()
         val = bm.einsum('cqld, ...cl -> ...cqd', phi, uh[..., e2dof])
+        
         return val
 
     @barycentric
@@ -959,5 +958,6 @@ class HuZhangFESpace2d(FunctionSpace):
         # TODO 目前只考虑散度值在单元上计算的情形
         e2dof = self.dof.cell_to_dof(index=index)
         val = bm.einsum('cilm, cl -> cim', gphi, uh[e2dof])
+
         return val
     
