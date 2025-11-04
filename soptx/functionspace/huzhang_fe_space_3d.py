@@ -12,7 +12,6 @@ from fealpy.decorator import barycentric, cartesian
 
 from scipy.special import factorial, comb
 
-import time
 
 def number_of_multiindex(p, d):
     if d == 1:
@@ -188,7 +187,8 @@ class HuZhangFEDof3d():
         p = self.p
         TD = self.mesh.top_dimension()
         NS = TD*(TD+1)//2 # 对称矩阵的自由度个数
-        return NS*number_of_multiindex(p, TD)
+
+        return NS * number_of_multiindex(p, TD)
 
     def number_of_internal_local_dofs(self, doftype : str='cell') -> int:
         """
@@ -213,9 +213,7 @@ class HuZhangFEDof3d():
             raise ValueError("Unknown doftype: {}".format(doftype))
 
     def number_of_global_dofs(self) -> int:
-        """
-        Get the number of global dofs of the finite element space.
-        """
+        """Get the number of global dofs of the finite element space."""
         mesh = self.mesh
         NC = mesh.number_of_cells()
         NF = mesh.number_of_faces()
@@ -226,25 +224,23 @@ class HuZhangFEDof3d():
         fldof = self.number_of_internal_local_dofs('face')
         eldof = self.number_of_internal_local_dofs('edge')
         nldof = self.number_of_internal_local_dofs('node')
+
         return NC*cldof + NF*fldof + NE*eldof + NN*nldof
 
     def node_to_internal_dof(self) -> TensorLike:
-        """
-        Get the index array of the dofs defined on the nodes of the mesh.
-        """
+        """Get the index array of the dofs defined on the nodes of the mesh."""
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         nldof = self.number_of_internal_local_dofs('node')
 
         node2dof = bm.arange(NN*nldof, dtype=self.itype, device=self.device)
+
         return node2dof.reshape(NN, nldof)
 
     node_to_dof = node_to_internal_dof
 
     def edge_to_internal_dof(self) -> TensorLike:
-        """
-        Get the index array of the dofs defined on the edges of the mesh.
-        """
+        """Get the index array of the dofs defined on the edges of the mesh."""
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -253,15 +249,14 @@ class HuZhangFEDof3d():
 
         N = NN*nldof
         edge2dof = bm.arange(N, N+NE*eldof, dtype=self.itype, device=self.device)
+
         return edge2dof.reshape(NE, eldof)
 
     def edge_to_dof(self, index: Index=_S) -> TensorLike:
         pass
 
     def face_to_internal_dof(self) -> TensorLike:
-        """
-        Get the index array of the dofs defined on the faces of the mesh.
-        """
+        """Get the index array of the dofs defined on the faces of the mesh."""
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -279,9 +274,7 @@ class HuZhangFEDof3d():
         pass
 
     def cell_to_internal_dof(self) -> TensorLike:
-        """
-        Get the index array of the dofs defined on the cells of the mesh.
-        """
+        """Get the index array of the dofs defined on the cells of the mesh."""
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -298,9 +291,7 @@ class HuZhangFEDof3d():
         return cell2dof.reshape(NC, cldof)
 
     def cell_to_dof(self, index: Index=_S) -> TensorLike:
-        """
-        Get the cell to dof map of the finite element space.
-        """
+        """Get the cell to dof map of the finite element space."""
         p = self.p
         mesh = self.mesh
         ldof = self.number_of_local_dofs()
@@ -380,9 +371,7 @@ class HuZhangFEDof3d():
         return c2d
 
     def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
-        """
-        Get the bool array of the boundary dofs.
-        """
+        """Get the bool array of the boundary dofs."""
         pass
 
 class HuZhangFESpace3d(FunctionSpace):
@@ -399,8 +388,6 @@ class HuZhangFESpace3d(FunctionSpace):
         self.TD = mesh.top_dimension()
         self.GD = mesh.geo_dimension()
 
-    def __str__(self):
-        return "HuZhangFESpace on {} with p={}".format(self.mesh, self.p)
 
     ## 自由度接口
     def number_of_local_dofs(self) -> int:
@@ -429,21 +416,6 @@ class HuZhangFESpace3d(FunctionSpace):
 
     def top_dimension(self):
         return self.TD
-
-    def project(self, u: Union[Callable[..., TensorLike], TensorLike],) -> TensorLike:
-        pass
-
-    def interpolate(self, u: Union[Callable[..., TensorLike], TensorLike],) -> TensorLike:
-        pass
-
-    def boundary_interpolate(self,
-            gd: Union[Callable, int, float, TensorLike],
-            uh: Optional[TensorLike] = None,
-            *, threshold: Optional[Threshold]=None, method=None) -> TensorLike:
-        #return self.function(uh), isDDof
-        pass
-
-    set_dirichlet_bc = boundary_interpolate
 
     def dof_frame(self) -> TensorLike:
         mesh = self.mesh
@@ -476,6 +448,7 @@ class HuZhangFESpace3d(FunctionSpace):
         eframe[f2e, 0] = fn[:, None] 
         eframe[:, 1] = bm.cross(et, eframe[:, 0])
         eframe[:, 2] = et 
+
         return nframe, eframe, fframe, cframe
 
     def dof_frame_of_S(self):
@@ -505,6 +478,7 @@ class HuZhangFESpace3d(FunctionSpace):
         csframe = bm.zeros((NC, 6, 6), dtype=self.ftype)
         for i, alpha in enumerate(multiindex): 
             csframe[:, i] = symmetry_span_array(cframe, alpha).reshape(NC, -1)[:, idx]
+
         return nsframe, esframe, fsframe, csframe
 
     basis_frame = dof_frame
@@ -567,8 +541,6 @@ class HuZhangFESpace3d(FunctionSpace):
 
         nsframe, esframe, fsframe, csframe = self.basis_frame_of_S() 
         dnsframe, desframe, dfsframe, dcsframe = self.dof_frame_of_S()
-
-
 
         phi_s = self.mesh.shape_function(bc, self.p, index=index) # (NC, NQ, ldof)
 
@@ -739,5 +711,6 @@ class HuZhangFESpace3d(FunctionSpace):
         gphi = self.grad_basis(bc, index=index)
         e2dof = self.dof.entity_to_dof(TD, index=index)
         val = bm.einsum('cilm, cl -> cim', gphi, uh[e2dof])
+        
         return val
     

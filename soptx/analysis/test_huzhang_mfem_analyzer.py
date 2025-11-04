@@ -60,8 +60,15 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde = TriSolPureHomoNeuHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
-
-        analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+        
+        elif model == 'poly_sol_pure_homo_dir_huzhang_3d':
+            # 纯齐次 Dirichlet
+            from soptx.model.linear_elasticity_3d import PolySolPureDirHuZhang3d
+            lam, mu = 1.0, 0.5
+            pde = PolySolPureDirHuZhang3d(domain=[0, 1, 0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_tet')
+            nx, ny, nz = 2, 2, 2
+            analysis_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
 
         # n = analysis_mesh.edge_unit_normal()
         # t = analysis_mesh.edge_tangent(unit=True)
@@ -561,7 +568,7 @@ if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
     huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    huzhang_analyzer.run(model='tri_sol_pure_homo_neu_huzhang')
+    huzhang_analyzer.run(model='poly_sol_pure_homo_dir_huzhang_3d')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='tri_sol_mix_huzhang')

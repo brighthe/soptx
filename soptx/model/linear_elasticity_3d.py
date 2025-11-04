@@ -7,7 +7,7 @@ from fealpy.typing import TensorLike, Callable
 
 from soptx.model.pde_base import PDEBase
 
-class BoxPolyHuZhangData3d(PDEBase):
+class PolySolPureDirHuZhang3d(PDEBase):
     """
     -∇·σ = b    in Ω
       Aσ = ε(u) in Ω
@@ -26,7 +26,8 @@ class BoxPolyHuZhangData3d(PDEBase):
     def __init__(self, 
                 domain: List[float] = [0, 1, 0, 1, 0, 1],
                 mesh_type: str = 'uniform_tet', 
-                lam: float = 1.0, mu: float = 0.5,                
+                lam: float = 1.0, mu: float = 0.5,
+                plane_type: str = '3d',                
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None 
             ) -> None:
@@ -35,14 +36,11 @@ class BoxPolyHuZhangData3d(PDEBase):
                 enable_logging=enable_logging, logger_name=logger_name)
         
         self._lam, self._mu = lam, mu
-        self._eps = 1e-12
-        self._plane_type = '3d'
-        self._force_type = 'distribution'
-        self._boundary_type = 'dirichlet'
 
-        self._log_info(f"Initialized BoxPolyHuZhangData3d with domain={self._domain}, "
-                f"mesh_type='{mesh_type}', lam={lam}, mu={mu}, "
-                f"plane_type='{self._plane_type}', force_type='{self._force_type}', boundary_type='{self._boundary_type}'")
+        self._eps = 1e-12
+        self._plane_type = plane_type
+        self._load_type = None
+        self._boundary_type = 'dirichlet'
 
 
     #######################################################################################################################
@@ -59,6 +57,11 @@ class BoxPolyHuZhangData3d(PDEBase):
         """获取剪切模量 μ"""
         return self._mu
     
+
+    #######################################################################################################################
+    # 变体方法
+    #######################################################################################################################
+    
     @variantmethod('uniform_tet')
     def init_mesh(self, **kwargs) -> TetrahedronMesh:
         nx = kwargs.get('nx', 10)
@@ -73,25 +76,14 @@ class BoxPolyHuZhangData3d(PDEBase):
                                     threshold=threshold, 
                                     device=device
                                 )
-        
-        self._save_mesh(mesh, 'uniform_tet', nx=nx, ny=ny, nz=nz, threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_tet', nx=nx, ny=ny, nz=nz)
 
         return mesh
 
-    def stress_matrix_coefficient(self) -> tuple[float, float]:
-        """
-        材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1
-        
-        Returns:
-        --------
-        lambda0: 1/(2μ)
-        lambda1: λ/(2μ(dλ+2μ)), 其中 d=3 为空间维数
-        """
-        d = 3
-        lambda0 = 1.0 / (2 * self._mu)
-        lambda1 = self._lam / (2 * self._mu * (d * self._lam + 2 * self._mu))
-        
-        return lambda0, lambda1
+
+    #######################################################################################################################
+    # 核心方法
+    #######################################################################################################################
     
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
@@ -143,6 +135,36 @@ class BoxPolyHuZhangData3d(PDEBase):
         u3 = 64 * common
         
         val = bm.stack([u1, u2, u3], axis=-1)
+        
+        return val
+    
+    @cartesian
+    def grad_disp_solution(self, points: TensorLike) -> TensorLike:
+        x, y, z = points[..., 0], points[..., 1], points[..., 2]
+        
+        # 位移解的系数
+        c1, c2, c3 = 16, 32, 64
+        
+        # 计算 u1 的梯度
+        du1_dx = c1 * (1 - 2*x) * y * (1 - y) * z * (1 - z)
+        du1_dy = c1 * x * (1 - x) * (1 - 2*y) * z * (1 - z)
+        du1_dz = c1 * x * (1 - x) * y * (1 - y) * (1 - 2*z)
+        
+        # 计算 u2 的梯度
+        du2_dx = c2 * (1 - 2*x) * y * (1 - y) * z * (1 - z)
+        du2_dy = c2 * x * (1 - x) * (1 - 2*y) * z * (1 - z)
+        du2_dz = c2 * x * (1 - x) * y * (1 - y) * (1 - 2*z)
+        
+        # 计算 u3 的梯度
+        du3_dx = c3 * (1 - 2*x) * y * (1 - y) * z * (1 - z)
+        du3_dy = c3 * x * (1 - x) * (1 - 2*y) * z * (1 - z)
+        du3_dz = c3 * x * (1 - x) * y * (1 - y) * (1 - 2*z)
+        
+        val = bm.stack([
+                        bm.stack([du1_dx, du1_dy, du1_dz], axis=-1),
+                        bm.stack([du2_dx, du2_dy, du2_dz], axis=-1),
+                        bm.stack([du3_dx, du3_dy, du3_dz], axis=-1)
+                    ], axis=-2)
         
         return val
     

@@ -10,7 +10,6 @@ from fealpy.functionspace.function import Function
 from fealpy.functionspace.functional import symmetry_span_array, symmetry_index
 from fealpy.decorator import barycentric, cartesian
 
-import time
 
 def number_of_multiindex(p, d):
     if d == 1:
@@ -204,6 +203,7 @@ class HuZhangFEDof2d():
         nldof = self.number_of_internal_local_dofs('node')
 
         node2dof = bm.arange(NN*nldof, dtype=self.itype, device=self.device)
+
         return node2dof.reshape(NN, nldof)
 
     node_to_dof = node_to_internal_dof
@@ -588,8 +588,6 @@ class HuZhangFESpace2d(FunctionSpace):
         self.TD = mesh.top_dimension()
         self.GD = mesh.geo_dimension()
 
-    # def __str__(self):
-    #     return "HuZhangFESpace on {} with p={}".format(self.mesh, self.p)
     
     @property
     def NS(self):
@@ -666,6 +664,7 @@ class HuZhangFESpace2d(FunctionSpace):
 
         eframe[:, 0] = mesh.edge_unit_normal()
         eframe[:, 1] = mesh.edge_unit_tangent()
+
         return nframe, eframe, cframe
 
     def dof_frame_of_S(self):
@@ -690,6 +689,7 @@ class HuZhangFESpace2d(FunctionSpace):
         csframe = bm.zeros((NC, 3, 3), dtype=self.ftype)
         for i, alpha in enumerate(multiindex): 
             csframe[:, i] = symmetry_span_array(cframe, alpha).reshape(NC, -1)[:, idx]
+            
         return nsframe, esframe, csframe
 
     basis_frame = dof_frame
