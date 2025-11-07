@@ -88,7 +88,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         # analysis_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
         # plt.show()
 
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "

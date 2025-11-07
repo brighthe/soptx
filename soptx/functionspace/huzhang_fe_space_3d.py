@@ -29,7 +29,7 @@ def multiindex_to_number(a):
         a1 = a[:, 1] + a[:, 2]
         a2 = a[:, 2]
         return a1*(1+a1)//2 + a2 
-    elif d==3:
+    elif d==3:  
         a1 = a[:, 1] + a[:, 2] + a[:, 3]
         a2 = a[:, 2] + a[:, 3]
         a3 = a[:, 3]
@@ -720,6 +720,6 @@ class HuZhangFESpace3d(FunctionSpace):
         # TODO 目前只考虑散度值在单元上计算的情形
         e2dof = self.dof.cell_to_dof(index=index)
         val = bm.einsum('cilm, cl -> cim', gphi, uh[e2dof])
-        
+
         return val
     
