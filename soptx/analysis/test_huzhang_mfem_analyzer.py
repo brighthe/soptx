@@ -8,7 +8,7 @@ from soptx.utils.base_logged import BaseLogged
 from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-from fealpy.mesh import TriangleMesh
+from fealpy.mesh import TriangleMesh, HexahedronMesh, TetrahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 
 
@@ -559,7 +559,19 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         print("--------------")
 
 
+
 if __name__ == "__main__":
+    mesh = TetrahedronMesh.from_box(
+                            box=[0, 1, 0, 1, 0, 1], 
+                            nx=10, ny=10, nz=10
+                        )
+    sspace = LagrangeFESpace(mesh, p=1, ctype='D')
+    ldof_s = sspace.number_of_local_dofs()
+    space_uh = TensorFunctionSpace(sspace, shape=(-1, 3))
+
+    ldof_uh = space_uh.number_of_local_dofs()
+
+
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
     huzhang_analyzer.run.set('test_exact_solution_hzmfem')

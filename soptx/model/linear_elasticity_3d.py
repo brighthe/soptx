@@ -1,7 +1,7 @@
 from typing import List, Callable, Optional, Tuple
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import TetrahedronMesh
+from fealpy.mesh import TetrahedronMesh, HexahedronMesh
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.typing import TensorLike, Callable
 
@@ -78,6 +78,24 @@ class PolySolPureHomoDirHuZhang3d(PDEBase):
                                 )
         self._save_meshdata(mesh, 'uniform_tet', nx=nx, ny=ny, nz=nz)
 
+        return mesh
+    
+    @init_mesh.register('uniform_hex')
+    def init_mesh(self, **kwargs) -> HexahedronMesh:
+        nx = kwargs.get('nx', 10)
+        ny = kwargs.get('ny', 10)
+        nz = kwargs.get('nz', 10)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = HexahedronMesh.from_box(
+                                    box=self._domain, 
+                                    nx=nx, ny=ny, nz=nz,
+                                    threshold=threshold, 
+                                    device=device
+                                )
+        self._save_meshdata(mesh, 'uniform_hex', nx=nx, ny=ny, nz=nz)
+        
         return mesh
 
 
