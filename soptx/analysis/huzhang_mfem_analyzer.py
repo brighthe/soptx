@@ -160,6 +160,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         t = None
         if enable_timing:
             t = timer(f"组装刚度矩阵")
+            next(t)
 
         p = self._space_degree
         mesh = self._mesh
@@ -172,6 +173,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             if rho_val is not None:
                 self._log_warning("标准混合有限元分析模式下忽略相对密度分布参数 rho")
             coef = None
+
         elif self._topopt_algorithm in ['density_based']:
             E_rho = self._interpolation_scheme.interpolate_map(
                                             material=self._material,
@@ -180,6 +182,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                         )
             E0 = self.material.youngs_modulus
             coef = E0 / E_rho
+
         else:
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
             self._log_error(error_msg)
@@ -568,7 +571,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     @variantmethod('mumps')
     def solve_displacement(self, 
                         rho_val: Optional[Union[TensorLike, Function]] = None, 
-                        enable_timing: bool = False, 
+                        enable_timing: bool = True, 
                         **kwargs
                     ) -> Tuple[Function, Function]:
         
@@ -618,8 +621,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('应用边界条件时间')
             
-        # solver_type = kwargs.get('solver', 'mumps')
-        solver_type = kwargs.get('solver', 'scipy')
+        solver_type = kwargs.get('solver', 'mumps')
 
         X = spsolve(K, F, solver=solver_type)
 

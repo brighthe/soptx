@@ -88,7 +88,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         # analysis_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
         # plt.show()
 
-        space_degree = 3
+        space_degree = 4
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -561,16 +561,6 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
 
 
 if __name__ == "__main__":
-    mesh = TetrahedronMesh.from_box(
-                            box=[0, 1, 0, 1, 0, 1], 
-                            nx=10, ny=10, nz=10
-                        )
-    sspace = LagrangeFESpace(mesh, p=1, ctype='D')
-    ldof_s = sspace.number_of_local_dofs()
-    space_uh = TensorFunctionSpace(sspace, shape=(-1, 3))
-
-    ldof_uh = space_uh.number_of_local_dofs()
-
 
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 

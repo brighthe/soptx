@@ -6,6 +6,8 @@ from fealpy.functionspace import FunctionSpace
 from fealpy.functionspace.functional import symmetry_index
 from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 
+from soptx.utils import timer
+
 class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
     def __init__(self, 
                 lambda0: float = 1.0, 
@@ -46,7 +48,12 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
 
         return cm, phi, trphi, ws 
 
-    def assembly(self, space: FunctionSpace) -> TensorLike:
+    def assembly(self, space: FunctionSpace, enable_timing: bool = False) -> TensorLike:
+        t = None
+        if enable_timing:
+            t = timer(f"stress assembly")
+            next(t)
+
         mesh = getattr(space, 'mesh', None)
         TD = mesh.top_dimension()
         NC = mesh.number_of_cells()
@@ -61,19 +68,22 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
         # 3D: num = [1, 1, 1, 2, 2, 2]
         _, num = symmetry_index(d=TD, r=2)
 
-        # 单元密度: (NC, ); 节点密度: (NC, NQ)
+        if enable_timing:
+            t.send('2')
+
         coef = self.coef 
 
+        # TODO phi 的每个轴的计算复杂度太大了
         if coef is None:
             A  = lambda0 * bm.einsum('q, c, cqld, cqmd, d -> clm', ws, cm, phi, phi, num)
             A -= lambda1 * bm.einsum('q, c, cql, cqm -> clm', ws, cm, trphi, trphi)
 
-        # 单元密度的情况
+        # 单元密度 (NC, )
         elif coef.shape ==(NC, ):
             A  = lambda0 * bm.einsum('q, c, c, cqld, cqmd, d -> clm', ws, cm, coef, phi, phi, num)
             A -= lambda1 * bm.einsum('q, c, c, cql, cqm -> clm', ws, cm, coef, trphi, trphi)
 
-        # 节点密度的情况
+        # 节点密度 (NC, NQ)
         elif coef.shape == (NC, NQ):
             A  = lambda0 * bm.einsum('q, c, cq, cqld, cqmd, d -> clm', ws, cm, coef, phi, phi, num)
             A -= lambda1 * bm.einsum('q, c, cq, cql, cqm -> clm', ws, cm, coef, trphi, trphi)
@@ -81,6 +91,10 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
         else:
             raise NotImplementedError
         
+        if enable_timing:
+            t.send('Einsum 求和时间')
+            t.send(None)
+
         return A
 
 

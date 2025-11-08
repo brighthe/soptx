@@ -4,6 +4,8 @@ from fealpy.typing import TensorLike
 from fealpy.functionspace import FunctionSpace
 from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 
+from soptx.utils import timer
+
 class HuZhangMixIntegrator(LinearInt, OpInt, CellInt):
     def __init__(self, q = None) -> None:
         super().__init__()
@@ -35,11 +37,24 @@ class HuZhangMixIntegrator(LinearInt, OpInt, CellInt):
         return cm, ws, div_phi, psi
     
     @enable_cache
-    def assembly(self, space: FunctionSpace) -> TensorLike:
+    def assembly(self, space: FunctionSpace, enable_timing: bool = False) -> TensorLike:
         assert space[0].mesh == space[1].mesh, "The mesh should be same for two space "
 
+        t = None
+        if enable_timing:
+            t = timer(f"mix assembly")
+            next(t)
+
         cm, ws, div_phi, psi = self.fetch(space)
+
+        if enable_timing:
+            t.send('2')
+
         res = bm.einsum('q, c, cqld, cqmd -> clm', ws, cm, div_phi, psi)
+
+        if enable_timing:
+            t.send('3')
+            t.send(None)
 
         return res
 
