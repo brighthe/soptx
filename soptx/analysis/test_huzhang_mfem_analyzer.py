@@ -30,12 +30,21 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
 
-        elif model == 'poly_sol_dir_huzhang':
-            from soptx.model.linear_elasticity_2d import PolySolDirHuZhangData
+        elif model == 'poly_sol_pure_homo_dir_huzhang_2d':
+            # 二维纯齐次 Dirichlet
+            from soptx.model.linear_elasticity_2d import PolySolPureHomoDirHuZhang2d
             lam, mu = 0.3, 0.35
-            pde = PolySolDirHuZhangData(domain=[-1, 1, -1, 1], lam=lam, mu=mu)
+            pde = PolySolPureHomoDirHuZhang2d(domain=[-1, 1, -1, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
-            nx, ny = 4, 4
+            nx, ny = 2, 2
+            analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
 
         elif model == 'tri_sol_mix_homo_dir_huzhang':
             # 齐次 Dirichlet + 非齐次 Neumann
@@ -62,7 +71,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             nx, ny = 2, 2
         
         elif model == 'poly_sol_pure_homo_dir_huzhang_3d':
-            # 纯齐次 Dirichlet
+            # 三维纯齐次 Dirichlet
             from soptx.model.linear_elasticity_3d import PolySolPureHomoDirHuZhang3d
             lam, mu = 1.0, 0.5
             pde = PolySolPureHomoDirHuZhang3d(domain=[0, 1, 0, 1, 0, 1], lam=lam, mu=mu)
@@ -88,14 +97,14 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         # analysis_mesh.find_cell(axes, showindex=True, color='b', markersize=16, fontsize=20, fontcolor='b')
         # plt.show()
 
-        space_degree = 4
+        space_degree = 1
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
                           f"空间次数={space_degree}, 积分阶数={integration_order}")
         
 
-        maxit = 3
+        maxit = 4
         errorType = [
                     '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega, 0}$',
                     '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega, 0}$',

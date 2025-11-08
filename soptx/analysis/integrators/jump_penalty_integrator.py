@@ -103,7 +103,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         NQ = len(ws)
 
         fm = mesh.entity_measure('face', index=index) 
-        hF = fm
+        if GD == 2:
+            hF = fm  # 2D: 边长
+        elif GD == 3:
+            hF = bm.sqrt(fm)  # 3D: sqrt(面积) ≈ 面的特征尺度
+        else:
+            raise ValueError(f"Unsupported dimension: {GD}")
 
         cell2face = mesh.cell_to_face()               # (NC, TD+1)
         # 单元内局部面的局部取向是否与该全局面的全局取向一致
@@ -173,8 +178,11 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         NQ = len(ws)
 
         fm = mesh.entity_measure('face', index=index)
-        hF = fm
-
+        if GD == 2:
+            hF = fm  # 2D: 边长
+        elif GD == 3:
+            hF = bm.sqrt(fm)  # 3D: sqrt(面积) ≈ 面的特征尺度
+            
         # 获取面的单位法向量
         fn = mesh.face_unit_normal(index=index)  # (NF(index), GD)
 

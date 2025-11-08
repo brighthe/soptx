@@ -306,7 +306,7 @@ class TriSolDirHuZhangData(PDEBase):
         return val
 
 
-class PolySolDirHuZhangData(PDEBase):
+class PolySolPureHomoDirHuZhang2d(PDEBase):
     """
     胡张混合有限元
         带多项式真解的二维线弹性算例 (纯齐次 Dirichlet 边界条件)
