@@ -2,53 +2,100 @@ clc; clear;
 % --- 问题定义 ---
 % (P1) 质量最小化 + 应力约束 
 
-% 网格参数
+%% --- 输入参数准备 --- 
+% --- 网格参数 ---
 nelx = 120;
 nely = 40;
 
-% 几何参数
+% --- 几何参数 ---
 l = 300; % [mm]
 b = 100; % [mm]
 t = 1.0; % [mm]
 unit_size_x = l / nelx;
 unit_size_y = b / nely;
-% 过滤半径
-rmin = 2.0 * unit_size_x;
-% 材料参数
-E = 71000; % [MPa]
+
+% --- 材料参数 ---
+E = 71000;        % [MPa]
 nu = 0.33;
 density = 2.8e-9; % [ton/mm^3]
 
 % --- 应力约束参数 ---
-% 屈服应力限制
-sigmay = 350; % [MPa]
-% p-norm 聚合参数
-p = 8;
-% 应力约束数量
-nc = 10;
+sigmay = 350; % 屈服应力限制 [MPa]
+p = 8;        % p-norm 聚合参数
+nc = 10;      % 应力约束数量
 
 % --- 质量约束参数 ---
 element_area = unit_size_x * unit_size_y;
 element_volume = element_area * t;
-% 单个实体单元质量
-m_e = density * element_volume; % [ton]
+m_e = density * element_volume; % 单个实体单元质量 [ton]
 
-% 优化参数
-penal = 3;
+%% --- 有限元分析 ---
+% 局部刚度矩阵
+k = [ 1/2-nu/6   1/8+nu/8 -1/4-nu/12 -1/8+3*nu/8 ... 
+     -1/4+nu/12 -1/8-nu/8  nu/6       1/8-3*nu/8];
+KE = E/(1-nu^2)*[ k(1) k(2) k(3) k(4) k(5) k(6) k(7) k(8)
+                  k(2) k(1) k(8) k(7) k(6) k(5) k(4) k(3)
+                  k(3) k(8) k(1) k(6) k(7) k(4) k(5) k(2)
+                  k(4) k(7) k(6) k(1) k(8) k(3) k(2) k(5)
+                  k(5) k(6) k(7) k(8) k(1) k(2) k(3) k(4)
+                  k(6) k(5) k(4) k(3) k(2) k(1) k(8) k(7)
+                  k(7) k(4) k(5) k(2) k(3) k(8) k(1) k(6)
+                  k(8) k(3) k(2) k(5) k(4) k(7) k(6) k(1)]; 
 
-% --- *** 新增：过滤和循环控制 *** ---
-ft = 1; % 0 = 不过滤, 1 = 密度过滤
-maxite = 200; % 最大迭代次数
-tolx = 0.01;  % 收敛标准
-change = 1.0; % 变化量
-% ---
+penal_K = 3; % SIMP 参数
+x = repmat(0.5, [nely, nelx]); % 初始设计
 
-% 初始设计
-n = nelx * nely; % 设计变量数量
-x_design = 0.5 * ones(n, 1); % 初始设计 (1D 列向量)
-xPhys = x_design;            % 物理密度 (初始迭代)
+% 初始位移计算
+[F, U, K] = FEA(nelx, nely, x, penal_K, KE);
 
-% 准备过滤 (列优先索引)
+penal_S = 0.5 % 应力罚函数
+
+% 应变位移矩阵 (单元中心点)
+B = (1/2/unit_size_x) * [-1  0  1  0  1  0 -1  0; 
+                          0 -1  0 -1  0  1  0  1; 
+                         -1 -1 -1  1  1  1  1 -1];
+% 本构矩阵
+D = E/(1-nu^2)*[1 nu 0; nu 1 0; 0 0 (1-nu)/2];
+
+% 初始 von Mises 应力计算
+[stress_vm] = compute_von_mises(nelx, nely, x, U, penal_S, B, D);
+
+
+
+
+
+
+K = sparse(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
+F = sparse(2*(nely+1)*(nelx+1), 1); 
+U = zeros(2*(nely+1)*(nelx+1), 1);
+    
+% 全局刚度矩阵
+for elx = 1:nelx
+  for ely = 1:nely
+    n1 = (nely+1)*(elx-1)+ely; 
+    n2 = (nely+1)* elx   +ely;
+    edof = [2*n1-1; 2*n1; 2*n2-1; 2*n2; 2*n2+1; 2*n2+2; 2*n1+1; 2*n1+2];
+    K(edof, edof) = K(edof, edof) + x(ely, elx)^penal*KE;
+  end
+end
+
+% --- 定义 MBB 梁的载荷和边界条件 ---
+load_node = (nely+1);        % 载荷施加在左上角 (节点 nely+1) 的 Y 方向 
+F(2*load_node, 1) = -1500.0; % 载荷 1500 [N]
+
+% 边界条件 (BCs) 
+% 左边界 (对称) - X 方向固定
+fixeddofs_x = 1:2:2*(nely+1);
+% 右下角 (铰支) - Y 方向固定
+node_bottom_right = (nelx)*(nely+1) + 1;
+fixeddofs_y = 2*node_bottom_right;
+fixeddofs = unique([fixeddofs_x, fixeddofs_y]);
+alldofs     = [1:2*(nely+1)*(nelx+1)];
+freedofs    = setdiff(alldofs, fixeddofs);
+
+%% --- 过滤 ---
+ft = 1;  % 0 = 不过滤, 1 = 密度过滤, 2 = 灵敏度过滤
+rmin = 2.0 * unit_size_x; % 过滤半径
 iH = ones(nelx*nely*(2*(ceil(rmin)-1)+1)^2,1);
 jH = ones(size(iH));
 sH = zeros(size(iH));
@@ -62,7 +109,7 @@ for i1 = 1:nelx
         k = k+1;
         iH(k) = e1;
         jH(k) = e2;
-        sH(k) = max(0, rmin - sqrt((i1-i2)^2 + (j1 - j2)^2));
+        sH(k) = max(0, rmin - sqrt((i1-i2)^2 + (j1-j2)^2));
       end
     end
   end
@@ -70,23 +117,21 @@ end
 H = sparse(iH, jH, sH);
 Hs = sum(H, 2);
 
-% 单元刚度矩阵
-k = [ 1/2-nu/6   1/8+nu/8 -1/4-nu/12 -1/8+3*nu/8 ... 
-     -1/4+nu/12 -1/8-nu/8  nu/6       1/8-3*nu/8];
-KE = 1/(1-nu^2)*[ k(1) k(2) k(3) k(4) k(5) k(6) k(7) k(8)
-                  k(2) k(1) k(8) k(7) k(6) k(5) k(4) k(3)
-                  k(3) k(8) k(1) k(6) k(7) k(4) k(5) k(2)
-                  k(4) k(7) k(6) k(1) k(8) k(3) k(2) k(5)
-                  k(5) k(6) k(7) k(8) k(1) k(2) k(3) k(4)
-                  k(6) k(5) k(4) k(3) k(2) k(1) k(8) k(7)
-                  k(7) k(4) k(5) k(2) k(3) k(8) k(1) k(6)
-                  k(8) k(3) k(2) k(5) k(4) k(7) k(6) k(1)]; 
-% 应变位移矩阵 (单元中心点)
-B = (1/2/unit_size_x) * [-1  0  1  0  1  0 -1  0; 
-                          0 -1  0 -1  0  1  0  1; 
-                         -1 -1 -1  1  1  1  1 -1];
-% 本构矩阵
-C = E/(1-nu^2)*[1 nu 0; nu 1 0; 0 0 (1-nu)/2];
+          
+
+
+
+maxite = 200; % 最大迭代次数
+tolx = 0.01;  % 收敛标准
+change = 1.0; % 变化量
+
+% 初始设计
+nele = nelx * nely; % 设计变量数量
+x = repmat(volfrac, [nely, nelx]); % 初始设计
+xPhys = x_design;                  % 物理密度
+
+
+
 
 % --- MMA 初始化 (第 1 部分) ---
 m = nc; % m 个应力约束
