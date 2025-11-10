@@ -7,7 +7,7 @@ from fealpy.typing import TensorLike, Callable
 
 from soptx.model.pde_base import PDEBase
 
-class TriSolDirHuZhangData(PDEBase):
+class TriSolHomoDirHuZhang2d(PDEBase):
     """
     胡张混合有限元
         带真解的二维线弹性算例 (纯齐次 Dirichlet 边界条件)
@@ -568,23 +568,13 @@ class PolySolPureHomoDirHuZhang2d(PDEBase):
         return -self.body_force(points)
 
 
-class TriSolMixNoneHomoDirHuZhang(PDEBase):
+class TriSolMixNHomoDirNhomoNeu2d(PDEBase):
     r"""
     胡张混合有限元
-        二维线弹性（平面应变）—— 解析解 + 混合边界条件 (上/下 Dirichlet, 左/右 Neumann)
-
-    方程：
-        Aσ = ε(u)                     in Ω
-       -∇·σ = b                       in Ω
-            u = 0                    on Γ_D = {x=0} ∪ {y=0}
-          σ·n = t                    on Γ_N = {x=1} ∪ {y=1}
+        二维线弹性 (平面应变) —— 解析解 + 混合边界条件 (上/下 非齐次 Dirichlet, 左/右 非齐次 Neumann)
 
     材料参数：
-        λ = 1.0, μ = 0.5  (⇒ 2μ = 1)
-
-    本构（平面应变）：
-        σ = 2μ ε + λ tr(ε) I
-      ⇔  Aσ = ε,   A 为柔度算子 (与 λ, μ 对偶)
+        λ = 1.0, μ = 0.5 
 
     解析位移 (三角函数):
         u(x,y) = [ sin(πx/2)·sin(πy),
@@ -593,8 +583,11 @@ class TriSolMixNoneHomoDirHuZhang(PDEBase):
     体力密度: 
         b(x,y) = [ π^2( sin(πx/2) sin(πy) + (3/2) cos(πy) cos(πy/2) ),
                   -(3/4)π^2 cos(πx/2) cos(πy) - 2π^2 sin(πx) sin(πy/2) ]^T
-
-      Neumann:
+    
+    Dirichlet:
+        下边界  y = 0:  u(x, 0) = [0, 0]^T
+        上边界  y = 1:  u(x, 1) = [0, -2 sin(πx)]^T
+    Neumann:
         左边界  x=0,  n = (-1, 0):  t(0,y) = [ -π sin(πy),
                                              π sin(πy/2) ]^T
         右边界  x=1,  n = ( 1, 0):  t(1,y) = [ 0,
@@ -916,23 +909,30 @@ class TriSolMixNoneHomoDirHuZhang(PDEBase):
                 self.is_neumann_boundary_dof_yy)
 
 
-class TriSolMixHomoDirHuZhang(PDEBase):
-    """
+class TriSolMixHomoDirNhomoNeu2d(PDEBase):
+    r"""
+    胡张混合有限元
+        二维线弹性 (平面应变) —— 解析解 + 混合边界条件 (上/下 齐次 Dirichlet, 左/右 非齐次 Neumann)
+
+    材料参数：
+        λ = 1.0, μ = 0.5 
+
     解析位移 (三角函数):
-        u(x,y) = [
-                    sin(πx/2) · sin(πy),
-                -2 sin(πx) · ( sin(πy/2) - y )
-                ]^T
+        u(x, y) = [ sin(πx/2) · sin(πy),
+                   -2 sin(πx) · (sin(πy/2)-y) ]^T
 
     体力密度: 
-        b(x,y) = [ π^2( sin(πx/2) sin(πy) + (3/2) cos(πy) cos(πy/2) ) - 2π(λ+μ) cos(πx),
-                  -(3/4)π^2 cos(πx/2) cos(πy) - 2π^2 sin(πx) sin(πy/2) + 2μ π^2 y sin(πx) ]^T
+        b(x, y) = [ π^2( sin(πx/2) sin(πy) + (3/2) cos(πy) cos(πy/2) ) - 2π(λ+μ) cos(πx),
+                   -(3/4)π^2 cos(πx/2) cos(πy) - 2π^2 sin(πx) sin(πy/2) + 2μ π^2 y sin(πx) ]^T
 
+    Dirichlet:
+        下边界  y = 0:  u(x, 0) = [0, 0]^T
+        上边界  y = 1:  u(x, 1) = [0, 0]^T
     Neumann:
-        左边界  x=0,  n = (-1, 0):  t(0,y) = [ -π sin(πy),
-                                             π sin(πy/2) - 2μ π y ]^T
-        右边界  x=1,  n = ( 1, 0):  t(1,y) = [ 0,
-                                             (π/2) cos(πy) + π sin(πy/2) - 2μ π y ]^T
+        左边界  x = 0,  n = (-1, 0), t = (0, -1): g(0, y) = [ -πsin(πy),
+                                                            πsin(πy/2) - 2μπy ]^T
+        右边界  x = 1,  n = ( 1, 0), t = (0,  1): g(1, y) = [ 0,
+                                                            (π/2)cos(πy) + πsin(πy/2) - 2μπy ]^T
     """
     def __init__(self, 
             domain: List[float] = [0, 1, 0, 1],
@@ -1269,7 +1269,7 @@ class TriSolMixHomoDirHuZhang(PDEBase):
         return bm.einsum('...i, ...i -> ...', g_values, t_values)
 
 
-class TriSolPureHomoNeuHuZhang(PDEBase):
+class TriSolPureNHomoNeuHuZhang(PDEBase):
     """
     解析位移 (三角函数):
         u(x,y) = [ sin(pi x) sin(pi y),

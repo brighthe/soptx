@@ -559,8 +559,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
         isBdDof[:gdof_sigmah] = isBdDof_sigmah  
         
+        K_test = bm.round(K.to_dense(), decimals=4)
         K = self._apply_matrix(A=K, isDDof=isBdDof)
-
+        K_bc_test = bm.round(K.to_dense(), decimals=4)
         return K, F
     
 
@@ -935,6 +936,53 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         new_values = bm.empty((NNZ,), **A.values_context())
         new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], 1.)
+        new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
+
+        return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
+    
+    def _apply_matrix_test(self, A: CSRTensor, isDDof: TensorLike, DDof_val: TensorLike) -> CSRTensor:
+        """
+        FEALPy 中的 apply_matrix 使用了 D0@A@D0, 
+        不同后端下 @ 会使用大量的 for 循环, 这在 GPU 下非常缓慢
+        
+        Parameters:
+        -----------
+        A : CSRTensor
+            输入的稀疏矩阵
+        isDDof : TensorLike
+            边界自由度标记，形状为 (gdof,)
+        DDof_val : TensorLike
+            边界自由度对应的值，形状为 (gdof,)
+        """
+        isIDof = bm.logical_not(isDDof)
+        crow = A.crow
+        col = A.col
+        indices_context = bm.context(col)
+        ZERO = bm.array([0], **indices_context)
+
+        nnz_per_row = crow[1:] - crow[:-1]
+        remain_flag = bm.repeat(isIDof, nnz_per_row) & isIDof[col] # 保留行列均为内部自由度的非零元素
+        rm_cumsum = bm.concat([ZERO, bm.cumsum(remain_flag, axis=0)], axis=0) # 被保留的非零元素数量累积
+        nnz_per_row = rm_cumsum[crow[1:]] - rm_cumsum[crow[:-1]] + isDDof # 计算每行的非零元素数量
+
+        new_crow = bm.cumsum(bm.concat([ZERO, nnz_per_row], axis=0), axis=0)
+
+        NNZ = new_crow[-1]
+        non_diag = bm.ones((NNZ,), dtype=bm.bool, device=bm.get_device(isDDof)) # Field: non-zero elements
+        loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
+        non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
+
+        # 找出所有边界DOF对应的行索引
+        bd_rows = bm.where(loc_flag)[0]
+        new_col = bm.empty((NNZ,), **indices_context)
+        # 设置为相应行的边界 DOF 位置
+        new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)
+        # 设置非对角元素的列索引
+        new_col = bm.set_at(new_col, non_diag, col[remain_flag])
+
+        new_values = bm.empty((NNZ,), **A.values_context())
+        # 修改：使用 DDof_val 中对应边界 DOF 的值
+        new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], DDof_val[bd_rows])
         new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
 
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)

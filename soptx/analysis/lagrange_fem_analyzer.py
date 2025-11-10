@@ -12,6 +12,7 @@ from fealpy.sparse import CSRTensor, COOTensor
 from ..interpolation.linear_elastic_material import LinearElasticMaterial
 from ..interpolation.interpolation_scheme import MaterialInterpolationScheme
 from .integrators.linear_elastic_integrator import LinearElasticIntegrator
+from soptx.analysis.integrators.source_integrator import SourceIntegrator
 from soptx.model.pde_base import PDEBase
 from ..utils.base_logged import BaseLogged
 from soptx.utils import timer
@@ -222,7 +223,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         body_force = self._pde.body_force
 
         # NOTE F.dtype == COOTensor or TensorLike
-        integrator = VectorSourceIntegrator(source=body_force, q=self._integration_order)
+        integrator = SourceIntegrator(source=body_force, q=self._integration_order)
         lform = LinearForm(self._tensor_space)
         lform.add_integrator(integrator)
         F = lform.assembly(format='dense')

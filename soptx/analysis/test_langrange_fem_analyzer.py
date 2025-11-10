@@ -37,11 +37,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     enable_logging=False
                                 )
 
-        elif model == 'tri_sol_pure_neu_huzhang':
+        elif model == 'tri_sol_pure_nhomo_neu_huzhang':
             # 纯 Neumann
-            from soptx.model.linear_elasticity_2d import TriSolPureHomoNeuHuZhang
+            from soptx.model.linear_elasticity_2d import TriSolPureNHomoNeuHuZhang
             lam, mu = 1.0, 0.5
-            pde = TriSolPureHomoNeuHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde = TriSolPureNHomoNeuHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
             mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -53,11 +53,11 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 enable_logging=False
                                             )
             
-        elif model == 'tri_sol_mix_homo_dir_huzhang':
+        elif model == 'tri_sol_mix_homo_dir_nhomo_neu_2d':
             # 齐次 Dirichlet + 非齐次 Neumann
             lam, mu = 1.0, 0.5
-            from soptx.model.linear_elasticity_2d import TriSolMixHomoDirHuZhang
-            pde = TriSolMixHomoDirHuZhang(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            from soptx.model.linear_elasticity_2d import TriSolMixHomoDirNhomoNeu2d
+            pde = TriSolMixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
             mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -150,13 +150,13 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
                     f"空间次数={space_degree}, 积分阶数={integration_order}")
 
-        maxit = 3
+        maxit = 4
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 0}$', 
                      '$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 1}$']
         errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
@@ -173,7 +173,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method='standard',
-                                    solve_method='mumps',
+                                    solve_method='scipy',
                                     topopt_algorithm=None,
                                     interpolation_scheme=None
                                 )
@@ -384,7 +384,7 @@ if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
     test.run.set('test_exact_solution_lfem')
-    test.run(model='poly_sol_pure_homo_dir_huzhang_3d')
+    test.run(model='tri_sol_mix_homo_dir_nhomo_neu_2d')
 
     # test.run.set('test_none_exact_solution_lfem')
     # test.run(model='bearing_device_2d')
