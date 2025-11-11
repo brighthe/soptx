@@ -1,10 +1,10 @@
-function dsi_dx = compute_stress_sensitivity(xPhys, U, cluster_idx, dsi_dvm, ...
+function dsi_drho  = compute_stress_sensitivity(xPhys, U, cluster_idx, dsi_dvm, ...
                                            dvm_dstress, lambda, B, D, KE, ...
-                                           penal_S, penal_K, H, Hs, nelx, nely, ft)
+                                           penal_S, penal_K, nelx, nely)
 
     nc = length(cluster_idx);
     nele = nelx * nely;
-    dsi_dx = zeros(nc, nele);
+    dsi_drho = zeros(nc, nele);
     
     % 计算应力惩罚函数的导数 ∂η_S/∂ρ
     detaS_drho = penal_S * xPhys.^(penal_S - 1);
@@ -48,22 +48,22 @@ function dsi_dx = compute_stress_sensitivity(xPhys, U, cluster_idx, dsi_dvm, ...
             dK_drho_e = detaK_drho(ely, elx) * KE;
             term2 = -etaS_e * lambda(edof, i)' * dK_drho_e * Ue;
 
-            dsi_drho_e = term1 + term2;
+            dsi_drho(i, e) = term1 + term2;
 
-            if ft == 2
-                % 密度过滤：∂s_i/∂x_b = Σ_e [∂s_i/∂ρ_e * ∂ρ_e/∂x_b]
-                % 其中 ∂ρ_e/∂x_b = H(e,b) / Hs(e)
-                [~, cols, vals] = find(H(e, :)); 
-                
-                for idx = 1:length(cols)
-                    b = cols(idx);         
-                    H_eb = vals(idx);      
-
-                    dsi_dx(i, b) = dsi_dx(i, b) + dsi_drho_e * H_eb / Hs(e);
-                end
-            else
-                dsi_dx(i, e) = dsi_drho_e;
-            end
+            % if ft == 2
+            %     % 密度过滤：∂s_i/∂x_b = Σ_e [∂s_i/∂ρ_e * ∂ρ_e/∂x_b]
+            %     % 其中 ∂ρ_e/∂x_b = H(e,b) / Hs(e)
+            %     [~, cols, vals] = find(H(e, :)); 
+            % 
+            %     for idx = 1:length(cols)
+            %         b = cols(idx);         
+            %         H_eb = vals(idx);      
+            % 
+            %         dsi_dx(i, b) = dsi_dx(i, b) + dsi_drho_e * H_eb / Hs(e);
+            %     end
+            % else
+            %     dsi_dx(i, e) = dsi_drho_e;
+            % end
         end
     end
 end

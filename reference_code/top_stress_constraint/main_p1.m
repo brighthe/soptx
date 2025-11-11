@@ -84,7 +84,22 @@ penal_K = 3; % SIMP 参数
 % 初始位移计算
 [F, U, K, fixeddofs] = FEA(nelx, nely, xPhys, penal_K, KE);
 
-%% --- 应力处理 ---
+%% --- 质量目标函数及其灵敏度 ---
+% 质量目标函数
+f0val = sum(sum(m_e * xPhys)); 
+
+% 质量对物理密度的灵敏度 ∂f0/∂rho
+df0drho = m_e * ones(nely, nelx);
+
+df0dx = df0drho;
+% 应用过滤得到对设计变量的敏感度 ∂f0/∂x
+if ft == 1
+    df0dx(:) = H * (x(:) .* df0drho(:)) ./ Hs ./ max(1e-3, x(:));
+elseif ft == 2
+    df0dx(:) = H * (df0drho(:) ./ Hs);
+end
+
+%% --- 应力约束及其灵敏度 ---
 penal_S = 0.5; % 应力罚函数
 
 % 应变位移矩阵 (单元中心点)
@@ -99,39 +114,10 @@ D = E/(1-nu^2)*[1 nu 0; nu 1 0; 0 0 (1-nu)/2];
 [stress_vm, stress_penalized] = compute_von_mises(nelx, nely, xPhys, U, penal_S, B, D);
 
 % --- 应力聚类 (水平法) --- 
-[stress_vm_sorted, sort_idx] = sort(stress_vm, 'descend');
-% 计算每个聚类的单元数
-base_size = floor(nele / nc);
-remainder = mod(nele, nc);
-Ni = repmat(base_size, nc, 1);
-Ni(1:remainder) = Ni(1:remainder) + 1;
-% 分配单元到聚类
-cluster_vm = cell(nc, 1);
-cluster_idx = cell(nc, 1);
-start_pos = 1;
-for i = 1:nc
-    end_pos = start_pos + Ni(i) - 1;
-    cluster_idx{i} = sort_idx(start_pos:end_pos);
-    cluster_vm{i} = stress_vm_sorted(start_pos:end_pos);
-    start_pos = end_pos + 1;
-end
+[cluster_idx, cluster_vm, Ni] = stress_clustering(stress_vm, nc, nele);
 
-% --- 归一化 P-norm 应力约束及其梯度 ---
-% 归一化 P-norm 应力约束值
-sigmapn = zeros(nc, 1);
-for i = 1:nc
-    cluster_p = (cluster_vm{i} / sigmay).^p;
-    sigmapn(i) = (sum(cluster_p) / Ni(i))^(1/p);
-end
-fval = sigmapn - 1;
-% 归一化 P-norm 应力约束对单个 von Mises 应力的导数 d(s_i) / d(sigma_a^vM)
-dsi_dvm = zeros(nc, nele);
-for i = 1:nc
-    term_A = sigmapn(i)^(1-p);
-    term_B = 1 / (Ni(i) * sigmay^p);
-    stress_values = cluster_vm{i};
-    dsi_dvm(i, cluster_idx{i}) = term_A * term_B * (stress_values.^(p-1));
-end
+% --- 归一化 P-norm 应力约束及其灵敏度 ---
+[sigmapn, fval, dsi_dvm] = compute_pnorm_constraint(cluster_vm, cluster_idx, Ni, sigmay, p, nele, nc);
 
 % --- von Mises 应力对其应力分量的导数 d(sigma_a^vM) / d(sigma_a)  ---
 dvm_dstress = compute_dvm_dsigma(stress_vm, stress_penalized);
@@ -143,10 +129,53 @@ rhs_adjoint = compute_adjoint_rhs(cluster_idx, dsi_dvm, dvm_dstress, B, D, nely,
 % 求解伴随方程
 lambda = FEA_adjoint(K, rhs_adjoint, fixeddofs);
 
-% 计算应力约束敏感度 d(s_i) / dx
-dsi_dx = compute_stress_sensitivity(xPhys, U, cluster_idx, dsi_dvm, ...
+% 计算应力约束对物理密度的灵敏度 d(s_i) / drho
+dsi_drho = compute_stress_sensitivity(xPhys, U, cluster_idx, dsi_dvm, ...
                                    dvm_dstress, lambda, B, D, KE, ...
-                                   penal_S, penal_K, H, Hs, nelx, nely, ft);
+                                   penal_S, penal_K, nelx, nely);
+
+% 过滤得到应力约束对设计变量的灵敏度
+dsi_dx = zeros(nc, nele);
+if ft == 1
+    for i = 1:nc
+        dsi_dx_i = reshape(dsi_drho(i, :), nely, nelx);
+        dsi_dx_i(:) = H * (x(:) .* dsi_dx_i(:)) ./ Hs ./ max(1e-3, x(:));
+        dsi_dx(i, :) = dsi_dx_i(:);
+    end
+elseif ft == 2
+    for i = 1:nc
+        dsi_dx_i = reshape(dsi_drho(i, :), nely, nelx);
+        dsi_dx_i(:) = H * (dsi_dx_i(:) ./ Hs);
+        dsi_dx(i, :) = dsi_dx_i(:);
+    end
+else
+    dsi_dx = dsi_drho;
+end
+
+%% --- MMA 参数初始化 ---
+maxiter = 200;
+change = 1;
+loop = 0;
+
+m = nc;
+n = nelx * nely;
+xmin = 0.001 * ones(n, 1);
+xmax = 1.0 * ones(n, 1);
+xold1 = x(:);
+xold2 = x(:);
+low = xmin;
+upp = xmax;
+
+%% --- 优化迭代循环 ---
+while change > 0.01 && loop < maxiter
+    loop = loop + 1;
+    
+    % --- 有限元分析 ---
+    [F, U, K, fixeddofs] = FEA(nelx, nely, xPhys, penal_K, KE);
+    
+    % --- 应力计算 ---
+    [stress_vm, stress_penalized] = compute_von_mises(nelx, nely, xPhys, U, penal_S, B, D);
+end
 
 maxite = 200; % 最大迭代次数
 tolx = 0.01;  % 收敛标准
@@ -178,85 +207,7 @@ iter = 0;
 while change > tolx && iter < maxite
     
     iter = iter + 1;
-    
 
-    % --- 伴随法 (Adjoint Method) 灵敏度分析 ---
-    
-    % *** 更改 ***: 计算对 "物理密度 rho" 的导数
-    dfdrho = zeros(m, n); 
-    
-    KE_solid = KE; 
-    CB = C*B;
-    BTC = (CB)';
-
-    for i = 1:nc % --- 循环 nc 个应力约束 ---
-        
-        % --- 构造伴随载荷 R_i ---
-        R_i = sparse(2*(nely+1)*(nelx+1), 1);
-        
-        % *** 修正：循环改为 "列优先" ***
-        for elx = 1:nelx
-            for ely = 1:nely
-                % 'a' 是列优先索引
-                a = (elx-1)*nely + ely; 
-                
-                val_dsi_dvm = dsi_dvm(i, a);
-                if val_dsi_dvm == 0
-                    continue;
-                end
-                
-                val_dvm_dstress = dvm_dstress(a, :)';
-                Re = BTC * (val_dvm_dstress * val_dsi_dvm);
-                
-                n1 = (nely+1)*(elx-1)+ely;
-                n2 = (nely+1)* elx   +ely;
-                edof = [2*n1-1; 2*n1; 2*n2-1; 2*n2; 2*n2+1; 2*n2+2; 2*n1+1; 2*n1+2];
-                R_i(edof) = R_i(edof) + Re;
-            end
-        end
-        
-        % --- 求解伴随方程 K * lambda_i = R_i ---
-        lambda_i = zeros(2*(nely+1)*(nelx+1), 1);
-        lambda_i(freedofs, :) = K(freedofs, freedofs) \ R_i(freedofs, :);
-        lambda_i(fixeddofs, :) = 0;
-        
-        % --- *** 新增：计算 T1 - T2 (对 rho 的导数) *** ---
-        % *** 修正：循环改为 "列优先" ***
-        for elx = 1:nelx
-            for ely = 1:nely
-                % 'b' 是列优先索引
-                b = (elx-1)*nely + ely;
-                rhob = xPhys_2d(ely, elx); % 物理密度
-                
-                % --- T1 (局部项) ---
-                val_dsi_dvm_b = dsi_dvm(i, b);
-                if val_dsi_dvm_b == 0
-                    T1 = 0;
-                else
-                    d_eta_s = 0.5 * (rhob^(-0.5));
-                    val_dvm_dstress_b = dvm_dstress(b, :);
-                    solid_sigma_b = solid_stresses(b, :)';
-                    T1 = val_dsi_dvm_b * (val_dvm_dstress_b * solid_sigma_b) * d_eta_s;
-                end
-                
-                % --- T2 (全局项) ---
-                dK_drho = penal * (rhob^(penal-1));
-                
-                n1 = (nely+1)*(elx-1)+ely;
-                n2 = (nely+1)* elx   +ely;
-                edof = [2*n1-1; 2*n1; 2*n2-1; 2*n2; 2*n2+1; 2*n2+2; 2*n1+1; 2*n1+2];
-                
-                Ue = U(edof);
-                lambda_e = lambda_i(edof);
-                eta_s = rhob^0.5;
-                
-                T2 = eta_s * dK_drho * (lambda_e' * KE_solid * Ue);
-                
-                % 存储 (未过滤的) 灵敏度
-                dfdrho(i, b) = T1 - T2;
-            end
-        end
-    end % 结束 nc 个约束循环
 
     % --- *** 新增：过滤应力灵敏度 *** ---
     dfdx = zeros(m, n); % 最终传递给 MMA 的 "过滤后" 的灵敏度

@@ -568,10 +568,334 @@ class PolySolPureHomoDirHuZhang2d(PDEBase):
         return -self.body_force(points)
 
 
-class TriSolMixNHomoDirNhomoNeu2d(PDEBase):
+class PolyQ2MixHomoDirNhomoNeu2d(PDEBase):
     r"""
-    胡张混合有限元
-        二维线弹性 (平面应变) —— 解析解 + 混合边界条件 (上/下 非齐次 Dirichlet, 左/右 非齐次 Neumann)
+    二维线弹性 (平面应变) —— 二次多项式函数解析解 + 混合边界条件 (上/下 非齐次 Dirichlet, 左/右 非齐次 Neumann)
+    
+    材料参数：
+        λ = 1.0, μ = 0.5 
+
+    体力密度:
+        b(x, y) = [ -2λy² + 6λy - 2λ - 2μx² + 2μx - 4μy² + 8μy - 2μ
+                    -4λxy + 6λx + 2λy - 3λ - 4μxy + 10μx + 2μy - 5μ ]^T
+
+    Neumann:
+        左边界 x = 0, n = (-1, 0): g(0, y) = [-2μy(1-y)+λ(y²-3y+1), -2μy(1-y)]^T
+        右边界 x = 1, n = ( 1, 0): g(1, y) = [2μ(y²-y)+λ(y²-3y+1), 2μy(1-y)]^T
+    """
+    def __init__(self,
+                 domain: List[float] = [0, 1, 0, 1],
+                 mesh_type: str = 'uniform_aligned_tri',
+                 lam: float = 1.0,
+                 mu: float = 0.5,
+                 plane_type: str = 'plane_strain',
+                 enable_logging: bool = False,
+                 logger_name: Optional[str] = None) -> None:
+        super().__init__(domain=domain, mesh_type=mesh_type,
+                         enable_logging=enable_logging, logger_name=logger_name)
+        self._lam, self._mu = lam, mu
+        self._eps = 1e-12
+
+        self._plane_type = plane_type
+        self._load_type = 'distributed'   
+        self._boundary_type = 'mixed'     
+
+    @property
+    def lam(self) -> float:
+        return self._lam
+
+    @property
+    def mu(self) -> float:
+        return self._mu
+
+    @variantmethod('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 60); ny = kwargs.get('ny', 40)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+        mesh = QuadrangleMesh.from_box(self._domain, nx=nx, ny=ny,
+                                       threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
+
+        return mesh
+
+    @init_mesh.register('uniform_aligned_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60); ny = kwargs.get('ny', 40)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+        mesh = TriangleMesh.from_box(self._domain, nx=nx, ny=ny,
+                                     threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+
+    @cartesian
+    def disp_solution(self, points: TensorLike) -> TensorLike:
+        """解析解 u(x, y)"""
+        x, y = points[..., 0], points[..., 1]
+        u1 = x * (1.0 - x) * y * (1.0 - y)
+        u2 = (2.0 * x - 1.0) * y * (1.0 - y)
+
+        return bm.stack([u1, u2], axis=-1)
+
+    @cartesian
+    def grad_disp_solution(self, points: TensorLike) -> TensorLike:
+        """解析解梯度 ∇u"""
+        x, y = points[..., 0], points[..., 1]
+        du1_dx = y * (1.0 - y) * (1.0 - 2.0 * x)
+        du1_dy = x * (1.0 - x) * (1.0 - 2.0 * y)
+        du2_dx = 2.0 * y * (1.0 - y)
+        du2_dy = (2.0 * x - 1.0) * (1.0 - 2.0 * y)
+
+        return bm.stack([
+                        bm.stack([du1_dx, du1_dy], axis=-1),
+                        bm.stack([du2_dx, du2_dy], axis=-1)
+                    ], axis=-2)
+
+    @cartesian
+    def strain_solution(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        eps_xx = y * (1.0 - y) * (1.0 - 2.0 * x)
+        eps_yy = (2.0 * x - 1.0) * (1.0 - 2.0 * y)
+        eps_xy = 0.5 * ( x * (1.0 - x) * (1.0 - 2.0 * y) + 2.0 * y * (1.0 - y) )
+
+        return bm.stack([eps_xx, eps_xy, eps_yy], axis=-1)
+
+    @cartesian
+    def stress_solution(self, points: TensorLike) -> TensorLike:
+        """σ = 2μ ε + λ tr(ε) I, 返回顺序 (σ_xx, σ_xy, σ_yy)"""
+        lam, mu = self.lam, self.mu
+        x, y = points[..., 0], points[..., 1]
+        eps_xx = y * (1.0 - y) * (1.0 - 2.0 * x)
+        eps_yy = (2.0 * x - 1.0) * (1.0 - 2.0 * y)
+        eps_xy = 0.5 * ( x * (1.0 - x) * (1.0 - 2.0 * y) + 2.0 * y * (1.0 - y) )
+        tr_eps = eps_xx + eps_yy
+        sxx = 2.0 * mu * eps_xx + lam * tr_eps
+        syy = 2.0 * mu * eps_yy + lam * tr_eps
+        sxy = 2.0 * mu * eps_xy
+
+        return bm.stack([sxx, sxy, syy], axis=-1)
+
+    @cartesian
+    def div_stress_solution(self, points: TensorLike) -> TensorLike:
+        """
+        计算应力张量的散度: div(σ) = [∂σ_xx/∂x + ∂σ_xy/∂y, ∂σ_xy/∂x + ∂σ_yy/∂y]
+        也可以根据平衡方程: -∇·σ = b, 所以 ∇·σ = -b
+        """
+        lam, mu = self.lam, self.mu
+        x, y = points[..., 0], points[..., 1]
+
+        # ∂σ_xx/∂x = ∂(2μ·ε_xx + λ·tr(ε))/∂x
+        depsxx_dx = -2.0 * y * (1.0 - y)
+        depsyy_dx = 2.0 * (1.0 - 2.0 * y)
+        dsxx_dx = 2.0 * mu * depsxx_dx + lam * (depsxx_dx + depsyy_dx)
+
+        # ∂σ_xy/∂y = ∂(2μ·ε_xy)/∂y
+        depsxy_dy = 0.5 * (-2.0 * x * (1.0 - x) + 2.0 * (1.0 - 2.0 * y))
+        dsxy_dy = 2.0 * mu * depsxy_dy
+
+        # ∂σ_xy/∂x = ∂(2μ·ε_xy)/∂x
+        depsxy_dx = 0.5 * ((1.0 - 2.0 * x) * (1.0 - 2.0 * y))
+        dsxy_dx = 2.0 * mu * depsxy_dx
+
+        # ∂σ_yy/∂y = ∂(2μ·ε_yy + λ·tr(ε))/∂y
+        depsxx_dy = (1.0 - 2.0 * y) * (1.0 - 2.0 * x)
+        depsyy_dy = (2.0 * x - 1.0) * (-2.0)
+        dsyy_dy = 2.0 * mu * depsyy_dy + lam * (depsxx_dy + depsyy_dy)
+
+        # 组装散度
+        div_x = dsxx_dx + dsxy_dy
+        div_y = dsxy_dx + dsyy_dy
+
+        return bm.stack([div_x, div_y], axis=-1)
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        """体力密度向量 b = -div(σ)"""
+        lam, mu = self.lam, self.mu
+        x, y = points[..., 0], points[..., 1]
+        
+        b_x = (lam * (-2.0*y**2 + 6.0*y - 2.0) + 
+            mu * (-2.0*x**2 + 2.0*x - 4.0*y**2 + 8.0*y - 2.0))
+        
+        b_y = (lam * (-4.0*x*y + 6.0*x + 2.0*y - 3.0) + 
+            mu * (-4.0*x*y + 10.0*x + 2.0*y - 5.0))
+        
+        return bm.stack([b_x, b_y], axis=-1)
+
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        val = self.disp_solution(points)
+
+        return val
+
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        flag_y0 = bm.abs(y - domain[2]) < self._eps  # y=0
+        flag_y1 = bm.abs(y - domain[3]) < self._eps  # y=1
+
+        return flag_y0 | flag_y1
+
+    @cartesian
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        flag_y0 = bm.abs(y - domain[2]) < self._eps  # y=0
+        flag_y1 = bm.abs(y - domain[3]) < self._eps  # y=1
+
+        return flag_y0 | flag_y1
+
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        
+        return (self.is_dirichlet_boundary_dof_x,
+                self.is_dirichlet_boundary_dof_y)
+
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """
+        σ·n = g on Γ_N
+        
+        左边界 x=0, n=(-1,0): g = [-2μy(1-y)+λ(y²-3y+1), -2μy(1-y)]^T
+        右边界 x=1, n=(1,0):  g = [2μ(y²-y)+λ(y²-3y+1), 2μy(1-y)]^T
+        """
+        domain = self.domain
+        lam, mu = self.lam, self.mu
+        x, y = points[..., 0], points[..., 1]
+
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+
+        # 左边界 x=0
+        flag_left = bm.abs(x - domain[0]) < self._eps
+        g_x_left = -2.0 * mu * y * (1.0 - y) + lam * (y**2 - 3.0*y + 1.0)
+        g_y_left = -2.0 * mu * y * (1.0 - y)
+        val = bm.set_at(val, (flag_left, 0), g_x_left[flag_left])
+        val = bm.set_at(val, (flag_left, 1), g_y_left[flag_left])
+
+        # 右边界 x=1
+        flag_right = bm.abs(x - domain[1]) < self._eps
+        g_x_right = 2.0 * mu * (y**2 - y) + lam * (y**2 - 3.0*y + 1.0)
+        g_y_right = 2.0 * mu * y * (1.0 - y)
+        val = bm.set_at(val, (flag_right, 0), g_x_right[flag_right])
+        val = bm.set_at(val, (flag_right, 1), g_y_right[flag_right])
+
+        return val
+
+    @cartesian
+    def neumann_bc_normal(self, points: TensorLike) -> TensorLike:
+        """Unit outward normal vector on Γ_N."""
+        domain = self.domain
+        x = points[..., 0]
+
+        kwargs = bm.context(points)
+        normals = bm.zeros((points.shape[0], 2), **kwargs)
+
+        # x = 0, n = (-1, 0)
+        flag_left = bm.abs(x - domain[0]) < self._eps
+        normals = bm.set_at(normals, (flag_left, 0), -1.0)
+
+        # x = 1, n = (1, 0)
+        flag_right = bm.abs(x - domain[1]) < self._eps
+        normals = bm.set_at(normals, (flag_right, 0), 1.0)
+
+        return normals
+    
+    @cartesian
+    def neumann_bc_tangent(self, points: TensorLike) -> TensorLike:
+        """Unit tangent vector on Γ_N."""
+        domain = self.domain
+        x = points[..., 0]
+
+        kwargs = bm.context(points)
+        tangents = bm.zeros((points.shape[0], 2), **kwargs)
+
+        # x = 0, t = (0, -1)
+        flag_left = bm.abs(x - domain[0]) < self._eps
+        tangents = bm.set_at(tangents, (flag_left, 1), -1.0)
+
+        # x = 1, t = (0, 1)
+        flag_right = bm.abs(x - domain[1]) < self._eps
+        tangents = bm.set_at(tangents, (flag_right, 1), 1.0)
+
+        return tangents
+
+    @cartesian
+    def is_neumann_boundary_dof_xx(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  
+        flag_x1 = bm.abs(x - domain[1]) < self._eps  
+        
+        return flag_x0 | flag_x1
+    
+    @cartesian
+    def is_neumann_boundary_dof_xy(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps  
+        flag_x1 = bm.abs(x - domain[1]) < self._eps
+
+        return flag_x0 | flag_x1
+    
+    @cartesian
+    def is_neumann_boundary_dof_yy(self, points: TensorLike) -> TensorLike:
+
+        return bm.zeros(points.shape[:-1], dtype=bm.bool, device=points.device)
+
+    def is_neumann_boundary(self) -> Tuple[Callable, Callable, Callable]:
+        
+        return (self.is_neumann_boundary_dof_xx,
+                self.is_neumann_boundary_dof_xy,
+                self.is_neumann_boundary_dof_yy)
+    
+    @cartesian
+    def is_neumann_boundary_dof_nn(self, points: TensorLike) -> TensorLike:
+        """Mark σ_nn-DOFs on x=0 or x=1 (vertical edges) as Neumann-traction DOFs."""
+        domain = self.domain
+        x = points[..., 0]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps
+        flag_x1 = bm.abs(x - domain[1]) < self._eps
+
+        return flag_x0 | flag_x1
+
+    @cartesian
+    def is_neumann_boundary_dof_nt(self, points: TensorLike) -> TensorLike:
+        """Mark σ_nt-DOFs on x=0 or x=1 as Neumann-traction DOFs."""
+        domain = self.domain
+        x = points[..., 0]
+        flag_x0 = bm.abs(x - domain[0]) < self._eps
+        flag_x1 = bm.abs(x - domain[1]) < self._eps
+
+        return flag_x0 | flag_x1
+
+    def is_neumann_boundary_edge(self) -> Tuple[Callable, Callable]:
+
+        return (self.is_neumann_boundary_dof_nn,
+                self.is_neumann_boundary_dof_nt)
+    
+    @cartesian
+    def sigma_nn_bc(self, points: TensorLike) -> TensorLike:
+        """ σ_nn = g · n """
+        g_values = self.neumann_bc(points)
+        n_values = self.neumann_bc_normal(points)
+
+        return bm.einsum('...i, ...i -> ...', g_values, n_values)
+
+    @cartesian
+    def sigma_nt_bc(self, points: TensorLike) -> TensorLike:
+        """ σ_nt = g · t """
+        g_values = self.neumann_bc(points)
+        t_values = self.neumann_bc_tangent(points)
+
+        return bm.einsum('...i, ...i -> ...', g_values, t_values)
+
+
+class TriMixNHomoDirNhomoNeu2d(PDEBase):
+    r"""
+    二维线弹性 (平面应变) —— 三角函数解析解 + 混合边界条件 (上/下 非齐次 Dirichlet, 左/右 非齐次 Neumann)
 
     材料参数：
         λ = 1.0, μ = 0.5 
@@ -588,9 +912,9 @@ class TriSolMixNHomoDirNhomoNeu2d(PDEBase):
         下边界  y = 0:  u(x, 0) = [0, 0]^T
         上边界  y = 1:  u(x, 1) = [0, -2 sin(πx)]^T
     Neumann:
-        左边界  x=0,  n = (-1, 0):  t(0,y) = [ -π sin(πy),
+        左边界  x=0,  n = (-1, 0):  g(0,y) = [ -π sin(πy),
                                              π sin(πy/2) ]^T
-        右边界  x=1,  n = ( 1, 0):  t(1,y) = [ 0,
+        右边界  x=1,  n = ( 1, 0):  g(1,y) = [ 0,
                                              (π/2) cos(πy) + π sin(πy/2) ]^T
     """
     def __init__(self, 
@@ -701,13 +1025,13 @@ class TriSolMixNHomoDirNhomoNeu2d(PDEBase):
         du2_dy = -      pi * bm.sin(pi * x) * bm.cos(0.5 * pi * y)
         
         return bm.stack([
-                            bm.stack([du1_dx, du1_dy], axis=-1),
-                            bm.stack([du2_dx, du2_dy], axis=-1)
-                        ], axis=-2)
+                        bm.stack([du1_dx, du1_dy], axis=-1),
+                        bm.stack([du2_dx, du2_dy], axis=-1)
+                    ], axis=-2)
 
     @cartesian
     def stress_solution(self, points: TensorLike) -> TensorLike:
-        """σ=2μ ε + λ tr(ε) I, 返回顺序 (σ_xx, σ_xy, σ_yy)"""
+        """σ = 2μ ε + λ tr(ε) I, 返回顺序 (σ_xx, σ_xy, σ_yy)"""
         x, y = points[..., 0], points[..., 1]
         pi = bm.pi
         lam, mu = self.lam, self.mu
@@ -791,7 +1115,7 @@ class TriSolMixNHomoDirNhomoNeu2d(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
-        """体力密度 b=-div σ"""
+        """体力密度 b = -div σ"""
         x, y = points[..., 0], points[..., 1]
         pi = bm.pi
         b1 =  (pi**2) * ( bm.sin(0.5 * pi * x) * bm.sin(pi * y)
@@ -833,7 +1157,7 @@ class TriSolMixNHomoDirNhomoNeu2d(PDEBase):
     @cartesian
     def neumann_bc(self, points: TensorLike) -> TensorLike:
         """
-        σ·n = t on Γ_N
+        σ·n = g on Γ_N
         左边界 x=0, n=(-1, 0): t(0, y) = [-π sin(πy), π sin(πy/2)]^T
         右边界 x=1, n=(1, 0):  t(1, y) = [0, (π/2)cos(πy) + π sin(πy/2)]^T
         """
@@ -909,7 +1233,7 @@ class TriSolMixNHomoDirNhomoNeu2d(PDEBase):
                 self.is_neumann_boundary_dof_yy)
 
 
-class TriSolMixHomoDirNhomoNeu2d(PDEBase):
+class TriMixHomoDirNhomoNeu2d(PDEBase):
     r"""
     胡张混合有限元
         二维线弹性 (平面应变) —— 解析解 + 混合边界条件 (上/下 齐次 Dirichlet, 左/右 非齐次 Neumann)

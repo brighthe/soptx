@@ -53,11 +53,27 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 enable_logging=False
                                             )
             
-        elif model == 'tri_sol_mix_homo_dir_nhomo_neu_2d':
-            # 齐次 Dirichlet + 非齐次 Neumann
+        elif model == 'tri_mix_homo_dir_nhomo_neu_2d':
+            # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
             lam, mu = 1.0, 0.5
-            from soptx.model.linear_elasticity_2d import TriSolMixHomoDirNhomoNeu2d
-            pde = TriSolMixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            from soptx.model.linear_elasticity_2d import TriMixNHomoDirNhomoNeu2d
+            pde = TriMixNHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
+        
+        elif model == 'poly_q2_mix_homo_dir_nhomo_neu_2d':
+            # 二次多项式真解 + 齐次 Dirichlet + 非齐次 Neumann
+            lam, mu = 1.0, 0.5
+            from soptx.model.linear_elasticity_2d import PolyQ2MixHomoDirNhomoNeu2d
+            pde = PolyQ2MixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
             mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -150,7 +166,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                                 plane_type=pde.plane_type,
                                             )
 
-        space_degree = 3
+        space_degree = 1
         integration_order = space_degree + 4
 
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
@@ -173,7 +189,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method='standard',
-                                    solve_method='scipy',
+                                    solve_method='mumps',
                                     topopt_algorithm=None,
                                     interpolation_scheme=None
                                 )
@@ -384,7 +400,7 @@ if __name__ == "__main__":
     test = LagrangeFEMAnalyzerTest(enable_logging=True)
     
     test.run.set('test_exact_solution_lfem')
-    test.run(model='tri_sol_mix_homo_dir_nhomo_neu_2d')
+    test.run(model='poly_q2_mix_homo_dir_nhomo_neu_2d')
 
     # test.run.set('test_none_exact_solution_lfem')
     # test.run(model='bearing_device_2d')

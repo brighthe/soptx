@@ -46,11 +46,11 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                                 enable_logging=False
                                             )
 
-        elif model == 'tri_sol_mix_homo_dir_nhomo_neu_2d':
-            # 齐次 Dirichlet + 非齐次 Neumann
-            from soptx.model.linear_elasticity_2d import TriSolMixHomoDirNhomoNeu2d
+        elif model == 'tri_mix_homo_dir_nhomo_neu_2d':
+            # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
             lam, mu = 1.0, 0.5
-            pde = TriSolMixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            from soptx.model.linear_elasticity_2d import TriMixHomoDirNhomoNeu2d
+            pde = TriMixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
             pde.init_mesh.set('uniform_aligned_tri')
             nx, ny = 2, 2
             analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -59,7 +59,23 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                                                 lame_lambda=pde.lam, 
                                                 shear_modulus=pde.mu,
                                                 plane_type=pde.plane_type,
-                                                enable_logging=False, 
+                                                enable_logging=False
+                                            )
+        
+        elif model == 'poly_q2_mix_homo_dir_nhomo_neu_2d':
+            # 二次多项式真解 + 齐次 Dirichlet + 非齐次 Neumann
+            lam, mu = 1.0, 0.5
+            from soptx.model.linear_elasticity_2d import PolyQ2MixHomoDirNhomoNeu2d
+            pde = PolyQ2MixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
                                             )
 
         elif model == 'tri_sol_mix_nhomo_dir_huzhang':
@@ -574,30 +590,46 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
         print("--------------")
 
     @run.register('test_traction_boundary')
-    def run(self):
+    def run(self, model: str) -> None:
         """通过计算 L2 投影验证 traction 边界条件的正确性"""
         from fealpy.fem import BilinearForm, LinearForm
         from soptx.functionspace.huzhang_fe_space import HuZhangFESpace
         from soptx.analysis.integrators.mass_integrator import MassIntegrator
         from soptx.analysis.integrators.source_integrator import SourceIntegrator
 
-        # 齐次 Dirichlet + 非齐次 Neumann
-        from soptx.model.linear_elasticity_2d import TriSolMixHomoDirNhomoNeu2d
-        lam, mu = 1.0, 0.5
-        pde = TriSolMixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
-        pde.init_mesh.set('uniform_aligned_tri')
-        nx, ny = 2, 2
-        mesh = pde.init_mesh(nx=nx, ny=ny)
+        if model == 'tri_mix_homo_dir_nhomo_neu_2d':
+            # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
+            lam, mu = 1.0, 0.5
+            from soptx.model.linear_elasticity_2d import TriMixHomoDirNhomoNeu2d
+            pde = TriMixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
+        
+        elif model == 'poly_q2_mix_homo_dir_nhomo_neu_2d':
+            # 二次多项式真解 + 齐次 Dirichlet + 非齐次 Neumann
+            lam, mu = 1.0, 0.5
+            from soptx.model.linear_elasticity_2d import PolyQ2MixHomoDirNhomoNeu2d
+            pde = PolyQ2MixHomoDirNhomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+            pde.init_mesh.set('uniform_aligned_tri')
+            nx, ny = 2, 2
+            mesh = pde.init_mesh(nx=nx, ny=ny)
+            from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+            material = IsotropicLinearElasticMaterial(
+                                                lame_lambda=pde.lam, 
+                                                shear_modulus=pde.mu,
+                                                plane_type=pde.plane_type,
+                                                enable_logging=False
+                                            )
 
-        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-        material = IsotropicLinearElasticMaterial(
-                                            lame_lambda=pde.lam, 
-                                            shear_modulus=pde.mu,
-                                            plane_type=pde.plane_type,
-                                            enable_logging=False
-                                        )
-
-        p = 2
+        p = 4
         q = p + 3
 
         maxit = 5
@@ -625,11 +657,11 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             linear_integrator = SourceIntegrator(source=pde.stress_solution, q=q)
             lform = LinearForm(hz_space)
             lform.add_integrator(linear_integrator)
-            F = lform.assembly(format='dense')
+            B = lform.assembly(format='dense')
 
             from fealpy.solver import spsolve
             sigmah = hz_space.function()
-            sigmah[:] = spsolve(M, F, solver='mumps')
+            sigmah[:] = spsolve(M, B, solver='mumps')
 
             hz_analyzer = HuZhangMFEMAnalyzer(
                                 mesh=mesh,
@@ -650,24 +682,89 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
                             }
             
             isBdDof_sigmah = hz_space.is_boundary_dof(threshold=threshold_dict, method='barycenter')
-            # M_bc = hz_analyzer._apply_matrix(A=M, isDDof=isBdDof_sigmah)
-            # M_bc_test = M_bc.to_dense()
-            
-            from fealpy.decorator import cartesian
-            @cartesian
-            def stress_ones(points: TensorLike) -> TensorLike:
-                """返回与应力相同形状的全 1 张量 (1, 1, 1)."""
-                return bm.ones(points.shape[:-1] + (3,))
-            linear_integrator_bc = SourceIntegrator(source=stress_ones, q=q)
-            lform = LinearForm(hz_space)
-            lform.add_integrator(linear_integrator_bc)
-            bc_val = lform.assembly(format='dense')
+            bd_dof_idx = bm.where(isBdDof_sigmah)[0]
+        
+            # 如果没有 Neumann DOFs, 直接返回
+            if len(bd_dof_idx) == 0:
+                return M, B
 
-            M_bc = hz_analyzer._apply_matrix_test(A=M, isDDof=isBdDof_sigmah, DDof_val=bc_val)
-            M_bc_test = bm.round(M_bc.to_dense(), decimals=4)
+            # 2. 获取全局 DOF 映射
+            # (self._build_gdof_maps 会被缓存，只在首次调用时计算)
+            gdof_coords, gdof_type_map = hz_analyzer._build_gdof_maps()
+
+            # 3. 获取边界 DOF 的坐标和类型
+            bd_dof_coords = gdof_coords[bd_dof_idx]
+            bd_dof_types = gdof_type_map[bd_dof_idx] 
+
+            # 4. 在精确坐标处计算 PDE 值
+            g_values = pde.neumann_bc(bd_dof_coords)         # (N_bd, 2)
+            n_values = pde.neumann_bc_normal(bd_dof_coords)  # (N_bd, 2)
+            t_values = pde.neumann_bc_tangent(bd_dof_coords) # (N_bd, 2)
+            
+            g_x, g_y = g_values[..., 0], g_values[..., 1]
+            n_x, n_y = n_values[..., 0], n_values[..., 1]
+
+            # 5. 计算所有可能的边界值
+            sigmah_bd_values = bm.zeros(len(bd_dof_idx), dtype=hz_space.ftype, device=hz_space.device)
+
+            # 5a. 计算 nn 和 nt (用于边 DOF)
+            sigma_nn_values = bm.einsum('...i,...i->...', g_values, n_values)
+            sigma_nt_values = bm.einsum('...i,...i->...', g_values, t_values)
+
+            # 5b. 计算 xx, xy, yy (用于节点 DOF)
+            sigma_xx_values = bm.full_like(g_x, bm.nan)
+            sigma_xy_values = bm.full_like(g_x, bm.nan)
+            sigma_yy_values = bm.full_like(g_x, bm.nan)
+
+            is_nx_dominant = (bm.abs(n_x) > 1.0 - 1e-12)
+            is_ny_dominant = (bm.abs(n_y) > 1.0 - 1e-12)
+
+            if bm.any(is_nx_dominant):
+                sigma_xx_values = bm.set_at(sigma_xx_values, is_nx_dominant, g_x[is_nx_dominant] / n_x[is_nx_dominant])
+                sigma_xy_values = bm.set_at(sigma_xy_values, is_nx_dominant, g_y[is_nx_dominant] / n_x[is_nx_dominant])
+            
+            if bm.any(is_ny_dominant):
+                sigma_xy_values = bm.set_at(sigma_xy_values, is_ny_dominant, g_x[is_ny_dominant] / n_y[is_ny_dominant])
+                sigma_yy_values = bm.set_at(sigma_yy_values, is_ny_dominant, g_y[is_ny_dominant] / n_y[is_ny_dominant])
+
+            # 6. 根据 DOF 类型，从计算好的值中选择
+            is_xx = (bd_dof_types == 0)
+            is_xy = (bd_dof_types == 1)
+            is_yy = (bd_dof_types == 2)
+            is_nn = (bd_dof_types == 3)
+            is_nt = (bd_dof_types == 4)
+            
+            sigmah_bd_values = bm.set_at(sigmah_bd_values, is_xx, sigma_xx_values[is_xx])
+            sigmah_bd_values = bm.set_at(sigmah_bd_values, is_xy, sigma_xy_values[is_xy])
+            sigmah_bd_values = bm.set_at(sigmah_bd_values, is_yy, sigma_yy_values[is_yy]) 
+            sigmah_bd_values = bm.set_at(sigmah_bd_values, is_nn, sigma_nn_values[is_nn])
+            sigmah_bd_values = bm.set_at(sigmah_bd_values, is_nt, sigma_nt_values[is_nt])
+
+            # 7. 构建完整的 sigmah_bd 向量
+            sigmah_bd = hz_space.function()
+            sigmah_bd = bm.set_at(sigmah_bd, bd_dof_idx, sigmah_bd_values)
+
+            B_bc = B - M.matmul(sigmah_bd[:])
+            B_bc[isBdDof_sigmah] = sigmah_bd[isBdDof_sigmah]
+
+            M_bc = hz_analyzer._apply_matrix(A=M, isDDof=isBdDof_sigmah)
+            M_bc_test = M_bc.to_dense()
+            
+            # from fealpy.decorator import cartesian
+            # @cartesian
+            # def stress_ones(points: TensorLike) -> TensorLike:
+            #     """返回与应力相同形状的全 1 张量 (1, 1, 1)."""
+            #     return bm.ones(points.shape[:-1] + (3,))
+            # linear_integrator_bc = SourceIntegrator(source=stress_ones, q=q)
+            # lform = LinearForm(hz_space)
+            # lform.add_integrator(linear_integrator_bc)
+            # bc_val = lform.assembly(format='dense')
+
+            # M_bc = hz_analyzer._apply_matrix_test(A=M, isDDof=isBdDof_sigmah, DDof_val=bc_val)
+            # M_bc_test = bm.round(M_bc.to_dense(), decimals=4)
 
             sigmah_bc = hz_space.function()
-            sigmah_bc[:] = spsolve(M_bc, F, solver='mumps')
+            sigmah_bc[:] = spsolve(M_bc, B_bc, solver='mumps')
 
             e_sigmah_l2 = mesh.error(u=sigmah, v=pde.stress_solution, q=q)
             e_sigmah_bc_l2 = mesh.error(u=sigmah_bc, v=pde.stress_solution, q=q)
@@ -692,7 +789,7 @@ if __name__ == "__main__":
     huzhang_analyzer = HuZhangMFEMAnalyzerTest(enable_logging=True)
 
     huzhang_analyzer.run.set('test_exact_solution_hzmfem')
-    huzhang_analyzer.run(model='tri_sol_mix_homo_dir_nhomo_neu_2d')
+    huzhang_analyzer.run(model='tri_mix_homo_dir_nhomo_neu_2d')
 
     # huzhang_analyzer.run.set('test_exact_solution_lfem_hzmfem')
     # huzhang_analyzer.run(model='tri_sol_mix_huzhang')
@@ -707,4 +804,4 @@ if __name__ == "__main__":
     # huzhang_analyzer.run()
 
     # huzhang_analyzer.run.set('test_traction_boundary')
-    # huzhang_analyzer.run()
+    # huzhang_analyzer.run(model='poly_q2_mix_homo_dir_nhomo_neu_2d')
