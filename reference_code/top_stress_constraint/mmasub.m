@@ -52,16 +52,10 @@ function [xmma, ymma, zmma, lam, xsi, eta, mu, zet, s, low, upp] = mmasub(...
 
 % 常数
 epsimin = 10^(-7);
-% raa0 = 0.00001;
 raa0 = 10^(-5);
-% raa0 = 0.01;
-% move = 1.0;
-% albefa = 0.4;
 albefa = 0.1;
-% asyinit = 0.1;
 asyinit = 0.5;
 asyincr = 1.2;
-% asyincr = 0.8;
 asydecr = 0.7;
 eeen = ones(n, 1);
 eeem = ones(m, 1);
@@ -78,20 +72,8 @@ else
     epsilon = 1e-12;
     factor(find(zzz > epsilon)) = asyincr;
 	factor(find(zzz < -epsilon)) = asydecr;
-	% factor(find(zzz > 0)) = asyincr;
-	% factor(find(zzz < 0)) = asydecr;
-    % small_vals = zzz(abs(zzz) < 1e-10);
-    % fprintf('Near zero values count: %d\n', length(small_vals));
-    % fprintf('Min absolute non-zero value: %e\n', min(abs(zzz(zzz ~= 0))));
 	low = xval - factor.*(xold1 - low);
 	upp = xval + factor.*(upp - xold1);
-    % fprintf('xval: %f\n', mean(xval(:)));
-    % fprintf('factor: %f\n', mean(factor(:)));
-    % fprintf('xold1: %f\n', mean(xold1(:)));
-    % fprintf('xold2: %f\n', mean(xold2(:)));
-    % fprintf('low: %f\n', mean(low(:)));
-    % fprintf('upp: %f\n', mean(upp(:)));
-    % fprintf('upp: %f\n', mean(upp(:)));
 	lowmin = xval - 10*(xmax-xmin);
 	lowmax = xval - 0.01*(xmax-xmin);
 	uppmin = xval + 0.01*(xmax-xmin);
@@ -100,23 +82,6 @@ else
 	low = min(low, lowmax);
 	upp = min(upp, uppmax);
 	upp = max(upp, uppmin);
-    % fprintf('Positive count: %d\n', sum(zzz > epsilon));
-    % fprintf('Negative count: %d\n', sum(zzz < -epsilon));
-    % fprintf('Zero count: %d\n', sum(abs(zzz) < epsilon));
-    % fprintf('xval: %f\n', mean(xval(:)));
-    % fprintf('Max diff xval-xold1: %e\n', mean(xval-xold1));
-    % fprintf('Max diff xold1-xold2: %e\n', mean(xold1-xold2));
-    % fprintf('zzz: %f\n', mean(zzz(:)));
-    % fprintf('factor: %f\n', mean(factor(:)));
-    % fprintf('low: %f\n', mean(low(:)));   
-    % fprintf('upp: %f\n', mean(upp(:)));
-    % fprintf('upp: %f\n', mean(upp(:)));
-    % fprintf('zzz: %f\n', mean(zzz(:)));
-    % fprintf('xold1: %f\n', mean(xold1(:)));
-    % fprintf('xold2: %f\n', mean(xold2(:)));
-    % fprintf('low: %f\n', mean(low(:)));
-    % fprintf('upp: %f\n', mean(upp(:)));
-    % fprintf('upp: %f\n', mean(upp(:)));
 end
 
 % Calculation of the bounds alfa and beta :
@@ -144,8 +109,6 @@ p0 = zeron;
 q0 = zeron;
 p0 = max(df0dx,0);
 q0 = max(-df0dx,0);
-%p0(find(df0dx > 0)) = df0dx(find(df0dx > 0));
-%q0(find(df0dx < 0)) = -df0dx(find(df0dx < 0));
 pq0 = 0.001*(p0 + q0) + raa0*xmamiinv;
 p0 = p0 + pq0;
 q0 = q0 + pq0;
@@ -156,8 +119,6 @@ P = sparse(m,n);
 Q = sparse(m,n);
 P = max(dfdx,0);
 Q = max(-dfdx,0);
-%P(find(dfdx > 0)) = dfdx(find(dfdx > 0));
-%Q(find(dfdx < 0)) = -dfdx(find(dfdx < 0));
 PQ = 0.001*(P + Q) + raa0*eeem*xmamiinv.';
 P = P + PQ;
 Q = Q + PQ;

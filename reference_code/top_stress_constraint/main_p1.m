@@ -166,91 +166,108 @@ xold2 = x(:);
 low = xmin;
 upp = xmax;
 
+% 设置重新聚类频率 
+recluster_freq = 50;  % 1, 10, 50, 100, 或 inf (不重新聚类)
+
 %% --- 优化迭代循环 ---
 while change > 0.01 && loop < maxiter
     loop = loop + 1;
     
     % --- 有限元分析 ---
     [F, U, K, fixeddofs] = FEA(nelx, nely, xPhys, penal_K, KE);
+
+    % --- 质量目标函数及敏感度 ---
+    f0val = sum(sum(m_e * xPhys));
+    df0drho = m_e * ones(nely, nelx);
+    df0dx = df0drho;
+    
+    if ft == 1
+        df0dx(:) = H * (x(:) .* df0drho(:)) ./ Hs ./ max(1e-3, x(:));
+    elseif ft == 2
+        df0dx(:) = H * (df0drho(:) ./ Hs);
+    end
     
     % --- 应力计算 ---
     [stress_vm, stress_penalized] = compute_von_mises(nelx, nely, xPhys, U, penal_S, B, D);
-end
 
-maxite = 200; % 最大迭代次数
-tolx = 0.01;  % 收敛标准
-change = 1.0; % 变化量
-
-
-% --- MMA 初始化 (第 1 部分) ---
-m = nc; % m 个应力约束
-xval = x_design; % 当前的设计变量
-
-% --- MMA 初始化 (第 2 部分) ---
-xold1 = zeros(n, 1);
-xold2 = zeros(n, 1);
-low = zeros(n, 1);
-upp = zeros(n, 1);
-xmin = 1e-3 * ones(n, 1);
-xmax = ones(n, 1);
-c = 1000 * ones(m, 1); 
-d = zeros(m, 1);                
-a = zeros(m, 1);       
-a0 = 1;                
-df0dx2 = zeros(n, 1);
-dfdx2 = zeros(m, n);
-
-% 迭代计数器
-iter = 0;
-
-% --- *** 新增：开始主循环 *** ---
-while change > tolx && iter < maxite
-    
-    iter = iter + 1;
-
-
-    % --- *** 新增：过滤应力灵敏度 *** ---
-    dfdx = zeros(m, n); % 最终传递给 MMA 的 "过滤后" 的灵敏度
-    if ft == 1
-        for i = 1:m
-            unfiltered_sens = dfdrho(i, :)';
-            filtered_sens = H * (unfiltered_sens ./ Hs);
-            dfdx(i, :) = filtered_sens';
-        end
-    else % ft == 0
-        dfdx = dfdrho;
+    % --- 应力聚类 ---
+    if mod(loop, recluster_freq) == 1
+        % 重新聚类
+        [cluster_idx, cluster_vm, Ni] = stress_clustering(stress_vm, nc, nele);
+    else
+        % 更新现有聚类
+        [cluster_idx, cluster_vm, Ni] = stress_clustering(stress_vm, nc, nele, cluster_idx);
     end
+
+    % --- P-norm 应力约束 ---
+    [sigmapn, fval, dsi_dvm] = compute_pnorm_constraint(cluster_vm, cluster_idx, Ni, sigmay, p, nele, nc);
     
-    % --- *** 新增：调用 MMA 求解器 *** ---
-    % m = nc (约束数)
-    % n = nelx*nely (设计变量数)
-    % f0val = 质量
-    % df0dx = 质量灵敏度 (n x 1)
-    % fval = 应力约束 (m x 1)
-    % dfdx = 应力灵敏度 (m x n)
+    % --- 应力约束灵敏度 ---
+    dvm_dstress = compute_dvm_dsigma(stress_vm, stress_penalized);
+    rhs_adjoint = compute_adjoint_rhs(cluster_idx, dsi_dvm, dvm_dstress, B, D, nely, nelx);
+    lambda = FEA_adjoint(K, rhs_adjoint, fixeddofs);
+    
+    dsi_drho = compute_stress_sensitivity(xPhys, U, cluster_idx, dsi_dvm, ...
+                                         dvm_dstress, lambda, B, D, KE, ...
+                                         penal_S, penal_K, nelx, nely);
+
+    % --- 应力敏感度过滤 ---
+    dsi_dx = zeros(nc, nele);
+    if ft == 1
+        for i = 1:nc
+            dsi_dx_i = reshape(dsi_drho(i, :), nely, nelx);
+            dsi_dx_i(:) = H * (x(:) .* dsi_dx_i(:)) ./ Hs ./ max(1e-3, x(:));
+            dsi_dx(i, :) = dsi_dx_i(:);
+        end
+    elseif ft == 2
+        for i = 1:nc
+            dsi_dx_i = reshape(dsi_drho(i, :), nely, nelx);
+            dsi_dx_i(:) = H * (dsi_dx_i(:) ./ Hs);
+            dsi_dx(i, :) = dsi_dx_i(:);
+        end
+    else
+        dsi_dx = dsi_drho;
+    end
+
+    % --- 调用 MMA ---
+    xval = x(:);              % 当前设计变量
+    f0val_mma = f0val;        % 目标函数值
+    df0dx_mma = df0dx(:);     % 目标函数梯度 (n×1)
+    fval_mma = fval;          % 约束函数值 (m×1)
+    dfdx_mma = dsi_dx;        % 约束函数梯度 (m×n)
+
+    % MMA 参数
+    a0 = 1.0;
+    a = zeros(m, 1);     
+    c = 1000*ones(m, 1); 
+    d = zeros(m, 1);     
     
     [xmma, ~, ~, ~, ~, ~, ~, ~, ~, low, upp] = ...
-            mmasub(m, n, iter, xval, xmin, xmax, xold1, xold2, ...
-            f0val, df0dx, df0dx2, fval, dfdx, dfdx2, ...
-            low, upp, a0, a, c, d);
-    % --- *** 新增：更新设计变量 *** ---
+        mmasub(m, n, loop, xval, xmin, xmax, xold1, xold2, ...
+               f0val_mma, df0dx_mma, fval_mma, dfdx_mma, low, upp, ...
+               a0, a, c, d);
+
+    % --- 更新设计变量 ---
     xold2 = xold1;
     xold1 = xval;
-    xval = xmma; % 更新设计变量
+    x(:) = xmma;
+
+    % 应用过滤
+    if ft == 2
+        xPhys(:) = (H * x(:)) ./ Hs;
+    elseif ft == 0 || ft == 1
+        xPhys = x;
+    end
     
-    change = max(abs(xval - xold1));
+    % --- 收敛判断 ---
+    change = max(abs(xmma - xold1));
     
-    % --- 打印和绘图 ---
-    fprintf(' It.:%5i Obj.:%11.4f MaxCons.:%7.3f ch.:%7.3f\n', ...
-        iter, f0val, max(fval), change);
+    % --- 输出 ---
+    fprintf('It:%4i Obj:%7.3e Vol:%7.3f ch:%6.3f MaxCon:%6.3f\n', ...
+            loop, f0val*1e3, sum(xPhys(:))/nele, change, max(fval));
     
-    % 绘图
-    figure(1);
-    colormap(gray); 
-    imagesc(1-xPhys_2d); 
-    caxis([0 1]); 
-    axis equal; 
-    axis off; 
-    drawnow;
-    
-end % --- 结束主循环 ---
+    % --- 可视化 ---
+    colormap(gray); imagesc(1-xPhys); caxis([0 1]); axis equal; axis off; drawnow;
+
+
+end
