@@ -897,7 +897,7 @@ class TriMixNHomoDirNhomoNeu2d(PDEBase):
     r"""
     二维线弹性 (平面应变) —— 三角函数解析解 + 混合边界条件 (上/下 非齐次 Dirichlet, 左/右 非齐次 Neumann)
 
-    材料参数：
+    材料参数:
         λ = 1.0, μ = 0.5 
 
     解析位移 (三角函数):

@@ -256,36 +256,42 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             error_msg = (f"For Isotropic material, please provide exactly two "
                         f"independent elastic constants. You provided {provided_params}.")
             self._log_error(error_msg)
-        
+
+        # ---- Case 1: (E, nu) ----
         if E is not None and nu is not None:
             self._youngs_modulus = E
             self._poisson_ratio = nu
 
             self._shear_modulus = E / (2 * (1 + nu))
 
-            if self._plane_type =='plane_stress':
-                self._lame_lambda = nu * E / (1 - nu**2)
-                self._bulk_modulus = E / (3 * (1 - nu))
-            elif self._plane_type in ["plane_strain", "3d"]:
+            if self._plane_type in ["3d", "plane_strain"]:
+                # 谨防锁死
+                if nu >= 0.5 - 1e-6:
+                    error_msg = (
+                        "Nearly incompressible material (nu ≈ 0.5) under "
+                        f"{self._plane_type} is not supported by pure displacement FEM. "
+                        "Please use a mixed formulation (e.g. Hu–Zhang, u–p) instead."
+                    )
+                    self._log_error(error_msg)
+
                 self._lame_lambda = E * nu / ((1 + nu) * (1 - 2 * nu))
                 self._bulk_modulus = E / (3 * (1 - 2 * nu))
 
-            self._log_info(f"Set elastic constants from E={E:.2e}, nu={nu:.3f}")
+            elif self._plane_type == "plane_stress":
+                self._lame_lambda = None
+                self._bulk_modulus = None
 
+            else:
+                self._log_error(f"Unknown plane_type: {self._plane_type}")
+
+        # ---- Case 2: (λ, μ) ----
         elif lam is not None and mu is not None:
             self._lame_lambda = lam
             self._shear_modulus = mu
+
             self._youngs_modulus = mu * (3 * lam + 2 * mu) / (lam + mu)
             self._poisson_ratio = lam / (2 * (lam + mu))
-
-            if self._plane_type == "plane_stress":
-                self._bulk_modulus = E / (3 * (1 - nu))
-            elif self._plane_type in ["plane_strain", "3d"]:
-                self._bulk_modulus = (3 * lam + 2 * mu) / 3
-
             self._bulk_modulus = (3 * lam + 2 * mu) / 3
-
-            self._log_info(f"Set elastic constants from λ={lam:.2e}, μ={mu:.2e}")
 
         else:
             error_msg = ("Unsupported combination of parameters. "
@@ -293,39 +299,37 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             self._log_error(error_msg)
         
     def _compute_elastic_matrix(self):
-        E_val = self._youngs_modulus
-        nu_val = self._poisson_ratio
-        lam_val = self._lame_lambda
-        mu_val = self._shear_modulus
+        E = self._youngs_modulus
+        nu = self._poisson_ratio
+        lam = self._lame_lambda
+        mu = self._shear_modulus
 
         if self._plane_type == "3d":
-            self.D = bm.tensor([[2 * mu_val + lam_val, lam_val,              lam_val,              0,      0,           0],
-                                [lam_val,              2 * mu_val + lam_val, lam_val,              0,      0,           0],
-                                [lam_val,              lam_val,              2 * mu_val + lam_val, 0,      0,           0],
-                                [0,                    0,                    0,                    mu_val, 0,           0],
-                                [0,                    0,                    0,                    0,      mu_val,      0],
-                                [0,                    0,                    0,                    0,      0,      mu_val]], 
-                                dtype=bm.float64, device=self.device)
+            self.D = bm.tensor([[2*mu+lam, lam,      lam,      0,  0,  0],
+                                [lam,      2*mu+lam, lam,      0,  0,  0],
+                                [lam,      lam,      2*mu+lam, 0,  0,  0],
+                                [0,        0,        0,        mu, 0,  0],
+                                [0,        0,        0,        0,  mu, 0],
+                                [0,        0,        0,        0,  0,  mu]],
+                            dtype=bm.float64, device=self.device)
             
         elif self._plane_type == "plane_stress":
-            self.D = E_val / (1 - nu_val ** 2) * \
-                    bm.array([[1,      nu_val, 0],
-                              [nu_val, 1,      0],
-                              [0,      0,     (1 - nu_val) / 2]],    
+            self.D = E / (1 - nu ** 2) * \
+                    bm.array([[1,  nu, 0],
+                              [nu, 1,  0],
+                              [0,  0,  (1-nu)/2]],    
                             dtype=bm.float64, device=self.device)
         
         elif self._plane_type == "plane_strain":
-            self.D = bm.tensor([[2 * mu_val + lam_val, lam_val,                   0],
-                                [lam_val,              2 * mu_val + lam_val,      0],
-                                [0,                    0,                    mu_val]], 
+            self.D = bm.tensor([[2*mu+lam, lam,      0],
+                                [lam,      2*mu+lam, 0],
+                                [0,        0,        mu]], 
                                 dtype=bm.float64, device=self.device)
         
         else:
             error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
             self._log_error(error_msg)
         
-        self._log_info(f"Elastic matrix computed for {self._plane_type}, shape: {self.D.shape}")
-
     def elastic_matrix(self) -> TensorLike:
         """
         Calculate the elastic matrix D based on the defined hypothesis (3D, plane stress, or plane strain).

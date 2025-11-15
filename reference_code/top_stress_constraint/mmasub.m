@@ -61,6 +61,7 @@ eeen = ones(n, 1);
 eeem = ones(m, 1);
 zeron = zeros(n, 1);
 move = 0.2;
+% move = 100;
 
 % Calculation of the asymptotes low and upp :
 if iter < 2.5

@@ -11,7 +11,7 @@ ft = 1;     % 密度滤波器
 % ft = 2;   % 灵敏度滤波器
 
 % USER-DEFINED LOOP PARAMETERS
-maxloop = 500;    % Maximum number of iterations
+maxloop = 200;    % Maximum number of iterations
 tolx = 0.01;      % Terminarion criterion
 displayflag = 0;  % Display structure flag
 

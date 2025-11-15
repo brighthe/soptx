@@ -7,25 +7,19 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
-class HalfMBBBeam2dData(PDEBase):
+class HalfMBBBeam2d(PDEBase):
     '''
-    -∇·σ = b    in Ω
-       u = 0    on ∂Ω (homogeneous Dirichlet)
-    where:
-    - σ is the stress tensor
-    - ε = (∇u + ∇u^T)/2 is the strain tensor
-    
-    Material parameters:
-        E = 1, nu = 0.3
+    模型参数:
+        左侧对称约束, 右下角滑移支座, 左上角施加施加向下的集中载荷 P = 1 [N]
 
-    For isotropic materials:
-        σ = 2με + λtr(ε)I
+    材料参数:
+        E = 1 [Mpa], nu = 0.3
     ''' 
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20],
                 mesh_type: str = 'uniform_quad',
-                p: float = -1.0, # N
-                E: float = 1.0,  # Pa (N/m^2)
+                P: float = -1.0, # N
+                E: float = 1.0,  # Mpa (N/mm^2)
                 nu: float = 0.3,
                 plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
@@ -34,7 +28,7 @@ class HalfMBBBeam2dData(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
 
-        self._p = p
+        self._P = P
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
@@ -46,7 +40,6 @@ class HalfMBBBeam2dData(PDEBase):
     #######################################################################################################################
     # 属性访问器
     #######################################################################################################################
-
     @property
     def E(self) -> float:
         """获取杨氏模量"""
@@ -62,10 +55,10 @@ class HalfMBBBeam2dData(PDEBase):
         """获取点力"""
         return self._p
     
+
     #######################################################################################################################
     # 变体方法
     #######################################################################################################################
-    
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         nx = kwargs.get('nx', 60)
@@ -137,41 +130,11 @@ class HalfMBBBeam2dData(PDEBase):
     #######################################################################################################################
     # 核心方法
     #######################################################################################################################
-
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
-    
-    def get_neumann_loads(self):
-       
-       if self._load_type == 'concentrated':
-            
-            @cartesian
-            def concentrated_force(points: TensorLike) -> TensorLike:
-                domain = self._domain
-                x, y = points[..., 0], points[..., 1]   
-
-                coord = (
-                    (bm.abs(x - domain[0]) < self._eps) & 
-                    (bm.abs(y - domain[3]) < self._eps)
-                )
-                kwargs = bm.context(points)
-                val = bm.zeros(points.shape, **kwargs)
-
-                val = bm.set_at(val, (coord, 1), self._T)
-        
-                return val
-            
-            return concentrated_force
-       
-       elif self._load_type == 'distributed':
-           
-           pass
-       
-       else:
-                raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
     
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
@@ -202,9 +165,34 @@ class HalfMBBBeam2dData(PDEBase):
         return coord
     
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
-
+        """左侧对称约束 (u_x = 0), 右下角滑移支座 (u_y = 0)"""
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
+    
+    @cartesian
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷 (点力)"""
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (..., 1), self._P) 
+        
+        return val
+    
+    @cartesian
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]  
+
+        on_top_boundary = bm.abs(y - domain[3]) < self._eps
+        on_left_boundary = bm.abs(x - domain[0]) < self._eps
+
+        return on_top_boundary & on_left_boundary
+
+    def is_concentrate_load_boundary(self) -> Callable:
+
+        return self.is_concentrate_load_boundary_dof
+
+
 
 
 class MBBBeam2dData(PDEBase):

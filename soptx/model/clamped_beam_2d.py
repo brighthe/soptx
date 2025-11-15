@@ -187,14 +187,6 @@ class ClampedBeam2D(PDEBase):
 
 class HalfClampedBeam2D(PDEBase):
     '''
-    Symmetric half-domain model for the clamped-clamped beam example from 
-    Castañar et al. (2022), Section 5.1.
-    
-    PDEs:
-    -∇·σ = b   in Ω (left half-domain)
-      u = 0     on ∂Ω_D (fully clamped on the left side, x=0)
-      u_x = 0   on ∂Ω_S (symmetry boundary, x=80)
-      
     几何参数:
         左半部分矩形域, 左端完全固支, 右端为对称边界, 右下角施加向下的集中载荷
     
@@ -227,9 +219,8 @@ class HalfClampedBeam2D(PDEBase):
 
 
     #######################################################################################################################
-    # 访问器 (Accessors)
+    # 属性访问器
     #######################################################################################################################
-
     @property
     def E(self) -> float:
         """获取杨氏模量"""
@@ -245,11 +236,10 @@ class HalfClampedBeam2D(PDEBase):
         """获取点力"""
         return self._p
     
-    
+
     #######################################################################################################################
-    # 变体方法 (Variant Methods)
+    # 变体方法
     #######################################################################################################################
-    
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         nx = kwargs.get('nx', 80)
@@ -317,10 +307,10 @@ class HalfClampedBeam2D(PDEBase):
 
         return mesh
 
+
     #######################################################################################################################
     # 核心方法
     #######################################################################################################################
-
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
@@ -374,7 +364,7 @@ class HalfClampedBeam2D(PDEBase):
     
     @cartesian
     def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        """集中载荷点"""
+        """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p) 
