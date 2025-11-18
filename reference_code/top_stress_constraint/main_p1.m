@@ -118,7 +118,7 @@ B = 1/(2*h) * [-1  0  1  0  1  0 -1  0;
 D = E/(1-nu^2)*[1 nu 0; nu 1 0; 0 0 (1-nu)/2];
 
 %% --- MMA 参数初始化 ---
-maxiter = 2000;
+maxiter = 1000;
 change = 1;
 loop = 0;
 
@@ -133,6 +133,14 @@ upp = xmax;
 
 % 设置重新聚类频率 
 recluster_freq = 50;  % 1, 10, 50, 100, 或 inf (不重新聚类)
+
+obj_history = zeros(maxiter, 1);          % 质量历史
+change_history = zeros(maxiter, 1);       % 变化量历史
+constraint_history = zeros(maxiter, 1);   % 约束历史
+compliance_history = zeros(maxiter, 1);   % 柔顺度历史
+
+% --- 创建可视化窗口 ---
+fig = figure('Position', [100, 100, 1200, 400]);
 
 %% --- 优化迭代循环 ---
 while change > 0.01 && loop < maxiter
@@ -156,6 +164,9 @@ while change > 0.01 && loop < maxiter
     elseif ft == 2
         df0dx(:) = H * (df0drho(:) ./ Hs);
     end
+
+    % --- 柔顺度 ---
+    compliance = 0.5 * F' * U;
     
     % --- 应力计算 ---
     % 初始 von Mises 应力计算
@@ -272,13 +283,70 @@ while change > 0.01 && loop < maxiter
     
     % --- 收敛判断 ---
     change = max(abs(xmma - xold1));
+
+    obj_history(loop) = f0val;
+    change_history(loop) = change;
+    constraint_history(loop) = max(fval);
+    compliance_history(loop) = compliance;  
     
     % --- 输出 ---
-    fprintf('It:%4i Obj:%7.3e      Vol:%7.3f      ch:%6.3f MaxCon:%6.3f\n', ...
-              loop,   f0val,   sum(xPhys(:))/nele, change,   max(fval));
-    
-    % --- 可视化 ---
-    colormap(gray); imagesc(1-xPhys); caxis([0 1]); axis equal; axis off; axis xy; drawnow;
+    fprintf('It:%4i Mass:%7.3e Vol:%7.3f Comp:%8.0f ch:%6.3f MaxCon:%6.3f\n', ...
+              loop, f0val, sum(xPhys(:))/nele, compliance, change, max(fval));
 
+    % 将应力重塑为矩阵形式
+    stress_matrix = reshape(stress_vm, nely, nelx);
+    
+    % 子图 1: 拓扑
+    subplot(1, 2, 1);
+    imagesc(1-xPhys);
+    colormap(gca, gray);
+    caxis([0 1]);
+    axis equal; axis tight; axis off; axis xy;
+    title(sprintf('Topology (Iter %d)', loop), 'FontSize', 12);
+    
+    % 子图 2: 应力
+    subplot(1, 2, 2);
+    imagesc(stress_matrix);
+    colormap(gca, jet);
+    caxis([0 600]);  % 应力范围 0-600 MPa
+    axis equal; axis tight; axis off; axis xy;
+    title(sprintf('von Mises Stress [MPa] (Iter %d)', loop), 'FontSize', 12);
+    colorbar;
+
+    drawnow;
 
 end
+
+%% --- 简单的最终结果输出 ---
+fprintf('\n=== Final Results ===\n');
+fprintf('Iterations: %d\n', loop);
+fprintf('Mass: %.2f kg×10⁻³\n', f0val*1e6);
+fprintf('Compliance: %.0f N·mm\n', compliance_history(loop)); 
+
+%% --- 绘制收敛曲线 ---
+iterations = 1:loop;
+mass_hist_kg = obj_history(1:loop) * 1e6;  % 转换为 kg×10⁻³
+comp_hist = compliance_history(1:loop);
+
+figure('Position', [100, 100, 800, 500]);
+
+% 质量收敛
+subplot(2, 1, 1);
+plot(iterations, mass_hist_kg, 'b-', 'LineWidth', 1.5);
+xlabel('Iteration');
+ylabel('Mass [kg × 10^{-3}]');
+title('Mass Convergence');
+grid on;
+
+% 柔顺度收敛
+subplot(2, 1, 2);
+plot(iterations, comp_hist, 'g-', 'LineWidth', 1.5);
+xlabel('Iteration');
+ylabel('Compliance [N·mm]');
+title('Compliance Convergence');
+grid on;
+
+% 保存
+saveas(gcf, 'convergence.png');
+fprintf('Convergence plot saved to: convergence.png\n');
+
