@@ -13,13 +13,13 @@ class HalfMBBBeam2d(PDEBase):
         左侧对称约束, 右下角滑移支座, 左上角施加施加向下的集中载荷 P = 1 [N]
 
     材料参数:
-        E = 1 [Mpa], nu = 0.3
+        E = 1 [MPa], nu = 0.3
     ''' 
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 20],
                 mesh_type: str = 'uniform_quad',
                 P: float = -1.0, # N
-                E: float = 1.0,  # Mpa (N/mm^2)
+                E: float = 1.0,  # MPa (N/mm^2)
                 nu: float = 0.3,
                 plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
