@@ -8,7 +8,7 @@ from fealpy.mesh import HomogeneousMesh
 from fealpy.typing import TensorLike
 from fealpy.sparse import CSRTensor
 
-from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+# from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
 
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
@@ -94,15 +94,41 @@ class SensitivityStrategy(_FilterStrategy):
     """灵敏度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
-                Hs: TensorLike, 
+                # Hs: TensorLike, 
                 mesh: HomogeneousMesh, 
-                density_location: Literal['element'], 
+                density_location: Literal['element', 'node'], 
             ) -> None:
         
         self._H = H
-        self._Hs = Hs
+        # self._Hs = Hs
         self._mesh = mesh
         self._density_location = density_location
+
+        # --- 预计算测度权重 ---
+        if self._density_location == 'element':
+            # 单元密度表征：权重即为单元体积/面积
+            # shape: (NC, )
+            self._measure_weight = self._mesh.entity_measure('cell')
+            
+        elif self._density_location == 'node':
+            # 节点密度表征：权重为节点控制体积
+            # shape: (NN, )
+            cm = self._mesh.entity_measure('cell')
+            NN = self._mesh.number_of_nodes()
+            cell2node = self._mesh.cell_to_node()
+            NNE = cell2node.shape[1]
+
+            # 将单元测度均分给每个节点
+            val = bm.repeat(cm / NNE, NNE)
+            nm = bm.zeros(NN, dtype=bm.float64)
+            # 累加得到节点测度
+            self._measure_weight = bm.add_at(nm, cell2node.reshape(-1), val)
+        
+        else:
+            raise ValueError(f"Unsupported density_location: {self._density_location}")
+
+        # 预计算卷积归一化因子
+        self._Hs = self._H.matmul(self._measure_weight)
 
     def get_initial_density(self, 
                         density:  Union[TensorLike, Function]
@@ -133,50 +159,69 @@ class SensitivityStrategy(_FilterStrategy):
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
-
-        if self._density_location in ['element']:
-            # obj_grad_rho.shape = (NC, )
-            cm = self._mesh.entity_measure('cell')
-
-            weighted_obj_grad_rho = design_variable[:] * obj_grad_rho / cm
-            numerator = self._H.matmul(weighted_obj_grad_rho)
-
-            epsilon = 1e-3
-            stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), design_variable)
-            denominator = (stability_factor / cm) * self._Hs
-
-            obj_grad_dv = numerator / denominator
-
-            return obj_grad_dv
         
-        else:
-            raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
+        # 1. 准备源项
+        weighted_source = design_variable * obj_grad_rho / self._measure_weight
+        # 2. 卷积
+        numerator_conv = self._H.matmul(weighted_source)
+        # 3. 稳定性因子
+        epsilon = 1e-3
+        stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), design_variable)
+        # 4. 分母        
+        denominator = stability_factor * self._Hs
+        # 5. 组合
+        obj_grad_dv = (numerator_conv * self._measure_weight) / denominator
+
+        return obj_grad_dv
+
+        # if self._density_location in ['element']:
+        #     # obj_grad_rho.shape = (NC, )
+        #     cm = self._mesh.entity_measure('cell')
+
+        #     weighted_obj_grad_rho = design_variable[:] * obj_grad_rho / cm
+        #     numerator = self._H.matmul(weighted_obj_grad_rho)
+
+        #     epsilon = 1e-3
+        #     stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), design_variable)
+        #     denominator = (stability_factor / cm) * self._Hs
+
+        #     obj_grad_dv = numerator / denominator
+
+        #     return obj_grad_dv
+        
+        # else:
+        #     raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
 
     def filter_constraint_sensitivities(self, 
                                     design_variable: Union[TensorLike, Function],
                                     con_grad_rho: TensorLike
                                 ) -> TensorLike:
         
-        if self._density_location == 'element':
-            # 对于通用的 MMA 算法，体积约束越需要过滤
-            # cell_measure = self._integration_weights
+        # 对于简单的 OC 算法，体积约束不需要过滤
+        con_grad_dv = bm.copy(con_grad_rho)
 
-            # weighted_con_grad = rho_Phys[:] * con_grad / cell_measure
-            # numerator = self._H.matmul(weighted_con_grad)
+        return con_grad_dv
+    
+        # if self._density_location == 'element':
+        #     # 对于通用的 MMA 算法，体积约束越需要过滤
+        #     # cell_measure = self._integration_weights
 
-            # epsilon = 1e-3
-            # stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
-            # denominator = (stability_factor / cell_measure) * self._Hs
+        #     # weighted_con_grad = rho_Phys[:] * con_grad / cell_measure
+        #     # numerator = self._H.matmul(weighted_con_grad)
 
-            # con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
+        #     # epsilon = 1e-3
+        #     # stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
+        #     # denominator = (stability_factor / cell_measure) * self._Hs
 
-            # 对于简单的 OC 算法，体积约束不需要过滤
-            con_grad_dv = bm.copy(con_grad_rho)
+        #     # con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
 
-            return con_grad_dv
+        #     # 对于简单的 OC 算法，体积约束不需要过滤
+        #     con_grad_dv = bm.copy(con_grad_rho)
 
-        else:
-            raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
+        #     return con_grad_dv
+
+        # else:
+        #     raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
  
 
 class DensityStrategy(_FilterStrategy):
@@ -190,6 +235,32 @@ class DensityStrategy(_FilterStrategy):
         self._H = H
         self._mesh = mesh
         self._density_location = density_location
+
+        # --- 预计算测度权重 ---
+        if self._density_location == 'element':
+            # 单元密度表征：权重即为单元体积/面积
+            # shape: (NC, )
+            self._measure_weight = self._mesh.entity_measure('cell')
+            
+        elif self._density_location == 'node':
+            # 节点密度表征：权重为节点控制体积
+            # shape: (NN, )
+            cm = self._mesh.entity_measure('cell')
+            NN = self._mesh.number_of_nodes()
+            cell2node = self._mesh.cell_to_node()
+            NNE = cell2node.shape[1]
+
+            # 将单元测度均分给每个节点
+            val = bm.repeat(cm / NNE, NNE)
+            nm = bm.zeros(NN, dtype=bm.float64)
+            # 累加得到节点测度
+            self._measure_weight = bm.add_at(nm, cell2node.reshape(-1), val)
+        
+        else:
+            raise ValueError(f"Unsupported density_location: {self._density_location}")
+
+        # 预计算卷积归一化因子
+        self._Hs = self._H.matmul(self._measure_weight)
         
     def get_initial_density(self, 
                         density:  Union[TensorLike, Function]
@@ -209,152 +280,154 @@ class DensityStrategy(_FilterStrategy):
                             design_variable: Union[TensorLike, Function], 
                             physical_density: Union[TensorLike, Function]
                         ) -> Union[TensorLike, Function]:
-
-        if self._density_location in ['element']:
-            # design_variable.shape = (NC, )
-            cm = self._mesh.entity_measure('cell')
-            
-            weighted_dv = design_variable * cm
-
-            numerator = self._H.matmul(weighted_dv)
-            denominator = self._H.matmul(cm)
-
-            physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator) # (NC, )
-            
-            return physical_density
         
-        elif self._density_location in ['node']:
-            # design_variable.shape = (NN, )
-            cm = self._mesh.entity_measure('cell')
-            NN = self._mesh.number_of_nodes()
-            cell2node = self._mesh.cell_to_node()
-            NNE = cell2node.shape[1]
-
-            # 计算节点测度
-            val = bm.repeat(cm / NNE, NNE)
-            nm = bm.zeros(NN, dtype=bm.float64)
-            nm = bm.add_at(nm, cell2node.reshape(-1), val)
-
-            # 过滤设计变量
-            weighted_dv = design_variable * nm
-
-            numerator = self._H.matmul(weighted_dv)
-            denominator = self._H.matmul(nm)
-
-            physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator)  # (NN, )
-            
-            return physical_density
+        # 1. 对设计变量进行测度加权
+        weighted_dv = design_variable * self._measure_weight
+        # 2. 卷积求和
+        numerator = self._H.matmul(weighted_dv)
+        # 3. 归一化并赋值
+        physical_density[:] = bm.set_at(physical_density, slice(None), numerator / self._Hs)
         
-        elif self._density_location in ['element_multiresolution']:
-            # design_variable.shape = (NC*n_sub, )
-            cm = self._mesh.entity_measure('cell')
-            weighted_dv = design_variable * cm
+        return physical_density
 
-            numerator = self._H.matmul(weighted_dv)
-            denominator = self._H.matmul(cm)
-
-            data_flat = numerator / denominator
-
-            from soptx.analysis.utils import reshape_multiresolution_data_inverse
-            n_sub = physical_density.shape[-1]
-            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
-            physical_density_sub = reshape_multiresolution_data_inverse(nx=nx_displacement,
-                                                                ny=ny_displacement,
-                                                                data_flat=data_flat,
-                                                                n_sub=n_sub) # (NC, n_sub)
-
-            physical_density[:] = bm.set_at(physical_density, slice(None), physical_density_sub) # (NC, n_sub)
+        # if self._density_location in ['element']:
+        #     # design_variable.shape = (NC, )
+        #     cm = self._mesh.entity_measure('cell')
             
-            return physical_density
+        #     weighted_dv = design_variable * cm
+
+        #     numerator = self._H.matmul(weighted_dv)
+        #     denominator = self._H.matmul(cm)
+
+        #     physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator) # (NC, )
+            
+        #     return physical_density
+        
+        # elif self._density_location in ['node']:
+        #     # design_variable.shape = (NN, )
+        #     cm = self._mesh.entity_measure('cell')
+        #     NN = self._mesh.number_of_nodes()
+        #     cell2node = self._mesh.cell_to_node()
+        #     NNE = cell2node.shape[1]
+
+        #     # 计算节点测度
+        #     val = bm.repeat(cm / NNE, NNE)
+        #     nm = bm.zeros(NN, dtype=bm.float64)
+        #     nm = bm.add_at(nm, cell2node.reshape(-1), val)
+
+        #     # 过滤设计变量
+        #     weighted_dv = design_variable * nm
+
+        #     numerator = self._H.matmul(weighted_dv)
+        #     denominator = self._H.matmul(nm)
+
+        #     physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator)  # (NN, )
+            
+        #     return physical_density
+        
+        # elif self._density_location in ['element_multiresolution']:
+        # TODO
+        #     # design_variable.shape = (NC*n_sub, )
+        #     cm = self._mesh.entity_measure('cell')
+        #     weighted_dv = design_variable * cm
+
+        #     numerator = self._H.matmul(weighted_dv)
+        #     denominator = self._H.matmul(cm)
+
+        #     data_flat = numerator / denominator
+
+        #     from soptx.analysis.utils import reshape_multiresolution_data_inverse
+        #     n_sub = physical_density.shape[-1]
+        #     n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+        #     nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+        #     physical_density_sub = reshape_multiresolution_data_inverse(nx=nx_displacement,
+        #                                                         ny=ny_displacement,
+        #                                                         data_flat=data_flat,
+        #                                                         n_sub=n_sub) # (NC, n_sub)
+
+        #     physical_density[:] = bm.set_at(physical_density, slice(None), physical_density_sub) # (NC, n_sub)
+            
+        #     return physical_density
 
 
         # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
-
-        #     weighted_rho_local = bm.einsum('cq, cq -> cq', rho, self._integration_weights) # (NC, NQ)
-
-        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-        #                                                             nq_per_dim=self._integration_order)
-            
-        #     weighted_rho = weighted_rho_local[local_to_global] # (NC*NQ, )
-
-        #     integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
-
-        #     numerator_global = self._H.matmul(weighted_rho) # (NC*NQ, )
-        #     numerator = numerator_global[global_to_local] # (NC, NQ)
-            
-        #     denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
-        #     denominator = denominator_global[global_to_local] # (NC, NQ)
-
-        #     rho_Phys[:] = bm.set_at(rho_Phys, slice(None), numerator / denominator)
-
-        #     return rho_Phys
 
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
         
-        if self._density_location in ['element']:
-            # obj_grad_rho.shape = (NC, )
-            cm = self._mesh.entity_measure('cell')
-            
-            Hs = self._H.matmul(cm)
-            
-            scaled_dobj = obj_grad_rho / Hs
-            temp = self._H.matmul(scaled_dobj)
-
-            obj_grad_dv = cm * temp # (NC, )
-
-            return obj_grad_dv
+        # 1. 缩放物理密度导数
+        scaled_dobj = obj_grad_rho / self._Hs
         
-        elif self._density_location in ['node']:
-            # obj_grad_rho.shape = (NN, )
-            cm = self._mesh.entity_measure('cell')
-            NN = self._mesh.number_of_nodes()
-            cell2node = self._mesh.cell_to_node()
-            NNE = cell2node.shape[1]
+        # 2. 卷积求和
+        temp = self._H.matmul(scaled_dobj)
 
-            # 计算节点测度
-            val = bm.repeat(cm / NNE, NNE)
-            nm = bm.zeros(NN, dtype=bm.float64)
-            nm = bm.add_at(nm, cell2node.reshape(-1), val)
+        # 3. 乘以测度权重
+        obj_grad_dv = self._measure_weight * temp
 
-            # 灵敏度过滤
-            Hs = self._H.matmul(nm)
+        return obj_grad_dv
+        
+        # if self._density_location in ['element']:
+        #     # obj_grad_rho.shape = (NC, )
+        #     cm = self._mesh.entity_measure('cell')
             
-            scaled_dobj = obj_grad_rho / Hs
-            temp = self._H.matmul(scaled_dobj)
-
-            obj_grad_dv = nm * temp # (NN, )
-
-            return obj_grad_dv
-
-        elif self._density_location in ['element_multiresolution']:
-            # obj_grad_rho.shape = (NC, n_sub)
-            n_sub = obj_grad_rho.shape[-1]
-            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
-
-            from soptx.analysis.utils import reshape_multiresolution_data
-            obj_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
-                                                                ny=ny_displacement, 
-                                                                data=obj_grad_rho) # (NC*n_sub, )
-
-            cm = self._mesh.entity_measure('cell')
+        #     Hs = self._H.matmul(cm)
             
-            Hs = self._H.matmul(cm)
+        #     scaled_dobj = obj_grad_rho / Hs
+        #     temp = self._H.matmul(scaled_dobj)
 
-            scaled_dobj = obj_grad_rho_reshaped / Hs
-            temp = self._H.matmul(scaled_dobj)
+        #     obj_grad_dv = cm * temp # (NC, )
 
-            obj_grad_dv = cm * temp # (NC*n_sub, )
+        #     return obj_grad_dv
+        
+        # elif self._density_location in ['node']:
+        #     # obj_grad_rho.shape = (NN, )
+        #     cm = self._mesh.entity_measure('cell')
+        #     NN = self._mesh.number_of_nodes()
+        #     cell2node = self._mesh.cell_to_node()
+        #     NNE = cell2node.shape[1]
 
-            return obj_grad_dv
+        #     # 计算节点测度
+        #     val = bm.repeat(cm / NNE, NNE)
+        #     nm = bm.zeros(NN, dtype=bm.float64)
+        #     nm = bm.add_at(nm, cell2node.reshape(-1), val)
 
-        elif self._density_location in ['node_multiresolution']:
-            pass 
+        #     # 灵敏度过滤
+        #     Hs = self._H.matmul(nm)
+            
+        #     scaled_dobj = obj_grad_rho / Hs
+        #     temp = self._H.matmul(scaled_dobj)
+
+        #     obj_grad_dv = nm * temp # (NN, )
+
+        #     return obj_grad_dv
+
+        # elif self._density_location in ['element_multiresolution']:
+                # TODO
+        #     # obj_grad_rho.shape = (NC, n_sub)
+        #     n_sub = obj_grad_rho.shape[-1]
+        #     n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+        #     nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+
+        #     from soptx.analysis.utils import reshape_multiresolution_data
+        #     obj_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
+        #                                                         ny=ny_displacement, 
+        #                                                         data=obj_grad_rho) # (NC*n_sub, )
+
+        #     cm = self._mesh.entity_measure('cell')
+            
+        #     Hs = self._H.matmul(cm)
+
+        #     scaled_dobj = obj_grad_rho_reshaped / Hs
+        #     temp = self._H.matmul(scaled_dobj)
+
+        #     obj_grad_dv = cm * temp # (NC*n_sub, )
+
+        #     return obj_grad_dv
+
+        # elif self._density_location in ['node_multiresolution']:
+        #     pass 
 
         # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
             
@@ -384,64 +457,74 @@ class DensityStrategy(_FilterStrategy):
                                     design_variable: TensorLike, 
                                     con_grad_rho: TensorLike
                                 ) -> TensorLike:
-
-        if self._density_location in ['element']:
-            # con_grad_rho.shape = (NC, )
-            cm = self._mesh.entity_measure('cell')
-            Hs = self._H.matmul(cm)
-            
-            scaled_dcon = con_grad_rho / Hs
-            temp = self._H.matmul(scaled_dcon)
-
-            con_grad_dv = cm * temp # (NC, )
-
-            return con_grad_dv
+        # 1. 缩放物理密度导数
+        scaled_dcon = con_grad_rho / self._Hs
         
-        elif self._density_location in ['node']:
-            # con_grad_rho.shape = (NN, )
-            cm = self._mesh.entity_measure('cell')
-            NN = self._mesh.number_of_nodes()
-            cell2node = self._mesh.cell_to_node()
-            NNE = cell2node.shape[1]
+        # 2. 卷积求和
+        temp = self._H.matmul(scaled_dcon)
 
-            # 计算节点测度
-            val = bm.repeat(cm / NNE, NNE)
-            nm = bm.zeros(NN, dtype=bm.float64)
-            nm = bm.add_at(nm, cell2node.reshape(-1), val)
+        # 3. 乘以测度权重
+        con_grad_dv = self._measure_weight * temp
 
-            # 灵敏度过滤
-            Hs = self._H.matmul(nm)
+        return con_grad_dv
+
+        # if self._density_location in ['element']:
+        #     # con_grad_rho.shape = (NC, )
+        #     cm = self._mesh.entity_measure('cell')
+        #     Hs = self._H.matmul(cm)
             
-            scaled_dcon = con_grad_rho / Hs
-            temp = self._H.matmul(scaled_dcon)
+        #     scaled_dcon = con_grad_rho / Hs
+        #     temp = self._H.matmul(scaled_dcon)
 
-            con_grad_dv = nm * temp  # (NN, )
+        #     con_grad_dv = cm * temp # (NC, )
 
-            return con_grad_dv
+        #     return con_grad_dv
+        
+        # elif self._density_location in ['node']:
+        #     # con_grad_rho.shape = (NN, )
+        #     cm = self._mesh.entity_measure('cell')
+        #     NN = self._mesh.number_of_nodes()
+        #     cell2node = self._mesh.cell_to_node()
+        #     NNE = cell2node.shape[1]
 
-        elif self._density_location in ['element_multiresolution']:
-            # con_grad_rho.shape = (NC, n_sub)
-            n_sub = con_grad_rho.shape[-1]
-            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+        #     # 计算节点测度
+        #     val = bm.repeat(cm / NNE, NNE)
+        #     nm = bm.zeros(NN, dtype=bm.float64)
+        #     nm = bm.add_at(nm, cell2node.reshape(-1), val)
 
-            from soptx.analysis.utils import reshape_multiresolution_data
-            con_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
-                                                                ny=ny_displacement, 
-                                                                data=con_grad_rho) # (NC*n_sub, )
+        #     # 灵敏度过滤
+        #     Hs = self._H.matmul(nm)
+            
+        #     scaled_dcon = con_grad_rho / Hs
+        #     temp = self._H.matmul(scaled_dcon)
 
-            cm = self._mesh.entity_measure('cell')
-            Hs = self._H.matmul(cm)
+        #     con_grad_dv = nm * temp  # (NN, )
 
-            scaled_dobj = con_grad_rho_reshaped / Hs
-            temp = self._H.matmul(scaled_dobj)
+        #     return con_grad_dv
 
-            con_grad_dv = cm * temp # (NC*n_sub, )
+        # elif self._density_location in ['element_multiresolution']:
+        #     # con_grad_rho.shape = (NC, n_sub)
+        #     n_sub = con_grad_rho.shape[-1]
+        #     n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+        #     nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
 
-            return con_grad_dv
+        #     from soptx.analysis.utils import reshape_multiresolution_data
+        #     con_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
+        #                                                         ny=ny_displacement, 
+        #                                                         data=con_grad_rho) # (NC*n_sub, )
 
-        elif self._density_location in ['node_multiresolution']:
-            pass 
+        #     cm = self._mesh.entity_measure('cell')
+        #     Hs = self._H.matmul(cm)
+
+        #     scaled_dobj = con_grad_rho_reshaped / Hs
+        #     temp = self._H.matmul(scaled_dobj)
+
+        #     con_grad_dv = cm * temp # (NC*n_sub, )
+
+        #     return con_grad_dv
+
+        # elif self._density_location in ['node_multiresolution']:
+        #     pass 
 
         # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
         #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping

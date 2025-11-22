@@ -13,8 +13,8 @@ class FilterMatrixBuilder:
                 mesh: HomogeneousMesh, 
                 rmin: float, 
                 density_location: str, 
-                integration_order: int = None,
-                interpolation_order: int = None
+                # integration_order: int = None,
+                # interpolation_order: int = None
             ) -> None:
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
@@ -23,28 +23,39 @@ class FilterMatrixBuilder:
         self._rmin = rmin
         self._density_location = density_location
         
-        self._integration_order = integration_order
-        self._interpolation_order = interpolation_order
+        # self._integration_order = integration_order
+        # self._interpolation_order = interpolation_order
 
         self._device = mesh.device
 
     def build(self) -> Tuple[CSRTensor, TensorLike]:
-        """构建并返回权重矩阵 H 和其行和 Hs"""
+        """构建并返回权重矩阵 H"""
 
         if self._mesh.meshdata['mesh_type'] == 'uniform_quad':
             if self._density_location in ['element', 'element_multiresolution']:
-                H, Hs = self._compute_weighted_matrix_2d(
+                H = self._compute_weighted_matrix_2d(
                                             self._rmin,
                                             self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
                                             self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
                                         )
-                return H, Hs
+                return H        
+                # H, Hs = self._compute_weighted_matrix_2d(
+                #                             self._rmin,
+                #                             self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
+                #                             self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
+                #                         )
+                # return H, Hs
             elif self._density_location in ['node', 'node_multiresolution']:
-                H, Hs = self._compute_weighted_matrix_general(
-                                                rmin=self._rmin,
-                                                domain=self._mesh.meshdata['domain'], 
-                                            )
-                return H, Hs
+                H = self._compute_weighted_matrix_general(
+                                            rmin=self._rmin, 
+                                            domain=self._mesh.meshdata['domain']
+                                        )
+                return H
+                # H, Hs = self._compute_weighted_matrix_general(
+                #                                 rmin=self._rmin,
+                #                                 domain=self._mesh.meshdata['domain'], 
+                #                             )
+                # return H, Hs
 
         elif self._mesh.meshdata['mesh_type'] in ['uniform_aligned_tri', 'uniform_crisscross_tri']:
             H, Hs = self._compute_weighted_matrix_general(
@@ -187,7 +198,8 @@ class FilterMatrixBuilder:
             t.send('稀疏矩阵构建时间')
             t.send(None)
 
-        return H, Hs
+        return H
+        # return H, Hs
         
 
     def _compute_weighted_matrix_2d(self,
@@ -346,7 +358,8 @@ class FilterMatrixBuilder:
             t.send('矩阵构建')
             t.send(None)
         
-        return H, Hs
+        return H
+        # return H, Hs
 
 
     def _compute_weighted_matrix_2d_math(self,

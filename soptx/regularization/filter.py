@@ -35,8 +35,8 @@ class Filter(BaseLogged):
                 filter_type: Literal['none', 'sensitivity', 'density', 'heaviside_density'],
                 rmin: Optional[float] = None,
                 density_location: Optional[str] = None,
-                integration_order: Optional[int] = None,
-                interpolation_order: Optional[int] = None,
+                # integration_order: Optional[int] = None,
+                # interpolation_order: Optional[int] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
             ) -> None:
@@ -47,32 +47,32 @@ class Filter(BaseLogged):
         self._filter_type = filter_type
         self._rmin = rmin
         self._density_location = density_location
-        self._integration_order = integration_order
-        self._interpolation_order = interpolation_order
+        # self._integration_order = integration_order
+        # self._interpolation_order = interpolation_order
 
-        # 参数验证
-        if self._filter_type != 'none' and (self._rmin is None or self._rmin <= 0):
-            error_msg = (f"当 filter_type='{self._filter_type}' 时，必须提供有效的 rmin (> 0). "
-                        f"当前 rmin={self._rmin}")
-            self._log_error(error_msg)
+        # # 参数验证
+        # if self._filter_type != 'none' and (self._rmin is None or self._rmin <= 0):
+        #     error_msg = (f"当 filter_type='{self._filter_type}' 时，必须提供有效的 rmin (> 0). "
+        #                 f"当前 rmin={self._rmin}")
+        #     self._log_error(error_msg)
         
-        # 验证密度位置参数
-        if self._filter_type != 'none' and self._density_location is None:
-            error_msg = f"当 filter_type='{self._filter_type}' 时，必须提供 density_location 参数"
-            self._log_error(error_msg)
+        # # 验证密度位置参数
+        # if self._filter_type != 'none' and self._density_location is None:
+        #     error_msg = f"当 filter_type='{self._filter_type}' 时，必须提供 density_location 参数"
+        #     self._log_error(error_msg)
             
-        # 验证积分/插值参数
-        if (self._filter_type != 'none' and 
-            self._density_location == 'gauss_integration_point' and 
-            self._integration_order is None):
-            error_msg = "当 density_location='gauss_integration_point' 时，必须提供 integrator_order 参数"
-            self._log_error(error_msg)
+        # # 验证积分/插值参数
+        # if (self._filter_type != 'none' and 
+        #     self._density_location == 'gauss_integration_point' and 
+        #     self._integration_order is None):
+        #     error_msg = "当 density_location='gauss_integration_point' 时，必须提供 integrator_order 参数"
+        #     self._log_error(error_msg)
             
-        if (self._filter_type != 'none' and 
-            self._density_location == 'interpolation_point' and 
-            self._interpolation_order is None):
-            error_msg = "当 density_location='interpolation_point' 时，必须提供 interpolation_order 参数"
-            self._log_error(error_msg)
+        # if (self._filter_type != 'none' and 
+        #     self._density_location == 'interpolation_point' and 
+        #     self._interpolation_order is None):
+        #     error_msg = "当 density_location='interpolation_point' 时，必须提供 interpolation_order 参数"
+        #     self._log_error(error_msg)
         
         
         # 1. 构建过滤矩阵
@@ -81,14 +81,16 @@ class Filter(BaseLogged):
                                     mesh=mesh, 
                                     rmin=rmin, 
                                     density_location=density_location,
-                                    integration_order=integration_order,
-                                    interpolation_order=interpolation_order
+                                    # integration_order=integration_order,
+                                    # interpolation_order=interpolation_order
                                 )
-            self._H, self._Hs = builder.build()
-            self._integration_weights = self._compute_integration_weights()
+            self._H = builder.build()
+            # self._H, self._Hs = builder.build()
+            # self._integration_weights = self._compute_integration_weights()
             self._cell_measure = self._mesh.entity_measure('cell')
         else:
-            self._H, self._Hs, self._integration_weights = None, None, None
+            self._H = None
+            # self._H, self._Hs, self._integration_weights = None, None, None
 
         # 2. 策略选择和实例化
         strategy_class = FILTER_STRATEGY_REGISTRY.get(self._filter_type)
@@ -101,21 +103,26 @@ class Filter(BaseLogged):
                             'mesh': self._mesh,
                             'density_location': self._density_location,
                         }
-        if self._filter_type == 'none':
-            strategy_params.update({
-                                    'integration_order': self._integration_order,
-                                })
-        
-        if self._filter_type == 'sensitivity':
-            strategy_params.update({
-                                'H': self._H,
-                                'Hs': self._Hs,
-                            })
+        # if self._filter_type == 'none':
+        #     strategy_params.update({
+        #                             'integration_order': self._integration_order,
+        #                         })
 
-        if self._filter_type == 'density':
+        if self._filter_type in ['sensitivity', 'density']:
             strategy_params.update({
-                                'H': self._H,
+                                'H': self._H
                             })
+        
+        # if self._filter_type == 'sensitivity':
+        #     strategy_params.update({
+        #                         'H': self._H,
+        #                         # 'Hs': self._Hs,
+        #                     })
+
+        # if self._filter_type == 'density':
+        #     strategy_params.update({
+        #                         'H': self._H,
+        #                     })
 
         if self._filter_type == 'heaviside_density':
             strategy_params.update({
@@ -186,49 +193,49 @@ class Filter(BaseLogged):
     # 内部方法
     ###########################################################################################################
         
-    def _compute_integration_weights(self) -> TensorLike:
-        """根据物理密度位置类型计算积分权重"""
+    # def _compute_integration_weights(self) -> TensorLike:
+    #     """根据物理密度位置类型计算积分权重"""
 
-        if self._density_location in ['element', 'element_multiresolution']:
+    #     if self._density_location in ['element', 'element_multiresolution']:
 
-            integration_weights = self._mesh.entity_measure('cell')
+    #         integration_weights = self._mesh.entity_measure('cell')
 
-            return integration_weights
+    #         return integration_weights
         
-        elif self._density_location in ['node', 'node_multiresolution']:
+    #     elif self._density_location in ['node', 'node_multiresolution']:
 
-            integration_weights = 1
+    #         integration_weights = 1
 
-            return integration_weights
+    #         return integration_weights
             
-        elif self._density_location == 'gauss_integration_point':
+    #     elif self._density_location == 'gauss_integration_point':
             
-            qf = self._mesh.quadrature_formula(q=self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
+    #         qf = self._mesh.quadrature_formula(q=self._integration_order)
+    #         bcs, ws = qf.get_quadrature_points_and_weights()
             
-            J = self._mesh.jacobi_matrix(bcs)
-            detJ = bm.linalg.det(J)
+    #         J = self._mesh.jacobi_matrix(bcs)
+    #         detJ = bm.linalg.det(J)
 
-            integration_weights = bm.einsum('q, cq -> cq', ws, detJ)
+    #         integration_weights = bm.einsum('q, cq -> cq', ws, detJ)
 
-            return integration_weights
+    #         return integration_weights
             
-        elif self._density_location == 'density_subelement_gauss_point':
+    #     elif self._density_location == 'density_subelement_gauss_point':
 
-            # 获取单元测度
-            cell_measure = self._mesh.entity_measure('cell')  # (NC,)
+    #         # 获取单元测度
+    #         cell_measure = self._mesh.entity_measure('cell')  # (NC,)
             
-            # 获取子单元数量（等于高斯点数量）
-            qf = self._mesh.quadrature_formula(q=self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
-            NQ = ws.shape[0]
+    #         # 获取子单元数量（等于高斯点数量）
+    #         qf = self._mesh.quadrature_formula(q=self._integration_order)
+    #         bcs, ws = qf.get_quadrature_points_and_weights()
+    #         NQ = ws.shape[0]
             
-            # 每个子单元的测度 = 单元测度 / 子单元数量
-            NC = self._mesh.number_of_cells()
-            subcell_measure = cell_measure[:, None] / NQ
-            integration_weights = bm.broadcast_to(subcell_measure, (NC, NQ))
+    #         # 每个子单元的测度 = 单元测度 / 子单元数量
+    #         NC = self._mesh.number_of_cells()
+    #         subcell_measure = cell_measure[:, None] / NQ
+    #         integration_weights = bm.broadcast_to(subcell_measure, (NC, NQ))
 
-            return integration_weights
+    #         return integration_weights
             
-        else:
-            raise ValueError(f"不支持的密度位置类型: {self._density_location}")
+    #     else:
+    #         raise ValueError(f"不支持的密度位置类型: {self._density_location}")
