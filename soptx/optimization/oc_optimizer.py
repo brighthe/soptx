@@ -25,7 +25,7 @@ class OCOptions:
 
         # OC 算法的高级参数
         # 柔顺度最小化参数组合: m = 0.2, η = 0.5, λ = 1e9, btol = 1e-3
-        # 柔顺机械设计参数组合: m = 0.1, η = 0.3, λ = 1e6, btol = 1e-4
+        # 柔顺机械设计参数组合: m = 0.1, η = 0.3, λ = 1e5, btol = 1e-4
         self._move_limit = 0.2
         self._damping_coef = 0.5
         self._initial_lambda = 1e9
@@ -153,7 +153,10 @@ class OCOptimizer(BaseLogged):
             start_time = time()
 
             # 使用物理密度求解位移场
-            uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
+            if isinstance(self._objective, CompliantMechanismObjective):
+                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)
+            else:
+                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
             if enable_timing:
                 t.send('位移场求解')
 
