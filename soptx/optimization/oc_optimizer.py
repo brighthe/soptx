@@ -20,8 +20,8 @@ class OCOptions:
     def __init__(self):
         """初始化参数的默认值"""
         # OC 算法的用户级参数
-        self.max_iterations = 200     # 最大迭代次数
-        self.tolerance = 0.001        # 收敛容差
+        self.max_iterations = 200        # 最大迭代次数
+        self.change_tolerance = 1e-2     # 设计变量无穷范数阈值
 
         # OC 算法的高级参数
         # 柔顺度最小化参数组合: m = 0.2, η = 0.5, λ = 1e9, btol = 1e-3
@@ -98,7 +98,7 @@ class OCOptimizer(BaseLogged):
         self.options = OCOptions()
         if options is not None:
             # 只允许设置用户级参数
-            user_params = ['max_iterations', 'tolerance']
+            user_params = ['max_iterations', 'change_tolerance']
             for key, value in options.items():
                 if key in user_params:
                     setattr(self.options, key, value)
@@ -124,7 +124,7 @@ class OCOptimizer(BaseLogged):
 
         # 获取优化参数
         max_iters = self.options.max_iterations
-        tol = self.options.tolerance
+        change_tol = self.options.change_tolerance   # 设计变量无穷范数阈值
         bisection_tol = self.options.bisection_tol
 
         if isinstance(design_variable, Function):
@@ -204,7 +204,7 @@ class OCOptimizer(BaseLogged):
             if enable_timing:
                 t.send('OC 优化')
 
-            # 计算收敛性
+            # 设计变量变化（无穷范数）
             change = bm.max(bm.abs(dv_new - dv))
 
             # 更新设计变量
@@ -227,10 +227,17 @@ class OCOptimizer(BaseLogged):
                 t.send(None)
 
             # 收敛检查
-            if change <= tol:
-                msg = f"Converged after {iter_idx + 1} iterations"
+            if change <= change_tol:
+                msg = (f"Converged after {iter_idx + 1} iterations "
+                       f"(design variable change <= {change_tol}).")
                 self._log_info(msg)
                 break
+
+        else:
+            self._log_info(
+                "Maximum number of iterations reached before satisfying "
+                "design-change tolerance (quasi-convergence)."
+            )
 
         # 打印时间统计信息
         history.print_time_statistics()

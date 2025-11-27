@@ -8,9 +8,6 @@ from fealpy.typing import TensorLike
 from soptx.utils.base_logged import BaseLogged
 from soptx.optimization.tools import save_optimization_history, plot_optimization_history
 from soptx.optimization.tools import OptimizationHistory
-from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
-from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 
 class DensityTopOptTest(BaseLogged):
     def __init__(self, 
@@ -182,13 +179,14 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
 
         # 测试参数
-        nx, ny = 60, 20
+        # nx, ny = 60, 20
         # nx, ny = 90, 30
-        # nx, ny = 150, 50
+        nx, ny = 150, 50
         mesh_type = 'uniform_quad'
 
         space_degree = 1
-        integration_order = space_degree + 1 # 张量网格
+        # integration_order = space_degree + 1 # 单元密度 + 四边形网格
+        integration_order = space_degree + 2 # 节点密度 + 四边形网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
         volume_fraction = 0.5
@@ -202,11 +200,11 @@ class DensityTopOptTest(BaseLogged):
         assembly_method = 'standard'
 
         optimizer_algorithm = 'oc'  # 'oc', 'mma'
-        max_iterations = 2000
-        tolerance = 1e-2
+        max_iterations = 500
+        change_tolerance = 1e-2
         use_penalty_continuation = False
 
-        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
+        filter_type = 'none' # 'none', 'sensitivity', 'density'
         rmin = 2.4
 
         from soptx.model.mbb_beam_2d import HalfMBBBeam2d
@@ -319,7 +317,7 @@ class DensityTopOptTest(BaseLogged):
                                 filter=filter_regularization,
                                 options={
                                     'max_iterations': max_iterations,
-                                    'tolerance': 1e-2,
+                                    'change_tolerance': change_tolerance,
                                 }
                             )
             optimizer.options.set_advanced_options(
@@ -330,14 +328,15 @@ class DensityTopOptTest(BaseLogged):
                                     )
 
         self._log_info(f"开始密度拓扑优化, "
-                       f"模型名称={pde.__class__.__name__}, "
-                       f"体积约束={volume_fraction}, "
-                       f"网格类型={mesh_type},  " 
-                       f"密度类型={density_location}, " 
-                       f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-                       f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, "
-                       f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, 收敛容差={tolerance}, 惩罚因子连续化={use_penalty_continuation}, " 
-                       f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+            f"模型名称={pde.__class__.__name__}, "
+            f"体积约束={volume_fraction}, "
+            f"网格类型={mesh_type},  " 
+            f"密度类型={density_location}, " 
+            f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 积分次数={integration_order}, 位移场自由度={analysis_tgdofs}, \n"
+            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
+            f"设计变量变化收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
@@ -352,7 +351,6 @@ class DensityTopOptTest(BaseLogged):
                                 density_location=density_location,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
-
         return rho_opt, history
 
 
