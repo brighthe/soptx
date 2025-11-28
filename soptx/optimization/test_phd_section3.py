@@ -171,7 +171,7 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
-    @run.register('test_subsec_3_6_3_mbb_2d')
+    @run.register('test_subsec_3_6_3_half_mbb_right_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         # 固定参数
         domain = [0, 60.0, 0, 20.0]
@@ -179,12 +179,12 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
 
         # 测试参数
-        # nx, ny = 60, 20
+        nx, ny = 60, 20
         # nx, ny = 90, 30
-        nx, ny = 150, 50
+        # nx, ny = 150, 50
         mesh_type = 'uniform_quad'
 
-        space_degree = 1
+        space_degree =4
         # integration_order = space_degree + 1 # 单元密度 + 四边形网格
         integration_order = space_degree + 2 # 节点密度 + 四边形网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
@@ -204,11 +204,11 @@ class DensityTopOptTest(BaseLogged):
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
-        filter_type = 'none' # 'none', 'sensitivity', 'density'
+        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
         rmin = 2.4
 
-        from soptx.model.mbb_beam_2d import HalfMBBBeam2d
-        pde = HalfMBBBeam2d(
+        from soptx.model.mbb_beam_2d import HalfMBBBeamRight2d
+        pde = HalfMBBBeamRight2d(
                             domain=domain,
                             P=P, E=E, nu=nu,
                             enable_logging=False
@@ -343,7 +343,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/section3_6_3_half_mbb")
+        save_path = Path(f"{base_dir}/subsec_3_6_3_half_mbb_right_2d")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 
@@ -468,7 +468,7 @@ class DensityTopOptTest(BaseLogged):
         if optimizer_algorithm == 'mma': 
             from soptx.optimization.mma_optimizer import MMAOptimizer
             optimizer = MMAOptimizer(
-                            objective=compliance_objective,
+                            objective=compliant_mechanism_objective,
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
@@ -911,5 +911,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec_3_6_6_disp_inverter_upper_2d')
+    test.run.set('test_subsec_3_6_3_half_mbb_right_2d')
     rho_opt, history = test.run()

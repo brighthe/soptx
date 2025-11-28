@@ -7,10 +7,25 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
-class HalfMBBBeam2d(PDEBase):
+class HalfMBBBeamRight2d(PDEBase):
     '''
-    模型参数:
-        左侧对称约束, 右下角滑移支座, 左上角施加施加向下的集中载荷 P = 1 [N]
+    对称 MBB 梁右半设计域的 PDE 模型
+
+    控制方程:
+        -∇·σ = 0      in Ω
+            u = u_D    on ∂F_D (Dirichlet BC)
+          σ·n = t      on ∂Ω_N (Neumann BC)
+
+    设计域:
+        - 全设计域: 120 mm x 20 mm
+        - 右半设计域: 60 mm x 20 mm
+
+    边界条件:
+        - 左侧对称约束 (u_x = 0)
+        - 右下角滑移支座 (u_y = 0)
+    
+    载荷条件:
+        - 左上角施加向下的集中载荷 P = 1 [N]
 
     材料参数:
         E = 1 [MPa], nu = 0.3
@@ -40,6 +55,7 @@ class HalfMBBBeam2d(PDEBase):
     #######################################################################################################################
     # 属性访问器
     #######################################################################################################################
+
     @property
     def E(self) -> float:
         """获取杨氏模量"""
@@ -51,14 +67,15 @@ class HalfMBBBeam2d(PDEBase):
         return self._nu
     
     @property
-    def p(self) -> float:
+    def P(self) -> float:
         """获取点力"""
-        return self._p
+        return self._P
     
 
     #######################################################################################################################
     # 变体方法
     #######################################################################################################################
+
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         nx = kwargs.get('nx', 60)
@@ -191,8 +208,6 @@ class HalfMBBBeam2d(PDEBase):
     def is_concentrate_load_boundary(self) -> Callable:
 
         return self.is_concentrate_load_boundary_dof
-
-
 
 
 class MBBBeam2dData(PDEBase):
