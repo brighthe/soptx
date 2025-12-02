@@ -6,6 +6,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
+from soptx.optimization.compliant_mechanism_objective import CompliantMechanismObjective
 from soptx.optimization.compliance_objective import ComplianceObjective
 from soptx.optimization.volume_constraint import VolumeConstraint
 from soptx.optimization.tools import OptimizationHistory
@@ -21,9 +22,9 @@ class MMAOptions:
     def __init__(self):
         """初始化参数的默认值"""
         # MMA 算法的用户级参数
-        self.max_iterations = 200        # 最大迭代次数
-        self.tolerance = 0.001           # 收敛容差
-        self.use_penalty_continuation = True
+        self.max_iterations = 200             # 最大迭代次数
+        self.change_tolerance = 1e-2          # 设计变量无穷范数阈值
+        self.use_penalty_continuation = True  # 是否使用惩罚因子连续化技术
 
         # MMA 算法的高级参数
         self._m = 1
@@ -192,7 +193,7 @@ class MMAOptimizer(BaseLogged):
     """
     
     def __init__(self,
-                objective: ComplianceObjective,
+                objective: Union[ComplianceObjective, CompliantMechanismObjective],
                 constraint: VolumeConstraint,
                 filter: Filter,
                 options: MMAOptions = None,
@@ -210,7 +211,7 @@ class MMAOptimizer(BaseLogged):
         self.options = MMAOptions()
         if options is not None:
             # 只允许设置用户级参数
-            user_params = ['max_iterations', 'tolerance', 'use_penalty_continuation']
+            user_params = ['max_iterations', 'change_tolerance', 'use_penalty_continuation']
             for key, value in options.items():
                 if key in user_params:
                     setattr(self.options, key, value)
@@ -284,7 +285,7 @@ class MMAOptimizer(BaseLogged):
         """
         # 获取优化参数
         max_iters = self.options.max_iterations
-        tol = self.options.tolerance
+        change_tol = self.options.change_tolerance   # 设计变量无穷范数阈值
 
         # 检查或初始化问题相关参数
         if self.options.n is None:
@@ -338,19 +339,22 @@ class MMAOptimizer(BaseLogged):
             self._update_penalty(iter_idx=iter_idx)
             current_penalty = self._objective._analyzer._interpolation_scheme.penalty_factor
             
-            # 更新迭代计数
-            self._epoch = iter_idx + 1
+            # # 更新迭代计数
+            # self._epoch = iter_idx + 1
 
             # 使用物理密度求解位移场
-            uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
+            if isinstance(self._objective, CompliantMechanismObjective):
+                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)
+            else:
+                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
             if enable_timing:
                 t.send('位移场求解')
             
             # 使用物理密度计算目标函数
             obj_val = self._objective.fun(rho_phys, displacement=uh)
             if enable_timing:
-                t.send('位移场求解')
-
+                t.send('目标函数计算')
+                
             # 计算目标函数相对于物理密度的灵敏度
             obj_grad_rho = self._objective.jac(rho_phys, displacement=uh)
             if enable_timing:
@@ -378,7 +382,7 @@ class MMAOptimizer(BaseLogged):
             
             # MMA 算法: 
             # 标准化约束函数及其梯度
-            cm = self._filter.mesh.entity_measure('cell')
+            cm = self._filter._mesh.entity_measure('cell')
             fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
             dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
 
@@ -429,10 +433,23 @@ class MMAOptimizer(BaseLogged):
                 t.send(None)
 
             # 收敛检查
-            if change <= tol:
-                msg = f"Converged after {self._epoch} iterations"
+            if change <= change_tol:
+                msg = (f"Converged after {iter_idx + 1} iterations "
+                       f"(design variable change <= {change_tol}).")
                 self._log_info(msg)
                 break
+
+        else:
+            self._log_info(
+                "Maximum number of iterations reached before satisfying "
+                "design-change tolerance (quasi-convergence)."
+            )
+
+            # # 收敛检查
+            # if change <= tol:
+            #     msg = f"Converged after {self._epoch} iterations"
+            #     self._log_info(msg)
+            #     break
                 
         # 打印时间统计信息
         history.print_time_statistics()

@@ -13,8 +13,8 @@ class HalfMBBBeamRight2d(PDEBase):
 
     控制方程:
         -∇·σ = 0      in Ω
-            u = u_D    on ∂F_D (Dirichlet BC)
-          σ·n = t      on ∂Ω_N (Neumann BC)
+            u = u_D    on ∂F_D
+          σ·n = t      on ∂F_N 
 
     设计域:
         - 全设计域: 120 mm x 20 mm

@@ -8,34 +8,37 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 from soptx.model.pde_base import PDEBase  
 
 
-class HalfBearingDevice2D(PDEBase):
+class HalfBearingDeviceLeft2d(PDEBase):
     '''
-    Symmetric half-domain model for the bearing device example from
-    Castañar et al. (2022), Section 5.2.
+    轴承装置左半设计域的 PDE 模型
 
-    PDEs:
-    -∇·σ = 0      in Ω (左半区域)
-      u = 0        on ∂Ω_bottom (clamped bottom boundary, y=0)
-      u_x = 0      on ∂Ω_left (symmetry boundary, x=0)
-      σ·n = t      on ∂Ω_top (distributed traction, y=0.4)
+    控制方程:
+    -∇·σ = 0      in Ω 
+      u = 0        on ∂F_D
+      u_x = 0      on ∂F_D
+      σ·n = t      on ∂F_N
 
-    几何参数:
-        左半部分矩形域, 尺寸为 0.6m x 0.4m
-        底部完全固支, 右侧为对称边界, 顶部施加向下的分布载荷
+    设计域:
+        - 全设计域: 1200 mm x 400 mm
+        - 左半设计域: 600 mm x 400 mm
+
+    边界条件:
+        - 底部固支 (u_x = u_y = 0)
+        - 右侧对称边界 (u_x = 0)
+
+    载荷条件:
+        - 顶部向下的均匀分布牵引载荷 t = -1.8e-3 [N/mm]
     
-    载荷类型:
-        分布载荷(面力) (单位 - N/m)
-
     材料参数:
-        E_s = 100 Pa, nu_s = 0.5 (incompressible)
+        E = 1e-4 [MPa], nu = 0.5
     '''
     def __init__(self,
-                domain: List[float] = [0, 0.6, 0, 0.4],  
-                mesh_type: str = 'uniform_tri',
-                t: float = -1.8, 
-                E: float = 100.0,
+                domain: List[float] = [0, 600, 0, 400],  
+                mesh_type: str = 'uniform_quad',
+                t: float = -1.8e-3, # N/mm
+                E: float = 1e-4,    # MPa
                 nu: float = 0.5,
-                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
+                plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -51,7 +54,7 @@ class HalfBearingDevice2D(PDEBase):
         self._boundary_type = 'mixed'
 
     #######################################################################################################################
-    # 访问器 (Accessors)
+    # 访问器
     #######################################################################################################################
 
     @property
@@ -70,7 +73,7 @@ class HalfBearingDevice2D(PDEBase):
         return self._t
 
     #######################################################################################################################
-    # 变体方法 (Variant Methods) - 网格生成
+    # 变体方法
     #######################################################################################################################
 
     @variantmethod('uniform_quad')
@@ -242,28 +245,6 @@ class HalfBearingDevice2D(PDEBase):
                 self.is_neumann_boundary_dof_xy,
                 self.is_neumann_boundary_dof_yy)
 
-    
-    # @cartesian
-    # def neumann_bc(self, points: TensorLike) -> TensorLike:
-    #     kwargs = bm.context(points)
-    #     val = bm.zeros(points.shape, **kwargs)
-    #     val = bm.set_at(val, (..., 1), self._t) 
-        
-    #     return val
-    
-    # @cartesian
-    # def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
-    #     domain = self.domain
-    #     y = points[..., 1]
-
-    #     on_top_boundary = bm.abs(y - domain[3]) < self._eps
-
-    #     return on_top_boundary
-
-    # def is_neumann_boundary(self) -> Callable:
-        
-    #     return self.is_neumann_boundary_dof
-
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
@@ -305,33 +286,35 @@ class HalfBearingDevice2D(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
 
 
-class BearingDevice2D(PDEBase):
+class BearingDevice2d(PDEBase):
     '''
-    Full-domain model for the bearing device example from
-    Castañar et al. (2022), Section 5.2.
+    轴承装置全设计域的 PDE 模型
 
-    PDEs:
-    -∇·σ = 0      in Ω (full domain)
-      u = 0        on ∂Ω_bottom (clamped bottom boundary, y=0)
-      σ·n = t      on ∂Ω_top (distributed traction, y=0.4)
+    控制方程:
+    -∇·σ = 0      in Ω 
+      u = 0        on ∂F_D
+      u_x = 0      on ∂F_D
+      σ·n = t      on ∂F_N
 
-    几何参数:
-        完整矩形域, 尺寸为 1.2m x 0.4m
-        底部完全固支, 顶部施加向下的分布载荷
+    设计域:
+        - 全设计域: 1200 mm x 400 mm
+
+    边界条件:
+        - 底部固支 (u_x = u_y = 0)
     
-    载荷类型:
-        分布载荷(面力) (单位 - N/m)
-
+    载荷条件:
+        - 顶部向下的均匀分布牵引载荷 t = -1.8e-3 [N/mm]
+    
     材料参数:
-        E_s = 100 Pa, nu_s = 0.5 (incompressible)
+        E = 1e-4 [MPa], nu = 0.5
     '''
     def __init__(self,
-                domain: List[float] = [0, 120, 0, 40],  
-                mesh_type: str = 'uniform_tri',
-                t: float = -1.8, 
-                E: float = 100.0,
+                domain: List[float] = [0, 1200, 0, 400],  
+                mesh_type: str = 'uniform_quad',
+                t: float = -1.8e-3, # N/mm
+                E: float = 1e-4,    # MPa
                 nu: float = 0.5,
-                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
+                plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -347,7 +330,7 @@ class BearingDevice2D(PDEBase):
         self._boundary_type = 'mixed'
 
     #######################################################################################################################
-    # 访问器 (Accessors)
+    # 访问器
     #######################################################################################################################
 
     @property
@@ -366,7 +349,7 @@ class BearingDevice2D(PDEBase):
         return self._t
 
     #######################################################################################################################
-    # 变体方法 (Variant Methods) - 网格生成
+    # 变体方法
     #######################################################################################################################
 
     @variantmethod('uniform_quad')
@@ -453,12 +436,6 @@ class BearingDevice2D(PDEBase):
     
     # @cartesian
     # def neumann_bc(self, points: TensorLike) -> TensorLike:
-    #     """
-    #     σ·n = 0 on Γ_N1
-    #     σ·n = t on Γ_N2
-    #     上边界 y=1, n=(0, 1):  t(x, 1) = [0, -1.8]^T
-    #     左边界 x=0, n=(-1, 0): t(0, y) = [0, 0]^T
-    #     """
     #     domain = self.domain
     #     x, y = points[..., 0], points[..., 1]
 

@@ -7,7 +7,7 @@ from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
 from soptx.optimization.compliant_mechanism_objective import CompliantMechanismObjective
-from ..optimization.compliance_objective import ComplianceObjective
+from soptx.optimization.compliance_objective import ComplianceObjective
 from ..optimization.volume_constraint import VolumeConstraint
 from ..optimization.tools import OptimizationHistory
 from ..regularization.filter import Filter
