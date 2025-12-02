@@ -58,11 +58,16 @@ class FilterMatrixBuilder:
                 # return H, Hs
 
         elif self._mesh.meshdata['mesh_type'] in ['uniform_aligned_tri', 'uniform_crisscross_tri']:
-            H, Hs = self._compute_weighted_matrix_general(
-                                            rmin=self._rmin,
-                                            domain=self._mesh.meshdata['domain'], 
+            H = self._compute_weighted_matrix_general(
+                                            rmin=self._rmin, 
+                                            domain=self._mesh.meshdata['domain']
                                         )
-            return H, Hs
+            return H
+            # H, Hs = self._compute_weighted_matrix_general(
+            #                                 rmin=self._rmin,
+            #                                 domain=self._mesh.meshdata['domain'], 
+            #                             )
+            # return H, Hs
         
         elif self._mesh.meshdata['mesh_type'] == 'uniform_hex':
             if self._density_location in ['element', 'element_multiresolution']:

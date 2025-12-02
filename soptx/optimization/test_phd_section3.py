@@ -173,21 +173,38 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec_3_6_3_half_mbb_right_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        # 固定参数
         domain = [0, 60.0, 0, 20.0]
         P = -1.0
         E, nu = 1.0, 0.3
 
-        # 测试参数
         nx, ny = 60, 20
         # nx, ny = 90, 30
         # nx, ny = 150, 50
-        mesh_type = 'uniform_quad'
 
-        space_degree =4
+        mesh_type = 'uniform_quad'
+        # mesh_type = 'uniform_aligned_tri'
+        # mesh_type = 'uniform_crisscross_tri'
+
+        # # 三角形网格(P1) + 单元密度
+        # space_degree = 1
+        # integration_order = space_degree  
+
+        # # 三角形网格(Pk) + 单元密度
+        # space_degree = 4
+        # integration_order = space_degree*2 - 2 
+
+        # # 三角形网格(P1) + 节点密度
+        # space_degree = 1
+        # integration_order = space_degree*2 + 2
+
+        # 四边形网格 + 节点密度
+        space_degree = 1
+        integration_order = space_degree + 3
+
         # integration_order = space_degree + 1 # 单元密度 + 四边形网格
-        integration_order = space_degree + 2 # 节点密度 + 四边形网格
-        # integration_order = space_degree**2 + 2  # 单纯形网格
+        # integration_order = space_degree + 2 # 节点密度 + 四边形网格
+        # integration_order = space_degree  # 单元密度 + 三角形网格
+        # integration_order = space_degree**2 + 2  # 单元密度 + 三角形网格
 
         volume_fraction = 0.5
         penalty_factor = 3.0
