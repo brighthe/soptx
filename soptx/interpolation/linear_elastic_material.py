@@ -286,12 +286,24 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         # ---- Case 2: (λ, μ) ----
         elif lam is not None and mu is not None:
-            self._lame_lambda = lam
-            self._shear_modulus = mu
+            if self._plane_type in ["3d", "plane_strain"]:
+                self._lame_lambda = lam
+                self._shear_modulus = mu
 
-            self._youngs_modulus = mu * (3 * lam + 2 * mu) / (lam + mu)
-            self._poisson_ratio = lam / (2 * (lam + mu))
-            self._bulk_modulus = (3 * lam + 2 * mu) / 3
+                self._youngs_modulus = mu * (3 * lam + 2 * mu) / (lam + mu)
+                self._poisson_ratio = lam / (2 * (lam + mu))
+                self._bulk_modulus = (3 * lam + 2 * mu) / 3
+            
+            elif self._plane_type == "plane_stress":
+                self._lame_lambda = lam
+                self._shear_modulus = mu
+
+                self._youngs_modulus = 4 * mu * (lam + mu) / (lam + 2 * mu)
+                self._poisson_ratio = lam / (lam + 2 * mu)
+                self._bulk_modulus = None
+            
+            else:
+                self._log_error(f"Unknown plane_type: {self._plane_type}")
 
         else:
             error_msg = ("Unsupported combination of parameters. "

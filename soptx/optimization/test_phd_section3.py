@@ -16,7 +16,85 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_mbb_2d_subsection_3_6_2')
+    @variantmethod('test_subsec_3_6_2_linear_elastic_2d')
+    def run(self):
+        # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
+        lam, mu = 1.0, 0.5
+        plane_type = 'plane_stress' # 'plane_stress' or 'plane_strain'
+
+        mesh_type = 'uniform_quad'
+        from soptx.model.linear_elastic_2d import TriMixHomoDirNHomoNeu2d
+        pde = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
+        pde.init_mesh.set(mesh_type)
+        nx, ny = 2, 2
+        mesh = pde.init_mesh(nx=nx, ny=ny)
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            lame_lambda=pde.lam, 
+                                            shear_modulus=pde.mu,
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        space_degree = 3
+        integration_order = space_degree + 1
+
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                    f"空间次数={space_degree}, 积分阶数={integration_order}")
+
+        maxit = 5
+        errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 0}$', 
+                     '$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 1}$']
+        errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
+        NDof = bm.zeros(maxit, dtype=bm.int32)
+        h = bm.zeros(maxit, dtype=bm.float64)
+
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+
+        for i in range(maxit):
+            N = 2**(i+1)
+
+            lfa = LagrangeFEMAnalyzer(
+                                    mesh=mesh,
+                                    pde=pde, 
+                                    material=material, 
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method='standard',
+                                    solve_method='mumps',
+                                    topopt_algorithm=None,
+                                    interpolation_scheme=None
+                                )
+                    
+            uh = lfa.solve_displacement(rho_val=None)
+
+            NDof[i] = lfa.tensor_space.number_of_global_dofs()
+
+            e_l2 = mesh.error(uh, pde.disp_solution)
+            e_h1 = mesh.error(uh.grad_value, pde.grad_disp_solution)
+
+            h[i] = 1/N
+            errorMatrix[0, i] = e_l2
+            errorMatrix[1, i] = e_h1
+
+            if i < maxit - 1:
+                mesh.uniform_refine()
+
+        print("errorMatrix:\n", errorType, "\n", errorMatrix)
+        print("NDof:", NDof)
+        print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+        print("order_h1:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+
+        import matplotlib.pyplot as plt
+        from soptx.utils.show import showmultirate, show_error_table
+        show_error_table(h, errorType, errorMatrix)
+        showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
+        plt.show()
+
+        return uh
+        
+    
+    @run.register('test_mbb_2d_subsection_3_6_2')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         # 固定参数
         domain = [0, 60.0, 0, 20.0]
@@ -171,6 +249,7 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
+
     @run.register('test_subsec_3_6_3_half_mbb_right_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 60.0, 0, 20.0]
@@ -370,55 +449,60 @@ class DensityTopOptTest(BaseLogged):
         plot_optimization_history(history, save_path=str(save_path))
         return rho_opt, history
 
+
     @run.register('test_subsec_3_6_4_bearing_device_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         # domain = [0, 1200.0, 0, 400.0]
+        t = -1.8e-2
+        E, nu = 1, 0.5
         domain = [0, 120, 0, 40]
-        t = -1.8
-        E, nu = 100, 0.5
+        # t = -1.8
+        # E, nu = 100, 0.5
+
         plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
-
-        nx, ny = 12, 4
-        # nx, ny = 60, 40
-        mesh_type = 'uniform_quad'
-
-        space_degree = 1
-        integration_order = space_degree + 4 # 单元密度 + 四边形网格
-        # integration_order = space_degree + 2 # 节点密度 + 四边形网格
-        # integration_order = space_degree**2 + 2  # 单纯形网格
-
-        volume_fraction = 0.35
-        penalty_factor = 3.0
-
-        # 'element', 'node'
-        density_location = 'element'
-        relative_density = volume_fraction
-
-        # 'standard', 'voigt'
-        assembly_method = 'standard'
-
-        optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 500
-        change_tolerance = 1e-2
-        use_penalty_continuation = False
-
-        filter_type = 'density' # 'none', 'sensitivity', 'density'
-        rmin = 1.25
-
-        # from soptx.model.bearing_device_2d import BearingDevice2d
-        # pde = BearingDevice2d(
-        #                     domain=domain,
-        #                     t=t, E=E, nu=nu, 
-        #                     plane_type=plane_type,
-        #                     enable_logging=False
-        #                 )
-        from soptx.model.bearing_device_2d import HalfBearingDeviceLeft2d
-        pde = HalfBearingDeviceLeft2d(
+        from soptx.model.bearing_device_2d import BearingDevice2d
+        pde = BearingDevice2d(
                             domain=domain,
                             t=t, E=E, nu=nu, 
                             plane_type=plane_type,
                             enable_logging=False
                         )
+
+        nx, ny = 120, 40
+        # nx, ny = 60, 40
+        mesh_type = 'uniform_quad'
+
+        space_degree = 1
+        # integration_order = space_degree + 1 # 单元密度 + 四边形网格
+        integration_order = space_degree + 2 # 节点密度 + 四边形网格
+
+
+        volume_fraction = 0.35
+        penalty_factor = 3.0
+
+        # 'element', 'node'
+        density_location = 'node'
+        relative_density = volume_fraction
+
+        # 'standard', 'voigt'
+        assembly_method = 'standard'
+
+        optimizer_algorithm = 'oc'  # 'oc', 'mma'
+        max_iterations = 500
+        change_tolerance = 1e-2
+        use_penalty_continuation = False
+
+        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
+        rmin = 2.5
+
+
+        # from soptx.model.bearing_device_2d import HalfBearingDeviceLeft2d
+        # pde = HalfBearingDeviceLeft2d(
+        #                     domain=domain,
+        #                     t=t, E=E, nu=nu, 
+        #                     plane_type=plane_type,
+        #                     enable_logging=False
+        #                 )
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)

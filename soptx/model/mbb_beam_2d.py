@@ -36,7 +36,7 @@ class HalfMBBBeamRight2d(PDEBase):
                 P: float = -1.0, # N
                 E: float = 1.0,  # MPa (N/mm^2)
                 nu: float = 0.3,
-                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
+                plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -347,31 +347,6 @@ class MBBBeam2dData(PDEBase):
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
-    
-    # def get_neumann_loads(self):
-    #     """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
-    #     if self._load_type == 'concentrated':
-    #         @cartesian
-    #         def concentrated_force(points: TensorLike) -> TensorLike:
-    #             domain = self._domain
-    #             xm = 0.5 * (domain[0] + domain[1])
-    #             x, y = points[..., 0], points[..., 1]   
-
-    #             coord = (bm.abs(x - xm) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
-
-    #             kwargs = bm.context(points)
-    #             val = bm.zeros(points.shape, **kwargs)
-    #             val = bm.set_at(val, (coord, 1), self._p)
-        
-    #             return val
-            
-    #         return concentrated_force
-
-    #     elif self._load_type == 'distributed':
-    #         pass
-        
-    #     else:
-    #         raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
 
     @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:

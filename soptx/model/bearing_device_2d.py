@@ -255,8 +255,8 @@ class HalfBearingDeviceLeft2d(PDEBase):
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         """
         判断 x 方向的 Dirichlet 边界自由度
-        - 底部边界(y=0) 完全固支 -> u_x = 0
-        - 右侧边界(x=0) 对称 -> u_x = 0
+        - 底部边界完全固支 -> u_x = 0
+        - 右侧边界对称     -> u_x = 0
         """
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
@@ -270,7 +270,7 @@ class HalfBearingDeviceLeft2d(PDEBase):
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         """
         判断 y 方向的 Dirichlet 边界自由度
-        - 底部边界(y=0) 完全固支 -> u_y = 0
+        - 底部边界完全固支 -> u_y = 0
         - 右侧对称边界 y 方向自由
         """
         domain = self.domain
@@ -434,25 +434,36 @@ class BearingDevice2d(PDEBase):
 
         return bm.zeros(points.shape, **kwargs)
     
-    # @cartesian
-    # def neumann_bc(self, points: TensorLike) -> TensorLike:
-    #     domain = self.domain
-    #     x, y = points[..., 0], points[..., 1]
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """
+        Neumann 边界条件:
+        - 顶边: t = (0, -t_0)
+        - 左边: t = (0, 0)
+        - 右边: t = (0, 0)
+        """
+            
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
 
-    #     kwargs = bm.context(points)
-    #     val = bm.zeros(points.shape, **kwargs)
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
 
-    #     # 上边界 y = 1
-    #     flag_top = bm.abs(y - domain[3]) < self._eps
-    #     val = bm.set_at(val, (flag_top, 0), 0.0)  
-    #     val = bm.set_at(val, (flag_top, 1), self._t)
+        # 顶边: 非零牵引
+        flag_top = bm.abs(y - domain[3]) < self._eps
+        val = bm.set_at(val, (flag_top, 1), self._t)
 
-    #     # 左边界 x = 0
-    #     flag_left = bm.abs(x - domain[0]) < self._eps
-    #     val = bm.set_at(val, (flag_left, 0), 0.0)
-    #     val = bm.set_at(val, (flag_left, 1), 0.0)
+        # 上边界 y = 1
+        # flag_top = bm.abs(y - domain[3]) < self._eps
+        # val = bm.set_at(val, (flag_top, 0), 0.0)  
+        # val = bm.set_at(val, (flag_top, 1), self._t)
 
-    #     return val
+        # 左边界 x = 0
+        # flag_left = bm.abs(x - domain[0]) < self._eps
+        # val = bm.set_at(val, (flag_left, 0), 0.0)
+        # val = bm.set_at(val, (flag_left, 1), 0.0)
+
+        return val
     
     # @cartesian
     # def neumann_bc_normal(self, points: TensorLike) -> TensorLike:
@@ -514,13 +525,15 @@ class BearingDevice2d(PDEBase):
     
     @cartesian
     def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
-        """判断 Neumann 边界: 顶部边界"""
+        """标记所有 Neumann 边界: 顶边、左边、右边"""
         domain = self.domain
-        y = points[..., 1]
+        x, y = points[..., 0], points[..., 1]
 
-        on_top_boundary = bm.abs(y - domain[3]) < self._eps
+        on_top = bm.abs(y - domain[3]) < self._eps
+        on_left = bm.abs(x - domain[0]) < self._eps
+        on_right = bm.abs(x - domain[1]) < self._eps
 
-        return on_top_boundary
+        return on_top | on_left | on_right
 
     def is_neumann_boundary(self) -> Callable:
         
