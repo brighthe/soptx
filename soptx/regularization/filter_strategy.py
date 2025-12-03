@@ -150,7 +150,6 @@ class SensitivityStrategy(_FilterStrategy):
                         ) -> Union[TensorLike, Function]:
 
         if self._density_location in ['element', 'node']:
-
             physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
 
         return physical_density
