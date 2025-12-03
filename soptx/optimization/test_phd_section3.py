@@ -22,42 +22,51 @@ class DensityTopOptTest(BaseLogged):
         lam, mu = 1.0, 0.5
         plane_type = 'plane_stress' # 'plane_stress' or 'plane_strain'
 
-        mesh_type = 'uniform_quad'
+        space_degree = 4
+
+        mesh_type_quad = 'uniform_quad' # 'uniform_aligned_tri', 'uniform_quad'
         from soptx.model.linear_elastic_2d import TriMixHomoDirNHomoNeu2d
-        pde = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
-        pde.init_mesh.set(mesh_type)
+        pde_quad = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
+        pde_quad.init_mesh.set(mesh_type_quad)
         nx, ny = 2, 2
-        mesh = pde.init_mesh(nx=nx, ny=ny)
+        mesh_quad = pde_quad.init_mesh(nx=nx, ny=ny)
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
-        material = IsotropicLinearElasticMaterial(
-                                            lame_lambda=pde.lam, 
-                                            shear_modulus=pde.mu,
-                                            plane_type=pde.plane_type,
+        material_quad = IsotropicLinearElasticMaterial(
+                                            lame_lambda=pde_quad.lam, 
+                                            shear_modulus=pde_quad.mu,
+                                            plane_type=pde_quad.plane_type,
                                             enable_logging=False
                                         )
-        
-        space_degree = 3
         integration_order = space_degree + 1
-
-        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                    f"空间次数={space_degree}, 积分阶数={integration_order}")
+        
+        mesh_type_tri = 'uniform_aligned_tri'
+        pde_tri = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
+        pde_tri.init_mesh.set(mesh_type_tri)
+        mesh_tri = pde_tri.init_mesh(nx=nx, ny=ny)
+        material_tri = IsotropicLinearElasticMaterial(
+                                            lame_lambda=pde_tri.lam, 
+                                            shear_modulus=pde_tri.mu,
+                                            plane_type=pde_tri.plane_type,
+                                            enable_logging=False
+                                        )
+        integration_order_tri = space_degree*2 + 2  
 
         maxit = 5
         errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 0}$', 
                      '$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{\\Omega, 1}$']
-        errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         NDof = bm.zeros(maxit, dtype=bm.int32)
         h = bm.zeros(maxit, dtype=bm.float64)
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 
+        errorMatrix_quad = bm.zeros((len(errorType), maxit), dtype=bm.float64)
         for i in range(maxit):
             N = 2**(i+1)
 
             lfa = LagrangeFEMAnalyzer(
-                                    mesh=mesh,
-                                    pde=pde, 
-                                    material=material, 
+                                    mesh=mesh_quad,
+                                    pde=pde_quad, 
+                                    material=material_quad, 
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method='standard',
@@ -69,26 +78,86 @@ class DensityTopOptTest(BaseLogged):
             uh = lfa.solve_displacement(rho_val=None)
 
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
-
-            e_l2 = mesh.error(uh, pde.disp_solution)
-            e_h1 = mesh.error(uh.grad_value, pde.grad_disp_solution)
+            e_l2 = mesh_quad.error(uh, pde_quad.disp_solution)
+            e_h1 = mesh_quad.error(uh.grad_value, pde_quad.grad_disp_solution)
 
             h[i] = 1/N
-            errorMatrix[0, i] = e_l2
-            errorMatrix[1, i] = e_h1
+            errorMatrix_quad[0, i] = e_l2
+            errorMatrix_quad[1, i] = e_h1
 
             if i < maxit - 1:
-                mesh.uniform_refine()
+                mesh_quad.uniform_refine()
 
-        print("errorMatrix:\n", errorType, "\n", errorMatrix)
+        print("errorMatrix_quad:\n", errorType, "\n", errorMatrix_quad)
         print("NDof:", NDof)
-        print("order_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
-        print("order_h1:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+        print("order_l2:\n", bm.log2(errorMatrix_quad[0, :-1] / errorMatrix_quad[0, 1:]))
+        print("order_h1:\n", bm.log2(errorMatrix_quad[1, :-1] / errorMatrix_quad[1, 1:]))
+
+        errorMatrix_tri = bm.zeros((2, maxit), dtype=bm.float64)
+        for i in range(maxit):
+            N = 2**(i+1)
+
+            lfa = LagrangeFEMAnalyzer(
+                                    mesh=mesh_tri,
+                                    pde=pde_tri, 
+                                    material=material_tri, 
+                                    space_degree=space_degree,
+                                    integration_order=integration_order_tri,
+                                    assembly_method='standard',
+                                    solve_method='mumps',
+                                    topopt_algorithm=None,
+                                    interpolation_scheme=None
+                                )
+                    
+            uh = lfa.solve_displacement(rho_val=None)
+
+            NDof[i] = lfa.tensor_space.number_of_global_dofs()
+            e_l2 = mesh_tri.error(uh, pde_tri.disp_solution)
+            e_h1 = mesh_tri.error(uh.grad_value, pde_tri.grad_disp_solution)
+
+            h[i] = 1/N
+            errorMatrix_tri[0, i] = e_l2
+            errorMatrix_tri[1, i] = e_h1
+
+            if i < maxit - 1:
+                mesh_tri.uniform_refine()
+
+        print("errorMatrix_tri:\n", errorType, "\n", errorMatrix_tri)
+        print("NDof:", NDof)
+        print("order_l2:\n", bm.log2(errorMatrix_tri[0, :-1] / errorMatrix_tri[0, 1:]))
+        print("order_h1:\n", bm.log2(errorMatrix_tri[1, :-1] / errorMatrix_tri[1, 1:]))
 
         import matplotlib.pyplot as plt
-        from soptx.utils.show import showmultirate, show_error_table
-        show_error_table(h, errorType, errorMatrix)
-        showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
+        from soptx.utils.show import showmultirate
+
+        errorMatrix = bm.concatenate([errorMatrix_tri, errorMatrix_quad], axis=0)
+
+        errorType = [
+            r'$\| \boldsymbol{u} - \boldsymbol{u}_h \|_{0}$ (Tri)',
+            r'$| \boldsymbol{u} - \boldsymbol{u}_h |_{1}$ (Tri)',
+            r'$\| \boldsymbol{u} - \boldsymbol{u}_h \|_{0}$ (Quad)',
+            r'$| \boldsymbol{u} - \boldsymbol{u}_h |_{1}$ (Quad)',
+        ]
+        
+        optionlist = ['k-o', 'k--s', 'r-o', 'r--s']
+        plt.rcParams.update({
+            'font.size': 36,
+            'axes.labelsize': 42,
+            'xtick.labelsize': 34,
+            'ytick.labelsize': 34,
+            'legend.fontsize': 34,
+        })
+
+        fig = plt.figure(figsize=(16, 11))
+        ax = fig.gca()
+        showmultirate(ax, 2, h, errorMatrix, errorType, 
+                    optionlist=optionlist, propsize=34, lw=3.5, ms=14)
+
+        ax.set_xlabel(r'Mesh size $h$', fontsize=42)
+        ax.set_ylabel(r'Error', fontsize=42)
+        ax.legend(loc='lower right', fontsize=34, framealpha=0.9, ncol=2)
+
+        plt.tight_layout()
         plt.show()
 
         return uh
@@ -1202,5 +1271,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec_3_6_4_bearing_device_2d')
+    test.run.set('test_subsec_3_6_2_linear_elastic_2d')
     rho_opt, history = test.run()

@@ -111,26 +111,6 @@ def showmultirate(plot, k, N, errorMatrix, labellist, optionlist=None, lw=1,
     -------
     axes : matplotlib.axes.Axes
         返回绘图使用的坐标轴对象，可用于进一步自定义
-    
-    Examples
-    --------
-    >>> import numpy as np
-    >>> import matplotlib.pyplot as plt
-    >>> # 准备数据
-    >>> h = np.array([1/2, 1/4, 1/8, 1/16])  # 网格尺寸
-    >>> errorType = ['L2 error', 'H1 error']
-    >>> errorMatrix = np.array([[1e-2, 2.5e-3, 6.25e-4, 1.56e-4],  # L2误差，二阶收敛
-    ...                        [1e-1, 5e-2, 2.5e-2, 1.25e-2]])  # H1误差，一阶收敛
-    >>> # 绘制收敛曲线
-    >>> showmultirate(plt, 0, h, errorMatrix, errorType)
-    >>> plt.show()
-    
-    Notes
-    -----
-    1. 函数内部调用 showrate 函数来绘制每条误差曲线
-    2. 图例默认显示在左下角（loc=3），背景透明度为0.2
-    3. 如果 computerate=True，收敛阶通过最小二乘法拟合 log(error) vs log(N) 计算得出
-    4. 该函数特别适合展示有限元方法的误差收敛性分析结果
     """
     # 判断 plot 参数类型，创建或获取绘图坐标轴
     if isinstance(plot, ModuleType):
