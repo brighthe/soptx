@@ -324,47 +324,32 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 60.0, 0, 20.0]
         P = -1.0
         E, nu = 1.0, 0.3
+        plane_type = 'plane_stress'
 
         nx, ny = 60, 20
         # nx, ny = 90, 30
         # nx, ny = 150, 50
 
-        mesh_type = 'uniform_quad'
-        # mesh_type = 'uniform_aligned_tri'
-        # mesh_type = 'uniform_crisscross_tri'
+        # mesh_type = 'uniform_quad'
+        mesh_type = 'uniform_aligned_tri'
 
-        # # 三角形网格(P1) + 单元密度
-        # space_degree = 1
-        # integration_order = space_degree  
-
-        # # 三角形网格(Pk) + 单元密度
-        # space_degree = 4
-        # integration_order = space_degree*2 - 2 
-
-        # # 三角形网格(P1) + 节点密度
-        # space_degree = 1
-        # integration_order = space_degree*2 + 2
-
-        # 四边形网格 + 节点密度
         space_degree = 1
-        integration_order = space_degree + 3
 
         # integration_order = space_degree + 1 # 单元密度 + 四边形网格
         # integration_order = space_degree + 2 # 节点密度 + 四边形网格
-        # integration_order = space_degree  # 单元密度 + 三角形网格
-        # integration_order = space_degree**2 + 2  # 单元密度 + 三角形网格
+        # integration_order = space_degree*2 + 2  # 单元密度 + 三角形网格
+        integration_order = space_degree*2 + 3  # 节点密度 + 三角形网格
 
         volume_fraction = 0.5
         penalty_factor = 3.0
 
         # 'element', 'node'
         density_location = 'node'
-        relative_density = 0.5
+        relative_density = volume_fraction
 
         # 'standard', 'voigt'
         assembly_method = 'standard'
 
-        optimizer_algorithm = 'oc'  # 'oc', 'mma'
         max_iterations = 500
         change_tolerance = 1e-2
         use_penalty_continuation = False
@@ -376,7 +361,7 @@ class DensityTopOptTest(BaseLogged):
         pde = HalfMBBBeamRight2d(
                             domain=domain,
                             P=P, E=E, nu=nu,
-                            enable_logging=False
+                            plane_type=plane_type,
                         )
 
         pde.init_mesh.set(mesh_type)
@@ -400,7 +385,6 @@ class DensityTopOptTest(BaseLogged):
                                         'target_variables': ['E']
                                     },
                                 )
-
 
         if density_location in ['element']:
             design_variable_mesh = displacement_mesh
@@ -449,48 +433,23 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
-        if optimizer_algorithm == 'mma': 
-            from soptx.optimization.mma_optimizer import MMAOptimizer
-            optimizer = MMAOptimizer(
+        from soptx.optimization.oc_optimizer import OCOptimizer
+        optimizer = OCOptimizer(
                             objective=compliance_objective,
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
                                 'max_iterations': max_iterations,
                                 'change_tolerance': change_tolerance,
-                                'use_penalty_continuation': use_penalty_continuation,
                             }
                         )
-            design_variables_num = d.shape[0]
-            constraints_num = 1
-            optimizer.options.set_advanced_options(
-                                    m=constraints_num,
-                                    n=design_variables_num,
-                                    xmin=bm.zeros((design_variables_num, 1)),
-                                    xmax=bm.ones((design_variables_num, 1)),
-                                    a0=1,
-                                    a=bm.zeros((constraints_num, 1)),
-                                    c=1e4 * bm.ones((constraints_num, 1)),
-                                    d=bm.zeros((constraints_num, 1)),
+        optimizer.options.set_advanced_options(
+                                    move_limit=0.2,
+                                    damping_coef=0.5,
+                                    initial_lambda=1e9,
+                                    bisection_tol=1e-3,
+                                    design_variable_min=1e-9
                                 )
-
-        elif optimizer_algorithm == 'oc':
-            from soptx.optimization.oc_optimizer import OCOptimizer
-            optimizer = OCOptimizer(
-                                objective=compliance_objective,
-                                constraint=volume_constraint,
-                                filter=filter_regularization,
-                                options={
-                                    'max_iterations': max_iterations,
-                                    'change_tolerance': change_tolerance,
-                                }
-                            )
-            optimizer.options.set_advanced_options(
-                                        move_limit=0.2,
-                                        damping_coef=0.5,
-                                        initial_lambda=1e9,
-                                        bisection_tol=1e-3
-                                    )
 
         self._log_info(f"开始密度拓扑优化, "
             f"模型名称={pde.__class__.__name__}, "
@@ -508,7 +467,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec_3_6_3_half_mbb_right_2d")
+        save_path = Path(f"{base_dir}/subsec3_6_3_")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 
@@ -516,19 +475,17 @@ class DensityTopOptTest(BaseLogged):
                                 density_location=density_location,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
+
         return rho_opt, history
 
 
     @run.register('test_subsec_3_6_4_bearing_device_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        # domain = [0, 1200.0, 0, 400.0]
         t = -1.8e-2
         E, nu = 1, 0.5
         domain = [0, 120, 0, 40]
-        # t = -1.8
-        # E, nu = 100, 0.5
 
-        plane_type = 'plane_stress'  # 'plane_stress' or 'plane_strain'
+        plane_type = 'plane_stress'
         from soptx.model.bearing_device_2d import BearingDevice2d
         pde = BearingDevice2d(
                             domain=domain,
@@ -538,13 +495,11 @@ class DensityTopOptTest(BaseLogged):
                         )
 
         nx, ny = 120, 40
-        # nx, ny = 60, 40
         mesh_type = 'uniform_quad'
 
         space_degree = 1
         # integration_order = space_degree + 1 # 单元密度 + 四边形网格
         integration_order = space_degree + 2 # 节点密度 + 四边形网格
-
 
         volume_fraction = 0.35
         penalty_factor = 3.0
@@ -562,8 +517,7 @@ class DensityTopOptTest(BaseLogged):
         use_penalty_continuation = False
 
         filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
-        rmin = 2.5
-
+        rmin = 1.5
 
         # from soptx.model.bearing_device_2d import HalfBearingDeviceLeft2d
         # pde = HalfBearingDeviceLeft2d(
@@ -642,48 +596,23 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
-        if optimizer_algorithm == 'mma': 
-            from soptx.optimization.mma_optimizer import MMAOptimizer
-            optimizer = MMAOptimizer(
+        from soptx.optimization.oc_optimizer import OCOptimizer
+        optimizer = OCOptimizer(
                             objective=compliance_objective,
                             constraint=volume_constraint,
                             filter=filter_regularization,
                             options={
                                 'max_iterations': max_iterations,
                                 'change_tolerance': change_tolerance,
-                                'use_penalty_continuation': use_penalty_continuation,
                             }
                         )
-            design_variables_num = d.shape[0]
-            constraints_num = 1
-            optimizer.options.set_advanced_options(
-                                    m=constraints_num,
-                                    n=design_variables_num,
-                                    xmin=bm.zeros((design_variables_num, 1)),
-                                    xmax=bm.ones((design_variables_num, 1)),
-                                    a0=1,
-                                    a=bm.zeros((constraints_num, 1)),
-                                    c=1e4 * bm.ones((constraints_num, 1)),
-                                    d=bm.zeros((constraints_num, 1)),
+        optimizer.options.set_advanced_options(
+                                    move_limit=0.2,
+                                    damping_coef=0.5,
+                                    initial_lambda=1e9,
+                                    bisection_tol=1e-3,
+                                    design_variable_min=1e-9
                                 )
-
-        elif optimizer_algorithm == 'oc':
-            from soptx.optimization.oc_optimizer import OCOptimizer
-            optimizer = OCOptimizer(
-                                objective=compliance_objective,
-                                constraint=volume_constraint,
-                                filter=filter_regularization,
-                                options={
-                                    'max_iterations': max_iterations,
-                                    'change_tolerance': change_tolerance,
-                                }
-                            )
-            optimizer.options.set_advanced_options(
-                                        move_limit=0.2,
-                                        damping_coef=0.5,
-                                        initial_lambda=1e9,
-                                        bisection_tol=1e-3
-                                    )
 
         self._log_info(f"开始密度拓扑优化, "
             f"模型名称={pde.__class__.__name__}, "
@@ -701,7 +630,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec_3_6_4_bearing_device_2d")
+        save_path = Path(f"{base_dir}/subsec_3_6_4_")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 
@@ -711,6 +640,7 @@ class DensityTopOptTest(BaseLogged):
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
+
 
     @run.register('test_subsec_3_6_6_disp_inverter_upper_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:

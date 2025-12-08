@@ -148,7 +148,6 @@ class SensitivityStrategy(_FilterStrategy):
                             design_variable: TensorLike, 
                             physical_density: Union[TensorLike, Function]
                         ) -> Union[TensorLike, Function]:
-
         if self._density_location in ['element', 'node']:
             physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
 
@@ -158,7 +157,6 @@ class SensitivityStrategy(_FilterStrategy):
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
-        
         # 1. 准备源项
         weighted_source = design_variable * obj_grad_rho / self._measure_weight
         # 2. 卷积

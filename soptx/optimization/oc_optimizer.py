@@ -24,12 +24,13 @@ class OCOptions:
         self.change_tolerance = 1e-2     # 设计变量无穷范数阈值
 
         # OC 算法的高级参数
-        # 柔顺度最小化参数组合: m = 0.2, η = 0.5, λ = 1e9, btol = 1e-3
-        # 柔顺机械设计参数组合: m = 0.1, η = 0.3, λ = 1e5, btol = 1e-4
+        # 柔顺度最小化参数组合: m = 0.2, η = 0.5, λ = 1e9, btol = 1e-3, dmin = 1e-9
+        # 柔顺机械设计参数组合: m = 0.1, η = 0.3, λ = 1e5, btol = 1e-4, dmin = 1e-9
         self._move_limit = 0.2
         self._damping_coef = 0.5
         self._initial_lambda = 1e9
-        self._bisection_tol = 1e-4
+        self._bisection_tol = 1e-3
+        self._design_variable_min = 1e-9 # 设计变量下界，应与材料插值模型匹配
         
     def set_advanced_options(self, **kwargs):
         """设置高级选项，仅供专业用户使用
@@ -49,7 +50,8 @@ class OCOptions:
             'move_limit': '_move_limit',
             'damping_coef': '_damping_coef',
             'initial_lambda': '_initial_lambda',
-            'bisection_tol': '_bisection_tol'
+            'bisection_tol': '_bisection_tol',
+            'design_variable_min': '_design_variable_min'
         }
         
         for key, value in kwargs.items():
@@ -258,6 +260,7 @@ class OCOptimizer(BaseLogged):
         # 获取算法内部参数
         m = self.options.move_limit
         eta = self.options.damping_coef
+        dmin = self.options._design_variable_min
         kwargs = bm.context(design_variable)
 
         dv = design_variable
@@ -280,7 +283,7 @@ class OCOptimizer(BaseLogged):
         B_e_damped = bm.pow(B_e_clipped, eta)
 
         dv_new[:] = bm.maximum(
-                        bm.tensor(1e-3, **kwargs), 
+                        bm.tensor(dmin, **kwargs), 
                         bm.maximum(
                             dv - m, 
                             bm.minimum(
@@ -292,23 +295,6 @@ class OCOptimizer(BaseLogged):
                             )
                         )
                     )
-
-        # B_e = -dc / (dg * lmid)
-        # B_e_clipped = bm.maximum(bm.tensor(1e-12, **kwargs), B_e)
-        # B_e_damped = bm.pow(B_e_clipped, eta)
-        # dv_new[:] = bm.maximum(
-        #         bm.tensor(1e-3, **kwargs), 
-        #         bm.maximum(
-        #             dv - m, 
-        #             bm.minimum(
-        #                 bm.tensor(1.0, **kwargs), 
-        #                 bm.minimum(
-        #                     dv + m,
-        #                     dv * B_e_damped
-        #                 )
-        #             )
-        #         )
-        #     )
 
         if (bm.any(bm.isnan(dv_new[:])) or bm.any(bm.isinf(dv_new[:])) or
             bm.any(dv_new[:] < -1e-12) or bm.any(dv_new[:] > 1 + 1e-12)):

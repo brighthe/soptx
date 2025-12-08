@@ -122,29 +122,29 @@ class VolumeConstraint(BaseLogged):
 
             elif self._density_location in ['node']:
                 #* 标准节点密度表征下的体积计算
-                # # 计算单元积分点处的重心坐标
-                # qf = self._mesh.quadrature_formula(q=self._integration_order)
-                # # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
-                # bcs, ws = qf.get_quadrature_points_and_weights()
+                # 计算单元积分点处的重心坐标
+                qf = self._mesh.quadrature_formula(q=self._integration_order)
+                # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
+                bcs, ws = qf.get_quadrature_points_and_weights()
 
-                # rho_q = density(bcs) # (NC, NQ)
+                rho_q = density(bcs) # (NC, NQ)
 
-                # if isinstance(self._mesh, SimplexMesh):
-                #     cm = self._mesh.entity_measure('cell')
-                #     current_volume = bm.einsum('q, cq, c -> ', ws, rho_q, cm)
+                if isinstance(self._mesh, SimplexMesh):
+                    cm = self._mesh.entity_measure('cell')
+                    current_volume = bm.einsum('q, cq, c -> ', ws, rho_q, cm)
                 
-                # elif isinstance(self._mesh, TensorMesh):
-                #     J = self._mesh.jacobi_matrix(bcs)
-                #     detJ = bm.abs(bm.linalg.det(J))
-                #     current_volume = bm.einsum('q, cq, cq -> ', ws, rho_q, detJ)
+                elif isinstance(self._mesh, TensorMesh):
+                    J = self._mesh.jacobi_matrix(bcs)
+                    detJ = bm.abs(bm.linalg.det(J))
+                    current_volume = bm.einsum('q, cq, cq -> ', ws, rho_q, detJ)
 
                 #* 简化节点密度表征下的体积计算
-                cell_measure = self._mesh.entity_measure('cell')
-                total_volume = bm.sum(cell_measure)
+                # cell_measure = self._mesh.entity_measure('cell')
+                # total_volume = bm.sum(cell_measure)
 
-                rho_node = density[:] # (NN, )
-                avg_rho = bm.sum(rho_node) / rho_node.shape[0]
-                current_volume = total_volume * avg_rho
+                # rho_node = density[:] # (NN, )
+                # avg_rho = bm.sum(rho_node) / rho_node.shape[0]
+                # current_volume = total_volume * avg_rho
 
                 return current_volume
             
@@ -210,33 +210,33 @@ class VolumeConstraint(BaseLogged):
         
         elif self._density_location in ['node']:
             #* 标准节点密度表征下的体积分数梯度计算
-            # mesh = self._mesh
-            # density_space = density.space
+            mesh = self._mesh
+            density_space = density.space
 
-            # qf = mesh.quadrature_formula(self._integration_order)
-            # bcs, ws = qf.get_quadrature_points_and_weights()
+            qf = mesh.quadrature_formula(self._integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
 
-            # phi = density_space.basis(bcs)[0] # (NQ, NCN)
+            phi = density_space.basis(bcs)[0] # (NQ, NCN)
 
-            # if isinstance(mesh, SimplexMesh):
-            #     cell_measure = self._mesh.entity_measure('cell')
-            #     dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, phi) # (NC, NCN)
-            # elif isinstance(mesh, TensorMesh):
-            #     J = mesh.jacobi_matrix(bcs)                           # (NC, NQ, GD, GD)
-            #     detJ = bm.abs(bm.linalg.det(J))                       # (NC, NQ)
-            #     dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, phi)    # (NC, NCN)
+            if isinstance(mesh, SimplexMesh):
+                cell_measure = self._mesh.entity_measure('cell')
+                dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, phi) # (NC, NCN)
+            elif isinstance(mesh, TensorMesh):
+                J = mesh.jacobi_matrix(bcs)                           # (NC, NQ, GD, GD)
+                detJ = bm.abs(bm.linalg.det(J))                       # (NC, NQ)
+                dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, phi)    # (NC, NCN)
 
-            # NN = mesh.number_of_nodes()
-            # cell2node = mesh.cell_to_node() # (NC, NCN)
+            NN = mesh.number_of_nodes()
+            cell2node = mesh.cell_to_node() # (NC, NCN)
 
-            # dg = bm.zeros((NN, ), dtype=bm.float64, device=self._mesh.device) # (NN, )
-            # dg = bm.add_at(dg, cell2node.reshape(-1), dg_e.reshape(-1)) # (NN, )
+            dg = bm.zeros((NN, ), dtype=bm.float64, device=self._mesh.device) # (NN, )
+            dg = bm.add_at(dg, cell2node.reshape(-1), dg_e.reshape(-1)) # (NN, )
             
             #* 简化节点密度表征下体积分数梯度计算
-            mesh = self._mesh
-            NN = mesh.number_of_nodes()
+            # mesh = self._mesh
+            # NN = mesh.number_of_nodes()
 
-            dg = bm.full((NN, ), 1.0 / NN, dtype=bm.float64, device=mesh.device)
+            # dg = bm.full((NN, ), 1.0 / NN, dtype=bm.float64, device=mesh.device)
 
             return dg
 

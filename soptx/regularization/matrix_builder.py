@@ -28,9 +28,8 @@ class FilterMatrixBuilder:
 
         self._device = mesh.device
 
-    def build(self) -> Tuple[CSRTensor, TensorLike]:
+    def build(self) -> CSRTensor:
         """构建并返回权重矩阵 H"""
-
         if self._mesh.meshdata['mesh_type'] == 'uniform_quad':
             if self._density_location in ['element', 'element_multiresolution']:
                 H = self._compute_weighted_matrix_2d(
@@ -39,12 +38,7 @@ class FilterMatrixBuilder:
                                             self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
                                         )
                 return H        
-                # H, Hs = self._compute_weighted_matrix_2d(
-                #                             self._rmin,
-                #                             self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
-                #                             self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
-                #                         )
-                # return H, Hs
+
             elif self._density_location in ['node', 'node_multiresolution']:
                 H = self._compute_weighted_matrix_general(
                                             rmin=self._rmin, 
@@ -212,7 +206,7 @@ class FilterMatrixBuilder:
                                     nx: int, ny: int,
                                     hx: float, hy: float,
                                     enable_timing: bool = False,
-                                ) -> Tuple[CSRTensor, TensorLike]:
+                                ) -> CSRTensor:
         """
         计算四边形网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
 
@@ -228,7 +222,6 @@ class FilterMatrixBuilder:
         Returns:
         --------
         H: 过滤矩阵
-        Hs: 过滤矩阵行和
         """
         # 单元中心坐标需要偏移半个网格
         coord_offset_x = 0.5 * hx
@@ -353,19 +346,17 @@ class FilterMatrixBuilder:
                 )
         
         #! PyTorch 后端对 COOTensor 的支持更好
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
+        # Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
         
         H = H.tocsr()
         H = H.device_put(self._device)
-        Hs = bm.device_put(Hs, self._device)
+        # Hs = bm.device_put(Hs, self._device)
         
         if enable_timing:
             t.send('矩阵构建')
             t.send(None)
         
         return H
-        # return H, Hs
-
 
     def _compute_weighted_matrix_2d_math(self,
                                 rmin: float, 

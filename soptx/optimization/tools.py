@@ -249,26 +249,6 @@ def plot_optimization_history(history, save_path=None, show=True, title=None,
 
     plt.tight_layout()
     
-    # # 创建放大子图
-    # # 找到适合放大的范围
-    # if len(iterations) > 20:
-    #     start_idx = min(60, len(iterations) - 1)
-    #     if start_idx > 0:  # 确保有足够的数据点
-    #         end_idx = min(120, len(iterations))
-            
-    #         # 只有当有足够的数据点时才创建子图
-    #         if end_idx - start_idx > 10:
-    #             sub_ax = fig.add_axes([0.58, 0.58, 0.18, 0.18])  # [left, bottom, width, height]
-    #             sub_ax.plot(iterations[start_idx:end_idx], obj_values[start_idx:end_idx], 'r-', linewidth=linewidth)
-    #             sub_ax.set_xlim(iterations[start_idx], iterations[end_idx-1])
-    #             # 设置 y 轴范围略大于数据范围
-    #             if start_idx < end_idx:
-    #                 y_min = min(obj_values[start_idx:end_idx]) * 0.999
-    #                 y_max = max(obj_values[start_idx:end_idx]) * 1.001
-    #                 sub_ax.set_ylim(y_min, y_max)
-    #             sub_ax.grid(True, linestyle='--', alpha=0.4)
-    #             sub_ax.tick_params(labelsize=fontsize-2)
-    
     if save_path is not None:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
