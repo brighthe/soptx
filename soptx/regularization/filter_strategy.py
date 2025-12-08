@@ -1,6 +1,6 @@
 import math
 from abc import ABC, abstractmethod
-from typing import Tuple, Union, Literal
+from typing import Tuple, Union, Literal, Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.functionspace import Function
@@ -8,7 +8,7 @@ from fealpy.mesh import HomogeneousMesh
 from fealpy.typing import TensorLike
 from fealpy.sparse import CSRTensor
 
-# from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
+from soptx.utils.base_logged import BaseLogged
 
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
@@ -40,13 +40,17 @@ class _FilterStrategy(ABC):
         pass
 
 
-class NoneStrategy(_FilterStrategy):
+class NoneStrategy(_FilterStrategy, BaseLogged):
     """ '无操作' 策略, 当不需要过滤时使用"""
     def __init__(self,
                 mesh: HomogeneousMesh,
-                density_location: Literal['element', 'node'],
+                density_location: Literal['element', 'node', 'element_multiresolution'],
                 integration_order: int = 4,
+                enable_logging: bool = False,
+                logger_name: Optional[str] = None
             ) -> None:
+        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+
         self._mesh = mesh
         self._density_location = density_location
         self._integration_order = integration_order
@@ -68,8 +72,15 @@ class NoneStrategy(_FilterStrategy):
                         ) -> Union[TensorLike, Function]:
 
         if self._density_location in ['element', 'node']:
-
             physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
+
+        elif self._density_location == 'element_multiresolution':
+            reshaped_dv = bm.reshape(design_variable, physical_density.shape)
+            physical_density[:] = bm.set_at(physical_density, slice(None), reshaped_dv)
+
+        else:
+            error_msg = f"Unsupported density_location: {self._density_location}"
+            self._log_error(error_msg)
 
         return physical_density
     
@@ -77,7 +88,7 @@ class NoneStrategy(_FilterStrategy):
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
-        obj_grad_dv = bm.copy(obj_grad_rho)
+        obj_grad_dv = bm.reshape(obj_grad_rho, design_variable.shape)
 
         return obj_grad_dv
     
@@ -85,7 +96,7 @@ class NoneStrategy(_FilterStrategy):
                                 design_variable: TensorLike, 
                                 con_grad_rho: TensorLike
                             ) -> TensorLike:
-        con_grad_dv = bm.copy(con_grad_rho)
+        con_grad_dv = bm.reshape(con_grad_rho, design_variable.shape)
 
         return con_grad_dv
 

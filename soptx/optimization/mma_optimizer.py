@@ -339,8 +339,8 @@ class MMAOptimizer(BaseLogged):
             self._update_penalty(iter_idx=iter_idx)
             current_penalty = self._objective._analyzer._interpolation_scheme.penalty_factor
             
-            # # 更新迭代计数
-            # self._epoch = iter_idx + 1
+            # 更新迭代计数
+            self._epoch = iter_idx + 1
 
             # 使用物理密度求解位移场
             if isinstance(self._objective, CompliantMechanismObjective):
@@ -434,7 +434,7 @@ class MMAOptimizer(BaseLogged):
 
             # 收敛检查
             if change <= change_tol:
-                msg = (f"Converged after {iter_idx + 1} iterations "
+                msg = (f"Converged after {self._epoch} iterations "
                        f"(design variable change <= {change_tol}).")
                 self._log_info(msg)
                 break
@@ -444,12 +444,6 @@ class MMAOptimizer(BaseLogged):
                 "Maximum number of iterations reached before satisfying "
                 "design-change tolerance (quasi-convergence)."
             )
-
-            # # 收敛检查
-            # if change <= tol:
-            #     msg = f"Converged after {self._epoch} iterations"
-            #     self._log_info(msg)
-            #     break
                 
         # 打印时间统计信息
         history.print_time_statistics()

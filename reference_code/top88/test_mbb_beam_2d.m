@@ -2,13 +2,13 @@
 % nely = 10;
 % rmin = 1.2;
 
-nelx = 60;
-nely = 20;
-rmin = 2.4;
+% nelx = 60;
+% nely = 20;
+% rmin = 2.4;
 
-% nelx = 90;
-% nely = 30;
-% rmin = 3.6;
+nelx = 90;
+nely = 30;
+rmin = 3.6;
 
 % nelx = 120;
 % nely = 40;
@@ -26,8 +26,8 @@ volfrac = 0.5;
 penal = 3;
 
 % ft = 0;  % 无滤波器
-% ft = 1;   % 灵敏度滤波器
-ft = 2;   % 密度滤波器
+ft = 1;   % 灵敏度滤波器
+% ft = 2;   % 密度滤波器
 
 % MATERIAL PROPERTIES
 E0 = 1;
@@ -99,10 +99,10 @@ while change > 0.01
 	dc = -penal*(E0-Emin)*xPhys.^(penal-1).*ce;
 	dv = ones(nely, nelx);
 
-    % dc_sum = sum(dc(:));
-    % fprintf('dc_sum:%5f\n', dc_sum);
-    % dc_mean = mean(dc(:));
-    % fprintf('dc_mean:%5f\n', dc_mean);
+    dc_sum = sum(dc(:));
+    fprintf('dc_sum:%5f\n', dc_sum);
+    dc_mean = mean(dc(:));
+    fprintf('dc_mean:%5f\n', dc_mean);
 
 	% FILTERING/MODIFICATION OF SENSITIVITIES
 	if ft == 1
@@ -112,10 +112,10 @@ while change > 0.01
 		dv(:) = H*(dv(:)./Hs);
     end
 
-    % dc_sum = sum(dc(:));
-    % fprintf('after_dc_sum:%5f\n', dc_sum);
-    % dc_mean = mean(dc(:));
-    % fprintf('after_dc_mean:%5f\n', dc_mean);
+    dc_sum = sum(dc(:));
+    fprintf('after_dc_sum:%5f\n', dc_sum);
+    dc_mean = mean(dc(:));
+    fprintf('after_dc_mean:%5f\n', dc_mean);
 
     % x_sum = sum(x(:));
     % x_mean = mean(x(:));

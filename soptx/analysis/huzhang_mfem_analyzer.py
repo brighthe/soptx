@@ -559,9 +559,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
         isBdDof[:gdof_sigmah] = isBdDof_sigmah  
         
-        K_test = bm.round(K.to_dense(), decimals=4)
         K = self._apply_matrix(A=K, isDDof=isBdDof)
-        K_bc_test = bm.round(K.to_dense(), decimals=4)
+        
         return K, F
     
 

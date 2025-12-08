@@ -43,7 +43,7 @@ class ComplianceObjective(BaseLogged):
             # c = bm.einsum('i, i ->', uh[:], Ku)
 
         elif self._analyzer.__class__ in [HuZhangMFEMAnalyzer]:
-            # 胡张应力位移混合有限元
+            #* 胡张应力位移混合有限元 *#
             if displacement is None and stress is None:
                 sigmah, uh = self._analyzer.solve_displacement(rho_val=density)
             else:

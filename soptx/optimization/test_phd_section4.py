@@ -18,12 +18,12 @@ class DensityTopOptTest(BaseLogged):
 
     @variantmethod('test')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 40.0, 0, 20.0]
+        domain = [0, 60.0, 0, 10.0]
         E, nu = 1.0, 0.3
         P = -1.0
         plane_type = 'plane_stress' 
 
-        nx, ny = 40, 20
+        nx, ny = 60, 10
         # nx, ny = 60, 30
         # nx, ny = 100, 50
         mesh_type = 'uniform_quad'
@@ -32,7 +32,7 @@ class DensityTopOptTest(BaseLogged):
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
-        volume_fraction = 0.3
+        volume_fraction = 0.6
         penalty_factor = 3.0
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
@@ -46,7 +46,7 @@ class DensityTopOptTest(BaseLogged):
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 500
-        change_tolerance = 1e-2
+        change_tolerance = 1e-3
         use_penalty_continuation = True
 
         filter_type = 'none' # 'none', 'sensitivity', 'density'
@@ -150,47 +150,47 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
-        if optimizer_algorithm == 'mma': 
-            from soptx.optimization.mma_optimizer import MMAOptimizer
-            optimizer = MMAOptimizer(
-                            objective=compliance_objective,
-                            constraint=volume_constraint,
-                            filter=filter_regularization,
-                            options={
-                                'max_iterations': max_iterations,
-                                'change_tolerance': change_tolerance,
-                                'use_penalty_continuation': use_penalty_continuation,
-                            }
-                        )
-            design_variables_num = d.shape[0]
-            constraints_num = 1
-            optimizer.options.set_advanced_options(
-                                    m=constraints_num,
-                                    n=design_variables_num,
-                                    xmin=bm.zeros((design_variables_num, 1)),
-                                    xmax=bm.ones((design_variables_num, 1)),
-                                    a0=1,
-                                    a=bm.zeros((constraints_num, 1)),
-                                    c=1e4 * bm.ones((constraints_num, 1)),
-                                    d=bm.zeros((constraints_num, 1)),
-                                )
+        from soptx.optimization.mma_optimizer import MMAOptimizer
+        optimizer = MMAOptimizer(
+                        objective=compliance_objective,
+                        constraint=volume_constraint,
+                        filter=filter_regularization,
+                        options={
+                            'max_iterations': max_iterations,
+                            'change_tolerance': change_tolerance,
+                            'use_penalty_continuation': use_penalty_continuation,
+                        }
+                    )
+        design_variables_num = d.shape[0]
+        constraints_num = 1
+        optimizer.options.set_advanced_options(
+                                m=constraints_num,
+                                n=design_variables_num,
+                                xmin=bm.zeros((design_variables_num, 1)),
+                                xmax=bm.ones((design_variables_num, 1)),
+                                a0=1,
+                                a=bm.zeros((constraints_num, 1)),
+                                c=1e4 * bm.ones((constraints_num, 1)),
+                                d=bm.zeros((constraints_num, 1)),
+                            )
             
         self._log_info(f"开始密度拓扑优化, "
-        f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, "
-                f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
-                f"体积约束={volume_fraction}, "
-                f"网格类型={mesh_type},  " 
-                f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, \n" 
-                f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, "
-                f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, 收敛容差={change_tolerance}, " 
-                f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+        f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
+        f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
+        f"体积约束={volume_fraction}, "
+        f"网格类型={mesh_type},  " 
+        f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, \n" 
+        f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, \n"
+        f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
+        f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
+        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
             
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/sec4_half_mbb_right_2d")
+        save_path = Path(f"{base_dir}/subsec4_")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 

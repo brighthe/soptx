@@ -5,6 +5,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
 
+from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.utils.base_logged import BaseLogged
 from soptx.optimization.tools import save_optimization_history, plot_optimization_history
 from soptx.optimization.tools import OptimizationHistory
@@ -17,7 +18,95 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_bridge_2d')
+    @variantmethod('test')
+    def run(self) -> None:
+        # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
+        lam, mu = 1.0, 0.5
+        from soptx.model.linear_elastic_2d import TriMixHomoDirNHomoNeu2d
+        pde = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
+        pde.init_mesh.set('uniform_aligned_tri')
+        nx, ny = 2, 2
+        analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            lame_lambda=pde.lam, 
+                                            shear_modulus=pde.mu,
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        space_degree = 3
+        integration_order = space_degree*2 + 2
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                          f"空间次数={space_degree}, 积分阶数={integration_order}")
+
+        maxit = 4
+        errorType = [
+                    '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega, 0}$',
+                    '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega, 0}$',
+                    '$|| \\boldsymbol{\\div\\sigma} - \\boldsymbol{\\div\\sigma}_h||_{\\Omega, 0}$',
+                    '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega, H(div)}$'
+                    ]
+        errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
+        NDof = bm.zeros(maxit, dtype=bm.int32)
+        h = bm.zeros(maxit, dtype=bm.float64)
+
+        for i in range(maxit):
+            N = 2**(i+1) 
+            huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                                    mesh=analysis_mesh,
+                                                    pde=pde,
+                                                    material=material,
+                                                    space_degree=space_degree,
+                                                    integration_order=integration_order,
+                                                    solve_method='scipy',
+                                                    topopt_algorithm=None,
+                                                    interpolation_scheme=None,
+                                                )
+            
+            uh_dof = huzhang_mfem_analyzer._tensor_space.number_of_global_dofs()
+            sigma_dof = huzhang_mfem_analyzer._huzhang_space.number_of_global_dofs()
+            NDof[i] = uh_dof + sigma_dof
+
+            sigmah, uh = huzhang_mfem_analyzer.solve_displacement(rho_val=None)
+
+            e_uh_l2 = analysis_mesh.error(u=uh, 
+                                    v=pde.disp_solution,
+                                    q=integration_order) # 位移 L2 范数误差
+            e_sigmah_l2 = analysis_mesh.error(u=sigmah, 
+                                            v=pde.stress_solution, 
+                                            q=integration_order) # 应力 L2 范数误差
+            e_div_sigmah_l2 = analysis_mesh.error(u=sigmah.div_value, 
+                                                v=pde.div_stress_solution, 
+                                                q=integration_order) # 应力散度 L2 范数误差
+            e_sigmah_hdiv = bm.sqrt(e_sigmah_l2**2 + e_div_sigmah_l2**2) # 应力 H(div) 范数误差
+
+            h[i] = 1/N
+            errorMatrix[0, i] = e_uh_l2
+            errorMatrix[1, i] = e_sigmah_l2
+            errorMatrix[2, i] = e_div_sigmah_l2
+            errorMatrix[3, i] = e_sigmah_hdiv
+
+            if i < maxit - 1:
+                analysis_mesh.uniform_refine()
+
+        print("errorMatrix:\n", errorType, "\n", errorMatrix)   
+        print("NDof:", NDof)
+        print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+        print("order_sigmah_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+        print("order_div_sigmah_l2:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
+        print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[3, :-1] / errorMatrix[3, 1:]))
+
+
+        import matplotlib.pyplot as plt
+        from soptx.utils.show import showmultirate, show_error_table
+
+        show_error_table(h, errorType, errorMatrix)
+        showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
+        plt.show()
+        print('------------------')
+
+    @run.register('test_bridge_2d')
     def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 80, 0, 40]
 
@@ -198,3 +287,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
 
         return rho_opt, history
+    
+if __name__ == "__main__":
+    test = DensityTopOptHuZhangTest(enable_logging=True)
+
+    test.run.set('test')
+
+    rho_opt, history = test.run()

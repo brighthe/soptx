@@ -162,27 +162,23 @@ class HalfMBBBeamRight2d(PDEBase):
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self._domain
-
         x = points[..., 0]
-
         coord = bm.abs(x - domain[0]) < self._eps
         
         return coord
     
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-
+        domain = self._domain
         x = points[..., 0]
         y = points[..., 1]
-
         coord = ((bm.abs(x - domain[1]) < self._eps) &
                  (bm.abs(y - domain[2]) < self._eps))
         
         return coord
     
     def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
-        """左侧对称约束 (u_x = 0), 右下角滑移支座 (u_y = 0)"""
+        
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
     
@@ -210,22 +206,27 @@ class HalfMBBBeamRight2d(PDEBase):
         return self.is_concentrate_load_boundary_dof
 
 
-class MBBBeam2dData(PDEBase):
+class MBBBeam2d(PDEBase):
     """
-    全区域的 MBB 梁
+    全区域 MBB 梁的 PDE 模型
     
-    -∇·σ = b    in Ω
-       u = 0    on ∂Ω (homogeneous Dirichlet)
-    where:
-    - σ is the stress tensor
-    - ε = (∇u + ∇u^T)/2 is the strain tensor
-    
-    Material parameters:
-        E = 1, nu = 0.3
+    控制方程:
+        -∇·σ = 0      in Ω
+            u = u_D    on ∂F_D
+          σ·n = t      on ∂F_N 
 
-    For isotropic materials:
-        σ = 2με + λtr(ε)I
-        Young's modulus and Poisson's ratio.
+    设计域:
+        - 全设计域: 60 mm x 10 mm
+
+    边界条件:
+        - 左下角铰支座 (u_x = u_y = 0)
+        - 右下角滑移支座 (u_y = 0)
+
+    载荷条件:
+        - 上中点施加向下的集中载荷 p = -2 [N]
+    
+    材料参数:
+        E = 1 [MPa], nu = 0.3
     """
 
     def __init__(self,
@@ -357,9 +358,7 @@ class MBBBeam2dData(PDEBase):
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self._domain
-
         x, y = points[..., 0], points[..., 1]
-
         temp = (bm.abs(x - domain[0]) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
 
         return temp
@@ -367,12 +366,9 @@ class MBBBeam2dData(PDEBase):
     @cartesian
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         domain = self._domain
-
         x, y = points[..., 0], points[..., 1]
-
         left = (bm.abs(x - domain[0]) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
         right = (bm.abs(x - domain[1]) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
-
         temp = left | right
     
         return temp
@@ -384,6 +380,7 @@ class MBBBeam2dData(PDEBase):
     
     @cartesian
     def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p) 
@@ -395,7 +392,6 @@ class MBBBeam2dData(PDEBase):
         domain = self._domain
         xm = 0.5 * (domain[0] + domain[1])
         x, y = points[..., 0], points[..., 1]   
-
         coord = (bm.abs(x - xm) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
         
         return coord
