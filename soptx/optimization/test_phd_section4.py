@@ -18,14 +18,12 @@ class DensityTopOptTest(BaseLogged):
 
     @variantmethod('test')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 60.0, 0, 10.0]
+        domain = [0, 30.0, 0, 10.0]
         E, nu = 1.0, 0.3
         P = -1.0
         plane_type = 'plane_stress' 
 
-        nx, ny = 60, 10
-        # nx, ny = 60, 30
-        # nx, ny = 100, 50
+        nx, ny = 30, 10
         mesh_type = 'uniform_quad'
 
         space_degree = 1
@@ -49,8 +47,8 @@ class DensityTopOptTest(BaseLogged):
         change_tolerance = 1e-3
         use_penalty_continuation = True
 
-        filter_type = 'none' # 'none', 'sensitivity', 'density'
-        rmin = 1.2
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        rmin = 0.75
 
         from soptx.model.mbb_beam_2d import HalfMBBBeamRight2d
         pde = HalfMBBBeamRight2d(

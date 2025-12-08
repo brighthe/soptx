@@ -9,6 +9,7 @@ from fealpy.typing import TensorLike
 from fealpy.sparse import CSRTensor
 
 from soptx.utils.base_logged import BaseLogged
+from soptx.analysis.utils import reshape_multiresolution_data
 
 class _FilterStrategy(ABC):
     """过滤方法的抽象基类 (内部使用)"""
@@ -20,9 +21,9 @@ class _FilterStrategy(ABC):
 
     @abstractmethod
     def filter_design_variable(self,
-                            design_variable: Union[TensorLike, Function], 
-                            physical_density: Union[TensorLike, Function]
-                        ) -> Union[TensorLike, Function]:
+                            design_variable: TensorLike, 
+                            physical_density: Function
+                        ) -> Function:
         pass
 
     @abstractmethod
@@ -68,8 +69,8 @@ class NoneStrategy(_FilterStrategy, BaseLogged):
     
     def filter_design_variable(self,
                             design_variable: TensorLike, 
-                            physical_density: Union[TensorLike, Function]
-                        ) -> Union[TensorLike, Function]:
+                            physical_density: Function
+                        ) -> Function:
 
         if self._density_location in ['element', 'node']:
             physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
@@ -232,21 +233,25 @@ class SensitivityStrategy(_FilterStrategy):
         #     raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
  
 
-class DensityStrategy(_FilterStrategy):
+class DensityStrategy(_FilterStrategy, BaseLogged):
     """密度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
                 mesh: HomogeneousMesh, 
-                density_location: Literal['element', 'node'], 
+                density_location: Literal['element', 'node', 'element_multiresolution'],
+                enable_logging: bool = False,
+                logger_name: Optional[str] = None
             ) -> None:
         
+        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+
         self._H = H
-        self._mesh = mesh
+        self._mesh = mesh                            # 设计变量网格
         self._density_location = density_location
 
         # --- 预计算测度权重 ---
-        if self._density_location == 'element':
-            # 单元密度表征：权重即为单元体积/面积
+        if self._density_location in ['element', 'element_multiresolution']:
+            # 单元密度表征：权重即为设计变量网格单元体积/面积
             # shape: (NC, )
             self._measure_weight = self._mesh.entity_measure('cell')
             
@@ -263,9 +268,10 @@ class DensityStrategy(_FilterStrategy):
             nm = bm.zeros(NN, dtype=bm.float64)
             # 累加得到节点测度
             self._measure_weight = bm.add_at(nm, cell2node.reshape(-1), val)
-        
+
         else:
-            raise ValueError(f"Unsupported density_location: {self._density_location}")
+            error_msg = f"Unsupported density_location: {self._density_location}"
+            self._log_error(error_msg)
 
         # 预计算卷积归一化因子
         self._Hs = self._H.matmul(self._measure_weight)
@@ -285,16 +291,32 @@ class DensityStrategy(_FilterStrategy):
         return rho_phys
     
     def filter_design_variable(self,
-                            design_variable: Union[TensorLike, Function], 
-                            physical_density: Union[TensorLike, Function]
-                        ) -> Union[TensorLike, Function]:
+                            design_variable: TensorLike, 
+                            physical_density: Function
+                        ) -> Function:
         
         # 1. 对设计变量进行测度加权
         weighted_dv = design_variable * self._measure_weight
         # 2. 卷积求和
         numerator = self._H.matmul(weighted_dv)
         # 3. 归一化并赋值
-        physical_density[:] = bm.set_at(physical_density, slice(None), numerator / self._Hs)
+        if self._density_location in ['element', 'node']:
+            physical_density[:] = bm.set_at(physical_density, slice(None), numerator / self._Hs)
+
+        elif self._density_location == 'element_multiresolution':
+            from soptx.analysis.utils import reshape_multiresolution_data_inverse
+            n_sub = physical_density.shape[-1]
+            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+            sub_physical_density = reshape_multiresolution_data_inverse(nx=nx_displacement,
+                                                                    ny=ny_displacement,
+                                                                    data_flat=numerator / self._Hs,
+                                                                    n_sub=n_sub) # (NC, n_sub)
+            physical_density[:] = bm.set_at(physical_density, slice(None), sub_physical_density)
+        
+        else:
+            error_msg = f"Unsupported density_location: {self._density_location}"
+            self._log_error(error_msg)
         
         return physical_density
 
@@ -364,7 +386,13 @@ class DensityStrategy(_FilterStrategy):
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
-        
+        if self._density_location == 'element_multiresolution':
+            # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
+            n_sub = obj_grad_rho.shape[-1]
+            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+            obj_grad_rho = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=obj_grad_rho)  # (NC * n_sub, )
+            
         # 1. 缩放物理密度导数
         scaled_dobj = obj_grad_rho / self._Hs
         
@@ -465,6 +493,13 @@ class DensityStrategy(_FilterStrategy):
                                     design_variable: TensorLike, 
                                     con_grad_rho: TensorLike
                                 ) -> TensorLike:
+        if self._density_location == 'element_multiresolution':
+            # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
+            n_sub = con_grad_rho.shape[-1]
+            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+            con_grad_rho = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=con_grad_rho)  # (NC * n_sub, )
+    
         # 1. 缩放物理密度导数
         scaled_dcon = con_grad_rho / self._Hs
         
