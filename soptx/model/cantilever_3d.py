@@ -9,21 +9,24 @@ from soptx.model.pde_base import PDEBase
 
 class CantileverBeam3d(PDEBase):
     '''
-    3D Cantilever Beam Problem
+    3D 悬臂梁的 PDE 模型
     
-    -∇·σ = b    in Ω
-       u = 0    on ∂Ω (left boundary fixed)
-    where:
-    - σ is the stress tensor
-    - ε = (∇u + ∇u^T)/2 is the strain tensor
+    控制方程:
+        -∇·σ = 0      in Ω
+            u = u_D    on ∂F_D
+          σ·n = t      on ∂F_N 
     
-    Material parameters:
-        E = 1, nu = 0.3
+    设计域:
+        - 全设计域: 60 mm x 20 mm x 4 mm
+    
+    边界条件:
+        - 左端面 (x=0): 位移边界条件 u = 0
+        - 右端面底边 (x=60, y=0): 施加向下的均布线载荷 p = -1 [N/mm]
+
+    材料参数:
+        E = 1 [MPa], nu = 0.3
         
-    For isotropic materials:
-        σ = 2με + λtr(ε)I
-        
-    Geometry:
+    几何:
            3------- 7
          / |       /|
         1 ------- 5 |
@@ -36,7 +39,7 @@ class CantileverBeam3d(PDEBase):
                 domain: List[float] = [0, 60, 0, 20, 0, 4],
                 mesh_type: str = 'uniform_hex',
                 p: float = -1.0,  # N
-                E: float = 1.0,   # Pa (N/m^2)
+                E: float = 1.0,   # MPa
                 nu: float = 0.3,
                 plane_type: str = '3d',
                 enable_logging: bool = False, 
@@ -47,8 +50,7 @@ class CantileverBeam3d(PDEBase):
                         enable_logging=enable_logging, logger_name=logger_name)
         
         self._p = p
-        self._E = E
-        self._nu = nu
+        self._E, self._nu = E, nu
         self._plane_type = plane_type
         
         self._eps = 1e-12
@@ -129,7 +131,6 @@ class CantileverBeam3d(PDEBase):
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x = points[..., 0]
-        
         coord = bm.abs(x - domain[0]) < self._eps
         
         return coord
@@ -138,7 +139,6 @@ class CantileverBeam3d(PDEBase):
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x = points[..., 0]
-        
         coord = bm.abs(x - domain[0]) < self._eps
         
         return coord
@@ -147,7 +147,6 @@ class CantileverBeam3d(PDEBase):
     def is_dirichlet_boundary_dof_z(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x = points[..., 0]
-        
         coord = bm.abs(x - domain[0]) < self._eps
         
         return coord
@@ -159,7 +158,8 @@ class CantileverBeam3d(PDEBase):
                 self.is_dirichlet_boundary_dof_z)
     
     @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """均布线载荷 (类似二维点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p)
@@ -167,7 +167,7 @@ class CantileverBeam3d(PDEBase):
         return val
     
     @cartesian
-    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x = points[..., 0]
         y = points[..., 1]
@@ -177,6 +177,6 @@ class CantileverBeam3d(PDEBase):
         
         return on_right_boundary & on_bottom_boundary
     
-    def is_neumann_boundary(self) -> Callable:
+    def is_concentrate_load_boundary(self) -> Callable:
 
-        return self.is_neumann_boundary_dof
+        return self.is_concentrate_load_boundary_dof

@@ -163,7 +163,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_23 = bm.einsum('c, cqij -> cij', D01, A_yz) + bm.einsum('c, cqij -> cij', D55, A_zy)
                 KK_31 = bm.einsum('c, cqij -> cij', D01, A_zx) + bm.einsum('c, cqij -> cij', D55, A_xz)
                 KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
-        # 区域内的相对密度在单元内变化, D 为节点变化矩阵
+        # 节点密度情况, 区域内的相对密度在单元内变化, D 为节点变化矩阵
         elif coef.shape == (NC, NQ):
             if GD == 2:
                 D00 = D[..., 0, 0] # 2D: E/(1-ν²) 或 2μ+λ
@@ -176,7 +176,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             else:
                 D00 = D[..., 0, 0] # 2μ + λ
                 D01 = D[..., 0, 1] # λ
-                D22 = D[..., 2, 2] # μ
+                D55 = D[..., 5, 5] # μ
                 KK_11 = bm.einsum('cq, cqij -> cij', D00, A_xx) + bm.einsum('cq, cqij -> cij', D55, A_yy + A_zz)
                 KK_22 = bm.einsum('cq, cqij -> cij', D00, A_yy) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_zz)
                 KK_33 = bm.einsum('cq, cqij -> cij', D00, A_zz) + bm.einsum('cq, cqij -> cij', D55, A_xx + A_yy)

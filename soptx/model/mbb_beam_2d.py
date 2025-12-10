@@ -233,7 +233,7 @@ class MBBBeam2d(PDEBase):
                 domain: List[float] = [0.0, 60.0, 0.0, 10.0],
                 mesh_type: str = 'uniform_quad',
                 p: float = -2.0,  # N
-                E: float = 1.0,   # Pa (N/m^2)
+                E: float = 1.0,   # MPa
                 nu: float = 0.3,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False,
