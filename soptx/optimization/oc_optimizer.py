@@ -25,12 +25,12 @@ class OCOptions:
 
         # OC 算法的高级参数
         # 柔顺度最小化参数组合: m = 0.2, η = 0.5, λ = 1e9, btol = 1e-3, dmin = 1e-9
-        # 柔顺机械设计参数组合: m = 0.1, η = 0.3, λ = 1e5, btol = 1e-4, dmin = 1e-9
+        # 柔顺机械设计参数组合: m = 0.1, η = 0.3, λ = 1e5, btol = 1e-4, dmin = 1e-3
         self._move_limit = 0.2
         self._damping_coef = 0.5
         self._initial_lambda = 1e9
         self._bisection_tol = 1e-3
-        self._design_variable_min = 1e-9 # 设计变量下界，应与材料插值模型匹配
+        self._design_variable_min = 1e-9 
         
     def set_advanced_options(self, **kwargs):
         """设置高级选项，仅供专业用户使用
@@ -192,13 +192,6 @@ class OCOptimizer(BaseLogged):
             if enable_timing:
                 t.send('约束函数灵敏度分析 2')
 
-            obj_grad_rho_sum = bm.sum(obj_grad_rho)
-            obj_grad_rho_mean = bm.mean(obj_grad_rho)
-            print(f"obj_grad_rho sum: {obj_grad_rho_sum}, \n mean: {obj_grad_rho_mean}")
-
-            obj_grad_dv_sum = bm.sum(obj_grad_dv)
-            obj_grad_dv_mean = bm.mean(obj_grad_dv)
-            print(f"obj_grad_dv sum: {obj_grad_dv_sum}, \n mean: {obj_grad_dv_mean}")
             # OC 算法: 二分法求解拉格朗日乘子
             l1, l2 = 0.0, self.options.initial_lambda
             while (l2 - l1) / (l2 + l1) > bisection_tol and l2 > 1e-40:
@@ -215,11 +208,6 @@ class OCOptimizer(BaseLogged):
                     l2 = lmid
             if enable_timing:
                 t.send('OC 优化')
-
-            rho_phys_sum = bm.sum(rho_phys)
-            rho_phys_mean = bm.mean(rho_phys)
-            print(f"rho_phys sum: {rho_phys_sum}, \n mean: {rho_phys_mean}")
-
 
             # 设计变量变化（无穷范数）
             change = bm.max(bm.abs(dv_new - dv))
@@ -288,10 +276,8 @@ class OCOptimizer(BaseLogged):
             dv_new = bm.copy(dv[:])
 
         B_e = -dc / (dg * lmid)
-
-        # 柔顺机械设计: 必须截断保证非负
-        # 柔顺度最小化: 防止数值噪声
-        B_e_clipped = bm.maximum(bm.tensor(1e-12, **kwargs), B_e)
+        clip_B = 1e-12
+        B_e_clipped = bm.maximum(bm.tensor(clip_B, **kwargs), B_e)
         B_e_damped = bm.pow(B_e_clipped, eta)
 
         dv_new[:] = bm.maximum(
@@ -307,20 +293,6 @@ class OCOptimizer(BaseLogged):
                             )
                         )
                     )
-        # TODO 柔顺机构设计的代码需要修改
-        # dv_new[:] = bm.maximum(
-        #                 bm.tensor(1e-3, **kwargs), 
-        #                 bm.maximum(
-        #                     dv - m, 
-        #                     bm.minimum(
-        #                         bm.tensor(1.0, **kwargs), 
-        #                         bm.minimum(
-        #                             dv + m, 
-        #                             dv * B_e_damped
-        #                         )
-        #                     )
-        #                 )
-        #             )
 
         if (bm.any(bm.isnan(dv_new[:])) or bm.any(bm.isinf(dv_new[:])) or
             bm.any(dv_new[:] < -1e-12) or bm.any(dv_new[:] > 1 + 1e-12)):

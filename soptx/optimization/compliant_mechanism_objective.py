@@ -93,9 +93,17 @@ class CompliantMechanismObjective(BaseLogged):
             
             elif density_location in ['element_multiresolution']:
                 pass
-            
+
             elif density_location in ['node']:
-                pass
+                dc_e = bm.einsum('ci, clij, cj -> cl', lambdahe, diff_KE, uhe) # (NC, NCN)
+
+                mesh = space_uh.mesh
+                cell2node = mesh.cell_to_node() # (NC, NCN)
+                NN = mesh.number_of_nodes()
+                dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
+                dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))
+
+                return dc[:]
             
             elif density_location in ['node_multiresolution']:
                 pass

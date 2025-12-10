@@ -25,13 +25,23 @@ while change > 0.01
         end
     end
     % Filtering Of Sensitivity
+    dc_sum = sum(dc(:));
+    fprintf('dc_sum:%5f\n', dc_sum);
+    dc_mean = mean(dc(:));
+    fprintf('dc_mean:%5f\n', dc_mean);
+
     [dc] = check(nelx, nely, rmin, x, dc);
+    
     dc_sum = sum(dc(:));
     fprintf('dc_sum:%5f\n', dc_sum);
     dc_mean = mean(dc(:));
     fprintf('dc_mean:%5f\n', dc_mean);
 
     % Design Update By The Optimality Criteria Method
+    x_sum = sum(x(:));
+    fprintf('x_sum:%5f\n', x_sum);
+    x_mean = mean(x(:));
+    fprintf('x_mean:%5f\n', x_mean);
     [x] = OC_compliant_mechanism(nelx, nely, x, volfrac, dc);
     x_sum = sum(x(:));
     fprintf('x_sum:%5f\n', x_sum);
@@ -40,9 +50,9 @@ while change > 0.01
 
     % Print Results
     change = max(max(abs(x-xold)));
-    disp([' It.: ' sprintf('%4i',loop) ' Obj.: ' sprintf('%10.4f',c) ...
-        ' Vol.: ' sprintf('%6.3f',sum(sum(x))/(nelx*nely)) ...
-        ' ch.: ' sprintf('%6.3f',change )])
+    disp([' It.: ' sprintf('%4i',loop) ' Obj.: ' sprintf('%10.5f',c) ...
+        ' Vol.: ' sprintf('%6.4f',sum(sum(x))/(nelx*nely)) ...
+        ' ch.: ' sprintf('%6.4f',change )])
     
     % Plot Densities
     colormap(gray); imagesc(-x); axis equal; axis tight; axis off;pause(1e-6);

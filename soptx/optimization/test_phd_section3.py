@@ -651,15 +651,19 @@ class DensityTopOptTest(BaseLogged):
         nx, ny = 40, 20
         mesh_type = 'uniform_quad'
 
-        space_degree = 1
-        integration_order = space_degree + 1 # 张量网格
-        # integration_order = space_degree**2 + 2  # 单纯形网格
-
-        volume_fraction = 0.3
-        penalty_factor = 3.0
-
         # 'element', 'node'
-        density_location = 'element'
+        density_location = 'node'
+        volume_fraction = 0.3
+
+        space_degree = 1
+        # integration_order = space_degree + 1 # 单元密度 + 张量网格
+        integration_order = space_degree + 2   # 节点密度 + 张量网格
+
+        # 插值模型        
+        penalty_factor = 3.0
+        interpolation_method = 'msimp'
+        void_youngs_modulus = 1e-9
+        
         relative_density = volume_fraction
 
         # 'standard', 'voigt'
@@ -695,10 +699,10 @@ class DensityTopOptTest(BaseLogged):
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
                                     density_location=density_location,
-                                    interpolation_method='msimp',
+                                    interpolation_method=interpolation_method,
                                     options={
                                         'penalty_factor': penalty_factor,
-                                        'void_youngs_modulus': 1e-9,
+                                        'void_youngs_modulus': void_youngs_modulus,
                                         'target_variables': ['E']
                                     },
                                 )
@@ -765,12 +769,13 @@ class DensityTopOptTest(BaseLogged):
         damping_coef = 0.3
         initial_lambda = 1e5
         bisection_tol = 1e-4
+        design_variable_min = 1e-3
         optimizer.options.set_advanced_options(
                                     move_limit=move_limit,
                                     damping_coef=damping_coef,
                                     initial_lambda=initial_lambda,
                                     bisection_tol=bisection_tol,
-                                    design_variable_min=1e-9
+                                    design_variable_min=design_variable_min
                                 )
 
 
