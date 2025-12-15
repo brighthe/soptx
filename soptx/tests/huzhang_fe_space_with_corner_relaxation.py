@@ -1,15 +1,17 @@
 
-from typing import Optional, Union, Callable
+from typing import Optional, TypeVar, Union, Generic, Callable
 from fealpy.typing import TensorLike, Index, _S, Threshold
 
+from fealpy.backend import TensorLike
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh.mesh_base import Mesh
-from fealpy.sparse import COOTensor
-from fealpy.sparse.ops import spdiags
 from fealpy.functionspace import FunctionSpace
+from fealpy.functionspace.function import Function
 from fealpy.functionspace.functional import symmetry_span_array, symmetry_index
-from fealpy.decorator import barycentric
+from fealpy.decorator import barycentric, cartesian
+from scipy.sparse import csr_matrix, spdiags
 
+import time
 import numpy as np
 
 def number_of_multiindex(p, d):
@@ -89,16 +91,12 @@ class HuZhangFECellDof2d():
         localcell = bm.array([[0, 1, 2]], dtype=mesh.itype)
         self.subsimplex = [localnode, mesh.localEdge, localcell]
 
+
         dual = lambda alpha : [i for i in range(self.TD+1) if i not in alpha]
         self.dual_subsimplex = [[dual(f) for f in ssixi] for ssixi in self.subsimplex]
 
     def dof_classfication(self):
         """
-        张量自由度顺序: (-1, NS): gd_priority 
-        (σ0_xx, σ0_xy, σ0_yy, 
-         σ1_xx, σ1_xy, σ1_yy, 
-         ...,
-         σn_xx, σn_xy, σn_yy)
         Classify the dofs by the the entities.
         """
         p = self.p
@@ -127,15 +125,18 @@ class HuZhangFECellDof2d():
                     boundary_dofs[i].append(TensorDofsOnSubsimplex(dof_cotinuous, fs[j]))
                 if len(dof_discontinuous) > 0:
                     internal_dofs[i].append(TensorDofsOnSubsimplex(dof_discontinuous, fs[j]))
-
         return boundary_dofs, internal_dofs 
 
     def get_boundary_dof_from_dim(self, d):
-        """Get the dofs of the entities of dimension d."""
+        """
+        Get the dofs of the entities of dimension d.
+        """
         return self.boundary_dofs[d]
 
     def get_internal_dof_from_dim(self, d):
-        """Get the dofs of the entities of dimension d."""
+        """
+        Get the dofs of the entities of dimension d.
+        """
         return self.internal_dofs[d]
 
 class HuZhangFEDof2d():
@@ -144,50 +145,47 @@ class HuZhangFEDof2d():
     @note: Only support the simplicial mesh, the order of  
             local edge, face of the mesh is the same as the order of subsimplex.
     """
-    # TODO 
-    def __init__(self, mesh: Mesh, p: int, corner: dict=None, use_relaxation: bool=False):
+    def __init__(self, mesh: Mesh, p: int, corner):
         self.mesh = mesh
         self.p = p
         self.ftype = mesh.ftype
         self.itype = mesh.itype
         self.device = mesh.device
 
-        self.use_relaxation = use_relaxation
         self.corner = corner
-
-        # TODO 只有开启松弛且有角点数据时，NCP 才有效，否则为0
-        self.NCP = len(corner['coords']) if (use_relaxation and corner is not None) else 0
-
+        self.NCP = len(corner['coords']) 
         self.cell_dofs = HuZhangFECellDof2d(mesh, p)
 
-    def number_of_local_dofs(self) -> int:
-        """Get the number of local dofs on cell """
+    def number_of_local_dofs(self, doftype='cell') -> int:
+        """
+        Get the number of local dofs on cell 
+        """
         p = self.p
         TD = self.mesh.top_dimension()
         NS = TD*(TD+1)//2 # 对称矩阵的自由度个数
-        
         return NS*(p+1)*(p+2)//2 
 
     def number_of_internal_local_dofs(self, doftype : str='cell') -> int:
-        """Get the number of internal local dofs of the finite element space."""
+        """
+        Get the number of internal local dofs of the finite element space.
+        """
         p = self.p
         TD = self.mesh.top_dimension()
         NS = TD*(TD+1)//2
         ldof = self.number_of_local_dofs()
-
         if doftype == 'cell':
             return ldof - NS*3 - 2*(p-1)*3
-        
         elif doftype == 'face' or doftype == 'edge':
             return 2*(p-1) 
-        
         elif doftype == 'node':
             return NS
         else:
             raise ValueError("Unknown doftype: {}".format(doftype))
 
     def number_of_global_dofs(self) -> int:
-        """Get the number of global dofs of the finite element space."""
+        """
+        Get the number of global dofs of the finite element space.
+        """
         mesh = self.mesh
         NC = mesh.number_of_cells()
         NE = mesh.number_of_edges()
@@ -196,80 +194,70 @@ class HuZhangFEDof2d():
         cldof = self.number_of_internal_local_dofs('cell')
         eldof = self.number_of_internal_local_dofs('edge')
         nldof = self.number_of_internal_local_dofs('node')
-        
         return NC*cldof + NE*eldof + NN*nldof + self.NCP
-    
+
     def node_to_internal_dof(self) -> TensorLike:
+        """
+        Get the index array of the dofs defined on the nodes of the mesh.
+        """
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         nldof = self.number_of_internal_local_dofs('node')
-        
-        node2dof = bm.arange(NN*nldof, dtype=self.itype, device=self.device).reshape(NN, nldof)
+        cornidx = self.corner['idx']
 
-        # TODO 根据开关决定是否处理角点自由度重定向
-        if self.use_relaxation and self.NCP > 0:
-            cornidx = self.corner['idx']
-            N = self.NCP
-            # 扩展出的自由度索引
-            extra_dofs = bm.arange(NN*nldof, NN*nldof+N, dtype=self.itype, device=self.device).reshape(N, 1)
-            # 构造角点处的 4 个自由度索引 [d0, d1, d2, new_d3]
-            corner2dof = bm.concatenate([node2dof[cornidx], extra_dofs], axis=1)
-            return node2dof, corner2dof 
-        else:
-            # 未松弛模式，不需要 corner2dof，返回 None 占位
-            return node2dof, None
+        node2dof = bm.arange(NN*nldof).reshape(NN, nldof)
+
+        N = self.NCP
+        newdof = bm.arange(NN*nldof, NN*nldof+N).reshape(N, 1)
+        corner2dof = bm.concatenate([node2dof[cornidx], newdof], axis=1)
+        return node2dof, corner2dof 
 
     node_to_dof = node_to_internal_dof
 
     def edge_to_internal_dof(self) -> TensorLike:
-        """得到每条边的 2(p-1) 个牵引迹矩 DOFs"""
+        """
+        Get the index array of the dofs defined on the edges of the mesh.
+        """
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
         nldof = self.number_of_internal_local_dofs('node')
         eldof = self.number_of_internal_local_dofs('edge')
 
-        N = NN*nldof + self.NCP
+        N = NN*nldof+self.NCP
         edge2dof = bm.arange(N, N+NE*eldof, dtype=self.itype, device=self.device)
-
         return edge2dof.reshape(NE, eldof)
 
     def edge_to_dof(self) -> TensorLike:
         mesh = self.mesh
         edge = mesh.entity('edge')
+        corner = self.corner
         edge2idof = self.edge_to_internal_dof()
         node2idof, corner2dof = self.node_to_internal_dof()
 
         e0dof = node2idof[edge[:, 0], :2]
         e1dof = node2idof[edge[:, 1], :2]
-
-        # TODO 只在开启松弛时执行角点逻辑
-        if self.use_relaxation and self.NCP > 0:
-            corner = self.corner
-            for p in range(self.NCP):
-                ce = corner['to_edge'][p]
-                # 处理第一条边
-                eid = ce[0]
-                loc = ce[1]
-                if loc == 0:
-                    e0dof[eid, :] = corner2dof[p, :2]  # 分配前两个自由度给第一条边
-                else:
-                    e1dof[eid, :] = corner2dof[p, :2]  # 分配前两个自由度给第一条边
-                
-                # 处理第二条边
-                eid = ce[2]
-                loc = ce[3]
-                if loc == 0:
-                    e0dof[eid, :] = corner2dof[p, 2:]  # 分配后两个自由度给第二条边
-                else:
-                    e1dof[eid, :] = corner2dof[p, 2:]  # 分配后两个自由度给第二条边
-                
+        for p in range(self.NCP):
+            ce = corner['to_edge'][p]
+            eid = ce[0]
+            loc = ce[1]
+            if loc == 0:
+                e0dof[eid, :] = corner2dof[p, :2]
+            else:
+                e1dof[eid, :] = corner2dof[p, :2]
+            eid = ce[2]
+            loc = ce[3]
+            if loc == 0:
+                e0dof[eid, :] = corner2dof[p, 2:]
+            else:
+                e1dof[eid, :] = corner2dof[p, 2:]
         e2d = bm.concatenate([e0dof, edge2idof, e1dof], axis=1)
-        
         return e2d
 
     def cell_to_internal_dof(self) -> TensorLike:
-        """Get the index array of the dofs defined on the cells of the mesh."""
+        """
+        Get the index array of the dofs defined on the cells of the mesh.
+        """
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -281,18 +269,17 @@ class HuZhangFEDof2d():
 
         N = NN*nldof + NE*eldof + self.NCP
         cell2dof = bm.arange(N, N+NC*cldof, dtype=self.itype, device=self.device)
-
         return cell2dof.reshape(NC, cldof)
-    
+
     def cell_to_dof(self, index: Index=_S) -> TensorLike:
         """
-        自由度顺序: 顶点 → 边 → 单元
         Get the cell to dof map of the finite element space.
         """
         p = self.p
         mesh = self.mesh
         ldof = self.number_of_local_dofs()
-        
+        corner = self.corner
+
         NC = mesh.number_of_cells()
         cell = mesh.entity('cell')
         edge = mesh.entity('edge')
@@ -301,108 +288,90 @@ class HuZhangFEDof2d():
         ndofs = self.cell_dofs.get_boundary_dof_from_dim(0)
         edofs = self.cell_dofs.get_boundary_dof_from_dim(1)
 
-        node2idof, corner2dof = self.node_to_internal_dof() 
+        node2idof, corner2dof = self.node_to_internal_dof()
         edge2idof = self.edge_to_internal_dof()
         cell2idof = self.cell_to_internal_dof()
 
         c2d = bm.zeros((NC, ldof), dtype=self.itype, device=self.device)
-        idx = 0 
+        idx = 0 # 统计自由度的个数
 
-        # 1. 顶点自由度
+        # 顶点自由度
         for v, dof in enumerate(ndofs):
             n = len(dof)
             c2d[:, idx:idx+n] = node2idof[cell[:, v]]
             idx += n
 
-        # 2. 边自由度
+        # 边自由度
         inverse_perm = [1, 0]
         for e, dof in enumerate(edofs):
             n = len(dof)
+
             le = bm.sort(mesh.localEdge[e])
             flag = cell[:, le[0]] != edge[c2e[:, e], 0]
+
             c2d[:, idx:idx+n] = edge2idof[c2e[:, e]]
+
             inverse_dofidx = dof.permute_to_order(inverse_perm)
             c2d[flag, idx:idx+n] = edge2idof[c2e[flag, e]][:, inverse_dofidx]
             idx += n
 
-        # 3. 单元自由度
+        # 单元自由度
         c2d[:, idx:] = cell2idof
 
-        # TODO 4. 角点自由度覆盖 (仅在松弛模式下)
-        if self.use_relaxation and self.NCP > 0:
-            corner = self.corner
-            local_dof = bm.array([[0, 1, 2], [0, 1, 3]], dtype=bm.int32)
-            for p in range(self.NCP):
-                cp2dpf = corner2dof[p] # 取出该角点的4个DOFs
-                cp2c = corner['to_cell'][p]
-                for c in range(2):
-                    cid = cp2c[c*2]
-                    loc = cp2c[c*2+1]
-                    # 将对应位置的3个标准DOF替换为松弛后的DOF组合
-                    c2d[cid, loc*3:loc*3+3] = cp2dpf[local_dof[c]]
-                    
+        # 角点自由度
+        local_dof = bm.array([[0, 1, 2], [0, 1, 3]], dtype=bm.int32)
+        for p in range(self.NCP):
+            cp2dpf = corner2dof[p]
+            cp2c = corner['to_cell'][p]
+            for c in range(2):
+                cid = cp2c[c*2]
+                loc = cp2c[c*2+1]
+                c2d[cid, loc*3:loc*3+3] = cp2dpf[local_dof[c]]
         return c2d
 
+    def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
+        """
+        Get the bool array of the boundary dofs.
+        """
+        pass
+
 class HuZhangFESpace2d(FunctionSpace):
-    def __init__(self, mesh, p: int=1, ctype='C', use_relaxation: bool=False):
+    def __init__(self, mesh, p: int=1, ctype='C'):
         self.mesh = mesh
         self.p = p
+        self.corner = self._get_corner_data() 
+        self.NCP = len(self.corner['coords'])
 
-        cell_type = mesh.entity('cell').shape[1]
-        if cell_type != 3:
-            raise ValueError("HuZhangFESpace only support the simplicial mesh in 2D, "
-                             "but the cell type of the mesh is {}".format(cell_type))
-
-        # TODO 保持开关状态
-        self.use_relaxation = use_relaxation
-
-        # TODO 仅在需要松弛时计算角点拓扑
-        if self.use_relaxation:
-            self.corner = self._get_corner_data() 
-            self.NCP = len(self.corner['coords'])
-        else:
-            self.corner = None
-            self.NCP = 0
-
-        # TODO 将开关传入 Dof 类
-        self.dof = HuZhangFEDof2d(mesh, p, self.corner, use_relaxation=self.use_relaxation)
+        self.dof = HuZhangFEDof2d(mesh, p, self.corner)
 
         self.ftype = mesh.ftype
         self.itype = mesh.itype
-        self.device = mesh.device
-        self.TD = mesh.top_dimension()
-        self.GD = mesh.geo_dimension()
 
         self.nsframe, self.esframe, self.csframe = self.dof_frame_of_S()
         self.TM = self._transform_matrix()
 
+        self.device = mesh.device
+        self.TD = mesh.top_dimension()
+        self.GD = mesh.geo_dimension()
+
+    def __str__(self):
+        return "HuZhangFESpace on {} with p={}".format(self.mesh, self.p)
+
     def _transform_matrix(self):
-        """
-        构建基底变换矩阵 TM
-        如果 use_relaxation=False, 则返回单位矩阵 (即不变换)
-        """
-        gdof = self.number_of_global_dofs()
-
-        # 未松弛模式直接返回单位阵
-        if not self.use_relaxation or self.NCP == 0:
-            TM = spdiags(bm.ones(gdof, dtype=self.ftype), 0, gdof, gdof)
-
-            return TM
-
-        # 松弛模式
         nframe, eframe = self.nsframe, self.esframe
         _, corner2dof = self.dof.node_to_internal_dof()
 
         TM = bm.zeros((self.NCP, 4, 4), dtype=self.ftype)
         for p in range(self.NCP): 
             nid = self.corner['idx'][p]
-            nf = nframe[nid] 
+            nf = nframe[nid] # (3, 3)
 
-            ef0 = eframe[self.corner['to_edge'][p, 0], :2].copy()
+            ef0 = eframe[self.corner['to_edge'][p, 0], :2].copy() # (2, 3)
             ef1 = eframe[self.corner['to_edge'][p, 2], :2].copy()
             ef0[1] *= 2
             ef1[1] *= 2
 
+            # 计算变换矩阵
             M = bm.zeros((4, 4), dtype=self.ftype)
             num = bm.array([1, 2, 1], dtype=self.ftype)
 
@@ -410,19 +379,17 @@ class HuZhangFESpace2d(FunctionSpace):
             M[[0, 1, 3], 2:] = bm.einsum('id, jd, d -> ij', nf, ef1, num)
             TM[p] = bm.linalg.inv(M)
 
+        gdof = self.number_of_global_dofs()
         I = bm.broadcast_to(corner2dof[:, None, :], (self.NCP, 4, 4))
         J = bm.broadcast_to(corner2dof[:, :, None], (self.NCP, 4, 4))
+        TM = csr_matrix((TM.reshape(-1), (I.reshape(-1), J.reshape(-1))),
+                        shape=(gdof, gdof))
 
-        TM = COOTensor(indices=bm.stack([I.reshape(-1), J.reshape(-1)], axis=0),
-                    values=TM.reshape(-1), 
-                    spshape=(gdof, gdof))
-        TM = TM.tocsr()
-        flag = bm.ones((gdof,), dtype=self.itype)
-        flag = bm.set_at(flag, corner2dof.reshape(-1), 0.0)
-        TM = TM.add(spdiags(flag, 0, gdof, gdof))
-
+        flag = bm.ones((gdof,), dtype=bm.int32)
+        flag[corner2dof] = 0
+        TM = TM + spdiags(flag.astype(self.ftype), 0, gdof, gdof)
         return TM
-    
+
     def _get_corner_data(self): 
         mesh = self.mesh
         node = mesh.entity('node')     # (NN, 2)
@@ -432,7 +399,7 @@ class HuZhangFESpace2d(FunctionSpace):
 
         isbdedge = mesh.boundary_edge_flag()  # (NE,)
 
-        corners = mesh.meshdata['corner']
+        corners = mesh.data['corner']
         NCP = len(corners)
 
         corner_idx = bm.zeros((NCP,), dtype=bm.int32)
@@ -470,37 +437,11 @@ class HuZhangFESpace2d(FunctionSpace):
         corner = {'coords' : corners, 'idx'    : corner_idx, 'to_cell':
                   corner_to_cell, 'to_edge': corner_to_edge, 'to_midedge':
                   corner_to_midedge}
-        
         return corner
 
-    @property
-    def NS(self):
-        """
-        对称矩阵/张量的独立分量数
-        
-        对于 2D: NS = 3 (σ_xx, σ_xy, σ_yy)
-        对于 3D: NS = 6 (σ_xx, σ_xy, σ_xz, σ_yy, σ_yz, σ_zz)
-        
-        Returns
-        -------
-        独立分量的数量 = TD*(TD+1)//2
-        """
-        return self.TD * (self.TD + 1) // 2
-    
-    @property
-    def shape(self):
-        """
-        自由度的形状，表示排序方式
-        (-1, NS): gd_priority, 先排每个位置的所有应力分量
-        
-        对于 2D: (-1, 3) 表示 (σ0_xx, σ0_xy, σ0_yy, σ1_xx, σ1_xy, σ1_yy, ...)
-        对于 3D: (-1, 6) 表示 (σ0_xx, σ0_xy, σ0_xz, σ0_yy, σ0_yz, σ0_zz, ...)
-        """
-        return (-1, self.NS)
-
     ## 自由度接口
-    def number_of_local_dofs(self) -> int:
-        return self.dof.number_of_local_dofs()
+    def number_of_local_dofs(self, doftype='cell') -> int:
+        return self.dof.number_of_local_dofs(doftype=doftype)
 
     def number_of_global_dofs(self) -> int:
         return self.dof.number_of_global_dofs()
@@ -525,12 +466,17 @@ class HuZhangFESpace2d(FunctionSpace):
 
     def top_dimension(self):
         return self.TD
-    
+
+    def project(self, u: Union[Callable[..., TensorLike], TensorLike],) -> TensorLike:
+        pass
+
+    def interpolate(self, u: Union[Callable[..., TensorLike], TensorLike],) -> TensorLike:
+        pass
+
     def boundary_interpolate(self,
             gd: Union[Callable, int, float, TensorLike],
             uh: Optional[TensorLike] = None,
             *, threshold: Optional[Threshold]=None, method=None) -> TensorLike:
-        
         if uh is None:
             uh = bm.zeros((self.number_of_global_dofs(),), dtype=self.ftype,
                           device=self.device)
@@ -538,63 +484,22 @@ class HuZhangFESpace2d(FunctionSpace):
         p = self.p
 
         # 获取边界自由度的掩码
-        # 优先检查是否有专门标记的本质边界（dirichlet），否则默认全边界
         if 'dirichlet' not in mesh.edgedata:
             ebdflag = mesh.boundary_edge_flag()
         else:
-            ebdflag = mesh.edgedata['dirichlet']
+            ebdflag = mesh.edge_data['dirichlet']
 
-        # 调用 Dof 类的 edge_to_dof
-        # 如果开启松弛，这里返回的是已经重定向到 relaxed variables 的索引
-        # 如果未开启，这里返回的是标准的 internal DOFs
         e2d = self.dof.edge_to_dof()[ebdflag] #(NEb, Nbasis)
         NEb = e2d.shape[0]
 
         bcs = bm.multi_index_matrix(p, 1)/p
         points = self.mesh.bc_to_point(bcs)[ebdflag] #(NEb, Nbasis, 2)
-        
-        # 计算给定函数在边界积分点的值 (牵引力或应力)
-        if callable(gd):
-            gd_vals = gd(points)     # (NEb, Nbasis, 3) 或 (NEb, Nbasis, 3)
-        else:
-            gd_vals = bm.broadcast_to(gd, (NEb, len(bcs), gd.shape[-1]))
+        gd_vals = gd(points)               #(NEb, Nbasis, 3)
 
-        # 获取边界标架
-        eframe = self.esframe[ebdflag, :2].copy() # (NEb, 2, 3)
-
-        dim_gd = gd_vals.shape[-1]
-
-        # TODO 根据输入类型进行投影
-        if dim_gd == 3:
-            #* Case A: 输入是应力张量 (Voigt) [xx, xy, yy]
-            # voigt 内积权重
-            eframe[:, 1] *= 2
-            num = bm.array([1, 2, 1], dtype=self.ftype)
-
-            # 计算应力张量内积
-            val = bm.einsum('eid, ejd, d -> eij', gd_vals, eframe, num)
-
-        elif dim_gd == 2:
-            #* Case B: 输入是牵引力向量 [gn, gt]
-            # 获取边界法向 n 和切向 t
-            en = mesh.edge_unit_normal()[ebdflag]   # (NEb, 2)
-            et = mesh.edge_unit_tangent()[ebdflag]  # (NEb, 2)
-            
-            en = en[:, None, :]
-            et = et[:, None, :]
-                        
-            # 法向投影 (sigma_nn)
-            val_n = bm.sum(gd_vals * en, axis=-1)
-            
-            # 切向投影 (sigma_nt)
-            val_t = bm.sum(gd_vals * et, axis=-1)
-            
-            val = bm.stack([val_n, 2.0 * val_t], axis=-1)
-
-        else:
-            raise ValueError(f"Unknown gd output dimension: {dim_gd.shape[-1]}")
-        
-        # 赋值
+        eframe = self.esframe[ebdflag, :2].copy() #(NEb, 2, 3)
+        eframe[:, 1] *= 2
+        num = bm.array([1, 2, 1], dtype=self.ftype)
+        val = bm.einsum('eid, ejd, d -> eij', gd_vals, eframe, num)
         uh[e2d] = val.reshape(NEb, -1)
 
         isDDof = bm.zeros((uh.shape[0],), dtype=bm.bool)
@@ -632,14 +537,11 @@ class HuZhangFESpace2d(FunctionSpace):
         isbdege = mesh.boundary_edge_flag()
         nframe[edge[isbdege]] = eframe[isbdege, None]
 
-        # 修改角点的标架 (仅在松弛模式有效)
-        # 如果 self.NCP == 0 (未开启松弛)，循环自动跳过
+        # 修改角点的标架
         for p in range(self.NCP):
             eid = self.corner['to_midedge'][p]
             nid = self.corner['idx'][p]
-            # 将角点处的节点标架旋转至对齐中间分割边
             nframe[nid] = eframe[eid]
-            
         return nframe, eframe, cframe
 
     def dof_frame_of_S(self):
@@ -664,7 +566,6 @@ class HuZhangFESpace2d(FunctionSpace):
         csframe = bm.zeros((NC, 3, 3), dtype=self.ftype)
         for i, alpha in enumerate(multiindex): 
             csframe[:, i] = symmetry_span_array(cframe, alpha).reshape(NC, -1)[:, idx]
-            
         return nsframe, esframe, csframe
 
     basis_frame = dof_frame
@@ -683,22 +584,17 @@ class HuZhangFESpace2d(FunctionSpace):
         iedofs = dof.cell_dofs.get_internal_dof_from_dim(1)
         icdofs = dof.cell_dofs.get_internal_dof_from_dim(2)
 
-        if index is _S:
-            cell_indices = slice(None)
-            NC = mesh.number_of_cells()
-        else:
-            cell_indices = index
-            NC = len(cell_indices) if hasattr(cell_indices, '__len__') else 1
-
-        cell = mesh.entity('cell')[cell_indices]     
-        c2e = mesh.cell_to_edge()[cell_indices]      
+        NN = mesh.number_of_nodes()
+        NE = mesh.number_of_edges()
+        NC = mesh.number_of_cells()
+        cell = mesh.entity('cell')
+        c2e = mesh.cell_to_edge()
 
         nsframe, esframe, csframe = self.basis_frame_of_S()
 
-        phi_s = self.mesh.shape_function(bc, self.p, index=index) # (NQ, LDOF)
+        phi_s = self.mesh.shape_function(bc, self.p, index=index) # (NC, NQ, ldof)
 
         NQ = bc.shape[0]
-
         phi = bm.zeros((NC, NQ, ldof, 3), dtype=self.ftype)
 
         # 顶点基函数
@@ -711,7 +607,7 @@ class HuZhangFESpace2d(FunctionSpace):
             phi[..., idx:idx+N, :] = scalar_part * tensor_part
             idx += N
 
-        # 边界边基函数
+        # 边基函数
         for e, edof in enumerate(edofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -720,7 +616,7 @@ class HuZhangFESpace2d(FunctionSpace):
             phi[..., idx:idx+N, :] = scalar_part * tensor_part
             idx += N
 
-        # 边内部基函数
+        # 单元基函数
         for e, edof in enumerate(iedofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -728,21 +624,10 @@ class HuZhangFESpace2d(FunctionSpace):
             tensor_part = esframe[c2e[:, e]][:, None, edof.dof_tensor, :]
             phi[..., idx:idx+N, :] = scalar_part * tensor_part
             idx += N
-        
-        # 单元气泡基函数 - 只有当 p >= n+1 时才存在单元内部自由度
-        n = mesh.geo_dimension()
-        if p >= n + 1:
-            scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-            scalar_part = phi_s[None, :, scalar_phi_idx, None]
-
-            if csframe.shape[0] == mesh.number_of_cells():
-                 current_csframe = csframe[cell_indices]
-            else:
-                 current_csframe = csframe
-
-            tensor_part = current_csframe[:, None, icdofs[0].dof_tensor, :]
-            phi[..., idx:, :] = scalar_part * tensor_part
-
+        scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
+        scalar_part = phi_s[None, :, scalar_phi_idx, None]
+        tensor_part = csframe[:, None, icdofs[0].dof_tensor, :]
+        phi[..., idx:, :] = scalar_part * tensor_part
         return phi
 
     def div_basis(self, bc: TensorLike): 
@@ -783,7 +668,7 @@ class HuZhangFESpace2d(FunctionSpace):
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
             idx += N
 
-        # 边界边基函数
+        # 边基函数
         for e, edof in enumerate(edofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -793,7 +678,7 @@ class HuZhangFESpace2d(FunctionSpace):
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
             idx += N
 
-        # 边内部基函数
+        # 单元基函数
         for e, edof in enumerate(iedofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -803,69 +688,41 @@ class HuZhangFESpace2d(FunctionSpace):
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
             idx += N
 
-        # 单元气泡基函数 - 只有当 p >= n+1 时才存在单元内部自由度
-        n = mesh.geo_dimension()
-        if p >= n + 1:
-            scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-            grad_scalar = gphi_s[..., scalar_phi_idx, :]
-            frame = csframe[:, None, icdofs[0].dof_tensor]
-            dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
-            dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
-
+        scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
+        grad_scalar = gphi_s[..., scalar_phi_idx, :]
+        frame = csframe[:, None, icdofs[0].dof_tensor]
+        dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
+        dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
         return dphi
 
     def hess_basis(self, bc: TensorLike, index: Index=_S, variable='x'):
         return self.mesh.hess_shape_function(bc, self.p, index=index, variables=variable)
-    
+
     @barycentric
     def value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike: 
-        """
-        计算有限元函数的值。
-        自动处理松弛模式下的系数变换。
-        """
-        # 1. 系数变换 (仅在松弛模式且存在角点时执行，避免不必要的矩阵乘法)
-        if self.use_relaxation and self.NCP > 0:
-            uh0 = self.TM @ uh
-        else:
-            uh0 = uh
-
-        # 2. 计算值
-        phi = self.basis(bc, index=index)
-        
-        # 获取单元到自由度的映射
-        e2dof = self.dof.cell_to_dof(index=index)
-
-        val = bm.einsum('cqld, ...cl -> ...cqd', phi, uh0[..., e2dof])
-
-        return val
-
-    @barycentric
-    def div_value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike:
-        """
-        计算有限元函数的散度值。
-        """
         if isinstance(bc, tuple):
             TD = len(bc)
         else :
             TD = bc.shape[-1] - 1
+        uh0 = self.TM@uh
+        #uh0 = uh
 
-        # 1. 系数变换
-        if self.use_relaxation and self.NCP > 0:
-            uh0 = self.TM @ uh
-        else:
-            uh0 = uh
+        phi = self.basis(bc, index=index)
+        e2dof = self.dof.cell_to_dof()
+        val = bm.einsum('cqld, ...cl -> ...cqd', phi, uh0[..., e2dof])
+        return val
 
-        # 2. 计算散度基函数值
-        gphi = self.div_basis(bc) 
-        
-        # 如果提供了 index，需要对 gphi 进行切片，因为 div_basis 通常计算所有单元
-        if index is not _S:
-            gphi = gphi[index]
+    @barycentric
+    def div_value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike:
+        if isinstance(bc, tuple):
+            TD = len(bc)
+        else :
+            TD = bc.shape[-1] - 1
+        uh0 = self.TM@uh
+        #uh0 = uh
 
-        # 3. 获取自由度映射
-        e2dof = self.dof.cell_to_dof(index=index)
-        
+        gphi = self.grad_basis(bc, index=index)
+        e2dof = self.dof.entity_to_dof(TD, index=index)
         val = bm.einsum('cilm, cl -> cim', gphi, uh0[e2dof])
-
         return val
     

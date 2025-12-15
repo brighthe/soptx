@@ -44,12 +44,6 @@ class SourceIntegrator(LinearInt, SrcInt, CellInt):
         f = self.source
         mesh = getattr(space, 'mesh', None)
         bcs, ws, phi, cm, index = self.fetch(space)
-        
-        # if getattr(f, 'coordtype', 'barycentric') == 'barycentric':
-        #     val = f(bcs, index=index)
-        # else:
-        #     ps = mesh.bc_to_point(bcs, index=index)
-        #     val = f(ps)
  
         val = process_coef_func(f, bcs=bcs, mesh=mesh, etype='cell', index=index)
 

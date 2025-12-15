@@ -6,7 +6,8 @@ from fealpy.mesh import HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from fealpy.fem import BlockForm, BilinearForm, LinearForm
 from fealpy.decorator.variantmethod import variantmethod
-from fealpy.sparse import CSRTensor, COOTensor
+from fealpy.sparse import CSRTensor, COOTensor 
+from fealpy.sparse.ops import bmat, spdiags
 
 from soptx.functionspace.huzhang_fe_space import HuZhangFESpace
 from soptx.analysis.integrators.huzhang_stress_integrator import HuZhangStressIntegrator
@@ -26,6 +27,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
                 integration_order: int = 4,
+                use_relaxation: bool = True,
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 interpolation_scheme: Optional[MaterialInterpolationScheme] = None,
@@ -47,6 +49,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         self._space_degree = space_degree
         self._integration_order = integration_order
+        self._use_relaxation = use_relaxation
 
         self._topopt_algorithm = topopt_algorithm
         self._interpolation_scheme = interpolation_scheme
@@ -55,9 +58,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self.solve_displacement.set(solve_method)
 
         self._GD = self._mesh.geo_dimension()
-        self._setup_function_spaces(mesh=self._mesh, 
-                                    p=self._space_degree, 
-                                    shape=(-1, self._GD))
+        self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation)
+        self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
+        self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
         # 缓存的矩阵和向量
         self._K = None
@@ -67,9 +70,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     
     ##############################################################################################
-    # 属性访问器 - 获取内部状态
+    # 属性访问器 
     ##############################################################################################
-    
+
     @property
     def mesh(self) -> HomogeneousMesh:
         """获取当前的网格对象"""
@@ -112,7 +115,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     
 
     ##############################################################################################
-    # 属性修改器 - 修改内部状态
+    # 属性修改器
     ##############################################################################################
 
     @huzhang_space.setter
@@ -139,23 +142,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                         rho_val: Optional[Union[Function, TensorLike]] = None,
                         enable_timing: bool = False,
                     ) -> Union[CSRTensor, COOTensor]:
-        """组装全局刚度矩阵
-
-        Parameters
-        ----------
-        rho_val : 密度值
-            - 单元密度 
-                - 单分辨率 - (NC, )
-                - 多分辨率 - (NC, n_sub)
-            - 节点密度 
-                - 单分辨率 - (NC, NQ)
-                - 多分辨率 - (NC, n_sub, NQ)
-
-        Returns
-        -------
-        Union[CSRTensor, COOTensor]
-            组装后的刚度矩阵
-        """
+        """组装全局刚度矩阵"""
                 
         t = None
         if enable_timing:
@@ -193,28 +180,35 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
                                                 q=self._integration_order, coef=coef)
         bform1.add_integrator(hzs_integrator)
+        M = bform1.assembly(format='csr')
 
         bform2 = BilinearForm((space_u, space_sigma)) # 应力-位移矩阵 B_σu
+
         hzm_integrator = HuZhangMixIntegrator()
         bform2.add_integrator(hzm_integrator)
+        B = bform2.assembly(format='csr')
+
+        # TODO 角点松弛
+        if space_sigma.use_relaxation == True:
+            TM = space_sigma.TM
+            M = TM.T @ M @ TM
+            B = TM.T @ B
 
         if p >= GD + 1:
-            bform = BlockForm([[bform1,   bform2],
-                               [bform2.T, None]])
+            K = bmat([[M,   B   ],
+                      [B.T, None]], format='csr')
 
         elif p <= GD:
             bform3 = BilinearForm(space_u)
-            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, method='vector_jump')
+            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, 
+                                                threshold='internal', 
+                                                method='vector_jump')
             # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, method='matrix_jump')
             bform3.add_integrator(jpi_integrator)
+            J = bform3.assembly(format='csr')
 
-            bform = BlockForm([[bform1,   bform2],
-                               [bform2.T, bform3]])
-
-        if enable_timing:
-            t.send('准备时间')
-
-        K = bform.assembly(format='csr')
+            K = bmat([[M,   B],
+                      [B.T, J]], format='csr')
 
         if enable_timing:
             t.send('组装时间')
@@ -269,301 +263,139 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return B_sigma_u
 
-    def assemble_displacement_load_vector(self,
-                                        enable_timing: bool = False,
-                                    ) -> Union[TensorLike, COOTensor]:
-        """组装载荷向量的位移分量 f_u"""
+    def assemble_body_force_vector(self, 
+                                   enable_timing: bool = False
+                                ) -> TensorLike:
+        """组装体力源项向量 (f, v)"""
         t = None
         if enable_timing:
-            t = timer(f"组装 f_u")
-
+            t = timer(f"组装 f_body")
+        
         body_force = self._pde.body_force
         space_uh = self._tensor_space
 
-        # NOTE F.dtype == COOTensor or TensorLike
         integrator = SourceIntegrator(source=body_force, q=self._integration_order)
         lform = LinearForm(space_uh)
         lform.add_integrator(integrator)
-        F_v = lform.assembly(format='dense')
 
-        #######################################################################################################################
-        # 应力边界条件处理方式 1: 集中载荷视作等效节点力
-        #######################################################################################################################
+        F_body = lform.assembly(format='dense')
 
-        load_type = self._pde.load_type
-        
-        if load_type == 'concentrated':
-            # Neumann 边界条件处理
-            gd_sigmah = self._pde.concentrate_load_bc
-            threshold_sigmah = self._pde.is_concentrate_load_boundary()
-            # 集中载荷 (点力) - 等效节点力方法 - 弱形式施加
-            #! 点力必须定义在网格节点上
-            isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-            isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-            ipoints_uh = space_uh.interpolation_points()
-            gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
-
-            F_uh = space_uh.function()
-            if space_uh.dof_priority:
-                F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
-            else:
-                F_uh[:] = bm.set_at(F_uh[:], isBdTDof, gd_sigmah_val.reshape(-1))
-
-            F_u = -F_v + F_uh
-
-        else:
-            F_u = -F_v
-
-        #######################################################################################################################
-        # 应力边界条件处理方式 2: 集中载荷近似为分布载荷
-        #######################################################################################################################
-
-        # F_u = -F_v
-        
         if enable_timing:
             t.send('组装时间')
             t.send(None)
 
-        return F_u
-
-    def assemble_stress_load_vector(self, 
-                                enable_timing: bool = False
-                            ) -> Union[TensorLike, COOTensor]:
-        """组装载荷向量的应力分量 f_sigma =  <u_D, (τ·n)>_Γ_D"""
+        return F_body
+    
+    def assemble_displacement_bc_vector(self, enable_timing: bool = False):
+        """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D"""
         t = None
         if enable_timing:
-            t = timer(f"组装 f_sigma")
+            t = timer("组装 F_disp_bc")
 
-        space_sigmah = self._huzhang_space
-        boundary_type = self._pde.boundary_type
+        space = self._huzhang_space
+        mesh = space.mesh
 
-        if boundary_type == 'neumann':
-            F_sigma = space_sigmah.function()
-        
+        gdof = space.number_of_global_dofs()
+        ldof = space.number_of_local_dofs()
+
+        if 'neumann' not in mesh.edgedata:
+            # 如果没有特定标记，默认全边界都是位移边界
+            bdedge = mesh.boundary_edge_flag()
         else:
-            # Dirichlet 边界条件处理 - 弱形式施加
-            gd_uh = self._pde.dirichlet_bc
-            threshold_uh = self._pde.is_dirichlet_boundary()
+            bdedge = mesh.edgedata['neumann']
 
-            # 齐次 Dirichlet
-            F_sigma = space_sigmah.function()
-            # 非齐次 Dirichlet
-            # TODO 胡张元空间中的边界积分不好做
-            # from soptx.analysis.integrators.face_source_integrator_mfem import BoundaryFaceSourceIntegrator_mfem
-            # integrator_sigmah = BoundaryFaceSourceIntegrator_mfem(source=gd_uh, 
-            #                                                 q=self._integration_order, 
-            #                                                 threshold=threshold_uh,
-            #                                                 method='dirichlet')
-            # lform_sigmah = LinearForm(space_sigmah)
-            # lform_sigmah.add_integrator(integrator_sigmah)
-            # F_sigma = lform_sigmah.assembly(format='dense')
+        e2c = mesh.edge_to_cell()[bdedge] 
+        en  = mesh.edge_unit_normal()[bdedge]
+        NBF = bdedge.sum() 
+
+        cellmeasure = mesh.entity_measure('edge')[bdedge]
+
+        qf = mesh.quadrature_formula(self._integration_order, 'edge')
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        NQ = len(bcs)
+
+        # 将边积分点映射到单元内部
+        bcsi = [bm.insert(bcs, i, 0, axis=-1) for i in range(3)]
+
+        # 计算基函数投影
+        symidx = [[0, 1], [1, 2]]
+        phi_n = bm.zeros((NBF, NQ, ldof, 2), dtype=space.ftype)
+        gd_val = bm.zeros((NBF, NQ, 2), dtype=space.ftype)
+
+        # 获取位移边界函数
+        gd = self._pde.displacement_bc
+
+        for i in range(3):
+            # 找到局部编号为 i 的面
+            flag = (e2c[:, 2] == i)
+            if not bm.any(flag):
+                continue
+                
+            # 计算基函数
+            current_cells = e2c[flag, 0]
+            phi = space.basis(bcsi[i], index=current_cells)
+
+            # 计算 tau · n
+            en_curr = en[flag, None, None, :]
+            phi_n[flag, ..., 0] = bm.sum(phi[..., symidx[0]] * en_curr, axis=-1)
+            phi_n[flag, ..., 1] = bm.sum(phi[..., symidx[1]] * en_curr, axis=-1)
+
+            # 计算边界函数值 u_D
+            points = mesh.bc_to_point(bcsi[i], index=current_cells)
+            gd_val[flag] = gd(points)
+        
+        # 组装
+        val = bm.einsum('q, c, cqld, cqd -> cl', ws, cellmeasure, phi_n, gd_val)
+        
+        cell2dof = space.cell_to_dof()[e2c[:, 0]]
+        F_vec = bm.zeros(gdof, dtype=space.ftype)
+        bm.add.at(F_vec, cell2dof, val)
+
+        # TODO 角点松弛变换
+        if space.use_relaxation == True:
+            F_vec = space.TM.T @ F_vec
 
         if enable_timing:
-            t.send('组装时间')
+            t.send("组装完成")
             t.send(None)
 
-        return F_sigma
+        return F_vec
     
-    import functools
-
-    @functools.lru_cache(maxsize=None)
-    def _build_gdof_maps(self):
-        """
-        构建全局 DOF 到坐标和类型的映射。
+    def apply_traction_boundary_condition(self, K: CSRTensor, F: TensorLike, space_sigma):
+        """施加本质边界条件  σ·n = g_N"""
+        # 获取面力边界函数
+        gd_traction = self._pde.traction_bc
         
-        此函数被缓存 (@functools.lru_cache)，因此只在首次调用时运行。
+        # 计算边界自由度的值
+        uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
 
-        返回:
-        - gdof_coords (gdof, GD): 每个 DOF 的物理坐标
-        - gdof_type_map (gdof,): 每个 DOF 的类型 (0-8)
-        """
-        space_sigmah = self._huzhang_space
-        mesh = space_sigmah.mesh
-        dof = space_sigmah.dof
+        gdof_total = K.shape[0]
+        gdof_sigma = space_sigma.number_of_global_dofs()
         
-        gdof_sigmah = space_sigmah.number_of_global_dofs()
-        ldof = space_sigmah.number_of_local_dofs()
-        NC = mesh.number_of_cells()
-        GD = mesh.geo_dimension()
-        NS = space_sigmah.NS # 3
-
-        # 1. 构建 local_type_map (ldof,)
-        #    标记局部自由度的类型
-        #    -1=UNKNOWN
-        #     0=NODE_XX, 1=NODE_XY, 2=NODE_YY
-        #     3=EDGE_NN (连续), 4=EDGE_NT (连续)
-        #     5=EDGE_TT (不连续)
-        #     6=CELL_XX (内部), 7=CELL_XY (内部), 8=CELL_YY (内部)
-        local_type_map = bm.full(ldof, -1, dtype=bm.int32)
-        idx = 0
+        U_fixed = bm.zeros(gdof_total, dtype=F.dtype)
+        U_fixed[:gdof_sigma] = uh_val
         
-        # 1a. 节点自由度 (NS*3 个)
-        # 顺序: (V0_xx, V0_xy, V0_yy), (V1_xx, V1_xy, V1_yy), (V2_...)
-        # 对应类型: [0, 1, 2, 0, 1, 2, 0, 1, 2]
-        n_node_dof_per_v = len(dof.cell_dofs.get_boundary_dof_from_dim(0)[0]) # 3
-        node_types = bm.array([0, 1, 2], dtype=bm.int32) # [NODE_XX, NODE_XY, NODE_YY]
-        local_type_map[idx : idx + n_node_dof_per_v * 3] = bm.tile(node_types, 3)
-        idx += n_node_dof_per_v * 3
+        is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
+        is_fixed_dof[:gdof_sigma] = is_bd_dof
 
-        # 1b. 边连续自由度 ( 2*(p-1) * 3 个 )
-        # 顺序: (E0_nn0, E0_nt0, E0_nn1, E0_nt1, ...), (E1_...), (E2_...)
-        # 对应类型: [3, 4, 3, 4, ...] 重复 3 次
-        edge_dofs_cont = dof.cell_dofs.get_boundary_dof_from_dim(1) # [E0_dofs, E1_dofs, E2_dofs]
-        edge_nn_nt_types = bm.array([3, 4], dtype=bm.int32) # [EDGE_NN, EDGE_NT]
+        #* 修改线性系统 (标准的置 1 置 0 法)
+        # 移项: 将已知非零值的贡献移到右端项
+        F = F - K @ U_fixed
         
-        if len(edge_dofs_cont) > 0:
-            n_ldof_on_edge = len(edge_dofs_cont[0]) # 2*(p-1)
-            p_m1 = n_ldof_on_edge // 2 # (p-1)
-            if p_m1 > 0:
-                # [3, 4, 3, 4, ...] (p-1) pairs
-                edge_types_on_one_edge = bm.tile(edge_nn_nt_types, p_m1) 
-                local_type_map[idx : idx + n_ldof_on_edge * 3] = bm.tile(edge_types_on_one_edge, 3)
-                idx += n_ldof_on_edge * 3
+        # 强加边界值: 在右端项直接填入已知值
+        F[is_fixed_dof] = U_fixed[is_fixed_dof]
         
-        # 1c. 边不连续自由度 ( (p-1) * 3 个 )
-        # 顺序: (E0_tt0, E0_tt1, ...), (E1_...), (E2_...)
-        # 对应类型: [5, 5, ...] 重复 3 次
-        edge_dofs_int = dof.cell_dofs.get_internal_dof_from_dim(1) # [E0_dofs, E1_dofs, E2_dofs]
+        # 修改矩阵：行列清零，对角置1        
+        fixed_idx = bm.zeros(gdof_total, dtype=bm.int32)
+        fixed_idx[is_fixed_dof] = 1
         
-        if len(edge_dofs_int) > 0:
-            n_ldof_on_edge_int = len(edge_dofs_int[0]) # (p-1)
-            if n_ldof_on_edge_int > 0:
-                edge_int_types = bm.full(n_ldof_on_edge_int, 5, dtype=bm.int32) # [EDGE_TT, EDGE_TT, ...]
-                local_type_map[idx : idx + n_ldof_on_edge_int * 3] = bm.tile(edge_int_types, 3)
-                idx += n_ldof_on_edge_int * 3
-
-        # 1d. 单元内部自由度 ( NS * (p-1)*(p-2)/2 个 )
-        # 顺序: (C_xx0, C_xy0, C_yy0, C_xx1, C_xy1, C_yy1, ...)
-        # 对应类型: [6, 7, 8, 6, 7, 8, ...]
-        if idx < ldof:
-            n_cell_int_scalar_dofs = (ldof - idx) // NS # (p-1)*(p-2)/2
-            cell_types = bm.array([6, 7, 8], dtype=bm.int32) # [CELL_XX, CELL_XY, CELL_YY]
-            local_type_map[idx:] = bm.tile(cell_types, n_cell_int_scalar_dofs)
-
-        # 2. 获取局部坐标
-        # (ldof, 3) 数组, 顺序与 local_type_map 一一对应
-        local_ips_bc = space_sigmah.interpolation_points() #
+        I_bd = spdiags(fixed_idx, 0, gdof_total, gdof_total)
+        I_in = spdiags(1 - fixed_idx, 0, gdof_total, gdof_total)
         
-        # 3. 映射到物理坐标
-        # physical_ips_all_cells[i, j, :] 是 cell i, local dof j 的物理坐标
-        physical_ips_all_cells = mesh.bc_to_point(local_ips_bc, index=bm.arange(NC)) # (NC, ldof, GD)
-
-        # 4. 构建全局映射
-        cell2dof = space_sigmah.cell_to_dof() # (NC, ldof)
-        
-        # 初始化为 NaN 和 -1, 以便调试时发现未被单元覆盖的 DOF
-        gdof_coords = bm.full((gdof_sigmah, GD), bm.nan, dtype=space_sigmah.ftype, device=space_sigmah.device)
-        gdof_type_map = bm.full(gdof_sigmah, -1, dtype=bm.int32, device=space_sigmah.device)
-
-        # 遍历所有单元，填充映射表
-        # 对于共享自由度 (节点/边), 后续单元会覆盖先前单元的写入，
-        # 这是正确的, 因为共享 DOF 的坐标和类型在所有共享单元中是一致的。
-        for i in range(NC):
-            gdofs_i = cell2dof[i] # (ldof,)
-            gdof_coords = bm.set_at(gdof_coords, gdofs_i, physical_ips_all_cells[i])
-            gdof_type_map = bm.set_at(gdof_type_map, gdofs_i, local_type_map)
-            
-        return gdof_coords, gdof_type_map
-    
-    def apply_neumann_bc(self, K: Union[CSRTensor, COOTensor], F: CSRTensor) -> tuple[CSRTensor, CSRTensor]:
-        """
-        应用 Neumann 边界条件 (强施加)
-        使用 interpolation_points 的精确坐标，支持任意阶 p
-        """
-        space_sigmah = self._huzhang_space
-        space_uh = self._tensor_space
-
-        gdof_sigmah = space_sigmah.number_of_global_dofs()
-        gdof_uh = space_uh.number_of_global_dofs()
-        
-        # 1. 确定所有被约束的 DOF (包含节点和边)
-        threshold_sigmah_node = self._pde.is_neumann_boundary()
-        threshold_sigmah_edge = self._pde.is_neumann_boundary_edge()
-        
-        threshold_dict = {
-            'node': threshold_sigmah_node,
-            'edge': threshold_sigmah_edge
-        }
-        
-        isBdDof_sigmah = space_sigmah.is_boundary_dof(threshold=threshold_dict, method='barycenter')
-
-        bd_dof_idx = bm.where(isBdDof_sigmah)[0]
-        
-        # 如果没有 Neumann DOFs, 直接返回
-        if len(bd_dof_idx) == 0:
-            return K, F
-
-        # 2. 获取全局 DOF 映射
-        # (self._build_gdof_maps 会被缓存，只在首次调用时计算)
-        gdof_coords, gdof_type_map = self._build_gdof_maps()
-
-        # 3. 获取边界 DOF 的坐标和类型
-        bd_dof_coords = gdof_coords[bd_dof_idx]
-        bd_dof_types = gdof_type_map[bd_dof_idx] 
-
-        # 4. 在精确坐标处计算 PDE 值
-        g_values = self._pde.neumann_bc(bd_dof_coords)         # (N_bd, 2)
-        n_values = self._pde.neumann_bc_normal(bd_dof_coords)  # (N_bd, 2)
-        t_values = self._pde.neumann_bc_tangent(bd_dof_coords) # (N_bd, 2)
-        
-        g_x, g_y = g_values[..., 0], g_values[..., 1]
-        n_x, n_y = n_values[..., 0], n_values[..., 1]
-
-        # 5. 计算所有可能的边界值
-        sigmah_bd_values = bm.zeros(len(bd_dof_idx), dtype=space_sigmah.ftype, device=space_sigmah.device)
-
-        # 5a. 计算 nn 和 nt (用于边 DOF)
-        sigma_nn_values = bm.einsum('...i,...i->...', g_values, n_values)
-        sigma_nt_values = bm.einsum('...i,...i->...', g_values, t_values)
-
-        # 5b. 计算 xx, xy, yy (用于节点 DOF)
-        sigma_xx_values = bm.full_like(g_x, bm.nan)
-        sigma_xy_values = bm.full_like(g_x, bm.nan)
-        sigma_yy_values = bm.full_like(g_x, bm.nan)
-
-        is_nx_dominant = (bm.abs(n_x) > 1.0 - 1e-12)
-        is_ny_dominant = (bm.abs(n_y) > 1.0 - 1e-12)
-
-        if bm.any(is_nx_dominant):
-            sigma_xx_values = bm.set_at(sigma_xx_values, is_nx_dominant, g_x[is_nx_dominant] / n_x[is_nx_dominant])
-            sigma_xy_values = bm.set_at(sigma_xy_values, is_nx_dominant, g_y[is_nx_dominant] / n_x[is_nx_dominant])
-        
-        if bm.any(is_ny_dominant):
-            sigma_xy_values = bm.set_at(sigma_xy_values, is_ny_dominant, g_x[is_ny_dominant] / n_y[is_ny_dominant])
-            sigma_yy_values = bm.set_at(sigma_yy_values, is_ny_dominant, g_y[is_ny_dominant] / n_y[is_ny_dominant])
-
-        # 6. 根据 DOF 类型，从计算好的值中选择
-        is_xx = (bd_dof_types == 0)
-        is_xy = (bd_dof_types == 1)
-        is_yy = (bd_dof_types == 2)
-        is_nn = (bd_dof_types == 3)
-        is_nt = (bd_dof_types == 4)
-        
-        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_xx, sigma_xx_values[is_xx])
-        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_xy, sigma_xy_values[is_xy])
-        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_yy, sigma_yy_values[is_yy]) 
-        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_nn, sigma_nn_values[is_nn])
-        sigmah_bd_values = bm.set_at(sigmah_bd_values, is_nt, sigma_nt_values[is_nt])
-
-        # 7. 构建完整的 sigmah_bd 向量
-        sigmah_bd = bm.zeros(gdof_sigmah, dtype=space_sigmah.ftype, device=space_sigmah.device)
-        sigmah_bd = bm.set_at(sigmah_bd, bd_dof_idx, sigmah_bd_values)
-
-        # 8. 标准的施加边界条件流程
-        load_bd = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.float64, device=space_sigmah.device)
-        load_bd[:gdof_sigmah] = sigmah_bd
-
-        F = F - K.matmul(load_bd[:])
-        F[:gdof_sigmah][isBdDof_sigmah] = sigmah_bd[isBdDof_sigmah]
-
-        isBdDof = bm.zeros(gdof_sigmah + gdof_uh, dtype=bm.bool, device=space_sigmah.device)
-        isBdDof[:gdof_sigmah] = isBdDof_sigmah  
-        
-        K = self._apply_matrix(A=K, isDDof=isBdDof)
+        K = I_in @ K @ I_in + I_bd
         
         return K, F
     
-
     ##########################################################################################################
     # 变体方法
     ##########################################################################################################
@@ -571,9 +403,18 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     @variantmethod('mumps')
     def solve_displacement(self, 
                         rho_val: Optional[Union[TensorLike, Function]] = None, 
-                        enable_timing: bool = True, 
+                        enable_timing: bool = False, 
                         **kwargs
                     ) -> Tuple[Function, Function]:
+        
+        if self._topopt_algorithm is None:
+            if rho_val is not None:
+                self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
+        
+        elif self._topopt_algorithm in ['density_based']:
+            if rho_val is None:
+                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+                self._log_error(error_msg)
         
         t = None
         if enable_timing:
@@ -582,63 +423,53 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         from fealpy.solver import spsolve
 
-        if self._topopt_algorithm is None:
-            if rho_val is not None:
-                self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
-        
-        elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if rho_val is None:
-                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-                self._log_error(error_msg)
+        mesh = self._mesh
+        pde = self._pde
+        bc = mesh.entity_barycenter('edge')
+
+        mesh.edgedata['dirichlet'] = pde.is_traction_boundary(bc)   # 应力是本质边界条件
+        mesh.edgedata['neumann'] = pde.is_displacement_boundary(bc) # 位移是自然边界条件
     
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-
-        if enable_timing:
-            t.send('刚度矩阵组装时间')
 
         space_sigmah = self._huzhang_space
         space_uh = self._tensor_space
         gdof_sigmah = space_sigmah.number_of_global_dofs()
         gdof_uh = space_uh.number_of_global_dofs()
         gdof = gdof_sigmah + gdof_uh
+
         F0 = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
 
-        F_sigmah = self.assemble_stress_load_vector()
-        F0[:gdof_sigmah] = F_sigmah
-        
-        F_uh = self.assemble_displacement_load_vector()
-        F0[gdof_sigmah:] = F_uh
+        # 组装体力源项 -> 对应位移测试函数 v
+        F_body = self.assemble_body_force_vector() 
+        F0[gdof_sigmah:] = -F_body 
 
-        if enable_timing:
-            t.send('载荷向量组装时间')
+        # 自然边界条件处理 (位移边界 u = u_D)
+        F_natural = self.assemble_displacement_bc_vector()
+        F0[:gdof_sigmah] = F_natural
 
-        boundary_type = self._pde.boundary_type
-        if boundary_type == 'dirichlet':
+        # 本质边界条件处理 (应力边界 σ·n = g_N)
+        if self._pde.boundary_type == 'neumann':
             K, F = K0, F0
         else:
-            K, F = self.apply_neumann_bc(K0, F0)
+            K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
 
         if enable_timing:
-            t.send('应用边界条件时间')
-            
-        solver_type = kwargs.get('solver', 'mumps')
+            t.send('组装时间')
 
+        solver_type = kwargs.get('solver', 'scipy')
         X = spsolve(K, F, solver=solver_type)
 
         if enable_timing:
-            t.send('求解线性系统时间')
+            t.send('求解时间')
 
-        space0 = self._huzhang_space
-        space1 = self._tensor_space
-        gdof0 = space0.number_of_global_dofs()
+        sigmaval = X[:gdof_sigmah]
+        uval = X[gdof_sigmah:]
 
-        sigmaval = X[:gdof0]
-        uval = X[gdof0:]
-
-        sigmah = space0.function()
+        sigmah = space_sigmah.function()
         sigmah[:] = sigmaval
 
-        uh = space1.function()
+        uh = space_uh.function()
         uh[:] = uval
 
         if enable_timing:
@@ -861,23 +692,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         else:
             error_msg = f"不支持的拓扑优化算法: {topopt_algorithm}"
             self._log_error(error_msg)
-    
-    def _setup_function_spaces(self, 
-                            mesh: HomogeneousMesh, 
-                            p: int, 
-                            shape : tuple[int, int]
-                        ) -> None:
-        """设置函数空间"""
-        huzhang_space = HuZhangFESpace(mesh, p=p)
-        self._huzhang_space = huzhang_space
-
-        scalar_space = LagrangeFESpace(mesh, p=p-1, ctype='D')
-        self._scalar_space = scalar_space
-
-        tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=shape)
-        self._tensor_space = tensor_space
-
-        self._log_info(f"Tensor space DOF ordering: dof_priority")
 
     def _stress_matrix_coefficient(self) -> tuple[float, float]:
         """
@@ -935,53 +749,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         new_values = bm.empty((NNZ,), **A.values_context())
         new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], 1.)
-        new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
-
-        return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
-    
-    def _apply_matrix_test(self, A: CSRTensor, isDDof: TensorLike, DDof_val: TensorLike) -> CSRTensor:
-        """
-        FEALPy 中的 apply_matrix 使用了 D0@A@D0, 
-        不同后端下 @ 会使用大量的 for 循环, 这在 GPU 下非常缓慢
-        
-        Parameters:
-        -----------
-        A : CSRTensor
-            输入的稀疏矩阵
-        isDDof : TensorLike
-            边界自由度标记，形状为 (gdof,)
-        DDof_val : TensorLike
-            边界自由度对应的值，形状为 (gdof,)
-        """
-        isIDof = bm.logical_not(isDDof)
-        crow = A.crow
-        col = A.col
-        indices_context = bm.context(col)
-        ZERO = bm.array([0], **indices_context)
-
-        nnz_per_row = crow[1:] - crow[:-1]
-        remain_flag = bm.repeat(isIDof, nnz_per_row) & isIDof[col] # 保留行列均为内部自由度的非零元素
-        rm_cumsum = bm.concat([ZERO, bm.cumsum(remain_flag, axis=0)], axis=0) # 被保留的非零元素数量累积
-        nnz_per_row = rm_cumsum[crow[1:]] - rm_cumsum[crow[:-1]] + isDDof # 计算每行的非零元素数量
-
-        new_crow = bm.cumsum(bm.concat([ZERO, nnz_per_row], axis=0), axis=0)
-
-        NNZ = new_crow[-1]
-        non_diag = bm.ones((NNZ,), dtype=bm.bool, device=bm.get_device(isDDof)) # Field: non-zero elements
-        loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
-        non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
-
-        # 找出所有边界DOF对应的行索引
-        bd_rows = bm.where(loc_flag)[0]
-        new_col = bm.empty((NNZ,), **indices_context)
-        # 设置为相应行的边界 DOF 位置
-        new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)
-        # 设置非对角元素的列索引
-        new_col = bm.set_at(new_col, non_diag, col[remain_flag])
-
-        new_values = bm.empty((NNZ,), **A.values_context())
-        # 修改：使用 DDof_val 中对应边界 DOF 的值
-        new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], DDof_val[bd_rows])
         new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
 
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)

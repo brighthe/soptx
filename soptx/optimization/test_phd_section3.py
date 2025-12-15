@@ -16,7 +16,7 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_subsec_3_6_2_linear_elastic_2d')
+    @variantmethod('test_subsec3_6_2_linear_elastic_2d')
     def run(self):
         # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
         lam, mu = 1.0, 0.5
@@ -25,8 +25,8 @@ class DensityTopOptTest(BaseLogged):
         space_degree = 4
 
         mesh_type_quad = 'uniform_quad' # 'uniform_aligned_tri', 'uniform_quad'
-        from soptx.model.linear_elastic_2d import TriMixHomoDirNHomoNeu2d
-        pde_quad = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
+        from soptx.model.linear_elastic_2d import LagfemData2d2
+        pde_quad = LagfemData2d2(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
         pde_quad.init_mesh.set(mesh_type_quad)
         nx, ny = 2, 2
         mesh_quad = pde_quad.init_mesh(nx=nx, ny=ny)
@@ -40,7 +40,7 @@ class DensityTopOptTest(BaseLogged):
         integration_order = space_degree + 1
         
         mesh_type_tri = 'uniform_aligned_tri'
-        pde_tri = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
+        pde_tri = LagfemData2d2(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
         pde_tri.init_mesh.set(mesh_type_tri)
         mesh_tri = pde_tri.init_mesh(nx=nx, ny=ny)
         material_tri = IsotropicLinearElasticMaterial(
@@ -78,8 +78,8 @@ class DensityTopOptTest(BaseLogged):
             uh = lfa.solve_displacement(rho_val=None)
 
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
-            e_l2 = mesh_quad.error(uh, pde_quad.disp_solution)
-            e_h1 = mesh_quad.error(uh.grad_value, pde_quad.grad_disp_solution)
+            e_l2 = mesh_quad.error(uh, pde_quad.displacement_solution)
+            e_h1 = mesh_quad.error(uh.grad_value, pde_quad.grad_displacement_solution)
 
             h[i] = 1/N
             errorMatrix_quad[0, i] = e_l2
@@ -112,8 +112,8 @@ class DensityTopOptTest(BaseLogged):
             uh = lfa.solve_displacement(rho_val=None)
 
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
-            e_l2 = mesh_tri.error(uh, pde_tri.disp_solution)
-            e_h1 = mesh_tri.error(uh.grad_value, pde_tri.grad_disp_solution)
+            e_l2 = mesh_tri.error(uh, pde_tri.displacement_solution)
+            e_h1 = mesh_tri.error(uh.grad_value, pde_tri.grad_displacement_solution)
 
             h[i] = 1/N
             errorMatrix_tri[0, i] = e_l2
@@ -479,13 +479,13 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
 
 
-    @run.register('test_subsec_3_6_4_bearing_device_2d')
+    @run.register('test_subsec3_6_4_bearing_device_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         t = -1.8e-2
         E, nu = 1, 0.5
         domain = [0, 120, 0, 40]
-
         plane_type = 'plane_stress'
+        
         from soptx.model.bearing_device_2d import BearingDevice2d
         pde = BearingDevice2d(
                             domain=domain,
@@ -498,34 +498,25 @@ class DensityTopOptTest(BaseLogged):
         mesh_type = 'uniform_quad'
 
         space_degree = 1
-        # integration_order = space_degree + 1 # 单元密度 + 四边形网格
-        integration_order = space_degree + 2 # 节点密度 + 四边形网格
+        integration_order = space_degree + 1 # 单元密度 + 四边形网格
+        # integration_order = space_degree + 2 # 节点密度 + 四边形网格
 
         volume_fraction = 0.35
         penalty_factor = 3.0
 
         # 'element', 'node'
-        density_location = 'node'
+        density_location = 'element'
         relative_density = volume_fraction
 
         # 'standard', 'voigt'
         assembly_method = 'standard'
 
-        optimizer_algorithm = 'oc'  # 'oc', 'mma'
         max_iterations = 500
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
         filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
-        rmin = 1.5
-
-        # from soptx.model.bearing_device_2d import HalfBearingDeviceLeft2d
-        # pde = HalfBearingDeviceLeft2d(
-        #                     domain=domain,
-        #                     t=t, E=E, nu=nu, 
-        #                     plane_type=plane_type,
-        #                     enable_logging=False
-        #                 )
+        rmin = 2.4
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -1161,5 +1152,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec_3_6_6_disp_inverter_upper_2d')
+    test.run.set('test_subsec3_6_4_bearing_device_2d')
     rho_opt, history = test.run()

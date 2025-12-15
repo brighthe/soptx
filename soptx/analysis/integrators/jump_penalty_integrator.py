@@ -6,7 +6,6 @@ from fealpy.functionspace import FunctionSpace as _FS
 from fealpy.decorator import variantmethod
 from fealpy.fem.integrator import LinearInt, OpInt, FaceInt, enable_cache
 
-
 class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
     def __init__(self, 

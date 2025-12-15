@@ -198,25 +198,21 @@ class Bridge2dSingleLoadData(PDEBase):
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
     
-class Bridge2dDoubleLoadData(PDEBase):
+class BridgeDoubleLoad2d(PDEBase):
     '''
-    Example 2 from Bruggi & Venini (2007) paper
-    Double-point load bridge structure
-    
-    -∇·σ = b    in Ω
-       u = 0    on ∂Ω_D (左右两端下半部分固支)
-    where:
-    - σ is the stress tensor
-    - ε = (∇u + ∇u^T)/2 is the strain tensor
-    
-    几何参数:
-        矩形域, 左右两端下半部分固支, 顶部和底部中点各施加向下集中载荷
+    两点载荷桥梁设计域的 PDE 模型
 
-    载荷类型:
-        集中载荷(点力) (单位 - N)
+    设计域:
+        - 全设计域: 80 mm x 40 mm
+
+    边界条件:
+        - 左右两端下半部分固支 (u)
+
+    载荷条件:
+        - 底部和顶部中点各施加向下集中载荷 P = -2
     
     材料参数:
-        E_s = 1, nu_s = 0.35 (compressible) or 0.5 (incompressible)
+        E = 1 [MPa], nu = 0.3
     '''
     def __init__(self,
                 domain: List[float] = [0, 80, 0, 40], 
@@ -226,7 +222,7 @@ class Bridge2dDoubleLoadData(PDEBase):
                 E: float = 1.0, 
                 nu: float = 0.35,  
                 support_height_ratio: float = 0.5,  # 支撑高度比例（0.5 表示下半部分）
-                plane_type: str = 'plane_strain', # 'plane_stress' or 'plane_strain'
+                plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -237,13 +233,11 @@ class Bridge2dDoubleLoadData(PDEBase):
         self._p2 = p2
         self._E, self._nu = E, nu
         self._support_height_ratio = support_height_ratio 
-        
-        self._eps = 1e-12
-        
         self._plane_type = plane_type
+
+        self._eps = 1e-12        
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
-
 
     #######################################################################################################################
     # 访问器
@@ -345,7 +339,6 @@ class Bridge2dDoubleLoadData(PDEBase):
 
         return mesh
 
-
     #######################################################################################################################
     # 核心方法
     #######################################################################################################################
@@ -355,6 +348,41 @@ class Bridge2dDoubleLoadData(PDEBase):
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        
+        # 计算支撑的最大高度
+        height = domain[3] - domain[2]
+        y_max_support = domain[2] + height * self._support_height_ratio
+        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
+        
+        return coord
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        
+        # 计算支撑的最大高度
+        height = domain[3] - domain[2]
+        y_max_support = domain[2] + height * self._support_height_ratio
+        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
+        
+        return coord
+    
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
     
     def get_neumann_loads(self):
        """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
@@ -434,39 +462,3 @@ class Bridge2dDoubleLoadData(PDEBase):
         
         return self.is_neumann_boundary_dof
  
-    @cartesian
-    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
-        kwargs = bm.context(points)
-
-        return bm.zeros(points.shape, **kwargs)
-    
-    @cartesian
-    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-        x, y = points[..., 0], points[..., 1]
-        
-        # 计算支撑的最大高度
-        height = domain[3] - domain[2]
-        y_max_support = domain[2] + height * self._support_height_ratio
-        
-        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
-        
-        return coord
-    
-    @cartesian
-    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-        x, y = points[..., 0], points[..., 1]
-        
-        # 计算支撑的最大高度
-        height = domain[3] - domain[2]
-        y_max_support = domain[2] + height * self._support_height_ratio
-        
-        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
-        
-        return coord
-    
-    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
-        
-        return (self.is_dirichlet_boundary_dof_x, 
-                self.is_dirichlet_boundary_dof_y)

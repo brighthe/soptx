@@ -18,15 +18,43 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test')
+    @variantmethod('test_linear_elastic_huzhang')
     def run(self) -> None:
-        # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
+        #* 算例 - 纯位移边界条件
+        # from soptx.model.linear_elastic_2d import HZmfemData2d0
+        # lam, mu = 0.125, 0.125
+        # pde = HZmfemData2d0(lam=lam, mu=mu)
+
+        #* 算例 - 混合边界条件 (满足角点相容性条件) 
+        # from soptx.model.linear_elastic_2d import HZmfemConsistentMix
+        # lam, mu = 0.125, 0.125
+        # pde = HZmfemConsistentMix(lam=lam, mu=mu)
+
+        #* 算例 - 混合边界条件 (不满足角点相容性条件)
+        from soptx.model.linear_elastic_2d import HZmfemInconsistentMix
         lam, mu = 1.0, 0.5
-        from soptx.model.linear_elastic_2d import TriMixHomoDirNHomoNeu2d
-        pde = TriMixHomoDirNHomoNeu2d(domain=[0, 1, 0, 1], lam=lam, mu=mu)
-        pde.init_mesh.set('uniform_aligned_tri')
+        pde = HZmfemInconsistentMix(lam=lam, mu=mu)
+
+        pde.init_mesh.set('uniform_crisscross_tri')
         nx, ny = 2, 2
         analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+        node = analysis_mesh.entity('node')
+        analysis_mesh.meshdata['corner'] = pde.mark_corners(node)
+
+        # pde.init_mesh.set('union_crisscross')
+        # analysis_mesh = pde.init_mesh()
+        # node = analysis_mesh.entity('node')
+        # analysis_mesh.meshdata['corner'] = node[:-1]
+
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.add_subplot(111)
+        # analysis_mesh.add_plot(axes)
+        # analysis_mesh.find_node(axes, showindex=True)
+        # analysis_mesh.find_edge(axes, showindex=True)
+        # analysis_mesh.find_cell(axes, showindex=True)
+        # plt.show()
+
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
                                             lame_lambda=pde.lam, 
@@ -38,9 +66,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         space_degree = 3
         integration_order = space_degree*2 + 2
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                          f"空间次数={space_degree}, 积分阶数={integration_order}")
+                       f"网格类型={analysis_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}")
 
-        maxit = 4
+        maxit = 5
         errorType = [
                     '$|| \\boldsymbol{u} - \\boldsymbol{u}_h||_{\\Omega, 0}$',
                     '$|| \\boldsymbol{\\sigma} - \\boldsymbol{\\sigma}_h||_{\\Omega, 0}$',
@@ -59,7 +87,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                                     material=material,
                                                     space_degree=space_degree,
                                                     integration_order=integration_order,
-                                                    solve_method='scipy',
+                                                    use_relaxation=False,
+                                                    solve_method='mumps',
                                                     topopt_algorithm=None,
                                                     interpolation_scheme=None,
                                                 )
@@ -71,7 +100,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
             sigmah, uh = huzhang_mfem_analyzer.solve_displacement(rho_val=None)
 
             e_uh_l2 = analysis_mesh.error(u=uh, 
-                                    v=pde.disp_solution,
+                                    v=pde.displacement_solution,
                                     q=integration_order) # 位移 L2 范数误差
             e_sigmah_l2 = analysis_mesh.error(u=sigmah, 
                                             v=pde.stress_solution, 
@@ -97,7 +126,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         print("order_div_sigmah_l2:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
         print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[3, :-1] / errorMatrix[3, 1:]))
 
-
         import matplotlib.pyplot as plt
         from soptx.utils.show import showmultirate, show_error_table
 
@@ -106,14 +134,14 @@ class DensityTopOptHuZhangTest(BaseLogged):
         plt.show()
         print('------------------')
 
+
+
     @run.register('test_bridge_2d')
     def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 80, 0, 40]
 
         E = 1.0
-        nu = 0.35   # 可压缩
-        # nu = 0.5    # 不可压缩
-        # nu = 0.4999 # 近不可压缩
+        nu = 0.35   
         plane_type = 'plane_strain'  # 'plane_stress' or 'plane_strain'
         
         from soptx.model.bridge_2d import Bridge2dDoubleLoadData
@@ -288,9 +316,185 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         return rho_opt, history
     
+    @run.register('test_subsec5_6_2_bearing_device_2d')
+    def run(self, analysis_method: str = 'lfem') -> Union[TensorLike, OptimizationHistory]:
+        t = -1.8e-2
+        E, nu = 1, 0.5
+        domain = [0, 60, 0, 40]
+        plane_type = 'plane_stress'
+
+        from soptx.model.bearing_device_2d import HalfBearingDeviceLeft2d
+        pde = HalfBearingDeviceLeft2d(
+                            domain=domain,
+                            t=t, E=E, nu=nu, 
+                            plane_type=plane_type,
+                            enable_logging=False
+                        )
+
+        nx, ny = 60, 40
+        mesh_type = 'uniform_quad' 
+
+        volume_fraction = 0.35
+        interpolation_method = 'msimp'
+        penalty_factor = 3.0
+        void_youngs_modulus = 1e-9
+        
+        # 'element'
+        density_location = 'element'
+        relative_density = volume_fraction
+
+        # 'standard', , 'voigt', 
+        assembly_method = 'standard'
+
+        optimizer_algorithm = 'mma'
+        max_iterations = 500
+        change_tolerance = 1e-3
+        use_penalty_continuation = True
+
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        rmin = 2.4
+
+        pde.init_mesh.set(mesh_type)
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method=interpolation_method,
+                                    options={
+                                        'penalty_factor': penalty_factor,
+                                        'void_youngs_modulus': void_youngs_modulus,
+                                        'target_variables': ['E']
+                                    },
+                                )
+        
+        if analysis_method == 'lfem':
+            space_degree = 1
+            integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
+            from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+            lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                        mesh=displacement_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        space_degree=space_degree,
+                                        integration_order=integration_order,
+                                        assembly_method=assembly_method,
+                                        solve_method='mumps',
+                                        topopt_algorithm='density_based',
+                                        interpolation_scheme=interpolation_scheme,
+                                    )
+            
+            analyzer = lagrange_fem_analyzer
+
+        elif analysis_method == 'huzhangfem':
+            # TODO 支持低阶 1 <=p <= d
+            huzhang_space_degree = 3
+            integration_order = huzhang_space_degree**2 + 2
+            from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
+            huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                        mesh=displacement_mesh,
+                                        pde=pde,
+                                        material=material,
+                                        space_degree=huzhang_space_degree,
+                                        integration_order=integration_order,
+                                        solve_method='mumps',
+                                        topopt_algorithm='density_based',
+                                        interpolation_scheme=interpolation_scheme,
+                                    )
+            
+            analyzer = huzhang_mfem_analyzer
+
+        design_variable_mesh = displacement_mesh
+        d, rho = interpolation_scheme.setup_density_distribution(
+                                                design_variable_mesh=design_variable_mesh,
+                                                displacement_mesh=displacement_mesh,
+                                                relative_density=relative_density,
+                                            )
+        
+        from soptx.regularization.filter import Filter
+        filter_regularization = Filter(
+                                    mesh=design_variable_mesh,
+                                    filter_type=filter_type,
+                                    rmin=rmin,
+                                    density_location=density_location,
+                                )
+        
+        from soptx.optimization.compliance_objective import ComplianceObjective
+        compliance_objective = ComplianceObjective(analyzer=analyzer)
+
+        from soptx.optimization.volume_constraint import VolumeConstraint
+        volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
+
+
+
+        from soptx.optimization.mma_optimizer import MMAOptimizer
+        optimizer = MMAOptimizer(
+                        objective=compliance_objective,
+                        constraint=volume_constraint,
+                        filter=filter_regularization,
+                        options={
+                            'max_iterations': max_iterations,
+                            'change_tolerance': change_tolerance,
+                            'use_penalty_continuation': use_penalty_continuation,
+                        }
+                    )
+
+        design_variables_num = d.shape[0]
+        constraints_num = 1
+        optimizer.options.set_advanced_options(
+                                m=constraints_num,
+                                n=design_variables_num,
+                                xmin=bm.zeros((design_variables_num, 1)),
+                                xmax=bm.ones((design_variables_num, 1)),
+                                a0=1,
+                                a=bm.zeros((constraints_num, 1)),
+                                c=1e4 * bm.ones((constraints_num, 1)),
+                                d=bm.zeros((constraints_num, 1)),
+                            ) 
+        
+        fe_tspace = lagrange_fem_analyzer.tensor_space
+        fe_dofs = fe_tspace.number_of_global_dofs()
+        
+        self._log_info(f"开始密度拓扑优化, "
+                    f"分析数值方法={analyzer.__class__.__name__}, "
+                    f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
+                    f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
+                    f"离散方法={analysis_method}, "
+                    f"网格类型={mesh_type}, 密度类型={density_location}, " 
+                    f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+                    f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
+                    f"优化算法={optimizer_algorithm} , " 
+                    f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+        
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test_subsec5_6_2_")
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        
+        save_optimization_history(mesh=design_variable_mesh, 
+                                history=history, 
+                                density_location=density_location,
+                                save_path=str(save_path))
+        plot_optimization_history(history, save_path=str(save_path))
+
+
+        return rho_opt, history
+    
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test')
+    test.run.set('test_subsec5_6_2_bearing_device_2d')
 
     rho_opt, history = test.run()
