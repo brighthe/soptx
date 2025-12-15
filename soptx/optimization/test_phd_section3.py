@@ -319,7 +319,7 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
     
 
-    @run.register('test_subsec_3_6_3_half_mbb_right_2d')
+    @run.register('test_subsec3_6_3_half_mbb_right_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 60.0, 0, 20.0]
         P = -1.0
@@ -652,12 +652,12 @@ class DensityTopOptTest(BaseLogged):
         mesh_type = 'uniform_quad'
 
         # 'element', 'node'
-        density_location = 'node'
+        density_location = 'element'
         volume_fraction = 0.3
 
-        space_degree = 1
-        # integration_order = space_degree + 1 # 单元密度 + 张量网格
-        integration_order = space_degree + 2   # 节点密度 + 张量网格
+        space_degree = 4
+        integration_order = space_degree + 1 # 单元密度 + 张量网格
+        # integration_order = space_degree + 2   # 节点密度 + 张量网格
 
         # 插值模型        
         penalty_factor = 3.0

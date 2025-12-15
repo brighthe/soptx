@@ -203,14 +203,14 @@ class FilterMatrixBuilder:
         SRTO - 设计变量 = 单元密度中心点
         MRTO - 设计变量 = 密度子单元中心点 - 要求设计变量网格 = 密度子单元网格
 
-        Parameters:
-        -----------
-        rmin: 过滤半径
+        Parameters
+        ----------
+        rmin: 过滤半径 (物理长度尺度), 与 hx, hy 同单位
         nx, ny : 设计变量网格剖分数
         hx, hy : 设计变量网格单元大小 
             
-        Returns:
-        --------
+        Returns
+        -------
         H: 过滤矩阵
         """
         # 单元中心坐标需要偏移半个网格
@@ -335,12 +335,8 @@ class FilterMatrixBuilder:
                     spshape=(N_total, N_total)
                 )
         
-        #! PyTorch 后端对 COOTensor 的支持更好
-        # Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
-        
         H = H.tocsr()
         H = H.device_put(self._device)
-        # Hs = bm.device_put(Hs, self._device)
         
         if enable_timing:
             t.send('矩阵构建')

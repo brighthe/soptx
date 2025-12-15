@@ -223,7 +223,7 @@ class MBBBeam2d(PDEBase):
         - 右下角滑移支座 (u_y = 0)
 
     载荷条件:
-        - 上中点施加向下的集中载荷 p = -2 [N]
+        - 上中点施加向下的集中载荷 P = -2 [N]
     
     材料参数:
         E = 1 [MPa], nu = 0.3
@@ -232,7 +232,7 @@ class MBBBeam2d(PDEBase):
     def __init__(self,
                 domain: List[float] = [0.0, 60.0, 0.0, 10.0],
                 mesh_type: str = 'uniform_quad',
-                p: float = -2.0,  # N
+                P: float = -2.0,  # N
                 E: float = 1.0,   # MPa
                 nu: float = 0.3,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
@@ -243,7 +243,7 @@ class MBBBeam2d(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type,
                          enable_logging=enable_logging, logger_name=logger_name)
 
-        self._p = p
+        self._P = P
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
@@ -267,9 +267,9 @@ class MBBBeam2d(PDEBase):
         return self._nu
 
     @property
-    def p(self) -> float:
+    def P(self) -> float:
         """获取集中力"""
-        return self._p
+        return self._P
 
 
     #######################################################################################################################
@@ -383,7 +383,7 @@ class MBBBeam2d(PDEBase):
         """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._p) 
+        val = bm.set_at(val, (..., 1), self._P) 
         
         return val
     
