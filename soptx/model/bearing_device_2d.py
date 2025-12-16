@@ -25,7 +25,7 @@ class HalfBearingDeviceLeft2d(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 40],  
                 mesh_type: str = 'uniform_quad',
-                t: float = -1.8e-3, # N/mm
+                t: float = -1.8e-2, # N/mm
                 E: float = 1,      # MPa
                 nu: float = 0.5,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'

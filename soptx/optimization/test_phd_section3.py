@@ -495,25 +495,28 @@ class DensityTopOptTest(BaseLogged):
                         )
 
         nx, ny = 120, 40
-        mesh_type = 'uniform_quad'
+        mesh_type = 'uniform_crisscross_tri'
 
-        space_degree = 1
-        # integration_order = space_degree + 1 # 单元密度 + 四边形网格
-        integration_order = space_degree + 2 # 节点密度 + 四边形网格
+        space_degree = 2
+        integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
+        # integration_order = space_degree*2 + 3 # 节点密度 + 四边形网格
 
         volume_fraction = 0.35
+        interpolation_method = 'msimp'
         penalty_factor = 3.0
+        void_youngs_modulus = 1e-9
 
         # 'element', 'node'
-        density_location = 'node'
+        density_location = 'element'
         relative_density = volume_fraction
 
         # 'standard', 'voigt'
         assembly_method = 'standard'
 
+        optimizer_algorithm = 'mma'
         max_iterations = 500
         change_tolerance = 1e-2
-        use_penalty_continuation = False
+        use_penalty_continuation = True
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 2.4
@@ -532,10 +535,10 @@ class DensityTopOptTest(BaseLogged):
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
                                     density_location=density_location,
-                                    interpolation_method='msimp',
+                                    interpolation_method=interpolation_method,
                                     options={
                                         'penalty_factor': penalty_factor,
-                                        'void_youngs_modulus': 1e-9,
+                                        'void_youngs_modulus': void_youngs_modulus,
                                         'target_variables': ['E']
                                     },
                                 )
@@ -587,23 +590,30 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
-        from soptx.optimization.oc_optimizer import OCOptimizer
-        optimizer = OCOptimizer(
-                            objective=compliance_objective,
-                            constraint=volume_constraint,
-                            filter=filter_regularization,
-                            options={
-                                'max_iterations': max_iterations,
-                                'change_tolerance': change_tolerance,
-                            }
-                        )
+        from soptx.optimization.mma_optimizer import MMAOptimizer
+        optimizer = MMAOptimizer(
+                        objective=compliance_objective,
+                        constraint=volume_constraint,
+                        filter=filter_regularization,
+                        options={
+                            'max_iterations': max_iterations,
+                            'change_tolerance': change_tolerance,
+                            'use_penalty_continuation': use_penalty_continuation,
+                        }
+                    )
+
+        design_variables_num = d.shape[0]
+        constraints_num = 1
         optimizer.options.set_advanced_options(
-                                    move_limit=0.2,
-                                    damping_coef=0.5,
-                                    initial_lambda=1e9,
-                                    bisection_tol=1e-3,
-                                    design_variable_min=1e-9
-                                )
+                                m=constraints_num,
+                                n=design_variables_num,
+                                xmin=bm.zeros((design_variables_num, 1)),
+                                xmax=bm.ones((design_variables_num, 1)),
+                                a0=1,
+                                a=bm.zeros((constraints_num, 1)),
+                                c=1e4 * bm.ones((constraints_num, 1)),
+                                d=bm.zeros((constraints_num, 1)),
+                            ) 
 
         self._log_info(f"开始密度拓扑优化, "
             f"模型名称={pde.__class__.__name__}, "
@@ -612,7 +622,7 @@ class DensityTopOptTest(BaseLogged):
             f"密度类型={density_location}, " 
             f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
             f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 积分次数={integration_order}, 位移场自由度={analysis_tgdofs}, \n"
-            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
+            f"优化算法={optimizer_algorithm}, 最大迭代次数={max_iterations}, "
             f"设计变量变化收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
@@ -621,7 +631,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec_3_6_4_")
+        save_path = Path(f"{base_dir}/subsec3_6_4_")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 

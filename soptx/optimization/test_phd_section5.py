@@ -332,7 +332,23 @@ class DensityTopOptHuZhangTest(BaseLogged):
                         )
 
         nx, ny = 60, 40
-        mesh_type = 'uniform_quad' 
+        mesh_type = 'uniform_crisscross_tri' 
+
+        # t = -1.8e-2
+        # E, nu = 1, 0.5
+        # domain = [0, 120, 0, 40]
+        # plane_type = 'plane_stress'
+        
+        # from soptx.model.bearing_device_2d import BearingDevice2d
+        # pde = BearingDevice2d(
+        #                     domain=domain,
+        #                     t=t, E=E, nu=nu, 
+        #                     plane_type=plane_type,
+        #                     enable_logging=False
+        #                 )
+
+        # nx, ny = 120, 40
+        # mesh_type = 'uniform_crisscross_tri'
 
         volume_fraction = 0.35
         interpolation_method = 'msimp'
@@ -348,11 +364,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         optimizer_algorithm = 'mma'
         max_iterations = 500
-        change_tolerance = 1e-3
+        change_tolerance = 1e-2
         use_penalty_continuation = True
 
-        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
-        rmin = 2.4
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        rmin = 2.5
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -464,15 +480,16 @@ class DensityTopOptHuZhangTest(BaseLogged):
         fe_dofs = fe_tspace.number_of_global_dofs()
         
         self._log_info(f"开始密度拓扑优化, "
-                    f"分析数值方法={analyzer.__class__.__name__}, "
-                    f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                    f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
-                    f"离散方法={analysis_method}, "
-                    f"网格类型={mesh_type}, 密度类型={density_location}, " 
-                    f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-                    f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, "
-                    f"优化算法={optimizer_algorithm} , " 
-                    f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+                f"分析数值方法={analyzer.__class__.__name__}, "
+                f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"
+                f"杨氏模量={pde.E}, 泊松比={pde.nu}, "
+                f"离散方法={analysis_method}, "
+                f"网格类型={mesh_type}, 密度类型={density_location}, " 
+                f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+                f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={fe_dofs}, \n"
+                f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
+                f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation}, \n" 
+                f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 

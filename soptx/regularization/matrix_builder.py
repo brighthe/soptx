@@ -81,14 +81,14 @@ class FilterMatrixBuilder:
         SRTO - 设计变量 = 单元密度中心点 / 节点密度
         MRTO - 设计变量 = 子单元密度中心点 / 节点密度  - 要求设计变量网格 = 子单元密度网格
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         rmin: 过滤半径
         domain: 计算域的边界, 
         periodic: 各方向是否周期性, 默认为 [False, False, False]
             
-        Returns:
-        --------
+        Returns
+        -------
         H: 过滤矩阵
         Hs: 过滤矩阵行和
         """
@@ -176,20 +176,15 @@ class FilterMatrixBuilder:
                 values=sH[:nnz],
                 spshape=(gdof, gdof)
             )
-        
-        Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
-        
+                
         H = H.tocsr()
         H = H.device_put(self._device)
-        Hs = bm.device_put(Hs, self._device)
         
         if enable_timing:
             t.send('稀疏矩阵构建时间')
             t.send(None)
 
-        return H
-        # return H, Hs
-        
+        return H        
 
     def _compute_weighted_matrix_2d(self,
                                     rmin: float,
