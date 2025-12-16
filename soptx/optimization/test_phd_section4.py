@@ -189,10 +189,13 @@ class DensityTopOptTest(BaseLogged):
         P = -2.0
         plane_type = 'plane_stress' 
 
-        nx, ny = 60, 10
+        # nx, ny = 60, 10
+        # nx, ny = 120, 20
+        # nx, ny = 240, 40
+        nx, ny = 480, 80
         mesh_type = 'uniform_quad'
 
-        space_degree = 4
+        space_degree = 1
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -200,13 +203,14 @@ class DensityTopOptTest(BaseLogged):
         penalty_factor = 3.0
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-        density_location = 'element_multiresolution'
+        density_location = 'element'
+        # sub_density_element = 4
         sub_density_element = 16
 
         relative_density = volume_fraction
 
         # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
-        assembly_method = 'standard_multiresolution'
+        assembly_method = 'standard'
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 500
@@ -214,9 +218,11 @@ class DensityTopOptTest(BaseLogged):
         use_penalty_continuation = True
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
-        rmin = 1.0
+        # rmin = 1.2
+        # rmin = 1.0
         # rmin = 0.75
         # rmin = 0.5
+        rmin = 0.25
 
         from soptx.model.mbb_beam_2d import MBBBeam2d
         pde = MBBBeam2d(
