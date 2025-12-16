@@ -498,14 +498,14 @@ class DensityTopOptTest(BaseLogged):
         mesh_type = 'uniform_quad'
 
         space_degree = 1
-        integration_order = space_degree + 1 # 单元密度 + 四边形网格
-        # integration_order = space_degree + 2 # 节点密度 + 四边形网格
+        # integration_order = space_degree + 1 # 单元密度 + 四边形网格
+        integration_order = space_degree + 2 # 节点密度 + 四边形网格
 
         volume_fraction = 0.35
         penalty_factor = 3.0
 
         # 'element', 'node'
-        density_location = 'element'
+        density_location = 'node'
         relative_density = volume_fraction
 
         # 'standard', 'voigt'
@@ -515,7 +515,7 @@ class DensityTopOptTest(BaseLogged):
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
-        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 2.4
 
         pde.init_mesh.set(mesh_type)

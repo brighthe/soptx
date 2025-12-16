@@ -351,7 +351,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         change_tolerance = 1e-3
         use_penalty_continuation = True
 
-        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
         rmin = 2.4
 
         pde.init_mesh.set(mesh_type)

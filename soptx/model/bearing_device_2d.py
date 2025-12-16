@@ -7,7 +7,6 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
-
 class HalfBearingDeviceLeft2d(PDEBase):
     '''
     轴承装置左半设计域的 PDE 模型
