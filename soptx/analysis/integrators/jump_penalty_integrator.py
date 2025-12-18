@@ -65,7 +65,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         cell2facesign = mesh.cell_to_face_sign()
         cell2dof = space.cell_to_dof()
 
-        face2dof = bm.full((NF, 2*ldof), -1, dtype=bm.int64)
+        # face2dof = bm.full((NF, 2*ldof), -1, dtype=bm.int64)
+        face2dof = bm.zeros((NF, 2*ldof), dtype=bm.int64)
 
         for i in range(TD+1):
             fidx = cell2face[:, i]
@@ -80,6 +81,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
                 face2dof[fidx[L], ldof:2*ldof] = cell2dof[L]
 
         return face2dof[index]
+    
     
     ########################################################################################
     # 变体方法

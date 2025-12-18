@@ -200,13 +200,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         elif p <= GD:
             bform3 = BilinearForm(space_u)
-            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, 
-                                                threshold='internal', 
-                                                method='vector_jump')
-            # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, method='matrix_jump')
+            # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='vector_jump')
+            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='matrix_jump')
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')
-
             K = bmat([[M,   B],
                       [B.T, J]], format='csr')
 

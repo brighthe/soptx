@@ -144,7 +144,6 @@ class HuZhangFEDof2d():
     @note: Only support the simplicial mesh, the order of  
             local edge, face of the mesh is the same as the order of subsimplex.
     """
-    # TODO 
     def __init__(self, mesh: Mesh, p: int, corner: dict=None, use_relaxation: bool=False):
         self.mesh = mesh
         self.p = p
