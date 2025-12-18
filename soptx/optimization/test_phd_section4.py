@@ -195,7 +195,7 @@ class DensityTopOptTest(BaseLogged):
         nx, ny = 480, 80
         mesh_type = 'uniform_quad'
 
-        space_degree = 1
+        space_degree = 8
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -203,9 +203,8 @@ class DensityTopOptTest(BaseLogged):
         penalty_factor = 3.0
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-        density_location = 'element'
-        # sub_density_element = 4
-        sub_density_element = 16
+        density_location = 'element_multiresolution'
+        sub_density_element = 64
 
         relative_density = volume_fraction
 
@@ -213,7 +212,7 @@ class DensityTopOptTest(BaseLogged):
         assembly_method = 'standard'
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 500
+        max_iterations = 1000
         change_tolerance = 1e-3
         use_penalty_continuation = True
 

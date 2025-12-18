@@ -228,11 +228,20 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         mesh_u = getattr(space, 'mesh', None)
         s_space_u = space.scalar_space
         GD = mesh_u.geo_dimension()
-        q = s_space_u.p+3 if self._q is None else self._q
+        # TODO 原高阶 q 作为 fallback 保留
+        default_q = s_space_u.p+3 if self._q is None else self._q
     
         # 单元密度多分辨率: (NC, n_sub); 节点密度多分辨率: (NC, n_sub, NQ)
         coef = self._coef
         NC, n_sub = coef.shape[0], coef.shape[1]
+
+        if 4 <= n_sub <= 9:
+            q = 4
+        elif n_sub >= 16:
+            # TODO 2 不对, 3 对, 5 对
+            q = 3
+        else:
+            q = default_q
         
         # 计算位移单元积分点处的重心坐标
         qf_e = mesh_u.quadrature_formula(q)
@@ -456,7 +465,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         coef = self._coef
 
         if coef is None:
-
             D = D0[0, 0] # (NS, NS)
 
             if isinstance(mesh, SimplexMesh):
@@ -466,7 +474,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         
         # 单元密度的情况
         elif coef.shape == (NC, ):
-            
             D_base = D0[0, 0] # (NS, NS)
             D = bm.einsum('c, kl -> ckl', coef, D_base) # (NC, NS, NS)
             
@@ -477,7 +484,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                     
         # 节点密度的情况
         elif coef.shape == (NC, NQ):
-            
             D = bm.einsum('cq, ijkl -> cqkl', coef, D0) # (NC, NQ, NS, NS)
             
             if isinstance(mesh, SimplexMesh):
@@ -486,8 +492,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.einsum('q, cq, cqki, cqkl, cqlj -> cij', ws, detJ, B, D, B)
         
         else:
-
-
             raise NotImplementedError
 
         return KK
@@ -498,11 +502,19 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         mesh_u = getattr(space, 'mesh', None)
         s_space_u = space.scalar_space
         GD = mesh_u.geo_dimension()
-        q = s_space_u.p+3 if self._q is None else self._q
+        # TODO 原高阶 q 作为 fallback 保留
+        default_q = s_space_u.p+3 if self._q is None else self._q
        
         # 单元密度多分辨率: (NC, n_sub); 节点密度多分辨率: (NC, n_sub, NQ)
         coef = self._coef
         NC, n_sub = coef.shape[0], coef.shape[1]
+
+        if 4 <= n_sub <= 9:
+            q = 3
+        elif n_sub >= 16:
+            q = 2
+        else:
+            q = default_q
         
         # 计算位移单元积分点处的重心坐标
         qf_e = mesh_u.quadrature_formula(q)
