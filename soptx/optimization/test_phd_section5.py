@@ -26,31 +26,33 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # plane_type = 'plane_strain'
         # pde = HZmfemZeroShearDirichlet(lam=lam, mu=mu, plane_type=plane_type)
 
-        #* 算例 - 纯位移边界条件 - 一般剪切应力
+        #* 算例 - 纯位移边界条件 
         # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearDirichlet
         # lam, mu = 1.0, 0.5
         # pde = HZmfemGeneralShearDirichlet(lam=lam, mu=mu)
 
         #* 算例 - 混合边界条件 - 零剪切应力
-        from soptx.model.linear_elastic_2d_hzmfem import HZmfemZeroShearMix
-        lam, mu = 1.0, 0.5
-        pde = HZmfemZeroShearMix(lam=lam, mu=mu)
-
-        #* 算例 - 混合边界条件 (不满足角点相容性条件)
-        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemInconsistentMix
+        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemZeroShearMix
         # lam, mu = 1.0, 0.5
-        # pde = HZmfemInconsistentMix(lam=lam, mu=mu)
+        # pde = HZmfemZeroShearMix(lam=lam, mu=mu)
 
-        pde.init_mesh.set('uniform_crisscross_tri')
-        nx, ny = 2, 2
-        analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+        #* 算例 - 混合边界条件 - 一般剪切应力
+        from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix
+        lam, mu = 1.0, 0.5
+        pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
+
+        #* 第一类网格
+        pde.init_mesh.set('union_crisscross')
+        analysis_mesh = pde.init_mesh()
         node = analysis_mesh.entity('node')
-        analysis_mesh.meshdata['corner'] = pde.mark_corners(node)
+        analysis_mesh.meshdata['corner'] = node[:-1]
 
-        # pde.init_mesh.set('union_crisscross')
-        # analysis_mesh = pde.init_mesh()
+        #* 第二类网格
+        # pde.init_mesh.set('uniform_crisscross_tri')
+        # nx, ny = 2, 2
+        # analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
         # node = analysis_mesh.entity('node')
-        # analysis_mesh.meshdata['corner'] = node[:-1]
+        # analysis_mesh.meshdata['corner'] = pde.mark_corners(node)
 
         # import matplotlib.pyplot as plt
         # fig = plt.figure()
@@ -71,7 +73,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         space_degree = 3
         integration_order = space_degree*2 + 2
-        use_relaxation = True
+        use_relaxation = False
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
                        f"网格类型={analysis_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}, "
                        f"是否使用松弛={use_relaxation}")

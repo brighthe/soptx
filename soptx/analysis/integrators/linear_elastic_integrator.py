@@ -626,7 +626,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         if isinstance(mesh, SimplexMesh):
             glambda_x = mesh.grad_lambda()   # (NC, LDOF, GD)
             S = bm.einsum('q, qik, qjl -> ijkl', ws, gphi_lambda, gphi_lambda)  # (LDOF, LDOF, BC, BC)
-            return cm, bcs, glambda_x, S
+            return cm, glambda_x, S
         
         elif isinstance(mesh, StructuredMesh):
             J = mesh.jacobi_matrix(bcs)[:, 0, ...]         # (NC, GD, GD)
@@ -634,7 +634,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             G = bm.linalg.inv(G)                           # (NC, GD, GD)
             JG = bm.einsum('ckm, cmn -> ckn', J, G)        # (NC, GD, GD)
             S = bm.einsum('qim, qjn, q -> ijmn', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, BC, BC)
-            return cm, bcs, ws, JG, S
+            return cm, ws, JG, S
         
         else:
             J = mesh.jacobi_matrix(bcs)                   # (NC, NQ, GD, GD)
@@ -644,7 +644,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             JG = bm.einsum('cqkm, cqmn -> cqkn', J, G)    # (NC, NQ, GD, GD)
             S = bm.einsum('qim, qjn, q -> ijmnq', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, GD, GD, NQ)
         
-            return cm, bcs, ws, detJ, JG, S
+            return cm, ws, detJ, JG, S
 
 
     @assembly.register('fast')
@@ -666,21 +666,21 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             raise NotImplementedError("The fast assembly currently only supports")
         
         if isinstance(mesh, SimplexMesh):
-            cm, bcs, glambda_x, S = self.fetch_fast_assembly(space)
+            cm, glambda_x, S = self.fetch_fast_assembly(space)
             A_xx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 0], cm) # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 1], cm)
             A_xy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 1], cm)
             A_yx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 0], cm)
 
         elif isinstance(mesh, StructuredMesh):
-            cm, bcs, JG, S = self.fetch_fast_assembly(space)
+            cm, JG, S = self.fetch_fast_assembly(space)
             A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 0], cm)  # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 1], cm) 
             A_xy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 1], cm)  
             A_yx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 0], cm)  
         
         else:
-            cm, bcs, detJ, JG, S = self.fetch_fast_assembly(space)
+            cm, detJ, JG, S = self.fetch_fast_assembly(space)
             A_xx = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 0, :], detJ) # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 1, :], JG[..., 1, :], detJ) 
             A_xy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 1, :], detJ) 

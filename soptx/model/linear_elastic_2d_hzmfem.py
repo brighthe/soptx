@@ -219,6 +219,7 @@ class HZmfemGeneralShearDirichlet(PDEBase):
         """应力解析解散度 ∇·σ"""
         return -self.body_force(points)
 
+
 class HZmfemZeroShearDirichlet(PDEBase):
     """
     二维线弹性 (胡张混合元) —— 零剪切应力 + 纯位移边界条件模型
@@ -424,9 +425,6 @@ class HZmfemZeroShearDirichlet(PDEBase):
 class HZmfemZeroShearMix(PDEBase):
     """
     二维线弹性 (胡张混合元) —— 零剪切应力 + 混合边界条件
-
-    材料参数：
-        λ = 0.125, μ = 0.125 
     
     解析位移:
         u(x, y) = [ sin(πx)sin(πy) + x, 
@@ -653,9 +651,12 @@ class HZmfemGeneralShearMix(PDEBase):
     """
     二维线弹性 (胡张混合元) —— 一般剪切应力 + 混合边界条件
 
-    解析位移 (三角函数):
+    解析位移:
         u(x, y) = [ sin(πx/2) · sin(πy),
                    -2 sin(πx) · (sin(πy/2)-y) ]^T
+
+    解析应力:
+        
 
     体力密度: 
         b(x, y) = [ π^2( sin(πx/2) sin(πy) + (3/2) cos(πx) cos(πy/2) ) - 2π(λ+μ) cos(πx),
