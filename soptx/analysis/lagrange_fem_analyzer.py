@@ -10,7 +10,7 @@ from fealpy.sparse import CSRTensor, COOTensor
 
 from ..interpolation.linear_elastic_material import LinearElasticMaterial
 from ..interpolation.interpolation_scheme import MaterialInterpolationScheme
-from .integrators.linear_elastic_integrator import LinearElasticIntegrator
+from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.analysis.integrators.source_integrator import SourceIntegrator
 from soptx.model.pde_base import PDEBase
 from ..utils.base_logged import BaseLogged
@@ -23,7 +23,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
                 integration_order: int = 4,
-                assembly_method: Literal['standard', 'fast'] = 'standard',
+                assembly_method: Literal['standard', 'voigt', 'fast'] = 'standard',
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 interpolation_scheme: Optional[MaterialInterpolationScheme] = None,
@@ -54,9 +54,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._GD = self._mesh.geo_dimension()
 
+        self._scalar_space = LagrangeFESpace(mesh, p=self._space_degree, ctype='C')
         #* (GD, -1): dof_priority (x0, ..., xn, y0, ..., yn)
         #* (-1, GD): gd_priority (x0, y0, ..., xn, yn)
-        self._scalar_space = LagrangeFESpace(mesh, p=self._space_degree, ctype='C')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
         # 缓存的矩阵和向量
@@ -137,6 +137,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def assemble_stiff_matrix(self, 
                             rho_val: Optional[Union[Function, TensorLike]] = None,
+                            enable_timing: bool = False, 
                         ) -> Union[CSRTensor, COOTensor]:
         """组装全局刚度矩阵
 
@@ -155,6 +156,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Union[CSRTensor, COOTensor]
             组装后的刚度矩阵
         """
+        t = None
+        if enable_timing:
+            t = timer(f"双线性型组装内部")
+            next(t)
 
         if self._topopt_algorithm is None:
             if rho_val is not None:
@@ -180,17 +185,27 @@ class LagrangeFEMAnalyzer(BaseLogged):
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
             self._log_error(error_msg)
 
+        if enable_timing:
+            t.send('预备')
+
         # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
         integrator = LinearElasticIntegrator(material=self._material,
                                             coef=coef,
                                             q=self._integration_order,
                                             method=self._assembly_method)
+        # TODO integrator 应该在哪里创建
+        integrator.keep_data(True)
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(integrator)
         K = bform.assembly(format='csr')
 
+
         self._K = K
+
+        if enable_timing:
+            t.send('组装')
+            t.send(None)
 
         return K
     
@@ -600,7 +615,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     ) -> Function:
         t = None
         if enable_timing:
-            t = timer(f"分析阶段")
+            t = timer(f"分析求解位移阶段")
             next(t)
 
         from fealpy.solver import spsolve
@@ -646,8 +661,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         uh[:] = spsolve(K, F, solver=solver_type)
         if enable_timing:
             t.send('求解')
-
-        if enable_timing:
             t.send(None)
 
         return uh

@@ -106,19 +106,21 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
     """灵敏度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
-                # Hs: TensorLike, 
                 mesh: HomogeneousMesh, 
-                density_location: Literal['element', 'node'], 
+                density_location: Literal['element', 'node', 'element_multiresolution'], 
+                enable_logging: bool = False,
+                logger_name: Optional[str] = None
             ) -> None:
         
+        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        
         self._H = H
-        # self._Hs = Hs
         self._mesh = mesh
         self._density_location = density_location
 
         # --- 预计算测度权重 ---
-        if self._density_location == 'element':
-            # 单元密度表征：权重即为单元体积/面积
+        if self._density_location in ['element', 'element_multiresolution']:
+            # 单元密度表征：权重即为设计变量网格单元体积/面积
             # shape: (NC, )
             self._measure_weight = self._mesh.entity_measure('cell')
             
@@ -137,7 +139,8 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
             self._measure_weight = bm.add_at(nm, cell2node.reshape(-1), val)
         
         else:
-            raise ValueError(f"Unsupported density_location: {self._density_location}")
+            error_msg = f"Unsupported density_location: {self._density_location}"
+            self._log_error(error_msg)
 
         # 预计算卷积归一化因子
         self._Hs = self._H.matmul(self._measure_weight)
@@ -163,12 +166,39 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
         if self._density_location in ['element', 'node']:
             physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
 
+        elif self._density_location == 'element_multiresolution':
+            from soptx.analysis.utils import reshape_multiresolution_data_inverse
+            n_sub = physical_density.shape[-1]
+            n_sub_x = int(math.sqrt(n_sub))
+            n_sub_y = int(math.sqrt(n_sub))
+            nx_displacement = int(self._mesh.meshdata['nx'] / n_sub_x)
+            ny_displacement = int(self._mesh.meshdata['ny'] / n_sub_y)
+            sub_physical_density = reshape_multiresolution_data_inverse(
+                                                    nx=nx_displacement,
+                                                    ny=ny_displacement,
+                                                    data_flat=design_variable, # 注意这里直接使用 dv，不做卷积
+                                                    n_sub=n_sub
+                                                ) 
+            physical_density[:] = bm.set_at(physical_density, slice(None), sub_physical_density)
+        
+        else:
+            error_msg = f"Unsupported density_location: {self._density_location}"
+            self._log_error(error_msg)
+        
         return physical_density
     
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
+        
+        if self._density_location == 'element_multiresolution':
+            # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
+            n_sub = obj_grad_rho.shape[-1]
+            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+            obj_grad_rho = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=obj_grad_rho)  # (NC * n_sub, )
+
         # 1. 准备源项
         weighted_source = design_variable * obj_grad_rho / self._measure_weight
         # 2. 卷积
@@ -183,55 +213,24 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
 
         return obj_grad_dv
 
-        # if self._density_location in ['element']:
-        #     # obj_grad_rho.shape = (NC, )
-        #     cm = self._mesh.entity_measure('cell')
-
-        #     weighted_obj_grad_rho = design_variable[:] * obj_grad_rho / cm
-        #     numerator = self._H.matmul(weighted_obj_grad_rho)
-
-        #     epsilon = 1e-3
-        #     stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), design_variable)
-        #     denominator = (stability_factor / cm) * self._Hs
-
-        #     obj_grad_dv = numerator / denominator
-
-        #     return obj_grad_dv
-        
-        # else:
-        #     raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
-
     def filter_constraint_sensitivities(self, 
                                     design_variable: Union[TensorLike, Function],
                                     con_grad_rho: TensorLike
                                 ) -> TensorLike:
         
-        # 对于简单的 OC 算法，体积约束不需要过滤
-        con_grad_dv = bm.copy(con_grad_rho)
+        #* 对于简单的 OC 算法，体积约束不需要过滤
+        if self._density_location == 'element_multiresolution':
+            n_sub = con_grad_rho.shape[-1]
+            n_sub_x = int(math.sqrt(n_sub))
+            nx_displacement = int(self._mesh.meshdata['nx'] / n_sub_x)
+            ny_displacement = int(self._mesh.meshdata['ny'] / n_sub_x)
+            con_grad_dv = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=con_grad_rho) # (NC * n_sub, )
+
+        else:
+            con_grad_dv = bm.copy(con_grad_rho)
 
         return con_grad_dv
-    
-        # if self._density_location == 'element':
-        #     # 对于通用的 MMA 算法，体积约束越需要过滤
-        #     # cell_measure = self._integration_weights
 
-        #     # weighted_con_grad = rho_Phys[:] * con_grad / cell_measure
-        #     # numerator = self._H.matmul(weighted_con_grad)
-
-        #     # epsilon = 1e-3
-        #     # stability_factor = bm.maximum(bm.tensor(epsilon, dtype=bm.float64), rho_Phys)
-        #     # denominator = (stability_factor / cell_measure) * self._Hs
-
-        #     # con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
-
-        #     # 对于简单的 OC 算法，体积约束不需要过滤
-        #     con_grad_dv = bm.copy(con_grad_rho)
-
-        #     return con_grad_dv
-
-        # else:
-        #     raise NotImplementedError("Sensitivity filtering only supports 'element' density location.")
- 
 
 class DensityStrategy(_FilterStrategy, BaseLogged):
     """密度过滤策略"""

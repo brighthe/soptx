@@ -24,13 +24,12 @@ class DensityTopOptTest(BaseLogged):
         plane_type = '3d'
 
         nx, ny, nz = 60, 20, 4
-        mesh_type = 'uniform_hex'
-        # mesh_type = 'uniform_tet'
+        # mesh_type = 'uniform_hex'
+        mesh_type = 'uniform_tet'
 
         space_degree = 2
-        integration_order = space_degree + 1 # 单元密度 + 六面体网格
-        # integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
-        # integration_order = space_degree + 2 # 节点密度 + 六面体网格
+        # integration_order = space_degree + 1 # 单元密度 + 六面体网格
+        integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
 
         volume_fraction = 0.3
         penalty_factor = 3.0
@@ -43,8 +42,8 @@ class DensityTopOptTest(BaseLogged):
         assembly_method = 'fast'
 
         max_iterations = 500
-        change_tolerance = 1e-2
-        use_penalty_continuation = False
+        change_tolerance = 1e-3
+        use_penalty_continuation = True
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.5
@@ -124,32 +123,37 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
-
-        from soptx.optimization.oc_optimizer import OCOptimizer
-        optimizer = OCOptimizer(
-                            objective=compliance_objective,
-                            constraint=volume_constraint,
-                            filter=filter_regularization,
-                            options={
-                                'max_iterations': max_iterations,
-                                'change_tolerance': 1e-2,
-                            }
-                        )
+        from soptx.optimization.mma_optimizer import MMAOptimizer
+        optimizer = MMAOptimizer(
+                        objective=compliance_objective,
+                        constraint=volume_constraint,
+                        filter=filter_regularization,
+                        options={
+                            'max_iterations': max_iterations,
+                            'change_tolerance': change_tolerance,
+                            'use_penalty_continuation': use_penalty_continuation,
+                        }
+                    )
+        design_variables_num = d.shape[0]
+        constraints_num = 1
         optimizer.options.set_advanced_options(
-                                    move_limit=0.2,
-                                    damping_coef=0.5,
-                                    initial_lambda=1e9,
-                                    bisection_tol=1e-3,
-                                    design_variable_min=1e-9
-                                )
+                                m=constraints_num,
+                                n=design_variables_num,
+                                xmin=bm.zeros((design_variables_num, 1)),
+                                xmax=bm.ones((design_variables_num, 1)),
+                                a0=1,
+                                a=bm.zeros((constraints_num, 1)),
+                                c=1e4 * bm.ones((constraints_num, 1)),
+                                d=bm.zeros((constraints_num, 1)),
+                            )
 
         self._log_info(f"开始密度拓扑优化, "
             f"模型名称={pde.__class__.__name__}, "
             f"体积约束={volume_fraction}, "
-            f"网格类型={mesh_type},  " 
-            f"密度类型={density_location}, " 
-            f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 积分次数={integration_order}, 位移场自由度={analysis_tgdofs}, \n"
+            f"网格类型={displacement_mesh.__class__.__name__},  " 
+            f"密度类型={density_location}, "
+            f"空间次数={space_degree}, 积分次数={integration_order}, 位移自由度总数={analysis_tgdofs}, \n"
+            f"矩阵组装方法={assembly_method}, \n"
             f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
             f"设计变量变化收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")

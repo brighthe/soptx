@@ -3,7 +3,7 @@ from typing import Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Index, _S
-from fealpy.mesh import HomogeneousMesh, SimplexMesh, StructuredMesh
+from fealpy.mesh import HomogeneousMesh, SimplexMesh, StructuredMesh, TensorMesh
 from fealpy.functionspace.space import FunctionSpace, Function
 from fealpy.functionspace.tensor_space import TensorFunctionSpace
 from fealpy.decorator.variantmethod import variantmethod
@@ -11,6 +11,8 @@ from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 from fealpy.fem.utils import LinearSymbolicIntegration
 
 from ...interpolation.linear_elastic_material import LinearElasticMaterial
+
+from soptx.utils import timer
 
 class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     """The linear elastic integrator for function spaces based on homogeneous meshes."""
@@ -29,13 +31,13 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         self._q = q
         self._index = index
         
+        # 设置默认组装方法
         self.assembly.set(method)
 
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
         return space.cell_to_dof()[self._index]
     
-
     ########################################################################################
     # 变体方法
     ########################################################################################
@@ -68,10 +70,21 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         return cm, bcs, ws, gphi, detJ
 
     @variantmethod('standard')
-    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+    def assembly(self, 
+                space: TensorFunctionSpace, 
+                enable_timing: bool = False
+            ) -> TensorLike:
+        t = None
+        if enable_timing:
+            t = timer(f"矩阵组装")
+            next(t)
+
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
         cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
+
+        if enable_timing:
+            t.send('缓存部分')
 
         NC = mesh.number_of_cells()
         GD = mesh.geo_dimension()
@@ -219,6 +232,10 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_23)
                 KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_31)
                 KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_32)
+
+        if enable_timing:
+            t.send('组装部分')
+            t.send(None)
 
         return KK
     
@@ -424,7 +441,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         return KK
 
-
     @enable_cache
     def fetch_voigt_assembly(self, space: TensorFunctionSpace):
         index = self._index
@@ -450,7 +466,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             detJ = bm.abs(bm.linalg.det(J))
 
         return cm, ws, bcs, gphi, detJ
-
 
     @assembly.register('voigt')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
@@ -605,10 +620,9 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 
             return KK
 
-
     @enable_cache
     def fetch_fast_assembly(self, space: TensorFunctionSpace):
-        index = self.index
+        index = self._index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
     
@@ -618,7 +632,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                                "not a subclass of HomoMesh.")
     
         cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self.q is None else self.q
+        q = scalar_space.p+3 if self._q is None else self._q
         qf = mesh.quadrature_formula(q)
         bcs, ws = qf.get_quadrature_points_and_weights()
         gphi_lambda = scalar_space.grad_basis(bcs, index=index, variable='u')    # (NQ, LDOF, BC)
@@ -628,13 +642,17 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             S = bm.einsum('q, qik, qjl -> ijkl', ws, gphi_lambda, gphi_lambda)  # (LDOF, LDOF, BC, BC)
             return cm, glambda_x, S
         
-        elif isinstance(mesh, StructuredMesh):
-            J = mesh.jacobi_matrix(bcs)[:, 0, ...]         # (NC, GD, GD)
+        elif isinstance(mesh, TensorMesh):
+            #TODO 仅仅支持结构四边形网格
+            J = mesh.jacobi_matrix(bcs)                    # (NC, NQ, GD, GD)
+            if not bm.allclose(J[:, 0, ...], J[:, -1, ...]):  
+                raise ValueError("雅可比矩阵 J 在积分点上不恒定, 无法使用快速组装. 请使用传统组装或检查网格类型")
+            J = J[:, 0, ...]                               # (NC, GD, GD)
             G = mesh.first_fundamental_form(J)             # (NC, GD, GD)
             G = bm.linalg.inv(G)                           # (NC, GD, GD)
             JG = bm.einsum('ckm, cmn -> ckn', J, G)        # (NC, GD, GD)
             S = bm.einsum('qim, qjn, q -> ijmn', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, BC, BC)
-            return cm, ws, JG, S
+            return cm, JG, S
         
         else:
             J = mesh.jacobi_matrix(bcs)                   # (NC, NQ, GD, GD)
@@ -644,11 +662,17 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             JG = bm.einsum('cqkm, cqmn -> cqkn', J, G)    # (NC, NQ, GD, GD)
             S = bm.einsum('qim, qjn, q -> ijmnq', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, GD, GD, NQ)
         
-            return cm, ws, detJ, JG, S
-
+            return cm, detJ, JG, S
 
     @assembly.register('fast')
-    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+    def assembly(self, 
+                space: TensorFunctionSpace,
+                enable_timing: bool = True
+                ) -> TensorLike:
+        t = None
+        if enable_timing:
+            t = timer(f"矩阵组装")
+            next(t)
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
                 
@@ -667,12 +691,15 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         
         if isinstance(mesh, SimplexMesh):
             cm, glambda_x, S = self.fetch_fast_assembly(space)
+            if enable_timing:
+                t.send('缓存部分')
             A_xx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 0], cm) # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 1], cm)
             A_xy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 1], cm)
             A_yx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 0], cm)
 
-        elif isinstance(mesh, StructuredMesh):
+        elif isinstance(mesh, TensorMesh):
+            #TODO 仅仅支持结构四边形网格
             cm, JG, S = self.fetch_fast_assembly(space)
             A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 0], cm)  # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 1], cm) 
@@ -685,7 +712,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             A_yy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 1, :], JG[..., 1, :], detJ) 
             A_xy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 1, :], detJ) 
             A_yx = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 1, :], JG[..., 0, :], detJ) 
-        
 
         if GD == 3:
             if isinstance(mesh, SimplexMesh):
@@ -695,7 +721,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 A_zx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 0], cm)
                 A_zy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 1], cm)
             
-            elif isinstance(mesh, StructuredMesh):
+            elif isinstance(mesh, TensorMesh):
+                #TODO 仅仅支持结构四边形网格
                 A_zz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 2], cm)
                 A_xz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 2], cm)
                 A_yz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 2], cm)
@@ -792,83 +819,11 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_31)
                 KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_32)
 
+        if enable_timing:
+            t.send('组装部分')
+            t.send(None)
+
         return KK
-
-        #         if space.dof_priority:
-        #             # Fill the diagonal part
-        #             KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), 
-        #                             D00 * A_xx + D22 * A_yy)
-        #             KK = bm.set_at(KK, (slice(None), slice(ldof, KK.shape[1]), slice(ldof, KK.shape[1])), 
-        #                             D00 * A_yy + D22 * A_xx)
-
-        #             # Fill the off-diagonal part
-        #             KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, KK.shape[1])), 
-        #                         D01 * A_xy + D22 * A_yx)
-        #             KK = bm.set_at(KK, (slice(None), slice(ldof, KK.shape[1]), slice(0, ldof)), 
-        #                         D01 * A_yx + D22 * A_xy)
-        #         else:
-        #             # Fill the diagonal part
-        #             KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-        #                         D00 * A_xx + D22 * A_yy)
-        #             KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-        #                         D00 * A_yy + D22 * A_xx)
-
-        #             # Fill the off-diagonal part
-        #             KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-        #                         D01 * A_xy + D22 * A_yx)
-        #             KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-        #                         D01 * A_yx + D22 * A_xy)
-        # else:
-        #     D00 = D[..., 0, 0, None]  # 2μ + λ
-        #     D01 = D[..., 0, 1, None]  # λ
-        #     D55 = D[..., 5, 5, None]  # μ
-
-        #     if space.dof_priority:
-        #         # Fill the diagonal part
-        #         KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), 
-        #                         D00 * A_xx + D55 * A_yy + D55 * A_zz)
-        #         KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), 
-        #                         D00 * A_yy + D55 * A_xx + D55 * A_zz)
-        #         KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), 
-        #                         D00 * A_zz + D55 * A_xx + D55 * A_yy)
-
-        #         # Fill the off-diagonal part
-        #         KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), 
-        #                         D01 * A_xy + D55 * A_yx)
-        #         KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), 
-        #                         D01 * A_xz + D55 * A_zx)
-        #         KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), 
-        #                         D01 * A_yx + D55 * A_xy)
-        #         KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(2 * ldof, None)), 
-        #                         D01 * A_yz + D55 * A_zy)
-        #         KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(0, ldof)), 
-        #                         D01 * A_zx + D55 * A_xz)
-        #         KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(ldof, 2 * ldof)), 
-        #                         D01 * A_zy + D55 * A_yz)
-        #     else:
-        #         # Fill the diagonal part
-        #         KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-        #                         (2 * D55 + D01) * A_xx + D55 * (A_yy + A_zz))
-        #         KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-        #                         (2 * D55 + D01) * A_yy + D55 * (A_xx + A_zz))
-        #         KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-        #                         (2 * D55 + D01) * A_zz + D55 * (A_xx + A_yy))
-
-        #         # Fill the off-diagonal
-        #         KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-        #                         D01 * A_xy + D55 * A_yx)
-        #         KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-        #                         D01 * A_xz + D55 * A_zx)
-        #         KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-        #                         D01 * A_yx + D55 * A_xy)
-        #         KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-        #                         D01 * A_yz + D55 * A_zy)
-        #         KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-        #                         D01 * A_zx + D55 * A_xz)
-        #         KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-        #                         D01 * A_zy + D55 * A_yz)
-
-        # return KK
 
     @enable_cache
     def fetch_symbolic_assembly(self, space: TensorFunctionSpace) -> TensorLike:
