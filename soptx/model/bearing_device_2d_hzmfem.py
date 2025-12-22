@@ -9,7 +9,7 @@ from soptx.model.pde_base import PDEBase
 
 class HalfBearingDeviceLeft2d(PDEBase):
     '''
-    轴承装置左半设计域的 PDE 模型
+    轴承装置左半设计域的 PDE 模型 - 胡张混合元
 
     设计域:
         - 全设计域: 120 mm x 40 mm
@@ -20,7 +20,7 @@ class HalfBearingDeviceLeft2d(PDEBase):
         - 右侧对称边界 (u_x = 0)
 
     载荷条件:
-        - 顶部向下的均匀分布牵引载荷 t = -1.8e-3 [N/mm]
+        - 顶部向下的均匀分布牵引载荷
     '''
     def __init__(self,
                 domain: List[float] = [0, 60, 0, 40],  
@@ -65,23 +65,8 @@ class HalfBearingDeviceLeft2d(PDEBase):
     #######################################################################################################################
     # 变体方法
     #######################################################################################################################
-
-    @variantmethod('uniform_quad')
-    def init_mesh(self, **kwargs) -> QuadrangleMesh:
-        # 根据几何调整默认单元数
-        nx = kwargs.get('nx', 60)
-        ny = kwargs.get('ny', 40)
-        threshold = kwargs.get('threshold', None)
-        device = kwargs.get('device', 'cpu')
-
-        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
-                                       threshold=threshold, device=device)
-
-        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
-
-        return mesh
     
-    @init_mesh.register('uniform_aligned_tri')
+    @variantmethod('uniform_aligned_tri')
     def init_mesh(self, **kwargs) -> TriangleMesh:
         nx = kwargs.get('nx', 60)
         ny = kwargs.get('ny', 40)
@@ -133,6 +118,18 @@ class HalfBearingDeviceLeft2d(PDEBase):
         self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return mesh
+    
+    def mark_corners(self, node: TensorLike) -> TensorLike:
+        """显示标记几何角点坐标"""
+        x_min, x_max = self._domain[0], self._domain[1]
+        y_min, y_max = self._domain[2], self._domain[3]
+
+        is_x_bd = (bm.abs(node[:, 0] - x_min) < self._eps) | (bm.abs(node[:, 0] - x_max) < self._eps)
+        is_y_bd = (bm.abs(node[:, 1] - y_min) < self._eps) | (bm.abs(node[:, 1] - y_max) < self._eps)
+        is_corner = is_x_bd & is_y_bd
+        corner_coords = node[is_corner]
+
+        return corner_coords
 
     #######################################################################################################################
     # 核心方法
@@ -140,46 +137,20 @@ class HalfBearingDeviceLeft2d(PDEBase):
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
+        """体力密度 b(x, y)"""
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-        x, y = points[..., 0], points[..., 1]
-
-        kwargs = bm.context(points)
-        val = bm.zeros(points.shape, **kwargs)
-
-        flag_top = bm.abs(y - domain[3]) < self._eps
-        val = bm.set_at(val, (flag_top, 1), self._t) 
-
-        return val
-    
-    @cartesian
-    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
-        """标记所有 Neumann 边界: 顶边、左边"""
-        domain = self.domain
-        x, y = points[..., 0], points[..., 1]
-
-        on_top = bm.abs(y - domain[3]) < self._eps
-        on_left = bm.abs(x - domain[0]) < self._eps
-
-        return on_top | on_left
-
-    def is_neumann_boundary(self) -> Callable:
-        
-        return self.is_neumann_boundary_dof
-
-    @cartesian
-    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+    def displacement_bc(self, points: TensorLike) -> TensorLike:
+        """位移边界条件 u_D(x, y)"""
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
 
     @cartesian
-    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+    def is_displacement_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -189,7 +160,7 @@ class HalfBearingDeviceLeft2d(PDEBase):
         return on_bottom_boundary | on_right_boundary
 
     @cartesian
-    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+    def is_displacement_boundary_dof_y(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         y = points[..., 1]
         
@@ -197,10 +168,34 @@ class HalfBearingDeviceLeft2d(PDEBase):
 
         return on_bottom_boundary
 
-    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+    def is_displacement_boundary(self) -> Tuple[Callable, Callable]:
+        """标记位移边界"""
+        return (self.is_displacement_boundary_dof_x,
+                self.is_displacement_boundary_dof_y)
+    
+    @cartesian
+    def traction_bc(self, points: TensorLike) -> TensorLike:
+        """牵引边界条件 g_N(x, y) - 牵引力分量 σ·n"""
+        domain = self.domain
+        y = points[..., 1]
 
-        return (self.is_dirichlet_boundary_dof_x,
-                self.is_dirichlet_boundary_dof_y)
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)  
+
+        flag_top = bm.abs(y - domain[3]) < self._eps
+        val = bm.set_at(val, (flag_top, 1), self._t)  
+
+        return val
+    
+    def is_traction_boundary(self, points: TensorLike) -> TensorLike:
+        """标记牵引边界"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+
+        on_top  = bm.abs(y - domain[3]) < self._eps
+        on_left = bm.abs(x - domain[0]) < self._eps
+
+        return on_top | on_left
 
 
 class BearingDevice2d(PDEBase):

@@ -200,7 +200,7 @@ class Bridge2dSingleLoadData(PDEBase):
     
 class BridgeDoubleLoad2d(PDEBase):
     '''
-    两点载荷桥梁设计域的 PDE 模型
+    两点载荷桥梁设计域的 PDE 模型 - 位移有限元
 
     设计域:
         - 全设计域: 80 mm x 40 mm
@@ -210,16 +210,13 @@ class BridgeDoubleLoad2d(PDEBase):
 
     载荷条件:
         - 底部和顶部中点各施加向下集中载荷 P = -2
-    
-    材料参数:
-        E = 1 [MPa], nu = 0.3
     '''
     def __init__(self,
                 domain: List[float] = [0, 80, 0, 40], 
                 mesh_type: str = 'uniform_quad',
-                p1: float = -2.0,  
-                p2: float = -2.0,  
-                E: float = 1.0, 
+                p1: float = -2.0,  # N
+                p2: float = -2.0,  # N
+                E: float = 1.0,    # MPa
                 nu: float = 0.35,  
                 support_height_ratio: float = 0.5,  # 支撑高度比例（0.5 表示下半部分）
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
@@ -238,10 +235,6 @@ class BridgeDoubleLoad2d(PDEBase):
         self._eps = 1e-12        
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
-
-    #######################################################################################################################
-    # 访问器
-    #######################################################################################################################
 
     @property
     def E(self) -> float:
@@ -267,10 +260,6 @@ class BridgeDoubleLoad2d(PDEBase):
     def support_height_ratio(self) -> float:
         """获取支撑高度比例"""
         return self._support_height_ratio
-    
-    #######################################################################################################################
-    # 变体方法
-    #######################################################################################################################
     
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
@@ -339,10 +328,6 @@ class BridgeDoubleLoad2d(PDEBase):
 
         return mesh
 
-    #######################################################################################################################
-    # 核心方法
-    #######################################################################################################################
-
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
@@ -384,53 +369,9 @@ class BridgeDoubleLoad2d(PDEBase):
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
     
-    def get_neumann_loads(self):
-       """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
-       if self._load_type == 'concentrated':
-            
-            @cartesian
-            def concentrated_force(points: TensorLike) -> TensorLike:
-                """
-                定义集中载荷 (两点载荷), 点力恰好在节点上
-                底部中点和顶部中点各施加方向向下, 相同大小的集中载荷 F = -2
-                """
-                domain = self.domain
-                x, y = points[..., 0], points[..., 1]   
-
-                mid_x = (domain[0] + domain[1]) / 2  
-                
-                coord_bottom = (
-                    (bm.abs(x - mid_x) < self._eps) & 
-                    (bm.abs(y - domain[2]) < self._eps)
-                )
-                coord_top = (
-                    (bm.abs(x - mid_x) < self._eps) & 
-                    (bm.abs(y - domain[3]) < self._eps)
-                )
-                
-                kwargs = bm.context(points)
-                val = bm.zeros(points.shape, **kwargs)
-                
-                val = bm.set_at(val, (coord_bottom, 1), self._p1) 
-                val = bm.set_at(val, (coord_top, 1), self._p2)    
-                
-                return val
-            
-            return concentrated_force
-       
-       elif self._load_type == 'distributed':
-           
-           pass
-       
-       else:
-                raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
-       
     @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
-        """
-        Neumann 边界条件: 表面力向量 t = (t_x, t_y) = (0, -2)
-        在底部和顶部中点都施加相同大小的向下的力
-        """
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p1) 
@@ -438,27 +379,104 @@ class BridgeDoubleLoad2d(PDEBase):
         return val
     
     @cartesian
-    def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
-
         mid_x = (domain[0] + domain[1]) / 2  
         
         coord_bottom = (
-            (bm.abs(x - mid_x) < self._eps) & 
-            (bm.abs(y - domain[2]) < self._eps)
-        )
-        
+                        (bm.abs(x - mid_x) < self._eps) & 
+                        (bm.abs(y - domain[2]) < self._eps)
+                    )
         coord_top = (
-            (bm.abs(x - mid_x) < self._eps) & 
-            (bm.abs(y - domain[3]) < self._eps)
-        )
+                    (bm.abs(x - mid_x) < self._eps) & 
+                    (bm.abs(y - domain[3]) < self._eps)
+                )
         
-        coord = (coord_bottom | coord_top)
+        return coord_bottom | coord_top
+
+    def is_concentrate_load_boundary(self) -> Callable:
+
+        return self.is_concentrate_load_boundary_dof
         
-        return coord
     
-    def is_neumann_boundary(self) -> Callable:
+
+    
+    # def get_neumann_loads(self):
+    #    """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
+    #    if self._load_type == 'concentrated':
+            
+    #         @cartesian
+    #         def concentrated_force(points: TensorLike) -> TensorLike:
+    #             """
+    #             定义集中载荷 (两点载荷), 点力恰好在节点上
+    #             底部中点和顶部中点各施加方向向下, 相同大小的集中载荷 F = -2
+    #             """
+    #             domain = self.domain
+    #             x, y = points[..., 0], points[..., 1]   
+
+    #             mid_x = (domain[0] + domain[1]) / 2  
+                
+    #             coord_bottom = (
+    #                 (bm.abs(x - mid_x) < self._eps) & 
+    #                 (bm.abs(y - domain[2]) < self._eps)
+    #             )
+    #             coord_top = (
+    #                 (bm.abs(x - mid_x) < self._eps) & 
+    #                 (bm.abs(y - domain[3]) < self._eps)
+    #             )
+                
+    #             kwargs = bm.context(points)
+    #             val = bm.zeros(points.shape, **kwargs)
+                
+    #             val = bm.set_at(val, (coord_bottom, 1), self._p1) 
+    #             val = bm.set_at(val, (coord_top, 1), self._p2)    
+                
+    #             return val
+            
+    #         return concentrated_force
+       
+    #    elif self._load_type == 'distributed':
+           
+    #        pass
+       
+    #    else:
+    #             raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
+       
+    # @cartesian
+    # def neumann_bc(self, points: TensorLike) -> TensorLike:
+    #     """
+    #     Neumann 边界条件: 表面力向量 t = (t_x, t_y) = (0, -2)
+    #     在底部和顶部中点都施加相同大小的向下的力
+    #     """
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     val = bm.set_at(val, (..., 1), self._p1) 
         
-        return self.is_neumann_boundary_dof
+    #     return val
+    
+    # @cartesian
+    # def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     mid_x = (domain[0] + domain[1]) / 2  
+        
+    #     coord_bottom = (
+    #         (bm.abs(x - mid_x) < self._eps) & 
+    #         (bm.abs(y - domain[2]) < self._eps)
+    #     )
+        
+    #     coord_top = (
+    #         (bm.abs(x - mid_x) < self._eps) & 
+    #         (bm.abs(y - domain[3]) < self._eps)
+    #     )
+        
+    #     coord = (coord_bottom | coord_top)
+        
+    #     return coord
+    
+    # def is_neumann_boundary(self) -> Callable:
+        
+    #     return self.is_neumann_boundary_dof
  

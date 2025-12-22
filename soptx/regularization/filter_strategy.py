@@ -102,7 +102,7 @@ class NoneStrategy(_FilterStrategy, BaseLogged):
         return con_grad_dv
 
 
-class SensitivityStrategy(_FilterStrategy):
+class SensitivityStrategy(_FilterStrategy, BaseLogged):
     """灵敏度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
@@ -246,7 +246,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._H = H
-        self._mesh = mesh                            # 设计变量网格
+        self._mesh = mesh                           
         self._density_location = density_location
 
         # --- 预计算测度权重 ---
@@ -320,68 +320,6 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         
         return physical_density
 
-        # if self._density_location in ['element']:
-        #     # design_variable.shape = (NC, )
-        #     cm = self._mesh.entity_measure('cell')
-            
-        #     weighted_dv = design_variable * cm
-
-        #     numerator = self._H.matmul(weighted_dv)
-        #     denominator = self._H.matmul(cm)
-
-        #     physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator) # (NC, )
-            
-        #     return physical_density
-        
-        # elif self._density_location in ['node']:
-        #     # design_variable.shape = (NN, )
-        #     cm = self._mesh.entity_measure('cell')
-        #     NN = self._mesh.number_of_nodes()
-        #     cell2node = self._mesh.cell_to_node()
-        #     NNE = cell2node.shape[1]
-
-        #     # 计算节点测度
-        #     val = bm.repeat(cm / NNE, NNE)
-        #     nm = bm.zeros(NN, dtype=bm.float64)
-        #     nm = bm.add_at(nm, cell2node.reshape(-1), val)
-
-        #     # 过滤设计变量
-        #     weighted_dv = design_variable * nm
-
-        #     numerator = self._H.matmul(weighted_dv)
-        #     denominator = self._H.matmul(nm)
-
-        #     physical_density[:] = bm.set_at(physical_density, slice(None), numerator / denominator)  # (NN, )
-            
-        #     return physical_density
-        
-        # elif self._density_location in ['element_multiresolution']:
-        # TODO
-        #     # design_variable.shape = (NC*n_sub, )
-        #     cm = self._mesh.entity_measure('cell')
-        #     weighted_dv = design_variable * cm
-
-        #     numerator = self._H.matmul(weighted_dv)
-        #     denominator = self._H.matmul(cm)
-
-        #     data_flat = numerator / denominator
-
-        #     from soptx.analysis.utils import reshape_multiresolution_data_inverse
-        #     n_sub = physical_density.shape[-1]
-        #     n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-        #     nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
-        #     physical_density_sub = reshape_multiresolution_data_inverse(nx=nx_displacement,
-        #                                                         ny=ny_displacement,
-        #                                                         data_flat=data_flat,
-        #                                                         n_sub=n_sub) # (NC, n_sub)
-
-        #     physical_density[:] = bm.set_at(physical_density, slice(None), physical_density_sub) # (NC, n_sub)
-            
-        #     return physical_density
-
-
-        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
-
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
@@ -403,91 +341,6 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         obj_grad_dv = self._measure_weight * temp
 
         return obj_grad_dv
-        
-        # if self._density_location in ['element']:
-        #     # obj_grad_rho.shape = (NC, )
-        #     cm = self._mesh.entity_measure('cell')
-            
-        #     Hs = self._H.matmul(cm)
-            
-        #     scaled_dobj = obj_grad_rho / Hs
-        #     temp = self._H.matmul(scaled_dobj)
-
-        #     obj_grad_dv = cm * temp # (NC, )
-
-        #     return obj_grad_dv
-        
-        # elif self._density_location in ['node']:
-        #     # obj_grad_rho.shape = (NN, )
-        #     cm = self._mesh.entity_measure('cell')
-        #     NN = self._mesh.number_of_nodes()
-        #     cell2node = self._mesh.cell_to_node()
-        #     NNE = cell2node.shape[1]
-
-        #     # 计算节点测度
-        #     val = bm.repeat(cm / NNE, NNE)
-        #     nm = bm.zeros(NN, dtype=bm.float64)
-        #     nm = bm.add_at(nm, cell2node.reshape(-1), val)
-
-        #     # 灵敏度过滤
-        #     Hs = self._H.matmul(nm)
-            
-        #     scaled_dobj = obj_grad_rho / Hs
-        #     temp = self._H.matmul(scaled_dobj)
-
-        #     obj_grad_dv = nm * temp # (NN, )
-
-        #     return obj_grad_dv
-
-        # elif self._density_location in ['element_multiresolution']:
-                # TODO
-        #     # obj_grad_rho.shape = (NC, n_sub)
-        #     n_sub = obj_grad_rho.shape[-1]
-        #     n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-        #     nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
-
-        #     from soptx.analysis.utils import reshape_multiresolution_data
-        #     obj_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
-        #                                                         ny=ny_displacement, 
-        #                                                         data=obj_grad_rho) # (NC*n_sub, )
-
-        #     cm = self._mesh.entity_measure('cell')
-            
-        #     Hs = self._H.matmul(cm)
-
-        #     scaled_dobj = obj_grad_rho_reshaped / Hs
-        #     temp = self._H.matmul(scaled_dobj)
-
-        #     obj_grad_dv = cm * temp # (NC*n_sub, )
-
-        #     return obj_grad_dv
-
-        # elif self._density_location in ['node_multiresolution']:
-        #     pass 
-
-        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
-            
-        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
-
-        #     weighted_dobj_local = bm.einsum('cq, cq -> cq', obj_grad, self._integration_weights) # (NC, NQ)
-
-        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-        #                                                             nq_per_dim=self._integration_order)
-            
-        #     weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
-
-        #     integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
-
-        #     numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
-        #     numerator = numerator_global[global_to_local] # (NC, NQ)
-            
-        #     denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
-        #     denominator = denominator_global[global_to_local] # (NC, NQ)
-
-        #     obj_grad = bm.set_at(obj_grad, slice(None), numerator / denominator)
-
-            # return obj_grad 
 
     def filter_constraint_sensitivities(self, 
                                     design_variable: TensorLike, 
@@ -510,87 +363,180 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         con_grad_dv = self._measure_weight * temp
 
         return con_grad_dv
+    
 
-        # if self._density_location in ['element']:
-        #     # con_grad_rho.shape = (NC, )
-        #     cm = self._mesh.entity_measure('cell')
-        #     Hs = self._H.matmul(cm)
-            
-        #     scaled_dcon = con_grad_rho / Hs
-        #     temp = self._H.matmul(scaled_dcon)
-
-        #     con_grad_dv = cm * temp # (NC, )
-
-        #     return con_grad_dv
+class ProjectionStrategy(DensityStrategy):
+    """
+    基于 Heaviside 投影的非线性映射策略
+    该策略首先执行线性密度过滤, 然后应用 Heaviside 投影    
+    """
+    def __init__(self, 
+                H: CSRTensor, 
+                mesh: HomogeneousMesh, 
+                density_location: Literal['element', 'node', 'element_multiresolution'],
+                projection_type: Literal['tanh', 'exponential'] = 'exponential', 
+                beta: float = 1.0,
+                eta: float = 0.5,
+                beta_max: float = 512.0,
+                enable_logging: bool = False,
+                logger_name: Optional[str] = None
+            ) -> None:
         
-        # elif self._density_location in ['node']:
-        #     # con_grad_rho.shape = (NN, )
-        #     cm = self._mesh.entity_measure('cell')
-        #     NN = self._mesh.number_of_nodes()
-        #     cell2node = self._mesh.cell_to_node()
-        #     NNE = cell2node.shape[1]
+        super().__init__(H, mesh, density_location, enable_logging, logger_name)
+        
+        # 投影参数
+        self.beta = beta      # 控制投影陡峭程度
+        self.eta = eta        # 投影阈值 (通常为 0.5)
+        self.beta_max = beta_max
+        
+        # 用于存储线性过滤后的中间密度 (rho_tilde)，用于灵敏度分析的链式法则
+        self._rho_tilde_cache: Optional[TensorLike] = None
 
-        #     # 计算节点测度
-        #     val = bm.repeat(cm / NNE, NNE)
-        #     nm = bm.zeros(NN, dtype=bm.float64)
-        #     nm = bm.add_at(nm, cell2node.reshape(-1), val)
+        def get_initial_density(self, 
+                            density: Union[TensorLike, Function]
+                        ) -> Union[TensorLike, Function]:
+            rho_phys = super().get_initial_density(density)
 
-        #     # 灵敏度过滤
-        #     Hs = self._H.matmul(nm)
+            if isinstance(rho_phys, Function):
+                val = rho_phys[:]
+                self._rho_tilde_cache = bm.copy(val)
+                
+                # 3. 执行投影: rho_tilde -> rho_bar
+                projected_val = self._apply_projection(self._rho_tilde_cache)
+                
+                # 4. 更新 Function 中的值
+                rho_phys[:] = bm.set_at(rho_phys, slice(None), projected_val)
+                
+            else:
+                # 处理 TensorLike 的情况
+                self._rho_tilde_cache = bm.copy(rho_phys)
+                rho_phys = self._apply_projection(self._rho_tilde_cache)
+
+            return rho_phys
+
+    def update_beta(self, current_step: int, update_interval: int = 50, double: bool = True):
+        """
+        更新投影参数 beta (Continuation Scheme)。
+        通常在优化过程中逐步增大 beta 以避免局部最优。
+        """
+        if self.beta >= self.beta_max:
+            return
+
+        if current_step > 0 and current_step % update_interval == 0:
+            if double:
+                self.beta = min(self.beta * 2, self.beta_max)
+            else:
+                self.beta = min(self.beta + 1, self.beta_max)
             
-        #     scaled_dcon = con_grad_rho / Hs
-        #     temp = self._H.matmul(scaled_dcon)
+            if self._enable_logging:
+                print(f"Projection beta updated to: {self.beta}")
 
-        #     con_grad_dv = nm * temp  # (NN, )
+    def _tanh_projection(self, x: TensorLike) -> TensorLike:
+        """
+        计算 Tanh 形式的 Heaviside 投影。
+        rho_bar = (tanh(beta*eta) + tanh(beta*(rho_tilde - eta))) / (tanh(beta*eta) + tanh(beta*(1 - eta)))
+        """
+        # 为了数值稳定性，避免重复计算常数项
+        tanh_beta_eta = bm.tanh(self.beta * self.eta)
+        tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+        denominator = tanh_beta_eta + tanh_beta_1_eta
+        
+        numerator = tanh_beta_eta + bm.tanh(self.beta * (x - self.eta))
+        return numerator / denominator
 
-        #     return con_grad_dv
+    def _tanh_projection_grad(self, x: TensorLike) -> TensorLike:
+        """
+        计算 Tanh 投影关于中间密度的导数 d(rho_bar) / d(rho_tilde)。
+        """
+        tanh_beta_eta = bm.tanh(self.beta * self.eta)
+        tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+        denominator = tanh_beta_eta + tanh_beta_1_eta
+        
+        # d/dx (tanh(u)) = sech^2(u) * u' = (1 - tanh^2(u)) * u'
+        inner = self.beta * (x - self.eta)
+        # 注意：这里假设 bm 支持 tanh，导数为 beta * (1 - tanh^2)
+        derivative_numerator = self.beta * (1.0 - bm.square(bm.tanh(inner)))
+        
+        return derivative_numerator / denominator
 
-        # elif self._density_location in ['element_multiresolution']:
-        #     # con_grad_rho.shape = (NC, n_sub)
-        #     n_sub = con_grad_rho.shape[-1]
-        #     n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-        #     nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+    def filter_design_variable(self,
+                            design_variable: TensorLike, 
+                            physical_density: Function
+                        ) -> Function:
+        """
+        正向映射: d -> rho_tilde -> rho_bar
+        """
+        # 1. 调用父类方法，执行线性密度过滤
+        # 注意：父类方法会直接修改 physical_density 的值
+        # 此时 physical_density 存储的是中间密度 (rho_tilde)
+        super().filter_design_variable(design_variable, physical_density)
+        
+        # 2. 缓存中间密度 (rho_tilde)
+        # 这一步非常关键，因为非线性映射的导数依赖于中间密度的值
+        # 必须使用 copy，因为 physical_density 马上要被覆盖为 rho_bar
+        self._rho_tilde_cache = bm.copy(physical_density[:]) 
+        
+        # 3. 执行 Heaviside 投影: rho_tilde -> rho_bar
+        # 直接原地修改 physical_density
+        projected_val = self._tanh_projection(self._rho_tilde_cache)
+        physical_density[:] = bm.set_at(physical_density, slice(None), projected_val)
+        
+        return physical_density
 
-        #     from soptx.analysis.utils import reshape_multiresolution_data
-        #     con_grad_rho_reshaped = reshape_multiresolution_data(nx=nx_displacement, 
-        #                                                         ny=ny_displacement, 
-        #                                                         data=con_grad_rho) # (NC*n_sub, )
+    def filter_objective_sensitivities(self, 
+                                    design_variable: TensorLike, 
+                                    obj_grad_rho: TensorLike
+                                ) -> TensorLike:
+        """
+        灵敏度分析: Chain Rule
+        dC/dd = (dC/d_rho_bar) * (d_rho_bar/d_rho_tilde) * (d_rho_tilde/dd)
+        
+        输入 obj_grad_rho 为 dC/d_rho_bar
+        """
+        if self._rho_tilde_cache is None:
+            raise RuntimeError("filter_design_variable must be called before filter_sensitivities to cache intermediate density.")
 
-        #     cm = self._mesh.entity_measure('cell')
-        #     Hs = self._H.matmul(cm)
+        # 1. 处理多分辨率数据的形状 (如果是 element_multiresolution)
+        # 确保 cached rho_tilde 和传入的梯度形状一致
+        rho_tilde_for_grad = self._rho_tilde_cache
+        
+        # 如果是多分辨率，传入的梯度可能是 (NC, n_sub)，但也可能在外部已经被展平
+        # 这里我们需要确保 rho_tilde 和 obj_grad_rho 形状对齐以进行逐元素相乘
+        if self._density_location == 'element_multiresolution' and obj_grad_rho.ndim > 1:
+             # 如果梯度是 (NC, n_sub)，我们的缓存通常也是 (NC, n_sub) 或者展平的
+             # 根据父类逻辑，Function 内部通常存储为 (NC, n_sub)
+             pass 
 
-        #     scaled_dobj = con_grad_rho_reshaped / Hs
-        #     temp = self._H.matmul(scaled_dobj)
+        # 2. 计算投影导数: d_rho_bar / d_rho_tilde
+        # 这一步是非线性映射引入的额外缩放因子
+        projection_derivative = self._tanh_projection_grad(rho_tilde_for_grad)
+        
+        # 3. 应用链式法则第一步: dC/d_rho_tilde = (dC/d_rho_bar) * projection_derivative
+        # 逐元素相乘
+        obj_grad_rho_tilde = obj_grad_rho * projection_derivative
+        
+        # 4. 应用链式法则第二步: dC/dd = (dC/d_rho_tilde) * (d_rho_tilde/dd)
+        # 调用父类的灵敏度过滤方法，父类方法处理线性卷积部分
+        return super().filter_objective_sensitivities(design_variable, obj_grad_rho_tilde)
 
-        #     con_grad_dv = cm * temp # (NC*n_sub, )
+    def filter_constraint_sensitivities(self, 
+                                    design_variable: TensorLike, 
+                                    con_grad_rho: TensorLike
+                                ) -> TensorLike:
+        """
+        约束灵敏度分析，逻辑同目标函数
+        """
+        if self._rho_tilde_cache is None:
+             raise RuntimeError("filter_design_variable must be called before filter_sensitivities.")
 
-        #     return con_grad_dv
-
-        # elif self._density_location in ['node_multiresolution']:
-        #     pass 
-
-        # elif self._density_location == 'gauss_integration_point' or self._density_location == 'density_subelement_gauss_point':
-        #     from soptx.utils.gauss_intergation_point_mapping import get_gauss_integration_point_mapping
-
-        #     weighted_dobj_local = bm.einsum('cq, cq -> cq', con_grad, self._integration_weights) # (NC, NQ)
-
-        #     nx, ny = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-        #     local_to_global, global_to_local = get_gauss_integration_point_mapping(nx=nx, ny=ny,
-        #                                                             nq_pcer_dim=self._integration_order)
-            
-        #     weighted_dobj = weighted_dobj_local[local_to_global] # (NC*NQ, )
-
-        #     integration_weights = self._integration_weights[local_to_global] # (NC*NQ, )
-
-        #     numerator_global = self._H.matmul(weighted_dobj) # (NC*NQ, )
-        #     numerator = numerator_global[global_to_local] # (NC, NQ)
-            
-        #     denominator_global = self._H.matmul(integration_weights) # (NC*NQ, )
-        #     denominator = denominator_global[global_to_local] # (NC, NQ)
-
-        # con_grad = bm.set_at(con_grad, slice(None), numerator / denominator)
-
-        # return con_grad
+        # 1. 计算投影导数
+        projection_derivative = self._tanh_projection_grad(self._rho_tilde_cache)
+        
+        # 2. 链式法则第一步
+        con_grad_rho_tilde = con_grad_rho * projection_derivative
+        
+        # 3. 链式法则第二步 (调用父类)
+        return super().filter_constraint_sensitivities(design_variable, con_grad_rho_tilde)
 
 
 class HeavisideDensityStrategy(_FilterStrategy):
