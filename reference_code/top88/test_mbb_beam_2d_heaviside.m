@@ -1,10 +1,10 @@
-% nelx = 60;
-% nely = 20;
-% rmin = 1.8;
+nelx = 60;
+nely = 20;
+rmin = 1.8;
 
-nelx = 150;
-nely = 50;
-rmin = 4.5;
+% nelx = 150;
+% nely = 50;
+% rmin = 4.5;
 
 % nelx = 300;
 % nely = 100;
@@ -124,6 +124,7 @@ while change > 0.01
   change = max(abs(xnew(:) - x(:)));
   x = xnew;
 
+  test = mean(xPhys(:));
   if ft == 3 && beta < 512 && (loopbeta >= 50 || change <= 0.01)  
     beta = 2*beta;  
     loopbeta = 0;  
@@ -134,7 +135,6 @@ while change > 0.01
   %% PRINT RESULTS
   iter_time = toc;  % Stop timing and get iteration time
   fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.4f ch.:%7.3f Time:%7.3f sec\n', loop, c, mean(xPhys(:)), change, iter_time);
-  % fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f ch.:%7.3f\n',loop, c, mean(xPhys(:)), change);
 
   %% PLOT DENSITIES
   colormap(gray); imagesc(1-xPhys); caxis([0 1]); axis equal; axis off; drawnow;
