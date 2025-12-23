@@ -16,7 +16,7 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test')
+    @variantmethod('test_subsec6_4_1')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
@@ -27,7 +27,7 @@ class DensityTopOptTest(BaseLogged):
         # mesh_type = 'uniform_hex'
         mesh_type = 'uniform_tet'
 
-        space_degree = 2
+        space_degree = 1
         # integration_order = space_degree + 1 # 单元密度 + 六面体网格
         integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
 
@@ -39,7 +39,7 @@ class DensityTopOptTest(BaseLogged):
         relative_density = volume_fraction
 
         # 'standard', 'voigt', 'fast'
-        assembly_method = 'fast'
+        assembly_method = 'standard'
 
         max_iterations = 500
         change_tolerance = 1e-3

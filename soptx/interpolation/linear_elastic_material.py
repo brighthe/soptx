@@ -278,7 +278,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                 self._bulk_modulus = E / (3 * (1 - 2 * nu))
 
             elif self._plane_type == "plane_stress":
-                self._lame_lambda = None
+                self._lame_lambda = E * nu / (1 - nu ** 2)
                 self._bulk_modulus = None
 
             else:

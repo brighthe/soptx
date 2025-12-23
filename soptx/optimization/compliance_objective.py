@@ -47,7 +47,7 @@ class ComplianceObjective(BaseLogged):
             if displacement is None and stress is None:
                 sigmah, uh = self._analyzer.solve_displacement(rho_val=density)
             else:
-                sigmah, uh = displacement, stress
+                sigmah, uh = stress, displacement
                 
             if self._state_variable == 'u':
                 from fealpy.solver import spsolve

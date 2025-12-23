@@ -39,7 +39,7 @@ class HalfBearingDeviceLeft2d(PDEBase):
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-        self._eps = 1e-12
+        self._eps = 1e-8
         self._load_type = 'distributed'
         self._boundary_type = 'mixed'
 

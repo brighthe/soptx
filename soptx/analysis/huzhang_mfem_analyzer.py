@@ -424,8 +424,27 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         pde = self._pde
         bc = mesh.entity_barycenter('edge')
 
+        # TODO 注释
         mesh.edgedata['dirichlet'] = pde.is_traction_boundary(bc)   # 应力是本质边界条件
         mesh.edgedata['neumann'] = pde.is_displacement_boundary(bc) # 位移是自然边界条件
+
+        # tx_fun, ty_fun = pde.is_traction_boundary_dof()   # Tuple[Callable, Callable]
+        # tx_edge = tx_fun(bc)                               # (NE,)
+        # ty_edge = ty_fun(bc)                               # (NE,)
+        # dirichlet_comp = bm.stack([tx_edge, ty_edge], axis=-1)     # (NE, 2)
+        # dirichlet_edge = bm.any(dirichlet_comp, axis=-1)           # (NE,)
+
+        # mesh.edgedata['dirichlet_comp'] = dirichlet_comp
+        # mesh.edgedata['dirichlet']      = dirichlet_edge
+
+        # tx_fun, ty_fun = pde.is_traction_boundary_dof()   # Tuple[Callable, Callable]
+        # tx_edge = tx_fun(bc)                               # (NE,)
+        # ty_edge = ty_fun(bc)                               # (NE,)
+        # dirichlet_comp = bm.stack([tx_edge, ty_edge], axis=-1)     # (NE, 2)
+        # dirichlet_edge = bm.any(dirichlet_comp, axis=-1)           # (NE,)
+
+        # mesh.edgedata['dirichlet_comp'] = dirichlet_comp
+        # mesh.edgedata['dirichlet']      = dirichlet_edge
     
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
