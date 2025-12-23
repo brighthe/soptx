@@ -228,6 +228,10 @@ class OCOptimizer(BaseLogged):
                                 time_cost=iteration_time, 
                                 physical_density=rho_phys)
             
+            change, beta_updated = self._filter.continuation_step(change)
+            if beta_updated:
+                    continue
+            
             if enable_timing:
                 t.send(None)
 

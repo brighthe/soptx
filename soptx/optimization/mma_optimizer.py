@@ -254,7 +254,7 @@ class MMAOptimizer(BaseLogged):
         
         interpolation_scheme = self._objective._analyzer._interpolation_scheme
         
-        # 方式 1: 每30次迭代增加0.5
+        # 方式 1: 每 30 次迭代增加 0.5
         penalty_update = iter_idx // 30
         current_penalty = min(1.0 + penalty_update * 0.5, 3.0)
         
@@ -278,10 +278,6 @@ class MMAOptimizer(BaseLogged):
         design_variable : 设计变量
         density_distribution : 密度分布
         **kwargs : 其他参数
-            
-        Returns:
-        --------
-        优化后的密度场和优化历史记录
         """
         # 获取优化参数
         max_iters = self.options.max_iterations
@@ -350,15 +346,24 @@ class MMAOptimizer(BaseLogged):
             if enable_timing:
                 t.send('位移场求解')
             
-            # 使用物理密度计算目标函数
-            obj_val = self._objective.fun(rho_phys, displacement=uh)
+            # TODO 使用物理密度计算目标函数
+            obj_val_raw = self._objective.fun(rho_phys, displacement=uh)
+            # 计算缩放因子
+            if iter_idx == 0:
+                if abs(obj_val_raw) > 1e-10:
+                    obj_scale_factor = 10.0 / obj_val_raw
+                else:
+                    obj_scale_factor = 1.0
+                self._log_info(f"Objective scaling factor initialized to: {obj_scale_factor:.4e}")
+            # 应用缩放因子到目标函数值
+            obj_val = obj_val_raw * obj_scale_factor
             if enable_timing:
                 t.send('目标函数计算')
                 
-            # 计算目标函数相对于物理密度的灵敏度
-            obj_grad_rho = self._objective.jac(rho_phys, displacement=uh)
-            if enable_timing:
-                t.send('目标函数灵敏度分析 1')
+            # TODO 计算目标函数相对于物理密度的灵敏度
+            obj_grad_rho_raw = self._objective.jac(rho_phys, displacement=uh)
+            # 应用缩放因子到灵敏度
+            obj_grad_rho = obj_grad_rho_raw * obj_scale_factor
 
             # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
@@ -402,6 +407,7 @@ class MMAOptimizer(BaseLogged):
 
             # 过滤后得到的物理密度
             rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
+
             if enable_timing:
                 t.send('密度过滤')
             
@@ -428,6 +434,16 @@ class MMAOptimizer(BaseLogged):
                                 penalty_factor=current_penalty, 
                                 time_cost=iteration_time, 
                                 physical_density=rho_phys)
+            
+            # 尝试更新 beta, 如果 beta 更新了，change 会被强制重置为 1.0，确保循环继续以在新 beta 下收敛
+            beta_updated = False # 默认为 False
+            if current_penalty >= 3.0:
+                change, beta_updated = self._filter.continuation_step(change)
+            if beta_updated:
+                rho_phys = self._filter.filter_design_variable(design_variable=dv, physical_density=rho_phys)
+                
+                self._log_info(f"Beta updated. Physical density refreshed for next iteration.")
+                continue
             
             if enable_timing:
                 t.send(None)

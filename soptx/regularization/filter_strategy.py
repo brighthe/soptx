@@ -40,6 +40,10 @@ class _FilterStrategy(ABC):
                                     ) -> TensorLike:
         pass
 
+    def continuation_step(self, change: float) -> Tuple[float, bool]:
+
+        return change, False
+
 
 class NoneStrategy(_FilterStrategy, BaseLogged):
     """ '无操作' 策略, 当不需要过滤时使用"""
@@ -48,7 +52,8 @@ class NoneStrategy(_FilterStrategy, BaseLogged):
                 density_location: Literal['element', 'node', 'element_multiresolution'],
                 integration_order: int = 4,
                 enable_logging: bool = False,
-                logger_name: Optional[str] = None
+                logger_name: Optional[str] = None,
+                **kwargs
             ) -> None:
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
@@ -377,6 +382,7 @@ class ProjectionStrategy(DensityStrategy):
                 beta: float = 1.0,
                 eta: float = 0.5,
                 beta_max: float = 512.0,
+                continuation_iter: int = 50,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -384,14 +390,35 @@ class ProjectionStrategy(DensityStrategy):
         super().__init__(H, mesh, density_location, enable_logging, logger_name)
         
         # 投影参数
+        self.projection_type = projection_type
         self.beta = beta      # 控制投影陡峭程度
         self.eta = eta        # 投影阈值 (通常为 0.5)
         self.beta_max = beta_max
+        self.continuation_iter = continuation_iter
+
+        # 初始化计数器
+        self._beta_iter = 0 
         
         # 用于存储线性过滤后的中间密度 (rho_tilde)，用于灵敏度分析的链式法则
         self._rho_tilde_cache: Optional[TensorLike] = None
 
-        def get_initial_density(self, 
+    def _apply_projection(self, rho_tilde: TensorLike) -> TensorLike:
+        if self.projection_type == 'tanh':
+            tanh_beta_eta = bm.tanh(self.beta * self.eta)
+            tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+            numerator = tanh_beta_eta + bm.tanh(self.beta * (rho_tilde - self.eta))
+            denominator = tanh_beta_eta + tanh_beta_1_eta
+            return numerator / denominator
+            
+        elif self.projection_type == 'exponential':
+            term1 = bm.exp(-self.beta * rho_tilde)
+            term2 = rho_tilde * bm.exp(-self.beta)
+            return 1.0 - term1 + term2
+        
+        else:
+            raise ValueError(f"Unknown projection type: {self.projection_type}")
+
+    def get_initial_density(self, 
                             density: Union[TensorLike, Function]
                         ) -> Union[TensorLike, Function]:
             rho_phys = super().get_initial_density(density)
@@ -400,10 +427,9 @@ class ProjectionStrategy(DensityStrategy):
                 val = rho_phys[:]
                 self._rho_tilde_cache = bm.copy(val)
                 
-                # 3. 执行投影: rho_tilde -> rho_bar
+                # 执行投影: rho_tilde -> rho_bar
                 projected_val = self._apply_projection(self._rho_tilde_cache)
                 
-                # 4. 更新 Function 中的值
                 rho_phys[:] = bm.set_at(rho_phys, slice(None), projected_val)
                 
             else:
@@ -412,201 +438,81 @@ class ProjectionStrategy(DensityStrategy):
                 rho_phys = self._apply_projection(self._rho_tilde_cache)
 
             return rho_phys
-
-    def update_beta(self, current_step: int, update_interval: int = 50, double: bool = True):
-        """
-        更新投影参数 beta (Continuation Scheme)。
-        通常在优化过程中逐步增大 beta 以避免局部最优。
-        """
-        if self.beta >= self.beta_max:
-            return
-
-        if current_step > 0 and current_step % update_interval == 0:
-            if double:
-                self.beta = min(self.beta * 2, self.beta_max)
-            else:
-                self.beta = min(self.beta + 1, self.beta_max)
-            
-            if self._enable_logging:
-                print(f"Projection beta updated to: {self.beta}")
-
-    def _tanh_projection(self, x: TensorLike) -> TensorLike:
-        """
-        计算 Tanh 形式的 Heaviside 投影。
-        rho_bar = (tanh(beta*eta) + tanh(beta*(rho_tilde - eta))) / (tanh(beta*eta) + tanh(beta*(1 - eta)))
-        """
-        # 为了数值稳定性，避免重复计算常数项
-        tanh_beta_eta = bm.tanh(self.beta * self.eta)
-        tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
-        denominator = tanh_beta_eta + tanh_beta_1_eta
-        
-        numerator = tanh_beta_eta + bm.tanh(self.beta * (x - self.eta))
-        return numerator / denominator
-
-    def _tanh_projection_grad(self, x: TensorLike) -> TensorLike:
-        """
-        计算 Tanh 投影关于中间密度的导数 d(rho_bar) / d(rho_tilde)。
-        """
-        tanh_beta_eta = bm.tanh(self.beta * self.eta)
-        tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
-        denominator = tanh_beta_eta + tanh_beta_1_eta
-        
-        # d/dx (tanh(u)) = sech^2(u) * u' = (1 - tanh^2(u)) * u'
-        inner = self.beta * (x - self.eta)
-        # 注意：这里假设 bm 支持 tanh，导数为 beta * (1 - tanh^2)
-        derivative_numerator = self.beta * (1.0 - bm.square(bm.tanh(inner)))
-        
-        return derivative_numerator / denominator
-
-    def filter_design_variable(self,
-                            design_variable: TensorLike, 
-                            physical_density: Function
-                        ) -> Function:
-        """
-        正向映射: d -> rho_tilde -> rho_bar
-        """
-        # 1. 调用父类方法，执行线性密度过滤
-        # 注意：父类方法会直接修改 physical_density 的值
-        # 此时 physical_density 存储的是中间密度 (rho_tilde)
+    
+    def filter_design_variable(self, design_variable: TensorLike, physical_density: Function) -> Function:
         super().filter_design_variable(design_variable, physical_density)
         
-        # 2. 缓存中间密度 (rho_tilde)
-        # 这一步非常关键，因为非线性映射的导数依赖于中间密度的值
-        # 必须使用 copy，因为 physical_density 马上要被覆盖为 rho_bar
-        self._rho_tilde_cache = bm.copy(physical_density[:]) 
+        self._rho_tilde_cache = bm.copy(physical_density[:])
         
-        # 3. 执行 Heaviside 投影: rho_tilde -> rho_bar
-        # 直接原地修改 physical_density
-        projected_val = self._tanh_projection(self._rho_tilde_cache)
-        physical_density[:] = bm.set_at(physical_density, slice(None), projected_val)
+        rho_val = self._apply_projection(self._rho_tilde_cache)
+        physical_density[:] = bm.set_at(physical_density, slice(None), rho_val)
         
         return physical_density
+
+    
+    def _apply_projection_derivative(self, rho_tilde: TensorLike) -> TensorLike:
+        if self.projection_type == 'tanh':
+            tanh_beta_eta = bm.tanh(self.beta * self.eta)
+            tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+            denominator = tanh_beta_eta + tanh_beta_1_eta
+            inner = self.beta * (rho_tilde - self.eta)
+            numerator = self.beta * (1.0 - bm.square(bm.tanh(inner)))
+            return numerator / denominator
+
+        elif self.projection_type == 'exponential':
+            return self.beta * bm.exp(-self.beta * rho_tilde) + bm.exp(-self.beta)
+        
+        else:
+            raise ValueError(f"Unknown projection type: {self.projection_type}")
 
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
-        """
-        灵敏度分析: Chain Rule
-        dC/dd = (dC/d_rho_bar) * (d_rho_bar/d_rho_tilde) * (d_rho_tilde/dd)
-        
-        输入 obj_grad_rho 为 dC/d_rho_bar
-        """
         if self._rho_tilde_cache is None:
             raise RuntimeError("filter_design_variable must be called before filter_sensitivities to cache intermediate density.")
-
-        # 1. 处理多分辨率数据的形状 (如果是 element_multiresolution)
-        # 确保 cached rho_tilde 和传入的梯度形状一致
-        rho_tilde_for_grad = self._rho_tilde_cache
         
-        # 如果是多分辨率，传入的梯度可能是 (NC, n_sub)，但也可能在外部已经被展平
-        # 这里我们需要确保 rho_tilde 和 obj_grad_rho 形状对齐以进行逐元素相乘
-        if self._density_location == 'element_multiresolution' and obj_grad_rho.ndim > 1:
-             # 如果梯度是 (NC, n_sub)，我们的缓存通常也是 (NC, n_sub) 或者展平的
-             # 根据父类逻辑，Function 内部通常存储为 (NC, n_sub)
-             pass 
+        d_rho_d_tilde = self._apply_projection_derivative(self._rho_tilde_cache)
+        obj_grad_tilde = obj_grad_rho * d_rho_d_tilde
 
-        # 2. 计算投影导数: d_rho_bar / d_rho_tilde
-        # 这一步是非线性映射引入的额外缩放因子
-        projection_derivative = self._tanh_projection_grad(rho_tilde_for_grad)
-        
-        # 3. 应用链式法则第一步: dC/d_rho_tilde = (dC/d_rho_bar) * projection_derivative
-        # 逐元素相乘
-        obj_grad_rho_tilde = obj_grad_rho * projection_derivative
-        
-        # 4. 应用链式法则第二步: dC/dd = (dC/d_rho_tilde) * (d_rho_tilde/dd)
-        # 调用父类的灵敏度过滤方法，父类方法处理线性卷积部分
-        return super().filter_objective_sensitivities(design_variable, obj_grad_rho_tilde)
+        obj_grad_dv = super().filter_objective_sensitivities(design_variable, obj_grad_tilde)
 
-    def filter_constraint_sensitivities(self, 
-                                    design_variable: TensorLike, 
-                                    con_grad_rho: TensorLike
-                                ) -> TensorLike:
-        """
-        约束灵敏度分析，逻辑同目标函数
-        """
+        return obj_grad_dv
+    
+    def filter_constraint_sensitivities(self, design_variable: TensorLike, con_grad_rho: TensorLike) -> TensorLike:
         if self._rho_tilde_cache is None:
-             raise RuntimeError("filter_design_variable must be called before filter_sensitivities.")
+            raise RuntimeError("filter_design_variable must be called before sensitivities.")
 
-        # 1. 计算投影导数
-        projection_derivative = self._tanh_projection_grad(self._rho_tilde_cache)
+        d_rho_d_tilde = self._apply_projection_derivative(self._rho_tilde_cache)
+        con_grad_tilde = con_grad_rho * d_rho_d_tilde
+
+        con_grad_dv = super().filter_constraint_sensitivities(design_variable, con_grad_tilde)
         
-        # 2. 链式法则第一步
-        con_grad_rho_tilde = con_grad_rho * projection_derivative
-        
-        # 3. 链式法则第二步 (调用父类)
-        return super().filter_constraint_sensitivities(design_variable, con_grad_rho_tilde)
-
-
-class HeavisideDensityStrategy(_FilterStrategy):
-    """密度过滤 + Heaviside 投影"""
-    def __init__(self, 
-                H: CSRTensor, 
-                density_location: Literal['element', 'node'], 
-                integration_weights: TensorLike, 
-                mesh: HomogeneousMesh, 
-                beta: float = 1.0, max_beta: float = 512, continuation_iter: int = 50
-            ):
-        
-        self._H = H
-        self._density_location = density_location
-        self._integration_weights = integration_weights
-        self._mesh = mesh
-        
-        self._beta = beta
-        self._max_beta = max_beta
-        self._continuation_iter = continuation_iter
-        self._rho_Tilde = None
-        self._beta_iter = 0
-
-    def get_initial_density(self, density: Function, physical_density: Function) -> Function:
-
-        self._rho_Tilde = density
-        projected_values = 1 - bm.exp(-self._beta * self._rho_Tilde) + self._rho_Tilde * bm.exp(-self._beta)
-
-        physical_density = bm.set_at(physical_density, slice(None), projected_values)
-
-        return physical_density
-
-    def filter_variables(self, 
-                        design_variable: Union[TensorLike, Function], 
-                        rho_Phys: Union[TensorLike, Function]
-                    ) -> Union[TensorLike, Function]:
-        
-        if self._density_location in ['element', 'element_multiresolution']:
-
-            dv = design_variable
-            cell_measure = self._integration_weights
-            weighted_rho = dv[:] * cell_measure
-        
-            numerator = self._H.matmul(weighted_rho)
-            denominator = self._H.matmul(cell_measure)
-
-            self._rho_Tilde[:] = bm.set_at(self._rho_Tilde, slice(None), numerator / denominator)
-
-            projected_values = 1 - bm.exp(-self._beta * self._rho_Tilde) + self._rho_Tilde * bm.exp(-self._beta)
-
-            rho_Phys[:] = bm.set_at(rho_Phys, slice(None), projected_values)
-
-        return rho_Phys
-
-    def filter_objective_sensitivities(self, xPhys: TensorLike, dobj: TensorLike) -> TensorLike:
-        # Heaviside 投影的导数
-        projection_deriv = self.beta * (1 - bm.tanh(self.beta * (self._xTilde - 0.5))**2) / (2 * bm.tanh(self.beta/2))
-        weighted_dobj = dobj * projection_deriv * self._cell_measure
-        return self._H.matmul(weighted_dobj / self._normalize_factor)
-
-    def filter_constraint_sensitivities(self, xPhys: TensorLike, dcons: TensorLike) -> TensorLike:
-        projection_deriv = self.beta * (1 - bm.tanh(self.beta * (self._xTilde - 0.5))**2) / (2 * bm.tanh(self.beta/2))
-        weighted_dcons = dcons * projection_deriv * self._cell_measure
-        return self._H.matmul(weighted_dcons / self._normalize_factor)
-
+        return con_grad_dv
+    
     def continuation_step(self, change: float) -> Tuple[float, bool]:
-        """执行 beta continuation"""
+        """执行一步 beta continuation (更新 beta 值)"""
         self._beta_iter += 1
-        if self.beta < self.max_beta and (self._beta_iter >= self.continuation_iter or change <= 0.01):
-            self.beta *= 2
+        
+        # 判断条件：beta 未达上限 且 (达到迭代间隔 或 收敛)
+        if (self.beta < self.beta_max and 
+                (self._beta_iter >= self.continuation_iter or change <= 0.01)):
+            
+            # 记录旧值用于日志
+            old_beta = self.beta
+            
+            # 1. 加倍 Beta
+            self.beta = min(self.beta * 2, self.beta_max)
+            
+            # 2. 重置计数器
             self._beta_iter = 0
-            print(f"Beta increased to {self.beta}")
+            
+            if self._enable_logging:
+                trigger = "Interval" if self._beta_iter >= self.continuation_iter else "Convergence"
+                print(f"[{trigger}] Projection beta updated: {old_beta} -> {self.beta}")
+            
+            # 3. 关键：强制返回 1.0，防止外层循环提前退出
             return 1.0, True
+        
+        # 如果没有更新，保持原有的 change 值
         return change, False
