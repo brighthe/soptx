@@ -189,13 +189,13 @@ class DensityTopOptTest(BaseLogged):
         P = -2.0
         plane_type = 'plane_stress' 
 
-        # nx, ny = 60, 10
+        nx, ny = 60, 10
         # nx, ny = 120, 20
         # nx, ny = 240, 40
-        nx, ny = 480, 80
+        # nx, ny = 480, 80
         mesh_type = 'uniform_quad'
 
-        space_degree = 8
+        space_degree = 1
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -203,7 +203,7 @@ class DensityTopOptTest(BaseLogged):
         penalty_factor = 3.0
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-        density_location = 'element_multiresolution'
+        density_location = 'element'
         sub_density_element = 64
 
         relative_density = volume_fraction
@@ -217,11 +217,11 @@ class DensityTopOptTest(BaseLogged):
         use_penalty_continuation = True
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
-        # rmin = 1.2
+        rmin = 1.2
         # rmin = 1.0
         # rmin = 0.75
         # rmin = 0.5
-        rmin = 0.25
+        # rmin = 0.25
 
         from soptx.model.mbb_beam_2d import MBBBeam2d
         pde = MBBBeam2d(
@@ -336,7 +336,6 @@ class DensityTopOptTest(BaseLogged):
         f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
         f"过滤类型={filter_type}, 过滤半径={rmin}, ")
             
-
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
         current_file = Path(__file__)
@@ -354,73 +353,56 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
-    @run.register('test_subsec4_6_3_mma')
+    @run.register('test_subsec4_6_3_mbb_beam')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* MBB 
-        # domain = [0, 60.0, 0, 10.0]
-        # E, nu = 1.0, 0.3
-        # P = -2.0
-        # plane_type = 'plane_stress' 
-
-        # nx, ny = 60, 10
-        # mesh_type = 'uniform_quad'
-
-        # from soptx.model.mbb_beam_2d import MBBBeam2d
-        # pde = MBBBeam2d(
-        #                 domain=domain,
-        #                 P=P, E=E, nu=nu,
-        #                 plane_type=plane_type
-        #             )
-        # volume_fraction = 0.6
-        
-        #* 对称 MBB
-        domain = [0, 60.0, 0, 20.0]
-        P = -1.0
+        domain = [0, 60.0, 0, 10.0]
         E, nu = 1.0, 0.3
+        P = -2.0
         plane_type = 'plane_stress' 
 
-        nx, ny = 60, 20
+        nx, ny = 60, 10
         mesh_type = 'uniform_quad'
 
-        from soptx.model.mbb_beam_2d import HalfMBBBeamRight2d
-        pde = HalfMBBBeamRight2d(
-                            domain=domain,
-                            P=P, E=E, nu=nu,
-                            plane_type=plane_type,
-                        )
-        
-        volume_fraction = 0.5
+        from soptx.model.mbb_beam_2d import MBBBeam2d
+        pde = MBBBeam2d(
+                        domain=domain,
+                        P=P, E=E, nu=nu,
+                        plane_type=plane_type
+                    )
+        volume_fraction = 0.6
         
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
         
         penalty_factor = 3.0
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-        density_location = 'element'
+        density_location = 'element_multiresolution'
         sub_density_element = 16
 
         relative_density = volume_fraction
 
         # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
-        assembly_method = 'standard'
+        assembly_method = 'standard_multiresolution'
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 1000
         change_tolerance = 1e-3
         use_penalty_continuation = True
 
-        filter_type = 'projection' # 'none', 'sensitivity', 'density', 'projection'
-        rmin = 1.8
+        filter_type = 'density' # 'none', 'sensitivity', 'density', 'projection'
+        # rmin = 1.0
+        rmin = 0.75
         projection_config = {
-                        'projection_type': 'exponential',  # 或 'exponential'
+                        'projection_type': 'tanh',  # 'tanh', 'exponential'
                         'beta': 1.0,                # 初始 beta
                         'beta_max': 512.0,          # 最大 beta 
-                        'continuation_iter': 50,    # 每 50 步尝试更新
+                        'continuation_iter': 80,    # 每指定步尝试更新
                         'eta': 0.5                  # 投影阈值
                     }
 
@@ -534,7 +516,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec4_6_2")
+        save_path = Path(f"{base_dir}/test_subsec4_6_3_mbb_beam")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 
@@ -717,5 +699,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_3_mma')
+    test.run.set('test_subsec4_6_3_mbb_beam')
     rho_opt, history = test.run()

@@ -448,7 +448,6 @@ class ProjectionStrategy(DensityStrategy):
         physical_density[:] = bm.set_at(physical_density, slice(None), rho_val)
         
         return physical_density
-
     
     def _apply_projection_derivative(self, rho_tilde: TensorLike) -> TensorLike:
         if self.projection_type == 'tanh':

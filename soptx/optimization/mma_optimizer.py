@@ -197,7 +197,7 @@ class MMAOptimizer(BaseLogged):
                 constraint: VolumeConstraint,
                 filter: Filter,
                 options: MMAOptions = None,
-                enable_logging: bool = False,
+                enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
         
@@ -258,7 +258,7 @@ class MMAOptimizer(BaseLogged):
         penalty_update = iter_idx // 30
         current_penalty = min(1.0 + penalty_update * 0.5, 3.0)
         
-        # 方式 2: 每步增加 0.04，第 50 步达到3
+        # 方式 2: 每步增加 0.04，第 50 步达到 3
         # current_penalty = min(1.0 + iter_idx * 0.04, 3.0)
         
         # 更新插值方案中的惩罚因子
@@ -317,11 +317,10 @@ class MMAOptimizer(BaseLogged):
         # 初始化历史设计变量
         xold1 = bm.copy(dv[:])
         xold2 = bm.copy(xold1[:])
-        
-        # 初始化渐近线
-        low = bm.ones_like(xold1)
-        upp = bm.ones_like(xold1)
-        
+
+        #! 目标函数缩放因子
+        self._obj_scale_factor = None
+
         # 优化主循环
         for iter_idx in range(max_iters):
 
@@ -346,24 +345,24 @@ class MMAOptimizer(BaseLogged):
             if enable_timing:
                 t.send('位移场求解')
             
-            # TODO 使用物理密度计算目标函数
             obj_val_raw = self._objective.fun(rho_phys, displacement=uh)
-            # 计算缩放因子
-            if iter_idx == 0:
-                if abs(obj_val_raw) > 1e-10:
-                    obj_scale_factor = 10.0 / obj_val_raw
-                else:
-                    obj_scale_factor = 1.0
-                self._log_info(f"Objective scaling factor initialized to: {obj_scale_factor:.4e}")
-            # 应用缩放因子到目标函数值
-            obj_val = obj_val_raw * obj_scale_factor
+
+            #! 动态重置缩放因子
+            if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
+                obj0 = float(obj_val_raw.item()) 
+                denom = max(abs(obj0), 1e-10)
+                self._obj_scale_factor = min(1e6, 10.0 / denom)
+                self._log_info(f"Objective scaling factor (re)initialized to: {self._obj_scale_factor:.4e}")
+            elif self._obj_scale_factor is None:
+                self._obj_scale_factor = 1.0
+
+            obj_val = obj_val_raw * self._obj_scale_factor
             if enable_timing:
                 t.send('目标函数计算')
                 
-            # TODO 计算目标函数相对于物理密度的灵敏度
+            # 灵敏度应用缩放因子
             obj_grad_rho_raw = self._objective.jac(rho_phys, displacement=uh)
-            # 应用缩放因子到灵敏度
-            obj_grad_rho = obj_grad_rho_raw * obj_scale_factor
+            obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
 
             # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
@@ -392,22 +391,19 @@ class MMAOptimizer(BaseLogged):
             dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
 
             # 求解子问题
-            dv_new, low, upp = self._solve_subproblem(
-                                                xval=dv[:, None],
-                                                fval=fval,
-                                                df0dx=obj_grad_dv[:, None],
-                                                dfdx=dfdx,
-                                                low=low[:, None],
-                                                upp=upp[:, None],
-                                                xold1=xold1[:, None],
-                                                xold2=xold2[:, None]
-                                            )
+            dv_new = self._solve_subproblem(
+                                        xval=dv[:, None],
+                                        fval=fval,
+                                        df0dx=obj_grad_dv[:, None],
+                                        dfdx=dfdx,
+                                        xold1=xold1[:, None],
+                                        xold2=xold2[:, None]
+                                    )
             if enable_timing:
                 t.send('MMA 优化')
 
             # 过滤后得到的物理密度
             rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
-
             if enable_timing:
                 t.send('密度过滤')
             
@@ -428,28 +424,31 @@ class MMAOptimizer(BaseLogged):
             iteration_time = time() - start_time
 
             history.log_iteration(iter_idx=iter_idx, 
-                                obj_val=obj_val, 
+                                obj_val=obj_val_raw, 
                                 volfrac=volfrac, 
                                 change=change,
                                 penalty_factor=current_penalty, 
                                 time_cost=iteration_time, 
                                 physical_density=rho_phys)
             
-            # 尝试更新 beta, 如果 beta 更新了，change 会被强制重置为 1.0，确保循环继续以在新 beta 下收敛
-            beta_updated = False # 默认为 False
+            #! Beta 更新后的状态重置
+            beta_updated = False 
             if current_penalty >= 3.0:
                 change, beta_updated = self._filter.continuation_step(change)
+            
             if beta_updated:
+                self._obj_scale_factor = None 
+                self._low, self._upp = None, None  # 重置渐近线
+                xold1, xold2 = dv[:], dv[:]        # 重置历史步
                 rho_phys = self._filter.filter_design_variable(design_variable=dv, physical_density=rho_phys)
-                
-                self._log_info(f"Beta updated. Physical density refreshed for next iteration.")
+                self._log_info(f"Beta updated. Resetting MMA asymptotes and scaling for stability.")
                 continue
             
             if enable_timing:
                 t.send(None)
 
             # 收敛检查
-            if change <= change_tol:
+            if change <= change_tol and current_penalty >= 3.0:
                 msg = (f"Converged after {self._epoch} iterations "
                        f"(design variable change <= {change_tol}).")
                 self._log_info(msg)
@@ -499,7 +498,8 @@ class MMAOptimizer(BaseLogged):
 
         xmami = xmax - xmin
         
-        if self._epoch <= 2:
+        # if self._epoch <= 2:
+        if self._epoch <= 2 or self._low is None or self._upp is None:
             self._low = xval - asyinit * xmami
             self._upp = xval + asyinit * xmami
         else:
@@ -529,8 +529,6 @@ class MMAOptimizer(BaseLogged):
                         fval: TensorLike,
                         df0dx: TensorLike,
                         dfdx: TensorLike,
-                        low: TensorLike,
-                        upp: TensorLike,
                         xold1: TensorLike,
                         xold2: TensorLike
                     ) -> Tuple[TensorLike, TensorLike, TensorLike]:
@@ -546,10 +544,10 @@ class MMAOptimizer(BaseLogged):
             目标函数的梯度
         dfdx : TensorLike (m, n)
             约束函数的梯度
-        low : TensorLike (n, 1)
-            下渐近线
-        upp : TensorLike (n, 1)
-            上渐近线
+        # low : TensorLike (n, 1)
+            # 下渐近线
+        # upp : TensorLike (n, 1)
+            # 上渐近线
         xold1 : TensorLike (n, 1)
             前一步设计变量
         xold2 : TensorLike (n, 1)
@@ -570,10 +568,17 @@ class MMAOptimizer(BaseLogged):
         c = self.options.c
         d = self.options.d
 
-        move = self.options.move_limit
         albefa = self.options.albefa
         raa0 = self.options.raa0
         epsimin = self.options.epsilon_min
+
+        #! 动态移动限制
+        move = self.options.move_limit
+        beta_val = getattr(self._filter, 'beta', None)
+
+        if beta_val is not None:
+            move = move / (1.0 + 0.3 * bm.log(beta_val))
+        # move = self.options.move_limit
 
         eeen = bm.ones((n, 1), dtype=bm.float64)
         eeem = bm.ones((m, 1), dtype=bm.float64)
@@ -642,4 +647,4 @@ class MMAOptimizer(BaseLogged):
             self._log_error(f"输出密度超出合理范围 [0, 1]: "
                             f"range=[{bm.min(xmma):.2e}, {bm.max(xmma):.2e}]")
         
-        return xmma.reshape(-1), low, upp
+        return xmma.reshape(-1)

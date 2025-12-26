@@ -107,6 +107,12 @@ class Filter(BaseLogged):
         # 实例化策略
         self._strategy: _FilterStrategy = strategy_class(**strategy_params)
 
+    @property
+    def beta(self) -> Optional[float]:
+        """动态获取当前策略的 beta 值（如果存在）"""
+        # 探测底层策略对象是否具有 beta 属性
+        return getattr(self._strategy, 'beta', None)
+
     # 3. 委托公共方法到具体策略
     def get_initial_density(self, 
                         density:  Union[TensorLike, Function], 

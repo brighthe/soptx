@@ -69,25 +69,49 @@ def solve_mma_subproblem(m: int, n: int,
     een = bm.ones((n, 1))
     eem = bm.ones((m, 1))
     x = 0.5 * (alfa + beta)
+    #! A-1: 保证 x 远离渐近线/上下界 ----
+    eps_x = 1e-12
+
+    def clamp_x(x_in: TensorLike) -> TensorLike:
+        xmin = bm.maximum(alfa, low) + eps_x
+        xmax = bm.minimum(beta, upp) - eps_x
+        xmax = bm.maximum(xmax, xmin + eps_x)
+        return bm.minimum(bm.maximum(x_in, xmin), xmax)
+
+    x = clamp_x(x)
+    #! ------------------------------------------------------------
     y = bm.copy(eem)
     z = bm.array([[1.0]])
     lam = bm.copy(eem)
-    xsi = een / (x - alfa)
+    
+    #! A-2：用安全分母初始化 xsi / eta，避免 (x-alfa) 或 (beta-x) 为 0 ----
+    xalfa = bm.maximum(x - alfa, eps_x)
+    betax = bm.maximum(beta - x, eps_x)
+
+    xsi = een / xalfa
     xsi = bm.maximum(xsi, een)
-    eta = een / (beta - x)
+
+    eta = een / betax
     eta = bm.maximum(eta, een)
+    # xsi = een / (x - alfa)
+    # xsi = bm.maximum(xsi, een)
+
+    # eta = een / (beta - x)
+    # eta = bm.maximum(eta, een)
+    #! ----------------------------------------------------------------------
+    
     mu = bm.maximum(eem, 0.5*c)
     zet = bm.array([[1.0]])
     s = bm.copy(eem)
 
     epsi = 1 # 松弛参数, 每次外循环迭代中逐步减小   
-    epsvecn = epsi * een # (m, 1)
-    epsvecm = epsi * eem # (n, 1)
+    epsvecn = epsi * een # (n, 1)
+    epsvecm = epsi * eem # (m, 1)
     # 外循环迭代: 逐步减小松弛参数 epsi
     itera = 0
     while epsi > epsimin:
-        epsvecn = epsi * een # (m, 1)
-        epsvecm = epsi * eem # (n, 1)
+        epsvecn = epsi * een # (n, 1)
+        epsvecm = epsi * eem # (m, 1)
         ux1 = upp - x
         xl1 = x - low
         ux2 = ux1 * ux1
@@ -138,22 +162,27 @@ def solve_mma_subproblem(m: int, n: int,
             qlam = q0 + bm.dot(Q.T, lam)
             gvec = bm.dot(P, uxinv1) + bm.dot(Q, xlinv1)
 
-            # TODO 使用 einsum 替代对角矩阵乘法
             GG = bm.einsum('j, ij -> ij', uxinv2.flatten(), P) - \
-                 bm.einsum('j, ij -> ij', xlinv2.flatten(), Q)  # (m, n) 
-            # GG = (diags(uxinv2.flatten(), 0).dot(P.T)).T - \
-            #      (diags(xlinv2.flatten(), 0).dot(Q.T)).T # (m, n)
+                 bm.einsum('j, ij -> ij', xlinv2.flatten(), Q)          # (m, n) 
             
             # 2. 计算 Newton 方向的一阶残差 delta_x, delta_y, delta_z, delta_lambda
             dpsidx = plam / ux2 - qlam / xl2                            # (n, 1)
-            delx = dpsidx - epsvecn / (x - alfa) + epsvecn / (beta - x) # (n, 1)
+            #! A-3：Newton 迭代内安全分母（每次内循环都要更新，因为 x 在变）----
+            xalfa = bm.maximum(x - alfa, eps_x)
+            betax = bm.maximum(beta - x, eps_x)
+            delx = dpsidx - epsvecn / xalfa + epsvecn / betax           # (n, 1)
+            # delx = dpsidx - epsvecn / (x - alfa) + epsvecn / (beta - x) # (n, 1)
+            #! ----------------------------------------------------------------
             dely = c + d * y - lam - epsvecm / y                        # (m, 1)
             delz = a0 - bm.dot(a.T, lam) - epsi / z                     # (1, 1)
             dellam = gvec - a * z - y - b + epsvecm / lam               # (m, 1)
             
             # 3. 计算 Hessian 的对角线
             diagx = plam / ux3 + qlam / xl3
-            diagx = 2 * diagx + xsi / (x - alfa) + eta / (beta - x) # (n, 1)
+            #! A-3
+            diagx = 2 * diagx + xsi / xalfa + eta / betax               # (n, 1)
+            # diagx = 2 * diagx + xsi / (x - alfa) + eta / (beta - x) # (n, 1)
+            #! ----------------------------------------------------------------
             diagxinv = een / diagx
             diagy = d + mu / y                                      # (m, 1)
             diagyinv = eem/diagy
@@ -165,12 +194,9 @@ def solve_mma_subproblem(m: int, n: int,
                 # 选择 (\Delta\lambda, \Delta z) 系统
                 blam = dellam + dely / diagy - bm.dot(GG, (delx / diagx)) # (m, 1)
                 bb = bm.concatenate((blam, delz), axis=0)                 # (m+1, 1)
-                # TODO 使用 einsum 替代对角矩阵乘法
                 D_lamyi = diaglamyi * bm.eye(1)  
                 GD_xG = bm.einsum('ik, k, jk -> ij', GG, diagxinv.flatten(), GG)  
                 Alam = D_lamyi + GD_xG  # (m, 1)
-                # Alam = bm.asarray(d5 = riags(diaglamyi.flatten(), 0) + \
-                #         (diags(diagxinv.flatten(), 0).dot(GG.T).T).dot(GG.T))
                 AAr1 = bm.concatenate((Alam, a), axis=1)     # (m, m+1)
                 AAr2 = bm.concatenate((a, -zet/z), axis=0).T # (1, m+1)
                 AA = bm.concatenate((AAr1, AAr2), axis=0)    # (m+1, m+1)
@@ -182,12 +208,9 @@ def solve_mma_subproblem(m: int, n: int,
                 # 选择 (\Delta x, \Delta z) 系统
                 diaglamyiinv = eem / diaglamyi
                 dellamyi = dellam + dely/diagy
-                # TODO 使用 einsum 替代对角矩阵乘法
                 D_x = diagx * bm.eye(1)
                 GD_lamyiG = bm.einsum('ik, k, jk -> ij', GG, diaglamyiinv.flatten(), GG)
                 Axx = D_x + GD_lamyiG
-                # Axx = bm.asarray(diags(diagx.flatten(), 0) + \
-                #     (diags(diaglamyiinv.flatten(), 0).dot(GG).T).dot(GG))
                 azz = zet/z + bm.dot(a.T, (a/diaglamyi))
                 axz = bm.dot(-GG.T, (a/diaglamyi))
                 bx = delx + bm.dot(GG.T, (dellamyi/diaglamyi))
@@ -203,8 +226,12 @@ def solve_mma_subproblem(m: int, n: int,
                 
             # 5.计算 Newton 方向 \Delta w
             dy = -dely / diagy + dlam / diagy                  # (m, 1)
-            dxsi = -xsi + epsvecn/(x-alfa) - (xsi*dx)/(x-alfa) # (n, 1)
-            deta = -eta + epsvecn/(beta-x) + (eta*dx)/(beta-x) # (n, 1)
+            #! A-3
+            dxsi = -xsi + epsvecn / xalfa - (xsi * dx) / xalfa  # (n, 1)
+            deta = -eta + epsvecn / betax + (eta * dx) / betax  # (n, 1)
+            # dxsi = -xsi + epsvecn/(x-alfa) - (xsi*dx)/(x-alfa) # (n, 1)
+            # deta = -eta + epsvecn/(beta-x) + (eta*dx)/(beta-x) # (n, 1)
+            #! ----------------------------------------------------------------
             dmu = -mu + epsvecm / y - (mu * dy) / y            # (m, 1)
             dzet = -zet + epsi / z - zet * dz / z              # (1, 1)
             ds = -s + epsvecm / lam - (s * dlam) / lam         # (m, 1)
@@ -214,10 +241,16 @@ def solve_mma_subproblem(m: int, n: int,
             # 6. 确定线搜索步长
             stepxx = -1.01 * dxx / xx
             stmxx = bm.max(stepxx)
-            stepalfa = -1.01 * dx / (x - alfa)
+            #! A-4
+            stepalfa = -1.01 * dx / xalfa
             stmalfa = bm.max(stepalfa)
-            stepbeta = 1.01 * dx / (beta - x)
+            stepbeta =  1.01 * dx / betax
             stmbeta = bm.max(stepbeta)
+            # stepalfa = -1.01 * dx / (x - alfa)
+            # stmalfa = bm.max(stepalfa)
+            # stepbeta = 1.01 * dx / (beta - x)
+            # stmbeta = bm.max(stepbeta)
+            #! ----------------------------------------------------------------
             stmalbe = max(stmalfa, stmbeta)
             stmalbexx = max(stmalbe, stmxx)
             stminv = max(stmalbexx, 1.0)
@@ -240,6 +273,9 @@ def solve_mma_subproblem(m: int, n: int,
                 itto = itto + 1
  
                 x = xold + steg*dx
+                #! A-5: 更新 x 后进行夹紧 ----
+                x = clamp_x(x)   
+                #! ---------------------------------------------
                 y = yold + steg*dy
                 z = zold + steg*dz
                 lam = lamold + steg*dlam
