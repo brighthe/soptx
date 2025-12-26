@@ -42,17 +42,17 @@ class DensityTopOptHuZhangTest(BaseLogged):
         pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
 
         #* 第一类网格
-        # pde.init_mesh.set('union_crisscross')
-        # analysis_mesh = pde.init_mesh()
-        # node = analysis_mesh.entity('node')
-        # analysis_mesh.meshdata['corner'] = node[:-1]
+        pde.init_mesh.set('union_crisscross')
+        analysis_mesh = pde.init_mesh()
+        node = analysis_mesh.entity('node')
+        analysis_mesh.meshdata['corner'] = node[:-1]
 
         #* 第二类网格
-        pde.init_mesh.set('uniform_crisscross_tri')
-        nx, ny = 2, 2
-        analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
-        node = analysis_mesh.entity('node')
-        analysis_mesh.meshdata['corner'] = pde.mark_corners(node)
+        # pde.init_mesh.set('uniform_crisscross_tri')
+        # nx, ny = 2, 2
+        # analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
+        # node = analysis_mesh.entity('node')
+        # analysis_mesh.meshdata['corner'] = pde.mark_corners(node)
 
         # import matplotlib.pyplot as plt
         # fig = plt.figure()
@@ -74,9 +74,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         space_degree = 3
         integration_order = space_degree*2 + 2
         use_relaxation = True
-        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, "
-                       f"网格类型={analysis_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}, "
-                       f"是否使用松弛={use_relaxation}")
+        self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"
+                    f"网格类型={analysis_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}, \n"
+                    f"是否使用松弛={use_relaxation}")
 
         maxit = 5
         errorType = [
@@ -685,5 +685,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_2_bearing_device_2d')
-    rho_opt, history = test.run(analysis_method='hzmfem')
+    test.run.set('test_linear_elastic_huzhang')
+    rho_opt, history = test.run()
