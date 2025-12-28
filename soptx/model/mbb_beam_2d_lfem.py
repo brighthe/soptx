@@ -46,11 +46,6 @@ class HalfMBBBeamRight2d(PDEBase):
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
-
-    #######################################################################################################################
-    # 属性访问器
-    #######################################################################################################################
-
     @property
     def E(self) -> float:
         """获取杨氏模量"""
@@ -65,11 +60,6 @@ class HalfMBBBeamRight2d(PDEBase):
     def P(self) -> float:
         """获取点力"""
         return self._P
-    
-
-    #######################################################################################################################
-    # 变体方法
-    #######################################################################################################################
 
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
@@ -138,10 +128,6 @@ class HalfMBBBeamRight2d(PDEBase):
 
         return mesh
 
-
-    #######################################################################################################################
-    # 核心方法
-    #######################################################################################################################
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
         kwargs = bm.context(points)
@@ -199,7 +185,40 @@ class HalfMBBBeamRight2d(PDEBase):
     def is_concentrate_load_boundary(self) -> Callable:
 
         return self.is_concentrate_load_boundary_dof
-
+    
+    def get_passive_element_mask(self, nx: int, ny: int) -> TensorLike:
+        """
+        生成被动单元掩码 (适用于列主序的单元编号)
+        
+        区域定义：
+        1. 载荷点 (左上角): 3x2 区域 
+           防止点载荷引起的应力奇异性
+        2. 支座点 (右下角): 3x3 区域
+           防止点支撑引起的应力奇异性。
+        """        
+        n_elements = nx * ny
+        
+        # === 修正点：使用列主序 (Column-Major) ===
+        # 对应图片：编号先沿 Y 轴增加
+        el_indices = bm.arange(n_elements)
+        ix = el_indices // ny  # 整除 ny 得到列号 x
+        iy = el_indices % ny   # 对 ny 取余得到行号 y
+        
+        # 区域 1: 载荷点 (左上角 3x2)
+        # x < 3, y >= ny - 2
+        load_region_w = 3
+        load_region_h = 2 
+        mask_load = (ix < load_region_w) & (iy >= (ny - load_region_h))
+        
+        # 区域 2: 支座点 (右下角 3x3)
+        # x >= nx - 3, y < 3
+        support_region_w = 3
+        support_region_h = 3
+        mask_support = (ix >= (nx - support_region_w)) & (iy < support_region_h)
+        
+        mask = mask_load | mask_support
+        
+        return mask
 
 class MBBBeam2d(PDEBase):
     """

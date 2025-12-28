@@ -51,20 +51,21 @@ class LinearElasticMaterial(BaseLogged, ABC):
             [0        ∂Ni/∂z  ∂Ni/∂y]
             [∂Ni/∂z   0       ∂Ni/∂x]
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         dof_priority: A flag that determines the ordering of DOFs.
                             If True, the priority is given to the first dimension of degrees of freedom.
-        gphi - (NC, NQ, LDOF, GD).
+        gphi: 标量基函数的梯度 - (NC, NQ, LDOF, GD).
         shear_order: Specifies the order of shear strain components for GD=3.
                                         Valid options are permutations of {'xy', 'yz', 'xz'}.
         
-        Returns:
-        --------
-        B: The strain-displacement matrix `B`, which is a tensor with shape:
-            - For 2D problems (GD=2): (NC, NQ, 3, TLDOF)
-            - For 3D problems (GD=3): (NC, NQ, 6, TLDOF)
+        Returns
+        -------
+        B: The strain-displacement matrix B - (NC, NQ, NS, TLDOF)
         '''
+        if len(gphi.shape) != 4:
+            self._log_error('f"预期 gphi 的维度为 4 (NC, NQ, LDOF, GD)，但得到的形状为 {gphi.shape}."')
+
         ldof, GD = gphi.shape[-2:]
         if dof_priority:
             indices = flatten_indices((ldof, GD), (1, 0))
@@ -202,11 +203,6 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         self._log_info("Isotropic linear elastic material initialized successfully")
 
-
-    #########################################################################################
-    # 属性访问器
-    #########################################################################################
-
     @property
     def youngs_modulus(self) -> float:
         """杨氏模量"""
@@ -342,18 +338,16 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
             self._log_error(error_msg)
         
+    #########################################################################################
+    # 外部方法
+    #########################################################################################
     def elastic_matrix(self) -> TensorLike:
         """
-        Calculate the elastic matrix D based on the defined hypothesis (3D, plane stress, or plane strain).
+        Calculate the elastic matrix D based on the defined hypothesis ('3d', 'plane_stress', 'plane_strain').
 
-        Returns:
-        --------
-        TensorLike: The elastic matrix D.
-            - For 2D problems (GD=2): (1, 1, 3, 3)
-            - For 3D problems (GD=3): (1, 1, 6, 6)
-        Here, the first dimension (NC) is the number of cells, and the second dimension (NQ) is the 
-        number of quadrature points, both of which are set to 1 for compatibility with other finite 
-        element tensor operations.
+        Returns
+        -------
+        The elastic matrix D - (1, 1, NS, NS)
         """
         if not hasattr(self, 'D') or self.D is None:
             self._log_warning("Elastic matrix not computed, computing now...")
@@ -366,3 +360,74 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                    f"shape: {D.shape}")
 
         return D
+    
+    def calculate_stress_vector(self, 
+                            B: TensorLike, 
+                            u_e: TensorLike
+                        ) -> TensorLike:
+        """计算名义应力向量 (对应实体材料)
+
+        Parameters
+        ----------
+        B - (NC, NQ, NS, TLDOF)
+        u_e - (NC, TLDOF)
+
+        Returns
+        -------
+        stress_vector - (NC, NQ, NS)
+        """
+        # D 为实体材料弹性矩阵，不包含密度插值
+        D = self.elastic_matrix()  # (1, 1, NS, NS)
+        kwargs = bm.context(u_e)
+        stress_vector = bm.einsum('...ij, cqjk, ck -> cqi', D, B, u_e, **kwargs)
+
+        return stress_vector
+    
+    def calculate_von_mises_stress(self, 
+                                stress_vector: TensorLike
+                            ) -> TensorLike:
+        """计算 von Mises 应力场
+
+        Parameters:
+        -----------
+        stress_vector - (NC, NQ, NS)
+
+        Returns
+        -------
+        von_mises_stress - (NC, NQ)
+        """
+        kwargs = bm.context(stress_vector)
+        if self._plane_type == '3d':
+            M = bm.tensor([
+                        [ 1.0, -0.5, -0.5,  0.0,  0.0,  0.0],
+                        [-0.5,  1.0, -0.5,  0.0,  0.0,  0.0],
+                        [-0.5, -0.5,  1.0,  0.0,  0.0,  0.0],
+                        [ 0.0,  0.0,  0.0,  3.0,  0.0,  0.0],
+                        [ 0.0,  0.0,  0.0,  0.0,  3.0,  0.0],
+                        [ 0.0,  0.0,  0.0,  0.0,  0.0,  3.0]
+                    ], **kwargs)
+        
+        elif self.plane_type == 'plane_stress':
+            M = bm.tensor([
+                        [ 1.0, -0.5,  0.0],
+                        [-0.5,  1.0,  0.0],
+                        [ 0.0,  0.0,  3.0]
+                    ], **kwargs)
+
+        elif self.plane_type == 'plane_strain':
+            nu = self.poisson_ratio
+            M = bm.tensor([
+                        [1-nu+nu**2, -(0.5-nu+nu**2), 0.0],
+                        [-(0.5-nu+nu**2), 1-nu+nu**2, 0.0],
+                        [0.0,            0.0,           3.0]
+                    ], **kwargs)
+            
+        else:
+            error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
+            self._log_error(error_msg)
+
+        sig_sq = bm.einsum('cqi, ij, cqj -> cq', stress_vector, M, stress_vector)
+        
+        von_mises_stress = bm.sqrt(bm.maximum(sig_sq, 1e-12))
+
+        return von_mises_stress
