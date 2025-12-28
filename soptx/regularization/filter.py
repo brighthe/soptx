@@ -45,19 +45,6 @@ class Filter(BaseLogged):
         self._filter_type = filter_type
         self._rmin = rmin
         self._density_location = density_location
-        
-        # 1. 构建过滤矩阵
-        if self._filter_type != 'none' and self._rmin > 0:
-            builder = FilterMatrixBuilder(
-                                    mesh=mesh, 
-                                    rmin=rmin, 
-                                    density_location=density_location,
-                                )
-            self._H = builder.build()
-            self._cell_measure = self._mesh.entity_measure('cell')
-
-        else:
-            self._H = None
 
         # 1. 构建过滤矩阵
         if self._filter_type != 'none' and self._rmin is not None and self._rmin > 0:
