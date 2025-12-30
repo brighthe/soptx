@@ -1,4 +1,4 @@
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Union, Dict
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -23,17 +23,14 @@ class ComplianceObjective(BaseLogged):
         self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
-            density: Union[Function, TensorLike], 
-            displacement: Optional[Function] = None,
-            stress: Optional[Function] = None
+            density: Union[Function, TensorLike],
+            state: Optional[Dict] = None, 
+            **kwargs
         ) -> float:
         """计算柔顺度目标函数值"""
-        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+        if isinstance(self._analyzer, LagrangeFEMAnalyzer):
             #* 拉格朗日位移有限元 *#
-            if displacement is None:
-                uh = self._analyzer.solve_displacement(rho_val=density)
-            else:
-                uh = displacement
+            uh = state['displacement']
         
             F = self._analyzer.force_vector
             c = bm.einsum('i, i ->', uh[:], F)
@@ -42,12 +39,9 @@ class ComplianceObjective(BaseLogged):
             # Ku = K.matmul(uh[:])
             # c = bm.einsum('i, i ->', uh[:], Ku)
 
-        elif self._analyzer.__class__ in [HuZhangMFEMAnalyzer]:
+        elif isinstance(self._analyzer, HuZhangMFEMAnalyzer):
             #* 胡张应力位移混合有限元 *#
-            if displacement is None and stress is None:
-                sigmah, uh = self._analyzer.solve_displacement(rho_val=density)
-            else:
-                sigmah, uh = stress, displacement
+            sigmah, uh = state['stress'], state['displacement']
                 
             if self._state_variable == 'u':
                 from fealpy.solver import spsolve
@@ -72,35 +66,35 @@ class ComplianceObjective(BaseLogged):
     
     def jac(self, 
             density: Union[Function, TensorLike], 
-            displacement: Optional[Function] = None,
-            diff_mode: Literal["auto", "manual"] = "manual"
+            state: Optional[dict] = None,
+            diff_mode: Literal["auto", "manual"] = "manual",
+            **kwargs
         ) -> TensorLike:
         """计算柔顺度目标函数相对于物理密度的灵敏度"""
 
         if diff_mode == "manual":
-            return self._manual_differentiation(density=density, displacement=displacement)
+            return self._manual_differentiation(density=density, state=state, **kwargs)
 
         elif diff_mode == "auto": 
-            return self._auto_differentiation(density=density, displacement=displacement)
+            return self._auto_differentiation(density=density, state=state, **kwargs)
 
         else:
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
         
     def _manual_differentiation(self, 
-                                density: Union[Function, TensorLike],  
-                                displacement: Optional[Function] = None
+                                density: Union[Function, TensorLike],
+                                state: Optional[dict] = None,  
+                                # displacement: Optional[Function] = None
+                                **kwargs
                             ) -> TensorLike:
         """手动计算柔顺度目标函数相对于物理密度的灵敏度"""
 
         density_location = self._interpolation_scheme.density_location
 
         if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
-            # 拉格朗日位移有限元
-            if displacement is None:
-                uh = self._analyzer.solve_displacement(rho_val=density)
-            else:
-                uh = displacement
+            #* 拉格朗日位移有限元 *#
+            uh = state.get('displacement')
             
             space_uh = self._analyzer._tensor_space
             cell2dof = space_uh.cell_to_dof()
@@ -146,24 +140,24 @@ class ComplianceObjective(BaseLogged):
                 error_msg = f"Unknown density location: {density_location}"
                 self._log_error(error_msg)
 
-        elif self._analyzer.__class__ in [HuZhangMFEMAnalyzer]:
-            # 胡张应力位移混合有限元
-            if displacement is None:
-                sigmah, uh = self._analyzer.solve_displacement(rho_val=density)
-            else:
-                sigmah, uh = displacement, None
-            
-            space_sigmah = self._analyzer._huzhang_space
+        elif isinstance(self._analyzer, HuZhangMFEMAnalyzer):
+            #* 胡张应力位移混合有限元 *#
+            sigmah = state.get('stress')
+
+            if sigmah is None:
+                self._log_error(f"胡张混合元的灵敏度分析需要应力状态变量，但未提供")
+
+            space_sigmah = self._analyzer.huzhang_space
             cell2dof = space_sigmah.cell_to_dof()
-            sigmahe = sigmah[cell2dof] # (NC, TLDOF_sigma)
+            sigmah_e = sigmah[cell2dof] # (NC, TLDOF_sigma)
 
             diff_AE = self._analyzer.get_local_stress_matrix_derivative(rho_val=density) # (NC, TLDOF_sigma, TLDOF_sigma)
 
             if density_location in ['element']:
-                dc = -bm.einsum('ci, cij, cj -> c', sigmahe, diff_AE, sigmahe) # (NC, )
+                dc = bm.einsum('ci, cij, cj -> c', sigmah_e, diff_AE, sigmah_e) # (NC, )
 
                 return dc[:]
-            
+        
             elif density_location in ['node']:
                 raise NotImplementedError("节点密度尚未实现")
             
@@ -172,7 +166,7 @@ class ComplianceObjective(BaseLogged):
             
             elif density_location in ['node_multiresolution']:
                 raise NotImplementedError("多分辨率节点密度尚未实现")
-
+            
     
     def _auto_differentiation(self, 
             density_distribution: Function, 

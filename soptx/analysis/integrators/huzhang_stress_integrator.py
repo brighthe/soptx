@@ -48,10 +48,10 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
 
         return cm, phi, trphi, ws 
 
-    def assembly(self, space: FunctionSpace, enable_timing: bool = False) -> TensorLike:
+    def assembly(self, space: FunctionSpace, enable_timing: bool = True) -> TensorLike:
         t = None
         if enable_timing:
-            t = timer(f"stress assembly")
+            t = timer(f"应力项组装")
             next(t)
 
         mesh = getattr(space, 'mesh', None)
@@ -69,19 +69,29 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
         _, num = symmetry_index(d=TD, r=2)
 
         if enable_timing:
-            t.send('2')
+            t.send('准备时间')
 
         coef = self.coef 
 
         # TODO phi 的每个轴的计算复杂度太大了
         if coef is None:
             A  = lambda0 * bm.einsum('q, c, cqld, cqmd, d -> clm', ws, cm, phi, phi, num)
+            if enable_timing:
+                t.send('Einsum 求和时间 1')
+
             A -= lambda1 * bm.einsum('q, c, cql, cqm -> clm', ws, cm, trphi, trphi)
+            if enable_timing:
+                t.send('Einsum 求和时间 2')
 
         # 单元密度 (NC, )
         elif coef.shape ==(NC, ):
             A  = lambda0 * bm.einsum('q, c, c, cqld, cqmd, d -> clm', ws, cm, coef, phi, phi, num)
+            if enable_timing:
+                t.send('Einsum 求和时间 1')
+            
             A -= lambda1 * bm.einsum('q, c, c, cql, cqm -> clm', ws, cm, coef, trphi, trphi)
+            if enable_timing:
+                t.send('Einsum 求和时间 2')
 
         # 节点密度 (NC, NQ)
         elif coef.shape == (NC, NQ):

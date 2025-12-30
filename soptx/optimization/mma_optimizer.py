@@ -1,6 +1,6 @@
 import warnings
 from time import time
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -337,15 +337,36 @@ class MMAOptimizer(BaseLogged):
             # 更新迭代计数
             self._epoch = iter_idx + 1
 
-            # 使用物理密度求解位移场
-            if isinstance(self._objective, CompliantMechanismObjective):
-                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)
+            analyzer = self._objective._analyzer
+            
+            #TODO 基于物理密度求解状态变量
+            if hasattr(analyzer, 'solve_state'):
+                # 例如: state = {'stress': sigma, 'displacement': u}
+                state = analyzer.solve_state(rho_val=rho_phys)
+            elif isinstance(self._objective, CompliantMechanismObjective):
+                # 兼容旧代码: 柔性机构
+                state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)}
             else:
-                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
+                # 兼容旧代码: 最小柔度
+                state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys)}
+
+            # # 使用物理密度求解位移场
+            # if isinstance(self._objective, CompliantMechanismObjective):
+            #     uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)
+            # else:
+            #     uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
             if enable_timing:
                 t.send('位移场求解')
+
+            #TODO 计算目标函数
+            obj_val_raw = self._objective.fun(density=rho_phys, state=state)
+
+            # if isinstance(state, dict):
+            #     obj_val_raw = self._objective.fun(density=rho_phys, state=state)
+            # else:
+            #     obj_val_raw = self._objective.fun(rho_phys, displacement=state)
             
-            obj_val_raw = self._objective.fun(rho_phys, displacement=uh)
+            # obj_val_raw = self._objective.fun(rho_phys, displacement=uh)
 
             #! 动态重置缩放因子
             if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
@@ -353,16 +374,25 @@ class MMAOptimizer(BaseLogged):
                 denom = max(abs(obj0), 1e-10)
                 self._obj_scale_factor = min(1e6, 10.0 / denom)
                 self._log_info(f"Objective scaling factor (re)initialized to: {self._obj_scale_factor:.4e}")
+                
             elif self._obj_scale_factor is None:
                 self._obj_scale_factor = 1.0
 
             obj_val = obj_val_raw * self._obj_scale_factor
             if enable_timing:
                 t.send('目标函数计算')
-                
-            # 灵敏度应用缩放因子
-            obj_grad_rho_raw = self._objective.jac(rho_phys, displacement=uh)
+
+            #TODO 计算目标函数灵敏度
+            if isinstance(state, dict):
+                obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
+            else:
+                obj_grad_rho_raw = self._objective.jac(rho_phys, displacement=state)
+            
             obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
+                
+            # # 灵敏度应用缩放因子
+            # obj_grad_rho_raw = self._objective.jac(rho_phys, displacement=uh)
+            # obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
 
             # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)

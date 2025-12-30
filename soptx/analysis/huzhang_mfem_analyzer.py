@@ -1,4 +1,4 @@
-from typing import Optional, Union, Literal, Tuple
+from typing import Optional, Union, Literal, Tuple, Dict
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -54,8 +54,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._topopt_algorithm = topopt_algorithm
         self._interpolation_scheme = interpolation_scheme
 
-        # 设置默认求解方法
-        self.solve_displacement.set(solve_method)
+        self._solve_method = solve_method
+
+        # # 设置默认求解方法
+        # self.solve_displacement.set(solve_method)
 
         self._GD = self._mesh.geo_dimension()
         self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation)
@@ -90,7 +92,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     
     @property
     def tensor_space(self) -> TensorFunctionSpace:
-        """获取当前的张量函数空间"""
+        """获取当前的位移有限元空间"""
         return self._tensor_space
     
     @property
@@ -98,10 +100,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         """获取当前的材料类"""
         return self._material
     
-    @property
-    def topopt_algorithm(self) -> Optional[str]:
-        """获取当前的拓扑优化算法"""
-        return self._topopt_algorithm
+    # @property
+    # def topopt_algorithm(self) -> Optional[str]:
+    #     """获取当前的拓扑优化算法"""
+    #     return self._topopt_algorithm
 
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
@@ -140,7 +142,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     def assemble_stiff_matrix(self, 
                         rho_val: Optional[Union[Function, TensorLike]] = None,
-                        enable_timing: bool = False,
+                        enable_timing: bool = True,
                     ) -> Union[CSRTensor, COOTensor]:
         """组装全局刚度矩阵"""
                 
@@ -182,11 +184,17 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         bform1.add_integrator(hzs_integrator)
         M = bform1.assembly(format='csr')
 
+        if enable_timing:
+            t.send('应力项时间')
+
         bform2 = BilinearForm((space_u, space_sigma)) # 应力-位移矩阵 B_σu
 
         hzm_integrator = HuZhangMixIntegrator()
         bform2.add_integrator(hzm_integrator)
         B = bform2.assembly(format='csr')
+
+        if enable_timing:
+            t.send('混合项时间')
 
         # TODO 角点松弛
         if space_sigma.use_relaxation == True:
@@ -393,32 +401,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         return K, F
     
-    ##########################################################################################################
-    # 变体方法
-    ##########################################################################################################
-
-    @variantmethod('mumps')
-    def solve_displacement(self, 
+    def solve_state(self, 
                         rho_val: Optional[Union[TensorLike, Function]] = None, 
-                        enable_timing: bool = False, 
+                        enable_timing: bool = True, 
                         **kwargs
-                    ) -> Tuple[Function, Function]:
-        
-        if self._topopt_algorithm is None:
-            if rho_val is not None:
-                self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
-        
-        elif self._topopt_algorithm in ['density_based']:
-            if rho_val is None:
-                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-                self._log_error(error_msg)
-        
+                    ) -> Dict[str, Function]:
         t = None
         if enable_timing:
             t = timer(f"分析阶段时间")
             next(t)
-        
-        from fealpy.solver import spsolve
 
         mesh = self._mesh
         pde = self._pde
@@ -427,26 +418,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # TODO 注释
         mesh.edgedata['dirichlet'] = pde.is_traction_boundary(bc)   # 应力是本质边界条件
         mesh.edgedata['neumann'] = pde.is_displacement_boundary(bc) # 位移是自然边界条件
-
-        # tx_fun, ty_fun = pde.is_traction_boundary_dof()   # Tuple[Callable, Callable]
-        # tx_edge = tx_fun(bc)                               # (NE,)
-        # ty_edge = ty_fun(bc)                               # (NE,)
-        # dirichlet_comp = bm.stack([tx_edge, ty_edge], axis=-1)     # (NE, 2)
-        # dirichlet_edge = bm.any(dirichlet_comp, axis=-1)           # (NE,)
-
-        # mesh.edgedata['dirichlet_comp'] = dirichlet_comp
-        # mesh.edgedata['dirichlet']      = dirichlet_edge
-
-        # tx_fun, ty_fun = pde.is_traction_boundary_dof()   # Tuple[Callable, Callable]
-        # tx_edge = tx_fun(bc)                               # (NE,)
-        # ty_edge = ty_fun(bc)                               # (NE,)
-        # dirichlet_comp = bm.stack([tx_edge, ty_edge], axis=-1)     # (NE, 2)
-        # dirichlet_edge = bm.any(dirichlet_comp, axis=-1)           # (NE,)
-
-        # mesh.edgedata['dirichlet_comp'] = dirichlet_comp
-        # mesh.edgedata['dirichlet']      = dirichlet_edge
     
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+
+        if enable_timing:
+            t.send('矩阵组装时间')
 
         space_sigmah = self._huzhang_space
         space_uh = self._tensor_space
@@ -464,6 +440,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         F_natural = self.assemble_displacement_bc_vector()
         F0[:gdof_sigmah] = F_natural
 
+        if enable_timing:
+            t.send('源项处理时间')
+
         # 本质边界条件处理 (应力边界 σ·n = g_N)
         if self._pde.boundary_type == 'neumann':
             K, F = K0, F0
@@ -471,10 +450,19 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
 
         if enable_timing:
-            t.send('组装时间')
+            t.send('本质边界条件处理时间')
 
-        solver_type = kwargs.get('solver', 'scipy')
-        X = spsolve(K, F, solver=solver_type)
+        solver_type = kwargs.get('solver', self._solve_method)
+        
+        if solver_type in ['mumps', 'scipy']:
+            from fealpy.solver import spsolve
+            X = spsolve(K, F, solver=solver_type)
+
+        elif solver_type in ['cg']: 
+            pass
+
+        else:
+            self._log_error(f"未知的求解器类型: {solver_type}")
 
         if enable_timing:
             t.send('求解时间')
@@ -492,135 +480,135 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send('结果赋值时间')
             t.send(None)
 
-        return sigmah, uh
+        return {'stress': sigmah, 'displacement': uh}
     
-    @solve_displacement.register('scipy')
-    def solve_displacement(self, 
-                        rho_val: Optional[Union[TensorLike, Function]] = None, 
-                        enable_timing: bool = False, 
-                        **kwargs
-                    ) -> Tuple[Function, Function]:
+    # @solve_state.register('scipy')
+    # def solve_state(self, 
+    #                     rho_val: Optional[Union[TensorLike, Function]] = None, 
+    #                     enable_timing: bool = False, 
+    #                     **kwargs
+    #                 ) -> Tuple[Function, Function]:
         
-        t = None
-        if enable_timing:
-            t = timer(f"分析阶段时间")
-            next(t)
+    #     t = None
+    #     if enable_timing:
+    #         t = timer(f"分析阶段时间")
+    #         next(t)
         
-        from fealpy.solver import spsolve
+    #     from fealpy.solver import spsolve
 
-        if self._topopt_algorithm is None:
-            if rho_val is not None:
-                self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
+    #     if self._topopt_algorithm is None:
+    #         if rho_val is not None:
+    #             self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
         
-        elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if rho_val is None:
-                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-                self._log_error(error_msg)
+    #     elif self._topopt_algorithm in ['density_based', 'level_set']:
+    #         if rho_val is None:
+    #             error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+    #             self._log_error(error_msg)
     
-        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+    #     K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
-        if enable_timing:
-            t.send('刚度矩阵组装时间')
+    #     if enable_timing:
+    #         t.send('刚度矩阵组装时间')
 
-        space_sigmah = self._huzhang_space
-        space_uh = self._tensor_space
-        gdof_sigmah = space_sigmah.number_of_global_dofs()
-        gdof_uh = space_uh.number_of_global_dofs()
-        gdof = gdof_sigmah + gdof_uh
-        F0 = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
+    #     space_sigmah = self._huzhang_space
+    #     space_uh = self._tensor_space
+    #     gdof_sigmah = space_sigmah.number_of_global_dofs()
+    #     gdof_uh = space_uh.number_of_global_dofs()
+    #     gdof = gdof_sigmah + gdof_uh
+    #     F0 = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
 
-        F_sigmah = self.assemble_stress_load_vector()
-        F0[:gdof_sigmah] = F_sigmah
+    #     F_sigmah = self.assemble_stress_load_vector()
+    #     F0[:gdof_sigmah] = F_sigmah
         
-        F_uh = self.assemble_displacement_load_vector()
-        F0[gdof_sigmah:] = F_uh
+    #     F_uh = self.assemble_displacement_load_vector()
+    #     F0[gdof_sigmah:] = F_uh
 
-        if enable_timing:
-            t.send('载荷向量组装时间')
+    #     if enable_timing:
+    #         t.send('载荷向量组装时间')
 
-        boundary_type = self._pde.boundary_type
-        if boundary_type == 'dirichlet':
-            K, F = K0, F0
-        else:
-            K, F = self.apply_neumann_bc(K0, F0)
+    #     boundary_type = self._pde.boundary_type
+    #     if boundary_type == 'dirichlet':
+    #         K, F = K0, F0
+    #     else:
+    #         K, F = self.apply_neumann_bc(K0, F0)
 
-        if enable_timing:
-            t.send('应用边界条件时间')
+    #     if enable_timing:
+    #         t.send('应用边界条件时间')
             
-        solver_type = kwargs.get('solver', 'scipy')
+    #     solver_type = kwargs.get('solver', 'scipy')
 
-        X = spsolve(K, F, solver=solver_type)
+    #     X = spsolve(K, F, solver=solver_type)
 
-        if enable_timing:
-            t.send('求解线性系统时间')
+    #     if enable_timing:
+    #         t.send('求解线性系统时间')
 
-        space0 = self._huzhang_space
-        space1 = self._tensor_space
-        gdof0 = space0.number_of_global_dofs()
+    #     space0 = self._huzhang_space
+    #     space1 = self._tensor_space
+    #     gdof0 = space0.number_of_global_dofs()
 
-        sigmaval = X[:gdof0]
-        uval = X[gdof0:]
+    #     sigmaval = X[:gdof0]
+    #     uval = X[gdof0:]
 
-        sigmah = space0.function()
-        sigmah[:] = sigmaval
+    #     sigmah = space0.function()
+    #     sigmah[:] = sigmaval
 
-        uh = space1.function()
-        uh[:] = uval
+    #     uh = space1.function()
+    #     uh[:] = uval
 
-        if enable_timing:
-            t.send('结果赋值时间')
-            t.send(None)
+    #     if enable_timing:
+    #         t.send('结果赋值时间')
+    #         t.send(None)
 
-        return sigmah, uh
+    #     return sigmah, uh
     
-    @solve_displacement.register('cg')
-    def solve_displacement(self, 
-            density_distribution: Optional[Function] = None, 
-            **kwargs
-            ) -> Function:
-        from fealpy.solver import cg
+    # @solve_state.register('cg')
+    # def solve_state(self, 
+    #         density_distribution: Optional[Function] = None, 
+    #         **kwargs
+    #         ) -> Function:
+    #     from fealpy.solver import cg
 
-        if self._topopt_algorithm is None:
-            if density_distribution is not None:
-                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+    #     if self._topopt_algorithm is None:
+    #         if density_distribution is not None:
+    #             self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
         
-        elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if density_distribution is None:
-                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-                self._log_error(error_msg)
+    #     elif self._topopt_algorithm in ['density_based', 'level_set']:
+    #         if density_distribution is None:
+    #             error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+    #             self._log_error(error_msg)
             
-        K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
-        F0 = self.assemble_force_vector()
-        K, F = self.apply_bc(K0, F0)
+    #     K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
+    #     F0 = self.assemble_force_vector()
+    #     K, F = self.apply_bc(K0, F0)
 
-        maxiter = kwargs.get('maxiter', 5000)
-        atol = kwargs.get('atol', 1e-12)
-        rtol = kwargs.get('rtol', 1e-12)
-        x0 = kwargs.get('x0', None)
+    #     maxiter = kwargs.get('maxiter', 5000)
+    #     atol = kwargs.get('atol', 1e-12)
+    #     rtol = kwargs.get('rtol', 1e-12)
+    #     x0 = kwargs.get('x0', None)
 
-        X, info = cg(K, F[:], x0=x0,
-            batch_first=True, 
-            atol=atol, rtol=rtol, 
-            maxit=maxiter, returninfo=True)
+    #     X, info = cg(K, F[:], x0=x0,
+    #         batch_first=True, 
+    #         atol=atol, rtol=rtol, 
+    #         maxit=maxiter, returninfo=True)
         
-        space0 = self._huzhang_space
-        space1 = self._tensor_space
-        gdof0 = space0.number_of_global_dofs()
+    #     space0 = self._huzhang_space
+    #     space1 = self._tensor_space
+    #     gdof0 = space0.number_of_global_dofs()
 
-        sigmaval = X[:gdof0]
-        uval = X[gdof0:]
+    #     sigmaval = X[:gdof0]
+    #     uval = X[gdof0:]
 
-        sigmah = space0.function()
-        sigmah[:] = sigmaval
+    #     sigmah = space0.function()
+    #     sigmah[:] = sigmaval
 
-        uh = space1.function()
-        uh[:] = uval
+    #     uh = space1.function()
+    #     uh[:] = uval
         
         
-        gdof = self._tensor_space.number_of_global_dofs()
-        self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
+    #     gdof = self._tensor_space.number_of_global_dofs()
+    #     self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
 
-        return uh
+    #     return uh
 
 
     ###############################################################################################
