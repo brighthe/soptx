@@ -57,24 +57,30 @@ class MaterialInterpolationScheme(BaseLogged):
                 density_location: Literal['element', 'element_multiresolution', 
                                           'node', 'node_multiresolution'] = 'element',
                 interpolation_method: Literal['simp', 'msimp', 'ramp'] = 'simp',
+                stress_interpolation_method: Literal['power_law'] = 'power_law',
                 options: Optional[dict] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
-        """
-        材料插值方法变体示例
-        """
+        """材料插值方法变体示例"""
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._density_location = density_location
         self._interpolation_method = interpolation_method
+        self._stress_interpolation_method = stress_interpolation_method
 
         self._options = options or {}
         self._set_default_options()
 
+        # 注册密度分布方法
         self.setup_density_distribution.set(density_location)
-        self.interpolate_map.set(interpolation_method)
-        self.interpolate_map_derivative.set(interpolation_method)
+        
+        # 注册材料插值方法
+        self.interpolate_material.set(interpolation_method)
+        self.interpolate_material_derivative.set(interpolation_method)
+
+        # 注册应力惩罚方法
+        self.interpolate_stress.set(stress_interpolation_method)
 
     
     #########################################################################################
@@ -88,18 +94,29 @@ class MaterialInterpolationScheme(BaseLogged):
 
     @property
     def interpolation_method(self) -> Optional[str]:
-        """获取当前的插值方法"""
+        """获取当前的材料插值方法"""
         return self._interpolation_method
+    
+    @property
+    def stress_interpolation_method(self) -> Optional[str]:
+        """获取当前的应力插值方法"""
+        return self._stress_interpolation_method
     
     @property
     def penalty_factor(self) -> float:
         """获取当前的惩罚因子"""
         return self._options['penalty_factor']
     
+    @property
+    def stress_penalty_factor(self) -> float:
+        """获取当前的应力惩罚因子"""
+        return self._options['stress_penalty_factor']
+    
 
     #########################################################################################
     # 属性修改器
     #########################################################################################
+
     @penalty_factor.setter
     def penalty_factor(self, penalty_factor: float) -> None:
         """更新惩罚因子"""
@@ -234,7 +251,7 @@ class MaterialInterpolationScheme(BaseLogged):
     
 
     @variantmethod('simp')
-    def interpolate_map(self, 
+    def interpolate_material(self, 
                     material: LinearElasticMaterial, 
                     rho_val: Union[Function, TensorLike],
                     integration_order: Optional[int] = None,
@@ -270,21 +287,21 @@ class MaterialInterpolationScheme(BaseLogged):
 
             return E_rho
         
-    @interpolate_map.register('msimp')
-    def interpolate_map(self,
+    @interpolate_material.register('msimp')
+    def interpolate_material(self,
                     material: LinearElasticMaterial, 
                     rho_val: Union[Function, TensorLike, DensityDistribution],
                     integration_order: Optional[int] = None,
                     displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
-        """修正 SIMP 插值: E(ρ) = Emin + ρ^p * (E0 - Emin)"""
+        """修正 SIMP 插值"""
 
         penalty_factor = self._options['penalty_factor']
         target_variables = self._options['target_variables']
         void_youngs_modulus = self._options['void_youngs_modulus']
 
         if target_variables == ['E']:
-
+            """E(ρ) = Emin + ρ^p * (E0 - Emin)"""
             E0 = material.youngs_modulus
             Emin = void_youngs_modulus
 
@@ -332,18 +349,8 @@ class MaterialInterpolationScheme(BaseLogged):
             
             return E_rho
 
-    @interpolate_map.register('simp_double')
-    def interpolate_map(self) -> TensorLike:
-        """双指数 SIMP 插值"""
-        pass
-
-    @interpolate_map.register('ramp')
-    def interpolate_map(self) -> TensorLike:
-        """RAMP 插值"""
-        pass
-
     @variantmethod('simp')
-    def interpolate_map_derivative(self, 
+    def interpolate_material_derivative(self, 
                         material: LinearElasticMaterial, 
                         rho_val: Union[Function, TensorLike],
                         integration_order: Optional[int] = None,
@@ -377,8 +384,8 @@ class MaterialInterpolationScheme(BaseLogged):
             error_msg = f"Unknown target_variables: {target_variables}"
             self._log_error(error_msg)
 
-    @interpolate_map_derivative.register('msimp')
-    def interpolate_map_derivative(self, 
+    @interpolate_material_derivative.register('msimp')
+    def interpolate_material_derivative(self, 
                         material: LinearElasticMaterial, 
                         rho_val: Union[Function, TensorLike],
                         integration_order: Optional[int] = None,
@@ -419,77 +426,35 @@ class MaterialInterpolationScheme(BaseLogged):
             error_msg = f"Unknown target_variables: {target_variables}"
             self._log_error(error_msg)
 
+    @variantmethod('power_law') 
+    def interpolate_stress(self, 
+                        stress_solid: TensorLike, 
+                        rho_val: Union[Function, TensorLike],
+                        integration_order: Optional[int] = None,
+                    ) -> TensorLike:
+        """
+        应力惩罚: sigma = rho^q * sigma_nominal
 
-
-    # ###########################################################################################################
-    # # 核心方法
-    # ###########################################################################################################
-
-    # def interpolate_derivative(self,
-    #                     material: LinearElasticMaterial, 
-    #                     density_distribution: Union[Function, TensorLike],
-    #                 ) -> TensorLike:
-    #     """获取当前插值方法的标量系数相对于物理密度的导数"""
-
-    #     method = self.interpolation_method
-    #     p = self._options['penalty_factor']
-
-    #     if self._density_location in ['element']:
-
-    #         rho_element = density_distribution[:] # (NC, )
-            
-    #         if method == 'simp':    
-    #             E0 = material.youngs_modulus
-    #             dE_rho = p * rho_element[:] ** (p - 1) * E0
-    #             return dE_rho
-    #         elif method == 'msimp':
-    #             E0 = material.youngs_modulus
-    #             Emin = self._options['void_youngs_modulus']
-    #             dE_rho = p * rho_element[:] ** (p - 1) * (E0 - Emin)
-    #             return dE_rho
-            
-    #     elif self._density_location in ['element_multiresolution']:
-            
-    #         rho_sub_element = density_distribution[:] # (NC, n_sub)
-
-    #         if method == 'simp':
-    #             E0 = material.youngs_modulus
-    #             dE_rho = p * rho_sub_element[:] ** (p - 1) * E0
-    #             return dE_rho
-    #         elif method == 'msimp':
-    #             E0 = material.youngs_modulus
-    #             Emin = self._options['void_youngs_modulus']
-    #             dE_rho = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin)
-    #             return dE_rho
-            
-    #     elif self._density_location in ['node']:
+        Parameters
+        ----------
+        stress_solid : 实体应力张量
+        """
+        q = self._options['stress_penalty_factor']
         
-    #         rho_q = density_distribution[:] # (NC, NQ)
+        if self._density_location in ['element']:
+            # rho_val.shape = (NC, )
+            rho_element = rho_val[:]
+            stress_penalized = bm.einsum('c, cql -> cql', rho_element ** q, stress_solid)
 
-    #         if method == 'simp':
-    #             E0 = material.youngs_modulus
-    #             dE_rho = p * rho_q[:] ** (p - 1) * E0
-    #             return dE_rho
-    #         elif method == 'msimp':
-    #             E0 = material.youngs_modulus
-    #             Emin = self._options['void_youngs_modulus']
-    #             dE_rho = p * rho_q[:] ** (p - 1) * (E0 - Emin)
-    #             return dE_rho
+        elif self._density_location in ['node']:
+            # rho_val.shape = (NN, )
+            pass
+
+        elif self._density_location in ['element_multiresolution']:
+            # rho_val.shape = (NC, n_sub)
+            pass
         
-    #     elif self._density_location in ['node_multiresolution']:
-            
-    #         rho_sub_q = density_distribution[:] # (NC, n_sub, NQ)
-
-    #         if method == 'simp':
-    #             E0 = material.youngs_modulus
-    #             dE_rho = p * rho_sub_q[:] ** (p - 1) * E0
-    #             return dE_rho
-    #         elif method == 'msimp':
-    #             E0 = material.youngs_modulus
-    #             Emin = self._options['void_youngs_modulus']
-    #             dE_rho = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin)
-    #             return dE_rho
-
+        return stress_penalized
 
     ###########################################################################################################
     # 内部方法
@@ -498,9 +463,10 @@ class MaterialInterpolationScheme(BaseLogged):
     def _set_default_options(self) -> None:
         """设置默认选项"""
         defaults = {
-            'penalty_factor': 3.0,
+            'penalty_factor': 3.0,       # 材料惩罚因子 
             'void_youngs_modulus': 1e-9,
-            'target_variables': ['E']
+            'target_variables': ['E'],
+            'stress_penalty_factor': 0.5 # 应力惩罚因子 
         }
         
         for key, default_value in defaults.items():

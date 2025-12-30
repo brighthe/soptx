@@ -172,7 +172,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 self._log_error("基于密度的拓扑优化算法需要提供相对密度 rho")
 
             # TODO 目前仅支持插值杨氏模量 E 
-            E_rho = self._interpolation_scheme.interpolate_map(
+            E_rho = self._interpolation_scheme.interpolate_material(
                                             material=self._material,
                                             rho_val=rho_val,
                                             integration_order=self._integration_order,
