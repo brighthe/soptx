@@ -107,7 +107,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
             sigma_dof = huzhang_mfem_analyzer._huzhang_space.number_of_global_dofs()
             NDof[i] = uh_dof + sigma_dof
 
-            sigmah, uh = huzhang_mfem_analyzer.solve_displacement(rho_val=None)
+            state = huzhang_mfem_analyzer.solve_state(rho_val=None)
+            sigmah, uh = state['stress'], state['displacement']
 
             e_uh_l2 = analysis_mesh.error(u=uh, 
                                     v=pde.displacement_solution,
@@ -359,11 +360,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
         assembly_method = 'standard'
 
         optimizer_algorithm = 'mma'
-        max_iterations = 500
+        max_iterations = 200
         change_tolerance = 1e-2  
         use_penalty_continuation = True
 
-        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        filter_type = 'none' # 'none', 'sensitivity', 'density'
         rmin = 2.5
 
         pde.init_mesh.set(mesh_type)

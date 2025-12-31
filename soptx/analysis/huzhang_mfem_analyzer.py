@@ -99,11 +99,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     def material(self) -> LinearElasticMaterial:
         """获取当前的材料类"""
         return self._material
-    
-    # @property
-    # def topopt_algorithm(self) -> Optional[str]:
-    #     """获取当前的拓扑优化算法"""
-    #     return self._topopt_algorithm
 
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
@@ -142,7 +137,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     def assemble_stiff_matrix(self, 
                         rho_val: Optional[Union[Function, TensorLike]] = None,
-                        enable_timing: bool = True,
+                        enable_timing: bool = False,
                     ) -> Union[CSRTensor, COOTensor]:
         """组装全局刚度矩阵"""
                 
@@ -180,7 +175,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         bform1 = BilinearForm(space_sigma)
         hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
-                                                q=self._integration_order, coef=coef)
+                                                q=self._integration_order, coef=coef, method='fast')
+        #TODO 缓存功能如何实现 ?
+        hzs_integrator.keep_data(True)
         bform1.add_integrator(hzs_integrator)
         M = bform1.assembly(format='csr')
 
@@ -403,7 +400,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     
     def solve_state(self, 
                         rho_val: Optional[Union[TensorLike, Function]] = None, 
-                        enable_timing: bool = True, 
+                        enable_timing: bool = False, 
                         **kwargs
                     ) -> Dict[str, Function]:
         t = None

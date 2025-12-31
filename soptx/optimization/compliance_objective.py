@@ -34,7 +34,6 @@ class ComplianceObjective(BaseLogged):
         
             F = self._analyzer.force_vector
             c = bm.einsum('i, i ->', uh[:], F)
-
             # K = self._analyzer.stiffness_matrix
             # Ku = K.matmul(uh[:])
             # c = bm.einsum('i, i ->', uh[:], Ku)

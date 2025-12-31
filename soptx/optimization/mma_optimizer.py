@@ -341,7 +341,6 @@ class MMAOptimizer(BaseLogged):
             
             #TODO 基于物理密度求解状态变量
             if hasattr(analyzer, 'solve_state'):
-                # 例如: state = {'stress': sigma, 'displacement': u}
                 state = analyzer.solve_state(rho_val=rho_phys)
             elif isinstance(self._objective, CompliantMechanismObjective):
                 # 兼容旧代码: 柔性机构
@@ -350,23 +349,11 @@ class MMAOptimizer(BaseLogged):
                 # 兼容旧代码: 最小柔度
                 state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys)}
 
-            # # 使用物理密度求解位移场
-            # if isinstance(self._objective, CompliantMechanismObjective):
-            #     uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)
-            # else:
-            #     uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
             if enable_timing:
                 t.send('位移场求解')
 
             #TODO 计算目标函数
             obj_val_raw = self._objective.fun(density=rho_phys, state=state)
-
-            # if isinstance(state, dict):
-            #     obj_val_raw = self._objective.fun(density=rho_phys, state=state)
-            # else:
-            #     obj_val_raw = self._objective.fun(rho_phys, displacement=state)
-            
-            # obj_val_raw = self._objective.fun(rho_phys, displacement=uh)
 
             #! 动态重置缩放因子
             if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
