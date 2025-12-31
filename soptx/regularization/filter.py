@@ -30,7 +30,7 @@ class Filter(BaseLogged):
     该类使用策略模式来动态选择和应用不同的过滤算法
     """
     def __init__(self,
-                mesh: HomogeneousMesh,
+                design_mesh: HomogeneousMesh,
                 filter_type: Literal['none', 'sensitivity', 'density', 'projection'],
                 rmin: Optional[float] = None,
                 density_location: Optional[str] = None,
@@ -41,7 +41,7 @@ class Filter(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
-        self._mesh = mesh
+        self._mesh = design_mesh
         self._filter_type = filter_type
         self._rmin = rmin
         self._density_location = density_location
@@ -49,9 +49,9 @@ class Filter(BaseLogged):
         # 1. 构建过滤矩阵
         if self._filter_type != 'none' and self._rmin is not None and self._rmin > 0:
             builder = FilterMatrixBuilder(
-                                    mesh=mesh, 
-                                    rmin=rmin, 
-                                    density_location=density_location,
+                                    mesh=self._mesh, 
+                                    rmin=self._rmin, 
+                                    density_location=self._density_location,
                                 )
             self._H = builder.build()
             self._cell_measure = self._mesh.entity_measure('cell')
@@ -62,7 +62,6 @@ class Filter(BaseLogged):
                 error_msg = (f"过滤类型 '{self._filter_type}' 需要有效的过滤半径 rmin。"
                              f"当前 rmin={self._rmin}")
                 self._log_error(error_msg)
-                raise ValueError(error_msg)
 
         # 2. 策略选择和实例化
         strategy_class = FILTER_STRATEGY_REGISTRY.get(self._filter_type)
@@ -93,6 +92,11 @@ class Filter(BaseLogged):
         
         # 实例化策略
         self._strategy: _FilterStrategy = strategy_class(**strategy_params)
+
+    @property
+    def design_mesh(self) -> HomogeneousMesh:
+        """获取设计变量网格对象"""
+        return self._mesh
 
     @property
     def beta(self) -> Optional[float]:

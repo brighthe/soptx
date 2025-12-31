@@ -355,6 +355,7 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
+
     @run.register('test_subsec4_6_3_mbb_beam')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* MBB 
@@ -531,6 +532,7 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
 
+
     @run.register('test_subsec4_6_3_oc')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 60.0, 0, 20.0]
@@ -698,6 +700,7 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
+
     @run.register('test_subsec4_6_4_half_mbb_beam')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 300.0, 0, 100.0]
@@ -727,10 +730,6 @@ class DensityTopOptTest(BaseLogged):
         
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
-
-        passive_mask = pde.get_passive_element_mask(nx=nx, ny=ny)
-        centers = displacement_mesh.entity_barycenter('cell')
-        passive_centers = centers[passive_mask, :]
 
         # import matplotlib.pyplot as plt
         # fig = plt.figure()
@@ -780,7 +779,9 @@ class DensityTopOptTest(BaseLogged):
                                                     design_variable_mesh=design_variable_mesh,
                                                     displacement_mesh=displacement_mesh,
                                                     relative_density=relative_density,
-                                                ) 
+                                                )
+            passive_mask = pde.get_passive_element_mask(nx=nx, ny=ny)
+            design_variable_mesh.celldata['passive_mask'] = passive_mask 
         
         elif density_location in ['element_multiresolution']:
             import math
@@ -793,7 +794,13 @@ class DensityTopOptTest(BaseLogged):
                                                     relative_density=relative_density,
                                                     sub_density_element=sub_density_element,
                                                 )
+            passive_mask = pde.get_passive_element_mask(nx=nx*sub_x, ny=ny*sub_y)
+            design_variable_mesh.celldata['passive_mask'] = passive_mask
+
+            centers = design_variable_mesh.entity_barycenter('cell')
+            passive_centers = centers[passive_mask, :]
         
+
         space_degree = 1
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
@@ -813,26 +820,83 @@ class DensityTopOptTest(BaseLogged):
                                     solve_method='mumps',
                                     topopt_algorithm='density_based',
                                 )
-        space_uh = lagrange_fem_analyzer.tensor_space
-        sspace = lagrange_fem_analyzer.scalar_space
-        cell2dof = space_uh.cell_to_dof()
-        uh = lagrange_fem_analyzer.solve_displacement(rho_val=rho)
-        uh_e = uh[cell2dof] # (NC, TLDOF)
+        # space_uh = lagrange_fem_analyzer.tensor_space
+        # sspace = lagrange_fem_analyzer.scalar_space
+        # cell2dof = space_uh.cell_to_dof()
 
-        q = 1
-        qf = displacement_mesh.quadrature_formula(q)
-        bcs, ws = qf.get_quadrature_points_and_weights()
-        gphi = sspace.grad_basis(bcs, variable='x')
-        B = material.strain_displacement_matrix(dof_priority=space_uh.dof_priority, gphi=gphi)
-        # 实体材料应力
-        stress_solid = material.calculate_stress_vector(B, uh_e)
-        # 惩罚后的应力
-        stress_penalized = interpolation_scheme.interpolate_stress(
-                                                        stress_solid=stress_solid,
-                                                        rho_val=rho,
-                                                    )
-        # 惩罚后的 von Mises 应力
-        von_mises_stress = material.calculate_von_mises_stress(stress_vector=stress_penalized)
+
+        # uh = lagrange_fem_analyzer.solve_displacement(rho_val=rho)
+        # uh_e = uh[cell2dof] # (NC, TLDOF)
+
+        # q = 1
+        # qf = displacement_mesh.quadrature_formula(q)
+        # bcs, ws = qf.get_quadrature_points_and_weights()
+        # gphi = sspace.grad_basis(bcs, variable='x')
+        # B = material.strain_displacement_matrix(dof_priority=space_uh.dof_priority, gphi=gphi)
+        # # 实体材料应力
+        # stress_solid = material.calculate_stress_vector(B, uh_e)
+        # # 惩罚后的应力
+        # stress_penalized = interpolation_scheme.interpolate_stress(
+        #                                                 stress_solid=stress_solid,
+        #                                                 rho_val=rho,
+        #                                             )
+        # # 惩罚后的 von Mises 应力
+        # von_mises_stress = material.calculate_von_mises_stress(stress_vector=stress_penalized)
+
+        from soptx.optimization.compliance_objective import ComplianceObjective
+        compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
+
+        from soptx.optimization.volume_constraint import VolumeConstraint
+        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
+
+        from soptx.regularization.filter import Filter
+        filter_regularization = Filter(
+                                    design_mesh=design_variable_mesh,
+                                    filter_type=filter_type,
+                                    rmin=rmin,
+                                    density_location=density_location,
+                                )
+        
+        from soptx.optimization.mma_optimizer import MMAOptimizer
+        optimizer = MMAOptimizer(
+                        objective=compliance_objective,
+                        constraint=volume_constraint,
+                        filter=filter_regularization,
+                        options={
+                            'max_iterations': max_iterations,
+                            'change_tolerance': change_tolerance,
+                            'use_penalty_continuation': use_penalty_continuation,
+                        }
+                    )
+        design_variables_num = d.shape[0]
+        constraints_num = 1
+        optimizer.options.set_advanced_options(
+                                m=constraints_num,
+                                n=design_variables_num,
+                                xmin=bm.zeros((design_variables_num, 1)),
+                                xmax=bm.ones((design_variables_num, 1)),
+                                a0=1,
+                                a=bm.zeros((constraints_num, 1)),
+                                c=1e4 * bm.ones((constraints_num, 1)),
+                                d=bm.zeros((constraints_num, 1)),
+                            )
+        
+        analysis_tspace = lagrange_fem_analyzer.tensor_space
+        analysis_tgdofs = analysis_tspace.number_of_global_dofs()
+        
+        self._log_info(f"开始密度拓扑优化, "
+            f"模型名称={pde.__class__.__name__}, \n"
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
+            f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
+            f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
+            f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
+            f"体积分数约束={volume_fraction}, \n"
+            f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
+            f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
 
 

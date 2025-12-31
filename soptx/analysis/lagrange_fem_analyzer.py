@@ -757,18 +757,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
             self._log_error(error_msg)
             raise ValueError(error_msg)
 
-    def _setup_function_spaces(self, 
-                            mesh: HomogeneousMesh, 
-                            p: int, 
-                            shape : tuple[int, int]
-                        ) -> None:
-        """设置函数空间"""
-        scalar_space = LagrangeFESpace(mesh, p=p, ctype='C')
-        self._scalar_space = scalar_space
-
-        tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=shape)
-        self._tensor_space = tensor_space
-
     def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike) -> CSRTensor:
         """
         FEALPy 中的 apply_matrix 使用了 D0@A@D0, 

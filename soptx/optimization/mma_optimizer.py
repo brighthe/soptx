@@ -314,12 +314,27 @@ class MMAOptimizer(BaseLogged):
         # 初始化历史记录
         history = OptimizationHistory()
 
+        design_mesh = getattr(self._filter, 'design_variable_mesh', self._filter.design_mesh)
+
+        # TODO 强制被动单元为实体材料
+        passive_mask = None
+        if hasattr(design_mesh, 'celldata'):
+            passive_mask = design_mesh.celldata.get('passive_mask')
+
+        if passive_mask is not None:
+            dv[passive_mask] = 1.0
+            rho_phys[passive_mask] = 1.0
+
         # 初始化历史设计变量
         xold1 = bm.copy(dv[:])
         xold2 = bm.copy(xold1[:])
 
-        #! 目标函数缩放因子
+        #TODO 初始化目标函数缩放因子
         self._obj_scale_factor = None
+
+        interpolation_scheme = self._objective._analyzer._interpolation_scheme
+
+        analyzer = self._objective._analyzer
 
         # 优化主循环
         for iter_idx in range(max_iters):
@@ -332,15 +347,18 @@ class MMAOptimizer(BaseLogged):
             start_time = time()
 
             self._update_penalty(iter_idx=iter_idx)
-            current_penalty = self._objective._analyzer._interpolation_scheme.penalty_factor
+            current_penalty = interpolation_scheme.penalty_factor
             
             # 更新迭代计数
             self._epoch = iter_idx + 1
 
-            analyzer = self._objective._analyzer
-            
+            if passive_mask is not None:
+                dv[passive_mask] = 0.0
+                rho_phys[passive_mask] = 1.0
+
             #TODO 基于物理密度求解状态变量
             if hasattr(analyzer, 'solve_state'):
+                # 例如: state = {'stress': sigma, 'displacement': u}
                 state = analyzer.solve_state(rho_val=rho_phys)
             elif isinstance(self._objective, CompliantMechanismObjective):
                 # 兼容旧代码: 柔性机构
@@ -355,7 +373,7 @@ class MMAOptimizer(BaseLogged):
             #TODO 计算目标函数
             obj_val_raw = self._objective.fun(density=rho_phys, state=state)
 
-            #! 动态重置缩放因子
+            #TODO 动态重置缩放因子
             if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
                 obj0 = float(obj_val_raw.item()) 
                 denom = max(abs(obj0), 1e-10)
@@ -365,21 +383,17 @@ class MMAOptimizer(BaseLogged):
             elif self._obj_scale_factor is None:
                 self._obj_scale_factor = 1.0
 
+            # 目标函数应用缩放因子
             obj_val = obj_val_raw * self._obj_scale_factor
+
             if enable_timing:
                 t.send('目标函数计算')
 
             #TODO 计算目标函数灵敏度
-            if isinstance(state, dict):
-                obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
-            else:
-                obj_grad_rho_raw = self._objective.jac(rho_phys, displacement=state)
+            obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
             
-            obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
-                
-            # # 灵敏度应用缩放因子
-            # obj_grad_rho_raw = self._objective.jac(rho_phys, displacement=uh)
-            # obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
+            # 灵敏度应用缩放因子
+            obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor                
 
             # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
@@ -448,7 +462,7 @@ class MMAOptimizer(BaseLogged):
                                 time_cost=iteration_time, 
                                 physical_density=rho_phys)
             
-            #! Beta 更新后的状态重置
+            #TODO Beta 更新后的状态重置
             beta_updated = False 
             if current_penalty >= 3.0:
                 change, beta_updated = self._filter.continuation_step(change)
