@@ -96,6 +96,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._material
     
     @property
+    def interpolation_scheme(self) -> MaterialInterpolationScheme:
+        """获取当前的材料插值方案"""
+        return self._interpolation_scheme
+    
+    @property
     def assembly_method(self) -> str:
         """获取当前的组装方法"""
         return self._assembly_method
@@ -367,7 +372,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         density_location = self._interpolation_scheme.density_location
 
         # TODO 目前仅支持插值杨氏模量 E 
-        dE_rho = self._interpolation_scheme.interpolate_map_derivative(
+        dE_rho = self._interpolation_scheme.interpolate_material_derivative(
                                                 material=self._material, 
                                                 rho_val=rho_val,
                                                 integration_order=self._integration_order,

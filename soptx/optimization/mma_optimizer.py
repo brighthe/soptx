@@ -321,6 +321,7 @@ class MMAOptimizer(BaseLogged):
         if hasattr(design_mesh, 'celldata'):
             passive_mask = design_mesh.celldata.get('passive_mask')
 
+        # TODO 强制被动单元为实体材料
         if passive_mask is not None:
             dv[passive_mask] = 1.0
             rho_phys[passive_mask] = 1.0
@@ -352,8 +353,9 @@ class MMAOptimizer(BaseLogged):
             # 更新迭代计数
             self._epoch = iter_idx + 1
 
+            # TODO 强制被动单元为实体材料
             if passive_mask is not None:
-                dv[passive_mask] = 0.0
+                dv[passive_mask] = 1.0
                 rho_phys[passive_mask] = 1.0
 
             #TODO 基于物理密度求解状态变量
@@ -400,6 +402,11 @@ class MMAOptimizer(BaseLogged):
 
             # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
+
+            #TODO 强制被动单元灵敏度为零
+            if passive_mask is not None:
+                obj_grad_dv[passive_mask] = 0.0
+                
             if enable_timing:
                 t.send('目标函数灵敏度分析 2')
 
@@ -415,6 +422,11 @@ class MMAOptimizer(BaseLogged):
 
             # 计算约束函数相对于设计变量的灵敏度
             con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
+
+            #TODO 强制被动单元灵敏度为零
+            if passive_mask is not None:
+                con_grad_dv[passive_mask] = 0.0
+
             if enable_timing:
                 t.send('约束函数灵敏度分析 2')
             
@@ -433,11 +445,21 @@ class MMAOptimizer(BaseLogged):
                                         xold1=xold1[:, None],
                                         xold2=xold2[:, None]
                                     )
+            
+            #TODO 强制被动单元为实体材料
+            if passive_mask is not None:
+                dv_new[passive_mask] = 1.0
+
             if enable_timing:
                 t.send('MMA 优化')
 
             # 过滤后得到的物理密度
             rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
+
+            #TODO 强制被动单元为实体材料
+            if passive_mask is not None:
+                rho_phys[passive_mask] = 1.0
+
             if enable_timing:
                 t.send('密度过滤')
             
