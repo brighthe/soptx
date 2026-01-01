@@ -7,6 +7,8 @@ from fealpy.functionspace import Function
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.utils.base_logged import BaseLogged
+from soptx.utils import timer
+
 
 class ComplianceObjective(BaseLogged):
     def __init__(self,
@@ -83,8 +85,8 @@ class ComplianceObjective(BaseLogged):
         
     def _manual_differentiation(self, 
                                 density: Union[Function, TensorLike],
-                                state: Optional[dict] = None,  
-                                # displacement: Optional[Function] = None
+                                state: Optional[dict] = None, 
+                                enable_timing: bool = True, 
                                 **kwargs
                             ) -> TensorLike:
         """手动计算柔顺度目标函数相对于物理密度的灵敏度"""
@@ -141,6 +143,11 @@ class ComplianceObjective(BaseLogged):
 
         elif isinstance(self._analyzer, HuZhangMFEMAnalyzer):
             #* 胡张应力位移混合有限元 *#
+            t = None
+            if enable_timing:
+                t = timer(f"灵敏度时间")
+                next(t)
+
             sigmah = state.get('stress')
 
             if sigmah is None:
@@ -150,11 +157,18 @@ class ComplianceObjective(BaseLogged):
             cell2dof = space_sigmah.cell_to_dof()
             sigmah_e = sigmah[cell2dof] # (NC, TLDOF_sigma)
 
-            diff_AE = self._analyzer.get_local_stress_matrix_derivative(rho_val=density) # (NC, TLDOF_sigma, TLDOF_sigma)
+            diff_AE = self._analyzer.compute_local_stress_matrix_derivative(rho_val=density) # (NC, TLDOF_sigma, TLDOF_sigma)
+
+            if enable_timing:
+                t.send('矩阵求导时间')
 
             if density_location in ['element']:
                 dc = bm.einsum('ci, cij, cj -> c', sigmah_e, diff_AE, sigmah_e) # (NC, )
 
+                if enable_timing:
+                    t.send('einsum 时间')
+                    t.send(None)
+                
                 return dc[:]
         
             elif density_location in ['node']:
@@ -165,6 +179,8 @@ class ComplianceObjective(BaseLogged):
             
             elif density_location in ['node_multiresolution']:
                 raise NotImplementedError("多分辨率节点密度尚未实现")
+            
+
             
     
     def _auto_differentiation(self, 

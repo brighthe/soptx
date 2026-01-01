@@ -1,4 +1,5 @@
 from typing import Optional, Union, Literal, Tuple, Dict
+from time import time
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -56,23 +57,26 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         self._solve_method = solve_method
 
-        # # 设置默认求解方法
-        # self.solve_displacement.set(solve_method)
-
         self._GD = self._mesh.geo_dimension()
         self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation)
         self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
-        # 缓存的矩阵和向量
-        self._K = None
-        self._F = None
+        lambda0, lambda1 = self._stress_matrix_coefficient()
+        self._hzs_integrator = HuZhangStressIntegrator(
+                                            lambda0=lambda0, 
+                                            lambda1=lambda1, 
+                                            q=self._integration_order, 
+                                            method='fast'
+                                        )
+        self._hzs_integrator.keep_data(True)
+        self._cached_stress_matrix = None
 
-        self._log_info(f"Mesh Information: NC: {self._mesh.number_of_cells()}, ")
+        self._cached_mix_matrix = self._calculate_mix_matrix()
 
-    
+
     ##############################################################################################
-    # 属性访问器 
+    # 属性相关函数
     ##############################################################################################
 
     @property
@@ -99,21 +103,21 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     def material(self) -> LinearElasticMaterial:
         """获取当前的材料类"""
         return self._material
-
-    @property
-    def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
-        """刚度矩阵"""
-        return self._K
     
     @property
-    def load_vector(self) -> Union[TensorLike, COOTensor]:
-        """载荷向量"""
-        return self._F
+    def mix_matrix(self) -> Union[CSRTensor, COOTensor]:
+        """获取应力-位移耦合矩阵 B_σu"""
+        return self._cached_mix_matrix
     
+    def get_stress_matrix(self, 
+                        rho_val: Optional[Union[Function, TensorLike]] = None
+                        ) -> Union[CSRTensor, COOTensor]:
+        """获取应力矩阵 A_σσ """
+        if self._cached_stress_matrix is not None:
+            return self._cached_stress_matrix
 
-    ##############################################################################################
-    # 属性修改器
-    ##############################################################################################
+        else:
+            return self._calculate_stress_matrix(rho_val=rho_val, enable_timing=False)
 
     @huzhang_space.setter
     def huzhang_space(self, space: HuZhangFESpace) -> None:
@@ -135,23 +139,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     # 核心方法
     ##################################################################################################
 
-    def assemble_stiff_matrix(self, 
+    def _calculate_stress_matrix(self, 
                         rho_val: Optional[Union[Function, TensorLike]] = None,
-                        enable_timing: bool = False,
+                        enable_timing: bool = True,
                     ) -> Union[CSRTensor, COOTensor]:
-        """组装全局刚度矩阵"""
-                
-        t = None
-        if enable_timing:
-            t = timer(f"组装刚度矩阵")
-            next(t)
-
-        p = self._space_degree
-        mesh = self._mesh
-        GD = mesh.geo_dimension()
-
+        """组装应力矩阵 A_σσ"""
         space_sigma = self._huzhang_space
-        space_u = self._tensor_space
 
         if self._topopt_algorithm is None:
             if rho_val is not None:
@@ -159,7 +152,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             coef = None
 
         elif self._topopt_algorithm in ['density_based']:
-            E_rho = self._interpolation_scheme.interpolate_map(
+            E_rho = self._interpolation_scheme.interpolate_material(
                                             material=self._material,
                                             rho_val=rho_val,
                                             integration_order=self._integration_order
@@ -171,33 +164,75 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
             self._log_error(error_msg)
 
-        lambda0, lambda1 = self._stress_matrix_coefficient()
+        # 更新密度系数
+        self._hzs_integrator.coef = coef
 
         bform1 = BilinearForm(space_sigma)
-        hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
-                                                q=self._integration_order, coef=coef, method='fast')
-        #TODO 缓存功能如何实现 ?
-        hzs_integrator.keep_data(True)
-        bform1.add_integrator(hzs_integrator)
+        bform1.add_integrator(self._hzs_integrator)
         M = bform1.assembly(format='csr')
 
-        if enable_timing:
-            t.send('应力项时间')
-
-        bform2 = BilinearForm((space_u, space_sigma)) # 应力-位移矩阵 B_σu
-
-        hzm_integrator = HuZhangMixIntegrator()
-        bform2.add_integrator(hzm_integrator)
-        B = bform2.assembly(format='csr')
-
-        if enable_timing:
-            t.send('混合项时间')
-
-        # TODO 角点松弛
+        #TODO 角点松弛
         if space_sigma.use_relaxation == True:
             TM = space_sigma.TM
             M = TM.T @ M @ TM
+
+        # 缓存应力矩阵
+        self._cached_stress_matrix = M
+
+        return M
+    
+    def _calculate_mix_matrix(self, enable_timing: bool=True) -> Union[CSRTensor, COOTensor]:
+        """组装应力-位移耦合矩阵 B_σu"""
+        start_time = time()
+        
+        space_sigma = self._huzhang_space
+        space_u = self._tensor_space
+
+        bform = BilinearForm((space_u, space_sigma)) 
+        hzm_integrator = HuZhangMixIntegrator()
+        bform.add_integrator(hzm_integrator)
+
+        B = bform.assembly(format='csr') # (GDOF_sigma, GDOF_u)
+
+        #TODO 角点松弛
+        if space_sigma.use_relaxation == True:
+            TM = space_sigma.TM
             B = TM.T @ B
+        
+        iteration_time = time() - start_time
+
+        if enable_timing:
+            print(f"初始化应力-位移耦合矩阵 B_σu 时间: {iteration_time:.6f} 秒")
+
+        return B
+
+    def assemble_stiff_matrix(self, 
+                        rho_val: Optional[Union[Function, TensorLike]] = None,
+                        enable_timing: bool = False,
+                    ) -> Union[CSRTensor, COOTensor]:
+        """组装全局刚度矩阵"""
+        t = None
+        if enable_timing:
+            t = timer(f"组装刚度矩阵")
+            next(t)
+
+        p = self._space_degree
+        mesh = self._mesh
+        GD = mesh.geo_dimension()
+
+        space_u = self._tensor_space
+
+        # 应力矩阵
+        M = self._calculate_stress_matrix(rho_val=rho_val)
+
+        if enable_timing:
+            t.send('组装应力矩阵时间')
+
+        # 应力-位移耦合矩阵
+        B = self._cached_mix_matrix
+
+        if enable_timing:
+            t.send('组装混合矩阵时间')
 
         if p >= GD + 1:
             K = bmat([[M,   B   ],
@@ -218,52 +253,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return K
     
-    def get_stress_matrix(self, 
-                      rho_val: Optional[Union[Function, TensorLike]] = None
-                     ) -> Union[CSRTensor, COOTensor]:
-        """获取应力矩阵 A_σσ """
-        
-        space0 = self._huzhang_space
-        
-        if self._topopt_algorithm is None:
-            coef = None
-        elif self._topopt_algorithm in ['density_based']:
-            # 目前仅支持插值杨氏模量 E 
-            E_rho = self._interpolation_scheme.interpolate_map(
-                                            material=self._material,
-                                            rho_val=rho_val,
-                                            integration_order=self._integration_order
-                                        )
-            E0 = self._material.youngs_modulus
-            coef = E0 / E_rho
-        else:
-            error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
-            self._log_error(error_msg)
-        
-        lambda0, lambda1 = self._stress_matrix_coefficient()
-        
-        bform = BilinearForm(space0)
-        hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
-                                                q=self._integration_order, coef=coef)
-        bform.add_integrator(hzs_integrator)
-        
-        stress_matrix = bform.assembly(format='csr')
-
-        return stress_matrix
-    
-    def get_mix_matrix(self) -> Union[CSRTensor, COOTensor]:
-        """获取应力-位移耦合矩阵 B_σu"""
-        
-        space_sigma = self._huzhang_space
-        space_u = self._tensor_space
-
-        bform = BilinearForm((space_u, space_sigma)) # 应力-位移矩阵 B_σu
-        hzm_integrator = HuZhangMixIntegrator()
-        bform.add_integrator(hzm_integrator)
-
-        B_sigma_u = bform.assembly(format='csr') # (GDOF_sigma, GDOF_u)
-
-        return B_sigma_u
 
     def assemble_body_force_vector(self, 
                                    enable_timing: bool = False
@@ -478,152 +467,24 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return {'stress': sigmah, 'displacement': uh}
-    
-    # @solve_state.register('scipy')
-    # def solve_state(self, 
-    #                     rho_val: Optional[Union[TensorLike, Function]] = None, 
-    #                     enable_timing: bool = False, 
-    #                     **kwargs
-    #                 ) -> Tuple[Function, Function]:
-        
-    #     t = None
-    #     if enable_timing:
-    #         t = timer(f"分析阶段时间")
-    #         next(t)
-        
-    #     from fealpy.solver import spsolve
-
-    #     if self._topopt_algorithm is None:
-    #         if rho_val is not None:
-    #             self._log_warning("标准胡张混合有限元分析模式下忽略密度分布参数 rho")
-        
-    #     elif self._topopt_algorithm in ['density_based', 'level_set']:
-    #         if rho_val is None:
-    #             error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-    #             self._log_error(error_msg)
-    
-    #     K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-
-    #     if enable_timing:
-    #         t.send('刚度矩阵组装时间')
-
-    #     space_sigmah = self._huzhang_space
-    #     space_uh = self._tensor_space
-    #     gdof_sigmah = space_sigmah.number_of_global_dofs()
-    #     gdof_uh = space_uh.number_of_global_dofs()
-    #     gdof = gdof_sigmah + gdof_uh
-    #     F0 = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
-
-    #     F_sigmah = self.assemble_stress_load_vector()
-    #     F0[:gdof_sigmah] = F_sigmah
-        
-    #     F_uh = self.assemble_displacement_load_vector()
-    #     F0[gdof_sigmah:] = F_uh
-
-    #     if enable_timing:
-    #         t.send('载荷向量组装时间')
-
-    #     boundary_type = self._pde.boundary_type
-    #     if boundary_type == 'dirichlet':
-    #         K, F = K0, F0
-    #     else:
-    #         K, F = self.apply_neumann_bc(K0, F0)
-
-    #     if enable_timing:
-    #         t.send('应用边界条件时间')
-            
-    #     solver_type = kwargs.get('solver', 'scipy')
-
-    #     X = spsolve(K, F, solver=solver_type)
-
-    #     if enable_timing:
-    #         t.send('求解线性系统时间')
-
-    #     space0 = self._huzhang_space
-    #     space1 = self._tensor_space
-    #     gdof0 = space0.number_of_global_dofs()
-
-    #     sigmaval = X[:gdof0]
-    #     uval = X[gdof0:]
-
-    #     sigmah = space0.function()
-    #     sigmah[:] = sigmaval
-
-    #     uh = space1.function()
-    #     uh[:] = uval
-
-    #     if enable_timing:
-    #         t.send('结果赋值时间')
-    #         t.send(None)
-
-    #     return sigmah, uh
-    
-    # @solve_state.register('cg')
-    # def solve_state(self, 
-    #         density_distribution: Optional[Function] = None, 
-    #         **kwargs
-    #         ) -> Function:
-    #     from fealpy.solver import cg
-
-    #     if self._topopt_algorithm is None:
-    #         if density_distribution is not None:
-    #             self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
-        
-    #     elif self._topopt_algorithm in ['density_based', 'level_set']:
-    #         if density_distribution is None:
-    #             error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-    #             self._log_error(error_msg)
-            
-    #     K0 = self.assemble_stiff_matrix(density_distribution=density_distribution)
-    #     F0 = self.assemble_force_vector()
-    #     K, F = self.apply_bc(K0, F0)
-
-    #     maxiter = kwargs.get('maxiter', 5000)
-    #     atol = kwargs.get('atol', 1e-12)
-    #     rtol = kwargs.get('rtol', 1e-12)
-    #     x0 = kwargs.get('x0', None)
-
-    #     X, info = cg(K, F[:], x0=x0,
-    #         batch_first=True, 
-    #         atol=atol, rtol=rtol, 
-    #         maxit=maxiter, returninfo=True)
-        
-    #     space0 = self._huzhang_space
-    #     space1 = self._tensor_space
-    #     gdof0 = space0.number_of_global_dofs()
-
-    #     sigmaval = X[:gdof0]
-    #     uval = X[gdof0:]
-
-    #     sigmah = space0.function()
-    #     sigmah[:] = sigmaval
-
-    #     uh = space1.function()
-    #     uh[:] = uval
-        
-        
-    #     gdof = self._tensor_space.number_of_global_dofs()
-    #     self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
-
-    #     return uh
 
 
     ###############################################################################################
     # 外部方法
     ###############################################################################################
-    def get_local_stress_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
+
+    def compute_local_stress_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部应力矩阵 A 关于物理密度的导数（灵敏度）"""
-        
         density_location = self._interpolation_scheme.density_location
 
         # TODO 目前仅支持插值杨氏模量 E
         E0 = self._material.youngs_modulus
-        E_rho =  self._interpolation_scheme.interpolate_map(
+        E_rho =  self._interpolation_scheme.interpolate_material(
                                                 material=self._material, 
                                                 rho_val=rho_val,
                                                 integration_order=self._integration_order,
                                             )
-        dE_rho = self._interpolation_scheme.interpolate_map_derivative(
+        dE_rho = self._interpolation_scheme.interpolate_material_derivative(
                                                 material=self._material, 
                                                 rho_val=rho_val,
                                                 integration_order=self._integration_order,

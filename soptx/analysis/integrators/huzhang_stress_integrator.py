@@ -192,7 +192,7 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
         if enable_timing:
             t = timer(f"应力项组装 (Fast Cached)")
             next(t)
-        #TODO 缓存功能如何实现 ?
+            
         A0 = self.fetch_fast(space)
 
         if enable_timing:

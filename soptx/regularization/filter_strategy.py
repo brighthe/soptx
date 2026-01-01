@@ -9,6 +9,7 @@ from fealpy.typing import TensorLike
 from fealpy.sparse import CSRTensor
 
 from soptx.utils.base_logged import BaseLogged
+from soptx.utils import timer
 from soptx.analysis.utils import reshape_multiresolution_data
 
 class _FilterStrategy(ABC):
@@ -92,7 +93,7 @@ class NoneStrategy(_FilterStrategy, BaseLogged):
     
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
-                                    obj_grad_rho: TensorLike
+                                    obj_grad_rho: TensorLike,
                                 ) -> TensorLike:
         obj_grad_dv = bm.reshape(obj_grad_rho, design_variable.shape)
 
@@ -326,7 +327,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
 
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
-                                    obj_grad_rho: TensorLike
+                                    obj_grad_rho: TensorLike,
                                 ) -> TensorLike:
         if self._density_location == 'element_multiresolution':
             # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )

@@ -268,7 +268,7 @@ class MMAOptimizer(BaseLogged):
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
-                enable_timing: bool = False,
+                enable_timing: bool = True,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
         """运行 MMA 优化算法
@@ -393,7 +393,10 @@ class MMAOptimizer(BaseLogged):
             obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
             
             # 灵敏度应用缩放因子
-            obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor                
+            obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
+
+            if enable_timing:
+                t.send('目标函数灵敏度分析 1')                
 
             # 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
@@ -476,6 +479,7 @@ class MMAOptimizer(BaseLogged):
                 continue
             
             if enable_timing:
+                t.send('后处理')
                 t.send(None)
 
             # 收敛检查

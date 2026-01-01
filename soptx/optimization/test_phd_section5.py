@@ -464,7 +464,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
-                                    mesh=design_variable_mesh,
+                                    design_mesh=design_variable_mesh,
                                     filter_type=filter_type,
                                     rmin=rmin,
                                     density_location=density_location,
