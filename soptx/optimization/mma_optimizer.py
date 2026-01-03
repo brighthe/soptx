@@ -194,7 +194,7 @@ class MMAOptimizer(BaseLogged):
     
     def __init__(self,
                 objective: Union[ComplianceObjective, CompliantMechanismObjective],
-                constraint: VolumeConstraint,
+                constraint: Union[VolumeConstraint, list],
                 filter: Filter,
                 options: MMAOptions = None,
                 enable_logging: bool = True,

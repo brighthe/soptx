@@ -709,6 +709,7 @@ class DensityTopOptTest(BaseLogged):
         plane_type = 'plane_stress' 
 
         volume_fraction = 0.3
+        stress_limit = 350.0
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
         max_iterations = 1000
@@ -849,6 +850,9 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
+        from soptx.optimization.stress_constraint import StressConstraint
+        stress_constraint = StressConstraint(analyzer=lagrange_fem_analyzer, stress_limit=stress_limit)
+
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
                                     design_mesh=design_variable_mesh,
@@ -860,7 +864,7 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.mma_optimizer import MMAOptimizer
         optimizer = MMAOptimizer(
                         objective=compliance_objective,
-                        constraint=volume_constraint,
+                        constraint=[volume_constraint, stress_constraint],
                         filter=filter_regularization,
                         options={
                             'max_iterations': max_iterations,
