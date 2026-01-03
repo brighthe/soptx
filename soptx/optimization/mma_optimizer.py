@@ -268,7 +268,7 @@ class MMAOptimizer(BaseLogged):
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
-                enable_timing: bool = True,
+                enable_timing: bool = False,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
         """运行 MMA 优化算法

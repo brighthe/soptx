@@ -169,17 +169,17 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         bform1 = BilinearForm(space_sigma)
         bform1.add_integrator(self._hzs_integrator)
-        M = bform1.assembly(format='csr')
+        A = bform1.assembly(format='csr')
 
         #TODO 角点松弛
         if space_sigma.use_relaxation == True:
             TM = space_sigma.TM
-            M = TM.T @ M @ TM
+            A = TM.T @ A @ TM
 
         # 缓存应力矩阵
-        self._cached_stress_matrix = M
+        self._cached_stress_matrix = A
 
-        return M
+        return A
     
     def _calculate_mix_matrix(self, enable_timing: bool=True) -> Union[CSRTensor, COOTensor]:
         """组装应力-位移耦合矩阵 B_σu"""
@@ -223,7 +223,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         space_u = self._tensor_space
 
         # 应力矩阵
-        M = self._calculate_stress_matrix(rho_val=rho_val)
+        A = self._calculate_stress_matrix(rho_val=rho_val)
 
         if enable_timing:
             t.send('组装应力矩阵时间')
@@ -235,7 +235,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send('组装混合矩阵时间')
 
         if p >= GD + 1:
-            K = bmat([[M,   B   ],
+            K = bmat([[A,   B   ],
                       [B.T, None]], format='csr')
 
         elif p <= GD:
@@ -244,7 +244,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='matrix_jump')
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')
-            K = bmat([[M,   B],
+            K = bmat([[A,   B],
                       [B.T, J]], format='csr')
 
         if enable_timing:
@@ -388,10 +388,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         return K, F
     
     def solve_state(self, 
-                        rho_val: Optional[Union[TensorLike, Function]] = None, 
-                        enable_timing: bool = False, 
-                        **kwargs
-                    ) -> Dict[str, Function]:
+                    rho_val: Optional[Union[TensorLike, Function]] = None, 
+                    enable_timing: bool = False, 
+                    **kwargs
+                ) -> Dict[str, Function]:
         t = None
         if enable_timing:
             t = timer(f"分析阶段时间")
@@ -489,17 +489,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                                 rho_val=rho_val,
                                                 integration_order=self._integration_order,
                                             ) 
-        space0 = self._huzhang_space
+        space_sigma = self._huzhang_space
 
         if density_location in ['element']:
             # rho_val: (NC, )
             diff_coef_element = - E0 * dE_rho / (E_rho**2) # (NC, )
 
-            # TODO A0 的计算可以缓存下来
-            lambda0, lambda1 = self._stress_matrix_coefficient()
-            hzs_integrator = HuZhangStressIntegrator(lambda0=lambda0, lambda1=lambda1, 
-                                                    q=self._integration_order, coef=None)
-            AE0 = hzs_integrator.assembly(space=space0)
+            AE0 = self._hzs_integrator.fetch_fast(space_sigma)
 
             diff_AE = bm.einsum('c, cij -> cij', diff_coef_element, AE0) # (NC, TLDOF, TLDOF)
 

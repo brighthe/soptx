@@ -86,7 +86,7 @@ class ComplianceObjective(BaseLogged):
     def _manual_differentiation(self, 
                                 density: Union[Function, TensorLike],
                                 state: Optional[dict] = None, 
-                                enable_timing: bool = True, 
+                                enable_timing: bool = False, 
                                 **kwargs
                             ) -> TensorLike:
         """手动计算柔顺度目标函数相对于物理密度的灵敏度"""
@@ -147,38 +147,48 @@ class ComplianceObjective(BaseLogged):
             if enable_timing:
                 t = timer(f"灵敏度时间")
                 next(t)
+            
+            if self._state_variable == 'u':
+                raise NotImplementedError(
+                    "基于位移的灵敏度分析暂未实现。请使用 'sigma' 状态变量以利用胡张混合元的高效互补能列式。"
+                )
 
-            sigmah = state.get('stress')
+            elif self._state_variable == 'sigma':
+                sigmah = state.get('stress')
 
-            if sigmah is None:
-                self._log_error(f"胡张混合元的灵敏度分析需要应力状态变量，但未提供")
+                if sigmah is None:
+                    self._log_error(f"胡张混合元的灵敏度分析需要应力状态变量，但未提供")
 
-            space_sigmah = self._analyzer.huzhang_space
-            cell2dof = space_sigmah.cell_to_dof()
-            sigmah_e = sigmah[cell2dof] # (NC, TLDOF_sigma)
+                space_sigmah = self._analyzer.huzhang_space
+                cell2dof = space_sigmah.cell_to_dof()
+                sigmah_e = sigmah[cell2dof] # (NC, TLDOF_sigma)
 
-            diff_AE = self._analyzer.compute_local_stress_matrix_derivative(rho_val=density) # (NC, TLDOF_sigma, TLDOF_sigma)
-
-            if enable_timing:
-                t.send('矩阵求导时间')
-
-            if density_location in ['element']:
-                dc = bm.einsum('ci, cij, cj -> c', sigmah_e, diff_AE, sigmah_e) # (NC, )
+                diff_AE = self._analyzer.compute_local_stress_matrix_derivative(rho_val=density) # (NC, TLDOF_sigma, TLDOF_sigma)
 
                 if enable_timing:
-                    t.send('einsum 时间')
-                    t.send(None)
+                    t.send('矩阵求导时间')
+
+                if density_location in ['element']:
+                    dc = bm.einsum('ci, cij, cj -> c', sigmah_e, diff_AE, sigmah_e) # (NC, )
+
+                    if enable_timing:
+                        t.send('einsum 时间')
+                        t.send(None)
+                    
+                    return dc[:]
+            
+                elif density_location in ['node']:
+                    raise NotImplementedError("节点密度尚未实现")
                 
-                return dc[:]
-        
-            elif density_location in ['node']:
-                raise NotImplementedError("节点密度尚未实现")
-            
-            elif density_location in ['element_multiresolution']:
-                raise NotImplementedError("多分辨率单元密度尚未实现")
-            
-            elif density_location in ['node_multiresolution']:
-                raise NotImplementedError("多分辨率节点密度尚未实现")
+                elif density_location in ['element_multiresolution']:
+                    raise NotImplementedError("多分辨率单元密度尚未实现")
+                
+                elif density_location in ['node_multiresolution']:
+                    raise NotImplementedError("多分辨率节点密度尚未实现")
+                
+            else:
+                error_msg = f"Unknown state_variable: {self._state_variable}"
+                self._log_error(error_msg)
             
 
             

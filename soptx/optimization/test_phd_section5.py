@@ -370,7 +370,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree**2 + 2 # 单元密度 + 三角形网格
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
