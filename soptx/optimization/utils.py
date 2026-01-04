@@ -66,8 +66,8 @@ def solve_mma_subproblem(m: int, n: int,
     """
 
     # 变量初始化
-    een = bm.ones((n, 1))
-    eem = bm.ones((m, 1))
+    een = bm.ones((n, 1), dtype=bm.float64)
+    eem = bm.ones((m, 1), dtype=bm.float64)
     x = 0.5 * (alfa + beta)
     #! A-1: 保证 x 远离渐近线/上下界 ----
     eps_x = 1e-12
@@ -85,8 +85,8 @@ def solve_mma_subproblem(m: int, n: int,
     lam = bm.copy(eem)
     
     #! A-2：用安全分母初始化 xsi / eta，避免 (x-alfa) 或 (beta-x) 为 0 ----
-    xalfa = bm.maximum(x - alfa, eps_x)
-    betax = bm.maximum(beta - x, eps_x)
+    xalfa = bm.maximum(x - alfa, bm.tensor(eps_x, dtype=bm.float64))
+    betax = bm.maximum(beta - x, bm.tensor(eps_x, dtype=bm.float64))
 
     xsi = een / xalfa
     xsi = bm.maximum(xsi, een)
@@ -168,8 +168,8 @@ def solve_mma_subproblem(m: int, n: int,
             # 2. 计算 Newton 方向的一阶残差 delta_x, delta_y, delta_z, delta_lambda
             dpsidx = plam / ux2 - qlam / xl2                            # (n, 1)
             #! A-3：Newton 迭代内安全分母（每次内循环都要更新，因为 x 在变）----
-            xalfa = bm.maximum(x - alfa, eps_x)
-            betax = bm.maximum(beta - x, eps_x)
+            xalfa = bm.maximum(x - alfa, bm.tensor(eps_x, dtype=bm.float64))
+            betax = bm.maximum(beta - x, bm.tensor(eps_x, dtype=bm.float64))
             delx = dpsidx - epsvecn / xalfa + epsvecn / betax           # (n, 1)
             # delx = dpsidx - epsvecn / (x - alfa) + epsvecn / (beta - x) # (n, 1)
             #! ----------------------------------------------------------------

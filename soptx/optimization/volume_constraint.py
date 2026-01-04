@@ -1,4 +1,4 @@
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Union, Dict
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -13,6 +13,7 @@ class VolumeConstraint(BaseLogged):
     def __init__(self,
                 analyzer: LagrangeFEMAnalyzer,
                 volume_fraction: float,
+                diff_mode: Literal["auto", "manual"] = "manual",
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -21,29 +22,23 @@ class VolumeConstraint(BaseLogged):
 
         self._analyzer = analyzer
         self._volume_fraction = volume_fraction
+        self._diff_mode = diff_mode
+
         self._mesh = self._analyzer._mesh
         self._scalar_space = self._analyzer._scalar_space
         self._interpolation_scheme = self._analyzer._interpolation_scheme
         self._integration_order = self._analyzer._integration_order
         self._density_location = self._interpolation_scheme._density_location        
 
-    #####################################################################################################
-    # 属性访问器
-    #####################################################################################################
-
     @property
     def volume_fraction(self) -> float:
         """获取体积分数"""
         return self._volume_fraction
 
-
-    #####################################################################################################
-    # 核心方法
-    #####################################################################################################
-
     def fun(self, 
-            density: Function, 
-            displacement: Optional[Function] = None,
+            density: Union[Function, TensorLike], 
+            state: Optional[Dict] = None,
+            **kwargs 
         ) -> float:
         """计算体积分数约束函数值"""
 
@@ -54,30 +49,26 @@ class VolumeConstraint(BaseLogged):
         return gneq
     
     def jac(self, 
-            density: Function, 
-            displacement: Optional[Function] = None,
-            diff_mode: Literal["auto", "manual"] = "manual"
+            density: Union[Function, TensorLike], 
+            state: Optional[dict] = None,
+            diff_mode: Optional[Literal["auto", "manual"]] = None,
+            **kwargs
         ) -> TensorLike:
         """计算体积约束函数相对于物理密度的灵敏度"""
+        mode = diff_mode if diff_mode is not None else self._diff_mode
 
-        if diff_mode == "manual":
-            return self._manual_differentiation(density, displacement)
+        if mode == "manual":
+            return self._manual_differentiation(density=density, state=state, **kwargs)
         
-        elif diff_mode == "auto":  
-            return self._auto_differentiation(density, displacement)
+        elif mode == "auto":  
+            return self._auto_differentiation(density=density, state=state, **kwargs)
         
         else:
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
-
-        
-    #####################################################################################################
-    # 外部调用方法
-    #####################################################################################################
         
     def get_volume_fraction(self, density: Function) -> float:
         """计算当前设计的体积分数"""
-
         current_volume = self._compute_volume(density=density)            
         total_volume = self._compute_volume(density=None)
 
@@ -85,14 +76,8 @@ class VolumeConstraint(BaseLogged):
 
         return volume_fraction
 
-
-    #####################################################################################################
-    # 内部方法
-    #####################################################################################################
-
     def _compute_volume(self, density: Union[Function, TensorLike] = None) -> float:
         """计算当前设计的体积"""
-
         if density is None:
             cell_measure = self._mesh.entity_measure('cell')
             current_volume = bm.sum(cell_measure)
@@ -182,24 +167,24 @@ class VolumeConstraint(BaseLogged):
                     current_volume = bm.einsum('q, cnq, cnq -> ', ws_e, rho_sub_q, detJ_eg)
 
             else:
-
                 error_msg = f"Unknown density_location: {self._density_location}"
                 self._log_error(error_msg)
 
     def _manual_differentiation(self, 
-                                density: Union[Function, TensorLike], 
-                                displacement: Optional[Function] = None
-                            ) -> TensorLike:
+                            density: Union[Function, TensorLike],
+                            state: Optional[dict] = None, 
+                            enable_timing: bool = False, 
+                            **kwargs
+                        ) -> TensorLike:
         """手动计算体积约束函数相对于物理密度的灵敏度"""
-
         if self._density_location in ['element']:
+            # density.shape = (NC, )
             cell_measure = self._mesh.entity_measure('cell')
-            dg = bm.copy(cell_measure) # (NC, )
+            dg = bm.copy(cell_measure) 
 
             return dg
         
         elif self._density_location in ['element_multiresolution']:
-            
             NC, n_sub = density.shape
             cell_measure = self._mesh.entity_measure('cell')
             sub_cm = bm.tile(cell_measure.reshape(NC, 1), (1, n_sub)) / n_sub
@@ -241,64 +226,36 @@ class VolumeConstraint(BaseLogged):
             return dg
 
         elif self._density_location in ['node_multiresolution']:
-            pass
-        
-        elif self._density_location in ['lagrange_interpolation_point', 
-                                        'berstein_interpolation_point', 
-                                        'shepard_interpolation_point']:
-
-            qf = self._mesh.quadrature_formula(self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
-
-            density_space = physical_density.space
-
-            # space_degree = density_space.p
-            # N = self._mesh.shape_function(bcs=bcs, p=space_degree)          # (NQ, LDOF)
-            
-            phi_rho = density_space.basis(bcs)[0] # (NQ, LDOF_rho)
-
-            if isinstance(self._mesh, SimplexMesh):
-                dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, phi_rho) # (NC, LDOF_rho)
-
-            elif isinstance(self._mesh, TensorMesh):
-
-                J = self._mesh.jacobi_matrix(bcs)                           # (NC, NQ, GD, GD)
-                detJ = bm.abs(bm.linalg.det(J))                             # (NC, NQ)
-                dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, phi_rho)      # (NC, LDOF_rho)
-            
-            gdof = density_space.number_of_global_dofs()  
-            cell2dof = density_space.cell_to_dof() # (NC, LDOF)
-
-            dg = bm.zeros((gdof, ), dtype=bm.float64, device=self._mesh.device)
-            dg = bm.add_at(dg, cell2dof.reshape(-1), dg_e.reshape(-1)) # (GDOF,)
-
-            return dg
-
-        elif self._density_location in ['gauss_integration_point']:
-
-            qf = self._mesh.quadrature_formula(q=self._integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights()
-
-            if isinstance(self._mesh, SimplexMesh):
-                dg = bm.einsum('q, c -> cq', ws, cell_measure)
-
-            elif isinstance(self._mesh, TensorMesh):
-                J = self._mesh.jacobi_matrix(bcs)
-                detJ = bm.abs(bm.linalg.det(J)) 
-                dg = bm.einsum('q, cq -> cq', ws, detJ)  
-
-            return dg # (NC, NQ)
-
-        elif self._density_location == 'density_subelement_gauss_point':
-            
-            NC = self._mesh.number_of_cells()
-            NQ = physical_density.shape[1]  # 子单元数量
-            
-            subcell_measure = cell_measure[:, None] / NQ
-            dg = bm.broadcast_to(subcell_measure, (NC, NQ))
-
-            return dg
+            raise NotImplementedError(f"暂时不考虑节点多分辨率密度分布")
 
         else:
-            raise ValueError(f"Unsupported density_location: {self._density_location}")
+            raise NotImplementedError(f"暂时不考虑其它密度分布")
+        
+    def _auto_differentiation(self, 
+                            density: Union[Function, TensorLike],
+                            state: Optional[dict] = None, 
+                            enable_timing: bool = False, 
+                            **kwargs
+                        ) -> TensorLike:
+        """使用自动微分技术计算体积约束函数关于物理密度的梯度"""
+        if bm.backend_name not in ['pytorch', 'jax']:
+            self._log_error(f"自动微分仅在 pytorch 或者 jax 后端下有效")
+
+        if self._density_location == 'element':
+            # density.shape = (NC, )
+            cell_measure = self._mesh.entity_measure('cell')
+
+            # 定义核函数: 计算单个单元的体积贡献
+            def vol_kernel(rho_i, cm_i):
+                return rho_i * cm_i
+            
+            # 向量化求导
+            grad_func = bm.vmap(bm.grad(vol_kernel), in_axes=(0, 0))
+            
+            dg = grad_func(density[:], cell_measure)
+
+            return dg
+        
+        else:
+            raise NotImplementedError(f"暂时不考虑其它密度分布")
 

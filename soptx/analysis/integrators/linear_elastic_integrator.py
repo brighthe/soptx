@@ -34,6 +34,16 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         # 设置默认组装方法
         self.assembly.set(method)
 
+    @property
+    def coef(self) -> Optional[TensorLike]:
+        """获取当前的材料密度系数"""
+        return self._coef
+
+    @coef.setter
+    def coef(self, value: Optional[TensorLike]):
+        """设置材料密度系数"""
+        self._coef = value
+
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
         return space.cell_to_dof()[self._index]
@@ -513,7 +523,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         return KK
 
-
     @assembly.register('voigt_multiresolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
         index = self._index
@@ -667,7 +676,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     @assembly.register('fast')
     def assembly(self, 
                 space: TensorFunctionSpace,
-                enable_timing: bool = True
+                enable_timing: bool = False
                 ) -> TensorLike:
         t = None
         if enable_timing:

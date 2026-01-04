@@ -253,7 +253,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return K
     
-
     def assemble_body_force_vector(self, 
                                    enable_timing: bool = False
                                 ) -> TensorLike:

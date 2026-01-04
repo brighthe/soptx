@@ -360,14 +360,14 @@ class MMAOptimizer(BaseLogged):
 
             #TODO 基于物理密度求解状态变量
             if hasattr(analyzer, 'solve_state'):
-                # 例如: state = {'stress': sigma, 'displacement': u}
                 state = analyzer.solve_state(rho_val=rho_phys)
             elif isinstance(self._objective, CompliantMechanismObjective):
-                # 兼容旧代码: 柔性机构
-                state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)}
-            else:
-                # 兼容旧代码: 最小柔度
-                state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys)}
+                state = analyzer.solve_state(rho_val=rho_phys, adjoint=True)
+            #     # 兼容旧代码: 柔性机构
+            #     state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)}
+            # else:
+            #     # 兼容旧代码: 最小柔度
+            #     state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys)}
 
             if enable_timing:
                 t.send('位移场求解')
@@ -394,7 +394,7 @@ class MMAOptimizer(BaseLogged):
             #TODO 计算目标函数灵敏度
             obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
             
-            # 灵敏度应用缩放因子
+            #TODO 灵敏度应用缩放因子
             obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
 
             if enable_timing:
@@ -667,8 +667,8 @@ class MMAOptimizer(BaseLogged):
         uxinv = eeen / ux1
         xlinv = eeen / xl1
         
-        p0 = bm.maximum(df0dx, 0)   
-        q0 = bm.maximum(-df0dx, 0) 
+        p0 = bm.maximum(df0dx, bm.tensor(0, dtype=bm.float64))   
+        q0 = bm.maximum(-df0dx, bm.tensor(0, dtype=bm.float64)) 
         pq0 = 0.001 * (p0 + q0) + raa0 * xmami_inv
         p0 = p0 + pq0
         q0 = q0 + pq0
@@ -678,8 +678,8 @@ class MMAOptimizer(BaseLogged):
         # 构建 P, Q 和 b 构建约束函数的近似
         P = bm.zeros((m, n), dtype=bm.float64)
         Q = bm.zeros((m, n), dtype=bm.float64)
-        P = bm.maximum(dfdx, 0)
-        Q = bm.maximum(-dfdx, 0)
+        P = bm.maximum(dfdx, bm.tensor(0, dtype=bm.float64))
+        Q = bm.maximum(-dfdx, bm.tensor(0, dtype=bm.float64))
         PQ = 0.001 * (P + Q) + raa0 * bm.dot(eeem, xmami_inv.T)
         P = P + PQ
         Q = Q + PQ

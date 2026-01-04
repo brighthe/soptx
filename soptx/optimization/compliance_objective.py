@@ -14,6 +14,7 @@ class ComplianceObjective(BaseLogged):
     def __init__(self,
                 analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
                 state_variable: Literal['u', 'sigma'] = 'u',
+                diff_mode: Literal["auto", "manual"] = "manual",
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -22,7 +23,10 @@ class ComplianceObjective(BaseLogged):
 
         self._analyzer = analyzer
         self._state_variable = state_variable
+        self._diff_mode = diff_mode
         self._interpolation_scheme = analyzer._interpolation_scheme
+
+        self._material = self._analyzer.material
 
     def fun(self, 
             density: Union[Function, TensorLike],
@@ -35,7 +39,7 @@ class ComplianceObjective(BaseLogged):
             uh = state['displacement']
         
             F = self._analyzer.force_vector
-            c = bm.einsum('i, i ->', uh[:], F)
+            c = bm.einsum('i, i ->', uh[:], F[:])
             # K = self._analyzer.stiffness_matrix
             # Ku = K.matmul(uh[:])
             # c = bm.einsum('i, i ->', uh[:], Ku)
@@ -68,15 +72,16 @@ class ComplianceObjective(BaseLogged):
     def jac(self, 
             density: Union[Function, TensorLike], 
             state: Optional[dict] = None,
-            diff_mode: Literal["auto", "manual"] = "manual",
+            diff_mode: Optional[Literal["auto", "manual"]] = None,
             **kwargs
         ) -> TensorLike:
         """计算柔顺度目标函数相对于物理密度的灵敏度"""
+        mode = diff_mode if diff_mode is not None else self._diff_mode
 
-        if diff_mode == "manual":
+        if mode == "manual":
             return self._manual_differentiation(density=density, state=state, **kwargs)
 
-        elif diff_mode == "auto": 
+        elif mode == "auto": 
             return self._auto_differentiation(density=density, state=state, **kwargs)
 
         else:
@@ -90,18 +95,20 @@ class ComplianceObjective(BaseLogged):
                                 **kwargs
                             ) -> TensorLike:
         """手动计算柔顺度目标函数相对于物理密度的灵敏度"""
-
         density_location = self._interpolation_scheme.density_location
 
         if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
             #* 拉格朗日位移有限元 *#
+            if state is None:
+                state = self._analyzer.solve_state(rho_val=density)
+            
             uh = state.get('displacement')
             
             space_uh = self._analyzer._tensor_space
             cell2dof = space_uh.cell_to_dof()
             uhe = uh[cell2dof]
 
-            diff_KE = self._analyzer.get_stiffness_matrix_derivative(rho_val=density)
+            diff_KE = self._analyzer.compute_stiffness_matrix_derivative(rho_val=density)
 
             if density_location in ['element']:
                 dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_KE, uhe) # (NC, )
@@ -190,14 +197,66 @@ class ComplianceObjective(BaseLogged):
                 error_msg = f"Unknown state_variable: {self._state_variable}"
                 self._log_error(error_msg)
             
-
-            
     
     def _auto_differentiation(self, 
-            density_distribution: Function, 
-            displacement: Optional[Function] = None
-        ) -> Function:
-        # TODO 待实现
-        pass
-        
-    
+                                density: Union[Function, TensorLike],
+                                state: Optional[dict] = None, 
+                                enable_timing: bool = False, 
+                                **kwargs
+                            ) -> TensorLike:
+        """使用自动微分技术计算目标函数关于物理密度的梯度"""
+        if bm.backend_name not in ['pytorch', 'jax']:
+            self._log_error(f"自动微分仅在 pytorch 或者 jax 后端下有效")
+
+        density_location = self._interpolation_scheme.density_location
+
+        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+            #* 拉格朗日位移有限元 *#
+            if state is None:
+                state = self._analyzer.solve_state(rho_val=density)
+            
+            uh = state.get('displacement')
+
+            if density_location in ['element']:
+                cell2dof = self._analyzer.tensor_space.cell_to_dof()
+                
+                if self._analyzer._cached_ke0 is None:
+                    ke0 = self._analyzer.compute_solid_stiffness_matrix()
+                else:
+                    ke0 = self._analyzer._cached_ke0
+
+                uhe = uh[cell2dof]
+                # 定义自动微分核函数
+                def compliance_kernel(rho_i, ue_i, ke0_i):
+                    E_rho = self._interpolation_scheme.interpolate_material(
+                                                    material=self._material, 
+                                                    rho_val=rho_i
+                                                )
+                    strain_energy = bm.einsum('i, ij, j ->', ue_i, ke0_i, ue_i)
+                    ce = -E_rho * strain_energy
+                    
+                    return ce
+                
+                if ke0.ndim == 3:
+                    # Case A: ke0 是 (NC, ldof, ldof), 每个单元有独立的刚度矩阵
+                    # 我们需要沿 axis 0 进行批处理映射
+                    k_axis = 0
+                elif ke0.ndim == 2:
+                    # Case B: ke0 是 (ldof, ldof), 所有单元共用一个基础刚度矩阵
+                    # 我们不需要映射 (Broadcast)
+                    k_axis = None
+                else:
+                    self._log_error(f"ke0 维度异常: {ke0.shape}, 期望为 2 维或 3 维")
+                
+                grad_func = bm.vmap(bm.grad(compliance_kernel), in_axes=(0, 0, k_axis))
+
+                dc = grad_func(density[:], uhe, ke0)
+
+                return dc
+
+            else:
+                raise NotImplementedError(f"暂时不考虑其它密度分布")
+
+        elif isinstance(self._analyzer, HuZhangMFEMAnalyzer):
+            #* 胡张应力位移混合有限元 *#
+            raise NotImplementedError("暂时不考虑胡张混合有限元")

@@ -13,8 +13,6 @@ class FilterMatrixBuilder:
                 mesh: HomogeneousMesh, 
                 rmin: float, 
                 density_location: str, 
-                # integration_order: int = None,
-                # interpolation_order: int = None
             ) -> None:
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
@@ -22,9 +20,6 @@ class FilterMatrixBuilder:
         self._mesh = mesh
         self._rmin = rmin
         self._density_location = density_location
-        
-        # self._integration_order = integration_order
-        # self._interpolation_order = interpolation_order
 
         self._device = mesh.device
 

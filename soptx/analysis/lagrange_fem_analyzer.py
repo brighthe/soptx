@@ -1,4 +1,4 @@
-from typing import Optional, Union, Literal
+from typing import Optional, Union, Literal, Dict
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -49,8 +49,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._topopt_algorithm = topopt_algorithm
         self._interpolation_scheme = interpolation_scheme
 
-        # 设置默认求解方法
-        self.solve_displacement.set(solve_method)
+        self._solve_method = solve_method
 
         self._GD = self._mesh.geo_dimension()
 
@@ -63,11 +62,15 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._K = None
         self._F = None
 
-        self._log_info(f"Mesh Information: NC: {self._mesh.number_of_cells()}, ")
+        self._integrator = LinearElasticIntegrator(material=self._material,
+                                                q=self._integration_order,
+                                                method=self._assembly_method)
+        self._integrator.keep_data(True)
 
+        self._cached_ke0 = None
 
     ##############################################################################################
-    # 属性访问器 - 获取内部状态
+    # 属性相关函数
     ##############################################################################################
     
     @property
@@ -109,7 +112,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def topopt_algorithm(self) -> Optional[str]:
         """获取当前的拓扑优化算法"""
         return self._topopt_algorithm
-
+    
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
         """获取当前的刚度矩阵"""
@@ -119,11 +122,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def force_vector(self) -> Union[TensorLike, COOTensor]:
         """获取当前的载荷向量"""
         return self._F
-    
-
-    ##############################################################################################
-    # 属性修改器 - 修改内部状态
-    ##############################################################################################
 
     @scalar_space.setter
     def scalar_space(self, space: LagrangeFESpace) -> None:
@@ -195,16 +193,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
-        integrator = LinearElasticIntegrator(material=self._material,
-                                            coef=coef,
-                                            q=self._integration_order,
-                                            method=self._assembly_method)
-        # TODO integrator 应该在哪里创建
-        integrator.keep_data(True)
-        bform = BilinearForm(self._tensor_space)
-        bform.add_integrator(integrator)
-        K = bform.assembly(format='csr')
+        # 更新密度系数
+        self._integrator.coef = coef
 
+        bform = BilinearForm(self._tensor_space)
+        bform.add_integrator(self._integrator)
+        K = bform.assembly(format='csr')
 
         self._K = K
 
@@ -366,9 +360,20 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 外部方法
     ###############################################################################################
 
-    def get_stiffness_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
+    def compute_solid_stiffness_matrix(self):
+        """计算实体材料的刚度矩阵"""
+        lea = LinearElasticIntegrator(material=self._material,
+                            coef=None,
+                            q=self._integration_order,
+                            method=self._assembly_method)
+        ke0 = lea.assembly(space=self.tensor_space)
+
+        self._cached_ke0 = ke0
+
+        return ke0
+
+    def compute_stiffness_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部刚度矩阵关于物理密度的导数 (灵敏度)"""
-        
         density_location = self._interpolation_scheme.density_location
 
         # TODO 目前仅支持插值杨氏模量 E 
@@ -382,11 +387,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
             # rho_val.shape = (NC, )
             diff_coef_element = dE_rho / self._material.youngs_modulus # (NC, )
 
-            lea = LinearElasticIntegrator(material=self._material,
-                                        coef=None,
-                                        q=self._integration_order,
-                                        method=self._assembly_method)
-            ke0 = lea.assembly(space=self.tensor_space)
+            if self._cached_ke0 is None:
+                ke0 = self.compute_solid_stiffness_matrix()
+            
+            ke0 = self._cached_ke0
+
             diff_ke = bm.einsum('c, cij -> cij', diff_coef_element, ke0) # (NC, TLDOF, TLDOF)
  
             return diff_ke
@@ -606,18 +611,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             return diff_ke
 
-
-    ###############################################################################################
-    # 变体方法
-    ###############################################################################################
-
-    @variantmethod('mumps')
-    def solve_displacement(self, 
-                        rho_val: Optional[Union[TensorLike, Function]] = None,
-                        adjoint: bool = False,
-                        enable_timing: bool = False, 
-                        **kwargs
-                    ) -> Function:
+    def solve_state(self, 
+                    rho_val: Optional[Union[TensorLike, Function]] = None,
+                    adjoint: bool = False,
+                    enable_timing: bool = True, 
+                    **kwargs
+                ) -> Dict[str, Function]:
         t = None
         if enable_timing:
             t = timer(f"分析求解位移阶段")
@@ -633,8 +632,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if rho_val is None:
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
-
-        solver_type = kwargs.get('solver', 'mumps')
 
         if adjoint:
             K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
@@ -663,65 +660,75 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             uh = self._tensor_space.function()
 
-        uh[:] = spsolve(K, F, solver=solver_type)
+        solver_type = kwargs.get('solver', self._solve_method)
+
+        if solver_type in ['mumps', 'scipy']:
+            uh[:] = spsolve(K, F, solver=solver_type)
+
+        elif solver_type in ['cg']: 
+            pass
+
+        else:
+            self._log_error(f"未知的求解器类型: {solver_type}")
+        
         if enable_timing:
             t.send('求解')
             t.send(None)
 
-        return uh
+        return {'displacement': uh}
     
-    @solve_displacement.register('cg')
-    def solve_displacement(self, 
-                        rho_val: Optional[Union[TensorLike, Function]] = None,
-                        adjoint: bool = False, 
-                        **kwargs
-                    ) -> Function:
+    # @solve_displacement.register('cg')
+    # def solve_displacement(self, 
+    #                     rho_val: Optional[Union[TensorLike, Function]] = None,
+    #                     adjoint: bool = False, 
+    #                     **kwargs
+    #                 ) -> Function:
         
-        from fealpy.solver import cg
+    #     from fealpy.solver import cg
 
-        if self._topopt_algorithm is None:
-            if rho_val is not None:
-                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+    #     if self._topopt_algorithm is None:
+    #         if rho_val is not None:
+    #             self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
         
-        elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if rho_val is None:
-                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-                self._log_error(error_msg)
+    #     elif self._topopt_algorithm in ['density_based', 'level_set']:
+    #         if rho_val is None:
+    #             error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+    #             self._log_error(error_msg)
 
-        if adjoint:
-            K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
-            K_spring = self.assemble_spring_stiff_matrix()
-            K0 = K_struct + K_spring
-            F0_struct = self.assemble_body_force_vector()
-            F0_spring = bm.zeros_like(F0_struct)
-            F0 = bm.stack([F0_struct, F0_spring], axis=1)
+    #     if adjoint:
+    #         K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
+    #         K_spring = self.assemble_spring_stiff_matrix()
+    #         K0 = K_struct + K_spring
+    #         F0_struct = self.assemble_body_force_vector()
+    #         F0_spring = bm.zeros_like(F0_struct)
+    #         F0 = bm.stack([F0_struct, F0_spring], axis=1)
 
-            K, F = self.apply_bc(K0, F0, adjoint)
+    #         K, F = self.apply_bc(K0, F0, adjoint)
 
-            uh = self._tensor_space.function()
+    #         uh = self._tensor_space.function()
         
-        else:
-            K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-            F0 = self.assemble_body_force_vector()
-            K, F = self.apply_bc(K0, F0)
+    #     else:
+    #         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+    #         F0 = self.assemble_body_force_vector()
+    #         K, F = self.apply_bc(K0, F0)
 
-            uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
+    #         uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
 
-        maxiter = kwargs.get('maxiter', 5000)
-        atol = kwargs.get('atol', 1e-12)
-        rtol = kwargs.get('rtol', 1e-12)
-        x0 = kwargs.get('x0', None)
+    #     maxiter = kwargs.get('maxiter', 5000)
+    #     atol = kwargs.get('atol', 1e-12)
+    #     rtol = kwargs.get('rtol', 1e-12)
+    #     x0 = kwargs.get('x0', None)
         
-        #! cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
-        uh[:], info = cg(K, F, x0=x0,
-                        batch_first=False, 
-                        atol=atol, rtol=rtol, 
-                        maxit=maxiter, returninfo=True)
+    #     #! cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
+    #     uh[:], info = cg(K, F, x0=x0,
+    #                     batch_first=False, 
+    #                     atol=atol, rtol=rtol, 
+    #                     maxit=maxiter, returninfo=True)
         
-        gdof = self._tensor_space.number_of_global_dofs()
-        self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
+    #     gdof = self._tensor_space.number_of_global_dofs()
+    #     self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
 
-        return uh
+    #     return uh
 
     
     ##############################################################################################
@@ -785,9 +792,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
         non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
 
-        # 修复：只选取适当数量的值对应设置
         # 找出所有边界DOF对应的行索引
         bd_rows = bm.where(loc_flag)[0]
+        bd_rows = bm.astype(bd_rows, col.dtype)
         new_col = bm.empty((NNZ,), **indices_context)
         # 设置为相应行的边界 DOF 位置
         new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)

@@ -258,7 +258,6 @@ class MaterialInterpolationScheme(BaseLogged):
                     displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
         """SIMP 插值: E(ρ) = ρ^p * E0"""
-
         penalty_factor = self._options['penalty_factor']
         target_variables = self._options['target_variables']
         
@@ -295,7 +294,6 @@ class MaterialInterpolationScheme(BaseLogged):
                     displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
         """修正 SIMP 插值"""
-
         penalty_factor = self._options['penalty_factor']
         target_variables = self._options['target_variables']
         void_youngs_modulus = self._options['void_youngs_modulus']
@@ -307,8 +305,11 @@ class MaterialInterpolationScheme(BaseLogged):
 
             if self._density_location in ['element']:
                 # rho_val.shape = (NC, )
-                rho_element = rho_val[:]
-                E_rho = Emin + rho_element[:] ** penalty_factor * (E0 - Emin)
+                if hasattr(rho_val, 'ndim') and rho_val.ndim == 0:
+                    rho_element = rho_val
+                else:
+                    rho_element = rho_val[:]
+                E_rho = Emin + rho_element ** penalty_factor * (E0 - Emin)
 
             elif self._density_location in ['node']:
                 # rho_val.shape = (NN, )
