@@ -358,7 +358,6 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec4_6_3_mbb_beam')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        #* MBB 
         domain = [0, 60.0, 0, 10.0]
         E, nu = 1.0, 0.3
         P = -2.0
@@ -367,7 +366,7 @@ class DensityTopOptTest(BaseLogged):
         nx, ny = 60, 10
         mesh_type = 'uniform_quad'
 
-        from soptx.model.mbb_beam_2d import MBBBeam2d
+        from soptx.model.mbb_beam_2d_lfem import MBBBeam2d
         pde = MBBBeam2d(
                         domain=domain,
                         P=P, E=E, nu=nu,
@@ -378,7 +377,7 @@ class DensityTopOptTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        space_degree = 4
+        space_degree = 2
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
         
@@ -398,10 +397,10 @@ class DensityTopOptTest(BaseLogged):
         change_tolerance = 1e-2
         use_penalty_continuation = True
 
-        filter_type = 'density' # 'none', 'sensitivity', 'density', 'projection'
+        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density', 'projection'
         # rmin = 1.0
-        # rmin = 0.75
-        rmin = 0.5
+        rmin = 0.75
+        # rmin = 0.5
         projection_config = {
                         'projection_type': 'tanh',  # 'tanh', 'exponential'
                         'beta': 1.0,                # 初始 beta
@@ -450,7 +449,7 @@ class DensityTopOptTest(BaseLogged):
             
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
-                                    mesh=design_variable_mesh,
+                                    design_mesh=design_variable_mesh,
                                     filter_type=filter_type,
                                     rmin=rmin,
                                     density_location=density_location,
@@ -1000,5 +999,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_4_half_mbb_beam')
+    test.run.set('test_subsec4_6_3_mbb_beam')
     rho_opt, history = test.run()
