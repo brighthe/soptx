@@ -377,7 +377,7 @@ class DensityTopOptTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        space_degree = 2
+        space_degree = 4
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
         
@@ -399,8 +399,8 @@ class DensityTopOptTest(BaseLogged):
 
         filter_type = 'sensitivity' # 'none', 'sensitivity', 'density', 'projection'
         # rmin = 1.0
-        rmin = 0.75
-        # rmin = 0.5
+        # rmin = 0.75
+        rmin = 0.5
         projection_config = {
                         'projection_type': 'tanh',  # 'tanh', 'exponential'
                         'beta': 1.0,                # 初始 beta
