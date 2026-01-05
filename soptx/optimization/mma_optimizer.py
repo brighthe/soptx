@@ -15,6 +15,8 @@ from soptx.regularization.filter import Filter
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
 
+FLOAT_DTYPE = bm.float64
+INT_DTYPE = bm.int32
 
 class MMAOptions:
     """MMA 算法的配置选项"""
@@ -48,8 +50,8 @@ class MMAOptions:
     def set_advanced_options(self, **kwargs):
         """设置高级选项，仅供专业用户使用
         
-        Parameters:
-        -----------
+        Parameters
+        ----------
         - **kwargs : 高级参数设置，可包含：
             - m : 约束函数的数量
             - n : 设计变量的数量
@@ -71,103 +73,110 @@ class MMAOptions:
                      UserWarning)
         
         valid_params = {
-            'm': '_m',
-            'n': '_n',
-            'xmin': '_xmin',
-            'xmax': '_xmax',
-            'a0': '_a0',
-            'a': '_a',
-            'c': '_c',
-            'd': '_d',
-            'asymp_init': '_asymp_init',
-            'asymp_incr': '_asymp_incr',
-            'asymp_decr': '_asymp_decr',
-            'move_limit': '_move_limit',
-            'albefa': '_albefa',
-            'raa0': '_raa0',
-            'epsilon_min': '_epsilon_min'
-        }
-        
+                    'm': '_m',
+                    'n': '_n',
+                    'xmin': '_xmin',
+                    'xmax': '_xmax',
+                    'a0': '_a0',
+                    'a': '_a',
+                    'c': '_c',
+                    'd': '_d',
+                    'asymp_init': '_asymp_init',
+                    'asymp_incr': '_asymp_incr',
+                    'asymp_decr': '_asymp_decr',
+                    'move_limit': '_move_limit',
+                    'albefa': '_albefa',
+                    'raa0': '_raa0',
+                    'epsilon_min': '_epsilon_min'
+                }
+                
         for key, value in kwargs.items():
+            if key in {'xmin', 'xmax', 'a', 'c', 'd'} and value is not None:
+                if hasattr(value, 'astype'):
+                    value = value.astype(FLOAT_DTYPE)
+                elif hasattr(value, 'to'):
+                    value = value.to(dtype=FLOAT_DTYPE)
+                else:
+                    value = bm.array(value, dtype=FLOAT_DTYPE)
             if key in valid_params:
                 setattr(self, valid_params[key], value)
             else:
                 raise ValueError(f"Unknown parameter: {key}")
 
-    @property
-    def m(self) -> int:
-        """约束函数的数量"""
-        return self._m
+    # @property
+    # def m(self) -> int:
+    #     """约束函数的数量"""
+    #     return self._m
 
-    @property
-    def n(self) -> Optional[int]:
-        """设计变量的数量"""
-        return self._n
+    # @property
+    # def n(self) -> Optional[int]:
+    #     """设计变量的数量"""
+    #     return self._n
 
-    @property
-    def xmin(self) -> Optional[TensorLike]:
-        """设计变量的下界"""
-        return self._xmin
+    # @property
+    # def xmin(self) -> Optional[TensorLike]:
+    #     """设计变量的下界"""
+    #     return self._xmin
 
-    @property
-    def xmax(self) -> Optional[TensorLike]:
-        """设计变量的上界"""
-        return self._xmax
+    # @property
+    # def xmax(self) -> Optional[TensorLike]:
+    #     """设计变量的上界"""
+    #     return self._xmax
 
-    @property
-    def a0(self) -> float:
-        """a_0*z 项的常数系数 a_0"""
-        return self._a0
+    # @property
+    # def a0(self) -> float:
+    #     """a_0*z 项的常数系数 a_0"""
+    #     return self._a0
 
-    @property
-    def a(self) -> Optional[TensorLike]:
-        """a_i*z 项的线性系数 a_i"""
-        return self._a
+    # @property
+    # def a(self) -> Optional[TensorLike]:
+    #     """a_i*z 项的线性系数 a_i"""
+    #     return self._a
 
-    @property
-    def c(self) -> Optional[TensorLike]:
-        """c_i*y_i 项的线性系数 c_i"""
-        return self._c
+    # @property
+    # def c(self) -> Optional[TensorLike]:
+    #     """c_i*y_i 项的线性系数 c_i"""
+    #     return self._c
 
-    @property
-    def d(self) -> Optional[TensorLike]:
-        """0.5*d_i*(y_i)**2 项的二次项系数 d_i"""
-        return self._d
+    # @property
+    # def d(self) -> Optional[TensorLike]:
+    #     """0.5*d_i*(y_i)**2 项的二次项系数 d_i"""
+    #     return self._d
 
-    @property
-    def asymp_init(self) -> float:
-        """渐近线初始距离的因子"""
-        return self._asymp_init
+    # @property
+    # def asymp_init(self) -> float:
+    #     """渐近线初始距离的因子"""
+    #     return self._asymp_init
     
-    @property
-    def asymp_incr(self) -> float:
-        """渐近线矩阵减小的因子"""
-        return self._asymp_incr
+    # @property
+    # def asymp_incr(self) -> float:
+    #     """渐近线矩阵减小的因子"""
+    #     return self._asymp_incr
     
-    @property
-    def asymp_decr(self) -> float:
-        """渐近线矩阵增加的因子"""
-        return self._asymp_decr
+    # @property
+    # def asymp_decr(self) -> float:
+    #     """渐近线矩阵增加的因子"""
+    #     return self._asymp_decr
     
-    @property
-    def move_limit(self) -> float:
-        """移动限制"""
-        return self._move_limit
+    # @property
+    # def move_limit(self) -> float:
+    #     """移动限制"""
+    #     return self._move_limit
     
-    @property
-    def albefa(self) -> float:
-        """计算边界 alfa 和 beta 的因子"""
-        return self._albefa
+    # @property
+    # def albefa(self) -> float:
+    #     """计算边界 alfa 和 beta 的因子"""
+    #     return self._albefa
     
-    @property
-    def raa0(self) -> float:
-        """函数近似精度的参数"""
-        return self._raa0
+    # @property
+    # def raa0(self) -> float:
+    #     """函数近似精度的参数"""
+    #     return self._raa0
     
-    @property
-    def epsilon_min(self) -> float:
-        """最小容差"""
-        return self._epsilon_min
+    # @property
+    # def epsilon_min(self) -> float:
+    #     """最小容差"""
+    #     return self._epsilon_min
 
 
 class MMAOptimizer(BaseLogged):
@@ -176,8 +185,8 @@ class MMAOptimizer(BaseLogged):
     用于求解拓扑优化问题的 MMA 方法实现. 该方法通过动态调整渐近线位置
     来控制优化过程, 具有良好的收敛性能
     
-    Parameters:
-    -----------
+    Parameters
+    ----------
     objective : ComplianceObjective
         目标函数对象
     constraint : VolumeConstraint
@@ -230,7 +239,6 @@ class MMAOptimizer(BaseLogged):
 
         # 只在参数未设置时初始化默认值
         if self.options.n is None:
-            # 设置所有默认值
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 self.options.set_advanced_options(

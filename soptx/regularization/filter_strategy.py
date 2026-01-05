@@ -207,7 +207,6 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
 
         # 1. 准备源项
         weighted_source = self._measure_weight * design_variable * obj_grad_rho
-        # weighted_source = design_variable * obj_grad_rho / self._measure_weight
         # 2. 卷积
         numerator_conv = self._H.matmul(weighted_source)
         # 3. 稳定性因子
@@ -217,7 +216,6 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
         denominator = stability_factor * self._Hs
         # 5. 组合
         obj_grad_dv = numerator_conv  / denominator
-        # obj_grad_dv = (numerator_conv * self._measure_weight) / denominator
 
         return obj_grad_dv
 

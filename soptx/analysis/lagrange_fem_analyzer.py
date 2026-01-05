@@ -8,12 +8,12 @@ from fealpy.fem import BilinearForm, LinearForm
 from fealpy.decorator import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
-from ..interpolation.linear_elastic_material import LinearElasticMaterial
-from ..interpolation.interpolation_scheme import MaterialInterpolationScheme
+from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
+from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
 from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.analysis.integrators.source_integrator import SourceIntegrator
 from soptx.model.pde_base import PDEBase
-from ..utils.base_logged import BaseLogged
+from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
 
 class LagrangeFEMAnalyzer(BaseLogged):

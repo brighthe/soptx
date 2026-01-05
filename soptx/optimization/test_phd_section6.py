@@ -183,7 +183,7 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
         plane_type = '3d'
 
-        nx, ny, nz = 60, 20, 4
+        nx, ny, nz = 6, 2, 4
         # mesh_type = 'uniform_hex'
         mesh_type = 'uniform_tet'
 
@@ -353,9 +353,6 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
         
-
-
-
 
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
