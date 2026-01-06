@@ -141,6 +141,8 @@ class OCOptimizer(BaseLogged):
 
         rho_phys = self._filter.get_initial_density(density=rho)
 
+        analyzer = self._objective._analyzer
+
         # 初始化历史记录
         history = OptimizationHistory()
 
@@ -154,21 +156,23 @@ class OCOptimizer(BaseLogged):
 
             start_time = time()
 
-            # 使用物理密度求解位移场
+            #TODO 基于物理密度求解状态变量
+            state = analyzer.solve_state(rho_val=rho_phys)
             if isinstance(self._objective, CompliantMechanismObjective):
-                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)
-            else:
-                uh = self._objective._analyzer.solve_displacement(rho_val=rho_phys)
+                state = analyzer.solve_state(rho_val=rho_phys, adjoint=True)
+
             if enable_timing:
                 t.send('位移场求解')
 
-            # 使用物理密度和位移计算目标函数
-            obj_val = self._objective.fun(rho_phys, displacement=uh)
+            #TODO 使用物理密度和位移计算目标函数
+            obj_val = self._objective.fun(density=rho_phys, state=state)
+            # obj_val = self._objective.fun(rho_phys, displacement=uh)
             if enable_timing:
                 t.send('目标函数计算')
 
-            # 计算目标函数相对于物理密度的灵敏度
-            obj_grad_rho = self._objective.jac(rho_phys, displacement=uh)
+            #TODO 计算目标函数相对于物理密度的灵敏度
+            obj_grad_rho = self._objective.jac(density=rho_phys, state=state)
+            # obj_grad_rho = self._objective.jac(rho_phys, displacement=uh)
             if enable_timing:
                 t.send('目标函数灵敏度分析 1')
 

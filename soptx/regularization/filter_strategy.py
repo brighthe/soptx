@@ -170,7 +170,8 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
                             physical_density: Union[TensorLike, Function]
                         ) -> Union[TensorLike, Function]:
         if self._density_location in ['element', 'node']:
-            physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
+            physical_density_filter = bm.set_at(physical_density, slice(None), design_variable)
+            # physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
 
         elif self._density_location == 'element_multiresolution':
             from soptx.analysis.utils import reshape_multiresolution_data_inverse
@@ -191,7 +192,7 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
             error_msg = f"Unsupported density_location: {self._density_location}"
             self._log_error(error_msg)
         
-        return physical_density
+        return physical_density_filter
     
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 
@@ -280,7 +281,8 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
 
         # 预计算卷积归一化因子
         #? matmul 函数下 self._H 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-        self._H = self._H.device_put('cuda')
+        device = self._mesh.device
+        self._H = self._H.device_put(device)
         self._Hs = self._H.matmul(self._measure_weight)
         # val = bm.tensor(data=1, dtype=bm.float32, device='cpu')
         # val = bm.device_put(val, device='cuda')
@@ -311,7 +313,8 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         numerator = self._H.matmul(weighted_dv)
         # 3. 归一化并赋值
         if self._density_location in ['element', 'node']:
-            physical_density[:] = bm.set_at(physical_density, slice(None), numerator / self._Hs)
+            physical_density_filter = bm.set_at(physical_density, slice(None), numerator / self._Hs)
+            # physical_density[:] = bm.set_at(physical_density, slice(None), numerator / self._Hs)
 
         elif self._density_location == 'element_multiresolution':
             from soptx.analysis.utils import reshape_multiresolution_data_inverse
@@ -328,7 +331,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
             error_msg = f"Unsupported density_location: {self._density_location}"
             self._log_error(error_msg)
         
-        return physical_density
+        return physical_density_filter
 
     def filter_objective_sensitivities(self, 
                                     design_variable: TensorLike, 

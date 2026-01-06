@@ -198,6 +198,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(self._integrator)
+
         K = bform.assembly(format='csr')
 
         self._K = K
@@ -223,6 +224,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         spshape = (TGDOF, TGDOF)
 
         K_coo = COOTensor(indices=indices, values=values, spshape=spshape)
+
         K = K_coo.tocsr()
 
         return K
@@ -321,7 +323,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 F[isBdDof, :] = uh_bd[isBdDof, :]
 
             else: 
-                F = F - K.matmul(uh_bd[:])
+                #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
+                F = F - K.tocoo().matmul(uh_bd[:])
                 F[isBdDof] = uh_bd[isBdDof]
             
             K = self._apply_matrix(A=K, isDDof=isBdDof)
@@ -674,7 +677,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
             x0 = kwargs.get('x0', None)
             
             # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
-            uh[:], info = cg(K, F, x0=x0,
+            #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
+            uh[:], info = cg(K.tocoo(), F[:], x0=x0,
                             batch_first=False, 
                             atol=atol, rtol=rtol, 
                             maxit=maxiter, returninfo=True)

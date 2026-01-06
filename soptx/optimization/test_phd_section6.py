@@ -179,14 +179,14 @@ class DensityTopOptTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         bm.set_backend('pytorch') # numpy, pytorch
         # bm.set_default_device('cuda') # cpu, cuda
-        device = 'cuda' # cpu, cuda
+        device = 'cpu' # cpu, cuda
 
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
         E, nu = 1.0, 0.3
         plane_type = '3d'
 
-        nx, ny, nz = 6, 2, 4
+        nx, ny, nz = 60, 20, 4
         mesh_type = 'uniform_hex'
         # mesh_type = 'uniform_tet'
 
@@ -204,13 +204,12 @@ class DensityTopOptTest(BaseLogged):
         # 'standard', 'voigt', 'fast'
         assembly_method = 'fast'
         # 'mumps', 'cg'
-        solve_method = 'cg'
+        solve_method = 'mumps'
 
-        max_iterations = 500
-        change_tolerance = 1e-3
-        use_penalty_continuation = True
+        max_iterations = 200
+        change_tolerance = 1e-2
 
-        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
         rmin = 1.5
 
         from soptx.model.cantilever_3d import CantileverBeam3d
@@ -228,7 +227,7 @@ class DensityTopOptTest(BaseLogged):
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
                                             plane_type=pde.plane_type,
-                                            enable_logging=False
+                                            device=device,
                                         )
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
@@ -282,7 +281,7 @@ class DensityTopOptTest(BaseLogged):
         analysis_tspace = lagrange_fem_analyzer.tensor_space
         analysis_tgdofs = analysis_tspace.number_of_global_dofs()
 
-        diff_mode_compliance = 'auto'
+        diff_mode_compliance = 'manual'
         from soptx.optimization.compliance_objective import ComplianceObjective
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer, 
                                                 diff_mode=diff_mode_compliance)
@@ -307,31 +306,27 @@ class DensityTopOptTest(BaseLogged):
 
         # error_dv = bm.sum(bm.abs(dv_auto - dv_manual))
 
-        from soptx.optimization.mma_optimizer import MMAOptimizer
-        optimizer = MMAOptimizer(
-                        objective=compliance_objective,
-                        constraint=volume_constraint,
-                        filter=filter_regularization,
-                        options={
-                            'max_iterations': max_iterations,
-                            'change_tolerance': change_tolerance,
-                            'use_penalty_continuation': use_penalty_continuation,
-                        }
-                    )
-        design_variables_num = d.shape[0]
-        constraints_num = 1
+        from soptx.optimization.oc_optimizer import OCOptimizer
+        optimizer = OCOptimizer(
+                            objective=compliance_objective,
+                            constraint=volume_constraint,
+                            filter=filter_regularization,
+                            options={
+                                'max_iterations': max_iterations,
+                                'change_tolerance': change_tolerance,
+                            }
+                        )
         optimizer.options.set_advanced_options(
-                                m=constraints_num,
-                                n=design_variables_num,
-                                xmin=bm.zeros((design_variables_num, 1)),
-                                xmax=bm.ones((design_variables_num, 1)),
-                                a0=1,
-                                a=bm.zeros((constraints_num, 1)),
-                                c=1e4 * bm.ones((constraints_num, 1)),
-                                d=bm.zeros((constraints_num, 1)),
-                            )
+                                    move_limit=0.2,
+                                    damping_coef=0.5,
+                                    initial_lambda=1e9,
+                                    bisection_tol=1e-3,
+                                    design_variable_min=1e-9
+                                )
 
-        self._log_info(f"开始密度拓扑优化, "
+        self._log_info(f"开始密度拓扑优化, \n"
+            f"设备={device}, 后端={bm.backend_name}, "
+            f"目标函数自动微分={diff_mode_compliance}, 体积分数约束自动微分={diff_mode_volume}\n"
             f"模型名称={pde.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
             f"目标函数灵敏度计算方法={diff_mode_compliance}, 体积分数约束灵敏度计算方法={diff_mode_volume}, \n"
             f"网格类型={displacement_mesh.__class__.__name__},  " 
@@ -339,7 +334,7 @@ class DensityTopOptTest(BaseLogged):
             f"空间次数={space_degree}, 积分次数={integration_order}, 位移自由度总数={analysis_tgdofs}, \n"
             f"矩阵组装方法={assembly_method}, \n"
             f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
-            f"设计变量变化收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
+            f"设计变量变化收敛容差={change_tolerance} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
