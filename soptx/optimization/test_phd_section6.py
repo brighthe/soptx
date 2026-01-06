@@ -1,6 +1,7 @@
 from typing import Optional, Union
 from pathlib import Path
-
+import os
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
@@ -177,6 +178,8 @@ class DensityTopOptTest(BaseLogged):
     @run.register('test_subsec6_4_2')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         bm.set_backend('pytorch') # numpy, pytorch
+        # bm.set_default_device('cuda') # cpu, cuda
+        device = 'cuda' # cpu, cuda
 
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
@@ -184,12 +187,12 @@ class DensityTopOptTest(BaseLogged):
         plane_type = '3d'
 
         nx, ny, nz = 6, 2, 4
-        # mesh_type = 'uniform_hex'
-        mesh_type = 'uniform_tet'
+        mesh_type = 'uniform_hex'
+        # mesh_type = 'uniform_tet'
 
         space_degree = 1
-        # integration_order = space_degree + 1 # 单元密度 + 六面体网格
-        integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
+        integration_order = space_degree + 1 # 单元密度 + 六面体网格
+        # integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
 
         volume_fraction = 0.3
         penalty_factor = 3.0
@@ -200,6 +203,8 @@ class DensityTopOptTest(BaseLogged):
 
         # 'standard', 'voigt', 'fast'
         assembly_method = 'fast'
+        # 'mumps', 'cg'
+        solve_method = 'cg'
 
         max_iterations = 500
         change_tolerance = 1e-3
@@ -214,9 +219,9 @@ class DensityTopOptTest(BaseLogged):
                             p=p, E=E, nu=nu,
                             plane_type=plane_type,
                         )
-
         pde.init_mesh.set(mesh_type)
-        displacement_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+        # displacement_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz, device=device)
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -260,7 +265,7 @@ class DensityTopOptTest(BaseLogged):
                                     rmin=rmin,
                                     density_location=density_location,
                                 )
-
+        
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
                                     mesh=displacement_mesh,
@@ -270,7 +275,7 @@ class DensityTopOptTest(BaseLogged):
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method=assembly_method,
-                                    solve_method='mumps',
+                                    solve_method=solve_method,
                                     topopt_algorithm='density_based',
                                 )
 

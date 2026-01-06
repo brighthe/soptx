@@ -622,8 +622,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
             t = timer(f"分析求解位移阶段")
             next(t)
 
-        from fealpy.solver import spsolve
-
         if self._topopt_algorithm is None:
             if rho_val is not None:
                 self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
@@ -663,10 +661,23 @@ class LagrangeFEMAnalyzer(BaseLogged):
         solver_type = kwargs.get('solver', self._solve_method)
 
         if solver_type in ['mumps', 'scipy']:
+            from fealpy.solver import spsolve
+
             uh[:] = spsolve(K, F, solver=solver_type)
 
-        elif solver_type in ['cg']: 
-            pass
+        elif solver_type in ['cg']:
+            from fealpy.solver import cg
+
+            maxiter = kwargs.get('maxiter', 5000)
+            atol = kwargs.get('atol', 1e-12)
+            rtol = kwargs.get('rtol', 1e-12)
+            x0 = kwargs.get('x0', None)
+            
+            # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
+            uh[:], info = cg(K, F, x0=x0,
+                            batch_first=False, 
+                            atol=atol, rtol=rtol, 
+                            maxit=maxiter, returninfo=True)
 
         else:
             self._log_error(f"未知的求解器类型: {solver_type}")
@@ -676,59 +687,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return {'displacement': uh}
-    
-    # @solve_displacement.register('cg')
-    # def solve_displacement(self, 
-    #                     rho_val: Optional[Union[TensorLike, Function]] = None,
-    #                     adjoint: bool = False, 
-    #                     **kwargs
-    #                 ) -> Function:
-        
-    #     from fealpy.solver import cg
-
-    #     if self._topopt_algorithm is None:
-    #         if rho_val is not None:
-    #             self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
-        
-    #     elif self._topopt_algorithm in ['density_based', 'level_set']:
-    #         if rho_val is None:
-    #             error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-    #             self._log_error(error_msg)
-
-    #     if adjoint:
-    #         K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
-    #         K_spring = self.assemble_spring_stiff_matrix()
-    #         K0 = K_struct + K_spring
-    #         F0_struct = self.assemble_body_force_vector()
-    #         F0_spring = bm.zeros_like(F0_struct)
-    #         F0 = bm.stack([F0_struct, F0_spring], axis=1)
-
-    #         K, F = self.apply_bc(K0, F0, adjoint)
-
-    #         uh = self._tensor_space.function()
-        
-    #     else:
-    #         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-    #         F0 = self.assemble_body_force_vector()
-    #         K, F = self.apply_bc(K0, F0)
-
-    #         uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
-
-    #     maxiter = kwargs.get('maxiter', 5000)
-    #     atol = kwargs.get('atol', 1e-12)
-    #     rtol = kwargs.get('rtol', 1e-12)
-    #     x0 = kwargs.get('x0', None)
-        
-    #     #! cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
-    #     uh[:], info = cg(K, F, x0=x0,
-    #                     batch_first=False, 
-    #                     atol=atol, rtol=rtol, 
-    #                     maxit=maxiter, returninfo=True)
-        
-    #     gdof = self._tensor_space.number_of_global_dofs()
-    #     self._log_info(f"Solving linear system with {gdof} displacement DOFs with CG solver.")
-
-    #     return uh
 
     
     ##############################################################################################

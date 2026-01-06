@@ -171,9 +171,6 @@ class FilterMatrixBuilder:
                 values=sH[:nnz],
                 spshape=(gdof, gdof)
             )
-                
-        H = H.tocsr()
-        H = H.device_put(self._device)
         
         if enable_timing:
             t.send('稀疏矩阵构建时间')
@@ -325,9 +322,6 @@ class FilterMatrixBuilder:
                     spshape=(N_total, N_total)
                 )
         
-        H = H.tocsr()
-        H = H.device_put(self._device)
-        
         if enable_timing:
             t.send('矩阵构建')
             t.send(None)
@@ -437,8 +431,7 @@ class FilterMatrixBuilder:
         Returns:
         --------
         H: 过滤矩阵
-        """
-        
+        """        
         t = None
         if enable_timing:
             t = timer(f"Filter_3d_{self._density_location}")
@@ -556,13 +549,6 @@ class FilterMatrixBuilder:
                     values=sH,
                     spshape=(nx * ny * nz, nx * ny * nz)
                 )
-        
-        #! PyTorch 后端对 COOTensor 的支持更好
-        # Hs = H @ bm.ones(H.shape[1], dtype=bm.float64, device='cpu')
-        
-        H = H.tocsr()
-        H = H.device_put(self._device)
-        # Hs = bm.device_put(Hs, self._device)
 
         if enable_timing:
             t.send('矩阵构建')
@@ -570,7 +556,6 @@ class FilterMatrixBuilder:
         
         return H
     
-
     def _compute_filter_3d_math(self,
                                 rmin: float, 
                                 nx: int, ny: int, nz: int, 

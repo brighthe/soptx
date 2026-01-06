@@ -279,7 +279,12 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
             self._log_error(error_msg)
 
         # 预计算卷积归一化因子
+        #? matmul 函数下 self._H 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
+        self._H = self._H.device_put('cuda')
         self._Hs = self._H.matmul(self._measure_weight)
+        # val = bm.tensor(data=1, dtype=bm.float32, device='cpu')
+        # val = bm.device_put(val, device='cuda')
+        # print("------------")
         
     def get_initial_density(self, 
                         density:  Union[TensorLike, Function]
