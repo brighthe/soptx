@@ -103,15 +103,15 @@ class MMAOptions:
             else:
                 raise ValueError(f"Unknown parameter: {key}")
 
-    # @property
-    # def m(self) -> int:
-    #     """约束函数的数量"""
-    #     return self._m
+    @property
+    def m(self) -> int:
+        """约束函数的数量"""
+        return self._m
 
-    # @property
-    # def n(self) -> Optional[int]:
-    #     """设计变量的数量"""
-    #     return self._n
+    @property
+    def n(self) -> Optional[int]:
+        """设计变量的数量"""
+        return self._n
 
     # @property
     # def xmin(self) -> Optional[TensorLike]:
