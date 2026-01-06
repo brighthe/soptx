@@ -453,7 +453,9 @@ class MaterialInterpolationScheme(BaseLogged):
 
         elif self._density_location in ['element_multiresolution']:
             # rho_val.shape = (NC, n_sub)
-            pass
+            # stress_solid.shape = (NC, NQ, NS)
+            rho_sub_element = rho_val[:] # (NC, n_sub)
+            stress_penalized = bm.einsum('cq, cql -> cql', rho_element ** q, stress_solid)
         
         return stress_penalized
 

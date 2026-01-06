@@ -4,16 +4,17 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
-from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from ..utils.base_logged import BaseLogged
 
 class StressConstraint(BaseLogged):
     """
     应力约束类
-    实现基于 P-norm 或 KS 函数的全局应力聚合约束
+    实现基于 P-norm 的全局应力聚合约束
     """
     def __init__(self,
-                analyzer: LagrangeFEMAnalyzer,
+                analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
                 stress_limit: float,
                 p_norm_factor: float = 8.0,
                 enable_logging: bool = False,
@@ -43,10 +44,10 @@ class StressConstraint(BaseLogged):
 
     def _compute_stress_state(self, density: TensorLike, state: dict) -> Dict[str, TensorLike]:
         """根据当前位移和密度计算完整的应力状态"""
-        if 'stress' in state:
-            pass
-
-        elif 'displacement' in state:
+        if isinstance(self._analyzer, LagrangeFEMAnalyzer):
+            if state is None:
+                state = self._analyzer.solve_state(rho_val=density)
+        
             uh = state['displacement']
             cell2dof = self._space_uh.cell_to_dof()
             # 提取单元位移
@@ -61,6 +62,9 @@ class StressConstraint(BaseLogged):
                                                                 rho_val=density
                                                             )
         
+        elif isinstance(self._analyzer, HuZhangMFEMAnalyzer):
+            raise NotImplementedError(f"暂未实现")
+        
         else:
             self._log_error("State dictionary must contain either 'stress' or 'displacement'.")
         
@@ -74,8 +78,8 @@ class StressConstraint(BaseLogged):
             }
         
     def fun(self, 
-            density: Function, 
-            state: Optional[dict] = None,  
+            density: Union[Function, TensorLike], 
+            state: Optional[Dict] = None,
             **kwargs
         ) -> TensorLike:
         """计算应力约束函数值"""

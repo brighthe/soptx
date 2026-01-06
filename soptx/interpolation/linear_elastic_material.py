@@ -365,7 +365,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                             B: TensorLike, 
                             u_e: TensorLike
                         ) -> TensorLike:
-        """计算名义应力向量 (对应实体材料)
+        """计算实体应力向量 (对应实体材料)
 
         Parameters
         ----------

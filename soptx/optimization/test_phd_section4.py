@@ -574,8 +574,8 @@ class DensityTopOptTest(BaseLogged):
         # plt.show()
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-        density_location = 'element'
-        sub_density_element = 64
+        density_location = 'element_multiresolution'
+        sub_density_element = 4
         interpolation_method = 'msimp'
         penalty_factor = 3.0
         void_youngs_modulus = 1e-9
@@ -679,6 +679,8 @@ class DensityTopOptTest(BaseLogged):
 
         from soptx.optimization.stress_constraint import StressConstraint
         stress_constraint = StressConstraint(analyzer=lagrange_fem_analyzer, stress_limit=stress_limit)
+
+        test = stress_constraint.fun(density=rho)
 
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
@@ -827,5 +829,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_3_mbb_beam')
+    test.run.set('test_subsec4_6_4_half_mbb_beam')
     rho_opt, history = test.run()
