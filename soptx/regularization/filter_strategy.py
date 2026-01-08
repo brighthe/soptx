@@ -325,7 +325,8 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                                                                     ny=ny_displacement,
                                                                     data_flat=numerator / self._Hs,
                                                                     n_sub=n_sub) # (NC, n_sub)
-            physical_density[:] = bm.set_at(physical_density, slice(None), sub_physical_density)
+            physical_density_filter = bm.set_at(physical_density, slice(None), sub_physical_density)
+            # physical_density[:] = bm.set_at(physical_density, slice(None), sub_physical_density)
         
         else:
             error_msg = f"Unsupported density_location: {self._density_location}"

@@ -9,7 +9,6 @@ from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
 
-
 class ComplianceObjective(BaseLogged):
     def __init__(self,
                 analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
@@ -27,6 +26,45 @@ class ComplianceObjective(BaseLogged):
         self._interpolation_scheme = analyzer._interpolation_scheme
 
         self._material = self._analyzer.material
+
+        self._cached_grad_func = None
+
+    @staticmethod
+    def _element_compliance_kernel(rho, ue, ke0, material, interpolation_scheme):
+        """[静态纯函数] 单元级柔顺度核函数"""
+        E_rho = interpolation_scheme.interpolate_material(
+                                material=material, 
+                                rho_val=rho
+                            )
+        strain_energy = bm.einsum('i, ij, j ->', ue, ke0, ue)
+        ce = -E_rho * strain_energy
+
+        return ce
+    
+    def _build_grad_operator(self, ke0: TensorLike) -> TensorLike:
+        """构建并编译梯度算子"""
+        import functools
+
+        if ke0.ndim == 3:
+            # Case A: ke0 是 (NC, ldof, ldof), 每个单元有独立的刚度矩阵
+            # 我们需要沿 axis 0 进行批处理映射
+            k_axis = 0
+        elif ke0.ndim == 2:
+            # Case B: ke0 是 (ldof, ldof), 所有单元共用一个基础刚度矩阵
+            # 我们不需要映射 (Broadcast)
+            k_axis = None
+        else:
+            self._log_error(f"ke0 维度异常: {ke0.shape}, 期望为 2 维或 3 维")
+
+        kernel_partial = functools.partial(
+                                self._element_compliance_kernel, 
+                                material=self._material,
+                                interpolation_scheme=self._interpolation_scheme
+                            )
+
+        grad_func = bm.vmap(bm.grad(kernel_partial, argnums=0), in_axes=(0, 0, k_axis))
+        
+        return grad_func
 
     def fun(self, 
             density: Union[Function, TensorLike],
@@ -226,31 +264,37 @@ class ComplianceObjective(BaseLogged):
                     ke0 = self._analyzer._cached_ke0
 
                 uhe = uh[cell2dof]
-                # 定义自动微分核函数
-                def compliance_kernel(rho_i, ue_i, ke0_i):
-                    E_rho = self._interpolation_scheme.interpolate_material(
-                                                    material=self._material, 
-                                                    rho_val=rho_i
-                                                )
-                    strain_energy = bm.einsum('i, ij, j ->', ue_i, ke0_i, ue_i)
-                    ce = -E_rho * strain_energy
-                    
-                    return ce
-                
-                if ke0.ndim == 3:
-                    # Case A: ke0 是 (NC, ldof, ldof), 每个单元有独立的刚度矩阵
-                    # 我们需要沿 axis 0 进行批处理映射
-                    k_axis = 0
-                elif ke0.ndim == 2:
-                    # Case B: ke0 是 (ldof, ldof), 所有单元共用一个基础刚度矩阵
-                    # 我们不需要映射 (Broadcast)
-                    k_axis = None
-                else:
-                    self._log_error(f"ke0 维度异常: {ke0.shape}, 期望为 2 维或 3 维")
-                
-                grad_func = bm.vmap(bm.grad(compliance_kernel), in_axes=(0, 0, k_axis))
 
-                dc = grad_func(density[:], uhe, ke0)
+                if self._cached_grad_func is None:
+                    self._cached_grad_func = self._build_grad_operator(ke0)
+                
+                dc = self._cached_grad_func(density[:], uhe, ke0)
+
+                # # 定义自动微分核函数
+                # def compliance_kernel(rho_i, ue_i, ke0_i):
+                #     E_rho = self._interpolation_scheme.interpolate_material(
+                #                                     material=self._material, 
+                #                                     rho_val=rho_i
+                #                                 )
+                #     strain_energy = bm.einsum('i, ij, j ->', ue_i, ke0_i, ue_i)
+                #     ce = -E_rho * strain_energy
+                    
+                #     return ce
+                
+                # if ke0.ndim == 3:
+                #     # Case A: ke0 是 (NC, ldof, ldof), 每个单元有独立的刚度矩阵
+                #     # 我们需要沿 axis 0 进行批处理映射
+                #     k_axis = 0
+                # elif ke0.ndim == 2:
+                #     # Case B: ke0 是 (ldof, ldof), 所有单元共用一个基础刚度矩阵
+                #     # 我们不需要映射 (Broadcast)
+                #     k_axis = None
+                # else:
+                #     self._log_error(f"ke0 维度异常: {ke0.shape}, 期望为 2 维或 3 维")
+                
+                # grad_func = bm.vmap(bm.grad(compliance_kernel), in_axes=(0, 0, k_axis))
+
+                # dc = grad_func(density[:], uhe, ke0)
 
                 return dc
 

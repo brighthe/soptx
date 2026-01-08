@@ -286,25 +286,11 @@ class DensityTopOptTest(BaseLogged):
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer, 
                                                 diff_mode=diff_mode_compliance)
 
-        # state = compliance_objective._analyzer.solve_state(rho_val=rho)
-
-        # dc_auto = compliance_objective.jac(density=rho, state=state, diff_mode='auto')
-
-        # dc_manual = compliance_objective.jac(density=rho, state=state, diff_mode='manual')
-
-        # error_dc = bm.sum(bm.abs(dc_auto - dc_manual))
-
         diff_mode_volume = 'manual'
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, 
                                             volume_fraction=volume_fraction,
                                             diff_mode=diff_mode_volume)
-        
-        # dv_auto = volume_constraint.jac(density=rho, diff_mode='auto')
-
-        # dv_manual = volume_constraint.jac(density=rho, diff_mode='manual')
-
-        # error_dv = bm.sum(bm.abs(dv_auto - dv_manual))
 
         from soptx.optimization.oc_optimizer import OCOptimizer
         optimizer = OCOptimizer(

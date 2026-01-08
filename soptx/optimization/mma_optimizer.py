@@ -113,70 +113,70 @@ class MMAOptions:
         """设计变量的数量"""
         return self._n
 
-    # @property
-    # def xmin(self) -> Optional[TensorLike]:
-    #     """设计变量的下界"""
-    #     return self._xmin
+    @property
+    def xmin(self) -> Optional[TensorLike]:
+        """设计变量的下界"""
+        return self._xmin
 
-    # @property
-    # def xmax(self) -> Optional[TensorLike]:
-    #     """设计变量的上界"""
-    #     return self._xmax
+    @property
+    def xmax(self) -> Optional[TensorLike]:
+        """设计变量的上界"""
+        return self._xmax
 
-    # @property
-    # def a0(self) -> float:
-    #     """a_0*z 项的常数系数 a_0"""
-    #     return self._a0
+    @property
+    def a0(self) -> float:
+        """a_0*z 项的常数系数 a_0"""
+        return self._a0
 
-    # @property
-    # def a(self) -> Optional[TensorLike]:
-    #     """a_i*z 项的线性系数 a_i"""
-    #     return self._a
+    @property
+    def a(self) -> Optional[TensorLike]:
+        """a_i*z 项的线性系数 a_i"""
+        return self._a
 
-    # @property
-    # def c(self) -> Optional[TensorLike]:
-    #     """c_i*y_i 项的线性系数 c_i"""
-    #     return self._c
+    @property
+    def c(self) -> Optional[TensorLike]:
+        """c_i*y_i 项的线性系数 c_i"""
+        return self._c
 
-    # @property
-    # def d(self) -> Optional[TensorLike]:
-    #     """0.5*d_i*(y_i)**2 项的二次项系数 d_i"""
-    #     return self._d
+    @property
+    def d(self) -> Optional[TensorLike]:
+        """0.5*d_i*(y_i)**2 项的二次项系数 d_i"""
+        return self._d
 
-    # @property
-    # def asymp_init(self) -> float:
-    #     """渐近线初始距离的因子"""
-    #     return self._asymp_init
+    @property
+    def asymp_init(self) -> float:
+        """渐近线初始距离的因子"""
+        return self._asymp_init
     
-    # @property
-    # def asymp_incr(self) -> float:
-    #     """渐近线矩阵减小的因子"""
-    #     return self._asymp_incr
+    @property
+    def asymp_incr(self) -> float:
+        """渐近线矩阵减小的因子"""
+        return self._asymp_incr
     
-    # @property
-    # def asymp_decr(self) -> float:
-    #     """渐近线矩阵增加的因子"""
-    #     return self._asymp_decr
+    @property
+    def asymp_decr(self) -> float:
+        """渐近线矩阵增加的因子"""
+        return self._asymp_decr
     
-    # @property
-    # def move_limit(self) -> float:
-    #     """移动限制"""
-    #     return self._move_limit
+    @property
+    def move_limit(self) -> float:
+        """移动限制"""
+        return self._move_limit
     
-    # @property
-    # def albefa(self) -> float:
-    #     """计算边界 alfa 和 beta 的因子"""
-    #     return self._albefa
+    @property
+    def albefa(self) -> float:
+        """计算边界 alfa 和 beta 的因子"""
+        return self._albefa
     
-    # @property
-    # def raa0(self) -> float:
-    #     """函数近似精度的参数"""
-    #     return self._raa0
+    @property
+    def raa0(self) -> float:
+        """函数近似精度的参数"""
+        return self._raa0
     
-    # @property
-    # def epsilon_min(self) -> float:
-    #     """最小容差"""
-    #     return self._epsilon_min
+    @property
+    def epsilon_min(self) -> float:
+        """最小容差"""
+        return self._epsilon_min
 
 
 class MMAOptimizer(BaseLogged):
