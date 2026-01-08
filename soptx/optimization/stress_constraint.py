@@ -33,14 +33,41 @@ class StressConstraint(BaseLogged):
         self._material = self._analyzer.material
         self._interpolation_scheme = self._analyzer.interpolation_scheme
 
-        q = 1 
-        qf = self._mesh.quadrature_formula(q)
-        bcs, _ = qf.get_quadrature_points_and_weights()
-        gphi = self._analyzer.scalar_space.grad_basis(bcs, variable='x')
-        self._B = self._material.strain_displacement_matrix(
-                                        dof_priority=self._space_uh.dof_priority, 
-                                        gphi=gphi
-                                    )
+        self._density_location = self._interpolation_scheme.density_location
+
+        q = 1
+
+
+    def _compute_strain_displacement_matrix(self) -> TensorLike:
+        """构建并缓存应变-位移矩阵 B"""
+
+        if self._density_location in ['element']:
+            qf = self._mesh.quadrature_formula(q)
+            bcs, _ = qf.get_quadrature_points_and_weights()
+            gphi = self._analyzer.scalar_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
+            B = self._material.strain_displacement_matrix(
+                                            dof_priority=self._space_uh.dof_priority, 
+                                            gphi=gphi
+                                        ) # (NC, NQ, NS, TLDOF)
+            
+        elif self._density_location in ['multiresolution_element']:
+            from soptx.interpolation.utils import calculate_multiresolution_gphi_eg, reshape_multiresolution_data_inverse
+            gphi_eg_reshaped = calculate_multiresolution_gphi_eg(
+                                            s_space_u=self._analyzer.scalar_space,
+                                            q=q,
+                                            n_sub=n_sub) # (NC*n_sub, NQ, LDOF, GD)
+            B_reshaped = self._material.strain_displacement_matrix(
+                                                dof_priority=self._tensor_space.dof_priority, 
+                                                gphi=gphi_eg_reshaped
+                                            ) # (NC*n_sub, NQ, NS, TLDOF)
+            B = reshape_multiresolution_data_inverse(nx=nx_u, ny=ny_u, 
+                                                    data_flat=B_reshaped, 
+                                                    n_sub=n_sub) # (NC, n_sub, NQ, NS, TLDOF)
+            
+        else:
+            self._log_error(f"Unsupported density location: {self._density_location}")
+        
+        return B
 
     def _compute_stress_state(self, density: TensorLike, state: dict) -> Dict[str, TensorLike]:
         """根据当前位移和密度计算完整的应力状态"""

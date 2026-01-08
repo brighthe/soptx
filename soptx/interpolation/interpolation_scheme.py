@@ -112,11 +112,6 @@ class MaterialInterpolationScheme(BaseLogged):
         """获取当前的应力惩罚因子"""
         return self._options['stress_penalty_factor']
     
-
-    #########################################################################################
-    # 属性修改器
-    #########################################################################################
-
     @penalty_factor.setter
     def penalty_factor(self, penalty_factor: float) -> None:
         """更新惩罚因子"""

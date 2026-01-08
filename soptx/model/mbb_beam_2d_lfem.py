@@ -224,11 +224,6 @@ class MBBBeam2d(PDEBase):
     """
     全区域 MBB 梁的 PDE 模型
     
-    控制方程:
-        -∇·σ = 0      in Ω
-            u = u_D    on ∂F_D
-          σ·n = t      on ∂F_N 
-
     设计域:
         - 全设计域: 60 mm x 10 mm
 
@@ -265,10 +260,6 @@ class MBBBeam2d(PDEBase):
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
-    #######################################################################################################################
-    # 属性访问器
-    #######################################################################################################################
-
     @property
     def E(self) -> float:
         """获取杨氏模量"""
@@ -284,10 +275,6 @@ class MBBBeam2d(PDEBase):
         """获取集中力"""
         return self._P
 
-    #######################################################################################################################
-    # 变体方法
-    #######################################################################################################################
-
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         nx = kwargs.get('nx', 60)
@@ -298,6 +285,7 @@ class MBBBeam2d(PDEBase):
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                        threshold=threshold, device=device)
         self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
+
         return mesh
 
     @init_mesh.register('uniform_aligned_tri')
@@ -310,6 +298,7 @@ class MBBBeam2d(PDEBase):
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                      threshold=threshold, device=device)
         self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
         return mesh
 
     @init_mesh.register('uniform_crisscross_tri')
@@ -346,13 +335,9 @@ class MBBBeam2d(PDEBase):
                         rcell[:, [0, 1, 3]],
                         rcell[:, [2, 3, 1]]]
         mesh = TriangleMesh(node, newCell)
-
         self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
-        return mesh
 
-    #######################################################################################################################
-    # 核心方法
-    #######################################################################################################################
+        return mesh
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:

@@ -341,6 +341,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
     #########################################################################################
     # 外部方法
     #########################################################################################
+    
     def elastic_matrix(self) -> TensorLike:
         """
         Calculate the elastic matrix D based on the defined hypothesis ('3d', 'plane_stress', 'plane_strain').
@@ -369,17 +370,22 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         Parameters
         ----------
-        B - (NC, NQ, NS, TLDOF)
-        u_e - (NC, TLDOF)
+        B
+        - STOP 下 - (NC, NQ, NS, TLDOF)
+        - MTOP 下 - (NC, n_sub, NQ, NS, TLDOF)
+        u_e 
+        - (NC, TLDOF)
 
         Returns
         -------
-        stress_vector - (NC, NQ, NS)
+        stress_vector 
+        - STOP 下 - (NC, NQ, NS)
+        - MTOP 下 - (NC, n_sub, NQ, NS)
         """
         # D 为实体材料弹性矩阵，不包含密度插值
-        D = self.elastic_matrix()  # (1, 1, NS, NS)
+        D = self.elastic_matrix()[0, 0]  # (NS, NS)
         kwargs = bm.context(u_e)
-        stress_vector = bm.einsum('...ij, cqjk, ck -> cqi', D, B, u_e, **kwargs)
+        stress_vector = bm.einsum('ij, c...qjk, ck -> c...qi', D, B, u_e, **kwargs)
 
         return stress_vector
     
