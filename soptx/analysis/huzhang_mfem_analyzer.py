@@ -401,9 +401,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         bc = mesh.entity_barycenter('edge')
 
         # TODO 注释
-        mesh.edgedata['dirichlet'] = pde.is_traction_boundary(bc)   # 应力是本质边界条件
-        mesh.edgedata['neumann'] = pde.is_displacement_boundary(bc) # 位移是自然边界条件
-    
+        # mesh.edgedata['dirichlet'] = pde.is_traction_boundary(bc)   # 应力是本质边界条件
+        # mesh.edgedata['neumann'] = pde.is_displacement_boundary(bc) # 位移是自然边界条件
+        mesh.edgedata['essential_bc'] = pde.is_traction_boundary(bc)      # σ·n = t (强施加)
+        mesh.edgedata['natural_bc']   = pde.is_displacement_boundary(bc)  # u = u_D (弱施加)
+
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
         if enable_timing:

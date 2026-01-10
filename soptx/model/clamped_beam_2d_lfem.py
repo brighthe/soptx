@@ -198,9 +198,9 @@ class Bridge2dSingleLoadData(PDEBase):
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
     
-class BridgeDoubleLoad2d(PDEBase):
+class ClampedBeam2d(PDEBase):
     '''
-    两点载荷桥梁设计域的 PDE 模型 - 位移有限元
+    两点载荷夹持板设计域的 PDE 模型
 
     设计域:
         - 全设计域: 80 mm x 40 mm
