@@ -532,7 +532,7 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
 
 
-    @run.register('test_subsec4_6_4_half_mbb_beam')
+    @run.register('test_subsec4_6_5_half_mbb_beam')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 300.0, 0, 100.0]
         E, nu = 71000, 0.3
