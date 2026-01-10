@@ -526,31 +526,26 @@ class HuZhangFESpace2d(FunctionSpace):
         return self.TD
     
     def boundary_interpolate(self,
-            gd: Union[Callable, int, float, TensorLike],
-            uh: Optional[TensorLike] = None,
-            *, threshold: Optional[Threshold]=None, method=None) -> TensorLike:
-        
+                            gd: Union[Callable, int, float, TensorLike],
+                            uh: Optional[TensorLike] = None,
+                            *, threshold: Optional[Threshold]=None, method=None
+                        ) -> TensorLike:
         if uh is None:
             uh = bm.zeros((self.number_of_global_dofs(),), dtype=self.ftype,
                           device=self.device)
         mesh = self.mesh
         p = self.p
 
-        # 获取边界自由度的掩码
-        # 优先检查是否有专门标记的本质边界（dirichlet），否则默认全边界
-        if 'dirichlet' not in mesh.edgedata:
-            ebdflag = mesh.boundary_edge_flag()
+        if 'essential_bc' in mesh.edgedata:
+            ebdflag = mesh.edgedata['essential_bc']
         else:
-            ebdflag = mesh.edgedata['dirichlet']
+            ebdflag = mesh.boundary_edge_flag()
 
-        # 调用 Dof 类的 edge_to_dof
-        # 如果开启松弛，这里返回的是已经重定向到 relaxed variables 的索引
-        # 如果未开启，这里返回的是标准的 internal DOFs
-        e2d = self.dof.edge_to_dof()[ebdflag] #(NEb, Nbasis)
+        e2d = self.dof.edge_to_dof()[ebdflag] # (NEb, Nbasis)
         NEb = e2d.shape[0]
 
         bcs = bm.multi_index_matrix(p, 1)/p
-        points = self.mesh.bc_to_point(bcs)[ebdflag] #(NEb, Nbasis, 2)
+        points = self.mesh.bc_to_point(bcs)[ebdflag] # (NEb, Nbasis, 2)
         
         # 计算给定函数在边界积分点的值 (牵引力或应力)
         if callable(gd):

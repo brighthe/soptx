@@ -288,17 +288,27 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         gdof = space.number_of_global_dofs()
         ldof = space.number_of_local_dofs()
 
-        if 'neumann' not in mesh.edgedata:
-            # 如果没有特定标记，默认全边界都是位移边界
-            bdedge = mesh.boundary_edge_flag()
+        bd_edge_flag = mesh.boundary_edge_flag()
+
+        if 'natural_bc' in mesh.edgedata:
+            disp_edge_flag = mesh.edgedata['natural_bc']
         else:
-            bdedge = mesh.edgedata['neumann']
+            bc_edge = mesh.entity_barycenter('edge')
+            disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
+        
+        bdedge = bd_edge_flag & disp_edge_flag
+
+        if 'essential_bc' in mesh.edgedata:
+            bdedge = bdedge & (~mesh.edgedata['essential_bc'])
+
+        NBF = int(bdedge.sum())
+        if NBF == 0:
+            return bm.zeros(gdof, dtype=bm.float64, device=space.device)
 
         e2c = mesh.edge_to_cell()[bdedge] 
         en  = mesh.edge_unit_normal()[bdedge]
-        NBF = bdedge.sum() 
-
-        cellmeasure = mesh.entity_measure('edge')[bdedge]
+         
+        edge_measure  = mesh.entity_measure('edge')[bdedge]
 
         qf = mesh.quadrature_formula(self._integration_order, 'edge')
         bcs, ws = qf.get_quadrature_points_and_weights()
@@ -309,10 +319,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         # 计算基函数投影
         symidx = [[0, 1], [1, 2]]
-        phi_n = bm.zeros((NBF, NQ, ldof, 2), dtype=space.ftype)
-        gd_val = bm.zeros((NBF, NQ, 2), dtype=space.ftype)
+        phi_n = bm.zeros((NBF, NQ, ldof, 2), dtype=bm.float64, device=space.device)
+        gd_val = bm.zeros((NBF, NQ, 2), dtype=bm.float64, device=space.device)
 
         # 获取位移边界函数
+        gd = getattr(self._pde, "displacement_bc", None)
+        if gd is None or (not callable(gd)):
+            self._log_error("PDE 对象缺少位移边界函数 displacement_bc")
         gd = self._pde.displacement_bc
 
         for i in range(3):
@@ -335,10 +348,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             gd_val[flag] = gd(points)
         
         # 组装
-        val = bm.einsum('q, c, cqld, cqd -> cl', ws, cellmeasure, phi_n, gd_val)
+        val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n, gd_val)
         
         cell2dof = space.cell_to_dof()[e2c[:, 0]]
-        F_vec = bm.zeros(gdof, dtype=space.ftype)
+        F_vec = bm.zeros(gdof, dtype=bm.float64, device=space.device)
         bm.add.at(F_vec, cell2dof, val)
 
         # TODO 角点松弛变换
@@ -353,8 +366,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     
     def apply_traction_boundary_condition(self, K: CSRTensor, F: TensorLike, space_sigma):
         """施加本质边界条件  σ·n = g_N"""
-        # 获取面力边界函数
-        gd_traction = self._pde.traction_bc
+        gd_traction = getattr(self._pde, "traction_bc", None)
+        if gd_traction is None or (not callable(gd_traction)):
+                self._log_error("PDE 对象缺少牵引边界函数 traction_bc")
+
+        # 根据网格设置点载荷作用区域
+        if hasattr(self._pde, 'set_load_region'):
+            self._pde.set_load_region(self._mesh)
         
         # 计算边界自由度的值
         uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
@@ -431,10 +449,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send('源项处理时间')
 
         # 本质边界条件处理 (应力边界 σ·n = g_N)
-        if self._pde.boundary_type == 'neumann':
-            K, F = K0, F0
-        else:
+        # if self._pde.boundary_type == 'neumann':
+        #     K, F = K0, F0
+        # else:
+        #     K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
+        has_essential = ('essential_bc' in mesh.edgedata) and bool(mesh.edgedata['essential_bc'].any())
+        if has_essential:
             K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
+        else:
+            K, F = K0, F0
 
         if enable_timing:
             t.send('本质边界条件处理时间')

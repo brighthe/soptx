@@ -41,9 +41,12 @@ class ClampedBeam2d(PDEBase):
         self._support_height_ratio = support_height_ratio 
         self._plane_type = plane_type
 
-        self._eps = 1e-12        
+        self._eps = 1e-8        
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
+
+         # 点载荷作用区域的半宽度 (需要根据网格尺寸调整)
+        self._load_region_half_width = None 
 
     @property
     def E(self) -> float:
@@ -132,160 +135,119 @@ class ClampedBeam2d(PDEBase):
                 rcell[:, [2, 3, 1]]]
         
         mesh = TriangleMesh(node, newCell)
-
         self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return mesh
+    
+    def mark_corners(self, node: TensorLike) -> TensorLike:
+        """显示标记几何角点坐标"""
+        x_min, x_max = self._domain[0], self._domain[1]
+        y_min, y_max = self._domain[2], self._domain[3]
+
+        is_x_bd = (bm.abs(node[:, 0] - x_min) < self._eps) | (bm.abs(node[:, 0] - x_max) < self._eps)
+        is_y_bd = (bm.abs(node[:, 1] - y_min) < self._eps) | (bm.abs(node[:, 1] - y_max) < self._eps)
+        is_corner = is_x_bd & is_y_bd
+        corner_coords = node[is_corner]
+
+        return corner_coords
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:
+        """体力密度 b(x, y)"""
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
-    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+    def displacement_bc(self, points: TensorLike) -> TensorLike:
+        """位移边界条件 u_D(x, y)"""
         kwargs = bm.context(points)
 
         return bm.zeros(points.shape, **kwargs)
     
     @cartesian
-    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+    def is_displacement_boundary(self, points: TensorLike) -> TensorLike:
+        """标记位移边界 - 左右两端下半部分固支"""
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
         
-        # 计算支撑的最大高度
         height = domain[3] - domain[2]
         y_max_support = domain[2] + height * self._support_height_ratio
-        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
         
-        return coord
+        on_left = bm.abs(x - domain[0]) < self._eps
+        on_right = bm.abs(x - domain[1]) < self._eps
+        in_lower_half = y <= y_max_support + self._eps
+        
+        return (on_left | on_right) & in_lower_half
+    
+    def set_load_region(self, mesh):
+        """根据网格设置点载荷作用区域"""
+        if self._load_region_half_width is not None:
+            return
+    
+        node = mesh.entity('node')
+        edge = mesh.entity('edge')
+        
+        bd_edge_flag = mesh.boundary_edge_flag()
+        bd_edges = edge[bd_edge_flag]
+        edge_lengths = bm.linalg.norm(
+                            node[bd_edges[:, 1]] - node[bd_edges[:, 0]], axis=-1
+                        )
+        
+        self._load_region_half_width = float(bm.min(edge_lengths)) / 2 + self._eps
+        
+        # 计算等效牵引力强度
+        load_region_width = 2 * self._load_region_half_width
+        self._t1 = self._p1 / load_region_width  # N/mm
+        self._t2 = self._p2 / load_region_width  # N/mm
     
     @cartesian
-    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+    def is_traction_boundary(self, points: TensorLike) -> TensorLike:
+        """标记牵引边界 - 排除位移边界后的所有外边界"""
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
         
-        # 计算支撑的最大高度
         height = domain[3] - domain[2]
         y_max_support = domain[2] + height * self._support_height_ratio
-        coord = ((bm.abs(x - domain[0]) < self._eps) | (bm.abs(x - domain[1]) < self._eps)) & (y <= y_max_support + self._eps)
         
-        return coord
-    
-    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+        # 顶部和底部边界（全部为牵引边界）
+        on_top = bm.abs(y - domain[3]) < self._eps
+        on_bottom = bm.abs(y - domain[2]) < self._eps
         
-        return (self.is_dirichlet_boundary_dof_x, 
-                self.is_dirichlet_boundary_dof_y)
-    
+        # 左右边界的上半部分（排除位移边界部分）
+        on_left = bm.abs(x - domain[0]) < self._eps
+        on_right = bm.abs(x - domain[1]) < self._eps
+        in_upper_half = y > y_max_support + self._eps
+        
+        return on_top | on_bottom | ((on_left | on_right) & in_upper_half)
+
     @cartesian
-    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        """集中载荷 (点力)"""
+    def traction_bc(self, points: TensorLike) -> TensorLike:
+        """牵引边界条件 - 包含点载荷的等效分布牵引"""
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        x_mid = (domain[0] + domain[1]) / 2  
+        
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._p1) 
         
+        if self._load_region_half_width is None:
+            # 未设置载荷区域，返回零牵引
+            return val
+        
+        hw = self._load_region_half_width
+        
+        # 顶部载荷区域：y = y_max, x ∈ [x_mid - hw, x_mid + hw]
+        on_top = bm.abs(y - domain[3]) < self._eps
+        in_top_load_region = on_top & (bm.abs(x - x_mid) <= hw)
+        
+        # 底部载荷区域：y = y_min, x ∈ [x_mid - hw, x_mid + hw]
+        on_bottom = bm.abs(y - domain[2]) < self._eps
+        in_bottom_load_region = on_bottom & (bm.abs(x - x_mid) <= hw)
+        
+        # 设置牵引力（向下为负 y 方向）
+        val = bm.set_at(val, (in_top_load_region, 1), self._t1)
+        val = bm.set_at(val, (in_bottom_load_region, 1), self._t2)
+
         return val
-    
-    @cartesian
-    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
-        domain = self.domain
-        x, y = points[..., 0], points[..., 1]
-        mid_x = (domain[0] + domain[1]) / 2  
         
-        coord_bottom = (
-                        (bm.abs(x - mid_x) < self._eps) & 
-                        (bm.abs(y - domain[2]) < self._eps)
-                    )
-        coord_top = (
-                    (bm.abs(x - mid_x) < self._eps) & 
-                    (bm.abs(y - domain[3]) < self._eps)
-                )
-        
-        return coord_bottom | coord_top
-
-    def is_concentrate_load_boundary(self) -> Callable:
-
-        return self.is_concentrate_load_boundary_dof
-        
-    
-
-    
-    # def get_neumann_loads(self):
-    #    """返回集中载荷函数, 用于位移有限元方法中的 Neumann 边界条件 (弱形式施加)"""
-    #    if self._load_type == 'concentrated':
-            
-    #         @cartesian
-    #         def concentrated_force(points: TensorLike) -> TensorLike:
-    #             """
-    #             定义集中载荷 (两点载荷), 点力恰好在节点上
-    #             底部中点和顶部中点各施加方向向下, 相同大小的集中载荷 F = -2
-    #             """
-    #             domain = self.domain
-    #             x, y = points[..., 0], points[..., 1]   
-
-    #             mid_x = (domain[0] + domain[1]) / 2  
-                
-    #             coord_bottom = (
-    #                 (bm.abs(x - mid_x) < self._eps) & 
-    #                 (bm.abs(y - domain[2]) < self._eps)
-    #             )
-    #             coord_top = (
-    #                 (bm.abs(x - mid_x) < self._eps) & 
-    #                 (bm.abs(y - domain[3]) < self._eps)
-    #             )
-                
-    #             kwargs = bm.context(points)
-    #             val = bm.zeros(points.shape, **kwargs)
-                
-    #             val = bm.set_at(val, (coord_bottom, 1), self._p1) 
-    #             val = bm.set_at(val, (coord_top, 1), self._p2)    
-                
-    #             return val
-            
-    #         return concentrated_force
-       
-    #    elif self._load_type == 'distributed':
-           
-    #        pass
-       
-    #    else:
-    #             raise NotImplementedError(f"不支持的载荷类型: {self._load_type}")
-       
-    # @cartesian
-    # def neumann_bc(self, points: TensorLike) -> TensorLike:
-    #     """
-    #     Neumann 边界条件: 表面力向量 t = (t_x, t_y) = (0, -2)
-    #     在底部和顶部中点都施加相同大小的向下的力
-    #     """
-    #     kwargs = bm.context(points)
-    #     val = bm.zeros(points.shape, **kwargs)
-    #     val = bm.set_at(val, (..., 1), self._p1) 
-        
-    #     return val
-    
-    # @cartesian
-    # def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
-    #     domain = self.domain
-    #     x, y = points[..., 0], points[..., 1]
-
-    #     mid_x = (domain[0] + domain[1]) / 2  
-        
-    #     coord_bottom = (
-    #         (bm.abs(x - mid_x) < self._eps) & 
-    #         (bm.abs(y - domain[2]) < self._eps)
-    #     )
-        
-    #     coord_top = (
-    #         (bm.abs(x - mid_x) < self._eps) & 
-    #         (bm.abs(y - domain[3]) < self._eps)
-    #     )
-        
-    #     coord = (coord_bottom | coord_top)
-        
-    #     return coord
-    
-    # def is_neumann_boundary(self) -> Callable:
-        
-    #     return self.is_neumann_boundary_dof
- 

@@ -572,10 +572,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # 'standard', 'voigt', 'fast'
         assembly_method = 'fast'
 
-        optimizer_algorithm = 'mma'
-        max_iterations = 500
+        max_iterations = 200
         change_tolerance = 1e-2
-        use_penalty_continuation = True
+        use_penalty_continuation = False
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
@@ -636,30 +635,47 @@ class DensityTopOptHuZhangTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
 
-        from soptx.optimization.mma_optimizer import MMAOptimizer
-        optimizer = MMAOptimizer(
-                        objective=compliance_objective,
-                        constraint=volume_constraint,
-                        filter=filter_regularization,
-                        options={
-                            'max_iterations': max_iterations,
-                            'change_tolerance': change_tolerance,
-                            'use_penalty_continuation': use_penalty_continuation,
-                        }
-                    )
-
-        design_variables_num = d.shape[0]
-        constraints_num = 1
+        from soptx.optimization.oc_optimizer import OCOptimizer
+        optimizer = OCOptimizer(
+                            objective=compliance_objective,
+                            constraint=volume_constraint,
+                            filter=filter_regularization,
+                            options={
+                                'max_iterations': max_iterations,
+                                'change_tolerance': change_tolerance,
+                            }
+                        )
         optimizer.options.set_advanced_options(
-                                m=constraints_num,
-                                n=design_variables_num,
-                                xmin=bm.zeros((design_variables_num, 1)),
-                                xmax=bm.ones((design_variables_num, 1)),
-                                a0=1,
-                                a=bm.zeros((constraints_num, 1)),
-                                c=1e4 * bm.ones((constraints_num, 1)),
-                                d=bm.zeros((constraints_num, 1)),
-                            ) 
+                                    move_limit=0.2,
+                                    damping_coef=0.5,
+                                    initial_lambda=1e9,
+                                    bisection_tol=1e-3
+                                )
+
+        # from soptx.optimization.mma_optimizer import MMAOptimizer
+        # optimizer = MMAOptimizer(
+        #                 objective=compliance_objective,
+        #                 constraint=volume_constraint,
+        #                 filter=filter_regularization,
+        #                 options={
+        #                     'max_iterations': max_iterations,
+        #                     'change_tolerance': change_tolerance,
+        #                     'use_penalty_continuation': use_penalty_continuation,
+        #                 }
+        #             )
+
+        # design_variables_num = d.shape[0]
+        # constraints_num = 1
+        # optimizer.options.set_advanced_options(
+        #                         m=constraints_num,
+        #                         n=design_variables_num,
+        #                         xmin=bm.zeros((design_variables_num, 1)),
+        #                         xmax=bm.ones((design_variables_num, 1)),
+        #                         a0=1,
+        #                         a=bm.zeros((constraints_num, 1)),
+        #                         c=1e4 * bm.ones((constraints_num, 1)),
+        #                         d=bm.zeros((constraints_num, 1)),
+        #                     ) 
         
         fe_tspace = analyzer.tensor_space
         fe_dofs = fe_tspace.number_of_global_dofs()
@@ -668,9 +684,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
                 f"模型名称={pde.__class__.__name__} \n"
                 f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
                 f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
-                f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+                f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, \n"
+                f"分析算法={analyzer.__class__.__name__} \n" 
                 f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={fe_dofs} \n"
-                f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
+                f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
                 f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
                 f"体积分数约束={volume_fraction}, 惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n" 
                 f"过滤类型={filter_type}, 过滤半径={rmin} ")
@@ -698,11 +715,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.5
+        E, nu = 1, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_stress'
 
-        from soptx.model.clamped_beam_2d_lfem import ClampedBeam2d
+        from soptx.model.clamped_beam_2d_hzmfem import ClampedBeam2d
         pde = ClampedBeam2d(
                     domain=domain,
                     p1=p1, p2=p2,
@@ -747,15 +764,12 @@ class DensityTopOptHuZhangTest(BaseLogged):
         density_location = 'element'
         relative_density = volume_fraction
 
-        # 'standard', 'voigt', 'fast'
-        assembly_method = 'fast'
         solve_method = 'mumps'
         use_relaxation = True
 
-        optimizer_algorithm = 'mma'
-        max_iterations = 500
+        max_iterations = 200
         change_tolerance = 1e-2
-        use_penalty_continuation = True
+        use_penalty_continuation = False
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 1.25
@@ -765,13 +779,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         node = displacement_mesh.entity('node')
         displacement_mesh.meshdata['corner'] = pde.mark_corners(node)
-
-        design_variable_mesh = displacement_mesh
-        d, rho = interpolation_scheme.setup_density_distribution(
-                                                design_variable_mesh=design_variable_mesh,
-                                                displacement_mesh=displacement_mesh,
-                                                relative_density=relative_density,
-                                            )
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -791,6 +798,13 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                         'target_variables': ['E']
                                     },
                                 )
+        
+        design_variable_mesh = displacement_mesh
+        d, rho = interpolation_scheme.setup_density_distribution(
+                                                design_variable_mesh=design_variable_mesh,
+                                                displacement_mesh=displacement_mesh,
+                                                relative_density=relative_density,
+                                            )
         
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
@@ -819,30 +833,46 @@ class DensityTopOptHuZhangTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
 
-        from soptx.optimization.mma_optimizer import MMAOptimizer
-        optimizer = MMAOptimizer(
-                        objective=compliance_objective,
-                        constraint=volume_constraint,
-                        filter=filter_regularization,
-                        options={
-                            'max_iterations': max_iterations,
-                            'change_tolerance': change_tolerance,
-                            'use_penalty_continuation': use_penalty_continuation,
-                        }
-                    )
-
-        design_variables_num = d.shape[0]
-        constraints_num = 1
+        from soptx.optimization.oc_optimizer import OCOptimizer
+        optimizer = OCOptimizer(
+                            objective=compliance_objective,
+                            constraint=volume_constraint,
+                            filter=filter_regularization,
+                            options={
+                                'max_iterations': max_iterations,
+                                'change_tolerance': change_tolerance,
+                            }
+                        )
         optimizer.options.set_advanced_options(
-                                m=constraints_num,
-                                n=design_variables_num,
-                                xmin=bm.zeros((design_variables_num, 1)),
-                                xmax=bm.ones((design_variables_num, 1)),
-                                a0=1,
-                                a=bm.zeros((constraints_num, 1)),
-                                c=1e4 * bm.ones((constraints_num, 1)),
-                                d=bm.zeros((constraints_num, 1)),
-                            ) 
+                                    move_limit=0.2,
+                                    damping_coef=0.5,
+                                    initial_lambda=1e9,
+                                    bisection_tol=1e-3
+                                )
+        # from soptx.optimization.mma_optimizer import MMAOptimizer
+        # optimizer = MMAOptimizer(
+        #                 objective=compliance_objective,
+        #                 constraint=volume_constraint,
+        #                 filter=filter_regularization,
+        #                 options={
+        #                     'max_iterations': max_iterations,
+        #                     'change_tolerance': change_tolerance,
+        #                     'use_penalty_continuation': use_penalty_continuation,
+        #                 }
+        #             )
+
+        # design_variables_num = d.shape[0]
+        # constraints_num = 1
+        # optimizer.options.set_advanced_options(
+        #                         m=constraints_num,
+        #                         n=design_variables_num,
+        #                         xmin=bm.zeros((design_variables_num, 1)),
+        #                         xmax=bm.ones((design_variables_num, 1)),
+        #                         a0=1,
+        #                         a=bm.zeros((constraints_num, 1)),
+        #                         c=1e4 * bm.ones((constraints_num, 1)),
+        #                         d=bm.zeros((constraints_num, 1)),
+        #                     ) 
         
         fe_tspace = analyzer.tensor_space
         fe_dofs = fe_tspace.number_of_global_dofs()
@@ -854,7 +884,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                 f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
                 f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
                 f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={fe_dofs} \n"
-                f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
+                f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
                 f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
                 f"体积分数约束={volume_fraction}, 惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n" 
                 f"过滤类型={filter_type}, 过滤半径={rmin} ")
@@ -879,5 +909,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_2_hzmfem')
+    test.run.set('test_subsec5_6_2_lfem')
     rho_opt, history = test.run()
