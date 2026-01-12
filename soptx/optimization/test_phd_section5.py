@@ -520,9 +520,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.5
+        E, nu = 1, 0.3
         domain = [0, 80, 0, 40]
-        plane_type = 'plane_stress'
+        plane_type = 'plane_strain' # plane_strain, plane_stress
 
         from soptx.model.clamped_beam_2d_lfem import ClampedBeam2d
         pde = ClampedBeam2d(
@@ -651,31 +651,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     initial_lambda=1e9,
                                     bisection_tol=1e-3
                                 )
-
-        # from soptx.optimization.mma_optimizer import MMAOptimizer
-        # optimizer = MMAOptimizer(
-        #                 objective=compliance_objective,
-        #                 constraint=volume_constraint,
-        #                 filter=filter_regularization,
-        #                 options={
-        #                     'max_iterations': max_iterations,
-        #                     'change_tolerance': change_tolerance,
-        #                     'use_penalty_continuation': use_penalty_continuation,
-        #                 }
-        #             )
-
-        # design_variables_num = d.shape[0]
-        # constraints_num = 1
-        # optimizer.options.set_advanced_options(
-        #                         m=constraints_num,
-        #                         n=design_variables_num,
-        #                         xmin=bm.zeros((design_variables_num, 1)),
-        #                         xmax=bm.ones((design_variables_num, 1)),
-        #                         a0=1,
-        #                         a=bm.zeros((constraints_num, 1)),
-        #                         c=1e4 * bm.ones((constraints_num, 1)),
-        #                         d=bm.zeros((constraints_num, 1)),
-        #                     ) 
         
         fe_tspace = analyzer.tensor_space
         fe_dofs = fe_tspace.number_of_global_dofs()
@@ -849,30 +824,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     initial_lambda=1e9,
                                     bisection_tol=1e-3
                                 )
-        # from soptx.optimization.mma_optimizer import MMAOptimizer
-        # optimizer = MMAOptimizer(
-        #                 objective=compliance_objective,
-        #                 constraint=volume_constraint,
-        #                 filter=filter_regularization,
-        #                 options={
-        #                     'max_iterations': max_iterations,
-        #                     'change_tolerance': change_tolerance,
-        #                     'use_penalty_continuation': use_penalty_continuation,
-        #                 }
-        #             )
-
-        # design_variables_num = d.shape[0]
-        # constraints_num = 1
-        # optimizer.options.set_advanced_options(
-        #                         m=constraints_num,
-        #                         n=design_variables_num,
-        #                         xmin=bm.zeros((design_variables_num, 1)),
-        #                         xmax=bm.ones((design_variables_num, 1)),
-        #                         a0=1,
-        #                         a=bm.zeros((constraints_num, 1)),
-        #                         c=1e4 * bm.ones((constraints_num, 1)),
-        #                         d=bm.zeros((constraints_num, 1)),
-        #                     ) 
         
         fe_tspace = analyzer.tensor_space
         fe_dofs = fe_tspace.number_of_global_dofs()
