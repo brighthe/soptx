@@ -394,13 +394,17 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                             ) -> TensorLike:
         """计算 von Mises 应力场
 
-        Parameters:
-        -----------
-        stress_vector - (NC, NQ, NS)
+        Parameters
+        ----------
+        stress_vector 
+        - STOP: (NC, NQ, NS)
+        - MTOP: (NC, n_sub, NQ, NS)
 
         Returns
         -------
-        von_mises_stress - (NC, NQ)
+        von_mises_stress 
+        - STOP: (NC, NQ)
+        - MTOP: (NC, n_sub, NQ)
         """
         kwargs = bm.context(stress_vector)
         if self._plane_type == '3d':
@@ -422,12 +426,14 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         elif self.plane_type == 'plane_strain':
             nu = self.poisson_ratio
+            val_diag = 1 - nu + nu**2
+            val_off = nu**2 - nu - 0.5
             M = bm.tensor([
-                        [1-nu+nu**2, -(0.5-nu+nu**2), 0.0],
-                        [-(0.5-nu+nu**2), 1-nu+nu**2, 0.0],
-                        [0.0,            0.0,           3.0]
+                        [val_diag, val_off,  0.0],
+                        [val_off,  val_diag, 0.0],
+                        [0.0,      0.0,      3.0]
                     ], **kwargs)
-            
+
         else:
             error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
             self._log_error(error_msg)

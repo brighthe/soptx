@@ -197,25 +197,16 @@ class CantileverCorner2d(PDEBase):
 
 class CantileverRightMiddle2d(PDEBase):
     '''
-    -∇·σ = b    in Ω
-       u = 0    on ∂Ω (homogeneous Dirichlet)
-    where:
-    - σ is the stress tensor
-    - ε = (∇u + ∇u^T)/2 is the strain tensor
+    二维悬臂梁结构
     
-    Material parameters:
-        E = 1, nu = 0.3
-
-    For isotropic materials:
-        σ = 2με + λtr(ε)I
-        
-    This model applies concentrated force at the middle of the right boundary.
+    设计域:
+        - 全设计域: 80 mm x 40 mm
     '''
     def __init__(self,
                 domain: List[float] = [0, 120, 0, 60],
                 mesh_type: str = 'uniform_quad',
                 p: float = -1.0, # N
-                E: float = 1.0,  # Pa (N/m^2)
+                E: float = 1.0,  # MPa
                 nu: float = 0.3,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
@@ -228,13 +219,9 @@ class CantileverRightMiddle2d(PDEBase):
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-        self._eps = 1e-12
+        self._eps = 1e-8
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
-        
-    #######################################################################################################################
-    # 访问器
-    #######################################################################################################################
 
     @property
     def E(self) -> float:
