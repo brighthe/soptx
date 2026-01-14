@@ -203,12 +203,12 @@ class BearingDevice2d(PDEBase):
         - 底部固支 (u_x = u_y = 0)
     
     载荷条件:
-        - 顶部向下的均匀分布牵引载荷 t = -1.8e-3 [N/mm]
+        - 顶部向下的均匀分布牵引载荷 t = -8e-2 [N/mm]
     '''
     def __init__(self,
                 domain: List[float] = [0, 120, 0, 40],  
                 mesh_type: str = 'uniform_quad',
-                t: float = -1.8e-2, # N/mm
+                t: float = -8e-2, # N/mm
                 E: float = 1,       # MPa
                 nu: float = 0.5,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
@@ -222,7 +222,7 @@ class BearingDevice2d(PDEBase):
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-        self._eps = 1e-12
+        self._eps = 1e-8
         self._load_type = 'distributed'
         self._boundary_type = 'mixed'
 

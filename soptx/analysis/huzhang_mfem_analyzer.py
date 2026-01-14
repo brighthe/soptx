@@ -576,24 +576,22 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             self._log_error(error_msg)
 
     def _stress_matrix_coefficient(self) -> tuple[float, float]:
-        """
-        材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1
-        
-        Returns
-        -------
-        lambda0: float
-            1/(2μ)
-        lambda1: float
-            λ/(2μ(dλ+2μ)), 其中 d=2 为空间维数
-        """
-        d = self._GD  # 使用类中已有的几何维度
-        
-        # 从材料对象获取 Lamé 参数
-        lam = self._material.lame_lambda
+        """材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1"""
+        d = self._GD  
+        #TODO 修改
+        nu = self._material.poisson_ratio
         mu = self._material.shear_modulus
         
-        lambda0 = 1.0 / (2 * mu)
-        lambda1 = lam / (2 * mu * (d * lam + 2 * mu))
+        lambda0 = 1.0 / (2.0 * mu)
+        denominator_factor = 1.0 + (d - 2.0) * nu
+        lambda1 = nu / (2.0 * mu * denominator_factor)
+        
+        # 从材料对象获取 Lamé 参数
+        # lam = self._material.lame_lambda
+        # mu = self._material.shear_modulus
+        
+        # lambda0 = 1.0 / (2 * mu)
+        # lambda1 = lam / (2 * mu * (d * lam + 2 * mu))
         
         return lambda0, lambda1
 

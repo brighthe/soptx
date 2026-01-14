@@ -195,15 +195,21 @@ class CantileverCorner2d(PDEBase):
 
         return self.is_concentrate_load_boundary_dof
 
-class CantileverRightMiddle2d(PDEBase):
+class Cantilever2d(PDEBase):
     '''
-    二维悬臂梁结构
-    
+    二维悬臂梁设计域的 PDE 模型
+
     设计域:
         - 全设计域: 80 mm x 40 mm
+
+    边界条件:
+        - 左侧边界完全固支 (u_x = u_y = 0)
+
+    载荷条件:
+        - 右侧边界中点施加向下集中载荷 P = -1 N
     '''
     def __init__(self,
-                domain: List[float] = [0, 120, 0, 60],
+                domain: List[float] = [0, 80, 0, 40],
                 mesh_type: str = 'uniform_quad',
                 p: float = -1.0, # N
                 E: float = 1.0,  # MPa
@@ -237,12 +243,7 @@ class CantileverRightMiddle2d(PDEBase):
     def p(self) -> float:
         """获取点力"""
         return self._p
-    
 
-    #######################################################################################################################
-    # 变体方法
-    #######################################################################################################################
-    
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         nx = kwargs.get('nx', 60)
@@ -252,7 +253,6 @@ class CantileverRightMiddle2d(PDEBase):
 
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)
-
         self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
 
         return mesh
@@ -266,7 +266,6 @@ class CantileverRightMiddle2d(PDEBase):
 
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                 threshold=threshold, device=device)
-
         self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
 
         return mesh
@@ -305,14 +304,9 @@ class CantileverRightMiddle2d(PDEBase):
                 rcell[:, [2, 3, 1]]]
         
         mesh = TriangleMesh(node, newCell)
-
         self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return mesh
-    
-    ###############################################################################################
-    # 核心方法
-    ###############################################################################################
 
     @cartesian
     def body_force(self, points: TensorLike) -> TensorLike:

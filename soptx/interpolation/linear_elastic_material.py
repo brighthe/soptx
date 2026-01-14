@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from abc import ABC, abstractmethod
 
 from fealpy.backend import backend_manager as bm
@@ -190,8 +190,6 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         self._plane_type = plane_type
 
-        self._log_info("Initializing isotropic linear elastic material")
-        
         self._compute_elastic_constants(
                                 youngs_modulus=youngs_modulus, 
                                 poisson_ratio=poisson_ratio, 
@@ -199,10 +197,8 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                                 shear_modulus=shear_modulus,
                             )
         
-        self._compute_elastic_matrix()
-
-        self._log_info("Isotropic linear elastic material initialized successfully")
-
+        self.D = None
+        
     @property
     def youngs_modulus(self) -> float:
         """杨氏模量"""
@@ -261,21 +257,19 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             self._shear_modulus = E / (2 * (1 + nu))
 
             if self._plane_type in ["3d", "plane_strain"]:
-                # 谨防锁死
-                if nu >= 0.5 - 1e-6:
-                    error_msg = (
-                        "Nearly incompressible material (nu ≈ 0.5) under "
-                        f"{self._plane_type} is not supported by pure displacement FEM. "
-                        "Please use a mixed formulation (e.g. Hu–Zhang, u–p) instead."
-                    )
-                    self._log_error(error_msg)
-
-                self._lame_lambda = E * nu / ((1 + nu) * (1 - 2 * nu))
-                self._bulk_modulus = E / (3 * (1 - 2 * nu))
+                if nu >= 0.5 - 1e-12:
+                    self._lame_lambda = float('inf')
+                    self._bulk_modulus = float('inf')
+                else:
+                    self._lame_lambda = E * nu / ((1 + nu) * (1 - 2 * nu))
+                    self._bulk_modulus = E / (3 * (1 - 2 * nu))
 
             elif self._plane_type == "plane_stress":
                 self._lame_lambda = E * nu / (1 - nu ** 2)
-                self._bulk_modulus = None
+                if nu >= 0.5 - 1e-10:
+                    self._bulk_modulus = float('inf')
+                else:
+                    self._bulk_modulus = E / (3 * (1 - 2 * nu))
 
             else:
                 self._log_error(f"Unknown plane_type: {self._plane_type}")
@@ -311,6 +305,9 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         nu = self._poisson_ratio
         lam = self._lame_lambda
         mu = self._shear_modulus
+
+        if lam == float('inf'):
+            self._log_error(f"不可压缩材料下, The first Lamé parameter λ → ∞.")
 
         if self._plane_type == "3d":
             self.D = bm.tensor([[2*mu+lam, lam,      lam,      0,  0,  0],
@@ -351,8 +348,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         The elastic matrix D - (1, 1, NS, NS)
         """
         if not hasattr(self, 'D') or self.D is None:
-            self._log_warning("Elastic matrix not computed, computing now...")
-            self._compute_elastic_matrix()
+            self._compute_elastic_matrix() 
         
         kwargs = bm.context(self.D)
         D = bm.tensor(self.D[None, None, ...], **kwargs)

@@ -7,7 +7,7 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
     
-class CantileverBeam2d(PDEBase):
+class Cantilever2d(PDEBase):
     '''
     二维悬臂梁设计域的 PDE 模型
 
@@ -68,7 +68,6 @@ class CantileverBeam2d(PDEBase):
 
         mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                     threshold=threshold, device=device)
-
         self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
 
         return mesh
@@ -82,7 +81,6 @@ class CantileverBeam2d(PDEBase):
 
         mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
                                 threshold=threshold, device=device)
-
         self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
 
         return mesh
