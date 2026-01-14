@@ -23,15 +23,15 @@ from soptx.utils import timer
 
 class HuZhangMFEMAnalyzer(BaseLogged):
     def __init__(self,
-                mesh: HomogeneousMesh,
+                disp_mesh: HomogeneousMesh,
                 pde: PDEBase, 
                 material: LinearElasticMaterial,
+                interpolation_scheme: Optional[MaterialInterpolationScheme] = None,
                 space_degree: int = 1,
                 integration_order: int = 4,
                 use_relaxation: bool = True,
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
-                interpolation_scheme: Optional[MaterialInterpolationScheme] = None,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -43,7 +43,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._validate_topopt_config(topopt_algorithm, interpolation_scheme)
         
         # 私有属性（建议通过属性访问器访问，不要直接修改）
-        self._mesh = mesh
+        self._mesh = disp_mesh
         self._pde = pde
         self._material = material
         self._interpolation_scheme = interpolation_scheme
@@ -56,6 +56,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._interpolation_scheme = interpolation_scheme
 
         self._solve_method = solve_method
+
+        node = self._mesh.entity('node')
+        self._mesh.meshdata['corner'] = self._pde.mark_corners(node)
 
         self._GD = self._mesh.geo_dimension()
         self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation)
@@ -80,8 +83,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     ##############################################################################################
 
     @property
-    def mesh(self) -> HomogeneousMesh:
-        """获取当前的网格对象"""
+    def disp_mesh(self) -> HomogeneousMesh:
+        """获取当前的位移网格对象"""
         return self._mesh
     
     @property
@@ -103,6 +106,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     def material(self) -> LinearElasticMaterial:
         """获取当前的材料类"""
         return self._material
+    
+    @property
+    def interpolation_scheme(self) -> MaterialInterpolationScheme:
+        """获取当前的材料插值方案"""
+        return self._interpolation_scheme
     
     @property
     def mix_matrix(self) -> Union[CSRTensor, COOTensor]:
@@ -295,11 +303,35 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         else:
             bc_edge = mesh.entity_barycenter('edge')
             disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
+
+        #TODO === 关键修改：保留方向信息 ===
+        is_direction_dependent = (disp_edge_flag.ndim == 2)
         
-        bdedge = bd_edge_flag & disp_edge_flag
+        if is_direction_dependent:
+            # 方向相关：bdedge_dir 保留 (NE, 2) 形状
+            bdedge_dir = bd_edge_flag[:, None] & disp_edge_flag  # (NE, 2)
+            # 用于索引：任一方向有约束的边
+            bdedge = bm.any(bdedge_dir, axis=1)  # (NE,)
+        else:
+            # 方向无关：完全固支
+            bdedge = bd_edge_flag & disp_edge_flag  # (NE,)
+            bdedge_dir = None
 
         if 'essential_bc' in mesh.edgedata:
-            bdedge = bdedge & (~mesh.edgedata['essential_bc'])
+            essential_bc = mesh.edgedata['essential_bc']
+            if essential_bc.ndim == 2:
+                essential_bc_1d = bm.any(essential_bc, axis=1)
+            else:
+                essential_bc_1d = essential_bc
+            bdedge = bdedge & (~essential_bc_1d)
+            if is_direction_dependent:
+                bdedge_dir = bdedge_dir[bdedge]  # 同步更新方向标记
+        
+        # bdedge = bd_edge_flag & disp_edge_flag
+
+        # if 'essential_bc' in mesh.edgedata:
+        #     bdedge = bdedge & (~mesh.edgedata['essential_bc'])
+        # ===============================
 
         NBF = int(bdedge.sum())
         if NBF == 0:
@@ -307,7 +339,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         e2c = mesh.edge_to_cell()[bdedge] 
         en  = mesh.edge_unit_normal()[bdedge]
-         
         edge_measure  = mesh.entity_measure('edge')[bdedge]
 
         qf = mesh.quadrature_formula(self._integration_order, 'edge')
@@ -347,8 +378,19 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             points = mesh.bc_to_point(bcsi[i], index=current_cells)
             gd_val[flag] = gd(points)
         
-        # 组装
-        val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n, gd_val)
+        #TODO === 关键修改：分方向积分 ===
+        if is_direction_dependent:
+            # 只对有约束的方向积分
+            dir_mask = bdedge_dir.astype(bm.float64)  # (NBF, 2)
+            phi_n_masked = phi_n * dir_mask[:, None, None, :]
+            gd_val_masked = gd_val * dir_mask[:, None, :]
+            
+            val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n_masked, gd_val_masked)
+        else:
+            # 完全固支：两个方向都积分
+            val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n, gd_val)
+        # val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n, gd_val)
+        # ================================
         
         cell2dof = space.cell_to_dof()[e2c[:, 0]]
         F_vec = bm.zeros(gdof, dtype=bm.float64, device=space.device)
@@ -357,6 +399,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # TODO 角点松弛变换
         if space.use_relaxation == True:
             F_vec = space.TM.T @ F_vec
+        # ===============================
 
         if enable_timing:
             t.send("组装完成")
@@ -536,6 +579,43 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             raise NotImplementedError("多分辨率节点密度尚未实现")
 
         return diff_AE
+    
+    def extract_stress_at_quadrature_points(self, 
+                                        stress_dof: TensorLike, 
+                                        integration_order: int = None
+                                    ) -> TensorLike:
+        """
+        将全局应力自由度转换为单元积分点上的应力向量
+        
+        Parameters
+        ----------
+        stress_dof : TensorLike, shape (gdof,)
+            全局应力自由度向量
+        integration_order : int, optional
+            积分阶数，默认使用分析器的积分阶数
+            
+        Returns
+        -------
+        stress_vector : TensorLike, shape (NC, NQ, NS)
+            单元积分点上的应力向量 [σ_xx, σ_yy, σ_xy]
+        """
+        space = self._huzhang_space
+        mesh = space.mesh
+        
+        if integration_order is None:
+            integration_order = self._integration_order
+        
+        qf = mesh.quadrature_formula(integration_order, 'cell')
+        bcs, ws = qf.get_quadrature_points_and_weights()
+                
+        phi = space.basis(bcs) # (NC, NQ, LDOF, NS)
+        
+        cell2dof = space.cell_to_dof()  # (NC, LDOF)
+        stress_cell = stress_dof[cell2dof]  # (NC, LDOF)
+        
+        stress_vector = bm.einsum('cqls, cl -> cqs', phi, stress_cell) # (NC, NQ, NS)
+        
+        return stress_vector
 
 
     ##############################################################################################

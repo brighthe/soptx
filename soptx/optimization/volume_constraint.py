@@ -1,4 +1,4 @@
-from typing import Optional, Literal, Union, Dict
+from typing import Optional, Literal, Union, Dict, Tuple
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -7,7 +7,6 @@ from fealpy.functionspace import Function
 
 from ..analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from ..utils.base_logged import BaseLogged
-
 
 class VolumeConstraint(BaseLogged):
     def __init__(self,
@@ -40,8 +39,7 @@ class VolumeConstraint(BaseLogged):
             state: Optional[Dict] = None,
             **kwargs 
         ) -> float:
-        """计算体积分数约束函数值"""
-
+        """计算体积分数约束值"""
         g = self._compute_volume(density=density)
         g0 = self._volume_fraction * self._compute_volume(density=None)
         gneq = g - g0
@@ -66,6 +64,16 @@ class VolumeConstraint(BaseLogged):
         else:
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
+
+    def normalize(self, 
+              con_val: TensorLike, 
+              con_grad: TensorLike
+          ) -> Tuple[TensorLike, TensorLike]:
+        """标准化体积分数约束值和梯度"""
+        cm = self._mesh.entity_measure('cell')
+        scale = self._volume_fraction * bm.sum(cm)
+        
+        return con_val / scale, con_grad / scale
         
     def get_volume_fraction(self, density: Function) -> float:
         """计算当前设计的体积分数"""

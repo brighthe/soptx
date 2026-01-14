@@ -12,15 +12,15 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike
     将 (NC*n_sub, ...) 形状的数据重新排列为 (NC, n_sub, ...) 形状,
     其中数据按照空间位置顺序重新排列
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     nx: 位移单元在 x 方向的数量
     ny: 位移单元在 y 方向的数量  
     data_flat : (NC*n_sub, ...)
     n_sub : 每个位移单元的子密度单元数量
 
-    Returns:
-    --------
+    Returns
+    -------
     data_reordered : (NC, n_sub, ...)
     """
     NC = nx * ny
@@ -55,7 +55,6 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int, data_flat: TensorLike
     return data_restored
 
 def calculate_multiresolution_gphi_eg(
-                            mesh_u: HomogeneousMesh,
                             s_space_u: FunctionSpace,
                             *,
                             q: int,
@@ -74,8 +73,6 @@ def calculate_multiresolution_gphi_eg(
 
     Parameters
     ----------
-    mesh_u:    
-        位移网格 (父单元网格), 提供 `quadrature_formula` and `meshdata`.
     s_space_u: 
         位移单元对应的标量函数空间 (父单元空间), 提供 `grad_basis` 和 `number_of_local_dofs`.
     q:        
@@ -91,7 +88,7 @@ def calculate_multiresolution_gphi_eg(
     mesh_u = s_space_u.mesh
     
     NC = mesh_u.number_of_cells()
-    GD = mesh_u.geometry.dimension()
+    GD = mesh_u.geo_dimension()
 
     # 计算位移单元 (父参考单元) 高斯积分点处的重心坐标
     qf_e = mesh_u.quadrature_formula(q)

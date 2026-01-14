@@ -18,7 +18,7 @@ from soptx.utils import timer
 
 class LagrangeFEMAnalyzer(BaseLogged):
     def __init__(self,
-                mesh: HomogeneousMesh,
+                disp_mesh: HomogeneousMesh,
                 pde: PDEBase, 
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
@@ -38,7 +38,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._validate_topopt_config(topopt_algorithm, interpolation_scheme)
 
         # 私有属性（建议通过属性访问器访问，不要直接修改）
-        self._mesh = mesh
+        self._mesh = disp_mesh
         self._pde = pde
         self._material = material
        
@@ -55,7 +55,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         #* (GD, -1): dof_priority (x0, ..., xn, y0, ..., yn)
         #* (-1, GD): gd_priority (x0, y0, ..., xn, yn)
-        self._scalar_space = LagrangeFESpace(mesh, p=self._space_degree, ctype='C')
+        self._scalar_space = LagrangeFESpace(self._mesh, p=self._space_degree, ctype='C')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
         # 缓存的矩阵和向量
@@ -74,8 +74,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##############################################################################################
     
     @property
-    def mesh(self) -> HomogeneousMesh:
-        """获取当前的网格对象"""
+    def disp_mesh(self) -> HomogeneousMesh:
+        """获取当前的位移网格对象"""
         return self._mesh
     
     @property

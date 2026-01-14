@@ -429,7 +429,7 @@ class MaterialInterpolationScheme(BaseLogged):
                         integration_order: Optional[int] = None,
                     ) -> TensorLike:
         """
-        应力惩罚: sigma = rho^q * sigma_nominal
+        应力惩罚
 
         Parameters
         ----------
@@ -441,7 +441,7 @@ class MaterialInterpolationScheme(BaseLogged):
             # rho_val.shape = (NC, )
             # stress_solid.shape = (NC, NQ, NS)
             rho_element = rho_val[:]
-            stress_penalized = bm.einsum('c, c.. -> c...', rho_element ** q, stress_solid)
+            stress_penalized = bm.einsum('c, cqs -> cqs', rho_element ** q, stress_solid)
 
         elif self._density_location in ['node']:
             # rho_val.shape = (NN, )
@@ -451,7 +451,7 @@ class MaterialInterpolationScheme(BaseLogged):
             # rho_val.shape = (NC, n_sub)
             # stress_solid.shape = (NC, n_sub, NQ, NS)
             rho_sub_element = rho_val[:] # (NC, n_sub)
-            stress_penalized = bm.einsum('cn, cn.. -> cn...', rho_sub_element ** q, stress_solid)
+            stress_penalized = bm.einsum('cn, cnqs -> cnqs', rho_sub_element ** q, stress_solid)
         
         return stress_penalized
 

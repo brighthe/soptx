@@ -413,14 +413,14 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                         [ 0.0,  0.0,  0.0,  0.0,  0.0,  3.0]
                     ], **kwargs)
         
-        elif self.plane_type == 'plane_stress':
+        elif self._plane_type == 'plane_stress':
             M = bm.tensor([
                         [ 1.0, -0.5,  0.0],
                         [-0.5,  1.0,  0.0],
                         [ 0.0,  0.0,  3.0]
                     ], **kwargs)
 
-        elif self.plane_type == 'plane_strain':
+        elif self._plane_type == 'plane_strain':
             nu = self.poisson_ratio
             val_diag = 1 - nu + nu**2
             val_off = nu**2 - nu - 0.5
@@ -434,7 +434,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
             self._log_error(error_msg)
 
-        sig_sq = bm.einsum('cqi, ij, cqj -> cq', stress_vector, M, stress_vector)
+        sig_sq = bm.einsum('c...qi, ij, c...qj -> c...q', stress_vector, M, stress_vector)
         
         von_mises_stress = bm.sqrt(bm.maximum(sig_sq, 1e-12))
 

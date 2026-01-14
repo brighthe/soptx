@@ -42,7 +42,7 @@ class HalfMBBBeamRight2d(PDEBase):
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-        self._eps = 1e-12
+        self._eps = 1e-8
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
@@ -194,7 +194,7 @@ class HalfMBBBeamRight2d(PDEBase):
         1. 载荷点 (左上角): 3x2 区域 
            防止点载荷引起的应力奇异性
         2. 支座点 (右下角): 3x3 区域
-           防止点支撑引起的应力奇异性。
+           防止点支撑引起的应力奇异性
         """        
         n_elements = nx * ny
         

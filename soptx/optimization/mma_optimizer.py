@@ -1,6 +1,6 @@
 import warnings
 from time import time
-from typing import Optional, Tuple, Union, Dict
+from typing import Optional, Tuple, Union, List, Any
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -9,95 +9,105 @@ from fealpy.functionspace import Function
 from soptx.optimization.compliant_mechanism_objective import CompliantMechanismObjective
 from soptx.optimization.compliance_objective import ComplianceObjective
 from soptx.optimization.volume_constraint import VolumeConstraint
+from soptx.optimization.stress_constraint import StressConstraint
 from soptx.optimization.tools import OptimizationHistory
 from soptx.optimization.utils import solve_mma_subproblem
 from soptx.regularization.filter import Filter
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
 
-FLOAT_DTYPE = bm.float64
-INT_DTYPE = bm.int32
-
 class MMAOptions:
     """MMA 算法的配置选项"""
 
     def __init__(self):
         """初始化参数的默认值"""
-        # MMA 算法的用户级参数
+        # --- 用户常用参数 ---
         self.max_iterations = 200             # 最大迭代次数
         self.change_tolerance = 1e-2          # 设计变量无穷范数阈值
         self.use_penalty_continuation = True  # 是否使用惩罚因子连续化技术
 
-        # MMA 算法的高级参数
-        self._m = 1
-        self._n = None
+        # --- 几何/渐近线控制参数 ---
+        # 控制渐近线的移动速度和范围
+        self._move_limit = 0.2        # 移动限制
+        self._asymp_init = 0.5        # 初始渐近线距离
+        self._asymp_incr = 1.2        # 渐近线扩张系数
+        self._asymp_decr = 0.7        # 渐近线收缩系数
+
+        # --- 子问题求解数值参数 ---
+        # 控制对偶求解器的行为
+        self._albefa = 0.1            # 计算边界 alfa 和 beta 的因子
+        self._raa0 = 1e-5             # 函数近似精度的参数
+        self._epsilon_min = 1e-7      # 子问题求解的最小数值容差
+
+        # --- 惩罚项策略配置 ---
+        # 控制 a, c, d 向量的生成策略
+        self._a0 = 1.0               # a0 常数
+        self._a = None               # a 向量的默认系数
+        self._d = None               # d 向量的默认系数
+        self._c = None               # c 向量的默认系数 (惩罚项)
+
+        # --- 内部状态 ---
+        self._m = None               # 当前约束函数的数量
+        self._n = None               # 当前设计变量的数量
         self._xmin = None
         self._xmax = None
-        self._a0 = 1.0
-        self._a = None
-        self._c = None
-        self._d = None
-        
-        # MMA 算法的固定参数
-        self._asymp_init = 0.5      # 渐近线初始距离的因子
-        self._asymp_incr = 1.2      # 渐近线矩阵减小的因子
-        self._asymp_decr = 0.7      # 渐近线矩阵增加的因子
-        self._move_limit = 0.2      # 移动限制
-        self._albefa = 0.1          # 计算边界 alfa 和 beta 的因子
-        self._raa0 = 1e-5           # 函数近似精度的参数
-        self._epsilon_min = 1e-7    # 最小容差
+
+    def _initialize_problem_params(self, m: int, n: int) -> None:
+        """初始化问题规模相关参数
+                
+        Parameters
+        ----------
+        m : int
+            约束函数的数量
+        n : int
+            设计变量的数量
+        """
+        self._m = m
+        self._n = n
+        self._xmin = bm.zeros((n, 1), dtype=bm.float64)
+        self._xmax = bm.ones((n, 1), dtype=bm.float64)
+        self._a = bm.zeros((m, 1), dtype=bm.float64)
+        self._c = 1000 * bm.ones((m, 1), dtype=bm.float64)
+        self._d = bm.zeros((m, 1), dtype=bm.float64)
 
     def set_advanced_options(self, **kwargs):
         """设置高级选项，仅供专业用户使用
         
         Parameters
         ----------
-        - **kwargs : 高级参数设置，可包含：
-            - m : 约束函数的数量
-            - n : 设计变量的数量
-            - xmin : 设计变量的下界
-            - xmax : 设计变量的上界
-            - a0 : a_0*z 项的常数系数
-            - a : a_i*z 项的线性系数
-            - c : c_i*y_i 项的线性系数
-            - d : 0.5*d_i*(y_i)**2 项的二次项系数
-            - asymp_init : 渐近线初始距离的因子
-            - asymp_incr : 渐近线矩阵减小的因子
-            - asymp_decr : 渐近线矩阵增加的因子
-            - move_limit : 移动限制
-            - albefa : 计算边界 alfa 和 beta 的因子
-            - raa0 : 函数近似精度的参数
-            - epsilon_min : 最小容差
+        **kwargs : 高级参数设置，可包含：
+            - a0 : float
+                a_0*z 项的常数系数，默认 1.0
+            - asymp_init : float
+                渐近线初始距离因子，默认 0.5
+            - asymp_incr : float
+                渐近线距离增大因子，默认 1.2
+            - asymp_decr : float
+                渐近线距离减小因子，默认 0.7
+            - move_limit : float
+                移动限制，默认 0.2
+            - albefa : float
+                计算边界 alfa 和 beta 的因子，默认 0.1
+            - raa0 : float
+                函数近似精度的参数，默认 1e-5
+            - epsilon_min : float
+                最小容差，默认 1e-7
         """
         warnings.warn("Modifying advanced options may affect algorithm stability",
-                     UserWarning)
+                    UserWarning)
         
         valid_params = {
-                    'm': '_m',
-                    'n': '_n',
-                    'xmin': '_xmin',
-                    'xmax': '_xmax',
-                    'a0': '_a0',
-                    'a': '_a',
-                    'c': '_c',
-                    'd': '_d',
-                    'asymp_init': '_asymp_init',
-                    'asymp_incr': '_asymp_incr',
-                    'asymp_decr': '_asymp_decr',
-                    'move_limit': '_move_limit',
-                    'albefa': '_albefa',
-                    'raa0': '_raa0',
-                    'epsilon_min': '_epsilon_min'
-                }
+            'a0': '_a0',
+            'asymp_init': '_asymp_init',
+            'asymp_incr': '_asymp_incr',
+            'asymp_decr': '_asymp_decr',
+            'move_limit': '_move_limit',
+            'albefa': '_albefa',
+            'raa0': '_raa0',
+            'epsilon_min': '_epsilon_min'
+        }
                 
         for key, value in kwargs.items():
-            if key in {'xmin', 'xmax', 'a', 'c', 'd'} and value is not None:
-                if hasattr(value, 'astype'):
-                    value = value.astype(FLOAT_DTYPE)
-                elif hasattr(value, 'to'):
-                    value = value.to(dtype=FLOAT_DTYPE)
-                else:
-                    value = bm.array(value, dtype=FLOAT_DTYPE)
             if key in valid_params:
                 setattr(self, valid_params[key], value)
             else:
@@ -147,108 +157,89 @@ class MMAOptions:
     def asymp_init(self) -> float:
         """渐近线初始距离的因子"""
         return self._asymp_init
-    
+
     @property
     def asymp_incr(self) -> float:
         """渐近线矩阵减小的因子"""
         return self._asymp_incr
-    
+
     @property
     def asymp_decr(self) -> float:
         """渐近线矩阵增加的因子"""
         return self._asymp_decr
-    
+
     @property
     def move_limit(self) -> float:
         """移动限制"""
         return self._move_limit
-    
+
     @property
     def albefa(self) -> float:
         """计算边界 alfa 和 beta 的因子"""
         return self._albefa
-    
+
     @property
     def raa0(self) -> float:
         """函数近似精度的参数"""
         return self._raa0
-    
+
     @property
     def epsilon_min(self) -> float:
         """最小容差"""
         return self._epsilon_min
 
-
 class MMAOptimizer(BaseLogged):
-    """Method of Moving Asymptotes (MMA) 优化器
-    
-    用于求解拓扑优化问题的 MMA 方法实现. 该方法通过动态调整渐近线位置
-    来控制优化过程, 具有良好的收敛性能
-    
-    Parameters
-    ----------
-    objective : ComplianceObjective
-        目标函数对象
-    constraint : VolumeConstraint
-        约束条件对象
-    filter : Filter
-        过滤器对象
-    options : MMAOptions, optional
-        优化器配置选项
-    enable_logging : bool, optional
-        是否启用日志记录，默认为 False
-    logger_name : str, optional
-        日志记录器名称
-    """
-    
     def __init__(self,
                 objective: Union[ComplianceObjective, CompliantMechanismObjective],
-                constraint: Union[VolumeConstraint, list],
+                constraint: Union[VolumeConstraint, StressConstraint, List[Any]],
                 filter: Filter,
                 options: MMAOptions = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
+        """Method of Moving Asymptotes (MMA) 优化器
+    
+        用于求解拓扑优化问题的 MMA 方法实现. 该方法通过动态调整渐近线位置
+        来控制优化过程, 具有良好的收敛性能
         
+        Parameters
+        ----------
+        objective: 目标函数对象
+        constraint: 约束条件对象，支持单约束或约束列表
+        filter: 过滤器对象
+        options: 优化器配置选项
+        """
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
         self._objective = objective
-        self._constraint = constraint
+
+        # 约束标准化处理: 统一转换为 list
+        if isinstance(constraint, list):
+            self._constraints = constraint
+        else:
+            self._constraints = [constraint]
+
         self._filter = filter
 
-        # 设置基本参数
-        self.options = MMAOptions()
-        if options is not None:
-            # 只允许设置用户级参数
-            user_params = ['max_iterations', 'change_tolerance', 'use_penalty_continuation']
-            for key, value in options.items():
-                if key in user_params:
-                    setattr(self.options, key, value)
-                else:
-                    error_msg = f"Invalid parameter in options111: {key}. " \
-                                f"Use set_advanced_options() for advanced parameters."
-                    self._log_error(error_msg)
-                    
-        # MMA 内部状态
+        if isinstance(options, MMAOptions):
+            self.options = options
+        else:
+            self.options = MMAOptions()
+            # 如果传入的是字典，则覆盖默认值
+            if isinstance(options, dict):
+                for key, value in options.items():
+                    # 仅允许设置公开属性
+                    if hasattr(self.options, key) and not key.startswith('_'):
+                        setattr(self.options, key, value)
+                    else:
+                        self._log_warning(f"Ignored unknown or private parameter in options: '{key}'")
+            elif options is not None:
+                self._log_error("The 'options' parameter must be a dict or an MMAOptions instance.")
+        
+        # MMA 内部状态初始化
         self._epoch = 0
         self._low = None
         self._upp = None
-        
-    def _initialize_problem_dependent_params(self, n: int) -> None:
-        """初始化依赖于问题规模的参数"""
-
-        # 只在参数未设置时初始化默认值
-        if self.options.n is None:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.options.set_advanced_options(
-                                                n=n,
-                                                xmin=bm.zeros((n, 1)),
-                                                xmax=bm.ones((n, 1)),
-                                                a=bm.zeros((self.options.m, 1)),
-                                                c=1e4 * bm.ones((self.options.m, 1)),
-                                                d=bm.zeros((self.options.m, 1))
-                                            )
 
     def _update_penalty(self, iter_idx: int) -> None:
         """连续化技术对幂指数惩罚因子进行更新
@@ -287,67 +278,66 @@ class MMAOptimizer(BaseLogged):
         density_distribution : 密度分布
         **kwargs : 其他参数
         """
-        # 获取优化参数
+        # ==================== 获取分析器引用 ====================
+        analyzer = self._objective._analyzer
+        pde = analyzer.pde
+        interpolation_scheme = analyzer.interpolation_scheme
+
+        # ==================== 问题规模参数初始化 ====================
+        m = len(self._constraints)
+        n = design_variable.shape[0]
+        self.options._initialize_problem_params(m, n)
+
+        # ==================== 优化参数获取 ====================
         max_iters = self.options.max_iterations
-        change_tol = self.options.change_tolerance   # 设计变量无穷范数阈值
+        change_tol = self.options.change_tolerance
 
-        # 检查或初始化问题相关参数
-        if self.options.n is None:
-            # 未设置高级参数，使用默认值
-            self._initialize_problem_dependent_params(n=design_variable.shape[0])
-        else:
-            # 已设置高级参数，检查一致性
-            if self.options.n != design_variable.shape[0]:
-                error_msg = (f"设计变量数量不匹配: "
-                            f"设置的 n={self.options.n}, "
-                            f"实际的 n={design_variable.shape[0]}")
-                self._log_error(error_msg)
-
+        # ==================== 变量初始化 ====================
         if isinstance(design_variable, Function):
             dv = design_variable.space.function(bm.copy(design_variable[:]))
         else:
             dv = bm.copy(design_variable[:])
         
         from soptx.interpolation.interpolation_scheme import DensityDistribution
-
         if isinstance(density_distribution, Function):
             rho = density_distribution.space.function(bm.copy(density_distribution[:]))
         elif isinstance(density_distribution, DensityDistribution):
             rho = density_distribution
         else:
             rho = bm.copy(density_distribution[:])
-
+        # 初始物理密度
         rho_phys = self._filter.get_initial_density(density=rho)
 
-        # 初始化历史记录
-        history = OptimizationHistory()
-
-        design_mesh = getattr(self._filter, 'design_variable_mesh', self._filter.design_mesh)
-
-        # TODO 强制被动单元为实体材料
+        #TODO ==================== 被动单元处理 ====================
         passive_mask = None
-        if hasattr(design_mesh, 'celldata'):
-            passive_mask = design_mesh.celldata.get('passive_mask')
-
-        # TODO 强制被动单元为实体材料
+        design_mesh = getattr(self._filter, 'design_mesh', None)
+        if hasattr(pde, 'get_passive_element_mask'):
+            nx_design , ny_design  = design_mesh.meshdata['nx'], design_mesh.meshdata['ny']
+            passive_mask = pde.get_passive_element_mask(nx=nx_design, ny=ny_design)
+        # 将被动单元强制设为实体材料
         if passive_mask is not None:
             dv[passive_mask] = 1.0
-            rho_phys[passive_mask] = 1.0
+            if rho_phys.ndim == 1:
+                rho_phys[passive_mask] = 1.0
+            else:
+                from soptx.analysis.utils import reshape_multiresolution_data_inverse
+                NC, n_sub = rho_phys.shape
+                disp_mesh = getattr(analyzer, 'disp_mesh', None)
+                nx_disp , ny_disp  = disp_mesh.meshdata['nx'], disp_mesh.meshdata['ny']
+                passive_mask_rho = reshape_multiresolution_data_inverse(nx_disp, ny_disp, passive_mask, n_sub)
+                rho_phys[passive_mask_rho] = 1.0
 
-        # 初始化历史设计变量
+        # ==================== MMA 历史变量初始化 ====================
         xold1 = bm.copy(dv[:])
         xold2 = bm.copy(xold1[:])
 
+        # ==================== 优化状态初始化 ====================
+        self.history = OptimizationHistory()
         #TODO 初始化目标函数缩放因子
         self._obj_scale_factor = None
 
-        interpolation_scheme = self._objective._analyzer._interpolation_scheme
-
-        analyzer = self._objective._analyzer
-
         # 优化主循环
         for iter_idx in range(max_iters):
-
             t = None
             if enable_timing:
                 t = timer(f"拓扑优化单次迭代")
@@ -355,6 +345,7 @@ class MMAOptimizer(BaseLogged):
 
             start_time = time()
 
+            # ==================== 惩罚因子更新 ====================
             self._update_penalty(iter_idx=iter_idx)
             current_penalty = interpolation_scheme.penalty_factor
             
@@ -364,85 +355,78 @@ class MMAOptimizer(BaseLogged):
             # TODO 强制被动单元为实体材料
             if passive_mask is not None:
                 dv[passive_mask] = 1.0
-                rho_phys[passive_mask] = 1.0
+                rho_phys[passive_mask_rho] = 1.0
 
             #TODO 基于物理密度求解状态变量
             if hasattr(analyzer, 'solve_state'):
                 state = analyzer.solve_state(rho_val=rho_phys)
             elif isinstance(self._objective, CompliantMechanismObjective):
                 state = analyzer.solve_state(rho_val=rho_phys, adjoint=True)
-            #     # 兼容旧代码: 柔性机构
-            #     state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys, adjoint=True)}
-            # else:
-            #     # 兼容旧代码: 最小柔度
-            #     state = {'displacement': analyzer.solve_displacement(rho_val=rho_phys)}
 
             if enable_timing:
                 t.send('位移场求解')
 
-            #TODO 计算目标函数
+            #TODO ==================== 目标函数计算 ====================
             obj_val_raw = self._objective.fun(density=rho_phys, state=state)
-
-            #TODO 动态重置缩放因子
+            # 动态重置缩放因子
             if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
                 obj0 = float(obj_val_raw.item()) 
                 denom = max(abs(obj0), 1e-10)
                 self._obj_scale_factor = min(1e6, 10.0 / denom)
                 self._log_info(f"Objective scaling factor (re)initialized to: {self._obj_scale_factor:.4e}")
-                
             elif self._obj_scale_factor is None:
                 self._obj_scale_factor = 1.0
-
             # 目标函数应用缩放因子
             obj_val = obj_val_raw * self._obj_scale_factor
 
             if enable_timing:
                 t.send('目标函数计算')
-
-            #TODO 计算目标函数灵敏度
+    
+            #TODO ==================== 目标函数灵敏度 ====================
+            # 1. 计算目标函数相对于物理密度的灵敏度
             obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
-            
-            #TODO 灵敏度应用缩放因子
-            obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor
+            # 灵敏度应用缩放因子
+            obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor 
 
-            if enable_timing:
-                t.send('目标函数灵敏度分析 1')                
-
-            # 计算目标函数相对于设计变量的灵敏度
+            # 2. 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
 
-            #TODO 强制被动单元灵敏度为零
             if passive_mask is not None:
                 obj_grad_dv[passive_mask] = 0.0
                 
             if enable_timing:
-                t.send('目标函数灵敏度分析 2')
+                t.send('目标函数灵敏度分析')
 
-            # 使用物理密度计算约束函数
-            con_val = self._constraint.fun(rho_phys)
+            #TODO ==================== 约束函数计算 ====================
+            con_vals = []
+            con_grads_dv = []
+
+            for constraint in self._constraints:
+                val = constraint.fun(density=rho_phys, state=state)
+                # 相对于物理密度的灵敏度
+                grad_rho = constraint.jac(density=rho_phys, state=state)
+                # 相对于设计变量的灵敏度
+                grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=grad_rho)
+
+                if passive_mask is not None:
+                    grad_dv[passive_mask] = 0.0
+
+                val_norm, grad_norm = constraint.normalize(val, grad_dv)
+
+                con_vals.append(val_norm)
+                con_grads_dv.append(grad_norm)
+
             if enable_timing:
-                t.send('约束函数计算')
-
-            # 计算约束函数相对于物理密度的灵敏度
-            con_grad_rho = self._constraint.jac(rho_phys)
-            if enable_timing:
-                t.send('约束函数灵敏度分析 1')
-
-            # 计算约束函数相对于设计变量的灵敏度
-            con_grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=con_grad_rho)
-
-            #TODO 强制被动单元灵敏度为零
-            if passive_mask is not None:
-                con_grad_dv[passive_mask] = 0.0
-
-            if enable_timing:
-                t.send('约束函数灵敏度分析 2')
+                t.send('约束函数灵敏度分析')
             
-            # MMA 算法: 
-            # 标准化约束函数及其梯度
-            cm = self._filter._mesh.entity_measure('cell')
-            fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
-            dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
+            #TODO ==================== MMA 子问题求解 ====================
+            fval = bm.stack(con_vals).reshape(m, 1)       # (m, 1)
+            dfdx = bm.stack(con_grads_dv).reshape(m, n)   # (m, n)
+            # # MMA 算法: 
+            # # 标准化约束函数及其梯度
+            # cm = self._filter._mesh.entity_measure('cell')
+            # fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
+            # dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
 
             # 求解子问题
             dv_new = self._solve_subproblem(
@@ -596,32 +580,21 @@ class MMAOptimizer(BaseLogged):
                         dfdx: TensorLike,
                         xold1: TensorLike,
                         xold2: TensorLike
-                    ) -> Tuple[TensorLike, TensorLike, TensorLike]:
+                    ) -> TensorLike:
         """求解 MMA 子问题
         
         Parameters
         ----------
-        xval : TensorLike (n, 1)
-            当前设计变量
-        fval : TensorLike
-            约束函数值
-        df0dx : TensorLike (n, 1)
-            目标函数的梯度
-        dfdx : TensorLike (m, n)
-            约束函数的梯度
-        # low : TensorLike (n, 1)
-            # 下渐近线
-        # upp : TensorLike (n, 1)
-            # 上渐近线
-        xold1 : TensorLike (n, 1)
-            前一步设计变量
-        xold2 : TensorLike (n, 1)
-            前两步设计变量
+        xval :  (n, 1) - 当前设计变量
+        fval :  (m, 1) - 标准化后的约束函数值
+        df0dx:  (n, 1) - 目标函数相对于设计变量的梯度
+        dfdx :  (m, n) - 约束函数相对于设计变量的梯度 (第 i 行对应第 i 个约束)
+        xold1 : (n, 1) - 前一步设计变量
+        xold2 : (n, 1) - 前两步设计变量
 
         Returns
         -------
-        Tuple[TensorLike, TensorLike, TensorLike]
-            MMA 子问题的最优解、下渐近线、上渐近线
+        xmma :  (n, ) MMA 子问题的最优解 (新的设计变量)
         """
         xmin = self.options.xmin
         xmax = self.options.xmax
@@ -637,13 +610,12 @@ class MMAOptimizer(BaseLogged):
         raa0 = self.options.raa0
         epsimin = self.options.epsilon_min
 
-        #! 动态移动限制
+        #! 动态移动限制: 根据投影滤波器的 beta 值调整
         move = self.options.move_limit
         beta_val = getattr(self._filter, 'beta', None)
 
         if beta_val is not None:
             move = move / (1.0 + 0.3 * bm.log(beta_val))
-        # move = self.options.move_limit
 
         eeen = bm.ones((n, 1), dtype=bm.float64)
         eeem = bm.ones((m, 1), dtype=bm.float64)

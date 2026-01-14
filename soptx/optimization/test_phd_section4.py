@@ -534,7 +534,7 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec4_6_5_half_mbb_beam')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 300.0, 0, 100.0]
+        domain = [0, 60.0, 0, 20.0]
         E, nu = 71000, 0.3
         P = -1500
         plane_type = 'plane_stress' 
@@ -547,11 +547,13 @@ class DensityTopOptTest(BaseLogged):
         change_tolerance = 1e-3
         use_penalty_continuation = True
 
-        nx, ny = 300, 100
+        nx, ny = 60, 20
         mesh_type = 'uniform_quad'
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 2
+
+        solve_method = 'mumps'
 
         from soptx.model.mbb_beam_2d_lfem import HalfMBBBeamRight2d
         pde = HalfMBBBeamRight2d(
@@ -638,39 +640,17 @@ class DensityTopOptTest(BaseLogged):
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method=assembly_method,
-                                    solve_method='mumps',
+                                    solve_method=solve_method,
                                     topopt_algorithm='density_based',
                                 )
-        # space_uh = lagrange_fem_analyzer.tensor_space
-        # sspace = lagrange_fem_analyzer.scalar_space
-        # cell2dof = space_uh.cell_to_dof()
-
-
-        # uh = lagrange_fem_analyzer.solve_displacement(rho_val=rho)
-        # uh_e = uh[cell2dof] # (NC, TLDOF)
-
-        # q = 1
-        # qf = displacement_mesh.quadrature_formula(q)
-        # bcs, ws = qf.get_quadrature_points_and_weights()
-        # gphi = sspace.grad_basis(bcs, variable='x')
-        # B = material.strain_displacement_matrix(dof_priority=space_uh.dof_priority, gphi=gphi)
-        # # 实体材料应力
-        # stress_solid = material.calculate_stress_vector(B, uh_e)
-        # # 惩罚后的应力
-        # stress_penalized = interpolation_scheme.interpolate_stress(
-        #                                                 stress_solid=stress_solid,
-        #                                                 rho_val=rho,
-        #                                             )
-        # # 惩罚后的 von Mises 应力
-        # von_mises_stress = material.calculate_von_mises_stress(stress_vector=stress_penalized)
-
+        
         from soptx.optimization.compliance_objective import ComplianceObjective
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
 
@@ -680,7 +660,7 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.stress_constraint import StressConstraint
         stress_constraint = StressConstraint(analyzer=lagrange_fem_analyzer, stress_limit=stress_limit)
 
-        test = stress_constraint.fun(density=rho)
+        # test = stress_constraint.fun(density=rho)
 
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
@@ -701,17 +681,15 @@ class DensityTopOptTest(BaseLogged):
                             'use_penalty_continuation': use_penalty_continuation,
                         }
                     )
-        design_variables_num = d.shape[0]
-        constraints_num = 1
         optimizer.options.set_advanced_options(
-                                m=constraints_num,
-                                n=design_variables_num,
-                                xmin=bm.zeros((design_variables_num, 1)),
-                                xmax=bm.ones((design_variables_num, 1)),
                                 a0=1,
-                                a=bm.zeros((constraints_num, 1)),
-                                c=1e4 * bm.ones((constraints_num, 1)),
-                                d=bm.zeros((constraints_num, 1)),
+                                asymp_init=0.5,
+                                asymp_incr=1.2,
+                                asymp_decr=0.7,
+                                move_limit=0.2,
+                                albefa=0.1,
+                                raa0=1e-5,
+                                epsilon_min=1e-7,
                             )
         
         analysis_tspace = lagrange_fem_analyzer.tensor_space
@@ -824,10 +802,164 @@ class DensityTopOptTest(BaseLogged):
 
 
         return rho_opt, history
+    
+    @run.register('test_subsec_stress_constraint')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        domain = [0, 60.0, 0, 20.0]
+        E, nu = 71000, 0.3
+        P = -1500
+        plane_type = 'plane_stress' 
+
+        volume_fraction = 0.3
+        stress_limit = 350.0
+
+        optimizer_algorithm = 'mma'  # 'oc', 'mma'
+        max_iterations = 1000
+        change_tolerance = 1e-3
+        use_penalty_continuation = True
+
+        nx, ny = 60, 20
+        mesh_type = 'uniform_crisscross_tri'
+
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        rmin = 2
+
+        solve_method = 'mumps'
+
+        # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
+        density_location = 'element'
+        sub_density_element = 4
+        interpolation_method = 'msimp'
+        penalty_factor = 3.0
+        void_youngs_modulus = 1e-9
+        stress_interpolation_method = 'power_law'
+        stress_penalty_factor = 0.5
+
+        from soptx.model.mbb_beam_2d_lfem import HalfMBBBeamRight2d
+        pde_lfem = HalfMBBBeamRight2d(
+                            domain=domain,
+                            P=P, E=E, nu=nu,
+                            plane_type=plane_type,
+                        )
+        
+        pde_lfem.init_mesh.set(mesh_type)
+        displacement_mesh_lfem = pde_lfem.init_mesh(nx=nx, ny=ny)
+
+        from soptx.model.mbb_beam_2d_hzmfem import HalfMBBBeamRight2d
+        pde_mfem = HalfMBBBeamRight2d(
+                            domain=domain,
+                            P=P, E=E, nu=nu,
+                            plane_type=plane_type,
+                        )
+        pde_mfem.init_mesh.set(mesh_type)
+        displacement_mesh_mfem = pde_mfem.init_mesh(nx=nx, ny=ny)
+
+        # node = displacement_mesh_mfem.entity('node')
+        # displacement_mesh_mfem.meshdata['corner'] = pde_mfem.mark_corners(node)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde_lfem.E, 
+                                            poisson_ratio=pde_lfem.nu, 
+                                            plane_type=pde_lfem.plane_type,
+                                            enable_logging=False
+                                        )
+        
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method=interpolation_method,
+                                    stress_interpolation_method=stress_interpolation_method,
+                                    options={
+                                        'penalty_factor': penalty_factor,
+                                        'void_youngs_modulus': void_youngs_modulus,
+                                        'target_variables': ['E'],
+                                        'stress_penalty_factor': stress_penalty_factor,
+                                    },
+                                )
+        
+        space_degree = 3
+        integration_order = space_degree**2 + 2  # 单纯形网格
+
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                    disp_mesh=displacement_mesh_lfem,
+                                    pde=pde_lfem,
+                                    material=material,
+                                    interpolation_scheme=interpolation_scheme,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method='fast',
+                                    solve_method=solve_method,
+                                    topopt_algorithm='density_based',
+                                )
+        from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
+        huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
+                                    disp_mesh=displacement_mesh_mfem,
+                                    pde=pde_mfem,
+                                    material=material,
+                                    interpolation_scheme=interpolation_scheme,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    use_relaxation=True,
+                                    solve_method=solve_method,
+                                    topopt_algorithm='density_based',
+                                )
+        
+        relative_density = volume_fraction
+
+        if density_location in ['element']:
+            design_variable_mesh_lfem = displacement_mesh_lfem
+            d_lfem, rho_lfem = interpolation_scheme.setup_density_distribution(
+                                                        design_variable_mesh=design_variable_mesh_lfem,
+                                                        displacement_mesh=displacement_mesh_lfem,
+                                                        relative_density=relative_density,
+                                                    )
+            design_variable_mesh_mfem = displacement_mesh_mfem
+            d_mfem, rho_mfem = interpolation_scheme.setup_density_distribution(
+                                                        design_variable_mesh=design_variable_mesh_mfem,
+                                                        displacement_mesh=displacement_mesh_mfem,
+                                                        relative_density=relative_density,
+                                                    )
+        
+        # elif density_location in ['element_multiresolution']:
+        #     import math
+        #     sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
+        #     pde_mfem.init_mesh.set(mesh_type)
+        #     design_variable_mesh_mfem = pde_mfem.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
+        #     d_mfem, rho_mfem = interpolation_scheme.setup_density_distribution(
+        #                                                         design_variable_mesh=design_variable_mesh_mfem,
+        #                                                         displacement_mesh=displacement_mesh_mfem,
+        #                                                         relative_density=relative_density,
+        #                                                         sub_density_element=sub_density_element,
+        #                                                     )
+
+        
+        # from soptx.optimization.compliance_objective import ComplianceObjective
+        # compliance_objective_lfem = ComplianceObjective(analyzer=lagrange_fem_analyzer)
+        # compliance_objective_mfem = ComplianceObjective(analyzer=huzhang_mfem_analyzer)
+
+        # from soptx.optimization.volume_constraint import VolumeConstraint
+        # volume_constraint_lfem = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
+        # volume_constraint_mfem = VolumeConstraint(analyzer=huzhang_mfem_analyzer, volume_fraction=volume_fraction)
+
+        from soptx.optimization.stress_constraint import StressConstraint
+        stress_constraint_lfem = StressConstraint(analyzer=lagrange_fem_analyzer, stress_limit=stress_limit)
+        stress_constraint_mfem = StressConstraint(analyzer=huzhang_mfem_analyzer, stress_limit=stress_limit)
+
+        sigma_vm_lfem = stress_constraint_lfem._compute_stress_state(density=rho_lfem, state=None)['von_mises']
+        sigma_vm_mfem = stress_constraint_mfem._compute_stress_state(density=rho_mfem, state=None)['von_mises']
+        print('---------------------')
+        
+        
+
+                                                
+        
+
 
     
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_2_mbb_beam')
+    test.run.set('test_subsec_stress_constraint')
     rho_opt, history = test.run()
