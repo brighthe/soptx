@@ -666,7 +666,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         interpolation_method = 'msimp'
         penalty_factor = 3.0
         void_youngs_modulus = 1e-9
-        
+        target_variables = ['E', 'nu']
+
         # 'element'
         density_location = 'element'
         relative_density = volume_fraction
@@ -703,7 +704,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     options={
                                         'penalty_factor': penalty_factor,
                                         'void_youngs_modulus': void_youngs_modulus,
-                                        'target_variables': ['E']
+                                        'target_variables': target_variables
                                     },
                                 )
         

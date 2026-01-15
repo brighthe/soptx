@@ -289,9 +289,47 @@ class MaterialInterpolationScheme(BaseLogged):
                     displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
         """修正 SIMP 插值"""
+        target_variables = self._options['target_variables']
+
+        results = []
+
+        rho_interp = None
+
+        if self._density_location in ['element']:
+            # rho_val.shape = (NC, )
+            if hasattr(rho_val, 'ndim') and rho_val.ndim == 0:
+                rho_interp = rho_val
+            else:
+                rho_interp = rho_val[:]
+
+        if 'E' in target_variables:
+            p = self._options['penalty_factor']
+            E0 = material.youngs_modulus
+            Emin = self._options['void_youngs_modulus']
+            
+            E_rho = Emin + rho_interp ** p * (E0 - Emin)
+            results.append(E_rho)
+        
+        if 'nu' in target_variables:
+            p_nu = self._options.get('nu_penalty_factor', 1.0) # 默认为 1.0
+            nu0 = material.poisson_ratio  # 强材料泊松比 (例如 0.5)
+            nu_void = self._options.get('void_poisson_ratio', 0.3) # 弱材料泊松比 (例如 0.3)
+            
+            # 插值公式: nu(rho) = nu_void + rho^p_nu * (nu_solid - nu_void)
+            nu_rho = nu_void + rho_interp ** p_nu * (nu0 - nu_void)
+            results.append(nu_rho)
+
+        if len(results) == 1:
+            return results[0]
+        else:
+            return tuple(results)
+
+
+
         penalty_factor = self._options['penalty_factor']
         target_variables = self._options['target_variables']
         void_youngs_modulus = self._options['void_youngs_modulus']
+        
 
         if target_variables == ['E']:
             """E(ρ) = Emin + ρ^p * (E0 - Emin)"""

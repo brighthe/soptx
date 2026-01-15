@@ -147,17 +147,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Parameters
         ----------
         rho_val : 密度值
-            - 单元密度 - TensorLike
-                - 单分辨率 - (NC, )
-                - 多分辨率 - (NC, n_sub)
-            - 节点密度 - Fucntion
-                - 单分辨率 - (NN, )
-                - 多分辨率 - (NN, )
-
-        Returns
-        -------
-        Union[CSRTensor, COOTensor]
-            组装后的刚度矩阵
+        - 单元密度 - TensorLike
+            - 单分辨率 - (NC, )
+            - 多分辨率 - (NC, n_sub)
+        - 节点密度 - Fucntion
+            - 单分辨率 - (NN, )
+            - 多分辨率 - (NN, )
         """
         t = None
         if enable_timing:
