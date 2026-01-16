@@ -94,6 +94,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._tensor_space
     
     @property
+    def integration_order(self) -> int:
+        """获取当前的数值积分阶次"""
+        return self._integration_order
+    
+    @property
     def material(self) -> LinearElasticMaterial:
         """获取当前的材料类"""
         return self._material
@@ -352,7 +357,85 @@ class LagrangeFEMAnalyzer(BaseLogged):
         else:
             error_msg = f"Unsupported boundary type: {boundary_type}"
             self._log_error(error_msg)
+    
+    def solve_state(self, 
+                    rho_val: Optional[Union[TensorLike, Function]] = None,
+                    adjoint: bool = False,
+                    enable_timing: bool = False, 
+                    **kwargs
+                ) -> Dict[str, Function]:
+        t = None
+        if enable_timing:
+            t = timer(f"分析求解位移阶段")
+            next(t)
+
+        if self._topopt_algorithm is None:
+            if rho_val is not None:
+                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
         
+        elif self._topopt_algorithm in ['density_based', 'level_set']:
+            if rho_val is None:
+                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
+                self._log_error(error_msg)
+
+        if adjoint:
+            K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
+            K_spring = self.assemble_spring_stiff_matrix()
+            K0 = K_struct + K_spring
+            F0_struct = self.assemble_body_force_vector()
+            F0_spring = bm.zeros_like(F0_struct)
+            F0 = bm.stack([F0_struct, F0_spring], axis=1)
+
+            K, F = self.apply_bc(K0, F0, adjoint)
+
+            uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
+        
+        else:
+            K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+            if enable_timing:
+                t.send('双线性型组装')
+
+            F0 = self.assemble_body_force_vector()
+            if enable_timing:
+                t.send('线性型组装')
+
+            K, F = self.apply_bc(K0, F0)
+            if enable_timing:
+                t.send('边界条件处理')
+
+            uh = self._tensor_space.function()
+
+        solver_type = kwargs.get('solver', self._solve_method)
+
+        if solver_type in ['mumps', 'scipy']:
+            from fealpy.solver import spsolve
+
+            uh[:] = spsolve(K, F, solver=solver_type)
+
+        elif solver_type in ['cg']:
+            from fealpy.solver import cg
+
+            maxiter = kwargs.get('maxiter', 5000)
+            atol = kwargs.get('atol', 1e-12)
+            rtol = kwargs.get('rtol', 1e-12)
+            x0 = kwargs.get('x0', None)
+            
+            # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
+            #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
+            uh[:], info = cg(K.tocoo(), F[:], x0=x0,
+                            batch_first=False, 
+                            atol=atol, rtol=rtol, 
+                            maxit=maxiter, returninfo=True)
+
+        else:
+            self._log_error(f"未知的求解器类型: {solver_type}")
+        
+        if enable_timing:
+            t.send('求解')
+            t.send(None)
+
+        return {'displacement': uh}
+
     
     ###############################################################################################
     # 外部方法
@@ -609,84 +692,138 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             return diff_ke
 
-    def solve_state(self, 
-                    rho_val: Optional[Union[TensorLike, Function]] = None,
-                    adjoint: bool = False,
-                    enable_timing: bool = False, 
-                    **kwargs
-                ) -> Dict[str, Function]:
-        t = None
-        if enable_timing:
-            t = timer(f"分析求解位移阶段")
-            next(t)
-
-        if self._topopt_algorithm is None:
-            if rho_val is not None:
-                self._log_warning("标准有限元分析模式下忽略密度分布参数 rho")
+    
+    def compute_strain_displacement_matrix(self, integration_order: Optional[int] = None) -> TensorLike:
+        """
+        计算应变-位移矩阵 B
         
-        elif self._topopt_algorithm in ['density_based', 'level_set']:
-            if rho_val is None:
-                error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
-                self._log_error(error_msg)
-
-        if adjoint:
-            K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
-            K_spring = self.assemble_spring_stiff_matrix()
-            K0 = K_struct + K_spring
-            F0_struct = self.assemble_body_force_vector()
-            F0_spring = bm.zeros_like(F0_struct)
-            F0 = bm.stack([F0_struct, F0_spring], axis=1)
-
-            K, F = self.apply_bc(K0, F0, adjoint)
-
-            uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
+        Parameters
+        ----------
+        integration_order : 积分阶次，默认使用分析器的积分阶次
         
-        else:
-            K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-            if enable_timing:
-                t.send('双线性型组装')
-
-            F0 = self.assemble_body_force_vector()
-            if enable_timing:
-                t.send('线性型组装')
-
-            K, F = self.apply_bc(K0, F0)
-            if enable_timing:
-                t.send('边界条件处理')
-
-            uh = self._tensor_space.function()
-
-        solver_type = kwargs.get('solver', self._solve_method)
-
-        if solver_type in ['mumps', 'scipy']:
-            from fealpy.solver import spsolve
-
-            uh[:] = spsolve(K, F, solver=solver_type)
-
-        elif solver_type in ['cg']:
-            from fealpy.solver import cg
-
-            maxiter = kwargs.get('maxiter', 5000)
-            atol = kwargs.get('atol', 1e-12)
-            rtol = kwargs.get('rtol', 1e-12)
-            x0 = kwargs.get('x0', None)
+        Returns
+        -------
+        B : 应变-位移矩阵
+            - 单分辨率: (NC, NQ, NS, TLDOF)
+            - 多分辨率: (NC, n_sub, NQ, NS, TLDOF)
+        """
+        if integration_order is None:
+            integration_order = self._integration_order
+        
+        density_location = self._interpolation_scheme.density_location
+        
+        if density_location in ['element']:
+            qf = self._mesh.quadrature_formula(integration_order)
+            bcs, _ = qf.get_quadrature_points_and_weights()
+            gphi = self._scalar_space.grad_basis(bcs, variable='x')  # (NC, NQ, LDOF, GD)
+            B = self._material.strain_displacement_matrix(
+                                                dof_priority=self._tensor_space.dof_priority, 
+                                                gphi=gphi
+                                            )  # (NC, NQ, NS, TLDOF)
             
-            # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
-            #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-            uh[:], info = cg(K.tocoo(), F[:], x0=x0,
-                            batch_first=False, 
-                            atol=atol, rtol=rtol, 
-                            maxit=maxiter, returninfo=True)
-
+        elif density_location in ['element_multiresolution']:
+            nx_u = self._mesh.meshdata['nx']
+            ny_u = self._mesh.meshdata['ny']
+            n_sub = 4
+            
+            from soptx.interpolation.utils import (
+                                        calculate_multiresolution_gphi_eg, 
+                                        reshape_multiresolution_data_inverse
+                                    )
+            gphi_eg_reshaped = calculate_multiresolution_gphi_eg(
+                                                        s_space_u=self._scalar_space,
+                                                        q=integration_order,
+                                                        n_sub=n_sub
+                                                    )  # (NC*n_sub, NQ, LDOF, GD)
+            
+            B_reshaped = self._material.strain_displacement_matrix(
+                                                        dof_priority=self._tensor_space.dof_priority, 
+                                                        gphi=gphi_eg_reshaped
+                                                    )  # (NC*n_sub, NQ, NS, TLDOF)
+                                                    
+            B = reshape_multiresolution_data_inverse(
+                                                nx=nx_u, ny=ny_u, 
+                                                data_flat=B_reshaped, 
+                                                n_sub=n_sub
+                                            )  # (NC, n_sub, NQ, NS, TLDOF)
+            
         else:
-            self._log_error(f"未知的求解器类型: {solver_type}")
+            self._log_error(f"不支持的密度位置类型: {density_location}")
         
-        if enable_timing:
-            t.send('求解')
-            t.send(None)
+        return B
 
-        return {'displacement': uh}
 
+    def compute_stress_state(self, 
+                            state: dict,
+                            rho_val: Optional[Union[TensorLike, Function]] = None,
+                            integration_order: Optional[int] = None
+                        ) -> Dict[str, TensorLike]:
+        """
+        计算应力场
+        
+        Parameters
+        ----------
+        state : 状态字典，包含位移场等信息
+        rho_val : 密度场（用于应力惩罚，拓扑优化时需要）
+        integration_order : 积分阶次
+        
+        Returns
+        -------
+        dict : 包含以下键值：
+            - 'stress_solid': 实体应力 (NC, NQ, NS) 或 (NC, n_sub, NQ, NS)
+            - 'stress_penalized': 惩罚后应力
+            - 'von_mises': von Mises 等效应力 (NC, NQ) 或 (NC, n_sub, NQ)
+            - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
+        """
+        if integration_order is None:
+            integration_order = self._integration_order
+
+        if state is None:
+            state = self.solve_state(rho_val=rho_val)
+        
+        uh = state['displacement']
+        cell2dof = self._tensor_space.cell_to_dof()
+        uh_e = uh[cell2dof]  # (NC, TLDOF)
+
+        B = self.compute_strain_displacement_matrix(integration_order)
+        
+        # 计算实体应力 (与密度无关)
+        stress_solid = self._material.calculate_stress_vector(B, uh_e)
+        
+        result = {'stress_solid': stress_solid}
+        
+        # 应力惩罚（拓扑优化场景）
+        if self._topopt_algorithm == 'density_based':
+            if rho_val is None:
+                self._log_warning("拓扑优化模式下建议提供 rho_val 以计算惩罚后应力")
+                stress_for_vm = stress_solid
+            else:
+                stress_penalized = self._interpolation_scheme.interpolate_stress(
+                                                                        stress_solid=stress_solid,
+                                                                        rho_val=rho_val
+                                                                    )
+                result['stress_penalized'] = stress_penalized
+                stress_for_vm = stress_penalized
+        else:
+            stress_for_vm = stress_solid
+        
+        # 计算 von Mises 应力
+        von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_for_vm)
+        result['von_mises'] = von_mises
+        
+        # 每个单元取最大值
+        if von_mises.ndim == 2:
+            # 单分辨率: (NC, NQ) -> (NC,)
+            von_mises_max = bm.max(von_mises, axis=1)
+        elif von_mises.ndim == 3:
+            # 多分辨率: (NC, n_sub, NQ) -> (NC,)
+            von_mises_max = bm.max(von_mises.reshape(von_mises.shape[0], -1), axis=1)
+        else:
+            self._log_error(f"意外的 von Mises 应力维度: {von_mises.ndim}")
+        
+        result['von_mises_max'] = von_mises_max
+        
+        return result
     
     ##############################################################################################
     # 内部方法

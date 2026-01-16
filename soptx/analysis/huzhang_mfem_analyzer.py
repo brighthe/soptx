@@ -103,6 +103,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         return self._tensor_space
     
     @property
+    def integration_order(self) -> int:
+        """获取当前的数值积分阶次"""
+        return self._integration_order
+    
+    @property
     def material(self) -> LinearElasticMaterial:
         """获取当前的材料类"""
         return self._material
@@ -534,6 +539,59 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return {'stress': sigmah, 'displacement': uh}
+    
+    def compute_stress_state(self, 
+                        state: dict,
+                        rho_val: Union[TensorLike, Function] = None,
+                        integration_order: Optional[int] = None,
+                    ) -> Dict[str, TensorLike]:
+        """
+        计算应力场
+        
+        Parameters
+        ----------
+        state : 状态字典，包含位移场等信息
+        rho_val : 密度场（用于应力惩罚，拓扑优化时需要）
+        integration_order : 积分阶次
+        
+        Returns
+        -------
+        dict : 包含以下键值：
+            - 'stress_solid': 实体应力 (NC, NQ, NS) 或 (NC, n_sub, NQ, NS)
+            - 'von_mises': von Mises 等效应力 (NC, NQ) 或 (NC, n_sub, NQ)
+            - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
+        """
+        if integration_order is None:
+            integration_order = self._integration_order
+        
+        if state is None:
+            state = self.solve_state(rho_val=rho_val)
+        
+        stress_dof = state['stress']  
+        
+        # 转换为积分点应力
+        stress_at_quad = self.extract_stress_at_quadrature_points(
+                                                        stress_dof=stress_dof, 
+                                                        integration_order=integration_order
+                                                    )  # (NC, NQ, NS)
+        
+        result = {'stress_solid': stress_at_quad}
+        
+        # 计算 von Mises 应力
+        von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_at_quad)
+        result['von_mises'] = von_mises
+        
+        # 每个单元取最大值
+        if von_mises.ndim == 2:
+            von_mises_max = bm.max(von_mises, axis=1)
+        elif von_mises.ndim == 3:
+            von_mises_max = bm.max(von_mises.reshape(von_mises.shape[0], -1), axis=1)
+        else:
+            self._log_error(f"意外的 von Mises 应力维度: {von_mises.ndim}")
+        
+        result['von_mises_max'] = von_mises_max
+        
+        return result
 
 
     ###############################################################################################
@@ -544,7 +602,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         """计算局部应力矩阵 A 关于物理密度的导数（灵敏度）"""
         density_location = self._interpolation_scheme.density_location
 
-        # TODO 目前仅支持插值杨氏模量 E
         E0 = self._material.youngs_modulus
         E_rho =  self._interpolation_scheme.interpolate_material(
                                                 material=self._material, 
