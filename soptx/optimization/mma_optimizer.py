@@ -305,10 +305,8 @@ class MMAOptimizer(BaseLogged):
             rho = density_distribution
         else:
             rho = bm.copy(density_distribution[:])
-        # 初始物理密度
-        rho_phys = self._filter.get_initial_density(density=rho)
 
-        #TODO ==================== 被动单元处理 ====================
+        #TODO ==================== 被动单元处理 (预处理) ====================
         passive_mask = None
         design_mesh = getattr(self._filter, 'design_mesh', None)
         if hasattr(pde, 'get_passive_element_mask'):
@@ -317,15 +315,18 @@ class MMAOptimizer(BaseLogged):
         # 将被动单元强制设为实体材料
         if passive_mask is not None:
             dv[passive_mask] = 1.0
-            if rho_phys.ndim == 1:
-                rho_phys[passive_mask] = 1.0
+            if rho.ndim == 1:
+                rho[passive_mask] = 1.0
             else:
                 from soptx.analysis.utils import reshape_multiresolution_data_inverse
-                NC, n_sub = rho_phys.shape
+                NC, n_sub = rho.shape
                 disp_mesh = getattr(analyzer, 'disp_mesh', None)
                 nx_disp , ny_disp  = disp_mesh.meshdata['nx'], disp_mesh.meshdata['ny']
                 passive_mask_rho = reshape_multiresolution_data_inverse(nx_disp, ny_disp, passive_mask, n_sub)
-                rho_phys[passive_mask_rho] = 1.0
+                rho[passive_mask_rho] = 1.0
+
+        # 初始物理密度
+        rho_phys = self._filter.get_initial_density(density=rho)
 
         # ==================== MMA 历史变量初始化 ====================
         xold1 = bm.copy(dv[:])
@@ -352,11 +353,6 @@ class MMAOptimizer(BaseLogged):
             # 更新迭代计数
             self._epoch = iter_idx + 1
 
-            # TODO 强制被动单元为实体材料
-            if passive_mask is not None:
-                dv[passive_mask] = 1.0
-                rho_phys[passive_mask_rho] = 1.0
-
             #TODO 基于物理密度求解状态变量
             if hasattr(analyzer, 'solve_state'):
                 state = analyzer.solve_state(rho_val=rho_phys)
@@ -365,6 +361,14 @@ class MMAOptimizer(BaseLogged):
 
             if enable_timing:
                 t.send('位移场求解')
+
+            #TODO ==================== 动态约束状态更新 ====================
+            for constraint in self._constraints:
+                if hasattr(constraint, 'update_clustering'):
+                    constraint.update_clustering(iter_idx=iter_idx, state=state, density=rho_phys)
+            
+                if enable_timing:
+                    t.send('应力聚类更新') 
 
             #TODO ==================== 目标函数计算 ====================
             obj_val_raw = self._objective.fun(density=rho_phys, state=state)
@@ -447,10 +451,6 @@ class MMAOptimizer(BaseLogged):
 
             # 过滤后得到的物理密度
             rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
-
-            #TODO 强制被动单元为实体材料
-            if passive_mask is not None:
-                rho_phys[passive_mask] = 1.0
 
             if enable_timing:
                 t.send('密度过滤')

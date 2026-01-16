@@ -34,9 +34,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-        # 验证拓扑优化算法与插值方案的匹配性
-        self._validate_topopt_config(topopt_algorithm, interpolation_scheme)
-
         # 私有属性（建议通过属性访问器访问，不要直接修改）
         self._mesh = disp_mesh
         self._pde = pde
@@ -810,6 +807,21 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 计算 von Mises 应力
         von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_for_vm)
         result['von_mises'] = von_mises
+
+        # 计算积分权重
+        density_location = self._interpolation_scheme.density_location
+        if density_location == 'element':
+            qf = self._mesh.quadrature_formula(integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights() 
+            
+            J = self._mesh.jacobi_matrix(bcs)
+            detJ = bm.abs(bm.linalg.det(J))  # (NC, NQ)
+            
+            weights = detJ * ws # (NC, NQ) 
+            result['weights'] = weights
+            
+        elif density_location == 'element_multiresolution':
+            pass
         
         # 每个单元取最大值
         if von_mises.ndim == 2:
@@ -829,39 +841,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 内部方法
     ##############################################################################################
 
-    def _validate_topopt_config(self, 
-                            topopt_algorithm: Literal[None, 'density_based', 'level_set'], 
-                            interpolation_scheme: Optional[MaterialInterpolationScheme]
-                        ) -> None:
-        """验证拓扑优化算法与插值方案的匹配性"""
-        
-        if topopt_algorithm is None:
-
-            if interpolation_scheme is not None:
-                error_msg = ("当 topopt_algorithm=None 时, interpolation_scheme 必须为 None."
-                        "标准有限元分析不需要插值方案.")
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
-            
-            self._log_info("使用标准有限元分析模式（无拓扑优化）")
-                
-        elif topopt_algorithm == 'density_based':
-
-            if interpolation_scheme is None:
-                error_msg = "当 topopt_algorithm='density_based' 时，必须提供 MaterialInterpolationScheme"
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
-            
-            self._log_info(f"使用基于密度的拓扑优化, 插值方法：{interpolation_scheme.interpolation_method}")
-                
-        elif topopt_algorithm == 'level_set':
-            
-            raise NotImplementedError("Level set topology optimization is not yet implemented.")
-                
-        else:
-            error_msg = f"不支持的拓扑优化算法: {topopt_algorithm}"
-            self._log_error(error_msg)
-            raise ValueError(error_msg)
 
     def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike) -> CSRTensor:
         """

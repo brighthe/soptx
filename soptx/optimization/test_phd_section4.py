@@ -576,7 +576,7 @@ class DensityTopOptTest(BaseLogged):
         # plt.show()
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-        density_location = 'element_multiresolution'
+        density_location = 'element'
         sub_density_element = 4
         interpolation_method = 'msimp'
         penalty_factor = 3.0
@@ -961,5 +961,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec_stress_constraint')
+    test.run.set('test_subsec4_6_5_half_mbb_beam')
     rho_opt, history = test.run()
