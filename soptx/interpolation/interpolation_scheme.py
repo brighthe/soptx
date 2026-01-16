@@ -290,7 +290,6 @@ class MaterialInterpolationScheme(BaseLogged):
                 ) -> TensorLike:
         """修正 SIMP 插值"""
         target_variables = self._options['target_variables']
-
         results = []
 
         rho_interp = None
@@ -301,6 +300,32 @@ class MaterialInterpolationScheme(BaseLogged):
                 rho_interp = rho_val
             else:
                 rho_interp = rho_val[:]
+
+        elif self._density_location in ['node']:
+            # rho_val.shape = (NN, )
+            density_mesh = rho_val.space.mesh
+            qf = density_mesh.quadrature_formula(q=integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+            rho_interp = rho_val(bcs)
+
+        elif self._density_location in ['element_multiresolution']:
+            # rho_val.shape = (NC, n_sub)
+            rho_interp = rho_val[:]
+
+        elif self._density_location in ['node_multiresolution']:
+            # rho_val.shape = (NN, )
+            NC = displacement_mesh.number_of_cells()
+            qf_e = displacement_mesh.quadrature_formula(q=integration_order)
+            bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+            n_sub = rho_val.sub_density_element
+            from soptx.analysis.utils import map_bcs_to_sub_elements
+            bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+            bcs_eg_x, bcs_eg_y = bcs_eg
+            NQ = ws_e.shape[0]
+            rho_interp = bm.zeros((NC, n_sub, NQ), dtype=bm.float64, device=displacement_mesh.device)
+            for s_idx in range(n_sub):
+                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
+                rho_interp[:, s_idx, :] = rho_val(sub_bcs)
 
         if 'E' in target_variables:
             p = self._options['penalty_factor']
@@ -323,65 +348,6 @@ class MaterialInterpolationScheme(BaseLogged):
             return results[0]
         else:
             return tuple(results)
-
-
-
-        penalty_factor = self._options['penalty_factor']
-        target_variables = self._options['target_variables']
-        void_youngs_modulus = self._options['void_youngs_modulus']
-        
-
-        if target_variables == ['E']:
-            """E(ρ) = Emin + ρ^p * (E0 - Emin)"""
-            E0 = material.youngs_modulus
-            Emin = void_youngs_modulus
-
-            if self._density_location in ['element']:
-                # rho_val.shape = (NC, )
-                if hasattr(rho_val, 'ndim') and rho_val.ndim == 0:
-                    rho_element = rho_val
-                else:
-                    rho_element = rho_val[:]
-                E_rho = Emin + rho_element ** penalty_factor * (E0 - Emin)
-
-            elif self._density_location in ['node']:
-                # rho_val.shape = (NN, )
-                density_mesh = rho_val.space.mesh
-                qf = density_mesh.quadrature_formula(q=integration_order)
-                bcs, ws = qf.get_quadrature_points_and_weights()
-                rho_q = rho_val(bcs) # (NC, NQ)
-                E_rho = Emin + rho_q[:] ** penalty_factor * (E0 - Emin)
-
-            elif self._density_location in ['element_multiresolution']:
-                # rho_val.shape = (NC, n_sub)
-                rho_sub_element = rho_val[:] # (NC, n_sub)
-                E_rho = Emin + rho_sub_element[:] ** penalty_factor * (E0 - Emin)
-
-            elif self._density_location in ['node_multiresolution']:
-                # rho_val.shape = (NN, )
-                NC = displacement_mesh.number_of_cells()
-                qf_e = displacement_mesh.quadrature_formula(q=integration_order)
-                # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
-                bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
-
-                n_sub = rho_val.sub_density_element
-
-                # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
-                from soptx.analysis.utils import map_bcs_to_sub_elements
-                # bcs_eg.shape = ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) ), ws_e.shape = (NQ, )
-                bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-                bcs_eg_x, bcs_eg_y = bcs_eg
-
-                NQ = ws_e.shape[0]
-                rho_q = bm.zeros((NC, n_sub, NQ), dtype=bm.float64  , device=displacement_mesh.device)
-                for s_idx in range(n_sub):
-                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
-                    rho_q_sub = rho_val(sub_bcs) # (NC, NQ)
-                    rho_q[:, s_idx, :] = rho_q_sub
-
-                E_rho = Emin + rho_q[:] ** penalty_factor * (E0 - Emin)
-            
-            return E_rho
 
     @variantmethod('simp')
     def interpolate_material_derivative(self, 
@@ -423,42 +389,73 @@ class MaterialInterpolationScheme(BaseLogged):
                         material: LinearElasticMaterial, 
                         rho_val: Union[Function, TensorLike],
                         integration_order: Optional[int] = None,
+                        displacement_mesh: Optional[HomogeneousMesh] = None,
                     ) -> TensorLike:
-        """修正 SIMP 插值求导: dE(ρ) = pρ^{p-1} * (E0 - Emin)"""
-        p = self._options['penalty_factor']
+        """修正 SIMP 插值求导"""
         target_variables = self._options['target_variables']
+        results = []
 
-        if target_variables == ['E']:
+        rho_interp = None
 
+        if self._density_location in ['element']:
+            # rho_val.shape = (NC, )
+            if hasattr(rho_val, 'ndim') and rho_val.ndim == 0:
+                rho_interp = rho_val
+            else:
+                rho_interp = rho_val[:]
+
+        elif self._density_location in ['node']:
+            # rho_val.shape = (NN, )
+            density_mesh = rho_val.space.mesh
+            qf = density_mesh.quadrature_formula(q=integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights()
+            rho_interp = rho_val(bcs)
+
+        elif self._density_location in ['element_multiresolution']:
+            # rho_val.shape = (NC, n_sub)
+            rho_interp = rho_val[:]
+
+        elif self._density_location in ['node_multiresolution']:
+            # rho_val.shape = (NN, )
+            NC = displacement_mesh.number_of_cells()
+            qf_e = displacement_mesh.quadrature_formula(q=integration_order)
+            bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+            n_sub = rho_val.sub_density_element
+            from soptx.analysis.utils import map_bcs_to_sub_elements
+            bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+            bcs_eg_x, bcs_eg_y = bcs_eg
+            NQ = ws_e.shape[0]
+            rho_interp = bm.zeros((NC, n_sub, NQ), dtype=bm.float64, device=displacement_mesh.device)
+            for s_idx in range(n_sub):
+                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
+                rho_interp[:, s_idx, :] = rho_val(sub_bcs)
+
+        if 'E' in target_variables:
+            p = self._options['penalty_factor']
             E0 = material.youngs_modulus
             Emin = self._options['void_youngs_modulus']
-
-            if self._density_location in ['element']:
-                rho_element = rho_val[:] # (NC, )
-                dE_rho = p * rho_element[:] ** (p - 1) * (E0 - Emin)
-
-            elif self._density_location in ['node']:
-                # rho_val.shape = (NN, )
-                density_mesh = rho_val.space.mesh
-                qf = density_mesh.quadrature_formula(q=integration_order)
-                bcs, ws = qf.get_quadrature_points_and_weights()
-                rho_q = rho_val(bcs) # (NC, NQ)
-                dE_rho = p * rho_q[:] ** (p - 1) * (E0 - Emin)
-
-            elif self._density_location in ['element_multiresolution']:
-                rho_sub_element = rho_val[:] # (NC, n_sub)
-                dE_rho = p * rho_sub_element[:] ** (p - 1) * (E0 - Emin)
-
-            elif self._density_location in ['node_multiresolution']:
-                rho_sub_q = rho_val[:] # (NC, n_sub, NQ)
-                dE_rho = p * rho_sub_q[:] ** (p - 1) * (E0 - Emin)
             
-            return dE_rho
+            dE_rho = p * rho_interp ** (p - 1) * (E0 - Emin)
+            results.append(dE_rho)
 
+        if 'nu' in target_variables:
+            p_nu = self._options.get('nu_penalty_factor', 1.0) # 默认为 1.0
+            nu0 = material.poisson_ratio
+            nu_void = self._options.get('void_poisson_ratio', 0.3)
+            
+            # 插值公式: dnu = p_nu * rho^(p_nu-1) * (nu_solid - nu_void)
+            if abs(p_nu - 1.0) < 1e-6:
+                # 线性插值特例 (p=1): 导数为常数 (nu0 - nu_void)
+                dnu_rho = (nu0 - nu_void) * (rho_interp ** 0.0)
+            else:
+                dnu_rho = p_nu * rho_interp ** (p_nu - 1) * (nu0 - nu_void)
+            
+            results.append(dnu_rho)
+
+        if len(results) == 1:
+            return results[0]
         else:
-
-            error_msg = f"Unknown target_variables: {target_variables}"
-            self._log_error(error_msg)
+            return tuple(results)
 
     @variantmethod('power_law') 
     def interpolate_stress(self, 
@@ -500,9 +497,13 @@ class MaterialInterpolationScheme(BaseLogged):
     def _set_default_options(self) -> None:
         """设置默认选项"""
         defaults = {
-            'penalty_factor': 3.0,       # 材料惩罚因子 
-            'void_youngs_modulus': 1e-9,
-            'target_variables': ['E'],
+            'penalty_factor': 3.0,       # 杨氏模量惩罚因子 
+            'void_youngs_modulus': 1e-9, # 孔洞杨氏模量
+            'target_variables': ['E'],   # 插值变量
+
+            'nu_penalty_factor': 1.0,    # 泊松比惩罚因子
+            'void_poisson_ratio': 0.3,   # 孔洞泊松比
+
             'stress_penalty_factor': 0.5 # 应力惩罚因子 
         }
         

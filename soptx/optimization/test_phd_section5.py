@@ -496,6 +496,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         interpolation_method = 'msimp'
         penalty_factor = 3.0
         void_youngs_modulus = 1e-9
+        target_variables = ['E', 'nu']
         
         # 'element'
         density_location = 'element'
@@ -503,6 +504,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         # 'standard', 'voigt', 'fast'
         assembly_method = 'fast'
+        solve_method = 'mumps'
 
         max_iterations = 500
         change_tolerance = 1e-2
@@ -529,19 +531,19 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     options={
                                         'penalty_factor': penalty_factor,
                                         'void_youngs_modulus': void_youngs_modulus,
-                                        'target_variables': ['E']
+                                        'target_variables': target_variables
                                     },
                                 )
         
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         analyzer = LagrangeFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method=assembly_method,
-                                    solve_method='mumps',
+                                    solve_method=solve_method,
                                     topopt_algorithm='density_based',
                                     interpolation_scheme=interpolation_scheme,
                                 )
@@ -622,7 +624,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.3
+        E, nu = 1, 0.5
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_stress, plane_strain
 
@@ -663,11 +665,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
-        interpolation_method = 'msimp'
-        penalty_factor = 3.0
-        void_youngs_modulus = 1e-9
-        target_variables = ['E', 'nu']
-
         # 'element'
         density_location = 'element'
         relative_density = volume_fraction
@@ -696,6 +693,12 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                             plane_type=pde.plane_type,
                                             enable_logging=False
                                         )
+        interpolation_method = 'msimp'
+        penalty_factor = 3.0
+        void_youngs_modulus = 1e-9
+        target_variables = ['E', 'nu']
+        nu_penalty_factor = 1.0
+        void_poisson_ratio = 0.3
 
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -704,7 +707,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     options={
                                         'penalty_factor': penalty_factor,
                                         'void_youngs_modulus': void_youngs_modulus,
-                                        'target_variables': target_variables
+                                        'target_variables': target_variables,
+                                        'nu_penalty_factor': nu_penalty_factor,
+                                        'void_poisson_ratio': void_poisson_ratio,
                                     },
                                 )
         
@@ -717,7 +722,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     space_degree=space_degree,
@@ -764,23 +769,28 @@ class DensityTopOptHuZhangTest(BaseLogged):
         fe_dofs = fe_tspace.number_of_global_dofs()
         
         self._log_info(f"开始密度拓扑优化, \n"
-                f"模型名称={pde.__class__.__name__} \n"
-                f"平面类型={material.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
-                f"分析算法={analyzer.__class__.__name__}, 是否角点松弛={use_relaxation}, 状态变量={state_variable} \n" 
-                f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
-                f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-                f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={fe_dofs} \n"
-                f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
-                f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
-                f"体积分数约束={volume_fraction}, 惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n" 
-                f"过滤类型={filter_type}, 过滤半径={rmin} ")
+            f"模型名称={pde.__class__.__name__} \n"
+            f"平面类型={material.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+            f"分析算法={analyzer.__class__.__name__}, 是否角点松弛={use_relaxation}, 状态变量={state_variable} \n" 
+            f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
+            f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={fe_dofs} \n"
+            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
+            f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
+            f"体积分数约束={volume_fraction}, \n"
+            f"材料插值方案={interpolation_scheme._interpolation_method}, "
+            f"杨氏模量惩罚因子={interpolation_scheme._options['penalty_factor']}, "
+            f"孔洞杨氏模量={void_youngs_modulus}, "
+            f"泊松比惩罚因子={interpolation_scheme._options['nu_penalty_factor']}, "
+            f"孔洞泊松比={interpolation_scheme._options['void_poisson_ratio']} \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin} ")
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec5_6_3_hzmfem_03")
+        save_path = Path(f"{base_dir}/test_subsec5_6_3_hzmfem")
         save_path.mkdir(parents=True, exist_ok=True)
         
         save_optimization_history(mesh=design_variable_mesh, 

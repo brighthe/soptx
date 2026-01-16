@@ -38,9 +38,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         """初始化胡张混合有限元分析器"""
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
-
-        # 验证拓扑优化算法与插值方案的匹配性
-        self._validate_topopt_config(topopt_algorithm, interpolation_scheme)
         
         # 私有属性（建议通过属性访问器访问，不要直接修改）
         self._mesh = disp_mesh
@@ -65,7 +62,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
-        lambda0, lambda1 = self._stress_matrix_coefficient()
+        E0 = self._material.youngs_modulus
+        nu0 = self._material.poisson_ratio
+        lambda0, lambda1 = self._compute_compliance_coefficients(E0, nu0)
         self._hzs_integrator = HuZhangStressIntegrator(
                                             lambda0=lambda0, 
                                             lambda1=lambda1, 
@@ -159,32 +158,30 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         """组装应力矩阵 A_σσ"""
         space_sigma = self._huzhang_space
 
-        if self._topopt_algorithm is None:
-            if rho_val is not None:
-                self._log_warning("标准混合有限元分析模式下忽略相对密度分布参数 rho")
-            coef = None
-
-        elif self._topopt_algorithm in ['density_based']:
-            E_rho = self._interpolation_scheme.interpolate_material(
-                                            material=self._material,
-                                            rho_val=rho_val,
-                                            integration_order=self._integration_order
-                                        )
-            E0 = self.material.youngs_modulus
-            coef = E0 / E_rho
-
+        material_params = self._interpolation_scheme.interpolate_material(
+                                        material=self._material,
+                                        rho_val=rho_val,
+                                        integration_order=self._integration_order,
+                                        displacement_mesh=self._mesh,
+                                )
+        
+        if isinstance(material_params, tuple):
+            E_rho, nu_rho = material_params
         else:
-            error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
-            self._log_error(error_msg)
+            E_rho = material_params
+            nu_rho = self._material.poisson_ratio
+        
+        lambda0, lambda1 = self._compute_compliance_coefficients(E_rho, nu_rho)
 
         # 更新密度系数
-        self._hzs_integrator.coef = coef
+        self._hzs_integrator.lambda0 = lambda0
+        self._hzs_integrator.lambda1 = lambda1
 
         bform1 = BilinearForm(space_sigma)
         bform1.add_integrator(self._hzs_integrator)
         A = bform1.assembly(format='csr')
 
-        #TODO 角点松弛
+        # 角点松弛
         if space_sigma.use_relaxation == True:
             TM = space_sigma.TM
             A = TM.T @ A @ TM
@@ -600,43 +597,54 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     def compute_local_stress_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部应力矩阵 A 关于物理密度的导数（灵敏度）"""
-        density_location = self._interpolation_scheme.density_location
+        material_vals = self._interpolation_scheme.interpolate_material(
+                                        material=self._material, 
+                                        rho_val=rho_val,
+                                        integration_order=self._integration_order,
+                                        displacement_mesh=self._mesh,
+                                    )
+        if isinstance(material_vals, tuple):
+            E_rho, nu_rho = material_vals
+        else:
+            E_rho = material_vals
+            nu_rho = bm.full_like(E_rho, self._material.poisson_ratio)
 
-        E0 = self._material.youngs_modulus
-        E_rho =  self._interpolation_scheme.interpolate_material(
-                                                material=self._material, 
-                                                rho_val=rho_val,
-                                                integration_order=self._integration_order,
-                                            )
-        dE_rho = self._interpolation_scheme.interpolate_material_derivative(
-                                                material=self._material, 
-                                                rho_val=rho_val,
-                                                integration_order=self._integration_order,
-                                            ) 
+        material_derivs = self._interpolation_scheme.interpolate_material_derivative(
+                                        material=self._material, 
+                                        rho_val=rho_val,
+                                        integration_order=self._integration_order,
+                                    )
+        if isinstance(material_derivs, tuple):
+            dE_rho, dnu_rho = material_derivs
+        else:
+            dE_rho = material_derivs
+            dnu_rho = bm.zeros_like(dE_rho) 
+
+        lambda0, lambda1 = self._compute_compliance_coefficients(E_rho, nu_rho)
+
+        d = self._GD
+
+        dlambda0 = (1.0 / E_rho) * dnu_rho - (lambda0 / E_rho) * dE_rho
+
+        denominator_factor = 1.0 + (d - 2.0) * nu_rho
+        numerator_deriv = 1.0 + 2.0 * nu_rho + (d - 2.0) * nu_rho**2
+        g_prime = numerator_deriv / (denominator_factor**2)
+        dlambda1 = (1.0 / E_rho) * g_prime * dnu_rho - (lambda1 / E_rho) * dE_rho
+
         space_sigma = self._huzhang_space
-
-        if density_location in ['element']:
-            # rho_val: (NC, )
-            diff_coef_element = - E0 * dE_rho / (E_rho**2) # (NC, )
-
-            AE0 = self._hzs_integrator.fetch_fast(space_sigma)
-
-            diff_AE = bm.einsum('c, cij -> cij', diff_coef_element, AE0) # (NC, TLDOF, TLDOF)
-
-        elif density_location in ['node']:
-            # rho_val: (NN, )
-            diff_coef_q = - E0 * dE_rho / (E_rho**2) # (NC, NQ)
-
-            raise NotImplementedError("节点密度尚未实现")
         
-        elif density_location in ['element_multiresolution']:
-            raise NotImplementedError("多分辨率单元密度尚未实现")
-        
-        elif density_location in ['node_multiresolution']:
-            raise NotImplementedError("多分辨率节点密度尚未实现")
+        # 调用 fetch_fast 获取缓存的几何矩阵 (M0, M1)
+        M0, M1 = self._hzs_integrator.fetch_fast(space_sigma)
+
+        if dlambda0.ndim == 1:
+            dlambda0 = dlambda0[:, None, None]
+        if dlambda1.ndim == 1:
+            dlambda1 = dlambda1[:, None, None]
+
+        diff_AE = dlambda0 * M0 - dlambda1 * M1
 
         return diff_AE
-    
+
     def extract_stress_at_quadrature_points(self, 
                                         stress_dof: TensorLike, 
                                         integration_order: int = None
@@ -679,56 +687,23 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     # 内部方法
     ##############################################################################################
 
-    def _validate_topopt_config(self, 
-                            topopt_algorithm: Literal[None, 'density_based', 'level_set'], 
-                            interpolation_scheme: Optional[MaterialInterpolationScheme]
-                        ) -> None:
-        """验证拓扑优化算法与插值方案的匹配性"""
-        
-        if topopt_algorithm is None:
-
-            if interpolation_scheme is not None:
-                error_msg = ("当 topopt_algorithm=None 时, interpolation_scheme 必须为 None."
-                        "标准有限元分析不需要插值方案.")
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
-            
-            self._log_info("使用标准有限元分析模式（无拓扑优化）")
-                
-        elif topopt_algorithm == 'density_based':
-
-            if interpolation_scheme is None:
-                error_msg = "当 topopt_algorithm='density_based' 时，必须提供 MaterialInterpolationScheme"
-                self._log_error(error_msg)
-                raise ValueError(error_msg)
-            
-            self._log_info(f"使用基于密度的拓扑优化, 插值方法：{interpolation_scheme.interpolation_method}")
-                
-        elif topopt_algorithm == 'level_set':
-            
-            raise NotImplementedError("Level set topology optimization is not yet implemented.")
-                
-        else:
-            error_msg = f"不支持的拓扑优化算法: {topopt_algorithm}"
-            self._log_error(error_msg)
-
-    def _stress_matrix_coefficient(self) -> tuple[float, float]:
-        """材料为均匀各向同性线弹性体时, 计算应力块矩阵的系数 lambda0 和 lambda1"""
+    def _compute_compliance_coefficients(self, 
+                                       E: TensorLike, 
+                                       nu: TensorLike
+                                    ) -> tuple[TensorLike, TensorLike]:
+        """
+        材料为均匀各向同性线弹性体时, 
+        根据杨氏模量场 E 和泊松比场 nu 计算柔度矩阵系数场 lambda0 和 lambda1
+        """
         d = self._GD  
-        #TODO 修改
-        nu = self._material.poisson_ratio
-        mu = self._material.shear_modulus
-        
-        lambda0 = 1.0 / (2.0 * mu)
+
+        lambda0 = (1.0 + nu) / E
+
+        numerator = nu * (1.0 + nu)
         denominator_factor = 1.0 + (d - 2.0) * nu
-        lambda1 = nu / (2.0 * mu * denominator_factor)
+        denominator = E * denominator_factor
         
-        # 从材料对象获取 Lamé 参数
-        # lam = self._material.lame_lambda
-        # mu = self._material.shear_modulus
-        
-        # lambda0 = 1.0 / (2 * mu)
-        # lambda1 = lam / (2 * mu * (d * lam + 2 * mu))
+        lambda1 = numerator / denominator
         
         return lambda0, lambda1
 

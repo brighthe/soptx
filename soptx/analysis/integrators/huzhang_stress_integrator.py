@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 from fealpy.backend import backend_manager as bm
 
 from fealpy.typing import TensorLike
@@ -11,8 +11,8 @@ from soptx.utils import timer
 
 class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
     def __init__(self, 
-                lambda0: float = 1.0, 
-                lambda1: float = 1.0,
+                lambda0: Union[float, TensorLike] = 1.0, 
+                lambda1: Union[float, TensorLike] = 1.0,
                 coef: Optional[TensorLike] = None,
                 q: Optional[int] = None, 
                 method: Optional[str] = None
@@ -116,10 +116,13 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
                 w = weighted_lambda0[i]
                 part = bm.einsum('q, c, c, cql, cqm -> clm', ws, cm, coef, phi_comp, phi_comp)
                 A += w * part
+
             if enable_timing:
                 t.send('Einsum 求和时间 1')
+
             part_tr = bm.einsum('q, c, c, cql, cqm -> clm', ws, cm, coef, trphi, trphi)
             A -= self.lambda1 * part_tr
+            
             if enable_timing:
                 t.send('Einsum 求和时间 2')
             
@@ -165,23 +168,24 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
 
         NC = mesh.number_of_cells()
         LDOF = phi.shape[2]
-        
-        A0 = bm.zeros((NC, LDOF, LDOF), dtype=phi.dtype)
+
+        # --- 计算 M0 (剪切/自项部分) ---
+        M0 = bm.zeros((NC, LDOF, LDOF), dtype=phi.dtype)
         
         _, num = symmetry_index(d=TD, r=2)
-        weighted_lambda0 = self.lambda0 * num
 
         for i in range(phi.shape[-1]): 
             phi_comp = phi[..., i]
-            w = weighted_lambda0[i]
+            weight = num[i] # 纯几何权重 (1 or 2)
             
+            # 纯几何积分，不乘 lambda
             part = bm.einsum('q, c, cql, cqm -> clm', ws, cm, phi_comp, phi_comp)
-            A0 += w * part
+            M0 += weight * part
 
-        part_tr = bm.einsum('q, c, cql, cqm -> clm', ws, cm, trphi, trphi)
-        A0 -= self.lambda1 * part_tr
-        
-        return A0
+        # --- 计算 M1 (体积/耦合部分) ---
+        M1 = bm.einsum('q, c, cql, cqm -> clm', ws, cm, trphi, trphi)
+
+        return M0, M1
 
     @assembly.register('fast')
     def assembly(self, 
@@ -192,33 +196,35 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
         if enable_timing:
             t = timer(f"应力项组装 (Fast Cached)")
             next(t)
-            
-        A0 = self.fetch_fast(space)
+
+        M0, M1 = self.fetch_fast(space)
+        # A0 = self.fetch_fast(space)
 
         if enable_timing:
             t.send("获取 A0 (Cache Hit/Miss)")
 
-        coef = self.coef
+        # 2. 获取材料系数场
+        lam0 = self.lambda0
+        lam1 = self.lambda1
+        # coef = self.coef
 
-        if coef is None:
-            if enable_timing: t.send(None)
-            return A0
+        # 3. 组装 (支持广播)
+        # Case A: 标量 (均匀材料)
+        if isinstance(lam0, float) and isinstance(lam1, float):
+            A = lam0 * M0 - lam1 * M1
 
-        if coef.ndim == 1: # (NC, )
-            A = A0 * coef[:, None, None]
-            
-            if enable_timing:
-                t.send("应用密度系数 (Broadcasting)")
-                t.send(None)
-            return A
-        
-        elif coef.ndim == 2: # (NC, NQ)
-            raise NotImplementedError(
-                "Fast assembly method does not support quadrature-point dependent coefficients (NC, NQ). "
-                "Please use method='standard'."
-            )
+        # Case B: 数组 (拓扑优化)
         else:
-             raise ValueError(f"Unsupported coef shape: {coef.shape}")
+            # 确保维度匹配 (NC, ) -> (NC, 1, 1)
+            if hasattr(lam0, 'ndim') and lam0.ndim == 1:
+                lam0 = lam0[:, None, None]
+            if hasattr(lam1, 'ndim') and lam1.ndim == 1:
+                lam1 = lam1[:, None, None]
+            
+            # 线性组合
+            A = lam0 * M0 - lam1 * M1
+
+        return A 
 
 
 
