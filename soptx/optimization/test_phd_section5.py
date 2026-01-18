@@ -623,8 +623,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_3_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
+        '''
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.5
+        E, nu = 1, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_stress, plane_strain
 
@@ -640,9 +641,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri'
 
         volume_fraction = 0.3
+        '''
 
         #* 轴承装置结构 bearing_device_2d
-        '''
         t = -8e-2
         E, nu = 1, 0.3
         domain = [0, 120, 0, 40]
@@ -660,7 +661,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri' 
 
         volume_fraction = 0.35
-        '''
 
         space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
@@ -682,9 +682,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
-
-        node = displacement_mesh.entity('node')
-        displacement_mesh.meshdata['corner'] = pde.mark_corners(node)
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(

@@ -229,6 +229,13 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         """平面类型"""
         return self._plane_type
     
+    @property
+    def is_incompressible(self) -> bool:
+        """判断材料是否为不可压缩材料"""
+        if self._plane_type == 'plane_stress':
+            return False
+        else:
+            return self._poisson_ratio >= 0.5 - 1e-12
 
     #########################################################################################
     # 内部方法

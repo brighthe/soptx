@@ -76,6 +76,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         self._cached_mix_matrix = self._calculate_mix_matrix()
 
+        self._E_rho = None
+        self._nu_rho = None
+        self._lambda0_rho = None
+        self._lambda1_rho = None
+
 
     ##############################################################################################
     # 属性相关函数
@@ -171,11 +176,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             E_rho = material_params
             nu_rho = self._material.poisson_ratio
         
-        lambda0, lambda1 = self._compute_compliance_coefficients(E_rho, nu_rho)
+        lambda0_rho, lambda1_rho = self._compute_compliance_coefficients(E_rho, nu_rho)
+
+        self._E_rho = E_rho
+        self._nu_rho = nu_rho
+        self._lambda0_rho = lambda0_rho
+        self._lambda1_rho = lambda1_rho
 
         # 更新密度系数
-        self._hzs_integrator.lambda0 = lambda0
-        self._hzs_integrator.lambda1 = lambda1
+        self._hzs_integrator.lambda0 = lambda0_rho
+        self._hzs_integrator.lambda1 = lambda1_rho
 
         bform1 = BilinearForm(space_sigma)
         bform1.add_integrator(self._hzs_integrator)
@@ -597,17 +607,26 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
     def compute_local_stress_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部应力矩阵 A 关于物理密度的导数（灵敏度）"""
-        material_vals = self._interpolation_scheme.interpolate_material(
-                                        material=self._material, 
-                                        rho_val=rho_val,
-                                        integration_order=self._integration_order,
-                                        displacement_mesh=self._mesh,
-                                    )
-        if isinstance(material_vals, tuple):
-            E_rho, nu_rho = material_vals
+        if self._lambda0_rho is None or self._lambda1_rho is None:
+            material_vals = self._interpolation_scheme.interpolate_material(
+                                            material=self._material, 
+                                            rho_val=rho_val,
+                                            integration_order=self._integration_order,
+                                            displacement_mesh=self._mesh,
+                                        )
+            if isinstance(material_vals, tuple):
+                E_rho, nu_rho = material_vals
+            else:
+                E_rho = material_vals
+                nu_rho = bm.full_like(E_rho, self._material.poisson_ratio)
+
+            lambda0_rho, lambda1_rho = self._compute_compliance_coefficients(E_rho, nu_rho)
+
         else:
-            E_rho = material_vals
-            nu_rho = bm.full_like(E_rho, self._material.poisson_ratio)
+            E_rho = self._E_rho
+            nu_rho = self._nu_rho
+            lambda0_rho = self._lambda0_rho
+            lambda1_rho = self._lambda1_rho
 
         material_derivs = self._interpolation_scheme.interpolate_material_derivative(
                                         material=self._material, 
@@ -620,16 +639,14 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             dE_rho = material_derivs
             dnu_rho = bm.zeros_like(dE_rho) 
 
-        lambda0, lambda1 = self._compute_compliance_coefficients(E_rho, nu_rho)
-
         d = self._GD
 
-        dlambda0 = (1.0 / E_rho) * dnu_rho - (lambda0 / E_rho) * dE_rho
+        dlambda0 = (1.0 / E_rho) * dnu_rho - (lambda0_rho / E_rho) * dE_rho
 
         denominator_factor = 1.0 + (d - 2.0) * nu_rho
         numerator_deriv = 1.0 + 2.0 * nu_rho + (d - 2.0) * nu_rho**2
         g_prime = numerator_deriv / (denominator_factor**2)
-        dlambda1 = (1.0 / E_rho) * g_prime * dnu_rho - (lambda1 / E_rho) * dE_rho
+        dlambda1 = (1.0 / E_rho) * g_prime * dnu_rho - (lambda1_rho / E_rho) * dE_rho
 
         space_sigma = self._huzhang_space
         

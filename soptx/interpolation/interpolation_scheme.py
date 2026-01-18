@@ -290,6 +290,19 @@ class MaterialInterpolationScheme(BaseLogged):
                 ) -> TensorLike:
         """修正 SIMP 插值"""
         target_variables = self._options['target_variables']
+
+        if material.is_incompressible and not 'nu' in target_variables:
+            self._log_warning(
+                f"材料为不可压缩 (ν={material.poisson_ratio:.4f}), "
+                f"建议将 'nu' 添加到 target_variables 中以避免体积闭锁。"
+            )
+        
+        if not material.is_incompressible and 'nu' in target_variables:
+            self._log_info(
+                f"材料为可压缩 (ν={material.poisson_ratio:.4f}), "
+                f"无需对泊松比进行插值，'nu' 配置将被忽略。"
+            )
+
         results = []
 
         rho_interp = None
@@ -335,7 +348,7 @@ class MaterialInterpolationScheme(BaseLogged):
             E_rho = Emin + rho_interp ** p * (E0 - Emin)
             results.append(E_rho)
         
-        if 'nu' in target_variables:
+        if 'nu' in target_variables and material.is_incompressible:
             p_nu = self._options.get('nu_penalty_factor', 1.0) # 默认为 1.0
             nu0 = material.poisson_ratio  # 强材料泊松比 (例如 0.5)
             nu_void = self._options.get('void_poisson_ratio', 0.3) # 弱材料泊松比 (例如 0.3)
@@ -393,6 +406,7 @@ class MaterialInterpolationScheme(BaseLogged):
                     ) -> TensorLike:
         """修正 SIMP 插值求导"""
         target_variables = self._options['target_variables']
+
         results = []
 
         rho_interp = None
@@ -438,7 +452,7 @@ class MaterialInterpolationScheme(BaseLogged):
             dE_rho = p * rho_interp ** (p - 1) * (E0 - Emin)
             results.append(dE_rho)
 
-        if 'nu' in target_variables:
+        if 'nu' in target_variables and material.is_incompressible:
             p_nu = self._options.get('nu_penalty_factor', 1.0) # 默认为 1.0
             nu0 = material.poisson_ratio
             nu_void = self._options.get('void_poisson_ratio', 0.3)
