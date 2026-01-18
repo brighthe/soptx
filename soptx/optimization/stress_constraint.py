@@ -150,7 +150,7 @@ class StressConstraint(BaseLogged):
         
         # 聚类求和
         aggregated_numerator = bm.zeros((self._n_clusters,), dtype=vals.dtype)
-        bm.scatter_add(aggregated_numerator, self._clustering_map, weighted_term)
+        bm.add_at(aggregated_numerator, self._clustering_map, weighted_term)
         
         # 平均化修正
         mean_term = aggregated_numerator / (self._cluster_weight_sums + 1e-12)        
@@ -181,7 +181,7 @@ class StressConstraint(BaseLogged):
             weights = stress_state['weights']
 
         # 计算 P-norm
-        val = self._compute_clustered_pnorm(sigma_vm, weights)
+        val = self._compute_clustered_pnorm(sigma_vm, weights) # (N_clusterm, )
         
         return val
     
