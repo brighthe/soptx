@@ -452,7 +452,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.3 # 0.4999, 0.3
+        E, nu = 1, 0.4999 # 0.4999, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -466,15 +466,16 @@ class DensityTopOptHuZhangTest(BaseLogged):
                 )
         nx, ny = 80, 40
         mesh_type = 'uniform_crisscross_tri'
+        # mesh_type = 'uniform_quad'
 
         volume_fraction = 0.3
 
         #* 轴承装置结构 bearing_device_2d
         '''
         t = -8e-2
-        E, nu = 1, 0.3
+        E, nu = 1, 0.4999 # 0.3, 4999
         domain = [0, 120, 0, 40]
-        plane_type = 'plane_stress' # plane_strain, plane_stress
+        plane_type = 'plane_strain' # plane_strain, plane_stress
 
         from soptx.model.bearing_device_2d_lfem import BearingDevice2d
         pde = BearingDevice2d(
@@ -606,9 +607,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec5_6_2_lfem_03")
+        save_path = Path(f"{base_dir}/test_subsec5_6_2_lfem_k3_04999")
         save_path.mkdir(parents=True, exist_ok=True)
-
         
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
@@ -647,7 +647,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         t = -8e-2
         E, nu = 1, 0.3
         domain = [0, 120, 0, 40]
-        plane_type = 'plane_stress' # plane_strain, plane_stress
+        plane_type = 'plane_strain' # plane_strain, plane_stress
 
         from soptx.model.bearing_device_2d_hzmfem import BearingDevice2d
         pde = BearingDevice2d(
@@ -802,5 +802,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_3_hzmfem')
+    test.run.set('test_subsec5_6_3_lfem')
     rho_opt, history = test.run()

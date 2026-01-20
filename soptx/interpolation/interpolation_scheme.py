@@ -72,6 +72,8 @@ class MaterialInterpolationScheme(BaseLogged):
         self._options = options or {}
         self._set_default_options()
 
+        self._target_variables_validated = False
+
         # 注册密度分布方法
         self.setup_density_distribution.set(density_location)
         
@@ -291,17 +293,20 @@ class MaterialInterpolationScheme(BaseLogged):
         """修正 SIMP 插值"""
         target_variables = self._options['target_variables']
 
-        if material.is_incompressible and not 'nu' in target_variables:
-            self._log_warning(
-                f"材料为不可压缩 (ν={material.poisson_ratio:.4f}), "
-                f"建议将 'nu' 添加到 target_variables 中以避免体积闭锁。"
-            )
-        
-        if not material.is_incompressible and 'nu' in target_variables:
-            self._log_info(
-                f"材料为可压缩 (ν={material.poisson_ratio:.4f}), "
-                f"无需对泊松比进行插值，'nu' 配置将被忽略。"
-            )
+        if not self._target_variables_validated:
+            if material.is_incompressible and 'nu' not in target_variables:
+                self._log_warning(
+                    f"材料为不可压缩 (ν={material.poisson_ratio:.4f}), "
+                    f"建议将 'nu' 添加到 target_variables 中以避免体积闭锁。"
+                )
+            
+            if not material.is_incompressible and 'nu' in target_variables:
+                self._log_info(
+                    f"材料为可压缩 (ν={material.poisson_ratio:.4f}), "
+                    f"无需对泊松比进行插值，'nu' 配置将被忽略。"
+                )
+            
+            self._target_variables_validated = True
 
         results = []
 

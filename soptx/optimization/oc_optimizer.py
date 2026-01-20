@@ -113,6 +113,7 @@ class OCOptimizer(BaseLogged):
                 design_variable: Union[Function, TensorLike],
                 density_distribution: Union[Function, TensorLike],
                 enable_timing: bool = False,
+                is_store_stress: bool = True,
                 **kwargs
             ) -> Tuple[TensorLike, OptimizationHistory]:
         """运行 OC 优化算法
@@ -224,13 +225,26 @@ class OCOptimizer(BaseLogged):
 
             iteration_time = time() - start_time
 
-            history.log_iteration(iter_idx=iter_idx, 
+            von_mises_stress = None
+            if is_store_stress:
+                stress_state = analyzer.compute_stress_state(
+                                        state=state,
+                                        rho_val=rho_phys,
+                                    )
+                von_mises_stress = stress_state['von_mises_max']
+                if enable_timing:
+                    t.send('von Mises 应力计算')
+
+            history.log_iteration(
+                                iter_idx=iter_idx, 
                                 obj_val=obj_val, 
                                 volfrac=volfrac, 
                                 change=change,
                                 penalty_factor=self._objective._analyzer._interpolation_scheme.penalty_factor, 
                                 time_cost=iteration_time, 
-                                physical_density=rho_phys)
+                                physical_density=rho_phys,
+                                von_mises_stress=von_mises_stress,
+                            )
             
             change, beta_updated = self._filter.continuation_step(change)
             if beta_updated:

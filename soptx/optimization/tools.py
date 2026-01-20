@@ -21,6 +21,8 @@ class OptimizationHistory:
     iteration_times: List[float] = field(default_factory=list)
     # 优化开始时间
     start_time: float = field(default_factory=time)
+    # von Mises 应力历史（可选）
+    von_mises_stresses: List[TensorLike] = field(default_factory=list)
     
     def log_iteration(self, 
                     iter_idx: int, 
@@ -30,6 +32,7 @@ class OptimizationHistory:
                     penalty_factor: float, 
                     time_cost: float, 
                     physical_density: TensorLike,
+                    von_mises_stress: Optional[TensorLike] = None,
                     verbose: bool = True
                 ) -> None:
         """记录一次迭代的信息"""
@@ -42,6 +45,9 @@ class OptimizationHistory:
         self.obj_values.append(obj_val)
         self.con_values.append(volfrac)
         self.iteration_times.append(time_cost)
+
+        if von_mises_stress is not None:
+            self.von_mises_stresses.append(von_mises_stress)
         
         if verbose:
             print(f"Iteration: {iter_idx + 1}, "
@@ -100,93 +106,54 @@ def save_optimization_history(mesh: HomogeneousMesh,
     if save_path is None:
         return
     
-    for i, physical_density in enumerate(history.physical_densities):
-
-        if density_location in ['element']:
-            # 单分辨率单元密度情况：形状为 (NC, )
-            mesh.celldata['density'] = physical_density
-
-        elif density_location in ['node']:
-            # 单分辨率节点密度情况：形状为 (NN, )
-            mesh.nodedata['density'] = physical_density
-
-        elif density_location in ['element_multiresolution']:
-            # 多分辨率单元密度情况：形状为 (NC, n_sub)
-            from soptx.analysis.utils import reshape_multiresolution_data
-            n_sub = physical_density.shape[-1]
-            n_sub_x, n_sub_y = int(bm.sqrt(n_sub)), int(bm.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(mesh.meshdata['nx'] / n_sub_x), int(mesh.meshdata['ny'] / n_sub_y)
-
-            rho_phys = reshape_multiresolution_data(nx=nx_displacement, 
-                                                    ny=ny_displacement, 
-                                                    data=physical_density) # (NC*n_sub, )
-
-            mesh.celldata['density'] = rho_phys
-
-        elif density_location in ['node_multiresolution']:
-            # 多分辨率节点密度情况：形状为 (NN, )
-            mesh.nodedata['density'] = physical_density
-
-
-        elif density_location in ['lagrange_interpolation_point', 
-                                'berstein_interpolation_point', 
-                                'shepard_interpolation_point']:
+    if history.von_mises_stresses is not None:
+        #TODO 不对 
+        for i, physical_density, von_mises_stresses in zip(range(len(history.physical_densities)), 
+                                                    history.physical_densities, 
+                                                    history.von_mises_stresses):
+            if density_location in ['element']:
+                # 单分辨率单元密度情况：形状为 (NC, )
+                mesh.celldata['density'] = physical_density
+                mesh.celldata['von_mises_max'] = von_mises_stresses
             
-            # 节点密度情况：形状为 (GDOF_rho, )
-            rho = physical_density  # (GDOF_rho, )
-            qf = mesh.quadrature_formula(2)
-            bcs, ws = qf.get_quadrature_points_and_weights()       
-            rho_q = rho(bcs)    # (NC, NQ)
-
-            if isinstance(mesh, SimplexMesh):
-                cm = mesh.entity_measure('cell')
-                num = bm.einsum('q, c, cq -> c', ws, cm, rho_q)
-                den = cm
+            elif density_location in ['element_multiresolution']:
+                pass
             
-            elif isinstance(mesh, TensorMesh):
-                J = mesh.jacobi_matrix(bcs)
-                detJ = bm.abs(bm.linalg.det(J))
-                num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_q)
-                den = bm.einsum('q, cq -> c', ws, detJ)
-                
-            rho_e = num / den  # (NC, )
+    else:
+        for i, physical_density in enumerate(history.physical_densities):
 
-            mesh.celldata['density'] = rho_e
-            # mesh.nodedata['density'] = rho
-            
-        elif density_location in ['gauss_integration_point', ]:
-            # 高斯积分点密度情况: 形状为 (NC, NQ)
-            rho_q = physical_density  # (NC, NQ)
-            NQ = rho_q.shape[1]
-            qf = mesh.quadrature_formula(int(bm.sqrt(NQ)))
-            bcs, ws = qf.get_quadrature_points_and_weights()       
-            
-            if isinstance(mesh, SimplexMesh):
-                cm = mesh.entity_measure('cell')
-                num = bm.einsum('q, c, cq -> c', ws, cm, rho_q)
-                den = cm
-            
-            elif isinstance(mesh, TensorMesh):
-                J = mesh.jacobi_matrix(bcs)
-                detJ = bm.abs(bm.linalg.det(J))
-                num = bm.einsum('q, cq, cq -> c', ws, detJ, rho_q)
-                den = bm.einsum('q, cq -> c', ws, detJ)
-                
-            rho_e = num / den  # (NC, )
+            if density_location in ['element']:
+                # 单分辨率单元密度情况：形状为 (NC, )
+                mesh.celldata['density'] = physical_density
 
-            mesh.celldata['density'] = rho_e
+            elif density_location in ['node']:
+                # 单分辨率节点密度情况：形状为 (NN, )
+                mesh.nodedata['density'] = physical_density
 
-        else:
+            elif density_location in ['element_multiresolution']:
+                # 多分辨率单元密度情况：形状为 (NC, n_sub)
+                from soptx.analysis.utils import reshape_multiresolution_data
+                n_sub = physical_density.shape[-1]
+                n_sub_x, n_sub_y = int(bm.sqrt(n_sub)), int(bm.sqrt(n_sub))
+                nx_displacement, ny_displacement = int(mesh.meshdata['nx'] / n_sub_x), int(mesh.meshdata['ny'] / n_sub_y)
 
-            raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
+                rho_phys = reshape_multiresolution_data(nx=nx_displacement, 
+                                                        ny=ny_displacement, 
+                                                        data=physical_density) # (NC*n_sub, )
 
-        if isinstance(mesh, StructuredMesh):
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
-        else:  
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
+                mesh.celldata['density'] = rho_phys
 
-    print("------------------------------")
+            elif density_location in ['node_multiresolution']:
+                # 多分辨率节点密度情况：形状为 (NN, )
+                mesh.nodedata['density'] = physical_density
 
+            else:
+                raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
+
+    if isinstance(mesh, StructuredMesh):
+        mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
+    else:  
+        mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
 
 def plot_optimization_history(history, save_path=None, show=True, title=None, 
                             fontsize=20, figsize=(14, 10), linewidth=2.5,
