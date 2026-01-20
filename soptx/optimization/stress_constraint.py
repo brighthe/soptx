@@ -3,6 +3,7 @@ import numpy as np
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
+from fealpy.mesh import SimplexMesh
 
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
@@ -19,7 +20,8 @@ class StressConstraint(BaseLogged):
                 stress_limit: float,
                 p_norm_factor: float = 8.0,
                 n_clusters: int = 10,
-                recluster_freq: int = 1,          
+                recluster_freq: int = 1,    
+                diff_mode: Literal["auto", "manual"] = "manual",      
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -32,12 +34,50 @@ class StressConstraint(BaseLogged):
         self._p_norm_factor = p_norm_factor
         self._n_clusters = n_clusters
         self._recluster_freq = recluster_freq
+
+        self._diff_mode = diff_mode
         
         # 聚类相关变量
         self._clustering_map = None
         self._cluster_weight_sums = None
 
         self._cached_stress_state = None
+
+        # P-norm 计算的缓存
+        self._cached_normalized_stress = None
+        self._cached_pnorm_normalized = None
+
+        # 积分权重缓存
+        self._integration_weights = None
+    
+    def _compute_integration_weights(self) -> TensorLike:
+        """计算 P-norm 聚合所需的积分权重 detJ * w_q"""
+        if self._integration_weights is not None:
+            return self._integration_weights
+    
+        mesh = self._analyzer.disp_mesh
+        interpolation_scheme = self._analyzer.interpolation_scheme
+        integration_order = self._analyzer.integration_order
+
+        density_location = interpolation_scheme.density_location
+        if density_location == 'element':
+            qf = mesh.quadrature_formula(integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights() 
+            
+            if isinstance(mesh, SimplexMesh):
+                cm = mesh.entity_measure('cell')
+                weights = cm[:, None] * ws  # (NC, NQ)
+            else:
+                J = mesh.jacobi_matrix(bcs)
+                detJ = bm.abs(bm.linalg.det(J))  # (NC, NQ)
+                weights = detJ * ws # (NC, NQ) 
+            
+        elif density_location == 'element_multiresolution':
+            pass
+
+        self._integration_weights = weights
+        
+        return weights
 
     def _perform_clustering_logic(self, sigma_vm: TensorLike, weights: TensorLike) -> None:
         """
@@ -101,7 +141,6 @@ class StressConstraint(BaseLogged):
         self._clustering_map = new_map
         self._cluster_weight_sums = cluster_weight_sums  # 缓存分母
         
-
     def update_clustering(self, iter_idx: int, state: Dict, density: TensorLike) -> None:
         """根据当前迭代步数和物理状态更新聚类"""
         should_update = (self._recluster_freq > 0) and (iter_idx % self._recluster_freq == 0)
@@ -112,7 +151,7 @@ class StressConstraint(BaseLogged):
         if should_update:
             stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
             sigma_vm = stress_state['von_mises'] # (NC, NQ)
-            weights = stress_state['weights'] # 获取积分权重 - (NC, NQ)
+            weights = self._integration_weights  # (NC, NQ)
 
             # 执行核心聚类算法 (排序、切分等)
             self._perform_clustering_logic(sigma_vm, weights)
@@ -125,7 +164,7 @@ class StressConstraint(BaseLogged):
     def _compute_clustered_pnorm(self, 
                                 sigma_vm: TensorLike,
                                 weights: TensorLike
-                            ) -> float:
+                            ) -> TensorLike:
         """计算聚类 P-norm 应力约束值
 
         Parameters
@@ -133,19 +172,26 @@ class StressConstraint(BaseLogged):
         sigma_vm: von Mises 应力场
             - STOP: (NC, NQ)
             - MTOP: (NC, n_sub, NQ)
-        weigths: 积分权重 (NC, NQ)
+        weights: 积分权重 (NC, NQ)
+
+        Returns
+        -------
+        constraint_values: (n_clusters,) 约束函数值
         """
+        P = self._p_norm_factor
+        sigma_lim = self._stress_limit
+        
         vals = sigma_vm.flatten()
         ws = weights.flatten()
         
         if self._clustering_map is None or self._cluster_weight_sums is None:
-             self._perform_clustering_logic(sigma_vm, weights)
+            self._perform_clustering_logic(sigma_vm, weights)
         
         # 归一化应力
-        normalized_stress = vals / self._stress_limit
+        normalized_stress = vals / sigma_lim
 
         # 加权项
-        base_term = (bm.maximum(normalized_stress, 0.0) + 1e-12) ** self._p_norm_factor
+        base_term = (bm.maximum(normalized_stress, 0.0) + 1e-12) ** P
         weighted_term = ws * base_term
         
         # 聚类求和
@@ -156,12 +202,14 @@ class StressConstraint(BaseLogged):
         mean_term = aggregated_numerator / (self._cluster_weight_sums + 1e-12)        
         
         # 开 P 次方
-        pnorm_values = mean_term ** (1.0 / self._p_norm_factor)
+        pnorm_normalized = mean_term ** (1.0 / P)
+        
+        self._cached_normalized_stress = normalized_stress
+        self._cached_pnorm_normalized = pnorm_normalized
         
         # 约束值
-        return pnorm_values - 1.0
+        return pnorm_normalized - 1.0
 
-        
     def fun(self, 
             density: Union[Function, TensorLike], 
             state: Optional[Dict] = None,
@@ -181,14 +229,300 @@ class StressConstraint(BaseLogged):
             weights = stress_state['weights']
 
         # 计算 P-norm
-        val = self._compute_clustered_pnorm(sigma_vm, weights) # (N_clusterm, )
+        val = self._compute_clustered_pnorm(sigma_vm, weights) # (n_clusterm, )
         
         return val
     
     def jac(self, 
-            density: Function, 
-            state: dict,
+            density: Union[Function, TensorLike], 
+            state: Optional[dict] = None,
+            diff_mode: Optional[Literal["auto", "manual"]] = None,
             **kwargs
         ) -> TensorLike:
-        """计算应力约束的灵敏度"""
-        pass
+        """计算应力约束相对于物理密度的灵敏度"""
+        mode = diff_mode if diff_mode is not None else self._diff_mode
+
+        if mode == "manual":
+            return self._manual_differentiation(density=density, state=state, **kwargs)
+
+        elif mode == "auto": 
+            return self._auto_differentiation(density=density, state=state, **kwargs)
+
+        else:
+            error_msg = f"Unknown diff_mode: {diff_mode}"
+            self._log_error(error_msg)
+
+    def _manual_differentiation(self, 
+                            density: Union[Function, TensorLike],
+                            state: Optional[dict] = None, 
+                            enable_timing: bool = False, 
+                            **kwargs
+                        ) -> TensorLike:
+        """手动计算应力约束相对于物理密度的灵敏度"""
+        if self._cached_stress_state is not None:
+            stress_state = self._cached_stress_state
+        else:
+            stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
+
+        sigma_vm = stress_state['von_mises']     # (NC, NQ)
+        weights = stress_state['weights']        # (NC, NQ)
+        eta_sigma = stress_state['eta_sigma']    # (NC, )
+        stress_penalized  = stress_state['stress_penalized']     # (NC, NQ, NS)
+
+        # 确保聚类已初始化
+        if self._clustering_map is None:
+            self._perform_clustering_logic(sigma_vm, weights)
+
+        # ===================== 计算链式法则各项偏导 =====================
+        # ∂g_m/∂σ^vM: P-norm 对 von Mises 应力的偏导
+        dg_dsigma_vm = self._compute_pnorm_derivative(sigma_vm, weights)  # (n_clusters, n_points)
+        
+        # ∂σ^vM/∂σ: von Mises 对应力张量的偏导
+        dvm_dsigma = self._compute_vm_stress_derivative(stress_penalized, sigma_vm)  # (NC, NQ, NS)
+
+        # ===================== 组装伴随载荷并求解伴随方程 =====================
+        # 组装伴随载荷向量 L_m
+        L = self._assemble_adjoint_load(
+                            dg_dsigma_vm=dg_dsigma_vm,
+                            dvm_dsigma=dvm_dsigma,
+                            eta_sigma=eta_sigma,
+                        )  # (n_clusters, n_gdof)
+        
+        # 求解伴随方程 K @ λ_m = L_m
+        L_transposed = L.T  # (n_gdof, n_clusters)
+        adjoint_lambda_transposed = self._analyzer.solve_adjoint(L_transposed, rho_val=density)
+        adjoint_lambda = adjoint_lambda_transposed.T  # (n_clusters, n_gdof)
+        
+        # ===================== 计算灵敏度两项 =====================
+        # 显式密度项 Term_I: (∂σ^vM/∂σ)^T · σ̂ * (∂η_σ/∂ρ)
+        vm_dot_sigma_hat = bm.einsum('eqi, eqi -> eq', dvm_dsigma, sigma_hat)  # (NC, NQ)
+        explicit_term = deta_drho * vm_dot_sigma_hat  # (NC, NQ)
+        explicit_flat = explicit_term.flatten()       # (n_points, )
+        
+        # 4.2 隐式伴随项 Term_II: λ_m^T · (∂K_e/∂ρ) · U_e
+        # 获取位移场
+        U = state['displacement']  # (n_gdof,)
+        U_e = U[cell2dof]          # (NC, n_ldof)
+        
+        # 计算 (∂η_K/∂ρ) 和 K_e^0 · U_e 的乘积
+        # 这里假设刚度惩罚与应力惩罚使用相同的密度，但导数可能不同
+        deta_K_drho = self._analyzer.get_stiffness_penalty_derivative()  # (NC,) 或 (NC, NQ)
+        Ke0_Ue = self._analyzer.compute_Ke0_U(U_e)  # (NC, n_ldof)
+        
+        # ===================== 5. 组装最终灵敏度 =====================
+        n_design_vars = len(density[:])
+        sensitivity = bm.zeros((self._n_clusters, n_design_vars), dtype=sigma_vm.dtype)
+        
+        for m in range(self._n_clusters):
+            # 获取该聚类的 ∂g_m/∂σ^vM
+            dg_m = dg_dsigma_vm[m, :]  # (n_points,)
+            
+            # Term I: 加权显式项
+            term_I = dg_m * explicit_flat  # (n_points,)
+            
+            # Term II: 伴随刚度项
+            lambda_m = adjoint_lambda[m]       # (n_gdof,)
+            lambda_e = lambda_m[cell2dof]      # (NC, n_ldof)
+            
+            # λ_e^T · K_e^0 · U_e * (∂η_K/∂ρ)
+            lambda_Ke0_U = bm.einsum('ei,ei->e', lambda_e, Ke0_Ue)  # (NC,)
+            
+            if deta_K_drho.ndim == 1:
+                # 按单元的刚度惩罚导数
+                term_II_cell = deta_K_drho * lambda_Ke0_U  # (NC,)
+                # 需要将 term_I 也按单元聚合
+                term_I_cell = term_I.reshape(NC, NQ).sum(axis=1)  # (NC,)
+                local_sensitivity = term_I_cell - term_II_cell    # (NC,)
+            else:
+                # 按积分点的刚度惩罚导数
+                term_II = (deta_K_drho * lambda_Ke0_U[:, None]).flatten()  # (n_points,)
+                local_sensitivity = term_I - term_II  # (n_points,)
+                # 按单元聚合
+                local_sensitivity = local_sensitivity.reshape(NC, NQ).sum(axis=1)  # (NC,)
+            
+            # 应用密度映射 ∂ρ/∂d (如滤波器的链式法则)
+            # 对于单分辨率且无滤波: ∂ρ_e/∂d_j = δ_{ej}，灵敏度直接对应单元
+            # 对于有滤波或多分辨率，需要通过 filter 进行链式法则
+            if hasattr(self._analyzer, 'filter') and self._analyzer.filter is not None:
+                sensitivity[m, :] = self._analyzer.filter.backward(local_sensitivity)
+            else:
+                sensitivity[m, :] = local_sensitivity
+        
+        return sensitivity
+
+    def _compute_pnorm_derivative(self, 
+                                sigma_vm: TensorLike, 
+                                weights: TensorLike
+                            ) -> TensorLike:
+        """计算 P-norm 聚合函数对 von Mises 应力的偏导数
+        
+        Parameters
+        ----------
+        sigma_vm : (NC, NQ) von Mises 应力
+        weights : (NC, NQ) 积分权重
+        
+        Returns
+        -------
+        dg_dsigma_vm : (n_clusters, n_points) 每个聚类对每个应力点的偏导数
+        """
+        P = self._p_norm_factor
+        sigma_lim = self._stress_limit
+
+        if hasattr(self, '_cached_normalized_stress') and self._cached_normalized_stress is not None:
+            normalized_stress = self._cached_normalized_stress
+            pnorm_normalized = self._cached_pnorm_normalized
+        else:
+            self._compute_clustered_pnorm(sigma_vm, weights)
+            normalized_stress = self._cached_normalized_stress
+            pnorm_normalized = self._cached_pnorm_normalized
+
+        n_points = normalized_stress.shape[0]
+
+        ws = weights.flatten()   
+
+        # 计算 (σ_m^PN / σ_lim)^(1-P)
+        pnorm_factor = (pnorm_normalized + 1e-12) ** (1.0 - P)  
+
+        # 计算 (σ^vM_{e,i} / σ_lim)^(P-1)
+        stress_factor = (bm.maximum(normalized_stress, 0.0) + 1e-12) ** (P - 1.0)  
+
+        # 构建完整的导数矩阵 (n_clusters, n_points)
+        dg_dsigma_vm = bm.zeros((self._n_clusters, n_points), dtype=normalized_stress.dtype)
+
+        for m in range(self._n_clusters):
+            # 找到属于聚类 m 的点
+            mask = (self._clustering_map == m)
+            # 计算该聚类的导数系数
+            coeff = pnorm_factor[m] / (self._cluster_weight_sums[m] * sigma_lim + 1e-12)
+            # 对属于该聚类的点，乘以各点的 stress_factor 和权重
+            dg_dsigma_vm[m, mask] = coeff * ws[mask] * stress_factor[mask]
+        
+        return dg_dsigma_vm
+    
+    def _compute_vm_stress_derivative(self, 
+                                    stress_penalized: TensorLike,
+                                    sigma_vm: TensorLike,
+                                ) -> TensorLike:
+        """
+        计算 von Mises 应力对应力张量分量的偏导数
+        
+        Parameters
+        ----------
+        stress_penalized : (NC, NQ, NS) 惩罚后的应力张量分量
+            - 2D: NS = 3, [σ_xx, σ_yy, τ_xy]
+            - 3D: NS = 6, [σ_xx, σ_yy, σ_zz, τ_xy, τ_yz, τ_zx]
+        sigma_vm : (NC, NQ) von Mises 应力
+        
+        Returns
+        -------
+        dvm_dsigma : (NC, NQ, NS) von Mises 应力对各应力分量的偏导
+        """
+        NS = stress_penalized.shape[-1]
+
+        vm_safe = sigma_vm + 1e-12
+        
+        if NS == 3:
+            # 2D 平面应力: σ = [σ_x, σ_y, τ_xy]
+            sigma_x = stress_penalized[..., 0]
+            sigma_y = stress_penalized[..., 1]
+            tau_xy = stress_penalized[..., 2]
+
+            dvm_dsigma = bm.stack([
+                                (2.0 * sigma_x - sigma_y) / (2.0 * vm_safe),
+                                (2.0 * sigma_y - sigma_x) / (2.0 * vm_safe),
+                                (6.0 * tau_xy) / (2.0 * vm_safe)
+                            ], axis=-1) 
+            
+        elif NS == 6:
+            # 3D: σ = [σ_x, σ_y, σ_z, τ_xy, τ_yz, τ_zx]
+            sigma_x = stress_penalized[..., 0]
+            sigma_y = stress_penalized[..., 1]
+            sigma_z = stress_penalized[..., 2]
+            tau_xy = stress_penalized[..., 3]
+            tau_yz = stress_penalized[..., 4]
+            tau_zx = stress_penalized[..., 5]
+                        
+            dvm_dsigma = bm.stack([
+                                (2.0 * sigma_x - sigma_y - sigma_z) / (2.0 * vm_safe),
+                                (2.0 * sigma_y - sigma_x - sigma_z) / (2.0 * vm_safe),
+                                (2.0 * sigma_z - sigma_x - sigma_y) / (2.0 * vm_safe),
+                                (6.0 * tau_xy) / (2.0 * vm_safe),
+                                (6.0 * tau_yz) / (2.0 * vm_safe),
+                                (6.0 * tau_zx) / (2.0 * vm_safe)
+                            ], axis=-1)  
+        
+        else:
+            error_msg = f"Unsupported stress component number NS={NS} for von Mises derivative."
+            self._log_error(error_msg)
+        
+        return dvm_dsigma
+    
+    def _assemble_adjoint_load(self,
+                           dg_dsigma_vm: TensorLike,
+                           dvm_dsigma: TensorLike,
+                           eta_sigma: TensorLike,
+                        ) -> TensorLike:
+        """
+        组装伴随载荷向量
+        
+        L_m = Σ_{(e,i)∈Ω_m} (∂g_m/∂σ^vM) * η_σ * B^T * D_0 * (∂σ^vM/∂σ)
+        
+        Parameters
+        ----------
+        dg_dsigma_vm : (n_clusters, n_points) P-norm 对 von Mises 应力的偏导
+        dvm_dsigma : (NC, NQ, NS) von Mises 对应力分量的偏导
+        eta_sigma : (NC, ) 应力惩罚因子
+        
+        Returns
+        -------
+        L : (n_clusters, n_gdof) 伴随载荷向量
+        """
+        material = self._analyzer.material
+        tensor_space = self._analyzer.tensor_space
+
+        D0 = material.elastic_matrix()[0, 0]  # (NS, NS)
+        B = self._analyzer.compute_strain_displacement_matrix()  # (NC, NQ, NS, n_ldof)
+
+        n_points = dg_dsigma_vm.shape[-1]
+        NQ = dvm_dsigma.shape[1]
+        n_gdof = tensor_space.number_of_global_dofs()
+
+        cell2dof = tensor_space.cell_to_dof()  # (NC, n_ldof)
+
+        dvm_dsigma_flat = dvm_dsigma.reshape(n_points, -1)  # (n_points, NS)
+        B_flat = B.reshape(n_points, B.shape[-2], -1)  # (n_points, NS, n_ldof)
+
+        # 计算 D_0 @ (∂σ^vM/∂σ)
+        D_dvm = bm.einsum('ij, pj -> pi', D0, dvm_dsigma_flat)  # (n_points, NS)
+
+        # 将 eta_sigma 从 (NC,) 扩展到 (n_points, ), 同一单元的所有积分点共享相同的惩罚因子
+        eta_expanded = bm.repeat(eta_sigma, NQ)  # (NC, ) -> (NC*NQ, ) = (n_points, )
+
+        # 计算 B^T @ D_0 @ (∂σ^vM/∂σ)
+        BT_D_dvm = bm.einsum('pij, pi -> pj', B_flat, D_dvm)  # (n_points, n_ldof)
+
+        # 乘以应力惩罚因子 η_σ * B^T @ D_0 @ (∂σ^vM/∂σ)
+        local_contrib = eta_expanded[:, None] * BT_D_dvm  # (n_points, n_ldof)
+
+        # 扩展 cell2dof：每个积分点对应其所在单元的自由度
+        cell2dof_expanded = bm.repeat(cell2dof, NQ, axis=0)  # (n_points, n_ldof)
+
+        # 初始化伴随载荷向量
+        L = bm.zeros((self._n_clusters, n_gdof), dtype=dg_dsigma_vm.dtype)
+
+        # 组装各聚类的伴随载荷
+        for m in range(self._n_clusters):
+            dg_m = dg_dsigma_vm[m, :]  # (n_points,)
+            weighted_contrib = dg_m[:, None] * local_contrib  # (n_points, n_ldof)
+            
+            indices = cell2dof_expanded.flatten()
+            values = weighted_contrib.flatten()
+            bm.add_at(L[m], indices, values)
+
+        return L
+
+
+
+
+
+        

@@ -307,7 +307,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                         "Please provide (E, nu) or (λ, μ).")
             self._log_error(error_msg)
         
-    def _compute_elastic_matrix(self):
+    def _compute_elastic_matrix(self) -> None:
         E = self._youngs_modulus
         nu = self._poisson_ratio
         lam = self._lame_lambda

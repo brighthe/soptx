@@ -536,7 +536,7 @@ class DensityTopOptTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 60.0, 0, 20.0]
         E, nu = 71000, 0.3
-        P = -1500
+        P = -750
         plane_type = 'plane_stress' 
 
         volume_fraction = 0.3

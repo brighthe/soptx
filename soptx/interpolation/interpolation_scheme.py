@@ -475,7 +475,7 @@ class MaterialInterpolationScheme(BaseLogged):
     def interpolate_stress(self, 
                         stress_solid: TensorLike, 
                         rho_val: Union[Function, TensorLike],
-                        integration_order: Optional[int] = None,
+                        return_stress_penalty: bool = False
                     ) -> TensorLike:
         """
         应力惩罚
@@ -490,7 +490,9 @@ class MaterialInterpolationScheme(BaseLogged):
             # rho_val.shape = (NC, )
             # stress_solid.shape = (NC, NQ, NS)
             rho_element = rho_val[:]
-            stress_penalized = bm.einsum('c, cqs -> cqs', rho_element ** q, stress_solid)
+            eta_sigma = rho_element ** q
+
+            stress_penalized = bm.einsum('c, cqs -> cqs', eta_sigma, stress_solid)
 
         elif self._density_location in ['node']:
             # rho_val.shape = (NN, )
@@ -502,7 +504,13 @@ class MaterialInterpolationScheme(BaseLogged):
             rho_sub_element = rho_val[:] # (NC, n_sub)
             stress_penalized = bm.einsum('cn, cnqs -> cnqs', rho_sub_element ** q, stress_solid)
         
-        return stress_penalized
+        if return_stress_penalty:
+            return {
+                'stress_penalized': stress_penalized,
+                'eta_sigma': eta_sigma,
+            }
+        else:
+            return stress_penalized
 
     ###########################################################################################################
     # 内部方法

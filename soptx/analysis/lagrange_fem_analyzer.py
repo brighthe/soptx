@@ -303,7 +303,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             self._F = F
 
-            # 2. Dirichlet 边界条件处理 - 强形式施加
+            #* 2. Dirichlet 边界条件处理 - 强形式施加 *#
             gd_uh = self._pde.dirichlet_bc
             threshold_uh = self._pde.is_dirichlet_boundary()
 
@@ -432,6 +432,65 @@ class LagrangeFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return {'displacement': uh}
+    
+    def solve_adjoint(self, 
+                    rhs: TensorLike,
+                    rho_val: Optional[Union[TensorLike, Function]] = None,
+                    **kwargs
+                ) -> TensorLike:
+        """
+        求解伴随方程 K @ λ = rhs
+        
+        Parameters
+        ----------
+        rhs : (n_gdof,) 或 (n_gdof, n_rhs) 伴随载荷向量 (支持批量求解)
+        rho_val : 密度场
+        
+        Returns
+        -------
+        adjoint_lambda : (n_gdof, n_rhs) 伴随变量
+        """
+        # 组装刚度矩阵
+        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+
+        # 获取 Dirichlet 边界自由度
+        gd = self._pde.dirichlet_bc
+        threshold = self._pde.is_dirichlet_boundary()
+        _, isBdDof = self._tensor_space.boundary_interpolate(
+                                        gd=gd,
+                                        threshold=threshold,
+                                        method='interp'
+                                    )
+        
+        # 先处理右端项（伴随问题边界条件为齐次，λ = 0）
+        rhs_bc = bm.copy(rhs)
+        rhs_bc[isBdDof, :] = 0.0
+
+        # 再处理刚度矩阵
+        K = self._apply_matrix(A=K0, isDDof=isBdDof)
+        
+        # 初始化结果
+        adjoint_lambda = bm.zeros_like(rhs_bc)
+        
+        # 求解
+        solver_type = kwargs.get('solver', self._solve_method)
+        
+        if solver_type in ['mumps', 'scipy']:
+            from fealpy.solver import spsolve
+            adjoint_lambda[:] = spsolve(K, rhs_bc, solver=solver_type)
+            
+        elif solver_type in ['cg']:
+            from fealpy.solver import cg
+            maxiter = kwargs.get('maxiter', 5000)
+            atol = kwargs.get('atol', 1e-12)
+            rtol = kwargs.get('rtol', 1e-12)
+            
+            adjoint_lambda[:], _ = cg(K.tocoo(), rhs_bc, 
+                                    batch_first=False,
+                                    atol=atol, rtol=rtol, 
+                                    maxit=maxiter, returninfo=True)
+        
+        return adjoint_lambda
 
     
     ###############################################################################################
@@ -795,12 +854,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 self._log_warning("拓扑优化模式下建议提供 rho_val 以计算惩罚后应力")
                 stress_for_vm = stress_solid
             else:
-                stress_penalized = self._interpolation_scheme.interpolate_stress(
+                penalty_data = self._interpolation_scheme.interpolate_stress(
                                                                         stress_solid=stress_solid,
-                                                                        rho_val=rho_val
+                                                                        rho_val=rho_val,
+                                                                        return_stress_penalty=True,
                                                                     )
-                result['stress_penalized'] = stress_penalized
-                stress_for_vm = stress_penalized
+                stress_for_vm = penalty_data['stress_penalized']
+                result['stress_penalized'] = stress_for_vm
+                result['eta_sigma'] = penalty_data['eta_sigma']
         else:
             stress_for_vm = stress_solid
         
