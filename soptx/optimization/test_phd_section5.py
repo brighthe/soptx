@@ -452,7 +452,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.4999 # 0.4999, 0.3
+        E, nu = 1, 0.3 # 0.4999, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -507,7 +507,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         assembly_method = 'fast'
         solve_method = 'mumps'
 
-        max_iterations = 500
+        max_iterations = 50
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
