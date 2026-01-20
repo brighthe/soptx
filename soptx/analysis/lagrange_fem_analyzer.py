@@ -868,21 +868,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 计算 von Mises 应力
         von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_for_vm)
         result['von_mises'] = von_mises
-
-        # 计算积分权重
-        density_location = self._interpolation_scheme.density_location
-        if density_location == 'element':
-            qf = self._mesh.quadrature_formula(integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights() 
-            
-            J = self._mesh.jacobi_matrix(bcs)
-            detJ = bm.abs(bm.linalg.det(J))  # (NC, NQ)
-            
-            weights = detJ * ws # (NC, NQ) 
-            result['weights'] = weights
-            
-        elif density_location == 'element_multiresolution':
-            pass
         
         # 每个单元取最大值
         if von_mises.ndim == 2:

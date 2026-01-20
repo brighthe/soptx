@@ -49,35 +49,67 @@ class StressConstraint(BaseLogged):
 
         # 积分权重缓存
         self._integration_weights = None
-    
-    def _compute_integration_weights(self) -> TensorLike:
-        """计算 P-norm 聚合所需的积分权重 detJ * w_q"""
-        if self._integration_weights is not None:
-            return self._integration_weights
-    
-        mesh = self._analyzer.disp_mesh
-        interpolation_scheme = self._analyzer.interpolation_scheme
-        integration_order = self._analyzer.integration_order
 
-        density_location = interpolation_scheme.density_location
-        if density_location == 'element':
-            qf = mesh.quadrature_formula(integration_order)
-            bcs, ws = qf.get_quadrature_points_and_weights() 
-            
-            if isinstance(mesh, SimplexMesh):
-                cm = mesh.entity_measure('cell')
-                weights = cm[:, None] * ws  # (NC, NQ)
-            else:
-                J = mesh.jacobi_matrix(bcs)
-                detJ = bm.abs(bm.linalg.det(J))  # (NC, NQ)
-                weights = detJ * ws # (NC, NQ) 
-            
-        elif density_location == 'element_multiresolution':
-            pass
-
-        self._integration_weights = weights
+    def fun(self, 
+            density: Union[Function, TensorLike], 
+            state: Optional[Dict] = None,
+            iter_idx: Optional[int] = None,
+            **kwargs
+        ) -> TensorLike:
+        """计算应力约束函数值
         
-        return weights
+        Parameters
+        ----------
+        density : 物理密度场
+        state : 状态变量（位移场等）
+        iter_idx : 当前迭代次数，用于控制聚类更新频率
+        """
+        self._update_clustering(iter_idx=iter_idx, state=state, density=density)
+        
+        if self._cached_stress_state is not None:
+            sigma_vm = self._cached_stress_state['von_mises']
+        else:
+            stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
+            sigma_vm = stress_state['von_mises']
+            
+            self._cached_stress_state = stress_state
+
+        weights = self._compute_integration_weights()
+        
+        val = self._compute_clustered_pnorm(sigma_vm, weights)
+        
+        return val
+    
+    def _update_clustering(self, 
+                        iter_idx: int, 
+                        state: Dict, 
+                        density: TensorLike
+                    ) -> None:
+        """根据当前迭代步数和物理状态更新聚类"""
+        # 如果没有传入 iter_idx，默认不更新
+        if iter_idx is None:
+            if self._clustering_map is None:
+                iter_idx = 0  
+            else:
+                return  
+        
+        should_update = (self._recluster_freq > 0) and (iter_idx % self._recluster_freq == 0)
+        
+        if self._clustering_map is None:
+            should_update = True
+        
+        if should_update:
+            stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
+            sigma_vm = stress_state['von_mises'] # (NC, NQ)
+            weights = self._integration_weights  # (NC, NQ)
+
+            # 执行核心聚类算法 (排序、切分等)
+            self._perform_clustering_logic(sigma_vm, weights)
+
+            self._cached_stress_state = stress_state
+        
+        else:
+            self._cached_stress_state = None
 
     def _perform_clustering_logic(self, sigma_vm: TensorLike, weights: TensorLike) -> None:
         """
@@ -140,26 +172,35 @@ class StressConstraint(BaseLogged):
         # 更新类内部状态
         self._clustering_map = new_map
         self._cluster_weight_sums = cluster_weight_sums  # 缓存分母
-        
-    def update_clustering(self, iter_idx: int, state: Dict, density: TensorLike) -> None:
-        """根据当前迭代步数和物理状态更新聚类"""
-        should_update = (self._recluster_freq > 0) and (iter_idx % self._recluster_freq == 0)
-        
-        if self._clustering_map is None:
-            should_update = True
-        
-        if should_update:
-            stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
-            sigma_vm = stress_state['von_mises'] # (NC, NQ)
-            weights = self._integration_weights  # (NC, NQ)
+    
+    def _compute_integration_weights(self) -> TensorLike:
+        """计算 P-norm 聚合所需的积分权重 detJ * w_q"""
+        if self._integration_weights is not None:
+            return self._integration_weights
+    
+        mesh = self._analyzer.disp_mesh
+        interpolation_scheme = self._analyzer.interpolation_scheme
+        integration_order = self._analyzer.integration_order
 
-            # 执行核心聚类算法 (排序、切分等)
-            self._perform_clustering_logic(sigma_vm, weights)
+        density_location = interpolation_scheme.density_location
+        if density_location == 'element':
+            qf = mesh.quadrature_formula(integration_order)
+            bcs, ws = qf.get_quadrature_points_and_weights() 
+            
+            if isinstance(mesh, SimplexMesh):
+                cm = mesh.entity_measure('cell')
+                weights = cm[:, None] * ws  # (NC, NQ)
+            else:
+                J = mesh.jacobi_matrix(bcs)
+                detJ = bm.abs(bm.linalg.det(J))  # (NC, NQ)
+                weights = detJ * ws # (NC, NQ) 
+            
+        elif density_location == 'element_multiresolution':
+            pass
 
-            self._cached_stress_state = stress_state
+        self._integration_weights = weights
         
-        else:
-            self._cached_stress_state = None
+        return weights
         
     def _compute_clustered_pnorm(self, 
                                 sigma_vm: TensorLike,
@@ -209,29 +250,7 @@ class StressConstraint(BaseLogged):
         
         # 约束值
         return pnorm_normalized - 1.0
-
-    def fun(self, 
-            density: Union[Function, TensorLike], 
-            state: Optional[Dict] = None,
-            **kwargs
-        ) -> TensorLike:
-        """计算应力约束函数值"""
-        sigma_vm = None
-        weights = None
-        
-        if hasattr(self, '_cached_stress_state') and self._cached_stress_state is not None:
-            sigma_vm = self._cached_stress_state['von_mises']
-            weights = self._cached_stress_state['weights']
-
-        if sigma_vm is None:
-            stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
-            sigma_vm = stress_state['von_mises']
-            weights = stress_state['weights']
-
-        # 计算 P-norm
-        val = self._compute_clustered_pnorm(sigma_vm, weights) # (n_clusterm, )
-        
-        return val
+       
     
     def jac(self, 
             density: Union[Function, TensorLike], 
@@ -264,8 +283,9 @@ class StressConstraint(BaseLogged):
         else:
             stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
 
+        weights = self._integration_weights        # (NC, NQ)
+
         sigma_vm = stress_state['von_mises']     # (NC, NQ)
-        weights = stress_state['weights']        # (NC, NQ)
         eta_sigma = stress_state['eta_sigma']    # (NC, )
         stress_penalized  = stress_state['stress_penalized']     # (NC, NQ, NS)
 

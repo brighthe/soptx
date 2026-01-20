@@ -362,16 +362,16 @@ class MMAOptimizer(BaseLogged):
             if enable_timing:
                 t.send('位移场求解')
 
-            #TODO ==================== 动态约束状态更新 ====================
-            for constraint in self._constraints:
-                if hasattr(constraint, 'update_clustering'):
-                    constraint.update_clustering(iter_idx=iter_idx, state=state, density=rho_phys)
+            # #TODO ==================== 动态约束状态更新 ====================
+            # for constraint in self._constraints:
+            #     if hasattr(constraint, 'update_clustering'):
+            #         constraint.update_clustering(iter_idx=iter_idx, state=state, density=rho_phys)
             
-                if enable_timing:
-                    t.send('应力聚类更新') 
+            #     if enable_timing:
+            #         t.send('应力聚类更新') 
 
             #TODO ==================== 目标函数计算 ====================
-            obj_val_raw = self._objective.fun(density=rho_phys, state=state)
+            obj_val_raw = self._objective.fun(density=rho_phys, state=state, iter_idx=iter_idx)
             # 动态重置缩放因子
             if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
                 obj0 = float(obj_val_raw.item()) 
