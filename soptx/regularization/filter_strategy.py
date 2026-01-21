@@ -355,11 +355,26 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         obj_grad_dv = self._measure_weight * temp
 
         return obj_grad_dv
-
+    
     def filter_constraint_sensitivities(self, 
-                                    design_variable: TensorLike, 
-                                    con_grad_rho: TensorLike
-                                ) -> TensorLike:
+                                design_variable: TensorLike, 
+                                con_grad_rho: TensorLike
+                            ) -> TensorLike:
+        # 多约束情况
+        if con_grad_rho.ndim == 2:
+            n_con = con_grad_rho.shape[0]
+            con_grad_dv = bm.zeros_like(con_grad_rho)
+            for i in range(n_con):
+                con_grad_dv[i, :] = self._filter_single_constraint_sensitivity(design_variable, con_grad_rho[i, :])
+            return con_grad_dv
+        
+        # 单约束情况
+        return self._filter_single_constraint_sensitivity(design_variable, con_grad_rho)
+
+    def _filter_single_constraint_sensitivity(self, 
+                                            design_variable: TensorLike, 
+                                            con_grad_rho: TensorLike
+                                        ) -> TensorLike:
         if self._density_location == 'element_multiresolution':
             # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
             n_sub = con_grad_rho.shape[-1]

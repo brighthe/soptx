@@ -264,9 +264,22 @@ class MMAOptimizer(BaseLogged):
         if current_penalty != interpolation_scheme.penalty_factor:
             interpolation_scheme.penalty_factor = current_penalty
 
+    def _count_total_constraints(self) -> int:
+        """计算所有约束的总数"""
+        total = 0
+        for constraint in self._constraints:
+            if isinstance(constraint, VolumeConstraint):
+                total += 1
+            elif isinstance(constraint, StressConstraint):
+                total += constraint._n_clusters  
+            else:
+                total += 1 
+        return total
+
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
+                is_store_stress: bool = False,
                 enable_timing: bool = False,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
@@ -284,7 +297,7 @@ class MMAOptimizer(BaseLogged):
         interpolation_scheme = analyzer.interpolation_scheme
 
         # ==================== 问题规模参数初始化 ====================
-        m = len(self._constraints)
+        m = self._count_total_constraints()
         n = design_variable.shape[0]
         self.options._initialize_problem_params(m, n)
 
@@ -362,16 +375,8 @@ class MMAOptimizer(BaseLogged):
             if enable_timing:
                 t.send('位移场求解')
 
-            # #TODO ==================== 动态约束状态更新 ====================
-            # for constraint in self._constraints:
-            #     if hasattr(constraint, 'update_clustering'):
-            #         constraint.update_clustering(iter_idx=iter_idx, state=state, density=rho_phys)
-            
-            #     if enable_timing:
-            #         t.send('应力聚类更新') 
-
             #TODO ==================== 目标函数计算 ====================
-            obj_val_raw = self._objective.fun(density=rho_phys, state=state, iter_idx=iter_idx)
+            obj_val_raw = self._objective.fun(density=rho_phys, state=state)
             # 动态重置缩放因子
             if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
                 obj0 = float(obj_val_raw.item()) 
@@ -406,31 +411,38 @@ class MMAOptimizer(BaseLogged):
             con_grads_dv = []
 
             for constraint in self._constraints:
-                val = constraint.fun(density=rho_phys, state=state)
+                val = constraint.fun(density=rho_phys, state=state, iter_idx=iter_idx)
                 # 相对于物理密度的灵敏度
                 grad_rho = constraint.jac(density=rho_phys, state=state)
                 # 相对于设计变量的灵敏度
                 grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=grad_rho)
 
                 if passive_mask is not None:
-                    grad_dv[passive_mask] = 0.0
+                    if grad_dv.ndim == 1:
+                        grad_dv[passive_mask] = 0.0
+                    else:
+                        grad_dv[:, passive_mask] = 0.0
 
                 val_norm, grad_norm = constraint.normalize(val, grad_dv)
 
-                con_vals.append(val_norm)
-                con_grads_dv.append(grad_norm)
+                if val_norm.ndim == 0:
+                    val_flat = val_norm.reshape(1)
+                    grad_flat = grad_norm.reshape(1, -1)  # (1, n)
+                elif val_norm.ndim == 1:
+                    val_flat = val_norm  # (n_clusters,)
+                    grad_flat = grad_norm if grad_norm.ndim == 2 else grad_norm.reshape(1, -1)  # (n_clusters, n)
+                else:
+                    raise ValueError(f"Unexpected constraint value shape: {val_norm.shape}")
+
+                con_vals.append(val_flat)
+                con_grads_dv.append(grad_flat)
 
             if enable_timing:
                 t.send('约束函数灵敏度分析')
             
             #TODO ==================== MMA 子问题求解 ====================
-            fval = bm.stack(con_vals).reshape(m, 1)       # (m, 1)
-            dfdx = bm.stack(con_grads_dv).reshape(m, n)   # (m, n)
-            # # MMA 算法: 
-            # # 标准化约束函数及其梯度
-            # cm = self._filter._mesh.entity_measure('cell')
-            # fval = con_val / (self._constraint.volume_fraction * bm.sum(cm))
-            # dfdx = con_grad_dv[:, None].T / (self._constraint.volume_fraction * bm.sum(cm))
+            fval = bm.concatenate(con_vals).reshape(-1, 1)  # (m, 1)
+            dfdx = bm.concatenate(con_grads_dv, axis=0)     # (m, n)
 
             # 求解子问题
             dv_new = self._solve_subproblem(
@@ -466,18 +478,34 @@ class MMAOptimizer(BaseLogged):
             dv = dv_new
                 
             # 当前体积分数
-            volfrac = self._constraint.get_volume_fraction(rho_phys)
+            volfrac = None
+            for constraint in self._constraints:
+                if hasattr(constraint, 'get_volume_fraction'):
+                    volfrac = constraint.get_volume_fraction(rho_phys)
+                    break
 
             # 记录当前迭代信息
             iteration_time = time() - start_time
 
-            history.log_iteration(iter_idx=iter_idx, 
+            von_mises_stress = None
+            if is_store_stress:
+                stress_state = analyzer.compute_stress_state(
+                                        state=state,
+                                        rho_val=rho_phys,
+                                    )
+                von_mises_stress = stress_state['von_mises_max']
+                if enable_timing:
+                    t.send('von Mises 应力计算')
+
+            self.history.log_iteration(iter_idx=iter_idx, 
                                 obj_val=obj_val_raw, 
                                 volfrac=volfrac, 
                                 change=change,
                                 penalty_factor=current_penalty, 
                                 time_cost=iteration_time, 
-                                physical_density=rho_phys)
+                                physical_density=rho_phys,
+                                von_mises_stress=von_mises_stress
+                            )
             
             #TODO Beta 更新后的状态重置
             beta_updated = False 
@@ -510,9 +538,9 @@ class MMAOptimizer(BaseLogged):
             )
                 
         # 打印时间统计信息
-        history.print_time_statistics()
+        self.history.print_time_statistics()
         
-        return rho_phys, history
+        return rho_phys, self.history
         
     def _update_asymptotes(self, 
                           xval: TensorLike, 

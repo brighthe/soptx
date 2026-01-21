@@ -481,15 +481,9 @@ class MaterialInterpolationScheme(BaseLogged):
     def interpolate_stress(self, 
                         stress_solid: TensorLike, 
                         rho_val: Union[Function, TensorLike],
-                        return_stress_penalty: bool = False
+                        return_stress_penalty: bool = True
                     ) -> TensorLike:
-        """
-        应力惩罚
-
-        Parameters
-        ----------
-        stress_solid : 实体应力张量
-        """
+        """应力惩罚"""
         q = self._options['stress_penalty_factor']
         
         if self._density_location in ['element']:
@@ -512,11 +506,54 @@ class MaterialInterpolationScheme(BaseLogged):
         
         if return_stress_penalty:
             return {
-                'stress_penalized': stress_penalized,
-                'eta_sigma': eta_sigma,
+                'eta_sigma': eta_sigma,               # (NC, )
+                'stress_penalized': stress_penalized, # (NC, NQ, NS)
             }
         else:
             return stress_penalized
+        
+    @variantmethod('power_law') 
+    def interpolate_stress_derivative(self, 
+                        rho_val: Union[Function, TensorLike],
+                        stress_solid: Optional[TensorLike] = None,
+                    ) -> Dict:
+        """应力惩罚的导数"""
+        q = self._options['stress_penalty_factor']
+        
+        result = {}
+        
+        if self._density_location == 'element':
+            # rho_val.shape = (NC,)
+            rho_element = rho_val[:]
+            deta_sigma_drho = q * rho_element ** (q - 1)  # (NC,)
+            
+            result['deta_sigma_drho'] = deta_sigma_drho
+            
+            if stress_solid is not None:
+                # stress_solid.shape = (NC, NQ, NS)
+                # dstress_penalized_drho.shape = (NC, NQ, NS)
+                dstress_penalized_drho = bm.einsum('c, cqs -> cqs', deta_sigma_drho, stress_solid)
+                result['dstress_penalized_drho'] = dstress_penalized_drho
+
+        elif self._density_location == 'node':
+            # rho_val.shape = (NN,)
+            pass
+
+        elif self._density_location == 'element_multiresolution':
+            # rho_val.shape = (NC, n_sub)
+            rho_sub_element = rho_val[:]
+            deta_sigma_drho = q * rho_sub_element ** (q - 1)  # (NC, n_sub)
+            
+            result['deta_sigma_drho'] = deta_sigma_drho
+            
+            if stress_solid is not None:
+                # stress_solid.shape = (NC, n_sub, NQ, NS)
+                # dstress_penalized_drho.shape = (NC, n_sub, NQ, NS)
+                dstress_penalized_drho = bm.einsum('cn, cnqs -> cnqs', deta_sigma_drho, stress_solid)
+                result['dstress_penalized_drho'] = dstress_penalized_drho
+        
+        return result
+    
 
     ###########################################################################################################
     # 内部方法

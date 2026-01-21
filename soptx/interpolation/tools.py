@@ -6,7 +6,6 @@ from fealpy.mesh import QuadrangleMesh, HomogeneousMesh
 from fealpy.functionspace import Function
 
 from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
-from soptx.interpolation.space import ShepardFunction
 
 
 def get_barycentric_coordinates(nx: int, ny: int) -> Tuple[Tuple[TensorLike, TensorLike], TensorLike]:
