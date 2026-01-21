@@ -457,7 +457,8 @@ class MaterialInterpolationScheme(BaseLogged):
             dE_rho = p * rho_interp ** (p - 1) * (E0 - Emin)
             results.append(dE_rho)
 
-        if 'nu' in target_variables and material.is_incompressible:
+        # if 'nu' in target_variables and material.is_incompressible:
+        if 'nu' in target_variables:
             p_nu = self._options.get('nu_penalty_factor', 1.0) # 默认为 1.0
             nu0 = material.poisson_ratio
             nu_void = self._options.get('void_poisson_ratio', 0.3)

@@ -106,25 +106,20 @@ def save_optimization_history(mesh: HomogeneousMesh,
     if save_path is None:
         return
     
-    if history.von_mises_stresses is not None:
-        #TODO 不对 
-        for i, physical_density, von_mises_stresses in zip(range(len(history.physical_densities)), 
-                                                    history.physical_densities, 
-                                                    history.von_mises_stresses):
-            if density_location in ['element']:
-                # 单分辨率单元密度情况：形状为 (NC, )
-                mesh.celldata['density'] = physical_density
-                mesh.celldata['von_mises_max'] = von_mises_stresses
-            
-            elif density_location in ['element_multiresolution']:
-                pass
-            
+    has_stress = (history.von_mises_stresses is not None)
+    
+    if has_stress:
+        iterator = zip(history.physical_densities, history.von_mises_stresses)
     else:
-        for i, physical_density in enumerate(history.physical_densities):
+        iterator = zip(history.physical_densities, [None]*len(history.physical_densities))
 
-            if density_location in ['element']:
-                # 单分辨率单元密度情况：形状为 (NC, )
-                mesh.celldata['density'] = physical_density
+    for i, (physical_density, von_mises_stress) in enumerate(iterator):
+        if density_location in ['element']:
+            # 单分辨率单元密度情况：形状为 (NC, )
+            mesh.celldata['density'] = physical_density
+            
+            if von_mises_stress is not None:
+                mesh.celldata['von_mises'] = von_mises_stress
 
             elif density_location in ['node']:
                 # 单分辨率节点密度情况：形状为 (NN, )
@@ -150,10 +145,10 @@ def save_optimization_history(mesh: HomogeneousMesh,
             else:
                 raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
 
-    if isinstance(mesh, StructuredMesh):
-        mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
-    else:  
-        mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
+        if isinstance(mesh, StructuredMesh):
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
+        else:  
+            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
 
 def plot_optimization_history(history, save_path=None, show=True, title=None, 
                             fontsize=20, figsize=(14, 10), linewidth=2.5,

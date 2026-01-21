@@ -452,7 +452,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.3 # 0.4999, 0.3
+        E, nu = 1, 0.4999 # 0.4999, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -473,7 +473,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         #* 轴承装置结构 bearing_device_2d
         '''
         t = -8e-2
-        E, nu = 1, 0.4999 # 0.3, 4999
+        E, nu = 1, 0.4999 # 0.3, 0.4999
         domain = [0, 120, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -491,7 +491,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         volume_fraction = 0.35
         '''
 
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         interpolation_method = 'msimp'
@@ -507,7 +507,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         assembly_method = 'fast'
         solve_method = 'mumps'
 
-        max_iterations = 50
+        max_iterations = 500
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
@@ -607,7 +607,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec5_6_2_lfem_k3_04999")
+        save_path = Path(f"{base_dir}/test_subsec5_6_3_lfem")
         save_path.mkdir(parents=True, exist_ok=True)
         
         save_optimization_history(mesh=design_variable_mesh, 
@@ -623,9 +623,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_3_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
-        '''
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.3
+        E, nu = 1, 0.5
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_stress, plane_strain
 
@@ -641,11 +640,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri'
 
         volume_fraction = 0.3
-        '''
-
+        
         #* 轴承装置结构 bearing_device_2d
+        '''
         t = -8e-2
-        E, nu = 1, 0.3
+        E, nu = 1, 0.5
         domain = [0, 120, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -661,6 +660,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri' 
 
         volume_fraction = 0.35
+        '''
 
         space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
