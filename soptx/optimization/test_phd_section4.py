@@ -336,7 +336,7 @@ class DensityTopOptTest(BaseLogged):
         f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
         f"过滤类型={filter_type}, 过滤半径={rmin}, ")
             
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=False)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
@@ -547,7 +547,7 @@ class DensityTopOptTest(BaseLogged):
         recluster_freq = 1
 
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 500
+        max_iterations = 200
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
@@ -703,12 +703,12 @@ class DensityTopOptTest(BaseLogged):
             f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
             f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
             f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
-            f"体积分数约束={volume_fraction}, \n"
+            f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数约束={volume_fraction}, \n"
             f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
             f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
@@ -728,5 +728,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_2_mbb_beam')
+    test.run.set('test_subsec4_6_5_half_mbb_beam')
     rho_opt, history = test.run()

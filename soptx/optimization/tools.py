@@ -108,7 +108,7 @@ def save_optimization_history(mesh: HomogeneousMesh,
     
     has_stress = (history.von_mises_stresses is not None)
     
-    if has_stress:
+    if history.von_mises_stresses:
         iterator = zip(history.physical_densities, history.von_mises_stresses)
     else:
         iterator = zip(history.physical_densities, [None]*len(history.physical_densities))
@@ -121,29 +121,29 @@ def save_optimization_history(mesh: HomogeneousMesh,
             if von_mises_stress is not None:
                 mesh.celldata['von_mises'] = von_mises_stress
 
-            elif density_location in ['node']:
-                # 单分辨率节点密度情况：形状为 (NN, )
-                mesh.nodedata['density'] = physical_density
+        elif density_location in ['node']:
+            # 单分辨率节点密度情况：形状为 (NN, )
+            mesh.nodedata['density'] = physical_density
 
-            elif density_location in ['element_multiresolution']:
-                # 多分辨率单元密度情况：形状为 (NC, n_sub)
-                from soptx.analysis.utils import reshape_multiresolution_data
-                n_sub = physical_density.shape[-1]
-                n_sub_x, n_sub_y = int(bm.sqrt(n_sub)), int(bm.sqrt(n_sub))
-                nx_displacement, ny_displacement = int(mesh.meshdata['nx'] / n_sub_x), int(mesh.meshdata['ny'] / n_sub_y)
+        elif density_location in ['element_multiresolution']:
+            # 多分辨率单元密度情况：形状为 (NC, n_sub)
+            from soptx.analysis.utils import reshape_multiresolution_data
+            n_sub = physical_density.shape[-1]
+            n_sub_x, n_sub_y = int(bm.sqrt(n_sub)), int(bm.sqrt(n_sub))
+            nx_displacement, ny_displacement = int(mesh.meshdata['nx'] / n_sub_x), int(mesh.meshdata['ny'] / n_sub_y)
 
-                rho_phys = reshape_multiresolution_data(nx=nx_displacement, 
-                                                        ny=ny_displacement, 
-                                                        data=physical_density) # (NC*n_sub, )
+            rho_phys = reshape_multiresolution_data(nx=nx_displacement, 
+                                                    ny=ny_displacement, 
+                                                    data=physical_density) # (NC*n_sub, )
 
-                mesh.celldata['density'] = rho_phys
+            mesh.celldata['density'] = rho_phys
 
-            elif density_location in ['node_multiresolution']:
-                # 多分辨率节点密度情况：形状为 (NN, )
-                mesh.nodedata['density'] = physical_density
+        elif density_location in ['node_multiresolution']:
+            # 多分辨率节点密度情况：形状为 (NN, )
+            mesh.nodedata['density'] = physical_density
 
-            else:
-                raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
+        else:
+            raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
 
         if isinstance(mesh, StructuredMesh):
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")

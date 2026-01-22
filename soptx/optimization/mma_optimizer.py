@@ -377,14 +377,38 @@ class MMAOptimizer(BaseLogged):
 
             #TODO ==================== 目标函数计算 ====================
             obj_val_raw = self._objective.fun(density=rho_phys, state=state)
-            # 动态重置缩放因子
-            if self._filter._filter_type == 'projection' and self._obj_scale_factor is None:
+
+            # 动态初始化缩放因子
+            if self._obj_scale_factor is None:
+                # 1. 检查是否存在应力约束
+                has_stress_constraint = False
+                for constraint in self._constraints:
+                    if isinstance(constraint, StressConstraint):
+                        has_stress_constraint = True
+                        break
+                
                 obj0 = float(obj_val_raw.item()) 
                 denom = max(abs(obj0), 1e-10)
-                self._obj_scale_factor = min(1e6, 10.0 / denom)
-                self._log_info(f"Objective scaling factor (re)initialized to: {self._obj_scale_factor:.4e}")
-            elif self._obj_scale_factor is None:
-                self._obj_scale_factor = 1.0
+
+                # 情况 A: 存在应力约束 -> 强制缩放至 1.0 以平衡梯度量级
+                if has_stress_constraint:
+                    target_initial_val = 1.0
+                    self._obj_scale_factor = min(1e6, target_initial_val / denom)
+                    self._log_info(f"Stress constraint detected. Objective scaling enabled: "
+                                   f"{self._obj_scale_factor:.4e} (Target: {target_initial_val})")
+                
+                # 情况 B: 无应力约束，但使用投影滤波 -> 维持原有逻辑 (缩放至 10.0)
+                elif self._filter._filter_type == 'projection':
+                    target_initial_val = 10.0
+                    self._obj_scale_factor = min(1e6, target_initial_val / denom)
+                    self._log_info(f"Projection filter detected. Objective scaling enabled: "
+                                   f"{self._obj_scale_factor:.4e} (Target: {target_initial_val})")
+                
+                # 情况 C: 其他情况 (如普通体积约束) -> 保持默认 1.0
+                else:
+                    self._obj_scale_factor = 1.0
+                    self._log_info(f"Default objective scaling: {self._obj_scale_factor:.4e}")
+
             # 目标函数应用缩放因子
             obj_val = obj_val_raw * self._obj_scale_factor
 
@@ -439,6 +463,13 @@ class MMAOptimizer(BaseLogged):
 
             if enable_timing:
                 t.send('约束函数灵敏度分析')
+
+            print(f"柔顺度目标函数:{obj_val}")
+            print(f"柔顺度梯度平均值:{bm.mean(obj_grad_dv)}")
+            print(f"体积约束:{con_vals[0]}")
+            print(f"体积约束梯度平均值:{bm.mean(con_grads_dv[0])}")
+            print(f"应力约束:{con_vals[1:]}")
+            print(f"应力约束梯度平均值:{bm.mean(con_grads_dv[1:])}")
             
             #TODO ==================== MMA 子问题求解 ====================
             fval = bm.concatenate(con_vals).reshape(-1, 1)  # (m, 1)
