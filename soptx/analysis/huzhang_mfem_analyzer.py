@@ -163,29 +163,30 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         """组装应力矩阵 A_σσ"""
         space_sigma = self._huzhang_space
 
-        material_params = self._interpolation_scheme.interpolate_material(
-                                        material=self._material,
-                                        rho_val=rho_val,
-                                        integration_order=self._integration_order,
-                                        displacement_mesh=self._mesh,
-                                )
+        if self._topopt_algorithm in ['density_based']:
+            material_params = self._interpolation_scheme.interpolate_material(
+                                            material=self._material,
+                                            rho_val=rho_val,
+                                            integration_order=self._integration_order,
+                                            displacement_mesh=self._mesh,
+                                    )
+            
+            if isinstance(material_params, tuple):
+                E_rho, nu_rho = material_params
+            else:
+                E_rho = material_params
+                nu_rho = self._material.poisson_ratio
         
-        if isinstance(material_params, tuple):
-            E_rho, nu_rho = material_params
-        else:
-            E_rho = material_params
-            nu_rho = self._material.poisson_ratio
-        
-        lambda0_rho, lambda1_rho = self._compute_compliance_coefficients(E_rho, nu_rho)
+            lambda0_rho, lambda1_rho = self._compute_compliance_coefficients(E_rho, nu_rho)
 
-        self._E_rho = E_rho
-        self._nu_rho = nu_rho
-        self._lambda0_rho = lambda0_rho
-        self._lambda1_rho = lambda1_rho
+            self._E_rho = E_rho
+            self._nu_rho = nu_rho
+            self._lambda0_rho = lambda0_rho
+            self._lambda1_rho = lambda1_rho
 
-        # 更新密度系数
-        self._hzs_integrator.lambda0 = lambda0_rho
-        self._hzs_integrator.lambda1 = lambda1_rho
+            # 更新密度系数
+            self._hzs_integrator.lambda0 = lambda0_rho
+            self._hzs_integrator.lambda1 = lambda1_rho
 
         bform1 = BilinearForm(space_sigma)
         bform1.add_integrator(self._hzs_integrator)

@@ -832,7 +832,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             - 'stress_penalized': 惩罚后应力
             - 'von_mises': von Mises 等效应力 (NC, NQ) 或 (NC, n_sub, NQ)
             - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
-        """
+        """        
         if integration_order is None:
             integration_order = self._integration_order
 

@@ -113,7 +113,7 @@ class OCOptimizer(BaseLogged):
                 design_variable: Union[Function, TensorLike],
                 density_distribution: Union[Function, TensorLike],
                 enable_timing: bool = False,
-                is_store_stress: bool = True,
+                is_store_stress: bool = False,
                 **kwargs
             ) -> Tuple[TensorLike, OptimizationHistory]:
         """运行 OC 优化算法

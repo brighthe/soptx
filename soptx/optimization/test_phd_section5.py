@@ -42,25 +42,23 @@ class DensityTopOptHuZhangTest(BaseLogged):
         pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
 
         #* 第一类网格
-        pde.init_mesh.set('union_crisscross')
-        analysis_mesh = pde.init_mesh()
-        node = analysis_mesh.entity('node')
-        analysis_mesh.meshdata['corner'] = node[:-1]
+        # pde.init_mesh.set('union_crisscross')
+        # displacement_mesh = pde.init_mesh()
+        # node = displacement_mesh.entity('node')
+        # displacement_mesh.meshdata['corner'] = node[:-1]
 
         #* 第二类网格
-        # pde.init_mesh.set('uniform_crisscross_tri')
-        # nx, ny = 2, 2
-        # analysis_mesh = pde.init_mesh(nx=nx, ny=ny)
-        # node = analysis_mesh.entity('node')
-        # analysis_mesh.meshdata['corner'] = pde.mark_corners(node)
+        pde.init_mesh.set('uniform_crisscross_tri')
+        nx, ny = 2, 2
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
         # import matplotlib.pyplot as plt
         # fig = plt.figure()
         # axes = fig.add_subplot(111)
-        # analysis_mesh.add_plot(axes)
-        # analysis_mesh.find_node(axes, showindex=True)
-        # analysis_mesh.find_edge(axes, showindex=True)
-        # analysis_mesh.find_cell(axes, showindex=True)
+        # displacement_mesh.add_plot(axes)
+        # displacement_mesh.find_node(axes, showindex=True)
+        # displacement_mesh.find_edge(axes, showindex=True)
+        # displacement_mesh.find_cell(axes, showindex=True)
         # plt.show()
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -71,11 +69,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree*2 + 2
         use_relaxation = True
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"
-                    f"网格类型={analysis_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}, \n"
+                    f"网格类型={displacement_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}, \n"
                     f"是否使用松弛={use_relaxation}")
 
         maxit = 5
@@ -92,15 +90,15 @@ class DensityTopOptHuZhangTest(BaseLogged):
         for i in range(maxit):
             N = 2**(i+1) 
             huzhang_mfem_analyzer = HuZhangMFEMAnalyzer(
-                                                    mesh=analysis_mesh,
+                                                    disp_mesh=displacement_mesh,
                                                     pde=pde,
                                                     material=material,
+                                                    interpolation_scheme=None,
                                                     space_degree=space_degree,
                                                     integration_order=integration_order,
                                                     use_relaxation=use_relaxation,
-                                                    solve_method='mumps',
+                                                    solve_method='scipy', # 'scipy', 'mumps'
                                                     topopt_algorithm=None,
-                                                    interpolation_scheme=None,
                                                 )
             
             uh_dof = huzhang_mfem_analyzer._tensor_space.number_of_global_dofs()
@@ -110,13 +108,13 @@ class DensityTopOptHuZhangTest(BaseLogged):
             state = huzhang_mfem_analyzer.solve_state(rho_val=None)
             sigmah, uh = state['stress'], state['displacement']
 
-            e_uh_l2 = analysis_mesh.error(u=uh, 
+            e_uh_l2 = displacement_mesh.error(u=uh, 
                                     v=pde.displacement_solution,
                                     q=integration_order) # 位移 L2 范数误差
-            e_sigmah_l2 = analysis_mesh.error(u=sigmah, 
+            e_sigmah_l2 = displacement_mesh.error(u=sigmah, 
                                             v=pde.stress_solution, 
                                             q=integration_order) # 应力 L2 范数误差
-            e_div_sigmah_l2 = analysis_mesh.error(u=sigmah.div_value, 
+            e_div_sigmah_l2 = displacement_mesh.error(u=sigmah.div_value, 
                                                 v=pde.div_stress_solution, 
                                                 q=integration_order) # 应力散度 L2 范数误差
             e_sigmah_hdiv = bm.sqrt(e_sigmah_l2**2 + e_div_sigmah_l2**2) # 应力 H(div) 范数误差
@@ -128,14 +126,31 @@ class DensityTopOptHuZhangTest(BaseLogged):
             errorMatrix[3, i] = e_sigmah_hdiv
 
             if i < maxit - 1:
-                analysis_mesh.uniform_refine()
-
+                displacement_mesh.uniform_refine()
         print("errorMatrix:\n", errorType, "\n", errorMatrix)   
         print("NDof:", NDof)
         print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
         print("order_sigmah_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
         print("order_div_sigmah_l2:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
         print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[3, :-1] / errorMatrix[3, 1:]))
+
+        # 转换为积分点应力
+        stress_at_quad = huzhang_mfem_analyzer.extract_stress_at_quadrature_points(
+                                                        stress_dof=sigmah, 
+                                                        integration_order=integration_order
+                                                    )  # (NC, NQ, NS)
+                
+        # 计算 von Mises 应力
+        von_mises = material.calculate_von_mises_stress(stress_vector=stress_at_quad)
+
+        von_mises_max = bm.max(von_mises, axis=1)
+        displacement_mesh.celldata['von_mises'] = von_mises_max
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test")
+        save_path.mkdir(parents=True, exist_ok=True)
+        displacement_mesh.to_vtk(f"{save_path}/von_mises.vtu")
 
         import matplotlib.pyplot as plt
         from soptx.utils.show import showmultirate, show_error_table
@@ -623,7 +638,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_3_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
-        '''
         p1, p2 = -2.0, -2.0
         E, nu = 1, 0.5
         domain = [0, 80, 0, 40]
@@ -637,13 +651,13 @@ class DensityTopOptHuZhangTest(BaseLogged):
                     support_height_ratio=0.5,
                     plane_type=plane_type,
                 )
-        nx, ny = 80, 40
+        nx, ny = 8, 4
         mesh_type = 'uniform_crisscross_tri'
 
         volume_fraction = 0.3
-        '''
-        
+
         #* 轴承装置结构 bearing_device_2d
+        '''
         t = -8e-2
         E, nu = 1, 0.5
         domain = [0, 120, 0, 40]
@@ -661,6 +675,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri' 
 
         volume_fraction = 0.35
+        '''
 
         space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
@@ -782,7 +797,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
             f"孔洞泊松比={interpolation_scheme._options['void_poisson_ratio']} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
         
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
@@ -802,5 +817,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_3_hzmfem')
+    test.run.set('test_linear_elastic_huzhang')
     rho_opt, history = test.run()

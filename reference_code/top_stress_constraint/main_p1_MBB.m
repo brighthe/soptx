@@ -257,6 +257,11 @@ while change > 0.01 && loop < maxiter
     fval_mma = fval;          % 约束函数值 (m×1)
     dfdx_mma = dsi_dx;        % 约束函数梯度 (m×n)
 
+    fprintf('目标函数值 f0val_mma: %e\n', f0val_mma)
+    fprintf('目标函数梯度平均值 df0dx_mma: %e\n', mean(df0dx_mma))
+    fprintf('约束函数值 fval_mma: %e\n', fval_mma)
+    fprintf('约束函数梯度平均值 dfdx_mma: %e\n', mean(dfdx_mma(:)))
+
     % MMA 参数
     a0 = 1.0;
     a = zeros(m, 1);     
