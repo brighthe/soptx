@@ -87,6 +87,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     ##############################################################################################
 
     @property
+    def pde(self) -> PDEBase:
+        """获取当前的 PDE 对象"""
+        return self._pde
+
+    @property
     def disp_mesh(self) -> HomogeneousMesh:
         """获取当前的位移网格对象"""
         return self._mesh

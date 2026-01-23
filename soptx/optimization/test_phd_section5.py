@@ -651,7 +651,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                     support_height_ratio=0.5,
                     plane_type=plane_type,
                 )
-        nx, ny = 8, 4
+        nx, ny = 80, 40
         mesh_type = 'uniform_crisscross_tri'
 
         volume_fraction = 0.3

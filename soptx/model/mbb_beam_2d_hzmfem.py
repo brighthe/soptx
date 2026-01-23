@@ -3,7 +3,7 @@ from typing import List, Callable, Optional, Tuple
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
+from fealpy.mesh import QuadrangleMesh, TriangleMesh, HomogeneousMesh
 
 from soptx.model.pde_base import PDEBase  
 
@@ -239,40 +239,44 @@ class HalfMBBBeamRight2d(PDEBase):
         return val
     
     def get_passive_element_mask(self, 
-                                nx: int, 
-                                ny: int,
+                                mesh: HomogeneousMesh,
                                 load_region: tuple = (3, 2),
-                                support_region: tuple = (3, 3)
+                                support_region: tuple = (3, 3),
                             ) -> TensorLike:
-        """
-        生成被动单元掩码（适用于列主序的单元编号）
+        """生成被动单元掩码"""
+        # 1. 确定总单元数和父方格索引映射
+        nx , ny  = mesh.meshdata['nx'], mesh.meshdata['ny']
+
+        if isinstance(mesh, TriangleMesh):
+            n_elements = 2 * nx * ny
+            # 生成所有三角形的索引
+            el_indices = bm.arange(n_elements)
+            # 核心修正：将三角形索引映射回它所在的“父方格”索引
+            # 例如：三角形 0,1 -> 方格 0；三角形 2,3 -> 方格 1
+            grid_cell_indices = el_indices // 2
+        elif isinstance(mesh, QuadrangleMesh):
+            n_elements = nx * ny
+            el_indices = bm.arange(n_elements)
+            # 四边形本身就是方格，索引不变
+            grid_cell_indices = el_indices
+
+        # 2. 基于父方格索引计算空间坐标 (ix, iy)
+        # 注意：这里依然使用 ny，因为网格在几何上仍然是 nx 列 ny 行
+        ix = grid_cell_indices // ny  # 列号
+        iy = grid_cell_indices % ny   # 行号
         
-        Parameters
-        ----------
-        nx, ny : int
-            网格在 x, y 方向的单元数
-        load_region : tuple, optional
-            载荷点区域尺寸 (宽度, 高度)，默认 (3, 2)
-        support_region : tuple, optional
-            支座点区域尺寸 (宽度, 高度)，默认 (3, 3)
-            
-        Returns
-        -------
-        mask : TensorLike, shape (nx * ny,)
-            被动单元掩码，True 表示被动单元
-        """
-        n_elements = nx * ny
-        
-        el_indices = bm.arange(n_elements)
-        ix = el_indices // ny  # 列号 (x 方向)
-        iy = el_indices % ny   # 行号 (y 方向)
+        # 3. 区域判定 (逻辑与之前完全一致，因为是基于 ix, iy 判定的)
         
         # 载荷点区域（左上角）
         load_w, load_h = load_region
-        mask_load = (ix < load_w) & (iy >= ny - load_h)
+        # 增加边界保护
+        limit_load_w = min(load_w, nx)
+        mask_load = (ix < limit_load_w) & (iy >= ny - load_h)
         
         # 支座点区域（右下角）
         support_w, support_h = support_region
-        mask_support = (ix >= nx - support_w) & (iy < support_h)
+        # 增加边界保护
+        limit_support_w = max(nx - support_w, 0)
+        mask_support = (ix >= limit_support_w) & (iy < support_h)
         
         return mask_load | mask_support

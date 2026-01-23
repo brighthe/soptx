@@ -323,8 +323,9 @@ class MMAOptimizer(BaseLogged):
         passive_mask = None
         design_mesh = getattr(self._filter, 'design_mesh', None)
         if hasattr(pde, 'get_passive_element_mask'):
-            nx_design , ny_design  = design_mesh.meshdata['nx'], design_mesh.meshdata['ny']
-            passive_mask = pde.get_passive_element_mask(nx=nx_design, ny=ny_design)
+            # nx_design , ny_design  = design_mesh.meshdata['nx'], design_mesh.meshdata['ny']
+            # passive_mask = pde.get_passive_element_mask(nx=nx_design, ny=ny_design)
+            passive_mask = pde.get_passive_element_mask(mesh=design_mesh)
         # 将被动单元强制设为实体材料
         if passive_mask is not None:
             dv[passive_mask] = 1.0
