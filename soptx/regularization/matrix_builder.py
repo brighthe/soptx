@@ -409,7 +409,6 @@ class FilterMatrixBuilder:
         
         return H, Hs
 
-
     def _compute_weighted_matrix_3d(self,
                                     rmin: float, 
                                     nx: int, ny: int, nz: int, 

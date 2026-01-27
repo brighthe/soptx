@@ -138,7 +138,7 @@ class CantileverBeam3d(PDEBase):
     
     @cartesian
     def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        """均布线载荷 (类似二维点力)"""
+        """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._p)
@@ -152,7 +152,7 @@ class CantileverBeam3d(PDEBase):
         y = points[..., 1]
 
         on_right_boundary = bm.abs(x - domain[1]) < self._eps
-        on_bottom_boundary = bm.abs(y - domain[0]) < self._eps
+        on_bottom_boundary = bm.abs(y - domain[2]) < self._eps
         
         return on_right_boundary & on_bottom_boundary
     

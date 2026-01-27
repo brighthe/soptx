@@ -263,6 +263,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 ipoints_uh = space_uh.interpolation_points()
                 gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
 
+                # 动态计算节点数量, 将总力平均分配
+                num_load_nodes = bm.sum(isBdSDof)
+                if num_load_nodes > 0:
+                    gd_sigmah_val = gd_sigmah_val / num_load_nodes
+
                 F_sigmah = space_uh.function()
                 if space_uh.dof_priority:
                     F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
@@ -358,7 +363,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def solve_state(self, 
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     adjoint: bool = False,
-                    enable_timing: bool = False, 
+                    enable_timing: bool = True, 
                     **kwargs
                 ) -> Dict[str, Function]:
         t = None
@@ -440,7 +445,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 ) -> TensorLike:
         """
         求解伴随方程 K @ λ = rhs
-        
+        v
         Parameters
         ----------
         rhs : (n_gdof,) 或 (n_gdof, n_rhs) 伴随载荷向量 (支持批量求解)

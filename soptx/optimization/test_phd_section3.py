@@ -25,7 +25,7 @@ class DensityTopOptTest(BaseLogged):
         space_degree = 4
 
         mesh_type_quad = 'uniform_quad' # 'uniform_aligned_tri', 'uniform_quad'
-        from soptx.model.linear_elastic_2d import LagfemData2d2
+        from soptx.model.linear_elastic_2d_lfem import LagfemData2d2
         pde_quad = LagfemData2d2(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
         pde_quad.init_mesh.set(mesh_type_quad)
         nx, ny = 2, 2
@@ -64,18 +64,18 @@ class DensityTopOptTest(BaseLogged):
             N = 2**(i+1)
 
             lfa = LagrangeFEMAnalyzer(
-                                    mesh=mesh_quad,
+                                    disp_mesh=mesh_quad,
                                     pde=pde_quad, 
                                     material=material_quad, 
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method='standard',
-                                    solve_method='mumps',
+                                    solve_method='cg',
                                     topopt_algorithm=None,
                                     interpolation_scheme=None
                                 )
                     
-            uh = lfa.solve_displacement(rho_val=None)
+            uh = lfa.solve_state(rho_val=None)['displacement']
 
             NDof[i] = lfa.tensor_space.number_of_global_dofs()
             e_l2 = mesh_quad.error(uh, pde_quad.displacement_solution)
@@ -98,7 +98,7 @@ class DensityTopOptTest(BaseLogged):
             N = 2**(i+1)
 
             lfa = LagrangeFEMAnalyzer(
-                                    mesh=mesh_tri,
+                                    disp_mesh=mesh_tri,
                                     pde=pde_tri, 
                                     material=material_tri, 
                                     space_degree=space_degree,
@@ -1317,5 +1317,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_mbb_2d_subsection_3_6_2')
+    test.run.set('test_subsec3_6_2_linear_elastic_2d')
     rho_opt, history = test.run()

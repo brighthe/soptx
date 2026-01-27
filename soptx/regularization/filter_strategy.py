@@ -120,7 +120,11 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
         
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
-        self._H = H
+        H_device = H.data.device
+        if H_device != mesh.device:
+            self._H = H.device_put(mesh.device)
+        else:
+            self._H = H
         self._mesh = mesh
         self._density_location = density_location
 

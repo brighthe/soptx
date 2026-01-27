@@ -680,7 +680,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 ) -> TensorLike:
         t = None
         if enable_timing:
-            t = timer(f"矩阵组装")
+            t = timer(f"矩阵快速组装")
             next(t)
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
@@ -708,7 +708,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             A_yx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 0], cm)
 
         elif isinstance(mesh, TensorMesh):
-            #TODO 仅仅支持结构四边形网格
+            if enable_timing:
+                t.send('缓存部分')
             cm, JG, S = self.fetch_fast_assembly(space)
             A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 0], cm)  # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 1], cm) 
@@ -731,7 +732,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 A_zy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 1], cm)
             
             elif isinstance(mesh, TensorMesh):
-                #TODO 仅仅支持结构四边形网格
                 A_zz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 2], cm)
                 A_xz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 2], cm)
                 A_yz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 2], cm)
@@ -771,6 +771,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_23 = D01 * A_yz + D55 * A_zy
                 KK_31 = D01 * A_zx + D55 * A_xz
                 KK_32 = D01 * A_zy + D55 * A_yz
+
         # 单元密度情况, D 为单元均匀矩阵
         elif coef.shape == (NC, ):
             if GD == 2:
@@ -806,6 +807,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
                 KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
                 KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
+
         else:
             if space.dof_priority:
                 KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
@@ -861,30 +863,57 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         if isinstance(mesh, SimplexMesh):   
             glambda_x = mesh.grad_lambda()  # (NC, LDOF, GD)
             return cm, bcs, glambda_x, S
-        elif isinstance(mesh, StructuredMesh):
+        
+        elif isinstance(mesh, TensorMesh):
             JG = symbolic_int.compute_mapping(vertices=cell_vertices)  # (NC, GD, GD)
             return cm, bcs, JG, S
+        
         else:
             raise NotImplementedError("symbolic assembly for general meshes is not implemented yet.")
 
     @assembly.register('symbolic')
-    def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+    def assembly(self, 
+                space: TensorFunctionSpace,
+                enable_timing: bool = False
+            ) -> TensorLike:
+        t = None
+        if enable_timing:
+            t = timer(f"参考单元解析预计算组装")
+            next(t)
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
+
+        NC = mesh.number_of_cells()
+        GD = mesh.geo_dimension()
+        D0 = self._material.elastic_matrix()  # (1, 1, NS, NS)
+
+        # 不考虑相对密度: None; 相对单元密度: (NC, )
+        coef = self._coef
+        if coef is None:
+            D = D0[0, 0] # (NS, NS)
+        elif coef.shape == (NC, ):
+            D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # (NC, NS, NS)
+        else:
+            raise NotImplementedError("The fast assembly currently only supports")
         
         if isinstance(mesh, SimplexMesh):
             cm, bcs, glambda_x, S = self.fetch_symbolic_assembly(space)   
-            # 计算各方向的矩阵
+            if enable_timing:
+                t.send('缓存部分')
             A_xx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 0], cm)
             A_yy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 1], cm)
             A_xy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 1], cm)
             A_yx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 0], cm)
-        elif isinstance(mesh, StructuredMesh):
+        
+        elif isinstance(mesh, TensorMesh):
+            if enable_timing:
+                t.send('缓存部分')
             cm, bcs, JG, S = self.fetch_symbolic_assembly(space)
             A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 0], cm)
             A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 1], cm)
             A_xy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 1], cm)
             A_yx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 0], cm)   
+        
         else:
             raise NotImplementedError("symbolic assembly for general meshes is not implemented yet.")
         
@@ -896,101 +925,104 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 A_yz = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 2], cm)
                 A_zx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 0], cm)
                 A_zy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 1], cm)
-            elif isinstance(mesh, StructuredMesh):
+
+            elif isinstance(mesh, TensorMesh):
                 A_zz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 2], cm)
                 A_xz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 2], cm)
                 A_yz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 2], cm)
                 A_zx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 0], cm)
                 A_zy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 1], cm)
+
             else:
                 raise NotImplementedError("symbolic assembly for general meshes is not implemented yet.")
 
-        D = self.material.elastic_matrix(bcs)
-        if D.shape[1] != 1:
-            raise ValueError("assembly currently only supports elastic matrices "
-                            f"with shape (NC, 1, {2*GD}, {2*GD}) or (1, 1, {2*GD}, {2*GD}).")
-        
-        NC = mesh.number_of_cells()
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
+        # 区域内的相对密度恒定都为 1, D 为全局常数矩阵
+        if coef is None:
+            if GD == 2:
+                D00 = D[0, 0] # 2D: E/(1-ν²) 或 2μ+λ
+                D01 = D[0, 1] # 2D: νE/(1-ν²) 或 λ
+                D22 = D[2, 2] # 2D: E/2(1+ν) 或 μ
+                KK_11 = D00 * A_xx + D22 * A_yy
+                KK_22 = D00 * A_yy + D22 * A_xx
+                KK_12 = D01 * A_xy + D22 * A_yx
+                KK_21 = D01 * A_yx + D22 * A_xy
+            else:
+                D00 = D[0, 0]  # 2μ + λ
+                D01 = D[0, 1]  # λ
+                D55 = D[5, 5]  # μ
+                KK_11 = D00 * A_xx + D55 * (A_yy + A_zz)
+                KK_22 = D00 * A_yy + D55 * (A_xx + A_zz)
+                KK_33 = D00 * A_zz + D55 * (A_xx + A_yy)
+                KK_12 = D01 * A_xy + D55 * A_yx
+                KK_13 = D01 * A_xz + D55 * A_zx
+                KK_21 = D01 * A_yx + D55 * A_xy
+                KK_23 = D01 * A_yz + D55 * A_zy
+                KK_31 = D01 * A_zx + D55 * A_xz
+                KK_32 = D01 * A_zy + D55 * A_yz
+
+        # 单元密度情况, D 为单元均匀矩阵
+        elif coef.shape == (NC, ):
+            if GD == 2:
+                D00 = D[:, 0, 0]  # 2D: E/(1-ν²) 或 2μ+λ
+                D01 = D[:, 0, 1]  # 2D: νE/(1-ν²) 或 λ
+                D22 = D[:, 2, 2]  # 2D: E/2(1+ν) 或 μ
+                KK_11 = bm.einsum('c, cij -> cij', D00, A_xx) + bm.einsum('c, cij -> cij', D22, A_yy)
+                KK_22 = bm.einsum('c, cij -> cij', D00, A_yy) + bm.einsum('c, cij -> cij', D22, A_xx)
+                KK_12 = bm.einsum('c, cij -> cij', D01, A_xy) + bm.einsum('c, cij -> cij', D22, A_yx)
+                KK_21 = bm.einsum('c, cij -> cij', D01, A_yx) + bm.einsum('c, cij -> cij', D22, A_xy)
+            else:
+                D00 = D[:, 0, 0]  # 2μ + λ
+                D01 = D[:, 0, 1]  # λ
+                D55 = D[:, 5, 5]  # μ
+                KK_11 = bm.einsum('c, cij -> cij', D00, A_xx) + bm.einsum('c, cij -> cij', D55, (A_yy + A_zz))
+                KK_22 = bm.einsum('c, cij -> cij', D00, A_yy) + bm.einsum('c, cij -> cij', D55, (A_xx + A_zz))
+                KK_33 = bm.einsum('c, cij -> cij', D00, A_zz) + bm.einsum('c, cij -> cij', D55, (A_xx + A_yy))
+                KK_12 = bm.einsum('c, cij -> cij', D01, A_xy) + bm.einsum('c, cij -> cij', D55, A_yx)
+                KK_13 = bm.einsum('c, cij -> cij', D01, A_xz) + bm.einsum('c, cij -> cij', D55, A_zx)
+                KK_21 = bm.einsum('c, cij -> cij', D01, A_yx) + bm.einsum('c, cij -> cij', D55, A_xy)
+                KK_23 = bm.einsum('c, cij -> cij', D01, A_yz) + bm.einsum('c, cij -> cij', D55, A_zy)
+                KK_31 = bm.einsum('c, cij -> cij', D01, A_zx) + bm.einsum('c, cij -> cij', D55, A_xz)
+                KK_32 = bm.einsum('c, cij -> cij', D01, A_zy) + bm.einsum('c, cij -> cij', D55, A_yz)
+
         if GD == 2:
-            D00 = D[..., 0, 0, None]  # E / (1-\nu^2) * 1         or 2*\mu + \lambda
-            D01 = D[..., 0, 1, None]  # E / (1-\nu^2) * \nu       or \lambda
-            D22 = D[..., 2, 2, None]  # E / (1-\nu^2) * (1-nu)/2  or \mu
-
             if space.dof_priority:
-                # 填充对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), 
-                            D00 * A_xx + D22 * A_yy)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, KK.shape[1]), slice(ldof, KK.shape[1])), 
-                            D00 * A_yy + D22 * A_xx)
-                
-                # 填充非对角块
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, KK.shape[1])), 
-                            D01 * A_xy + D22 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, KK.shape[1]), slice(0, ldof)), 
-                            D01 * A_yx + D22 * A_xy)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(ldof, None)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, None)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, None), slice(0, ldof)), KK_21)
             else:
-                # 类似的填充方式，但使用不同的索引方式
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                            D00 * A_xx + D22 * A_yy)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                            D00 * A_yy + D22 * A_xx)
-                
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                            D01 * A_xy + D22 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                            D01 * A_yx + D22 * A_xy)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
+
         else:
-            D00 = D[..., 0, 0, None]  # 2μ + λ
-            D01 = D[..., 0, 1, None]  # λ
-            D55 = D[..., 5, 5, None]  # μ
-
             if space.dof_priority:
-                # Fill the diagonal part
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), 
-                                D00 * A_xx + D55 * A_yy + D55 * A_zz)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), 
-                                D00 * A_yy + D55 * A_xx + D55 * A_zz)
-                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), 
-                                D00 * A_zz + D55 * A_xx + D55 * A_yy)
-
-                # Fill the off-diagonal part
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), 
-                                D01 * A_xy + D55 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), 
-                                D01 * A_xz + D55 * A_zx)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), 
-                                D01 * A_yx + D55 * A_xy)
-                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(2 * ldof, None)), 
-                                D01 * A_yz + D55 * A_zy)
-                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(0, ldof)), 
-                                D01 * A_zx + D55 * A_xz)
-                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(ldof, 2 * ldof)), 
-                                D01 * A_zy + D55 * A_yz)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(0, ldof)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(ldof, 2 * ldof)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(2 * ldof, None)), KK_33)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(ldof, 2 * ldof)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(0, ldof), slice(2 * ldof, None)), KK_13)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(0, ldof)), KK_21)
+                KK = bm.set_at(KK, (slice(None), slice(ldof, 2 * ldof), slice(2 * ldof, None)), KK_23)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(0, ldof)), KK_31)
+                KK = bm.set_at(KK, (slice(None), slice(2 * ldof, None), slice(ldof, 2 * ldof)), KK_32)
             else:
-                # Fill the diagonal part
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                                (2 * D55 + D01) * A_xx + D55 * (A_yy + A_zz))
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                                (2 * D55 + D01) * A_yy + D55 * (A_xx + A_zz))
-                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-                                (2 * D55 + D01) * A_zz + D55 * (A_xx + A_yy))
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_22)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_33)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_12)
+                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_13)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_21)
+                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(2, KK.shape[2], GD)), KK_23)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_31)
+                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), KK_32)
 
-                # Fill the off-diagonal
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                                D01 * A_xy + D55 * A_yx)
-                KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-                                D01 * A_xz + D55 * A_zx)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                                D01 * A_yx + D55 * A_xy)
-                KK = bm.set_at(KK, (slice(None), slice(1, KK.shape[1], GD), slice(2, KK.shape[2], GD)), 
-                                D01 * A_yz + D55 * A_zy)
-                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(0, KK.shape[2], GD)), 
-                                D01 * A_zx + D55 * A_xz)
-                KK = bm.set_at(KK, (slice(None), slice(2, KK.shape[1], GD), slice(1, KK.shape[2], GD)), 
-                                D01 * A_zy + D55 * A_yz)
+        if enable_timing:
+            t.send('组装部分')
+            t.send(None)
 
         return KK
-    
