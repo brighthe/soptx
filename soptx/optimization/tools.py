@@ -144,7 +144,7 @@ def save_optimization_history(mesh: HomogeneousMesh,
 
         else:
             raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
-
+        
         if isinstance(mesh, StructuredMesh):
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
         else:  

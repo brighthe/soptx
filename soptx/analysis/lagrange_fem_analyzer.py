@@ -196,7 +196,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(self._integrator)
 
-        K = bform.assembly(format='csr')
+        K = bform.assembly(format='coo')
 
         self._K = K
 
@@ -329,7 +329,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 F = F - K.tocoo().matmul(uh_bd[:])
                 F[isBdDof] = uh_bd[isBdDof]
             
-            K = self._apply_matrix(A=K, isDDof=isBdDof)
+            K = self._apply_matrix(K, isDDof=isBdDof)
 
             return K, F
 
@@ -349,7 +349,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             F = F - K.matmul(uh_bd[:])
             F[isBdDof] = uh_bd[isBdDof]
 
-            K = self._apply_matrix(A=K, isDDof=isBdDof)
+            K = self._apply_matrix(K, isDDof=isBdDof)
 
             return K, F
 
@@ -363,7 +363,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def solve_state(self, 
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     adjoint: bool = False,
-                    enable_timing: bool = True, 
+                    enable_timing: bool = False, 
                     **kwargs
                 ) -> Dict[str, Function]:
         t = None
@@ -421,21 +421,36 @@ class LagrangeFEMAnalyzer(BaseLogged):
             atol = kwargs.get('atol', 1e-12)
             rtol = kwargs.get('rtol', 1e-12)
             x0 = kwargs.get('x0', None)
+
+            #? 需要使用 PyTorch 原始的稀疏矩阵, FEALPy 中的 CSRTensor 存在问题
+            K_row, K_col, K_data = K.row, K.col, K.data
+            import torch 
+            K_coo_torch = torch.sparse_coo_tensor(
+                                            indices=bm.stack([K_row, K_col]),
+                                            values=bm.tensor(K_data),
+                                            size=K.shape,
+                                            device=K.data.device
+                                        )
+            K_csr_torch = K_coo_torch.to_sparse_csr()
+
+            if enable_timing:
+                t.send('预备时间')
             
             # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
             #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-            uh[:], info = cg(K.tocoo(), F[:], x0=x0,
+            K._values = bm.copy(K._values)
+            uh[:], info = cg(K_csr_torch, F[:], x0=x0,
                             batch_first=False, 
                             atol=atol, rtol=rtol, 
                             maxit=maxiter, returninfo=True)
+            
+            if enable_timing:
+                t.send('求解 1')
+                t.send(None)
 
         else:
             self._log_error(f"未知的求解器类型: {solver_type}")
         
-        if enable_timing:
-            t.send('求解')
-            t.send(None)
-
         return {'displacement': uh}
     
     def solve_adjoint(self, 
@@ -472,7 +487,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         rhs_bc[isBdDof, :] = 0.0
 
         # 再处理刚度矩阵
-        K = self._apply_matrix(A=K0, isDDof=isBdDof)
+        K = self._apply_matrix(K0, isDDof=isBdDof)
         
         # 初始化结果
         adjoint_lambda = bm.zeros_like(rhs_bc)
@@ -787,41 +802,63 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 内部方法
     ##############################################################################################
 
+    def _apply_matrix(self, matrix, isDDof, check=True):
+        """Apply Dirichlet boundary condition to left-hand-size matrix only.
 
-    def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike) -> CSRTensor:
+        Parameters:
+            matrix (SparseTensor): The original left-hand-size sparse matrix\
+                of the linear system.
+            check (bool, optional): Whether to check the matrix. Defaults to True.
+
+        Returns:
+            SparseTensor: New adjusted left-hand-size matrix.
         """
-        FEALPy 中的 apply_matrix 使用了 D0@A@D0, 
-        不同后端下 @ 会使用大量的 for 循环, 这在 GPU 下非常缓慢 
-        """
-        isIDof = bm.logical_not(isDDof)
-        crow = A.crow
-        col = A.col
-        indices_context = bm.context(col)
-        ZERO = bm.array([0], **indices_context)
+        A = matrix
+        kwargs = A.values_context()
+        if isinstance(A, COOTensor):
+            indices = A.indices
+            remove_flag = bm.logical_or(
+                isDDof[indices[0, :]], isDDof[indices[1, :]]
+            )
+            retain_flag = bm.logical_not(remove_flag)
+            new_indices = indices[:, retain_flag]
+            new_values = A.values[..., retain_flag]
+            A = COOTensor(new_indices, new_values, A.sparse_shape)
 
-        nnz_per_row = crow[1:] - crow[:-1]
-        remain_flag = bm.repeat(isIDof, nnz_per_row) & isIDof[col] # 保留行列均为内部自由度的非零元素
-        rm_cumsum = bm.concat([ZERO, bm.cumsum(remain_flag, axis=0)], axis=0) # 被保留的非零元素数量累积
-        nnz_per_row = rm_cumsum[crow[1:]] - rm_cumsum[crow[:-1]] + isDDof # 计算每行的非零元素数量
+            index = bm.nonzero(isDDof)[0]
+            shape = new_values.shape[:-1] + (len(index), )
+            one_values = bm.ones(shape, **kwargs)
+            one_indices = bm.stack([index, index], axis=0)
+            A1 = COOTensor(one_indices, one_values, A.sparse_shape)
+            A = A.add(A1).coalesce()
 
-        new_crow = bm.cumsum(bm.concat([ZERO, nnz_per_row], axis=0), axis=0)
+        elif isinstance(A, CSRTensor):
+            isIDof = bm.logical_not(isDDof)
+            crow = A.crow
+            col = A.col
+            indices_context = bm.context(col)
+            ZERO = bm.array([0], **indices_context)
 
-        NNZ = new_crow[-1]
-        non_diag = bm.ones((NNZ,), dtype=bm.bool, device=bm.get_device(isDDof)) # Field: non-zero elements
-        loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
-        non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
+            nnz_per_row = crow[1:] - crow[:-1]
+            remain_flag = bm.repeat(isIDof, nnz_per_row) & isIDof[col] # 保留行列均为内部自由度的非零元素
+            rm_cumsum = bm.concat([ZERO, bm.cumsum(remain_flag, axis=0)], axis=0) # 被保留的非零元素数量累积
+            nnz_per_row = rm_cumsum[crow[1:]] - rm_cumsum[crow[:-1]] + isDDof # 计算每行的非零元素数量
 
-        # 找出所有边界DOF对应的行索引
-        bd_rows = bm.where(loc_flag)[0]
-        bd_rows = bm.astype(bd_rows, col.dtype)
-        new_col = bm.empty((NNZ,), **indices_context)
-        # 设置为相应行的边界 DOF 位置
-        new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)
-        # 设置非对角元素的列索引
-        new_col = bm.set_at(new_col, non_diag, col[remain_flag])
+            new_crow = bm.cumsum(bm.concat([ZERO, nnz_per_row], axis=0), axis=0)
 
-        new_values = bm.empty((NNZ,), **A.values_context())
-        new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], 1.)
-        new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
+            NNZ = new_crow[-1]
+            non_diag = bm.ones((NNZ,), dtype=bm.bool, device=bm.get_device(isDDof)) # Field: non-zero elements
+            loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
+            non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
 
-        return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
+            new_col = bm.empty((NNZ,), **indices_context)
+            new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], self.boundary_dof_index)
+            new_col = bm.set_at(new_col, non_diag, col[remain_flag])
+
+            new_values = bm.empty((NNZ,), **kwargs)
+            new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], 1.)
+            new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
+
+            A = CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
+
+        return A

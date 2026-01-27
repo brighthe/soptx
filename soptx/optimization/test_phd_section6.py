@@ -28,12 +28,11 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
         plane_type = '3d'
 
-        # nx, ny, nz = 60, 20, 4
-        nx, ny, nz = 120, 40, 8
+        nx, ny, nz = 60, 20, 4
         mesh_type = 'uniform_hex'
         # mesh_type = 'uniform_tet'
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 1 # 单元密度 + 六面体网格
         # integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
 
@@ -47,7 +46,7 @@ class DensityTopOptTest(BaseLogged):
         # 'standard', 'voigt', 'fast', 'symbolic'
         assembly_method = 'fast'
         # 'mumps', 'cg'
-        solve_method = 'cg'
+        solve_method = 'mumps'
 
         max_iterations = 200
         change_tolerance = 1e-2
@@ -173,7 +172,6 @@ class DensityTopOptTest(BaseLogged):
                                 density_location=density_location,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
-
 
 
         return rho_opt, history
