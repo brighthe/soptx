@@ -3,7 +3,7 @@ from typing import List, Callable, Optional, Tuple
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
+from fealpy.mesh import QuadrangleMesh, TriangleMesh, HomogeneousMesh
 
 from soptx.model.pde_base import PDEBase  
 
@@ -186,39 +186,49 @@ class HalfMBBBeamRight2d(PDEBase):
 
         return self.is_concentrate_load_boundary_dof
     
-    def get_passive_element_mask(self, nx: int, ny: int) -> TensorLike:
-        """
-        生成被动单元掩码 (适用于列主序的单元编号)
+    def get_passive_element_mask(self, 
+                                mesh: HomogeneousMesh,
+                                load_region: tuple = (3, 2),
+                                support_region: tuple = (3, 3),
+                            ) -> TensorLike:
+        """生成被动单元掩码"""
+        # 1. 确定总单元数和父方格索引映射
+        nx , ny  = mesh.meshdata['nx'], mesh.meshdata['ny']
+
+        if isinstance(mesh, TriangleMesh):
+            n_elements = 2 * nx * ny
+            # 生成所有三角形的索引
+            el_indices = bm.arange(n_elements)
+            # 核心修正：将三角形索引映射回它所在的“父方格”索引
+            # 例如：三角形 0,1 -> 方格 0；三角形 2,3 -> 方格 1
+            grid_cell_indices = el_indices // 2
+        elif isinstance(mesh, QuadrangleMesh):
+            n_elements = nx * ny
+            el_indices = bm.arange(n_elements)
+            # 四边形本身就是方格，索引不变
+            grid_cell_indices = el_indices
+
+        # 2. 基于父方格索引计算空间坐标 (ix, iy)
+        # 注意：这里依然使用 ny，因为网格在几何上仍然是 nx 列 ny 行
+        ix = grid_cell_indices // ny  # 列号
+        iy = grid_cell_indices % ny   # 行号
         
-        区域定义：
-        1. 载荷点 (左上角): 3x2 区域 
-           防止点载荷引起的应力奇异性
-        2. 支座点 (右下角): 3x3 区域
-           防止点支撑引起的应力奇异性
-        """        
-        n_elements = nx * ny
+        # 3. 区域判定 (逻辑与之前完全一致，因为是基于 ix, iy 判定的)
         
-        # === 修正点：使用列主序 (Column-Major) ===
-        # 对应图片：编号先沿 Y 轴增加
-        el_indices = bm.arange(n_elements)
-        ix = el_indices // ny  # 整除 ny 得到列号 x
-        iy = el_indices % ny   # 对 ny 取余得到行号 y
+        # 载荷点区域（左上角）
+        load_w, load_h = load_region
+        # 增加边界保护
+        limit_load_w = min(load_w, nx)
+        mask_load = (ix < limit_load_w) & (iy >= ny - load_h)
         
-        # 区域 1: 载荷点 (左上角 3x2)
-        # x < 3, y >= ny - 2
-        load_region_w = 3
-        load_region_h = 2 
-        mask_load = (ix < load_region_w) & (iy >= (ny - load_region_h))
+        # 支座点区域（右下角）
+        support_w, support_h = support_region
+        # 增加边界保护
+        limit_support_w = max(nx - support_w, 0)
+        mask_support = (ix >= limit_support_w) & (iy < support_h)
         
-        # 区域 2: 支座点 (右下角 3x3)
-        # x >= nx - 3, y < 3
-        support_region_w = 3
-        support_region_h = 3
-        mask_support = (ix >= (nx - support_region_w)) & (iy < support_region_h)
-        
-        mask = mask_load | mask_support
-        
-        return mask
+        return mask_load | mask_support
+
 
 class MBBBeam2d(PDEBase):
     """

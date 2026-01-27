@@ -10,11 +10,7 @@ from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from ..utils.base_logged import BaseLogged
 
 class StressConstraint(BaseLogged):
-    """
-    应力约束类
-
-    实现基于聚类 P-norm 的全局应力聚合约束
-    """
+    """基于聚类 P-norm 的应力聚合约束"""
     def __init__(self,
                 analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
                 stress_limit: float,
@@ -40,7 +36,6 @@ class StressConstraint(BaseLogged):
         # 聚类相关变量
         self._clustering_map = None
         self._cluster_weight_sums = None
-
         self._cached_stress_state = None
 
         # P-norm 计算的缓存
@@ -49,6 +44,9 @@ class StressConstraint(BaseLogged):
 
         # 积分权重缓存
         self._integration_weights = None
+
+        # 初始化被动单元掩码
+        self._passive_mask = None
 
     def fun(self, 
             density: Union[Function, TensorLike], 
@@ -173,6 +171,13 @@ class StressConstraint(BaseLogged):
         # 更新类内部状态
         self._clustering_map = new_map
         self._cluster_weight_sums = cluster_weight_sums  # 缓存分母
+
+    def set_passive_mask(self, mask: TensorLike) -> None:
+        """设置被动单元掩码 (True 表示是被动单元/载荷单元，需要剔除)"""
+        self._passive_mask = mask
+
+        # 掩码更新后，缓存的应力状态可能失效，清理缓存
+        self._integration_weights = None
     
     def _get_integration_weights(self) -> TensorLike:
         """计算 P-norm 聚合所需的积分权重 detJ * w_q"""
@@ -199,6 +204,22 @@ class StressConstraint(BaseLogged):
         elif density_location == 'element_multiresolution':
             pass
 
+        #TODO 处理被动单元
+        if self._passive_mask is not None:
+            # 假设 mask=True 代表是被动单元(需要剔除)
+            # 扩展 mask 维度以匹配积分点: (NC, ) -> (NC, NQ)
+            # 如果 weights 是 (NC, NQ)，我们需要广播乘法
+            
+            # 将 mask 转换为 0.0 (被动) 和 1.0 (主动)
+            active_factor = bm.where(self._passive_mask, 0.0, 1.0)
+            
+            # 应用到权重上
+            if weights.ndim == 2: # (NC, NQ)
+                weights = weights * active_factor[:, None]
+            else:
+                weights = weights * active_factor
+
+        # 更新缓存
         self._integration_weights = weights
         
         return weights
@@ -251,7 +272,6 @@ class StressConstraint(BaseLogged):
         
         # 约束值
         return pnorm_normalized - 1.0
-       
     
     def jac(self, 
             density: Union[Function, TensorLike], 
@@ -263,7 +283,14 @@ class StressConstraint(BaseLogged):
         mode = diff_mode if diff_mode is not None else self._diff_mode
 
         if mode == "manual":
-            return self._manual_differentiation(density=density, state=state, **kwargs)
+            if isinstance(self._analyzer, HuZhangMFEMAnalyzer):
+                return self._manual_differentiation_mixed(density=density, state=state, **kwargs)
+        
+            elif isinstance(self._analyzer, LagrangeFEMAnalyzer):
+                return self._manual_differentiation_disp(density=density, state=state, **kwargs)
+            
+            else:
+                self._log_error("Unsupported analyzer type for manual differentiation.")
 
         elif mode == "auto": 
             return self._auto_differentiation(density=density, state=state, **kwargs)
@@ -272,7 +299,7 @@ class StressConstraint(BaseLogged):
             error_msg = f"Unknown diff_mode: {diff_mode}"
             self._log_error(error_msg)
 
-    def _manual_differentiation(self, 
+    def _manual_differentiation_disp(self, 
                             density: Union[Function, TensorLike],
                             state: Optional[dict] = None, 
                             enable_timing: bool = False, 
@@ -306,7 +333,7 @@ class StressConstraint(BaseLogged):
 
         # ===================== 组装伴随载荷并求解伴随方程 =====================
         # 组装伴随载荷向量 L_m
-        L = self._assemble_adjoint_load(
+        L = self._assemble_adjoint_load_disp(
                             dg_dsigma_vm=dg_dsigma_vm,
                             dvm_dsigma=dvm_dsigma,
                             eta_sigma=eta_sigma,
@@ -352,6 +379,73 @@ class StressConstraint(BaseLogged):
 
         # 组合两项得到最终局部灵敏度
         local_sensitivity = term_I_cell - term_II_cell  # (n_clusters, NC)
+        
+        return local_sensitivity
+    
+    def _manual_differentiation_mixed(self, 
+                            density: Union[Function, TensorLike],
+                            state: Optional[dict] = None, 
+                            **kwargs
+                        ) -> TensorLike:
+        if self._cached_stress_state is not None:
+            stress_state = self._cached_stress_state
+        else:
+            stress_state = self._analyzer.compute_stress_state(state=state, rho_val=density)
+
+        weights = self._get_integration_weights() # (NC, NQ)
+
+        sigma_vm = stress_state['von_mises']          # (NC, NQ)
+        stress_solid = stress_state['stress_solid']   # (NC, NQ, NS)
+        sigma_vec = state['stress']                   # (n_gdof, )
+
+        # 确保聚类已初始化
+        if self._clustering_map is None:
+            self._perform_clustering_logic(sigma_vm, weights)
+
+        # ===================== 计算链式法则各项偏导 =====================
+        # ∂g_m/∂σ^vM: P-norm 对 von Mises 应力的偏导
+        dg_dsigma_vm = self._compute_pnorm_derivative(sigma_vm, weights)  # (n_clusters, n_points)
+
+        # ∂σ^vM/∂σ: von Mises 对应力张量的偏导
+        dvm_dsigma = self._compute_vm_stress_derivative(stress_solid, sigma_vm)  # (NC, NQ, NS)
+
+        
+        # ===================== 组装伴随载荷并求解伴随方程 =====================
+        # 组装伴随载荷向量 L_m
+        L = self._assemble_adjoint_load_mixed(
+                            dg_dsigma_vm=dg_dsigma_vm,
+                            dvm_dsigma=dvm_dsigma,
+                        )  # (n_clusters, n_gdof)
+        
+        # 求解伴随方程 K @ λ_m = L_m
+        L_transposed = L.T  # (n_gdof, n_clusters)
+        adjoint_lambda_transposed = self._analyzer.solve_adjoint(L_transposed, rho_val=density) 
+        adjoint_lambda = adjoint_lambda_transposed.T # (n_clusters, n_gdof)
+
+        # ===================== 计算局部灵敏度 =====================
+        # - lambda_e^T * (dA_e/drho) * sigma_e
+        
+        # 获取局部应力矩阵对密度的导数 dA/drho
+        dA_drho = self._analyzer.compute_local_stress_matrix_derivative(rho_val=density) # (NC, n_ldof, n_ldof)
+        
+        # 提取状态向量和伴随向量的单元级系数
+        stress_space = self._analyzer.huzhang_space
+        cell2dof = stress_space.cell_to_dof() # (NC, n_ldof)
+        
+        # 提取状态应力系数
+        sigma_e = sigma_vec[cell2dof]  # (NC, n_ldof)
+        
+        # 提取伴随应力系数 Lambda_e 
+        n_stress_dof = stress_space.number_of_global_dofs()
+        lambda_sigma = adjoint_lambda[:, :n_stress_dof]
+        Lambda_e = lambda_sigma[:, cell2dof]  # (n_clusters, NC, n_ldof)
+
+        # 计算双线性形式
+        dA_times_sigma = bm.einsum('cij, cj -> ci', dA_drho, sigma_e) # (NC, n_ldof)
+        
+        dot_product = bm.einsum('mci, ci -> mc', Lambda_e, dA_times_sigma) # (n_clusters, NC)
+
+        local_sensitivity = -dot_product
         
         return local_sensitivity
 
@@ -462,21 +556,23 @@ class StressConstraint(BaseLogged):
         
         return dvm_dsigma
     
-    def _assemble_adjoint_load(self,
+    def _assemble_adjoint_load_disp(self,
                            dg_dsigma_vm: TensorLike,
                            dvm_dsigma: TensorLike,
                            eta_sigma: TensorLike,
                         ) -> TensorLike:
-        """
-        组装伴随载荷向量
+        """组装位移有限元下的伴随载荷向量
         
         L_m = Σ_{(e,i)∈Ω_m} (∂g_m/∂σ^vM) * η_σ * B^T * D_0 * (∂σ^vM/∂σ)
         
         Parameters
         ----------
-        dg_dsigma_vm : (n_clusters, n_points) P-norm 对 von Mises 应力的偏导
-        dvm_dsigma : (NC, NQ, NS) von Mises 对应力分量的偏导
-        eta_sigma : (NC, ) 应力惩罚因子
+        dg_dsigma_vm : (n_clusters, n_points) 
+            P-norm 对 von Mises 应力的偏导
+        dvm_dsigma : (NC, NQ, NS) 
+            von Mises 对应力分量的偏导
+        eta_sigma : (NC, ) 
+            应力惩罚因子
         
         Returns
         -------
@@ -525,6 +621,61 @@ class StressConstraint(BaseLogged):
             bm.add_at(L[m], indices, values)
 
         return L
+    
+    def _assemble_adjoint_load_mixed(self,
+                            dg_dsigma_vm: TensorLike,
+                            dvm_dsigma: TensorLike,
+                            ) -> TensorLike:
+            """组装混合有限元下的伴随载荷向量
+                        
+            Parameters
+            ----------
+            dg_dsigma_vm : (n_clusters, n_points) 
+                P-norm 对 von Mises 应力的偏导
+            dvm_dsigma : (NC, NQ, NS) 
+                von Mises 对应力张量分量的偏导
+            
+            Returns
+            -------
+            L : (n_clusters, n_gdof) 伴随载荷向量
+            """
+            stress_space = self._analyzer.huzhang_space
+            disp_space = self._analyzer.tensor_space
+            mesh = self._analyzer.disp_mesh
+            
+            # 取积分点信息
+            qf = mesh.quadrature_formula(self._analyzer.integration_order)
+            bcs, _ = qf.get_quadrature_points_and_weights()
+            
+            # 获取应力基函数值 
+            phi = stress_space.basis(bcs)  # (NC, NQ, n_ldof, NS)
+            
+            NC = dvm_dsigma.shape[0]
+            NQ = dvm_dsigma.shape[1]
+            
+            dg_reshaped = dg_dsigma_vm.reshape(self._n_clusters, NC, NQ) # (n_clusters, NC, NQ)
+
+            # 计算被积函数的核心密度
+            sens_density = dg_reshaped[..., None] * dvm_dsigma[None, ...] # (n_clusters, NC, NQ, NS)
+            
+            # 投影积分 
+            cell_loads = bm.einsum('mcqs, cqds -> mcd', sens_density, phi) # (n_clusters, NC, n_ldof)
+            
+            n_gdof = stress_space.number_of_global_dofs() + disp_space.number_of_global_dofs()
+
+            # 初始化伴随载荷向量
+            L = bm.zeros((self._n_clusters, n_gdof), dtype=dg_dsigma_vm.dtype)
+            
+            # 获取单元自由度索引
+            s_cell2dof = stress_space.cell_to_dof() # (NC, n_ldof)
+            indices = s_cell2dof.flatten()
+            
+            # 对每个聚类分别组装
+            for m in range(self._n_clusters):
+                vals = cell_loads[m].flatten()
+                bm.add_at(L[m], indices, vals)
+                
+            return L
 
     def normalize(self, 
               con_val: TensorLike, 

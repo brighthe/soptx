@@ -171,8 +171,8 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
 
         # 测试参数
-        # nx, ny = 60, 20
-        nx, ny = 90, 30
+        nx, ny = 60, 20
+        # nx, ny = 90, 30
         # nx, ny = 150, 50
         mesh_type = 'uniform_quad'
 
@@ -191,15 +191,15 @@ class DensityTopOptTest(BaseLogged):
         assembly_method = 'standard'
 
         optimizer_algorithm = 'oc'  # 'oc', 'mma'
-        max_iterations = 500
-        tolerance = 1e-2
+        max_iterations = 200
+        change_tolerance = 1e-2
         use_penalty_continuation = False
 
         filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
         rmin = 2.4
 
-        from soptx.model.mbb_beam_2d import HalfMBBBeam2d
-        pde = HalfMBBBeam2d(
+        from soptx.model.mbb_beam_2d_lfem import HalfMBBBeamRight2d
+        pde = HalfMBBBeamRight2d(
                             domain=domain,
                             P=P, E=E, nu=nu,
                             enable_logging=False
@@ -247,7 +247,7 @@ class DensityTopOptTest(BaseLogged):
             
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
-                                    mesh=design_variable_mesh,
+                                    design_mesh=design_variable_mesh,
                                     filter_type=filter_type,
                                     rmin=rmin,
                                     density_location=density_location,
@@ -255,7 +255,7 @@ class DensityTopOptTest(BaseLogged):
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
@@ -282,7 +282,7 @@ class DensityTopOptTest(BaseLogged):
                             filter=filter_regularization,
                             options={
                                 'max_iterations': max_iterations,
-                                'tolerance': 1e-2,
+                                'change_tolerance': change_tolerance,
                             }
                         )
         optimizer.options.set_advanced_options(
@@ -299,7 +299,7 @@ class DensityTopOptTest(BaseLogged):
                        f"密度类型={density_location}, " 
                        f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
                        f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移有限元空间阶数={space_degree}, 位移场自由度={analysis_tgdofs}, "
-                       f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, 收敛容差={tolerance}, 惩罚因子连续化={use_penalty_continuation}, " 
+                       f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, 收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, " 
                        f"过滤类型={filter_type}, 过滤半径={rmin}, ")
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
@@ -1317,5 +1317,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec3_6_4_simply_support_bridge_2d')
+    test.run.set('test_mbb_2d_subsection_3_6_2')
     rho_opt, history = test.run()

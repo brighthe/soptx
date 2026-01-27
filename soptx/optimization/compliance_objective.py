@@ -78,6 +78,11 @@ class ComplianceObjective(BaseLogged):
         
             F = self._analyzer.force_vector
             c = bm.einsum('i, i ->', uh[:], F[:])
+
+            print(f"位移场范围: [{bm.min(uh):.4f}, {bm.max(uh):.4f}]")
+            print(f"载荷向量和: {bm.sum(F):.2f}")
+            print(f"柔顺度目标函数:{c}")
+
             # K = self._analyzer.stiffness_matrix
             # Ku = K.matmul(uh[:])
             # c = bm.einsum('i, i ->', uh[:], Ku)

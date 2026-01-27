@@ -67,7 +67,8 @@ class MMAOptions:
         self._xmin = bm.zeros((n, 1), dtype=bm.float64)
         self._xmax = bm.ones((n, 1), dtype=bm.float64)
         self._a = bm.zeros((m, 1), dtype=bm.float64)
-        self._c = 1000 * bm.ones((m, 1), dtype=bm.float64)
+        self._c = 1e3 * bm.ones((m, 1), dtype=bm.float64)
+        # self._c = 1000 * bm.ones((m, 1), dtype=bm.float64)
         self._d = bm.zeros((m, 1), dtype=bm.float64)
 
     def set_advanced_options(self, **kwargs):
@@ -241,6 +242,26 @@ class MMAOptimizer(BaseLogged):
         self._low = None
         self._upp = None
 
+        #TODO ==================== 被动单元预处理 ====================
+        # 判断是否存在应力约束
+        self._has_stress_constraint = any(
+            isinstance(c, StressConstraint) for c in self._constraints
+        )
+        
+        # 仅当存在应力约束时获取被动单元掩码
+        pde = self._objective._analyzer.pde
+        self._passive_mask = None
+        if self._has_stress_constraint:
+            design_mesh = getattr(self._filter, 'design_mesh', None)
+            if hasattr(pde, 'get_passive_element_mask'):
+                self._passive_mask = pde.get_passive_element_mask(mesh=design_mesh)
+
+                if self._passive_mask is not None:
+                    for c in self._constraints:
+                        if isinstance(c, StressConstraint):
+                            if hasattr(c, 'set_passive_mask'):
+                                c.set_passive_mask(self._passive_mask)
+
     def _update_penalty(self, iter_idx: int) -> None:
         """连续化技术对幂指数惩罚因子进行更新
         
@@ -275,6 +296,31 @@ class MMAOptimizer(BaseLogged):
             else:
                 total += 1 
         return total
+    
+    def _apply_passive_mask(self, dv, rho) -> None:
+        """将被动单元强制设为实体材料"""
+        dv[self._passive_mask] = 1.0
+        
+        if rho.ndim == 1:
+            rho[self._passive_mask] = 1.0
+        else:
+            from soptx.analysis.utils import reshape_multiresolution_data_inverse
+            NC, n_sub = rho.shape
+            disp_mesh = getattr(self._objective._analyzer, 'disp_mesh', None)
+            nx_disp, ny_disp = disp_mesh.meshdata['nx'], disp_mesh.meshdata['ny']
+            passive_mask_rho = reshape_multiresolution_data_inverse(
+                nx_disp, ny_disp, self._passive_mask, n_sub
+            )
+            rho[passive_mask_rho] = 1.0
+
+        # design_mesh = getattr(self._filter, 'design_mesh', None)
+        # design_mesh.celldata['rho'] = rho
+        # from pathlib import Path
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu'
+        # base_dir = str(base_dir)
+        # save_path = Path(f"{base_dir}/")
+        # design_mesh.to_vtk(f"{save_path}/rho_section5.vtu")
 
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
@@ -293,7 +339,6 @@ class MMAOptimizer(BaseLogged):
         """
         # ==================== 获取分析器引用 ====================
         analyzer = self._objective._analyzer
-        pde = analyzer.pde
         interpolation_scheme = analyzer.interpolation_scheme
 
         # ==================== 问题规模参数初始化 ====================
@@ -319,25 +364,9 @@ class MMAOptimizer(BaseLogged):
         else:
             rho = bm.copy(density_distribution[:])
 
-        #TODO ==================== 被动单元处理 (预处理) ====================
-        passive_mask = None
-        design_mesh = getattr(self._filter, 'design_mesh', None)
-        if hasattr(pde, 'get_passive_element_mask'):
-            # nx_design , ny_design  = design_mesh.meshdata['nx'], design_mesh.meshdata['ny']
-            # passive_mask = pde.get_passive_element_mask(nx=nx_design, ny=ny_design)
-            passive_mask = pde.get_passive_element_mask(mesh=design_mesh)
-        # 将被动单元强制设为实体材料
-        if passive_mask is not None:
-            dv[passive_mask] = 1.0
-            if rho.ndim == 1:
-                rho[passive_mask] = 1.0
-            else:
-                from soptx.analysis.utils import reshape_multiresolution_data_inverse
-                NC, n_sub = rho.shape
-                disp_mesh = getattr(analyzer, 'disp_mesh', None)
-                nx_disp , ny_disp  = disp_mesh.meshdata['nx'], disp_mesh.meshdata['ny']
-                passive_mask_rho = reshape_multiresolution_data_inverse(nx_disp, ny_disp, passive_mask, n_sub)
-                rho[passive_mask_rho] = 1.0
+        #TODO ==================== 被动单元处理 ====================
+        if self._passive_mask is not None:
+            self._apply_passive_mask(dv, rho)
 
         # 初始物理密度
         rho_phys = self._filter.get_initial_density(density=rho)
@@ -363,6 +392,7 @@ class MMAOptimizer(BaseLogged):
             # ==================== 惩罚因子更新 ====================
             self._update_penalty(iter_idx=iter_idx)
             current_penalty = interpolation_scheme.penalty_factor
+            print(f"初始惩罚因子: {current_penalty}")
             
             # 更新迭代计数
             self._epoch = iter_idx + 1
@@ -381,52 +411,43 @@ class MMAOptimizer(BaseLogged):
 
             # 动态初始化缩放因子
             if self._obj_scale_factor is None:
-                # 1. 检查是否存在应力约束
-                has_stress_constraint = False
-                for constraint in self._constraints:
-                    if isinstance(constraint, StressConstraint):
-                        has_stress_constraint = True
-                        break
                 
                 obj0 = float(obj_val_raw.item()) 
                 denom = max(abs(obj0), 1e-10)
 
                 # 情况 A: 存在应力约束 -> 强制缩放至 1.0 以平衡梯度量级
-                if has_stress_constraint:
-                    target_initial_val = 1.0
-                    self._obj_scale_factor = min(1e6, target_initial_val / denom)
-                    self._log_info(f"Stress constraint detected. Objective scaling enabled: "
-                                   f"{self._obj_scale_factor:.4e} (Target: {target_initial_val})")
+                if self._has_stress_constraint:
+                    # target_initial_val = 1.0
+                    # self._obj_scale_factor = min(1e6, target_initial_val / denom)
+                    self._obj_scale_factor = 1.0
                 
-                # 情况 B: 无应力约束，但使用投影滤波 -> 维持原有逻辑 (缩放至 10.0)
+                # 情况 B: 无应力约束，但使用投影滤波 -> 缩放至 10.0
                 elif self._filter._filter_type == 'projection':
                     target_initial_val = 10.0
                     self._obj_scale_factor = min(1e6, target_initial_val / denom)
-                    self._log_info(f"Projection filter detected. Objective scaling enabled: "
-                                   f"{self._obj_scale_factor:.4e} (Target: {target_initial_val})")
                 
-                # 情况 C: 其他情况 (如普通体积约束) -> 保持默认 1.0
+                # 情况 C: 其他情况 -> 默认 1.0 不缩放
                 else:
                     self._obj_scale_factor = 1.0
-                    self._log_info(f"Default objective scaling: {self._obj_scale_factor:.4e}")
 
             # 目标函数应用缩放因子
             obj_val = obj_val_raw * self._obj_scale_factor
 
             if enable_timing:
                 t.send('目标函数计算')
-    
+
             #TODO ==================== 目标函数灵敏度 ====================
             # 1. 计算目标函数相对于物理密度的灵敏度
             obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
             # 灵敏度应用缩放因子
             obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor 
-
+            print(f"目标函数相对于物理密度的灵敏度范围: [{bm.min(obj_grad_rho):.4f}, {bm.max(obj_grad_rho):.4f}]")
             # 2. 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
+            print(f"目标函数相对于设计变量的灵敏度范围: [{bm.min(obj_grad_dv):.4f}, {bm.max(obj_grad_dv):.4f}]")
 
-            if passive_mask is not None:
-                obj_grad_dv[passive_mask] = 0.0
+            if self._passive_mask is not None:
+                obj_grad_dv[self._passive_mask] = 0.0
                 
             if enable_timing:
                 t.send('目标函数灵敏度分析')
@@ -442,11 +463,11 @@ class MMAOptimizer(BaseLogged):
                 # 相对于设计变量的灵敏度
                 grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=grad_rho)
 
-                if passive_mask is not None:
+                if self._passive_mask is not None:
                     if grad_dv.ndim == 1:
-                        grad_dv[passive_mask] = 0.0
+                        grad_dv[self._passive_mask] = 0.0
                     else:
-                        grad_dv[:, passive_mask] = 0.0
+                        grad_dv[:, self._passive_mask] = 0.0
 
                 val_norm, grad_norm = constraint.normalize(val, grad_dv)
 
@@ -465,12 +486,10 @@ class MMAOptimizer(BaseLogged):
             if enable_timing:
                 t.send('约束函数灵敏度分析')
 
-            print(f"柔顺度目标函数:{obj_val}")
-            print(f"柔顺度梯度平均值:{bm.mean(obj_grad_dv)}")
-            print(f"体积约束:{con_vals[0]}")
-            print(f"体积约束梯度平均值:{bm.mean(con_grads_dv[0])}")
-            print(f"应力约束:{con_vals[1:]}")
-            print(f"应力约束梯度平均值:{bm.mean(con_grads_dv[1:])}")
+            # print(f"体积约束:{con_vals[0]}")
+            # print(f"体积约束梯度平均值:{bm.mean(con_grads_dv[0])}")
+            print(f"应力约束:{con_vals[0:]}")
+            print(f"应力约束梯度平均值:{bm.mean(con_grads_dv[0:])}")
             
             #TODO ==================== MMA 子问题求解 ====================
             fval = bm.concatenate(con_vals).reshape(-1, 1)  # (m, 1)
@@ -487,8 +506,8 @@ class MMAOptimizer(BaseLogged):
                                     )
             
             #TODO 强制被动单元为实体材料
-            if passive_mask is not None:
-                dv_new[passive_mask] = 1.0
+            if self._passive_mask is not None:
+                dv_new[self._passive_mask] = 1.0
 
             if enable_timing:
                 t.send('MMA 优化')
@@ -505,6 +524,7 @@ class MMAOptimizer(BaseLogged):
 
             # 计算收敛性
             change = bm.max(bm.abs(dv_new - dv))
+            print(f"设计变量最大变化量: {change}")
             
             # 更新设计变量
             dv = dv_new

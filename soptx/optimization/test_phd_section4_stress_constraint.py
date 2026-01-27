@@ -25,17 +25,15 @@ class DensityTopOptTest(BaseLogged):
 
         volume_fraction = 0.5
 
-        relative_density = volume_fraction
-
         stress_limit = 350.0
         p_norm_factor = 8.0
         n_clusters = 10
         recluster_freq = 1
 
         optimizer_algorithm = 'mma'
-        max_iterations = 200
+        max_iterations = 500
         change_tolerance = 1e-2
-        use_penalty_continuation = False
+        use_penalty_continuation = True
 
         nx, ny = 60, 20
         mesh_type = 'uniform_quad'
@@ -84,26 +82,6 @@ class DensityTopOptTest(BaseLogged):
                                         'stress_penalty_factor': stress_penalty_factor,
                                     },
                                 )
-        
-        if density_location in ['element']:
-            design_variable_mesh = displacement_mesh
-            d, rho = interpolation_scheme.setup_density_distribution(
-                                                    design_variable_mesh=design_variable_mesh,
-                                                    displacement_mesh=displacement_mesh,
-                                                    relative_density=relative_density,
-                                                )
-        
-        elif density_location in ['element_multiresolution']:
-            import math
-            sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
-            pde.init_mesh.set(mesh_type)
-            design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
-            d, rho = interpolation_scheme.setup_density_distribution(
-                                                    design_variable_mesh=design_variable_mesh,
-                                                    displacement_mesh=displacement_mesh,
-                                                    relative_density=relative_density,
-                                                    sub_density_element=sub_density_element,
-                                                )
 
         space_degree = 1
         integration_order = space_degree + 1 # 张量网格
@@ -125,11 +103,34 @@ class DensityTopOptTest(BaseLogged):
                                     topopt_algorithm='density_based',
                                 )
         
-        from soptx.optimization.compliance_objective import ComplianceObjective
-        compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
+        relative_density = 1.0
+        if density_location in ['element']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                )
+        elif density_location in ['element_multiresolution']:
+            import math
+            sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
+            pde.init_mesh.set(mesh_type)
+            design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                    sub_density_element=sub_density_element,
+                                                )
+        
+        # from soptx.optimization.compliance_objective import ComplianceObjective
+        # compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
 
-        from soptx.optimization.volume_constraint import VolumeConstraint
-        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
+        from soptx.optimization.volume_objective import VolumeObjective
+        objective = VolumeObjective(analyzer=lagrange_fem_analyzer)
+
+        # from soptx.optimization.volume_constraint import VolumeConstraint
+        # volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
         from soptx.optimization.stress_constraint import StressConstraint
         stress_constraint = StressConstraint(analyzer=lagrange_fem_analyzer, 
@@ -147,10 +148,11 @@ class DensityTopOptTest(BaseLogged):
                                     density_location=density_location,
                                 )
         
+        # constraint = [volume_constraint, stress_constraint]
         constraint = [stress_constraint]
         from soptx.optimization.mma_optimizer import MMAOptimizer
         optimizer = MMAOptimizer(
-                        objective=compliance_objective,
+                        objective=objective,
                         constraint=constraint,
                         filter=filter_regularization,
                         options={
@@ -165,8 +167,8 @@ class DensityTopOptTest(BaseLogged):
                                 asymp_incr=1.2,
                                 asymp_decr=0.7,
                                 move_limit=0.2,
-                                albefa=0.1,
-                                raa0=1e-5,
+                                albefa=0.1, 
+                                raa0=1e-5, 
                                 epsilon_min=1e-7,
                             )
         
@@ -175,13 +177,15 @@ class DensityTopOptTest(BaseLogged):
         
         self._log_info(f"开始密度拓扑优化, "
             f"模型名称={pde.__class__.__name__}, \n"
-            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type} \n"
             f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
-            f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
+            f"分析算法={lagrange_fem_analyzer.__class__.__name__}, 网格类型={displacement_mesh.__class__.__name__}, "
+            f"空间阶数={space_degree}, \n" 
             f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
-            f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数约束={volume_fraction}, \n"
-            f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
+            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs} \n"
+            f"目标函数={objective.__class__.__name__} \n"
+            f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数上限={volume_fraction}, 应力上限={stress_limit}, \n"
+            f"优化算法={optimizer_algorithm} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
             f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 
@@ -190,7 +194,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec4_6_5_mbb_beam")
+        save_path = Path(f"{base_dir}/test_subsec4_6_5")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 

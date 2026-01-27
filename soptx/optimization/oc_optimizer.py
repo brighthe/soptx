@@ -12,6 +12,7 @@ from ..optimization.volume_constraint import VolumeConstraint
 from ..optimization.tools import OptimizationHistory
 from ..regularization.filter import Filter
 from ..utils.base_logged import BaseLogged
+from soptx.optimization.utils import compute_volume
 from soptx.utils import timer
 
 class OCOptions:
@@ -165,15 +166,13 @@ class OCOptimizer(BaseLogged):
             if enable_timing:
                 t.send('位移场求解')
 
-            #TODO 使用物理密度和位移计算目标函数
+            # 使用物理密度和位移计算目标函数
             obj_val = self._objective.fun(density=rho_phys, state=state)
-            # obj_val = self._objective.fun(rho_phys, displacement=uh)
             if enable_timing:
                 t.send('目标函数计算')
 
-            #TODO 计算目标函数相对于物理密度的灵敏度
+            # 计算目标函数相对于物理密度的灵敏度
             obj_grad_rho = self._objective.jac(density=rho_phys, state=state)
-            # obj_grad_rho = self._objective.jac(rho_phys, displacement=uh)
             if enable_timing:
                 t.send('目标函数灵敏度分析 1')
 
@@ -221,7 +220,9 @@ class OCOptimizer(BaseLogged):
             dv = dv_new
 
             # 当前体积分数
-            volfrac = self._constraint.get_volume_fraction(rho_phys)
+            current_volume = self._constraint._v
+            total_volume = self._constraint._v0
+            volfrac = current_volume / total_volume
 
             iteration_time = time() - start_time
 

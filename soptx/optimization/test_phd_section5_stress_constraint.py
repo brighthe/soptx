@@ -25,7 +25,7 @@ class DensityTopOptTest(BaseLogged):
 
         volume_fraction = 0.5
 
-        relative_density = volume_fraction
+        relative_density = volume_fraction - 0.1
 
         stress_limit = 350.0
         p_norm_factor = 8.0
@@ -142,7 +142,8 @@ class DensityTopOptTest(BaseLogged):
                                     density_location=density_location,
                                 )
         
-        constraint = [volume_constraint, stress_constraint]
+        # constraint = [volume_constraint, stress_constraint]
+        constraint = [volume_constraint]
         from soptx.optimization.mma_optimizer import MMAOptimizer
         optimizer = MMAOptimizer(
                         objective=compliance_objective,
@@ -178,8 +179,8 @@ class DensityTopOptTest(BaseLogged):
             f"离散算法={analyzer.__class__.__name__}, 状态变量={state_variable}, \n"
             f"位移空间={disp_space.__class__.__name__}, 位移空间次数={disp_space.p}, 位移场自由度={disp_tgdofs}, \n"
             f"应力空间={stress_space.__class__.__name__}, 应力空间次数={stress_space.p}, 应力场自由度={stress_tgdofs}, \n"
-            f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数约束={volume_fraction}, \n"
-            f"优化算法={optimizer_algorithm} , 最大迭代次数={max_iterations}, "
+            f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数上限={volume_fraction}, 应力上限={stress_limit}, \n"
+            f"优化算法={optimizer_algorithm}, 最大迭代次数={max_iterations}, 初始构型={relative_density}, "
             f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 

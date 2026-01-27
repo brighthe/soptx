@@ -9,8 +9,11 @@ from numpy.linalg import solve
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-from fealpy.solver import cg, spsolve
-
+from typing import Union, Optional, Literal
+from fealpy.backend import backend_manager as bm
+from fealpy.typing import TensorLike
+from fealpy.functionspace import Function
+from fealpy.mesh import HomogeneousMesh, SimplexMesh, TensorMesh
 
 """Method of Moving Asymptotes (MMA) 子问题求解器
 
@@ -330,3 +333,95 @@ def solve_mma_subproblem(m: int, n: int,
     smma = s
 
     return xmma, ymma, zmma, lamma, xsimma, etamma, mumma, zetmma, smma
+
+
+def compute_volume(
+                density: Union[Function, TensorLike],
+                mesh: HomogeneousMesh,
+                density_location: Literal['element', 'node'] = 'element',
+                integration_order: Optional[int] = None
+            ) -> float:
+    """计算设计域内材料的总体积"""
+    if density_location in ['element']:
+        rho_element = density  # (NC, )
+
+        cell_measure = mesh.entity_measure('cell')
+        current_volume = bm.einsum('c, c -> ', cell_measure, rho_element[:])
+
+        return current_volume
+    
+    elif density_location in ['element_multiresolution']:
+
+        rho_sub_element = density # (NC, n_sub)
+
+        NC, n_sub = rho_sub_element.shape
+        cell_measure = mesh.entity_measure('cell')
+        sub_cm = bm.tile(cell_measure.reshape(NC, 1), (1, n_sub)) / n_sub # (NC, n_sub)
+
+        current_volume = bm.einsum('cn, cn -> ', sub_cm, rho_sub_element[:])
+
+        return current_volume
+
+    elif density_location in ['node']:
+        #* 标准节点密度表征下的体积计算
+        # 计算单元积分点处的重心坐标
+        qf = mesh.quadrature_formula(q=integration_order)
+        # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
+        bcs, ws = qf.get_quadrature_points_and_weights()
+
+        rho_q = density(bcs) # (NC, NQ)
+
+        if isinstance(mesh, SimplexMesh):
+            cm = mesh.entity_measure('cell')
+            current_volume = bm.einsum('q, cq, c -> ', ws, rho_q, cm)
+        
+        elif isinstance(mesh, TensorMesh):
+            J = mesh.jacobi_matrix(bcs)
+            detJ = bm.abs(bm.linalg.det(J))
+            current_volume = bm.einsum('q, cq, cq -> ', ws, rho_q, detJ)
+
+        #* 简化节点密度表征下的体积计算
+        # cell_measure = self._mesh.entity_measure('cell')
+        # total_volume = bm.sum(cell_measure)
+
+        # rho_node = density[:] # (NN, )
+        # avg_rho = bm.sum(rho_node) / rho_node.shape[0]
+        # current_volume = total_volume * avg_rho
+
+        return current_volume
+    
+    elif density_location in ['node_multiresolution']:
+
+        rho_sub_q = density # (NC, n_sub, NQ)
+        NC, n_sub, NQ = rho_sub_q.shape
+
+        if isinstance(mesh, SimplexMesh):
+            cell_measure = mesh.entity_measure('cell')
+            sub_cm = bm.tile(cell_measure.reshape(NC, 1), (1, n_sub)) / n_sub # (NC, n_sub)
+            current_volume = bm.einsum('q, cnq, cn -> ', ws, rho_sub_q, sub_cm)
+        
+        elif isinstance(mesh, TensorMesh):
+            # 计算位移单元积分点处的重心坐标
+            qf_e = mesh.quadrature_formula(q=integration_order)
+            # bcs_e.shape = ( (NQ, GD), (NQ, GD) ), ws_e.shape = (NQ, )
+            bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
+
+            # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
+            from soptx.analysis.utils import map_bcs_to_sub_elements
+            # bcs_eg.shape = ( (n_sub, NQ, GD), (n_sub, NQ, GD) ), ws_e.shape = (NQ, )
+            bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+            bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+
+            detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
+            for s_idx in range(n_sub):
+                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ, GD), (NQ, GD))
+
+                J_sub = mesh.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
+
+                detJ_eg[:, s_idx, :] = detJ_sub
+
+            current_volume = bm.einsum('q, cnq, cnq -> ', ws_e, rho_sub_q, detJ_eg)
+
+    else:
+        raise ValueError(f"Unsupported density_location: {density_location}")

@@ -240,43 +240,48 @@ class HalfMBBBeamRight2d(PDEBase):
     
     def get_passive_element_mask(self, 
                                 mesh: HomogeneousMesh,
-                                load_region: tuple = (3, 2),
-                                support_region: tuple = (3, 3),
+                                load_region_idx: tuple = (3, 2),    # 网格格数 (宽, 高)
+                                support_region_idx: tuple = (3, 3)  # 网格格数 (宽, 高)
                             ) -> TensorLike:
         """生成被动单元掩码"""
-        # 1. 确定总单元数和父方格索引映射
-        nx , ny  = mesh.meshdata['nx'], mesh.meshdata['ny']
-
-        if isinstance(mesh, TriangleMesh):
-            n_elements = 2 * nx * ny
-            # 生成所有三角形的索引
-            el_indices = bm.arange(n_elements)
-            # 核心修正：将三角形索引映射回它所在的“父方格”索引
-            # 例如：三角形 0,1 -> 方格 0；三角形 2,3 -> 方格 1
-            grid_cell_indices = el_indices // 2
-        elif isinstance(mesh, QuadrangleMesh):
-            n_elements = nx * ny
-            el_indices = bm.arange(n_elements)
-            # 四边形本身就是方格，索引不变
-            grid_cell_indices = el_indices
-
-        # 2. 基于父方格索引计算空间坐标 (ix, iy)
-        # 注意：这里依然使用 ny，因为网格在几何上仍然是 nx 列 ny 行
-        ix = grid_cell_indices // ny  # 列号
-        iy = grid_cell_indices % ny   # 行号
+        nodes = mesh.entity('node')
+        nx, ny = mesh.meshdata['nx'], mesh.meshdata['ny']
         
-        # 3. 区域判定 (逻辑与之前完全一致，因为是基于 ix, iy 判定的)
+        # 1. 计算所有单元的几何中心 (Centroids)
+        # elements 是整数索引，nodes[elements] 得到形状为 (N_elems, 3, 2) 的坐标数组
+        # 在第1轴（3个节点）上求平均，得到 (N_elems, 2) 的重心坐标
+        centroids = mesh.entity_barycenter('cell')
+        cx = centroids[:, 0]
+        cy = centroids[:, 1]
         
-        # 载荷点区域（左上角）
-        load_w, load_h = load_region
-        # 增加边界保护
-        limit_load_w = min(load_w, nx)
-        mask_load = (ix < limit_load_w) & (iy >= ny - load_h)
+        # 2. 获取网格的物理尺寸步长 (假设网格是均匀的 1x1 或 dx*dy)
+        # 如果你的网格坐标就是 0,1,2...nx,ny，这一步可以简化
+        # 这里假设节点坐标范围是 [0, nx] 和 [0, ny]
+        max_x = bm.max(nodes[:, 0])
+        max_y = bm.max(nodes[:, 1])
         
-        # 支座点区域（右下角）
-        support_w, support_h = support_region
-        # 增加边界保护
-        limit_support_w = max(nx - support_w, 0)
-        mask_support = (ix >= limit_support_w) & (iy < support_h)
+        # 计算每个格子的物理宽度和高度
+        dx = max_x / nx
+        dy = max_y / ny
+        
+        # 3. 将格数转换为物理坐标阈值
+        # 载荷区域 (左上角): x < load_w, y > total_h - load_h
+        load_w_phys = load_region_idx[0] * dx
+        load_h_phys = load_region_idx[1] * dy
+        
+        # 支撑区域 (右下角): x > total_w - support_w, y < support_h
+        support_w_phys = support_region_idx[0] * dx
+        support_h_phys = support_region_idx[1] * dy
+        
+        # 4. 生成掩码
+        # 注意：根据你的图示 (Image 1)，载荷在左上 (Top-Left)，支撑在右下 (Bottom-Right)
+        
+        # 载荷区判定 (左上)
+        # x 小于阈值 且 y 大于 (总高度 - 阈值)
+        mask_load = (cx < load_w_phys) & (cy > (max_y - load_h_phys))
+        
+        # 支撑区判定 (右下)
+        # x 大于 (总宽度 - 阈值) 且 y 小于 阈值
+        mask_support = (cx > (max_x - support_w_phys)) & (cy < support_h_phys)
         
         return mask_load | mask_support

@@ -479,9 +479,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         pde = self._pde
         bc = mesh.entity_barycenter('edge')
 
-        # TODO 注释
-        # mesh.edgedata['dirichlet'] = pde.is_traction_boundary(bc)   # 应力是本质边界条件
-        # mesh.edgedata['neumann'] = pde.is_displacement_boundary(bc) # 位移是自然边界条件
         mesh.edgedata['essential_bc'] = pde.is_traction_boundary(bc)      # σ·n = t (强施加)
         mesh.edgedata['natural_bc']   = pde.is_displacement_boundary(bc)  # u = u_D (弱施加)
 
@@ -509,11 +506,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('源项处理时间')
 
-        # 本质边界条件处理 (应力边界 σ·n = g_N)
-        # if self._pde.boundary_type == 'neumann':
-        #     K, F = K0, F0
-        # else:
-        #     K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
         has_essential = ('essential_bc' in mesh.edgedata) and bool(mesh.edgedata['essential_bc'].any())
         if has_essential:
             K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
@@ -552,6 +544,80 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return {'stress': sigmah, 'displacement': uh}
+    
+    def solve_adjoint(self, 
+                    rhs: TensorLike,
+                    rho_val: Optional[Union[TensorLike, Function]] = None,
+                    **kwargs
+                ) -> TensorLike:
+        """
+        求解伴随方程 K @ λ = rhs
+        
+        Parameters
+        ----------
+        rhs : (n_gdof,) 或 (n_gdof, n_rhs) 伴随载荷向量 (支持批量求解)
+        rho_val : 密度场
+        
+        Returns
+        -------
+        adjoint_lambda : (n_gdof, n_rhs) 伴随变量
+        """
+        # 组装刚度矩阵
+        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+
+        # 施加齐次本质边界条件
+        space_sigma = self._huzhang_space
+        pde = self._pde
+        
+        gdof_sigma = space_sigma.number_of_global_dofs()
+        gdof_total = K0.shape[0]
+
+        # 根据网格设置点载荷作用区域
+        if hasattr(pde, 'set_load_region'):
+            pde.set_load_region(self._mesh)
+
+        # 获取边界自由度位置
+        gd_traction = pde.traction_bc
+        _, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
+
+        # 扩展到全局自由度
+        is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
+        is_fixed_dof[:gdof_sigma] = is_bd_dof
+
+        # 齐次边界条件：载荷在边界自由度上置零
+        rhs = bm.set_at(rhs, is_fixed_dof, 0.0)
+
+        # 修改矩阵：行列清零，对角置 1
+        fixed_idx = bm.zeros(gdof_total, dtype=bm.int32)
+        fixed_idx[is_fixed_dof] = 1
+        
+        I_bd = spdiags(fixed_idx, 0, gdof_total, gdof_total)
+        I_in = spdiags(1 - fixed_idx, 0, gdof_total, gdof_total)
+        
+        K = I_in @ K0 @ I_in + I_bd
+
+        # 初始化结果
+        adjoint_lambda = bm.zeros_like(rhs)
+        
+        # 求解
+        solver_type = kwargs.get('solver', self._solve_method)
+        
+        if solver_type in ['mumps', 'scipy']:
+            from fealpy.solver import spsolve
+            adjoint_lambda[:] = spsolve(K, rhs, solver=solver_type)
+            
+        elif solver_type in ['cg']:
+            from fealpy.solver import cg
+            maxiter = kwargs.get('maxiter', 5000)
+            atol = kwargs.get('atol', 1e-12)
+            rtol = kwargs.get('rtol', 1e-12)
+            
+            adjoint_lambda[:], _ = cg(K.tocoo(), rhs, 
+                                    batch_first=False,
+                                    atol=atol, rtol=rtol, 
+                                    maxit=maxiter, returninfo=True)
+        
+        return adjoint_lambda
     
     def compute_stress_state(self, 
                         state: dict,

@@ -817,5 +817,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_linear_elastic_huzhang')
+    test.run.set('test_subsec5_6_3_hzmfem')
     rho_opt, history = test.run()
