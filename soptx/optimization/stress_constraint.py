@@ -176,8 +176,22 @@ class StressConstraint(BaseLogged):
         """设置被动单元掩码 (True 表示是被动单元/载荷单元，需要剔除)"""
         self._passive_mask = mask
 
-        # 掩码更新后，缓存的应力状态可能失效，清理缓存
+    # ================== 缓存清理清单 ==================
+        # 1. 积分权重 (直接依赖 mask)
         self._integration_weights = None
+        
+        # 2. 聚类结果 (依赖权重)
+        # 必须清理，否则 _update_clustering 会误以为聚类有效而跳过更新
+        # 导致 P-norm 使用旧的分母 (cluster_weight_sums) 计算
+        self._clustering_map = None
+        self._cluster_weight_sums = None
+        
+        # 3. P-norm 计算缓存 (依赖权重和聚类)
+        self._cached_normalized_stress = None
+        self._cached_pnorm_normalized = None
+        
+        # 4. 应力状态缓存 (可选，但建议清理以防万一)
+        self._cached_stress_state = None
     
     def _get_integration_weights(self) -> TensorLike:
         """计算 P-norm 聚合所需的积分权重 detJ * w_q"""
@@ -676,14 +690,6 @@ class StressConstraint(BaseLogged):
                 bm.add_at(L[m], indices, vals)
                 
             return L
-
-    def normalize(self, 
-              con_val: TensorLike, 
-              con_grad: TensorLike
-          ) -> Tuple[TensorLike, TensorLike]:
-        """标准化应力约束值和梯度"""
-
-        return con_val, con_grad
 
 
 

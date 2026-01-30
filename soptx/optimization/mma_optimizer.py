@@ -12,6 +12,7 @@ from soptx.optimization.volume_constraint import VolumeConstraint
 from soptx.optimization.stress_constraint import StressConstraint
 from soptx.optimization.tools import OptimizationHistory
 from soptx.optimization.utils import solve_mma_subproblem
+from soptx.optimization.utils import compute_volume
 from soptx.regularization.filter import Filter
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
@@ -68,7 +69,6 @@ class MMAOptions:
         self._xmax = bm.ones((n, 1), dtype=bm.float64)
         self._a = bm.zeros((m, 1), dtype=bm.float64)
         self._c = 1e3 * bm.ones((m, 1), dtype=bm.float64)
-        # self._c = 1000 * bm.ones((m, 1), dtype=bm.float64)
         self._d = bm.zeros((m, 1), dtype=bm.float64)
 
     def set_advanced_options(self, **kwargs):
@@ -392,12 +392,11 @@ class MMAOptimizer(BaseLogged):
             # ==================== 惩罚因子更新 ====================
             self._update_penalty(iter_idx=iter_idx)
             current_penalty = interpolation_scheme.penalty_factor
-            print(f"初始惩罚因子: {current_penalty}")
             
             # 更新迭代计数
             self._epoch = iter_idx + 1
 
-            #TODO 基于物理密度求解状态变量
+            # 基于物理密度求解状态变量
             if hasattr(analyzer, 'solve_state'):
                 state = analyzer.solve_state(rho_val=rho_phys)
             elif isinstance(self._objective, CompliantMechanismObjective):
@@ -417,8 +416,6 @@ class MMAOptimizer(BaseLogged):
 
                 # 情况 A: 存在应力约束 -> 强制缩放至 1.0 以平衡梯度量级
                 if self._has_stress_constraint:
-                    # target_initial_val = 1.0
-                    # self._obj_scale_factor = min(1e6, target_initial_val / denom)
                     self._obj_scale_factor = 1.0
                 
                 # 情况 B: 无应力约束，但使用投影滤波 -> 缩放至 10.0
@@ -441,13 +438,16 @@ class MMAOptimizer(BaseLogged):
             obj_grad_rho_raw = self._objective.jac(density=rho_phys, state=state)
             # 灵敏度应用缩放因子
             obj_grad_rho = obj_grad_rho_raw * self._obj_scale_factor 
-            print(f"目标函数相对于物理密度的灵敏度范围: [{bm.min(obj_grad_rho):.4f}, {bm.max(obj_grad_rho):.4f}]")
             # 2. 计算目标函数相对于设计变量的灵敏度
             obj_grad_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=obj_grad_rho)
-            print(f"目标函数相对于设计变量的灵敏度范围: [{bm.min(obj_grad_dv):.4f}, {bm.max(obj_grad_dv):.4f}]")
 
+            # 设置被动单元的目标函数的灵敏度为 0
             if self._passive_mask is not None:
                 obj_grad_dv[self._passive_mask] = 0.0
+
+            print(f"体积目标函数值: {obj_val:.4f}")
+            print(f"体积目标函数的灵敏度范围: [{bm.min(obj_grad_dv):.4f}, {bm.max(obj_grad_dv):.4f}], "
+                  f"平均值{bm.mean(obj_grad_dv):.4f}")
                 
             if enable_timing:
                 t.send('目标函数灵敏度分析')
@@ -463,22 +463,21 @@ class MMAOptimizer(BaseLogged):
                 # 相对于设计变量的灵敏度
                 grad_dv = self._filter.filter_constraint_sensitivities(design_variable=dv, con_grad_rho=grad_rho)
 
+                # 设置被动单元的约束函数灵敏度为 0
                 if self._passive_mask is not None:
                     if grad_dv.ndim == 1:
                         grad_dv[self._passive_mask] = 0.0
                     else:
                         grad_dv[:, self._passive_mask] = 0.0
-
-                val_norm, grad_norm = constraint.normalize(val, grad_dv)
-
-                if val_norm.ndim == 0:
-                    val_flat = val_norm.reshape(1)
-                    grad_flat = grad_norm.reshape(1, -1)  # (1, n)
-                elif val_norm.ndim == 1:
-                    val_flat = val_norm  # (n_clusters,)
-                    grad_flat = grad_norm if grad_norm.ndim == 2 else grad_norm.reshape(1, -1)  # (n_clusters, n)
+                
+                if val.ndim == 0:
+                    val_flat = val.reshape(1)
+                    grad_flat = grad_dv.reshape(1, -1)  # (1, n)
+                elif val.ndim == 1:
+                    val_flat = val  # (n_clusters,)
+                    grad_flat = grad_dv if grad_dv.ndim == 2 else grad_dv.reshape(1, -1)  # (n_clusters, n)
                 else:
-                    raise ValueError(f"Unexpected constraint value shape: {val_norm.shape}")
+                    raise ValueError(f"Unexpected constraint value shape: {val.shape}")
 
                 con_vals.append(val_flat)
                 con_grads_dv.append(grad_flat)
@@ -486,10 +485,9 @@ class MMAOptimizer(BaseLogged):
             if enable_timing:
                 t.send('约束函数灵敏度分析')
 
-            # print(f"体积约束:{con_vals[0]}")
-            # print(f"体积约束梯度平均值:{bm.mean(con_grads_dv[0])}")
-            print(f"应力约束:{con_vals[0:]}")
-            print(f"应力约束梯度平均值:{bm.mean(con_grads_dv[0:])}")
+            print(f"应力约束函数:{con_vals[0:]}")
+            print(f"应力约束函数的灵敏度范围: [{bm.min(con_grads_dv[0]):.4f}, {bm.max(con_grads_dv[0]):.4f}], "
+                  f"平均值{bm.mean(con_grads_dv[0]):.4f}")
             
             #TODO ==================== MMA 子问题求解 ====================
             fval = bm.concatenate(con_vals).reshape(-1, 1)  # (m, 1)
@@ -530,11 +528,11 @@ class MMAOptimizer(BaseLogged):
             dv = dv_new
                 
             # 当前体积分数
-            volfrac = None
-            for constraint in self._constraints:
-                if hasattr(constraint, 'get_volume_fraction'):
-                    volfrac = constraint.get_volume_fraction(rho_phys)
-                    break
+            mesh = self._objective._analyzer._mesh            
+            cell_measure = mesh.entity_measure('cell')
+            current_volume = bm.einsum('c, c -> ', cell_measure, rho_phys[:])
+            total_volume = bm.sum(cell_measure)
+            volfrac = current_volume / total_volume
 
             # 记录当前迭代信息
             iteration_time = time() - start_time
@@ -593,6 +591,81 @@ class MMAOptimizer(BaseLogged):
         self.history.print_time_statistics()
         
         return rho_phys, self.history
+    
+    def verify_stress_constraint_sensitivity(self, analyzer, constraint, density, state, 
+                                         test_cells=None, h=1e-6):
+        """
+        使用有限差分法验证应力约束灵敏度
+        
+        Parameters
+        ----------
+        analyzer : LagrangeFEMAnalyzer
+        constraint : StressConstraint
+        density : 当前密度场
+        state : 当前状态（位移场）
+        test_cells : 要测试的单元索引列表，默认随机选择 5 个
+        h : 有限差分步长
+        """
+        from fealpy.backend import backend_manager as bm
+        
+        NC = density.shape[0]
+        
+        if test_cells is None:
+            # 随机选择 5 个非被动单元进行测试
+            bm.random.seed(42)
+            test_cells = bm.random.choice(NC, size=min(5, NC), replace=False)
+        
+        # 计算解析灵敏度
+        analytic_grad = constraint.jac(density=density, state=state)  # (n_clusters, NC)
+        n_clusters = analytic_grad.shape[0]
+        
+        print(f"{'='*70}")
+        print(f"应力约束灵敏度有限差分验证 (h = {h})")
+        print(f"{'='*70}")
+        
+        for cell_idx in test_cells:
+            cell_idx = int(cell_idx)
+            
+            # 原始约束值
+            g0 = constraint.fun(density=density, state=state, iter_idx=None)  # (n_clusters,)
+            
+            # 扰动密度
+            density_pert = bm.copy(density)
+            density_pert[cell_idx] += h
+            
+            # 重新求解状态方程（关键步骤！）
+            state_pert = analyzer.solve_state(rho_val=density_pert)
+            
+            # 清除约束类的缓存，确保重新计算
+            constraint._cached_stress_state = None
+            
+            # 扰动后的约束值
+            g1 = constraint.fun(density=density_pert, state=state_pert, iter_idx=None)
+            
+            # 有限差分灵敏度
+            fd_grad = (g1 - g0) / h  # (n_clusters,)
+            
+            # 恢复缓存状态
+            constraint._cached_stress_state = None
+            _ = constraint.fun(density=density, state=state, iter_idx=None)
+            
+            print(f"\n单元 {cell_idx} (密度 = {density[cell_idx]:.4f}):")
+            print(f"{'聚类':<8} {'解析值':<15} {'有限差分':<15} {'相对误差':<15}")
+            print(f"{'-'*53}")
+            
+            for m in range(n_clusters):
+                analytic_val = float(analytic_grad[m, cell_idx])
+                fd_val = float(fd_grad[m])
+                
+                if abs(fd_val) > 1e-12:
+                    rel_error = abs(analytic_val - fd_val) / abs(fd_val)
+                else:
+                    rel_error = abs(analytic_val - fd_val)
+                
+                status = "✓" if rel_error < 0.05 else "✗"
+                print(f"{m:<8} {analytic_val:<15.6e} {fd_val:<15.6e} {rel_error:<15.4%} {status}")
+        
+        print(f"\n{'='*70}")
         
     def _update_asymptotes(self, 
                           xval: TensorLike, 
@@ -627,7 +700,6 @@ class MMAOptimizer(BaseLogged):
 
         xmami = xmax - xmin
         
-        # if self._epoch <= 2:
         if self._epoch <= 2 or self._low is None or self._upp is None:
             self._low = xval - asyinit * xmami
             self._upp = xval + asyinit * xmami
@@ -690,32 +762,64 @@ class MMAOptimizer(BaseLogged):
         raa0 = self.options.raa0
         epsimin = self.options.epsilon_min
 
-        #! 动态移动限制: 根据投影滤波器的 beta 值调整
-        move = self.options.move_limit
-        beta_val = getattr(self._filter, 'beta', None)
-
-        if beta_val is not None:
-            move = move / (1.0 + 0.3 * bm.log(beta_val))
-
         eeen = bm.ones((n, 1), dtype=bm.float64)
         eeem = bm.ones((m, 1), dtype=bm.float64)
+
+        #TODO ============ 移动限制策略 ============
+        # 检测是否存在应力约束
+        has_stress_constraint = any(isinstance(c, StressConstraint) for c in self._constraints)
         
-        # 更新渐近线
-        low, upp = self._update_asymptotes(xval, xmin, xmax, xold1, xold2)
+        if has_stress_constraint:
+            # 绝对移动限制
+            # 参考: Amir (2021) - Efficient stress-constrained topology optimization
+            move = 0.1
+            xmin_eff = bm.maximum(xmin, xval - move)
+            xmax_eff = bm.minimum(xmax, xval + move)
+        else:
+            # 原始的相对移动限制
+            move = self.options.move_limit
+            beta_val = getattr(self._filter, 'beta', None)
+            if beta_val is not None:
+                move = move / (1.0 + 0.3 * bm.log(beta_val))
+            xmin_eff = xmin
+            xmax_eff = xmax
+        #TODO =====================================
+
+        # 使用有效边界更新渐近线
+        low, upp = self._update_asymptotes(xval, xmin_eff, xmax_eff, xold1, xold2)
         
         # 计算变量边界 alfa, beta
-        xxx1 = low + albefa * (xval - low)
-        xxx2 = xval - move * (xmax - xmin)
-        xxx = bm.maximum(xxx1, xxx2)
-        alfa = bm.maximum(xmin, xxx)
+        if has_stress_constraint:
+            # Amir 风格：简化计算，直接使用有效边界
+            alfa = bm.maximum(xmin_eff, low + albefa * (xval - low))
+            beta = bm.minimum(xmax_eff, upp - albefa * (upp - xval))
+        else:
+            # 原始方式：move limit 与渐近线约束竞争
+            xxx1 = low + albefa * (xval - low)
+            xxx2 = xval - move * (xmax_eff - xmin_eff)
+            xxx = bm.maximum(xxx1, xxx2)
+            alfa = bm.maximum(xmin_eff, xxx)
+            
+            xxx1 = upp - albefa * (upp - xval)
+            xxx2 = xval + move * (xmax_eff - xmin_eff)
+            xxx = bm.minimum(xxx1, xxx2)
+            beta = bm.minimum(xmax_eff, xxx)
+    
+        # xxx1 = low + albefa * (xval - low)
+        # xxx2 = xval - move * (xmax - xmin)
+        # xxx = bm.maximum(xxx1, xxx2)
+        # alfa = bm.maximum(xmin, xxx)
         
-        xxx1 = upp - albefa * (upp - xval)
-        xxx2 = xval + move * (xmax - xmin)
-        xxx = bm.minimum(xxx1, xxx2)
-        beta = bm.minimum(xmax, xxx)
+        # xxx1 = upp - albefa * (upp - xval)
+        # xxx2 = xval + move * (xmax - xmin)
+        # xxx = bm.minimum(xxx1, xxx2)
+        # beta = bm.minimum(xmax, xxx)
+
+        print(f"渐近线距离: low_dist={bm.mean(xval - low):.6f}, upp_dist={bm.mean(upp - xval):.6f}")
+        print(f"alfa-beta 范围: [{bm.mean(alfa):.6f}, {bm.mean(beta):.6f}]")
 
         # 计算 p0, q0 构建目标函数的近似
-        xmami = xmax - xmin
+        xmami = xmax_eff - xmin_eff
         xmami_eps = raa0 * eeen
         xmami = bm.maximum(xmami, xmami_eps)
         xmami_inv = eeen / xmami

@@ -18,9 +18,9 @@ class DensityTopOptTest(BaseLogged):
 
     @variantmethod('test_subsec4_2_2')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 60.0, 0, 20.0]
+        domain = [0, 300.0, 0, 100.0]
         E, nu = 71000, 0.33
-        P = -150
+        P = -1500
         plane_type = 'plane_stress' 
 
         volume_fraction = 0.5
@@ -30,10 +30,9 @@ class DensityTopOptTest(BaseLogged):
         n_clusters = 10
         recluster_freq = 1
 
-        optimizer_algorithm = 'mma'
-        max_iterations = 500
-        change_tolerance = 1e-2
-        use_penalty_continuation = True
+        max_iterations = 30
+        change_tolerance = 1e-6
+        use_penalty_continuation = False
 
         nx, ny = 60, 20
         mesh_type = 'uniform_quad'
@@ -168,7 +167,7 @@ class DensityTopOptTest(BaseLogged):
                                 asymp_decr=0.7,
                                 move_limit=0.2,
                                 albefa=0.1, 
-                                raa0=1e-5, 
+                                raa0=1e-9, 
                                 epsilon_min=1e-7,
                             )
         
@@ -185,7 +184,7 @@ class DensityTopOptTest(BaseLogged):
             f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs} \n"
             f"目标函数={objective.__class__.__name__} \n"
             f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数上限={volume_fraction}, 应力上限={stress_limit}, \n"
-            f"优化算法={optimizer_algorithm} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
+            f"优化算法={optimizer.__class__.__name__} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
             f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 
