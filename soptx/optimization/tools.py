@@ -1,8 +1,10 @@
 from fealpy.backend import backend_manager as bm
 
+import json
 from dataclasses import dataclass, field
 from time import time
-from typing import List, Optional
+from typing import List, Optional, Dict
+from pathlib import Path
 
 from fealpy.typing import TensorLike
 from fealpy.mesh import StructuredMesh, HomogeneousMesh, SimplexMesh, TensorMesh
@@ -213,6 +215,195 @@ def plot_optimization_history(history, save_path=None, show=True, title=None,
     
     if save_path is not None:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+
+def save_history_data(
+                    history: OptimizationHistory, 
+                    save_path: str, 
+                    label: str
+                ) -> None:
+    """
+    保存 history 中用于对比的关键数据（轻量级 JSON 格式）
+    
+    Parameters
+    ----------
+    history : OptimizationHistory
+        优化历史记录
+    save_path : str
+        保存目录路径
+    label : str
+        标签名，如 'k1', 'k2', 'p3' 等
+    
+    Examples
+    --------
+    >>> save_history_data(history, './results', label='k=1')
+    """
+    save_dir = Path(save_path)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 只保存绘图需要的标量数据
+    data = {
+        'label': label,
+        'obj_values': [float(v) for v in history.obj_values],
+        'con_values': [float(v) for v in history.con_values],
+        'iteration_times': [float(t) for t in history.iteration_times],
+    }
+    
+    filepath = save_dir / f"history_{label}.json"
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+    
+    print(f"History saved to: {filepath}")
+
+def load_history_data(
+                    save_path: str, 
+                    labels: str | List[str]
+                ) -> dict | Dict[str, dict]:
+    """
+    加载保存的 history 数据
+    
+    Parameters
+    ----------
+    save_path : str
+        保存目录路径
+    labels : str | List[str]
+        单个标签名或标签名列表，如 'k=1' 或 ['k=1', 'k=2']
+    
+    Returns
+    -------
+    dict | Dict[str, dict]
+        - 如果 labels 是字符串：返回单个 history 的字典
+        - 如果 labels 是列表：返回 {label: history_data} 的字典
+    
+    Examples
+    --------
+    >>> # 加载单个
+    >>> data = load_history_data('./results', labels='k=1')
+    >>> 
+    >>> # 加载多个
+    >>> histories = load_history_data('./results', labels=['k=1', 'k=2'])
+    """
+    if isinstance(labels, str):
+        # 加载单个
+        filepath = Path(save_path) / f"history_{labels}.json"
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        return data
+    else:
+        # 加载多个
+        histories = {}
+        for label in labels:
+            filepath = Path(save_path) / f"history_{label}.json"
+            with open(filepath, 'r') as f:
+                histories[label] = json.load(f)
+        return histories
+    
+def plot_optimization_history_comparison(
+                    histories: Dict[str, dict],
+                    save_path: Optional[str] = None,
+                    show: bool = True,
+                    title: Optional[str] = None,
+                    fontsize: int = 20,
+                    figsize: tuple = (14, 10),
+                    linewidth: float = 2.5,
+                    colors: Optional[List[str]] = None,
+                    linestyles: Optional[List[str]] = None,
+                ):
+    """
+    绘制多组优化历史的对比图
+    
+    Parameters  
+    ----------
+    histories : Dict[str, dict]
+        键为标签名，值为包含 obj_values, con_values 的字典
+        例如: {'k=1': {...}, 'k=2': {...}}
+    save_path : str, optional
+        保存路径（完整文件路径，如 './results/comparison.png'）
+    show : bool, optional
+        是否显示图像
+    title : str, optional
+        图表标题
+    fontsize : int, optional
+        字体大小
+    figsize : tuple, optional
+        图形大小
+    linewidth : float, optional
+        线条宽度
+    colors : List[str], optional
+        颜色列表
+    linestyles : List[str], optional
+        线型列表
+    
+    Examples
+    --------
+    >>> histories = load_all_histories('./results', labels=['k=1', 'k=2'])
+    >>> plot_optimization_history_comparison(
+    ...     histories,
+    ...     save_path='./results/comparison.png',
+    ...     title='Comparison of Different k Values'
+    ... )
+    """
+    import matplotlib.pyplot as plt
+    
+    if colors is None:
+        colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray']
+    if linestyles is None:
+        linestyles = ['-', '--', '-.', ':', '-', '--', '-.', ':']
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    plt.rcParams.update({'font.size': fontsize})
+    
+    # 绘制目标函数对比
+    for idx, (label, history) in enumerate(histories.items()):
+        color = colors[idx % len(colors)]
+        linestyle = linestyles[idx % len(linestyles)]
+        
+        obj_values = history['obj_values']
+        iterations = range(1, len(obj_values) + 1)
+        
+        ax1.plot(iterations, obj_values, 
+                 color=color, linestyle=linestyle, 
+                 linewidth=linewidth, label=label)
+    
+    ax1.set_xlabel('Iteration', fontsize=fontsize)
+    ax1.set_ylabel('Compliance, $c$', fontsize=fontsize)
+    ax1.tick_params(axis='both', labelsize=fontsize-2)
+    ax1.legend(fontsize=fontsize-2)
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.set_title('Objective Convergence', fontsize=fontsize+2)
+    
+    # 绘制体积分数对比
+    for idx, (label, history) in enumerate(histories.items()):
+        color = colors[idx % len(colors)]
+        linestyle = linestyles[idx % len(linestyles)]
+        
+        con_values = history['con_values']
+        iterations = range(1, len(con_values) + 1)
+        
+        ax2.plot(iterations, con_values, 
+                 color=color, linestyle=linestyle, 
+                 linewidth=linewidth, label=label)
+    
+    ax2.set_xlabel('Iteration', fontsize=fontsize)
+    ax2.set_ylabel('Volume Fraction, $v_f$', fontsize=fontsize)
+    ax2.tick_params(axis='both', labelsize=fontsize-2)
+    ax2.legend(fontsize=fontsize-2)
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.set_title('Volume Convergence', fontsize=fontsize+2)
+    
+    if title is not None:
+        fig.suptitle(title, fontsize=fontsize+4, fontweight='bold')
+    
+    plt.tight_layout()
+    
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Figure saved to: {save_path}")
     
     if show:
         plt.show()

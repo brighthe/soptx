@@ -110,6 +110,17 @@ class OCOptimizer(BaseLogged):
                                 f"Use set_advanced_options() for advanced parameters."
                     self._log_error(error_msg)
 
+        # 获取被动单元掩码
+        self._passive_mask = None
+
+        analyzer = getattr(objective, '_analyzer', None)
+        pde = getattr(analyzer, 'pde', None)
+        design_mesh = getattr(self._filter, 'design_mesh', None)
+
+        if pde is not None and design_mesh is not None:
+            if hasattr(pde, 'get_passive_element_mask'):
+                self._passive_mask = pde.get_passive_element_mask(mesh=design_mesh)
+
     def optimize(self, 
                 design_variable: Union[Function, TensorLike],
                 density_distribution: Union[Function, TensorLike],
@@ -140,6 +151,21 @@ class OCOptimizer(BaseLogged):
             rho = density_distribution.space.function(bm.copy(density_distribution[:]))
         else:
             rho = bm.copy(density_distribution[:])
+
+        # 初始化时设置被动单元 
+        if self._passive_mask is not None:
+            dv[self._passive_mask] = 1.0
+            rho[self._passive_mask] = 1.0
+
+        # design_mesh = getattr(self._filter, 'design_mesh', None)
+        # # design_mesh.celldata['rho'] = rho
+        # design_mesh.nodedata['rho'] = rho
+        # from pathlib import Path
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu'
+        # base_dir = str(base_dir)
+        # save_path = Path(f"{base_dir}/")
+        # design_mesh.to_vtk(f"{save_path}/rho_section3.vtu")
 
         rho_phys = self._filter.get_initial_density(density=rho)
 
@@ -316,11 +342,10 @@ class OCOptimizer(BaseLogged):
                             )
                         )
                     )
-
-        if (bm.any(bm.isnan(dv_new[:])) or bm.any(bm.isinf(dv_new[:])) or
-            bm.any(dv_new[:] < -1e-12) or bm.any(dv_new[:] > 1 + 1e-12)):
-            self._log_error(f"输出设计变量超出合理范围 [0, 1]: "
-                            f"range=[{bm.min(dv_new):.2e}, {bm.max(dv_new):.2e}]")
+        
+        # 强制被动单元保持密度为 1.0
+        if self._passive_mask is not None:
+            dv_new[self._passive_mask] = 1.0
 
         return dv_new
         

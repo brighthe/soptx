@@ -829,7 +829,6 @@ class HZmfemGeneralShearMix(PDEBase):
     #         val = bm.set_at(val, (flag_right, 1), g_y[flag_right])
 
     #     return val
-
     
     def is_traction_boundary(self, points: TensorLike) -> TensorLike:
         """标记牵引边界"""

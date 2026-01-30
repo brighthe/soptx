@@ -144,7 +144,7 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
 
             # 将单元测度均分给每个节点
             val = bm.repeat(cm / NNE, NNE)
-            nm = bm.zeros(NN, dtype=bm.float64)
+            nm = bm.zeros(NN, dtype=bm.float64, device=mesh.device)
             # 累加得到节点测度
             self._measure_weight = bm.add_at(nm, cell2node.reshape(-1), val)
         
@@ -175,7 +175,6 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
                         ) -> Union[TensorLike, Function]:
         if self._density_location in ['element', 'node']:
             physical_density_filter = bm.set_at(physical_density, slice(None), design_variable)
-            # physical_density[:] = bm.set_at(physical_density, slice(None), design_variable)
 
         elif self._density_location == 'element_multiresolution':
             from soptx.analysis.utils import reshape_multiresolution_data_inverse
@@ -318,7 +317,6 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         # 3. 归一化并赋值
         if self._density_location in ['element', 'node']:
             physical_density_filter = bm.set_at(physical_density, slice(None), numerator / self._Hs)
-            # physical_density[:] = bm.set_at(physical_density, slice(None), numerator / self._Hs)
 
         elif self._density_location == 'element_multiresolution':
             from soptx.analysis.utils import reshape_multiresolution_data_inverse

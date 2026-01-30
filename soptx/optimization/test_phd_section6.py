@@ -19,9 +19,9 @@ class DensityTopOptTest(BaseLogged):
 
     @variantmethod('test_subsec6_6_1')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        bm.set_backend('pytorch') # numpy, pytorch
+        bm.set_backend('numpy') # numpy, pytorch
         # bm.set_default_device('cpu') # cpu, cuda
-        device = 'cuda' # cpu, cuda
+        device = 'cpu' # cpu, cuda
 
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
@@ -32,19 +32,19 @@ class DensityTopOptTest(BaseLogged):
         mesh_type = 'uniform_hex'
         # mesh_type = 'uniform_tet'
 
-        space_degree = 2
-        integration_order = space_degree + 1 # 单元密度 + 六面体网格
+        space_degree = 1
+        integration_order = space_degree + 3 # 单元密度 + 六面体网格
         # integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
 
         volume_fraction = 0.3
         penalty_factor = 3.0
 
         # 'element', 'node'
-        density_location = 'element'
+        density_location = 'node'
         relative_density = volume_fraction
 
         # 'standard', 'voigt', 'fast', 'symbolic'
-        assembly_method = 'fast'
+        assembly_method = 'voigt'
         # 'mumps', 'cg'
         solve_method = 'mumps'
 

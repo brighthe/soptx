@@ -69,7 +69,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        space_degree = 3
+        space_degree = 4
         integration_order = space_degree*2 + 2
         use_relaxation = True
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"
@@ -127,13 +127,15 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
             if i < maxit - 1:
                 displacement_mesh.uniform_refine()
-        print("errorMatrix:\n", errorType, "\n", errorMatrix)   
+        
+        import numpy as np
+        with np.printoptions(formatter={'float': '{:.3e}'.format}):
+            print(f"errorMatrix: {errorType}\n", errorMatrix)
         print("NDof:", NDof)
-        print("order_uh_l2:\n", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
-        print("order_sigmah_l2:\n", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
-        print("order_div_sigmah_l2:\n", bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]))
-        print("order_sigmah_hdiv:\n", bm.log2(errorMatrix[3, :-1] / errorMatrix[3, 1:]))
-
+        print("order_uh_l2:\n", bm.round(bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]), 2))
+        print("order_sigmah_l2:\n", bm.round(bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]), 2))
+        print("order_div_sigmah_l2:\n", bm.round(bm.log2(errorMatrix[2, :-1] / errorMatrix[2, 1:]), 2))
+        print("order_sigmah_hdiv:\n", bm.round(bm.log2(errorMatrix[3, :-1] / errorMatrix[3, 1:]), 2))
         # 转换为积分点应力
         stress_at_quad = huzhang_mfem_analyzer.extract_stress_at_quadrature_points(
                                                         stress_dof=sigmah, 
@@ -817,5 +819,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_3_hzmfem')
+    test.run.set('test_linear_elastic_huzhang')
     rho_opt, history = test.run()
