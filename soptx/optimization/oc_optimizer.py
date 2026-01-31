@@ -184,7 +184,7 @@ class OCOptimizer(BaseLogged):
 
             start_time = time()
 
-            #TODO 基于物理密度求解状态变量
+            # TODO 基于物理密度求解状态变量 (待完善)
             state = analyzer.solve_state(rho_val=rho_phys)
             if isinstance(self._objective, CompliantMechanismObjective):
                 state = analyzer.solve_state(rho_val=rho_phys, adjoint=True)

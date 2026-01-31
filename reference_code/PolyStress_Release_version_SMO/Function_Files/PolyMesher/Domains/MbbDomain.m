@@ -1,54 +1,63 @@
-%----------------------------- PolyStress --------------------------------%
-% 终极修正版 MbbDomain
-% 1. PFix 返回空，避免干扰结构化网格
-% 2. 距离函数增加 -1e-5 的强力容差，防止边界节点被误删
+%------------------------------ PolyMesher -------------------------------%
+% MBB梁（右半部分）的域定义文件                                             %
 %-------------------------------------------------------------------------%
-function [x] = MbbDomain(Demand, Arg)
-  
-  L = 60; H = 20;
-
+function [x] = MbbDomain(Demand,Arg)
+  BdBox = [0 60 0 20];  % [xmin xmax ymin ymax]
   switch(Demand)
-    case('Dist')
-        P = Arg;
-        % 【关键修正】减去 1e-5 (10微米) 的容差
-        % 这让边界点的距离变成负数 (d = -1e-5)，绝对被判定为"内部"
-        x = dRectangle(P, 0, L, 0, H) - 1e-5;
-        
-    case('BdBox')
-        x = [0, L, 0, H];
-        
-    case('PFix')
-        % 【关键修正】返回空矩阵。
-        % 结构化种子点会自动生成完美的角点，不需要 PFix 强制指定。
-        % 返回 [] 可以骗过 PolyMesher 的检查，同时避免节点冲突。
-        x = [];
-        
-    case('BC')
-        % 兼容性处理
-        if iscell(Arg); Node = Arg{1}; else; Node = Arg; end
-
-        tol = 1e-4;
-
-        % 1. 左侧对称 (x=0)
-        LeftNodes = find(abs(Node(:,1)) < tol);
-        Supp1 = [LeftNodes, ones(length(LeftNodes),1), zeros(length(LeftNodes),1)];
-
-        % 2. 右下角滑移 (x=L, y=0)
-        RightNode = find(abs(Node(:,1)-L) < tol & abs(Node(:,2)) < tol);
-        Supp2 = [RightNode, zeros(length(RightNode),1), ones(length(RightNode),1)];
-
-        Supp = [Supp1; Supp2];
-
-        % 3. 左上角载荷 (x=0, y=H)
-        LoadNode = find(abs(Node(:,1)) < tol & abs(Node(:,2)-H) < tol);
-        Load = [LoadNode, 0, -400];
-
-        x = {Supp, Load};
+    case('Dist');  x = DistFnc(Arg,BdBox);
+    case('BC');    x = BndryCnds(Arg{:},BdBox);
+    case('BdBox'); x = BdBox;
+    case('PFix');  x = FixedPoints(BdBox);
   end
-end
+%----------------------------------------------- COMPUTE DISTANCE FUNCTIONS
+function Dist = DistFnc(P,BdBox)
+  Dist = dRectangle(P,BdBox(1),BdBox(2),BdBox(3),BdBox(4));
+%---------------------------------------------- SPECIFY BOUNDARY CONDITIONS
+function [x] = BndryCnds(Node,Element,BdBox)
+  eps = 0.1*sqrt((BdBox(2)-BdBox(1))*(BdBox(4)-BdBox(3))/size(Node,1));
+  
+  % 左侧边节点：对称约束 (ux = 0)
+  LeftEdgeNodes = find(abs(Node(:,1)-BdBox(1))<eps);
+  
+  % 右下角节点：滚动支座 (uy = 0)
+  RightBottomNode = find(abs(Node(:,1)-BdBox(2))<eps & ...
+                         abs(Node(:,2)-BdBox(3))<eps);
+  
+  % 构建支撑数组
+  nLeft = length(LeftEdgeNodes);
+  Supp = zeros(nLeft + 1, 3);
+  Supp(1:nLeft, 1) = LeftEdgeNodes;
+  Supp(1:nLeft, 2) = 1;  % 约束ux
+  Supp(1:nLeft, 3) = 0;  % 不约束uy
+  Supp(nLeft+1, 1) = RightBottomNode(1);
+  Supp(nLeft+1, 2) = 0;  % 不约束ux
+  Supp(nLeft+1, 3) = 1;  % 约束uy
 
-% 距离函数
-function d = dRectangle(P, x1, x2, y1, y2)
-    d = -min(min(min(-y1+P(:,2), y2-P(:,2)), -x1+P(:,1)), x2-P(:,1));
-end
+  % %% 集中载荷的方式
+  % % 左上角节点：载荷施加点
+  % LeftTopNode = find(abs(Node(:,1)-BdBox(1))<eps & ...
+  %                    abs(Node(:,2)-BdBox(4))<eps);
+  % 
+  % % 构建载荷数组
+  % n = length(LeftTopNode);
+  % Load = [LeftTopNode, zeros(n,1), -400*ones(n,1)/n];
+
+  %% 分布载荷的方式
+  % 上边缘左侧区域节点：分布载荷
+  % 载荷分布在上边缘 x <= 0.1*H 的范围内
+  H = BdBox(4) - BdBox(3);  % 梁高度
+  d = 0.1 * H;  % 载荷分布长度
+  TopLeftNodes = find(abs(Node(:,2)-BdBox(4))<eps & ...
+                      Node(:,1) <= BdBox(1) + d);
+
+  % 构建载荷数组：总力 P=-400 均分到各节点
+  P_total = -400;
+  n = length(TopLeftNodes);
+  Load = [TopLeftNodes, zeros(n,1), P_total/n * ones(n,1)];
+  
+  x = {Supp,Load};
+%----------------------------------------------------- SPECIFY FIXED POINTS
+function [PFix] = FixedPoints(BdBox)
+  PFix = [BdBox(1), BdBox(4);   % 左上角
+          BdBox(2), BdBox(3)];  % 右下角
 %-------------------------------------------------------------------------%

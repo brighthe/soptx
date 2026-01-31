@@ -1,4 +1,4 @@
-from typing import Optional, Union, Literal
+from typing import Optional, Union, Literal, Dict
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
@@ -9,6 +9,8 @@ from ..utils.base_logged import BaseLogged
 class CompliantMechanismObjective(BaseLogged):
     def __init__(self,
                 analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
+                state_variable: Literal['u', 'sigma'] = 'u',
+                diff_mode: Literal["auto", "manual"] = "manual",
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -16,23 +18,26 @@ class CompliantMechanismObjective(BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._analyzer = analyzer
+        self._state_variable = state_variable
+        self._diff_mode = diff_mode
         self._pde = analyzer.pde
         self._interpolation_scheme = analyzer._interpolation_scheme
 
     def fun(self, 
             density: Union[Function, TensorLike], 
-            displacement: Optional[TensorLike] = None,
+            state: Optional[Dict] = None, 
+            **kwargs
            ) -> float:
         """
         计算柔顺机械的目标函数值 (即输出点的位移 u_out).
         """
         if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
             #* 拉格朗日位移有限元 *#
-            if displacement is None:
-                U = self._analyzer.solve_displacement(rho_val=density, adjoint=True) 
-            else:
-                U = displacement
-            
+            if state is None:
+                state = self._analyzer.solve_state(rho_val=density, adjoint=True)
+
+            U = state['displacement']
+
             space_uh = self._analyzer.tensor_space
 
             threshold_dout = self._pde.is_dout_boundary()
@@ -49,16 +54,18 @@ class CompliantMechanismObjective(BaseLogged):
     
     def jac(self, 
             density: Union[Function, TensorLike], 
-            displacement: Optional[Function] = None,
-            diff_mode: Literal["auto", "manual"] = "manual"
+            state: Optional[Dict] = None, 
+            diff_mode: Optional[Literal["auto", "manual"]] = None,
+            **kwargs
         ) -> TensorLike:
         """计算柔顺机械相对于物理密度的灵敏度"""
+        mode = diff_mode if diff_mode is not None else self._diff_mode
 
-        if diff_mode == "manual":
-            return self._manual_differentiation(density=density, displacement=displacement)
+        if mode == "manual":
+            return self._manual_differentiation(density=density, state=state, **kwargs)
 
-        elif diff_mode == "auto": 
-            return self._auto_differentiation(density=density, displacement=displacement)
+        elif mode == "auto": 
+            return self._auto_differentiation(density=density, state=state, **kwargs)
 
         else:
             error_msg = f"Unknown diff_mode: {diff_mode}"
@@ -66,7 +73,9 @@ class CompliantMechanismObjective(BaseLogged):
 
     def _manual_differentiation(self, 
                                 density: Union[Function, TensorLike], 
-                                displacement: Optional[Function] = None
+                                state: Optional[dict] = None, 
+                                enable_timing: bool = False, 
+                                **kwargs
                             ) -> TensorLike:
         """手动计算柔顺机械相对于物理密度的灵敏度"""
 
@@ -74,17 +83,17 @@ class CompliantMechanismObjective(BaseLogged):
 
         if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
             #* 拉格朗日位移有限元 *#
-            if displacement is None:
-                uh = self._analyzer.solve_displacement(rho_val=density, adjoint=True)
-            else:
-                uh = displacement
+            if state is None:
+                state = self._analyzer.solve_state(rho_val=density, adjoint=True)
+            
+            uh = state.get('displacement')
             
             space_uh = self._analyzer._tensor_space
             cell2dof = space_uh.cell_to_dof()
             uhe = uh[cell2dof, 0]
             lambdahe = uh[cell2dof, 1]
             
-            diff_KE = self._analyzer.get_stiffness_matrix_derivative(rho_val=density)
+            diff_KE = self._analyzer.compute_stiffness_matrix_derivative(rho_val=density)
 
             if density_location in ['element']:
                 dc = bm.einsum('ci, cij, cj -> c', lambdahe, diff_KE, uhe) # (NC, )

@@ -220,9 +220,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         values = bm.tensor([k_in, k_out], dtype=bm.float64, device=tspace.device)
         spshape = (TGDOF, TGDOF)
 
-        K_coo = COOTensor(indices=indices, values=values, spshape=spshape)
-
-        K = K_coo.tocsr()
+        K = COOTensor(indices=indices, values=values, spshape=spshape)
 
         return K
 

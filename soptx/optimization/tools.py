@@ -370,7 +370,8 @@ def plot_optimization_history_comparison(
     for p_type, ax in axes_to_plot:
         # 设置数据键名和标签
         data_key = 'obj_values' if p_type == 'objective' else 'con_values'
-        y_label = 'Compliance, $C$' if p_type == 'objective' else 'Volume Fraction, $V_f$'
+        # y_label = 'Compliance, $C$' if p_type == 'objective' else 'Volume Fraction, $V_f$'
+        y_label = 'Output displacement, $u_{out}$' if p_type == 'objective' else 'Volume Fraction, $V_f$'
         
         for idx, (label, history) in enumerate(histories.items()):
             color = colors[idx % len(colors)]

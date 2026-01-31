@@ -642,20 +642,37 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec_3_6_6_disp_inverter_upper_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec3_6_6_disp_inverter/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['element', 'node'])
+
+        # 重命名键以美化图例
+        histories = {'element': histories['element'], 'node': histories['node']}
+
+        plot_optimization_history_comparison(
+                                histories,
+                                save_path=f'{save_path}/convergence_comparison.png',
+                                plot_type='objective'
+                            )
+    
         domain = [0, 40.0, 0, 20.0]
         E, nu = 1.0, 0.3
         plane_type = 'plane_stress' 
 
-        nx, ny = 40, 20
+        nx, ny = 80, 40
         mesh_type = 'uniform_quad'
 
         # 'element', 'node'
-        density_location = 'element'
+        density_location = 'node'
         volume_fraction = 0.3
 
-        space_degree = 4
-        integration_order = space_degree + 1 # 单元密度 + 张量网格
-        # integration_order = space_degree + 2   # 节点密度 + 张量网格
+        space_degree = 1
+        # integration_order = space_degree + 1 # 单元密度 + 张量网格
+        integration_order = space_degree + 2   # 节点密度 + 张量网格
 
         # 插值模型        
         penalty_factor = 3.0
@@ -724,7 +741,7 @@ class DensityTopOptTest(BaseLogged):
             
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
-                                    mesh=design_variable_mesh,
+                                    design_mesh=design_variable_mesh,
                                     filter_type=filter_type,
                                     rmin=rmin,
                                     density_location=density_location,
@@ -732,7 +749,7 @@ class DensityTopOptTest(BaseLogged):
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
@@ -797,6 +814,8 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/subsec3_6_6_")
         save_path.mkdir(parents=True, exist_ok=True)    
 
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
+
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
@@ -806,7 +825,7 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
 
 
-    @run.register('test_subsec3_6_6_cantilever_3d')
+    @run.register('test_subsec3_6_5_cantilever_3d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu' 
@@ -1177,5 +1196,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec3_6_6_cantilever_3d')
+    test.run.set('test_subsec_3_6_6_disp_inverter_upper_2d')
     rho_opt, history = test.run()
