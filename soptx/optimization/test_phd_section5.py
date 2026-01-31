@@ -69,7 +69,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        space_degree = 4
+        space_degree = 1
         integration_order = space_degree*2 + 2
         use_relaxation = True
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"

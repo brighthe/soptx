@@ -1,6 +1,7 @@
 from fealpy.backend import backend_manager as bm
 
 import json
+import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from time import time
 from typing import List, Optional, Dict
@@ -302,107 +303,106 @@ def load_history_data(
             with open(filepath, 'r') as f:
                 histories[label] = json.load(f)
         return histories
-    
+
 def plot_optimization_history_comparison(
-                    histories: Dict[str, dict],
-                    save_path: Optional[str] = None,
-                    show: bool = True,
-                    title: Optional[str] = None,
-                    fontsize: int = 20,
-                    figsize: tuple = (14, 10),
-                    linewidth: float = 2.5,
-                    colors: Optional[List[str]] = None,
-                    linestyles: Optional[List[str]] = None,
-                ):
+    histories: Dict[str, dict],
+    save_path: Optional[str] = None,
+    show: bool = True,
+    title: Optional[str] = None,
+    # --- 论文绘图关键参数 ---
+    fontsize: int = 14,          # 论文推荐 12-14，保证缩放后可读
+    figsize: Optional[tuple] = None, # 默认为 None，由代码内部决定最佳比例
+    linewidth: float = 2.0,      # 线宽 2.0 在论文中视觉效果最佳
+    colors: Optional[List[str]] = None,
+    linestyles: Optional[List[str]] = None,
+    plot_type: str = 'both',     # 'both', 'objective', 'volume'
+):
     """
-    绘制多组优化历史的对比图
-    
-    Parameters  
-    ----------
-    histories : Dict[str, dict]
-        键为标签名，值为包含 obj_values, con_values 的字典
-        例如: {'k=1': {...}, 'k=2': {...}}
-    save_path : str, optional
-        保存路径（完整文件路径，如 './results/comparison.png'）
-    show : bool, optional
-        是否显示图像
-    title : str, optional
-        图表标题
-    fontsize : int, optional
-        字体大小
-    figsize : tuple, optional
-        图形大小
-    linewidth : float, optional
-        线条宽度
-    colors : List[str], optional
-        颜色列表
-    linestyles : List[str], optional
-        线型列表
-    
-    Examples
-    --------
-    >>> histories = load_all_histories('./results', labels=['k=1', 'k=2'])
-    >>> plot_optimization_history_comparison(
-    ...     histories,
-    ...     save_path='./results/comparison.png',
-    ...     title='Comparison of Different k Values'
-    ... )
+    绘制符合博士学位论文排版标准的收敛曲线（长方形黄金比例）
     """
-    import matplotlib.pyplot as plt
     
+    # 1. 颜色与线型：选用学术界常用的高对比度配色
     if colors is None:
-        colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray']
+        # 经典的红、蓝、黑、绿，打印成黑白也能区分灰度
+        colors = ['#d62728', '#1f77b4', 'black', '#2ca02c', '#ff7f0e'] 
     if linestyles is None:
-        linestyles = ['-', '--', '-.', ':', '-', '--', '-.', ':']
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
-    plt.rcParams.update({'font.size': fontsize})
-    
-    # 绘制目标函数对比
-    for idx, (label, history) in enumerate(histories.items()):
-        color = colors[idx % len(colors)]
-        linestyle = linestyles[idx % len(linestyles)]
+        # 实线、虚线、点划线，区分度高
+        linestyles = ['-', '--', '-.', ':', (0, (3, 1, 1, 1))] 
+
+    # 2. 全局字体设置：使用 Times New Roman 或类似衬线体
+    plt.rcParams.update({
+        'font.family': 'serif',
+        'font.serif': ['Times New Roman'], # 论文标准字体
+        'font.size': fontsize,
+        'mathtext.fontset': 'stix',        # 公式字体与 Times 搭配最好
+        'axes.grid': True,                 # 默认开启网格
+        'grid.alpha': 0.4,                 # 网格淡一点
+        'grid.linestyle': '--'
+    })
+
+    # 3. 智能设置画布大小 (figsize) - 核心修改
+    # A4纸内容宽度通常在 15-16cm 左右。
+    # Matplotlib 默认 dpi=100，所以 6.4 inch ≈ 16cm。
+    if figsize is None:
+        if plot_type == 'both':
+            # 双图并排：宽一点，高保持黄金比
+            # 12 inch 宽，5 inch 高 -> 每个子图接近 1.2:1
+            figsize = (12, 5) 
+        else:
+            # 单图：经典的 4:3 或 黄金比例
+            # 8 inch * 2.54 = 20cm (稍大，适合缩小插入), 高 5 inch
+            figsize = (8, 5) 
+
+    # 创建画布
+    if plot_type == 'both':
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+        axes_to_plot = [('objective', ax1), ('volume', ax2)]
+    elif plot_type == 'objective':
+        fig, ax1 = plt.subplots(figsize=figsize)
+        axes_to_plot = [('objective', ax1)]
+    elif plot_type == 'volume':
+        fig, ax2 = plt.subplots(figsize=figsize)
+        axes_to_plot = [('volume', ax2)]
+    else:
+        raise ValueError("Invalid plot_type")
+
+    # 4. 绘图循环
+    for p_type, ax in axes_to_plot:
+        # 设置数据键名和标签
+        data_key = 'obj_values' if p_type == 'objective' else 'con_values'
+        y_label = 'Compliance, $C$' if p_type == 'objective' else 'Volume Fraction, $V_f$'
         
-        obj_values = history['obj_values']
-        iterations = range(1, len(obj_values) + 1)
+        for idx, (label, history) in enumerate(histories.items()):
+            color = colors[idx % len(colors)]
+            linestyle = linestyles[idx % len(linestyles)]
+            
+            values = history[data_key]
+            # 迭代步数通常从 0 或 1 开始，这里假设从 0 开始
+            iterations = range(len(values))
+            
+            ax.plot(iterations, values, 
+                    color=color, linestyle=linestyle, 
+                    linewidth=linewidth, label=label)
         
-        ax1.plot(iterations, obj_values, 
-                 color=color, linestyle=linestyle, 
-                 linewidth=linewidth, label=label)
-    
-    ax1.set_xlabel('Iteration', fontsize=fontsize)
-    ax1.set_ylabel('Compliance, $c$', fontsize=fontsize)
-    ax1.tick_params(axis='both', labelsize=fontsize-2)
-    ax1.legend(fontsize=fontsize-2)
-    ax1.grid(True, linestyle='--', alpha=0.7)
-    ax1.set_title('Objective Convergence', fontsize=fontsize+2)
-    
-    # 绘制体积分数对比
-    for idx, (label, history) in enumerate(histories.items()):
-        color = colors[idx % len(colors)]
-        linestyle = linestyles[idx % len(linestyles)]
+        # 坐标轴修饰
+        ax.set_xlabel('Iteration')
+        ax.set_ylabel(y_label)
         
-        con_values = history['con_values']
-        iterations = range(1, len(con_values) + 1)
+        # 图例设置：去掉边框背景，显得更干净，或者放在最佳位置
+        ax.legend(loc='best', frameon=True, framealpha=0.9, edgecolor='gray', fancybox=False)
         
-        ax2.plot(iterations, con_values, 
-                 color=color, linestyle=linestyle, 
-                 linewidth=linewidth, label=label)
-    
-    ax2.set_xlabel('Iteration', fontsize=fontsize)
-    ax2.set_ylabel('Volume Fraction, $v_f$', fontsize=fontsize)
-    ax2.tick_params(axis='both', labelsize=fontsize-2)
-    ax2.legend(fontsize=fontsize-2)
-    ax2.grid(True, linestyle='--', alpha=0.7)
-    ax2.set_title('Volume Convergence', fontsize=fontsize+2)
-    
-    if title is not None:
-        fig.suptitle(title, fontsize=fontsize+4, fontweight='bold')
-    
+        # 科学计数法：如果数值太大或太小（比如 Compliance），强制使用科学计数法
+        if p_type == 'objective':
+            ax.ticklabel_format(style='sci', axis='y', scilimits=(-2, 3))
+
+    if title:
+        fig.suptitle(title, fontweight='bold', y=0.98)
+
     plt.tight_layout()
     
-    if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    if save_path:
+        # 保存为 PDF 或高 DPI 的 PNG
+        plt.savefig(save_path, dpi=600, bbox_inches='tight')
         print(f"Figure saved to: {save_path}")
     
     if show:

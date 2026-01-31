@@ -9,7 +9,9 @@ from soptx.utils.base_logged import BaseLogged
 from soptx.optimization.tools import (
                                     save_optimization_history,
                                     plot_optimization_history, 
-                                    save_history_data
+                                    save_history_data,
+                                    load_history_data,
+                                    plot_optimization_history_comparison
                                 )
 from soptx.optimization.tools import OptimizationHistory
 
@@ -806,6 +808,23 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec3_6_6_cantilever_3d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test_cantilever_3d/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['k1', 'k2'])
+
+        # 重命名键以美化图例
+        histories = {'k=1': histories['k1'], 'k=2': histories['k2']}
+
+        plot_optimization_history_comparison(
+                                        histories,
+                                        save_path=f'{save_path}/convergence_comparison.png',
+                                        plot_type='objective'
+                                    )
+
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
         E, nu = 1.0, 0.3

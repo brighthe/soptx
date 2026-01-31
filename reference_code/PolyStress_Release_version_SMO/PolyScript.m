@@ -8,8 +8,18 @@ clear; clc; close all
 restoredefaultpath; addpath(genpath('./')); %Use all folders and subfolders
 set(0,'defaulttextinterpreter','latex')
 %% ------------------------------------------------------------ CREATE Mesh
-[Node,Element,Supp,Load] = Mesh_L_bracket(10000); 
+% [Node,Element,Supp,Load] = Mesh_L_bracket(10000); 
+[Node,Element,Supp,Load] = Mesh_MBB(3000); 
 NElem = size(Element,1); % Number of elements
+
+figure(101); clf; axis equal; hold on; title('Generated Quad Mesh');
+patch('Faces', cell2mat(Element), 'Vertices', Node, ...
+      'FaceColor', 'w', 'EdgeColor', 'k');
+plot(Node(fixed_nodes,1), Node(fixed_nodes,2), 'r^', 'MarkerFaceColor','r');
+plot(Node(load_node,1), Node(load_node,2), 'bo', 'MarkerFaceColor','b');
+xlabel('X'); ylabel('Y');
+set(gca, 'XLim', [-0.1 1.1], 'YLim', [-0.1 1.1]);
+drawnow;
 %% ---------------------------------------------------- CREATE 'fem' STRUCT
 E0 = 70e3; % E0 in MPa
 G = E0/2.5; Et = E0; Ec = E0;  % 0<=(Et,Ec)<=3*G; %Material props. (linear)
