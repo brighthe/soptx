@@ -838,7 +838,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def fetch_symbolic_assembly(self, space: TensorFunctionSpace) -> TensorLike:
-        index = self.index
+        index = self._index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
     
@@ -848,7 +848,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                                "not a subclass of HomoMesh.")
     
         cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self.q is None else self.q
+        q = scalar_space.p+3 if self._q is None else self._q
         qf = mesh.quadrature_formula(q)
         bcs, ws = qf.get_quadrature_points_and_weights()
         node = mesh.entity('node')

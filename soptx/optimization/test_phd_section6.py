@@ -17,7 +17,7 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_subsec6_6_1')
+    @variantmethod('test_subsec6_6_2')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         bm.set_backend('numpy') # numpy, pytorch
         # bm.set_default_device('cpu') # cpu, cuda
@@ -29,18 +29,19 @@ class DensityTopOptTest(BaseLogged):
         plane_type = '3d'
 
         nx, ny, nz = 60, 20, 4
-        mesh_type = 'uniform_hex'
-        # mesh_type = 'uniform_tet'
+        # nx, ny, nz = 120, 40, 8
+        # mesh_type = 'uniform_hex'
+        mesh_type = 'uniform_tet'
 
         space_degree = 1
-        integration_order = space_degree + 3 # 单元密度 + 六面体网格
-        # integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
+        # integration_order = space_degree + 2 # 单元密度 + 六面体网格
+        integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
 
         volume_fraction = 0.3
         penalty_factor = 3.0
 
         # 'element', 'node'
-        density_location = 'node'
+        density_location = 'element'
         relative_density = volume_fraction
 
         # 'standard', 'voigt', 'fast', 'symbolic'
@@ -652,5 +653,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec6_6_1')
+    test.run.set('test_subsec6_6_2')
     rho_opt, history = test.run()

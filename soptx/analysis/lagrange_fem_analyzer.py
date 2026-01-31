@@ -361,7 +361,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def solve_state(self, 
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     adjoint: bool = False,
-                    enable_timing: bool = False, 
+                    enable_timing: bool = True, 
                     **kwargs
                 ) -> Dict[str, Function]:
         t = None
@@ -411,6 +411,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
             from fealpy.solver import spsolve
 
             uh[:] = spsolve(K, F, solver=solver_type)
+
+            if enable_timing:
+                t.send('求解')
+                t.send(None)
 
         elif solver_type in ['cg']:
             from fealpy.solver import cg
