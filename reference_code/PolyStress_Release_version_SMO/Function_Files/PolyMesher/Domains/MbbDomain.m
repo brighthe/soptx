@@ -2,7 +2,7 @@
 % MBB梁（右半部分）的域定义文件                                             %
 %-------------------------------------------------------------------------%
 function [x] = MbbDomain(Demand,Arg)
-  BdBox = [0 60 0 20];  % [xmin xmax ymin ymax]
+  BdBox = [0 3 0 1];
   switch(Demand)
     case('Dist');  x = DistFnc(Arg,BdBox);
     case('BC');    x = BndryCnds(Arg{:},BdBox);
@@ -51,7 +51,8 @@ function [x] = BndryCnds(Node,Element,BdBox)
                       Node(:,1) <= BdBox(1) + d);
 
   % 构建载荷数组：总力 P=-400 均分到各节点
-  P_total = -400;
+  % P_total = -400; % 原物理载荷
+  P_total = -2;     % 归一化载荷 (与 L型梁量级一致)
   n = length(TopLeftNodes);
   Load = [TopLeftNodes, zeros(n,1), P_total/n * ones(n,1)];
   

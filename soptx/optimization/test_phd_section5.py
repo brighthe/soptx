@@ -26,10 +26,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # plane_type = 'plane_strain'
         # pde = HZmfemZeroShearDirichlet(lam=lam, mu=mu, plane_type=plane_type)
 
-        #* 算例 - 纯位移边界条件 
-        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearDirichlet
-        # lam, mu = 1.0, 0.5
-        # pde = HZmfemGeneralShearDirichlet(lam=lam, mu=mu)
+        #* 算例 - 纯位移边界条件 - 一般剪切应力
+        from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearDirichlet
+        lam, mu = 1.0, 0.5
+        pde = HZmfemGeneralShearDirichlet(lam=lam, mu=mu)
 
         #* 算例 - 混合边界条件 - 零剪切应力
         # from soptx.model.linear_elastic_2d_hzmfem import HZmfemZeroShearMix
@@ -37,9 +37,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # pde = HZmfemZeroShearMix(lam=lam, mu=mu)
 
         #* 算例 - 混合边界条件 - 一般剪切应力
-        from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix
-        lam, mu = 1.0, 0.5
-        pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
+        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix
+        # lam, mu = 1.0, 0.5
+        # pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
 
         #* 第一类网格
         # pde.init_mesh.set('union_crisscross')
@@ -69,7 +69,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        space_degree = 4
+        space_degree = 2
         integration_order = space_degree*2 + 2
         use_relaxation = True
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"

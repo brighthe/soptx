@@ -53,10 +53,12 @@ fem = struct(...
   'MaxIter', 15, ...            % Max NR iterations per load step
   'MEX', 'No');                 % Tag to use MEX functions in NLFEM routine
 %% ---------------------------------------------------- CREATE 'opt' STRUCT
-R = 0.05; q = 3; % Filter radius and filter exponent
+R = 0.08; q = 3; % Filter radius and filter exponent
 p = 3.5; eta0 = 0.5;
 m = @(y,B)MatIntFnc(y,'SIMP-H1',[p,B,eta0]);
-P = PolyFilter(fem,R,q);
+% 对于 MBB 梁 (关于 Y 轴对称，即 X 方向是对称轴):
+% 你的代码建模的是右半边，左边是对称轴
+P = PolyFilter(fem, R, q, 'X');
 zIni = 0.5*ones(size(P,2),1);
 opt = struct(...               
   'zMin',0.0,...              % Lower bound for design variables

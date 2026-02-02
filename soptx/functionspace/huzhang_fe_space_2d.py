@@ -836,7 +836,7 @@ class HuZhangFESpace2d(FunctionSpace):
     @barycentric
     def div_value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike:
         """
-        计算有限元函数的散度值。
+        计算有限元函数的散度值
         """
         if isinstance(bc, tuple):
             TD = len(bc)
