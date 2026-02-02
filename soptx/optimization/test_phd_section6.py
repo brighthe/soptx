@@ -30,12 +30,12 @@ class DensityTopOptTest(BaseLogged):
 
         nx, ny, nz = 60, 20, 4
         # nx, ny, nz = 120, 40, 8
-        # mesh_type = 'uniform_hex'
-        mesh_type = 'uniform_tet'
+        mesh_type = 'uniform_hex'
+        # mesh_type = 'uniform_tet'
 
         space_degree = 1
-        # integration_order = space_degree + 2 # 单元密度 + 六面体网格
-        integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
+        integration_order = space_degree + 2 # 单元密度 + 六面体网格
+        # integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
 
         volume_fraction = 0.3
         penalty_factor = 3.0
@@ -45,7 +45,7 @@ class DensityTopOptTest(BaseLogged):
         relative_density = volume_fraction
 
         # 'standard', 'voigt', 'fast', 'symbolic'
-        assembly_method = 'voigt'
+        assembly_method = 'symbolic'
         # 'mumps', 'cg'
         solve_method = 'mumps'
 

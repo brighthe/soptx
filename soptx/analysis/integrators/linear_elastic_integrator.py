@@ -8,9 +8,10 @@ from fealpy.functionspace.space import FunctionSpace, Function
 from fealpy.functionspace.tensor_space import TensorFunctionSpace
 from fealpy.decorator.variantmethod import variantmethod
 from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
-from fealpy.fem.utils import LinearSymbolicIntegration
+# from fealpy.fem.utils import LinearSymbolicIntegration
 
 from ...interpolation.linear_elastic_material import LinearElasticMaterial
+from soptx.analysis.integrators.utils import LinearSymbolicIntegration
 
 from soptx.utils import timer
 
@@ -837,7 +838,15 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         return KK
 
     @enable_cache
-    def fetch_symbolic_assembly(self, space: TensorFunctionSpace) -> TensorLike:
+    def fetch_symbolic_assembly(self, 
+                            space: TensorFunctionSpace,
+                            enable_timing: bool = False
+                        ) -> TensorLike:
+        t = None
+        if enable_timing:
+            t = timer(f"参考单元解析预计算组装(缓存)")
+            next(t)
+
         index = self._index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
@@ -855,10 +864,16 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         cell = mesh.entity('cell')
         cell_vertices = node[cell]
 
+        if enable_timing:
+            t.send('准备时间')
+        
         symbolic_int = LinearSymbolicIntegration(space1=scalar_space, space2=scalar_space)
         kwargs = bm.context(node)
 
         S = bm.tensor(symbolic_int.gphi_gphi_matrix(), **kwargs)  # (LDOF1, LDOF1, BC, BC)
+
+        if enable_timing:
+            t.send('计算 S')
 
         if isinstance(mesh, SimplexMesh):   
             glambda_x = mesh.grad_lambda()  # (NC, LDOF, GD)
@@ -866,10 +881,15 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         
         elif isinstance(mesh, TensorMesh):
             JG = symbolic_int.compute_mapping(vertices=cell_vertices)  # (NC, GD, GD)
+
+            if enable_timing:
+                t.send('计算部分')
+                t.send(None)
+
             return cm, bcs, JG, S
         
-        else:
-            raise NotImplementedError("symbolic assembly for general meshes is not implemented yet.")
+
+        
 
     @assembly.register('symbolic')
     def assembly(self, 

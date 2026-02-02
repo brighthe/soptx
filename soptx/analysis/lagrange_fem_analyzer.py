@@ -361,7 +361,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def solve_state(self, 
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     adjoint: bool = False,
-                    enable_timing: bool = True, 
+                    enable_timing: bool = False, 
                     **kwargs
                 ) -> Dict[str, Function]:
         t = None

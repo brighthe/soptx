@@ -183,7 +183,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.3
 
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         interpolation_method = 'msimp'
@@ -229,7 +229,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         analyzer = LagrangeFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     space_degree=space_degree,
@@ -284,7 +284,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         self._log_info(f"开始密度拓扑优化, \n"
                 f"模型名称={pde.__class__.__name__} \n"
                 f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
-                f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
+                f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree}, 积分次数={integration_order} \n" 
                 f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, \n"
                 f"分析算法={analyzer.__class__.__name__} \n" 
                 f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={fe_dofs} \n"
@@ -347,7 +347,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         use_relaxation = True # True, False
 
-        max_iterations = 200
+        max_iterations = 500
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
@@ -357,8 +357,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        node = displacement_mesh.entity('node')
-        displacement_mesh.meshdata['corner'] = pde.mark_corners(node)
+        # node = displacement_mesh.entity('node')
+        # displacement_mesh.meshdata['corner'] = pde.mark_corners(node)
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -381,7 +381,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     space_degree=space_degree,
@@ -438,9 +438,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
                 f"模型名称={pde.__class__.__name__} \n"
                 f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
                 f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
-                f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, \n"
-                f"分析算法={analyzer.__class__.__name__}, 是否角点松弛={use_relaxation}, 状态变量={state_variable} \n" 
+                f"密度空间阶数={analyzer.huzhang_space.p}, "
+                f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape[0]} \n"
+                f"位移空间阶数={analyzer.tensor_space.p}, "
                 f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={fe_dofs} \n"
+                f"分析算法={analyzer.__class__.__name__}, 是否角点松弛={use_relaxation}, 状态变量={state_variable} \n" 
                 f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
                 f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
                 f"体积分数约束={volume_fraction}, 惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n" 
@@ -819,5 +821,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_linear_elastic_huzhang')
+    test.run.set('test_subsec5_6_2_hzmfem')
     rho_opt, history = test.run()
