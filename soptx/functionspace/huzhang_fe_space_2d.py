@@ -528,11 +528,11 @@ class HuZhangFESpace2d(FunctionSpace):
     def boundary_interpolate(self,
                             gd: Union[Callable, int, float, TensorLike],
                             uh: Optional[TensorLike] = None,
-                            *, threshold: Optional[Threshold]=None, method=None
+                            *, threshold: Optional[Threshold]=None, method=None,
                         ) -> TensorLike:
         if uh is None:
-            uh = bm.zeros((self.number_of_global_dofs(),), dtype=self.ftype,
-                          device=self.device)
+            uh = bm.zeros((self.number_of_global_dofs(),), dtype=self.ftype, device=self.device)
+
         mesh = self.mesh
         p = self.p
 

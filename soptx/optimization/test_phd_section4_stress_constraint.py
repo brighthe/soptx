@@ -16,11 +16,11 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_subsec4_2_2')
+    @variantmethod('test_subsec4_6_5_half_mbb_beam_compliance')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 300.0, 0, 100.0]
-        E, nu = 71000, 0.33
-        P = -1500
+        domain = [0, 60.0, 0, 20.0]
+        E, nu = 1.0, 0.33
+        P = -1
         plane_type = 'plane_stress' 
 
         volume_fraction = 0.5
@@ -30,8 +30,8 @@ class DensityTopOptTest(BaseLogged):
         n_clusters = 10
         recluster_freq = 1
 
-        max_iterations = 30
-        change_tolerance = 1e-6
+        max_iterations = 500
+        change_tolerance = 1e-2
         use_penalty_continuation = False
 
         nx, ny = 60, 20
@@ -58,8 +58,8 @@ class DensityTopOptTest(BaseLogged):
         interpolation_method = 'msimp'
         penalty_factor = 3.0
         void_youngs_modulus = 1e-9
-        stress_interpolation_method = 'power_law'
-        stress_penalty_factor = 0.5
+        # stress_interpolation_method = 'power_law'
+        # stress_penalty_factor = 0.5
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -73,12 +73,12 @@ class DensityTopOptTest(BaseLogged):
         interpolation_scheme = MaterialInterpolationScheme(
                                     density_location=density_location,
                                     interpolation_method=interpolation_method,
-                                    stress_interpolation_method=stress_interpolation_method,
+                                    # stress_interpolation_method=stress_interpolation_method,
                                     options={
                                         'penalty_factor': penalty_factor,
                                         'void_youngs_modulus': void_youngs_modulus,
                                         'target_variables': ['E'],
-                                        'stress_penalty_factor': stress_penalty_factor,
+                                        # 'stress_penalty_factor': stress_penalty_factor,
                                     },
                                 )
 
@@ -122,22 +122,22 @@ class DensityTopOptTest(BaseLogged):
                                                     sub_density_element=sub_density_element,
                                                 )
         
-        # from soptx.optimization.compliance_objective import ComplianceObjective
-        # compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
+        from soptx.optimization.compliance_objective import ComplianceObjective
+        objective = ComplianceObjective(analyzer=lagrange_fem_analyzer)
 
         from soptx.optimization.volume_objective import VolumeObjective
-        objective = VolumeObjective(analyzer=lagrange_fem_analyzer)
+        # objective = VolumeObjective(analyzer=lagrange_fem_analyzer)
 
-        # from soptx.optimization.volume_constraint import VolumeConstraint
-        # volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
+        from soptx.optimization.volume_constraint import VolumeConstraint
+        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
 
-        from soptx.optimization.stress_constraint import StressConstraint
-        stress_constraint = StressConstraint(analyzer=lagrange_fem_analyzer, 
-                                            stress_limit=stress_limit,
-                                            p_norm_factor=p_norm_factor,
-                                            n_clusters=n_clusters,
-                                            recluster_freq=recluster_freq,
-                                        )
+        # from soptx.optimization.stress_constraint import StressConstraint
+        # stress_constraint = StressConstraint(analyzer=lagrange_fem_analyzer, 
+        #                                     stress_limit=stress_limit,
+        #                                     p_norm_factor=p_norm_factor,
+        #                                     n_clusters=n_clusters,
+        #                                     recluster_freq=recluster_freq,
+        #                                 )
 
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
@@ -148,7 +148,7 @@ class DensityTopOptTest(BaseLogged):
                                 )
         
         # constraint = [volume_constraint, stress_constraint]
-        constraint = [stress_constraint]
+        constraint = [volume_constraint]
         from soptx.optimization.mma_optimizer import MMAOptimizer
         optimizer = MMAOptimizer(
                         objective=objective,
@@ -183,7 +183,7 @@ class DensityTopOptTest(BaseLogged):
             f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
             f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs} \n"
             f"目标函数={objective.__class__.__name__} \n"
-            f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数上限={volume_fraction}, 应力上限={stress_limit}, \n"
+            f"约束类型={[type(c).__name__ for c in optimizer._constraints]}, 体积分数上限={volume_fraction} \n"
             f"优化算法={optimizer.__class__.__name__} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
             f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")

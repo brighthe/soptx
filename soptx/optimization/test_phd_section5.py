@@ -642,28 +642,27 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_3_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
-        p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.5
-        domain = [0, 80, 0, 40]
-        plane_type = 'plane_strain' # plane_stress, plane_strain
+        # p1, p2 = -2.0, -2.0
+        # E, nu = 1, 0.5
+        # domain = [0, 80, 0, 40]
+        # plane_type = 'plane_strain' # plane_stress, plane_strain
 
-        from soptx.model.clamped_beam_2d_hzmfem import ClampedBeam2d
-        pde = ClampedBeam2d(
-                    domain=domain,
-                    p1=p1, p2=p2,
-                    E=E, nu=nu,
-                    support_height_ratio=0.5,
-                    plane_type=plane_type,
-                )
-        nx, ny = 80, 40
-        mesh_type = 'uniform_crisscross_tri'
+        # from soptx.model.clamped_beam_2d_hzmfem import ClampedBeam2d
+        # pde = ClampedBeam2d(
+        #             domain=domain,
+        #             p1=p1, p2=p2,
+        #             E=E, nu=nu,
+        #             support_height_ratio=0.5,
+        #             plane_type=plane_type,
+        #         )
+        # nx, ny = 80, 40
+        # mesh_type = 'uniform_crisscross_tri'
 
-        volume_fraction = 0.3
+        # volume_fraction = 0.3
 
         #* 轴承装置结构 bearing_device_2d
-        '''
         t = -8e-2
-        E, nu = 1, 0.5
+        E, nu = 1, 0.3
         domain = [0, 120, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -679,7 +678,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri' 
 
         volume_fraction = 0.35
-        '''
 
         space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
@@ -692,7 +690,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         use_relaxation = True # True, False
 
-        max_iterations = 500
+        max_iterations = 200
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
@@ -821,5 +819,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_2_hzmfem')
+    test.run.set('test_subsec5_6_3_hzmfem')
     rho_opt, history = test.run()
