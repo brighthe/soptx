@@ -7,7 +7,8 @@ from fealpy.typing import TensorLike
 
 from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.utils.base_logged import BaseLogged
-from soptx.optimization.tools import save_optimization_history, plot_optimization_history
+from soptx.optimization.tools import (save_optimization_history, plot_optimization_history,
+                                      save_history_data, load_history_data, plot_optimization_history_comparison)
 from soptx.optimization.tools import OptimizationHistory
 
 
@@ -456,6 +457,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec5_6_2_hzmfem")
         save_path.mkdir(parents=True, exist_ok=True)
 
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
         
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 

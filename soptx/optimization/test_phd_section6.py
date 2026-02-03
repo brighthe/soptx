@@ -7,7 +7,8 @@ from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
 
 from soptx.utils.base_logged import BaseLogged
-from soptx.optimization.tools import save_optimization_history, plot_optimization_history
+from soptx.optimization.tools import (save_optimization_history, plot_optimization_history,
+                                    save_history_data, load_history_data, plot_optimization_history_comparison)
 from soptx.optimization.tools import OptimizationHistory
 
 class DensityTopOptTest(BaseLogged):
@@ -177,8 +178,25 @@ class DensityTopOptTest(BaseLogged):
 
         return rho_opt, history
     
-    @run.register('test_subsec6_4_2')
+    @run.register('test_subsec6_6_3')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec6_6_3_canti_3d/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['manual', 'auto'])
+
+        # 重命名键以美化图例
+        histories = {'manual': histories['manual'], 'auto': histories['auto']}
+
+        plot_optimization_history_comparison(
+                                        histories,
+                                        save_path=f'{save_path}/convergence_comparison.png',
+                                        plot_type='objective'
+                                    )
+
         bm.set_backend('pytorch') # numpy, pytorch
         # bm.set_default_device('cuda') # cpu, cuda
         device = 'cpu' # cpu, cuda
@@ -214,7 +232,7 @@ class DensityTopOptTest(BaseLogged):
         filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
         rmin = 1.5
 
-        from soptx.model.cantilever_3d import CantileverBeam3d
+        from soptx.model.cantilever_3d_lfem import CantileverBeam3d
         pde = CantileverBeam3d(
                             domain=domain,
                             p=p, E=E, nu=nu,
@@ -269,7 +287,7 @@ class DensityTopOptTest(BaseLogged):
         
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         lagrange_fem_analyzer = LagrangeFEMAnalyzer(
-                                    mesh=displacement_mesh,
+                                    disp_mesh=displacement_mesh,
                                     pde=pde,
                                     material=material,
                                     interpolation_scheme=interpolation_scheme,
@@ -283,12 +301,12 @@ class DensityTopOptTest(BaseLogged):
         analysis_tspace = lagrange_fem_analyzer.tensor_space
         analysis_tgdofs = analysis_tspace.number_of_global_dofs()
 
-        diff_mode_compliance = 'manual'
+        diff_mode_compliance = 'auto'
         from soptx.optimization.compliance_objective import ComplianceObjective
         compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer, 
                                                 diff_mode=diff_mode_compliance)
 
-        diff_mode_volume = 'manual'
+        diff_mode_volume = 'auto'
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, 
                                             volume_fraction=volume_fraction,
@@ -314,9 +332,9 @@ class DensityTopOptTest(BaseLogged):
 
         self._log_info(f"开始密度拓扑优化, \n"
             f"设备={device}, 后端={bm.backend_name}, "
-            f"目标函数自动微分={diff_mode_compliance}, 体积分数约束自动微分={diff_mode_volume}\n"
+            f"目标函数灵敏度分析方法={compliance_objective._diff_mode}, "
+            f"体积分数约束灵敏度分析方法={volume_constraint._diff_mode} \n"
             f"模型名称={pde.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
-            f"目标函数灵敏度计算方法={diff_mode_compliance}, 体积分数约束灵敏度计算方法={diff_mode_volume}, \n"
             f"网格类型={displacement_mesh.__class__.__name__},  " 
             f"密度类型={density_location}, "
             f"空间次数={space_degree}, 积分次数={integration_order}, 位移自由度总数={analysis_tgdofs}, \n"
@@ -332,6 +350,8 @@ class DensityTopOptTest(BaseLogged):
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_cantilever_3d")
         save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='manual')
 
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
@@ -653,5 +673,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec6_6_2')
+    test.run.set('test_subsec6_6_3')
     rho_opt, history = test.run()
