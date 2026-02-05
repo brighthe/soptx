@@ -203,10 +203,114 @@ class DensityTopOptTest(BaseLogged):
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
-                         
+    
+    
+    @run.register('test_subsec4_6_5_L_bracket')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        domain = [0, 1.0, 0, 1.0]
+        hole_domain = [0.4, 1.0, 0.4, 1.0]
+        P = -2.0
+        E, nu = 7e4, 0.3
+        plane_type = 'plane_stress' 
+
+        nx, ny = 10, 10
+        mesh_type = 'quad_threshold'
+        # mesh_type = 'tri_threshold'
+
+        from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
+        pde = LBracketBeam2d(
+                            domain=domain,
+                            hole_domain=hole_domain,
+                            P=P, E=E, nu=nu,
+                            plane_type=plane_type,
+                        )
+        pde.init_mesh.set(mesh_type)
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+        node = displacement_mesh.entity('node')
+        right_edge = node[bm.abs(node[:, 0] - 1.0) < 1e-8]
+        right_edge_in_range = right_edge[right_edge[:, 1] <= 0.4]
+        print(f"右边缘节点数: {len(right_edge_in_range)}")
+        print(right_edge_in_range)
+
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+
+        density_location = 'element'
+        interpolation_method = 'msimp'
+        penalty_factor = 3.0
+        void_youngs_modulus = 1e-9
+
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method=interpolation_method,
+                                    options={
+                                        'penalty_factor': penalty_factor,
+                                        'void_youngs_modulus': void_youngs_modulus,
+                                        'target_variables': ['E'],
+                                    },
+                                )
+        
+        relative_density = 1.0
+        if density_location in ['element']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                )
+        elif density_location in ['element_multiresolution']:
+            sub_density_element = 4
+            import math
+            sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
+            pde.init_mesh.set(mesh_type)
+            design_variable_mesh = pde.init_mesh(nx=nx*sub_x, ny=ny*sub_y)
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                    sub_density_element=sub_density_element,
+                                                )
+            
+
+        space_degree = 1
+        integration_order = space_degree + 1 # 张量网格
+        # integration_order = space_degree**2 + 2  # 单纯形网格
+        # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
+        assembly_method = 'fast'
+        solve_method = 'mumps'
+
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        analyzer = LagrangeFEMAnalyzer(
+                                disp_mesh=displacement_mesh,
+                                pde=pde,
+                                material=material,
+                                interpolation_scheme=interpolation_scheme,
+                                space_degree=space_degree,
+                                integration_order=integration_order,
+                                assembly_method=assembly_method,
+                                solve_method=solve_method,
+                                topopt_algorithm='density_based',
+                            )
+        
+        uh = analyzer.solve_state(rho_val=rho, adjoint=False)
+
+
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        axes = fig.gca()
+        displacement_mesh.add_plot(axes)
+        plt.show()      
+        print("----------------")      
     
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_half_mbb_beam')
+    test.run.set('test_subsec4_6_5_L_bracket')
     rho_opt, history = test.run()

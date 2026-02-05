@@ -1,5 +1,5 @@
 %------------------------------- PolyStress ------------------------------%
-% Ref: O Giraldo-Londo駉, GH Paulino, "PolyStress: A Matlab implementation%
+% Ref: O Giraldo-Londoño, GH Paulino, "PolyStress: A Matlab implementation%
 % for topology optimization with local stress constraints using the       %
 % augmented Lagrangian method", Structural and Multidisciplinary          %
 % Optimization, DOI 10.1007/s00158-020-02664-7, 2020                      %
@@ -7,8 +7,9 @@
 clear; clc; close all
 restoredefaultpath; addpath(genpath('./')); %Use all folders and subfolders
 set(0,'defaulttextinterpreter','latex')
+
 %% ------------------------------------------------------------ CREATE Mesh
-[Node,Element,Supp,Load] = Mesh_L_bracket(50000); 
+[Node,Element,Supp,Load] = Mesh_Mbb(4800);  % 或调整为更高网格密度
 NElem = size(Element,1); % Number of elements
 
 %% ---------------------------------------------------- CREATE 'fem' STRUCT
@@ -29,11 +30,16 @@ fem = struct(...
   'TolR', 1e-8, ...             % Tolerance for norm of force residual
   'MaxIter', 15, ...            % Max NR iterations per load step
   'MEX', 'No');                 % Tag to use MEX functions in NLFEM routine
+
 %% ---------------------------------------------------- CREATE 'opt' STRUCT
-R = 0.05; q = 3; % Filter radius and filter exponent
+R = 0.05; q = 3; % 建议：与 L_bracket 保持一致
 p = 3.5; eta0 = 0.5;
 m = @(y,B)MatIntFnc(y,'SIMP-H1',[p,B,eta0]);
-P = PolyFilter(fem,R,q);
+
+% 重要：MBB 梁关于 Y 轴对称，左边缘是对称轴
+% 'X' 参数指示对称性方向
+P = PolyFilter(fem, R, q, 'X');  % ← 必须保留 'X' 参数！
+
 zIni = 0.5*ones(size(P,2),1);
 opt = struct(...               
   'zMin',0.0,...              % Lower bound for design variables
@@ -56,6 +62,7 @@ opt = struct(...
   'AsymInc',1.2,...           % Asymptote increment in MMA update scheme  
   'AsymDecr',0.7...           % Asymptote decrement in MMA update scheme     
    );
+
 %% ------------------------------------------------------- RUN 'PolyStress'
 fem = preComputations(fem); % Run preComputations before running PolyStress
 [z,V,fem] = PolyStress(fem,opt);

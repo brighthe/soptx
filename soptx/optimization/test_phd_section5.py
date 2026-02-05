@@ -70,9 +70,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        space_degree = 2
+        space_degree = 3
         integration_order = space_degree*2 + 2
-        use_relaxation = True
+        use_relaxation = False
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"
                     f"网格类型={displacement_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}, \n"
                     f"是否使用松弛={use_relaxation}")
@@ -819,5 +819,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_3_lfem')
+    test.run.set('test_linear_elastic_huzhang')
     rho_opt, history = test.run()

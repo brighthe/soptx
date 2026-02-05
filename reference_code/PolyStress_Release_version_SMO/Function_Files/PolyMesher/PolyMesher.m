@@ -157,7 +157,10 @@ if exist('Load','var')&&~isempty(Load) %Plot Load BC if specified
   h(idx)=plot(Node(Load(:,1),1),Node(Load(:,1),2),'m^','MarkerSize',8);
   leg{idx}='Load';
 end
-legend(h,leg,'Location','Northoutside','Orientation','Horizontal')
+if exist('h', 'var')
+    legend(h,leg,'Location','Northoutside','Orientation','Horizontal')
+end
+% legend(h,leg,'Location','Northoutside','Orientation','Horizontal')
 %-------------------------------------------------------------------------%
 %------------------------ PolyMesher - History ---------------------------%
 % version: 1.1 (Aug13)

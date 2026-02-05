@@ -8,32 +8,8 @@ clear; clc; close all
 restoredefaultpath; addpath(genpath('./')); %Use all folders and subfolders
 set(0,'defaulttextinterpreter','latex')
 %% ------------------------------------------------------------ CREATE Mesh
-[Node,Element,Supp,Load] = Mesh_MBB(3000); 
+[Node,Element,Supp,Load] = Mesh_L_bracket(10000); % 10000, 22500
 NElem = size(Element,1); % Number of elements
-
-% % 绘图代码
-% figure(101); clf; axis equal; axis off; hold on; 
-% title('Generated Quad Mesh');
-% 
-% % 使用NaN填充法处理不同节点数的单元
-% MaxNVer = max(cellfun(@numel, Element));
-% PadWNaN = @(E) [E, NaN(1, MaxNVer-numel(E))];
-% ElemMat = cellfun(PadWNaN, Element, 'UniformOutput', false);
-% ElemMat = vertcat(ElemMat{:});
-% 
-% patch('Faces', ElemMat, 'Vertices', Node, ...
-%       'FaceColor', 'w', 'EdgeColor', 'k');
-% 
-% % 从Supp和Load中提取节点编号
-% fixed_nodes = Supp(:,1);
-% load_nodes = Load(:,1);
-% 
-% plot(Node(fixed_nodes,1), Node(fixed_nodes,2), 'b>', 'MarkerSize', 8);
-% plot(Node(load_nodes,1), Node(load_nodes,2), 'm^', 'MarkerSize', 8);
-% 
-% legend('', 'Support', 'Load', 'Location', 'northoutside', 'Orientation', 'horizontal');
-% drawnow;
-
 %% ---------------------------------------------------- CREATE 'fem' STRUCT
 E0 = 70e3; % E0 in MPa
 G = E0/2.5; Et = E0; Ec = E0;  % 0<=(Et,Ec)<=3*G; %Material props. (linear)
@@ -53,12 +29,10 @@ fem = struct(...
   'MaxIter', 15, ...            % Max NR iterations per load step
   'MEX', 'No');                 % Tag to use MEX functions in NLFEM routine
 %% ---------------------------------------------------- CREATE 'opt' STRUCT
-R = 0.08; q = 3; % Filter radius and filter exponent
+R = 0.05; q = 3; % Filter radius and filter exponent
 p = 3.5; eta0 = 0.5;
 m = @(y,B)MatIntFnc(y,'SIMP-H1',[p,B,eta0]);
-% 对于 MBB 梁 (关于 Y 轴对称，即 X 方向是对称轴):
-% 你的代码建模的是右半边，左边是对称轴
-P = PolyFilter(fem, R, q, 'X');
+P = PolyFilter(fem,R,q);
 zIni = 0.5*ones(size(P,2),1);
 opt = struct(...               
   'zMin',0.0,...              % Lower bound for design variables

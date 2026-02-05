@@ -273,6 +273,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
             # 分布载荷 (面力)
             elif load_type == 'distributed':
+                #TODO 支持节点载荷等效分布载荷的情况
+                if hasattr(self._pde, 'set_equivalent_traction'):
+                    self._pde.set_equivalent_traction(self._mesh)
+
                 gd_sigmah = self._pde.neumann_bc
                 threshold_sigmah = self._pde.is_neumann_boundary()
 
