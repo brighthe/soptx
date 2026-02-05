@@ -199,7 +199,7 @@ class DensityTopOptTest(BaseLogged):
 
         bm.set_backend('pytorch') # numpy, pytorch
         # bm.set_default_device('cuda') # cpu, cuda
-        device = 'cpu' # cpu, cuda
+        device = 'cuda' # cpu, cuda
 
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
@@ -360,6 +360,260 @@ class DensityTopOptTest(BaseLogged):
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
+    
+    @run.register('test_subsec6_6_4')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec6_6_4_canti_3d/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['cpu', 'gpu'])
+
+        # 重命名键以美化图例
+        histories = {'cpu': histories['cpu'], 'gpu': histories['gpu']}
+
+        plot_optimization_history_comparison(
+                                        histories,
+                                        save_path=f'{save_path}/convergence_comparison.png',
+                                        plot_type='objective'
+                                    )
+
+        bm.set_backend('pytorch') # numpy, pytorch
+        # bm.set_default_device('cuda') # cpu, cuda
+        device = 'cpu' # cpu, cuda
+
+        domain = [0, 60.0, 0, 20.0, 0, 4.0]
+        p = -1.0
+        E, nu = 1.0, 0.3
+        plane_type = '3d'
+
+        # nx, ny, nz = 60, 20, 4
+        nx, ny, nz = 120, 40, 8
+        mesh_type = 'uniform_hex'
+        # mesh_type = 'uniform_tet'
+
+        space_degree = 1
+        integration_order = space_degree + 1 # 单元密度 + 六面体网格
+        # integration_order = space_degree*2 + 2 # 单元密度 + 四面体网格
+
+        volume_fraction = 0.3
+        penalty_factor = 3.0
+
+        # 'element'
+        density_location = 'element'
+        relative_density = volume_fraction
+
+        # 'standard', 'voigt', 'fast'
+        assembly_method = 'fast'
+        # 'mumps', 'cg'
+        solve_method = 'cg'
+
+        max_iterations = 200
+        change_tolerance = 1e-2
+
+        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
+        rmin = 1.5
+
+        from soptx.model.cantilever_3d_lfem import CantileverBeam3d
+        pde = CantileverBeam3d(
+                            domain=domain,
+                            p=p, E=E, nu=nu,
+                            plane_type=plane_type,
+                        )
+        pde.init_mesh.set(mesh_type)
+        # displacement_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz)
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny, nz=nz, device=device)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            device=device,
+                                        )
+
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method='msimp',
+                                    options={
+                                        'penalty_factor': penalty_factor,
+                                        'void_youngs_modulus': 1e-9,
+                                        'target_variables': ['E']
+                                    },
+                                )
+
+        if density_location in ['element']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                )                                           
+        elif density_location in ['node']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                    integration_order=integration_order,
+                                                )
+            
+        from soptx.regularization.filter import Filter
+        filter_regularization = Filter(
+                                    design_mesh=design_variable_mesh,
+                                    filter_type=filter_type,
+                                    rmin=rmin,
+                                    density_location=density_location,
+                                )
+        
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        lagrange_fem_analyzer = LagrangeFEMAnalyzer(
+                                    disp_mesh=displacement_mesh,
+                                    pde=pde,
+                                    material=material,
+                                    interpolation_scheme=interpolation_scheme,
+                                    space_degree=space_degree,
+                                    integration_order=integration_order,
+                                    assembly_method=assembly_method,
+                                    solve_method=solve_method,
+                                    topopt_algorithm='density_based',
+                                )
+
+        analysis_tspace = lagrange_fem_analyzer.tensor_space
+        analysis_tgdofs = analysis_tspace.number_of_global_dofs()
+
+        diff_mode_compliance = 'manual'
+        from soptx.optimization.compliance_objective import ComplianceObjective
+        compliance_objective = ComplianceObjective(analyzer=lagrange_fem_analyzer, 
+                                                diff_mode=diff_mode_compliance)
+
+        diff_mode_volume = 'manual'
+        from soptx.optimization.volume_constraint import VolumeConstraint
+        volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, 
+                                            volume_fraction=volume_fraction,
+                                            diff_mode=diff_mode_volume)
+
+        from soptx.optimization.oc_optimizer import OCOptimizer
+        optimizer = OCOptimizer(
+                            objective=compliance_objective,
+                            constraint=volume_constraint,
+                            filter=filter_regularization,
+                            options={
+                                'max_iterations': max_iterations,
+                                'change_tolerance': change_tolerance,
+                            }
+                        )
+        optimizer.options.set_advanced_options(
+                                    move_limit=0.2,
+                                    damping_coef=0.5,
+                                    initial_lambda=1e9,
+                                    bisection_tol=1e-3,
+                                    design_variable_min=1e-9
+                                )
+
+        self._log_info(f"开始密度拓扑优化, \n"
+            f"设备={device}, 后端={bm.backend_name}, "
+            f"目标函数灵敏度分析方法={compliance_objective._diff_mode}, "
+            f"体积分数约束灵敏度分析方法={volume_constraint._diff_mode} \n"
+            f"模型名称={pde.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
+            f"网格类型={displacement_mesh.__class__.__name__},  " 
+            f"密度类型={density_location}, "
+            f"空间次数={space_degree}, 积分次数={integration_order}, 位移自由度总数={analysis_tgdofs}, \n"
+            f"矩阵组装方法={assembly_method}, \n"
+            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
+            f"设计变量变化收敛容差={change_tolerance} \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+        
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test_cantilever_3d")
+        save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='gpu')
+
+        save_optimization_history(mesh=design_variable_mesh, 
+                                history=history, 
+                                density_location=density_location,
+                                save_path=str(save_path))
+        plot_optimization_history(history, save_path=str(save_path))
+
+        return rho_opt, history
+    
+    @run.register('test_subsec6_6_4_2')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        import numpy as np
+        import matplotlib.pyplot as plt
+
+        # ---- Input (steady-state / subsequent average) ----
+        iter_time = {"CPU": 20.777, "GPU": 4.585}
+        assembly  = {"CPU": 0.712,  "GPU": 0.127}
+        solve     = {"CPU": 18.736, "GPU": 4.106}
+
+        # compute "Other" to close the decomposition
+        other = {
+            dev: iter_time[dev] - assembly[dev] - solve[dev]
+            for dev in ["CPU", "GPU"]
+        }
+        if any(v < -1e-9 for v in other.values()):
+            raise ValueError(f"'Other' became negative: {other}. Please re-check inputs.")
+        for k in other:
+            other[k] = max(other[k], 0.0)
+
+        # ---- Data arranged as: categories x devices ----
+        categories = ["Assembly", "Solve", "Other"]
+        cpu_vals = [assembly["CPU"], solve["CPU"], other["CPU"]]
+        gpu_vals = [assembly["GPU"], solve["GPU"], other["GPU"]]
+
+        x = np.arange(len(categories))
+        width = 0.34  # bar width
+
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+
+        bars_cpu = ax.bar(x - width/2, cpu_vals, width, label="CPU")
+        bars_gpu = ax.bar(x + width/2, gpu_vals, width, label="GPU")
+
+        ax.set_xticks(x, categories)
+        ax.set_ylabel("Time per iteration (s)")
+        ax.set_title("Steady-state time breakdown by stage")
+        ax.legend(frameon=False)
+
+        # light grid helps readability
+        ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.6)
+
+        # value labels on top of bars
+        def add_labels(bars):
+            for b in bars:
+                h = b.get_height()
+                ax.text(
+                    b.get_x() + b.get_width()/2, h,
+                    f"{h:.3f}",
+                    ha="center", va="bottom",
+                    fontsize=10
+                )
+
+        add_labels(bars_cpu)
+        add_labels(bars_gpu)
+
+        # optional: show total steady-state per-iteration time as text
+        ax.text(0.02, 0.98,
+                f"Total (CPU/GPU): {iter_time['CPU']:.3f}s / {iter_time['GPU']:.3f}s",
+                transform=ax.transAxes, ha="left", va="top", fontsize=10)
+
+        plt.tight_layout()
+        plt.savefig("ch6_device_breakdown_grouped.pdf", bbox_inches="tight")
+        plt.show()
+
+        print(f"Other: CPU={other['CPU']:.3f}s, GPU={other['GPU']:.3f}s")
+
+        
+        print("----------")
+
     
 
     @run.register('test_subsec6_6_simple_bridge_2d')
@@ -673,5 +927,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec6_6_3')
+    test.run.set('test_subsec6_6_4')
     rho_opt, history = test.run()

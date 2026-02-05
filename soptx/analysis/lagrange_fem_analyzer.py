@@ -361,7 +361,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def solve_state(self, 
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     adjoint: bool = False,
-                    enable_timing: bool = False, 
+                    enable_timing: bool = True, 
                     **kwargs
                 ) -> Dict[str, Function]:
         t = None
@@ -750,6 +750,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """        
         if integration_order is None:
             integration_order = self._integration_order
+            # TODO 测试
+            integration_order = 1
 
         if state is None:
             state = self.solve_state(rho_val=rho_val)
@@ -785,6 +787,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 计算 von Mises 应力
         von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_for_vm)
         result['von_mises'] = von_mises
+
         
         # 每个单元取最大值
         if von_mises.ndim == 2:

@@ -325,7 +325,7 @@ class MMAOptimizer(BaseLogged):
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
-                is_store_stress: bool = False,
+                is_store_stress: bool = True,
                 enable_timing: bool = False,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:

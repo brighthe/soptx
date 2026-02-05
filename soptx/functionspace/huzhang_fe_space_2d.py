@@ -93,14 +93,6 @@ class HuZhangFECellDof2d():
         self.dual_subsimplex = [[dual(f) for f in ssixi] for ssixi in self.subsimplex]
 
     def dof_classfication(self):
-        """
-        张量自由度顺序: (-1, NS): gd_priority 
-        (σ0_xx, σ0_xy, σ0_yy, 
-         σ1_xx, σ1_xy, σ1_yy, 
-         ...,
-         σn_xx, σn_xy, σn_yy)
-        Classify the dofs by the the entities.
-        """
         p = self.p
         mesh = self.mesh
         TD = mesh.top_dimension()

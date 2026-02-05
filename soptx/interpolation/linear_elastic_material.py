@@ -403,6 +403,14 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         - STOP: (NC, NQ, NS)
         - MTOP: (NC, n_sub, NQ, NS)
 
+        分量顺序要求 (NS 维度的索引顺序):
+            - Case '3d' (NS=6): 
+              [sigma_xx, sigma_yy, sigma_zz, tau_xy, tau_yz, tau_zx]
+            
+            - Case 'plane_stress' / 'plane_strain' (NS=3):
+              [sigma_xx, sigma_yy, tau_xy]
+              注意：对于平面应变, 输入不包含 sigma_zz, 其贡献已通过修改 M 矩阵系数隐式包含
+
         Returns
         -------
         von_mises_stress 

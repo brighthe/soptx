@@ -472,29 +472,28 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_3_lfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
-        p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.4999 # 0.4999, 0.3
-        domain = [0, 80, 0, 40]
-        plane_type = 'plane_strain' # plane_strain, plane_stress
+        # p1, p2 = -2.0, -2.0
+        # E, nu = 1, 0.4999 # 0.4999, 0.3
+        # domain = [0, 80, 0, 40]
+        # plane_type = 'plane_strain' # plane_strain, plane_stress
 
-        from soptx.model.clamped_beam_2d_lfem import ClampedBeam2d
-        pde = ClampedBeam2d(
-                    domain=domain,
-                    p1=p1, p2=p2,
-                    E=E, nu=nu,
-                    support_height_ratio=0.5,
-                    plane_type=plane_type,
-                )
-        nx, ny = 80, 40
-        mesh_type = 'uniform_crisscross_tri'
-        # mesh_type = 'uniform_quad'
+        # from soptx.model.clamped_beam_2d_lfem import ClampedBeam2d
+        # pde = ClampedBeam2d(
+        #             domain=domain,
+        #             p1=p1, p2=p2,
+        #             E=E, nu=nu,
+        #             support_height_ratio=0.5,
+        #             plane_type=plane_type,
+        #         )
+        # nx, ny = 80, 40
+        # mesh_type = 'uniform_crisscross_tri'
+        # # mesh_type = 'uniform_quad'
 
-        volume_fraction = 0.3
+        # volume_fraction = 0.3
 
         #* 轴承装置结构 bearing_device_2d
-        '''
         t = -8e-2
-        E, nu = 1, 0.4999 # 0.3, 0.4999
+        E, nu = 1, 0.3 # 0.3, 0.4999
         domain = [0, 120, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -510,15 +509,14 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri' 
 
         volume_fraction = 0.35
-        '''
 
-        space_degree = 3
+        space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         interpolation_method = 'msimp'
         penalty_factor = 3.0
         void_youngs_modulus = 1e-9
-        target_variables = ['E', 'nu']
+        target_variables = ['E']
         
         # 'element'
         density_location = 'element'
@@ -681,7 +679,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.35
 
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         # 'element'
@@ -692,7 +690,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         use_relaxation = True # True, False
 
-        max_iterations = 200
+        max_iterations = 500
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
@@ -821,5 +819,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_3_hzmfem')
+    test.run.set('test_subsec5_6_3_lfem')
     rho_opt, history = test.run()

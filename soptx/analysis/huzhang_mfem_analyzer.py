@@ -731,14 +731,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
         """
         if integration_order is None:
-            integration_order = self._integration_order
+            # integration_order = self._integration_order
+            # TODO 测试
+            integration_order = 1
         
         if state is None:
             state = self.solve_state(rho_val=rho_val)
         
         stress_dof = state['stress']  
         
-        # 转换为积分点应力
+        #TODO 转换为积分点应力
         stress_at_quad = self.extract_stress_at_quadrature_points(
                                                         stress_dof=stress_dof, 
                                                         integration_order=integration_order
@@ -750,7 +752,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_at_quad)
         result['von_mises'] = von_mises
         
-        # 每个单元取最大值
         if von_mises.ndim == 2:
             von_mises_max = bm.max(von_mises, axis=1)
         elif von_mises.ndim == 3:
@@ -830,6 +831,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                     ) -> TensorLike:
         """
         将全局应力自由度转换为单元积分点上的应力向量
+            注意: 胡张元空间基函数输出的应力分量顺序为 [xx, xy, yy]
+                  本函数会自动将其重排为标准 Voigt 顺序 [xx, yy, xy] 以适配后续计算
         
         Parameters
         ----------
@@ -841,7 +844,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         Returns
         -------
         stress_vector : TensorLike, shape (NC, NQ, NS)
-            单元积分点上的应力向量 [σ_xx, σ_yy, σ_xy]
+            单元积分点上的应力向量
         """
         space = self._huzhang_space
         mesh = space.mesh
@@ -858,6 +861,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         stress_cell = stress_dof[cell2dof]  # (NC, LDOF)
         
         stress_vector = bm.einsum('cqls, cl -> cqs', phi, stress_cell) # (NC, NQ, NS)
+
+        if stress_vector.shape[-1] == 3:
+            perm_indices = [0, 2, 1]
+            stress_vector = stress_vector[..., perm_indices]
+        else:
+            raise NotImplementedError("仅支持二维问题的应力分量重排")
         
         return stress_vector
 
