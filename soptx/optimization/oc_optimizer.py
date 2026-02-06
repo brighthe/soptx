@@ -124,7 +124,7 @@ class OCOptimizer(BaseLogged):
     def optimize(self, 
                 design_variable: Union[Function, TensorLike],
                 density_distribution: Union[Function, TensorLike],
-                enable_timing: bool = True,
+                enable_timing: bool = False,
                 is_store_stress: bool = False,
                 **kwargs
             ) -> Tuple[TensorLike, OptimizationHistory]:

@@ -369,14 +369,16 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/subsec6_6_4_canti_3d/json")
         save_path.mkdir(parents=True, exist_ok=True)    
     
+        # histories = load_history_data(save_path, labels=['numpy', 'pytorch', 'jax'])
         histories = load_history_data(save_path, labels=['cpu', 'gpu'])
 
         # 重命名键以美化图例
-        histories = {'cpu': histories['cpu'], 'gpu': histories['gpu']}
+        # histories = {'NumPy': histories['numpy'], 'PyTorch': histories['pytorch'], 'JAX': histories['jax']}
+        histories = {'CPU': histories['cpu'], 'GPU': histories['gpu']}
 
         plot_optimization_history_comparison(
                                         histories,
-                                        save_path=f'{save_path}/convergence_comparison.png',
+                                        save_path=f'{save_path}/convergence_comparison_device.png',
                                         plot_type='objective'
                                     )
 
@@ -389,8 +391,8 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 1.0, 0.3
         plane_type = '3d'
 
-        # nx, ny, nz = 60, 20, 4
-        nx, ny, nz = 120, 40, 8
+        nx, ny, nz = 60, 20, 4
+        # nx, ny, nz = 120, 40, 8
         mesh_type = 'uniform_hex'
         # mesh_type = 'uniform_tet'
 
@@ -408,7 +410,7 @@ class DensityTopOptTest(BaseLogged):
         # 'standard', 'voigt', 'fast'
         assembly_method = 'fast'
         # 'mumps', 'cg'
-        solve_method = 'cg'
+        solve_method = 'mumps'
 
         max_iterations = 200
         change_tolerance = 1e-2
@@ -532,10 +534,10 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_cantilever_3d")
+        save_path = Path(f"{base_dir}/test_cantilever_3d_torch")
         save_path.mkdir(parents=True, exist_ok=True)    
 
-        save_history_data(history=history, save_path=str(save_path/'json'), label='gpu')
+        save_history_data(history=history, save_path=str(save_path/'json'), label='pytorch')
 
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
@@ -549,70 +551,82 @@ class DensityTopOptTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         import numpy as np
         import matplotlib.pyplot as plt
+        from matplotlib.ticker import PercentFormatter
 
-        # ---- Input (steady-state / subsequent average) ----
-        iter_time = {"CPU": 20.777, "GPU": 4.585}
-        assembly  = {"CPU": 0.712,  "GPU": 0.127}
-        solve     = {"CPU": 18.736, "GPU": 4.106}
+        # -----------------------------
+        # Input (steady-state averages)
+        # -----------------------------
+        devices = ["CPU", "GPU"]
+        y = np.arange(len(devices))
 
-        # compute "Other" to close the decomposition
-        other = {
-            dev: iter_time[dev] - assembly[dev] - solve[dev]
-            for dev in ["CPU", "GPU"]
-        }
-        if any(v < -1e-9 for v in other.values()):
-            raise ValueError(f"'Other' became negative: {other}. Please re-check inputs.")
-        for k in other:
-            other[k] = max(other[k], 0.0)
+        analysis = {"CPU": 20.677, "GPU": 4.382}   # 分析阶段（稳态平均）
+        optim   = {"CPU": 0.317,  "GPU": 0.377}   # 优化阶段（稳态平均）
 
-        # ---- Data arranged as: categories x devices ----
-        categories = ["Assembly", "Solve", "Other"]
-        cpu_vals = [assembly["CPU"], solve["CPU"], other["CPU"]]
-        gpu_vals = [assembly["GPU"], solve["GPU"], other["GPU"]]
+        A = np.array([analysis[d] for d in devices])
+        O = np.array([optim[d]   for d in devices])
+        T = A + O
 
-        x = np.arange(len(categories))
-        width = 0.34  # bar width
+        # share (for 100% stacked)
+        A_frac = A / T
+        O_frac = O / T
 
-        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        # -----------------------------
+        # Plot: two panels in one figure
+        # -----------------------------
+        fig, (ax1, ax2) = plt.subplots(
+            nrows=2, ncols=1, figsize=(6.2, 4.2), dpi=300
+        )
 
-        bars_cpu = ax.bar(x - width/2, cpu_vals, width, label="CPU")
-        bars_gpu = ax.bar(x + width/2, gpu_vals, width, label="GPU")
+        # --- (a) absolute time, stacked barh ---
+        ax1.barh(y, A, label="Analysis")
+        ax1.barh(y, O, left=A, label="Optimization")
 
-        ax.set_xticks(x, categories)
-        ax.set_ylabel("Time per iteration (s)")
-        ax.set_title("Steady-state time breakdown by stage")
-        ax.legend(frameon=False)
+        ax1.set_yticks(y, devices)
+        ax1.set_xlabel("Time per iteration (s)")
+        ax1.grid(axis="x", linestyle="--", linewidth=0.6, alpha=0.6)
+        ax1.spines["top"].set_visible(False)
+        ax1.spines["right"].set_visible(False)
 
-        # light grid helps readability
-        ax.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.6)
+        # small panel mark
+        ax1.text(0.01, 0.90, "(a)", transform=ax1.transAxes)
 
-        # value labels on top of bars
-        def add_labels(bars):
-            for b in bars:
-                h = b.get_height()
-                ax.text(
-                    b.get_x() + b.get_width()/2, h,
-                    f"{h:.3f}",
-                    ha="center", va="bottom",
-                    fontsize=10
-                )
+        # annotate totals
+        for i, t in enumerate(T):
+            ax1.text(t, i, f"  {t:.3f}s", va="center", ha="left", fontsize=9)
 
-        add_labels(bars_cpu)
-        add_labels(bars_gpu)
+        ax1.set_xlim(0, T.max() * 1.12)
 
-        # optional: show total steady-state per-iteration time as text
-        ax.text(0.02, 0.98,
-                f"Total (CPU/GPU): {iter_time['CPU']:.3f}s / {iter_time['GPU']:.3f}s",
-                transform=ax.transAxes, ha="left", va="top", fontsize=10)
+        # --- (b) fraction (100% stacked) ---
+        ax2.barh(y, A_frac, label="Analysis")
+        ax2.barh(y, O_frac, left=A_frac, label="Optimization")
 
-        plt.tight_layout()
-        plt.savefig("ch6_device_breakdown_grouped.pdf", bbox_inches="tight")
+        ax2.set_yticks(y, devices)
+        ax2.set_xlabel("Fraction of time (%)")
+        ax2.xaxis.set_major_formatter(PercentFormatter(1.0))
+        ax2.grid(axis="x", linestyle="--", linewidth=0.6, alpha=0.6)
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["right"].set_visible(False)
+
+        ax2.text(0.01, 0.90, "(b)", transform=ax2.transAxes)
+        ax2.set_xlim(0, 1.0)
+
+        # optional: annotate analysis share on bars
+        for i in range(len(devices)):
+            ax2.text(A_frac[i] * 0.5, i, f"{A_frac[i]*100:.1f}%", va="center", ha="center", fontsize=9)
+            ax2.text(A_frac[i] + O_frac[i] * 0.5, i, f"{O_frac[i]*100:.1f}%", va="center", ha="center", fontsize=9)
+
+        # one common legend (top center)
+        handles, labels = ax1.get_legend_handles_labels()
+        fig.legend(handles, labels, frameon=False, ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.02))
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.savefig("ch6_stage_breakdown_two_panels.pdf", bbox_inches="tight")
         plt.show()
 
-        print(f"Other: CPU={other['CPU']:.3f}s, GPU={other['GPU']:.3f}s")
+        print("---------")
 
-        
-        print("----------")
+
+
 
     
 
@@ -927,5 +941,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec6_6_4')
+    test.run.set('test_subsec6_6_4_2')
     rho_opt, history = test.run()
