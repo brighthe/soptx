@@ -213,7 +213,7 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 7e4, 0.3
         plane_type = 'plane_stress' 
 
-        nx, ny = 10, 10
+        nx, ny = 100, 100
         mesh_type = 'quad_threshold'
         # mesh_type = 'tri_threshold'
 

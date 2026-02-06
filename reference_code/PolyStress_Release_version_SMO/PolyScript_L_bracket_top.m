@@ -25,13 +25,13 @@ fem = struct(...
     'Nu0', 0.25,...                 % Poisson's ratio (PolyTop需要)
     'MatModel', 'Bilinear',...      % 【新增】应力计算需要
     'MatParam', [Et, Ec, G],...     % 【新增】应力计算需要
-    'SLim',100,...                % Stress limit
+    'SLim',100,...                  % Stress limit
     'Reg', 0,...                    % 是否规则网格 (PolyTop需要)
     'Thickness',1);                 % Element thickness
 
 %% ---------------------------------------------------------- CREATE 'opt' STRUCT
 R = 0.05; q = 3;                    % Filter radius and exponent
-p = 3; eta0 = 0.5;                  % SIMP参数
+p = 3;                              % SIMP参数
 B = 1;                              % 投影参数（如果不用投影，设为1或很小的值）
 eta0 = 0.5;                         % 投影阈值
 VolFrac = 0.32;                      % 体积分数约束 (PolyTop特有)
@@ -53,5 +53,5 @@ opt = struct(...
 
 %% ------------------------------------------------------- RUN 'PolyTop'
 fem = preComputations(fem); % Run preComputations before running PolyStress
-[z,V,fem] = PolyTop(fem,opt);
+[z,V,fem,history] = PolyTop(fem,opt);  % 接收 history 输出
 %-------------------------------------------------------------------------%

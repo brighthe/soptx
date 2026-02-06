@@ -13,6 +13,7 @@ if (strcmp(fem.MatModel,'Bilinear')==1)&&(fem.MatParam(1)==fem.MatParam(2))
   [U(fem.FreeDofs),L,s] = SolveLinSys(K,fem.Fext(fem.FreeDofs));
   fem.L = L; fem.s = s; % Store Cholesky decomposition information
   fem.f_NL = sparse(fem.iK0,fem.jK0,fem.k0)*U(fem.eDof); 
+  fem.U = U;
 else
   U = fem.U; % Use previously converged U as initial guess
   [K,~,Res,~,fem] = GlobalK(fem,U,E); %Initial stiffness mtrx. & Res vector

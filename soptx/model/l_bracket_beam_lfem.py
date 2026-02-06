@@ -15,7 +15,7 @@ class LBracketBeam2d(PDEBase):
                 mesh_type: str = 'uniform_quad',
                 P: float = -2.0, # N
                 E: float = 7e4,  # MPa (N/mm^2)
-                nu: float = 0.3,
+                nu: float = 0.25,
                 load_height_ratio: float = 0.85,  # 载荷施加位置参数
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 

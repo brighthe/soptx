@@ -1,20 +1,25 @@
 %------------------------------ PolyTop ----------------------------------%
 % Modified to include Stress Visualization for Comparison
 %-------------------------------------------------------------------------%
-function [z,V,fem] = PolyTop(fem,opt)
+function [z,V,fem,history] = PolyTop(fem,opt)  % 添加 history 输出
 Iter=0; Tol=opt.Tol*(opt.zMax-opt.zMin); Change=2*Tol; z=opt.zIni; P=opt.P;
 [E,dEdy,V,dVdy] = opt.MatIntFnc(P*z);
 
-% ==【修改 1】初始化双窗口绘图 (拓扑 + 应力) ==
-figure; 
-[hV, hS] = InitialPlot(fem, V, 0*V); 
-% ==========================================
+% 初始化历史记录
+history = struct('iter',[],'obj',[],'vol_frac',[],'change',[],'max_stress_ratio',[]);
 
+% 初始化双窗口绘图
+figure; 
+[hV, hS] = InitialPlot(fem, V, 0*V);
+% ==========================================
 while (Iter<opt.MaxIter) && (Change>Tol)  
   Iter = Iter + 1;
   % Analysis
-  [f,dfdE,dfdV,fem,U] = ObjectiveFnc(fem,E,V); % 让 ObjectiveFnc 返回 U
+  [f,dfdE,dfdV,fem,U] = ObjectiveFnc(fem,E,V);
   [g,dgdE,dgdV,fem] = ConstraintFnc(fem,E,V,opt.VolFrac); 
+
+  % 计算实际体积分数
+  V_actual = sum(fem.ElemArea.*V)/sum(fem.ElemArea);
   
   % Sensitivity
   dfdz = P'*(dEdy.*dfdE + dVdy.*dfdV);
@@ -24,19 +29,30 @@ while (Iter<opt.MaxIter) && (Change>Tol)
   [z,Change] = UpdateScheme(dfdz,g,dgdz,z,opt);
   [E,dEdy,V,dVdy] = opt.MatIntFnc(P*z);
   
-  % ==【修改 2】计算应力并更新绘图 ==
   % 计算当前应力 (仅用于显示，不参与优化)
   [VM_Stress, ~] = von_Mises_Stress(fem, U); 
   % 归一化应力 (Stress / Limit)
   SM = E .* VM_Stress ./ fem.SLim; 
   
-  fprintf('It: %i \t Obj: %1.3f \t Ch: %1.3f \t MaxStressRatio: %1.3f\n', ...
-          Iter, f, Change, max(SM));
+  % 输出
+  fprintf('It:%3d | Obj:%8.3f | Vol:%5.3f | Ch:%6.4f | MaxS:%5.2f\n', ...
+          Iter, f, V_actual, Change, max(SM));
+
+  % 记录历史
+  history.iter(end+1) = Iter;
+  history.obj(end+1) = f;
+  history.vol_frac(end+1) = V_actual;
+  history.change(end+1) = Change;
+  history.max_stress_ratio(end+1) = max(SM);
       
+  % 更新绘图
   set(hV,'FaceColor','flat','CData',1-V); drawnow
-  set(hS,'FaceColor','flat','CData',SM); drawnow % 更新右侧应力图
+  set(hS,'FaceColor','flat','CData',SM); drawnow 
   % ==========================================
 end
+
+save('PolyTop_history.mat', 'history', 'z', 'V', 'fem');
+fprintf('History saved to: PolyTop_history.mat\n');
 
 %------------------------------------------------------- OBJECTIVE FUNCTION
 function [f,dfdE,dfdV,fem,U] = ObjectiveFnc(fem,E,V)

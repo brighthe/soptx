@@ -8,7 +8,7 @@ clear; clc; close all
 restoredefaultpath; addpath(genpath('./')); %Use all folders and subfolders
 set(0,'defaulttextinterpreter','latex')
 %% ------------------------------------------------------------ CREATE Mesh
-[Node,Element,Supp,Load] = Mesh_L_bracket(10000); % 10000, 22500
+[Node,Element,Supp,Load] = Mesh_L_bracket(50176); % 10000, 22500, 50176
 NElem = size(Element,1); % Number of elements
 %% ---------------------------------------------------- CREATE 'fem' STRUCT
 E0 = 70e3; % E0 in MPa
@@ -59,3 +59,86 @@ opt = struct(...
 fem = preComputations(fem); % Run preComputations before running PolyStress
 [z,V,fem] = PolyStress(fem,opt);
 %-------------------------------------------------------------------------%
+%% ------------------------------------------------------- POST-PROCESSING
+% 绘制 Von Mises 屈服面和主应力分布
+fprintf('Plotting Yield Surface...\n');
+PlotYieldSurface(fem, z, opt);
+
+%% ------------------------------------------------------- AUXILIARY FUNCTION
+function PlotYieldSurface(fem, z, opt) % 注意：这里我顺便把输入参数改为了支持 (fem, z, opt) 以匹配你的调用
+    % 1. 获取位移和参数
+    U = fem.U;                         
+    SLim = fem.SLim;                   
+    
+    % 2. 计算单元中心应变和应力
+    ElemU = U(fem.eDof);               
+    ee_elem = fem.B0 * ElemU;
+    
+    % 应变向量重塑为 [3 x NElem] 矩阵
+    ee_elem = reshape(ee_elem, 3, []); 
+    
+    % 调用本构模型
+    [Cauchy_S, ~] = material_model(fem.MatModel, fem.MatParam, ee_elem);
+    
+    % 提取分量 (现在 Cauchy_S 是 3 x NElem 矩阵，提取后为 NElem x 1 向量)
+    sig_x = Cauchy_S(1, :)';
+    sig_y = Cauchy_S(2, :)';
+    tau_xy = Cauchy_S(3, :)';
+
+    % 3. 计算主应力 (Principal Stresses)
+    center = (sig_x + sig_y) / 2;
+    radius = sqrt(((sig_x - sig_y) / 2).^2 + tau_xy.^2);
+    
+    sig_1 = center + radius;
+    sig_2 = center - radius;
+
+    % 4. 过滤数据
+    % 确保 z 和 sig_1 长度一致。通常 z 是 [NElem x 1]。
+    if length(z) ~= length(sig_1)
+        warning('z 和 sig_1 长度不一致，尝试使用 V 或调整维度');
+        % 如果 z 是设计变量，可能需要检查是否被被重塑过，但在 PolyStress 中通常是一致的
+    end
+    
+    mask = z > 0.5;  % 仅绘制实体单元
+    
+    % 检查是否有满足条件的单元
+    if ~any(mask)
+        warning('没有单元满足 z > 0.5 的条件，无法绘图。');
+        return;
+    end
+
+    s1_plot = sig_1(mask) / SLim; 
+    s2_plot = sig_2(mask) / SLim; 
+
+    % 5. 绘图
+    % 创建新图形窗口，避免覆盖原有图形
+    figure('Name', 'Yield Surface Analysis'); 
+    hold on; box on; grid on; axis equal;
+    
+    % 绘制 Von Mises 包络线 (单位圆变换)
+    fimplicit(@(x,y) x.^2 - x.*y + y.^2 - 1, [-1.5 1.5 -1.5 1.5], 'r', 'LineWidth', 2);
+
+    % 绘制应力点
+    scatter(s1_plot, s2_plot, 15, 'k', 'filled', 'MarkerFaceAlpha', 0.5);
+
+    % 标注
+    xlabel('$\sigma_1 / \sigma_{lim}$', 'Interpreter', 'latex', 'FontSize', 14);
+    ylabel('$\sigma_2 / \sigma_{lim}$', 'Interpreter', 'latex', 'FontSize', 14);
+    
+    % 计算最大应力比 (基于显示的单元)
+    max_stress_ratio = 0;
+    if ~isempty(s1_plot)
+        % 重新计算这些点的 VM 应力来找最大值，或者直接用 fem.VM_Stress0
+        % 这里简单用 fem.VM_Stress0 (如果它被更新了)
+        if isfield(fem, 'VM_Stress0') && length(fem.VM_Stress0) == length(mask)
+            max_val = max(fem.VM_Stress0(mask)) / SLim;
+        else
+            max_val = max(sqrt(s1_plot.^2 - s1_plot.*s2_plot + s2_plot.^2)); % 近似反算
+        end
+        title(['Yield Surface Check (Max Ratio: ' num2str(max_val, '%.2f') ')']);
+    else
+        title('Yield Surface Check');
+    end
+    
+    xlim([-1.5 1.5]); ylim([-1.5 1.5]);
+end
