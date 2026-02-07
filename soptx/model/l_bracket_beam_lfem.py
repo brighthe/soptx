@@ -76,7 +76,7 @@ class LBracketBeam2d(PDEBase):
 
         return l_shape_mesh
     
-    @init_mesh.register('quad_threshold')
+    @init_mesh.register('uniform_quad')
     def init_mesh(self, nx: int = 10, ny: int = 10) -> QuadrangleMesh:
         
         big_box = self._domain
@@ -94,7 +94,7 @@ class LBracketBeam2d(PDEBase):
                                             nx=nx, ny=ny,
                                             threshold=threshold)
                                              
-        self._save_meshdata(l_shape_mesh, 'quad_threshold', nx=nx, ny=ny)
+        self._save_meshdata(l_shape_mesh, 'uniform_quad', nx=nx, ny=ny)
 
         return l_shape_mesh
     

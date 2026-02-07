@@ -8,7 +8,7 @@ clear; clc; close all
 restoredefaultpath; addpath(genpath('./')); %Use all folders and subfolders
 set(0,'defaulttextinterpreter','latex')
 %% ------------------------------------------------------------ CREATE Mesh
-[Node,Element,Supp,Load] = Mesh_L_bracket(10000); 
+[Node,Element,Supp,Load] = Mesh_L_bracket(40000); 
 NElem = size(Element,1); % Number of elements
 
 %% ---------------------------------------------------------- CREATE 'fem' STRUCT

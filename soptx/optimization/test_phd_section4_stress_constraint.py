@@ -214,8 +214,7 @@ class DensityTopOptTest(BaseLogged):
         plane_type = 'plane_stress' 
 
         nx, ny = 100, 100
-        mesh_type = 'quad_threshold'
-        # mesh_type = 'tri_threshold'
+        mesh_type = 'uniform_quad'
 
         from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
         pde = LBracketBeam2d(
@@ -226,12 +225,11 @@ class DensityTopOptTest(BaseLogged):
                         )
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
-        node = displacement_mesh.entity('node')
-        right_edge = node[bm.abs(node[:, 0] - 1.0) < 1e-8]
-        right_edge_in_range = right_edge[right_edge[:, 1] <= 0.4]
-        print(f"右边缘节点数: {len(right_edge_in_range)}")
-        print(right_edge_in_range)
-
+        # node = displacement_mesh.entity('node')
+        # right_edge = node[bm.abs(node[:, 0] - 1.0) < 1e-8]
+        # right_edge_in_range = right_edge[right_edge[:, 1] <= 0.4]
+        # print(f"右边缘节点数: {len(right_edge_in_range)}")
+        # print(right_edge_in_range)
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -299,15 +297,82 @@ class DensityTopOptTest(BaseLogged):
                                 topopt_algorithm='density_based',
                             )
         
-        uh = analyzer.solve_state(rho_val=rho, adjoint=False)
+        from soptx.optimization.compliance_objective import ComplianceObjective
+        compliance_objective = ComplianceObjective(analyzer=analyzer)
+
+        volume_fraction = 0.35
+
+        from soptx.optimization.volume_constraint import VolumeConstraint
+        volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
+        
+        filter_type = 'density' # 'none', 'sensitivity', 'density'
+        rmin = 2
+        from soptx.regularization.filter import Filter
+        filter_regularization = Filter(
+                                    design_mesh=design_variable_mesh,
+                                    filter_type=filter_type,
+                                    rmin=rmin,
+                                    density_location=density_location,
+                                )
+        
+        max_iterations = 200
+        change_tolerance = 1e-2
+        use_penalty_continuation = False
+        constraint = [volume_constraint]
+
+        from soptx.optimization.mma_optimizer import MMAOptimizer
+        optimizer = MMAOptimizer(
+                        objective=compliance_objective,
+                        constraint=constraint,
+                        filter=filter_regularization,
+                        options={
+                            'max_iterations': max_iterations,
+                            'change_tolerance': change_tolerance,
+                            'use_penalty_continuation': use_penalty_continuation,
+                        }
+                    )
+        optimizer.options.set_advanced_options(
+                                a0=1,
+                                asymp_init=0.5,
+                                asymp_incr=1.2,
+                                asymp_decr=0.7,
+                                move_limit=0.2,
+                                albefa=0.1,
+                                raa0=1e-5,
+                                epsilon_min=1e-7,
+                            )
 
 
-        import matplotlib.pyplot as plt
-        fig = plt.figure()
-        axes = fig.gca()
-        displacement_mesh.add_plot(axes)
-        plt.show()      
-        print("----------------")      
+        analysis_tspace = analyzer.tensor_space
+        analysis_tgdofs = analysis_tspace.number_of_global_dofs()
+        
+        self._log_info(f"开始密度拓扑优化, "
+            f"模型名称={pde.__class__.__name__}, \n"
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
+            f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
+            f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
+            f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
+            f"约束类型={optimizer._constraints.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
+            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
+            f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
+
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test_subsec4_6_5_mbb_beam")
+        save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_optimization_history(mesh=design_variable_mesh, 
+                                history=history, 
+                                density_location=density_location,
+                                save_path=str(save_path))
+        plot_optimization_history(history, save_path=str(save_path))
+
+        return rho_opt, history
     
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
