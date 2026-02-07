@@ -549,83 +549,269 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec6_6_4_2')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        import numpy as np
         import matplotlib.pyplot as plt
-        from matplotlib.ticker import PercentFormatter
+        import numpy as np
+        from matplotlib import font_manager
 
-        # -----------------------------
-        # Input (steady-state averages)
-        # -----------------------------
-        devices = ["CPU", "GPU"]
-        y = np.arange(len(devices))
+        # ==========================================
+        # 1. 字体路径配置 (基于您系统扫描的结果)
+        # ==========================================
+        # 中文字体：SimHei
+        path_zh = '/usr/share/fonts/suanhai_fonts/Sim/simhei.ttf'
+        # 西文字体：Times New Roman (常规)
+        path_en = '/usr/share/fonts/suanhai_fonts/Times/times.ttf'
+        # 西文字体：Times New Roman (粗体) - 用于强调数字
+        path_en_bold = '/usr/share/fonts/suanhai_fonts/Times/timesbd.ttf'
 
-        analysis = {"CPU": 20.677, "GPU": 4.382}   # 分析阶段（稳态平均）
-        optim   = {"CPU": 0.317,  "GPU": 0.377}   # 优化阶段（稳态平均）
+        # 加载字体属性对象
+        try:
+            font_zh = font_manager.FontProperties(fname=path_zh, size=12) 
+            font_zh_bold = font_manager.FontProperties(fname=path_zh, size=12, weight='bold')
+            font_en = font_manager.FontProperties(fname=path_en, size=12)
+            font_en_bold = font_manager.FontProperties(fname=path_en_bold, size=11)
+            print("字体加载成功！")
+        except Exception as e:
+            print(f"字体加载失败: {e}")
 
-        A = np.array([analysis[d] for d in devices])
-        O = np.array([optim[d]   for d in devices])
-        T = A + O
+        # ==========================================
+        # 2. 数据准备
+        # ==========================================
+        labels = ['CPU', 'GPU']
+        # 总耗时
+        total_times = np.array([21.087, 4.841])
+        # 分析阶段耗时
+        analysis_times = np.array([20.677, 4.382])
+        # 优化阶段耗时
+        optimization_times = np.array([0.317, 0.377])
+        # 其他/开销 (用于填补微小差值，保证总高一致)
+        other_times = total_times - analysis_times - optimization_times
 
-        # share (for 100% stacked)
-        A_frac = A / T
-        O_frac = O / T
+        # ==========================================
+        # 3. 绘图主设置
+        # ==========================================
+        # 设置 DPI 为 300 (高清印刷标准)
+        fig, ax = plt.subplots(figsize=(6, 5), dpi=300)
 
-        # -----------------------------
-        # Plot: two panels in one figure
-        # -----------------------------
-        fig, (ax1, ax2) = plt.subplots(
-            nrows=2, ncols=1, figsize=(6.2, 4.2), dpi=300
-        )
+        # 柱子宽度
+        width = 0.5
+        # 颜色配置 (学术风格：柔和蓝、柔和橙、灰)
+        color_analysis = '#5B9BD5' 
+        color_opt = '#ED7D31'      
+        color_other = '#A5A5A5'    
 
-        # --- (a) absolute time, stacked barh ---
-        ax1.barh(y, A, label="Analysis")
-        ax1.barh(y, O, left=A, label="Optimization")
+        # ==========================================
+        # 4. 绘制堆叠柱状图
+        # ==========================================
+        # 绘制分析阶段 (底部)
+        p1 = ax.bar(labels, analysis_times, width, label='结构分析阶段', 
+                    color=color_analysis, edgecolor='black', linewidth=0.8, zorder=3)
 
-        ax1.set_yticks(y, devices)
-        ax1.set_xlabel("Time per iteration (s)")
-        ax1.grid(axis="x", linestyle="--", linewidth=0.6, alpha=0.6)
-        ax1.spines["top"].set_visible(False)
-        ax1.spines["right"].set_visible(False)
+        # 绘制优化阶段 (中间)
+        p2 = ax.bar(labels, optimization_times, width, bottom=analysis_times, 
+                    label='优化更新阶段', color=color_opt, edgecolor='black', linewidth=0.8, zorder=3)
 
-        # small panel mark
-        ax1.text(0.01, 0.90, "(a)", transform=ax1.transAxes)
+        # 绘制其他开销 (顶部)
+        p3 = ax.bar(labels, other_times, width, bottom=analysis_times + optimization_times, 
+                    label='其他/开销', color=color_other, edgecolor='black', linewidth=0.8, zorder=3)
 
-        # annotate totals
-        for i, t in enumerate(T):
-            ax1.text(t, i, f"  {t:.3f}s", va="center", ha="left", fontsize=9)
+        # ==========================================
+        # 5. 精细化标注 (混排字体核心部分)
+        # ==========================================
+        def add_labels(rects, data_values):
+            """在柱子内部添加数值"""
+            for rect, val in zip(rects, data_values):
+                height = rect.get_height()
+                y_pos = rect.get_y() + height / 2
+                
+                # 只有数值大于1秒才显示，避免文字重叠
+                if val > 1.0: 
+                    # 注意：这里使用 font_en_bold (Times New Roman Bold)
+                    ax.text(rect.get_x() + rect.get_width()/2., y_pos,
+                            f'{val:.3f} s',
+                            ha='center', va='center', color='white', 
+                            fontproperties=font_en_bold) 
 
-        ax1.set_xlim(0, T.max() * 1.12)
+        # 添加数值标注
+        add_labels(p1, analysis_times)
 
-        # --- (b) fraction (100% stacked) ---
-        ax2.barh(y, A_frac, label="Analysis")
-        ax2.barh(y, O_frac, left=A_frac, label="Optimization")
+        # 在柱子顶端添加总耗时 (中文 + 数字)
+        for i, total in enumerate(total_times):
+            # 这里我们采用 "SimHei" 显示整行，因为单独混排非常复杂。
+            # SimHei 的数字在图表中是可以接受的，或者我们可以分段写。
+            # 方案：为了美观，整行使用中文粗体
+            ax.text(i, total + 0.5, f'总计: {total:.3f} s', 
+                    ha='center', va='bottom', 
+                    fontproperties=font_zh_bold) 
 
-        ax2.set_yticks(y, devices)
-        ax2.set_xlabel("Fraction of time (%)")
-        ax2.xaxis.set_major_formatter(PercentFormatter(1.0))
-        ax2.grid(axis="x", linestyle="--", linewidth=0.6, alpha=0.6)
-        ax2.spines["top"].set_visible(False)
-        ax2.spines["right"].set_visible(False)
+        # ==========================================
+        # 6. 图表修饰 (应用字体)
+        # ==========================================
 
-        ax2.text(0.01, 0.90, "(b)", transform=ax2.transAxes)
-        ax2.set_xlim(0, 1.0)
+        # X轴标签：CPU/GPU 是英文，使用 Times New Roman
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, fontproperties=font_en)
 
-        # optional: annotate analysis share on bars
-        for i in range(len(devices)):
-            ax2.text(A_frac[i] * 0.5, i, f"{A_frac[i]*100:.1f}%", va="center", ha="center", fontsize=9)
-            ax2.text(A_frac[i] + O_frac[i] * 0.5, i, f"{O_frac[i]*100:.1f}%", va="center", ha="center", fontsize=9)
+        # Y轴标签：中文，使用 SimHei
+        ax.set_ylabel('平均单次迭代耗时 (s)', fontproperties=font_zh)
 
-        # one common legend (top center)
-        handles, labels = ax1.get_legend_handles_labels()
-        fig.legend(handles, labels, frameon=False, ncol=2, loc="upper center", bbox_to_anchor=(0.5, 1.02))
+        # Y轴刻度数字：使用 Times New Roman
+        for label in ax.get_yticklabels():
+            label.set_fontproperties(font_en)
 
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
-        plt.savefig("ch6_stage_breakdown_two_panels.pdf", bbox_inches="tight")
+        # 图例：中文，使用 SimHei
+        ax.legend(loc='upper right', frameon=True, edgecolor='black', prop=font_zh)
+
+        # 网格线
+        ax.grid(axis='y', linestyle='--', alpha=0.5, zorder=0)
+
+        # Y轴范围
+        ax.set_ylim(0, 24)
+
+        # 紧凑布局并保存
+        plt.tight_layout()
+        output_file = 'fig_6_11_final.pdf'
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"图片已生成: {output_file}")
+
+        # 显示图片 (如果在 Notebook 环境)
         plt.show()
 
         print("---------")
 
+    @run.register('test_subsec6_6_4_3')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from matplotlib import font_manager
 
+        # ==========================================
+        # 1. 字体路径配置 (沿用您之前的成功配置)
+        # ==========================================
+        # 中文字体：SimHei
+        path_zh = '/usr/share/fonts/suanhai_fonts/Sim/simhei.ttf'
+        # 西文字体：Times New Roman (常规)
+        path_en = '/usr/share/fonts/suanhai_fonts/Times/times.ttf'
+        # 西文字体：Times New Roman (粗体) - 用于强调数字
+        path_en_bold = '/usr/share/fonts/suanhai_fonts/Times/timesbd.ttf'
+
+        # 加载字体属性对象
+        try:
+            font_zh = font_manager.FontProperties(fname=path_zh, size=12) 
+            font_zh_bold = font_manager.FontProperties(fname=path_zh, size=12, weight='bold')
+            font_en = font_manager.FontProperties(fname=path_en, size=12)
+            font_en_bold = font_manager.FontProperties(fname=path_en_bold, size=11)
+            print("字体加载成功！")
+        except Exception as e:
+            print(f"字体加载失败: {e}")
+
+        # ==========================================
+        # 2. 数据准备
+        # ==========================================
+        labels = ['CPU', 'GPU']
+
+        # 总分析阶段耗时 (用于顶部标注)
+        total_analysis_times = np.array([20.677, 4.382])
+
+        # 细分数据 (来自论文正文)
+        solver_times = np.array([19.565, 4.187])   # 线性系统求解
+        assembly_times = np.array([0.695, 0.127])  # 矩阵组装
+        # 计算剩余部分 (边界处理、数据传输等)
+        other_times = total_analysis_times - solver_times - assembly_times
+
+        # ==========================================
+        # 3. 绘图主设置
+        # ==========================================
+        fig, ax = plt.subplots(figsize=(6, 5), dpi=300)
+
+        width = 0.5
+        # 配色方案 (保持学术风格，与图6.11协调但有所区分)
+        # 线性求解 (主导瓶颈) - 深蓝色
+        color_solver = '#4472C4' 
+        # # 矩阵组装 (加速最快) - 橙色
+        # color_assembly = '#ED7D31'      
+        # 矩阵组装：改为绿色，避免与左图的“优化阶段(橙色)”混淆
+        color_assembly = '#70AD47'  # 推荐使用这种学术绿    
+        # 其他 - 灰色
+        color_other = '#A5A5A5'    
+
+        # ==========================================
+        # 4. 绘制堆叠柱状图
+        # ==========================================
+        # 底部：线性系统求解 (占比最大)
+        p1 = ax.bar(labels, solver_times, width, label='线性系统求解', 
+                    color=color_solver, edgecolor='black', linewidth=0.8, zorder=3)
+
+        # 中间：矩阵组装
+        p2 = ax.bar(labels, assembly_times, width, bottom=solver_times, 
+                    label='矩阵组装', color=color_assembly, edgecolor='black', linewidth=0.8, zorder=3)
+
+        # 顶部：其他
+        p3 = ax.bar(labels, other_times, width, bottom=solver_times + assembly_times, 
+                    label='其他/开销', color=color_other, edgecolor='black', linewidth=0.8, zorder=3)
+
+        # ==========================================
+        # 5. 精细化标注
+        # ==========================================
+        def add_labels(rects, data_values, show_threshold=0):
+            """
+            rects: 柱子对象
+            data_values: 数据值
+            show_threshold: 显示阈值，只有大于该值的才显示
+            """
+            for rect, val in zip(rects, data_values):
+                height = rect.get_height()
+                y_pos = rect.get_y() + height / 2
+                
+                if val > show_threshold: 
+                    ax.text(rect.get_x() + rect.get_width()/2., y_pos,
+                            f'{val:.3f} s',
+                            ha='center', va='center', color='white', 
+                            fontproperties=font_en_bold)
+
+        # 添加数值标注
+        add_labels(p1, solver_times, show_threshold=0.5)
+        # CPU的组装时间(0.695)足够大，可以显示；GPU的(0.127)太小，自动隐藏以保持整洁
+        # add_labels(p2, assembly_times)
+
+        # 在柱子顶端添加总耗时 (中文 + 数字)
+        for i, total in enumerate(total_analysis_times):
+            ax.text(i, total + 0.5, f'总计: {total:.3f} s', 
+                    ha='center', va='bottom', 
+                    fontproperties=font_zh_bold) 
+
+        # ==========================================
+        # 6. 图表修饰
+        # ==========================================
+
+        # X轴标签
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, fontproperties=font_en)
+
+        # Y轴标签 (注意这里是分析阶段的时间，单位依然是s)
+        ax.set_ylabel('结构分析阶段耗时 (s)', fontproperties=font_zh)
+
+        # Y轴刻度数字
+        for label in ax.get_yticklabels():
+            label.set_fontproperties(font_en)
+
+        # 图例
+        ax.legend(loc='upper right', frameon=True, edgecolor='black', prop=font_zh)
+
+        # 网格线
+        ax.grid(axis='y', linestyle='--', alpha=0.5, zorder=0)
+
+        # Y轴范围 (根据最大值20.677调整)
+        ax.set_ylim(0, 24)
+
+        # 保存
+        plt.tight_layout()
+        output_file = 'fig_6_12_analysis_breakdown.pdf'
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"图片已生成: {output_file}")
+
+        plt.show()
+
+        print("---------")
 
 
     
@@ -941,5 +1127,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec6_6_4_2')
+    test.run.set('test_subsec6_6_4_3')
     rho_opt, history = test.run()
