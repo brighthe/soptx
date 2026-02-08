@@ -445,9 +445,9 @@ class MMAOptimizer(BaseLogged):
             if self._passive_mask is not None:
                 obj_grad_dv[self._passive_mask] = 0.0
 
-            print(f"体积目标函数值: {obj_val:.4f}")
-            print(f"体积目标函数的灵敏度范围: [{bm.min(obj_grad_dv):.4f}, {bm.max(obj_grad_dv):.4f}], "
-                  f"平均值{bm.mean(obj_grad_dv):.4f}")
+            # print(f"体积目标函数值: {obj_val:.4f}")
+            # print(f"体积目标函数的灵敏度范围: [{bm.min(obj_grad_dv):.4f}, {bm.max(obj_grad_dv):.4f}], "
+            #       f"平均值{bm.mean(obj_grad_dv):.4f}")
                 
             if enable_timing:
                 t.send('目标函数灵敏度分析')
@@ -485,9 +485,9 @@ class MMAOptimizer(BaseLogged):
             if enable_timing:
                 t.send('约束函数灵敏度分析')
 
-            print(f"应力约束函数:{con_vals[0:]}")
-            print(f"应力约束函数的灵敏度范围: [{bm.min(con_grads_dv[0]):.4f}, {bm.max(con_grads_dv[0]):.4f}], "
-                  f"平均值{bm.mean(con_grads_dv[0]):.4f}")
+            # print(f"应力约束函数:{con_vals[0:]}")
+            # print(f"应力约束函数的灵敏度范围: [{bm.min(con_grads_dv[0]):.4f}, {bm.max(con_grads_dv[0]):.4f}], "
+            #       f"平均值{bm.mean(con_grads_dv[0]):.4f}")
             
             #TODO ==================== MMA 子问题求解 ====================
             fval = bm.concatenate(con_vals).reshape(-1, 1)  # (m, 1)
@@ -522,7 +522,7 @@ class MMAOptimizer(BaseLogged):
 
             # 计算收敛性
             change = bm.max(bm.abs(dv_new - dv))
-            print(f"设计变量最大变化量: {change}")
+            # print(f"设计变量最大变化量: {change}")
             
             # 更新设计变量
             dv = dv_new
@@ -591,81 +591,6 @@ class MMAOptimizer(BaseLogged):
         self.history.print_time_statistics()
         
         return rho_phys, self.history
-    
-    def verify_stress_constraint_sensitivity(self, analyzer, constraint, density, state, 
-                                         test_cells=None, h=1e-6):
-        """
-        使用有限差分法验证应力约束灵敏度
-        
-        Parameters
-        ----------
-        analyzer : LagrangeFEMAnalyzer
-        constraint : StressConstraint
-        density : 当前密度场
-        state : 当前状态（位移场）
-        test_cells : 要测试的单元索引列表，默认随机选择 5 个
-        h : 有限差分步长
-        """
-        from fealpy.backend import backend_manager as bm
-        
-        NC = density.shape[0]
-        
-        if test_cells is None:
-            # 随机选择 5 个非被动单元进行测试
-            bm.random.seed(42)
-            test_cells = bm.random.choice(NC, size=min(5, NC), replace=False)
-        
-        # 计算解析灵敏度
-        analytic_grad = constraint.jac(density=density, state=state)  # (n_clusters, NC)
-        n_clusters = analytic_grad.shape[0]
-        
-        print(f"{'='*70}")
-        print(f"应力约束灵敏度有限差分验证 (h = {h})")
-        print(f"{'='*70}")
-        
-        for cell_idx in test_cells:
-            cell_idx = int(cell_idx)
-            
-            # 原始约束值
-            g0 = constraint.fun(density=density, state=state, iter_idx=None)  # (n_clusters,)
-            
-            # 扰动密度
-            density_pert = bm.copy(density)
-            density_pert[cell_idx] += h
-            
-            # 重新求解状态方程（关键步骤！）
-            state_pert = analyzer.solve_state(rho_val=density_pert)
-            
-            # 清除约束类的缓存，确保重新计算
-            constraint._cached_stress_state = None
-            
-            # 扰动后的约束值
-            g1 = constraint.fun(density=density_pert, state=state_pert, iter_idx=None)
-            
-            # 有限差分灵敏度
-            fd_grad = (g1 - g0) / h  # (n_clusters,)
-            
-            # 恢复缓存状态
-            constraint._cached_stress_state = None
-            _ = constraint.fun(density=density, state=state, iter_idx=None)
-            
-            print(f"\n单元 {cell_idx} (密度 = {density[cell_idx]:.4f}):")
-            print(f"{'聚类':<8} {'解析值':<15} {'有限差分':<15} {'相对误差':<15}")
-            print(f"{'-'*53}")
-            
-            for m in range(n_clusters):
-                analytic_val = float(analytic_grad[m, cell_idx])
-                fd_val = float(fd_grad[m])
-                
-                if abs(fd_val) > 1e-12:
-                    rel_error = abs(analytic_val - fd_val) / abs(fd_val)
-                else:
-                    rel_error = abs(analytic_val - fd_val)
-                
-                status = "✓" if rel_error < 0.05 else "✗"
-                print(f"{m:<8} {analytic_val:<15.6e} {fd_val:<15.6e} {rel_error:<15.4%} {status}")
-        
-        print(f"\n{'='*70}")
         
     def _update_asymptotes(self, 
                           xval: TensorLike, 
@@ -815,8 +740,8 @@ class MMAOptimizer(BaseLogged):
         # xxx = bm.minimum(xxx1, xxx2)
         # beta = bm.minimum(xmax, xxx)
 
-        print(f"渐近线距离: low_dist={bm.mean(xval - low):.6f}, upp_dist={bm.mean(upp - xval):.6f}")
-        print(f"alfa-beta 范围: [{bm.mean(alfa):.6f}, {bm.mean(beta):.6f}]")
+        # print(f"渐近线距离: low_dist={bm.mean(xval - low):.6f}, upp_dist={bm.mean(upp - xval):.6f}")
+        # print(f"alfa-beta 范围: [{bm.mean(alfa):.6f}, {bm.mean(beta):.6f}]")
 
         # 计算 p0, q0 构建目标函数的近似
         xmami = xmax_eff - xmin_eff

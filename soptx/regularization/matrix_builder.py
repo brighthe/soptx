@@ -57,7 +57,9 @@ class FilterMatrixBuilder:
                                             )
                 return H
             
-        elif self._mesh.meshdata['mesh_type'] in ['uniform_aligned_tri', 'uniform_crisscross_tri', 'uniform_tet']:
+        elif self._mesh.meshdata['mesh_type'] in ['uniform_aligned_tri', 'uniform_crisscross_tri',
+                                                  'quad_threshold',
+                                                  'uniform_tet']:
             H = self._compute_weighted_matrix_general(
                                             rmin=self._rmin, 
                                             domain=self._mesh.meshdata['domain']

@@ -7,7 +7,7 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
-class CantileverCorner2d(PDEBase):
+class Cantilever2dCorner(PDEBase):
     '''
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
@@ -24,7 +24,7 @@ class CantileverCorner2d(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 160, 0, 100],
                 mesh_type: str = 'uniform_quad',
-                p: float = -1.0, # N
+                P: float = -1.0, # N
                 E: float = 1.0,  # Pa (N/m^2)
                 nu: float = 0.3,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
@@ -34,11 +34,11 @@ class CantileverCorner2d(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
         
-        self._p = p
+        self._P = P
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-        self._eps = 1e-12
+        self._eps = 1e-8
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
@@ -58,9 +58,9 @@ class CantileverCorner2d(PDEBase):
         return self._nu
     
     @property
-    def p(self) -> float:
+    def P(self) -> float:
         """获取点力"""
-        return self._p
+        return self._P
     
 
     #######################################################################################################################
@@ -177,7 +177,7 @@ class CantileverCorner2d(PDEBase):
         """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._p) 
+        val = bm.set_at(val, (..., 1), self._P) 
         
         return val
     
@@ -211,7 +211,7 @@ class Cantilever2d(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 80, 0, 40],
                 mesh_type: str = 'uniform_quad',
-                p: float = -1.0, # N
+                P: float = -1.0, # N
                 E: float = 1.0,  # MPa
                 nu: float = 0.3,
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
@@ -221,7 +221,7 @@ class Cantilever2d(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
         
-        self._p = p
+        self._P = P
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
@@ -350,7 +350,7 @@ class Cantilever2d(PDEBase):
         """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._p) 
+        val = bm.set_at(val, (..., 1), self._P) 
         
         return val
     

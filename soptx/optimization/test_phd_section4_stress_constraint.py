@@ -214,7 +214,7 @@ class DensityTopOptTest(BaseLogged):
         plane_type = 'plane_stress' 
 
         nx, ny = 100, 100
-        mesh_type = 'uniform_quad'
+        mesh_type = 'quad_threshold'
 
         from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
         pde = LBracketBeam2d(
@@ -301,12 +301,11 @@ class DensityTopOptTest(BaseLogged):
         compliance_objective = ComplianceObjective(analyzer=analyzer)
 
         volume_fraction = 0.35
-
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
         
         filter_type = 'density' # 'none', 'sensitivity', 'density'
-        rmin = 2
+        rmin = 0.05
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
                                     design_mesh=design_variable_mesh,
