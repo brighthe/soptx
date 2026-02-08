@@ -8,7 +8,13 @@ clear; clc; close all
 restoredefaultpath; addpath(genpath('./')); %Use all folders and subfolders
 set(0,'defaulttextinterpreter','latex')
 %% ------------------------------------------------------------ CREATE Mesh
-[Node,Element,Supp,Load] = Mesh_L_bracket(10000);  % 10000, 40000, 90000
+nx = 10; ny = 10;
+% nx = 200; ny = 200;
+% nx = 300; ny = 300;
+[Node, Element, Supp, Load] = Mesh_L_bracket_quad(nx, ny);
+% 将数值矩阵转换为元胞数组
+% PolyStress 里的函数预期 Element 是 cell array
+Element = num2cell(Element, 2);
 NElem = size(Element,1); % Number of elements
 %% ---------------------------------------------------- CREATE 'fem' STRUCT
 E0 = 70e3; % E0 in MPa

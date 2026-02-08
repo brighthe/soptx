@@ -213,8 +213,8 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 7e4, 0.3
         plane_type = 'plane_stress' 
 
-        nx, ny = 100, 100
-        mesh_type = 'quad_threshold'
+        nx, ny = 10, 10
+        mesh_type = 'uniform_quad'
 
         from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
         pde = LBracketBeam2d(
@@ -241,9 +241,8 @@ class DensityTopOptTest(BaseLogged):
 
         density_location = 'element'
         interpolation_method = 'msimp'
-        penalty_factor = 3.0
+        penalty_factor = 3.5
         void_youngs_modulus = 1e-9
-
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
                                     density_location=density_location,
@@ -255,7 +254,7 @@ class DensityTopOptTest(BaseLogged):
                                     },
                                 )
         
-        relative_density = 1.0
+        relative_density = 0.5
         if density_location in ['element']:
             design_variable_mesh = displacement_mesh
             d, rho = interpolation_scheme.setup_density_distribution(
@@ -353,7 +352,7 @@ class DensityTopOptTest(BaseLogged):
             f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
             f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
             f"约束类型={optimizer._constraints.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
-            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_iterations}, "
+            f"优化算法={optimizer.__class__.__name__} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
             f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 
