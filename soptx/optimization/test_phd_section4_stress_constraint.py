@@ -532,7 +532,7 @@ class DensityTopOptTest(BaseLogged):
                         al_objective=augmented_lagrangian_objective,
                         filter=filter_regularization,
                         options={
-                            'max_al_iterations': 10,     # 对应 opt.MaxIter = 150
+                            'max_al_iterations': 10,      # 对应 opt.MaxIter = 150
                             'mma_iters_per_al': 5,        # 对应 opt.MMA_Iter = 5
                             'change_tolerance': 0.002,    # 对应 opt.Tol = 0.002
                             'stress_tolerance': 0.003,    # 对应 opt.TolS = 0.003
