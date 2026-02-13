@@ -189,7 +189,7 @@ class DensityTopOptTest(BaseLogged):
         histories = load_history_data(save_path, labels=['manual', 'auto'])
 
         # 重命名键以美化图例
-        histories = {'manual': histories['manual'], 'auto': histories['auto']}
+        histories = {'手动微分': histories['manual'], '自动微分': histories['auto']}
 
         plot_optimization_history_comparison(
                                         histories,
@@ -379,6 +379,7 @@ class DensityTopOptTest(BaseLogged):
         plot_optimization_history_comparison(
                                         histories,
                                         save_path=f'{save_path}/convergence_comparison_device.png',
+                                        # save_path=f'{save_path}/convergence_comparison_backend.png',
                                         plot_type='objective'
                                     )
 
@@ -549,6 +550,7 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec6_6_4_plot1')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        """绘制柱状图代码"""
         import matplotlib.pyplot as plt
         import numpy as np
         from matplotlib import font_manager
@@ -680,6 +682,7 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec6_6_4_plot2')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        """绘制柱状图代码"""
         import matplotlib.pyplot as plt
         import numpy as np
         from matplotlib import font_manager
@@ -815,6 +818,16 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec6_5_2_canti2d_corner')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test_subsec6_5_2_canti2d_corner/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['convergence'])
+
+        plot_optimization_history(histories['convergence'], save_path=f'{save_path}/convergence.png')
+    
         # 固定参数
         domain = [0, 160.0, 0, 100.0]
         P = -1.0
@@ -940,7 +953,7 @@ class DensityTopOptTest(BaseLogged):
                                     bisection_tol=1e-3
                                 )
 
-        self._log_info(f"开始密度拓扑优化, "
+        self._log_info(f"开始密度拓扑优化 \n"
                        f"模型名称={pde.__class__.__name__}, "
                        f"体积约束={volume_fraction}, "
                        f"网格类型={mesh_type},  " 
@@ -958,10 +971,14 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec6_5_2_canti2d_corner")
         save_path.mkdir(parents=True, exist_ok=True)    
 
+        save_history_data(history=history, save_path=str(save_path/'json'), label='convergence')
+
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
                                 save_path=str(save_path))
+        
+        
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
@@ -1278,5 +1295,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec6_5_2_canti2d_corner')
+    test.run.set('test_subsec6_6_4')
     rho_opt, history = test.run()

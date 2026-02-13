@@ -153,75 +153,119 @@ def save_optimization_history(mesh: HomogeneousMesh,
         else:  
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
 
-def plot_optimization_history(history, save_path=None, show=True, title=None, 
-                            fontsize=20, figsize=(14, 10), linewidth=2.5,
-                            ):
-    """绘制优化过程中目标函数和约束函数的变化
-    
-    Parameters
-    ----------
-    history : OptimizationHistory
-        优化历史记录
-    save_path : str, optional
-        保存路径，如不提供则不保存
-    show : bool, optional
-        是否显示图像，默认为 True
-    title : str, optional
-        图表标题，默认为 None
-    fontsize : int, optional
-        标签和刻度字体大小
-    figsize : tuple, optional
-        图形大小
-    linewidth : float, optional
-        线条宽度
-    """
-    import matplotlib.pyplot as plt
-    
-    # 准备数据
-    iterations = bm.arange(1, len(history.obj_values) + 1)
-    obj_values = bm.array(history.obj_values)
-    con_values = bm.array(history.con_values)
-    
-    # 创建图形
-    fig, ax1 = plt.subplots(figsize=figsize)
-    
-    # 设置全局字体大小
-    plt.rcParams.update({'font.size': fontsize})
-    
-    # 绘制目标函数曲线（左轴）
-    ax1.set_xlabel('Iteration', fontsize=fontsize+6)
-    ax1.set_ylabel('Compliance, $c$', color='red', fontsize=fontsize+6)
-    ax1.plot(iterations, obj_values, 'r-', label=r'$c$', linewidth=linewidth)
-    ax1.tick_params(axis='y', labelcolor='red', labelsize=fontsize)
-    ax1.tick_params(axis='x', labelsize=fontsize)
-    
-    # 创建右轴
-    ax2 = ax1.twinx()
-    ax2.set_ylabel('Volfrac, $v_f$', color='blue', fontsize=fontsize+6)
-    ax2.plot(iterations, con_values, 'b--', label=r'$v_f$', linewidth=linewidth)
-    ax2.tick_params(axis='y', labelcolor='blue', labelsize=fontsize)
 
-    ax1.grid(True, linestyle='--', alpha=0.7)
-
-    # 添加标题（如果提供）
-    if title is not None:
-        plt.title(title, fontsize=fontsize+6, pad=20, fontweight='bold')
+# def plot_optimization_history(history, save_path=None, show=True, title=None, 
+#                             fontsize=20, figsize=(14, 10), linewidth=2.5,
+#                             ):
+#     """绘制优化过程中目标函数和约束函数的变化
     
-    # 添加图例
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    leg = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=fontsize+6)
-
-    plt.tight_layout()
+#     Parameters
+#     ----------
+#     history : OptimizationHistory
+#         优化历史记录
+#     save_path : str, optional
+#         保存路径，如不提供则不保存
+#     show : bool, optional
+#         是否显示图像，默认为 True
+#     title : str, optional
+#         图表标题，默认为 None
+#     fontsize : int, optional
+#         标签和刻度字体大小
+#     figsize : tuple, optional
+#         图形大小
+#     linewidth : float, optional
+#         线条宽度
+#     """
+#     import matplotlib.pyplot as plt
     
-    if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+#     # 准备数据
+#     iterations = bm.arange(1, len(history.obj_values) + 1)
+#     obj_values = bm.array(history.obj_values)
+#     con_values = bm.array(history.con_values)
     
-    if show:
-        plt.show()
-    else:
-        plt.close()
+#     # 创建图形
+#     fig, ax1 = plt.subplots(figsize=figsize)
+    
+#     # 设置全局字体大小
+#     plt.rcParams.update({'font.size': fontsize})
+    
+#     # 绘制目标函数曲线（左轴）
+#     ax1.set_xlabel('Iteration', fontsize=fontsize+6)
+#     ax1.set_ylabel('Compliance, $c$', color='red', fontsize=fontsize+6)
+#     ax1.plot(iterations, obj_values, 'r-', label=r'$c$', linewidth=linewidth)
+#     ax1.tick_params(axis='y', labelcolor='red', labelsize=fontsize)
+#     ax1.tick_params(axis='x', labelsize=fontsize)
+    
+#     # 创建右轴
+#     ax2 = ax1.twinx()
+#     ax2.set_ylabel('Volfrac, $v_f$', color='blue', fontsize=fontsize+6)
+#     ax2.plot(iterations, con_values, 'b--', label=r'$v_f$', linewidth=linewidth)
+#     ax2.tick_params(axis='y', labelcolor='blue', labelsize=fontsize)
 
+#     ax1.grid(True, linestyle='--', alpha=0.7)
+
+#     # 添加标题（如果提供）
+#     if title is not None:
+#         plt.title(title, fontsize=fontsize+6, pad=20, fontweight='bold')
+    
+#     # 添加图例
+#     lines1, labels1 = ax1.get_legend_handles_labels()
+#     lines2, labels2 = ax2.get_legend_handles_labels()
+#     leg = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=fontsize+6)
+
+#     plt.tight_layout()
+    
+#     if save_path is not None:
+#         plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+#     if show:
+#         plt.show()
+#     else:
+#         plt.close()
+
+#####################################################
+#                    绘图和数据保存工具函数
+#####################################################
+
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as font_manager
+import numpy as np
+
+# ==========================================
+# 1. SOPTX 论文全局配色配置 (模块级常量)
+# ==========================================
+# 这段配置应该放在脚本的最顶端，所有函数都能访问
+SOPTX_COLORS = {
+    # 物理量 (用于收敛曲线)
+    'compliance': '#d62728',  # 红色 (Tab:red)
+    'volume':     '#1f77b4',  # 蓝色 (Tab:blue)
+    
+    # 性能耗时 (用于柱状图)
+    'analysis':   '#5B9BD5',  # 柔和蓝 (结构分析)
+    'optimization': '#ED7D31',# 柔和橙 (优化更新)
+    'overhead':   '#A5A5A5',  # 灰色 (其他开销)
+    'total':      '#444444'   # 深灰 (用于总耗时文字)
+}
+
+# ==========================================
+# 2. 字体配置 (基于您提供的绝对路径)
+# ==========================================
+# 建议也作为全局变量加载一次，避免每次绘图都重新加载
+PATH_ZH = '/usr/share/fonts/suanhai_fonts/Sim/simhei.ttf'
+PATH_EN = '/usr/share/fonts/suanhai_fonts/Times/times.ttf'
+try:
+    # 标签与图例字体 (中文黑体)
+    # 建议将 size 也设为变量，方便统一调整
+    FONT_ZH = font_manager.FontProperties(fname=PATH_ZH, size=14)
+    
+    # 刻度数值字体 (西文 Times New Roman)
+    FONT_EN = font_manager.FontProperties(fname=PATH_EN, size=12)
+    
+    print(f"全局字体加载成功: {FONT_ZH.get_name()}, {FONT_EN.get_name()}")
+except Exception as e:
+    print(f"全局字体加载失败: {e}。将回退到默认字体。")
+    FONT_ZH = None
+    FONT_EN = None
 
 def save_history_data(
                     history: OptimizationHistory, 
@@ -303,108 +347,248 @@ def load_history_data(
             with open(filepath, 'r') as f:
                 histories[label] = json.load(f)
         return histories
-
-def plot_optimization_history_comparison(
-    histories: Dict[str, dict],
-    save_path: Optional[str] = None,
-    show: bool = True,
-    title: Optional[str] = None,
-    # --- 论文绘图关键参数 ---
-    fontsize: int = 14,          # 论文推荐 12-14，保证缩放后可读
-    figsize: Optional[tuple] = None, # 默认为 None，由代码内部决定最佳比例
-    linewidth: float = 2.0,      # 线宽 2.0 在论文中视觉效果最佳
-    colors: Optional[List[str]] = None,
-    linestyles: Optional[List[str]] = None,
-    plot_type: str = 'both',     # 'both', 'objective', 'volume'
-):
-    """
-    绘制符合博士学位论文排版标准的收敛曲线（长方形黄金比例）
-    """
     
-    # 1. 颜色与线型：选用学术界常用的高对比度配色
-    if colors is None:
-        # 经典的红、蓝、黑、绿，打印成黑白也能区分灰度
-        colors = ['#d62728', '#1f77b4', 'black', '#2ca02c', '#ff7f0e'] 
-    if linestyles is None:
-        # 实线、虚线、点划线，区分度高
-        linestyles = ['-', '--', '-.', ':', (0, (3, 1, 1, 1))] 
-
-    # 2. 全局字体设置：使用 Times New Roman 或类似衬线体
-    plt.rcParams.update({
-        'font.family': 'serif',
-        'font.serif': ['Times New Roman'], # 论文标准字体
-        'font.size': fontsize,
-        'mathtext.fontset': 'stix',        # 公式字体与 Times 搭配最好
-        'axes.grid': True,                 # 默认开启网格
-        'grid.alpha': 0.4,                 # 网格淡一点
-        'grid.linestyle': '--'
-    })
-
-    # 3. 智能设置画布大小 (figsize) - 核心修改
-    # A4纸内容宽度通常在 15-16cm 左右。
-    # Matplotlib 默认 dpi=100，所以 6.4 inch ≈ 16cm。
-    if figsize is None:
-        if plot_type == 'both':
-            # 双图并排：宽一点，高保持黄金比
-            # 12 inch 宽，5 inch 高 -> 每个子图接近 1.2:1
-            figsize = (12, 5) 
+def plot_optimization_history(history, save_path=None, show=True, 
+                            figsize=(10, 6), linewidth=2.5):
+    """绘制目标函数与体积约束收敛曲线"""
+    # ------------------------------------------
+    # 数据准备
+    # ------------------------------------------
+    # 定义一个内部辅助函数来获取数据
+    def get_data(obj, key):
+        if isinstance(obj, dict):
+            return obj[key]  # 字典方式访问
         else:
-            # 单图：经典的 4:3 或 黄金比例
-            # 8 inch * 2.54 = 20cm (稍大，适合缩小插入), 高 5 inch
-            figsize = (8, 5) 
+            return getattr(obj, key) # 对象属性方式访问
 
-    # 创建画布
-    if plot_type == 'both':
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
-        axes_to_plot = [('objective', ax1), ('volume', ax2)]
-    elif plot_type == 'objective':
-        fig, ax1 = plt.subplots(figsize=figsize)
-        axes_to_plot = [('objective', ax1)]
-    elif plot_type == 'volume':
-        fig, ax2 = plt.subplots(figsize=figsize)
-        axes_to_plot = [('volume', ax2)]
-    else:
-        raise ValueError("Invalid plot_type")
+    # 获取数据
+    try:
+        obj_values = np.array(get_data(history, 'obj_values'))
+        con_values = np.array(get_data(history, 'con_values'))
+    except KeyError as e:
+        print(f"数据解析错误: 找不到键值 {e}")
+        return
+    except AttributeError as e:
+        print(f"数据解析错误: 对象缺少属性 {e}")
+        return
+    iterations = np.arange(1, len(obj_values) + 1)
+    
+    # 创建画布 (设置高 DPI 以满足印刷要求)c
+    fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
+    
+    # ------------------------------------------
+    # 绘制左轴：柔顺度 (Compliance)
+    # ------------------------------------------
+    # 直接使用全局配色字典
+    color_c = SOPTX_COLORS['compliance'] 
+    
+    # 设置标签 (混合排版：中文使用 SimHei)
+    ax1.set_xlabel('迭代步数', fontproperties=FONT_ZH)
+    ax1.set_ylabel('柔顺度 $c$', color=color_c, fontproperties=FONT_ZH)
+    
+    # 绘制曲线
+    l1, = ax1.plot(iterations, obj_values, color=color_c, linestyle='-', 
+                   linewidth=linewidth, label='柔顺度 $c$')
+    
+    # 设置刻度颜色
+    ax1.tick_params(axis='y', labelcolor=color_c)
+    ax1.grid(True, linestyle='--', alpha=0.5)
+    
+    # 强制设置左轴刻度数值为 Times New Roman
+    if FONT_EN:
+        for label in ax1.get_xticklabels():
+            label.set_fontproperties(FONT_EN)
+        for label in ax1.get_yticklabels():
+            label.set_fontproperties(FONT_EN)
 
-    # 4. 绘图循环
-    for p_type, ax in axes_to_plot:
-        # 设置数据键名和标签
-        data_key = 'obj_values' if p_type == 'objective' else 'con_values'
-        y_label = 'Compliance, $c$' if p_type == 'objective' else 'Volume Fraction, $V_f$'
-        # y_label = 'Output displacement, $u_{out}$' if p_type == 'objective' else 'Volume Fraction, $V_f$'
-        
-        for idx, (label, history) in enumerate(histories.items()):
-            color = colors[idx % len(colors)]
-            linestyle = linestyles[idx % len(linestyles)]
-            
-            values = history[data_key]
-            # 迭代步数通常从 0 或 1 开始，这里假设从 0 开始
-            iterations = range(len(values))
-            
-            ax.plot(iterations, values, 
-                    color=color, linestyle=linestyle, 
-                    linewidth=linewidth, label=label)
-        
-        # 坐标轴修饰
-        ax.set_xlabel('Iteration')
-        ax.set_ylabel(y_label)
-        
-        # 图例设置：去掉边框背景，显得更干净，或者放在最佳位置
-        ax.legend(loc='best', frameon=True, framealpha=0.9, edgecolor='gray', fancybox=False)
-        
-        # 科学计数法：如果数值太大或太小（比如 Compliance），强制使用科学计数法
-        if p_type == 'objective':
-            ax.ticklabel_format(style='sci', axis='y', scilimits=(-2, 3))
+    # ------------------------------------------
+    # 绘制右轴：体积分数 (Volume Fraction)
+    # ------------------------------------------
+    ax2 = ax1.twinx()
+    # 直接使用全局配色字典
+    color_v = SOPTX_COLORS['volume']
+    
+    # 设置标签
+    ax2.set_ylabel('体积分数 $V_f$', color=color_v, fontproperties=FONT_ZH)
+    
+    # 绘制曲线
+    l2, = ax2.plot(iterations, con_values, color=color_v, linestyle='--', 
+                   linewidth=linewidth, label='体积分数 $V_f$')
+    
+    ax2.tick_params(axis='y', labelcolor=color_v)
+    
+    # 强制设置右轴刻度数值为 Times New Roman
+    if FONT_EN:
+        for label in ax2.get_yticklabels():
+            label.set_fontproperties(FONT_EN)
 
-    if title:
-        fig.suptitle(title, fontweight='bold', y=0.98)
+    # ------------------------------------------
+    # 智能锁定右轴范围 (保持平稳美观)
+    # ------------------------------------------
+    v_min, v_max = np.min(con_values), np.max(con_values)
+    if (v_max - v_min) < 0.01:
+        target = np.mean(con_values[-10:]) 
+        margin = 0.05 
+        ax2.set_ylim(target - margin, target + margin)
+
+    # ------------------------------------------
+    # 图例与保存
+    # ------------------------------------------
+    lines = [l1, l2]
+    labels = [l.get_label() for l in lines]
+    
+    # 放置在右上角
+    ax1.legend(lines, labels, loc='upper right', prop=FONT_ZH, framealpha=0.9)
 
     plt.tight_layout()
     
     if save_path:
-        # 保存为 PDF 或高 DPI 的 PNG
         plt.savefig(save_path, dpi=600, bbox_inches='tight')
-        print(f"Figure saved to: {save_path}")
+        print(f"图片已保存至: {save_path}")
+        
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+def plot_optimization_history_comparison(
+    histories: dict,
+    save_path=None,
+    show=True,
+    title=None,
+    figsize=None,
+    linewidth=2.0,
+    colors=None,
+    linestyles=None,
+    plot_type='both'  # 'both', 'objective', 'volume'
+):
+    """
+    绘制不同情形下的对比收敛曲线
+    
+    Parameters
+    ----------
+    histories : dict
+        包含多个历史数据的字典, e.g., {'CPU': history_obj1, 'GPU': history_obj2}
+    plot_type : str
+        'both' (双图并排), 'objective' (仅目标函数), 'volume' (仅体积分数)
+    """
+    # ------------------------------------------
+    # 1. 绘图参数设置
+    # ------------------------------------------
+    # 默认配色方案：使用 SOPTX 全局色 + 补充对比色
+    if colors is None:
+        # 顺序：红、蓝、绿、黑、橙 (用于区分不同的 Method)
+        colors = [
+            SOPTX_COLORS['compliance'], # 红色
+            SOPTX_COLORS['volume'],     # 蓝色
+            '#2ca02c',                # 绿色
+            'black',                    # 黑色
+            '#ff7f0e'                 # 橙色
+        ]
+    
+    # 默认线型 (实线、虚线、点划线、点线)
+    if linestyles is None:
+        linestyles = ['-', '--', '-.', ':'] 
+    # 智能设置画布大小
+    if figsize is None:
+        if plot_type == 'both':
+            figsize = (12, 5) # 双图并排，长宽比约 2.4:1
+        else:
+            figsize = (8, 5)  # 单图，长宽比 1.6:1 (接近黄金比例)
+
+    # ------------------------------------------
+    # 2. 辅助函数 (数据兼容性)
+    # ------------------------------------------
+    def get_data(obj, key):
+        """兼容字典(离线数据)和对象(在线数据)"""
+        if isinstance(obj, dict):
+            return obj[key]
+        return getattr(obj, key)
+
+    # ------------------------------------------
+    # 3. 创建画布与子图
+    # ------------------------------------------
+    # 设置 dpi=600 以满足高清印刷需求
+    if plot_type == 'both':
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, dpi=600)
+        axes_to_plot = [('objective', ax1), ('volume', ax2)]
+    elif plot_type == 'objective':
+        fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
+        axes_to_plot = [('objective', ax1)]
+    elif plot_type == 'volume':
+        fig, ax2 = plt.subplots(figsize=figsize, dpi=600)
+        axes_to_plot = [('volume', ax2)]
+    else:
+        raise ValueError("Invalid plot_type. Choose 'both', 'objective', or 'volume'.")
+
+    # ------------------------------------------
+    # 4. 绘图主循环
+    # ------------------------------------------
+    for p_type, ax in axes_to_plot:
+        # 确定数据键名和中文Y轴标签
+        if p_type == 'objective':
+            data_key = 'obj_values'
+            y_label = '柔顺度 $c$'
+        else:
+            data_key = 'con_values'
+            y_label = '体积分数 $V_f$'
+        
+        # 遍历所有历史数据 (例如 label='CPU', history=data)
+        for idx, (label, history) in enumerate(histories.items()):
+            # 循环获取颜色和线型
+            color = colors[idx % len(colors)]
+            linestyle = linestyles[idx % len(linestyles)]
+            
+            try:
+                values = np.array(get_data(history, data_key))
+            except Exception as e:
+                print(f"Warning: Skipping {label} for {data_key}: {e}")
+                continue
+            
+            # 假设迭代步从 1 开始
+            iterations = np.arange(1, len(values) + 1)
+            
+            # 绘制曲线
+            ax.plot(iterations, values, 
+                    color=color, linestyle=linestyle, 
+                    linewidth=linewidth, label=label)
+        
+        # ------------------------------------------
+        # 5. 样式修饰 (核心规范化)
+        # ------------------------------------------
+        # 设置中文标签 (使用全局 SimHei 字体变量)
+        ax.set_xlabel('迭代步数', fontproperties=FONT_ZH)
+        ax.set_ylabel(y_label, fontproperties=FONT_ZH)
+        
+        # 设置网格 (半透明虚线)
+        ax.grid(True, linestyle='--', alpha=0.5)
+        
+        # 设置图例 (右上角，中文支持)
+        # framealpha=0.9 防止遮挡背景网格
+        # prop=FONT_ZH 确保图例中的中文(如果有)能显示，英文(CPU/GPU)也会使用该字体显示
+        ax.legend(loc='upper right', prop=FONT_ZH, framealpha=0.9, fancybox=False)
+        
+        # --- 关键：强制设置刻度字体为 Times New Roman ---
+        if FONT_EN:
+            for label in ax.get_xticklabels():
+                label.set_fontproperties(FONT_EN)
+            for label in ax.get_yticklabels():
+                label.set_fontproperties(FONT_EN)
+
+    # ------------------------------------------
+    # 6. 标题与保存
+    # ------------------------------------------
+    if title:
+        # 如果有总标题，使用中文
+        fig.suptitle(title, fontproperties=FONT_ZH, y=0.98)
+
+    plt.tight_layout()
+    
+    if save_path:
+        # 自动创建目录
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=600, bbox_inches='tight')
+        print(f"对比曲线已保存至: {save_path}")
     
     if show:
         plt.show()

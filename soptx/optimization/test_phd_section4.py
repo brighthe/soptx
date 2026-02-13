@@ -434,6 +434,7 @@ class DensityTopOptTest(BaseLogged):
                                                     relative_density=relative_density,
                                                 ) 
         elif density_location in ['element_multiresolution']:
+            
             import math
             sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
