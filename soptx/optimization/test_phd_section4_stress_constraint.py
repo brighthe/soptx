@@ -455,7 +455,6 @@ class DensityTopOptTest(BaseLogged):
                                     options={
                                         'penalty_factor': penalty_factor,
                                         'void_youngs_modulus': void_youngs_modulus,
-                                        'target_variables': ['E'],
                                     },
                                 )
         
@@ -498,21 +497,14 @@ class DensityTopOptTest(BaseLogged):
                                 integration_order=integration_order,
                                 assembly_method=assembly_method,
                                 solve_method=solve_method,
-                                # topopt_algorithm=None,
                                 topopt_algorithm='density_based',
                             )
-        
-        # state = analyzer.solve_state(rho_val=rho)
-        
+                
         from soptx.optimization.volume_objective import VolumeObjective
         objective = VolumeObjective(analyzer=analyzer)
 
-        # f = objective.fun(density=rho, state=None)
-
         from soptx.optimization.stress_constraint import StressConstraint
         constraint = StressConstraint(analyzer=analyzer, stress_limit=100.0)
-
-        # g = constraint.fun(density=rho, state=state)
 
         NC = displacement_mesh.number_of_cells()
         from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
@@ -524,8 +516,6 @@ class DensityTopOptTest(BaseLogged):
                                             initial_lambda=bm.zeros((NC, 1), dtype=bm.float64),
                                             penalty_update_factor=1.1,
                                         )
-        # J = augmented_lagrangian_objective.fun(density=rho, state=state)
-        # dJ = augmented_lagrangian_objective.jac(density=rho, state=state, diff_mode='manual')
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 0.05
@@ -557,26 +547,8 @@ class DensityTopOptTest(BaseLogged):
             asymp_incr=1.2,       # 对应 opt.AsymInc = 1.2
             asymp_decr=0.7        # 对应 opt.AsymDecr = 0.7
         )
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
-        
-        analysis_tspace = analyzer.tensor_space
-        analysis_tgdofs = analysis_tspace.number_of_global_dofs()
-        
-        # self._log_info(f"开始密度拓扑优化, "
-        #     f"模型名称={pde.__class__.__name__}, \n"
-        #     f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
-        #     f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
-        #     f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
-        #     f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-        #     f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
-        #     f"约束类型={optimizer._constraints.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
-        #     f"优化算法={optimizer.__class__.__name__} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
-        #     f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
-        #     f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
-
-        self.verify_stress_results(optimizer, rho_opt)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
