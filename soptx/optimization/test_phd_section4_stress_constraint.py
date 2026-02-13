@@ -210,11 +210,11 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 1.0, 0, 1.0]
         hole_domain = [0.4, 1.0, 0.4, 1.0]
         P = -2.0
-        E, nu = 7e4, 0.3
+        E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
-        nx, ny = 10, 10
-        mesh_type = 'uniform_quad'
+        nx, ny = 100, 100
+        mesh_type = 'quad_threshold'
 
         from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
         pde = LBracketBeam2d(
@@ -225,11 +225,6 @@ class DensityTopOptTest(BaseLogged):
                         )
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
-        # node = displacement_mesh.entity('node')
-        # right_edge = node[bm.abs(node[:, 0] - 1.0) < 1e-8]
-        # right_edge_in_range = right_edge[right_edge[:, 1] <= 0.4]
-        # print(f"右边缘节点数: {len(right_edge_in_range)}")
-        # print(right_edge_in_range)
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -293,16 +288,35 @@ class DensityTopOptTest(BaseLogged):
                                 integration_order=integration_order,
                                 assembly_method=assembly_method,
                                 solve_method=solve_method,
+                                # topopt_algorithm=None,
                                 topopt_algorithm='density_based',
                             )
         
-        from soptx.optimization.compliance_objective import ComplianceObjective
-        compliance_objective = ComplianceObjective(analyzer=analyzer)
-
-        volume_fraction = 0.35
-        from soptx.optimization.volume_constraint import VolumeConstraint
-        volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
+        # state = analyzer.solve_state(rho_val=rho)
         
+        from soptx.optimization.volume_objective import VolumeObjective
+        objective = VolumeObjective(analyzer=analyzer)
+
+        # f = objective.fun(density=rho, state=None)
+
+        from soptx.optimization.stress_constraint import StressConstraint
+        constraint = StressConstraint(analyzer=analyzer, stress_limit=100.0)
+
+        # g = constraint.fun(density=rho, state=state)
+
+        NC = displacement_mesh.number_of_cells()
+        from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
+        augmented_lagrangian_objective = AugmentedLagrangianObjective(
+                                            volume_objective=objective,
+                                            stress_constraint=constraint,
+                                            initial_penalty=10.0,
+                                            max_penalty=10000.0,
+                                            initial_lambda=bm.zeros((NC, 1), dtype=bm.float64),
+                                            penalty_update_factor=1.1,
+                                        )
+        # J = augmented_lagrangian_objective.fun(density=rho, state=state)
+        # dJ = augmented_lagrangian_objective.jac(density=rho, state=state, diff_mode='manual')
+
         filter_type = 'density' # 'none', 'sensitivity', 'density'
         rmin = 0.05
         from soptx.regularization.filter import Filter
@@ -312,49 +326,43 @@ class DensityTopOptTest(BaseLogged):
                                     rmin=rmin,
                                     density_location=density_location,
                                 )
-        
-        max_iterations = 200
-        change_tolerance = 1e-2
-        use_penalty_continuation = False
-        constraint = [volume_constraint]
 
-        from soptx.optimization.mma_optimizer import MMAOptimizer
-        optimizer = MMAOptimizer(
-                        objective=compliance_objective,
-                        constraint=constraint,
+        from soptx.optimization.al_mma_optimizer import ALMMMAOptimizer
+        optimizer = ALMMMAOptimizer(
+                        al_objective=augmented_lagrangian_objective,
                         filter=filter_regularization,
                         options={
-                            'max_iterations': max_iterations,
-                            'change_tolerance': change_tolerance,
-                            'use_penalty_continuation': use_penalty_continuation,
-                        }
+                            'max_al_iterations': 10,     # 对应 opt.MaxIter = 150
+                            'mma_iters_per_al': 5,        # 对应 opt.MMA_Iter = 5
+                            'change_tolerance': 0.002,    # 对应 opt.Tol = 0.002
+                            'stress_tolerance': 0.003,    # 对应 opt.TolS = 0.003
+                            'alpha': 1.1,                 # 对应 opt.alpha = 1.1
+                            'use_penalty_continuation': False,
+                        },
+                        enable_logging=True,
                     )
         optimizer.options.set_advanced_options(
-                                a0=1,
-                                asymp_init=0.5,
-                                asymp_incr=1.2,
-                                asymp_decr=0.7,
-                                move_limit=0.2,
-                                albefa=0.1,
-                                raa0=1e-5,
-                                epsilon_min=1e-7,
-                            )
-
-
+            move_limit=0.15,      # 对应 opt.Move = 0.15 (应力优化需限制步长防震荡)
+            asymp_init=0.2,       # 对应 opt.AsymInit = 0.2
+            asymp_incr=1.2,       # 对应 opt.AsymInc = 1.2
+            asymp_decr=0.7        # 对应 opt.AsymDecr = 0.7
+        )
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        
         analysis_tspace = analyzer.tensor_space
         analysis_tgdofs = analysis_tspace.number_of_global_dofs()
         
-        self._log_info(f"开始密度拓扑优化, "
-            f"模型名称={pde.__class__.__name__}, \n"
-            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
-            f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
-            f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
-            f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
-            f"约束类型={optimizer._constraints.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
-            f"优化算法={optimizer.__class__.__name__} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
-            f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
-            f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+        # self._log_info(f"开始密度拓扑优化, "
+        #     f"模型名称={pde.__class__.__name__}, \n"
+        #     f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
+        #     f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
+        #     f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
+        #     f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+        #     f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移场自由度={analysis_tgdofs}, \n"
+        #     f"约束类型={optimizer._constraints.__class__.__name__}, 体积分数约束={volume_fraction}, \n"
+        #     f"优化算法={optimizer.__class__.__name__} , 初始构型={relative_density}, 最大迭代次数={max_iterations}, "
+        #     f"收敛容差={change_tolerance}, 惩罚因子连续化={use_penalty_continuation}, \n" 
+        #     f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
 

@@ -58,8 +58,7 @@ function [J,dJdz,f,h,fem] = AL_Function(fem,E,dEdy,V,dVdy,lambda,mu,P)
 [h,Penal,dPenaldV,dPenaldE,fem] = PenalFnc(fem,E,V,lambda,mu);
 N = fem.NElem;
 J = f + Penal/N; %Normalized AL function
-dJdz = P'*(dEdy.*(dfdE+dPenaldE./N)+dVdy.*(dfdV+dPenaldV./N)); %Sensitivity
-%% ----------------------------------- OBJECTIVE FUNCTION (VOLUME FRACTION)
+dJdz = P'*(dEdy.*(dfdE+dPenaldE./N)+dVdy.*(dfdV+dPenaldV./N)); %Sensitivity%% ----------------------------------- OBJECTIVE FUNCTION (VOLUME FRACTION)
 function [f,dfdV,dfdE,fem] = ObjectiveFnc(fem,E,V)
 f = sum(fem.ElemArea.*V)/sum(fem.ElemArea); %Mass ratio
 dfdV = fem.ElemArea./sum(fem.ElemArea);

@@ -332,18 +332,7 @@ class MaterialInterpolationScheme(BaseLogged):
 
         elif self._density_location in ['node_multiresolution']:
             # rho_val.shape = (NN, )
-            NC = displacement_mesh.number_of_cells()
-            qf_e = displacement_mesh.quadrature_formula(q=integration_order)
-            bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
-            n_sub = rho_val.sub_density_element
-            from soptx.analysis.utils import map_bcs_to_sub_elements
-            bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-            bcs_eg_x, bcs_eg_y = bcs_eg
-            NQ = ws_e.shape[0]
-            rho_interp = bm.zeros((NC, n_sub, NQ), dtype=bm.float64, device=displacement_mesh.device)
-            for s_idx in range(n_sub):
-                sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])
-                rho_interp[:, s_idx, :] = rho_val(sub_bcs)
+            pass
 
         if 'E' in target_variables:
             p = self._options['penalty_factor']

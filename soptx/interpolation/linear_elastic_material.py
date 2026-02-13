@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace.utils import flatten_indices
+from fealpy.functionspace import LagrangeFESpace
 
 from ..utils.base_logged import BaseLogged
 
@@ -365,6 +366,51 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
 
         return D
     
+    def von_mises_matrix(self) -> TensorLike:
+        """计算 von Mises 投影矩阵
+        
+        提示：输入应力向量的分量顺序必须严格遵循以下约定：
+        - 2D: [sigma_xx, sigma_yy, tau_xy]
+        - 3D: [sigma_xx, sigma_yy, sigma_zz, tau_xy, tau_yz, tau_zx]
+        """
+        kwargs = bm.context(self.D)
+        if self._plane_type == '3d':
+            M = bm.tensor([
+                        [ 1.0, -0.5, -0.5,  0.0,  0.0,  0.0],
+                        [-0.5,  1.0, -0.5,  0.0,  0.0,  0.0],
+                        [-0.5, -0.5,  1.0,  0.0,  0.0,  0.0],
+                        [ 0.0,  0.0,  0.0,  3.0,  0.0,  0.0],
+                        [ 0.0,  0.0,  0.0,  0.0,  3.0,  0.0],
+                        [ 0.0,  0.0,  0.0,  0.0,  0.0,  3.0]
+                    ], **kwargs)
+            
+            return M 
+        
+        elif self._plane_type == 'plane_stress':
+            M = bm.tensor([
+                        [ 1.0, -0.5,  0.0],
+                        [-0.5,  1.0,  0.0],
+                        [ 0.0,  0.0,  3.0]
+                    ], **kwargs)
+            
+            return M 
+
+        elif self._plane_type == 'plane_strain':
+            nu = self.poisson_ratio
+            val_diag = 1 - nu + nu**2
+            val_off = nu**2 - nu - 0.5
+            M = bm.tensor([
+                        [val_diag, val_off,  0.0],
+                        [val_off,  val_diag, 0.0],
+                        [0.0,      0.0,      3.0]
+                    ], **kwargs)
+            
+            return M
+
+        else:
+            error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
+            self._log_error(error_msg)
+    
     def calculate_stress_vector(self, 
                             B: TensorLike, 
                             u_e: TensorLike
@@ -403,13 +449,9 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         - STOP: (NC, NQ, NS)
         - MTOP: (NC, n_sub, NQ, NS)
 
-        分量顺序要求 (NS 维度的索引顺序):
-            - Case '3d' (NS=6): 
-              [sigma_xx, sigma_yy, sigma_zz, tau_xy, tau_yz, tau_zx]
-            
-            - Case 'plane_stress' / 'plane_strain' (NS=3):
-              [sigma_xx, sigma_yy, tau_xy]
-              注意：对于平面应变, 输入不包含 sigma_zz, 其贡献已通过修改 M 矩阵系数隐式包含
+        提示：输入应力向量的分量顺序必须严格遵循以下约定：
+        - 2D: [sigma_xx, sigma_yy, tau_xy]
+        - 3D: [sigma_xx, sigma_yy, sigma_zz, tau_xy, tau_yz, tau_zx]
 
         Returns
         -------
@@ -417,37 +459,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         - STOP: (NC, NQ)
         - MTOP: (NC, n_sub, NQ)
         """
-        kwargs = bm.context(stress_vector)
-        if self._plane_type == '3d':
-            M = bm.tensor([
-                        [ 1.0, -0.5, -0.5,  0.0,  0.0,  0.0],
-                        [-0.5,  1.0, -0.5,  0.0,  0.0,  0.0],
-                        [-0.5, -0.5,  1.0,  0.0,  0.0,  0.0],
-                        [ 0.0,  0.0,  0.0,  3.0,  0.0,  0.0],
-                        [ 0.0,  0.0,  0.0,  0.0,  3.0,  0.0],
-                        [ 0.0,  0.0,  0.0,  0.0,  0.0,  3.0]
-                    ], **kwargs)
-        
-        elif self._plane_type == 'plane_stress':
-            M = bm.tensor([
-                        [ 1.0, -0.5,  0.0],
-                        [-0.5,  1.0,  0.0],
-                        [ 0.0,  0.0,  3.0]
-                    ], **kwargs)
-
-        elif self._plane_type == 'plane_strain':
-            nu = self.poisson_ratio
-            val_diag = 1 - nu + nu**2
-            val_off = nu**2 - nu - 0.5
-            M = bm.tensor([
-                        [val_diag, val_off,  0.0],
-                        [val_off,  val_diag, 0.0],
-                        [0.0,      0.0,      3.0]
-                    ], **kwargs)
-
-        else:
-            error_msg = "Only '3d', 'plane_stress', and 'plane_strain' are supported."
-            self._log_error(error_msg)
+        M = self.von_mises_matrix()
 
         sig_sq = bm.einsum('c...qi, ij, c...qj -> c...q', stress_vector, M, stress_vector)
         

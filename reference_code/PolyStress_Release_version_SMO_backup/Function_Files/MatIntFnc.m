@@ -13,11 +13,12 @@ function [E,dEdy,V,dVdy] = MatIntFnc(y,type,param)
 eps = 1e-8;  %Ersatz stiffness
 switch(type)
   case('SIMP')
-    p = param; % Exponent for SIMP
+    % p = param; % Exponent for SIMP
+    p = param(1);  % 改为只取第一个元素
     V = y; % Volume fraction
     E = eps+(1-eps)*V.^p; % Stiffness interpolation
     dVdy = ones(size(y,1),1);
-    dEdy = (1-eps)*p.*y.^(p-1);     
+    dEdy = (1-eps)*p.*y.^(p-1); 
   case('SIMP-H') % SIMP with Heaviside projection 
     p = param(1); % Exponent for SIMP
     B = param(2); % Exponent for Heaviside projection

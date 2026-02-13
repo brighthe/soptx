@@ -346,7 +346,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
             n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
             nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
             obj_grad_rho = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=obj_grad_rho)  # (NC * n_sub, )
-            
+        
         # 1. 缩放物理密度导数
         scaled_dobj = obj_grad_rho / self._Hs
         

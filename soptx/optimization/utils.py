@@ -344,9 +344,9 @@ def compute_volume(
     """计算设计域内材料的总体积"""
     if density_location in ['element']:
         rho_element = density  # (NC, )
-
         cell_measure = mesh.entity_measure('cell')
-        current_volume = bm.einsum('c, c -> ', cell_measure, rho_element[:])
+
+        current_volume = bm.sum(cell_measure * rho_element[:])
 
         return current_volume
     

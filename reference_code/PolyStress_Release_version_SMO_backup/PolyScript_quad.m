@@ -8,7 +8,7 @@ clear; clc; close all
 restoredefaultpath; addpath(genpath('./')); %Use all folders and subfolders
 set(0,'defaulttextinterpreter','latex')
 %% ------------------------------------------------------------ CREATE Mesh
-nx = 10; ny = 10;
+nx = 100; ny = 100;
 % nx = 200; ny = 200;
 % nx = 300; ny = 300;
 [Node, Element, Supp, Load] = Mesh_L_bracket_quad(nx, ny);
@@ -37,8 +37,10 @@ fem = struct(...
 %% ---------------------------------------------------- CREATE 'opt' STRUCT
 R = 0.05; q = 3; % Filter radius and filter exponent
 p = 3.5; eta0 = 0.5;
-m = @(y,B)MatIntFnc(y,'SIMP-H1',[p,B,eta0]);
+% m = @(y,B)MatIntFnc(y,'SIMP-H1',[p,B,eta0]);
+m = @(y,B)MatIntFnc(y,'SIMP',[p,B,eta0]);
 P = PolyFilter(fem,R,q);
+% P = speye(NElem); 
 zIni = 0.5*ones(size(P,2),1);
 opt = struct(...               
   'zMin',0.0,...              % Lower bound for design variables
@@ -63,9 +65,25 @@ opt = struct(...
    );
 %% ------------------------------------------------------- RUN 'PolyStress'
 fem = preComputations(fem); % Run preComputations before running PolyStress
+
+% E_solid = ones(size(Element,1), 1); 
+% 
+% 3. 运行求解器
+% [U_matlab, fem_out] = NLFEM(fem, E_solid);
+% 
+% 4. 输出标量指标
+% max_disp = max(sqrt(U_matlab(1:2:end).^2 + U_matlab(2:2:end).^2));
+% compliance = fem.Fext' * U_matlab;
+% 
+% fprintf('MATLAB Max Displacement: %.6e\n', max_disp);
+% fprintf('MATLAB Compliance: %.6e\n', compliance);
+
+
+
+
+
 [z,V,fem] = PolyStress(fem,opt);
 %-------------------------------------------------------------------------%
-
 %% ============ 应力约束检查和可视化 ============
 % 1. 获取最终的单元密度和材料插值
 y = opt.P * z;  % 过滤后的密度

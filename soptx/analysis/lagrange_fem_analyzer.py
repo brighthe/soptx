@@ -66,6 +66,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._cached_ke0 = None
 
+        self._cached_stiffness_absolute = None # 绝对刚度 (带量纲)
+        self._cached_stiffness_relative = None # 相对刚度 (无量纲)
+
     ##############################################################################################
     # 属性相关函数
     ##############################################################################################
@@ -164,8 +167,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if self._topopt_algorithm is None:
             if rho_val is not None:
                 self._log_warning("标准有限元分析模式下忽略相对密度 rho")
-            
+        
             coef = None
+
+            self._cached_E_rho = None
+            self._cached_coef = None
         
         elif self._topopt_algorithm == 'density_based':
             if rho_val is None:
@@ -179,7 +185,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                             displacement_mesh=self._mesh,
                                         )
             E0 = self._material.youngs_modulus
-            coef = E_rho / E0
+            relative_stiffness = E_rho / E0
+
+            self._cached_stiffness_absolute = E_rho               # 绝对刚度 (带量纲)
+            self._cached_stiffness_relative = relative_stiffness  # 相对刚度 (无量纲)
         
         else:
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
@@ -191,7 +200,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
         # 更新密度系数
-        self._integrator.coef = coef
+        self._integrator.coef = relative_stiffness
 
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(self._integrator)
@@ -457,25 +466,16 @@ class LagrangeFEMAnalyzer(BaseLogged):
         else:
             self._log_error(f"未知的求解器类型: {solver_type}")
         
-        return {'displacement': uh}
+        return {
+            'displacement': uh,
+            }
     
     def solve_adjoint(self, 
                     rhs: TensorLike,
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     **kwargs
                 ) -> TensorLike:
-        """
-        求解伴随方程 K @ λ = rhs
-        v
-        Parameters
-        ----------
-        rhs : (n_gdof,) 或 (n_gdof, n_rhs) 伴随载荷向量 (支持批量求解)
-        rho_val : 密度场
-        
-        Returns
-        -------
-        adjoint_lambda : (n_gdof, n_rhs) 伴随变量
-        """
+        """求解伴随方程 K @ λ = rhs"""
         # 组装刚度矩阵
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
@@ -490,7 +490,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         # 先处理右端项 (伴随问题边界条件为齐次, λ = 0)
         rhs_bc = bm.copy(rhs)
-        rhs_bc[isBdDof, :] = 0.0
+        rhs_bc[isBdDof] = 0.0
 
         # 再处理刚度矩阵
         K = self._apply_matrix(K0, isDDof=isBdDof)
@@ -728,84 +728,138 @@ class LagrangeFEMAnalyzer(BaseLogged):
             self._log_error(f"不支持的密度位置类型: {density_location}")
         
         return B
-
-
+    
     def compute_stress_state(self, 
                             state: dict,
-                            rho_val: Optional[Union[TensorLike, Function]] = None,
                             integration_order: Optional[int] = None
                         ) -> Dict[str, TensorLike]:
         """
-        计算应力场
-        
+        计算基础应力状态, 负责计算基于当前位移场的实体柯西应力
+
         Parameters
         ----------
-        state : 状态字典，包含位移场等信息
-        rho_val : 密度场（用于应力惩罚，拓扑优化时需要）
-        integration_order : 积分阶次
-        
+        state : dict
+            状态字典, 必须包含 'displacement' (位移场).
+        integration_order : int, optional
+            积分阶次. 默认为 1 (中心点积分), 这对 Q4 单元足以避免棋盘格效应.
+
         Returns
         -------
-        dict : 包含以下键值：
-            - 'stress_solid': 实体应力 (NC, NQ, NS) 或 (NC, n_sub, NQ, NS)
-            - 'stress_penalized': 惩罚后应力
-            - 'von_mises': von Mises 等效应力 (NC, NQ) 或 (NC, n_sub, NQ)
-            - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
+        dict : 包含以下键值的字典
+            - 'stress_solid': 实体柯西应力张量 (Voigt 向量形式)
+              Shape: (NC, NQ, NS)
+              
+              !! 关键提示: 应力分量顺序 (Voigt Notation) !!
+              -------------------------------------------
+              Index 0: sigma_xx (正应力 X)
+              Index 1: sigma_yy (正应力 Y)
+              Index 2: tau_xy   (剪应力 XY)
+              -------------------------------------------
         """        
         if integration_order is None:
-            integration_order = self._integration_order
-            # TODO 测试
-            integration_order = 1
+            integration_order = 1 # 默认使用中心点积分
 
         if state is None:
-            state = self.solve_state(rho_val=rho_val)
+            self._log_error("compute_stress_state 需要传入有效的 state 字典")
         
         uh = state['displacement']
         cell2dof = self._tensor_space.cell_to_dof()
-        uh_e = uh[cell2dof]  # (NC, TLDOF)
+        uh_e = uh[cell2dof]
 
+        # 1. 计算应变-位移矩阵 B
         B = self.compute_strain_displacement_matrix(integration_order)
         
-        # 计算实体应力 (与密度无关)
-        stress_solid = self._material.calculate_stress_vector(B, uh_e)
+        # 2. 计算实体柯西应力
+        stress_tensor = self._material.calculate_stress_vector(B, uh_e)
         
-        result = {'stress_solid': stress_solid}
+        # 返回最原始的应力张量 (或向量形式)
+        return {'stress_solid': stress_tensor}
+
+
+    # def compute_stress_state(self, 
+    #                         state: dict,
+    #                         rho_val: Optional[Union[TensorLike, Function]] = None,
+    #                         integration_order: Optional[int] = None
+    #                     ) -> Dict[str, TensorLike]:
+    #     """
+    #     计算应力场
         
-        # 应力惩罚（拓扑优化场景）
-        if self._topopt_algorithm == 'density_based':
-            if rho_val is None:
-                self._log_warning("拓扑优化模式下建议提供 rho_val 以计算惩罚后应力")
-                stress_for_vm = stress_solid
-            else:
-                penalty_data = self._interpolation_scheme.interpolate_stress(
-                                                                        stress_solid=stress_solid,
-                                                                        rho_val=rho_val,
-                                                                        return_stress_penalty=True,
-                                                                    )
-                stress_for_vm = penalty_data['stress_penalized']
-                result['stress_penalized'] = stress_for_vm
-                result['eta_sigma'] = penalty_data['eta_sigma']
-        else:
-            stress_for_vm = stress_solid
+    #     Parameters
+    #     ----------
+    #     state : 状态字典，包含位移场等信息
+    #     rho_val : 密度场（用于应力惩罚，拓扑优化时需要）
+    #     integration_order : 积分阶次
         
-        # 计算 von Mises 应力
-        von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_for_vm)
-        result['von_mises'] = von_mises
+    #     Returns
+    #     -------
+    #     dict : 包含以下键值：
+    #         - 'stress_solid': 实体应力 (NC, NQ, NS) 或 (NC, n_sub, NQ, NS)
+    #         - 'stress_penalized': 惩罚后应力
+    #         - 'von_mises': von Mises 等效应力 (NC, NQ) 或 (NC, n_sub, NQ)
+    #         - 'E_field': 插值后的杨氏模量场 (用于多项式消失约束), shape = rho_val.shape
+    #         - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
+    #     """        
+    #     if integration_order is None:
+    #         integration_order = self._integration_order
+    #         # TODO 测试
+    #         integration_order = 1
+
+    #     if state is None:
+    #         state = self.solve_state(rho_val=rho_val)
+        
+    #     uh = state['displacement']
+    #     cell2dof = self._tensor_space.cell_to_dof()
+    #     uh_e = uh[cell2dof]  # (NC, TLDOF)
+
+    #     B = self.compute_strain_displacement_matrix(integration_order)
+        
+    #     # 计算实体应力 (与密度无关)
+    #     stress_solid = self._material.calculate_stress_vector(B, uh_e)
+        
+    #     result = {'stress_solid': stress_solid}
+        
+    #     # 应力惩罚（拓扑优化场景）
+    #     if self._topopt_algorithm == 'density_based':
+    #         if rho_val is None:
+    #             self._log_warning("拓扑优化模式下建议提供 rho_val 以计算惩罚后应力")
+    #             stress_for_vm = stress_solid
+    #         else:
+    #             E_field = self._interpolation_scheme.interpolate_material(
+    #                                                         material=self._material,
+    #                                                         rho_val=rho_val
+    #                                                     )
+                
+    #             result['E_field'] = E_field # (NC, NQ)
+    #             penalty_data = self._interpolation_scheme.interpolate_stress(
+    #                                                                     stress_solid=stress_solid,
+    #                                                                     rho_val=rho_val,
+    #                                                                     return_stress_penalty=True,
+    #                                                                 )
+    #             stress_for_vm = penalty_data['stress_penalized']
+
+    #             result['stress_penalized'] = stress_for_vm
+    #             result['eta_sigma'] = penalty_data['eta_sigma']
+    #     else:
+    #         stress_for_vm = stress_solid
+        
+    #     # 计算 von Mises 应力
+    #     von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_for_vm)
+    #     result['von_mises'] = von_mises
 
         
-        # 每个单元取最大值
-        if von_mises.ndim == 2:
-            # 单分辨率: (NC, NQ) -> (NC,)
-            von_mises_max = bm.max(von_mises, axis=1)
-        elif von_mises.ndim == 3:
-            # 多分辨率: (NC, n_sub, NQ) -> (NC,)
-            von_mises_max = bm.max(von_mises.reshape(von_mises.shape[0], -1), axis=1)
-        else:
-            self._log_error(f"意外的 von Mises 应力维度: {von_mises.ndim}")
+    #     # 每个单元取最大值
+    #     if von_mises.ndim == 2:
+    #         # 单分辨率: (NC, NQ) -> (NC,)
+    #         von_mises_max = bm.max(von_mises, axis=1)
+    #     elif von_mises.ndim == 3:
+    #         # 多分辨率: (NC, n_sub, NQ) -> (NC,)
+    #         von_mises_max = bm.max(von_mises.reshape(von_mises.shape[0], -1), axis=1)
+    #     else:
+    #         self._log_error(f"意外的 von Mises 应力维度: {von_mises.ndim}")
         
-        result['von_mises_max'] = von_mises_max
+    #     result['von_mises_max'] = von_mises_max
         
-        return result
+    #     return result
     
     ##############################################################################################
     # 内部方法
