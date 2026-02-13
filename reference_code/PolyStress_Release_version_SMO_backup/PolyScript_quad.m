@@ -65,23 +65,6 @@ opt = struct(...
    );
 %% ------------------------------------------------------- RUN 'PolyStress'
 fem = preComputations(fem); % Run preComputations before running PolyStress
-
-% E_solid = ones(size(Element,1), 1); 
-% 
-% 3. 运行求解器
-% [U_matlab, fem_out] = NLFEM(fem, E_solid);
-% 
-% 4. 输出标量指标
-% max_disp = max(sqrt(U_matlab(1:2:end).^2 + U_matlab(2:2:end).^2));
-% compliance = fem.Fext' * U_matlab;
-% 
-% fprintf('MATLAB Max Displacement: %.6e\n', max_disp);
-% fprintf('MATLAB Compliance: %.6e\n', compliance);
-
-
-
-
-
 [z,V,fem] = PolyStress(fem,opt);
 %-------------------------------------------------------------------------%
 %% ============ 应力约束检查和可视化 ============
