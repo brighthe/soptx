@@ -1,38 +1,50 @@
-from typing import Optional, Literal, Union, Dict, Tuple
+from typing import Optional, Literal, Union, Dict, TYPE_CHECKING
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
-from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.optimization.volume_objective import VolumeObjective
 from soptx.optimization.stress_constraint import StressConstraint 
 from soptx.utils.base_logged import BaseLogged
 
+# 使用 TYPE_CHECKING 避免循环导入，仅用于类型提示
+if TYPE_CHECKING:
+    from soptx.optimization.al_mma_optimizer import ALMMMAOptions
+
 class AugmentedLagrangianObjective(BaseLogged):
-    """
-    增广拉格朗日目标函数 - 体积最小化 + 应力约束
-    """
     def __init__(self,
                 volume_objective: VolumeObjective, 
                 stress_constraint: StressConstraint,
-                initial_penalty: float = 10.0,
-                max_penalty: float = 10000.0,
+                options: 'ALMMMAOptions',
                 initial_lambda: Optional[TensorLike] = None,
-                penalty_update_factor: float = 1.1,
                 diff_mode: Literal["auto", "manual"] = "manual",
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
-        
+        """增广拉格朗日目标函数 - 体积最小化 + 应力约束
+
+        归一化增广拉格朗日子问题:
+            J^(k)(z, U) = f(z) + (1/N) · P^(k)(z, U)
+
+        其中:
+        - f(z) 为体积目标函数 (归一化), 由 VolumeObjective 计算
+        - P^(k) 为罚函数项:
+            P^(k) = Σ_j [λ_j · h_j + (μ/2) · h_j²]
+        - h_j = max(g_j, -λ_j/μ), Eq. (40)
+        - g_j 为多项式消失约束, 由 StressConstraint 计算
+        """
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._volume_objective = volume_objective
         self._stress_constraint = stress_constraint
 
+        self._options = options
+
         self._diff_mode = diff_mode
 
-        self._cache_g = None
-        self._cache_h = None
+        # 缓存: 用于在 fun() 和 jac() 之间共享中间结果
+        self._cache_g = None  # 约束值 g, shape (NC, NQ)
+        self._cache_h = None  # 辅助等式约束 h, shape (NC, NQ)
 
         self._analyzer = stress_constraint.analyzer
         self._disp_mesh = self._analyzer.disp_mesh
@@ -43,27 +55,29 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         # --- ALM 参数初始化 ---
         
-        # 1. 惩罚因子 mu
-        self.mu = initial_penalty
-        self.mu_max = max_penalty
+        # 罚因子 μ^(k)
+        self.mu = float(options.mu_0)
+        # 最大罚因子 μ_max
+        self.mu_max = float(options.mu_max)
 
-        # 2. 拉格朗日乘子 lambda
+        # 拉格朗日乘子 lambda 的初始化
         if initial_lambda is not None:
-            # 形状检查：必须与单元数量一致
+            # Case A: 热启动
+            # 用户显式传入了之前计算好的 lambda 向量
             if initial_lambda.shape != (self._NC, 1):
                 self._log_error(f"Shape mismatch: {initial_lambda.shape}")
             self.lamb = bm.copy(initial_lambda)
         else:
-            self.lamb = bm.zeros((self._NC, 1), dtype=bm.float64) 
+            # Case B: 冷启动 (Cold Start)
+            # 使用 Options 中的标量策略进行初始化
+            init_val = options.lambda_0_init_val
+            self.lamb = bm.full((self._NC, 1), init_val, dtype=bm.float64)
 
     def fun(self, 
             density: Union[Function, TensorLike],
             state: Optional[Dict] = None, 
             **kwargs
         ) -> float:
-        if self.lamb is None:
-            self._initialize_multipliers()
-
         # 1. 计算体积部分 f
         f = self._volume_objective.fun(density, state)
 
@@ -172,3 +186,23 @@ class AugmentedLagrangianObjective(BaseLogged):
         dJ_drho = dVol_drho + dP_drho_normalized # (NC, )
 
         return dJ_drho
+    
+    def update_multipliers(self) -> None:
+        """更新拉格朗日乘子 λ 和 罚因子 μ.
+        
+        此方法应在每一轮 ALM 外层迭代结束时调用.
+        """
+        if self._cache_h is None:
+            raise RuntimeError(
+                "update_multipliers() 必须在 fun() 之后调用, "
+                "以确保 h 已被计算并缓存."
+            )
+    
+        # 1. 更新拉格朗日乘子 λ
+        # λ^(k+1) = λ^(k) + μ^(k) · h
+        self.lamb = self.lamb + self.mu * self._cache_h
+        
+        # 2. 更新罚因子 μ
+        # μ^(k+1) = min(α · μ^(k), μ_max) [cite: 303]
+        self.mu = min(self._options.alpha * self.mu, self.mu_max)
+    

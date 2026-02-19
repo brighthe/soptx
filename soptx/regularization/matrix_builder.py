@@ -50,164 +50,134 @@ class FilterMatrixBuilder:
                                         domain=self._mesh.meshdata['domain']
                                     )
             return H
-        # if self._mesh.meshdata['mesh_type'] == 'uniform_quad':
-        #     if self._density_location in ['element', 'element_multiresolution']:
-        #         H = self._compute_weighted_matrix_2d(
-        #                                     self._rmin,
-        #                                     self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
-        #                                     self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
-        #                                 )
-        #         return H        
-
-        #     elif self._density_location in ['node', 'node_multiresolution']:
-        #         H = self._compute_weighted_matrix_general(
-        #                                     rmin=self._rmin, 
-        #                                     domain=self._mesh.meshdata['domain']
-        #                                 )
-        #         return H
         
-        # elif self._mesh.meshdata['mesh_type'] == 'uniform_hex':
-        #     if self._density_location in ['element', 'element_multiresolution']:
-        #         H = self._compute_weighted_matrix_3d(
-        #                                     self._rmin,
-        #                                     self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata['nz'],
-        #                                     self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], self._mesh.meshdata['hz'], 
-        #                                 )
-        #         return H
-            
-        #     elif self._density_location in ['node', 'node_multiresolution']:
-        #         H = self._compute_weighted_matrix_general(
-        #                                         rmin=self._rmin,
-        #                                         domain=self._mesh.meshdata['domain'], 
-        #                                     )
-        #         return H
-            
-        # elif self._mesh.meshdata['mesh_type'] in ['uniform_aligned_tri', 'uniform_crisscross_tri',
-        #                                           'quad_threshold',
-        #                                           'uniform_tet']:
-        #     H = self._compute_weighted_matrix_2d(
-        #                     self._rmin,
-        #                     self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
-        #                     self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
-        #                 )
-        #     H = self._compute_weighted_matrix_general(
-        #                                     rmin=self._rmin, 
-        #                                     domain=self._mesh.meshdata['domain']
-        #                                 )
-        #     return H
-
     def _compute_weighted_matrix_general(self, 
-                                        rmin: float,
-                                        domain: List[float],
-                                        q: int = 3,
-                                        periodic: List[bool]=[False, False, False],
-                                        enable_timing: bool = False,
-                                    ) -> Tuple[COOTensor, TensorLike]:
-        """
-        计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
+                                            rmin: float,
+                                            domain: List[float],
+                                            q: int = 3,
+                                            periodic: List[bool]=[False, False, False],
+                                            enable_timing: bool = False,
+                                        ) -> Tuple[COOTensor, TensorLike]:
+            """
+            计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
 
-        SRTO - 设计变量 = 单元密度中心点 / 节点密度
-        MRTO - 设计变量 = 子单元密度中心点 / 节点密度  - 要求设计变量网格 = 子单元密度网格
-        
-        Parameters
-        ----------
-        rmin: 过滤半径
-        domain: 计算域的边界
-        q: 滤波指数, 默认为 1 (线性滤波), q > 1 时远处邻居权重衰减更快
-            权重公式: w_ij = (1 - d_ij / rmin)^q, d_ij <= rmin
-        periodic: 各方向是否周期性, 默认为 [False, False, False]
+            支持线性过滤 (q=1) 和非线性过滤 (q>1):
+                - 线性过滤: w_ij = max(0, rmin - dist_ij)
+                - 非线性过滤: w_ij = (1 - dist_ij / rmin)^q, dist_ij <= rmin
+
+            非线性过滤参考:
+                PolyFilter.m from PolyStress (Giraldo-Londoño & Paulino, 2020)
+
+            Parameters
+            ----------
+            rmin: 过滤半径
+            domain: 计算域的边界
+            q: 过滤权重的幂次参数, 默认为 1 (线性过滤).
+                当 q=1 时, 权重函数为 w = max(0, 1 - d/rmin), 等价于线性锥形过滤.
+                当 q>1 时, 权重函数为 w = (1 - d/rmin)^q, 提供更集中的过滤效果.
+            periodic: 各方向是否周期性, 默认为 [False, False, False]
+                
+            Returns
+            -------
+            H: 过滤矩阵 (行归一化)
+            """
+            t = None
+            if enable_timing:
+                t = timer(f"Filter_general")
+                next(t)
+
+            if self._density_location in ['element']:
+                density_mesh = self._mesh
+                density_coords = density_mesh.entity_barycenter('cell')
+
+            elif self._density_location in ['element_multiresolution']:
+                sub_density_mesh = self._mesh
+                density_coords = sub_density_mesh.entity_barycenter('cell')
+
+            elif self._density_location in ['node']:
+                density_mesh = self._mesh
+                density_coords = density_mesh.entity_barycenter('node')
+
+            elif self._density_location in ['node_multiresolution']:
+                sub_density_mesh = self._mesh
+                density_coords = sub_density_mesh.entity_barycenter('node')
+
+            # 使用 KD-tree 查询邻近点
+            density_coords = bm.device_put(density_coords, 'cpu')        
+            density_indices, neighbor_indices = bm.query_point(
+                                                    x=density_coords, y=density_coords, h=rmin, 
+                                                    box_size=domain, mask_self=False, periodic=periodic
+                                                )
             
-        Returns
-        -------
-        H: 过滤矩阵
-        Hs: 过滤矩阵行和
-        """
-        t = None
-        if enable_timing:
-            t = timer(f"Filter_general")
-            next(t)
+            if enable_timing:
+                t.send('KD-tree 查询时间')
 
-        if self._density_location in ['element']:
+            # 自由度总数
+            gdof = density_coords.shape[0]
             
-            density_mesh = self._mesh
-            density_coords = density_mesh.entity_barycenter('cell') # (NC, GD)
-
-        elif self._density_location in ['element_multiresolution']:
-
-            sub_density_mesh = self._mesh
-            density_coords = sub_density_mesh.entity_barycenter('cell') # (NC*n_sub, GD)
-
-        elif self._density_location in ['node']:
-
-            density_mesh = self._mesh
-            density_coords = density_mesh.entity_barycenter('node') # (NN, GD)
-
-        elif self._density_location in ['node_multiresolution']:
-
-            sub_density_mesh = self._mesh
-            density_coords = sub_density_mesh.entity_barycenter('node') # (NN*, GD)
-
-        # 使用 KD-tree 查询临近点
-        density_coords = bm.device_put(density_coords, 'cpu')        
-        density_indices, neighbor_indices = bm.query_point(
-                                                x=density_coords, y=density_coords, h=rmin, 
-                                                box_size=domain, mask_self=False, periodic=periodic
-                                            )
-        
-        if enable_timing:
-            t.send('KD-tree 查询时间')
-
-        # 自由度总数
-        gdof = density_coords.shape[0]
-        
-        # 准备存储过滤器矩阵的数组
-        # 预估非零元素的数量（包括对角线元素）
-        max_nnz = len(density_indices) + gdof
-        iH = bm.zeros(max_nnz, dtype=bm.int32)
-        jH = bm.zeros(max_nnz, dtype=bm.int32)
-        sH = bm.zeros(max_nnz, dtype=bm.float64)
-        
-        # 首先添加对角线元素 (d=0 时, w = (1 - 0/rmin)^q = 1.0)
-        for i in range(gdof):
-            iH[i] = i
-            jH[i] = i
-            sH[i] = 1.0
-        
-        # 当前非零元素计数
-        nnz = gdof
-
-        if enable_timing:
-            t.send('对角线循环计算时间')
-        
-        # 填充其余非零元素 (邻居点)
-        for idx in range(len(density_indices)):
-            i = density_indices[idx]
-            j = neighbor_indices[idx]
+            # 预估非零元素的数量
+            max_nnz = len(density_indices) + gdof
+            iH = bm.zeros(max_nnz, dtype=bm.int32)
+            jH = bm.zeros(max_nnz, dtype=bm.int32)
+            sH = bm.zeros(max_nnz, dtype=bm.float64)
             
-            # 计算节点间的物理距离
-            physical_dist = bm.sqrt(bm.sum((density_coords[i] - density_coords[j])**2))
+            # 首先添加对角线元素 (自身距离为 0, 权重为 1.0^q = 1.0)
+            for i in range(gdof):
+                iH[i] = i
+                jH[i] = i
+                sH[i] = 1.0  # (1 - 0/rmin)^q = 1.0
+
+            # 当前非零元素计数
+            nnz = gdof
+
+            if enable_timing:
+                t.send('对角线循环计算时间')
             
-            if physical_dist < rmin:
-                iH[nnz] = i
-                jH[nnz] = j
-                sH[nnz] = (1.0 - physical_dist / rmin) ** q
-                nnz += 1
+            # 填充邻居点的权重
+            for idx in range(len(density_indices)):
+                i = density_indices[idx]
+                j = neighbor_indices[idx]
+                
+                # 计算节点间的物理距离
+                physical_dist = bm.sqrt(bm.sum((density_coords[i] - density_coords[j])**2))
+                
+                if physical_dist < rmin:
+                    # 非线性权重: (1 - d/rmin)^q
+                    w = (1.0 - physical_dist / rmin) ** q
+                    iH[nnz] = i
+                    jH[nnz] = j
+                    sH[nnz] = w
+                    nnz += 1
 
-        if enable_timing:
-            t.send('非对角线循环计算时间')
-        
-        # 创建稀疏矩阵
-        H = COOTensor(
-                indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
-                values=sH[:nnz],
-                spshape=(gdof, gdof)
-            )
-        
-        if enable_timing:
-            t.send('稀疏矩阵构建时间')
-            t.send(None)
+            if enable_timing:
+                t.send('非对角线循环计算时间')
+            
+            # 创建稀疏矩阵
+            H = COOTensor(
+                    indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
+                    values=sH[:nnz],
+                    spshape=(gdof, gdof)
+                )
+            
+            # # 行归一化: P = diag(1 / rowsum(H)) * H
+            # # 与 PolyFilter.m 一致: P = spdiags(1./sum(P,2),0,N,N)*P
+            # row_sum = H.sum(axis=1)  # (gdof,)
+            # inv_row_sum = 1.0 / row_sum
+            # # 对每个非零元素, 用其所在行的 inv_row_sum 进行缩放
+            # row_indices = iH[:nnz]
+            # normalized_values = sH[:nnz] * inv_row_sum[row_indices]
+            
+            # H = COOTensor(
+            #         indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
+            #         values=normalized_values,
+            #         spshape=(gdof, gdof)
+            #     )
 
-        return H
+            if enable_timing:
+                t.send('稀疏矩阵构建时间')
+                t.send(None)
+
+            return H
         
     def _compute_weighted_matrix_general_backup(self, 
                                         rmin: float,
@@ -230,7 +200,6 @@ class FilterMatrixBuilder:
         Returns
         -------
         H: 过滤矩阵
-        Hs: 过滤矩阵行和
         """
         t = None
         if enable_timing:

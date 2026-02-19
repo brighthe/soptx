@@ -423,6 +423,7 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
+        # nx, ny = 10, 10
         nx, ny = 100, 100
         mesh_type = 'quad_threshold'
 
@@ -506,15 +507,33 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.stress_constraint import StressConstraint
         constraint = StressConstraint(analyzer=analyzer, stress_limit=100.0)
 
-        NC = displacement_mesh.number_of_cells()
+        from soptx.optimization.al_mma_optimizer import ALMMMAOptions
+        options = ALMMMAOptions(
+                    # ALM 外层控制
+                    max_al_iterations=150,
+                    mma_iters_per_al=5,
+                    change_tolerance=0.002,
+                    stress_tolerance=0.003,
+                    # 增广拉格朗日罚参数
+                    mu_0=10.0,
+                    mu_max=10000.0,
+                    alpha=1.1,
+                    lambda_0_init_val=0.0,
+                    # MMA 渐近线控制
+                    move_limit=0.15,
+                    asymp_init=0.2,
+                    asymp_incr=1.2,
+                    asymp_decr=0.7,
+                    osc=0.2,
+                    # SIMP 连续化
+                    use_penalty_continuation=False,
+                )
+        
         from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
         augmented_lagrangian_objective = AugmentedLagrangianObjective(
                                             volume_objective=objective,
                                             stress_constraint=constraint,
-                                            initial_penalty=10.0,
-                                            max_penalty=10000.0,
-                                            initial_lambda=bm.zeros((NC, 1), dtype=bm.float64),
-                                            penalty_update_factor=1.1,
+                                            options=options,
                                         )
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
@@ -531,24 +550,25 @@ class DensityTopOptTest(BaseLogged):
         optimizer = ALMMMAOptimizer(
                         al_objective=augmented_lagrangian_objective,
                         filter=filter_regularization,
-                        options={
-                            'max_al_iterations': 10,      # 对应 opt.MaxIter = 150
-                            'mma_iters_per_al': 5,        # 对应 opt.MMA_Iter = 5
-                            'change_tolerance': 0.002,    # 对应 opt.Tol = 0.002
-                            'stress_tolerance': 0.003,    # 对应 opt.TolS = 0.003
-                            'alpha': 1.1,                 # 对应 opt.alpha = 1.1
-                            'use_penalty_continuation': False,
-                        },
+                        options=options,
                         enable_logging=True,
                     )
-        optimizer.options.set_advanced_options(
-            move_limit=0.15,      # 对应 opt.Move = 0.15 (应力优化需限制步长防震荡)
-            asymp_init=0.2,       # 对应 opt.AsymInit = 0.2
-            asymp_incr=1.2,       # 对应 opt.AsymInc = 1.2
-            asymp_decr=0.7        # 对应 opt.AsymDecr = 0.7
-        )
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
+
+        # ===================== 后处理 =====================
+        from soptx.optimization.stress_post import StressPostProcessor
+
+        post = StressPostProcessor(
+                    analyzer=analyzer,
+                    stress_limit=100.0,         # 对应 fem.SLim
+                    solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
+                    constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
+                )
+        results = post.check_stress_constraints(rho_phys=rho_opt)
+        post.print_summary(results)
+        post.plot_density_and_stress(results)
+        post.plot_yield_surface(results)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'

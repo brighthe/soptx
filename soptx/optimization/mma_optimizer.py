@@ -1,6 +1,7 @@
 import warnings
 from time import time
-from typing import Optional, Tuple, Union, List, Any
+from dataclasses import dataclass, field
+from typing import Optional, Tuple, Union, List, Any, Dict
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -17,216 +18,85 @@ from soptx.regularization.filter import Filter
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
 
+@dataclass
 class MMAOptions:
     """MMA 算法的配置选项"""
+    # =========================================================================
+    # 1. 用户常用控制参数
+    # =========================================================================
+    # 最大迭代次数 ([柔顺度]: ~200, [应力/ALM]: ~150)
+    max_iterations: int = 200
+    
+    # 收敛阈值 ([柔顺度]: 1e-2, [应力]: 2e-3)
+    change_tolerance: float = 1e-2
+    
+    # 是否使用惩罚因子连续化 (SIMP)
+    use_penalty_continuation: bool = True
 
-    def __init__(self):
-        """初始化参数的默认值"""
-        # =========================================================================
-        # 用户常用控制参数
-        # =========================================================================
-        
-        # 最大迭代次数
-        # [柔顺度]: 通常 200 (作为主求解器)
-        # [应力]: 若作为 ALM 内部子求解器则设为 5；若作为单层求解器则设为 150+
-        self.max_iterations = 200            
+    # =========================================================================
+    # 2. 几何/渐近线控制参数 (Asymptotes)
+    # =========================================================================
+    # 移动限制 (Move limit)
+    move_limit: float = 0.2
+    
+    # 初始渐近线距离因子 (Initial asymptote)
+    asymp_init: float = 0.5
+    
+    # 渐近线扩张/收缩系数
+    asymp_incr: float = 1.2
+    asymp_decr: float = 0.7
 
-        # 设计变量收敛阈值 (无穷范数)
-        # [柔顺度]: 1e-2 (0.01) - 只要目标函数平稳即可
-        # [应力]: 2e-3 (0.002) - 需要更严格的收敛以精确满足局部约束
-        self.change_tolerance = 1e-2         
-        
-        # 是否使用惩罚因子连续化技术 (通常用于 SIMP)
-        self.use_penalty_continuation = True
+    # =========================================================================
+    # 3. 子问题数值参数 (Subproblem)
+    # =========================================================================
+    # 边界计算因子
+    albefa: float = 0.1
+    # 近似精度参数
+    raa0: float = 1e-5
+    # 最小数值容差
+    epsilon_min: float = 1e-7
 
-        # =========================================================================
-        # 几何/渐近线控制参数
-        # =========================================================================
-        
-        # 移动限制: 控制单步设计变量的最大变化量
-        # [柔顺度]: 0.2  - 允许较大的步长，加快收敛
-        # [应力]: 0.15 - 限制步长，防止因应力敏感性导致的数值震荡
-        self._move_limit = 0.2
+    # =========================================================================
+    # 4. 辅助变量参数 (Auxiliary Variables)
+    # =========================================================================
+    # a0 常数 (目标函数项权重)
+    a0: float = 1.0
 
-        # 初始渐近线距离: 决定初始子问题的曲率
-        # [柔顺度]: 0.5 - 较宽的近似，曲率较小，步子较大
-        # [应力]: 0.2 - 较窄的近似，曲率较大 (更保守)，防止陷入局部极小或违反约束
-        self._asymp_init = 0.5
+    # -------------------------------------------------------------------------
+    # 内部状态 (由 initialize_problem_params 填充)
+    # -------------------------------------------------------------------------
+    m: int = field(default=0, init=False)  # 约束数量
+    n: int = field(default=0, init=False)  # 变量数量
+    
+    # 以下向量在初始化问题规模后分配
+    xmin: Optional[TensorLike] = field(default=None, init=False)
+    xmax: Optional[TensorLike] = field(default=None, init=False)
+    a: Optional[TensorLike] = field(default=None, init=False)
+    c: Optional[TensorLike] = field(default=None, init=False)
+    d: Optional[TensorLike] = field(default=None, init=False)
 
-        # 渐近线扩张系数 (当迭代平稳时，放宽渐近线)
-        self._asymp_incr = 1.2        
-        # 渐近线收缩系数 (当发生震荡时，收紧渐近线)
-        self._asymp_decr = 0.7
-
-        # =========================================================================
-        # 子问题求解数值参数 - 通常无需修改
-        # =========================================================================
-        
-        # 控制对偶求解器的行为
-        self._albefa = 0.1            # 计算边界 alfa 和 beta 的因子
-        self._raa0 = 1e-5             # 函数近似精度的参数
-        self._epsilon_min = 1e-7      # 子问题求解的最小数值容差
-
-        # =========================================================================
-        # 惩罚项/对偶参数配置 (Penalty/Lagrange)
-        # =========================================================================
-        
-        # 控制 a, c, d 向量的生成策略 (对应 MMA 中的辅助变量)
-        self._a0 = 1.0               # a0 常数 (目标函数项的权重)
-        self._a = None               # a 向量的默认系数
-        self._d = None               # d 向量的默认系数
-        self._c = None               # c 向量的默认系数 (约束项的惩罚)
-
-        # =========================================================================
-        # 5. 内部状态 - 运行时自动更新
-        # =========================================================================
-        self._m = None               # 当前约束函数的数量
-        self._n = None               # 当前设计变量的数量
-        self._xmin = None
-        self._xmax = None
-
-    def _initialize_problem_params(self, m: int, n: int) -> None:
-        """初始化问题规模相关参数
-                
-        Parameters
-        ----------
-        m : int
-            约束函数的数量
-        n : int
-            设计变量的数量
+    def initialize_problem_params(self, m: int, n: int) -> None:
         """
-        self._m = m
-        self._n = n
-        self._xmin = bm.zeros((n, 1), dtype=bm.float64)
-        self._xmax = bm.ones((n, 1), dtype=bm.float64)
-        self._a = bm.zeros((m, 1), dtype=bm.float64)
-        self._c = 1e3 * bm.ones((m, 1), dtype=bm.float64)
-        self._d = bm.zeros((m, 1), dtype=bm.float64)
-
-    def set_advanced_options(self, **kwargs):
-        """设置高级选项，仅供专业用户使用
-        
-        Parameters
-        ----------
-        **kwargs : 高级参数设置，可包含：
-            - a0 : float
-                a_0*z 项的常数系数
-            - asymp_init : float
-                渐近线初始距离因子
-            - asymp_incr : float
-                渐近线距离增大因子
-            - asymp_decr : float
-                渐近线距离减小因子
-            - move_limit : float
-                移动限制
-            - albefa : float
-                计算边界 alfa 和 beta 的因子
-            - raa0 : float
-                函数近似精度的参数
-            - epsilon_min : float
-                最小容差
+        初始化与问题规模相关的向量 (m: 约束数, n: 变量数)
         """
-        warnings.warn("Modifying advanced options may affect algorithm stability",
-                    UserWarning)
+        self.m = m
+        self.n = n
         
-        valid_params = {
-            'a0': '_a0',
-            'asymp_init': '_asymp_init',
-            'asymp_incr': '_asymp_incr',
-            'asymp_decr': '_asymp_decr',
-            'move_limit': '_move_limit',
-            'albefa': '_albefa',
-            'raa0': '_raa0',
-            'epsilon_min': '_epsilon_min'
-        }
-                
-        for key, value in kwargs.items():
-            if key in valid_params:
-                setattr(self, valid_params[key], value)
-            else:
-                raise ValueError(f"Unknown parameter: {key}")
+        # 初始化上下界与辅助向量
+        self.xmin = bm.zeros((n, 1), dtype=bm.float64)
+        self.xmax = bm.ones((n, 1), dtype=bm.float64)
+        
+        self.a = bm.zeros((m, 1), dtype=bm.float64)
+        self.d = bm.zeros((m, 1), dtype=bm.float64)
+        self.c = 1e4 * bm.ones((m, 1), dtype=bm.float64) 
 
-    @property
-    def m(self) -> int:
-        """约束函数的数量"""
-        return self._m
-
-    @property
-    def n(self) -> Optional[int]:
-        """设计变量的数量"""
-        return self._n
-
-    @property
-    def xmin(self) -> Optional[TensorLike]:
-        """设计变量的下界"""
-        return self._xmin
-
-    @property
-    def xmax(self) -> Optional[TensorLike]:
-        """设计变量的上界"""
-        return self._xmax
-
-    @property
-    def a0(self) -> float:
-        """a_0*z 项的常数系数 a_0"""
-        return self._a0
-
-    @property
-    def a(self) -> Optional[TensorLike]:
-        """a_i*z 项的线性系数 a_i"""
-        return self._a
-
-    @property
-    def c(self) -> Optional[TensorLike]:
-        """c_i*y_i 项的线性系数 c_i"""
-        return self._c
-
-    @property
-    def d(self) -> Optional[TensorLike]:
-        """0.5*d_i*(y_i)**2 项的二次项系数 d_i"""
-        return self._d
-
-    @property
-    def asymp_init(self) -> float:
-        """渐近线初始距离的因子"""
-        return self._asymp_init
-
-    @property
-    def asymp_incr(self) -> float:
-        """渐近线矩阵减小的因子"""
-        return self._asymp_incr
-
-    @property
-    def asymp_decr(self) -> float:
-        """渐近线矩阵增加的因子"""
-        return self._asymp_decr
-
-    @property
-    def move_limit(self) -> float:
-        """移动限制"""
-        return self._move_limit
-
-    @property
-    def albefa(self) -> float:
-        """计算边界 alfa 和 beta 的因子"""
-        return self._albefa
-
-    @property
-    def raa0(self) -> float:
-        """函数近似精度的参数"""
-        return self._raa0
-
-    @property
-    def epsilon_min(self) -> float:
-        """最小容差"""
-        return self._epsilon_min
 
 class MMAOptimizer(BaseLogged):
     def __init__(self,
                 objective: Union[ComplianceObjective, CompliantMechanismObjective],
                 constraint: Union[VolumeConstraint, StressConstraint, List[Any]],
                 filter: Filter,
-                options: MMAOptions = None,
+                options: Union[MMAOptions, Dict[str, Any], None] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -246,7 +116,7 @@ class MMAOptimizer(BaseLogged):
         
         self._objective = objective
 
-        # 约束标准化处理: 统一转换为 list
+        # 1. 约束标准化处理: 统一转换为 list
         if isinstance(constraint, list):
             self._constraints = constraint
         else:
@@ -254,27 +124,33 @@ class MMAOptimizer(BaseLogged):
 
         self._filter = filter
 
+        # 2. 选项初始化与适配
         if isinstance(options, MMAOptions):
             self.options = options
+        elif isinstance(options, dict):
+            # 如果传入字典，先创建默认实例，再更新
+            self.options = MMAOptions()
+            # 获取 dataclass 的有效字段集合
+            valid_configs = {f for f in self.options.__dict__ if not f.startswith('_')}
+            
+            for key, value in options.items():
+                if key in valid_configs:  
+                    setattr(self.options, key, value)
+                else:
+                    self._log_warning(f"Ignored unknown or internal parameter in options: '{key}'")
         else:
             self.options = MMAOptions()
-            # 如果传入的是字典，则覆盖默认值
-            if isinstance(options, dict):
-                for key, value in options.items():
-                    # 仅允许设置公开属性
-                    if hasattr(self.options, key) and not key.startswith('_'):
-                        setattr(self.options, key, value)
-                    else:
-                        self._log_warning(f"Ignored unknown or private parameter in options: '{key}'")
-            elif options is not None:
-                self._log_error("The 'options' parameter must be a dict or an MMAOptions instance.")
-        
-        # MMA 内部状态初始化
-        self._epoch = 0
-        self._low = None
-        self._upp = None
 
-        #TODO ==================== 被动单元预处理 ====================
+        # 3. 初始化问题规模参数为 None
+        self._n = None
+        self._m = None
+
+        # 4. MMA 内部状态初始化
+        self._epoch = 0
+        self._low: Optional[TensorLike] = None
+        self._upp: Optional[TensorLike] = None
+
+        # #TODO ==================== 被动单元预处理 ====================
         # 判断是否存在应力约束
         self._has_stress_constraint = any(
             isinstance(c, StressConstraint) for c in self._constraints

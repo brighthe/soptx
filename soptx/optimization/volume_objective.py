@@ -8,7 +8,6 @@ from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.optimization.utils import compute_volume
 from soptx.utils.base_logged import BaseLogged
-from soptx.utils import timer
 
 class VolumeObjective(BaseLogged):
     def __init__(self,

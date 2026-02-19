@@ -140,18 +140,18 @@ class DensityTopOptTest(BaseLogged):
                             'use_penalty_continuation': use_penalty_continuation,
                         }
                     )
-        design_variables_num = d.shape[0]
-        constraints_num = 1
-        optimizer.options.set_advanced_options(
-                                m=constraints_num,
-                                n=design_variables_num,
-                                xmin=bm.zeros((design_variables_num, 1)),
-                                xmax=bm.ones((design_variables_num, 1)),
-                                a0=1,
-                                a=bm.zeros((constraints_num, 1)),
-                                c=1e4 * bm.ones((constraints_num, 1)),
-                                d=bm.zeros((constraints_num, 1)),
-                            )
+        # design_variables_num = d.shape[0]
+        # constraints_num = 1
+        # optimizer.options.set_advanced_options(
+        #                         m=constraints_num,
+        #                         n=design_variables_num,
+        #                         xmin=bm.zeros((design_variables_num, 1)),
+        #                         xmax=bm.ones((design_variables_num, 1)),
+        #                         a0=1,
+        #                         a=bm.zeros((constraints_num, 1)),
+        #                         c=1e4 * bm.ones((constraints_num, 1)),
+        #                         d=bm.zeros((constraints_num, 1)),
+        #                     )
             
         self._log_info(f"开始密度拓扑优化, "
         f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
