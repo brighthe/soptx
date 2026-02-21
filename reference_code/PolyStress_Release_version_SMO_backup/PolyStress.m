@@ -33,13 +33,15 @@ while (Iter<opt.MaxIter) && (Change>Tol || max(SM)>1+TolS) %AL steps
                       L(Eid),U(Eid),Iter,AsymInc,AsymDecr,opt);
     [E,dEdy,V,dVdy] = opt.MatIntFnc(P*z,B);
     SM = E.*fem.VM_Stress0/fem.SLim; % Normalized stress measure
-    fprintf(['It:%3i_%1i Obj: %1.3f Max_VM: %1.3f |dJ|: %1.3f ',...
-        'Ch/Tol: %1.3f\n'],Iter,j,f,max(SM),norm(dJdz),Change/Tol);
+    fprintf(['It:%3i_%1i Obj: %1.6f Max_VM: %1.6f |dJ|: %1.6f ',...
+        'Ch/Tol: %1.6f\n'],Iter,j,f,max(SM),norm(dJdz),Change/Tol);
     if (Change<=Tol && max(SM)<=1+TolS), break; end
   end
   %% Update lagrange multiplier estimators and penalty parameter
   lambda = lambda + mu*h; 
   mu = min(opt.alpha*mu,opt.mu_max);
+  fprintf('ALM Step %i: lambda: norm=%1.6f, max=%1.6f, min=%1.6f, mu=%1.4f\n', ...
+    Iter, norm(lambda), max(lambda), min(lambda), mu);
   %% Update material interpolation function
   if mod(Iter,BFreq)==0; B = min(B+Binc,Bmax); end
   %% Update density and stress plots

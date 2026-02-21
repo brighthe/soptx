@@ -37,8 +37,8 @@ fem = struct(...
 %% ---------------------------------------------------- CREATE 'opt' STRUCT
 R = 0.05; q = 3; % Filter radius and filter exponent
 p = 3.5; eta0 = 0.5;
-% m = @(y,B)MatIntFnc(y,'SIMP-H1',[p,B,eta0]);
-m = @(y,B)MatIntFnc(y,'SIMP',[p,B,eta0]);
+m = @(y,B)MatIntFnc(y,'SIMP-H1',[p,B,eta0]);
+% m = @(y,B)MatIntFnc(y,'SIMP',[p,B,eta0]);
 P = PolyFilter(fem,R,q);
 % P = speye(NElem); 
 zIni = 0.5*ones(size(P,2),1);
