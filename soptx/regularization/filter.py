@@ -79,12 +79,22 @@ class Filter(BaseLogged):
                         }
         
         if self._filter_type == 'projection':
+            # proj_defaults = {
+            #                 'projection_type': 'exponential',
+            #                 'beta': 1.0,
+            #                 'beta_max': 512.0,
+            #                 'continuation_iter': 50,
+            #             }
             proj_defaults = {
-                            'projection_type': 'exponential',
-                            'beta': 1.0,
-                            'beta_max': 512.0,
-                            'continuation_iter': 50,
-                        }
+                'projection_type'       : 'exponential',
+                'beta'                  : 1.0,
+                'eta'                   : 0.5,
+                'beta_max'              : 512.0,
+                'continuation_strategy' : 'multiplicative',
+                'continuation_iter'     : 50,
+                'beta_increment'        : 1.0,
+                'beta_multiplier'       : 2.0,
+            }
             if projection_params:
                 proj_defaults.update(projection_params)
             

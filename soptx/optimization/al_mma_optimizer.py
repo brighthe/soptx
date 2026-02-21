@@ -218,17 +218,18 @@ class ALMMMAOptimizer(MMAOptimizer):
                 # 更新当前最大应力测度，用于收敛判定
                 max_stress_measure = float(bm.max(SM))
                 
-                # [修正 2] 完善日志记录和历史保存
+                # 完善日志记录和历史保存
                 iteration_time = time() - start_time
 
                 # 按照 PolyStress.m 的格式自定义输出日志
                 dJ_norm = float(bm.linalg.norm(dJ_dv))
+
                 self._log_info(
                         f"It:{al_iter+1:3d}_{mma_iter+1:1d} "
-                        f"Obj: {volfrac:.3f} "
-                        f"Max_VM: {max_stress_measure:.3f} "
-                        f"|dJ|: {dJ_norm:.3f} "
-                        f"Ch/Tol: {change/opts.change_tolerance:.3f}"
+                        f"Obj: {volfrac:.6f} "
+                        f"Max_VM: {max_stress_measure:.6f} "
+                        f"|dJ|: {dJ_norm:.6f} "
+                        f"Ch/Tol: {change/opts.change_tolerance:.6f}"
                     )
                 
                 # 调用确切的 log_iteration 接口保存历史数据
@@ -252,7 +253,29 @@ class ALMMMAOptimizer(MMAOptimizer):
             # ALM 乘子与惩罚参数更新 (外层更新)
             # =====================================================================
             self._al_objective.update_multipliers()
-            self._log_info(f"ALM Step {al_iter}: max(SM)={max_stress_measure:.3f}, mu={self._al_objective.mu:.1f}")
+            self._log_info(f"ALM Step {al_iter}: "
+                f"lambda: norm={bm.linalg.norm(self._al_objective.lamb):.6f},  max={bm.max(self._al_objective.lamb):.6f}, min={bm.min(self._al_objective.lamb):.6f}, "
+                f"mu={self._al_objective.mu:.4f}")
+            
+            # =====================================================================
+            # Beta 更新后的状态重置 (投影连续化)
+            # =====================================================================
+            beta_updated = False 
+            if hasattr(self._filter, 'continuation_step'):
+                change, beta_updated = self._filter.continuation_step(change)
+            
+            if beta_updated:
+                # 重置相关的缩放因子 (如果有)
+                if hasattr(self, '_obj_scale_factor'):
+                    self._obj_scale_factor = None 
+                # 重置 MMA 渐近线和历史步，防止非线性跳跃导致的震荡
+                self._low, self._upp = None, None  
+                xold1, xold2 = dv[:], dv[:]        
+                
+                # 基于新的 beta 重新过滤一次物理密度，确保物理场与当前 beta 严格一致
+                rho_phys = self._filter.filter_design_variable(design_variable=dv, physical_density=rho_phys)
+                
+                self._log_info("Beta updated. Resetting MMA asymptotes and scaling for stability.")
 
             # =====================================================================
             # 全局收敛判定

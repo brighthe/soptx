@@ -143,7 +143,7 @@ class StressConstraint(BaseLogged):
         dVM_dSigma = M_sigma / vm_safe[..., None] # (NC, NQ, NS)
 
         # --- 应力 -> 应变 ( D^T * dVM/dSigma ) ---
-        term1_eps = bm.einsum('kl, cqk -> cql', D, dVM_dSigma) # (NC, NQ, NS)
+        term1_eps = bm.einsum('kl, cqk -> cql', D, dVM_dSigma)
 
         # --- 应变 -> 位移 ( B^T * term1_eps ) ---
         element_sens = bm.einsum('cqkl, cqk -> cql', B, term1_eps) # (NC, NQ, LDOF)

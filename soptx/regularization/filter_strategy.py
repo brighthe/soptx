@@ -405,11 +405,14 @@ class ProjectionStrategy(DensityStrategy):
                 H: CSRTensor, 
                 mesh: HomogeneousMesh, 
                 density_location: Literal['element', 'node', 'element_multiresolution'],
-                projection_type: Literal['tanh', 'exponential'] = 'exponential', 
+                projection_type: Literal['tanh', 'exponential'] = 'tanh', 
                 beta: float = 1.0,
                 eta: float = 0.5,
                 beta_max: float = 512.0,
                 continuation_iter: int = 50,
+                continuation_strategy: Literal['additive', 'multiplicative'] = 'multiplicative',
+                beta_increment: float = 1.0,
+                beta_multiplier: float = 2.0,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -422,6 +425,16 @@ class ProjectionStrategy(DensityStrategy):
         self.eta = eta        # 投影阈值 (通常为 0.5)
         self.beta_max = beta_max
         self.continuation_iter = continuation_iter
+        
+        # 延拓策略参数
+        if continuation_strategy not in ('additive', 'multiplicative'):
+            raise ValueError(
+                f"Unknown continuation_strategy: '{continuation_strategy}'. "
+                f"Expected 'additive' or 'multiplicative'."
+            )
+        self.continuation_strategy = continuation_strategy
+        self.beta_increment  = beta_increment   # 加法策略专用：每次增量
+        self.beta_multiplier = beta_multiplier  # 乘法策略专用：每次倍数
 
         # 初始化计数器
         self._beta_iter = 0 
@@ -517,6 +530,58 @@ class ProjectionStrategy(DensityStrategy):
         return con_grad_dv
     
     def continuation_step(self, change: float) -> Tuple[float, bool]:
+        """执行一步 beta continuation (更新 beta 值)
+
+        加法策略 ('additive'):
+            仅按固定频率触发，与 PolyStress MATLAB 完全一致:
+                [BFreq=continuation_iter, B0=beta, Binc=beta_increment, Bmax=beta_max]
+            触发条件：达到迭代间隔
+
+        乘法策略 ('multiplicative'):
+            按固定频率或设计收敛时触发，适合快速推进二值化:
+            触发条件：达到迭代间隔 或 变化量 <= 0.01
+        """
+        self._beta_iter += 1
+
+        # ── 判断是否触发更新 ──────────────────────────────────────────
+        if self.continuation_strategy == 'additive':
+            # 加法策略：仅按固定频率触发
+            should_update = (
+                self.beta < self.beta_max and
+                self._beta_iter >= self.continuation_iter
+            )
+        else:
+            # 乘法策略：固定频率 或 收敛时触发
+            should_update = (
+                self.beta < self.beta_max and
+                (self._beta_iter >= self.continuation_iter or change <= 0.01)
+            )
+
+        # ── 执行更新 ──────────────────────────────────────────────────
+        if should_update:
+            old_beta = self.beta
+
+            if self.continuation_strategy == 'additive':
+                self.beta = min(self.beta + self.beta_increment, self.beta_max)
+                trigger = "Interval(additive)"
+            else:
+                self.beta = min(self.beta * self.beta_multiplier, self.beta_max)
+                trigger = ("Interval" if self._beta_iter >= self.continuation_iter
+                           else "Convergence")
+                trigger = f"{trigger}(multiplicative)"
+
+            # 重置计数器
+            self._beta_iter = 0
+
+            if self._enable_logging:
+                print(f"[{trigger}] beta: {old_beta:.4f} -> {self.beta:.4f}")
+
+            # 强制返回 change=1.0，防止外层优化循环因收敛判断提前退出
+            return 1.0, True
+
+        return change, False
+    
+    def continuation_step_backup(self, change: float) -> Tuple[float, bool]:
         """执行一步 beta continuation (更新 beta 值)"""
         self._beta_iter += 1
         

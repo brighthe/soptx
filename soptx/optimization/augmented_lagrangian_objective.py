@@ -18,7 +18,7 @@ class AugmentedLagrangianObjective(BaseLogged):
                 options: 'ALMMMAOptions',
                 initial_lambda: Optional[TensorLike] = None,
                 diff_mode: Literal["auto", "manual"] = "manual",
-                enable_logging: bool = False,
+                enable_logging: bool = True,
                 logger_name: Optional[str] = None
             ) -> None:
         """增广拉格朗日目标函数 - 体积最小化 + 应力约束
@@ -87,7 +87,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 3. 计算 ALM 的 h 和 Penal
         #    h_j = max(g_j, -lambda_j / mu)
         h = bm.maximum(g, -self.lamb / self.mu)
-        #    Penal = sum(lambda * h + 0.5 * mu * h^2)
+
         penal = bm.sum(self.lamb * h + 0.5 * self.mu * h**2)
 
         self._cache_g = g
