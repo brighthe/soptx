@@ -216,7 +216,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                 SM = E[..., None] * vm / slim
                 
                 # 更新当前最大应力测度，用于收敛判定
-                max_stress_measure = float(bm.max(SM))
+                max_vm_stress = float(bm.max(SM))
                 
                 # 完善日志记录和历史保存
                 iteration_time = time() - start_time
@@ -227,26 +227,29 @@ class ALMMMAOptimizer(MMAOptimizer):
                 self._log_info(
                         f"It:{al_iter+1:3d}_{mma_iter+1:1d} "
                         f"Obj: {volfrac:.6f} "
-                        f"Max_VM: {max_stress_measure:.6f} "
+                        f"Max_VM: {max_vm_stress:.6f} "
                         f"|dJ|: {dJ_norm:.6f} "
                         f"Ch/Tol: {change/opts.change_tolerance:.6f}"
+                        f"mu: {self._al_objective.mu:.4e}"
                     )
                 
                 # 调用确切的 log_iteration 接口保存历史数据
                 self.history.log_iteration(
                         iter_idx=global_iter,
-                        obj_val=float(J_val),                       # 记录 AL 总目标函数值
-                        volfrac=volfrac,                            # 记录体积分数约束/目标
-                        change=float(change),                       # 设计变量最大变化量
-                        penalty_factor=float(self._al_objective.mu),# 当前的 AL 罚因子
-                        time_cost=iteration_time,
-                        physical_density=rho_phys,                  # 保存密度场
-                        von_mises_stress=SM,                        # 保存 von Mises 应力场
-                        verbose=False                               # 关闭默认打印，避免重复
+                        change=change,                              # 设计变量最大变化量
+                        time_cost=iteration_time,                   # 本次迭代耗时
+                        physical_density=rho_phys,                  # 密度场
+                        scalars={
+                            'volfrac': volfrac,                     # 体积分数 (目标函数)
+                            'max_von_mises': max_vm_stress,         # 归一化的最大 von Mises 应力场
+                        },
+                        fields={
+                            'von_mises_stress': SM,                 # 归一化的 von Mises 应力场 (约束函数)
+                        },
                 )
 
                 # 内层收敛判定: 变化率达标 且 最大应力满足 (1 + TolS)
-                if change <= opts.change_tolerance and max_stress_measure <= 1.0 + opts.stress_tolerance:
+                if change <= opts.change_tolerance and max_vm_stress <= 1.0 + opts.stress_tolerance:
                     break # 跳出内层循环，进入 ALM 更新
             
             # =====================================================================

@@ -14,51 +14,45 @@ from fealpy.functionspace import Function
 @dataclass
 class OptimizationHistory:
     """优化过程的历史记录"""
-    # 密度场历史
-    physical_densities: List[TensorLike] = field(default_factory=list)
-    # 目标函数值历史
-    obj_values: List[float] = field(default_factory=list)
-    # 约束函数值历史（如体积分数）
-    con_values: List[float] = field(default_factory=list)
-    # 迭代时间历史
+    # 固定字段：对所有拓扑优化问题都通用
+    iter_indices: List[int] = field(default_factory=list)
+    changes: List[float] = field(default_factory=list)
     iteration_times: List[float] = field(default_factory=list)
-    # 优化开始时间
+    physical_densities: List[TensorLike] = field(default_factory=list)
     start_time: float = field(default_factory=time)
-    # von Mises 应力历史（可选）
-    von_mises_stresses: List[TensorLike] = field(default_factory=list)
+
+    # 动态字段：用字典存储问题相关的标量和场数据
+    scalar_histories: Dict[str, List[float]] = field(default_factory=dict)
+    field_histories: Dict[str, List[TensorLike]] = field(default_factory=dict)
     
-    def log_iteration(self, 
-                    iter_idx: int, 
-                    obj_val: float, 
-                    volfrac: float, 
-                    change: float, 
-                    penalty_factor: float, 
-                    time_cost: float, 
+    def log_iteration(self,
+                    iter_idx: int,
+                    change: float,
+                    time_cost: float,
                     physical_density: TensorLike,
-                    von_mises_stress: Optional[TensorLike] = None,
-                    verbose: bool = True
+                    scalars: Optional[Dict[str, float]] = None,
+                    fields: Optional[Dict[str, TensorLike]] = None,
                 ) -> None:
         """记录一次迭代的信息"""
         if isinstance(physical_density, Function):
-            rho_Phys = physical_density.space.function(bm.copy(physical_density[:]))
+            rho_phys = physical_density.space.function(bm.copy(physical_density[:]))
         else:
-            rho_Phys = bm.copy(physical_density[:])
+            rho_phys = bm.copy(physical_density[:])
 
-        self.physical_densities.append(rho_Phys)
-        self.obj_values.append(obj_val)
-        self.con_values.append(volfrac)
+        self.iter_indices.append(iter_idx)
+        self.changes.append(float(change))
         self.iteration_times.append(time_cost)
+        self.physical_densities.append(rho_phys)
 
-        if von_mises_stress is not None:
-            self.von_mises_stresses.append(von_mises_stress)
-        
-        if verbose:
-            print(f"Iteration: {iter_idx + 1}, "
-                  f"Objective: {obj_val:.4f}, "
-                  f"Volfrac: {volfrac:.4f}, "
-                  f"Change: {change:.4f}, "
-                  f"Penalty: {penalty_factor:.4f}, "
-                  f"Time: {time_cost:.3f} sec")
+        # 动态记录标量
+        if scalars is not None:
+            for key, val in scalars.items():
+                self.scalar_histories.setdefault(key, []).append(float(val))
+
+        # 动态记录场数据
+        if fields is not None:
+            for key, val in fields.items():
+                self.field_histories.setdefault(key, []).append(val)
     
     def get_total_time(self) -> float:
         """获取总优化时间"""
@@ -82,23 +76,6 @@ class OptimizationHistory:
         if len(self.iteration_times) > 1:
             print(f"Average iteration time (excluding first): {avg_time:.3f} sec")
             print(f"Number of iterations: {len(self.iteration_times)}")
-    
-    def get_best_iteration(self, minimize: bool = True) -> int:
-        """获取最优迭代的索引"""
-        if not self.obj_values:
-            return -1
-        
-        if minimize:
-            return self.obj_values.index(min(self.obj_values))
-        else:
-            return self.obj_values.index(max(self.obj_values))
-    
-    def get_best_density(self, minimize: bool = True) -> Optional[TensorLike]:
-        """获取最优迭代的密度场"""
-        best_idx = self.get_best_iteration(minimize)
-        if best_idx >= 0 and best_idx < len(self.physical_densities):
-            return self.physical_densities[best_idx]
-        return None
 
 def save_optimization_history(mesh: HomogeneousMesh, 
                             history: OptimizationHistory, 
@@ -109,10 +86,10 @@ def save_optimization_history(mesh: HomogeneousMesh,
     if save_path is None:
         return
     
-    has_stress = (history.von_mises_stresses is not None)
+    von_mises_stresses = history.field_histories.get('von_mises_stress', None)
     
-    if history.von_mises_stresses:
-        iterator = zip(history.physical_densities, history.von_mises_stresses)
+    if von_mises_stresses is not None:
+        iterator = zip(history.physical_densities, von_mises_stresses)
     else:
         iterator = zip(history.physical_densities, [None]*len(history.physical_densities))
 
@@ -153,76 +130,6 @@ def save_optimization_history(mesh: HomogeneousMesh,
         else:  
             mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
 
-
-# def plot_optimization_history(history, save_path=None, show=True, title=None, 
-#                             fontsize=20, figsize=(14, 10), linewidth=2.5,
-#                             ):
-#     """绘制优化过程中目标函数和约束函数的变化
-    
-#     Parameters
-#     ----------
-#     history : OptimizationHistory
-#         优化历史记录
-#     save_path : str, optional
-#         保存路径，如不提供则不保存
-#     show : bool, optional
-#         是否显示图像，默认为 True
-#     title : str, optional
-#         图表标题，默认为 None
-#     fontsize : int, optional
-#         标签和刻度字体大小
-#     figsize : tuple, optional
-#         图形大小
-#     linewidth : float, optional
-#         线条宽度
-#     """
-#     import matplotlib.pyplot as plt
-    
-#     # 准备数据
-#     iterations = bm.arange(1, len(history.obj_values) + 1)
-#     obj_values = bm.array(history.obj_values)
-#     con_values = bm.array(history.con_values)
-    
-#     # 创建图形
-#     fig, ax1 = plt.subplots(figsize=figsize)
-    
-#     # 设置全局字体大小
-#     plt.rcParams.update({'font.size': fontsize})
-    
-#     # 绘制目标函数曲线（左轴）
-#     ax1.set_xlabel('Iteration', fontsize=fontsize+6)
-#     ax1.set_ylabel('Compliance, $c$', color='red', fontsize=fontsize+6)
-#     ax1.plot(iterations, obj_values, 'r-', label=r'$c$', linewidth=linewidth)
-#     ax1.tick_params(axis='y', labelcolor='red', labelsize=fontsize)
-#     ax1.tick_params(axis='x', labelsize=fontsize)
-    
-#     # 创建右轴
-#     ax2 = ax1.twinx()
-#     ax2.set_ylabel('Volfrac, $v_f$', color='blue', fontsize=fontsize+6)
-#     ax2.plot(iterations, con_values, 'b--', label=r'$v_f$', linewidth=linewidth)
-#     ax2.tick_params(axis='y', labelcolor='blue', labelsize=fontsize)
-
-#     ax1.grid(True, linestyle='--', alpha=0.7)
-
-#     # 添加标题（如果提供）
-#     if title is not None:
-#         plt.title(title, fontsize=fontsize+6, pad=20, fontweight='bold')
-    
-#     # 添加图例
-#     lines1, labels1 = ax1.get_legend_handles_labels()
-#     lines2, labels2 = ax2.get_legend_handles_labels()
-#     leg = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=fontsize+6)
-
-#     plt.tight_layout()
-    
-#     if save_path is not None:
-#         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    
-#     if show:
-#         plt.show()
-#     else:
-#         plt.close()
-
 #####################################################
 #                    绘图和数据保存工具函数
 #####################################################
@@ -239,6 +146,7 @@ SOPTX_COLORS = {
     # 物理量 (用于收敛曲线)
     'compliance': '#d62728',  # 红色 (Tab:red)
     'volume':     '#1f77b4',  # 蓝色 (Tab:blue)
+    'stress':     '#2ca02c',  # 绿色 (Tab:green)
     
     # 性能耗时 (用于柱状图)
     'analysis':   '#5B9BD5',  # 柔和蓝 (结构分析)
@@ -273,7 +181,7 @@ def save_history_data(
                     label: str
                 ) -> None:
     """
-    保存 history 中用于对比的关键数据（轻量级 JSON 格式）
+    保存 history 中用于绘图的关键数据（轻量级 JSON 格式）
     
     Parameters
     ----------
@@ -291,19 +199,23 @@ def save_history_data(
     save_dir = Path(save_path)
     save_dir.mkdir(parents=True, exist_ok=True)
     
-    # 只保存绘图需要的标量数据
     data = {
         'label': label,
-        'obj_values': [float(v) for v in history.obj_values],
-        'con_values': [float(v) for v in history.con_values],
-        'iteration_times': [float(t) for t in history.iteration_times],
+        'iter_indices':     [int(i) for i in history.iter_indices],
+        'changes':          [float(v) for v in history.changes],
+        'iteration_times':  [float(t) for t in history.iteration_times],
+        'scalar_histories': {
+            k: [float(v) for v in vals]
+            for k, vals in history.scalar_histories.items()
+        },
     }
     
     filepath = save_dir / f"history_{label}.json"
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
     
-    print(f"History saved to: {filepath}")
+    print(f"History data saved to: {filepath}")
+
 
 def load_history_data(
                     save_path: str, 
@@ -317,7 +229,7 @@ def load_history_data(
     save_path : str
         保存目录路径
     labels : str | List[str]
-        单个标签名或标签名列表，如 'k=1' 或 ['k=1', 'k=2']
+        单个标签名或标签名列表
     
     Returns
     -------
@@ -327,20 +239,14 @@ def load_history_data(
     
     Examples
     --------
-    >>> # 加载单个
     >>> data = load_history_data('./results', labels='k=1')
-    >>> 
-    >>> # 加载多个
     >>> histories = load_history_data('./results', labels=['k=1', 'k=2'])
     """
     if isinstance(labels, str):
-        # 加载单个
         filepath = Path(save_path) / f"history_{labels}.json"
         with open(filepath, 'r') as f:
-            data = json.load(f)
-        return data
+            return json.load(f)
     else:
-        # 加载多个
         histories = {}
         for label in labels:
             filepath = Path(save_path) / f"history_{label}.json"
@@ -348,53 +254,68 @@ def load_history_data(
                 histories[label] = json.load(f)
         return histories
     
-def plot_optimization_history(history, save_path=None, show=True, 
-                            figsize=(10, 6), linewidth=2.5):
-    """绘制目标函数与体积约束收敛曲线"""
-    # ------------------------------------------
-    # 数据准备
-    # ------------------------------------------
-    # 定义一个内部辅助函数来获取数据
-    def get_data(obj, key):
-        if isinstance(obj, dict):
-            return obj[key]  # 字典方式访问
-        else:
-            return getattr(obj, key) # 对象属性方式访问
+def plot_optimization_history(history, 
+                            problem_type: str = 'compliance',
+                            save_path=None, 
+                            show=True, 
+                            figsize=(10, 6), 
+                            linewidth=2.5):
+    """
+    绘制优化收敛曲线
+    
+    Parameters
+    ----------
+    problem_type : str
+        'compliance' : 柔顺度最小化 + 体积约束，绘制柔顺度和体积分数
+        'stress'     : 体积最小化 + 应力约束，绘制体积分数和最大归一化应力
+    """
+    iterations = np.array(history.iter_indices) + 1
 
-    # 获取数据
-    try:
-        obj_values = np.array(get_data(history, 'obj_values'))
-        con_values = np.array(get_data(history, 'con_values'))
-    except KeyError as e:
-        print(f"数据解析错误: 找不到键值 {e}")
-        return
-    except AttributeError as e:
-        print(f"数据解析错误: 对象缺少属性 {e}")
-        return
-    iterations = np.arange(1, len(obj_values) + 1)
+    # ------------------------------------------
+    # 根据 problem_type 选择数据和标签配置
+    # ------------------------------------------
+    if problem_type == 'compliance':
+        try:
+            left_values  = np.array(history.scalar_histories['compliance'])
+            right_values = np.array(history.scalar_histories['volfrac'])
+        except KeyError as e:
+            print(f"数据解析错误: 找不到键值 {e}")
+            return
+        left_label  = '柔顺度 $c$'
+        right_label = '体积分数 $V_f$'
+        left_color  = SOPTX_COLORS['compliance']
+        right_color = SOPTX_COLORS['volume']
+
+    elif problem_type == 'stress':
+        try:
+            left_values  = np.array(history.scalar_histories['volfrac'])
+            right_values = np.array(history.scalar_histories['max_von_mises'])
+        except KeyError as e:
+            print(f"数据解析错误: 找不到键值 {e}")
+            return
+        left_label  = '体积分数 $V_f$'
+        right_label = '最大归一化应力 $\\sigma_{max}/\\sigma_{lim}$'
+        left_color  = SOPTX_COLORS['volume']
+        right_color = SOPTX_COLORS['stress']
+
+    else:
+        raise ValueError(f"不支持的问题类型: {problem_type}，可选 'compliance' 或 'stress'")
     
-    # 创建画布 (设置高 DPI 以满足印刷要求)c
+        # ------------------------------------------
+    # 创建画布
+    # ------------------------------------------
     fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
-    
+
     # ------------------------------------------
-    # 绘制左轴：柔顺度 (Compliance)
+    # 绘制左轴
     # ------------------------------------------
-    # 直接使用全局配色字典
-    color_c = SOPTX_COLORS['compliance'] 
-    
-    # 设置标签 (混合排版：中文使用 SimHei)
     ax1.set_xlabel('迭代步数', fontproperties=FONT_ZH)
-    ax1.set_ylabel('柔顺度 $c$', color=color_c, fontproperties=FONT_ZH)
-    
-    # 绘制曲线
-    l1, = ax1.plot(iterations, obj_values, color=color_c, linestyle='-', 
-                   linewidth=linewidth, label='柔顺度 $c$')
-    
-    # 设置刻度颜色
-    ax1.tick_params(axis='y', labelcolor=color_c)
+    ax1.set_ylabel(left_label, color=left_color, fontproperties=FONT_ZH)
+    l1, = ax1.plot(iterations, left_values, color=left_color, linestyle='-',
+                   linewidth=linewidth, label=left_label)
+    ax1.tick_params(axis='y', labelcolor=left_color)
     ax1.grid(True, linestyle='--', alpha=0.5)
-    
-    # 强制设置左轴刻度数值为 Times New Roman
+
     if FONT_EN:
         for label in ax1.get_xticklabels():
             label.set_fontproperties(FONT_EN)
@@ -402,33 +323,30 @@ def plot_optimization_history(history, save_path=None, show=True,
             label.set_fontproperties(FONT_EN)
 
     # ------------------------------------------
-    # 绘制右轴：体积分数 (Volume Fraction)
+    # 绘制右轴
     # ------------------------------------------
     ax2 = ax1.twinx()
-    # 直接使用全局配色字典
-    color_v = SOPTX_COLORS['volume']
-    
-    # 设置标签
-    ax2.set_ylabel('体积分数 $V_f$', color=color_v, fontproperties=FONT_ZH)
-    
-    # 绘制曲线
-    l2, = ax2.plot(iterations, con_values, color=color_v, linestyle='--', 
-                   linewidth=linewidth, label='体积分数 $V_f$')
-    
-    ax2.tick_params(axis='y', labelcolor=color_v)
-    
-    # 强制设置右轴刻度数值为 Times New Roman
+    ax2.set_ylabel(right_label, color=right_color, fontproperties=FONT_ZH)
+    l2, = ax2.plot(iterations, right_values, color=right_color, linestyle='--',
+                   linewidth=linewidth, label=right_label)
+    ax2.tick_params(axis='y', labelcolor=right_color)
+
     if FONT_EN:
         for label in ax2.get_yticklabels():
             label.set_fontproperties(FONT_EN)
 
+    # 应力问题时在右轴添加 sigma=1 的参考线，表示约束边界
+    if problem_type == 'stress':
+        ax2.axhline(y=1.0, color=right_color, linestyle=':', 
+                    linewidth=1.5, alpha=0.7, label='约束边界 $\\sigma=1$')
+
     # ------------------------------------------
-    # 智能锁定右轴范围 (保持平稳美观)
+    # 智能锁定右轴范围
     # ------------------------------------------
-    v_min, v_max = np.min(con_values), np.max(con_values)
-    if (v_max - v_min) < 0.01:
-        target = np.mean(con_values[-10:]) 
-        margin = 0.05 
+    r_min, r_max = np.min(right_values), np.max(right_values)
+    if (r_max - r_min) < 0.01:
+        target = np.mean(right_values[-10:])
+        margin = 0.05
         ax2.set_ylim(target - margin, target + margin)
 
     # ------------------------------------------
@@ -436,20 +354,127 @@ def plot_optimization_history(history, save_path=None, show=True,
     # ------------------------------------------
     lines = [l1, l2]
     labels = [l.get_label() for l in lines]
-    
-    # 放置在右上角
     ax1.legend(lines, labels, loc='upper right', prop=FONT_ZH, framealpha=0.9)
 
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(save_path, dpi=600, bbox_inches='tight')
         print(f"图片已保存至: {save_path}")
-        
+
     if show:
         plt.show()
     else:
         plt.close()
+    
+
+
+
+
+
+
+
+
+
+    # # ------------------------------------------
+    # # 数据准备
+    # # ------------------------------------------
+    # # 定义一个内部辅助函数来获取数据
+    # def get_data(obj, key):
+    #     if isinstance(obj, dict):
+    #         return obj[key]  # 字典方式访问
+    #     else:
+    #         return getattr(obj, key) # 对象属性方式访问
+
+    # # 获取数据
+    # try:
+    #     obj_values = np.array(get_data(history, 'obj_values'))
+    #     con_values = np.array(get_data(history, 'con_values'))
+    # except KeyError as e:
+    #     print(f"数据解析错误: 找不到键值 {e}")
+    #     return
+    # except AttributeError as e:
+    #     print(f"数据解析错误: 对象缺少属性 {e}")
+    #     return
+    # iterations = np.arange(1, len(obj_values) + 1)
+    
+    # # 创建画布 (设置高 DPI 以满足印刷要求)c
+    # fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
+    
+    # # ------------------------------------------
+    # # 绘制左轴：柔顺度 (Compliance)
+    # # ------------------------------------------
+    # # 直接使用全局配色字典
+    # color_c = SOPTX_COLORS['compliance'] 
+    
+    # # 设置标签 (混合排版：中文使用 SimHei)
+    # ax1.set_xlabel('迭代步数', fontproperties=FONT_ZH)
+    # ax1.set_ylabel('柔顺度 $c$', color=color_c, fontproperties=FONT_ZH)
+    
+    # # 绘制曲线
+    # l1, = ax1.plot(iterations, obj_values, color=color_c, linestyle='-', 
+    #                linewidth=linewidth, label='柔顺度 $c$')
+    
+    # # 设置刻度颜色
+    # ax1.tick_params(axis='y', labelcolor=color_c)
+    # ax1.grid(True, linestyle='--', alpha=0.5)
+    
+    # # 强制设置左轴刻度数值为 Times New Roman
+    # if FONT_EN:
+    #     for label in ax1.get_xticklabels():
+    #         label.set_fontproperties(FONT_EN)
+    #     for label in ax1.get_yticklabels():
+    #         label.set_fontproperties(FONT_EN)
+
+    # # ------------------------------------------
+    # # 绘制右轴：体积分数 (Volume Fraction)
+    # # ------------------------------------------
+    # ax2 = ax1.twinx()
+    # # 直接使用全局配色字典
+    # c = SOPTX_COLORS['volume']
+    
+    # # 设置标签
+    # ax2.set_ylabel('体积分数 $V_f$', color=color_v, fontproperties=FONT_ZH)
+    
+    # # 绘制曲线
+    # l2, = ax2.plot(iterations, con_values, color=color_v, linestyle='--', 
+    #                linewidth=linewidth, label='体积分数 $V_f$')
+    
+    # ax2.tick_params(axis='y', labelcolor=color_v)
+    
+    # # 强制设置右轴刻度数值为 Times New Roman
+    # if FONT_EN:
+    #     for label in ax2.get_yticklabels():
+    #         label.set_fontproperties(FONT_EN)
+
+    # # ------------------------------------------
+    # # 智能锁定右轴范围 (保持平稳美观)
+    # # ------------------------------------------
+    # v_min, v_max = np.min(con_values), np.max(con_values)
+    # if (v_max - v_min) < 0.01:
+    #     target = np.mean(con_values[-10:]) 
+    #     margin = 0.05 
+    #     ax2.set_ylim(target - margin, target + margin)
+
+    # # ------------------------------------------
+    # # 图例与保存
+    # # ------------------------------------------
+    # lines = [l1, l2]
+    # labels = [l.get_label() for l in lines]
+    
+    # # 放置在右上角
+    # ax1.legend(lines, labels, loc='upper right', prop=FONT_ZH, framealpha=0.9)
+
+    # plt.tight_layout()
+    
+    # if save_path:
+    #     plt.savefig(save_path, dpi=600, bbox_inches='tight')
+    #     print(f"图片已保存至: {save_path}")
+        
+    # if show:
+    #     plt.show()
+    # else:
+    #     plt.close()
 
 def plot_optimization_history_comparison(
     histories: dict,

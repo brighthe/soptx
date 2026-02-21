@@ -242,7 +242,6 @@ class MMAOptimizer(BaseLogged):
                 state = analyzer.solve_state(rho_val=rho_phys)
             elif isinstance(self._objective, CompliantMechanismObjective):
                 state = analyzer.solve_state(rho_val=rho_phys, adjoint=True)
-
             if enable_timing:
                 t.send('位移场求解')
 
@@ -336,24 +335,56 @@ class MMAOptimizer(BaseLogged):
             iteration_time = time() - start_time
 
             von_mises_stress = None
+            max_vm_stress = None
             if is_store_stress:
-                stress_state = analyzer.compute_stress_state(
-                                        state=state,
-                                        rho_val=rho_phys,
-                                    )
-                von_mises_stress = stress_state['von_mises_max']
+                import sys
+                stress_solid = analyzer.compute_stress_state(state=state)['stress_solid']
+                raw_von_mises = analyzer.material.calculate_von_mises_stress(stress_solid) / 100.0
+                # von_mises_stress = raw_von_mises * rho_phys
+                # max_vm_stress = float(bm.max(von_mises_stress))
+                # # 1. 计算原始的固体应力状态
+                # stress_solid = analyzer.compute_stress_state(state=state)['stress_solid']
+                
+                # # 2. 计算原始 von Mises 应力并进行归一化
+                # raw_von_mises = analyzer.material.calculate_von_mises_stress(stress_solid) / 100.0  
+                
+                # 3. 引入密度惩罚/松弛（关键修改）
+                von_mises_stress = raw_von_mises * rho_phys[:, None]  
+
+                # 4. 此时提取的最大应力才是真实存在于实体材料上的最大应力
+                max_vm_stress = float(bm.max(von_mises_stress))
+                # stress_solid = analyzer.compute_stress_state(state=state)['stress_solid']
+                # von_mises_stress = analyzer.material.calculate_von_mises_stress(stress_solid) / 100.0  # 归一化 von Mises 应力场
+                # max_vm_stress = float(bm.max(von_mises_stress))
                 if enable_timing:
                     t.send('von Mises 应力计算')
 
-            self.history.log_iteration(iter_idx=iter_idx, 
-                                obj_val=obj_val_raw, 
-                                volfrac=volfrac, 
-                                change=change,
-                                penalty_factor=current_penalty, 
-                                time_cost=iteration_time, 
-                                physical_density=rho_phys,
-                                von_mises_stress=von_mises_stress
-                            )
+            self._log_info(
+                    f"Iteration: {iter_idx + 1}, "
+                    f"Objective: {obj_val:.4f}, "
+                    f"Volfrac: {volfrac:.4f}, "
+                    f"Change: {change:.4f}, "
+                    f"Time: {iteration_time:.3f} sec"
+                )
+            
+            scalars = {
+                        'compliance': obj_val_raw,
+                        'volfrac': volfrac,
+                    }
+            fields = {}
+
+            if is_store_stress:
+                scalars['max_von_mises_stress'] = max_vm_stress
+                fields['von_mises_stress'] = von_mises_stress
+
+            self.history.log_iteration(
+                iter_idx=self._epoch,
+                change=change,
+                time_cost=iteration_time,
+                physical_density=rho_phys,
+                scalars=scalars,
+                fields=fields,
+            )
             
             # ==================== Beta 更新后的状态重置 (投影时使用) ====================
             beta_updated = False 

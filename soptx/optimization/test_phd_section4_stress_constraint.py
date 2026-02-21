@@ -39,7 +39,6 @@ class DensityTopOptTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
@@ -160,7 +159,7 @@ class DensityTopOptTest(BaseLogged):
             f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin}, ")
 
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=False)
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
@@ -172,7 +171,7 @@ class DensityTopOptTest(BaseLogged):
                                 history=history, 
                                 density_location=density_location,
                                 save_path=str(save_path))
-        plot_optimization_history(history, save_path=str(save_path))
+        plot_optimization_history(history, problem_type='compliance', save_path=str(save_path))
 
         return rho_opt, history
     
@@ -359,7 +358,7 @@ class DensityTopOptTest(BaseLogged):
                                 history=history, 
                                 density_location=density_location,
                                 save_path=str(save_path))
-        plot_optimization_history(history, save_path=str(save_path))
+        plot_optimization_history(history, problem_type='stress', save_path=str(save_path))
 
         return rho_opt, history
     
