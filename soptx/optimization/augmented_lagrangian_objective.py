@@ -53,6 +53,9 @@ class AugmentedLagrangianObjective(BaseLogged):
         self._interpolation_scheme = self._analyzer.interpolation_scheme
         self._material = self._analyzer.material
 
+        self._n_sub = self._interpolation_scheme.n_sub if self._interpolation_scheme.n_sub is not None else 1
+        self._is_multiresolution = (self._n_sub > 1)
+
         # --- ALM 参数初始化 ---
         
         # 罚因子 μ^(k)
@@ -63,15 +66,23 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 拉格朗日乘子 lambda 的初始化
         if initial_lambda is not None:
             # Case A: 热启动
-            # 用户显式传入了之前计算好的 lambda 向量
-            if initial_lambda.shape != (self._NC, 1):
-                self._log_error(f"Shape mismatch: {initial_lambda.shape}")
+            if self._is_multiresolution:
+                expected_shape = (self._NC, self._n_sub, 1)
+            else:
+                expected_shape = (self._NC, 1)
+
+            if initial_lambda.shape != expected_shape:
+                self._log_error(
+                    f"Shape mismatch: 期望 {expected_shape}, 实际得到 {initial_lambda.shape}"
+                )
             self.lamb = bm.copy(initial_lambda)
         else:
-            # Case B: 冷启动 (Cold Start)
-            # 使用 Options 中的标量策略进行初始化
+            # Case B: 冷启动
             init_val = options.lambda_0_init_val
-            self.lamb = bm.full((self._NC, 1), init_val, dtype=bm.float64)
+            if self._is_multiresolution:
+                self.lamb = bm.full((self._NC, self._n_sub, 1), init_val, dtype=bm.float64)
+            else:
+                self.lamb = bm.full((self._NC, 1), init_val, dtype=bm.float64)
 
     def fun(self, 
             density: Union[Function, TensorLike],
@@ -82,11 +93,11 @@ class AugmentedLagrangianObjective(BaseLogged):
         f = self._volume_objective.fun(density, state)
 
         # 2. 计算消失约束 g
-        g = self._stress_constraint.fun(density, state)
+        g = self._stress_constraint.fun(density, state) # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
 
         # 3. 计算 ALM 的 h 和 Penal
         #    h_j = max(g_j, -lambda_j / mu)
-        h = bm.maximum(g, -self.lamb / self.mu)
+        h = bm.maximum(g, -self.lamb / self.mu) # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
 
         penal = bm.sum(self.lamb * h + 0.5 * self.mu * h**2)
 

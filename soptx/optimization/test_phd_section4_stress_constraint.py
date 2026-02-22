@@ -61,7 +61,7 @@ class DensityTopOptTest(BaseLogged):
                                     },
                                 )
         
-        relative_density = 0.5
+        relative_density = 1.0
         if density_location in ['element']:
             design_variable_mesh = displacement_mesh
             d, rho = interpolation_scheme.setup_density_distribution(
@@ -179,15 +179,16 @@ class DensityTopOptTest(BaseLogged):
     @run.register('test_subsec4_6_5_L_bracket_stress')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         # 归一化尺寸
-        domain = [0, 1.0, 0, 1.0]
-        hole_domain = [0.4, 1.0, 0.4, 1.0]
-        rmin = 0.05
+        # domain = [0, 1.0, 0, 1.0]
+        # hole_domain = [0.4, 1.0, 0.4, 1.0]
+        # rmin = 0.05
+        # P = -2.0
         # 物理尺寸
-        # domain = [0, 200.0, 0, 200.0]            
-        # hole_domain = [80.0, 200.0, 80.0, 200.0]
-        # rmin = 10.0 
+        domain = [0, 200.0, 0, 200.0]            
+        hole_domain = [80.0, 200.0, 80.0, 200.0]
+        rmin = 10.0 
+        P = -400.0
 
-        P = -2.0
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
@@ -202,6 +203,13 @@ class DensityTopOptTest(BaseLogged):
                             P=P, E=E, nu=nu,
                             plane_type=plane_type,
                         )
+        # from soptx.model.mbb_beam_2d_lfem import MBBBeam2d
+        # pde = MBBBeam2d(
+        #                 domain=domain,
+        #                 P=P, E=E, nu=nu,
+        #                 plane_type=plane_type
+        #             )
+        
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
@@ -213,7 +221,7 @@ class DensityTopOptTest(BaseLogged):
                                             enable_logging=False
                                         )
 
-        density_location = 'element'
+        density_location = 'element_multiresolution' # element_multiresolution
         interpolation_method = 'msimp'
         penalty_factor = 3.5
         void_youngs_modulus = 1e-9
@@ -227,6 +235,7 @@ class DensityTopOptTest(BaseLogged):
                                     },
                                 )
         
+        # ! 这个地方就得取 0.5, 不能取 1.0
         relative_density = 0.5
         if density_location in ['element']:
             design_variable_mesh = displacement_mesh
@@ -235,6 +244,7 @@ class DensityTopOptTest(BaseLogged):
                                                     displacement_mesh=displacement_mesh,
                                                     relative_density=relative_density,
                                                 )
+            assembly_method = 'fast'
         elif density_location in ['element_multiresolution']:
             sub_density_element = 4
             import math
@@ -247,13 +257,13 @@ class DensityTopOptTest(BaseLogged):
                                                     relative_density=relative_density,
                                                     sub_density_element=sub_density_element,
                                                 )
+            # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
+            assembly_method = 'voigt_multiresolution'
             
-
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
-        # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
-        assembly_method = 'fast'
+
         solve_method = 'mumps'
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -330,10 +340,11 @@ class DensityTopOptTest(BaseLogged):
                     )
         
         self._log_info(f"开始密度拓扑优化, "
-            f"模型名称={pde.__class__.__name__}, \n"
-            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
-            f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
-            f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
+            f"模型名称={pde.__class__.__name__} \n"
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type} \n"
+            f"杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+            f"网格类型={mesh_type}, 空间阶数={space_degree} \n" 
+            f"初始构型={relative_density}, 密度分布={density_location} \n"
             f"过滤类型={filter_regularization._filter_type}, 投影类型={filter_regularization._strategy.projection_type}, 过滤半径={rmin}, ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)

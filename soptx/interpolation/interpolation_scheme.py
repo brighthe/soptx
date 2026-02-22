@@ -105,6 +105,13 @@ class MaterialInterpolationScheme(BaseLogged):
         return self._stress_interpolation_method
     
     @property
+    def n_sub(self) -> int:
+        """获取子密度单元数量（仅多分辨率时有效）"""
+        if not hasattr(self, '_n_sub'):
+            self._log_error("n_sub 未初始化，请确认当前 density_location 为多分辨率类型")
+        return self._n_sub
+    
+    @property
     def penalty_factor(self) -> float:
         """获取当前的惩罚因子"""
         return self._options['penalty_factor']
@@ -205,6 +212,8 @@ class MaterialInterpolationScheme(BaseLogged):
             error_msg = (f"Currently only support Nd = Ne * sub_density_element. "
                           f"Got Nd={NC_design_variable}, Ne={NC}, sub_density_element={n_sub}")
             self._log_error(error_msg)
+
+        self._n_sub = n_sub
 
         design_variable = bm.full((NC_design_variable, ), relative_density, 
                                 dtype=bm.float64, device=design_variable_mesh.device)

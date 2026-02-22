@@ -260,78 +260,27 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if boundary_type == 'mixed':
             #* 1. Neumann 边界条件处理 - 弱形式施加 *#
             # # 集中载荷 (点力) - 等效节点力方法
-            # if load_type == 'concentrated':
-            #     gd_sigmah = self._pde.concentrate_load_bc
-            #     threshold_sigmah = self._pde.is_concentrate_load_boundary()
-        
-            #     # 点力必须定义在网格节点上
-            #     isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-            #     isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-            #     ipoints_uh = space_uh.interpolation_points()
-            #     gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
-
-            #     # 动态计算节点数量, 将总力平均分配
-            #     num_load_nodes = bm.sum(isBdSDof)
-            #     if num_load_nodes > 0:
-            #         gd_sigmah_val = gd_sigmah_val / num_load_nodes
-
-            #     F_sigmah = space_uh.function()
-            #     if space_uh.dof_priority:
-            #         F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
-            #     else:
-            #         F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
-
             if load_type == 'concentrated':
+                gd_sigmah = self._pde.concentrate_load_bc
                 threshold_sigmah = self._pde.is_concentrate_load_boundary()
-                mesh = space_uh.mesh
-                scalar_space = space_uh.scalar_space
-                p = scalar_space.p
+        
+                # 点力必须定义在网格节点上
+                isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+                isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+                ipoints_uh = space_uh.interpolation_points()
+                gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
 
-                # --- Step 1: 找到载荷边界上的边索引 ---
-                bd_face_idx = mesh.boundary_face_index()
-                bd_face_bary = mesh.entity_barycenter('face')[bd_face_idx]
-                load_mask = threshold_sigmah(bd_face_bary)
-                load_face_idx = bd_face_idx[load_mask]
+                # 动态计算节点数量, 将总力平均分配
+                num_load_nodes = bm.sum(isBdSDof)
+                if num_load_nodes > 0:
+                    gd_sigmah_val = gd_sigmah_val / num_load_nodes
 
-                assert bm.sum(load_mask) > 0, \
-                    "未找到满足条件的载荷边界边，请检查 is_concentrate_load_boundary 的定义"
-
-                # --- Step 2: 计算均布面力强度 t_y = P / |Γ_load| ---
-                face_measure = mesh.entity_measure('face')[load_face_idx]  # (NF_load,)
-                total_length = bm.sum(face_measure)
-                traction_y = self._pde._P / total_length
-
-                # --- Step 3: 边界数值积分，装配一致等效节点力 ---
-                # 取 p+1 阶积分，保证对 p 次基函数精确
-                face_quad = mesh.integrator(p + 1, 'face')
-                face_bcs, face_ws = face_quad.get_quadrature_points_and_weights()
-                # face_bcs: (NQ, 2),  face_ws: (NQ,)
-
-                # phi: (NF_load, NQ, ldof)
-                phi = scalar_space.basis(face_bcs, index=load_face_idx)
-
-                # F_i^(e) = Σ_q w_q * φ_i(ξ_q) * t_y * h_e
-                # F_local: (NF_load, ldof)
-                F_local = bm.einsum('q, fqi, f -> fi', face_ws, phi, face_measure) * traction_y
-
-                # --- Step 4: 散布装配到全局 y 方向力向量 ---
-                # face_to_dof: (NF_load, ldof)
-                face_to_dof = scalar_space.face_to_dof(index=load_face_idx)
-                gdof = scalar_space.number_of_global_dofs()
-
-                kwargs = bm.context(F_local)
-                F_y = bm.zeros(gdof, **kwargs)
-                # index_add 自动处理相邻边共享节点处的力叠加
-                F_y = bm.index_add(F_y, face_to_dof.reshape(-1), F_local.reshape(-1))
-
-                # --- Step 5: 映射到向量空间自由度 ---
                 F_sigmah = space_uh.function()
                 if space_uh.dof_priority:
-                    # DOF 排列: [all-x | all-y]，y 分量位于偏移 gdof 之后
-                    F_sigmah[:] = bm.set_at(F_sigmah[:], (slice(gdof, 2 * gdof),), F_y)
+                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
                 else:
-                    # DOF 排列: [x0, y0, x1, y1, ...]，y 分量位于奇数位
-                    F_sigmah[:] = bm.set_at(F_sigmah[:], (slice(1, None, 2),), F_y)
+                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
+
 
             # 分布载荷 (面力)
             elif load_type == 'distributed':
@@ -752,14 +701,16 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                             )  # (NC, NQ, NS, TLDOF)
             
         elif density_location in ['element_multiresolution']:
-            nx_u = self._mesh.meshdata['nx']
-            ny_u = self._mesh.meshdata['ny']
-            n_sub = 4
+            n_sub = self._interpolation_scheme.n_sub
+            nx_u, ny_u = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
+            hx_u, hy_u = self._mesh.meshdata['hx'], self._mesh.meshdata['hy']
+            cell_centers = self._mesh.entity_barycenter('cell')  # (NC, 2)
+            eps = 1e-10
+            cols = bm.floor(cell_centers[:, 0] / hx_u + eps).astype(int)
+            rows = bm.floor(cell_centers[:, 1] / hy_u + eps).astype(int)
+            cell_positions = bm.stack([cols, rows], axis=1)  # (NC, 2)
             
-            from soptx.interpolation.utils import (
-                                        calculate_multiresolution_gphi_eg, 
-                                        reshape_multiresolution_data_inverse
-                                    )
+            from soptx.analysis.utils import calculate_multiresolution_gphi_eg, reshape_multiresolution_data_inverse
             gphi_eg_reshaped = calculate_multiresolution_gphi_eg(
                                                         s_space_u=self._scalar_space,
                                                         q=integration_order,
@@ -772,10 +723,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                     )  # (NC*n_sub, NQ, NS, TLDOF)
                                                     
             B = reshape_multiresolution_data_inverse(
-                                                nx=nx_u, ny=ny_u, 
-                                                data_flat=B_reshaped, 
-                                                n_sub=n_sub
-                                            )  # (NC, n_sub, NQ, NS, TLDOF)
+                            nx=nx_u, ny=ny_u, 
+                            data_flat=B_reshaped, 
+                            n_sub=n_sub,
+                            cell_positions=cell_positions
+                        ) # (NC, n_sub, NQ, NS, TLDOF)
             
         else:
             self._log_error(f"不支持的密度位置类型: {density_location}")

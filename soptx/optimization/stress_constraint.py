@@ -64,19 +64,23 @@ class StressConstraint(BaseLogged):
                     )
             state['stiffness_ratio'] = cached
             
-        E = state['stiffness_ratio'] # (NC, )
+        E = state['stiffness_ratio'] # 单分辨率: (NC,) | 多分辨率: (NC, n_sub)
 
         # 计算或获取 von Mises 应力和归一化偏差
         if 'von_mises' not in state:
             state['von_mises'] = self._analyzer.material.calculate_von_mises_stress(state['stress_solid'])
             
-        vm = state['von_mises'] # (NC, NQ)
+        vm = state['von_mises'] # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
 
-        s = vm / self._stress_limit - 1.0 # (NC, NQ)
+        s = vm / self._stress_limit - 1.0 # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
         state['stress_deviation'] = s
 
         # 计算约束值 g = E * (s^3 + s)
-        g = E[:, None] * (s**3 + s) # (NC, NQ)
+        is_multiresolution = (E.ndim == 2)  # (NC, n_sub) vs (NC,)
+        if is_multiresolution:
+            g = E[:, :, None] * (s**3 + s)  # (NC, n_sub, NQ)
+        else:
+            g = E[:, None] * (s**3 + s)     # (NC, NQ)
 
         return g
 
