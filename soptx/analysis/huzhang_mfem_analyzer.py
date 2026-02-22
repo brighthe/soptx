@@ -197,7 +197,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         bform1.add_integrator(self._hzs_integrator)
         A = bform1.assembly(format='csr')
 
-        # 角点松弛
+        #TODO 角点松弛
         if space_sigma.use_relaxation == True:
             TM = space_sigma.TM
             A = TM.T @ A @ TM
@@ -266,8 +266,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         elif p <= GD:
             bform3 = BilinearForm(space_u)
-            # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='vector_jump')
-            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='matrix_jump')
+            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='vector_jump')
+            # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='matrix_jump')
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')
             K = bmat([[A,   B],
@@ -282,7 +282,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     def assemble_body_force_vector(self, 
                                    enable_timing: bool = False
                                 ) -> TensorLike:
-        """组装体力源项向量 (f, v)"""
+        """组装体力源项向量 (f, v) - 位移空间"""
         t = None
         if enable_timing:
             t = timer(f"组装 f_body")
@@ -302,121 +302,31 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return F_body
     
-    def assemble_displacement_bc_vector(self, enable_timing: bool = False):
-        """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D"""
-        t = None
-        if enable_timing:
-            t = timer("组装 F_disp_bc")
+    def assemble_displacement_bc_vector_backup(self, enable_timing: bool = False):
+        """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D
+        
+        当前所有位移边界均为齐次边界条件 (u_D = 0), 故直接返回零向量.
 
+        NOTE 角点松弛: 若将来支持非齐次位移边界 (u_D ≠ 0), 需在积分完成后
+        对载荷向量施加松弛变换: F_natural = TM.T @ F_natural
+        参考 boundary_interpolate 中的处理方式.
+        """
         space = self._huzhang_space
-        mesh = space.mesh
-
         gdof = space.number_of_global_dofs()
-        ldof = space.number_of_local_dofs()
 
-        bd_edge_flag = mesh.boundary_edge_flag()
-
-        # 1. 获取自然边界标记 (Natural BC)
-        if 'natural_bc' in mesh.edgedata:
-            disp_edge_flag = mesh.edgedata['natural_bc']
-        else:
-            bc_edge = mesh.entity_barycenter('edge')
-            disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
-
-        # 简化逻辑：不再检查 ndim==2，默认全模型下的标记是 1D 布尔数组
-        bdedge = bd_edge_flag & disp_edge_flag
-
-        # 2. 排除本质边界 (Essential BC) 的干扰
-        # 虽然 PDE 定义中通常互斥，但保留此检查更健壮
-        if 'essential_bc' in mesh.edgedata:
-            essential_bc = mesh.edgedata['essential_bc']
-            # 如果 essential_bc 意外是 2D 的 (旧代码遗留)，将其压缩为 1D
-            if essential_bc.ndim == 2:
-                essential_bc_1d = bm.any(essential_bc, axis=1)
-            else:
-                essential_bc_1d = essential_bc
-            
-            bdedge = bdedge & (~essential_bc_1d)
-
-        NBF = int(bdedge.sum())
-        if NBF == 0:
-            return bm.zeros(gdof, dtype=bm.float64, device=space.device)
-
-        # 3. 准备积分数据
-        e2c = mesh.edge_to_cell()[bdedge] 
-        en  = mesh.edge_unit_normal()[bdedge]
-        edge_measure  = mesh.entity_measure('edge')[bdedge]
-
-        qf = mesh.quadrature_formula(self._integration_order, 'edge')
-        bcs, ws = qf.get_quadrature_points_and_weights()
-        NQ = len(bcs)
-
-        # 将边积分点映射到单元内部
-        bcsi = [bm.insert(bcs, i, 0, axis=-1) for i in range(3)]
-
-        # 计算基函数投影
-        symidx = [[0, 1], [1, 2]]
-        phi_n = bm.zeros((NBF, NQ, ldof, 2), dtype=bm.float64, device=space.device)
-        gd_val = bm.zeros((NBF, NQ, 2), dtype=bm.float64, device=space.device)
-
-        # 获取位移边界函数
-        gd = getattr(self._pde, "displacement_bc", None)
-        if gd is None or (not callable(gd)):
-            # 如果没有定义 displacement_bc，默认位移为 0 (齐次)，直接返回零向量
-            # (通常底部固支 u=0，此时该积分为0，可以直接返回，节省计算)
-            return bm.zeros(gdof, dtype=bm.float64, device=space.device)
-        
-        # 4. 循环计算
-        for i in range(3):
-            # 找到局部编号为 i 的面
-            flag = (e2c[:, 2] == i)
-            if not bm.any(flag):
-                continue
-                
-            # 计算基函数
-            current_cells = e2c[flag, 0]
-            phi = space.basis(bcsi[i], index=current_cells)
-
-            # 计算 tau · n (测试函数应力 在法向上的投影)
-            # phi 的形状通常是 (..., 3) 对应 Voigt [xx, yy, xy] 或 [xx, xy, yy]
-            # 这里假设 space.basis 返回的是标准 Voigt 顺序，需根据具体空间确认 symidx 映射
-            en_curr = en[flag, None, None, :]
-            
-            # 投影逻辑：假设 phi 输出为 [tau_xx, tau_xy, tau_yy]
-            # (tau . n)_x = tau_xx * n_x + tau_xy * n_y
-            # (tau . n)_y = tau_xy * n_x + tau_yy * n_y
-            phi_n[flag, ..., 0] = bm.sum(phi[..., symidx[0]] * en_curr, axis=-1)
-            phi_n[flag, ..., 1] = bm.sum(phi[..., symidx[1]] * en_curr, axis=-1)
-
-            # 计算边界函数值 u_D
-            points = mesh.bc_to_point(bcsi[i], index=current_cells)
-            gd_val[flag] = gd(points)
-        
-        # 5. 积分组装 (简化版)
-        # 直接计算点积 <phi_n, u_D>，无需 mask
-        val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n, gd_val)
-        
-        cell2dof = space.cell_to_dof()[e2c[:, 0]]
-        F_vec = bm.zeros(gdof, dtype=bm.float64, device=space.device)
-        bm.add.at(F_vec, cell2dof, val)
-
-        #TODO 角点松弛变换
-        if hasattr(space, 'use_relaxation') and space.use_relaxation:
-            F_vec = space.TM.T @ F_vec
-
-        if enable_timing:
-            t.send("组装完成")
-            t.send(None)
-
-        return F_vec
+        return bm.zeros(gdof, dtype=bm.float64, device=space.device)
     
     def apply_traction_boundary_condition(self, 
                                         K: CSRTensor, 
                                         F: TensorLike, 
                                         space_sigma: HuZhangFESpace,
-                                        debug: bool = False
                                     ) -> Tuple[CSRTensor, TensorLike]:
-        """施加本质边界条件  σ·n = g_N"""
+        """施加本质边界条件  σ·n = g_N
+
+        NOTE 角点松弛: set_dirichlet_bc (即 boundary_interpolate) 内部已完成
+        松弛变换 uh_val = TM.T @ uh_val, 此处无需额外处理.
+        若替换为其他方式获取边界 DOF 值, 需确保同样完成该变换.
+        """
         gd_traction = getattr(self._pde, "traction_bc", None)
         if gd_traction is None or (not callable(gd_traction)):
                 self._log_error("PDE 对象缺少牵引边界函数 traction_bc")
@@ -436,106 +346,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
         is_fixed_dof[:gdof_sigma] = is_bd_dof
-
-        # =======================================================
-        # [验证代码块 START] 建议在调试阶段插入
-        # =======================================================
-        if debug:
-            import matplotlib.pyplot as plt
-            import numpy as np
-
-            # 1. 获取网格信息
-            mesh = self._mesh
-            bc = mesh.entity_barycenter('edge')
-            
-            # 转换数据到 CPU numpy (如果是在 GPU 上)
-            def to_numpy(arr):
-                if hasattr(arr, 'cpu'): return arr.cpu().numpy()
-                if hasattr(arr, 'numpy'): return arr.numpy()
-                return np.array(arr)
-
-            # 获取被固定的自由度索引
-            fixed_dof_indices = np.where(to_numpy(is_fixed_dof))[0]
-            fixed_values = to_numpy(U_fixed)[fixed_dof_indices]
-            
-            print(f"\n[BC Check] Total DOFs: {gdof_total}")
-            print(f"[BC Check] Number of Fixed DOFs: {len(fixed_dof_indices)}")
-            print(f"[BC Check] Max Fixed Value: {np.max(fixed_values):.4e}")
-            print(f"[BC Check] Min Fixed Value: {np.min(fixed_values):.4e}")
-
-            # 2. 几何位置验证：绘制被锁定的边
-            # 注意：is_fixed_dof 是 DOF 索引，我们需要反查它属于哪些边
-            # 这是一个近似验证，通过 PDE 的判定函数来画图
-            is_traction = self._pde.is_traction_boundary(bc)
-            traction_edges = np.where(to_numpy(is_traction))[0]
-
-            # 找出顶部的边索引
-            y_top = mesh.node[:, 1].max()
-            bc_np = to_numpy(bc)
-            top_indices = np.where(np.abs(bc_np[:, 1] - y_top) < 1e-5)[0]
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            mesh.add_plot(ax, color='lightgray', linewidth=0.5)
-            
-            # A. 底层：Essential BC (红色)
-            # 策略：先画，用大号正方形 ('s') 或圆形 ('o')，颜色红色
-            # markersize=30 保证足够显眼
-            if len(traction_edges) > 0:
-                mesh.find_edge(ax, index=traction_edges, 
-                               color='red', marker='s', markersize=45)
-            
-            # B. 顶层：Loaded Edge (蓝色)
-            # 策略：后画，用小号向下箭头 ('v')，颜色蓝色
-            # markersize=25 (比红色小)，利用默认的覆盖机制
-            if len(top_indices) > 0:
-                 mesh.find_edge(ax, index=top_indices, 
-                                color='blue', marker='v', markersize=45)
-
-            # --- 手动添加图例 (绕过 find_edge 不支持 label 的问题) ---
-            from matplotlib.lines import Line2D
-            legend_elements = [
-                Line2D([0], [0], marker='s', color='w', label='Essential BC (Fixed)',
-                       markerfacecolor='red', markersize=10),
-                Line2D([0], [0], marker='v', color='w', label='Applied Load (Traction)',
-                       markerfacecolor='blue', markersize=8)
-            ]
-            ax.legend(handles=legend_elements, loc='upper right')
-
-            ax.set_title(f"Boundary Conditions Check\nValues range: [{np.min(fixed_values):.2e}, {np.max(fixed_values):.2e}]")
-            plt.show()
-
-            # 3. 代数验证：检查矩阵修改是否成功
-            # 随机抽取 5 个被固定的 DOF 进行检查
-            check_indices = np.random.choice(fixed_dof_indices, size=min(5, len(fixed_dof_indices)), replace=False)
-            print("\n[BC Check] Matrix Modification Sample Check:")
-            for idx in check_indices:
-                # 检查对角线元素
-                diag_val = K[idx, idx]
-                # 检查该行非对角线元素之和 (应该是 0)
-                # 注意：CSR 格式获取行比较麻烦，这里简化检查对角线
-                rhs_val = F[idx]
-                target_val = U_fixed[idx]
-                
-                status = "PASS" if (abs(diag_val - 1.0) < 1e-10 and abs(rhs_val - target_val) < 1e-10) else "FAIL"
-                print(f"  DOF {idx:5d}: K_ii={diag_val:.1f}, F_i={rhs_val:.2e}, Target={target_val:.2e} -> {status}")
-
-            # 4. 物理数值验证：Top 边是否有正确的 -0.08
-            # 检查是否有值接近 -0.08 (考虑投影后的数值可能略有不同，但数量级应一致)
-            expected_load = self._pde.t # -0.08
-            # 考虑到 val = stack([val_n, 2.0 * val_t])，且顶部 n=(0,1), t=(-1,0), load=(0, -0.08)
-            # Normal projection: (0)*0 + (-0.08)*1 = -0.08
-            # Tangential projection: 0
-            # 所以我们应该能找到接近 -0.08 的值
-            
-            has_load_val = np.any(np.isclose(fixed_values, expected_load, rtol=1e-3))
-            print(f"\n[BC Check] Searching for expected load value {expected_load}...")
-            if has_load_val:
-                print("  [SUCCESS] Found DOFs carrying the prescribed traction load!")
-            else:
-                print(f"  [WARNING] Did not find exact load value. Max deviation might be due to projection or basis functions.")
-        # =======================================================
-        # [验证代码块 END]
-        # =======================================================
 
         #* 修改线性系统 (标准的置 1 置 0 法)
         # 移项: 将已知非零值的贡献移到右端项
@@ -932,3 +742,112 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
 
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
+    
+
+    def assemble_displacement_bc_vector(self, enable_timing: bool = False):
+        """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D"""
+        t = None
+        if enable_timing:
+            t = timer("组装 F_disp_bc")
+
+        space = self._huzhang_space
+        mesh = space.mesh
+
+        gdof = space.number_of_global_dofs()
+        ldof = space.number_of_local_dofs()
+
+        bd_edge_flag = mesh.boundary_edge_flag()
+
+        # 1. 获取自然边界标记 (Natural BC)
+        if 'natural_bc' in mesh.edgedata:
+            disp_edge_flag = mesh.edgedata['natural_bc']
+        else:
+            bc_edge = mesh.entity_barycenter('edge')
+            disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
+
+        # 简化逻辑：不再检查 ndim==2，默认全模型下的标记是 1D 布尔数组
+        bdedge = bd_edge_flag & disp_edge_flag
+
+        # 2. 排除本质边界 (Essential BC) 的干扰
+        # 虽然 PDE 定义中通常互斥，但保留此检查更健壮
+        if 'essential_bc' in mesh.edgedata:
+            essential_bc = mesh.edgedata['essential_bc']
+            # 如果 essential_bc 意外是 2D 的 (旧代码遗留)，将其压缩为 1D
+            if essential_bc.ndim == 2:
+                essential_bc_1d = bm.any(essential_bc, axis=1)
+            else:
+                essential_bc_1d = essential_bc
+            
+            bdedge = bdedge & (~essential_bc_1d)
+
+        NBF = int(bdedge.sum())
+        if NBF == 0:
+            return bm.zeros(gdof, dtype=bm.float64, device=space.device)
+
+        # 3. 准备积分数据
+        e2c = mesh.edge_to_cell()[bdedge] 
+        en  = mesh.edge_unit_normal()[bdedge]
+        edge_measure  = mesh.entity_measure('edge')[bdedge]
+
+        qf = mesh.quadrature_formula(self._integration_order, 'edge')
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        NQ = len(bcs)
+
+        # 将边积分点映射到单元内部
+        bcsi = [bm.insert(bcs, i, 0, axis=-1) for i in range(3)]
+
+        # 计算基函数投影
+        symidx = [[0, 1], [1, 2]]
+        phi_n = bm.zeros((NBF, NQ, ldof, 2), dtype=bm.float64, device=space.device)
+        gd_val = bm.zeros((NBF, NQ, 2), dtype=bm.float64, device=space.device)
+
+        # 获取位移边界函数
+        gd = getattr(self._pde, "displacement_bc", None)
+        if gd is None or (not callable(gd)):
+            # 如果没有定义 displacement_bc，默认位移为 0 (齐次)，直接返回零向量
+            # (通常底部固支 u=0，此时该积分为0，可以直接返回，节省计算)
+            return bm.zeros(gdof, dtype=bm.float64, device=space.device)
+        
+        # 4. 循环计算
+        for i in range(3):
+            # 找到局部编号为 i 的面
+            flag = (e2c[:, 2] == i)
+            if not bm.any(flag):
+                continue
+                
+            # 计算基函数
+            current_cells = e2c[flag, 0]
+            phi = space.basis(bcsi[i], index=current_cells)
+
+            # 计算 tau · n (测试函数应力 在法向上的投影)
+            # phi 的形状通常是 (..., 3) 对应 Voigt [xx, yy, xy] 或 [xx, xy, yy]
+            # 这里假设 space.basis 返回的是标准 Voigt 顺序，需根据具体空间确认 symidx 映射
+            en_curr = en[flag, None, None, :]
+            
+            # 投影逻辑：假设 phi 输出为 [tau_xx, tau_xy, tau_yy]
+            # (tau . n)_x = tau_xx * n_x + tau_xy * n_y
+            # (tau . n)_y = tau_xy * n_x + tau_yy * n_y
+            phi_n[flag, ..., 0] = bm.sum(phi[..., symidx[0]] * en_curr, axis=-1)
+            phi_n[flag, ..., 1] = bm.sum(phi[..., symidx[1]] * en_curr, axis=-1)
+
+            # 计算边界函数值 u_D
+            points = mesh.bc_to_point(bcsi[i], index=current_cells)
+            gd_val[flag] = gd(points)
+        
+        # 5. 积分组装 (简化版)
+        # 直接计算点积 <phi_n, u_D>，无需 mask
+        val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n, gd_val)
+        
+        cell2dof = space.cell_to_dof()[e2c[:, 0]]
+        F_vec = bm.zeros(gdof, dtype=bm.float64, device=space.device)
+        bm.add.at(F_vec, cell2dof, val)
+
+        #TODO 角点松弛变换
+        if hasattr(space, 'use_relaxation') and space.use_relaxation:
+            F_vec = space.TM.T @ F_vec
+
+        if enable_timing:
+            t.send("组装完成")
+            t.send(None)
+
+        return F_vec

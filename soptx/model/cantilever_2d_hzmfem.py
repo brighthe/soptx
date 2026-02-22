@@ -174,7 +174,7 @@ class Cantilever2d(PDEBase):
                             node[bd_edges[:, 1]] - node[bd_edges[:, 0]], axis=-1
                         )
         
-        self._load_region_half_width = float(bm.min(edge_lengths)) / 2 + self._eps
+        self._load_region_half_width = float(bm.min(edge_lengths)) / 2
         
         # 计算等效牵引力强度
         load_region_width = 2 * self._load_region_half_width
@@ -209,14 +209,15 @@ class Cantilever2d(PDEBase):
         if self._load_region_half_width is None:
             # 未设置载荷区域，返回零牵引
             return val
+                
+        # 在进行几何位置判断时，显式加上浮点数容差 eps
+        search_hw = self._load_region_half_width + self._eps
         
-        hw = self._load_region_half_width
-        
-        # 右侧载荷区域：x = x_max, y ∈ [y_mid - hw, y_mid + hw]
+        # 右侧载荷区域：x = x_max, y ∈ [y_mid - search_hw, y_mid + search_hw]
         on_right = bm.abs(x - domain[1]) < self._eps
-        in_load_region = on_right & (bm.abs(y - y_mid) <= hw)
+        in_load_region = on_right & (bm.abs(y - y_mid) <= search_hw)
         
-        # 设置牵引力（向下为负 y 方向）
+        # 设置牵引力
         val = bm.set_at(val, (in_load_region, 1), self._t)
 
         return val
