@@ -364,13 +364,13 @@ class MMAOptimizer(BaseLogged):
                 fields['von_mises_stress'] = von_mises_stress
 
             self.history.log_iteration(
-                iter_idx=self._epoch,
-                change=change,
-                time_cost=iteration_time,
-                physical_density=rho_phys,
-                scalars=scalars,
-                fields=fields,
-            )
+                            iter_idx=self._epoch,
+                            change=change,
+                            time_cost=iteration_time,
+                            physical_density=rho_phys,
+                            scalars=scalars,
+                            fields=fields,
+                        )
             
             # ==================== Beta 更新后的状态重置 (投影时使用) ====================
             beta_updated = False 

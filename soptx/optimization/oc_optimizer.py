@@ -262,16 +262,29 @@ class OCOptimizer(BaseLogged):
                 if enable_timing:
                     t.send('von Mises 应力计算')
 
+            self._log_info(
+                    f"Iteration: {iter_idx + 1}, "
+                    f"Objective: {obj_val:.4f}, "
+                    f"Volfrac: {volfrac:.4f}, "
+                    f"Change: {change:.4f}, "
+                    f"Time: {iteration_time:.3f} sec"
+                )
+            
+            scalars = {
+                        'compliance': obj_val,
+                        'volfrac': volfrac,
+                    }
+            
+            fields = {}
+
             history.log_iteration(
-                                iter_idx=iter_idx, 
-                                obj_val=obj_val, 
-                                volfrac=volfrac, 
-                                change=change,
-                                penalty_factor=self._objective._analyzer._interpolation_scheme.penalty_factor, 
-                                time_cost=iteration_time, 
-                                physical_density=rho_phys,
-                                von_mises_stress=von_mises_stress,
-                            )
+                            iter_idx=iter_idx + 1,
+                            change=change,
+                            time_cost=iteration_time,
+                            physical_density=rho_phys,
+                            scalars=scalars,
+                            fields=fields,
+                        )
             
             change, beta_updated = self._filter.continuation_step(change)
             if beta_updated:

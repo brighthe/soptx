@@ -259,27 +259,80 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         if boundary_type == 'mixed':
             #* 1. Neumann 边界条件处理 - 弱形式施加 *#
-            # 集中载荷 (点力) - 等效节点力方法
-            if load_type == 'concentrated':
-                gd_sigmah = self._pde.concentrate_load_bc
-                threshold_sigmah = self._pde.is_concentrate_load_boundary()
+            # # 集中载荷 (点力) - 等效节点力方法
+            # if load_type == 'concentrated':
+            #     gd_sigmah = self._pde.concentrate_load_bc
+            #     threshold_sigmah = self._pde.is_concentrate_load_boundary()
         
-                # 点力必须定义在网格节点上
-                isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-                isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-                ipoints_uh = space_uh.interpolation_points()
-                gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
+            #     # 点力必须定义在网格节点上
+            #     isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+            #     isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+            #     ipoints_uh = space_uh.interpolation_points()
+            #     gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
 
-                # 动态计算节点数量, 将总力平均分配
-                num_load_nodes = bm.sum(isBdSDof)
-                if num_load_nodes > 0:
-                    gd_sigmah_val = gd_sigmah_val / num_load_nodes
+            #     # 动态计算节点数量, 将总力平均分配
+            #     num_load_nodes = bm.sum(isBdSDof)
+            #     if num_load_nodes > 0:
+            #         gd_sigmah_val = gd_sigmah_val / num_load_nodes
 
+            #     F_sigmah = space_uh.function()
+            #     if space_uh.dof_priority:
+            #         F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
+            #     else:
+            #         F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
+
+            if load_type == 'concentrated':
+                threshold_sigmah = self._pde.is_concentrate_load_boundary()
+                mesh = space_uh.mesh
+                scalar_space = space_uh.scalar_space
+                p = scalar_space.p
+
+                # --- Step 1: 找到载荷边界上的边索引 ---
+                bd_face_idx = mesh.boundary_face_index()
+                bd_face_bary = mesh.entity_barycenter('face')[bd_face_idx]
+                load_mask = threshold_sigmah(bd_face_bary)
+                load_face_idx = bd_face_idx[load_mask]
+
+                assert bm.sum(load_mask) > 0, \
+                    "未找到满足条件的载荷边界边，请检查 is_concentrate_load_boundary 的定义"
+
+                # --- Step 2: 计算均布面力强度 t_y = P / |Γ_load| ---
+                face_measure = mesh.entity_measure('face')[load_face_idx]  # (NF_load,)
+                total_length = bm.sum(face_measure)
+                traction_y = self._pde._P / total_length
+
+                # --- Step 3: 边界数值积分，装配一致等效节点力 ---
+                # 取 p+1 阶积分，保证对 p 次基函数精确
+                face_quad = mesh.integrator(p + 1, 'face')
+                face_bcs, face_ws = face_quad.get_quadrature_points_and_weights()
+                # face_bcs: (NQ, 2),  face_ws: (NQ,)
+
+                # phi: (NF_load, NQ, ldof)
+                phi = scalar_space.basis(face_bcs, index=load_face_idx)
+
+                # F_i^(e) = Σ_q w_q * φ_i(ξ_q) * t_y * h_e
+                # F_local: (NF_load, ldof)
+                F_local = bm.einsum('q, fqi, f -> fi', face_ws, phi, face_measure) * traction_y
+
+                # --- Step 4: 散布装配到全局 y 方向力向量 ---
+                # face_to_dof: (NF_load, ldof)
+                face_to_dof = scalar_space.face_to_dof(index=load_face_idx)
+                gdof = scalar_space.number_of_global_dofs()
+
+                kwargs = bm.context(F_local)
+                F_y = bm.zeros(gdof, **kwargs)
+                # index_add 自动处理相邻边共享节点处的力叠加
+                F_y = bm.index_add(F_y, face_to_dof.reshape(-1), F_local.reshape(-1))
+
+                # --- Step 5: 映射到向量空间自由度 ---
                 F_sigmah = space_uh.function()
                 if space_uh.dof_priority:
-                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
+                    # DOF 排列: [all-x | all-y]，y 分量位于偏移 gdof 之后
+                    F_sigmah[:] = bm.set_at(F_sigmah[:], (slice(gdof, 2 * gdof),), F_y)
                 else:
-                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
+                    # DOF 排列: [x0, y0, x1, y1, ...]，y 分量位于奇数位
+                    F_sigmah[:] = bm.set_at(F_sigmah[:], (slice(1, None, 2),), F_y)
+
             # 分布载荷 (面力)
             elif load_type == 'distributed':
                 #TODO 支持节点载荷等效分布载荷的情况
@@ -774,92 +827,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         # 返回最原始的应力张量 (或向量形式)
         return {'stress_solid': stress_tensor}
-
-
-    # def compute_stress_state(self, 
-    #                         state: dict,
-    #                         rho_val: Optional[Union[TensorLike, Function]] = None,
-    #                         integration_order: Optional[int] = None
-    #                     ) -> Dict[str, TensorLike]:
-    #     """
-    #     计算应力场
-        
-    #     Parameters
-    #     ----------
-    #     state : 状态字典，包含位移场等信息
-    #     rho_val : 密度场（用于应力惩罚，拓扑优化时需要）
-    #     integration_order : 积分阶次
-        
-    #     Returns
-    #     -------
-    #     dict : 包含以下键值：
-    #         - 'stress_solid': 实体应力 (NC, NQ, NS) 或 (NC, n_sub, NQ, NS)
-    #         - 'stress_penalized': 惩罚后应力
-    #         - 'von_mises': von Mises 等效应力 (NC, NQ) 或 (NC, n_sub, NQ)
-    #         - 'E_field': 插值后的杨氏模量场 (用于多项式消失约束), shape = rho_val.shape
-    #         - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
-    #     """        
-    #     if integration_order is None:
-    #         integration_order = self._integration_order
-    #         # TODO 测试
-    #         integration_order = 1
-
-    #     if state is None:
-    #         state = self.solve_state(rho_val=rho_val)
-        
-    #     uh = state['displacement']
-    #     cell2dof = self._tensor_space.cell_to_dof()
-    #     uh_e = uh[cell2dof]  # (NC, TLDOF)
-
-    #     B = self.compute_strain_displacement_matrix(integration_order)
-        
-    #     # 计算实体应力 (与密度无关)
-    #     stress_solid = self._material.calculate_stress_vector(B, uh_e)
-        
-    #     result = {'stress_solid': stress_solid}
-        
-    #     # 应力惩罚（拓扑优化场景）
-    #     if self._topopt_algorithm == 'density_based':
-    #         if rho_val is None:
-    #             self._log_warning("拓扑优化模式下建议提供 rho_val 以计算惩罚后应力")
-    #             stress_for_vm = stress_solid
-    #         else:
-    #             E_field = self._interpolation_scheme.interpolate_material(
-    #                                                         material=self._material,
-    #                                                         rho_val=rho_val
-    #                                                     )
-                
-    #             result['E_field'] = E_field # (NC, NQ)
-    #             penalty_data = self._interpolation_scheme.interpolate_stress(
-    #                                                                     stress_solid=stress_solid,
-    #                                                                     rho_val=rho_val,
-    #                                                                     return_stress_penalty=True,
-    #                                                                 )
-    #             stress_for_vm = penalty_data['stress_penalized']
-
-    #             result['stress_penalized'] = stress_for_vm
-    #             result['eta_sigma'] = penalty_data['eta_sigma']
-    #     else:
-    #         stress_for_vm = stress_solid
-        
-    #     # 计算 von Mises 应力
-    #     von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_for_vm)
-    #     result['von_mises'] = von_mises
-
-        
-    #     # 每个单元取最大值
-    #     if von_mises.ndim == 2:
-    #         # 单分辨率: (NC, NQ) -> (NC,)
-    #         von_mises_max = bm.max(von_mises, axis=1)
-    #     elif von_mises.ndim == 3:
-    #         # 多分辨率: (NC, n_sub, NQ) -> (NC,)
-    #         von_mises_max = bm.max(von_mises.reshape(von_mises.shape[0], -1), axis=1)
-    #     else:
-    #         self._log_error(f"意外的 von Mises 应力维度: {von_mises.ndim}")
-        
-    #     result['von_mises_max'] = von_mises_max
-        
-    #     return result
     
     ##############################################################################################
     # 内部方法
