@@ -148,10 +148,12 @@ class LBracketBeam2d(PDEBase):
         
         # 右边缘条件
         on_right_edge = bm.abs(x - domain[1]) < self._eps
+
+        L = domain[1] - domain[0]
         
         # 载荷高度条件
         # L型下部矩形高度为 2/5 = 0.4
-        lower_rect_height = 2.0 / 5.0
+        lower_rect_height = (2.0 / 5.0) * L
         load_threshold = self._load_height_ratio * lower_rect_height
         
         # y > 0.34 (即在 y ∈ (0.34, 0.4] 区间)

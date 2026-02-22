@@ -337,25 +337,11 @@ class MMAOptimizer(BaseLogged):
             von_mises_stress = None
             max_vm_stress = None
             if is_store_stress:
-                import sys
                 stress_solid = analyzer.compute_stress_state(state=state)['stress_solid']
                 raw_von_mises = analyzer.material.calculate_von_mises_stress(stress_solid) / 100.0
-                # von_mises_stress = raw_von_mises * rho_phys
-                # max_vm_stress = float(bm.max(von_mises_stress))
-                # # 1. 计算原始的固体应力状态
-                # stress_solid = analyzer.compute_stress_state(state=state)['stress_solid']
-                
-                # # 2. 计算原始 von Mises 应力并进行归一化
-                # raw_von_mises = analyzer.material.calculate_von_mises_stress(stress_solid) / 100.0  
-                
-                # 3. 引入密度惩罚/松弛（关键修改）
                 von_mises_stress = raw_von_mises * rho_phys[:, None]  
-
-                # 4. 此时提取的最大应力才是真实存在于实体材料上的最大应力
                 max_vm_stress = float(bm.max(von_mises_stress))
-                # stress_solid = analyzer.compute_stress_state(state=state)['stress_solid']
-                # von_mises_stress = analyzer.material.calculate_von_mises_stress(stress_solid) / 100.0  # 归一化 von Mises 应力场
-                # max_vm_stress = float(bm.max(von_mises_stress))
+
                 if enable_timing:
                     t.send('von Mises 应力计算')
 

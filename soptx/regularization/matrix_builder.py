@@ -158,20 +158,6 @@ class FilterMatrixBuilder:
                     values=sH[:nnz],
                     spshape=(gdof, gdof)
                 )
-            
-            # # 行归一化: P = diag(1 / rowsum(H)) * H
-            # # 与 PolyFilter.m 一致: P = spdiags(1./sum(P,2),0,N,N)*P
-            # row_sum = H.sum(axis=1)  # (gdof,)
-            # inv_row_sum = 1.0 / row_sum
-            # # 对每个非零元素, 用其所在行的 inv_row_sum 进行缩放
-            # row_indices = iH[:nnz]
-            # normalized_values = sH[:nnz] * inv_row_sum[row_indices]
-            
-            # H = COOTensor(
-            #         indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
-            #         values=normalized_values,
-            #         spshape=(gdof, gdof)
-            #     )
 
             if enable_timing:
                 t.send('稀疏矩阵构建时间')

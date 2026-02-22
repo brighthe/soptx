@@ -178,8 +178,15 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec4_6_5_L_bracket_stress')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        # 归一化尺寸
         domain = [0, 1.0, 0, 1.0]
         hole_domain = [0.4, 1.0, 0.4, 1.0]
+        rmin = 0.05
+        # 物理尺寸
+        # domain = [0, 200.0, 0, 200.0]            
+        # hole_domain = [80.0, 200.0, 80.0, 200.0]
+        # rmin = 10.0 
+
         P = -2.0
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
@@ -299,7 +306,6 @@ class DensityTopOptTest(BaseLogged):
                                         )
 
         filter_type = 'projection' # 'none', 'sensitivity', 'density', 'projection'
-        rmin = 0.05
         projection_config = {
                 'continuation_strategy': 'additive',
                 'projection_type': 'tanh',
@@ -365,5 +371,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_L_bracket_compliance')
+    test.run.set('test_subsec4_6_5_L_bracket_stress')
     rho_opt, history = test.run()
