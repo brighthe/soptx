@@ -214,6 +214,7 @@ class Cantilever2d(PDEBase):
                 P: float = -1.0, # N
                 E: float = 1.0,  # MPa
                 nu: float = 0.3,
+                load_width: Optional[float] = None, # 载荷分布宽度 (mm)，设为 None 时为单点载荷
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
@@ -224,6 +225,9 @@ class Cantilever2d(PDEBase):
         self._P = P
         self._E, self._nu = E, nu
         self._plane_type = plane_type
+
+        # 记录载荷分布区域的宽度
+        self._load_width = load_width
 
         self._eps = 1e-8
         self._load_type = 'concentrated'
@@ -360,10 +364,21 @@ class Cantilever2d(PDEBase):
         x, y = points[..., 0], points[..., 1]
 
         middle_y = (domain[2] + domain[3]) / 2.0
-        coord = (
-            (bm.abs(x - domain[1]) < self._eps) & 
-            (bm.abs(y - middle_y) < self._eps)
-        )
+
+        if self._load_width is None:
+            # 兼容模式：原始单点集中载荷逻辑，与原代码完全一致
+            coord = (
+                (bm.abs(x - domain[1]) < self._eps) & 
+                (bm.abs(y - middle_y) < self._eps)
+            )
+        else:
+            # 扩展模式：分布载荷逻辑，以中线为基准，上下各扩展 load_width / 2
+            half_width = self._load_width / 2.0
+            coord = (
+                (bm.abs(x - domain[1]) < self._eps) & 
+                (y >= middle_y - half_width - self._eps) & 
+                (y <= middle_y + half_width + self._eps)
+            )
 
         return coord
 

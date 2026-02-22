@@ -507,7 +507,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.35
 
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         interpolation_method = 'msimp'
@@ -677,7 +677,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.35
 
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         # 'element'
@@ -686,7 +686,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         solve_method = 'mumps'
 
-        max_iterations = 100
+        max_iterations = 500
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
@@ -730,7 +730,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                                 relative_density=relative_density,
                                             )
         
-        use_relaxation = False # True, False
+        use_relaxation = True # True, False
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
                                     disp_mesh=displacement_mesh,
