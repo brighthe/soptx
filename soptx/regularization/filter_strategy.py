@@ -295,11 +295,11 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                         density:  Union[TensorLike, Function]
                     ) ->  Union[TensorLike, Function]:
 
-        from soptx.interpolation.interpolation_scheme import DensityDistribution
+        # from soptx.interpolation.interpolation_scheme import DensityDistribution
         if isinstance(density, Function):
             rho_phys = density.space.function(bm.copy(density[:]))
-        elif isinstance(density, DensityDistribution):
-            rho_phys = density
+        # elif isinstance(density, DensityDistribution):
+            # rho_phys = density
         else:
             rho_phys = bm.copy(density)
 

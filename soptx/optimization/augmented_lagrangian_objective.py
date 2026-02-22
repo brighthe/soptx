@@ -105,7 +105,8 @@ class AugmentedLagrangianObjective(BaseLogged):
         self._cache_h = h
 
         # 4. 组装归一化后的增广拉格朗日目标函数 J
-        J = f + penal / self._NC
+        n_constraints = g.numel() if hasattr(g, 'numel') else g.size
+        J = f + penal / n_constraints
 
         return J
     
@@ -139,26 +140,32 @@ class AugmentedLagrangianObjective(BaseLogged):
         
         # --- 获取缓存的物理量 ---
         slim = self._stress_constraint._stress_limit
-        E = state['stiffness_ratio']  # (NC, )
-        s = state['stress_deviation'] # (NC, NQ)
+        E = state['stiffness_ratio']  # 单分辨率: (NC,)         | 多分辨率: (NC, n_sub)
+        s = state['stress_deviation'] # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
 
-        g = self._cache_g
-        h = self._cache_h
+        g = self._cache_g             # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
+        h = self._cache_h             # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
 
         # --- 确定激活集 a1 (Mask) ---
         #  逻辑: 当 g > -lambda/mu 时，h = g, 此时约束激活（或违反）
         limit_term = -self.lamb / self.mu
-        mask = g > limit_term  # (NC, NQ) bool
+        mask = g > limit_term         # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
 
         # --- 计算显式灵敏度 ---
         #  计算 dPenaldVM (罚函数对 Von Mises 应力的偏导数)
-        dhdVM_val = E[:, None] * (3 * s**2 + 1) / slim
+        #  单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
+        if self._is_multiresolution:
+            dhdVM_val = E[:, :, None] * (3 * s**2 + 1) / slim  # (NC, n_sub, NQ)
+        else:
+            dhdVM_val = E[:, None] * (3 * s**2 + 1) / slim     # (NC, NQ)
+        # dhdVM_val = E[:, None] * (3 * s**2 + 1) / slim
         dhdVM = bm.where(mask, dhdVM_val, 0.0)
-        dPenaldVM = (self.lamb + self.mu * h) * dhdVM # (NC, NQ)
+        dPenaldVM = (self.lamb + self.mu * h) * dhdVM  
 
         #  计算 dPenal/dE 的显式部分
+        #  单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
         dgdE = self._stress_constraint.compute_partial_gradient_wrt_stiffness(state=state)
-        dPenaldE_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdE, 0.0) # (NC, NQ)
+        dPenaldE_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdE, 0.0) 
 
         # --- 伴随法 ---        
         #  计算伴随载荷 F_adj = - (dVM/dU)^T * dPenaldVM
@@ -171,30 +178,35 @@ class AugmentedLagrangianObjective(BaseLogged):
         # dPenal/dE_implicit = psi^T * (dF_int / dE)
         dPenaldE_implicit = self._stress_constraint.compute_implicit_sensitivity_term(adjoint_vector, state)  # (NC, )
 
+        # --- 显式项归约: 对 NQ 维度求和 (NQ 始终在最后一维) ---
+        dPenaldE_explicit_reduced = bm.sum(dPenaldE_explicit, axis=-1) # 单分辨率: (NC,) | 多分辨率: (NC, n_sub)
+
         # --- 总灵敏度 (关于刚度变量 E) ---
-        # 归约显式项 (NC, NQ) -> (NC, )
-        dPenaldE_explicit_reduced = bm.sum(dPenaldE_explicit, axis=1)
-        dPenaldE_total = dPenaldE_explicit_reduced + dPenaldE_implicit # (NC, )
+        if self._is_multiresolution:
+            dPenaldE_total = dPenaldE_explicit_reduced + dPenaldE_implicit[:, None]  # (NC, n_sub)
+        else:
+            dPenaldE_total = dPenaldE_explicit_reduced + dPenaldE_implicit  # (NC,)
+        # dPenaldE_total = dPenaldE_explicit_reduced + dPenaldE_implicit # 单分辨率: (NC,) | 多分辨率: (NC, n_sub)
 
         # --- 链式法则: dPenal/drho = dPenal/dE * dE/drho ---
         # 获取 dE/drho (取决于具体的插值模型)
         dE_drho_absolute = self._interpolation_scheme.interpolate_material_derivative(
                                                     material=self._material, 
                                                     rho_val=density
-                                                )  # (NC, )
+                                                )  # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
         E0 = self._material.youngs_modulus
-        dE_drho = dE_drho_absolute / E0
+        dE_drho = dE_drho_absolute / E0    # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
 
-        dP_drho = dPenaldE_total * dE_drho
+        dP_drho = dPenaldE_total * dE_drho # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
 
         # 计算主目标函数 (体积) 的梯度
-        dVol_drho = self._volume_objective.jac(density=density, state=state) # (NC, )
+        dVol_drho = self._volume_objective.jac(density=density, state=state) # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
 
         # 归一化处理
-        dP_drho_normalized = dP_drho / self._NC
+        dP_drho_normalized = dP_drho / self._NC  # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
 
         # 组装总拉格朗日函数的梯度 (关于物理密度 rho)
-        dJ_drho = dVol_drho + dP_drho_normalized # (NC, )
+        dJ_drho = dVol_drho + dP_drho_normalized # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
 
         return dJ_drho
     

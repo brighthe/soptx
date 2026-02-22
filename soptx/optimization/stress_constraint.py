@@ -33,6 +33,10 @@ class StressConstraint(BaseLogged):
         
         self._analyzer = analyzer
         self._stress_limit = stress_limit
+
+        self._interpolation_scheme = self._analyzer.interpolation_scheme
+        self._n_sub = self._interpolation_scheme.n_sub if self._interpolation_scheme.n_sub is not None else 1
+        self._is_multiresolution = (self._n_sub > 1)
         
     @property
     def analyzer(self) -> LagrangeFEMAnalyzer:
@@ -133,34 +137,49 @@ class StressConstraint(BaseLogged):
         disp_space = self._analyzer.tensor_space
         
         # --- 获取应变位移矩阵 B, 刚度矩阵 D, 和 von Mises 投影矩阵 M ---
-        B = self._analyzer.compute_strain_displacement_matrix(integration_order=1) # (NC, NQ, NS, LDOF)
+        # 单分辨率: (NC, NQ, NS, LDOF) | 多分辨率: (NC, n_sub, NQ, NS, LDOF)
+        B = self._analyzer.compute_strain_displacement_matrix(integration_order=1) 
         D = material.elastic_matrix()[0, 0]    # (NS, NS)
         M = material.von_mises_matrix()        # (NS, NS)
 
         # --- 计算 dVM / dSigma (von Mises 应力相对于 Cauchy 应力张量的导数)---  
-        stress_vector = state['stress_solid'] # (NC, NQ, NS)
-        vm_val = state['von_mises']           # (NC, NQ)
+        stress_vector = state['stress_solid'] # 单分辨率: (NC, NQ, NS) | 多分辨率: (NC, n_sub, NQ, NS)
+        vm_val = state['von_mises']           # 单分辨率: (NC, NQ)     | 多分辨率: (NC, n_sub, NQ)
         vm_safe = bm.where(vm_val < 1e-12, 1.0, vm_val)
 
-        M_sigma = bm.einsum('ij, cqj -> cqi', M, stress_vector) # (NC, NQ, NS)
+        if self._is_multiresolution:
+            # (NC, n_sub, NQ, NS)
+            M_sigma = bm.einsum('ij, csnj -> csni', M, stress_vector) 
+            dVM_dSigma = M_sigma / vm_safe[..., None]
 
-        dVM_dSigma = M_sigma / vm_safe[..., None] # (NC, NQ, NS)
+            term1_eps = bm.einsum('kl, csnk -> csnl', D, dVM_dSigma) # # (NC, n_sub, NQ, NS)
 
-        # --- 应力 -> 应变 ( D^T * dVM/dSigma ) ---
-        term1_eps = bm.einsum('kl, cqk -> cql', D, dVM_dSigma)
+            element_sens = bm.einsum('csnkl, csnk -> csnl', B, term1_eps) # (NC, n_sub, NQ, LDOF)
 
-        # --- 应变 -> 位移 ( B^T * term1_eps ) ---
-        element_sens = bm.einsum('cqkl, cqk -> cql', B, term1_eps) # (NC, NQ, LDOF)
+            weights = dPenaldVM[..., None]                      # (NC, n_sub, NQ, 1)
+            element_loads = -1.0 * element_sens * weights       # (NC, n_sub, NQ, LDOF)
+            element_loads = bm.sum(element_loads, axis=(1, 2))  # (NC, LDOF)
 
-        # --- 应用罚函数权重 dPenaldVM ---
-        weights = dPenaldVM[..., None] # (NC, NQ)
-        
-        # 单元级伴随载荷 (来自伴随方程定义 F_adj = - dP/dU)
-        element_loads = -1.0 * element_sens * weights # (NC, NQ, LDOF)
+        else:
+            # (NC, NQ, NS)
+            M_sigma = bm.einsum('ij, cqj -> cqi', M, stress_vector) 
+            dVM_dSigma = M_sigma / vm_safe[..., None]
 
-        # TODO 如果 NQ > 1 (多个积分点), 通常取平均或积分,
-        # 但对应力约束而言，通常是每个点一个约束.
-        element_loads = bm.sum(element_loads, axis=1) # (NC, LDOF)
+            # --- 应力 -> 应变 ( D^T * dVM/dSigma ) ---
+            term1_eps = bm.einsum('kl, cqk -> cql', D, dVM_dSigma) # (NC, NQ, NS)
+
+            # --- 应变 -> 位移 ( B^T * term1_eps ) ---
+            element_sens = bm.einsum('cqkl, cqk -> cql', B, term1_eps) # (NC, NQ, LDOF)
+
+            # --- 应用罚函数权重 dPenaldVM ---
+            weights = dPenaldVM[..., None] # (NC, NQ)
+            
+            # 单元级伴随载荷 (来自伴随方程定义 F_adj = - dP/dU)
+            element_loads = -1.0 * element_sens * weights # (NC, NQ, LDOF)
+
+            # TODO 如果 NQ > 1 (多个积分点), 通常取平均或积分,
+            # 但对应力约束而言，通常是每个点一个约束.
+            element_loads = bm.sum(element_loads, axis=1) # (NC, LDOF)
 
         # --- 全局组装 ---
         cell2dof = disp_space.cell_to_dof() # (NC, LDOF)

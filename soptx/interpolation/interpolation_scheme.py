@@ -9,53 +9,53 @@ from fealpy.mesh import HomogeneousMesh
 from .linear_elastic_material import LinearElasticMaterial
 from ..utils.base_logged import BaseLogged
 
-from dataclasses import dataclass
-@dataclass
-class DensityDistribution:
-    """
-    密度分布信息容器
+# from dataclasses import dataclass
+# @dataclass
+# class DensityDistribution:
+#     """
+#     密度分布信息容器
     
-    Attributes
-    ----------
-    function : Function
-        密度有限元函数
-    sub_density_element : int
-        子密度单元数
-    """
-    function: Function
-    sub_density_element: int
+#     Attributes
+#     ----------
+#     function : Function
+#         密度有限元函数
+#     sub_density_element : int
+#         子密度单元数
+#     """
+#     function: Function
+#     sub_density_element: int
     
-    def __call__(self, points):
-        """在给定点处插值密度"""
-        return self.function(points)
+#     def __call__(self, points):
+#         """在给定点处插值密度"""
+#         return self.function(points)
     
-    def update(self, design_variable):
-        """更新密度值"""
-        self.function[:] = design_variable
+#     def update(self, design_variable):
+#         """更新密度值"""
+#         self.function[:] = design_variable
 
-    def __getitem__(self, key):
-        """支持下标访问"""
-        return self.function[key]
+#     def __getitem__(self, key):
+#         """支持下标访问"""
+#         return self.function[key]
     
-    def __setitem__(self, key, value):
-        """支持下标赋值"""
-        self.function[key] = value
+#     def __setitem__(self, key, value):
+#         """支持下标赋值"""
+#         self.function[key] = value
     
-    @property
-    def array(self):
-        """返回密度数组"""
-        return self.function.array
+#     @property
+#     def array(self):
+#         """返回密度数组"""
+#         return self.function.array
 
-    @property
-    def shape(self):
-        """返回形状"""
-        return self.function.shape
+#     @property
+#     def shape(self):
+#         """返回形状"""
+#         return self.function.shape
 
 class MaterialInterpolationScheme(BaseLogged):
     """材料插值方案类"""
     def __init__(self,
                 density_location: Literal['element', 'element_multiresolution', 
-                                          'node', 'node_multiresolution'] = 'element',
+                                          'node', ] = 'element',
                 interpolation_method: Literal['simp', 'msimp', 'ramp'] = 'simp',
                 stress_interpolation_method: Literal['power_law'] = 'power_law',
                 options: Optional[dict] = None,
@@ -107,9 +107,7 @@ class MaterialInterpolationScheme(BaseLogged):
     @property
     def n_sub(self) -> int:
         """获取子密度单元数量（仅多分辨率时有效）"""
-        if not hasattr(self, '_n_sub'):
-            self._log_error("n_sub 未初始化，请确认当前 density_location 为多分辨率类型")
-        return self._n_sub
+        return getattr(self, '_n_sub', None)
     
     @property
     def penalty_factor(self) -> float:
@@ -224,36 +222,36 @@ class MaterialInterpolationScheme(BaseLogged):
 
         return design_variable, density_distribution
 
-    @setup_density_distribution.register('node_multiresolution')
-    def setup_density_distribution(self, 
-                            design_variable_mesh: HomogeneousMesh,
-                            displacement_mesh: HomogeneousMesh,
-                            relative_density: float = 1.0,
-                            sub_density_element: int = 4,
-                            integration_order: int = 3,
-                            **kwargs,
-                        ) -> Tuple[TensorLike, DensityDistribution]:
-        """
-        节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度节点处
+    # @setup_density_distribution.register('node_multiresolution')
+    # def setup_density_distribution(self, 
+    #                         design_variable_mesh: HomogeneousMesh,
+    #                         displacement_mesh: HomogeneousMesh,
+    #                         relative_density: float = 1.0,
+    #                         sub_density_element: int = 4,
+    #                         integration_order: int = 3,
+    #                         **kwargs,
+    #                     ) -> Tuple[TensorLike, DensityDistribution]:
+    #     """
+    #     节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度节点处
         
-        Returns
-        -------
-        design_variable : TensorLike (NN_design_variable, )
-        density_distribution : Function (NN_density, )
-        """
+    #     Returns
+    #     -------
+    #     design_variable : TensorLike (NN_design_variable, )
+    #     density_distribution : Function (NN_density, )
+    #     """
 
-        NN_design_variable = design_variable_mesh.number_of_nodes()
-        design_variable = bm.full((NN_design_variable, ), relative_density, 
-                                dtype=bm.float64, device=design_variable_mesh.device) # (NN_design_variable, )
+    #     NN_design_variable = design_variable_mesh.number_of_nodes()
+    #     design_variable = bm.full((NN_design_variable, ), relative_density, 
+    #                             dtype=bm.float64, device=design_variable_mesh.device) # (NN_design_variable, )
 
-        NN_density = displacement_mesh.number_of_nodes()
-        density_val = bm.full((NN_density, ), relative_density, dtype=bm.float64, device=displacement_mesh.device)
-        space = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
-        density_func = space.function(density_val) # (NN_density, )
+    #     NN_density = displacement_mesh.number_of_nodes()
+    #     density_val = bm.full((NN_density, ), relative_density, dtype=bm.float64, device=displacement_mesh.device)
+    #     space = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
+    #     density_func = space.function(density_val) # (NN_density, )
 
-        density_distribution = DensityDistribution(function=density_func, sub_density_element=sub_density_element)
+    #     density_distribution = DensityDistribution(function=density_func, sub_density_element=sub_density_element)
 
-        return design_variable, density_distribution
+    #     return design_variable, density_distribution
     
 
     @variantmethod('simp')
@@ -295,7 +293,7 @@ class MaterialInterpolationScheme(BaseLogged):
     @interpolate_material.register('msimp')
     def interpolate_material(self,
                     material: LinearElasticMaterial, 
-                    rho_val: Union[Function, TensorLike, DensityDistribution],
+                    rho_val: Union[Function, TensorLike],
                     integration_order: Optional[int] = None,
                     displacement_mesh: Optional[HomogeneousMesh] = None,
                 ) -> TensorLike:
@@ -339,9 +337,12 @@ class MaterialInterpolationScheme(BaseLogged):
             # rho_val.shape = (NC, n_sub)
             rho_interp = rho_val[:]
 
-        elif self._density_location in ['node_multiresolution']:
-            # rho_val.shape = (NN, )
-            pass
+        else:
+            raise NotImplementedError(f"Unknown density_location: {self._density_location}")
+
+        # elif self._density_location in ['node_multiresolution']:
+        #     # rho_val.shape = (NN, )
+        #     pass
 
         if 'E' in target_variables:
             p = self._options['penalty_factor']

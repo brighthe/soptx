@@ -221,7 +221,7 @@ class DensityTopOptTest(BaseLogged):
                                             enable_logging=False
                                         )
 
-        density_location = 'element_multiresolution' # element_multiresolution
+        density_location = 'element_multiresolution' # element, element_multiresolution
         interpolation_method = 'msimp'
         penalty_factor = 3.5
         void_youngs_modulus = 1e-9
