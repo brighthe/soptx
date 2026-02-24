@@ -281,7 +281,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 else:
                     F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
 
-
             # 分布载荷 (面力)
             elif load_type == 'distributed':
                 #TODO 支持节点载荷等效分布载荷的情况

@@ -4,7 +4,8 @@ from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
 from soptx.optimization.volume_objective import VolumeObjective
-from soptx.optimization.stress_constraint import StressConstraint 
+from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
+from soptx.optimization.apparent_stress_constaint import ApparentStressConstraint 
 from soptx.utils.base_logged import BaseLogged
 
 # 使用 TYPE_CHECKING 避免循环导入，仅用于类型提示
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 class AugmentedLagrangianObjective(BaseLogged):
     def __init__(self,
                 volume_objective: VolumeObjective, 
-                stress_constraint: StressConstraint,
+                stress_constraint: Union[VanishingStressConstraint, ApparentStressConstraint],
                 options: 'ALMMMAOptions',
                 initial_lambda: Optional[TensorLike] = None,
                 diff_mode: Literal["auto", "manual"] = "manual",
@@ -37,6 +38,8 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         self._volume_objective = volume_objective
         self._stress_constraint = stress_constraint
+
+        self._is_apparent = isinstance(stress_constraint, ApparentStressConstraint)
 
         self._options = options
 
@@ -129,6 +132,128 @@ class AugmentedLagrangianObjective(BaseLogged):
             self._log_error(error_msg)
 
     def _manual_differentiation(self, 
+                    density: Union[Function, TensorLike],
+                    state: Optional[dict] = None, 
+                    enable_timing: bool = False, 
+                    **kwargs
+                ) -> TensorLike:
+        if state is None:
+            state = {}
+        
+        # --- 缓存检查与状态同步 ---
+        if self._is_apparent:
+            if self._cache_g is None or 'stiffness_ratio' not in state:
+                self.fun(density, state)
+        else:
+            if self._cache_g is None or 'stiffness_ratio' not in state or 'stress_deviation' not in state:
+                self.fun(density, state)
+
+        # --- 获取缓存的物理量 ---
+        slim = self._stress_constraint._stress_limit
+        m_E = state['stiffness_ratio']  # 单分辨率: (NC,) | 多分辨率: (NC, n_sub)
+
+        g = self._cache_g             # 单分辨率/混合元: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
+        h = self._cache_h             # 单分辨率/混合元: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
+
+        # --- 确定激活集 (Mask) ---
+        # 当 g > -lambda/mu 时，约束激活（或违反），h = g
+        limit_term = -self.lamb / self.mu
+        mask = g > limit_term         # 单分辨率/混合元: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
+
+        # --- 计算 dPenaldVM (罚函数对 von Mises 应力的偏导数) ---
+        # 两种约束对 ∂g/∂σ^vM 的形式不同:
+        # - 位移元 (VanishingStressConstraint): ∂g/∂σ^vM = m_E(ρ) * (3ε² + 1) / σ_lim
+        # - 混合元 (ApparentStressConstraint):  ∂g/∂σ^vM = 1 / σ_lim (常数)
+        if self._is_apparent:
+            dhdVM_val = bm.ones_like(g) / slim    # (NC, NQ)
+        else:
+            s = state['stress_deviation']
+            if self._is_multiresolution:
+                dhdVM_val = m_E[:, :, None] * (3 * s**2 + 1) / slim  # (NC, n_sub, NQ)
+            else:
+                dhdVM_val = m_E[:, None] * (3 * s**2 + 1) / slim     # (NC, NQ)
+
+        dhdVM = bm.where(mask, dhdVM_val, 0.0)
+        dPenaldVM = (self.lamb + self.mu * h) * dhdVM
+
+        # --- 计算 dPenal/dm_E 的显式部分 ---
+        # 两种约束对 ∂g/∂m_E 的形式不同:
+        # - 位移元: ∂g/∂m_E = ε³ + ε
+        # - 混合元: ∂g/∂m_E = -(1 - ε)  (常数)
+        dgdm_E = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state)
+        dPenaldm_E_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdm_E, 0.0)
+
+        # --- 伴随法 ---
+        # 计算伴随载荷:
+        # - 位移元: F_adj 作用在位移自由度上, F_adj = -(∂σ^v/∂U)^T * dPenaldVM
+        # - 混合元: F_adj 作用在应力自由度上, F_adj = -(∂σ^v/∂Σ)^T * dPenaldVM
+        adjoint_load = self._stress_constraint.compute_adjoint_load(
+                                                    dPenaldVM=dPenaldVM, state=state)  # (gdofs,)
+
+        # 解伴随方程
+        # - 位移元: K * ψ = F_adj
+        # - 混合元: [A  B^T; B  0] * [λ_σ; λ_u] = [F_adj; 0] (复用正向分解)
+        adjoint_vector = self._analyzer.solve_adjoint(
+                                            rhs=adjoint_load, rho_val=density)  # (gdofs,)
+
+        # --- 计算隐式灵敏度项 ---
+        # - 位移元: ψ^T * (∂K/∂m_E) * U
+        # - 混合元: λ_σ^T * (∂A_σσ/∂ρ) * Σ  (内积，不含 ρ 的幂次系数)
+        dPenaldm_E_implicit = self._stress_constraint.compute_implicit_sensitivity_term(
+                                adjoint_vector, state)  # (NC,)
+
+        # --- 显式项归约: 对 NQ 维度求和 ---
+        dPenaldm_E_explicit_reduced = bm.sum(dPenaldm_E_explicit, axis=-1)
+        # 单分辨率/混合元: (NC,) | 多分辨率: (NC, n_sub)
+
+        # --- 链式法则: dPenal/dρ ---
+        # 最终灵敏度一般公式（适用于任意插值模型）:
+        #   dJ/dρ_e = ∂f/∂ρ_e + (1/N_e) * ∂P/∂ρ_e + m_E'(ρ)/m_E²(ρ) * (λ_σ^T A0 Σ)
+        #
+        # 两种框架的链式法则系数存在根本差异:
+        # - 位移元: A_σσ 不存在, 刚度 E = m_E * E0
+        #   显式项与隐式项均通过同一系数 dm_E/dρ 串联:
+        #   dP/dρ = (dP/dm_E) * dm_E/dρ
+        # - 混合元: A_σσ,e = (1/m_E) * A0,  ∂A/∂ρ = -m_E'(ρ)/m_E²(ρ) * A0
+        #   显式项通过 dm_E/dρ 串联
+        #   隐式项通过通用系数 m_E'(ρ)/m_E²(ρ) 串联（适用于任意插值模型）
+        dE_drho_absolute = self._interpolation_scheme.interpolate_material_derivative(
+                                material=self._material, rho_val=density)  # (NC,) 或 (NC*n_sub,)
+        E0 = self._material.youngs_modulus
+        dm_E_drho = dE_drho_absolute / E0  # p * ρ^(p-1), (NC,) 或 (NC*n_sub,)
+
+        if self._is_apparent:
+            # 混合元: 显式项与隐式项系数分开处理
+            # 显式项: (∂P/∂m_E) * m_E'(ρ)
+            dP_drho_explicit = dPenaldm_E_explicit_reduced * dm_E_drho  # (NC,)
+
+            # 隐式项系数: m_E'(ρ) / m_E²(ρ)  —— 适用于任意插值模型
+            coeff_implicit = dm_E_drho / m_E**2                         # (NC,)
+            dP_drho_implicit = coeff_implicit * dPenaldm_E_implicit     # (NC,)
+
+            dP_drho = dP_drho_explicit + dP_drho_implicit               # (NC,)
+
+        else:
+            # 位移元: 显式项与隐式项共享同一个 dE/dρ
+            if self._is_multiresolution:
+                dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit[:, None]  # (NC, n_sub)
+            else:
+                dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit           # (NC,)
+
+            dP_drho = dPenaldm_E_total * dm_E_drho  # (NC,) 或 (NC*n_sub,)
+
+        # --- 体积目标函数梯度 ---
+        dVol_drho = self._volume_objective.jac(
+                        density=density, state=state)  # (NC,) 或 (NC*n_sub,)
+
+        # --- 归一化并组装总梯度 ---
+        dP_drho_normalized = dP_drho / self._NC
+
+        dJ_drho = dVol_drho + dP_drho_normalized  # (NC,) 或 (NC*n_sub,)
+
+        return dJ_drho
+
+    def _manual_differentiation_backup(self, 
                         density: Union[Function, TensorLike],
                         state: Optional[dict] = None, 
                         enable_timing: bool = False, 

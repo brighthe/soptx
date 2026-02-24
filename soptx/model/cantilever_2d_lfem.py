@@ -244,9 +244,9 @@ class Cantilever2d(PDEBase):
         return self._nu
     
     @property
-    def p(self) -> float:
+    def P(self) -> float:
         """获取点力"""
-        return self._p
+        return self._P
 
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:

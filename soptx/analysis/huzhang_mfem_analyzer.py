@@ -81,6 +81,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._lambda0_rho = None
         self._lambda1_rho = None
 
+        self._cached_K = None  # 缓存施加边界条件后的刚度矩阵，供伴随求解复用
+        self._cached_Ae0 = None  # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
+
 
     ##############################################################################################
     # 属性相关函数
@@ -302,7 +305,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return F_body
     
-    def assemble_displacement_bc_vector_backup(self, enable_timing: bool = False):
+    def assemble_displacement_bc_vector(self, enable_timing: bool = False):
         """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D
         
         当前所有位移边界均为齐次边界条件 (u_D = 0), 故直接返回零向量.
@@ -412,6 +415,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         else:
             K, F = K0, F0
 
+        self._cached_K = K
+
         if enable_timing:
             t.send('本质边界条件处理时间')
 
@@ -451,72 +456,80 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                     **kwargs
                 ) -> TensorLike:
         """
-        求解伴随方程 K @ λ = rhs
+        求解伴随方程，复用正向求解的矩阵分解.
         
+        伴随方程结构:
+            [A  B^T] [λ_σ]   [dP/dΣ]
+            [B  0  ] [λ_u] = [  0  ]
+        
+        左端矩阵与正向问题完全相同，直接复用 solve_state 中缓存的 K.
+
         Parameters
         ----------
-        rhs : (n_gdof,) 或 (n_gdof, n_rhs) 伴随载荷向量 (支持批量求解)
-        rho_val : 密度场
+        rhs : (gdofs_stress,)
+            仅包含应力自由度部分的伴随载荷向量，
+            由 ApparentStressConstraint.compute_adjoint_load 计算得到.
+        rho_val : 密度场（仅在缓存失效时重新组装矩阵时使用）
         
         Returns
         -------
-        adjoint_lambda : (n_gdof, n_rhs) 伴随变量
+        adjoint_lambda : (gdofs_total,)
+            完整伴随变量向量，前 gdofs_stress 个分量为 λ_σ.
         """
-        # 组装刚度矩阵
-        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-
-        # 施加齐次本质边界条件
         space_sigma = self._huzhang_space
-        pde = self._pde
-        
         gdof_sigma = space_sigma.number_of_global_dofs()
-        gdof_total = K0.shape[0]
 
-        # 根据网格设置点载荷作用区域
-        if hasattr(pde, 'set_load_region'):
-            pde.set_load_region(self._mesh)
+        # --- 构造全局 RHS: 应力部分来自伴随载荷，位移部分严格为零 ---
+        if self._cached_K is not None:
+            gdof_total = self._cached_K.shape[0]
+        else:
+            # 缓存失效时重新组装（正常流程不应走到这里）
+            self._log_warning("solve_adjoint: 未找到缓存的刚度矩阵，重新组装.")
+            K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+            gdof_total = K0.shape[0]
 
-        # 获取边界自由度位置
-        gd_traction = pde.traction_bc
+        rhs_full = bm.zeros(gdof_total, dtype=bm.float64)
+        rhs_full = bm.set_at(rhs_full, slice(0, gdof_sigma), rhs)
+
+        # --- 施加齐次边界条件：边界应力自由度上的伴随载荷置零 ---
+        if hasattr(self._pde, 'set_load_region'):
+            self._pde.set_load_region(self._mesh)
+
+        gd_traction = self._pde.traction_bc
         _, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
 
-        # 扩展到全局自由度
         is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
         is_fixed_dof[:gdof_sigma] = is_bd_dof
+        rhs_full = bm.set_at(rhs_full, is_fixed_dof, 0.0)
 
-        # 齐次边界条件：载荷在边界自由度上置零
-        rhs = bm.set_at(rhs, is_fixed_dof, 0.0)
+        # --- 复用缓存的矩阵求解 ---
+        if self._cached_K is not None:
+            K = self._cached_K
+        else:
+            fixed_idx = bm.zeros(gdof_total, dtype=bm.int32)
+            fixed_idx[is_fixed_dof] = 1
+            I_bd = spdiags(fixed_idx, 0, gdof_total, gdof_total)
+            I_in = spdiags(1 - fixed_idx, 0, gdof_total, gdof_total)
+            K = I_in @ K0 @ I_in + I_bd
 
-        # 修改矩阵：行列清零，对角置 1
-        fixed_idx = bm.zeros(gdof_total, dtype=bm.int32)
-        fixed_idx[is_fixed_dof] = 1
-        
-        I_bd = spdiags(fixed_idx, 0, gdof_total, gdof_total)
-        I_in = spdiags(1 - fixed_idx, 0, gdof_total, gdof_total)
-        
-        K = I_in @ K0 @ I_in + I_bd
+        adjoint_lambda = bm.zeros_like(rhs_full)
 
-        # 初始化结果
-        adjoint_lambda = bm.zeros_like(rhs)
-        
-        # 求解
         solver_type = kwargs.get('solver', self._solve_method)
-        
+
         if solver_type in ['mumps', 'scipy']:
             from fealpy.solver import spsolve
-            adjoint_lambda[:] = spsolve(K, rhs, solver=solver_type)
-            
+            adjoint_lambda[:] = spsolve(K, rhs_full, solver=solver_type)
+
         elif solver_type in ['cg']:
             from fealpy.solver import cg
             maxiter = kwargs.get('maxiter', 5000)
             atol = kwargs.get('atol', 1e-12)
             rtol = kwargs.get('rtol', 1e-12)
-            
-            adjoint_lambda[:], _ = cg(K.tocoo(), rhs, 
+            adjoint_lambda[:], _ = cg(K.tocoo(), rhs_full,
                                     batch_first=False,
-                                    atol=atol, rtol=rtol, 
+                                    atol=atol, rtol=rtol,
                                     maxit=maxiter, returninfo=True)
-        
+
         return adjoint_lambda
     
     def compute_stress_state(self, 
@@ -536,40 +549,26 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         Returns
         -------
         dict : 包含以下键值：
-            - 'stress_solid': 实体应力 (NC, NQ, NS) 或 (NC, n_sub, NQ, NS)
-            - 'von_mises': von Mises 等效应力 (NC, NQ) 或 (NC, n_sub, NQ)
-            - 'von_mises_max': 每个单元的最大 von Mises 应力 (NC,)
+            - 'stress_apparent': 积分点处的表观应力张量 (NC, n_sub, NQ, NS)
         """
         if integration_order is None:
-            # integration_order = self._integration_order
-            # TODO 测试
             integration_order = 1
-        
+
         if state is None:
-            state = self.solve_state(rho_val=rho_val)
+            state = {}
+
+        if 'stress' not in state:
+            state.update(self.solve_state(rho_val=rho_val))
         
         stress_dof = state['stress']  
         
-        #TODO 转换为积分点应力
+        # 将应力自由度转换为积分点处的表观应力
         stress_at_quad = self.extract_stress_at_quadrature_points(
                                                         stress_dof=stress_dof, 
                                                         integration_order=integration_order
                                                     )  # (NC, NQ, NS)
         
-        result = {'stress_solid': stress_at_quad}
-        
-        # 计算 von Mises 应力
-        von_mises = self._material.calculate_von_mises_stress(stress_vector=stress_at_quad)
-        result['von_mises'] = von_mises
-        
-        if von_mises.ndim == 2:
-            von_mises_max = bm.max(von_mises, axis=1)
-        elif von_mises.ndim == 3:
-            von_mises_max = bm.max(von_mises.reshape(von_mises.shape[0], -1), axis=1)
-        else:
-            self._log_error(f"意外的 von Mises 应力维度: {von_mises.ndim}")
-        
-        result['von_mises_max'] = von_mises_max
+        result = {'stress_apparent': stress_at_quad}
         
         return result
 
@@ -679,6 +678,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             raise NotImplementedError("仅支持二维问题的应力分量重排")
         
         return stress_vector
+    
+    def compute_solid_stress_matrix(self):
+        """计算实体材料（ρ=1）的单元局部柔度矩阵 A_σσ^(0)"""
+
+        Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space)  # (NC, LDOF, LDOF)
+
+        self._cached_Ae0 = Ae0
+
+        return Ae0
 
 
     ##############################################################################################
@@ -744,7 +752,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         return CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
     
 
-    def assemble_displacement_bc_vector(self, enable_timing: bool = False):
+    def assemble_displacement_bc_vector_backup(self, enable_timing: bool = False):
         """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D"""
         t = None
         if enable_timing:

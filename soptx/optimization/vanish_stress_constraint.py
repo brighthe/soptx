@@ -1,12 +1,11 @@
-from typing import Optional, Dict, Union
+from typing import Optional, Dict
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 
 from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
-from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.utils.base_logged import BaseLogged
 
-class StressConstraint(BaseLogged):
+class VanishingStressConstraint(BaseLogged):
     """
     局部应力约束计算器 (Aggregation-free)
 
@@ -23,7 +22,7 @@ class StressConstraint(BaseLogged):
         材料的应力极限 σ_lim (许用应力).
     """
     def __init__(self,
-                analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
+                analyzer: LagrangeFEMAnalyzer,
                 stress_limit: float,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
@@ -96,11 +95,11 @@ class StressConstraint(BaseLogged):
         """预留接口: 约束函数关于密度的完整梯度 (未实现)"""
         pass
 
-    def compute_partial_gradient_wrt_stiffness(self, state: Dict) -> TensorLike:
-        """计算约束关于相对刚度的偏导数 ∂g/∂E.
+    def compute_partial_gradient_wrt_mE(self, state: Dict) -> TensorLike:
+        """计算约束关于相对刚度的偏导数 ∂g/∂m_E.
 
-        由 g_j = E_j · (ε_j³ + ε_j), 对 E_j 求偏导 (ε_j 不显式依赖于 E_j):
-            ∂g_j / ∂E_j = ε_j³ + ε_j"""
+        由 g_j = m_E(ρ_j) · (ε_j³ + ε_j), 对 m_E 求偏导 (ε_j 不显式依赖于 m_E):
+            ∂g_j / ∂m_E = ε_j³ + ε_j"""
         s = state['stress_deviation']
 
         return s**3 + s

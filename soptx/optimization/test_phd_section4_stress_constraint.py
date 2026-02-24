@@ -223,7 +223,7 @@ class DensityTopOptTest(BaseLogged):
                                             enable_logging=False
                                         )
 
-        density_location = 'element_multiresolution' # element, element_multiresolution
+        density_location = 'element' # element, element_multiresolution
         interpolation_method = 'msimp'
         penalty_factor = 3.5
         void_youngs_modulus = 1e-9
@@ -262,7 +262,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -384,9 +384,8 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec4_6_5_cantilever_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-
         domain = [0, 80, 0, 40]
-        rmin = 2.5
+        rmin = 3.5
         P = -400.0
 
         E, nu = 7e4, 0.25
@@ -400,6 +399,7 @@ class DensityTopOptTest(BaseLogged):
                     domain=domain,
                     P=P, 
                     E=E, nu=nu,
+                    load_width=6,
                     plane_type=plane_type,
                 )
         
@@ -458,7 +458,6 @@ class DensityTopOptTest(BaseLogged):
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
         solve_method = 'mumps'
-
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         analyzer = LagrangeFEMAnalyzer(
                                 disp_mesh=displacement_mesh,
@@ -475,7 +474,7 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.volume_objective import VolumeObjective
         objective = VolumeObjective(analyzer=analyzer)
 
-        stress_limit = 100.0
+        stress_limit = 180.0
         from soptx.optimization.stress_constraint import StressConstraint
         constraint = StressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
@@ -547,7 +546,7 @@ class DensityTopOptTest(BaseLogged):
 
         post = StressPostProcessor(
                     analyzer=analyzer,
-                    stress_limit=100.0,         # 对应 fem.SLim
+                    stress_limit=stress_limit,         # 对应 fem.SLim
                     solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
                     constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
                 )
@@ -561,8 +560,6 @@ class DensityTopOptTest(BaseLogged):
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec4_6_5_cantilever_2d")
         save_path.mkdir(parents=True, exist_ok=True)    
-
-        # save_history_data(history=history, save_path=str(save_path/'json'), label='manual')
 
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 

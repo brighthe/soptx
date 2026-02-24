@@ -23,7 +23,7 @@ class Cantilever2d(PDEBase):
     def __init__(self,
                 domain: List[float] = [0, 80, 0, 40], 
                 mesh_type: str = 'uniform_quad',
-                p: float = -1.0,   # N，向下为负
+                P: float = -1.0,   # N，向下为负
                 E: float = 1.0,    # MPa
                 nu: float = 0.3,  
                 plane_type: str = 'plane_stress',  # 'plane_stress' or 'plane_strain'
@@ -33,12 +33,12 @@ class Cantilever2d(PDEBase):
         super().__init__(domain=domain, mesh_type=mesh_type, 
                 enable_logging=enable_logging, logger_name=logger_name)
 
-        self._p = p
+        self._P = P
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
         self._eps = 1e-8        
-        self._load_type = 'concentrated'
+        self._load_type = 'distributed'
         self._boundary_type = 'mixed'
 
         # 点载荷作用区域的半宽度 (需要根据网格尺寸调整)
@@ -55,9 +55,9 @@ class Cantilever2d(PDEBase):
         return self._nu
     
     @property
-    def p(self) -> float:
+    def P(self) -> float:
         """获取集中力"""
-        return self._p
+        return self._P
     
     @variantmethod('uniform_quad')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
@@ -178,7 +178,7 @@ class Cantilever2d(PDEBase):
         
         # 计算等效牵引力强度
         load_region_width = 2 * self._load_region_half_width
-        self._t = self._p / load_region_width  # N/mm
+        self._t = self._P / load_region_width  # N/mm
     
     @cartesian
     def is_traction_boundary(self, points: TensorLike) -> TensorLike:

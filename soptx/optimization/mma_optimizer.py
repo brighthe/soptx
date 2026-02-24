@@ -10,7 +10,7 @@ from fealpy.functionspace import Function
 from soptx.optimization.compliant_mechanism_objective import CompliantMechanismObjective
 from soptx.optimization.compliance_objective import ComplianceObjective
 from soptx.optimization.volume_constraint import VolumeConstraint
-from soptx.optimization.stress_constraint import StressConstraint
+from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
 from soptx.optimization.tools import OptimizationHistory
 from soptx.optimization.utils import solve_mma_subproblem
 from soptx.regularization.filter import Filter

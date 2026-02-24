@@ -298,10 +298,6 @@ class MaterialInterpolationScheme(BaseLogged):
         else:
             raise NotImplementedError(f"Unknown density_location: {self._density_location}")
 
-        # elif self._density_location in ['node_multiresolution']:
-        #     # rho_val.shape = (NN, )
-        #     pass
-
         if 'E' in target_variables:
             p = self._options['penalty_factor']
             E0 = material.youngs_modulus

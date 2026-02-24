@@ -373,7 +373,6 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         - 2D: [sigma_xx, sigma_yy, tau_xy]
         - 3D: [sigma_xx, sigma_yy, sigma_zz, tau_xy, tau_yz, tau_zx]
         """
-        kwargs = bm.context(self.D)
         if self._plane_type == '3d':
             M = bm.tensor([
                         [ 1.0, -0.5, -0.5,  0.0,  0.0,  0.0],
@@ -382,7 +381,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                         [ 0.0,  0.0,  0.0,  3.0,  0.0,  0.0],
                         [ 0.0,  0.0,  0.0,  0.0,  3.0,  0.0],
                         [ 0.0,  0.0,  0.0,  0.0,  0.0,  3.0]
-                    ], **kwargs)
+                    ], dtype=bm.float64, device=self.device)
             
             return M 
         
@@ -391,7 +390,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                         [ 1.0, -0.5,  0.0],
                         [-0.5,  1.0,  0.0],
                         [ 0.0,  0.0,  3.0]
-                    ], **kwargs)
+                    ], dtype=bm.float64, device=self.device)
             
             return M 
 
@@ -403,7 +402,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
                         [val_diag, val_off,  0.0],
                         [val_off,  val_diag, 0.0],
                         [0.0,      0.0,      3.0]
-                    ], **kwargs)
+                    ], dtype=bm.float64, device=self.device)
             
             return M
 
