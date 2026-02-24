@@ -1,55 +1,13 @@
 from typing import Optional, Dict, Any, Literal, List, Union
 
 from fealpy.backend import backend_manager as bm
-from fealpy.decorator import variantmethod, cartesian
+from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike, Tuple
 from fealpy.functionspace import Function, LagrangeFESpace
 from fealpy.mesh import HomogeneousMesh
 
 from .linear_elastic_material import LinearElasticMaterial
 from ..utils.base_logged import BaseLogged
-
-# from dataclasses import dataclass
-# @dataclass
-# class DensityDistribution:
-#     """
-#     密度分布信息容器
-    
-#     Attributes
-#     ----------
-#     function : Function
-#         密度有限元函数
-#     sub_density_element : int
-#         子密度单元数
-#     """
-#     function: Function
-#     sub_density_element: int
-    
-#     def __call__(self, points):
-#         """在给定点处插值密度"""
-#         return self.function(points)
-    
-#     def update(self, design_variable):
-#         """更新密度值"""
-#         self.function[:] = design_variable
-
-#     def __getitem__(self, key):
-#         """支持下标访问"""
-#         return self.function[key]
-    
-#     def __setitem__(self, key, value):
-#         """支持下标赋值"""
-#         self.function[key] = value
-    
-#     @property
-#     def array(self):
-#         """返回密度数组"""
-#         return self.function.array
-
-#     @property
-#     def shape(self):
-#         """返回形状"""
-#         return self.function.shape
 
 class MaterialInterpolationScheme(BaseLogged):
     """材料插值方案类"""

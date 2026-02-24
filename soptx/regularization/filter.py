@@ -34,6 +34,7 @@ class Filter(BaseLogged):
                 filter_type: Literal['none', 'sensitivity', 'density', 'projection'],
                 rmin: Optional[float] = None,
                 density_location: Optional[str] = None,
+                disp_mesh: Optional[HomogeneousMesh] = None, 
                 projection_params: Optional[Dict] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
@@ -41,20 +42,23 @@ class Filter(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
-        self._mesh = design_mesh
+        self._design_mesh = design_mesh
         self._filter_type = filter_type
+
         self._rmin = rmin
         self._density_location = density_location
+
+        self._disp_mesh = disp_mesh
 
         # 1. 构建过滤矩阵
         if self._filter_type != 'none' and self._rmin is not None and self._rmin > 0:
             builder = FilterMatrixBuilder(
-                                    mesh=self._mesh, 
+                                    mesh=self._design_mesh, 
                                     rmin=self._rmin, 
                                     density_location=self._density_location,
                                 )
             self._H = builder.build()
-            self._cell_measure = self._mesh.entity_measure('cell')
+            self._cell_measure = self._design_mesh.entity_measure('cell')
 
         else:
             self._H = None
@@ -72,19 +76,14 @@ class Filter(BaseLogged):
 
         strategy_params = {
                             'H': self._H,
-                            'mesh': self._mesh,
+                            'design_mesh': self._design_mesh,
                             'density_location': self._density_location,
+                            'disp_mesh': self._disp_mesh, 
                             'enable_logging': enable_logging, 
                             'logger_name': logger_name
                         }
         
         if self._filter_type == 'projection':
-            # proj_defaults = {
-            #                 'projection_type': 'exponential',
-            #                 'beta': 1.0,
-            #                 'beta_max': 512.0,
-            #                 'continuation_iter': 50,
-            #             }
             proj_defaults = {
                 'projection_type'       : 'exponential',
                 'beta'                  : 1.0,
@@ -102,11 +101,6 @@ class Filter(BaseLogged):
         
         # 实例化策略
         self._strategy: _FilterStrategy = strategy_class(**strategy_params)
-
-    @property
-    def design_mesh(self) -> HomogeneousMesh:
-        """获取设计变量网格对象"""
-        return self._mesh
 
     @property
     def beta(self) -> Optional[float]:

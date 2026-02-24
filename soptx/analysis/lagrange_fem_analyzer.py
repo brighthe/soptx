@@ -701,33 +701,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                             )  # (NC, NQ, NS, TLDOF)
             
         elif density_location in ['element_multiresolution']:
-            n_sub = self._interpolation_scheme.n_sub
-            nx_u, ny_u = self._mesh.meshdata['nx'], self._mesh.meshdata['ny']
-            hx_u, hy_u = self._mesh.meshdata['hx'], self._mesh.meshdata['hy']
-            cell_centers = self._mesh.entity_barycenter('cell')  # (NC, 2)
-            eps = 1e-10
-            cols = bm.floor(cell_centers[:, 0] / hx_u + eps).astype(int)
-            rows = bm.floor(cell_centers[:, 1] / hy_u + eps).astype(int)
-            cell_positions = bm.stack([cols, rows], axis=1)  # (NC, 2)
-            
             from soptx.analysis.utils import calculate_multiresolution_gphi_eg, reshape_multiresolution_data_inverse
+            n_sub = self._interpolation_scheme.n_sub
             gphi_eg_reshaped = calculate_multiresolution_gphi_eg(
-                                                        s_space_u=self._scalar_space,
-                                                        q=integration_order,
-                                                        n_sub=n_sub
-                                                    )  # (NC*n_sub, NQ, LDOF, GD)
-            
+                                        s_space_u=self._scalar_space,
+                                        q=integration_order,
+                                        n_sub=n_sub
+                                    )  # (NC*n_sub, NQ, LDOF, GD)
             B_reshaped = self._material.strain_displacement_matrix(
-                                                        dof_priority=self._tensor_space.dof_priority, 
-                                                        gphi=gphi_eg_reshaped
-                                                    )  # (NC*n_sub, NQ, NS, TLDOF)
-                                                    
+                                            dof_priority=self._tensor_space.dof_priority, 
+                                            gphi=gphi_eg_reshaped
+                                        )  # (NC*n_sub, NQ, NS, TLDOF)
             B = reshape_multiresolution_data_inverse(
-                            nx=nx_u, ny=ny_u, 
+                            mesh=self._mesh,
                             data_flat=B_reshaped, 
-                            n_sub=n_sub,
-                            cell_positions=cell_positions
-                        ) # (NC, n_sub, NQ, NS, TLDOF)
+                            n_sub=n_sub
+                        )  # (NC, n_sub, NQ, NS, TLDOF)
             
         else:
             self._log_error(f"不支持的密度位置类型: {density_location}")

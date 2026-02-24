@@ -86,6 +86,26 @@ class ALMMMAOptimizer(MMAOptimizer):
         self._asym_inc_dynamic = self.options.asymp_incr
         self._asym_decr_dynamic = self.options.asymp_decr
 
+    def _update_penalty(self, iter_idx: int) -> None:
+        """重写父类的连续化技术：自动捕获插值方案中的目标惩罚因子作为上限"""
+        if not self.options.use_penalty_continuation:
+            return
+        
+        interpolation_scheme = self._al_objective._analyzer.interpolation_scheme
+        
+        # 第一次调用时，把用户初始设置的 penalty_factor 保存为目标上限
+        if not hasattr(self, '_target_penalty'):
+            self._target_penalty = interpolation_scheme.penalty_factor
+            self._log_info(f"开启惩罚延续策略: 目标最大惩罚因子捕获为 {self._target_penalty}")
+        
+        # 按全局迭代步数计算当前的惩罚因子
+        penalty_update = iter_idx // 30
+        current_penalty = min(1.0 + penalty_update * 0.5, self._target_penalty)
+        
+        # 将更新后的惩罚因子写回插值方案中
+        if current_penalty != interpolation_scheme.penalty_factor:
+            interpolation_scheme.penalty_factor = current_penalty
+
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
@@ -107,11 +127,8 @@ class ALMMMAOptimizer(MMAOptimizer):
         else:
             dv = bm.copy(design_variable[:])
         
-        # from soptx.interpolation.interpolation_scheme import DensityDistribution
         if isinstance(density_distribution, Function):
             rho = density_distribution.space.function(bm.copy(density_distribution[:]))
-        # elif isinstance(density_distribution, DensityDistribution):
-        #     rho = density_distribution
         else:
             rho = bm.copy(density_distribution[:])
 
@@ -143,6 +160,11 @@ class ALMMMAOptimizer(MMAOptimizer):
             self._epoch = al_iter + 1
 
             change = 2 * opts.change_tolerance
+
+            # 初始化为一个远大于 1.0+TolS 的“魔法数字”（防守型编程）
+            # 作用：作为逻辑屏障，人为伪造一个“结构严重超载”的初始假象。
+            # 这能强制逼迫内层 MMA 循环去调用有限元求解器计算真实应力，
+            # 绝对防止在获取真实应力数据前意外触发底部的全局收敛条件（避免过早假收敛）。
             max_stress_measure = 2.0 
             
             # =====================================================================
@@ -150,6 +172,10 @@ class ALMMMAOptimizer(MMAOptimizer):
             # =====================================================================
             for mma_iter in range(opts.mma_iters_per_al):
                 start_time = time()
+
+                # --- 惩罚因子更新 (基于全局迭代步数) ---
+                self._update_penalty(iter_idx=global_iter)
+                current_penalty = analyzer.interpolation_scheme.penalty_factor
 
                 global_iter += 1
                 
@@ -229,8 +255,9 @@ class ALMMMAOptimizer(MMAOptimizer):
                         f"Obj: {volfrac:.6f} "
                         f"Max_VM: {max_vm_stress:.6f} "
                         f"|dJ|: {dJ_norm:.6f} "
-                        f"Ch/Tol: {change/opts.change_tolerance:.6f}"
-                        f"mu: {self._al_objective.mu:.4e}"
+                        f"Ch/Tol: {change/opts.change_tolerance:.6f} "
+                        f"mu: {self._al_objective.mu:.4e} "
+                        f"p: {current_penalty:.1f} "
                     )
                 
                 # 调用确切的 log_iteration 接口保存历史数据
@@ -250,8 +277,8 @@ class ALMMMAOptimizer(MMAOptimizer):
 
                 # 内层收敛判定: 变化率达标 且 最大应力满足 (1 + TolS)
                 if change <= opts.change_tolerance and max_vm_stress <= 1.0 + opts.stress_tolerance:
-                    break # 跳出内层循环，进入 ALM 更新
-            
+                        break # 跳出内层循环，进入 ALM 更新      
+
             # =====================================================================
             # ALM 乘子与惩罚参数更新 (外层更新)
             # =====================================================================
@@ -283,9 +310,13 @@ class ALMMMAOptimizer(MMAOptimizer):
             # =====================================================================
             # 全局收敛判定
             # =====================================================================
+            # 将内层计算出的最新最大应力赋值给外层判定变量
+            max_stress_measure = max_vm_stress
+
             if change <= opts.change_tolerance and max_stress_measure <= 1.0 + opts.stress_tolerance:
-                self._log_info(f"ALM Optimization converged perfectly at global iteration {global_iter}.")
-                break
+                if not opts.use_penalty_continuation or current_penalty >= self._target_penalty:
+                    self._log_info(f"ALM Optimization converged perfectly at global iteration {global_iter} with p={current_penalty:.1f}.")
+                    break
                 
         return rho_phys, self.history
     

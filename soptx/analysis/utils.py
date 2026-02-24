@@ -191,90 +191,83 @@ def calculate_multiresolution_gphi_eg(
         gphi_eg[:, s_idx, :, :, :] = gphi_sub
 
     # 展平为 (NC*n_sub, ...) 的多分辨率布局 
-    nx_u, ny_u = mesh_u.meshdata["nx"], mesh_u.meshdata["ny"]
-    gphi_eg_reshaped = reshape_multiresolution_data(nx=nx_u, ny=ny_u, data=gphi_eg)  # (NC*n_sub, NQ, LDOF, GD)
+    gphi_eg_reshaped = reshape_multiresolution_data(mesh=mesh_u, data=gphi_eg)  # (NC*n_sub, NQ, LDOF, GD)
 
     return gphi_eg_reshaped
 
-def reshape_multiresolution_data(nx: int, ny: int, 
-                                data: TensorLike,
-                                cell_positions: Optional[TensorLike] = None
-                            ) -> TensorLike:
+def reshape_multiresolution_data(mesh, data: TensorLike) -> TensorLike:
     """
     Parameters:
     -----------
-    nx, ny   : 位移单元在 x、y 方向的数量（完整矩形网格尺寸，仅用于确定 sub_dim 等）
+    mesh     : 位移网格对象
     data     : (NC, n_sub, ...)
-    cell_positions : (NC, 2)，每个实际单元在完整矩形网格中的 (col, row) 坐标，
-                     即 col ∈ [0, nx), row ∈ [0, ny)
-                     若为 None, 则退化为完整矩形网格
+
+    Returns:
+    --------
+    data_reordered : (NC * n_sub, ...)
     """
     original_shape = data.shape
     NC, n_sub = original_shape[0], original_shape[1]
     extra_dims = original_shape[2:]
     sub_dim = int(bm.sqrt(n_sub))
 
-    if cell_positions is None:
-        # 完整矩形网格：生成默认 (col, row) 坐标，列优先编号
+    nx = mesh.meshdata['nx']
+    ny = mesh.meshdata['ny']
+
+    is_full_rect = (NC == nx * ny)
+
+    if is_full_rect:
+        # 完整矩形网格：直接按列优先编号生成 col/row，无需计算 cell_centers
         cols = bm.arange(NC) // ny
         rows = bm.arange(NC) % ny
+        pos_to_local = None  # 完整矩形无需查找表
     else:
-        cols = cell_positions[:, 0]  # (NC,)
-        rows = cell_positions[:, 1]  # (NC,)
+        # 非完整区域（如 L 型）：需要从几何位置计算 cell_positions
+        hx = mesh.meshdata['hx']
+        hy = mesh.meshdata['hy']
+        cell_centers = mesh.entity_barycenter('cell')  # (NC, 2)
+        eps = 1e-10
+        cols = bm.floor(cell_centers[:, 0] / hx + eps).astype(int)
+        rows = bm.floor(cell_centers[:, 1] / hy + eps).astype(int)
+        pos_to_local = {}
+        for c in range(NC):
+            pos_to_local[(int(cols[c]), int(rows[c]))] = c
 
-    # 构建从 (col, row) 到实际单元局部索引 c 的查找表
-    pos_to_local = {}
-    for c in range(NC):
-        key = (int(cols[c]), int(rows[c]))
-        pos_to_local[key] = c
-
-    # 按密度单元的空间顺序生成重排索引
     reorder_indices = []
     for pos_col in range(nx):
         for sub_row in range(sub_dim):
             for pos_row in range(ny):
-                key = (pos_col, pos_row)
-                if key not in pos_to_local:
-                    continue  # L 型区域中不存在的单元，跳过
-                c = pos_to_local[key]
-                for sub_col in range(sub_dim):
-                    s = sub_row * sub_dim + sub_col
-                    data_idx = c * n_sub + s
-                    reorder_indices.append(data_idx)
+                if is_full_rect:
+                    c = pos_col * ny + pos_row
+                    for sub_col in range(sub_dim):
+                        reorder_indices.append(c * n_sub + sub_row * sub_dim + sub_col)
+                else:
+                    key = (pos_col, pos_row)
+                    if key not in pos_to_local:
+                        continue
+                    c = pos_to_local[key]
+                    for sub_col in range(sub_dim):
+                        reorder_indices.append(c * n_sub + sub_row * sub_dim + sub_col)
 
     reorder_indices = bm.array(reorder_indices)
 
-    # 验证重排索引数量与数据规模一致
     assert len(reorder_indices) == NC * n_sub, (
         f"重排索引数量 {len(reorder_indices)} 与预期 {NC * n_sub} 不符，"
-        f"请检查 cell_positions 是否正确（可能存在浮点精度问题）"
+        f"请检查网格数据是否正确（可能存在浮点精度问题）"
     )
 
-    # 重塑数据：(NC, n_sub, ...) -> (NC * n_sub, ...)
     data_reshaped = data.reshape(NC * n_sub, *extra_dims)
+    return data_reshaped[reorder_indices]
 
-    # 按照空间位置重排
-    data_reordered = data_reshaped[reorder_indices]
-
-    return data_reordered
-
-def reshape_multiresolution_data_inverse(nx: int, ny: int, 
-                                         data_flat: TensorLike, 
-                                         n_sub: int,
-                                         cell_positions: Optional[TensorLike] = None) -> TensorLike:
+def reshape_multiresolution_data_inverse(mesh, data_flat: TensorLike, n_sub: int) -> TensorLike:
     """
-    将多分辨率数据从密度单元布局映射到位移单元布局
-
-    将 (NC*n_sub, ...) 形状的数据重新排列为 (NC, n_sub, ...) 形状,
-    其中数据按照空间位置顺序重新排列。支持非完整矩形域（如 L 型区域）。
+    将多分辨率数据从密度单元布局映射回位移单元布局
 
     Parameters:
     -----------
-    nx, ny         : 位移单元在 x、y 方向的数量（完整矩形网格尺寸）
-    data_flat      : (NC*n_sub, ...)
-    n_sub          : 每个位移单元的子密度单元数量
-    cell_positions : (NC, 2)，每个实际单元在完整矩形网格中的 (col, row) 坐标。
-                     若为 None，则退化为完整矩形网格（原有逻辑）。
+    mesh       : 位移网格对象
+    data_flat  : (NC*n_sub, ...)
+    n_sub      : 每个位移单元的子密度单元数量
 
     Returns:
     --------
@@ -284,51 +277,55 @@ def reshape_multiresolution_data_inverse(nx: int, ny: int,
     extra_dims = original_shape[1:]
     sub_dim = int(bm.sqrt(n_sub))
 
-    if cell_positions is None:
+    nx = mesh.meshdata['nx']
+    ny = mesh.meshdata['ny']
+
+    is_full_rect = (data_flat.shape[0] // n_sub == nx * ny)
+
+    if is_full_rect:
         NC = nx * ny
-        cols = bm.arange(NC) // ny
-        rows = bm.arange(NC) % ny
+        pos_to_local = None
     else:
-        NC = cell_positions.shape[0]
-        cols = cell_positions[:, 0]
-        rows = cell_positions[:, 1]
+        hx = mesh.meshdata['hx']
+        hy = mesh.meshdata['hy']
+        cell_centers = mesh.entity_barycenter('cell')  # (NC, 2)
+        NC = cell_centers.shape[0]
+        eps = 1e-10
+        cols = bm.floor(cell_centers[:, 0] / hx + eps).astype(int)
+        rows = bm.floor(cell_centers[:, 1] / hy + eps).astype(int)
+        pos_to_local = {}
+        for c in range(NC):
+            pos_to_local[(int(cols[c]), int(rows[c]))] = c
 
-    # 构建从 (col, row) 到实际单元局部索引 c 的查找表
-    pos_to_local = {}
-    for c in range(NC):
-        key = (int(cols[c]), int(rows[c]))
-        pos_to_local[key] = c
-
-    # 创建逆映射索引
     inverse_indices = bm.zeros(NC * n_sub, dtype=bm.int32)
 
     idx = 0
     for pos_col in range(nx):
         for sub_row in range(sub_dim):
             for pos_row in range(ny):
-                key = (pos_col, pos_row)
-                if key not in pos_to_local:
-                    continue  # 非矩形区域中不存在的单元，跳过
-                c = pos_to_local[key]
-                for sub_col in range(sub_dim):
-                    s = sub_row * sub_dim + sub_col
-                    data_idx = c * n_sub + s
-                    inverse_indices[data_idx] = idx
-                    idx += 1
+                if is_full_rect:
+                    c = pos_col * ny + pos_row
+                    for sub_col in range(sub_dim):
+                        s = sub_row * sub_dim + sub_col
+                        inverse_indices[c * n_sub + s] = idx
+                        idx += 1
+                else:
+                    key = (pos_col, pos_row)
+                    if key not in pos_to_local:
+                        continue
+                    c = pos_to_local[key]
+                    for sub_col in range(sub_dim):
+                        s = sub_row * sub_dim + sub_col
+                        inverse_indices[c * n_sub + s] = idx
+                        idx += 1
 
-    # 验证 idx 与数据规模一致
     assert idx == NC * n_sub, (
         f"逆映射索引计数 {idx} 与预期 {NC * n_sub} 不符，"
-        f"请检查 cell_positions 是否正确"
+        f"请检查网格数据是否正确"
     )
 
-    # 按逆映射重排数据
     data_restored_flat = data_flat[inverse_indices]
-
-    # 重塑为 (NC, n_sub, ...)
-    data_restored = data_restored_flat.reshape(NC, n_sub, *extra_dims)
-
-    return data_restored
+    return data_restored_flat.reshape(NC, n_sub, *extra_dims)
 
 def reshape_multiresolution_data_bcakup(nx: int, ny: int, data: TensorLike) -> TensorLike:
     """

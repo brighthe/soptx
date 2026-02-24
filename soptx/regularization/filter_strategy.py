@@ -246,8 +246,9 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
     """密度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
-                mesh: HomogeneousMesh, 
+                design_mesh: HomogeneousMesh, 
                 density_location: Literal['element', 'node', 'element_multiresolution'],
+                disp_mesh: Optional[HomogeneousMesh] = None, 
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -255,21 +256,23 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
         self._H = H
-        self._mesh = mesh                           
+        self._design_mesh = design_mesh                           
         self._density_location = density_location
+
+        self._disp_mesh = disp_mesh
 
         # --- 预计算测度权重 ---
         if self._density_location in ['element', 'element_multiresolution']:
             # 单元密度表征：权重即为设计变量网格单元体积/面积
             # shape: (NC, )
-            self._measure_weight = self._mesh.entity_measure('cell')
+            self._measure_weight = self._design_mesh.entity_measure('cell')
             
         elif self._density_location == 'node':
             # 节点密度表征：权重为节点控制体积
             # shape: (NN, )
-            cm = self._mesh.entity_measure('cell')
-            NN = self._mesh.number_of_nodes()
-            cell2node = self._mesh.cell_to_node()
+            cm = self._design_mesh.entity_measure('cell')
+            NN = self._design_mesh.number_of_nodes()
+            cell2node = self._design_mesh.cell_to_node()
             NNE = cell2node.shape[1]
 
             # 将单元测度均分给每个节点
@@ -284,7 +287,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
 
         # 预计算卷积归一化因子
         #? matmul 函数下 self._H 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-        device = self._mesh.device
+        device = self._design_mesh.device
         self._H = self._H.device_put(device)
         self._Hs = self._H.matmul(self._measure_weight)
         # val = bm.tensor(data=1, dtype=bm.float32, device='cpu')
@@ -295,11 +298,8 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                         density:  Union[TensorLike, Function]
                     ) ->  Union[TensorLike, Function]:
 
-        # from soptx.interpolation.interpolation_scheme import DensityDistribution
         if isinstance(density, Function):
             rho_phys = density.space.function(bm.copy(density[:]))
-        # elif isinstance(density, DensityDistribution):
-            # rho_phys = density
         else:
             rho_phys = bm.copy(density)
 
@@ -321,12 +321,12 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         elif self._density_location == 'element_multiresolution':
             from soptx.analysis.utils import reshape_multiresolution_data_inverse
             n_sub = physical_density.shape[-1]
-            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
-            sub_physical_density = reshape_multiresolution_data_inverse(nx=nx_displacement,
-                                                                    ny=ny_displacement,
-                                                                    data_flat=numerator / self._Hs,
-                                                                    n_sub=n_sub) # (NC, n_sub)
+            sub_physical_density = reshape_multiresolution_data_inverse(
+                                mesh=self._disp_mesh,
+                                data_flat=numerator / self._Hs,
+                                n_sub=n_sub
+                            )  # (NC_displacement, n_sub)
+    
             physical_density_filter = bm.set_at(physical_density, slice(None), sub_physical_density)
             # physical_density[:] = bm.set_at(physical_density, slice(None), sub_physical_density)
         
@@ -342,10 +342,10 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                                 ) -> TensorLike:
         if self._density_location == 'element_multiresolution':
             # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
-            n_sub = obj_grad_rho.shape[-1]
-            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
-            obj_grad_rho = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=obj_grad_rho)  # (NC * n_sub, )
+            obj_grad_rho = reshape_multiresolution_data(
+                                    mesh=self._disp_mesh, 
+                                    data=obj_grad_rho
+                                )  # (NC_displacement * n_sub, )
         
         # 1. 缩放物理密度导数
         scaled_dobj = obj_grad_rho / self._Hs
@@ -403,7 +403,7 @@ class ProjectionStrategy(DensityStrategy):
     """
     def __init__(self, 
                 H: CSRTensor, 
-                mesh: HomogeneousMesh, 
+                design_mesh: HomogeneousMesh, 
                 density_location: Literal['element', 'node', 'element_multiresolution'],
                 projection_type: Literal['tanh', 'exponential'] = 'tanh', 
                 beta: float = 1.0,
@@ -413,11 +413,12 @@ class ProjectionStrategy(DensityStrategy):
                 continuation_strategy: Literal['additive', 'multiplicative'] = 'multiplicative',
                 beta_increment: float = 1.0,
                 beta_multiplier: float = 2.0,
+                disp_mesh: Optional[HomogeneousMesh] = None, 
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
         
-        super().__init__(H, mesh, density_location, enable_logging, logger_name)
+        super().__init__(H, design_mesh, density_location, disp_mesh, enable_logging, logger_name)
         
         # 投影参数
         self.projection_type = projection_type

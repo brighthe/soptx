@@ -13,7 +13,6 @@ from soptx.optimization.volume_constraint import VolumeConstraint
 from soptx.optimization.stress_constraint import StressConstraint
 from soptx.optimization.tools import OptimizationHistory
 from soptx.optimization.utils import solve_mma_subproblem
-from soptx.optimization.utils import compute_volume
 from soptx.regularization.filter import Filter
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
@@ -201,11 +200,11 @@ class MMAOptimizer(BaseLogged):
         else:
             dv = bm.copy(design_variable[:])
         
-        from soptx.interpolation.interpolation_scheme import DensityDistribution
+        # from soptx.interpolation.interpolation_scheme import DensityDistribution
         if isinstance(density_distribution, Function):
             rho = density_distribution.space.function(bm.copy(density_distribution[:]))
-        elif isinstance(density_distribution, DensityDistribution):
-            rho = density_distribution
+        # elif isinstance(density_distribution, DensityDistribution):
+            # rho = density_distribution
         else:
             rho = bm.copy(density_distribution[:])
 
@@ -319,7 +318,6 @@ class MMAOptimizer(BaseLogged):
 
             # 计算收敛性
             change = bm.max(bm.abs(dv_new - dv))
-            # print(f"设计变量最大变化量: {change}")
             
             # 更新设计变量
             dv = dv_new
@@ -347,7 +345,7 @@ class MMAOptimizer(BaseLogged):
 
             self._log_info(
                     f"Iteration: {iter_idx + 1}, "
-                    f"Objective: {obj_val:.4f}, "
+                    f"Objective: {obj_val_raw:.4f}, "
                     f"Volfrac: {volfrac:.4f}, "
                     f"Change: {change:.4f}, "
                     f"Time: {iteration_time:.3f} sec"

@@ -77,9 +77,10 @@ class OptimizationHistory:
             print(f"Average iteration time (excluding first): {avg_time:.3f} sec")
             print(f"Number of iterations: {len(self.iteration_times)}")
 
-def save_optimization_history(mesh: HomogeneousMesh, 
+def save_optimization_history(design_mesh: HomogeneousMesh, 
                             history: OptimizationHistory, 
-                            density_location: str, 
+                            density_location: str,
+                            disp_mesh: Optional[HomogeneousMesh]=None, 
                             save_path: Optional[str]=None
                         ) -> None:
     """保存优化过程的所有迭代结果"""
@@ -96,39 +97,40 @@ def save_optimization_history(mesh: HomogeneousMesh,
     for i, (physical_density, von_mises_stress) in enumerate(iterator):
         if density_location in ['element']:
             # 单分辨率单元密度情况：形状为 (NC, )
-            mesh.celldata['density'] = physical_density
+            design_mesh.celldata['density'] = physical_density
             
             if von_mises_stress is not None:
-                mesh.celldata['von_mises'] = von_mises_stress
+                design_mesh.celldata['von_mises'] = von_mises_stress
 
         elif density_location in ['node']:
             # 单分辨率节点密度情况：形状为 (NN, )
-            mesh.nodedata['density'] = physical_density
+            design_mesh.nodedata['density'] = physical_density
 
         elif density_location in ['element_multiresolution']:
-            # 多分辨率单元密度情况：形状为 (NC, n_sub)
             from soptx.analysis.utils import reshape_multiresolution_data
-            n_sub = physical_density.shape[-1]
-            n_sub_x, n_sub_y = int(bm.sqrt(n_sub)), int(bm.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(mesh.meshdata['nx'] / n_sub_x), int(mesh.meshdata['ny'] / n_sub_y)
+            # 密度: (NC, n_sub)
+            rho_phys = reshape_multiresolution_data(
+                            mesh=disp_mesh, 
+                            data=physical_density
+                        )  # (NC*n_sub, )
+            
+            # von Mises 应力: (NC, n_sub, NQ)
+            if von_mises_stress is not None:
+                vm = reshape_multiresolution_data(
+                                        mesh=disp_mesh, 
+                                        data=von_mises_stress
+                                    )  # (NC*n_sub, NQ)
+                design_mesh.celldata['von_mises'] = vm
 
-            rho_phys = reshape_multiresolution_data(nx=nx_displacement, 
-                                                    ny=ny_displacement, 
-                                                    data=physical_density) # (NC*n_sub, )
-
-            mesh.celldata['density'] = rho_phys
-
-        elif density_location in ['node_multiresolution']:
-            # 多分辨率节点密度情况：形状为 (NN, )
-            mesh.nodedata['density'] = physical_density
+            design_mesh.celldata['density'] = rho_phys
 
         else:
             raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
         
-        if isinstance(mesh, StructuredMesh):
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
+        if isinstance(design_mesh, StructuredMesh):
+            design_mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
         else:  
-            mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
+            design_mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
 
 #####################################################
 #                    绘图和数据保存工具函数

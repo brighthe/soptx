@@ -580,28 +580,12 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         # 计算 B 矩阵
         from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
-        nx_u, ny_u = mesh_u.meshdata['nx'], mesh_u.meshdata['ny']
-        hx_u, hy_u = mesh_u.meshdata['hx'], mesh_u.meshdata['hy']
-        cell_centers = mesh_u.entity_barycenter('cell')  # (NC, 2)
-        eps = 1e-10
-        cols = bm.floor(cell_centers[:, 0] / hx_u + eps).astype(int)
-        rows = bm.floor(cell_centers[:, 1] / hy_u + eps).astype(int)
-        cell_positions = bm.stack([cols, rows], axis=1)  # (NC, 2)
-        gphi_eg_reshaped = reshape_multiresolution_data(
-                                    nx=nx_u, ny=ny_u, 
-                                    data=gphi_eg, 
-                                    cell_positions=cell_positions
-                                ) # (NC*n_sub, NQ, LDOF, GD)
+        gphi_eg_reshaped = reshape_multiresolution_data(mesh=mesh_u, data=gphi_eg) # (NC*n_sub, NQ, NS, TLDOF)
         B_eg_reshaped = self._material.strain_displacement_matrix(
                                             dof_priority=space.dof_priority, 
                                             gphi=gphi_eg_reshaped
                                         ) # (NC*n_sub, NQ, NS, TLDOF)
-        B_eg = reshape_multiresolution_data_inverse(
-                                    nx=nx_u, ny=ny_u, 
-                                    data_flat=B_eg_reshaped, 
-                                    n_sub=n_sub,
-                                    cell_positions=cell_positions
-                                ) # (NC, n_sub, NQ, NS, TLDOF)
+        B_eg = reshape_multiresolution_data_inverse(mesh=mesh_u, data_flat=B_eg_reshaped, n_sub=n_sub) # (NC, n_sub, NQ, NS, TLDOF)
 
         # 位移单元 → 子密度单元的缩放
         J_g = 1 / n_sub
