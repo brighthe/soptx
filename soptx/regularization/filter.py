@@ -50,6 +50,11 @@ class Filter(BaseLogged):
 
         self._disp_mesh = disp_mesh
 
+        if self._density_location == 'element_multiresolution' and self._disp_mesh is None:
+            self._log_error(
+                "当 density_location 为 'element_multiresolution' 时, disp_mesh 不能为 None。"
+            )
+
         # 1. 构建过滤矩阵
         if self._filter_type != 'none' and self._rmin is not None and self._rmin > 0:
             builder = FilterMatrixBuilder(

@@ -432,8 +432,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         """
         # D 为实体材料弹性矩阵，不包含密度插值
         D = self.elastic_matrix()[0, 0]  # (NS, NS)
-        kwargs = bm.context(u_e)
-        stress_vector = bm.einsum('ij, c...qjk, ck -> c...qi', D, B, u_e, **kwargs)
+        stress_vector = bm.einsum('ij, c...qjk, ck -> c...qi', D, B, u_e)
 
         return stress_vector
     
@@ -461,7 +460,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         M = self.von_mises_matrix()
 
         sig_sq = bm.einsum('c...qi, ij, c...qj -> c...q', stress_vector, M, stress_vector)
-        
-        von_mises_stress = bm.sqrt(bm.maximum(sig_sq, 1e-12))
+
+        von_mises_stress = bm.sqrt(bm.maximum(sig_sq, bm.tensor(1e-12, dtype=sig_sq.dtype, device=sig_sq.device)))
 
         return von_mises_stress

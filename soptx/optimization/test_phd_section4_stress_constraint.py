@@ -187,6 +187,9 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec4_6_5_L_bracket_stress')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        bm.set_backend('pytorch') # numpy, pytorch
+        # bm.set_default_device('cpu') # cpu, cuda
+        device = 'cpu' # cpu, cuda
         # 归一化尺寸
         # domain = [0, 1.0, 0, 1.0]
         # hole_domain = [0.4, 1.0, 0.4, 1.0]
@@ -201,7 +204,9 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
-        nx, ny = 100, 100
+        nx, ny = 50, 50
+        # nx, ny = 100, 100
+        # nx, ny = 200, 200
         mesh_type = 'quad_threshold'
 
         from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
@@ -248,7 +253,7 @@ class DensityTopOptTest(BaseLogged):
                                                 )
             assembly_method = 'fast'
         elif density_location in ['element_multiresolution']:
-            sub_density_element = 4
+            sub_density_element = 16
             import math
             sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
@@ -262,11 +267,11 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
-        solve_method = 'mumps'
+        solve_method = 'cg'
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         analyzer = LagrangeFEMAnalyzer(
                                 disp_mesh=displacement_mesh,
@@ -284,14 +289,14 @@ class DensityTopOptTest(BaseLogged):
         objective = VolumeObjective(analyzer=analyzer)
 
         stress_limit = 100.0
-        from soptx.optimization.stress_constraint import StressConstraint
-        constraint = StressConstraint(analyzer=analyzer, stress_limit=stress_limit)
+        from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
+        constraint = VanishingStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
         options = ALMMMAOptions(
                     # ALM 外层控制
                     max_al_iterations=150,
-                    # max_al_iterations=5,
+                    # max_al_iterations=50,
                     mma_iters_per_al=5,
                     change_tolerance=0.002,
                     stress_tolerance=0.003,
@@ -307,7 +312,7 @@ class DensityTopOptTest(BaseLogged):
                     asymp_decr=0.7,
                     osc=0.2,
                     # SIMP 连续化
-                    use_penalty_continuation=False,
+                    use_penalty_continuation=True,
                 )
         
         from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
@@ -317,7 +322,8 @@ class DensityTopOptTest(BaseLogged):
                                             options=options,
                                         )
 
-        filter_type = 'projection' # 'none', 'sensitivity', 'density', 'projection'
+        filter_type = 'projection'
+        # filter_type = 'projection' # 'none', 'sensitivity', 'density', 'projection'
         projection_config = {
                 'continuation_strategy': 'additive',
                 'projection_type': 'tanh',
@@ -342,13 +348,18 @@ class DensityTopOptTest(BaseLogged):
                         enable_logging=True,
                     )
         
+        analysis_tspace = analyzer.tensor_space
+        analysis_tgdofs = analysis_tspace.number_of_global_dofs()
+        
         self._log_info(f"开始密度拓扑优化, "
             f"模型名称={pde.__class__.__name__} \n"
             f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type} \n"
             f"杨氏模量={pde.E}, 泊松比={pde.nu} \n"
-            f"网格类型={mesh_type}, 空间阶数={space_degree} \n" 
+            f"网格类型={mesh_type}, 空间阶数={space_degree} \n"
+            f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()},  位移场自由度={analysis_tgdofs}, \n" 
             f"初始构型={relative_density}, 密度分布={density_location} \n"
-            f"过滤类型={filter_regularization._filter_type}, 投影类型={filter_regularization._strategy.projection_type}, 过滤半径={rmin}, ")
+            f"过滤类型={filter_regularization._filter_type}, 过滤半径={rmin}, ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 

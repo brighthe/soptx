@@ -52,12 +52,12 @@ class FilterMatrixBuilder:
             return H
         
     def _compute_weighted_matrix_general(self, 
-                                            rmin: float,
-                                            domain: List[float],
-                                            q: int = 3,
-                                            periodic: List[bool]=[False, False, False],
-                                            enable_timing: bool = False,
-                                        ) -> Tuple[COOTensor, TensorLike]:
+                                        rmin: float,
+                                        domain: List[float],
+                                        q: int = 3,
+                                        periodic: List[bool]=[False, False, False],
+                                        enable_timing: bool = True,
+                                    ) -> Tuple[COOTensor, TensorLike]:
             """
             计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
 
@@ -98,9 +98,8 @@ class FilterMatrixBuilder:
                 density_mesh = self._mesh
                 density_coords = density_mesh.entity_barycenter('node')
 
-            elif self._density_location in ['node_multiresolution']:
-                sub_density_mesh = self._mesh
-                density_coords = sub_density_mesh.entity_barycenter('node')
+            else:
+                self._log_error(f"Unsupported density location for general filter: {self._density_location}")
 
             # 使用 KD-tree 查询邻近点
             density_coords = bm.device_put(density_coords, 'cpu')        
@@ -114,6 +113,46 @@ class FilterMatrixBuilder:
 
             # 自由度总数
             gdof = density_coords.shape[0]
+
+            # 对角线元素 (自身距离为 0, 权重为 1.0^q = 1.0), 向量化赋值
+            diag_indices = bm.arange(gdof, dtype=bm.int32)
+
+            if enable_timing:
+                t.send('对角线向量化计算时间')
+
+            # 批量计算所有邻居对的物理距离
+            diffs = density_coords[density_indices] - density_coords[neighbor_indices]
+            dists = bm.sqrt(bm.sum(diffs**2, axis=1))
+
+            # 筛选距离严格小于 rmin 的邻居对, 计算非线性权重
+            mask = dists < rmin
+            valid_i = density_indices[mask]
+            valid_j = neighbor_indices[mask]
+            valid_w = (1.0 - dists[mask] / rmin) ** q
+
+            if enable_timing:
+                t.send('非对角线向量化计算时间')
+
+            # 拼接对角线元素与邻居权重, 构建稀疏矩阵
+            all_i = bm.concatenate([diag_indices, valid_i])
+            all_j = bm.concatenate([diag_indices, valid_j])
+            all_s = bm.concatenate([bm.ones(gdof, dtype=bm.float64), valid_w])
+
+            H = COOTensor(
+                    indices=bm.astype(bm.stack((all_i, all_j), axis=0), bm.int32),
+                    values=all_s,
+                    spshape=(gdof, gdof)
+                )
+
+            if enable_timing:
+                t.send('稀疏矩阵构建时间')
+                t.send(None)
+
+            return H
+
+
+            # 自由度总数
+            gdof = density_coords.shape[0]
             
             # 预估非零元素的数量
             max_nnz = len(density_indices) + gdof
@@ -121,7 +160,7 @@ class FilterMatrixBuilder:
             jH = bm.zeros(max_nnz, dtype=bm.int32)
             sH = bm.zeros(max_nnz, dtype=bm.float64)
             
-            # 首先添加对角线元素 (自身距离为 0, 权重为 1.0^q = 1.0)
+            # 首先添加对角线元素 (自身距离为 0, 权重为 1.0^q = 1.0)c
             for i in range(gdof):
                 iH[i] = i
                 jH[i] = i

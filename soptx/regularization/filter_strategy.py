@@ -328,7 +328,6 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                             )  # (NC_displacement, n_sub)
     
             physical_density_filter = bm.set_at(physical_density, slice(None), sub_physical_density)
-            # physical_density[:] = bm.set_at(physical_density, slice(None), sub_physical_density)
         
         else:
             error_msg = f"Unsupported density_location: {self._density_location}"
@@ -359,31 +358,16 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
         return obj_grad_dv
     
     def filter_constraint_sensitivities(self, 
-                                design_variable: TensorLike, 
-                                con_grad_rho: TensorLike
-                            ) -> TensorLike:
-        # 多约束情况
-        if con_grad_rho.ndim == 2:
-            n_con = con_grad_rho.shape[0]
-            con_grad_dv = bm.zeros_like(con_grad_rho)
-            for i in range(n_con):
-                con_grad_dv[i, :] = self._filter_single_constraint_sensitivity(design_variable, con_grad_rho[i, :])
-            return con_grad_dv
-        
-        # 单约束情况
-        return self._filter_single_constraint_sensitivity(design_variable, con_grad_rho)
-
-    def _filter_single_constraint_sensitivity(self, 
-                                            design_variable: TensorLike, 
-                                            con_grad_rho: TensorLike
-                                        ) -> TensorLike:
+                            design_variable: TensorLike, 
+                            con_grad_rho: TensorLike
+                        ) -> TensorLike:
         if self._density_location == 'element_multiresolution':
             # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
-            n_sub = con_grad_rho.shape[-1]
-            n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
-            con_grad_rho = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=con_grad_rho)  # (NC * n_sub, )
-    
+            con_grad_rho = reshape_multiresolution_data(
+                                    mesh=self._disp_mesh, 
+                                    data=con_grad_rho
+                                )  # (NC_displacement * n_sub, )
+
         # 1. 缩放物理密度导数
         scaled_dcon = con_grad_rho / self._Hs
         
@@ -445,8 +429,8 @@ class ProjectionStrategy(DensityStrategy):
 
     def _apply_projection(self, rho_tilde: TensorLike) -> TensorLike:
         if self.projection_type == 'tanh':
-            tanh_beta_eta = bm.tanh(self.beta * self.eta)
-            tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+            tanh_beta_eta = math.tanh(self.beta * self.eta)
+            tanh_beta_1_eta = math.tanh(self.beta * (1.0 - self.eta))
             numerator = tanh_beta_eta + bm.tanh(self.beta * (rho_tilde - self.eta))
             denominator = tanh_beta_eta + tanh_beta_1_eta
             return numerator / denominator
@@ -470,8 +454,10 @@ class ProjectionStrategy(DensityStrategy):
                 
                 # 执行投影: rho_tilde -> rho_bar
                 projected_val = self._apply_projection(self._rho_tilde_cache)
-                
-                rho_phys[:] = bm.set_at(rho_phys, slice(None), projected_val)
+
+                # TODO 修改
+                rho_phys.array[:] = projected_val
+                # rho_phys[:] = bm.set_at(rho_phys, slice(None), projected_val)
                 
             else:
                 # 处理 TensorLike 的情况
@@ -492,8 +478,8 @@ class ProjectionStrategy(DensityStrategy):
     
     def _apply_projection_derivative(self, rho_tilde: TensorLike) -> TensorLike:
         if self.projection_type == 'tanh':
-            tanh_beta_eta = bm.tanh(self.beta * self.eta)
-            tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+            tanh_beta_eta = math.tanh(self.beta * self.eta)
+            tanh_beta_1_eta = math.tanh(self.beta * (1.0 - self.eta))
             denominator = tanh_beta_eta + tanh_beta_1_eta
             inner = self.beta * (rho_tilde - self.eta)
             numerator = self.beta * (1.0 - bm.square(bm.tanh(inner)))

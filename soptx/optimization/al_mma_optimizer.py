@@ -109,7 +109,7 @@ class ALMMMAOptimizer(MMAOptimizer):
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
-                enable_timing: bool = False,
+                enable_timing: bool = None,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
         
@@ -171,29 +171,41 @@ class ALMMMAOptimizer(MMAOptimizer):
             # 内层循环 (MMA 步) - 对当前的 lambda, mu 进行极小化
             # =====================================================================
             for mma_iter in range(opts.mma_iters_per_al):
+                t = None
+                if enable_timing:
+                    t = timer(f"拓扑优化单次迭代")
+                    next(t)
+
                 start_time = time()
 
                 # --- 惩罚因子更新 (基于全局迭代步数) ---
                 self._update_penalty(iter_idx=global_iter)
                 current_penalty = analyzer.interpolation_scheme.penalty_factor
 
+                # 更新迭代计数
                 global_iter += 1
                 
-                volfrac = self._al_objective._volume_objective.fun(density=rho_phys)
-
                 # --- 计算增广拉格朗日目标函数及灵敏度 ---
                 # a. 状态求解 (FEA)
                 state = analyzer.solve_state(rho_val=rho_phys)
+                if enable_timing:
+                    t.send('求解')
                 
                 # b. 评估增广拉格朗日目标函数及其物理敏度
                 J_val = self._al_objective.fun(density=rho_phys, state=state)
+                if enable_timing:
+                    t.send('目标函数计算')
                 dJ_drho = self._al_objective.jac(density=rho_phys, state=state)
-
-                # 从缓存中读取体积分数
-                volfrac = self._al_objective._volume_objective._v / self._al_objective._volume_objective._v0
+                if enable_timing:
+                    t.send('目标函数灵敏度分析')
                 
                 # c. 通过过滤器应用链式法则 (获取对设计变量 dv 的敏度)
                 dJ_dv = self._filter.filter_objective_sensitivities(design_variable=dv, obj_grad_rho=dJ_drho)
+                if enable_timing:
+                    t.send('灵敏度过滤')
+
+                # 从缓存中读取体积分数
+                volfrac = self._al_objective._volume_objective._v / self._al_objective._volume_objective._v0
                 
                 # 被动单元灵敏度置零
                 if passive_mask is not None:
@@ -213,9 +225,13 @@ class ALMMMAOptimizer(MMAOptimizer):
                     dv_new = self._solve_unconstrained_subproblem(
                                         dfdz=dJ_dv, z=dv, zold1=xold1, zold2=xold2,
                                     )
+                if enable_timing:
+                    t.send('MMA 优化')
                 
                 # 密度过滤与更新
                 rho_phys = self._filter.filter_design_variable(design_variable=dv_new, physical_density=rho_phys)
+                if enable_timing:
+                    t.send('密度过滤')
                 
                 # 更新历史设计变量
                 xold2 = xold1
@@ -249,6 +265,9 @@ class ALMMMAOptimizer(MMAOptimizer):
 
                 # 按照 PolyStress.m 的格式自定义输出日志
                 dJ_norm = float(bm.linalg.norm(dJ_dv))
+                if enable_timing:
+                    t.send('后处理')
+                    t.send(None)
 
                 self._log_info(
                         f"It:{al_iter+1:3d}_{mma_iter+1:1d} "
@@ -258,6 +277,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                         f"Ch/Tol: {change/opts.change_tolerance:.6f} "
                         f"mu: {self._al_objective.mu:.4e} "
                         f"p: {current_penalty:.1f} "
+                        f"Time: {iteration_time:.3f} sec "
                     )
                 
                 # 调用确切的 log_iteration 接口保存历史数据

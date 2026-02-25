@@ -203,22 +203,19 @@ class DensityTopOptTest(BaseLogged):
         penalty_factor = 3.0
 
         # 'element', 'element_multiresolution', 'node', 'node_multiresolution'
-        density_location = 'element'
+        density_location = 'element_multiresolution'
         sub_density_element = 16
 
         relative_density = volume_fraction
 
-        # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
-        assembly_method = 'standard'
-
         optimizer_algorithm = 'mma'  # 'oc', 'mma'
-        max_iterations = 500
+        max_iterations = 1000
         change_tolerance = 1e-2
         use_penalty_continuation = True
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
-        rmin = 1.2
-        # rmin = 1.0
+        # rmin = 1.2
+        rmin = 1.0
         # rmin = 0.75
         # rmin = 0.5
         # rmin = 0.25
@@ -261,6 +258,8 @@ class DensityTopOptTest(BaseLogged):
                                                     displacement_mesh=displacement_mesh,
                                                     relative_density=relative_density,
                                                 ) 
+            # 'standard', 'voigt'
+            assembly_method = 'standard'
         elif density_location in ['element_multiresolution']:
             import math
             sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
@@ -272,6 +271,8 @@ class DensityTopOptTest(BaseLogged):
                                                     relative_density=relative_density,
                                                     sub_density_element=sub_density_element,
                                                 )
+            # 'standard_multiresolution', 'voigt_multiresolution'
+            assembly_method = 'standard_multiresolution'
             
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
@@ -279,6 +280,7 @@ class DensityTopOptTest(BaseLogged):
                                     filter_type=filter_type,
                                     rmin=rmin,
                                     density_location=density_location,
+                                    disp_mesh=displacement_mesh,
                                 )
 
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -302,28 +304,28 @@ class DensityTopOptTest(BaseLogged):
 
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=lagrange_fem_analyzer, volume_fraction=volume_fraction)
-
+        
+        from soptx.optimization.mma_optimizer import MMAOptions
+        options = MMAOptions(
+                    # 循环控制
+                    max_iterations=max_iterations,
+                    change_tolerance=1e-2,
+                    # MMA 渐近线控制
+                    move_limit=0.2,
+                    asymp_init=0.5,
+                    asymp_incr=1.2,
+                    asymp_decr=0.7,
+                    # SIMP 连续化
+                    use_penalty_continuation=True,
+                )
+        
         from soptx.optimization.mma_optimizer import MMAOptimizer
         optimizer = MMAOptimizer(
                         objective=compliance_objective,
-                        constraint=[volume_constraint],
+                        constraint=volume_constraint,
                         filter=filter_regularization,
-                        options={
-                            'max_iterations': max_iterations,
-                            'change_tolerance': change_tolerance,
-                            'use_penalty_continuation': use_penalty_continuation,
-                        }
+                        options=options,
                     )
-        optimizer.options.set_advanced_options(
-                                a0=1,
-                                asymp_init=0.5,
-                                asymp_incr=1.2,
-                                asymp_decr=0.7,
-                                move_limit=0.2,
-                                albefa=0.1,
-                                raa0=1e-5,
-                                epsilon_min=1e-7,
-                            )
             
         self._log_info(f"开始密度拓扑优化, \n"
         f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
@@ -341,12 +343,17 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec4_6_2")
+        save_path = Path(f"{base_dir}/test_subsec4_6_2_mbb_beam")
         save_path.mkdir(parents=True, exist_ok=True)    
 
-        save_optimization_history(mesh=design_variable_mesh, 
+        # save_optimization_history(mesh=design_variable_mesh, 
+        #                         history=history, 
+        #                         density_location=density_location,
+        #                         save_path=str(save_path))
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
@@ -729,5 +736,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_half_mbb_beam')
+    test.run.set('test_subsec4_6_2_mbb_beam')
     rho_opt, history = test.run()

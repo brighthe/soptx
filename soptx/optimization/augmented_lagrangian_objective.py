@@ -7,6 +7,7 @@ from soptx.optimization.volume_objective import VolumeObjective
 from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
 from soptx.optimization.apparent_stress_constaint import ApparentStressConstraint 
 from soptx.utils.base_logged import BaseLogged
+from soptx.utils import timer
 
 # 使用 TYPE_CHECKING 避免循环导入，仅用于类型提示
 if TYPE_CHECKING:
@@ -134,9 +135,14 @@ class AugmentedLagrangianObjective(BaseLogged):
     def _manual_differentiation(self, 
                     density: Union[Function, TensorLike],
                     state: Optional[dict] = None, 
-                    enable_timing: bool = False, 
+                    enable_timing: bool = None, 
                     **kwargs
                 ) -> TensorLike:
+        t = None
+        if enable_timing:
+            t = timer(f"目标函数灵敏度分析")
+            next(t)
+
         if state is None:
             state = {}
         
@@ -183,18 +189,25 @@ class AugmentedLagrangianObjective(BaseLogged):
         dgdm_E = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state)
         dPenaldm_E_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdm_E, 0.0)
 
+        if enable_timing:
+            t.send('罚函数偏导数')
+
         # --- 伴随法 ---
         # 计算伴随载荷:
         # - 位移元: F_adj 作用在位移自由度上, F_adj = -(∂σ^v/∂U)^T * dPenaldVM
         # - 混合元: F_adj 作用在应力自由度上, F_adj = -(∂σ^v/∂Σ)^T * dPenaldVM
         adjoint_load = self._stress_constraint.compute_adjoint_load(
                                                     dPenaldVM=dPenaldVM, state=state)  # (gdofs,)
+        if enable_timing:
+            t.send('组装伴随向量')
 
         # 解伴随方程
         # - 位移元: K * ψ = F_adj
         # - 混合元: [A  B^T; B  0] * [λ_σ; λ_u] = [F_adj; 0] (复用正向分解)
         adjoint_vector = self._analyzer.solve_adjoint(
                                             rhs=adjoint_load, rho_val=density)  # (gdofs,)
+        if enable_timing:
+            t.send('解伴随方程')
 
         # --- 计算隐式灵敏度项 ---
         # - 位移元: ψ^T * (∂K/∂m_E) * U
@@ -234,9 +247,9 @@ class AugmentedLagrangianObjective(BaseLogged):
             dP_drho = dP_drho_explicit + dP_drho_implicit               # (NC,)
 
         else:
-            # 位移元: 显式项与隐式项共享同一个 dE/dρ
+            # TODO 位移元: 显式项与隐式项共享同一个 dE/dρ
             if self._is_multiresolution:
-                dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit[:, None]  # (NC, n_sub)
+                dPenaldm_E_total = dPenaldm_E_explicit_reduced + (dPenaldm_E_implicit[:, None] / self._n_sub)  # (NC, n_sub)
             else:
                 dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit           # (NC,)
 
@@ -250,6 +263,10 @@ class AugmentedLagrangianObjective(BaseLogged):
         dP_drho_normalized = dP_drho / self._NC
 
         dJ_drho = dVol_drho + dP_drho_normalized  # (NC,) 或 (NC*n_sub,)
+
+        if enable_timing:
+            t.send('其他')
+            t.send(None)
 
         return dJ_drho
 

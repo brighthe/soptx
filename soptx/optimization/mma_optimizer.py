@@ -10,7 +10,6 @@ from fealpy.functionspace import Function
 from soptx.optimization.compliant_mechanism_objective import CompliantMechanismObjective
 from soptx.optimization.compliance_objective import ComplianceObjective
 from soptx.optimization.volume_constraint import VolumeConstraint
-from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
 from soptx.optimization.tools import OptimizationHistory
 from soptx.optimization.utils import solve_mma_subproblem
 from soptx.regularization.filter import Filter
@@ -200,11 +199,8 @@ class MMAOptimizer(BaseLogged):
         else:
             dv = bm.copy(design_variable[:])
         
-        # from soptx.interpolation.interpolation_scheme import DensityDistribution
         if isinstance(density_distribution, Function):
             rho = density_distribution.space.function(bm.copy(density_distribution[:]))
-        # elif isinstance(density_distribution, DensityDistribution):
-            # rho = density_distribution
         else:
             rho = bm.copy(density_distribution[:])
 
@@ -323,11 +319,7 @@ class MMAOptimizer(BaseLogged):
             dv = dv_new
                 
             # 当前体积分数
-            mesh = self._objective._analyzer._mesh            
-            cell_measure = mesh.entity_measure('cell')
-            current_volume = bm.einsum('c, c -> ', cell_measure, rho_phys[:])
-            total_volume = bm.sum(cell_measure)
-            volfrac = current_volume / total_volume
+            volfrac = self._constraint._v / self._constraint._v0
 
             # 记录当前迭代信息
             iteration_time = time() - start_time

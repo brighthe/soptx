@@ -75,7 +75,20 @@ class VanishingStressConstraint(BaseLogged):
             
         vm = state['von_mises'] # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
 
+        # =====================================================================
+        #TODO 【新增修复：截断虚假应力】
+        # 将局部等效应力强行限制在安全极限的合理倍数内 (例如 10.0 倍)。
+        # 对于真实存在的实体材料，优化过程会将其应力压制在 1.0 附近，绝不会触发此截断；
+        # 此操作专门用于抹平孔洞区因刚度趋零导致的 268.0 这种毫无物理意义的数值奇点，
+        # 从而防止 (s**3) 爆发引发梯度 NaN。
+        # =====================================================================
+        # vm_capped = bm.minimum(vm, 10.0 * self._stress_limit)
+
+        # 使用截断后的应力计算偏差 s
+        # s = vm_capped / self._stress_limit - 1.0
+
         s = vm / self._stress_limit - 1.0 # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
+
         state['stress_deviation'] = s
 
         # 计算约束值 g = E * (s^3 + s)
