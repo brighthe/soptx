@@ -80,9 +80,7 @@ class ApparentStressConstraint(BaseLogged):
         根据公式 g = σ^v/σ_lim - (m_E + ε(1-m_E)):
         ∂g_e / ∂m_E = -(1 - ε)
         """
-        m_E = state['stiffness_ratio']
-
-        return bm.full_like(m_E, -(1.0 - self._epsilon))
+        return -(1.0 - self._epsilon)  # 标量
 
     def compute_adjoint_load(self, dPenaldVM: TensorLike, state: Dict) -> TensorLike:
         """
@@ -117,7 +115,7 @@ class ApparentStressConstraint(BaseLogged):
         element_sens = bm.einsum('cqls, cqs -> cql', phi, dVM_dSigma)  # (NC, NQ, LDOF)
 
         # 4. 应用罚函数权重并对积分点求和
-        weights = dPenaldVM[..., None]                          # (NC, NQ, 1)
+        weights = dPenaldVM[..., None] * ws[None, :, None]      # (NC, NQ, 1)
         element_loads = -1.0 * element_sens * weights           # (NC, NQ, LDOF)
         element_loads = bm.sum(element_loads, axis=1)           # (NC, LDOF)
 
@@ -159,3 +157,10 @@ class ApparentStressConstraint(BaseLogged):
         term = bm.einsum('ci, cij, cj -> c', lambda_sigma_e, A0, sigma_e)
         
         return term
+    
+    def compute_stress_measure(self, state: Dict) -> TensorLike:
+        """归一化应力测度：σ^v_apparent / (η * σ_lim)，>1 表示违反"""
+        vm  = state['von_mises']         # (NC, NQ)
+        eta = state['eta_threshold']     # (NC, )
+
+        return vm / (eta[..., None] * self._stress_limit)

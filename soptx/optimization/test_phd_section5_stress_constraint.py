@@ -25,8 +25,7 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
-        # nx, ny = 80, 40
-        nx, ny = 40, 10
+        nx, ny = 80, 40
         mesh_type = 'uniform_crisscross_tri'
 
         from soptx.model.cantilever_2d_hzmfem import Cantilever2d
@@ -95,8 +94,6 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.apparent_stress_constaint import ApparentStressConstraint
         constraint = ApparentStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
-        g = constraint.fun(density=rho)
-
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
         options = ALMMMAOptions(
                     # ALM 外层控制
@@ -125,9 +122,6 @@ class DensityTopOptTest(BaseLogged):
                                             stress_constraint=constraint,
                                             options=options,
                                         )
-        # J = augmented_lagrangian_objective.fun(density=rho)
-
-        # dJ = augmented_lagrangian_objective.jac(density=rho)
 
         filter_type = 'projection' # 'none', 'sensitivity', 'density', 'projection'
         projection_config = {
@@ -159,6 +153,8 @@ class DensityTopOptTest(BaseLogged):
             f"杨氏模量={pde.E}, 泊松比={pde.nu} \n"
             f"网格类型={mesh_type}, 空间阶数={space_degree} \n" 
             f"初始构型={relative_density}, 密度分布={density_location} \n"
+            f"约束类型={constraint.__class__.__name__}, 应力极限={stress_limit} \n"
+            f"分析器={analyzer.__class__.__name__} \n"
             f"过滤类型={filter_regularization._filter_type}, 投影类型={filter_regularization._strategy.projection_type}, 过滤半径={rmin}, ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)

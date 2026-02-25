@@ -96,7 +96,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 1. 计算体积部分 f
         f = self._volume_objective.fun(density, state)
 
-        # 2. 计算消失约束 g
+        # 2. 计算应力约束 g
         g = self._stress_constraint.fun(density, state) # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
 
         # 3. 计算 ALM 的 h 和 Penal
@@ -184,9 +184,9 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         # --- 计算 dPenal/dm_E 的显式部分 ---
         # 两种约束对 ∂g/∂m_E 的形式不同:
-        # - 位移元: ∂g/∂m_E = ε³ + ε
+        # - 位移元: ∂g/∂m_E = ε³ + ε    (单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ))
         # - 混合元: ∂g/∂m_E = -(1 - ε)  (常数)
-        dgdm_E = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state)
+        dgdm_E = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state) 
         dPenaldm_E_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdm_E, 0.0)
 
         if enable_timing:
@@ -260,7 +260,8 @@ class AugmentedLagrangianObjective(BaseLogged):
                         density=density, state=state)  # (NC,) 或 (NC*n_sub,)
 
         # --- 归一化并组装总梯度 ---
-        dP_drho_normalized = dP_drho / self._NC
+        n_constraints = g.numel() if hasattr(g, 'numel') else g.size
+        dP_drho_normalized = dP_drho / n_constraints  # (NC,) 或 (NC*n_sub,)
 
         dJ_drho = dVol_drho + dP_drho_normalized  # (NC,) 或 (NC*n_sub,)
 

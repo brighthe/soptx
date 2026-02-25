@@ -109,7 +109,7 @@ class VanishingStressConstraint(BaseLogged):
         pass
 
     def compute_partial_gradient_wrt_mE(self, state: Dict) -> TensorLike:
-        """计算约束关于相对刚度的偏导数 ∂g/∂m_E.
+        """计算约束关于相对刚度的偏导数 ∂g / ∂m_E.
 
         由 g_j = m_E(ρ_j) · (ε_j³ + ε_j), 对 m_E 求偏导 (ε_j 不显式依赖于 m_E):
             ∂g_j / ∂m_E = ε_j³ + ε_j"""
@@ -235,3 +235,16 @@ class VanishingStressConstraint(BaseLogged):
         implicit_term = bm.einsum('ci, cij, cj -> c', psi_e, K0, uh_e)
         
         return implicit_term
+    
+    def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
+        """归一化应力测度：m_E * σ^v_solid / σ_lim，>1 表示违反"""
+        analyzer = self._analyzer
+        E_rho = analyzer.interpolation_scheme.interpolate_material(
+                                                material=analyzer.material,
+                                                rho_val=rho,
+                                                integration_order=analyzer.integration_order,
+                                            )
+        m_E = E_rho / analyzer.material.youngs_modulus  # (NC,)
+        vm  = state['von_mises']                        # (NC, NQ)
+        
+        return m_E[..., None] * vm / self._stress_limit

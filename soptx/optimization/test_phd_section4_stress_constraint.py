@@ -228,7 +228,7 @@ class DensityTopOptTest(BaseLogged):
                                             enable_logging=False
                                         )
 
-        density_location = 'element' # element, element_multiresolution
+        density_location = 'element_multiresolution' # element, element_multiresolution
         interpolation_method = 'msimp'
         penalty_factor = 3.5
         void_youngs_modulus = 1e-9
@@ -464,7 +464,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -486,8 +486,8 @@ class DensityTopOptTest(BaseLogged):
         objective = VolumeObjective(analyzer=analyzer)
 
         stress_limit = 180.0
-        from soptx.optimization.stress_constraint import StressConstraint
-        constraint = StressConstraint(analyzer=analyzer, stress_limit=stress_limit)
+        from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
+        constraint = VanishingStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
         options = ALMMMAOptions(
@@ -583,5 +583,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_L_bracket_stress')
+    test.run.set('test_subsec4_6_5_cantilever_2d')
     rho_opt, history = test.run()

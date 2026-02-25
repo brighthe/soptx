@@ -243,19 +243,22 @@ class ALMMMAOptimizer(MMAOptimizer):
                 # 更新设计变量
                 dv = dv_new
                 
-                # --- 计算材料刚度插值系数 (基于新的物理密度)---
-                E_rho = analyzer.interpolation_scheme.interpolate_material(
-                                                            material=analyzer.material,
-                                                            rho_val=rho_phys,
-                                                            integration_order=analyzer.integration_order,
-                                                        )
-                E0 = analyzer.material.youngs_modulus
-                E = E_rho / E0 # (NC, )
+                #TODO # --- 计算材料刚度插值系数 (基于新的物理密度)---
+                # E_rho = analyzer.interpolation_scheme.interpolate_material(
+                #                                             material=analyzer.material,
+                #                                             rho_val=rho_phys,
+                #                                             integration_order=analyzer.integration_order,
+                #                                         )
+                # E0 = analyzer.material.youngs_modulus
+                # E = E_rho / E0 # (NC, )
 
-                # --- 计算归一化的 von Mises 应力 ---
-                vm = state['von_mises']
-                slim = self._al_objective._stress_constraint._stress_limit
-                SM = E[..., None] * vm / slim
+                # # --- 计算归一化的 von Mises 应力 ---
+                # vm = state['von_mises']
+                # slim = self._al_objective._stress_constraint._stress_limit
+                # SM = E[..., None] * vm / slim
+
+                SM = self._al_objective._stress_constraint.compute_stress_measure(
+                                                rho=rho_phys, state=state)
                 
                 # 更新当前最大应力测度，用于收敛判定
                 max_vm_stress = float(bm.max(SM))
