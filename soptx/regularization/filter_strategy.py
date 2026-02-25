@@ -429,15 +429,22 @@ class ProjectionStrategy(DensityStrategy):
 
     def _apply_projection(self, rho_tilde: TensorLike) -> TensorLike:
         if self.projection_type == 'tanh':
-            tanh_beta_eta = math.tanh(self.beta * self.eta)
-            tanh_beta_1_eta = math.tanh(self.beta * (1.0 - self.eta))
+            # TODO 不能使用 math.tanh
+            # tanh_beta_eta = bm.tanh(self.beta * self.eta)
+            # tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+            tanh_beta_eta   = math.tanh(float(self.beta) * float(self.eta))
+            tanh_beta_1_eta = math.tanh(float(self.beta) * (1.0 - float(self.eta)))
             numerator = tanh_beta_eta + bm.tanh(self.beta * (rho_tilde - self.eta))
             denominator = tanh_beta_eta + tanh_beta_1_eta
-            return numerator / denominator
+
+            # TODO 修改
+            # return numerator / denominator
+            return bm.clip(numerator / denominator, 0.0, 1.0) 
             
         elif self.projection_type == 'exponential':
             term1 = bm.exp(-self.beta * rho_tilde)
             term2 = rho_tilde * bm.exp(-self.beta)
+            
             return 1.0 - term1 + term2
         
         else:
@@ -449,19 +456,24 @@ class ProjectionStrategy(DensityStrategy):
             rho_phys = super().get_initial_density(density)
 
             if isinstance(rho_phys, Function):
-                val = rho_phys[:]
+                # TODO 修改
+                # val = rho_phys[:]
+                val = bm.clip(rho_phys[:], 0.0, 1.0)       
+
                 self._rho_tilde_cache = bm.copy(val)
                 
                 # 执行投影: rho_tilde -> rho_bar
                 projected_val = self._apply_projection(self._rho_tilde_cache)
 
                 # TODO 修改
-                rho_phys.array[:] = projected_val
                 # rho_phys[:] = bm.set_at(rho_phys, slice(None), projected_val)
+                rho_phys.array[:] = projected_val
                 
             else:
-                # 处理 TensorLike 的情况
-                self._rho_tilde_cache = bm.copy(rho_phys)
+                # TODO 修改
+                # self._rho_tilde_cache = bm.copy(rho_phys)
+                self._rho_tilde_cache = bm.clip(bm.copy(rho_phys), 0.0, 1.0)
+
                 rho_phys = self._apply_projection(self._rho_tilde_cache)
 
             return rho_phys
@@ -469,7 +481,9 @@ class ProjectionStrategy(DensityStrategy):
     def filter_design_variable(self, design_variable: TensorLike, physical_density: Function) -> Function:
         super().filter_design_variable(design_variable, physical_density)
         
-        self._rho_tilde_cache = bm.copy(physical_density[:])
+        # TODO 修改
+        # self._rho_tilde_cache = bm.copy(physical_density[:])
+        self._rho_tilde_cache = bm.clip(bm.copy(physical_density[:]), 0.0, 1.0)
         
         rho_val = self._apply_projection(self._rho_tilde_cache)
         physical_density[:] = bm.set_at(physical_density, slice(None), rho_val)
@@ -478,11 +492,15 @@ class ProjectionStrategy(DensityStrategy):
     
     def _apply_projection_derivative(self, rho_tilde: TensorLike) -> TensorLike:
         if self.projection_type == 'tanh':
-            tanh_beta_eta = math.tanh(self.beta * self.eta)
-            tanh_beta_1_eta = math.tanh(self.beta * (1.0 - self.eta))
+            # TODO 不能使用 math.tanh
+            # tanh_beta_eta = bm.tanh(self.beta * self.eta)
+            # tanh_beta_1_eta = bm.tanh(self.beta * (1.0 - self.eta))
+            tanh_beta_eta   = math.tanh(float(self.beta) * float(self.eta))
+            tanh_beta_1_eta = math.tanh(float(self.beta) * (1.0 - float(self.eta)))
             denominator = tanh_beta_eta + tanh_beta_1_eta
             inner = self.beta * (rho_tilde - self.eta)
             numerator = self.beta * (1.0 - bm.square(bm.tanh(inner)))
+
             return numerator / denominator
 
         elif self.projection_type == 'exponential':

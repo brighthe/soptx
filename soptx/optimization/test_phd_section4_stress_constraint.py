@@ -188,7 +188,6 @@ class DensityTopOptTest(BaseLogged):
     @run.register('test_subsec4_6_5_L_bracket_stress')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         bm.set_backend('numpy') # numpy, pytorch
-        bm.set_backend('numpy') # numpy, pytorch
         # bm.set_default_device('cpu') # cpu, cuda
         device = 'cpu' # cpu, cuda
         # 归一化尺寸
@@ -199,7 +198,7 @@ class DensityTopOptTest(BaseLogged):
         # 物理尺寸
         domain = [0, 200.0, 0, 200.0]            
         hole_domain = [80.0, 200.0, 80.0, 200.0]
-        rmin = 7.5 # 7.5, 10.0
+        rmin = 10.0 # 7.5, 10.0
         P = -400.0
 
         E, nu = 7e4, 0.25
@@ -254,7 +253,7 @@ class DensityTopOptTest(BaseLogged):
                                                 )
             assembly_method = 'fast'
         elif density_location in ['element_multiresolution']:
-            sub_density_element = 16
+            sub_density_element = 4
             import math
             sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
@@ -272,7 +271,7 @@ class DensityTopOptTest(BaseLogged):
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
-        solve_method = 'mumps'
+        solve_method = 'mumps' # 'scipy', 'mumps'
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         analyzer = LagrangeFEMAnalyzer(
                                 disp_mesh=displacement_mesh,
