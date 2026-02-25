@@ -151,58 +151,58 @@ class FilterMatrixBuilder:
             return H
 
 
-            # 自由度总数
-            gdof = density_coords.shape[0]
+            # # 自由度总数
+            # gdof = density_coords.shape[0]
             
-            # 预估非零元素的数量
-            max_nnz = len(density_indices) + gdof
-            iH = bm.zeros(max_nnz, dtype=bm.int32)
-            jH = bm.zeros(max_nnz, dtype=bm.int32)
-            sH = bm.zeros(max_nnz, dtype=bm.float64)
+            # # 预估非零元素的数量
+            # max_nnz = len(density_indices) + gdof
+            # iH = bm.zeros(max_nnz, dtype=bm.int32)
+            # jH = bm.zeros(max_nnz, dtype=bm.int32)
+            # sH = bm.zeros(max_nnz, dtype=bm.float64)
             
-            # 首先添加对角线元素 (自身距离为 0, 权重为 1.0^q = 1.0)c
-            for i in range(gdof):
-                iH[i] = i
-                jH[i] = i
-                sH[i] = 1.0  # (1 - 0/rmin)^q = 1.0
+            # # 首先添加对角线元素 (自身距离为 0, 权重为 1.0^q = 1.0)c
+            # for i in range(gdof):
+            #     iH[i] = i
+            #     jH[i] = i
+            #     sH[i] = 1.0  # (1 - 0/rmin)^q = 1.0
 
-            # 当前非零元素计数
-            nnz = gdof
+            # # 当前非零元素计数
+            # nnz = gdof
 
-            if enable_timing:
-                t.send('对角线循环计算时间')
+            # if enable_timing:
+            #     t.send('对角线循环计算时间')
             
-            # 填充邻居点的权重
-            for idx in range(len(density_indices)):
-                i = density_indices[idx]
-                j = neighbor_indices[idx]
+            # # 填充邻居点的权重
+            # for idx in range(len(density_indices)):
+            #     i = density_indices[idx]
+            #     j = neighbor_indices[idx]
                 
-                # 计算节点间的物理距离
-                physical_dist = bm.sqrt(bm.sum((density_coords[i] - density_coords[j])**2))
+            #     # 计算节点间的物理距离
+            #     physical_dist = bm.sqrt(bm.sum((density_coords[i] - density_coords[j])**2))
                 
-                if physical_dist < rmin:
-                    # 非线性权重: (1 - d/rmin)^q
-                    w = (1.0 - physical_dist / rmin) ** q
-                    iH[nnz] = i
-                    jH[nnz] = j
-                    sH[nnz] = w
-                    nnz += 1
+            #     if physical_dist < rmin:
+            #         # 非线性权重: (1 - d/rmin)^q
+            #         w = (1.0 - physical_dist / rmin) ** q
+            #         iH[nnz] = i
+            #         jH[nnz] = j
+            #         sH[nnz] = w
+            #         nnz += 1
 
-            if enable_timing:
-                t.send('非对角线循环计算时间')
+            # if enable_timing:
+            #     t.send('非对角线循环计算时间')
             
-            # 创建稀疏矩阵
-            H = COOTensor(
-                    indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
-                    values=sH[:nnz],
-                    spshape=(gdof, gdof)
-                )
+            # # 创建稀疏矩阵
+            # H = COOTensor(
+            #         indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
+            #         values=sH[:nnz],
+            #         spshape=(gdof, gdof)
+            #     )
 
-            if enable_timing:
-                t.send('稀疏矩阵构建时间')
-                t.send(None)
+            # if enable_timing:
+            #     t.send('稀疏矩阵构建时间')
+            #     t.send(None)
 
-            return H
+            # return H
         
     def _compute_weighted_matrix_general_backup(self, 
                                         rmin: float,

@@ -159,22 +159,9 @@ class ApparentStressConstraint(BaseLogged):
         return term
     
     def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
-        """归一化应力测度：σ^v_apparent / σ_lim，>1 表示违反
-        
-        说明：
-        在胡张混合有限元中，state['von_mises'] 直接由独立表观应力张量计算得出。
-        表观应力天然免疫孔洞区域的非物理应力奇异性，因此彻底解除了对密度插值 
-        m_E 的依赖，实现了应力测度与物理密度的完全代数解耦。
-        """
-        # 直接从系统状态中获取基于独立表观应力张量 Σ 计算的 von Mises 应力
-        vm  = state['von_mises']                        # (NC, NQ) 或 (NC,) 视高斯点设置而定
-
-        # 直接除以许用应力进行归一化
-        return vm / self._stress_limit
-    
-    def compute_stress_measure(self, state: Dict) -> TensorLike:
         """归一化应力测度：σ^v_apparent / (η * σ_lim)，>1 表示违反"""
-        vm  = state['von_mises']         # (NC, NQ)
-        eta = state['eta_threshold']     # (NC, )
+        vm  = state['von_mises']         # (NC, NQ) 从系统直接获取独立表观应力
+        eta = state['eta_threshold']     # (NC, ) 获取当前密度的松弛阈值
 
+        # 将动态阈值 eta 移至分母，为外层 MMA 提供统一的 <= 1.0 判定标尺
         return vm / (eta[..., None] * self._stress_limit)
