@@ -37,7 +37,14 @@ class DensityTopOptHuZhangTest(BaseLogged):
         # lam, mu = 1.0, 0.5
         # pde = HZmfemZeroShearMix(lam=lam, mu=mu)
 
-        #* 算例 - 混合边界条件 - 一般剪切应力
+        #* 算例 - 混合边界条件 - 一般剪切应力 (非齐次位移)
+        # TODO 结果不正确 (松弛不对, 不松驰反倒对)
+        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix 
+        # lam, mu = 1.0, 0.5
+        # pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
+
+        # #* 算例 - 混合边界条件 - 一般剪切应力 (齐次位移)
+        # TODO 结果正确 (松弛不松驰, 结果都对)
         from soptx.model.linear_elastic_2d_hzmfem import HZmfemMixedBoundary 
         lam, mu = 1.0, 0.5
         pde = HZmfemMixedBoundary(lam=lam, mu=mu)
@@ -70,9 +77,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                             enable_logging=False
                                         )
         
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree*2 + 2
-        use_relaxation = False
+        use_relaxation = True # True, False
         self._log_info(f"模型名称={pde.__class__.__name__}, 平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, \n"
                     f"网格类型={displacement_mesh.__class__.__name__}, 空间次数={space_degree}, 积分阶数={integration_order}, \n"
                     f"是否使用松弛={use_relaxation}")
@@ -813,5 +820,5 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_3_hzmfem')
+    test.run.set('test_linear_elastic_huzhang') # test_linear_elastic_huzhang
     rho_opt, history = test.run()

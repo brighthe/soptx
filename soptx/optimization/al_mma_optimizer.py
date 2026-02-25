@@ -256,7 +256,6 @@ class ALMMMAOptimizer(MMAOptimizer):
                 # vm = state['von_mises']
                 # slim = self._al_objective._stress_constraint._stress_limit
                 # SM = E[..., None] * vm / slim
-
                 SM = self._al_objective._stress_constraint.compute_stress_measure(
                                                 rho=rho_phys, state=state)
                 

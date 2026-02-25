@@ -65,6 +65,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._integrator.keep_data(True)
 
         self._cached_ke0 = None
+        self._cached_ke0_sub = None
 
         self._cached_stiffness_absolute = None # 绝对刚度 (带量纲)
         self._cached_stiffness_relative = None # 相对刚度 (无量纲)
@@ -535,6 +536,74 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._cached_ke0 = ke0
 
         return ke0
+    
+    def compute_sub_element_stiffness_matrix(self) -> TensorLike:
+        """计算各子单元对位移单元刚度矩阵的贡献 (单位弹性模量 E=1)
+
+        Returns
+        -------
+        ke0_sub : TensorLike, shape (NC, n_sub, TLDOF, TLDOF)
+            满足: K_e = Σ_s E(ρ_{e,s}) · ke0_sub[c, s]
+            因此: ∂K_e/∂ρ_{e,i} = E'(ρ_{e,i}) · ke0_sub[c, i]
+        """
+        space    = self.tensor_space
+        s_space  = space.scalar_space
+        mesh_u   = space.mesh
+        GD       = mesh_u.geo_dimension()
+        n_sub    = self._interpolation_scheme.n_sub
+        NC       = mesh_u.number_of_cells()
+        LDOF     = s_space.number_of_local_dofs()
+
+        # --- 复用 voigt_multiresolution 前半段: 积分点、gphi、detJ ---
+        if 4 <= n_sub <= 9:
+            q = 3
+        elif n_sub >= 16:
+            q = 2
+        else:
+            q = s_space.p + 3
+
+        qf_e = mesh_u.quadrature_formula(q)
+        bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()  # ws_e: (NQ,)
+
+        from soptx.analysis.utils import map_bcs_to_sub_elements
+        bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+        bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
+
+        NQ = ws_e.shape[0]
+        gphi_eg = bm.zeros((NC, n_sub, NQ, LDOF, GD))
+        detJ_eg = bm.zeros((NC, n_sub, NQ))
+
+        for s_idx in range(n_sub):
+            sub_bcs = (bcs_eg_x[s_idx], bcs_eg_y[s_idx])
+            gphi_eg[:, s_idx] = s_space.grad_basis(sub_bcs, variable='x')  # (NC, NQ, LDOF, GD)
+            J_sub = mesh_u.jacobi_matrix(sub_bcs)                          # (NC, NQ, GD, GD)
+            detJ_eg[:, s_idx] = bm.abs(bm.linalg.det(J_sub))              # (NC, NQ)
+
+        # --- 计算 B 矩阵, 与 voigt_multiresolution 完全一致 ---
+        from soptx.analysis.utils import (reshape_multiresolution_data,
+                                        reshape_multiresolution_data_inverse)
+        B_eg = reshape_multiresolution_data_inverse(
+                    mesh_u,
+                    self._material.strain_displacement_matrix(
+                        dof_priority=space.dof_priority,
+                        gphi=reshape_multiresolution_data(mesh_u, gphi_eg)  # (NC*n_sub, NQ, NS, TLDOF)
+                    ),
+                    n_sub=n_sub
+            )  # (NC, n_sub, NQ, NS, TLDOF)
+
+        # --- 核心改动: coef=1, 保留 n_sub 维度 ---
+        J_g = 1.0 / n_sub
+        D0  = self._material.elastic_matrix()[0, 0]  # (NS, NS)
+
+        # voigt assembly:  'q, cnq, cnqki, cnkl, cnqlj -> cij'  (消掉 n)
+        # 此处:            'q, cnq, cnqki,   kl, cnqlj -> cnij' (保留 n)
+        ke0_sub = J_g * bm.einsum('q, cnq, cnqki, kl, cnqlj -> cnij',
+                                ws_e, detJ_eg, B_eg, D0, B_eg)
+        # shape: (NC, n_sub, TLDOF, TLDOF)
+
+        self._cached_ke0_sub = ke0_sub
+
+        return ke0_sub
 
     def compute_stiffness_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部刚度矩阵关于物理密度的导数 (灵敏度)"""

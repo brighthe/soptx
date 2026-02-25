@@ -33,7 +33,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         - P^(k) 为罚函数项:
             P^(k) = Σ_j [λ_j · h_j + (μ/2) · h_j²]
         - h_j = max(g_j, -λ_j/μ), Eq. (40)
-        - g_j 为多项式消失约束, 由 StressConstraint 计算
+        - g_j 为应力约束
         """
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
@@ -213,7 +213,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         # - 位移元: ψ^T * (∂K/∂m_E) * U
         # - 混合元: λ_σ^T * (∂A_σσ/∂ρ) * Σ  (内积，不含 ρ 的幂次系数)
         dPenaldm_E_implicit = self._stress_constraint.compute_implicit_sensitivity_term(
-                                adjoint_vector, state)  # (NC,)
+                                                        adjoint_vector, state)  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
         # --- 显式项归约: 对 NQ 维度求和 ---
         dPenaldm_E_explicit_reduced = bm.sum(dPenaldm_E_explicit, axis=-1)
@@ -231,9 +231,9 @@ class AugmentedLagrangianObjective(BaseLogged):
         #   显式项通过 dm_E/dρ 串联
         #   隐式项通过通用系数 m_E'(ρ)/m_E²(ρ) 串联（适用于任意插值模型）
         dE_drho_absolute = self._interpolation_scheme.interpolate_material_derivative(
-                                material=self._material, rho_val=density)  # (NC,) 或 (NC*n_sub,)
+                                                            material=self._material, rho_val=density)  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
         E0 = self._material.youngs_modulus
-        dm_E_drho = dE_drho_absolute / E0  # p * ρ^(p-1), (NC,) 或 (NC*n_sub,)
+        dm_E_drho = dE_drho_absolute / E0  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
         if self._is_apparent:
             # 混合元: 显式项与隐式项系数分开处理
@@ -247,23 +247,20 @@ class AugmentedLagrangianObjective(BaseLogged):
             dP_drho = dP_drho_explicit + dP_drho_implicit               # (NC,)
 
         else:
-            # TODO 位移元: 显式项与隐式项共享同一个 dE/dρ
-            if self._is_multiresolution:
-                dPenaldm_E_total = dPenaldm_E_explicit_reduced + (dPenaldm_E_implicit[:, None] / self._n_sub)  # (NC, n_sub)
-            else:
-                dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit           # (NC,)
+            # 位移元: 显式项与隐式项共享同一个 dE/dρ
+            dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
-            dP_drho = dPenaldm_E_total * dm_E_drho  # (NC,) 或 (NC*n_sub,)
+            dP_drho = dPenaldm_E_total * dm_E_drho  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
         # --- 体积目标函数梯度 ---
         dVol_drho = self._volume_objective.jac(
-                        density=density, state=state)  # (NC,) 或 (NC*n_sub,)
+                        density=density, state=state)  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
         # --- 归一化并组装总梯度 ---
-        n_constraints = g.numel() if hasattr(g, 'numel') else g.size
-        dP_drho_normalized = dP_drho / n_constraints  # (NC,) 或 (NC*n_sub,)
+        n_constraints = g.numel() if hasattr(g, 'numel') else g.size # (单分辨率: NC*NQ | 多分辨率: NC*n_sub*NQ)
+        dP_drho_normalized = dP_drho / n_constraints  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
-        dJ_drho = dVol_drho + dP_drho_normalized  # (NC,) 或 (NC*n_sub,)
+        dJ_drho = dVol_drho + dP_drho_normalized      # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
         if enable_timing:
             t.send('其他')

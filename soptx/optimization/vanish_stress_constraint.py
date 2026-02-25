@@ -189,8 +189,7 @@ class VanishingStressConstraint(BaseLogged):
             # 单元级伴随载荷 (来自伴随方程定义 F_adj = - dP/dU)
             element_loads = -1.0 * element_sens * weights # (NC, NQ, LDOF)
 
-            # TODO 如果 NQ > 1 (多个积分点), 通常取平均或积分,
-            # 但对应力约束而言，通常是每个点一个约束.
+            # TODO 如果 NQ > 1 (多个积分点), 通常取平均或积分, 但对应力约束而言，通常是每个点一个约束.
             element_loads = bm.sum(element_loads, axis=1) # (NC, LDOF)
 
         # --- 全局组装 ---
@@ -213,12 +212,6 @@ class VanishingStressConstraint(BaseLogged):
                                         ) -> TensorLike:
         """计算伴随法隐式灵敏度项
             ξ^T · (∂F_int/∂E_ℓ)"""
-        # 获取单元基础刚度矩阵 K0
-        if self._analyzer._cached_ke0 is None:
-            K0 = self._analyzer.compute_solid_stiffness_matrix()
-        else:
-            K0 = self._analyzer._cached_ke0
-            
         # 提取位移向量 U 和伴随向量 ψ
         uh = state['displacement']
         
@@ -230,10 +223,23 @@ class VanishingStressConstraint(BaseLogged):
         cell2dof = self._analyzer.tensor_space.cell_to_dof()
         uh_e = uh_flat[cell2dof]
         psi_e = psi_flat[cell2dof]
+
+        if not self._is_multiresolution:
+            if self._analyzer._cached_ke0 is None:
+                K0 = self._analyzer.compute_solid_stiffness_matrix()
+            else:
+                K0 = self._analyzer._cached_ke0  # (NC, LDOF, LDOF)
+
+            implicit_term = bm.einsum('ci, cij, cj -> c', psi_e, K0, uh_e) # (NC, )
         
-        # 逐单元张量收缩: ψ_e^T · K₀^e · u_e, shape (NC,)
-        implicit_term = bm.einsum('ci, cij, cj -> c', psi_e, K0, uh_e)
-        
+        else:
+            if self._analyzer._cached_ke0_sub is None:
+                ke0_sub = self._analyzer.compute_sub_element_stiffness_matrix()
+            else:
+                ke0_sub = self._analyzer._cached_ke0_sub  # (NC, n_sub, TLDOF, TLDOF)
+
+            implicit_term = bm.einsum('ci, csij, cj -> cs', psi_e, ke0_sub, uh_e)  # (NC, n_sub)
+
         return implicit_term
     
     def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
@@ -244,7 +250,7 @@ class VanishingStressConstraint(BaseLogged):
                                                 rho_val=rho,
                                                 integration_order=analyzer.integration_order,
                                             )
-        m_E = E_rho / analyzer.material.youngs_modulus  # (NC,)
-        vm  = state['von_mises']                        # (NC, NQ)
-        
+        m_E = E_rho / analyzer.material.youngs_modulus  # 单分辨率: (NC,)         | 多分辨率: (NC, n_sub)
+        vm  = state['von_mises']                        # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
+
         return m_E[..., None] * vm / self._stress_limit

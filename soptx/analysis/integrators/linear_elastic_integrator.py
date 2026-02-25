@@ -883,9 +883,6 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
             return cm, bcs, JG, S
         
-
-        
-
     @assembly.register('symbolic')
     def assembly(self, 
                 space: TensorFunctionSpace,
