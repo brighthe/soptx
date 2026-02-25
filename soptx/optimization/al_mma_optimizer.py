@@ -375,8 +375,11 @@ class ALMMMAOptimizer(MMAOptimizer):
         Osc = opts.osc
         AsymInit = opts.asymp_init
 
-        xmin = bm.maximum(zMin, z - move)
-        xmax = bm.minimum(zMax, z + move)
+        #TODO 修改
+        xmin = bm.maximum(z - move, bm.full_like(z, zMin))
+        xmax = bm.minimum(z + move, bm.full_like(z, zMax))
+        # xmin = bm.maximum(zMin, z - move)
+        # xmax = bm.minimum(zMax, z + move)
 
         # 动态截断 AsymInc / AsymDecr
         self._asym_inc_dynamic = min(1 + Osc, self._asym_inc_dynamic)
@@ -412,12 +415,19 @@ class ALMMMAOptimizer(MMAOptimizer):
 
         # 3. 求解无约束子问题 (解析解)
         feps = 1e-6
-        p = (U - z)**2 * (bm.maximum(dfdz, 0.0) 
-                          + 0.001 * bm.abs(dfdz) 
-                          + feps / (U - L))
-        q = (z - L)**2 * (-bm.minimum(dfdz, 0.0) 
-                          + 0.001 * bm.abs(dfdz) 
-                          + feps / (U - L))
+        #TODO 修改
+        p = (U - z)**2 * (bm.maximum(dfdz, bm.zeros_like(dfdz)) 
+                            + 0.001 * bm.abs(dfdz) 
+                            + feps / (U - L))
+        q = (z - L)**2 * (-bm.minimum(dfdz, bm.zeros_like(dfdz)) 
+                            + 0.001 * bm.abs(dfdz) 
+                            + feps / (U - L))
+        # p = (U - z)**2 * (bm.maximum(dfdz, 0.0) 
+        #                   + 0.001 * bm.abs(dfdz) 
+        #                   + feps / (U - L))
+        # q = (z - L)**2 * (-bm.minimum(dfdz, 0.0) 
+        #                   + 0.001 * bm.abs(dfdz) 
+        #                   + feps / (U - L))
 
         zCnd = (L * p - U * q + (U - L) * bm.sqrt(p * q)) / (p - q)
         zNew = bm.maximum(alpha, bm.minimum(beta, zCnd))

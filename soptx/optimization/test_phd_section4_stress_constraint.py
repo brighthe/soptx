@@ -187,7 +187,7 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec4_6_5_L_bracket_stress')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        bm.set_backend('pytorch') # numpy, pytorch
+        bm.set_backend('numpy') # numpy, pytorch
         # bm.set_default_device('cpu') # cpu, cuda
         device = 'cpu' # cpu, cuda
         # 归一化尺寸
@@ -218,14 +218,14 @@ class DensityTopOptTest(BaseLogged):
                         )
         
         pde.init_mesh.set(mesh_type)
-        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny, device=device)
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
                                             plane_type=pde.plane_type,
-                                            enable_logging=False
+                                            device=device,
                                         )
 
         density_location = 'element_multiresolution' # element, element_multiresolution
@@ -271,7 +271,7 @@ class DensityTopOptTest(BaseLogged):
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
-        solve_method = 'cg'
+        solve_method = 'mumps' # 'cg', 'mumps'
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         analyzer = LagrangeFEMAnalyzer(
                                 disp_mesh=displacement_mesh,
@@ -583,5 +583,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_cantilever_2d')
+    test.run.set('test_subsec4_6_5_L_bracket_stress')
     rho_opt, history = test.run()

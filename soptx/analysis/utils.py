@@ -1,4 +1,5 @@
 from typing import Optional
+import math
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import  cartesian
@@ -95,7 +96,7 @@ def map_bcs_to_sub_elements(bcs_e: Tuple[TensorLike, TensorLike], n_sub: int):
     bcs_xi, bcs_eta = bcs_e
     GD = bcs_xi.shape[1]
 
-    sqrt_n_sub = bm.sqrt(n_sub)
+    sqrt_n_sub = math.sqrt(n_sub)
     if sqrt_n_sub != int(sqrt_n_sub):
         raise ValueError("子密度单元个数 'n_sub' 必须是一个完全平方数")
     

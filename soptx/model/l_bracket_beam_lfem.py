@@ -55,7 +55,11 @@ class LBracketBeam2d(PDEBase):
         return self._P
 
     @variantmethod('tri_threshold')
-    def init_mesh(self, nx: int = 10, ny: int = 10) -> TriangleMesh:
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 10)
+        ny = kwargs.get('ny', 10)
+        device = kwargs.get('device', 'cpu')
+
         
         big_box = self._domain
         small_box = self._hole_domain
@@ -70,14 +74,18 @@ class LBracketBeam2d(PDEBase):
 
         l_shape_mesh = TriangleMesh.from_box(big_box,
                                              nx=nx, ny=ny,
-                                             threshold=threshold)
+                                             threshold=threshold,
+                                             device=device)
         
         self._save_meshdata(l_shape_mesh, 'tri_threshold', nx=nx, ny=ny)
 
         return l_shape_mesh
     
     @init_mesh.register('quad_threshold')
-    def init_mesh(self, nx: int = 10, ny: int = 10) -> QuadrangleMesh:
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 10)
+        ny = kwargs.get('ny', 10)
+        device = kwargs.get('device', 'cpu')
         
         big_box = self._domain
         small_box = self._hole_domain
@@ -92,7 +100,8 @@ class LBracketBeam2d(PDEBase):
 
         l_shape_mesh = QuadrangleMesh.from_box(big_box,
                                             nx=nx, ny=ny,
-                                            threshold=threshold)
+                                            threshold=threshold, 
+                                            device=device)
                                              
         self._save_meshdata(l_shape_mesh, 'quad_threshold', nx=nx, ny=ny)
 
