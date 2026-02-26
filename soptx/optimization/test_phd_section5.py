@@ -39,15 +39,15 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         #* 算例 - 混合边界条件 - 一般剪切应力 (非齐次位移)
         # TODO 结果不正确 (松弛不对, 不松驰反倒对)
-        from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix 
-        lam, mu = 1.0, 0.5
-        pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
+        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix 
+        # lam, mu = 1.0, 0.5
+        # pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
 
         # #* 算例 - 混合边界条件 - 一般剪切应力 (齐次位移)
         # TODO 结果正确 (松弛不松驰, 结果都对)
-        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemMixedBoundary 
-        # lam, mu = 1.0, 0.5
-        # pde = HZmfemMixedBoundary(lam=lam, mu=mu)
+        from soptx.model.linear_elastic_2d_hzmfem import HZmfemMixedBoundary 
+        lam, mu = 1.0, 0.5
+        pde = HZmfemMixedBoundary(lam=lam, mu=mu)
 
         #* 第一类网格
         # pde.init_mesh.set('union_crisscross')
@@ -174,7 +174,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_2_lfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 悬臂梁结构 cantilever_2d
-        p = -1
+        P = -1
         E, nu = 1, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_stress' # plane_strain, plane_stress
@@ -182,7 +182,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         from soptx.model.cantilever_2d_lfem import Cantilever2d
         pde = Cantilever2d(
                     domain=domain,
-                    p=p, 
+                    P=P, 
                     E=E, nu=nu,
                     plane_type=plane_type,
                 )
@@ -191,7 +191,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.3
 
-        space_degree = 3
+        space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         interpolation_method = 'msimp'
@@ -211,7 +211,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         use_penalty_continuation = False
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
-        rmin = 1.25
+        rmin = 2.0
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -309,10 +309,13 @@ class DensityTopOptHuZhangTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec5_6_2_lfem")
         save_path.mkdir(parents=True, exist_ok=True)
 
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
+
         
-        save_optimization_history(mesh=design_variable_mesh, 
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
@@ -323,7 +326,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_2_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 悬臂梁结构 cantilever_2d
-        p = -1
+        P = -1
         E, nu = 1, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_stress' # plane_strain, plane_stress
@@ -331,7 +334,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         from soptx.model.cantilever_2d_hzmfem import Cantilever2d
         pde = Cantilever2d(
                     domain=domain,
-                    p=p, 
+                    P=P, 
                     E=E, nu=nu,
                     plane_type=plane_type,
                 )
@@ -458,14 +461,15 @@ class DensityTopOptHuZhangTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec5_6_2_hzmfem")
+        save_path = Path(f"{base_dir}/test_subsec5_6_2_hzmfem_k2")
         save_path.mkdir(parents=True, exist_ok=True)
 
         save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
         
-        save_optimization_history(mesh=design_variable_mesh, 
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
@@ -633,9 +637,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec5_6_3_lfem")
         save_path.mkdir(parents=True, exist_ok=True)
         
-        save_optimization_history(mesh=design_variable_mesh, 
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
@@ -679,19 +684,18 @@ class DensityTopOptHuZhangTest(BaseLogged):
                         )
 
         nx, ny = 120, 40
-        # nx, ny = 30, 10
         mesh_type = 'uniform_crisscross_tri' 
 
         volume_fraction = 0.35
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         # 'element'
         density_location = 'element'
         relative_density = volume_fraction
 
-        solve_method = 'mumps'
+        solve_method = 'mumps' # 'scipy', 'mumps'
 
         max_iterations = 500
         change_tolerance = 1e-2
@@ -827,5 +831,5 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
     # test_subsec5_6_3_hzmfem, test_linear_elastic_huzhang, test_subsec5_6_3_lfem
-    test.run.set('test_subsec5_6_3_hzmfem') 
+    test.run.set('test_subsec5_6_2_lfem') 
     rho_opt, history = test.run()

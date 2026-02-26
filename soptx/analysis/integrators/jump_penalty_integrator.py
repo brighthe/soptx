@@ -183,16 +183,25 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         
         # 构建缩放系数
         # E = 1.0     # MPa
-        # L0_1 = 120.0  # mm
-        # alpha1 = E / (L0_1**2)
+        # L0 = 120.0  # mm
+        # alpha = E / (L0**2)
 
-        mu = self.material.shear_modulus # MPa
+        # k=1 用 E，k>=2 用 mu，反映不同次数对稳定化强度的不同需求
+        # 应力空间的次数
+        p = space.p + 1
         mesh = space.mesh
         node = mesh.entity('node')
         bbox_max = bm.max(node, axis=0)  
         bbox_min = bm.min(node, axis=0)  
         L0 = bm.max(bbox_max - bbox_min) # mm
-        alpha = mu / (L0**2)
+        if p == 1:
+            E = self.material.youngs_modulus # MPa
+            alpha = E / (L0 ** 2)
+            # mu = self.material.shear_modulus # MPa
+            # alpha = mu / (L0 ** 2)
+        else:
+            mu = self.material.shear_modulus # MPa
+            alpha = mu / (L0 ** 2)
 
         KE = bm.einsum('f, fij -> fij', alpha * hF, integrand)
 
@@ -216,9 +225,9 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         fm = mesh.entity_measure('face', index=index) 
         if GD == 2:
-            hF = fm  # 2D: 边长
+            hF = fm  
         elif GD == 3:
-            hF = bm.sqrt(fm)  # 3D: sqrt(面积) ≈ 面的特征尺度
+            hF = bm.sqrt(fm)  
         else:
             raise ValueError(f"Unsupported dimension: {GD}")
 
