@@ -21,6 +21,7 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 80, 0, 40]
         rmin = 3.5
         P = -400.0
+        load_width = 6.0 
 
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
@@ -28,12 +29,13 @@ class DensityTopOptTest(BaseLogged):
         nx, ny = 80, 40
         mesh_type = 'uniform_crisscross_tri'
 
-        from soptx.model.cantilever_2d_hzmfem import Cantilever2d
-        pde = Cantilever2d(
+        from soptx.model.cantilever_2d_hzmfem import CantileverMiddle2d
+        pde = CantileverMiddle2d(
                     domain=domain,
                     P=P, 
                     E=E, nu=nu,
                     plane_type=plane_type,
+                    load_width=load_width,  
                 )
         
         pde.init_mesh.set(mesh_type)

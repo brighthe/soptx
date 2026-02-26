@@ -109,14 +109,18 @@ class ApparentStressConstraint(BaseLogged):
         integration_order = 1
         qf = disp_mesh.quadrature_formula(integration_order, 'cell')
         bcs, ws = qf.get_quadrature_points_and_weights()
-        phi = stress_space.basis(bcs) # (NC, NQ, LDOF, NS)
+        # TODO
+        phi = stress_space.basis(bcs) # (NC, NQ, LDOF, NS) HuZhang 原生 [xx, xy, yy]
+        phi = phi[..., [0, 2, 1]]     # 标准 Voigt [xx, yy, xy]
 
         # 3. 通过基函数将 ∂σ^v/∂σ_vec 映射到自由度空间
         element_sens = bm.einsum('cqls, cqs -> cql', phi, dVM_dSigma)  # (NC, NQ, LDOF)
 
         # 4. 应用罚函数权重并对积分点求和
         weights = dPenaldVM[..., None] * ws[None, :, None]      # (NC, NQ, 1)
-        element_loads = -1.0 * element_sens * weights           # (NC, NQ, LDOF)
+        # TODO
+        element_loads = 1.0 * element_sens * weights            # (NC, NQ, LDOF)
+        # element_loads = -1.0 * element_sens * weights           # (NC, NQ, LDOF)
         element_loads = bm.sum(element_loads, axis=1)           # (NC, LDOF)
 
         # 5. 全局组装至应力自由度
@@ -128,6 +132,9 @@ class ApparentStressConstraint(BaseLogged):
         values = element_loads.flatten()
         
         bm.add_at(adjoint_load, indices, values)
+
+        print(f"adjoint_load max: {float(bm.max(bm.abs(adjoint_load)))}")
+        print(f"adjoint_load nonzero: {int(bm.sum(bm.abs(adjoint_load) > 1e-12))}")
         
         return adjoint_load
 
@@ -135,13 +142,9 @@ class ApparentStressConstraint(BaseLogged):
                                           adjoint_vector: TensorLike, 
                                           state: Dict
                                         ) -> TensorLike:
-        """
-        计算伴随法隐式项: λ_σ^T * (∂A_σσ / ∂ρ) * Σ        
-        """
-        if self._analyzer._cached_Ae0 is None:
-            A0 = self._analyzer.compute_solid_stress_matrix()
-        else:
-            A0 = self._analyzer._cached_Ae0  # (NC, LDOF, LDOF)
+        """计算伴随法隐式项: λ_σ^T * (∂A_σσ / ∂ρ) * Σ"""
+        # TODO 
+        A0 = self._analyzer._cached_Ae0  # (NC, LDOF, LDOF)
 
         huzhang_space = self._analyzer.huzhang_space
         cell2dof = huzhang_space.cell_to_dof()  # (NC, LDOF)
@@ -165,3 +168,8 @@ class ApparentStressConstraint(BaseLogged):
 
         # 将动态阈值 eta 移至分母，为外层 MMA 提供统一的 <= 1.0 判定标尺
         return vm / (eta[..., None] * self._stress_limit)
+    
+    def compute_visual_stress_measure(self, state: Dict) -> TensorLike:
+        """可视化用归一化应力: σ^vM / σ_lim，不含 η 阈值"""
+        vm = state['von_mises']  # (NC, NQ)
+        return vm / self._stress_limit

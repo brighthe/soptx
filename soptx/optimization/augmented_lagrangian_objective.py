@@ -267,6 +267,23 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         dJ_drho = dVol_drho + dP_drho_normalized      # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
+        # 解伴随方程后
+        print(f"adjoint_vector max: {float(bm.max(bm.abs(adjoint_vector)))}")
+
+        # 各灵敏度分量
+        print(f"dVol_drho max:              {float(bm.max(bm.abs(dVol_drho)))}")
+        print(f"dP_drho_explicit max:       {float(bm.max(bm.abs(dP_drho_explicit)))}")  
+        print(f"dPenaldm_E_implicit max:    {float(bm.max(bm.abs(dPenaldm_E_implicit)))}")
+        print(f"coeff_implicit max:         {float(bm.max(bm.abs(coeff_implicit)))}")
+        print(f"dP_drho_implicit max:       {float(bm.max(bm.abs(dP_drho_implicit)))}")
+        print(f"dP_drho_normalized max:     {float(bm.max(bm.abs(dP_drho_normalized)))}")
+        print(f"dJ_drho max:                {float(bm.max(bm.abs(dJ_drho)))}")
+
+        print(f"dP_drho_explicit min: {float(bm.min(dP_drho_explicit))}")  # 确认符号
+        print(f"dP_drho_implicit min: {float(bm.min(dP_drho_implicit))}")  # 确认符号
+        print(f"dP_drho max (before norm): {float(bm.max(dP_drho))}")
+        print(f"dP_drho min (before norm): {float(bm.min(dP_drho))}")
+
         if enable_timing:
             t.send('其他')
             t.send(None)

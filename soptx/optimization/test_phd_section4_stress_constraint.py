@@ -583,5 +583,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_L_bracket_stress')
+    test.run.set('test_subsec4_6_5_cantilever_2d')
     rho_opt, history = test.run()

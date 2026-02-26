@@ -82,7 +82,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._lambda1_rho = None
 
         self._cached_K = None  # 缓存施加边界条件后的刚度矩阵，供伴随求解复用
-        self._cached_Ae0 = None  # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
+        # self._cached_Ae0 = None  
+        self._cached_Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space) # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
 
 
     ##############################################################################################
@@ -402,9 +403,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # 根据网格设置点载荷作用区域
         if hasattr(self._pde, 'set_load_region'):
             self._pde.set_load_region(self._mesh)
+
+        # # 验证载荷参数
+        # print(f"traction intensity t: {self._pde._t}")
         
         # 计算边界自由度的值
         uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
+
+        # # 验证被强施加的应力 DOF
+        # print(f"number of traction BCs DOFs: {int(is_bd_dof.sum())}")
+        # print(f"uh_val at traction DOFs (nonzero): {uh_val[is_bd_dof & (bm.abs(uh_val) > 1e-12)]}")
 
         gdof_total = K.shape[0]
         gdof_sigma = space_sigma.number_of_global_dofs()
@@ -744,14 +752,14 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         return stress_vector
     
-    def compute_solid_stress_matrix(self):
-        """计算实体材料（ρ=1）的单元局部柔度矩阵 A_σσ^(0)"""
+    # def compute_solid_stress_matrix(self):
+    #     """计算实体材料（ρ=1）的单元局部柔度矩阵 A_σσ^(0)"""
 
-        Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space)  # (NC, LDOF, LDOF)
+    #     Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space)  # (NC, LDOF, LDOF)
 
-        self._cached_Ae0 = Ae0
+    #     self._cached_Ae0 = Ae0
 
-        return Ae0
+    #     return Ae0
 
 
     ##############################################################################################
