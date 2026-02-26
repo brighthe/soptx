@@ -6,17 +6,22 @@ from fealpy.functionspace import FunctionSpace as _FS
 from fealpy.decorator import variantmethod
 from fealpy.fem.integrator import LinearInt, OpInt, FaceInt, enable_cache
 
+from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
+
 class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
     def __init__(self, 
                 q: Optional[int]=None,
                 threshold: Optional[Threshold]=None,
-                method: Optional[str]=None
+                method: Optional[str]=None,
+                material: Optional[LinearElasticMaterial]=None,
             ) -> None:
         super().__init__()
 
         self.q = q
         self.threshold = threshold
+
+        self.material = material
 
         self.assembly.set(method)
 
@@ -32,19 +37,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             is_internal_flag = is_internal_all
             return index, is_internal_flag
         
-        elif self.threshold == 'internal':
-            index = bm.nonzero(is_internal_all)[0]
-            is_internal_flag = bm.ones(len(index), dtype=bm.bool)
-            return index, is_internal_flag
-
-        elif callable(self.threshold):
-            bc = mesh.entity_barycenter('face')
-            index_bool = self.threshold(bc)
-            index = bm.nonzero(index_bool)[0]
-            is_internal_flag = is_internal_all[index]
-            return index, is_internal_flag
-        
-        elif isinstance(self.threshold, TensorLike):
+        elif isinstance(self.threshold, TensorLike): 
             index = self.threshold
             is_internal_flag = is_internal_all[index]
             return index, is_internal_flag
@@ -65,7 +58,6 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         cell2facesign = mesh.cell_to_face_sign()
         cell2dof = space.cell_to_dof()
 
-        # face2dof = bm.full((NF, 2*ldof), -1, dtype=bm.int64)
         face2dof = bm.zeros((NF, 2*ldof), dtype=bm.int64)
 
         for i in range(TD+1):
@@ -86,6 +78,125 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
     ########################################################################################
     # 变体方法
     ########################################################################################
+
+    @enable_cache
+    def fetch_matrix_jump(self, space: _FS):
+        """计算矩阵跳量"""
+        mesh = getattr(space, 'mesh', None)
+        index, is_internal_flag = self.make_index(space)
+        
+        q = space.p + 3 if self.q is None else self.q
+        qf = mesh.quadrature_formula(q, 'face')
+        bcs, ws = qf.get_quadrature_points_and_weights()
+
+        NC = mesh.number_of_cells()
+        NF = mesh.number_of_faces()
+        TD = mesh.top_dimension()
+        GD = mesh.geo_dimension()
+        NQ = len(ws)
+
+        fm = mesh.entity_measure('face', index=index)
+        if GD == 2:
+            hF = fm  # 2D: 边长
+        elif GD == 3:
+            hF = bm.sqrt(fm)  # 3D: sqrt(面积) ≈ 面的特征尺度
+            
+        # 获取面的单位法向量
+        fn = mesh.face_unit_normal(index=index)  # (NF(index), GD)
+
+        cell2face = mesh.cell_to_face()
+        # 单元内局部面的局部取向是否与该全局面的全局取向一致
+        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
+        ldof = space.number_of_local_dofs()
+
+        # 内部面 F 上, 基函数 w^+ 来自 L 侧单元, w^- 来自 R 侧单元
+        w_plus  = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  
+        w_minus = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  
+        
+        for i in range(TD+1):
+            fidx = cell2face[:, i]
+            pos  = cell2facesign[:, i]
+            
+            L = bm.nonzero(pos)[0]   # 左侧：pos=True，这是 w^+
+            R = bm.nonzero(~pos)[0]  # 右侧：pos=False，这是 w^-
+            
+            b = bm.insert(bcs, i, 0, axis=1)
+            phi_ref = space.basis(b)
+            phi = bm.broadcast_to(phi_ref, (NC, NQ, ldof, GD))
+            
+            # 存储原始基函数值（不带符号）
+            if L.size > 0:
+                w_plus[fidx[L]]  = phi[L]   # w^+
+            if R.size > 0:
+                w_minus[fidx[R]] = phi[R]   # w^-
+        
+        w_plus  = w_plus[index]   # (NF[index], NQ, ldof, GD)
+        w_minus = w_minus[index]  # (NF[index], NQ, ldof, GD)
+        
+        # 构造矩阵跳量
+        NF_local = len(index)
+        matrix_jump = bm.zeros((NF_local, NQ, 2*ldof, GD, GD), dtype=bm.float64)
+        
+        # ============ 内部面 ============
+        internal_idx = bm.nonzero(is_internal_flag)[0]
+        if len(internal_idx) > 0:
+            w_p = w_plus[internal_idx]
+            w_m = w_minus[internal_idx]
+            nu = fn[internal_idx]
+            
+            # R 侧
+            M_R = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_m, -nu) + bm.einsum('fi, fqdj -> fqdij', -nu, w_m))
+            matrix_jump[internal_idx, :, :ldof, :, :] = M_R
+            # L 侧
+            M_L = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_p, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w_p))
+            matrix_jump[internal_idx, :, ldof:, :, :] = M_L
+        
+        # ============ 边界面 ============
+        boundary_idx = bm.nonzero(~is_internal_flag)[0]
+        if len(boundary_idx) > 0:
+            w_p = w_plus[boundary_idx]
+            w_m = w_minus[boundary_idx]
+            nu = fn[boundary_idx]
+            
+            # 判断并选择非零侧
+            is_left = bm.any(w_p != 0, axis=(1, 2, 3))
+            w = bm.where(is_left[:, None, None, None], w_p, w_m)
+
+            # 计算矩阵跳量
+            M = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w))    
+            
+            # 分别存储 L 侧和 R 侧
+            left_idx = boundary_idx[is_left]
+            right_idx = boundary_idx[~is_left]
+            
+            if len(left_idx) > 0:
+                matrix_jump[left_idx, :, ldof:, :, :] = M[is_left]
+            if len(right_idx) > 0:
+                matrix_jump[right_idx, :, :ldof, :, :] = M[~is_left]
+                
+        return ws, matrix_jump, hF, fm
+
+    @variantmethod('matrix_jump')
+    def assembly(self, space: _FS) -> TensorLike:
+        ws, matrix_jump, hF, fm = self.fetch_matrix_jump(space)
+        integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
+        
+        # 构建缩放系数
+        # E = 1.0     # MPa
+        # L0_1 = 120.0  # mm
+        # alpha1 = E / (L0_1**2)
+
+        mu = self.material.shear_modulus # MPa
+        mesh = space.mesh
+        node = mesh.entity('node')
+        bbox_max = bm.max(node, axis=0)  
+        bbox_min = bm.min(node, axis=0)  
+        L0 = bm.max(bbox_max - bbox_min) # mm
+        alpha = mu / (L0**2)
+
+        KE = bm.einsum('f, fij -> fij', alpha * hF, integrand)
+
+        return KE        
 
     @enable_cache
     def fetch_vector_jump(self, space: _FS):
@@ -148,7 +259,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         return ws, val, hF, fm
 
-    @variantmethod('vector_jump')
+    @assembly.register('vector_jump')
     def assembly(self, space: _FS) -> TensorLike:
         ws, vector_jump, hF, fm = self.fetch_vector_jump(space)
         # hF: (NF, )
@@ -157,115 +268,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         # vector_jump: (NF, NQ, 2*LDOF, GD)
 
         integrand = bm.einsum('q, f, fqid, fqjd -> fij', ws, fm, vector_jump, vector_jump)
-        # KE = - bm.einsum('f, fij -> fij', 1 / hF, integrand)
-        KE = - bm.einsum('f, fij -> fij', hF, integrand)
+        KE = bm.einsum('f, fij -> fij', 1 / hF, integrand)
 
         return KE
     
-    @enable_cache
-    def fetch_matrix_jump(self, space: _FS):
-        """计算矩阵跳量"""
-        mesh = getattr(space, 'mesh', None)
-        index, is_internal_flag = self.make_index(space)
-        
-        q = space.p + 3 if self.q is None else self.q
-        qf = mesh.quadrature_formula(q, 'face')
-        bcs, ws = qf.get_quadrature_points_and_weights()
-
-        NC = mesh.number_of_cells()
-        NF = mesh.number_of_faces()
-        TD = mesh.top_dimension()
-        GD = mesh.geo_dimension()
-        NQ = len(ws)
-
-        fm = mesh.entity_measure('face', index=index)
-        if GD == 2:
-            hF = fm  # 2D: 边长
-        elif GD == 3:
-            hF = bm.sqrt(fm)  # 3D: sqrt(面积) ≈ 面的特征尺度
-            
-        # 获取面的单位法向量
-        fn = mesh.face_unit_normal(index=index)  # (NF(index), GD)
-
-        cell2face = mesh.cell_to_face()
-        # 单元内局部面的局部取向是否与该全局面的全局取向一致
-        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
-        ldof = space.number_of_local_dofs()
-
-        # 内部面 F 上, 基函数 w^+ 来自 L 侧单元, w^- 来自 R 侧单元
-        w_plus  = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  
-        w_minus = bm.zeros((NF, NQ, ldof, GD), dtype=bm.float64)  
-        
-        for i in range(TD+1):
-            fidx = cell2face[:, i]
-            pos  = cell2facesign[:, i]
-            
-            L = bm.nonzero(pos)[0]   # 左侧：pos=True，这是 w^+
-            R = bm.nonzero(~pos)[0]  # 右侧：pos=False，这是 w^-
-            
-            b = bm.insert(bcs, i, 0, axis=1)
-            phi_ref = space.basis(b)
-            phi = bm.broadcast_to(phi_ref, (NC, NQ, ldof, GD))
-            
-            # 存储原始基函数值（不带符号）
-            if L.size > 0:
-                w_plus[fidx[L]]  = phi[L]   # w^+
-            if R.size > 0:
-                w_minus[fidx[R]] = phi[R]   # w^-
-        
-        w_plus  = w_plus[index]   # (NF[index], NQ, ldof, GD)
-        w_minus = w_minus[index]  # (NF[index], NQ, ldof, GD)
-        
-        # 构造矩阵跳量
-        matrix_jump = bm.zeros((NF, NQ, 2*ldof, GD, GD), dtype=bm.float64)
-        
-        # ============ 内部面 ============
-        internal_idx = bm.nonzero(is_internal_flag)[0]
-        if len(internal_idx) > 0:
-            w_p = w_plus[internal_idx]
-            w_m = w_minus[internal_idx]
-            nu = fn[internal_idx]
-            
-            # R 侧
-            M_R = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_m, -nu) + bm.einsum('fi, fqdj -> fqdij', -nu, w_m))
-            matrix_jump[internal_idx, :, :ldof, :, :] = M_R
-            # L 侧
-            M_L = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w_p, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w_p))
-            matrix_jump[internal_idx, :, ldof:, :, :] = M_L
-        
-        # ============ 边界面 ============
-        boundary_idx = bm.nonzero(~is_internal_flag)[0]
-        if len(boundary_idx) > 0:
-            w_p = w_plus[boundary_idx]
-            w_m = w_minus[boundary_idx]
-            nu = fn[boundary_idx]
-            
-            # 判断并选择非零侧
-            is_left = bm.any(w_p != 0, axis=(1, 2, 3))
-            w = bm.where(is_left[:, None, None, None], w_p, w_m)
-            
-            # 计算矩阵跳量
-            M = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w))
-            
-            # 分别存储 L 侧和 R 侧
-            left_idx = boundary_idx[is_left]
-            right_idx = boundary_idx[~is_left]
-            
-            if len(left_idx) > 0:
-                matrix_jump[left_idx, :, ldof:, :, :] = M[is_left]
-            if len(right_idx) > 0:
-                matrix_jump[right_idx, :, :ldof, :, :] = M[~is_left]
-                
-        return ws, matrix_jump, hF, fm
-
-    @assembly.register('matrix_jump')
-    def assembly(self, space: _FS) -> TensorLike:
-        ws, matrix_jump, hF, fm = self.fetch_matrix_jump(space)
-        # hF: (NF, )
-        # ws: (NQ, )
-        # fm: (NF, )
-        # matrix_jump: (NF, NQ, 2*LDOF, GD, GD)
-        integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
-        KE = - bm.einsum('f, fij -> fij', hF, integrand)
-
-        return KE

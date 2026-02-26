@@ -99,6 +99,11 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 2. 计算应力约束 g
         g = self._stress_constraint.fun(density, state) # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
 
+        # 设计约定断言：每单元恰好1个应力评估点
+        assert g.shape[-1] == 1, (
+                        f"要求 NQ=1，但实际 NQ={g.shape[-1]}，请检查积分阶数设置。"
+                    )
+
         # 3. 计算 ALM 的 h 和 Penal
         #    h_j = max(g_j, -lambda_j / mu)
         h = bm.maximum(g, -self.lamb / self.mu) # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)

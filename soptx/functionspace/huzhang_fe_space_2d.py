@@ -583,10 +583,6 @@ class HuZhangFESpace2d(FunctionSpace):
         # 赋值
         uh[e2d] = val.reshape(NEb, -1)
 
-        # #TODO 角点松弛变换：将原始 DOF 值变换到松弛空间
-        if self.use_relaxation:
-            uh = self.TM.T @ uh
-
         isDDof = bm.zeros((uh.shape[0],), dtype=bm.bool)
         isDDof[e2d] = True
 
@@ -813,7 +809,7 @@ class HuZhangFESpace2d(FunctionSpace):
         计算有限元函数的值。
         自动处理松弛模式下的系数变换.
         """
-        # 1. 系数变换 (仅在松弛模式且存在角点时执行，避免不必要的矩阵乘法)
+        #TODO 1. 系数变换 (仅在松弛模式且存在角点时执行，避免不必要的矩阵乘法)
         if self.use_relaxation and self.NCP > 0:
             uh0 = self.TM @ uh
         else:
@@ -839,7 +835,7 @@ class HuZhangFESpace2d(FunctionSpace):
         else :
             TD = bc.shape[-1] - 1
 
-        # 1. 系数变换
+        #TODO 1. 系数变换
         if self.use_relaxation and self.NCP > 0:
             uh0 = self.TM @ uh
         else:

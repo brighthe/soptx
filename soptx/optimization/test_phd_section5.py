@@ -39,15 +39,15 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         #* 算例 - 混合边界条件 - 一般剪切应力 (非齐次位移)
         # TODO 结果不正确 (松弛不对, 不松驰反倒对)
-        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix 
-        # lam, mu = 1.0, 0.5
-        # pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
+        from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix 
+        lam, mu = 1.0, 0.5
+        pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
 
         # #* 算例 - 混合边界条件 - 一般剪切应力 (齐次位移)
         # TODO 结果正确 (松弛不松驰, 结果都对)
-        from soptx.model.linear_elastic_2d_hzmfem import HZmfemMixedBoundary 
-        lam, mu = 1.0, 0.5
-        pde = HZmfemMixedBoundary(lam=lam, mu=mu)
+        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemMixedBoundary 
+        # lam, mu = 1.0, 0.5
+        # pde = HZmfemMixedBoundary(lam=lam, mu=mu)
 
         #* 第一类网格
         # pde.init_mesh.set('union_crisscross')
@@ -514,7 +514,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.35
 
-        space_degree = 3
+        space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         interpolation_method = 'msimp'
@@ -807,11 +807,17 @@ class DensityTopOptHuZhangTest(BaseLogged):
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec5_6_3_hzmfem")
         save_path.mkdir(parents=True, exist_ok=True)
-        
-        save_optimization_history(mesh=design_variable_mesh, 
+
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
+        
+        # save_optimization_history(mesh=design_variable_mesh, 
+        #                         history=history, 
+        #                         density_location=density_location,
+        #                         save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
@@ -820,5 +826,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
-    test.run.set('test_linear_elastic_huzhang') # test_linear_elastic_huzhang
+    # test_subsec5_6_3_hzmfem, test_linear_elastic_huzhang, test_subsec5_6_3_lfem
+    test.run.set('test_subsec5_6_3_hzmfem') 
     rho_opt, history = test.run()

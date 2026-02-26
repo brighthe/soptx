@@ -268,13 +268,80 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                       [B.T, None]], format='csr')
 
         elif p <= GD:
+            # 1. 获取所有的内部面
+            face2cell = mesh.face_to_cell()
+            is_internal = face2cell[:, 0] != face2cell[:, 1]
+            
+            # 2. 获取所有的位移边界面 (Dirichlet)
+            bc_face = mesh.entity_barycenter('face')
+            is_dirichlet = self._pde.is_displacement_boundary(bc_face)
+            
+            # 3. 合并：只在内部面和位移边界上施加惩罚
+            valid_faces_bool = is_internal | is_dirichlet
+            valid_faces_idx = bm.nonzero(valid_faces_bool)[0]
+
             bform3 = BilinearForm(space_u)
-            jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='vector_jump')
-            # jpi_integrator = JumpPenaltyIntegrator(q=self._integration_order, threshold=None, method='matrix_jump')
+            # 默认使用矩阵跳量稳定化项
+            jpi_integrator = JumpPenaltyIntegrator(
+                                    q=self._integration_order, 
+                                    threshold=valid_faces_idx, 
+                                    method='matrix_jump',
+                                    material=self._material
+                                )
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')
             K = bmat([[A,   B],
-                      [B.T, J]], format='csr')
+                      [B.T, -J]], format='csr')
+            
+            # ========== 验证 valid_faces_idx ==========
+            # face2cell = mesh.face_to_cell()
+            # is_internal = face2cell[:, 0] != face2cell[:, 1]
+
+            # bc_face = mesh.entity_barycenter('face')
+            # is_dirichlet = self._pde.is_displacement_boundary(bc_face)
+
+            # # 基本数量检查
+            # NF = mesh.number_of_faces()
+            # NF_internal  = int(is_internal.sum())
+            # NF_dirichlet = int(is_dirichlet.sum())
+            # NF_neumann   = int((~is_internal & ~is_dirichlet).sum())  # 既非内部也非Dirichlet的边界面
+
+            # print(f"总面数:           {NF}")
+            # print(f"内部面数:         {NF_internal}")
+            # print(f"Dirichlet边界面:  {NF_dirichlet}")
+            # print(f"Neumann边界面:    {NF_neumann}")
+            # print(f"内部+Dirichlet:   {NF_internal + NF_dirichlet}")
+
+            # # 检查是否有面被重复计算（内部面不应出现在边界中）
+            # overlap = is_internal & is_dirichlet
+            # print(f"\n内部面与Dirichlet面是否有重叠: {int(overlap.sum())}")  # 应为 0
+
+            # # 检查 Dirichlet 面的坐标，确认只在正确边界上
+            # dirichlet_bc = bc_face[is_dirichlet]
+            # print(f"\nDirichlet 面重心坐标范围:")
+            # print(f"  x: [{float(dirichlet_bc[:,0].min()):.4f}, {float(dirichlet_bc[:,0].max()):.4f}]")
+            # print(f"  y: [{float(dirichlet_bc[:,1].min()):.4f}, {float(dirichlet_bc[:,1].max()):.4f}]")
+
+            # # 检查 Neumann 面的坐标，确认只在右边界
+            # neumann_mask = ~is_internal & ~is_dirichlet
+            # neumann_bc = bc_face[neumann_mask]
+            # print(f"\nNeumann 面重心坐标范围:")
+            # print(f"  x: [{float(neumann_bc[:,0].min()):.4f}, {float(neumann_bc[:,0].max()):.4f}]")
+            # print(f"  y: [{float(neumann_bc[:,1].min()):.4f}, {float(neumann_bc[:,1].max()):.4f}]")
+
+            # # 检查 valid_faces_idx
+            # valid_faces_bool = is_internal | is_dirichlet
+            # valid_faces_idx = bm.nonzero(valid_faces_bool)[0]
+            # print(f"\nvalid_faces_idx 长度: {len(valid_faces_idx)}")
+            # print(f"期望值: {NF_internal + NF_dirichlet}")
+            
+            # norm_A = abs(A.toarray()).max()
+            # norm_J = abs(J.toarray()).max()
+
+            # # 令 ||alpha*J|| ~ ||A||
+            # alpha = float(norm_A / norm_J)
+            # print(f"建议 alpha = {alpha:.4e}")
+            # print('----------------------------------')
 
         if enable_timing:
             t.send('组装时间')
@@ -309,27 +376,25 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D
         
         当前所有位移边界均为齐次边界条件 (u_D = 0), 故直接返回零向量.
-
-        NOTE 角点松弛: 若将来支持非齐次位移边界 (u_D ≠ 0), 需在积分完成后
-        对载荷向量施加松弛变换: F_natural = TM.T @ F_natural
-        参考 boundary_interpolate 中的处理方式.
         """
-        space = self._huzhang_space
-        gdof = space.number_of_global_dofs()
+        space_sigma = self._huzhang_space
+        gdof = space_sigma.number_of_global_dofs()
 
-        return bm.zeros(gdof, dtype=bm.float64, device=space.device)
+        F_natural = bm.zeros(gdof, dtype=bm.float64, device=space_sigma.device)
+
+        #TODO 角点松弛
+        if space_sigma.use_relaxation == True:
+            TM = space_sigma.TM
+            F_natural = TM.T @ F_natural
+
+        return F_natural
     
     def apply_traction_boundary_condition(self, 
                                         K: CSRTensor, 
                                         F: TensorLike, 
                                         space_sigma: HuZhangFESpace,
                                     ) -> Tuple[CSRTensor, TensorLike]:
-        """施加本质边界条件  σ·n = g_N
-
-        NOTE 角点松弛: set_dirichlet_bc (即 boundary_interpolate) 内部已完成
-        松弛变换 uh_val = TM.T @ uh_val, 此处无需额外处理.
-        若替换为其他方式获取边界 DOF 值, 需确保同样完成该变换.
-        """
+        """施加本质边界条件  σ·n = g_N"""
         gd_traction = getattr(self._pde, "traction_bc", None)
         if gd_traction is None or (not callable(gd_traction)):
                 self._log_error("PDE 对象缺少牵引边界函数 traction_bc")
