@@ -31,8 +31,8 @@ class CantileverMiddle2d(PDEBase):
                 P: float = -1.0,   # N，向下为负
                 E: float = 1.0,    # MPa
                 nu: float = 0.3,  
-                plane_type: str = 'plane_stress',  # 'plane_stress' or 'plane_strain'
-                load_width: float = 6.0,           # 载荷分布宽度 (必须显式指定，单位 mm)
+                plane_type: str = 'plane_stress',   # 'plane_stress' or 'plane_strain'
+                load_width: Optional[float] = None, # 载荷分布宽度 (必须显式指定，单位 mm)
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -180,6 +180,13 @@ class CantileverMiddle2d(PDEBase):
         """
         if self._t is not None:
             return
+        
+        hy = mesh.meshdata['hy']
+        self._hy = hy
+        
+        if self._load_width is None:
+            self._load_width = hy  # 默认载荷宽度为单元尺寸级别，逼近点载荷
+            
         self._t = self._P / self._load_width
     
     @cartesian
@@ -197,29 +204,69 @@ class CantileverMiddle2d(PDEBase):
         
         # 牵引边界 = 顶部 + 底部 + 右侧（左侧是位移边界）
         return on_top | on_bottom | on_right
-
+    
     @cartesian
     def traction_bc(self, points: TensorLike) -> TensorLike:
         """牵引边界条件 - 右侧边界中点区域施加等效分布牵引"""
         domain = self.domain
-        x, y = points[..., 0], points[..., 1]
         y_mid = (domain[2] + domain[3]) / 2
 
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
 
         if self._t is None:
-            # set_load_region 尚未被调用，返回零牵引
             return val
 
-        # 载荷区域：x = x_max，y ∈ [y_mid - load_width/2, y_mid + load_width/2]
-        search_hw = self._load_width / 2 + self._eps
-        on_right = bm.abs(x - domain[1]) < self._eps
-        in_load_region = on_right & (bm.abs(y - y_mid) <= search_hw)
+        # 边级中心坐标 (NEb, 2)
+        edge_center = points.mean(axis=-2)
+        x_c = edge_center[..., 0]
+        y_c = edge_center[..., 1]
 
-        val = bm.set_at(val, (in_load_region, 1), self._t)
+        # 在右边界中，用 argmin 强制选取唯一最近的单条边
+        on_right = bm.abs(x_c - domain[1]) < self._eps
+        dist = bm.where(on_right, bm.abs(y_c - y_mid), bm.full_like(y_c, bm.inf))
 
+        if self._load_width <= self._hy + self._eps:
+            # 逼近点载荷：argmin 选唯一最近边
+            nearest_idx = bm.argmin(dist)
+            in_load_region = bm.zeros(dist.shape, dtype=bm.bool)
+            in_load_region = bm.set_at(in_load_region, nearest_idx, True)
+        else:
+            # 显式分布载荷：区间选取覆盖 load_width 范围内的所有边
+            search_hw = self._load_width / 2 + self._eps
+            in_load_region = on_right & (dist <= search_hw)
+
+        # 广播到插值点维度并赋值
+        mask = in_load_region[:, None, None]  # (NEb, 1, 1)
+        t_field = bm.zeros(points.shape, **kwargs)
+        t_field = bm.set_at(t_field, (..., 1), self._t)
+
+        val = bm.where(mask, t_field, val)
         return val
+
+    # @cartesian
+    # def traction_bc(self, points: TensorLike) -> TensorLike:
+    #     """牵引边界条件 - 右侧边界中点区域施加等效分布牵引"""
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+    #     y_mid = (domain[2] + domain[3]) / 2
+
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+
+    #     if self._t is None:
+    #         # set_load_region 尚未被调用，返回零牵引
+    #         return val
+
+    #     # 载荷区域：x = x_max，y ∈ [y_mid - load_width/2, y_mid + load_width/2]
+    #     search_hw = self._load_width / 2 + self._eps
+    #     on_right = bm.abs(x - domain[1]) < self._eps
+    #     in_load_region = on_right & (bm.abs(y - y_mid) <= search_hw)
+
+    #     #TODO 设置牵引力 硬编码 c1 
+    #     val = bm.set_at(val, (in_load_region, 1), self._t)
+
+    #     return val
     
 class Cantilever2d(PDEBase):
     '''
