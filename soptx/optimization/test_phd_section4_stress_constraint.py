@@ -403,7 +403,8 @@ class DensityTopOptTest(BaseLogged):
         plane_type = 'plane_stress' 
 
         nx, ny = 80, 40
-        mesh_type = 'uniform_quad'
+        # mesh_type = 'uniform_quad'
+        mesh_type = 'uniform_crisscross_tri'
 
         from soptx.model.cantilever_2d_lfem import Cantilever2d
         pde = Cantilever2d(

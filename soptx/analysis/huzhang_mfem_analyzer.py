@@ -647,7 +647,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         Returns
         -------
         dict : 包含以下键值：
-            - 'stress_apparent': 积分点处的表观应力张量 (NC, n_sub, NQ, NS)
+            - 'stress_apparent': 积分点处的表观应力张量 (NC, NQ, NS)
         """
         if integration_order is None:
             integration_order = 1
@@ -776,15 +776,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             raise NotImplementedError("仅支持二维问题的应力分量重排")
         
         return stress_vector
-    
-    # def compute_solid_stress_matrix(self):
-    #     """计算实体材料（ρ=1）的单元局部柔度矩阵 A_σσ^(0)"""
-
-    #     Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space)  # (NC, LDOF, LDOF)
-
-    #     self._cached_Ae0 = Ae0
-
-    #     return Ae0
 
 
     ##############################################################################################

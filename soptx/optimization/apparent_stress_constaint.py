@@ -109,7 +109,6 @@ class ApparentStressConstraint(BaseLogged):
         integration_order = 1
         qf = disp_mesh.quadrature_formula(integration_order, 'cell')
         bcs, ws = qf.get_quadrature_points_and_weights()
-        # TODO
         phi = stress_space.basis(bcs) # (NC, NQ, LDOF, NS) HuZhang 原生 [xx, xy, yy]
         phi = phi[..., [0, 2, 1]]     # 标准 Voigt [xx, yy, xy]
 
@@ -117,10 +116,9 @@ class ApparentStressConstraint(BaseLogged):
         element_sens = bm.einsum('cqls, cqs -> cql', phi, dVM_dSigma)  # (NC, NQ, LDOF)
 
         # 4. 应用罚函数权重并对积分点求和
-        weights = dPenaldVM[..., None] * ws[None, :, None]      # (NC, NQ, 1)
-        # TODO
-        element_loads = 1.0 * element_sens * weights            # (NC, NQ, LDOF)
-        element_loads = bm.sum(element_loads, axis=1)           # (NC, LDOF)
+        weights = dPenaldVM[..., None]                 # (NC, NQ, 1)
+        element_loads = 1.0 * element_sens * weights   # (NC, NQ, LDOF)
+        element_loads = bm.sum(element_loads, axis=1)  # (NC, LDOF)
 
         # 5. 全局组装至应力自由度
         gdofs = stress_space.number_of_global_dofs()
@@ -132,16 +130,23 @@ class ApparentStressConstraint(BaseLogged):
         
         bm.add_at(adjoint_load, indices, values)
 
-        # print(f"adjoint_load max: {float(bm.max(bm.abs(adjoint_load)))}")
-        # print(f"adjoint_load nonzero: {int(bm.sum(bm.abs(adjoint_load) > 1e-12))}")
-        
         return adjoint_load
 
     def compute_implicit_sensitivity_term(self, 
                                           adjoint_vector: TensorLike, 
                                           state: Dict
                                         ) -> TensorLike:
-        """计算伴随法隐式项: λ_σ^T * (∂A_σσ / ∂ρ) * Σ"""
+        """
+        计算隐式灵敏度项（预除 m_E²）:
+            返回值 = (1/m_E²) * λ_σ,e^T * A⁰_e * Σ_e
+        
+        外部调用方需再乘以 m_E'(ρ_e), 才能还原完整理论项:
+            完整隐式项 = m_E'(ρ) / m_E²(ρ) * λ_σ,e^T * A⁰_e * Σ_e
+        
+        对比 VanishingStressConstraint.compute_implicit_sensitivity_term():
+            返回 ξ_e^T K⁰_e U_e (外部乘 m_E')
+            两者对外接口约定一致。
+        """
         # TODO 
         A0 = self._analyzer._cached_Ae0  # (NC, LDOF, LDOF)
 

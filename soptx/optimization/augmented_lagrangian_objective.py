@@ -151,135 +151,110 @@ class AugmentedLagrangianObjective(BaseLogged):
         if state is None:
             state = {}
         
-        # --- 缓存检查与状态同步 ---
+        # --- 确保正向计算已完成，缓存 g、h 及 state 中间量 ---
         if self._is_apparent:
             if self._cache_g is None or 'stiffness_ratio' not in state:
                 self.fun(density, state)
         else:
-            if self._cache_g is None or 'stiffness_ratio' not in state or 'stress_deviation' not in state:
+            if self._cache_g is None or 'stiffness_ratio' not in state \
+                    or 'stress_deviation' not in state:
                 self.fun(density, state)
 
-        # --- 获取缓存的物理量 ---
+        # ------------------------------------------------------------------ #
+        # 第一步：准备公共中间量
+        # ------------------------------------------------------------------ #
         slim = self._stress_constraint._stress_limit
-        m_E = state['stiffness_ratio']  # 单分辨率: (NC,) | 多分辨率: (NC, n_sub)
+        g    = self._cache_g   # (NC, NQ) 或 (NC, n_sub, NQ)
+        h    = self._cache_h   # (NC, NQ) 或 (NC, n_sub, NQ)
 
-        g = self._cache_g             # 单分辨率/混合元: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
-        h = self._cache_h             # 单分辨率/混合元: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
+        # 激活集：当 g > -λ/μ 时约束激活，h = g；否则 h = -λ/μ，梯度为零
+        mask = g > (-self.lamb / self.mu)  # 与 g、h 同形
 
-        # --- 确定激活集 (Mask) ---
-        # 当 g > -lambda/mu 时，约束激活（或违反），h = g
-        limit_term = -self.lamb / self.mu
-        mask = g > limit_term         # 单分辨率/混合元: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
-
-        # --- 计算 dPenaldVM (罚函数对 von Mises 应力的偏导数) ---
-        # 两种约束对 ∂g/∂σ^vM 的形式不同:
-        # - 位移元 (VanishingStressConstraint): ∂g/∂σ^vM = m_E(ρ) * (3ε² + 1) / σ_lim
-        # - 混合元 (ApparentStressConstraint):  ∂g/∂σ^vM = 1 / σ_lim (常数)
+        # ------------------------------------------------------------------ #
+        # 第二步：计算 dP/d(σ^vM)，用于构造伴随载荷
+        #   位移元: ∂g/∂σ^vM = m_E · (3Λ² + 1) / σ_lim
+        #   混合元: ∂g/∂σ^vM = 1 / σ_lim
+        # ------------------------------------------------------------------ #
         if self._is_apparent:
-            dhdVM_val = bm.ones_like(g) / slim    # (NC, NQ)
+            dhdVM_val = bm.ones_like(g) / slim
         else:
             s = state['stress_deviation']
+            m_E = state['stiffness_ratio']
             if self._is_multiresolution:
-                dhdVM_val = m_E[:, :, None] * (3 * s**2 + 1) / slim  # (NC, n_sub, NQ)
+                dhdVM_val = m_E[:, :, None] * (3 * s**2 + 1) / slim
             else:
-                dhdVM_val = m_E[:, None] * (3 * s**2 + 1) / slim     # (NC, NQ)
+                dhdVM_val = m_E[:, None] * (3 * s**2 + 1) / slim
 
-        dhdVM = bm.where(mask, dhdVM_val, 0.0)
-        dPenaldVM = (self.lamb + self.mu * h) * dhdVM
-
-        # --- 计算 dPenal/dm_E 的显式部分 ---
-        # 两种约束对 ∂g/∂m_E 的形式不同:
-        # - 位移元: ∂g/∂m_E = ε³ + ε    (单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ))
-        # - 混合元: ∂g/∂m_E = -(1 - ε)  (常数)
-        dgdm_E = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state) 
-        dPenaldm_E_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdm_E, 0.0)
+        dPenaldVM = (self.lamb + self.mu * h) * bm.where(mask, dhdVM_val, 0.0)
 
         if enable_timing:
             t.send('罚函数偏导数')
 
-        # --- 伴随法 ---
-        # 计算伴随载荷:
-        # - 位移元: F_adj 作用在位移自由度上, F_adj = -(∂σ^v/∂U)^T * dPenaldVM
-        # - 混合元: F_adj 作用在应力自由度上, F_adj = -(∂σ^v/∂Σ)^T * dPenaldVM
-        adjoint_load = self._stress_constraint.compute_adjoint_load(
-                                                    dPenaldVM=dPenaldVM, state=state)  # (gdofs,)
+        # ------------------------------------------------------------------ #
+        # 第三步：计算显式偏导数 ∂P/∂m_E|_explicit
+        #   位移元: ∂g/∂m_E = Λ³ + Λ
+        #   混合元: ∂g/∂m_E = -(1 - ε)
+        # ------------------------------------------------------------------ #
+        dgdm_E = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state)
+        dPenaldm_E_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdm_E, 0.0)  # (NC, NQ) 或 (NC, n_sub, NQ)
+
+        # ------------------------------------------------------------------ #
+        # 第四步：伴随法求解隐式偏导数 ∂P/∂m_E|_implicit
+        #
+        #   组装伴随载荷: F_adj = ∂P/∂(状态变量)
+        #     位移元作用在位移自由度: F_adj = (∂σ^v/∂U)^T · dP/dσ^v
+        #     混合元作用在应力自由度: F_adj = (∂σ^v/∂Σ)^T · dP/dσ^v
+        #
+        #   求解伴随方程:
+        #     位移元: K · ψ = F_adj
+        #     混合元: [A  B^T; B  0] · [λ_σ; λ_u] = [F_adj; 0]  (复用正向 LU 分解)
+        #
+        #   隐式项:
+        #     位移元: ψ^T · (∂K_e/∂m_E) · U_e
+        #     混合元: (1/m_E²) · λ_σ,e^T · A⁰_e · Σ_e
+        # ------------------------------------------------------------------ #
+        adjoint_load = self._stress_constraint.compute_adjoint_load(dPenaldVM=dPenaldVM, state=state)  # (gdofs, )
+
         if enable_timing:
             t.send('组装伴随向量')
 
-        # 解伴随方程
-        # - 位移元: K * ψ = F_adj
-        # - 混合元: [A  B^T; B  0] * [λ_σ; λ_u] = [F_adj; 0] (复用正向分解)
-        adjoint_vector = self._analyzer.solve_adjoint(
-                                            rhs=adjoint_load, rho_val=density)  # (gdofs,)
+        adjoint_vector = self._analyzer.solve_adjoint(rhs=adjoint_load, rho_val=density)  # (gdofs, )
+
         if enable_timing:
             t.send('解伴随方程')
 
-        # --- 计算隐式灵敏度项 ---
-        # - 位移元: ψ^T * (∂K/∂m_E) * U
-        # - 混合元: λ_σ^T * (∂A_σσ/∂ρ) * Σ
         dPenaldm_E_implicit = self._stress_constraint.compute_implicit_sensitivity_term(
-                                                        adjoint_vector, state)  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
+                                                        adjoint_vector, state)  # (NC,) 或 (NC, n_sub)
         
-        # --- 显式项归约: 对 NQ 维度求和 ---
-        dPenaldm_E_explicit_reduced = bm.sum(dPenaldm_E_explicit, axis=-1) # 单分辨率/混合元: (NC,) | 多分辨率: (NC, n_sub)
+        # ------------------------------------------------------------------ #
+        # 第五步：链式法则组装 dP/dρ
+        # ------------------------------------------------------------------ #
+        # 显式项对 NQ 维度求和，还原为单元级标量
+        dPenaldm_E_explicit_reduced = bm.sum(dPenaldm_E_explicit, axis=-1)  # (NC,) 或 (NC, n_sub)
 
-        # --- 链式法则: dPenal/dρ ---
-        # 最终灵敏度一般公式（适用于任意插值模型）:
-        #   dJ/dρ_e = ∂f/∂ρ_e + (1/N_e) * ∂P/∂ρ_e + m_E'(ρ)/m_E²(ρ) * (λ_σ^T A0 Σ)
-        #
-        # 两种框架的链式法则系数存在根本差异:
-        # - 位移元: A_σσ 不存在, 刚度 E = m_E * E0
-        #   显式项与隐式项均通过同一系数 dm_E/dρ 串联:
-        #   dP/dρ = (dP/dm_E) * dm_E/dρ
-        # - 混合元: A_σσ,e = (1/m_E) * A0,  ∂A/∂ρ = -m_E'(ρ)/m_E²(ρ) * A0
-        #   显式项通过 dm_E/dρ 串联
-        #   隐式项通过通用系数 m_E'(ρ)/m_E²(ρ) 串联（适用于任意插值模型）
-        dE_drho_absolute = self._interpolation_scheme.interpolate_material_derivative(
-                                                            material=self._material, rho_val=density)  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
-        E0 = self._material.youngs_modulus
-        dm_E_drho = dE_drho_absolute / E0  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
+        # 计算 dm_E/dρ = (dE/dρ) / E₀
+        dm_E_drho = self._interpolation_scheme.interpolate_material_derivative(
+                                                            material=self._material, rho_val=density
+                                                        ) / self._material.youngs_modulus  # (NC,) 或 (NC, n_sub)
 
         if self._is_apparent:
-            # --- 混合元 --- 
-            # 显式项: 
-            dP_drho_explicit = dPenaldm_E_explicit_reduced * dm_E_drho  # (NC,)
-            # 隐式项: 
-            dP_drho_implicit = dm_E_drho * dPenaldm_E_implicit          # (NC, )
-
-            dP_drho = dP_drho_explicit + dP_drho_implicit               # (NC, )
-
+            # 混合元:
+            #   显式项: (∂P/∂m_E|_explicit) · dm_E/dρ
+            #   隐式项: (1/m_E²) · λ_σ^T A⁰ Σ · m_E' = dPenaldm_E_implicit · dm_E_drho
+            #           (compute_implicit_sensitivity_term 已预除 m_E²，外部只需乘 m_E')
+            dP_drho = dPenaldm_E_explicit_reduced * dm_E_drho + dPenaldm_E_implicit * dm_E_drho           # (NC,)
         else:
-            # --- 位移元 --- 
-            dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
+            # 位移元: 显式与隐式通过同一 dm_E/dρ 串联
+            dP_drho = (dPenaldm_E_explicit_reduced + dPenaldm_E_implicit) * dm_E_drho  # (NC,) 或 (NC, n_sub)
+            
+        # ------------------------------------------------------------------ #
+        # 第六步：归一化并组装总梯度
+        #   dJ/dρ = ∂f/∂ρ + (1/N) · dP/dρ
+        # ------------------------------------------------------------------ #
+        dVol_drho     = self._volume_objective.jac(density=density, state=state)
+        n_constraints = g.numel() if hasattr(g, 'numel') else g.size
 
-            dP_drho = dPenaldm_E_total * dm_E_drho  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
-
-        # --- 体积目标函数梯度 ---
-        dVol_drho = self._volume_objective.jac(
-                        density=density, state=state)  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
-
-        # --- 归一化并组装总梯度 ---
-        n_constraints = g.numel() if hasattr(g, 'numel') else g.size # (单分辨率: NC*NQ | 多分辨率: NC*n_sub*NQ)
-        dP_drho_normalized = dP_drho / n_constraints  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
-
-        dJ_drho = dVol_drho + dP_drho_normalized      # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
-
-        # # 解伴随方程后
-        # print(f"adjoint_vector max: {float(bm.max(bm.abs(adjoint_vector)))}")
-
-        # # 各灵敏度分量
-        # print(f"dVol_drho max:              {float(bm.max(bm.abs(dVol_drho)))}")
-        # print(f"dP_drho_explicit max:       {float(bm.max(bm.abs(dP_drho_explicit)))}")  
-        # print(f"dPenaldm_E_implicit max:    {float(bm.max(bm.abs(dPenaldm_E_implicit)))}")
-        # print(f"coeff_implicit max:         {float(bm.max(bm.abs(coeff_implicit)))}")
-        # print(f"dP_drho_implicit max:       {float(bm.max(bm.abs(dP_drho_implicit)))}")
-        # print(f"dP_drho_normalized max:     {float(bm.max(bm.abs(dP_drho_normalized)))}")
-        # print(f"dJ_drho max:                {float(bm.max(bm.abs(dJ_drho)))}")
-
-        # print(f"dP_drho_explicit min: {float(bm.min(dP_drho_explicit))}")  # 确认符号
-        # print(f"dP_drho_implicit min: {float(bm.min(dP_drho_implicit))}")  # 确认符号
-        # print(f"dP_drho max (before norm): {float(bm.max(dP_drho))}")
-        # print(f"dP_drho min (before norm): {float(bm.min(dP_drho))}")
+        dJ_drho = dVol_drho + dP_drho / n_constraints  # (NC,) 或 (NC, n_sub)
 
         if enable_timing:
             t.send('其他')
@@ -323,7 +298,7 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         #  计算 dPenal/dE 的显式部分
         #  单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
-        dgdE = self._stress_constraint.compute_partial_gradient_wrt_stiffness(state=state)
+        dgdE = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state)
         dPenaldE_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdE, 0.0) 
 
         # --- 伴随法 ---        
