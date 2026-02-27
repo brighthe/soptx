@@ -21,33 +21,15 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
     @variantmethod('test_linear_elastic_huzhang')
     def run(self) -> None:
-        #* 算例 - 纯位移边界条件 - 零剪切应力
-        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemZeroShearDirichlet
-        # lam, mu = 1.0, 0.5
-        # plane_type = 'plane_strain'
-        # pde = HZmfemZeroShearDirichlet(lam=lam, mu=mu, plane_type=plane_type)
-
-        #* 算例 - 纯位移边界条件 - 一般剪切应力
-        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearDirichlet
-        # lam, mu = 1.0, 0.5
-        # pde = HZmfemGeneralShearDirichlet(lam=lam, mu=mu)
-
-        #* 算例 - 混合边界条件 - 零剪切应力
-        # from soptx.model.linear_elastic_2d_hzmfem import HZmfemZeroShearMix
-        # lam, mu = 1.0, 0.5
-        # pde = HZmfemZeroShearMix(lam=lam, mu=mu)
-
-        #* 算例 - 混合边界条件 - 一般剪切应力 (非齐次位移)
-        # TODO 结果不正确 (松弛不对, 不松驰反倒对)
+        #* 算例 - 混合边界条件 - (非齐次位移 + 非齐次应力)
         # from soptx.model.linear_elastic_2d_hzmfem import HZmfemGeneralShearMix 
         # lam, mu = 1.0, 0.5
         # pde = HZmfemGeneralShearMix(lam=lam, mu=mu)
 
-        # #* 算例 - 混合边界条件 - 一般剪切应力 (齐次位移)
-        # TODO 结果正确 (松弛不松驰, 结果都对)
-        from soptx.model.linear_elastic_2d_hzmfem import HZmfemMixedBoundary 
+        #* 算例 - 混合边界条件 - (齐次位移 + 非齐次应力))
+        from soptx.model.linear_elastic_2d_hzmfem import HDispNHStressMixedBdcc 
         lam, mu = 1.0, 0.5
-        pde = HZmfemMixedBoundary(lam=lam, mu=mu)
+        pde = HDispNHStressMixedBdcc(lam=lam, mu=mu)
 
         #* 第一类网格
         # pde.init_mesh.set('union_crisscross')
@@ -344,7 +326,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.3
 
-        space_degree = 1
+        space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         interpolation_method = 'msimp'
@@ -833,5 +815,5 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
     # test_subsec5_6_3_hzmfem, test_linear_elastic_huzhang, test_subsec5_6_3_lfem, test_subsec5_6_2_lfem, test_subsec5_6_2_hzmfem
-    test.run.set('test_subsec5_6_2_lfem') 
+    test.run.set('test_linear_elastic_huzhang') 
     rho_opt, history = test.run()
