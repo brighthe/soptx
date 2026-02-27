@@ -120,7 +120,6 @@ class ApparentStressConstraint(BaseLogged):
         weights = dPenaldVM[..., None] * ws[None, :, None]      # (NC, NQ, 1)
         # TODO
         element_loads = 1.0 * element_sens * weights            # (NC, NQ, LDOF)
-        # element_loads = -1.0 * element_sens * weights           # (NC, NQ, LDOF)
         element_loads = bm.sum(element_loads, axis=1)           # (NC, LDOF)
 
         # 5. 全局组装至应力自由度
@@ -133,8 +132,8 @@ class ApparentStressConstraint(BaseLogged):
         
         bm.add_at(adjoint_load, indices, values)
 
-        print(f"adjoint_load max: {float(bm.max(bm.abs(adjoint_load)))}")
-        print(f"adjoint_load nonzero: {int(bm.sum(bm.abs(adjoint_load) > 1e-12))}")
+        # print(f"adjoint_load max: {float(bm.max(bm.abs(adjoint_load)))}")
+        # print(f"adjoint_load nonzero: {int(bm.sum(bm.abs(adjoint_load) > 1e-12))}")
         
         return adjoint_load
 
@@ -149,12 +148,21 @@ class ApparentStressConstraint(BaseLogged):
         huzhang_space = self._analyzer.huzhang_space
         cell2dof = huzhang_space.cell_to_dof()  # (NC, LDOF)
 
+        #TODO 获取当前刚度插值系数 m_E
+        m_E = state['stiffness_ratio']  # (NC, )
+
+        # 提取自由度，并提前除以 m_E (还原到 O(1) 的真实应力级)
+        # 注意: m_E 最小也就是 E_min (1e-6)，除以它比除以 m_E**2 (1e-12) 安全得多
+        m_E_safe = bm.maximum(m_E, 1e-9) # 加一层极限安全锁
+
         # 提取伴随向量中的应力部分 λ_σ
         gdof_sigma = huzhang_space.number_of_global_dofs()
-        lambda_sigma_e = adjoint_vector[:gdof_sigma][cell2dof]  # (NC, LDOF)
+        # lambda_sigma_e = adjoint_vector[:gdof_sigma][cell2dof]  # (NC, LDOF)
+        lambda_sigma_e = adjoint_vector[:gdof_sigma][cell2dof] / m_E_safe[:, None]  # (NC, LDOF)
 
         # 提取应力自由度 Σ
-        sigma_e = state['stress'][cell2dof]  # (NC, LDOF)
+        # sigma_e = state['stress'][cell2dof]  # (NC, LDOF)
+        sigma_e = state['stress'][cell2dof] / m_E_safe[:, None]                     # (NC, LDOF)
 
         # 逐单元计算: λ_σ,e^T * A0_e * Σ_e, shape (NC,)
         term = bm.einsum('ci, cij, cj -> c', lambda_sigma_e, A0, sigma_e)

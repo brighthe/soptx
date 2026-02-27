@@ -88,6 +88,11 @@ class DensityTopOptTest(BaseLogged):
                                     topopt_algorithm='density_based',
                                     interpolation_scheme=interpolation_scheme,
                                 )
+        stress_space = analyzer.huzhang_space
+        stress_dofs = stress_space.number_of_global_dofs()
+
+        disp_space = analyzer.tensor_space
+        disp_dofs = disp_space.number_of_global_dofs()
 
         from soptx.optimization.volume_objective import VolumeObjective
         objective = VolumeObjective(analyzer=analyzer)
@@ -97,11 +102,15 @@ class DensityTopOptTest(BaseLogged):
         constraint = ApparentStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
+        use_penalty_continuation = False
+        max_al_iterations = 15
+        max_iters_per_al = 5
+        change_tolerance = 0.002
         options = ALMMMAOptions(
                     # ALM 外层控制
-                    max_al_iterations=150,
-                    mma_iters_per_al=5,
-                    change_tolerance=0.002,
+                    max_al_iterations=max_al_iterations,
+                    mma_iters_per_al=max_iters_per_al,
+                    change_tolerance=change_tolerance,
                     stress_tolerance=0.003,
                     # 增广拉格朗日罚参数
                     mu_0=10.0,
@@ -115,7 +124,7 @@ class DensityTopOptTest(BaseLogged):
                     asymp_decr=0.7,
                     osc=0.2,
                     # SIMP 连续化
-                    use_penalty_continuation=False,
+                    use_penalty_continuation=use_penalty_continuation,
                 )
         
         from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
@@ -149,15 +158,18 @@ class DensityTopOptTest(BaseLogged):
                         enable_logging=True,
                     )
         
-        self._log_info(f"开始密度拓扑优化 \n"
+        self._log_info(f"开始密度拓扑优化, \n"
             f"模型名称={pde.__class__.__name__} \n"
-            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type} \n"
-            f"杨氏模量={pde.E}, 泊松比={pde.nu} \n"
-            f"网格类型={mesh_type}, 空间阶数={space_degree} \n" 
-            f"初始构型={relative_density}, 密度分布={density_location} \n"
-            f"约束类型={constraint.__class__.__name__}, 应力极限={stress_limit} \n"
-            f"分析器={analyzer.__class__.__name__} \n"
-            f"过滤类型={filter_regularization._filter_type}, 投影类型={filter_regularization._strategy.projection_type}, 过滤半径={rmin}, ")
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+            f"网格类型={mesh_type}, 密度类型={density_location}, "
+            f"网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape[0]} \n"
+            f"应力空间阶数={analyzer.huzhang_space.p}, 应力场自由度={stress_dofs} \n"
+            f"位移空间阶数={analyzer.tensor_space.p}, 位移场自由度={disp_dofs} \n"
+            f"分析算法={analyzer.__class__.__name__}, 是否角点松弛={use_relaxation} \n" 
+            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_al_iterations*max_iters_per_al}, "
+            f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
+            f"应力约束={stress_limit}, 惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin} ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 

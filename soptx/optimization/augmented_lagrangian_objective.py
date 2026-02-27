@@ -216,13 +216,12 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         # --- 计算隐式灵敏度项 ---
         # - 位移元: ψ^T * (∂K/∂m_E) * U
-        # - 混合元: λ_σ^T * (∂A_σσ/∂ρ) * Σ  (内积，不含 ρ 的幂次系数)
+        # - 混合元: λ_σ^T * (∂A_σσ/∂ρ) * Σ
         dPenaldm_E_implicit = self._stress_constraint.compute_implicit_sensitivity_term(
                                                         adjoint_vector, state)  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
-
+        
         # --- 显式项归约: 对 NQ 维度求和 ---
-        dPenaldm_E_explicit_reduced = bm.sum(dPenaldm_E_explicit, axis=-1)
-        # 单分辨率/混合元: (NC,) | 多分辨率: (NC, n_sub)
+        dPenaldm_E_explicit_reduced = bm.sum(dPenaldm_E_explicit, axis=-1) # 单分辨率/混合元: (NC,) | 多分辨率: (NC, n_sub)
 
         # --- 链式法则: dPenal/dρ ---
         # 最终灵敏度一般公式（适用于任意插值模型）:
@@ -241,18 +240,16 @@ class AugmentedLagrangianObjective(BaseLogged):
         dm_E_drho = dE_drho_absolute / E0  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
         if self._is_apparent:
-            # 混合元: 显式项与隐式项系数分开处理
-            # 显式项: (∂P/∂m_E) * m_E'(ρ)
+            # --- 混合元 --- 
+            # 显式项: 
             dP_drho_explicit = dPenaldm_E_explicit_reduced * dm_E_drho  # (NC,)
+            # 隐式项: 
+            dP_drho_implicit = dm_E_drho * dPenaldm_E_implicit          # (NC, )
 
-            # 隐式项系数: m_E'(ρ) / m_E²(ρ)  —— 适用于任意插值模型
-            coeff_implicit = dm_E_drho / m_E**2                         # (NC,)
-            dP_drho_implicit = coeff_implicit * dPenaldm_E_implicit     # (NC,)
-
-            dP_drho = dP_drho_explicit + dP_drho_implicit               # (NC,)
+            dP_drho = dP_drho_explicit + dP_drho_implicit               # (NC, )
 
         else:
-            # 位移元: 显式项与隐式项共享同一个 dE/dρ
+            # --- 位移元 --- 
             dPenaldm_E_total = dPenaldm_E_explicit_reduced + dPenaldm_E_implicit # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
             dP_drho = dPenaldm_E_total * dm_E_drho  # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
@@ -267,22 +264,22 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         dJ_drho = dVol_drho + dP_drho_normalized      # (单分辨率: (NC, ) | 多分辨率: (NC, n_sub)
 
-        # 解伴随方程后
-        print(f"adjoint_vector max: {float(bm.max(bm.abs(adjoint_vector)))}")
+        # # 解伴随方程后
+        # print(f"adjoint_vector max: {float(bm.max(bm.abs(adjoint_vector)))}")
 
-        # 各灵敏度分量
-        print(f"dVol_drho max:              {float(bm.max(bm.abs(dVol_drho)))}")
-        print(f"dP_drho_explicit max:       {float(bm.max(bm.abs(dP_drho_explicit)))}")  
-        print(f"dPenaldm_E_implicit max:    {float(bm.max(bm.abs(dPenaldm_E_implicit)))}")
-        print(f"coeff_implicit max:         {float(bm.max(bm.abs(coeff_implicit)))}")
-        print(f"dP_drho_implicit max:       {float(bm.max(bm.abs(dP_drho_implicit)))}")
-        print(f"dP_drho_normalized max:     {float(bm.max(bm.abs(dP_drho_normalized)))}")
-        print(f"dJ_drho max:                {float(bm.max(bm.abs(dJ_drho)))}")
+        # # 各灵敏度分量
+        # print(f"dVol_drho max:              {float(bm.max(bm.abs(dVol_drho)))}")
+        # print(f"dP_drho_explicit max:       {float(bm.max(bm.abs(dP_drho_explicit)))}")  
+        # print(f"dPenaldm_E_implicit max:    {float(bm.max(bm.abs(dPenaldm_E_implicit)))}")
+        # print(f"coeff_implicit max:         {float(bm.max(bm.abs(coeff_implicit)))}")
+        # print(f"dP_drho_implicit max:       {float(bm.max(bm.abs(dP_drho_implicit)))}")
+        # print(f"dP_drho_normalized max:     {float(bm.max(bm.abs(dP_drho_normalized)))}")
+        # print(f"dJ_drho max:                {float(bm.max(bm.abs(dJ_drho)))}")
 
-        print(f"dP_drho_explicit min: {float(bm.min(dP_drho_explicit))}")  # 确认符号
-        print(f"dP_drho_implicit min: {float(bm.min(dP_drho_implicit))}")  # 确认符号
-        print(f"dP_drho max (before norm): {float(bm.max(dP_drho))}")
-        print(f"dP_drho min (before norm): {float(bm.min(dP_drho))}")
+        # print(f"dP_drho_explicit min: {float(bm.min(dP_drho_explicit))}")  # 确认符号
+        # print(f"dP_drho_implicit min: {float(bm.min(dP_drho_implicit))}")  # 确认符号
+        # print(f"dP_drho max (before norm): {float(bm.max(dP_drho))}")
+        # print(f"dP_drho min (before norm): {float(bm.min(dP_drho))}")
 
         if enable_timing:
             t.send('其他')
