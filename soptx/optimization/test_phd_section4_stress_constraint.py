@@ -406,8 +406,8 @@ class DensityTopOptTest(BaseLogged):
         # mesh_type = 'uniform_quad'
         mesh_type = 'uniform_crisscross_tri'
 
-        from soptx.model.cantilever_2d_lfem import Cantilever2d
-        pde = Cantilever2d(
+        from soptx.model.cantilever_2d_lfem import CantileverMiddle2d
+        pde = CantileverMiddle2d(
                     domain=domain,
                     P=P, 
                     E=E, nu=nu,
@@ -549,14 +549,6 @@ class DensityTopOptTest(BaseLogged):
                         options=options,
                         enable_logging=True,
                     )
-        
-        # self._log_info(f"开始密度拓扑优化, "
-        #     f"模型名称={pde.__class__.__name__} \n"
-        #     f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type} \n"
-        #     f"杨氏模量={pde.E}, 泊松比={pde.nu} \n"
-        #     f"网格类型={mesh_type}, 空间阶数={space_degree} \n" 
-        #     f"初始构型={relative_density}, 密度分布={density_location} \n"
-        #     f"过滤类型={filter_regularization._filter_type}, 投影类型={filter_regularization._strategy.projection_type}, 过滤半径={rmin}, ")
         
         self._log_info(f"开始密度拓扑优化, \n"
             f"模型名称={pde.__class__.__name__} \n"

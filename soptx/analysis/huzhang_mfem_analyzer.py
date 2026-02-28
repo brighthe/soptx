@@ -82,7 +82,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._lambda1_rho = None
 
         self._cached_K = None  # 缓存施加边界条件后的刚度矩阵，供伴随求解复用
-        # self._cached_Ae0 = None  
         self._cached_Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space) # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
 
 

@@ -195,7 +195,7 @@ class Cantilever2dCorner(PDEBase):
 
         return self.is_concentrate_load_boundary_dof
 
-class Cantilever2d(PDEBase):
+class CantileverMiddle2d(PDEBase):
     '''
     二维悬臂梁设计域的 PDE 模型
 

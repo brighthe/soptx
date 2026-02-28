@@ -232,7 +232,7 @@ class VanishingStressConstraint(BaseLogged):
         return implicit_term
     
     def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
-        """归一化应力测度：m_E * σ^v_solid / σ_lim，>1 表示违反"""
+        """归一化应力测度：m_E * σ^v_solid / σ_lim, >1 表示违反约束"""
         analyzer = self._analyzer
         E_rho = analyzer.interpolation_scheme.interpolate_material(
                                                 material=analyzer.material,

@@ -267,6 +267,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                         f"It:{al_iter+1:3d}_{mma_iter+1:1d} "
                         f"Obj: {volfrac:.6f} "
                         f"Max_VM: {max_vm_stress:.6f} "
+                        f"J_val: {J_val:.6f} "
                         f"|dJ|: {dJ_norm:.6f} "
                         f"Ch/Tol: {change/opts.change_tolerance:.6f} "
                         f"mu: {self._al_objective.mu:.4e} "

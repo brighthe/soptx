@@ -173,14 +173,14 @@ class ApparentStressConstraint(BaseLogged):
         term = bm.einsum('ci, cij, cj -> c', lambda_sigma_e, A0, sigma_e)
         
         return term
+
     
     def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
-        """归一化应力测度：σ^v_apparent / (η * σ_lim)，>1 表示违反"""
-        vm  = state['von_mises']         # (NC, NQ) 从系统直接获取独立表观应力
-        eta = state['eta_threshold']     # (NC, ) 获取当前密度的松弛阈值
+        """归一化应力: σ^vM / σ_lim, >1 表示违反约束"""
+        # # 表观应力的 von Mises 值
+        vm = state['von_mises']  # (NC, NQ)
 
-        # 将动态阈值 eta 移至分母，为外层 MMA 提供统一的 <= 1.0 判定标尺
-        return vm / (eta[..., None] * self._stress_limit)
+        return vm / self._stress_limit
     
     def compute_visual_stress_measure(self, state: Dict) -> TensorLike:
         """可视化用归一化应力: σ^vM / σ_lim，不含 η 阈值"""
