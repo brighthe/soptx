@@ -158,20 +158,20 @@ class DensityTopOptHuZhangTest(BaseLogged):
         #* 悬臂梁结构 cantilever_2d
         P = -1
         E, nu = 1, 0.3
-        domain = [0, 80, 0, 40]
+        domain = [0, 80, 0, 50]
         plane_type = 'plane_stress' # plane_strain, plane_stress
 
-        from soptx.model.cantilever_2d_lfem import Cantilever2d
-        pde = Cantilever2d(
+        from soptx.model.cantilever_2d_lfem import CantileverCorner2d
+        pde = CantileverCorner2d(
                     domain=domain,
                     P=P, 
                     E=E, nu=nu,
                     plane_type=plane_type,
                 )
-        nx, ny = 80, 40
+        nx, ny = 80, 50
         mesh_type = 'uniform_crisscross_tri'
 
-        volume_fraction = 0.3
+        volume_fraction = 0.4
 
         space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
@@ -193,7 +193,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         use_penalty_continuation = False
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
-        rmin = 2.0
+        rmin = 4.5
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -307,23 +307,49 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
     @run.register('test_subsec5_6_2_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        #* 悬臂梁结构 cantilever_2d
+        #* 悬臂梁结构 cantilever_2d (右下角受载)
         P = -1
         E, nu = 1, 0.3
-        domain = [0, 80, 0, 40]
         plane_type = 'plane_stress' # plane_strain, plane_stress
+        mesh_type = 'uniform_crisscross_tri'
 
-        from soptx.model.cantilever_2d_hzmfem import CantileverMiddle2d
-        pde = CantileverMiddle2d(
+        # domain = [0, 80, 0, 40]
+        # rmin = 2.0
+        # from soptx.model.cantilever_2d_hzmfem import CantileverMiddle2d
+        # pde = CantileverMiddle2d(
+        #             domain=domain,
+        #             P=P, 
+        #             E=E, nu=nu,
+        #             plane_type=plane_type,
+        #             load_width=None,
+        #         )
+        # nx, ny = 80, 40
+        # volume_fraction = 0.3
+
+        # domain = [0, 80, 0, 50]
+        # rmin = 4.5
+        # from soptx.model.cantilever_2d_hzmfem import Cantilever2dCorner
+        # pde = Cantilever2dCorner(
+        #             domain=domain,
+        #             P=P, 
+        #             E=E, nu=nu,
+        #             plane_type=plane_type,
+        #             load_width=None,
+        #         )
+        # nx, ny = 80, 50
+        # volume_fraction = 0.4
+
+        domain = [0, 60, 0, 30]
+        rmin = 2.4
+        from soptx.model.simple_bridge_2d_hzfem import SimpleBridge2d
+        pde = SimpleBridge2d(
                     domain=domain,
                     P=P, 
                     E=E, nu=nu,
                     plane_type=plane_type,
                     load_width=None,
                 )
-        nx, ny = 80, 40
-        mesh_type = 'uniform_crisscross_tri'
-
+        nx, ny = 60, 30
         volume_fraction = 0.3
 
         space_degree = 3
@@ -346,7 +372,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         use_penalty_continuation = False
 
         filter_type = 'density' # 'none', 'sensitivity', 'density'
-        rmin = 2.0
 
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
@@ -815,5 +840,5 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
     # test_subsec5_6_3_hzmfem, test_linear_elastic_huzhang, test_subsec5_6_3_lfem, test_subsec5_6_2_lfem, test_subsec5_6_2_hzmfem
-    test.run.set('test_linear_elastic_huzhang') 
+    test.run.set('test_subsec5_6_2_hzmfem') 
     rho_opt, history = test.run()

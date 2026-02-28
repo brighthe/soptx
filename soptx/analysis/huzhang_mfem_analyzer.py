@@ -419,10 +419,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         #                     bm.abs(edge_centers[:, 1] - y_mid),
         #                     bm.full_like(edge_centers[:, 1], bm.inf))
 
-        # hy = self._pde._hy
+        # # hy = self._pde._hy
+        # hx = self._pde._hx
         # load_width = self._pde._load_width
 
-        # if load_width <= hy + 1e-12:
+        # if load_width <= hx + 1e-12:
         #     # 逼近点载荷：选唯一最近边
         #     nearest = bm.argmin(dist_val)
         #     in_load = bm.zeros(dist_val.shape, dtype=bm.bool)

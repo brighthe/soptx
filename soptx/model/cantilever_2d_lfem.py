@@ -7,7 +7,7 @@ from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
-class Cantilever2dCorner(PDEBase):
+class CantileverCorner2d(PDEBase):
     '''
     -∇·σ = b    in Ω
        u = 0    on ∂Ω (homogeneous Dirichlet)
