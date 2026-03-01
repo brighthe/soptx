@@ -72,14 +72,17 @@ class LBracketBeam2d(PDEBase):
                    &(y>=small_box[2])
                    &(y<=small_box[3]))
 
-        l_shape_mesh = TriangleMesh.from_box(big_box,
+        l_shape_mesh = TriangleMesh.from_box_cross_mesh(big_box,
                                              nx=nx, ny=ny,
                                              threshold=threshold,
                                              device=device)
+                                             
         
         self._save_meshdata(l_shape_mesh, 'tri_threshold', nx=nx, ny=ny)
 
         return l_shape_mesh
+    
+
     
     @init_mesh.register('quad_threshold')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:

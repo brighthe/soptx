@@ -21,7 +21,7 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 80, 0, 40]
         rmin = 3.5
         P = -400.0
-        load_width = 6.0 
+        load_width = None # None
 
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
@@ -103,7 +103,7 @@ class DensityTopOptTest(BaseLogged):
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
         use_penalty_continuation = False
-        max_al_iterations = 15
+        max_al_iterations = 150
         max_iters_per_al = 5
         change_tolerance = 0.002
         options = ALMMMAOptions(
@@ -113,7 +113,7 @@ class DensityTopOptTest(BaseLogged):
                     change_tolerance=change_tolerance,
                     stress_tolerance=0.003,
                     # 增广拉格朗日罚参数
-                    mu_0=10.0,
+                    mu_0=1000.0, # 1000.0, 10.0
                     mu_max=10000.0,
                     alpha=1.1,
                     lambda_0_init_val=0.0,
@@ -179,9 +179,10 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec5_6_4_cantilever_2d")
         save_path.mkdir(parents=True, exist_ok=True)    
 
-        save_optimization_history(mesh=design_variable_mesh, 
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 

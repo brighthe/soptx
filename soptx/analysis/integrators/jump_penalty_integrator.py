@@ -182,10 +182,6 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
         
         # 构建缩放系数
-        # E = 1.0     # MPa
-        # L0 = 120.0  # mm
-        # alpha = E / (L0**2)
-
         # k=1 用 E，k>=2 用 mu，反映不同次数对稳定化强度的不同需求
         # 应力空间的次数
         p = space.p + 1
@@ -200,6 +196,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             # mu = self.material.shear_modulus # MPa
             # alpha = mu / (L0 ** 2)
         else:
+            # E = self.material.youngs_modulus # MPa
+            # alpha = E / (L0 ** 2)
             mu = self.material.shear_modulus # MPa
             alpha = mu / (L0 ** 2)
 

@@ -253,22 +253,50 @@ class AugmentedLagrangianObjective(BaseLogged):
         # ------------------------------------------------------------------ #
         dVol_drho     = self._volume_objective.jac(density=density, state=state)
         n_constraints = g.numel() if hasattr(g, 'numel') else g.size
+        dP_drho_norm = dP_drho / n_constraints
 
-        dJ_drho = dVol_drho + dP_drho / n_constraints  # (NC,) 或 (NC, n_sub)
+        # current_step = kwargs.get('iteration', 0) 
+        # if current_step <= 1: 
+        #     self._check_gradient_magnitude_balance(dVol_drho, dP_drho_norm, current_step)
 
-        print(f"[SIGN] dPenaldm_E_explicit_reduced: mean={float(bm.mean(dPenaldm_E_explicit_reduced)):.4e}")
-        print(f"[SIGN] dPenaldm_E_implicit:         mean={float(bm.mean(dPenaldm_E_implicit)):.4e}")
-        print(f"[SIGN] dm_E_drho:                   mean={float(bm.mean(dm_E_drho)):.4e}")
-        print(f"[SIGN] dP_drho:                     mean={float(bm.mean(dP_drho)):.4e}")
-        print(f"[SIGN] dJ_drho:                     mean={float(bm.mean(dJ_drho)):.4e}")
-        # 同时打印 mask 覆盖率（确认激活约束比例）
-        print(f"[SIGN] mask 激活比例: {float(bm.mean(mask.astype(bm.float64))):.4f}")
-        
+        dJ_drho = dVol_drho + dP_drho_norm  # (NC,) 或 (NC, n_sub)
+
         if enable_timing:
             t.send('其他')
             t.send(None)
 
         return dJ_drho
+
+    def _check_gradient_magnitude_balance(self, 
+                                          dVol_drho: TensorLike, 
+                                          dP_drho_norm: TensorLike, 
+                                          step_k: int = 0) -> None:
+        """
+        验证体积梯度与惩罚项梯度是否在同一数量级，辅助校准 mu_0
+        """
+        # 计算最大绝对值 (无穷大范数)
+        max_vol_grad = bm.max(bm.abs(dVol_drho))
+        max_pen_grad = bm.max(bm.abs(dP_drho_norm))
+        
+        # 计算比值 (加入极小数避免除零报错)
+        ratio = max_pen_grad / (max_vol_grad + 1e-12)
+        
+        print(f"\n[{'混合元' if self._is_apparent else '位移元'}] --- ALM 迭代步 {step_k} 梯度量级诊断 ---")
+        print(f"最大体积梯度 ||dVol_drho||_inf   : {max_vol_grad:.4e}")
+        print(f"最大惩罚梯度 ||dP_drho_norm||_inf: {max_pen_grad:.4e}")
+        print(f"梯度量级比值 (Penal / Vol)       : {ratio:.4f}")
+        
+        # 给出学术建议
+        if ratio < 0.1:
+            print("👉 诊断结论：惩罚力【过弱】。优化器可能会无视应力约束疯狂挖洞。")
+            print("💡 调整建议：请成倍【增大】初始惩罚因子 mu_0。")
+        elif ratio > 10.0:
+            print("👉 诊断结论：惩罚力【过强】。应力惩罚项将主导优化，可能导致拓扑演化停滞或全灰。")
+            print("💡 调整建议：请成倍或按数量级【减小】初始惩罚因子 mu_0。")
+        else:
+            print("👉 诊断结论：量级【完美平衡】！(理想范围 0.1 ~ 10.0)")
+            print("💡 调整建议：保持当前 mu_0 不变。")
+        print("-" * 50 + "\n")
 
     # def _manual_differentiation_backup(self, 
     #                     density: Union[Function, TensorLike],
