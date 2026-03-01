@@ -8,247 +8,9 @@ from fealpy.typing import TensorLike
 from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.utils.base_logged import BaseLogged
 from soptx.optimization.tools import (save_optimization_history, plot_optimization_history,
-                                      save_history_data, load_history_data)
+                                      save_history_data, load_history_data, plot_optimization_history_comparison)
 from soptx.optimization.tools import OptimizationHistory
 
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as font_manager
-import numpy as np
-
-# ==========================================
-# 1. SOPTX 论文全局配色配置 (模块级常量)
-# ==========================================
-# 这段配置应该放在脚本的最顶端，所有函数都能访问
-SOPTX_COLORS = {
-    # 物理量 (用于收敛曲线)
-    'compliance': '#d62728',  # 红色 (Tab:red)
-    'volume':     '#1f77b4',  # 蓝色 (Tab:blue)
-    'stress':     '#2ca02c',  # 绿色 (Tab:green)
-    
-    # 性能耗时 (用于柱状图)
-    'analysis':   '#5B9BD5',  # 柔和蓝 (结构分析)
-    'optimization': '#ED7D31',# 柔和橙 (优化更新)
-    'overhead':   '#A5A5A5',  # 灰色 (其他开销)
-    'total':      '#444444'   # 深灰 (用于总耗时文字)
-}
-
-# ==========================================
-# 2. 字体配置 (基于您提供的绝对路径)
-# ==========================================
-# 建议也作为全局变量加载一次，避免每次绘图都重新加载
-PATH_ZH = '/usr/share/fonts/suanhai_fonts/Sim/simhei.ttf'
-PATH_EN = '/usr/share/fonts/suanhai_fonts/Times/times.ttf'
-try:
-    # 标签与图例字体 (中文黑体)
-    # 建议将 size 也设为变量，方便统一调整
-    FONT_ZH = font_manager.FontProperties(fname=PATH_ZH, size=14)
-    
-    # 刻度数值字体 (西文 Times New Roman)
-    FONT_EN = font_manager.FontProperties(fname=PATH_EN, size=12)
-    
-    print(f"全局字体加载成功: {FONT_ZH.get_name()}, {FONT_EN.get_name()}")
-except Exception as e:
-    print(f"全局字体加载失败: {e}。将回退到默认字体。")
-    FONT_ZH = None
-    FONT_EN = None
-
-def plot_optimization_history_comparison(
-        histories: dict,
-        save_path=None,
-        show=True,
-        title=None,
-        figsize=None,
-        linewidth=2.0,
-        colors=None,
-        plot_type=None  # None/'both': 双纵轴单图, 'compliance': 仅柔顺度, 'volfrac': 仅体积分数
-    ):
-    """
-    绘制不同情形下的对比收敛曲线
-
-    Parameters
-    ----------
-    histories : dict
-        包含多个历史数据的字典, e.g., {'k2': history_obj1, 'k3': history_obj2}
-        支持两种数据格式：
-        - 扁平字典：{'compliance': [...], 'volfrac': [...]}
-        - 嵌套字典：{'scalar_histories': {'compliance': [...], 'volfrac': [...]}, ...}
-    plot_type : str or None
-        None 或 'both' : 双纵轴单图 (左轴柔顺度，右轴体积分数)
-        'compliance'   : 仅柔顺度
-        'volfrac'      : 仅体积分数
-    """
-    # ------------------------------------------
-    # 1. 绘图参数设置
-    # ------------------------------------------
-    if colors is None:
-        colors = [
-            SOPTX_COLORS['compliance'], # 红色
-            SOPTX_COLORS['volume'],     # 蓝色
-            '#2ca02c',                  # 绿色
-            'black',                    # 黑色
-            '#ff7f0e'                   # 橙色
-        ]
-
-    # 线型固定：颜色区分 k 值，线型区分物理量
-    LINESTYLE_MAP = {
-        'compliance': '-',   # 实线
-        'volfrac':    '--',  # 虚线
-    }
-
-    # 图例前缀
-    LABEL_PREFIX_MAP = {
-        'compliance': '柔顺度',
-        'volfrac':    '体积分数',
-    }
-
-    if plot_type is None:
-        plot_type = 'both'
-
-    if figsize is None:
-        figsize = (8, 5)
-
-    # ------------------------------------------
-    # 2. 辅助函数 (数据兼容性)
-    # ------------------------------------------
-    def get_data(obj, key):
-        """
-        兼容三种数据来源：
-        1. 对象属性 (在线数据)
-        2. 扁平字典 (顶层直接有 key)
-        3. 嵌套字典 (key 在 scalar_histories 中)
-        """
-        if not isinstance(obj, dict):
-            return getattr(obj, key)
-        if key in obj:
-            return obj[key]
-        if 'scalar_histories' in obj and key in obj['scalar_histories']:
-            return obj['scalar_histories'][key]
-        raise KeyError(f"Key '{key}' not found in dict or scalar_histories")
-
-    # ------------------------------------------
-    # 3. 创建画布与子图
-    # ------------------------------------------
-    if plot_type == 'both':
-        fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
-        ax2 = ax1.twinx()
-        axes_to_plot = [
-            ('compliance', ax1),
-            ('volfrac',    ax2),
-        ]
-    elif plot_type == 'compliance':
-        fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
-        axes_to_plot = [('compliance', ax1)]
-    elif plot_type == 'volfrac':
-        fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
-        axes_to_plot = [('volfrac', ax1)]
-    else:
-        raise ValueError("Invalid plot_type. Choose None/'both', 'compliance', or 'volfrac'.")
-
-    # ------------------------------------------
-    # 4. 绘图主循环
-    # ------------------------------------------
-    for data_key, ax in axes_to_plot:
-        linestyle = LINESTYLE_MAP[data_key]
-
-        for idx, (label, history) in enumerate(histories.items()):
-            color = colors[idx % len(colors)]
-
-            try:
-                values = np.array(get_data(history, data_key))
-            except Exception as e:
-                print(f"Warning: Skipping {label} for {data_key}: {e}")
-                continue
-
-            iterations = np.arange(1, len(values) + 1)
-            # compliance 标注 "$k = 2, C$" 等，volfrac 暂不注册（后面统一处理）
-            if data_key == 'compliance':
-                k_num = label.replace('k', '')
-                legend_label = f"$k = {k_num}$, 柔顺度"
-            else:
-                legend_label = None
-            ax.plot(iterations, values,
-                    color=color, linestyle=linestyle,
-                    linewidth=linewidth, label=legend_label)
-
-    # ------------------------------------------
-    # 5. 样式修饰
-    # ------------------------------------------
-    ax1.set_xlabel('迭代步数', fontproperties=FONT_ZH)
-    ax1.grid(True, linestyle='--', alpha=0.5)
-    ax1.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
-
-    if plot_type == 'both':
-        ax1.set_ylabel('柔顺度 $c$',    fontproperties=FONT_ZH)
-        ax2.set_ylabel('体积分数 $V_f$', fontproperties=FONT_ZH)
-
-        # 智能锁定右轴（体积分数）范围
-        all_volfrac_arrays = []
-        for history in histories.values():
-            try:
-                all_volfrac_arrays.append(np.array(get_data(history, 'volfrac')))
-            except Exception:
-                pass
-
-        if all_volfrac_arrays:
-            all_volfrac_flat = np.concatenate(all_volfrac_arrays)
-            v_min, v_max = np.min(all_volfrac_flat), np.max(all_volfrac_flat)
-            if (v_max - v_min) < 0.01:
-                target = np.mean(all_volfrac_flat[-10:])
-                margin = 0.05
-                ax2.set_ylim(target - margin, target + margin)
-
-        # 判断 volfrac 曲线是否几乎完全重叠
-        # 标准：所有曲线逐点最大差值 < 阈值
-        volfrac_overlap = False
-        if len(all_volfrac_arrays) > 1:
-            min_len = min(len(a) for a in all_volfrac_arrays)
-            stacked = np.stack([a[:min_len] for a in all_volfrac_arrays])
-            if np.max(np.max(stacked, axis=0) - np.min(stacked, axis=0)) < 1e-3:
-                volfrac_overlap = True
-
-        # 构建 volfrac 图例
-        from matplotlib.lines import Line2D
-        lines, labels = ax1.get_legend_handles_labels()  # compliance 的 k=2/3/4
-
-        if volfrac_overlap:
-            # 三条重叠，只加一条灰色虚线
-            lines  += [Line2D([0], [0], color='gray', linestyle='--', linewidth=linewidth)]
-            labels += [r'体积分数 (所有 $k$)']
-        else:
-            # 分别添加各 k 值的 volfrac 图例
-            for idx, (label, _) in enumerate(histories.items()):
-                color = colors[idx % len(colors)]
-                k_num = label.replace('k', '')
-                lines  += [Line2D([0], [0], color=color, linestyle='--', linewidth=linewidth)]
-                labels += [f"$k = {k_num}$, 体积分数"]
-
-        ax1.legend(lines, labels,
-                   loc='upper right', prop=FONT_ZH, framealpha=0.9, fancybox=False)
-
-    elif plot_type == 'compliance':
-        ax1.set_ylabel('柔顺度 $c$', fontproperties=FONT_ZH)
-        ax1.legend(loc='upper right', prop=FONT_ZH, framealpha=0.9, fancybox=False)
-    elif plot_type == 'volfrac':
-        ax1.set_ylabel('体积分数 $V_f$', fontproperties=FONT_ZH)
-        ax1.legend(loc='upper right', prop=FONT_ZH, framealpha=0.9, fancybox=False)
-
-    # ------------------------------------------
-    # 6. 标题与保存
-    # ------------------------------------------
-    if title:
-        fig.suptitle(title, fontproperties=FONT_ZH, y=0.98)
-
-    plt.tight_layout()
-
-    if save_path:
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(save_path, dpi=600, bbox_inches='tight')
-        print(f"对比曲线已保存至: {save_path}")
-
-    if show:
-        plt.show()
-    else:
-        plt.close()
 
 class DensityTopOptHuZhangTest(BaseLogged):
     def __init__(self, 
@@ -394,18 +156,20 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_2_lfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         """绘图代码"""
-        # current_file = Path(__file__)
-        # base_dir = current_file.parent.parent / 'vtu' 
-        # base_dir = str(base_dir)
-        # save_path = Path(f"{base_dir}/subsec5_6_2_fixed_fixed_beam2d/json")
-        # save_path.mkdir(parents=True, exist_ok=True)    
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec5_6_2_fixed_fixed_beam2d/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
     
-        # histories = load_history_data(save_path, labels=['k2', 'k3', 'k4'])
-        # plot_optimization_history_comparison(
-        #                         histories,
-        #                         save_path=f'{save_path}/convergence_comparison.png',
-        #                         plot_type='both'
-        #                     )
+        histories = load_history_data(save_path, labels=['k2', 'k3', 'k4'])
+        # 重命名键以美化图例
+        histories = {'k2': histories['k2'], 'k3': histories['k3'], 'k4': histories['k4']}
+        plot_optimization_history_comparison(
+                                histories,
+                                save_path=f'{save_path}/convergence_comparison.png',
+                                plot_type='objective'
+                            )
 
         #* 中点受载的两端固支梁
         P = -1
@@ -527,7 +291,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         from soptx.optimization.volume_constraint import VolumeConstraint
         volume_constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volume_fraction)
 
-        max_iterations = 500
+        max_iterations = 5
         change_tolerance = 1e-2
         from soptx.optimization.oc_optimizer import OCOptimizer
         optimizer = OCOptimizer(
@@ -584,21 +348,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
     @run.register('test_subsec5_6_2_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        """绘图代码"""
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu' 
-        base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec5_6_2_fixed_fixed_beam2d/json")
-        save_path.mkdir(parents=True, exist_ok=True)    
-    
-        histories = load_history_data(save_path, labels=['k2', 'k3', 'k4'])
-        plot_optimization_history_comparison(
-                                histories,
-                                save_path=f'{save_path}/convergence_comparison.png',
-                                plot_type='both'
-                            )
-    
-        #* 中点受载的两端固支梁
+        #* 悬臂梁结构 cantilever_2d (右下角受载)
         # P = -1
         # E, nu = 1, 0.3
         # plane_type = 'plane_stress' # plane_strain, plane_stress
@@ -647,6 +397,9 @@ class DensityTopOptHuZhangTest(BaseLogged):
         nx, ny = 160, 20
         volume_fraction = 0.4
 
+        space_degree = 2
+        integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
+
         interpolation_method = 'msimp'
         penalty_factor = 3.0
         void_youngs_modulus = 1e-9
@@ -687,8 +440,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     },
                                 )
         
-        space_degree = 4
-        integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
                                     disp_mesh=displacement_mesh,
@@ -767,7 +518,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec5_6_2_hzmfem")
         save_path.mkdir(parents=True, exist_ok=True)
 
-        save_history_data(history=history, save_path=str(save_path/'json'), label=f'{space_degree}')
+        # save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
         
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 

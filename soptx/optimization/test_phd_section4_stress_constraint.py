@@ -465,7 +465,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 

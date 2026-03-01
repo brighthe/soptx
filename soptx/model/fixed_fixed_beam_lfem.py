@@ -1,0 +1,187 @@
+from typing import List, Callable, Optional, Tuple
+
+from fealpy.backend import backend_manager as bm
+from fealpy.typing import TensorLike
+from fealpy.decorator import cartesian, variantmethod
+from fealpy.mesh import QuadrangleMesh, TriangleMesh
+
+from soptx.model.pde_base import PDEBase  
+
+class FixedFixedBeamCenterLoad2d(PDEBase):
+    '''
+    两端固支梁底部中点受载的 PDE 模型 (位移法框架)
+
+    设计域:
+        - 全设计域: 160 m x 20 m (参考图 2)
+
+    边界条件:
+        - 左侧边界完全固支 (x = 0, u_x = u_y = 0)
+        - 右侧边界完全固支 (x = 160, u_x = u_y = 0)
+
+    载荷条件:
+        - 底部边缘中点 (x = 80, y = 0) 施加竖直向下的集中载荷 P = -3.0 N
+    '''
+    def __init__(self,
+                domain: List[float] = [0, 160, 0, 20], 
+                mesh_type: str = 'uniform_aligned_tri',
+                P: float = -3.0,   # N
+                E: float = 30.0,   # Pa
+                nu: float = 0.3,   
+                load_width: Optional[float] = None, 
+                plane_type: str = 'plane_stress', 
+                enable_logging: bool = False, 
+                logger_name: Optional[str] = None
+            ) -> None:
+        super().__init__(domain=domain, mesh_type=mesh_type, 
+                enable_logging=enable_logging, logger_name=logger_name)
+        
+        self._P = P
+        self._E, self._nu = E, nu
+        self._plane_type = plane_type
+        self._load_width = load_width
+
+        self._eps = 1e-8
+        self._load_type = 'concentrated' # 对应位移法下的节点载荷逻辑
+        self._boundary_type = 'mixed'
+
+    @property
+    def E(self) -> float:
+        """获取杨氏模量"""
+        return self._E
+    
+    @property
+    def nu(self) -> float:
+        """获取泊松比"""
+        return self._nu
+    
+    @property
+    def P(self) -> float:
+        """获取点力"""
+        return self._P
+
+    @variantmethod('uniform_quad')
+    def init_mesh(self, **kwargs) -> QuadrangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = QuadrangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                    threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_quad', nx=nx, ny=ny)
+
+        return mesh
+    
+    @init_mesh.register('uniform_aligned_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        threshold = kwargs.get('threshold', None)
+        device = kwargs.get('device', 'cpu')
+
+        mesh = TriangleMesh.from_box(box=self._domain, nx=nx, ny=ny,
+                                threshold=threshold, device=device)
+        self._save_meshdata(mesh, 'uniform_aligned_tri', nx=nx, ny=ny)
+
+        return mesh
+    
+    @init_mesh.register('uniform_crisscross_tri')
+    def init_mesh(self, **kwargs) -> TriangleMesh:
+        nx = kwargs.get('nx', 60)
+        ny = kwargs.get('ny', 20)
+        device = kwargs.get('device', 'cpu')
+        node = bm.array([[0.0, 0.0],
+                        [1.0, 0.0],
+                        [1.0, 1.0],
+                        [0.0, 1.0]], dtype=bm.float64, device=device) 
+        
+        cell = bm.array([[0, 1, 2, 3]], dtype=bm.int32, device=device)     
+        
+        qmesh = QuadrangleMesh(node, cell)
+        qmesh = qmesh.from_box(box=self._domain, nx=nx, ny=ny)
+        node = qmesh.entity('node')
+        cell = qmesh.entity('cell')
+        isLeftCell = bm.zeros((nx, ny), dtype=bm.bool)
+        isLeftCell[0, 0::2] = True
+        isLeftCell[1, 1::2] = True
+        if nx > 2:
+            isLeftCell[2::2, :] = isLeftCell[0, :]
+        if ny > 3:
+            isLeftCell[3::2, :] = isLeftCell[1, :]
+        isLeftCell = isLeftCell.reshape(-1)
+        lcell = cell[isLeftCell]
+        rcell = cell[~isLeftCell]
+        import numpy as np
+        newCell = np.r_['0', 
+                lcell[:, [1, 2, 0]], 
+                lcell[:, [3, 0, 2]],
+                rcell[:, [0, 1, 3]],
+                rcell[:, [2, 3, 1]]]
+        
+        mesh = TriangleMesh(node, newCell)
+        self._save_meshdata(mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
+
+        return mesh
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+
+        return bm.zeros(points.shape, **kwargs)
+
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        kwargs = bm.context(points)
+
+        return bm.zeros(points.shape, **kwargs)
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        """标记位移边界 - 左侧 (x=0) 和 右侧 (x=160)"""
+        x = points[..., 0]
+        on_left = bm.abs(x - self._domain[0]) < self._eps
+        on_right = bm.abs(x - self._domain[1]) < self._eps
+
+        return on_left | on_right
+    
+    @cartesian
+    def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
+        """标记位移边界 - 同 x 方向"""
+
+        return self.is_dirichlet_boundary_dof_x(points)
+    
+    def is_dirichlet_boundary(self) -> Tuple[Callable, Callable]:
+
+        return (self.is_dirichlet_boundary_dof_x, 
+                self.is_dirichlet_boundary_dof_y)
+    
+    @cartesian
+    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """集中载荷 (点力)"""
+        val = bm.zeros(points.shape, **bm.context(points))
+
+        return bm.set_at(val, (..., 1), self._P) 
+    
+    @cartesian
+    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+        """标记载荷节点 - 底部边界中点 (80, 0)"""
+        x, y = points[..., 0], points[..., 1]
+        middle_x = (self._domain[0] + self._domain[1]) / 2.0
+        bottom_y = self._domain[2]
+
+        if self._load_width is None:
+            # 单点模式
+            coord = (bm.abs(x - middle_x) < self._eps) & (bm.abs(y - bottom_y) < self._eps)
+        else:
+            # 分布模式 (如果需要对比混合元的分布效果)
+            half_width = self._load_width / 2.0
+            coord = (
+                (bm.abs(y - bottom_y) < self._eps) & 
+                (x >= middle_x - half_width - self._eps) & 
+                (x <= middle_x + half_width + self._eps)
+            )
+        return coord
+
+    def is_concentrate_load_boundary(self) -> Callable:
+        
+        return self.is_concentrate_load_boundary_dof

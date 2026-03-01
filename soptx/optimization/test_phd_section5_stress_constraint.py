@@ -72,7 +72,7 @@ class DensityTopOptTest(BaseLogged):
                                                 relative_density=relative_density,
                                             )
 
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         use_relaxation = True
         solve_method = 'mumps'
