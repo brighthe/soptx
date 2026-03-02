@@ -491,7 +491,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     },
                                 )
         
-        space_degree = 4
+        space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
         analyzer = LagrangeFEMAnalyzer(

@@ -204,8 +204,8 @@ class DensityTopOptTest(BaseLogged):
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
-        nx, ny = 5, 5
-        # nx, ny = 100, 100
+        # nx, ny = 5, 5
+        nx, ny = 100, 100
         # nx, ny = 200, 200
         mesh_type = 'tri_threshold' # tri_threshold, quad_threshold
 
@@ -220,14 +220,14 @@ class DensityTopOptTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny, device=device)
 
-        import matplotlib.pyplot as plt
-        fig = plt.figure()
-        axes = fig.add_subplot(111)
-        displacement_mesh.add_plot(axes)
-        displacement_mesh.find_node(axes, showindex=True)
-        displacement_mesh.find_edge(axes, showindex=True)
-        displacement_mesh.find_cell(axes, showindex=True)
-        plt.show()
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.add_subplot(111)
+        # displacement_mesh.add_plot(axes)
+        # displacement_mesh.find_node(axes, showindex=True)
+        # displacement_mesh.find_edge(axes, showindex=True)
+        # displacement_mesh.find_cell(axes, showindex=True)
+        # plt.show()
 
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
@@ -302,7 +302,7 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
         constraint = VanishingStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
-        max_al_iterations = 1
+        max_al_iterations = 150
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
         options = ALMMMAOptions(
                     # ALM 外层控制
@@ -413,11 +413,12 @@ class DensityTopOptTest(BaseLogged):
 
         nx, ny = 80, 40
 
-        # rmin = 4.0
-        # mesh_type = 'uniform_quad'
+        rmin = 4.0
+        # rmin = 2.0
+        mesh_type = 'uniform_quad'
 
-        rmin = 6.0
-        mesh_type = 'uniform_crisscross_tri'
+        # rmin = 6.0
+        # mesh_type = 'uniform_crisscross_tri'
 
         from soptx.model.cantilever_2d_lfem import CantileverMiddle2d
         pde = CantileverMiddle2d(
@@ -478,7 +479,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 3
+        space_degree = 1
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
