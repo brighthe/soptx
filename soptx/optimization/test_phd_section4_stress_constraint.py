@@ -431,12 +431,12 @@ class DensityTopOptTest(BaseLogged):
 
         nx, ny = 80, 40
 
-        rmin = 4.0
+        # rmin = 4.0
         # rmin = 2.0
-        mesh_type = 'uniform_quad'
+        # mesh_type = 'uniform_quad'
 
-        # rmin = 6.0
-        # mesh_type = 'uniform_crisscross_tri'
+        rmin = 6.0
+        mesh_type = 'uniform_crisscross_tri'
 
         from soptx.model.cantilever_2d_lfem import CantileverMiddle2d
         pde = CantileverMiddle2d(
@@ -530,7 +530,7 @@ class DensityTopOptTest(BaseLogged):
         max_al_iterations = 150
         max_iters_per_al = 5
         change_tolerance = 0.002
-        mu_0 = 10.0
+        mu_0 = 50.0 # 50.0
         mu_max = 10000.0
         options = ALMMMAOptions(
                     # ALM 外层控制
@@ -589,9 +589,9 @@ class DensityTopOptTest(BaseLogged):
             f"模型名称={pde.__class__.__name__} \n"
             f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
             f"网格类型={mesh_type},  有限元空间阶数={space_degree} \n" 
-            f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度自由度={rho.shape}, \n" 
-            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移自由度={u_dofs}, \n"
-            f"空间阶数={u_space.p}, 应力场自由度={u_dofs} \n"
+            f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度自由度={rho.shape} \n" 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移自由度={u_dofs} \n"
+            f"空间阶数={u_space.p}, 自由度={u_dofs} \n"
             f"分析算法={analyzer.__class__.__name__} \n" 
             f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_al_iterations*max_iters_per_al}, "
             f"收敛容限={change_tolerance} \n" 
