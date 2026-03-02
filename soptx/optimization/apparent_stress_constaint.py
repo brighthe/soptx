@@ -64,6 +64,12 @@ class ApparentStressConstraint(BaseLogged):
             
         vm = state['von_mises'] # (NC, NQ) 
 
+        # max_abs_vm = bm.max(vm)
+        # print(f"\n[验证] 初始阶段最大绝对 von Mises 应力为: {max_abs_vm:.2f} MPa")
+        # print(f"[验证] 当前设置的许用应力限制为: {self._stress_limit:.2f} MPa")
+        # if max_abs_vm < self._stress_limit:
+        #     print(f"[警告] 初始应力({max_abs_vm:.2f}) < 许用应力({self._stress_limit:.2f})！ALM惩罚机制未被激活，建议降低许用应力！\n")
+
         # 4. 计算松弛阈值 η(ρ_e) = m_E + ε * (1 - m_E)
         eta = m_E + self._epsilon * (1.0 - m_E) # (NC, )
         state['eta_threshold'] = eta

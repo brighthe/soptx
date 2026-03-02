@@ -19,9 +19,7 @@ class DensityTopOptTest(BaseLogged):
     @variantmethod('test_subsec5_6_4_cantilever_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 80, 0, 40]
-        rmin = 3.5
         P = -400.0
-        load_width = None # None
 
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
@@ -35,7 +33,7 @@ class DensityTopOptTest(BaseLogged):
                     P=P, 
                     E=E, nu=nu,
                     plane_type=plane_type,
-                    load_width=load_width,  
+                    load_width=6.0,  
                 )
         
         pde.init_mesh.set(mesh_type)
@@ -72,7 +70,7 @@ class DensityTopOptTest(BaseLogged):
                                                 relative_density=relative_density,
                                             )
 
-        space_degree = 2
+        space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         use_relaxation = True
         solve_method = 'mumps'
@@ -102,10 +100,12 @@ class DensityTopOptTest(BaseLogged):
         constraint = ApparentStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
-        use_penalty_continuation = False
+        use_penalty_continuation = True
         max_al_iterations = 150
         max_iters_per_al = 5
         change_tolerance = 0.002
+        mu_0 = 10.0
+        mu_max = 10000.0
         options = ALMMMAOptions(
                     # ALM 外层控制
                     max_al_iterations=max_al_iterations,
@@ -113,8 +113,8 @@ class DensityTopOptTest(BaseLogged):
                     change_tolerance=change_tolerance,
                     stress_tolerance=0.003,
                     # 增广拉格朗日罚参数
-                    mu_0=1000.0, # 1000.0, 10.0
-                    mu_max=10000.0,
+                    mu_0=mu_0,
+                    mu_max=mu_max,
                     alpha=1.1,
                     lambda_0_init_val=0.0,
                     # MMA 渐近线控制
@@ -141,6 +141,7 @@ class DensityTopOptTest(BaseLogged):
                 'beta': 1.0, 'beta_max': 10.0,
                 'continuation_iter': 5, 'beta_increment': 1.0
             }
+        rmin = 6.0
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
                                     design_mesh=design_variable_mesh,
@@ -167,8 +168,9 @@ class DensityTopOptTest(BaseLogged):
             f"位移空间阶数={analyzer.tensor_space.p}, 位移场自由度={disp_dofs} \n"
             f"分析算法={analyzer.__class__.__name__}, 是否角点松弛={use_relaxation} \n" 
             f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_al_iterations*max_iters_per_al}, "
-            f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
-            f"应力约束={stress_limit}, 惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n" 
+            f"收敛容限={change_tolerance} \n" 
+            f"惩罚因子={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
+            f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
@@ -184,7 +186,7 @@ class DensityTopOptTest(BaseLogged):
                                 density_location=density_location,
                                 disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
-        plot_optimization_history(history, save_path=str(save_path))
+        plot_optimization_history(history, save_path=str(save_path), problem_type='stress')
 
         return rho_opt, history
     

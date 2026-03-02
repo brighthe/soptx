@@ -196,10 +196,10 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             # mu = self.material.shear_modulus # MPa
             # alpha = mu / (L0 ** 2)
         else:
-            # E = self.material.youngs_modulus # MPa
-            # alpha = E / (L0 ** 2)
-            mu = self.material.shear_modulus # MPa
-            alpha = mu / (L0 ** 2)
+            E = self.material.youngs_modulus # MPa
+            alpha = E / (L0 ** 2)
+            # mu = self.material.shear_modulus # MPa
+            # alpha = mu / (L0 ** 2)
 
         KE = bm.einsum('f, fij -> fij', alpha * hF, integrand)
 

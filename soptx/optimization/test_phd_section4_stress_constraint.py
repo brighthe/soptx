@@ -478,7 +478,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 2
+        space_degree = 3
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -511,6 +511,8 @@ class DensityTopOptTest(BaseLogged):
         max_al_iterations = 150
         max_iters_per_al = 5
         change_tolerance = 0.002
+        mu_0 = 10.0
+        mu_max = 10000.0
         options = ALMMMAOptions(
                     # ALM 外层控制
                     max_al_iterations=max_al_iterations,
@@ -518,8 +520,8 @@ class DensityTopOptTest(BaseLogged):
                     change_tolerance=change_tolerance,
                     stress_tolerance=0.003,
                     # 增广拉格朗日罚参数
-                    mu_0=10.0,
-                    mu_max=10000.0,
+                    mu_0=mu_0,
+                    mu_max=mu_max,
                     alpha=1.1,
                     lambda_0_init_val=0.0,
                     # MMA 渐近线控制
@@ -573,8 +575,9 @@ class DensityTopOptTest(BaseLogged):
             f"空间阶数={u_space.p}, 应力场自由度={u_dofs} \n"
             f"分析算法={analyzer.__class__.__name__} \n" 
             f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_al_iterations*max_iters_per_al}, "
-            f"收敛容限={change_tolerance}, 惩罚因子延续={use_penalty_continuation} \n"
-            f"应力约束={stress_limit}, 惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n" 
+            f"收敛容限={change_tolerance} \n" 
+            f"惩罚因子={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
+            f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
@@ -611,5 +614,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_L_bracket_stress')
+    test.run.set('test_subsec4_6_5_cantilever_2d')
     rho_opt, history = test.run()
