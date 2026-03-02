@@ -34,18 +34,21 @@ class DensityTopOptTest(BaseLogged):
         # hole_domain = [0.4, 1.0, 0.4, 1.0]
         # P = -2.0
         E, nu = 7e4, 0.25
+        load_width = None
         plane_type = 'plane_stress' 
 
         nx, ny = 100, 100
-        mesh_type = 'quad_threshold'
-
-        from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
-        pde = LBracketBeam2d(
+        mesh_type = 'uniform_quad' # uniform_quad, uniform_crisscross_tri
+        
+        from soptx.model.l_bracket_beam_lfem import LBracketMiddle2d
+        pde = LBracketMiddle2d(
                             domain=domain,
                             hole_domain=hole_domain,
                             P=P, E=E, nu=nu,
+                            load_width=load_width,
                             plane_type=plane_type,
                         )
+        
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
@@ -115,7 +118,7 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.compliance_objective import ComplianceObjective
         objective = ComplianceObjective(analyzer=analyzer)
 
-        volfrac = 0.31
+        volfrac = 0.3
         from soptx.optimization.volume_constraint import VolumeConstraint
         constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volfrac)
 
@@ -202,18 +205,30 @@ class DensityTopOptTest(BaseLogged):
         P = -400.0
 
         E, nu = 7e4, 0.25
+
+        load_width = 10.0
         plane_type = 'plane_stress' 
 
         # nx, ny = 5, 5
         nx, ny = 100, 100
         # nx, ny = 200, 200
-        mesh_type = 'tri_threshold' # tri_threshold, quad_threshold
+        mesh_type = 'uniform_quad' # uniform_quad, uniform_crisscross_tri
 
-        from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
-        pde = LBracketBeam2d(
+        # from soptx.model.l_bracket_beam_lfem import LBracketCorner2d
+        # pde = LBracketCorner2d(
+        #                     domain=domain,
+        #                     hole_domain=hole_domain,
+        #                     P=P, E=E, nu=nu,
+        #                     load_width=load_width,
+        #                     plane_type=plane_type,
+        #                 )
+        
+        from soptx.model.l_bracket_beam_lfem import LBracketMiddle2d
+        pde = LBracketMiddle2d(
                             domain=domain,
                             hole_domain=hole_domain,
                             P=P, E=E, nu=nu,
+                            load_width=load_width,
                             plane_type=plane_type,
                         )
         
@@ -303,6 +318,7 @@ class DensityTopOptTest(BaseLogged):
         constraint = VanishingStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
         max_al_iterations = 150
+        use_penalty_continuation = False
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
         options = ALMMMAOptions(
                     # ALM 外层控制
@@ -322,7 +338,7 @@ class DensityTopOptTest(BaseLogged):
                     asymp_decr=0.7,
                     osc=0.2,
                     # SIMP 连续化
-                    use_penalty_continuation=True,
+                    use_penalty_continuation=use_penalty_continuation,
                 )
         
         from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
@@ -361,13 +377,15 @@ class DensityTopOptTest(BaseLogged):
         analysis_tspace = analyzer.tensor_space
         analysis_tgdofs = analysis_tspace.number_of_global_dofs()
         
-        self._log_info(f"开始密度拓扑优化, "
+        self._log_info(f"开始密度拓扑优化 \n"
             f"模型名称={pde.__class__.__name__} \n"
             f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type} \n"
             f"杨氏模量={pde.E}, 泊松比={pde.nu} \n"
             f"网格类型={mesh_type}, 空间阶数={space_degree} \n"
             f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
-            f"位移网格尺寸={displacement_mesh.number_of_cells()},  位移场自由度={analysis_tgdofs}, \n" 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()},  位移场自由度={analysis_tgdofs}, \n"
+            f"分析算法={analyzer.__class__.__name__} \n"  
+            f"惩罚因子={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
             f"初始构型={relative_density}, 密度分布={density_location} \n"
             f"过滤类型={filter_regularization._filter_type}, 过滤半径={rmin}, ")
 
@@ -615,5 +633,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_cantilever_2d')
+    test.run.set('test_subsec4_6_5_L_bracket_compliance')
     rho_opt, history = test.run()
