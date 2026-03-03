@@ -274,8 +274,129 @@ def load_history_data(
             with open(filepath, 'r') as f:
                 histories[label] = json.load(f)
         return histories
-    
+
 def plot_optimization_history(history, 
+                            problem_type: str = 'compliance',
+                            save_path=None, 
+                            show=True, 
+                            figsize=(10, 6), 
+                            linewidth=2.5):
+    """
+    绘制优化收敛曲线
+    
+    Parameters
+    ----------
+    problem_type : str
+        'compliance' : 柔顺度最小化 + 体积约束，绘制柔顺度和体积分数
+        'stress'     : 体积最小化 + 应力约束，绘制体积分数和最大归一化应力
+    history : dict 或带属性的对象均可
+    """
+    def _get(obj, key):
+        """兼容 dict 和对象属性访问"""
+        if isinstance(obj, dict):
+            return obj[key]
+        return getattr(obj, key)
+
+    iterations = np.array(_get(history, 'iter_indices')) + 1
+    scalar_histories = _get(history, 'scalar_histories')
+
+    # ------------------------------------------
+    # 根据 problem_type 选择数据和标签配置
+    # ------------------------------------------
+    if problem_type == 'compliance':
+        try:
+            left_values  = np.array(scalar_histories['compliance'])
+            right_values = np.array(scalar_histories['volfrac'])
+        except KeyError as e:
+            print(f"数据解析错误: 找不到键值 {e}")
+            return
+        left_label  = '柔顺度 $c$'
+        right_label = '体积分数 $V_f$'
+        left_color  = SOPTX_COLORS['compliance']
+        right_color = SOPTX_COLORS['volume']
+
+    elif problem_type == 'stress':
+        try:
+            left_values  = np.array(scalar_histories['volfrac'])
+            right_values = np.array(scalar_histories['max_von_mises'])
+        except KeyError as e:
+            print(f"数据解析错误: 找不到键值 {e}")
+            return
+        left_label  = '体积分数 $V_f$'
+        right_label = '最大归一化应力 $\\sigma_{max}/\\sigma_{lim}$'
+        left_color  = SOPTX_COLORS['volume']
+        right_color = SOPTX_COLORS['stress']
+
+    else:
+        raise ValueError(f"不支持的问题类型: {problem_type}，可选 'compliance' 或 'stress'")
+
+    # ------------------------------------------
+    # 创建画布
+    # ------------------------------------------
+    fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
+
+    # ------------------------------------------
+    # 绘制左轴
+    # ------------------------------------------
+    ax1.set_xlabel('迭代步数', fontproperties=FONT_ZH)
+    ax1.set_ylabel(left_label, color=left_color, fontproperties=FONT_ZH)
+    l1, = ax1.plot(iterations, left_values, color=left_color, linestyle='-',
+                   linewidth=linewidth, label=left_label)
+    ax1.tick_params(axis='y', labelcolor=left_color)
+    ax1.grid(True, linestyle='--', alpha=0.5)
+
+    if FONT_EN:
+        for label in ax1.get_xticklabels():
+            label.set_fontproperties(FONT_EN)
+        for label in ax1.get_yticklabels():
+            label.set_fontproperties(FONT_EN)
+
+    # ------------------------------------------
+    # 绘制右轴
+    # ------------------------------------------
+    ax2 = ax1.twinx()
+    ax2.set_ylabel(right_label, color=right_color, fontproperties=FONT_ZH)
+    l2, = ax2.plot(iterations, right_values, color=right_color, linestyle='--',
+                   linewidth=linewidth, label=right_label)
+    ax2.tick_params(axis='y', labelcolor=right_color)
+
+    if FONT_EN:
+        for label in ax2.get_yticklabels():
+            label.set_fontproperties(FONT_EN)
+
+    # 应力问题时在右轴添加 sigma=1 的参考线，表示约束边界
+    if problem_type == 'stress':
+        ax2.axhline(y=1.0, color=right_color, linestyle=':', 
+                    linewidth=1.5, alpha=0.7, label='约束边界 $\\sigma=1$')
+
+    # ------------------------------------------
+    # 智能锁定右轴范围
+    # ------------------------------------------
+    r_min, r_max = np.min(right_values), np.max(right_values)
+    if (r_max - r_min) < 0.01:
+        target = np.mean(right_values[-10:])
+        margin = 0.05
+        ax2.set_ylim(target - margin, target + margin)
+
+    # ------------------------------------------
+    # 图例与保存
+    # ------------------------------------------
+    lines = [l1, l2]
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc='upper right', prop=FONT_ZH, framealpha=0.9)
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=600, bbox_inches='tight')
+        print(f"图片已保存至: {save_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+def plot_optimization_history_backup(history, 
                             problem_type: str = 'compliance',
                             save_path=None, 
                             show=True, 

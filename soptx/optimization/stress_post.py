@@ -26,7 +26,6 @@ from fealpy.typing import TensorLike
 
 import numpy as np
 
-
 @dataclass
 class StressPostResults:
     """后处理结果数据容器"""
@@ -80,6 +79,9 @@ class StressPostProcessor:
         self._solid_threshold = solid_threshold
         self._constraint_tolerance = constraint_tolerance
 
+        # 动态判定是否为胡张混合元分析器
+        self._is_mixed_fem = hasattr(analyzer, 'huzhang_space')
+
     def check_stress_constraints(self, 
                                   rho_phys: TensorLike,
                                   state: Optional[Dict] = None,
@@ -104,8 +106,9 @@ class StressPostProcessor:
         analyzer = self._analyzer
         slim = self._stress_limit
         tol = self._constraint_tolerance
+        is_mixed = self._is_mixed_fem
 
-        # --- 0. 确保 rho_phys 为数组 (从 history 读取时可能为 list) ---
+        # --- 0. 确保 rho_phys 为数组 ---
         if not hasattr(rho_phys, '__array__'):
             rho_phys = bm.array(rho_phys)
 
@@ -124,12 +127,16 @@ class StressPostProcessor:
 
         # --- 3. 计算 von Mises 应力 ---
         if 'von_mises' not in state:
-            if 'stress_solid' not in state:
-                solid_stress_dict = analyzer.compute_stress_state(state)
-                state.update(solid_stress_dict)
-            state['von_mises'] = analyzer.material.calculate_von_mises_stress(
-                state['stress_solid']
-            )
+            if is_mixed:
+                # 混合元：使用表观应力
+                if 'stress_apparent' not in state:
+                    state.update(analyzer.compute_stress_state(state=state, rho_val=rho_phys))
+                state['von_mises'] = analyzer.material.calculate_von_mises_stress(state['stress_apparent'])
+            else:
+                # 位移元：使用实体应力
+                if 'stress_solid' not in state:
+                    state.update(analyzer.compute_stress_state(state))
+                state['von_mises'] = analyzer.material.calculate_von_mises_stress(state['stress_solid'])
         
         vm = state['von_mises']  # (NC,) 或 (NC, NQ)
 
@@ -139,8 +146,12 @@ class StressPostProcessor:
         else:
             vm_scalar = vm
 
-        # --- 4. 归一化应力测度 SM = E · σ^v / σ_lim ---
-        SM = E * vm_scalar / slim  # (NC,)
+        # --- 4. 归一化应力测度 SM ---
+        # 核心区别：混合元直接使用表观应力，位移元需乘惩罚系数
+        if is_mixed:
+            SM = vm_scalar / slim
+        else:
+            SM = E * vm_scalar / slim
 
         # --- 5. 物理密度 V ---
         if hasattr(rho_phys, '__len__'):
@@ -181,28 +192,28 @@ class StressPostProcessor:
 
         # --- 9. 计算主应力 (用于屈服面绘制) ---
         sig_1_norm, sig_2_norm = self._compute_principal_stresses(
-            state=state, E=E, slim=slim
-        )
+                                            state=state, E=E, slim=slim
+                                        )
 
         # --- 10. 组装结果 ---
         results = StressPostResults(
-            max_SM=max_SM,
-            mean_SM=mean_SM,
-            num_violated=num_violated,
-            num_total=NC,
-            max_violation_pct=max_violation_pct,
-            num_solid=num_solid,
-            max_SM_solid=max_SM_solid,
-            mean_SM_solid=mean_SM_solid,
-            num_violated_solid=num_violated_solid,
-            volume_fraction=volume_fraction,
-            SM=SM,
-            V=V,
-            E=E,
-            sig_1_norm=sig_1_norm,
-            sig_2_norm=sig_2_norm,
-            solid_mask=solid_mask,
-        )
+                        max_SM=max_SM,
+                        mean_SM=mean_SM,
+                        num_violated=num_violated,
+                        num_total=NC,
+                        max_violation_pct=max_violation_pct,
+                        num_solid=num_solid,
+                        max_SM_solid=max_SM_solid,
+                        mean_SM_solid=mean_SM_solid,
+                        num_violated_solid=num_violated_solid,
+                        volume_fraction=volume_fraction,
+                        SM=SM,
+                        V=V,
+                        E=E,
+                        sig_1_norm=sig_1_norm,
+                        sig_2_norm=sig_2_norm,
+                        solid_mask=solid_mask,
+                    )
 
         return results
 
@@ -218,15 +229,22 @@ class StressPostProcessor:
             sig_1 = center + radius;
             sig_2 = center - radius;
         """
-        stress = state['stress_solid']  # (NC, NQ, NS) 或 (NC, NS)
+        is_mixed = self._is_mixed_fem
+
+        if is_mixed:
+            stress = state['stress_apparent']  # 混合元
+        else:
+            stress = state['stress_solid']     # 位移元
 
         # 处理多积分点: 取第一个积分点
         if stress.ndim == 3:
             stress = stress[:, 0, :]  # (NC, NS)
 
-        # 应力乘以材料插值 (得到"真实"应力)
-        # 对应 MATLAB: Cauchy_S = Cauchy_S .* repmat(E', 3, 1);
-        cauchy = stress * E[:, None]  # (NC, NS)
+        # 核心区别：混合元无需惩罚，位移元需乘插值系数还原表观应力
+        if is_mixed:
+            cauchy = stress  
+        else:
+            cauchy = stress * E[:, None]
 
         # 2D 平面应力/应变: [σ11, σ22, σ12]
         sig_11 = cauchy[:, 0]
@@ -275,31 +293,31 @@ class StressPostProcessor:
                             rho_phys: TensorLike,
                             save_path: Optional[str] = None,
                            ) -> StressPostResults:
-        """计算应力场并绘制 von Mises 屈服面图.
-
-        对应 MATLAB PlotYieldSurface 函数:
-        将所有实体单元的主应力点绘制在归一化的 σ1-σ2 平面上,
-        与 von Mises 屈服椭圆对比.
-
-        Parameters
-        ----------
-        rho_phys : TensorLike
-            优化后的物理密度场.
-        save_path : str, optional
-            如提供, 将图片保存到该路径.
-
-        Returns
-        -------
-        StressPostResults
-            后处理结果对象, 供进一步分析使用.
-
-        Examples
-        --------
-        >>> post.plot_yield_surface(rho_phys)
-        >>> post.plot_yield_surface(bm.array(histories['k1']['density']['values']))
-        """
+        """计算应力场并绘制 von Mises 屈服面图 (支持中文字体与学术规范格式)."""
         import matplotlib.pyplot as plt
+        from matplotlib import font_manager
 
+        # ==========================================
+        # 1. 字体路径配置 (基于系统扫描结果)
+        # ==========================================
+        path_zh = '/usr/share/fonts/suanhai_fonts/Sim/simhei.ttf'
+        path_en = '/usr/share/fonts/suanhai_fonts/Times/times.ttf'
+        path_en_bold = '/usr/share/fonts/suanhai_fonts/Times/timesbd.ttf'
+
+        try:
+            font_zh = font_manager.FontProperties(fname=path_zh, size=12)
+            font_zh_title = font_manager.FontProperties(fname=path_zh, size=13)
+            font_zh_legend = font_manager.FontProperties(fname=path_zh, size=11)
+            # 对于纯英文或数字，可以选用 font_en，但在纯 matplotlib 中混排时，
+            # 统一对包含中文的字符串使用 font_zh 通常能获得最稳定的效果。
+            print("字体加载成功！")
+        except Exception as e:
+            print(f"字体加载失败，将使用系统默认字体: {e}")
+            font_zh = font_zh_title = font_zh_legend = None
+
+        # ==========================================
+        # 2. 执行后处理计算
+        # ==========================================
         results = self.check_stress_constraints(rho_phys=rho_phys)
         self.print_summary(results)
 
@@ -307,48 +325,51 @@ class StressPostProcessor:
             print("无法绘制屈服面: 无实体单元或主应力未计算.")
             return results
 
+        # 提取实体单元数据
         solid = bm.to_numpy(results.solid_mask)
         s1 = bm.to_numpy(results.sig_1_norm)[solid]
         s2 = bm.to_numpy(results.sig_2_norm)[solid]
         SM_solid = bm.to_numpy(results.SM)[solid]
 
-        # von Mises 屈服椭圆精确参数化: σ1² - σ1·σ2 + σ2² = 1
+        # ==========================================
+        # 3. 构造 von Mises 屈服椭圆
+        # ==========================================
+        # σ1² - σ1·σ2 + σ2² = 1
         t = np.linspace(0, 2 * np.pi, 500)
         s1_ellipse = (2.0 / np.sqrt(3.0)) * np.cos(t + np.pi / 6)
         s2_ellipse = (2.0 / np.sqrt(3.0)) * np.cos(t - np.pi / 6)
 
+        # ==========================================
+        # 4. 开始绘图
+        # ==========================================
         fig, ax = plt.subplots(figsize=(8, 7))
 
+        # 绘制屈服面与散点
         ax.plot(s1_ellipse, s2_ellipse, 'r-', linewidth=2.5,
-                label='von Mises yield surface')
+                label='von Mises 屈服面')
         sc = ax.scatter(s1, s2, c=SM_solid, s=20, cmap='jet',
                         alpha=0.6, edgecolors='none',
-                        label='Stress evaluation points')
+                        label='实体单元应力点')
 
         vm_actual = np.sqrt(s1**2 - s1 * s2 + s2**2)
         max_ratio = float(np.max(vm_actual)) if len(vm_actual) > 0 else 0.0
 
+        # 设置坐标轴 (LaTeX 数学公式不受 FontProperties 影响，保持优美的数学字体)
         ax.set_xlabel(r'$\sigma_1 / \sigma_{\mathrm{lim}}$', fontsize=14)
         ax.set_ylabel(r'$\sigma_2 / \sigma_{\mathrm{lim}}$', fontsize=14)
-        ax.set_title(f'Yield Surface Check (max stress ratio: {max_ratio:.3f})',
-                     fontsize=13)
+        
         ax.set_aspect('equal')
         ax.set_xlim(-1.5, 1.5)
         ax.set_ylim(-1.5, 1.5)
         ax.grid(True, alpha=0.3)
-        ax.legend(loc='best', fontsize=11)
+        
+        # 设置图例
+        ax.legend(loc='best', prop=font_zh_legend)
 
+        # 设置 Colorbar
         cbar = plt.colorbar(sc, ax=ax)
-        cbar.set_label('Normalized stress measure', fontsize=11)
+        cbar.set_label('归一化应力测度', fontproperties=font_zh_legend)
         cbar.mappable.set_clim(0, max(1.2, max_ratio))
-
-        text_str = (f"Solid elements: {results.num_solid}\n"
-                    f"Max SM: {results.max_SM_solid:.3f}\n"
-                    f"Mean SM: {results.mean_SM_solid:.3f}")
-        ax.text(0.02, 0.98, text_str, transform=ax.transAxes,
-                fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='white',
-                          edgecolor='black', alpha=0.8))
 
         plt.tight_layout()
         if save_path:

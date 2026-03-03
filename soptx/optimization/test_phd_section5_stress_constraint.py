@@ -6,7 +6,8 @@ from fealpy.decorator import variantmethod
 from fealpy.typing import TensorLike
 
 from soptx.utils.base_logged import BaseLogged
-from soptx.optimization.tools import save_optimization_history, plot_optimization_history
+from soptx.optimization.tools import (save_optimization_history, plot_optimization_history, 
+                                    save_history_data, load_history_data)
 from soptx.optimization.tools import OptimizationHistory
 
 class DensityTopOptTest(BaseLogged):
@@ -184,28 +185,37 @@ class DensityTopOptTest(BaseLogged):
             f"惩罚因子p={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
             f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
+        
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['stress_constraint_hzmfem_k2'])
 
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        rho_opt = histories['stress_constraint_hzmfem_k2']['density']['values']  
 
         # ===================== 后处理 =====================
         from soptx.optimization.stress_post import StressPostProcessor
 
         post = StressPostProcessor(
                     analyzer=analyzer,
-                    stress_limit=100.0,         # 对应 fem.SLim
-                    solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
-                    constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
+                    stress_limit=stress_limit,        
+                    solid_threshold=0.5,        
+                    constraint_tolerance=0.01,  
                 )
-        results = post.check_stress_constraints(rho_phys=rho_opt)
-        post.print_summary(results)
-        post.plot_density_and_stress(results)
-        post.plot_yield_surface(results)
+        post.plot_yield_surface(rho_opt, save_path=str(save_path))
+
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec5_6_4_cantilever_2d")
         save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
 
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
@@ -426,5 +436,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_4_L_bracket')
+    test.run.set('test_subsec5_6_4_cantilever_2d')
     rho_opt, history = test.run()

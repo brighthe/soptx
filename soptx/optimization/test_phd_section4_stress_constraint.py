@@ -30,15 +30,13 @@ class DensityTopOptTest(BaseLogged):
         rmin = 10.0 
         P = -400.0
 
-        # domain = [0, 1.0, 0, 1.0]
-        # hole_domain = [0.4, 1.0, 0.4, 1.0]
-        # P = -2.0
         E, nu = 7e4, 0.25
         load_width = None
         plane_type = 'plane_stress' 
 
-        nx, ny = 100, 100
-        mesh_type = 'uniform_quad' # uniform_quad, uniform_crisscross_tri
+        # nx, ny = 100, 100
+        nx, ny = 200, 200
+        mesh_type = 'uniform_quad_Lshape' # uniform_quad_Lshape, uniform_crisscross_tri_Lshape
         
         from soptx.model.l_bracket_beam_lfem import LBracketMiddle2d
         pde = LBracketMiddle2d(
@@ -62,7 +60,7 @@ class DensityTopOptTest(BaseLogged):
 
         density_location = 'element'
         interpolation_method = 'msimp'
-        penalty_factor = 3.0
+        penalty_factor = 3.5
         void_youngs_modulus = 1e-9
         from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
         interpolation_scheme = MaterialInterpolationScheme(
@@ -118,7 +116,7 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.compliance_objective import ComplianceObjective
         objective = ComplianceObjective(analyzer=analyzer)
 
-        volfrac = 0.3
+        volfrac = 0.32
         from soptx.optimization.volume_constraint import VolumeConstraint
         constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=volfrac)
 
@@ -163,12 +161,21 @@ class DensityTopOptTest(BaseLogged):
                         options=options,
                     )
         
-        self._log_info(f"开始密度拓扑优化, 模型名称={pde.__class__.__name__} \n"
-            f"目标函数={objective.__class__.__name__}, 约束函数={constraint.__class__.__name__}, 体积分数={constraint._volume_fraction} \n"
-            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
-            f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
-            f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
-            f"过滤类型={filter_type}, 过滤半径={rmin}, ")
+        analysis_tspace = analyzer.tensor_space
+        analysis_tgdofs = analysis_tspace.number_of_global_dofs()
+        
+        self._log_info(f"开始密度拓扑优化 \n"
+            f"模型名称={pde.__class__.__name__} \n"
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type} \n"
+            f"杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+            f"网格类型={mesh_type}, 空间阶数={space_degree} \n"
+            f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, " 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()},  位移场自由度={analysis_tgdofs}, \n"
+            f"分析算法={analyzer.__class__.__name__} \n"  
+            f"惩罚因子={penalty_factor}, 空材料杨氏模量={void_youngs_modulus} \n"
+            f"体积约束={volfrac},  \n" 
+            f"初始构型={relative_density}, 密度分布={density_location} \n"
+            f"过滤类型={filter_regularization._filter_type}, 过滤半径={rmin}, ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho, is_store_stress=True)
 
@@ -177,6 +184,8 @@ class DensityTopOptTest(BaseLogged):
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec4_6_5_L_bracket_compliance")
         save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
 
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
@@ -190,6 +199,16 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec4_6_5_L_bracket_stress')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec4_6_5_L_bracket_middle/")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['stress_constraint_k1'])
+
+        plot_optimization_history(histories['stress_constraint_k1'], problem_type='stress', save_path=str(save_path))
+
         bm.set_backend('numpy') # numpy, pytorch
         # bm.set_default_device('cpu') # cpu, cuda
         device = 'cpu' # cpu, cuda
@@ -209,8 +228,9 @@ class DensityTopOptTest(BaseLogged):
         plane_type = 'plane_stress' 
 
         rmin = 10.0 # 7.5, 10.0
-        nx, ny = 100, 100
-        mesh_type = 'uniform_crisscross_tri' # uniform_quad, uniform_crisscross_tri
+        # nx, ny = 100, 100
+        nx, ny = 200, 200
+        mesh_type = 'uniform_quad_Lshape' # uniform_quad_Lshape, uniform_crisscross_tri_Lshape
         
         from soptx.model.l_bracket_beam_lfem import LBracketMiddle2d
         pde = LBracketMiddle2d(
@@ -307,7 +327,7 @@ class DensityTopOptTest(BaseLogged):
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
         use_penalty_continuation = False
-        max_al_iterations = 1
+        max_al_iterations = 150
         max_iters_per_al = 5
         change_tolerance = 0.002
         mu_0 = 10.0
@@ -385,13 +405,13 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu' 
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec4_6_5_L_bracket_stress/json")
+        save_path = Path(f"{base_dir}/subsec4_6_5_L_bracket_middle/json")
         save_path.mkdir(parents=True, exist_ok=True)    
     
-        histories = load_history_data(save_path, labels=['k1'])
+        histories = load_history_data(save_path, labels=['stress_constraint_k1'])
 
-        rho_opt = histories['k1']['density']['values']  # 获取最后一次迭代的密度分布
-    
+        rho_opt = histories['stress_constraint_k1']['density']['values']  # 获取最后一次迭代的密度分布
+
         # ===================== 后处理 =====================
         from soptx.optimization.stress_post import StressPostProcessor
 
@@ -636,5 +656,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_L_bracket_stress')
+    test.run.set('test_subsec4_6_5_L_bracket_compliance')
     rho_opt, history = test.run()

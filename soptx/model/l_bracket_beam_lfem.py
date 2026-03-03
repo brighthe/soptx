@@ -53,7 +53,7 @@ class LBracketMiddle2d(PDEBase):
         """获取总载荷"""
         return self._P
 
-    @variantmethod('uniform_crisscross_tri')
+    @variantmethod('uniform_crisscross_tri_Lshape')
     def init_mesh(self, **kwargs) -> TriangleMesh:
         nx = kwargs.get('nx', 10)
         ny = kwargs.get('ny', 10)
@@ -77,11 +77,11 @@ class LBracketMiddle2d(PDEBase):
                                              device=device)
                                              
         
-        self._save_meshdata(l_shape_mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
+        self._save_meshdata(l_shape_mesh, 'uniform_crisscross_tri_Lshape', nx=nx, ny=ny)
 
         return l_shape_mesh
     
-    @init_mesh.register('uniform_quad')
+    @init_mesh.register('uniform_quad_Lshape')
     def init_mesh(self, **kwargs) -> QuadrangleMesh:
         nx = kwargs.get('nx', 10)
         ny = kwargs.get('ny', 10)
@@ -103,7 +103,7 @@ class LBracketMiddle2d(PDEBase):
                                             threshold=threshold, 
                                             device=device)
                                              
-        self._save_meshdata(l_shape_mesh, 'uniform_quad', nx=nx, ny=ny)
+        self._save_meshdata(l_shape_mesh, 'uniform_quad_Lshape', nx=nx, ny=ny)
 
         return l_shape_mesh
     

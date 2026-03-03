@@ -406,38 +406,38 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # 计算边界自由度的值
         uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
 
-        # ================ 验证等效分布载荷 ================
-        mesh = space_sigma.mesh
-        ebdflag = mesh.edgedata.get('essential_bc', mesh.boundary_edge_flag())
-        edge_centers = mesh.entity_barycenter('edge')[ebdflag]  # (NEb, 2)
-        edge_lengths = mesh.entity_measure('edge')[ebdflag]     # (NEb,)
-        domain = self._pde.domain
-        y_mid = (domain[2] + domain[3]) / 2
+        # # ================ 验证等效分布载荷 ================
+        # mesh = space_sigma.mesh
+        # ebdflag = mesh.edgedata.get('essential_bc', mesh.boundary_edge_flag())
+        # edge_centers = mesh.entity_barycenter('edge')[ebdflag]  # (NEb, 2)
+        # edge_lengths = mesh.entity_measure('edge')[ebdflag]     # (NEb,)
+        # domain = self._pde.domain
+        # y_mid = (domain[2] + domain[3]) / 2
 
-        on_right = bm.abs(edge_centers[:, 0] - domain[1]) < 1e-12
-        dist_val = bm.where(on_right,
-                            bm.abs(edge_centers[:, 1] - y_mid),
-                            bm.full_like(edge_centers[:, 1], bm.inf))
+        # on_right = bm.abs(edge_centers[:, 0] - domain[1]) < 1e-12
+        # dist_val = bm.where(on_right,
+        #                     bm.abs(edge_centers[:, 1] - y_mid),
+        #                     bm.full_like(edge_centers[:, 1], bm.inf))
 
-        # hy = self._pde._hy
-        hx = self._pde._hx
-        load_width = self._pde._load_width
+        # # hy = self._pde._hy
+        # hx = self._pde._hx
+        # load_width = self._pde._load_width
 
-        if load_width <= hx + 1e-12:
-            # 逼近点载荷：选唯一最近边
-            nearest = bm.argmin(dist_val)
-            in_load = bm.zeros(dist_val.shape, dtype=bm.bool)
-            in_load = bm.set_at(in_load, nearest, True)
-        else:
-            # 显式分布载荷：区间选取
-            search_hw = load_width / 2 + 1e-12
-            in_load = on_right & (dist_val <= search_hw)
+        # if load_width <= hx + 1e-12:
+        #     # 逼近点载荷：选唯一最近边
+        #     nearest = bm.argmin(dist_val)
+        #     in_load = bm.zeros(dist_val.shape, dtype=bm.bool)
+        #     in_load = bm.set_at(in_load, nearest, True)
+        # else:
+        #     # 显式分布载荷：区间选取
+        #     search_hw = load_width / 2 + 1e-12
+        #     in_load = on_right & (dist_val <= search_hw)
 
-        total_force = self._pde._t * edge_lengths[in_load].sum()
-        print(f"载荷边数: {int(in_load.sum())}")
-        print(f"载荷边中心 y 坐标: {edge_centers[in_load, 1]}")
-        print(f"等效合力: {total_force}, 目标 P: {self._pde._P}")
-        # ======================================================
+        # total_force = self._pde._t * edge_lengths[in_load].sum()
+        # print(f"载荷边数: {int(in_load.sum())}")
+        # print(f"载荷边中心 y 坐标: {edge_centers[in_load, 1]}")
+        # print(f"等效合力: {total_force}, 目标 P: {self._pde._P}")
+        # # ======================================================
 
         gdof_total = K.shape[0]
         gdof_sigma = space_sigma.number_of_global_dofs()
