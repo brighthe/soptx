@@ -286,14 +286,14 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                     q=self._integration_order, 
                                     threshold=valid_faces_idx, 
                                     method='matrix_jump',
-                                    material=self._material
+                                    material=self._material,
                                 )
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')
             K = bmat([[A,   B],
                       [B.T, -J]], format='csr')
             
-            # ========== 验证 valid_faces_idx ==========
+            # # ========== 验证 valid_faces_idx ==========
             # face2cell = mesh.face_to_cell()
             # is_internal = face2cell[:, 0] != face2cell[:, 1]
 

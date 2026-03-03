@@ -180,15 +180,9 @@ class ApparentStressConstraint(BaseLogged):
         
         return term
 
-    
     def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
         """归一化应力: σ^vM / σ_lim, >1 表示违反约束"""
         # # 表观应力的 von Mises 值
         vm = state['von_mises']  # (NC, NQ)
 
-        return vm / self._stress_limit
-    
-    def compute_visual_stress_measure(self, state: Dict) -> TensorLike:
-        """可视化用归一化应力: σ^vM / σ_lim，不含 η 阈值"""
-        vm = state['von_mises']  # (NC, NQ)
         return vm / self._stress_limit

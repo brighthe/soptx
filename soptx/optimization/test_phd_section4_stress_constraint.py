@@ -213,15 +213,6 @@ class DensityTopOptTest(BaseLogged):
         nx, ny = 100, 100
         # nx, ny = 200, 200
         mesh_type = 'uniform_quad' # uniform_quad, uniform_crisscross_tri
-
-        # from soptx.model.l_bracket_beam_lfem import LBracketCorner2d
-        # pde = LBracketCorner2d(
-        #                     domain=domain,
-        #                     hole_domain=hole_domain,
-        #                     P=P, E=E, nu=nu,
-        #                     load_width=load_width,
-        #                     plane_type=plane_type,
-        #                 )
         
         from soptx.model.l_bracket_beam_lfem import LBracketMiddle2d
         pde = LBracketMiddle2d(
@@ -391,19 +382,19 @@ class DensityTopOptTest(BaseLogged):
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
-        # # ===================== 后处理 =====================
-        # from soptx.optimization.stress_post import StressPostProcessor
+        # ===================== 后处理 =====================
+        from soptx.optimization.stress_post import StressPostProcessor
 
-        # post = StressPostProcessor(
-        #             analyzer=analyzer,
-        #             stress_limit=100.0,         # 对应 fem.SLim
-        #             solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
-        #             constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
-        #         )
-        # results = post.check_stress_constraints(rho_phys=rho_opt)
-        # post.print_summary(results)
-        # post.plot_density_and_stress(results)
-        # post.plot_yield_surface(results)
+        post = StressPostProcessor(
+                    analyzer=analyzer,
+                    stress_limit=100.0,         # 对应 fem.SLim
+                    solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
+                    constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
+                )
+        results = post.check_stress_constraints(rho_phys=rho_opt)
+        post.print_summary(results)
+        post.plot_density_and_stress(results)
+        post.plot_yield_surface(results)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
@@ -497,7 +488,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -633,5 +624,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_L_bracket_compliance')
+    test.run.set('test_subsec4_6_5_cantilever_2d')
     rho_opt, history = test.run()

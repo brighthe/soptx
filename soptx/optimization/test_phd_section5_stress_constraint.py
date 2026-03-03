@@ -21,7 +21,19 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 80, 0, 40]
         P = -400.0
 
-        E, nu = 7e4, 0.25
+        # =====================================================================
+        # 2. 材料参数无量纲化设置 (克服混合元离散鞍点系统数值病态的关键)
+        # =====================================================================
+        # 真实材料参数 (例如铝合金：E=70000 MPa, nu=0.25)
+        # 警告：若直接代入真实 E，将导致跳量惩罚项与柔度项数量级跨度达 O(E^2)，引发 MUMPS 内存溢出。
+        # E_real, nu_real = 7e4, 0.25
+        
+        # 归一化材料参数：强制 E = 1.0 保证系统良态，同时严格保持真实的泊松比 nu
+        # 【物理后处理映射规则】：
+        #   - 局部应力约束：Sigma_real = Sigma_calc (直接评估，无需处理！)
+        #   - 真实物理位移：U_real = U_calc / E_real
+        #   - 真实结构柔顺度：C_real = C_calc / E_real
+        E, nu = 1.0, 0.25
         plane_type = 'plane_stress' 
 
         nx, ny = 80, 40
@@ -70,7 +82,7 @@ class DensityTopOptTest(BaseLogged):
                                                 relative_density=relative_density,
                                             )
 
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         use_relaxation = True
         solve_method = 'mumps'
@@ -174,6 +186,20 @@ class DensityTopOptTest(BaseLogged):
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+
+        # ===================== 后处理 =====================
+        from soptx.optimization.stress_post import StressPostProcessor
+
+        post = StressPostProcessor(
+                    analyzer=analyzer,
+                    stress_limit=100.0,         # 对应 fem.SLim
+                    solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
+                    constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
+                )
+        results = post.check_stress_constraints(rho_phys=rho_opt)
+        post.print_summary(results)
+        post.plot_density_and_stress(results)
+        post.plot_yield_surface(results)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'

@@ -1,3 +1,5 @@
+import warnings
+
 from typing import Optional
 
 from fealpy.backend import backend_manager as bm
@@ -190,16 +192,30 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         bbox_max = bm.max(node, axis=0)  
         bbox_min = bm.min(node, axis=0)  
         L0 = bm.max(bbox_max - bbox_min) # mm
+
+        # ==================== 材料归一化检查与物理量纲提示 ====================
+        E = self.material.youngs_modulus # MPa
+        mu = self.material.shear_modulus # MPa
+        
+        if abs(E - 1.0) > 1e-6:
+            msg = (
+                f"\n[SOPTX 警告] 当前材料杨氏模量 E = {E} MPa。未进行归一化！\n"
+                "在带有跳量稳定化项的胡张混合有限元中，柔度矩阵块量级为 O(1/E)，\n"
+                "而稳定化惩罚块量级为 O(E)。直接代入真实高模量(如 7e4)将导致离散鞍点\n"
+                "系统的条件数高达 O(E^2)，极易引发直接求解器(如 MUMPS)内存溢出(Error -9)。\n"
+                "强烈建议：在材料定义中设置 E = 1.0 且泊松比 nu 保持物理真实值。\n"
+                "【无量纲化物理映射规则】：\n"
+                " 1. [应力 Sigma]: 混合元求解的表观应力即为真实物理应力，直接可用于屈服评估！\n"
+                " 2. [位移 U]: 真实物理位移 U_real = 求解位移 U_calc / 真实的杨氏模量。\n"
+                " 3. [柔顺度 C]: 真实柔顺度 C_real = 求解柔顺度 C_calc / 真实的杨氏模量。"
+            )
+            warnings.warn(msg, UserWarning)
+        # ======================================================================
+        
         if p == 1:
-            E = self.material.youngs_modulus # MPa
             alpha = E / (L0 ** 2)
-            # mu = self.material.shear_modulus # MPa
-            # alpha = mu / (L0 ** 2)
         else:
-            E = self.material.youngs_modulus # MPa
-            alpha = E / (L0 ** 2)
-            # mu = self.material.shear_modulus # MPa
-            # alpha = mu / (L0 ** 2)
+            alpha = mu / (L0 ** 2)
 
         KE = bm.einsum('f, fij -> fij', alpha * hF, integrand)
 

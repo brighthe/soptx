@@ -585,53 +585,22 @@ class DensityTopOptHuZhangTest(BaseLogged):
     @run.register('test_subsec5_6_2_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         """绘图代码"""
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu' 
-        base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec5_6_2_fixed_fixed_beam2d/json")
-        save_path.mkdir(parents=True, exist_ok=True)    
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu' 
+        # base_dir = str(base_dir)
+        # save_path = Path(f"{base_dir}/subsec5_6_2_fixed_fixed_beam2d/json")
+        # save_path.mkdir(parents=True, exist_ok=True)    
     
-        histories = load_history_data(save_path, labels=['k2', 'k3', 'k4'])
-        plot_optimization_history_comparison(
-                                histories,
-                                save_path=f'{save_path}/convergence_comparison.png',
-                                plot_type='both'
-                            )
-    
-        #* 中点受载的两端固支梁
-        # P = -1
-        # E, nu = 1, 0.3
-        # plane_type = 'plane_stress' # plane_strain, plane_stress
-        # mesh_type = 'uniform_crisscross_tri'
-
-        # domain = [0, 80, 0, 40]
-        # rmin = 2.0
-        # from soptx.model.cantilever_2d_hzmfem import CantileverMiddle2d
-        # pde = CantileverMiddle2d(
-        #             domain=domain,
-        #             P=P, 
-        #             E=E, nu=nu,
-        #             plane_type=plane_type,
-        #             load_width=None,
-        #         )
-        # nx, ny = 80, 40
-        # volume_fraction = 0.3
-
-        # domain = [0, 80, 0, 50]
-        # rmin = 4.5
-        # from soptx.model.cantilever_2d_hzmfem import Cantilever2dCorner
-        # pde = Cantilever2dCorner(
-        #             domain=domain,
-        #             P=P, 
-        #             E=E, nu=nu,
-        #             plane_type=plane_type,
-        #             load_width=None,
-        #         )
-        # nx, ny = 80, 50
-        # volume_fraction = 0.4
+        # histories = load_history_data(save_path, labels=['k2', 'k3', 'k4'])
+        # plot_optimization_history_comparison(
+        #                         histories,
+        #                         save_path=f'{save_path}/convergence_comparison.png',
+        #                         plot_type='both'
+        #                     )
 
         P = -3
         E, nu = 30, 0.4
+        # E, nu = 1, 0.4
         plane_type = 'plane_stress' # plane_strain, plane_stress
         mesh_type = 'uniform_crisscross_tri'
         domain = [0, 160, 0, 20]
@@ -687,7 +656,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
                                     },
                                 )
         
-        space_degree = 4
+        space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
@@ -1134,5 +1103,5 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
     # test_subsec5_6_3_hzmfem, test_linear_elastic_huzhang, test_subsec5_6_3_lfem, test_subsec5_6_2_lfem, test_subsec5_6_2_hzmfem
-    test.run.set('test_subsec5_6_2_lfem') 
+    test.run.set('test_subsec5_6_2_hzmfem') 
     rho_opt, history = test.run()
