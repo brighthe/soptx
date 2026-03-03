@@ -223,8 +223,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         if enable_timing:
             t.send('解伴随方程')
 
-        dPenaldm_E_implicit = self._stress_constraint.compute_implicit_sensitivity_term(
-                                                        adjoint_vector, state)  # (NC,) 或 (NC, n_sub)
+        dPenaldm_E_implicit = self._stress_constraint.compute_implicit_sensitivity_term(adjoint_vector, state)  # (NC,) 或 (NC, n_sub)
         
         # ------------------------------------------------------------------ #
         # 第五步：链式法则组装 dP/dρ

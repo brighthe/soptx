@@ -83,7 +83,7 @@ class DensityTopOptTest(BaseLogged):
                                                 relative_density=relative_density,
                                             )
 
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         use_relaxation = True
         solve_method = 'mumps'
@@ -196,18 +196,19 @@ class DensityTopOptTest(BaseLogged):
 
         rho_opt = histories['stress_constraint_hzmfem_k2']['density']['values']  
 
-        # ===================== 后处理 =====================
-        from soptx.optimization.stress_post import StressPostProcessor
+        # # ===================== 后处理 =====================
+        # from soptx.optimization.stress_post import StressPostProcessor
 
-        post = StressPostProcessor(
-                    analyzer=analyzer,
-                    stress_limit=stress_limit,        
-                    solid_threshold=0.5,        
-                    constraint_tolerance=0.01,  
-                )
-        post.plot_yield_surface(rho_opt, save_path=str(save_path))
-
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        # post = StressPostProcessor(
+        #             analyzer=analyzer,
+        #             stress_limit=100.0,         # 对应 fem.SLim
+        #             solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
+        #             constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
+        #         )
+        # results = post.check_stress_constraints(rho_phys=rho_opt)
+        # post.print_summary(results)
+        # post.plot_density_and_stress(results)
+        # post.plot_yield_surface(results)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'

@@ -64,12 +64,6 @@ class ApparentStressConstraint(BaseLogged):
             
         vm = state['von_mises'] # (NC, NQ) 
 
-        # max_abs_vm = bm.max(vm)
-        # print(f"\n[验证] 初始阶段最大绝对 von Mises 应力为: {max_abs_vm:.2f} MPa")
-        # print(f"[验证] 当前设置的许用应力限制为: {self._stress_limit:.2f} MPa")
-        # if max_abs_vm < self._stress_limit:
-        #     print(f"[警告] 初始应力({max_abs_vm:.2f}) < 许用应力({self._stress_limit:.2f})！ALM惩罚机制未被激活，建议降低许用应力！\n")
-
         # 4. 计算松弛阈值 η(ρ_e) = m_E + ε * (1 - m_E)
         eta = m_E + self._epsilon * (1.0 - m_E) # (NC, )
         state['eta_threshold'] = eta
@@ -137,8 +131,39 @@ class ApparentStressConstraint(BaseLogged):
         bm.add_at(adjoint_load, indices, values)
 
         return adjoint_load
+    
+    def compute_implicit_sensitivity_term(self, adjoint_vector: TensorLike, state: Dict) -> TensorLike:
+        """
+        计算隐式灵敏度项（预除 m_E²）: (1/m_E²) * λ_σ,e^T * A⁰_e * Σ_e
+        通过物理掩码（Mask）防范孔洞区域除零溢出。
+        """
+        # --- 1. 提取基础数据 ---
+        A0 = self._analyzer._cached_Ae0
+        huzhang_space = self._analyzer.huzhang_space
+        cell2dof = huzhang_space.cell_to_dof()
+        gdof_sigma = huzhang_space.number_of_global_dofs()
+        m_E = state['stiffness_ratio']  # (NC, )
 
-    def compute_implicit_sensitivity_term(self, 
+        # --- 2. 提取完整的局部应力与伴随应力 (绝对不要在这里除以 m_E) ---
+        sigma_e = state['stress'][cell2dof]                     # (NC, LDOF)
+        lambda_sigma_e = adjoint_vector[:gdof_sigma][cell2dof]  # (NC, LDOF)
+
+        # --- 3. 全局计算双线性型 W_e = λ_σ,e^T * A⁰_e * Σ_e ---
+        # 这里只有纯乘法，即使在孔洞区遇到 1e-10 的数值噪声，乘完依然是极小数，绝对安全
+        W_e = bm.einsum('ci, cij, cj -> c', lambda_sigma_e, A0, sigma_e)
+
+        # --- 4. 物理掩码截断（核心防爆震逻辑） ---
+        term = bm.zeros_like(m_E)    # 默认全域敏度为 0
+        active = m_E > 1e-4          # 划定红线：只认有实质刚度的单元
+
+        # --- 5. 安全除法 ---
+        # 只有在非孔洞区域，才执行除以 m_E^2 的操作
+        if bm.any(active):
+            term[active] = W_e[active] / (m_E[active] ** 2)
+            
+        return term
+
+    def compute_implicit_sensitivity_term_backup(self, 
                                           adjoint_vector: TensorLike, 
                                           state: Dict
                                         ) -> TensorLike:
@@ -153,13 +178,11 @@ class ApparentStressConstraint(BaseLogged):
             返回 ξ_e^T K⁰_e U_e (外部乘 m_E')
             两者对外接口约定一致。
         """
-        # TODO 
         A0 = self._analyzer._cached_Ae0  # (NC, LDOF, LDOF)
 
         huzhang_space = self._analyzer.huzhang_space
         cell2dof = huzhang_space.cell_to_dof()  # (NC, LDOF)
 
-        #TODO 获取当前刚度插值系数 m_E
         m_E = state['stiffness_ratio']  # (NC, )
 
         # 提取自由度，并提前除以 m_E (还原到 O(1) 的真实应力级)

@@ -244,17 +244,11 @@ class ALMMMAOptimizer(MMAOptimizer):
                 dv = dv_new
             
                 # --- 计算归一化的 von Mises 应力 ---
-                SM_check  = self._al_objective._stress_constraint.compute_stress_measure(
+                SM = self._al_objective._stress_constraint.compute_stress_measure(
                                                 rho=rho_phys, state=state)
-                # 更新当前最大应力测度，用于收敛判定
-                max_vm_stress = float(bm.max(SM_check))
 
-                # 可视化量: 混合元用 σ^vM/σ_lim，位移元与判定量一致
-                stress_constraint = self._al_objective._stress_constraint
-                if hasattr(stress_constraint, 'compute_visual_stress_measure'):
-                    SM_visual = stress_constraint.compute_visual_stress_measure(state=state)
-                else:
-                    SM_visual = SM_check
+                # 更新当前最大应力测度，用于收敛判定
+                max_vm_stress = float(bm.max(SM))
                 
                 iteration_time = time() - start_time
 
@@ -285,7 +279,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                             'max_von_mises': max_vm_stress,         # 归一化的最大 von Mises 应力场
                         },
                         fields={
-                            'von_mises_stress': SM_visual,          # 归一化的 von Mises 应力场 (约束函数)
+                            'von_mises_stress': SM,          # 归一化的 von Mises 应力场 (约束函数)
                         },
                 )
 
