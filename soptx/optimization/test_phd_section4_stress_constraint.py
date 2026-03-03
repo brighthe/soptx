@@ -7,7 +7,7 @@ from fealpy.typing import TensorLike
 
 from soptx.utils.base_logged import BaseLogged
 from soptx.optimization.tools import (save_optimization_history, plot_optimization_history, 
-                                    save_history_data,)
+                                    save_history_data, load_history_data)
 from soptx.optimization.tools import OptimizationHistory
 
 class DensityTopOptTest(BaseLogged):
@@ -201,7 +201,6 @@ class DensityTopOptTest(BaseLogged):
         # 物理尺寸
         domain = [0, 200.0, 0, 200.0]            
         hole_domain = [80.0, 200.0, 80.0, 200.0]
-        rmin = 10.0 # 7.5, 10.0
         P = -400.0
 
         E, nu = 7e4, 0.25
@@ -209,10 +208,9 @@ class DensityTopOptTest(BaseLogged):
         load_width = 10.0
         plane_type = 'plane_stress' 
 
-        # nx, ny = 5, 5
+        rmin = 10.0 # 7.5, 10.0
         nx, ny = 100, 100
-        # nx, ny = 200, 200
-        mesh_type = 'uniform_quad' # uniform_quad, uniform_crisscross_tri
+        mesh_type = 'uniform_crisscross_tri' # uniform_quad, uniform_crisscross_tri
         
         from soptx.model.l_bracket_beam_lfem import LBracketMiddle2d
         pde = LBracketMiddle2d(
@@ -234,7 +232,6 @@ class DensityTopOptTest(BaseLogged):
         # displacement_mesh.find_edge(axes, showindex=True)
         # displacement_mesh.find_cell(axes, showindex=True)
         # plt.show()
-
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -308,18 +305,22 @@ class DensityTopOptTest(BaseLogged):
         from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
         constraint = VanishingStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
-        max_al_iterations = 150
-        use_penalty_continuation = False
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
+        use_penalty_continuation = False
+        max_al_iterations = 1
+        max_iters_per_al = 5
+        change_tolerance = 0.002
+        mu_0 = 10.0
+        mu_max = 10000.0
         options = ALMMMAOptions(
                     # ALM 外层控制
                     max_al_iterations=max_al_iterations,
-                    mma_iters_per_al=5,
-                    change_tolerance=0.002,
+                    mma_iters_per_al=max_iters_per_al,
+                    change_tolerance=change_tolerance,
                     stress_tolerance=0.003,
                     # 增广拉格朗日罚参数
-                    mu_0=10.0,
-                    mu_max=10000.0,
+                    mu_0=mu_0,
+                    mu_max=mu_max,
                     alpha=1.1,
                     lambda_0_init_val=0.0,
                     # MMA 渐近线控制
@@ -377,30 +378,41 @@ class DensityTopOptTest(BaseLogged):
             f"位移网格尺寸={displacement_mesh.number_of_cells()},  位移场自由度={analysis_tgdofs}, \n"
             f"分析算法={analyzer.__class__.__name__} \n"  
             f"惩罚因子={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
+            f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"初始构型={relative_density}, 密度分布={density_location} \n"
             f"过滤类型={filter_regularization._filter_type}, 过滤半径={rmin}, ")
+        
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test_subsec4_6_5_L_bracket_stress/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['k1'])
 
-        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
-
+        rho_opt = histories['k1']['density']['values']  # 获取最后一次迭代的密度分布
+    
         # ===================== 后处理 =====================
         from soptx.optimization.stress_post import StressPostProcessor
 
         post = StressPostProcessor(
                     analyzer=analyzer,
-                    stress_limit=100.0,         # 对应 fem.SLim
-                    solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
-                    constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
+                    stress_limit=100.0,        
+                    solid_threshold=0.5,        
+                    constraint_tolerance=0.01,  
                 )
-        results = post.check_stress_constraints(rho_phys=rho_opt)
-        post.print_summary(results)
-        post.plot_density_and_stress(results)
-        post.plot_yield_surface(results)
+        post.plot_yield_surface(rho_opt, save_path=str(save_path))
+
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec4_6_5_L_bracket_stress")
         save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
+
 
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
@@ -488,7 +500,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 2
+        space_degree = 1
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -624,5 +636,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_cantilever_2d')
+    test.run.set('test_subsec4_6_5_L_bracket_stress')
     rho_opt, history = test.run()

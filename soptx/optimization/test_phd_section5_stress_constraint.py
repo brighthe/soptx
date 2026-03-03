@@ -217,27 +217,38 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
     
 
-    @run.register('test_subsec5_6_4_L_bracket_stress')
+    @run.register('test_subsec5_6_4_L_bracket')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
-        domain = [0, 1.0, 0, 1.0]
-        hole_domain = [0.4, 1.0, 0.4, 1.0]
-        P = -2.0
+        domain = [0, 200.0, 0, 200.0]            
+        hole_domain = [80.0, 200.0, 80.0, 200.0]
+        load_width = 10.0
+        P = -400.0
+    
         E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
-        # nx, ny = 10, 10
-        nx, ny = 100, 100
-        mesh_type = 'quad_threshold'
+        nx, ny = 5, 5
+        mesh_type = 'uniform_crisscross_tri'
 
-        from soptx.model.l_bracket_beam_lfem import LBracketBeam2d
-        pde = LBracketBeam2d(
+        from soptx.model.l_bracket_beam_hzmfem import LBracketMiddle2d
+        pde = LBracketMiddle2d(
                             domain=domain,
                             hole_domain=hole_domain,
                             P=P, E=E, nu=nu,
+                            load_width=load_width,
                             plane_type=plane_type,
                         )
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        axes = fig.add_subplot(111)
+        displacement_mesh.add_plot(axes)
+        displacement_mesh.find_node(axes, showindex=True)
+        displacement_mesh.find_edge(axes, showindex=True)
+        displacement_mesh.find_cell(axes, showindex=True)
+        plt.show()
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -272,8 +283,8 @@ class DensityTopOptTest(BaseLogged):
 
         space_degree = 3
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
+        use_relaxation = True
         solve_method = 'mumps'
-
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
                                     disp_mesh=displacement_mesh,
@@ -286,24 +297,36 @@ class DensityTopOptTest(BaseLogged):
                                     topopt_algorithm='density_based',
                                     interpolation_scheme=interpolation_scheme,
                                 )
+        
+        stress_space = analyzer.huzhang_space
+        stress_dofs = stress_space.number_of_global_dofs()
+
+        disp_space = analyzer.tensor_space
+        disp_dofs = disp_space.number_of_global_dofs()
                 
         from soptx.optimization.volume_objective import VolumeObjective
         objective = VolumeObjective(analyzer=analyzer)
 
         stress_limit = 100.0
-        from soptx.optimization.stress_constraint import StressConstraint
-        constraint = StressConstraint(analyzer=analyzer, stress_limit=stress_limit)
+        from soptx.optimization.apparent_stress_constaint import ApparentStressConstraint
+        constraint = ApparentStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
+        use_penalty_continuation = False
+        max_al_iterations = 150
+        max_iters_per_al = 5
+        change_tolerance = 0.002
+        mu_0 = 10.0
+        mu_max = 10000.0
         options = ALMMMAOptions(
                     # ALM 外层控制
-                    max_al_iterations=150,
-                    mma_iters_per_al=5,
-                    change_tolerance=0.002,
+                    max_al_iterations=max_al_iterations,
+                    mma_iters_per_al=max_iters_per_al,
+                    change_tolerance=change_tolerance,
                     stress_tolerance=0.003,
                     # 增广拉格朗日罚参数
-                    mu_0=10.0,
-                    mu_max=10000.0,
+                    mu_0=mu_0,
+                    mu_max=mu_max,
                     alpha=1.1,
                     lambda_0_init_val=0.0,
                     # MMA 渐近线控制
@@ -313,7 +336,7 @@ class DensityTopOptTest(BaseLogged):
                     asymp_decr=0.7,
                     osc=0.2,
                     # SIMP 连续化
-                    use_penalty_continuation=False,
+                    use_penalty_continuation=use_penalty_continuation,
                 )
         
         from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
@@ -324,7 +347,6 @@ class DensityTopOptTest(BaseLogged):
                                         )
 
         filter_type = 'projection' # 'none', 'sensitivity', 'density', 'projection'
-        rmin = 0.05
         projection_config = {
                 'continuation_strategy': 'additive',
                 'projection_type': 'tanh',
@@ -332,6 +354,7 @@ class DensityTopOptTest(BaseLogged):
                 'continuation_iter': 5, 'beta_increment': 1.0
             }
         from soptx.regularization.filter import Filter
+        rmin = 10.0 
         filter_regularization = Filter(
                                     design_mesh=design_variable_mesh,
                                     filter_type=filter_type,
@@ -347,6 +370,20 @@ class DensityTopOptTest(BaseLogged):
                         options=options,
                         enable_logging=True,
                     )
+        
+        self._log_info(f"开始密度拓扑优化, \n"
+            f"模型名称={pde.__class__.__name__} \n"
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+            f"网格类型={mesh_type}, 密度类型={density_location}, "
+            f"网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape[0]} \n"
+            f"应力空间阶数={analyzer.huzhang_space.p}, 应力自由度={stress_dofs} \n"
+            f"位移空间阶数={analyzer.tensor_space.p}, 位移自由度={disp_dofs} \n"
+            f"分析算法={analyzer.__class__.__name__}, 是否角点松弛={use_relaxation} \n" 
+            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_al_iterations*max_iters_per_al}, "
+            f"收敛容限={change_tolerance} \n" 
+            f"惩罚因子p={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
+            f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin} ")
         
         self._log_info(f"开始密度拓扑优化, "
             f"模型名称={pde.__class__.__name__}, \n"
@@ -374,7 +411,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec5_6_4_L_bracket_stress")
+        save_path = Path(f"{base_dir}/test_subsec5_6_4_L_bracket")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_optimization_history(mesh=design_variable_mesh, 
@@ -389,5 +426,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_4_cantilever_2d')
+    test.run.set('test_subsec5_6_4_L_bracket')
     rho_opt, history = test.run()

@@ -9,20 +9,13 @@
 使用示例:
     from soptx.postprocessing.stress_post import StressPostProcessor
 
-    post = StressPostProcessor(
-        optimizer=optimizer,
-        analyzer=analyzer,
-        stress_limit=100.0,
-    )
+    post = StressPostProcessor(analyzer=analyzer, stress_limit=100.0)
 
-    # 运行完整后处理
-    results = post.run(rho_phys=rho_opt, design_variable=d)
+    # 直接传入密度
+    post.plot_yield_surface(rho_phys)
 
-    # 或分步调用
-    results = post.check_stress_constraints(rho_phys=rho_opt)
-    post.print_summary(results)
-    post.plot_yield_surface(results)
-    post.plot_density_and_stress(results)
+    # 从 histories 字典中读取密度
+    post.plot_yield_surface(bm.array(histories['k1']['density']['values']))
 """
 
 from typing import Dict, Optional, Union
@@ -111,6 +104,10 @@ class StressPostProcessor:
         analyzer = self._analyzer
         slim = self._stress_limit
         tol = self._constraint_tolerance
+
+        # --- 0. 确保 rho_phys 为数组 (从 history 读取时可能为 list) ---
+        if not hasattr(rho_phys, '__array__'):
+            rho_phys = bm.array(rho_phys)
 
         # --- 1. 求解或获取状态 ---
         if state is None:
@@ -274,107 +271,60 @@ class StressPostProcessor:
             print(f"实体单元平均归一化应力: {results.mean_SM_solid:.4f}")
             print(f"违反约束的实体单元: {results.num_violated_solid}")
 
-    def plot_density_and_stress(self, 
-                                 results: StressPostResults,
-                                 mesh=None,
-                                 save_path: Optional[str] = None,
-                                ) -> None:
-        """绘制单元密度分布和归一化 von Mises 应力分布.
-        
-        对应 MATLAB 中 InitialPlot 的 subplot(1,2,1) 和 subplot(1,2,2).
-        """
-        import matplotlib.pyplot as plt
-        from matplotlib.collections import PolyCollection
-
-        if mesh is None:
-            mesh = self._analyzer._mesh
-
-        node = bm.to_numpy(mesh.entity('node'))
-        cell = bm.to_numpy(mesh.entity('cell'))
-
-        V = bm.to_numpy(results.V)
-        SM = bm.to_numpy(results.SM)
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-
-        # --- 左图: 单元密度 ---
-        verts1 = [node[c] for c in cell]
-        pc1 = PolyCollection(verts1, array=1.0 - V, 
-                              cmap='gray', edgecolors='none')
-        pc1.set_clim(0, 1)
-        ax1.add_collection(pc1)
-        ax1.autoscale_view()
-        ax1.set_aspect('equal')
-        ax1.set_title('Element Densities')
-        ax1.axis('off')
-        plt.colorbar(pc1, ax=ax1)
-
-        # --- 右图: 归一化 von Mises 应力 ---
-        verts2 = [node[c] for c in cell]
-        pc2 = PolyCollection(verts2, array=SM, 
-                              cmap='jet', edgecolors='none')
-        pc2.set_clim(0, max(1.2, float(bm.max(results.SM))))
-        ax2.add_collection(pc2)
-        ax2.autoscale_view()
-        ax2.set_aspect('equal')
-        ax2.set_title('Normalized von Mises Stress')
-        ax2.axis('off')
-        plt.colorbar(pc2, ax=ax2)
-
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
-
-    def plot_yield_surface(self, 
-                            results: StressPostResults,
+    def plot_yield_surface(self,
+                            rho_phys: TensorLike,
                             save_path: Optional[str] = None,
-                           ) -> None:
-        """绘制 von Mises 屈服面图.
-        
+                           ) -> StressPostResults:
+        """计算应力场并绘制 von Mises 屈服面图.
+
         对应 MATLAB PlotYieldSurface 函数:
         将所有实体单元的主应力点绘制在归一化的 σ1-σ2 平面上,
         与 von Mises 屈服椭圆对比.
+
+        Parameters
+        ----------
+        rho_phys : TensorLike
+            优化后的物理密度场.
+        save_path : str, optional
+            如提供, 将图片保存到该路径.
+
+        Returns
+        -------
+        StressPostResults
+            后处理结果对象, 供进一步分析使用.
+
+        Examples
+        --------
+        >>> post.plot_yield_surface(rho_phys)
+        >>> post.plot_yield_surface(bm.array(histories['k1']['density']['values']))
         """
         import matplotlib.pyplot as plt
 
+        results = self.check_stress_constraints(rho_phys=rho_phys)
+        self.print_summary(results)
+
         if results.sig_1_norm is None or results.num_solid == 0:
             print("无法绘制屈服面: 无实体单元或主应力未计算.")
-            return
+            return results
 
         solid = bm.to_numpy(results.solid_mask)
         s1 = bm.to_numpy(results.sig_1_norm)[solid]
         s2 = bm.to_numpy(results.sig_2_norm)[solid]
         SM_solid = bm.to_numpy(results.SM)[solid]
 
-        # --- von Mises 屈服椭圆 ---
-        # σ1² - σ1·σ2 + σ2² = σ_lim²
-        # 参数化: σ1 = cos(θ) + 0.5·sin(θ), σ2 = cos(θ) - 0.5·sin(θ) (旋转)
-        theta = np.linspace(0, 2 * np.pi, 300)
-        # 精确参数化 von Mises 椭圆
-        r1 = np.cos(theta)
-        r2 = np.sin(theta)
-        # 变换到 σ1-σ2 坐标
-        s1_ellipse = r1 * np.sqrt(2/3) + r2 * np.sqrt(2) / np.sqrt(3) / np.sqrt(2)
-        s2_ellipse = r1 * np.sqrt(2/3) - r2 * np.sqrt(2) / np.sqrt(3) / np.sqrt(2)
-        
-        # 更简洁的参数化方法
+        # von Mises 屈服椭圆精确参数化: σ1² - σ1·σ2 + σ2² = 1
         t = np.linspace(0, 2 * np.pi, 500)
         s1_ellipse = (2.0 / np.sqrt(3.0)) * np.cos(t + np.pi / 6)
         s2_ellipse = (2.0 / np.sqrt(3.0)) * np.cos(t - np.pi / 6)
 
         fig, ax = plt.subplots(figsize=(8, 7))
 
-        # 屈服椭圆
-        ax.plot(s1_ellipse, s2_ellipse, 'r-', linewidth=2.5, 
+        ax.plot(s1_ellipse, s2_ellipse, 'r-', linewidth=2.5,
                 label='von Mises yield surface')
-
-        # 应力点
-        sc = ax.scatter(s1, s2, c=SM_solid, s=20, cmap='jet', 
+        sc = ax.scatter(s1, s2, c=SM_solid, s=20, cmap='jet',
                         alpha=0.6, edgecolors='none',
                         label='Stress evaluation points')
 
-        # 格式
         vm_actual = np.sqrt(s1**2 - s1 * s2 + s2**2)
         max_ratio = float(np.max(vm_actual)) if len(vm_actual) > 0 else 0.0
 
@@ -392,13 +342,12 @@ class StressPostProcessor:
         cbar.set_label('Normalized stress measure', fontsize=11)
         cbar.mappable.set_clim(0, max(1.2, max_ratio))
 
-        # 统计信息文本框
         text_str = (f"Solid elements: {results.num_solid}\n"
                     f"Max SM: {results.max_SM_solid:.3f}\n"
                     f"Mean SM: {results.mean_SM_solid:.3f}")
         ax.text(0.02, 0.98, text_str, transform=ax.transAxes,
                 fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='white', 
+                bbox=dict(boxstyle='round', facecolor='white',
                           edgecolor='black', alpha=0.8))
 
         plt.tight_layout()
@@ -407,13 +356,15 @@ class StressPostProcessor:
         plt.show()
         print("\n✓ 屈服面图已生成")
 
-    def run(self, 
+        return results
+
+    def run(self,
             rho_phys: TensorLike,
             state: Optional[Dict] = None,
             save_prefix: Optional[str] = None,
            ) -> StressPostResults:
         """运行完整后处理流程: 统计 + 打印 + 绘图.
-        
+
         Parameters
         ----------
         rho_phys : TensorLike
@@ -421,16 +372,7 @@ class StressPostProcessor:
         state : dict, optional
             FEA 求解结果, 如不传入则自动求解.
         save_prefix : str, optional
-            如提供, 将图片保存为 {prefix}_density_stress.png 
-            和 {prefix}_yield_surface.png.
+            如提供, 将屈服面图保存为 {prefix}_yield_surface.png.
         """
-        results = self.check_stress_constraints(rho_phys, state)
-        self.print_summary(results)
-
-        density_path = f"{save_prefix}_density_stress.png" if save_prefix else None
         yield_path = f"{save_prefix}_yield_surface.png" if save_prefix else None
-
-        self.plot_density_and_stress(results, save_path=density_path)
-        self.plot_yield_surface(results, save_path=yield_path)
-
-        return results
+        return self.plot_yield_surface(rho_phys, save_path=yield_path)

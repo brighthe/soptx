@@ -3,7 +3,7 @@ from typing import List, Callable, Optional, Tuple
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
-from fealpy.mesh import QuadrangleMesh, TriangleMesh, HomogeneousMesh
+from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.model.pde_base import PDEBase  
 
@@ -12,7 +12,7 @@ class LBracketMiddle2d(PDEBase):
                 domain: List[float] = [0, 1, 0, 1],
                 hole_domain: List[float] = [0.4, 1, 0.4, 1],
                 mesh_type: str = 'uniform_quad',
-                P: float = -2.0, # N
+                P: float = -400.0, # N
                 E: float = 7e4,  # MPa (N/mm^2)
                 nu: float = 0.25,
                 load_width: Optional[float] = None,  # 载荷分布宽度，None 时为单点载荷
@@ -77,7 +77,7 @@ class LBracketMiddle2d(PDEBase):
                                              device=device)
                                              
         
-        self._save_meshdata(l_shape_mesh, 'tri_threshold', nx=nx, ny=ny)
+        self._save_meshdata(l_shape_mesh, 'uniform_crisscross_tri', nx=nx, ny=ny)
 
         return l_shape_mesh
     
@@ -103,7 +103,7 @@ class LBracketMiddle2d(PDEBase):
                                             threshold=threshold, 
                                             device=device)
                                              
-        self._save_meshdata(l_shape_mesh, 'quad_threshold', nx=nx, ny=ny)
+        self._save_meshdata(l_shape_mesh, 'uniform_quad', nx=nx, ny=ny)
 
         return l_shape_mesh
     

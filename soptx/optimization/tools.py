@@ -180,7 +180,9 @@ except Exception as e:
 def save_history_data(
                     history: OptimizationHistory, 
                     save_path: str, 
-                    label: str
+                    label: str,
+                    save_density: bool = False,
+                    density_iter: int = -1,
                 ) -> None:
     """
     保存 history 中用于绘图的关键数据（轻量级 JSON 格式）
@@ -192,11 +194,17 @@ def save_history_data(
     save_path : str
         保存目录路径
     label : str
-        标签名，如 'k1', 'k2', 'p3' 等
+        标签名，如 'k1', 'k2', 'k3' 等
+    save_density : bool, optional
+        是否保存物理密度场，默认 False
+    density_iter : int, optional
+        保存第几次迭代的密度，支持负索引，默认 -1 (最后一次)
     
     Examples
     --------
     >>> save_history_data(history, './results', label='k=1')
+    >>> save_history_data(history, './results', label='k=1', save_density=True)
+    >>> save_history_data(history, './results', label='k=1', save_density=True, density_iter=50)
     """
     save_dir = Path(save_path)
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -211,6 +219,17 @@ def save_history_data(
             for k, vals in history.scalar_histories.items()
         },
     }
+
+    if save_density:
+        densities = history.physical_densities
+        if not densities:
+            print("Warning: no density data found in history, skipping.")
+        else:
+            actual_iter = history.iter_indices[density_iter]
+            data['density'] = {
+                'iter_index': actual_iter,
+                'values': list(densities[density_iter]),
+            }
     
     filepath = save_dir / f"history_{label}.json"
     with open(filepath, 'w') as f:
