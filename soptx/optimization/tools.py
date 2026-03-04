@@ -206,6 +206,16 @@ def save_history_data(
     >>> save_history_data(history, './results', label='k=1', save_density=True)
     >>> save_history_data(history, './results', label='k=1', save_density=True, density_iter=50)
     """
+    class NumpyEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            return super().default(obj)
+    
     save_dir = Path(save_path)
     save_dir.mkdir(parents=True, exist_ok=True)
     
@@ -233,7 +243,8 @@ def save_history_data(
     
     filepath = save_dir / f"history_{label}.json"
     with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, cls=NumpyEncoder)
+        # json.dump(data, f, indent=2)
     
     print(f"History data saved to: {filepath}")
 

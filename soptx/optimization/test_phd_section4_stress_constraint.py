@@ -17,7 +17,7 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_subsec4_6_5_L_bracket_compliance')
+    @variantmethod('test_subsec4_6_4_L_bracket_compliance')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         # 归一化尺寸
         # domain = [0, 1.0, 0, 1.0]
@@ -197,17 +197,18 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
     
     
-    @run.register('test_subsec4_6_5_L_bracket_stress')
+    @run.register('test_subsec4_6_4_L_bracket_stress')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu' 
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec4_6_5_L_bracket_middle/")
+        save_path = Path(f"{base_dir}/subsec4_6_4_L_bracket_middle/")
         save_path.mkdir(parents=True, exist_ok=True)    
     
-        histories = load_history_data(save_path, labels=['stress_constraint_k1'])
+        # stress_cons_mtop_d16_k2_r7_5_true, stress_cons_mtop_d16_k4_r5_true
+        histories = load_history_data(save_path, labels=['stress_cons_mtop_d16_k4_r5_true']) 
 
-        plot_optimization_history(histories['stress_constraint_k1'], problem_type='stress', save_path=str(save_path))
+        plot_optimization_history(histories['stress_cons_mtop_d16_k4_r5_true'], problem_type='stress', save_path=str(save_path))
 
         bm.set_backend('numpy') # numpy, pytorch
         # bm.set_default_device('cpu') # cpu, cuda
@@ -227,9 +228,9 @@ class DensityTopOptTest(BaseLogged):
         load_width = 10.0
         plane_type = 'plane_stress' 
 
-        rmin = 10.0 # 7.5, 10.0
-        # nx, ny = 100, 100
-        nx, ny = 200, 200
+        rmin = 5.0 # 5.0, 7.5, 10.0
+        nx, ny = 100, 100
+        # nx, ny = 200, 200
         mesh_type = 'uniform_quad_Lshape' # uniform_quad_Lshape, uniform_crisscross_tri_Lshape
         
         from soptx.model.l_bracket_beam_lfem import LBracketMiddle2d
@@ -261,7 +262,7 @@ class DensityTopOptTest(BaseLogged):
                                             device=device,
                                         )
 
-        density_location = 'element' # element, element_multiresolution
+        density_location = 'element_multiresolution' # element, element_multiresolution
         interpolation_method = 'msimp'
         penalty_factor = 3.5
         void_youngs_modulus = 1e-9
@@ -286,7 +287,7 @@ class DensityTopOptTest(BaseLogged):
                                                 )
             assembly_method = 'fast'
         elif density_location in ['element_multiresolution']:
-            sub_density_element = 4
+            sub_density_element = 16
             import math
             sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
@@ -300,7 +301,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 1
+        space_degree = 4
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -326,7 +327,7 @@ class DensityTopOptTest(BaseLogged):
         constraint = VanishingStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
 
         from soptx.optimization.al_mma_optimizer import ALMMMAOptions
-        use_penalty_continuation = False
+        use_penalty_continuation = True
         max_al_iterations = 150
         max_iters_per_al = 5
         change_tolerance = 0.002
@@ -405,19 +406,20 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu' 
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec4_6_5_L_bracket_middle/json")
+        save_path = Path(f"{base_dir}/subsec4_6_4_L_bracket_middle")
         save_path.mkdir(parents=True, exist_ok=True)    
     
-        histories = load_history_data(save_path, labels=['stress_constraint_k1'])
+        # stress_cons_mtop_d16_k2_r7_5_true
+        histories = load_history_data(save_path, labels=['stress_cons_mtop_d16_k2_r7_5_true']) 
 
-        rho_opt = histories['stress_constraint_k1']['density']['values']  # 获取最后一次迭代的密度分布
+        rho_opt = histories['stress_cons_mtop_d16_k2_r7_5_true']['density']['values']  # 获取最后一次迭代的密度分布
 
         # ===================== 后处理 =====================
         from soptx.optimization.stress_post import StressPostProcessor
 
         post = StressPostProcessor(
                     analyzer=analyzer,
-                    stress_limit=100.0,        
+                    stress_limit=stress_limit,        
                     solid_threshold=0.5,        
                     constraint_tolerance=0.01,  
                 )
@@ -428,7 +430,7 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec4_6_5_L_bracket_stress")
+        save_path = Path(f"{base_dir}/test_subsec4_6_4_L_bracket_stress")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
@@ -444,7 +446,7 @@ class DensityTopOptTest(BaseLogged):
         return rho_opt, history
     
 
-    @run.register('test_subsec4_6_5_cantilever_2d')
+    @run.register('test_subsec4_6_4_cantilever_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 80, 0, 40]
         P = -400.0
@@ -622,27 +624,36 @@ class DensityTopOptTest(BaseLogged):
             f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
 
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['lfem_k2'])
+
+        rho_opt = histories['lfem_k2']['density']['values']  
+
+        # ===================== 后处理 =====================
+        from soptx.optimization.stress_post import StressPostProcessor
+
+        post = StressPostProcessor(
+                    analyzer=analyzer,
+                    stress_limit=stress_limit,        
+                    solid_threshold=0.5,        
+                    constraint_tolerance=0.01,  
+                )
+        post.plot_yield_surface(rho_opt, save_path=str(save_path))
+
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
-
-        # # ===================== 后处理 =====================
-        # from soptx.optimization.stress_post import StressPostProcessor
-
-        # post = StressPostProcessor(
-        #             analyzer=analyzer,
-        #             stress_limit=stress_limit,         # 对应 fem.SLim
-        #             solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
-        #             constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
-        #         )
-        # results = post.check_stress_constraints(rho_phys=rho_opt)
-        # post.print_summary(results)
-        # post.plot_density_and_stress(results)
-        # post.plot_yield_surface(results)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec4_6_5_cantilever_2d")
         save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
 
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
@@ -656,5 +667,6 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec4_6_5_L_bracket_compliance')
+    # test_subsec4_6_4_cantilever_2d, test_subsec4_6_4_L_bracket_stress
+    test.run.set('test_subsec4_6_4_L_bracket_stress')
     rho_opt, history = test.run()

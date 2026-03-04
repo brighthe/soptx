@@ -17,7 +17,7 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_subsec5_6_4_cantilever_2d')
+    @variantmethod('test_subsec5_6_4_canti2d_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         domain = [0, 80, 0, 40]
         P = -400.0
@@ -83,7 +83,7 @@ class DensityTopOptTest(BaseLogged):
                                                 relative_density=relative_density,
                                             )
 
-        space_degree = 1
+        space_degree = 2
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         use_relaxation = True
         solve_method = 'mumps'
@@ -189,31 +189,30 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu' 
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle/json")
+        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle")
         save_path.mkdir(parents=True, exist_ok=True)    
     
-        histories = load_history_data(save_path, labels=['stress_constraint_hzmfem_k2'])
+        histories = load_history_data(save_path, labels=['hzmfem_k2'])
 
-        rho_opt = histories['stress_constraint_hzmfem_k2']['density']['values']  
+        rho_opt = histories['hzmfem_k2']['density']['values']  
 
-        # # ===================== 后处理 =====================
-        # from soptx.optimization.stress_post import StressPostProcessor
+        # ===================== 后处理 =====================
+        from soptx.optimization.stress_post import StressPostProcessor
 
-        # post = StressPostProcessor(
-        #             analyzer=analyzer,
-        #             stress_limit=100.0,         # 对应 fem.SLim
-        #             solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
-        #             constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
-        #         )
-        # results = post.check_stress_constraints(rho_phys=rho_opt)
-        # post.print_summary(results)
-        # post.plot_density_and_stress(results)
-        # post.plot_yield_surface(results)
-
+        post = StressPostProcessor(
+                    analyzer=analyzer,
+                    stress_limit=stress_limit,        
+                    solid_threshold=0.5,        
+                    constraint_tolerance=0.01,  
+                )
+        post.plot_yield_surface(rho_opt, save_path=str(save_path))
+        
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+        
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec5_6_4_cantilever_2d")
+        save_path = Path(f"{base_dir}/test_subsec5_6_4_canti2d_hzmfem")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
@@ -224,6 +223,210 @@ class DensityTopOptTest(BaseLogged):
                                 disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path), problem_type='stress')
+
+        return rho_opt, history
+    
+    @run.register('test_subsec5_6_4_canti2d_lfem')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        domain = [0, 80, 0, 40]
+        P = -400.0
+
+        E, nu = 7e4, 0.25
+        plane_type = 'plane_stress' 
+
+        nx, ny = 80, 40
+
+        # rmin = 4.0
+        # rmin = 2.0
+        # mesh_type = 'uniform_quad'
+
+        rmin = 6.0
+        mesh_type = 'uniform_crisscross_tri'
+
+        from soptx.model.cantilever_2d_lfem import CantileverMiddle2d
+        pde = CantileverMiddle2d(
+                    domain=domain,
+                    P=P, 
+                    E=E, nu=nu,
+                    load_width=6,
+                    plane_type=plane_type,
+                )
+        
+        pde.init_mesh.set(mesh_type)
+        displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
+
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        material = IsotropicLinearElasticMaterial(
+                                            youngs_modulus=pde.E, 
+                                            poisson_ratio=pde.nu, 
+                                            plane_type=pde.plane_type,
+                                            enable_logging=False
+                                        )
+
+        density_location = 'element' # element, element_multiresolution
+        interpolation_method = 'msimp'
+        penalty_factor = 3.5
+        void_youngs_modulus = 1e-9
+        from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
+        interpolation_scheme = MaterialInterpolationScheme(
+                                    density_location=density_location,
+                                    interpolation_method=interpolation_method,
+                                    options={
+                                        'penalty_factor': penalty_factor,
+                                        'void_youngs_modulus': void_youngs_modulus,
+                                    },
+                                )
+        
+        # ! 这个地方就得取 0.5, 不能取 1.0
+        relative_density = 0.5
+        if density_location in ['element']:
+            design_variable_mesh = displacement_mesh
+            d, rho = interpolation_scheme.setup_density_distribution(
+                                                    design_variable_mesh=design_variable_mesh,
+                                                    displacement_mesh=displacement_mesh,
+                                                    relative_density=relative_density,
+                                                )
+            assembly_method = 'fast'
+            
+        space_degree = 2
+        integration_order = space_degree + 1 # 张量网格
+        # integration_order = space_degree**2 + 2  # 单纯形网格
+
+        solve_method = 'mumps'
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
+        analyzer = LagrangeFEMAnalyzer(
+                                disp_mesh=displacement_mesh,
+                                pde=pde,
+                                material=material,
+                                interpolation_scheme=interpolation_scheme,
+                                space_degree=space_degree,
+                                integration_order=integration_order,
+                                assembly_method=assembly_method,
+                                solve_method=solve_method,
+                                topopt_algorithm='density_based',
+                            )
+        
+        u_space = analyzer.tensor_space
+        u_dofs = u_space.number_of_global_dofs()
+                
+        from soptx.optimization.volume_objective import VolumeObjective
+        objective = VolumeObjective(analyzer=analyzer)
+
+        stress_limit = 180.0
+        from soptx.optimization.vanish_stress_constraint import VanishingStressConstraint
+        constraint = VanishingStressConstraint(analyzer=analyzer, stress_limit=stress_limit)
+
+        from soptx.optimization.al_mma_optimizer import ALMMMAOptions
+        use_penalty_continuation = False
+        max_al_iterations = 150
+        max_iters_per_al = 5
+        change_tolerance = 0.002
+        mu_0 = 50.0 # 50.0
+        mu_max = 10000.0
+        options = ALMMMAOptions(
+                    # ALM 外层控制
+                    max_al_iterations=max_al_iterations,
+                    mma_iters_per_al=max_iters_per_al,
+                    change_tolerance=change_tolerance,
+                    stress_tolerance=0.003,
+                    # 增广拉格朗日罚参数
+                    mu_0=mu_0,
+                    mu_max=mu_max,
+                    alpha=1.1,
+                    lambda_0_init_val=0.0,
+                    # MMA 渐近线控制
+                    move_limit=0.15,
+                    asymp_init=0.2,
+                    asymp_incr=1.2,
+                    asymp_decr=0.7,
+                    osc=0.2,
+                    # SIMP 连续化
+                    use_penalty_continuation=use_penalty_continuation,
+                )
+        
+        from soptx.optimization.augmented_lagrangian_objective import AugmentedLagrangianObjective
+        augmented_lagrangian_objective = AugmentedLagrangianObjective(
+                                            volume_objective=objective,
+                                            stress_constraint=constraint,
+                                            options=options,
+                                        )
+
+        filter_type = 'projection' # 'none', 'sensitivity', 'density', 'projection'
+        projection_config = {
+                'continuation_strategy': 'additive',
+                'projection_type': 'tanh',
+                'beta': 1.0, 'beta_max': 10.0,
+                'continuation_iter': 5, 'beta_increment': 1.0
+            }
+        from soptx.regularization.filter import Filter
+        filter_regularization = Filter(
+                                    design_mesh=design_variable_mesh,
+                                    filter_type=filter_type,
+                                    rmin=rmin,
+                                    density_location=density_location,
+                                    disp_mesh=displacement_mesh,
+                                    projection_params=projection_config,
+                                )
+
+        from soptx.optimization.al_mma_optimizer import ALMMMAOptimizer
+        optimizer = ALMMMAOptimizer(
+                        al_objective=augmented_lagrangian_objective,
+                        filter=filter_regularization,
+                        options=options,
+                        enable_logging=True,
+                    )
+        
+        self._log_info(f"开始密度拓扑优化, \n"
+            f"模型名称={pde.__class__.__name__} \n"
+            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+            f"网格类型={mesh_type},  有限元空间阶数={space_degree} \n" 
+            f"密度类型={density_location}, 密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度自由度={rho.shape} \n" 
+            f"位移网格尺寸={displacement_mesh.number_of_cells()}, 位移自由度={u_dofs} \n"
+            f"空间阶数={u_space.p}, 自由度={u_dofs} \n"
+            f"分析算法={analyzer.__class__.__name__} \n" 
+            f"优化算法={optimizer.__class__.__name__} , 最大迭代次数={max_al_iterations*max_iters_per_al}, "
+            f"收敛容限={change_tolerance} \n" 
+            f"惩罚因子={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
+            f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
+            f"过滤类型={filter_type}, 过滤半径={rmin} ")
+
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        histories = load_history_data(save_path, labels=['lfem_k2'])
+
+        rho_opt = histories['lfem_k2']['density']['values']  
+
+        # ===================== 后处理 =====================
+        from soptx.optimization.stress_post import StressPostProcessor
+
+        post = StressPostProcessor(
+                    analyzer=analyzer,
+                    stress_limit=stress_limit,        
+                    solid_threshold=0.5,        
+                    constraint_tolerance=0.01,  
+                )
+        post.plot_yield_surface(rho_opt, save_path=str(save_path / "yield_surface.png"))
+
+        rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
+
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu'
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/test_subsec5_6_4_canti2d_lfem")
+        save_path.mkdir(parents=True, exist_ok=True)    
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
+
+        save_optimization_history(design_mesh=design_variable_mesh, 
+                                history=history, 
+                                density_location=density_location,
+                                disp_mesh=displacement_mesh,
+                                save_path=str(save_path))
+        plot_optimization_history(history, problem_type='stress', save_path=str(save_path))
 
         return rho_opt, history
     
@@ -437,5 +640,6 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec5_6_4_cantilever_2d')
+    # test_subsec5_6_4_canti2d_lfem, test_subsec5_6_4_canti2d_hzmfem
+    test.run.set('test_subsec5_6_4_canti2d_hzmfem')
     rho_opt, history = test.run()
