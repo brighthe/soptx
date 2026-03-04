@@ -29,6 +29,7 @@ class ClampedBeam2d(PDEBase):
                 nu: float = 0.35,  
                 support_height_ratio: float = 0.5,  # 支撑高度比例（0.5 表示下半部分）
                 plane_type: str = 'plane_stress', # 'plane_stress' or 'plane_strain'
+                load_width: Optional[float] = None, # 载荷作用区域宽度（如果 None 则自动根据网格尺寸设置）
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:
@@ -40,13 +41,15 @@ class ClampedBeam2d(PDEBase):
         self._E, self._nu = E, nu
         self._support_height_ratio = support_height_ratio 
         self._plane_type = plane_type
+        self._load_width = load_width   # 物理参数：载荷分布宽度
 
         self._eps = 1e-8        
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
-         # 点载荷作用区域的半宽度 (需要根据网格尺寸调整)
-        self._load_region_half_width = None 
+        self._t1 = None   
+        self._t2 = None
+        self._hx = None
 
     @property
     def E(self) -> float:
@@ -181,25 +184,23 @@ class ClampedBeam2d(PDEBase):
         return (on_left | on_right) & in_lower_half
     
     def set_load_region(self, mesh):
-        """根据网格设置点载荷作用区域"""
-        if self._load_region_half_width is not None:
+        """初始化牵引力强度 t = P / load_width
+
+        载荷宽度由物理参数 load_width 直接决定，与网格无关。
+        默认值退化为单元尺寸级别（逼近点载荷）
+        仅在首次调用时计算，后续调用直接返回
+        """
+        if self._t1 is not None:
             return
-    
-        node = mesh.entity('node')
-        edge = mesh.entity('edge')
-        
-        bd_edge_flag = mesh.boundary_edge_flag()
-        bd_edges = edge[bd_edge_flag]
-        edge_lengths = bm.linalg.norm(
-                            node[bd_edges[:, 1]] - node[bd_edges[:, 0]], axis=-1
-                        )
-        
-        self._load_region_half_width = float(bm.min(edge_lengths)) / 2 + self._eps
-        
-        # 计算等效牵引力强度
-        load_region_width = 2 * self._load_region_half_width
-        self._t1 = self._p1 / load_region_width  # N/mm
-        self._t2 = self._p2 / load_region_width  # N/mm
+
+        hx = mesh.meshdata['hx']
+        self._hx = hx
+
+        if self._load_width is None:
+            self._load_width = hx  # 默认：单元尺寸级别，逼近点载荷
+
+        self._t1 = self._p1 / self._load_width
+        self._t2 = self._p2 / self._load_width
     
     @cartesian
     def is_traction_boundary(self, points: TensorLike) -> TensorLike:
@@ -223,31 +224,55 @@ class ClampedBeam2d(PDEBase):
 
     @cartesian
     def traction_bc(self, points: TensorLike) -> TensorLike:
-        """牵引边界条件 - 包含点载荷的等效分布牵引"""
+        """牵引边界条件 - 顶/底边界中点区域施加等效分布牵引"""
         domain = self.domain
-        x, y = points[..., 0], points[..., 1]
-        x_mid = (domain[0] + domain[1]) / 2  
-        
+        x_mid = (domain[0] + domain[1]) / 2
+
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        
-        if self._load_region_half_width is None:
-            # 未设置载荷区域，返回零牵引
+
+        if self._t1 is None:
             return val
-        
-        hw = self._load_region_half_width
-        
-        # 顶部载荷区域：y = y_max, x ∈ [x_mid - hw, x_mid + hw]
-        on_top = bm.abs(y - domain[3]) < self._eps
-        in_top_load_region = on_top & (bm.abs(x - x_mid) <= hw)
-        
-        # 底部载荷区域：y = y_min, x ∈ [x_mid - hw, x_mid + hw]
-        on_bottom = bm.abs(y - domain[2]) < self._eps
-        in_bottom_load_region = on_bottom & (bm.abs(x - x_mid) <= hw)
-        
-        # 设置牵引力（向下为负 y 方向）
-        val = bm.set_at(val, (in_top_load_region, 1), self._t1)
-        val = bm.set_at(val, (in_bottom_load_region, 1), self._t2)
+
+        # 边级中心坐标 (NEb, 2)
+        edge_center = points.mean(axis=-2)
+        x_c = edge_center[..., 0]
+        y_c = edge_center[..., 1]
+
+        on_top    = bm.abs(y_c - domain[3]) < self._eps
+        on_bottom = bm.abs(y_c - domain[2]) < self._eps
+
+        # 各边到 x_mid 的距离（仅在对应边界上有效）
+        dist_top    = bm.where(on_top,    bm.abs(x_c - x_mid), bm.full_like(x_c, bm.inf))
+        dist_bottom = bm.where(on_bottom, bm.abs(x_c - x_mid), bm.full_like(x_c, bm.inf))
+
+        if self._load_width <= self._hx + self._eps:
+            # 逼近点载荷：选最近边（解决节点对称平局问题）
+            in_top_load    = on_top    & (dist_top    <= bm.min(dist_top)    + self._eps)
+            in_bottom_load = on_bottom & (dist_bottom <= bm.min(dist_bottom) + self._eps)
+        else:
+            # 显式分布载荷：覆盖 load_width/2 范围内所有边
+            search_hw = self._load_width / 2 + self._eps
+            in_top_load    = on_top    & (dist_top    <= search_hw)
+            in_bottom_load = on_bottom & (dist_bottom <= search_hw)
+
+        # 动态调整：严格保证宏观静力等效
+        num_top    = bm.sum(in_top_load)
+        num_bottom = bm.sum(in_bottom_load)
+        actual_t1 = self._p1 / (num_top    * self._hx)
+        actual_t2 = self._p2 / (num_bottom * self._hx)
+
+        # 顶部载荷
+        mask_top = in_top_load[:, None, None]       # (NEb, 1, 1)
+        t_top = bm.zeros(points.shape, **kwargs)
+        t_top = bm.set_at(t_top, (..., 1), actual_t1)
+        val = bm.where(mask_top, t_top, val)
+
+        # 底部载荷
+        mask_bottom = in_bottom_load[:, None, None]  # (NEb, 1, 1)
+        t_bottom = bm.zeros(points.shape, **kwargs)
+        t_bottom = bm.set_at(t_bottom, (..., 1), actual_t2)
+        val = bm.where(mask_bottom, t_bottom, val)
 
         return val
         

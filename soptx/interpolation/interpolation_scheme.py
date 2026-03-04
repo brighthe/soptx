@@ -180,38 +180,6 @@ class MaterialInterpolationScheme(BaseLogged):
 
         return design_variable, density_distribution
 
-    # @setup_density_distribution.register('node_multiresolution')
-    # def setup_density_distribution(self, 
-    #                         design_variable_mesh: HomogeneousMesh,
-    #                         displacement_mesh: HomogeneousMesh,
-    #                         relative_density: float = 1.0,
-    #                         sub_density_element: int = 4,
-    #                         integration_order: int = 3,
-    #                         **kwargs,
-    #                     ) -> Tuple[TensorLike, DensityDistribution]:
-    #     """
-    #     节点密度-多分辨率 (MRTO), 设计变量独立于有限元网格, 自由度位于子密度节点处
-        
-    #     Returns
-    #     -------
-    #     design_variable : TensorLike (NN_design_variable, )
-    #     density_distribution : Function (NN_density, )
-    #     """
-
-    #     NN_design_variable = design_variable_mesh.number_of_nodes()
-    #     design_variable = bm.full((NN_design_variable, ), relative_density, 
-    #                             dtype=bm.float64, device=design_variable_mesh.device) # (NN_design_variable, )
-
-    #     NN_density = displacement_mesh.number_of_nodes()
-    #     density_val = bm.full((NN_density, ), relative_density, dtype=bm.float64, device=displacement_mesh.device)
-    #     space = LagrangeFESpace(displacement_mesh, p=1, ctype='C')
-    #     density_func = space.function(density_val) # (NN_density, )
-
-    #     density_distribution = DensityDistribution(function=density_func, sub_density_element=sub_density_element)
-
-    #     return design_variable, density_distribution
-    
-
     @variantmethod('simp')
     def interpolate_material(self, 
                     material: LinearElasticMaterial, 
