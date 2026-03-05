@@ -83,7 +83,7 @@ class DensityTopOptTest(BaseLogged):
                                                 relative_density=relative_density,
                                             )
 
-        space_degree = 2
+        space_degree = 4
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
         use_relaxation = True
         solve_method = 'mumps'
@@ -186,26 +186,26 @@ class DensityTopOptTest(BaseLogged):
             f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
         
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu' 
-        base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle")
-        save_path.mkdir(parents=True, exist_ok=True)    
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu' 
+        # base_dir = str(base_dir)
+        # save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle")
+        # save_path.mkdir(parents=True, exist_ok=True)    
     
-        histories = load_history_data(save_path, labels=['hzmfem_k2'])
+        # histories = load_history_data(save_path, labels=['hzmfem_k2'])
 
-        rho_opt = histories['hzmfem_k2']['density']['values']  
+        # rho_opt = histories['hzmfem_k2']['density']['values']  
 
-        # ===================== 后处理 =====================
-        from soptx.optimization.stress_post import StressPostProcessor
+        # # ===================== 后处理 =====================
+        # from soptx.optimization.stress_post import StressPostProcessor
 
-        post = StressPostProcessor(
-                    analyzer=analyzer,
-                    stress_limit=stress_limit,        
-                    solid_threshold=0.5,        
-                    constraint_tolerance=0.01,  
-                )
-        post.plot_yield_surface(rho_opt, save_path=str(save_path))
+        # post = StressPostProcessor(
+        #             analyzer=analyzer,
+        #             stress_limit=stress_limit,        
+        #             solid_threshold=0.5,        
+        #             constraint_tolerance=0.01,  
+        #         )
+        # post.plot_yield_surface(rho_opt, save_path=str(save_path))
         
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
         

@@ -1039,6 +1039,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec5_6_3_lfem_bearing_device_2d")
         save_path.mkdir(parents=True, exist_ok=True)
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
         
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
@@ -1232,7 +1234,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
 
         volume_fraction = 0.35
 
-        space_degree = 2
+        space_degree = 4
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
 
         # 'element'
@@ -1357,6 +1359,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/test_subsec5_6_3_hzmfem_bearing_device_2d")
         save_path.mkdir(parents=True, exist_ok=True)
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
 
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
