@@ -406,6 +406,31 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # 计算边界自由度的值
         uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
 
+        gdof_total = K.shape[0]
+        gdof_sigma = space_sigma.number_of_global_dofs()
+        
+        U_fixed = bm.zeros(gdof_total, dtype=F.dtype)
+        U_fixed[:gdof_sigma] = uh_val
+        
+        is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
+        is_fixed_dof[:gdof_sigma] = is_bd_dof
+
+        #* 修改线性系统 (标准的置 1 置 0 法)
+        # 移项: 将已知非零值的贡献移到右端项
+        F = F - K @ U_fixed
+        
+        # 强加边界值: 在右端项直接填入已知值
+        F[is_fixed_dof] = U_fixed[is_fixed_dof]
+        
+        # 修改矩阵：行列清零，对角置1        
+        fixed_idx = bm.zeros(gdof_total, dtype=bm.int32)
+        fixed_idx[is_fixed_dof] = 1
+        
+        I_bd = spdiags(fixed_idx, 0, gdof_total, gdof_total)
+        I_in = spdiags(1 - fixed_idx, 0, gdof_total, gdof_total)
+        
+        K = I_in @ K @ I_in + I_bd
+
         # # ================ 验证等效分布载荷 ================
         # mesh = space_sigma.mesh
         # ebdflag = mesh.edgedata.get('essential_bc', mesh.boundary_edge_flag())
@@ -438,31 +463,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # print(f"载荷边中心 y 坐标: {edge_centers[in_load, 1]}")
         # print(f"等效合力: {total_force}, 目标 P: {self._pde._P}")
         # # ======================================================
-
-        gdof_total = K.shape[0]
-        gdof_sigma = space_sigma.number_of_global_dofs()
-        
-        U_fixed = bm.zeros(gdof_total, dtype=F.dtype)
-        U_fixed[:gdof_sigma] = uh_val
-        
-        is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
-        is_fixed_dof[:gdof_sigma] = is_bd_dof
-
-        #* 修改线性系统 (标准的置 1 置 0 法)
-        # 移项: 将已知非零值的贡献移到右端项
-        F = F - K @ U_fixed
-        
-        # 强加边界值: 在右端项直接填入已知值
-        F[is_fixed_dof] = U_fixed[is_fixed_dof]
-        
-        # 修改矩阵：行列清零，对角置1        
-        fixed_idx = bm.zeros(gdof_total, dtype=bm.int32)
-        fixed_idx[is_fixed_dof] = 1
-        
-        I_bd = spdiags(fixed_idx, 0, gdof_total, gdof_total)
-        I_in = spdiags(1 - fixed_idx, 0, gdof_total, gdof_total)
-        
-        K = I_in @ K @ I_in + I_bd
         
         return K, F
     

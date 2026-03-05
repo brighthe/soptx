@@ -260,27 +260,56 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         if boundary_type == 'mixed':
             #* 1. Neumann 边界条件处理 - 弱形式施加 *#
-            # # 集中载荷 (点力) - 等效节点力方法
-            if load_type == 'concentrated':
-                gd_sigmah = self._pde.concentrate_load_bc
-                threshold_sigmah = self._pde.is_concentrate_load_boundary()
+            # 集中载荷 (点力) - 等效节点力方法
+            # if load_type == 'concentrated':
+            #     gd_sigmah = self._pde.concentrate_load_bc
+            #     threshold_sigmah = self._pde.is_concentrate_load_boundary()
         
-                # 点力必须定义在网格节点上
-                isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-                isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
-                ipoints_uh = space_uh.interpolation_points()
-                gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
+            #     # 点力必须定义在网格节点上
+            #     isBdTDof = space_uh.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+            #     isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_sigmah, method='interp')
+            #     ipoints_uh = space_uh.interpolation_points()
+            #     gd_sigmah_val = gd_sigmah(ipoints_uh[isBdSDof])
 
-                # 动态计算节点数量, 将总力平均分配
-                num_load_nodes = bm.sum(isBdSDof)
-                if num_load_nodes > 0:
-                    gd_sigmah_val = gd_sigmah_val / num_load_nodes
+            #     # 动态计算节点数量, 将总力平均分配
+            #     num_load_nodes = bm.sum(isBdSDof)
+            #     if num_load_nodes > 0:
+            #         gd_sigmah_val = gd_sigmah_val / num_load_nodes
 
+            #     F_sigmah = space_uh.function()
+            #     if space_uh.dof_priority:
+            #         F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
+            #     else:
+            #         F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
+
+            if load_type == 'concentrated':
                 F_sigmah = space_uh.function()
-                if space_uh.dof_priority:
-                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.T.reshape(-1))
-                else:
-                    F_sigmah[:] = bm.set_at(F_sigmah[:], isBdTDof, gd_sigmah_val.reshape(-1))
+                ipoints_uh = space_uh.interpolation_points()
+
+                # 接口统一为列表，单点/多点均适用
+                load_bc_list       = self._pde.concentrate_load_bc()
+                load_threshold_list = self._pde.is_concentrate_load_boundary()
+
+                for gd_func, threshold_func in zip(load_bc_list, load_threshold_list):
+                    isBdTDof = space_uh.is_boundary_dof(threshold=threshold_func, method='interp')
+                    isBdSDof = space_uh.scalar_space.is_boundary_dof(threshold=threshold_func, method='interp')
+
+                    num_load_nodes = bm.sum(isBdSDof)
+                    if num_load_nodes == 0:
+                        continue
+
+                    gd_val = gd_func(ipoints_uh[isBdSDof]) / num_load_nodes
+
+                    if space_uh.dof_priority:
+                        F_sigmah[:] = bm.set_at(
+                            F_sigmah[:], isBdTDof,
+                            F_sigmah[isBdTDof] + gd_val.T.reshape(-1)
+                        )
+                    else:
+                        F_sigmah[:] = bm.set_at(
+                            F_sigmah[:], isBdTDof,
+                            F_sigmah[isBdTDof] + gd_val.reshape(-1)
+                        )
 
             # 分布载荷 (面力)
             elif load_type == 'distributed':

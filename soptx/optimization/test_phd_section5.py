@@ -753,7 +753,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.4999 # 0.4999, 0.3
+        E, nu = 1, 0.3 # 0.4999, 0.3
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_strain, plane_stress
 
@@ -889,6 +889,8 @@ class DensityTopOptHuZhangTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec5_6_3_lfem_clapmed_beam_2d")
         save_path.mkdir(parents=True, exist_ok=True)
         
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
+
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
@@ -1049,11 +1051,11 @@ class DensityTopOptHuZhangTest(BaseLogged):
         return rho_opt, history
 
     
-    @run.register('test_subsec5_6_3_hzmfem')
+    @run.register('test_subsec5_6_3_hzmfem_clapmed_beam_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
         #* 夹持板结构 clamped_beam_2d
         p1, p2 = -2.0, -2.0
-        E, nu = 1, 0.3
+        E, nu = 1, 0.5 # 0.3, 0.5
         domain = [0, 80, 0, 40]
         plane_type = 'plane_strain' # plane_stress, plane_strain
 
@@ -1070,25 +1072,6 @@ class DensityTopOptHuZhangTest(BaseLogged):
         mesh_type = 'uniform_crisscross_tri'
 
         volume_fraction = 0.3
-
-        #* 轴承装置结构 bearing_device_2d
-        # t = -8e-2
-        # E, nu = 1, 0.3
-        # domain = [0, 120, 0, 40]
-        # plane_type = 'plane_strain' # plane_strain, plane_stress
-
-        # from soptx.model.bearing_device_2d_hzmfem import BearingDevice2d
-        # pde = BearingDevice2d(
-        #                     domain=domain,
-        #                     t=t, E=E, nu=nu, 
-        #                     plane_type=plane_type,
-        #                     enable_logging=False
-        #                 )
-
-        # nx, ny = 120, 40
-        # mesh_type = 'uniform_crisscross_tri' 
-
-        # volume_fraction = 0.35
 
         space_degree = 2
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
@@ -1213,8 +1196,10 @@ class DensityTopOptHuZhangTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/test_subsec5_6_3_hzmfem")
+        save_path = Path(f"{base_dir}/test_subsec5_6_3_hzmfem_clapmed_beam_2d")
         save_path.mkdir(parents=True, exist_ok=True)
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='k1', save_density=True, density_iter=-1)
 
         save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
@@ -1388,5 +1373,5 @@ if __name__ == "__main__":
     test = DensityTopOptHuZhangTest(enable_logging=True)
 
     # test_subsec5_6_3_hzmfem, test_linear_elastic_huzhang, test_subsec5_6_3_lfem, test_subsec5_6_2_lfem, test_subsec5_6_2_hzmfem
-    test.run.set('test_subsec5_6_3_hzmfem_bearing_device_2d') 
+    test.run.set('test_subsec5_6_3_lfem_clapmed_beam_2d') 
     rho_opt, history = test.run()

@@ -368,36 +368,100 @@ class ClampedBeam2d(PDEBase):
         
         return (self.is_dirichlet_boundary_dof_x, 
                 self.is_dirichlet_boundary_dof_y)
-    
+
     @cartesian
-    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        """集中载荷 (点力)"""
+    def _concentrate_load_bc_bottom(self, points: TensorLike) -> TensorLike:
+        """底部中点集中载荷"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._p1) 
-        
+        val = bm.set_at(val, (..., 1), self._p1)
+        return val
+
+    @cartesian
+    def _concentrate_load_bc_top(self, points: TensorLike) -> TensorLike:
+        """顶部中点集中载荷"""
+        kwargs = bm.context(points)
+        val = bm.zeros(points.shape, **kwargs)
+        val = bm.set_at(val, (..., 1), self._p2)
         return val
     
+    def concentrate_load_bc(self) -> List[Callable]:
+        """返回所有集中载荷值函数列表，单点情况长度为 1"""
+        return [
+            self._concentrate_load_bc_bottom,
+            self._concentrate_load_bc_top,
+        ]
+    
     @cartesian
-    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def _is_concentrate_load_boundary_bottom(self, points: TensorLike) -> TensorLike:
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
-        mid_x = (domain[0] + domain[1]) / 2  
-        
-        coord_bottom = (
-                        (bm.abs(x - mid_x) < self._eps) & 
-                        (bm.abs(y - domain[2]) < self._eps)
-                    )
-        coord_top = (
-                    (bm.abs(x - mid_x) < self._eps) & 
-                    (bm.abs(y - domain[3]) < self._eps)
-                )
-        
-        return coord_bottom | coord_top
+        mid_x = (domain[0] + domain[1]) / 2
 
-    def is_concentrate_load_boundary(self) -> Callable:
+        return (bm.abs(x - mid_x) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
 
-        return self.is_concentrate_load_boundary_dof
+    @cartesian
+    def _is_concentrate_load_boundary_top(self, points: TensorLike) -> TensorLike:
+        domain = self.domain
+        x, y = points[..., 0], points[..., 1]
+        mid_x = (domain[0] + domain[1]) / 2
+
+        return (bm.abs(x - mid_x) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
+    
+    def is_concentrate_load_boundary(self) -> List[Callable]:
+        """返回所有集中载荷阈值函数列表"""
+        return [
+            self._is_concentrate_load_boundary_bottom,
+            self._is_concentrate_load_boundary_top,
+        ]
+    
+    # @cartesian
+    # def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+    #     """集中载荷 (点力)"""
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     val = bm.set_at(val, (..., 1), self._p1) 
+        
+    #     return val
+
+    # @cartesian
+    # def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+    #     mid_x = (domain[0] + domain[1]) / 2
+        
+    #     # 底部中点施加 p1
+    #     is_bottom = (bm.abs(x - mid_x) < self._eps) & (bm.abs(y - domain[2]) < self._eps)
+    #     # 顶部中点施加 p2
+    #     is_top = (bm.abs(x - mid_x) < self._eps) & (bm.abs(y - domain[3]) < self._eps)
+        
+    #     val = bm.set_at(val, (is_bottom, 1), self._p1)
+    #     val = bm.set_at(val, (is_top,   1), self._p2)
+        
+    #     return val
+    
+    # @cartesian
+    # def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+    #     mid_x = (domain[0] + domain[1]) / 2  
+        
+    #     coord_bottom = (
+    #                     (bm.abs(x - mid_x) < self._eps) & 
+    #                     (bm.abs(y - domain[2]) < self._eps)
+    #                 )
+    #     coord_top = (
+    #                 (bm.abs(x - mid_x) < self._eps) & 
+    #                 (bm.abs(y - domain[3]) < self._eps)
+    #             )
+        
+    #     return coord_bottom | coord_top
+
+    # def is_concentrate_load_boundary(self) -> Callable:
+
+    #     return self.is_concentrate_load_boundary_dof
         
     
 

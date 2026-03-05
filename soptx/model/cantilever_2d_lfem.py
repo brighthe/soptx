@@ -350,13 +350,17 @@ class CantileverMiddle2d(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
     
     @cartesian
-    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
         """集中载荷 (点力)"""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
         val = bm.set_at(val, (..., 1), self._P) 
         
         return val
+    
+    def concentrate_load_bc(self) -> List[Callable]:
+        """返回集中载荷值函数列表"""
+        return [self._concentrate_load_bc]
     
     @cartesian
     def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
@@ -382,6 +386,10 @@ class CantileverMiddle2d(PDEBase):
 
         return coord
 
-    def is_concentrate_load_boundary(self) -> Callable:
+    def _is_concentrate_load_boundary(self) -> Callable:
 
         return self.is_concentrate_load_boundary_dof
+    
+    def _is_concentrate_load_boundary(self) -> List[Callable]:
+        """返回集中载荷边界标记函数列表，与 concentrate_load_bc 一一对应"""
+        return [self._is_concentrate_load_boundary_dof]

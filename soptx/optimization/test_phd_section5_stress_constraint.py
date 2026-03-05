@@ -437,11 +437,24 @@ class DensityTopOptTest(BaseLogged):
         hole_domain = [80.0, 200.0, 80.0, 200.0]
         load_width = 10.0
         P = -400.0
-    
-        E, nu = 7e4, 0.25
+
+        # =====================================================================
+        # 2. 材料参数无量纲化设置 (克服混合元离散鞍点系统数值病态的关键)
+        # =====================================================================
+        # 真实材料参数 (例如铝合金：E=70000 MPa, nu=0.25)
+        # 警告：若直接代入真实 E，将导致跳量惩罚项与柔度项数量级跨度达 O(E^2)，引发 MUMPS 内存溢出。
+        # E_real, nu_real = 7e4, 0.25
+        
+        # 归一化材料参数：强制 E = 1.0 保证系统良态，同时严格保持真实的泊松比 nu
+        # 【物理后处理映射规则】：
+        #   - 局部应力约束：Sigma_real = Sigma_calc (直接评估，无需处理！)
+        #   - 真实物理位移：U_real = U_calc / E_real
+        #   - 真实结构柔顺度：C_real = C_calc / E_real
+        E, nu = 1.0, 0.25
+        # E, nu = 7e4, 0.25
         plane_type = 'plane_stress' 
 
-        nx, ny = 5, 5
+        nx, ny = 100, 100
         mesh_type = 'uniform_crisscross_tri'
 
         from soptx.model.l_bracket_beam_hzmfem import LBracketMiddle2d
@@ -455,14 +468,14 @@ class DensityTopOptTest(BaseLogged):
         pde.init_mesh.set(mesh_type)
         displacement_mesh = pde.init_mesh(nx=nx, ny=ny)
 
-        import matplotlib.pyplot as plt
-        fig = plt.figure()
-        axes = fig.add_subplot(111)
-        displacement_mesh.add_plot(axes)
-        displacement_mesh.find_node(axes, showindex=True)
-        displacement_mesh.find_edge(axes, showindex=True)
-        displacement_mesh.find_cell(axes, showindex=True)
-        plt.show()
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure()
+        # axes = fig.add_subplot(111)
+        # displacement_mesh.add_plot(axes)
+        # displacement_mesh.find_node(axes, showindex=True)
+        # displacement_mesh.find_edge(axes, showindex=True)
+        # displacement_mesh.find_cell(axes, showindex=True)
+        # plt.show()
 
         from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
         material = IsotropicLinearElasticMaterial(
@@ -495,9 +508,9 @@ class DensityTopOptTest(BaseLogged):
                                                 )
             
 
-        space_degree = 3
+        space_degree = 2
         integration_order = space_degree*2 + 2 # 单元密度 + 三角形网格
-        use_relaxation = True
+        use_relaxation = False
         solve_method = 'mumps'
         from soptx.analysis.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
         analyzer = HuZhangMFEMAnalyzer(
@@ -506,7 +519,7 @@ class DensityTopOptTest(BaseLogged):
                                     material=material,
                                     space_degree=space_degree,
                                     integration_order=integration_order,
-                                    use_relaxation=True,
+                                    use_relaxation=use_relaxation,
                                     solve_method=solve_method,
                                     topopt_algorithm='density_based',
                                     interpolation_scheme=interpolation_scheme,
@@ -599,28 +612,28 @@ class DensityTopOptTest(BaseLogged):
             f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"过滤类型={filter_type}, 过滤半径={rmin} ")
         
-        self._log_info(f"开始密度拓扑优化, "
-            f"模型名称={pde.__class__.__name__}, \n"
-            f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
-            f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
-            f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
-            f"过滤类型={filter_regularization._filter_type}, 投影类型={filter_regularization._strategy.projection_type}, 过滤半径={rmin}, ")
+        # self._log_info(f"开始密度拓扑优化, "
+        #     f"模型名称={pde.__class__.__name__}, \n"
+        #     f"平面类型={pde.plane_type}, 外载荷类型={pde.load_type}, 边界类型={pde.boundary_type}, \n"
+        #     f"杨氏模量={pde.E}, 泊松比={pde.nu}, \n"
+        #     f"网格类型={mesh_type}, 空间阶数={space_degree}, \n" 
+        #     f"过滤类型={filter_regularization._filter_type}, 投影类型={filter_regularization._strategy.projection_type}, 过滤半径={rmin}, ")
 
         rho_opt, history = optimizer.optimize(design_variable=d, density_distribution=rho)
 
-        # ===================== 后处理 =====================
-        from soptx.optimization.stress_post import StressPostProcessor
+        # # ===================== 后处理 =====================
+        # from soptx.optimization.stress_post import StressPostProcessor
 
-        post = StressPostProcessor(
-                    analyzer=analyzer,
-                    stress_limit=100.0,         # 对应 fem.SLim
-                    solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
-                    constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
-                )
-        results = post.check_stress_constraints(rho_phys=rho_opt)
-        post.print_summary(results)
-        post.plot_density_and_stress(results)
-        post.plot_yield_surface(results)
+        # post = StressPostProcessor(
+        #             analyzer=analyzer,
+        #             stress_limit=100.0,         # 对应 fem.SLim
+        #             solid_threshold=0.5,        # 对应 MATLAB: V > 0.5
+        #             constraint_tolerance=0.01,  # 对应 MATLAB: tolerance = 0.01
+        #         )
+        # results = post.check_stress_constraints(rho_phys=rho_opt)
+        # post.print_summary(results)
+        # post.plot_density_and_stress(results)
+        # post.plot_yield_surface(results)
 
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
@@ -628,9 +641,10 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_subsec5_6_4_L_bracket")
         save_path.mkdir(parents=True, exist_ok=True)    
 
-        save_optimization_history(mesh=design_variable_mesh, 
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, problem_type='stress', save_path=str(save_path))
 
@@ -641,5 +655,5 @@ if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
     # test_subsec5_6_4_canti2d_lfem, test_subsec5_6_4_canti2d_hzmfem
-    test.run.set('test_subsec5_6_4_canti2d_hzmfem')
+    test.run.set('test_subsec5_6_4_L_bracket')
     rho_opt, history = test.run()

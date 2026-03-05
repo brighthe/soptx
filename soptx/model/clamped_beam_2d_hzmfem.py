@@ -47,8 +47,9 @@ class ClampedBeam2d(PDEBase):
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
-        self._t1 = None   
-        self._t2 = None
+        # self._t1 = None   
+        # self._t2 = None
+        self._load_initialized = False
         self._hx = None
 
     @property
@@ -190,8 +191,10 @@ class ClampedBeam2d(PDEBase):
         默认值退化为单元尺寸级别（逼近点载荷）
         仅在首次调用时计算，后续调用直接返回
         """
-        if self._t1 is not None:
+        if self._load_initialized:
             return
+        # if self._t1 is not None:
+        #     return
 
         hx = mesh.meshdata['hx']
         self._hx = hx
@@ -199,8 +202,10 @@ class ClampedBeam2d(PDEBase):
         if self._load_width is None:
             self._load_width = hx  # 默认：单元尺寸级别，逼近点载荷
 
-        self._t1 = self._p1 / self._load_width
-        self._t2 = self._p2 / self._load_width
+        self._load_initialized = True
+
+        # self._t1 = self._p1 / self._load_width
+        # self._t2 = self._p2 / self._load_width
     
     @cartesian
     def is_traction_boundary(self, points: TensorLike) -> TensorLike:
@@ -231,7 +236,10 @@ class ClampedBeam2d(PDEBase):
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
 
-        if self._t1 is None:
+        # if self._t1 is None:
+        #     return val
+        
+        if not self._load_initialized:
             return val
 
         # 边级中心坐标 (NEb, 2)
