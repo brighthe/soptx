@@ -242,9 +242,9 @@ class DisplacementInverterUpper2d(PDEBase):
     ###########################################################################
 
     @cartesian
-    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
         """
-        集中载荷值
+        集中载荷（点力）值函数
 
         输入端 (0, 0) 处施加水平向右的力 F_in
         """
@@ -254,11 +254,29 @@ class DisplacementInverterUpper2d(PDEBase):
         val = bm.set_at(val, (..., 0), self._f_in)
 
         return val
+    
+    def concentrate_load_bc(self) -> List[Callable]:
+        """返回所有集中载荷值函数列表，单点情况长度为 1"""
+        return [self._concentrate_load_bc]
+
+    # @cartesian
+    # def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+    #     """
+    #     集中载荷值
+
+    #     输入端 (0, 0) 处施加水平向右的力 F_in
+    #     """
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     # 力作用在 x 方向 (水平向右为正)
+    #     val = bm.set_at(val, (..., 0), self._f_in)
+
+    #     return val
 
     @cartesian
-    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def _is_concentrate_load_boundary(self, points: TensorLike) -> TensorLike:
         """
-        判断集中载荷作用点
+        集中载荷作用位置判定函数
 
         输入端位置: 对称轴左端 (0, 0) - 左下角
         """
@@ -269,10 +287,29 @@ class DisplacementInverterUpper2d(PDEBase):
         on_left_boundary = (bm.abs(x - domain[0]) < self._eps)    # x = 0
 
         return on_bottom_boundary & on_left_boundary
+    
+    def is_concentrate_load_boundary(self) -> List[Callable]:
+        """返回所有集中载荷阈值函数列表，单点情况长度为 1"""
+        return [self._is_concentrate_load_boundary]
 
-    def is_concentrate_load_boundary(self) -> Callable:
-        """返回集中载荷边界判断函数"""
-        return self.is_concentrate_load_boundary_dof
+    # @cartesian
+    # def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     """
+    #     判断集中载荷作用点
+
+    #     输入端位置: 对称轴左端 (0, 0) - 左下角
+    #     """
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     on_bottom_boundary = (bm.abs(y - domain[2]) < self._eps)  # y = 0
+    #     on_left_boundary = (bm.abs(x - domain[0]) < self._eps)    # x = 0
+
+    #     return on_bottom_boundary & on_left_boundary
+
+    # def is_concentrate_load_boundary(self) -> Callable:
+    #     """返回集中载荷边界判断函数"""
+    #     return self.is_concentrate_load_boundary_dof
 
     ###########################################################################
     # 伴随载荷边界条件 - 用于柔顺机构优化

@@ -202,13 +202,14 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu' 
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec4_6_4_L_bracket_middle/")
+        save_path = Path(f"{base_dir}/subsec4_6_4_L_bracket_middle/json")
         save_path.mkdir(parents=True, exist_ok=True)    
     
         # stress_cons_mtop_d16_k2_r7_5_true, stress_cons_mtop_d16_k4_r5_true
-        histories = load_history_data(save_path, labels=['stress_cons_mtop_d16_k4_r5_true']) 
+        histories = load_history_data(save_path, labels=['stress_constraint_stop_k1']) 
 
-        plot_optimization_history(histories['stress_cons_mtop_d16_k4_r5_true'], problem_type='stress', save_path=str(save_path))
+        plot_optimization_history(histories['stress_constraint_stop_k1'], 
+                                  problem_type='stress', save_path=str(save_path))
 
         bm.set_backend('numpy') # numpy, pytorch
         # bm.set_default_device('cpu') # cpu, cuda
@@ -228,7 +229,7 @@ class DensityTopOptTest(BaseLogged):
         load_width = 10.0
         plane_type = 'plane_stress' 
 
-        rmin = 5.0 # 5.0, 7.5, 10.0
+        rmin = 10.0 # 5.0, 7.5, 10.0
         nx, ny = 100, 100
         # nx, ny = 200, 200
         mesh_type = 'uniform_quad_Lshape' # uniform_quad_Lshape, uniform_crisscross_tri_Lshape
@@ -287,7 +288,7 @@ class DensityTopOptTest(BaseLogged):
                                                 )
             assembly_method = 'fast'
         elif density_location in ['element_multiresolution']:
-            sub_density_element = 16
+            sub_density_element = 4 # 4, 16
             import math
             sub_x, sub_y = int(math.sqrt(sub_density_element)), int(math.sqrt(sub_density_element))
             pde.init_mesh.set(mesh_type)
@@ -301,7 +302,7 @@ class DensityTopOptTest(BaseLogged):
             # 'standard', 'standard_multiresolution', 'voigt', 'voigt_multiresolution'
             assembly_method = 'voigt_multiresolution'
             
-        space_degree = 4
+        space_degree = 1
         integration_order = space_degree + 1 # 张量网格
         # integration_order = space_degree**2 + 2  # 单纯形网格
 
@@ -369,12 +370,14 @@ class DensityTopOptTest(BaseLogged):
                 'beta': 1.0, 'beta_max': 10.0,
                 'continuation_iter': 5, 'beta_increment': 1.0
             }
+        filter_exponent = 3
         from soptx.regularization.filter import Filter
         filter_regularization = Filter(
                                     design_mesh=design_variable_mesh,
                                     filter_type=filter_type,
                                     rmin=rmin,
                                     density_location=density_location,
+                                    filter_exponent=filter_exponent,
                                     disp_mesh=displacement_mesh,
                                     projection_params=projection_config,
                                 )
@@ -401,18 +404,18 @@ class DensityTopOptTest(BaseLogged):
             f"惩罚因子={penalty_factor}, 惩罚因子延续={use_penalty_continuation}, 空材料杨氏模量={void_youngs_modulus} \n"
             f"应力约束={stress_limit}, 增广拉格朗日罚参数 mu_0={mu_0}, mu_max = {mu_max} \n" 
             f"初始构型={relative_density}, 密度分布={density_location} \n"
-            f"过滤类型={filter_regularization._filter_type}, 过滤半径={rmin}, ")
+            f"过滤类型={filter_regularization._filter_type}, 过滤半径={rmin}, 过滤指数={filter_exponent} ")
         
-        current_file = Path(__file__)
-        base_dir = current_file.parent.parent / 'vtu' 
-        base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec4_6_4_L_bracket_middle")
-        save_path.mkdir(parents=True, exist_ok=True)    
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu' 
+        # base_dir = str(base_dir)
+        # save_path = Path(f"{base_dir}/subsec4_6_4_L_bracket_middle")
+        # save_path.mkdir(parents=True, exist_ok=True)    
     
-        # stress_cons_mtop_d16_k2_r7_5_true
-        histories = load_history_data(save_path, labels=['stress_cons_mtop_d16_k2_r7_5_true']) 
+        # # stress_cons_mtop_d16_k2_r7_5_true
+        # histories = load_history_data(save_path, labels=['stress_cons_mtop_d16_k2_r7_5_true']) 
 
-        rho_opt = histories['stress_cons_mtop_d16_k2_r7_5_true']['density']['values']  # 获取最后一次迭代的密度分布
+        # rho_opt = histories['stress_cons_mtop_d16_k2_r7_5_true']['density']['values']  # 获取最后一次迭代的密度分布
 
         # ===================== 后处理 =====================
         from soptx.optimization.stress_post import StressPostProcessor

@@ -12,14 +12,34 @@ class FilterMatrixBuilder:
     def __init__(self, 
                 mesh: HomogeneousMesh, 
                 rmin: float, 
-                density_location: str, 
+                density_location: str,
+                filter_exponent: int = 1, 
             ) -> None:
+        """
+        Parameters
+        ----------
+        mesh : HomogeneousMesh
+            计算网格
+        rmin : float
+            过滤半径 (物理长度尺度), 必须为正数
+        density_location : str
+            密度变量的位置, 可选 'element', 'element_multiresolution', 'node'
+        filter_exponent : int, optional
+            过滤权重的衰减速率指数, 默认为 1 (线性过滤).
+            控制过滤权重随距离的衰减速率:
+                - q=1: 线性衰减, w = max(0, 1 - d/rmin), 过滤效果较平滑
+                - q>1: 加速衰减, w = (1 - d/rmin)^q, 过滤效果更集中于邻近单元
+            仅对 _compute_weighted_matrix_general 生效,
+            2D/3D 均匀网格的专用方法暂不支持该参数.
+        """
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
         
         self._mesh = mesh
         self._rmin = rmin
         self._density_location = density_location
+
+        self._filter_exponent = filter_exponent
 
         self._device = mesh.device
 
@@ -28,7 +48,7 @@ class FilterMatrixBuilder:
         mesh_type = self._mesh.meshdata['mesh_type']
         nx, ny, nz = self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata.get('nz', 1)
         NC = self._mesh.number_of_cells()
-        if mesh_type == 'uniform_quad' or nx * ny == NC:
+        if (mesh_type == 'uniform_quad' or nx * ny == NC) and self._density_location in ['element', 'element_multiresolution']:
             H = self._compute_weighted_matrix_2d(
                                         self._rmin,
                                         self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
@@ -36,7 +56,7 @@ class FilterMatrixBuilder:
                                     )
             return H
 
-        elif mesh_type == 'uniform_hex' or nx * ny * nz == NC:
+        elif (mesh_type == 'uniform_hex' or nx * ny * nz == NC) and self._density_location in ['element', 'element_multiresolution']:
             H = self._compute_weighted_matrix_3d(
                                         self._rmin,
                                         self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata['nz'],
@@ -47,14 +67,15 @@ class FilterMatrixBuilder:
         else:
             H = self._compute_weighted_matrix_general(
                                         rmin=self._rmin, 
-                                        domain=self._mesh.meshdata['domain']
+                                        domain=self._mesh.meshdata['domain'],
+                                        q=self._filter_exponent,
                                     )
             return H
         
     def _compute_weighted_matrix_general(self, 
                                         rmin: float,
                                         domain: List[float],
-                                        q: int = 3,
+                                        q: int = 1,
                                         periodic: List[bool]=[False, False, False],
                                         enable_timing: bool = False,
                                     ) -> Tuple[COOTensor, TensorLike]:

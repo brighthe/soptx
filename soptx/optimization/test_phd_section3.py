@@ -22,13 +22,13 @@ class DensityTopOptTest(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-    @variantmethod('test_subsec3_6_2_linear_elastic_2d')
+    @variantmethod('test_linear_elastic_2d')
     def run(self):
         # 三角函数真解 + 齐次 Dirichlet + 非齐次 Neumann
         lam, mu = 1.0, 0.5
         plane_type = 'plane_stress' # 'plane_stress' or 'plane_strain'
 
-        space_degree = 4
+        space_degree = 3
 
         mesh_type_quad = 'uniform_quad' # 'uniform_aligned_tri', 'uniform_quad'
         from soptx.model.linear_elastic_2d_lfem import LagfemData2d2
@@ -76,7 +76,7 @@ class DensityTopOptTest(BaseLogged):
                                     space_degree=space_degree,
                                     integration_order=integration_order,
                                     assembly_method='standard',
-                                    solve_method='cg',
+                                    solve_method='mumps',
                                     topopt_algorithm=None,
                                     interpolation_scheme=None
                                 )
@@ -99,74 +99,152 @@ class DensityTopOptTest(BaseLogged):
         print("order_l2:\n", bm.log2(errorMatrix_quad[0, :-1] / errorMatrix_quad[0, 1:]))
         print("order_h1:\n", bm.log2(errorMatrix_quad[1, :-1] / errorMatrix_quad[1, 1:]))
 
-        errorMatrix_tri = bm.zeros((2, maxit), dtype=bm.float64)
-        for i in range(maxit):
-            N = 2**(i+1)
+        return uh
+    
+    @run.register('test_subsec3_3_4_linear_elastic_2d')
+    def run(self) -> Union[TensorLike, OptimizationHistory]:
+        lam, mu = 1.0, 0.5
+        plane_type = 'plane_stress'
+        degrees = [1, 2, 3, 4]
+        maxit = 5
 
-            lfa = LagrangeFEMAnalyzer(
-                                    disp_mesh=mesh_tri,
-                                    pde=pde_tri, 
-                                    material=material_tri, 
-                                    space_degree=space_degree,
-                                    integration_order=integration_order_tri,
-                                    assembly_method='standard',
-                                    solve_method='mumps',
-                                    topopt_algorithm=None,
-                                    interpolation_scheme=None
-                                )
-                    
-            uh = lfa.solve_displacement(rho_val=None)
+        from soptx.model.linear_elastic_2d_lfem import LagfemData2d2
+        from soptx.interpolation.linear_elastic_material import IsotropicLinearElasticMaterial
+        from soptx.analysis.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 
-            NDof[i] = lfa.tensor_space.number_of_global_dofs()
-            e_l2 = mesh_tri.error(uh, pde_tri.displacement_solution)
-            e_h1 = mesh_tri.error(uh.grad_value, pde_tri.grad_displacement_solution)
+        all_error_matrices = []
+        h = bm.zeros(maxit, dtype=bm.float64)
 
-            h[i] = 1/N
-            errorMatrix_tri[0, i] = e_l2
-            errorMatrix_tri[1, i] = e_h1
+        for space_degree in degrees:
+            pde = LagfemData2d2(domain=[0, 1, 0, 1], lam=lam, mu=mu, plane_type=plane_type)
+            pde.init_mesh.set('uniform_aligned_tri') # 'uniform_aligned_tri', 'uniform_quad'
+            mesh = pde.init_mesh(nx=2, ny=2)
 
-            if i < maxit - 1:
-                mesh_tri.uniform_refine()
+            material = IsotropicLinearElasticMaterial(
+                lame_lambda=pde.lam,
+                shear_modulus=pde.mu,
+                plane_type=pde.plane_type,
+                enable_logging=False
+            )
+            integration_order = space_degree + 1
+            errorMatrix = bm.zeros((2, maxit), dtype=bm.float64)
 
-        print("errorMatrix_tri:\n", errorType, "\n", errorMatrix_tri)
-        print("NDof:", NDof)
-        print("order_l2:\n", bm.log2(errorMatrix_tri[0, :-1] / errorMatrix_tri[0, 1:]))
-        print("order_h1:\n", bm.log2(errorMatrix_tri[1, :-1] / errorMatrix_tri[1, 1:]))
+            for i in range(maxit):
+                N = 2 ** (i + 1)
+                lfa = LagrangeFEMAnalyzer(
+                    disp_mesh=mesh,
+                    pde=pde,
+                    material=material,
+                    space_degree=space_degree,
+                    integration_order=integration_order,
+                    assembly_method='standard',
+                    solve_method='mumps',
+                    topopt_algorithm=None,
+                    interpolation_scheme=None
+                )
+                uh = lfa.solve_state(rho_val=None)['displacement']
 
+                errorMatrix[0, i] = mesh.error(uh, pde.displacement_solution)
+                errorMatrix[1, i] = mesh.error(uh.grad_value, pde.grad_displacement_solution)
+                h[i] = 1 / N
+
+                if i < maxit - 1:
+                    mesh.uniform_refine()
+
+            all_error_matrices.append(errorMatrix)
+            print(f"k={space_degree}, L2 orders:", bm.log2(errorMatrix[0, :-1] / errorMatrix[0, 1:]))
+            print(f"k={space_degree}, H1 orders:", bm.log2(errorMatrix[1, :-1] / errorMatrix[1, 1:]))
+
+        # ---- 拼接误差矩阵 (8, maxit) ----
+        errorMatrix_all = bm.concatenate(all_error_matrices, axis=0)
+
+        # ---- errorType / optionlist：每个阶次 2 条，共 8 条，与矩阵行数严格对应 ----
+        errorType = []
+        optionlist = []
+        for k in degrees:
+            errorType.append(rf'$k={k}$, $L^2$')
+            errorType.append(rf'$k={k}$, $H^1$')
+            optionlist.append('k-o')   # L2 占位，调用后再覆盖
+            optionlist.append('k--s')  # H1 占位
+
+        # ---- 字体配置 ----
+        from matplotlib import font_manager
+        import matplotlib.lines as mlines
         import matplotlib.pyplot as plt
-        from soptx.utils.show import showmultirate
 
-        errorMatrix = bm.concatenate([errorMatrix_tri, errorMatrix_quad], axis=0)
+        PATH_ZH = '/usr/share/fonts/suanhai_fonts/Sim/simhei.ttf'
+        PATH_EN = '/usr/share/fonts/suanhai_fonts/Times/times.ttf'
+        FONT_ZH_L = font_manager.FontProperties(fname=PATH_ZH, size=36)
+        FONT_ZH_S = font_manager.FontProperties(fname=PATH_ZH, size=28)
+        FONT_EN_T = font_manager.FontProperties(fname=PATH_EN, size=34)
 
-        errorType = [
-            r'$\| \boldsymbol{u} - \boldsymbol{u}_h \|_{0}$ (Tri)',
-            r'$| \boldsymbol{u} - \boldsymbol{u}_h |_{1}$ (Tri)',
-            r'$\| \boldsymbol{u} - \boldsymbol{u}_h \|_{0}$ (Quad)',
-            r'$| \boldsymbol{u} - \boldsymbol{u}_h |_{1}$ (Quad)',
-        ]
-        
-        optionlist = ['k-o', 'k--s', 'r-o', 'r--s']
+        # ---- 配色与 marker ----
+        colors  = ['#000000',  # 黑
+                '#1f77b4',  # 蓝
+                '#d62728',  # 红
+                '#7b2d8b']  # 深紫
+        markers = ['o', 's', '^', 'D']
+
         plt.rcParams.update({
-            'font.size': 36,
-            'axes.labelsize': 42,
+            'font.size':       34,
+            'axes.labelsize':  36,
             'xtick.labelsize': 34,
             'ytick.labelsize': 34,
-            'legend.fontsize': 34,
+            'legend.fontsize': 28,
         })
 
+        # ---- 绘图 ----
         fig = plt.figure(figsize=(16, 11))
-        ax = fig.gca()
-        showmultirate(ax, 2, h, errorMatrix, errorType, 
-                    optionlist=optionlist, propsize=34, lw=3.5, ms=14)
+        ax  = fig.gca()
 
-        ax.set_xlabel(r'Mesh size $h$', fontsize=42)
-        ax.set_ylabel(r'Error', fontsize=42)
-        ax.legend(loc='lower right', fontsize=34, framealpha=0.9, ncol=2)
+        from soptx.utils.show import showmultirate
+        showmultirate(ax, 2, h, errorMatrix_all, errorType,
+                    optionlist=optionlist, propsize=30, lw=3.5, ms=14)
+
+        # ---- 调用后手动覆盖数据曲线样式 ----
+        data_lines = [l for l in ax.get_lines() if len(l.get_xdata()) == maxit]
+        for idx, line in enumerate(data_lines):
+            deg_idx, is_h1 = divmod(idx, 2)
+            line.set_color(colors[deg_idx])
+            line.set_marker(markers[deg_idx])
+            line.set_linestyle('--' if is_h1 else '-')
+            line.set_linewidth(3.5)
+            line.set_markersize(14)
+
+        # ---- 轴标签 ----
+        ax.set_xlabel('网格尺寸', fontproperties=FONT_ZH_L)
+        ax.set_ylabel('误差范数', fontproperties=FONT_ZH_L)
+
+        # ---- 刻度字体 ----
+        for tick in ax.get_xticklabels() + ax.get_yticklabels():
+            tick.set_fontproperties(FONT_EN_T)
+
+        # ---- 简化图例 ----
+        color_handles = [
+            mlines.Line2D([], [], color=c, marker=mk, lw=3.5, ms=12,
+                        linestyle='-', label=rf'$k={k}$')
+            for c, mk, k in zip(colors, markers, degrees)
+        ]
+        style_handles = [
+            mlines.Line2D([], [], color='#444444', lw=3.5, linestyle='-',
+                        marker='o', ms=10,
+                        label=r'$\|\boldsymbol{u}-\boldsymbol{u}_h\|_{0,\Omega}$'),
+            mlines.Line2D([], [], color='#444444', lw=3.5, linestyle='--',
+                        marker='s', ms=10,
+                        label=r'$\|\nabla(\boldsymbol{u}-\boldsymbol{u}_h)\|_{0,\Omega}$'),
+        ]
+        dummy = mlines.Line2D([], [], color='none', label='')
+        legend_handles = color_handles + [dummy, dummy] + style_handles
+
+        leg = ax.legend(handles=legend_handles, loc='lower right',
+                        ncol=2, framealpha=0.9)
+        for text in leg.get_texts():
+            text.set_fontproperties(FONT_ZH_S)
 
         plt.tight_layout()
+        plt.savefig('convergence_tri_k1234.png', dpi=150)
         plt.show()
-
-        return uh
+        print("----------------")
         
     
     @run.register('test_mbb_2d_subsection_3_6_2')
@@ -314,7 +392,9 @@ class DensityTopOptTest(BaseLogged):
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
         save_path = Path(f"{base_dir}/section3_6_2_half_mbb")
-        save_path.mkdir(parents=True, exist_ok=True)    
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        save_history_data(history=history, save_path=str(save_path/'json'), label='convergence')    
 
         save_optimization_history(mesh=design_variable_mesh, 
                                 history=history, 
@@ -327,6 +407,17 @@ class DensityTopOptTest(BaseLogged):
 
     @run.register('test_subsec3_6_3_half_mbb_right_2d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        save_path = base_dir / 'subsec3_6_3_half_mbb2d' / 'json'
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        print(list(save_path.glob('history_*.json')))
+    
+        histories = load_history_data(save_path, labels=['convergence_cell_k4'])
+
+        plot_optimization_history(histories['convergence_cell_k4'], save_path=f'{save_path}/convergence.png')
+    
         domain = [0, 60.0, 0, 20.0]
         P = -1.0
         E, nu = 1.0, 0.3
@@ -339,11 +430,11 @@ class DensityTopOptTest(BaseLogged):
         mesh_type = 'uniform_quad'
         # mesh_type = 'uniform_aligned_tri'
 
-        space_degree = 1
+        space_degree = 4
 
         # integration_order = space_degree + 1 # 单元密度 + 四边形网格
-        # integration_order = space_degree + 2 # 节点密度 + 四边形网格
-        integration_order = space_degree*2 + 2  # 单元密度 + 三角形网格
+        integration_order = space_degree + 2 # 节点密度 + 四边形网格
+        # integration_order = space_degree*2 + 2  # 单元密度 + 三角形网格
         # integration_order = space_degree*2 + 3  # 节点密度 + 三角形网格
 
         volume_fraction = 0.5
@@ -360,7 +451,7 @@ class DensityTopOptTest(BaseLogged):
         change_tolerance = 1e-2
         use_penalty_continuation = False
 
-        filter_type = 'sensitivity' # 'none', 'sensitivity', 'density'
+        filter_type = 'none' # 'none', 'sensitivity', 'density'
         rmin = 2.4
 
         from soptx.model.mbb_beam_2d_lfem import HalfMBBBeamRight2d
@@ -473,13 +564,16 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec3_6_3_")
-        save_path.mkdir(parents=True, exist_ok=True)    
+        save_path = Path(f"{base_dir}/test_subsec3_6_3_lfem")
+        save_path.mkdir(parents=True, exist_ok=True)
 
-        save_optimization_history(mesh=design_variable_mesh, 
-                                history=history, 
-                                density_location=density_location,
-                                save_path=str(save_path))
+        save_history_data(history=history, save_path=str(save_path/'json'), label='convergence')
+
+        save_optimization_history(design_mesh=design_variable_mesh, 
+                        history=history, 
+                        density_location=density_location,
+                        disp_mesh=displacement_mesh,
+                        save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
@@ -648,16 +742,18 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/subsec3_6_6_disp_inverter/json")
         save_path.mkdir(parents=True, exist_ok=True)    
     
-        histories = load_history_data(save_path, labels=['element', 'node'])
+        histories = load_history_data(save_path, labels=['node'])
 
-        # 重命名键以美化图例
-        histories = {'element': histories['element'], 'node': histories['node']}
+        plot_optimization_history(histories['node'], problem_type='mechanism', save_path=f'{save_path}/convergence.png')
 
-        plot_optimization_history_comparison(
-                                histories,
-                                save_path=f'{save_path}/convergence_comparison.png',
-                                plot_type='objective'
-                            )
+        # # 重命名键以美化图例
+        # histories = {'element': histories['element'], 'node': histories['node']}
+
+        # plot_optimization_history_comparison(
+        #                         histories,
+        #                         save_path=f'{save_path}/convergence_comparison.png',
+        #                         plot_type='objective'
+        #                     )
     
         domain = [0, 40.0, 0, 20.0]
         E, nu = 1.0, 0.3
@@ -811,22 +907,34 @@ class DensityTopOptTest(BaseLogged):
         current_file = Path(__file__)
         base_dir = current_file.parent.parent / 'vtu'
         base_dir = str(base_dir)
-        save_path = Path(f"{base_dir}/subsec3_6_6_")
+        save_path = Path(f"{base_dir}/test_subsec_3_6_6_disp_inverter_upper_2d")
         save_path.mkdir(parents=True, exist_ok=True)    
 
         save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
 
-        save_optimization_history(mesh=design_variable_mesh, 
-                                history=history, 
-                                density_location=density_location,
-                                save_path=str(save_path))
+        save_optimization_history(design_mesh=design_variable_mesh, 
+                        history=history, 
+                        density_location=density_location,
+                        disp_mesh=displacement_mesh,
+                        save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
         return rho_opt, history
 
 
-    @run.register('test_subsec3_6_5_cantilever_3d')
+    @run.register('test_subsec3_6_5_canti3d')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        # current_file = Path(__file__)
+        # base_dir = current_file.parent.parent / 'vtu' 
+        # save_path = base_dir / 'subsec3_6_5_canti3d' / 'json'
+        # save_path.mkdir(parents=True, exist_ok=True)
+
+        # print(list(save_path.glob('history_*.json')))
+    
+        # histories = load_history_data(save_path, labels=['convergence_k1'])
+
+        # plot_optimization_history(histories['convergence_k1'], save_path=f'{save_path}/convergence.png')
+
         # current_file = Path(__file__)
         # base_dir = current_file.parent.parent / 'vtu' 
         # base_dir = str(base_dir)
@@ -854,8 +962,8 @@ class DensityTopOptTest(BaseLogged):
         # mesh_type = 'uniform_tet'
 
         space_degree = 2
-        # integration_order = space_degree + 1 # 单元密度 + 六面体网格
-        integration_order = space_degree + 2 # 节点密度 + 六面体网格
+        integration_order = space_degree + 1 # 单元密度 + 六面体网格
+        # integration_order = space_degree + 2 # 节点密度 + 六面体网格
 
         volume_fraction = 0.3
         penalty_factor = 3.0
@@ -987,11 +1095,12 @@ class DensityTopOptTest(BaseLogged):
         save_path = Path(f"{base_dir}/test_cantilever_3d")
         save_path.mkdir(parents=True, exist_ok=True)    
 
-        # save_history_data(history=history, save_path=str(save_path/'json'), label='k1')
+        save_history_data(history=history, save_path=str(save_path/'json'), label='convergence_k1')
 
-        save_optimization_history(mesh=design_variable_mesh, 
+        save_optimization_history(design_mesh=design_variable_mesh, 
                                 history=history, 
                                 density_location=density_location,
+                                disp_mesh=displacement_mesh,
                                 save_path=str(save_path))
         plot_optimization_history(history, save_path=str(save_path))
 
@@ -1001,5 +1110,5 @@ class DensityTopOptTest(BaseLogged):
 if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
-    test.run.set('test_subsec3_6_5_cantilever_3d')
+    test.run.set('test_linear_elastic_2d')
     rho_opt, history = test.run()

@@ -140,7 +140,7 @@ class LBracketMiddle2d(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
     
     @cartesian
-    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
         """节点载荷边界条件
     
         返回总载荷值，实际使用时会自动均分到所有满足条件的节点上"""
@@ -150,8 +150,13 @@ class LBracketMiddle2d(PDEBase):
 
         return val
     
+    def concentrate_load_bc(self) -> List[Callable]:
+        """返回所有集中载荷值函数列表，单点情况长度为 1"""
+        return [self._concentrate_load_bc]
+
     @cartesian
-    def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+    def _is_concentrate_load_boundary(self, points: TensorLike) -> TensorLike:
+        """集中载荷作用位置判定函数"""
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -174,10 +179,50 @@ class LBracketMiddle2d(PDEBase):
             )
 
         return coord
-    
-    def is_concentrate_load_boundary(self) -> Callable:
 
-        return self.is_concentrate_load_boundary_dof
+    def is_concentrate_load_boundary(self) -> List[Callable]:
+        """返回所有集中载荷阈值函数列表，单点情况长度为 1"""
+        return [self._is_concentrate_load_boundary]
+    
+    # @cartesian
+    # def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+    #     """节点载荷边界条件
+    
+    #     返回总载荷值，实际使用时会自动均分到所有满足条件的节点上"""
+    #     kwargs = bm.context(points)
+    #     val = bm.zeros(points.shape, **kwargs)
+    #     val = bm.set_at(val, (..., 1), self._P)
+
+    #     return val
+    
+    # @cartesian
+    # def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+    #     domain = self.domain
+    #     x, y = points[..., 0], points[..., 1]
+
+    #     # 右侧边缘下部矩形的中点高度
+    #     # 下部矩形 y 范围为 [domain[2], hole_domain[2]]，中点为二者均值
+    #     middle_y = (domain[2] + self._hole_domain[2]) / 2.0
+    #     on_right_edge = bm.abs(x - domain[1]) < self._eps
+
+    #     if self._load_width is None:
+    #         # 单点载荷模式：集中力施加在右侧边缘中点处
+    #         coord = on_right_edge & (bm.abs(y - middle_y) < self._eps)
+    #     else:
+    #         # 分布载荷模式：以中点为中心，上下各扩展 load_width / 2
+    #         # 闭区间 y ∈ [middle_y - load_width/2, middle_y + load_width/2]
+    #         half_width = self._load_width / 2.0
+    #         coord = (
+    #             on_right_edge &
+    #             (y >= middle_y - half_width - self._eps) &
+    #             (y <= middle_y + half_width + self._eps)
+    #         )
+
+    #     return coord
+    
+    # def is_concentrate_load_boundary(self) -> Callable:
+
+    #     return self.is_concentrate_load_boundary_dof
     
 
 class LBracketCorner2d(PDEBase):

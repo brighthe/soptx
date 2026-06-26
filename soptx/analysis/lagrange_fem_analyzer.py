@@ -5,7 +5,6 @@ from fealpy.typing import TensorLike
 from fealpy.mesh import SimplexMesh, HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from fealpy.fem import BilinearForm, LinearForm
-from fealpy.decorator import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
 from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
@@ -169,10 +168,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if rho_val is not None:
                 self._log_warning("标准有限元分析模式下忽略相对密度 rho")
         
-            coef = None
+            relative_stiffness = None
 
-            self._cached_E_rho = None
-            self._cached_coef = None
+            self._cached_stiffness_absolute = None
+            self._cached_stiffness_relative = None
         
         elif self._topopt_algorithm == 'density_based':
             if rho_val is None:

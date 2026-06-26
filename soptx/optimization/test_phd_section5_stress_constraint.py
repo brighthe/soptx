@@ -19,6 +19,18 @@ class DensityTopOptTest(BaseLogged):
 
     @variantmethod('test_subsec5_6_4_canti2d_hzmfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        # stress_cons_mtop_d16_k2_r7_5_true, stress_cons_mtop_d16_k4_r5_true
+        histories = load_history_data(save_path, labels=['hzmfem_k2']) 
+
+        plot_optimization_history(histories['hzmfem_k2'], 
+                                  problem_type='stress', save_path=str(save_path))
+    
         domain = [0, 80, 0, 40]
         P = -400.0
 
@@ -228,6 +240,18 @@ class DensityTopOptTest(BaseLogged):
     
     @run.register('test_subsec5_6_4_canti2d_lfem')
     def run(self) -> Union[TensorLike, OptimizationHistory]:
+        current_file = Path(__file__)
+        base_dir = current_file.parent.parent / 'vtu' 
+        base_dir = str(base_dir)
+        save_path = Path(f"{base_dir}/subsec5_6_4_canti2d_middle/json")
+        save_path.mkdir(parents=True, exist_ok=True)    
+    
+        # stress_cons_mtop_d16_k2_r7_5_true, stress_cons_mtop_d16_k4_r5_true
+        histories = load_history_data(save_path, labels=['lfem_k2']) 
+
+        plot_optimization_history(histories['lfem_k2'], 
+                                  problem_type='stress', save_path=str(save_path))
+        
         domain = [0, 80, 0, 40]
         P = -400.0
 
@@ -655,5 +679,5 @@ if __name__ == "__main__":
     test = DensityTopOptTest(enable_logging=True)
 
     # test_subsec5_6_4_canti2d_lfem, test_subsec5_6_4_canti2d_hzmfem
-    test.run.set('test_subsec5_6_4_L_bracket')
+    test.run.set('test_subsec5_6_4_canti2d_lfem')
     rho_opt, history = test.run()

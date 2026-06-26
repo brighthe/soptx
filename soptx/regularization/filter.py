@@ -34,12 +34,40 @@ class Filter(BaseLogged):
                 filter_type: Literal['none', 'sensitivity', 'density', 'projection'],
                 rmin: Optional[float] = None,
                 density_location: Optional[str] = None,
+                filter_exponent: int = 1, 
                 disp_mesh: Optional[HomogeneousMesh] = None, 
                 projection_params: Optional[Dict] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
             ) -> None:
-
+        """
+        Parameters
+        ----------
+        design_mesh : HomogeneousMesh
+            设计变量网格
+        filter_type : {'none', 'sensitivity', 'density', 'projection'}
+            过滤方法类型
+        rmin : float, optional
+            过滤半径 (物理长度尺度), 必须为正数.
+            当 filter_type != 'none' 时必须提供.
+        density_location : str, optional
+            密度变量的位置, 可选 'element', 'element_multiresolution', 'node'
+        filter_exponent : int, optional
+            过滤权重的衰减速率指数, 默认为 1 (线性过滤).
+            控制过滤权重随距离的衰减速率:
+                - q=1: 线性衰减, w = max(0, 1 - d/rmin), 过滤效果较平滑
+                - q>1: 加速衰减, w = (1 - d/rmin)^q, 过滤效果更集中于邻近单元
+            仅对非均匀网格的通用过滤方法生效,
+            2D/3D 均匀网格的专用方法暂不支持该参数.
+        disp_mesh : HomogeneousMesh, optional
+            位移网格, 当 density_location 为 'element_multiresolution' 时必须提供
+        projection_params : dict, optional
+            投影过滤的参数, 仅当 filter_type='projection' 时生效
+        enable_logging : bool, optional
+            是否启用日志, 默认为 True
+        logger_name : str, optional
+            日志记录器名称
+        """
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
         self._design_mesh = design_mesh
@@ -47,6 +75,7 @@ class Filter(BaseLogged):
 
         self._rmin = rmin
         self._density_location = density_location
+        self._filter_exponent = filter_exponent
 
         self._disp_mesh = disp_mesh
 
@@ -61,6 +90,7 @@ class Filter(BaseLogged):
                                     mesh=self._design_mesh, 
                                     rmin=self._rmin, 
                                     density_location=self._density_location,
+                                    filter_exponent=self._filter_exponent,
                                 )
             self._H = builder.build()
             self._cell_measure = self._design_mesh.entity_measure('cell')

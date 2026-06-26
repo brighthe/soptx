@@ -299,6 +299,7 @@ def plot_optimization_history(history,
     ----------
     problem_type : str
         'compliance' : 柔顺度最小化 + 体积约束，绘制柔顺度和体积分数
+        'mechanism'  : 柔顺机制设计 + 提及分约束，绘制输出位移和体积分数
         'stress'     : 体积最小化 + 应力约束，绘制体积分数和最大归一化应力
     history : dict 或带属性的对象均可
     """
@@ -326,6 +327,18 @@ def plot_optimization_history(history,
         left_color  = SOPTX_COLORS['compliance']
         right_color = SOPTX_COLORS['volume']
 
+    elif problem_type == 'mechanism':
+        try:
+            left_values  = np.array(scalar_histories['compliance'])
+            right_values = np.array(scalar_histories['volfrac'])
+        except KeyError as e:
+            print(f"数据解析错误: 找不到键值 {e}")
+            return
+        left_label  = r'输出位移 $u_{\mathrm{out}}$'
+        right_label = '体积分数 $V_f$'
+        left_color  = SOPTX_COLORS['compliance']     
+        right_color = SOPTX_COLORS['volume']
+
     elif problem_type == 'stress':
         try:
             left_values  = np.array(scalar_histories['volfrac'])
@@ -334,7 +347,8 @@ def plot_optimization_history(history,
             print(f"数据解析错误: 找不到键值 {e}")
             return
         left_label  = '体积分数 $V_f$'
-        right_label = '最大归一化应力 $\\sigma_{max}/\\sigma_{lim}$'
+        # right_label = '最大归一化应力 $\\sigma_{max}/\\sigma_{lim}$'
+        right_label = '最大归一化应力 $\\sigma_{max}/\\bar{\\sigma}$'
         left_color  = SOPTX_COLORS['volume']
         right_color = SOPTX_COLORS['stress']
 
@@ -355,6 +369,12 @@ def plot_optimization_history(history,
                    linewidth=linewidth, label=left_label)
     ax1.tick_params(axis='y', labelcolor=left_color)
     ax1.grid(True, linestyle='--', alpha=0.5)
+
+    # # ↓↓↓ 新增：上限向上取整到最近的 200 的倍数，下限固定为 0
+    # l_max = np.max(left_values)
+    # step = 200
+    # nice_max = np.ceil(l_max / step) * step
+    # ax1.set_ylim(0, nice_max)
 
     if FONT_EN:
         for label in ax1.get_xticklabels():
@@ -381,13 +401,20 @@ def plot_optimization_history(history,
                     linewidth=1.5, alpha=0.7, label='约束边界 $\\sigma=1$')
 
     # ------------------------------------------
-    # 智能锁定右轴范围
+    # 智能锁定右轴范围（统一留白，避免曲线贴顶/贴底）
     # ------------------------------------------
     r_min, r_max = np.min(right_values), np.max(right_values)
-    if (r_max - r_min) < 0.01:
+    r_span = r_max - r_min
+
+    if r_span < 0.01:
+        # 数据几乎不变时，以均值为中心给固定对称区间
         target = np.mean(right_values[-10:])
         margin = 0.05
         ax2.set_ylim(target - margin, target + margin)
+    else:
+        # 正常情况：在数据实际范围上下各加 25% 的 padding
+        padding = r_span * 0.25
+        ax2.set_ylim(r_min - padding, r_max + padding)
 
     # ------------------------------------------
     # 图例与保存
@@ -519,115 +546,6 @@ def plot_optimization_history_backup(history,
         plt.show()
     else:
         plt.close()
-    
-
-
-
-
-
-
-
-
-
-    # # ------------------------------------------
-    # # 数据准备
-    # # ------------------------------------------
-    # # 定义一个内部辅助函数来获取数据
-    # def get_data(obj, key):
-    #     if isinstance(obj, dict):
-    #         return obj[key]  # 字典方式访问
-    #     else:
-    #         return getattr(obj, key) # 对象属性方式访问
-
-    # # 获取数据
-    # try:
-    #     obj_values = np.array(get_data(history, 'obj_values'))
-    #     con_values = np.array(get_data(history, 'con_values'))
-    # except KeyError as e:
-    #     print(f"数据解析错误: 找不到键值 {e}")
-    #     return
-    # except AttributeError as e:
-    #     print(f"数据解析错误: 对象缺少属性 {e}")
-    #     return
-    # iterations = np.arange(1, len(obj_values) + 1)
-    
-    # # 创建画布 (设置高 DPI 以满足印刷要求)c
-    # fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
-    
-    # # ------------------------------------------
-    # # 绘制左轴：柔顺度 (Compliance)
-    # # ------------------------------------------
-    # # 直接使用全局配色字典
-    # color_c = SOPTX_COLORS['compliance'] 
-    
-    # # 设置标签 (混合排版：中文使用 SimHei)
-    # ax1.set_xlabel('迭代步数', fontproperties=FONT_ZH)
-    # ax1.set_ylabel('柔顺度 $c$', color=color_c, fontproperties=FONT_ZH)
-    
-    # # 绘制曲线
-    # l1, = ax1.plot(iterations, obj_values, color=color_c, linestyle='-', 
-    #                linewidth=linewidth, label='柔顺度 $c$')
-    
-    # # 设置刻度颜色
-    # ax1.tick_params(axis='y', labelcolor=color_c)
-    # ax1.grid(True, linestyle='--', alpha=0.5)
-    
-    # # 强制设置左轴刻度数值为 Times New Roman
-    # if FONT_EN:
-    #     for label in ax1.get_xticklabels():
-    #         label.set_fontproperties(FONT_EN)
-    #     for label in ax1.get_yticklabels():
-    #         label.set_fontproperties(FONT_EN)
-
-    # # ------------------------------------------
-    # # 绘制右轴：体积分数 (Volume Fraction)
-    # # ------------------------------------------
-    # ax2 = ax1.twinx()
-    # # 直接使用全局配色字典
-    # c = SOPTX_COLORS['volume']
-    
-    # # 设置标签
-    # ax2.set_ylabel('体积分数 $V_f$', color=color_v, fontproperties=FONT_ZH)
-    
-    # # 绘制曲线
-    # l2, = ax2.plot(iterations, con_values, color=color_v, linestyle='--', 
-    #                linewidth=linewidth, label='体积分数 $V_f$')
-    
-    # ax2.tick_params(axis='y', labelcolor=color_v)
-    
-    # # 强制设置右轴刻度数值为 Times New Roman
-    # if FONT_EN:
-    #     for label in ax2.get_yticklabels():
-    #         label.set_fontproperties(FONT_EN)
-
-    # # ------------------------------------------
-    # # 智能锁定右轴范围 (保持平稳美观)
-    # # ------------------------------------------
-    # v_min, v_max = np.min(con_values), np.max(con_values)
-    # if (v_max - v_min) < 0.01:
-    #     target = np.mean(con_values[-10:]) 
-    #     margin = 0.05 
-    #     ax2.set_ylim(target - margin, target + margin)
-
-    # # ------------------------------------------
-    # # 图例与保存
-    # # ------------------------------------------
-    # lines = [l1, l2]
-    # labels = [l.get_label() for l in lines]
-    
-    # # 放置在右上角
-    # ax1.legend(lines, labels, loc='upper right', prop=FONT_ZH, framealpha=0.9)
-
-    # plt.tight_layout()
-    
-    # if save_path:
-    #     plt.savefig(save_path, dpi=600, bbox_inches='tight')
-    #     print(f"图片已保存至: {save_path}")
-        
-    # if show:
-    #     plt.show()
-    # else:
-    #     plt.close()
 
 def plot_optimization_history_comparison(
     histories: dict,

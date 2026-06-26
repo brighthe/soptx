@@ -340,6 +340,7 @@ class MMAOptimizer(BaseLogged):
                     f"Objective: {obj_val_raw:.4f}, "
                     f"Volfrac: {volfrac:.4f}, "
                     f"Change: {change:.4f}, "
+                    f"Penalty: {current_penalty:.2f}, "
                     f"Time: {iteration_time:.3f} sec"
                 )
             

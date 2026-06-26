@@ -19,7 +19,7 @@ class LagfemData2d2(PDEBase):
                    -2 sin(πx) · (sin(πy/2)-y) ]^T
 
     体力密度: 
-        b(x, y) = [ π^2( sin(πx/2) sin(πy) + (3/2) cos(πy) cos(πy/2) ) - 2π(λ+μ) cos(πx),
+        b(x, y) = [ π^2( sin(πx/2) sin(πy) + (3/2) cos(πx) cos(πy/2) ) - 2π(λ+μ) cos(πx),
                    -(3/4)π^2 cos(πx/2) cos(πy) - 2π^2 sin(πx) sin(πy/2) + 2μ π^2 y sin(πx) ]^T
 
     位移边界:
