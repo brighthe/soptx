@@ -11,6 +11,7 @@ from soptx.interpolation.linear_elastic_material import LinearElasticMaterial
 from soptx.interpolation.interpolation_scheme import MaterialInterpolationScheme
 from soptx.analysis.integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.analysis.integrators.source_integrator import SourceIntegrator
+from soptx.analysis.matrix_free import MatrixFreeCGSolver, MatrixFreeElasticityOperator
 from soptx.model.pde_base import PDEBase
 from soptx.utils.base_logged import BaseLogged
 from soptx.utils import timer
@@ -23,7 +24,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 space_degree: int = 1,
                 integration_order: int = 4,
                 assembly_method: Literal['standard', 'voigt', 'fast'] = 'standard',
-                solve_method: Literal['mumps', 'cg'] = 'mumps',
+                solve_method: Literal['mumps', 'scipy', 'cg'] = 'mumps',
+                operator_backend: Literal['assembled', 'matrix_free'] = 'assembled',
+                matrix_free_solver_options: Optional[Dict] = None,
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 interpolation_scheme: Optional[MaterialInterpolationScheme] = None,
                 enable_logging: bool = False,
@@ -46,6 +49,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._interpolation_scheme = interpolation_scheme
 
         self._solve_method = solve_method
+        self._operator_backend = operator_backend
+        self._matrix_free_solver_options = matrix_free_solver_options or {}
 
         self._GD = self._mesh.geo_dimension()
 
@@ -117,6 +122,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def topopt_algorithm(self) -> Optional[str]:
         """获取当前的拓扑优化算法"""
         return self._topopt_algorithm
+
+    @property
+    def operator_backend(self) -> str:
+        """获取当前状态方程算子后端"""
+        return self._operator_backend
     
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
@@ -164,35 +174,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             t = timer(f"双线性型组装内部")
             next(t)
 
-        if self._topopt_algorithm is None:
-            if rho_val is not None:
-                self._log_warning("标准有限元分析模式下忽略相对密度 rho")
-        
-            relative_stiffness = None
-
-            self._cached_stiffness_absolute = None
-            self._cached_stiffness_relative = None
-        
-        elif self._topopt_algorithm == 'density_based':
-            if rho_val is None:
-                self._log_error("基于密度的拓扑优化算法需要提供相对密度 rho")
-
-            # TODO 目前仅支持插值杨氏模量 E 
-            E_rho = self._interpolation_scheme.interpolate_material(
-                                            material=self._material,
-                                            rho_val=rho_val,
-                                            integration_order=self._integration_order,
-                                            displacement_mesh=self._mesh,
-                                        )
-            E0 = self._material.youngs_modulus
-            relative_stiffness = E_rho / E0
-
-            self._cached_stiffness_absolute = E_rho               # 绝对刚度 (带量纲)
-            self._cached_stiffness_relative = relative_stiffness  # 相对刚度 (无量纲)
-        
-        else:
-            error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
-            self._log_error(error_msg)
+        relative_stiffness = self._compute_relative_stiffness(rho_val)
 
         if enable_timing:
             t.send('预备')
@@ -420,6 +402,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if rho_val is None:
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
+
+        operator_backend = kwargs.get('operator_backend', self._operator_backend)
+        if operator_backend == 'matrix_free':
+            if adjoint:
+                self._log_error("matrix-free 状态方程后端当前尚未接入 adjoint=True 路径")
+            return self._solve_state_matrix_free(rho_val=rho_val,
+                                                 enable_timing=enable_timing,
+                                                 **kwargs)
 
         if adjoint:
             K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
@@ -864,6 +854,176 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##############################################################################################
     # 内部方法
     ##############################################################################################
+
+    def _compute_relative_stiffness(
+            self,
+            rho_val: Optional[Union[Function, TensorLike]] = None
+        ) -> Optional[TensorLike]:
+        """Compute the stiffness coefficient consumed by the elastic integrator."""
+        if self._topopt_algorithm is None:
+            if rho_val is not None:
+                self._log_warning("标准有限元分析模式下忽略相对密度 rho")
+
+            self._cached_stiffness_absolute = None
+            self._cached_stiffness_relative = None
+            return None
+
+        if self._topopt_algorithm == 'density_based':
+            if rho_val is None:
+                self._log_error("基于密度的拓扑优化算法需要提供相对密度 rho")
+
+            E_rho = self._interpolation_scheme.interpolate_material(
+                                    material=self._material,
+                                    rho_val=rho_val,
+                                    integration_order=self._integration_order,
+                                    displacement_mesh=self._mesh,
+                                )
+            relative_stiffness = E_rho / self._material.youngs_modulus
+
+            self._cached_stiffness_absolute = E_rho
+            self._cached_stiffness_relative = relative_stiffness
+            return relative_stiffness
+
+        self._log_error(f"不支持的拓扑优化算法: {self._topopt_algorithm}")
+
+    def _assemble_matrix_free_rhs_and_boundary(self):
+        """Assemble RHS data and Dirichlet dofs without changing a matrix."""
+        boundary_type = self._pde.boundary_type
+        load_type = self._pde.load_type
+        space_uh = self._tensor_space
+        gdof = space_uh.number_of_global_dofs()
+
+        F = self.assemble_body_force_vector()
+
+        if boundary_type == 'mixed':
+            if load_type == 'concentrated':
+                F_sigmah = space_uh.function()
+                ipoints_uh = space_uh.interpolation_points()
+
+                load_bc_list = self._pde.concentrate_load_bc()
+                load_threshold_list = self._pde.is_concentrate_load_boundary()
+
+                for gd_func, threshold_func in zip(load_bc_list, load_threshold_list):
+                    isBdTDof = space_uh.is_boundary_dof(threshold=threshold_func, method='interp')
+                    isBdSDof = space_uh.scalar_space.is_boundary_dof(
+                                                    threshold=threshold_func,
+                                                    method='interp'
+                                                )
+
+                    num_load_nodes = bm.sum(isBdSDof)
+                    if num_load_nodes == 0:
+                        continue
+
+                    gd_val = gd_func(ipoints_uh[isBdSDof]) / num_load_nodes
+
+                    if space_uh.dof_priority:
+                        F_sigmah[:] = bm.set_at(
+                            F_sigmah[:], isBdTDof,
+                            F_sigmah[isBdTDof] + gd_val.T.reshape(-1)
+                        )
+                    else:
+                        F_sigmah[:] = bm.set_at(
+                            F_sigmah[:], isBdTDof,
+                            F_sigmah[isBdTDof] + gd_val.reshape(-1)
+                        )
+
+            elif load_type == 'distributed':
+                if hasattr(self._pde, 'set_equivalent_traction'):
+                    self._pde.set_equivalent_traction(self._mesh)
+
+                from soptx.analysis.integrators.face_source_integrator_lfem import BoundaryFaceSourceIntegrator_lfem
+                integrator = BoundaryFaceSourceIntegrator_lfem(
+                                        source=self._pde.neumann_bc,
+                                        q=self._integration_order,
+                                        threshold=self._pde.is_neumann_boundary()
+                                    )
+                lform = LinearForm(self._tensor_space)
+                lform.add_integrator(integrator)
+                F_sigmah = lform.assembly(format='dense')
+
+            else:
+                raise NotImplementedError(f"不支持的载荷类型: {load_type}")
+
+            F += F_sigmah
+
+            gd = self._pde.dirichlet_bc
+            threshold = self._pde.is_dirichlet_boundary()
+
+        elif boundary_type == 'dirichlet':
+            gd = self._pde.dirichlet_bc
+            threshold = self._pde.is_dirichlet_boundary()
+
+        else:
+            self._log_error(f"matrix-free 后端暂不支持边界类型: {boundary_type}")
+
+        uh_bd = bm.zeros(gdof, dtype=bm.float64, device=space_uh.device)
+        uh_bd, isBdDof = space_uh.boundary_interpolate(
+                                        gd=gd,
+                                        threshold=threshold,
+                                        method='interp'
+                                    )
+        return F, uh_bd, isBdDof
+
+    def _solve_state_matrix_free(self,
+                                rho_val: Optional[Union[TensorLike, Function]] = None,
+                                enable_timing: bool = False,
+                                **kwargs) -> Dict[str, Function]:
+        t = None
+        if enable_timing:
+            t = timer(f"Matrix-Free 分析求解位移阶段")
+            next(t)
+
+        relative_stiffness = self._compute_relative_stiffness(rho_val)
+        self._integrator.coef = relative_stiffness
+
+        F, uh_bd, isBdDof = self._assemble_matrix_free_rhs_and_boundary()
+        if enable_timing:
+            t.send('线性型与边界准备')
+
+        op_free = MatrixFreeElasticityOperator(
+                            space=self._tensor_space,
+                            integrator=self._integrator,
+                            rho=relative_stiffness,
+                        )
+        F = F - op_free.matvec(uh_bd[:])
+        F[isBdDof] = uh_bd[isBdDof]
+
+        fixed_dofs = bm.where(isBdDof)[0]
+        op = MatrixFreeElasticityOperator(
+                            space=self._tensor_space,
+                            integrator=self._integrator,
+                            rho=relative_stiffness,
+                            dirichlet_dofs=fixed_dofs,
+                        )
+
+        options = dict(self._matrix_free_solver_options)
+        options.update(kwargs.get('matrix_free_solver_options', {}))
+        tol = kwargs.get('tol', options.pop('tol', 1.0e-8))
+        maxiter = kwargs.get('maxiter', options.pop('maxiter', 500))
+        preconditioner = kwargs.get('preconditioner', options.pop('preconditioner', None))
+        x0 = kwargs.get('x0', options.pop('x0', None))
+
+        solver = MatrixFreeCGSolver(tol=tol,
+                                    maxiter=maxiter,
+                                    preconditioner=preconditioner)
+        u_vec, info = solver.solve(op, F, x0=x0)
+        if not info.converged:
+            self._log_error(
+                f"Matrix-Free CG 未收敛: iterations={info.iterations}, "
+                f"final_residual={info.final_residual}"
+            )
+
+        uh = self._tensor_space.function()
+        uh[:] = u_vec
+
+        if enable_timing:
+            t.send('Matrix-Free CG 求解')
+            t.send(None)
+
+        return {
+            'displacement': uh,
+            'matrix_free_info': info,
+        }
 
     def _apply_matrix(self, matrix, isDDof, check=True):
         """Apply Dirichlet boundary condition to left-hand-size matrix only.

@@ -28,6 +28,9 @@
 *.gif   
 *.txt   
 
+# Office/WPS temporary lock files
+~$*.xlsx
+
 #----------------------------------------
 # 取消特定忽略的示例（当前已注释）
 #----------------------------------------
@@ -50,3 +53,6 @@ build
 
 # Python 包元数据目录
 soptx.egg-info
+
+# Local Python virtual environment
+.venv/

@@ -47,6 +47,92 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
         return space.cell_to_dof()[self._index]
+
+    def action(self,
+               space: TensorFunctionSpace,
+               xe: TensorLike,
+               coef: Optional[TensorLike] = None,
+               material_model=None) -> TensorLike:
+        """Apply the element elastic operator to local displacement vectors.
+
+        The primary path computes ``ye`` directly at quadrature points without
+        forming element stiffness matrices. Unsupported cases fall back to the
+        original local ``Ke @ xe`` implementation while the contraction kernel
+        is expanded incrementally.
+        """
+        active_coef = self._coef if coef is None else coef
+        try:
+            return self._action_standard_contraction(space, xe, active_coef)
+        except NotImplementedError:
+            pass
+
+        if getattr(self, '_disable_action_assembly_fallback', False):
+            raise AssertionError("matrix-free action fallback would assemble element stiffness")
+
+        old_coef = self._coef
+        if coef is not None:
+            self._coef = coef
+
+        try:
+            Ke = self.assembly(space)
+        finally:
+            self._coef = old_coef
+
+        input_shape = xe.shape
+        if len(input_shape) == 3:
+            xe_flat = bm.reshape(xe, (input_shape[0], -1))
+        else:
+            xe_flat = xe
+
+        ye_flat = bm.einsum('cij,cj->ci', Ke, xe_flat)
+
+        if len(input_shape) == 3:
+            return bm.reshape(ye_flat, input_shape)
+
+        return ye_flat
+
+    def _action_standard_contraction(self,
+                                    space: TensorFunctionSpace,
+                                    xe: TensorLike,
+                                    coef: Optional[TensorLike]) -> TensorLike:
+        """Apply the standard elastic operator through quadrature contraction."""
+        scalar_space = space.scalar_space
+        mesh = getattr(scalar_space, 'mesh', None)
+        cm, bcs, ws, gphi, detJ = self.fetch_assembly(space)
+
+        NC = mesh.number_of_cells()
+        input_shape = xe.shape
+        if len(input_shape) == 3:
+            xe_flat = bm.reshape(xe, (input_shape[0], -1))
+        else:
+            xe_flat = xe
+
+        D0 = self._material.elastic_matrix()[0, 0]
+        B = self._material.strain_displacement_matrix(
+                                dof_priority=space.dof_priority,
+                                gphi=gphi,
+                            )
+        strain = bm.einsum('cqik,ck->cqi', B, xe_flat)
+        stress = bm.einsum('ij,cqj->cqi', D0, strain)
+
+        if coef is None:
+            pass
+        elif coef.shape == (NC,):
+            stress = bm.einsum('c,cqi->cqi', coef, stress)
+        elif coef.shape == (NC, len(ws)):
+            stress = bm.einsum('cq,cqi->cqi', coef, stress)
+        else:
+            raise NotImplementedError
+
+        if isinstance(mesh, SimplexMesh):
+            ye_flat = bm.einsum('q,c,cqik,cqi->ck', ws, cm, B, stress)
+        else:
+            ye_flat = bm.einsum('q,cq,cqik,cqi->ck', ws, detJ, B, stress)
+
+        if len(input_shape) == 3:
+            return bm.reshape(ye_flat, input_shape)
+
+        return ye_flat
     
     ########################################################################################
     # 变体方法
