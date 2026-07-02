@@ -28,6 +28,13 @@ date: 2026-06-29
 
 > 注意：截至 2026-06-29，soptx 仓库中**尚无 PIML / 多尺度代码**。本文档记录的是
 > **接入前的架构判断与默认假设**，实现推进后应同步回填"已完成验证"。
+>
+> **2026-07-02 回填**：阶段一核心（T1/T2/T3/T5 + V1，Exact/Mock 预测器）已在分支
+> `codex/piml-multiscale-prototype` 落地并验证——K^cond 与全尺度全局 Schur 补机器
+> 精度一致（8×8 粗网格，L=5: 1.4e-15，L=10: 2.6e-15），接口解/细尺度恢复与全尺度
+> 直解一致（~1e-12），刚体模态再现与 Mock/Exact 接口互换测试通过。实测数据、代码
+> 位置与验证命令以 `ai/common/progress-piml.md` 为准。TrainedPredictor（T4b）、
+> V3 出图与 `operator_backend="piml_multiscale"` 接入尚未做。
 
 ## 1. 当前结论
 
@@ -201,21 +208,25 @@ K_coarse            组装后的全局粗刚度
 
 ## 9. 当前重要代码位置
 
-> 待实现，路径为建议；推进后回填实际文件。
+> 已落地（2026-07-02，分支 `codex/piml-multiscale-prototype`）。
 
 ```text
-C:\workspace\soptx_heliang\soptx\analysis\multiscale\coarse_fine_mesh.py
-C:\workspace\soptx_heliang\soptx\analysis\multiscale\multiscale_shape.py
-C:\workspace\soptx_heliang\soptx\analysis\multiscale\equivalent_stiffness.py
-C:\workspace\soptx_heliang\soptx\analysis\multiscale\piml_predictor.py
+C:\workspace\soptx_heliang\soptx\analysis\multiscale\coarse_fine_mesh.py       # T1 两级网格与映射
+C:\workspace\soptx_heliang\soptx\analysis\multiscale\multiscale_shape.py       # T2 参考模板 + 静力缩聚
+C:\workspace\soptx_heliang\soptx\analysis\multiscale\piml_predictor.py         # T4 Exact / Mock 预测器
+C:\workspace\soptx_heliang\soptx\analysis\multiscale\equivalent_stiffness.py   # T3 接口组装 + T5 前向闭环
+C:\workspace\soptx_heliang\soptx\analysis\multiscale\fullscale_reference.py    # V1 全尺度参照
 C:\workspace\soptx_heliang\soptx\tests\test_equivalent_stiffness_vs_fullscale.py
-C:\workspace\soptx_heliang\soptx\examples\piml_baseline_forward.py
+C:\workspace\soptx_heliang\soptx\benchmarks\benchmark_piml_forward.py          # 必跑产出
 ```
+
+（`soptx/examples/piml_baseline_forward.py` 出图 demo 属 V3，尚未实现。）
 
 ## 10. 当前验证命令
 
-> 待实现。模块就位后，预期在 `C:\workspace\soptx_heliang` 下运行：
+在 `C:\workspace\soptx_heliang` 下运行（当前期望 `4 passed`；刚体模态/分区单位
+检查并入同一测试文件）：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest soptx/tests/test_equivalent_stiffness_vs_fullscale.py soptx/tests/test_shape_function_partition_of_unity.py -q
+.\.venv\Scripts\python.exe -m pytest soptx/tests/test_equivalent_stiffness_vs_fullscale.py -q -p no:cacheprovider
 ```

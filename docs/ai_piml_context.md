@@ -5,14 +5,14 @@ tags:
   - piml
   - multiscale
   - soptx
-status: "paused"
-date: 2026-06-29
+status: "active"
+date: 2026-07-02
 ---
 
 # AI PIML 多尺度预测接续上下文
 
 这份文件用于后续新开的 AI 窗口快速掌握 SOPTX **PIML 多尺度预测**工作的全局分工。
-当前仓库已建立 `ai/common/status.md` 作为 AI 工作线总入口；PIML 工作线暂保留本文作为续接入口，后续可按 Matrix-Free 的方式整理为独立 progress 文档。
+当前仓库已建立 `ai/common/status.md` 作为 AI 工作线总入口；PIML 工作线的**续接入口已迁移到独立 progress 文档 `ai/common/progress-piml.md`**（2026-07-02 起，当前进度、实测数据、代码位置、验证命令以其为准），本文保留作全局分工与外部文档索引。
 PIML 与 Matrix-Free 对应同一拓扑优化框架的两条分析路径（PIML 多尺度预测 vs Matrix-Free 求解）。
 
 ## 1. 总体计划
@@ -102,30 +102,37 @@ C:\workspace\soptx_heliang\docs\piml_multiscale_architecture_notes.md
 4. 第一阶段（答辩前原型，**路线①·子结构静力缩聚**）：构造形式用 Schur 补 N^j=[-(K_ii)^-1 K_ib; I]、K_s^j=(N^j)^T K^j N^j（数学精确、无边界条件假设；正是全局 Matrix-Free 消费的逐子结构算子）。目标：**单步前向管道连通** + **K_s^j 对全尺度 Schur 补机器精度一致** + **极小预测器取得对照团队子结构 PIML 量级（~1e-3）的预测误差**；仍不跑优化循环、不替换灵敏度。Huang 2022 全 EMsFEM 角节点复现保留为长期计划阶段一，作奠基引用。
 5. mock（查表/解析）先打通接口；`TrainedPredictor`（极小 MLP，随机密度离线训练，损失=形函数MSE+刚度MSE）取预测误差；`ExactPredictor`（精确局部求解）作真值/标注。三者接口互换；极小网络不追求生产级精度/泛化。
 6. 粗尺度方程既可显式组装求解，也可把 K̂^E 接入 Matrix-Free（与 `ai/common/progress-matrix-free.md` 中记录的 Matrix-Free 路径协同）——这是科研计划方向一"主线一 PIML + 主线二 Matrix-Free"的结合点。
-7. 截至 2026-06-29，soptx 仓库中尚无 PIML/多尺度代码，本体系为**接入前的计划与架构判断**。
+7. **2026-07-02 更新**：T1/T2/T3/T5 + V1 已在分支 `codex/piml-multiscale-prototype` 落地
+   （Exact/Mock 预测器，单步前向闭环，V1 机器精度），TrainedPredictor（T4b）与
+   `operator_backend="piml_multiscale"` 接入仍未做。实测数据与代码位置见
+   `ai/common/progress-piml.md`。
 
 ## 当前重要代码位置
 
-> 待实现，路径为建议；推进后回填实际文件（与架构备忘录 §9 保持同步）。
+> 已落地（2026-07-02，分支 `codex/piml-multiscale-prototype`）；以 `ai/common/progress-piml.md` 为准。
 
 ```text
 C:\workspace\soptx_heliang\soptx\analysis\multiscale\coarse_fine_mesh.py
 C:\workspace\soptx_heliang\soptx\analysis\multiscale\multiscale_shape.py
 C:\workspace\soptx_heliang\soptx\analysis\multiscale\equivalent_stiffness.py
 C:\workspace\soptx_heliang\soptx\analysis\multiscale\piml_predictor.py
+C:\workspace\soptx_heliang\soptx\analysis\multiscale\fullscale_reference.py
 C:\workspace\soptx_heliang\soptx\tests\test_equivalent_stiffness_vs_fullscale.py
-C:\workspace\soptx_heliang\soptx\examples\piml_baseline_forward.py
+C:\workspace\soptx_heliang\soptx\benchmarks\benchmark_piml_forward.py
 ```
+
+（`soptx/examples/piml_baseline_forward.py` 出图 demo 属 V3，尚未实现。）
 
 ## 当前验证命令
 
-> 待实现。模块就位后，预期在 `C:\workspace\soptx_heliang` 下运行：
+在 `C:\workspace\soptx_heliang` 下运行（当前期望 `4 passed`；刚体模态/分区单位
+检查并入同一测试文件，未单设 `test_shape_function_partition_of_unity.py`）：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest soptx/tests/test_equivalent_stiffness_vs_fullscale.py soptx/tests/test_shape_function_partition_of_unity.py -q
+.\.venv\Scripts\python.exe -m pytest soptx/tests/test_equivalent_stiffness_vs_fullscale.py -q -p no:cacheprovider
 ```
 
-建议开发分支：
+开发分支：
 
 ```text
 codex/piml-multiscale-prototype
