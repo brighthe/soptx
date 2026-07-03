@@ -181,6 +181,20 @@ UnicodeEncodeError；两 T4b 脚本已在入口 `sys.stdout.reconfigure(encoding
 - 已补装 scipy、pytest、sympy、gmsh、tqdm、matplotlib（fealpy import 依赖）。
   修复后 matrix-free 安全网 `test_matrix_free_vs_assembled.py` 恢复 6 passed。
 
+**T4b 训练权重与 torch（2026-07-03 补充）**：
+
+- `torch 2.11.0+cu128` 在 `.venv` 可用，CUDA（RTX 5070 Ti）可用；训练脚本默认
+  `--device cuda`（各档约 3–4 分钟），亦可 `--device cpu`（明显更慢）。
+- 训练权重 `outputs/piml_trained_predictor_L{5,10}.pt` 被 `.gitignore` 忽略
+  （新加 `*.pt`/`*.pth` 规则），**不入库**——与「outputs/ 重跑即得」约定一致。
+  他人 checkout 后 `benchmark_piml_trained` 会因缺权重报 `FileNotFoundError`，
+  **需先跑 `train_piml_predictor` 复现**（见「Benchmark 命令」）。CSV 产出
+  `outputs/piml_*_prototype.csv` 同样 gitignore、重跑即得。
+- `TrainedPredictor` 依赖 torch；`soptx/analysis/multiscale/__init__.py` 对 torch
+  缺失做 `try/except` 跳过（不导出 TrainedPredictor 等），故 numpy-only 的
+  V1/V2 前向管道与 `test_equivalent_stiffness_vs_fullscale.py` 不受 torch 有无影响；
+  `test_trained_predictor.py` 则 `pytest.importorskip("torch")` 自动跳过。
+
 ## 已完成里程碑
 
 - **✅ deck 帧 7 证据 ④ 回填（2026-07-03 完成）**：T4b 极小 MLP 真实预测误差
