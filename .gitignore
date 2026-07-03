@@ -49,6 +49,9 @@
 # Python 字节码缓存目录
 __pycache__
 
+# pytest 缓存目录
+.pytest_cache/
+
 # JetBrains IDE 配置目录
 .idea
 
