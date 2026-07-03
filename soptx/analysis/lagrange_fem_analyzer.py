@@ -1006,7 +1006,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         solver = MatrixFreeCGSolver(tol=tol,
                                     maxiter=maxiter,
                                     preconditioner=preconditioner)
-        u_vec, info = solver.solve(op, F, x0=x0)
+        # 传裸张量给求解器: F 是 fealpy Function 包装对象, 在 pytorch 后端下
+        # torch.zeros_like(Function) 会失败; F[:] 在 numpy/pytorch 下均返回底层数组.
+        u_vec, info = solver.solve(op, F[:], x0=x0)
         if not info.converged:
             self._log_error(
                 f"Matrix-Free CG 未收敛: iterations={info.iterations}, "

@@ -40,7 +40,11 @@ class MatrixFreeElasticityOperator:
         y = bm.zeros((self.space.number_of_global_dofs(),),
                      dtype=ye.dtype,
                      device=self.space.device)
-        return bm.add_at(y, bm.reshape(cell2dof, (-1,)), bm.reshape(ye, (-1,)))
+        # NOTE: 使用 index_add 而非 add_at —— FEM 散射中全局自由度被多个单元共享,
+        # 索引必然重复, 必须做累加. fealpy 的 add_at 在 pytorch 后端 (a[idx] += src)
+        # 对重复索引不累加 (非确定性), 会算错; index_add 在 numpy/jax/pytorch
+        # 三后端均为正确累加语义.
+        return bm.index_add(y, bm.reshape(cell2dof, (-1,)), bm.reshape(ye, (-1,)))
 
     def matvec(self, x: TensorLike) -> TensorLike:
         x_bc = self.boundary.apply_input(x)

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from fealpy.backend import backend_manager as bm
 from fealpy.fem import BilinearForm
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
@@ -207,3 +208,114 @@ def test_lagrange_analyzer_matrix_free_state_matches_assembled_state():
     assert mf_state["matrix_free_info"].converged
     rel_error = bm.linalg.norm(u_assembled - u_matrix_free) / bm.linalg.norm(u_assembled)
     assert rel_error < 1.0e-10
+
+
+def test_matrix_free_matvec_matches_assembled_matrix_pytorch():
+    """matvec 在 pytorch 后端的正确性 (锁定 scatter_add 的 add_at -> index_add 修复).
+
+    旧实现用 bm.add_at, 在 pytorch 后端对重复全局自由度不累加 (rel_err ~0.9);
+    本用例确保改用 bm.index_add 后, pytorch 后端 matvec 与装配矩阵一致.
+    """
+    torch = pytest.importorskip("torch")
+    old_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    bm.set_backend("pytorch")
+    try:
+        mesh = TriangleMesh.from_box(box=[0.0, 1.0, 0.0, 1.0], nx=4, ny=4)
+        scalar_space = LagrangeFESpace(mesh, p=1, ctype="C")
+        tensor_space = TensorFunctionSpace(scalar_space, shape=(-1, mesh.geo_dimension()))
+
+        material = IsotropicLinearElasticMaterial(
+            youngs_modulus=1.0,
+            poisson_ratio=0.3,
+            plane_type="plane_stress",
+        )
+        integrator = LinearElasticIntegrator(material=material, q=4, method="standard")
+
+        coef = bm.linspace(0.4, 1.0, mesh.number_of_cells())
+        integrator.coef = coef
+
+        bform = BilinearForm(tensor_space)
+        bform.add_integrator(integrator)
+        K = bform.assembly(format="coo")
+        integrator._disable_action_assembly_fallback = True
+
+        op = MatrixFreeElasticityOperator(
+            space=tensor_space,
+            integrator=integrator,
+            rho=coef,
+        )
+
+        x = bm.linspace(0.1, 1.0, tensor_space.number_of_global_dofs())
+        y_ref = K.matmul(x)
+        y_mf = op.matvec(x)
+
+        rel_error = bm.linalg.norm(y_ref - y_mf) / bm.linalg.norm(y_ref)
+        assert rel_error < 1.0e-10
+    finally:
+        torch.set_default_dtype(old_dtype)
+        bm.set_backend("numpy")
+
+
+def test_lagrange_analyzer_matrix_free_state_matches_assembled_state_pytorch():
+    """完整 solve_state(matrix_free) 在 pytorch 后端的正确性.
+
+    覆盖 RHS 装配 + Dirichlet + matvec + CG 全链路, 并锁定 F -> F[:] 修复
+    (Function 包装对象在 pytorch 后端下 torch.zeros_like 会失败).
+    """
+    torch = pytest.importorskip("torch")
+    old_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    bm.set_backend("pytorch")
+    try:
+        pde = HalfMBBBeamRight2d(
+            domain=[0.0, 3.0, 0.0, 1.0],
+            mesh_type="uniform_quad",
+            P=-1.0,
+            E=1.0,
+            nu=0.3,
+            plane_type="plane_stress",
+        )
+        mesh = pde.init_mesh(nx=6, ny=2)
+        material = IsotropicLinearElasticMaterial(
+            youngs_modulus=pde.E,
+            poisson_ratio=pde.nu,
+            plane_type=pde.plane_type,
+        )
+        interpolation_scheme = MaterialInterpolationScheme(
+            density_location="element",
+            interpolation_method="simp",
+            options={"penalty_factor": 1.0},
+            enable_logging=False,
+        )
+        rho = bm.linspace(0.5, 1.0, mesh.number_of_cells())
+
+        common = dict(
+            disp_mesh=mesh,
+            pde=pde,
+            material=material,
+            space_degree=1,
+            integration_order=4,
+            assembly_method="standard",
+            solve_method="scipy",
+            topopt_algorithm="density_based",
+            interpolation_scheme=interpolation_scheme,
+        )
+        assembled_analyzer = LagrangeFEMAnalyzer(operator_backend="assembled", **common)
+        matrix_free_analyzer = LagrangeFEMAnalyzer(
+            operator_backend="matrix_free",
+            matrix_free_solver_options={"tol": 1.0e-12, "maxiter": 500},
+            **common,
+        )
+        matrix_free_analyzer._integrator._disable_action_assembly_fallback = True
+
+        u_assembled = assembled_analyzer.solve_state(rho_val=rho)["displacement"][:]
+        mf_state = matrix_free_analyzer.solve_state(rho_val=rho)
+        u_matrix_free = mf_state["displacement"][:]
+
+        assert mf_state["matrix_free_info"].converged
+        rel_error = bm.linalg.norm(u_assembled - u_matrix_free) / bm.linalg.norm(u_assembled)
+        assert rel_error < 1.0e-9
+    finally:
+        torch.set_default_dtype(old_dtype)
+        bm.set_backend("numpy")

@@ -15,14 +15,15 @@ date: 2026-06-29
 
 本文档中的 Matrix-Free 判断大量参考了 `dut-postdoc` 仓库中关于有光环 Matrix-Free 工作的相关内容，特别是：
 
-- `C:\workspace\dut-postdoc\research\soptx-matrix-free-integration-plan.md`
-- `C:\workspace\dut-postdoc\research\matrix_free_math_principles.md`
+- `C:\workspace\dut-postdoc\research\postdoc-plan\defense-sprint\direction-1-piml-matrix-free\frame8_matrix_free_pipeline_guide.md`
+  （帧 8 单一主入口；原 `soptx-matrix-free-integration-plan.md` 与 `matrix_free_math_principles.md`
+  已于 2026-07-02 被其取代删除）
 
 这些外部材料提供了 Matrix-Free 接入 SOPTX 的总体任务背景、数学原则、阶段划分和与 mfleo 的关系。本文档在此基础上，结合当前 `soptx_heliang` 仓库的实际代码结构，整理出更贴近 SOPTX 当前实现的架构判断。
 
 需要注意的是，本文档不是对 `dut-postdoc` 中计划文件的完整复刻，而是面向当前代码实现的工作备忘录。后续如果 `dut-postdoc` 中的 Matrix-Free 方案发生调整，应同步检查本文档中的默认假设是否仍然成立。
 
-如果后续新开 AI 窗口继续本任务，应先阅读 `C:\workspace\soptx_heliang\ai\common\status.md`，在工作线表中定位「Matrix-Free 结构分析原型」，再阅读 `C:\workspace\soptx_heliang\ai\common\progress-matrix-free.md`。
+如果后续新开 AI 窗口继续本任务，应先阅读 `C:\workspace\soptx_heliang\ai\common\status.md`，在工作线表中定位「Matrix-Free 结构分析原型」，再阅读 `C:\workspace\soptx_heliang\ai\common\progress-frame8_matrix_free.md`。
 
 ## 1. 当前结论
 
