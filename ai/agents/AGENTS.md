@@ -2,6 +2,8 @@
 
 本仓库采用与 `dut-postdoc` 一致的 AI 上下文组织方式。
 
+人机协作方式（含「程序实现按子任务确认执行」）统一见 `ai/common/collaboration-conventions.md`（SSOT）；本文件不复写。
+
 新开 AI/Codex 窗口续接工作前，优先阅读 hub：
 
 ```text
@@ -11,16 +13,18 @@ ai/common/status.md
 然后在工作线表中定位目标工作线。继续 SOPTX Matrix-Free 工作时，阅读：
 
 ```text
-ai/common/progress-matrix-free.md
+ai/common/progress-frame8_matrix_free.md
 ```
 
 Matrix-Free progress 和架构备忘录会指向三个主要文档：
 
 ```text
-C:\workspace\dut-postdoc\research\soptx-matrix-free-integration-plan.md
-C:\workspace\dut-postdoc\research\matrix_free_math_principles.md
+C:\workspace\dut-postdoc\research\postdoc-plan\defense-sprint\direction-1-piml-matrix-free\frame8_matrix_free_pipeline_guide.md
 C:\workspace\soptx_heliang\docs\matrix_free_architecture_notes.md
 ```
+
+（原 dut-postdoc 的 `soptx-matrix-free-integration-plan.md` 与 `matrix_free_math_principles.md`
+已于 2026-07-02 被帧 8 guide 取代删除。）
 
 默认工作判断：
 
@@ -68,12 +72,12 @@ C:\workspace\fealpy_heliang
 每次完成一轮重要讨论、架构判断、验证结论或代码阶段推进后，AI agent 应主动提醒用户：
 
 ```text
-是否需要把本轮讨论中的重要结论沉淀到 ai/common/progress-matrix-free.md 或 docs/matrix_free_architecture_notes.md？
+是否需要把本轮讨论中的重要结论沉淀到 ai/common/progress-frame8_matrix_free.md 或 docs/matrix_free_architecture_notes.md？
 ```
 
 默认判断：
 
-1. 如果是“长期有效的上下文入口、当前进度、关键默认假设”，优先沉淀到对应工作线 progress 文档，例如 `ai/common/progress-matrix-free.md`。
+1. 如果是“长期有效的上下文入口、当前进度、关键默认假设”，优先沉淀到对应工作线 progress 文档，例如 `ai/common/progress-frame8_matrix_free.md`。
 2. 如果是“实现细节、架构解释、阶段验证方法、代码路径说明”，优先沉淀到 `docs/matrix_free_architecture_notes.md`。
 3. 如果是“研究计划、数学原则、总体路线变化”，应提醒用户同步检查 `dut-postdoc` 中对应文档。
 4. 如果只是临时调试输出、一次性命令或已过期判断，不需要沉淀。

@@ -3,9 +3,14 @@
 本文档记录了基于 `soptx_heliang` 代码库中 `soptx/benchmarks/benchmark_piml_forward.py` 单次运行（2026-07-02，分支 `codex/piml-multiscale-prototype`）所产生的基准测试数据。这些数据可作为 `dut-postdoc` 仓库下答辩 PPT（`template-8min.tex` 的 Frame 7「方向一 · PIML 增强多尺度前向分析原型」）的上游事实数据源；帧 7 右栏四条证据链的数值均出自本文。
 
 本文的展示框架与答辩口径基于 dut-postdoc 帧级主入口
-`research/postdoc-plan/defense-sprint/direction-1-piml-matrix-free/frame7_piml_pipeline_guide.md`；
-任务划分与数学原则见同目录 `soptx-piml-multiscale-integration-plan.md` /
-`piml_multiscale_math_principles.md`。
+`research/postdoc-plan/defense-sprint/direction-1-piml-matrix-free/frame7_piml_pipeline_guide.md`（任务划分见其 §4、数学原理见其 §3）。
+
+> **本文为帧 7 的数值单一事实源（SSOT）**：全部数值表、复现命令、deck LaTeX 只在此维护；
+> `ai/common/progress-frame7_piml.md` 只留 headline 并指回本文，dut-postdoc guide §5 / deck
+> 的数字均从本文派生（各带出处行）。重跑 benchmark 后**只改本文一处**。
+> **数值源**：`soptx/benchmarks/benchmark_piml_forward.py`（§2/§3 @ 2026-07-02）与
+> `benchmark_piml_trained.py`（§4 @ 2026-07-03）；CSV `outputs/piml_forward_prototype.csv` /
+> `piml_trained_prototype.csv`（outputs/ 默认 gitignore，重跑即得）。
 
 ## 1. 测试用例参数设定
 
@@ -111,4 +116,7 @@
 
 - 已证明的是：**前向管道连通 + 静力缩聚机器精度精确 + 全局求解降至接口自由度 + 预测器接口互换 + 极小 MLP TrainedPredictor 产出真实预测误差（$L=5\sim10^{-3}$、$L=10\sim10^{-2}$，优于 Mock 约一个量级）**；
 - 尚未做的是：结构保持参数化（对称正定/能量一致）TrainedPredictor 与训练版前向恢复（T4b 只学 $K_s$，$X/\widehat N$ 属阶段三）、`operator_backend="piml_multiscale"` 接入分析器（阶段二）、$\widehat K_s^j$ 喂给全局 Matrix-Free 作用（阶段三，能力 A⊗B 咬合点）。
-- 上游进度与决策记录见 `ai/common/progress-frame7_piml.md`；帧级主入口见 dut-postdoc `frame7_piml_pipeline_guide.md`，任务计划见 `soptx-piml-multiscale-integration-plan.md`。
+## 8. 上游文档
+
+- 上游进度与决策记录见 `ai/common/progress-frame7_piml.md`；帧级主入口 / 数学原理见 dut-postdoc `frame7_piml_pipeline_guide.md`（数学原理见其 §3；长期计划 `piml-matrix-free-execution-plan.md`）。
+- 原「任务计划」`soptx-piml-multiscale-integration-plan.md` 与「数学原则」`piml_multiscale_math_principles.md` 已被单帧 guide 归并删除（2026-07-03 核对）。

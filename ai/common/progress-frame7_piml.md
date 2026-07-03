@@ -8,6 +8,11 @@ tags:
   - progress
 status: "active"
 date: 2026-07-02
+upstream:
+  guide: research/postdoc-plan/defense-sprint/direction-1-piml-matrix-free/frame7_piml_pipeline_guide.md
+  principle: frame7_piml_pipeline_guide.md §3（静力缩聚构造式见 §3.3）
+  plan_long_term: research/postdoc-plan/long-term/direction-1-piml-matrix-free/piml-matrix-free-execution-plan.md
+  plan_id: T1.3.2
 ---
 
 # PIML 多尺度预测原型 Progress
@@ -20,10 +25,17 @@ date: 2026-07-02
 
 ## 上位文档（dut-postdoc）
 
-- **帧级主入口**（缩聚路线、实测结果、答辩口径与补数方式）：`research/postdoc-plan/defense-sprint/direction-1-piml-matrix-free/frame7_piml_pipeline_guide.md`
-- **总体计划与答辩口径**：同目录 `soptx-piml-multiscale-integration-plan.md`
-- **数学原则**（EMsFEM 两级网格、静力缩聚构造式、问题无关性）：同目录 `piml_multiscale_math_principles.md`
-- **24 个月长期计划**（本原型 = 其阶段一 T1.3.2 最小前向核心）：`research/postdoc-plan/long-term/direction-1-piml-matrix-free/piml-matrix-free-execution-plan.md`
+> 跨库映射集中维护于 `ai/common/status.md`「跨库映射」表；本节给细粒度指针，
+> 只用「文件名 + 章节号 + 计划项 ID」，不写行号。
+> **2026-07-03 核对**：dut-postdoc 已把帧 7 收敛为单帧 guide，原「总体计划」
+> `soptx-piml-multiscale-integration-plan.md` 与「数学原则」`piml_multiscale_math_principles.md`
+> 已删除（被单帧 guide 归并接管），其数学原理并入 guide §3。两条旧指针已移除。
+
+- **帧级主入口 / 数学原理**（缩聚路线、实测结果、答辩口径、边界、补数方式；数学原理见
+  guide §3，EMsFEM 两级网格 / 问题无关性见 §3.1–3.2、静力缩聚构造式见 §3.3）：
+  `research/postdoc-plan/defense-sprint/direction-1-piml-matrix-free/frame7_piml_pipeline_guide.md`
+- **24 个月长期计划**（本原型 = 其阶段一 T1.3.2 最小前向核心）：
+  `research/postdoc-plan/long-term/direction-1-piml-matrix-free/piml-matrix-free-execution-plan.md`
 
 ## 当前结论
 
@@ -52,29 +64,21 @@ T4b 极小 MLP TrainedPredictor 已训练, 在实际 64 子结构光滑场上产
 `operator_backend="piml_multiscale"` 未接入 `LagrangeFEMAnalyzer`；
 K̂_s^j 喂给全局 Matrix-Free 作用属后续阶段。）
 
-## 必跑产出实测（2026-07-02，回填 dut-postdoc 答辩帧 7）
+## 必跑产出实测（headline；完整数值表见 results）
 
-算例：矩形悬臂 [0,2]×[0,1]，左边固支、右边中点竖向点载荷 P=-1，E=1、ν=0.3、
-平面应力，Q4 均匀细网格，光滑非均匀密度场（值域约 [0.3, 0.9]），粗网格 8×8。
+> **数值单一事实源（SSOT）= `docs/frame7_piml_pipeline_results.md`**——全表、复现命令、
+> deck LaTeX 均在此维护。本节只留续接需要的 headline；重跑 benchmark 后**只改 results，
+> 不在此复写全表**（避免两处数字漂移）。
 
-| 粗/细比 L | 细网格 | 全尺度 DOF | 接口 DOF | 降维 | ① V1 误差 (Exact) | ② 接口求解残差 | ③ 接口解 vs 全尺度直解 | ③′ 细尺度恢复 |
-|---|---|---|---|---|---|---|---|---|
-| 5×5 | 40×40 | 3,362 | 1,314 | 2.56x | 1.384e-15 | 2.142e-13 | 9.389e-14 | 9.534e-14 |
-| 10×10 | 80×80 | 13,122 | 2,754 | 4.76x | 2.617e-15 | 3.382e-13 | 4.320e-12 | 4.355e-12 |
+算例：矩形悬臂 [0,2]×[0,1]，左固支、右中点竖向载荷 P=-1，E=1/ν=0.3/平面应力，
+Q4 均匀细网格、光滑非均匀密度场（约 [0.3,0.9]），粗网格 8×8、64 子结构；粗/细比 L=5、10。
 
-- ① V1 = ‖K^cond − S‖_F/‖S‖_F，S 为全尺度细网格刚度阵消去全部内部自由度的全局
-  Schur 补——静力缩聚与全尺度数学等价，实测机器精度（目标 < 1e-10）。
-- MockPredictor（均匀缩放解析映射）同场对照 V1 误差：L=5 为 2.841e-2、L=10 为
-  3.117e-2——演示预测器接口互换 + 非精确预测器误差可度量（TrainedPredictor 对照基线位）。
-- TrainedPredictor（T4b 极小 MLP，2026-07-03 训练）同场逐子结构
-  ‖K̂_s−K_s‖_F/‖K_s‖_F：L=5 mean 1.633e-3（median 8.20e-4、max 8.12e-3）、
-  L=10 mean 8.230e-3（median 3.38e-3、max 6.26e-2）；assembled v1_trained
-  L=5 2.112e-3、L=10 9.343e-3（vs 全尺度 Schur，与 Mock/Exact 同表可比）。
-  数据文件：`outputs/piml_trained_prototype.csv`；权重
-  `outputs/piml_trained_predictor_L{5,10}.pt`（均 gitignore，重跑即得）。
-- ② 为接口方程 ‖K_bc U_b − F_bc‖/‖F_bc‖（直解后残差）。
-- 数据文件：`outputs/piml_forward_prototype.csv`（outputs/ 默认 gitignore，重跑即得）。
-- 数值说明文档（deck 帧 7 上游事实源）：`docs/frame7_piml_pipeline_results.md`。
+- ① 求解降维：DOF 3362→1314（2.6x）/ 13122→2754（4.8x）。
+- ② V1 缩聚精确性（vs 全尺度 Schur 补 S）：~1e-15（机器精度，目标 <1e-10）。
+- ③ 接口解 / 细尺度恢复 vs 全尺度直解：≤4.3e-12。
+- ④ TrainedPredictor（T4b 极小 MLP）逐子结构 ‖K̂_s−K_s‖/‖K_s‖ 均值 L=5 1.6e-3、
+  L=10 8.2e-3（Mock 对照 ~3e-2，优约一个量级）。
+- 逐档 median/max、assembled v1_trained、验证集泛化数、L=10>L=5 成因说明 → 见 results §2–§4。
 
 ## 当前进度
 
@@ -155,21 +159,10 @@ C:\workspace\soptx_heliang\soptx\benchmarks\benchmark_piml_trained.py       # T4
 
 ## Benchmark 命令（必跑产出复现）
 
-```powershell
-# 前向原型必跑产出（V1/接口/降维）
-.\.venv\Scripts\python.exe -m soptx.benchmarks.benchmark_piml_forward `
-  --coarse 8x8 --levels 5,10 --output outputs/piml_forward_prototype.csv
+完整复现命令（`benchmark_piml_forward` / `train_piml_predictor` / `benchmark_piml_trained`）
+统一维护于数值 SSOT `docs/frame7_piml_pipeline_results.md` §5，此处不复写，避免命令漂移。
 
-# T4b 训练极小 TrainedPredictor（产出 outputs/piml_trained_predictor_L{5,10}.pt，约各 3-4 分钟 @RTX5070Ti）
-.\.venv\Scripts\python.exe -m soptx.benchmarks.train_piml_predictor `
-  --coarse 8x8 --levels 5,10 --device cuda
-
-# T4b 回填 benchmark（deck ④ 真实预测误差，需先训练）
-.\.venv\Scripts\python.exe -m soptx.benchmarks.benchmark_piml_trained `
-  --coarse 8x8 --levels 5,10 --device cuda --output outputs/piml_trained_prototype.csv
-```
-
-注意：PowerShell 控制台若为 GBK 编码，中文/组合符号（K̂）会乱码或触发
+注意（环境备忘）：PowerShell 控制台若为 GBK 编码，中文/组合符号（K̂）会乱码或触发
 UnicodeEncodeError；两 T4b 脚本已在入口 `sys.stdout.reconfigure(encoding="utf-8")`，CSV 亦 UTF-8。
 
 ## 环境备忘（2026-07-02）
