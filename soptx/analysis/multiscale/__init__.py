@@ -9,7 +9,7 @@
 - fullscale_reference:    V1 全尺度参照 (全局 Schur 补 / 直解)
 
 原型阶段仅支持 numpy 后端; 与 matrix-free 的协同 (K̂_s^j 喂给全局
-matrix-free 作用) 属后续阶段, 见 docs/piml_multiscale_architecture_notes.md.
+matrix-free 作用) 属后续阶段, 见 ai/common/progress-frame7_piml.md「阶段二/三 接入设计」.
 """
 
 from .coarse_fine_mesh import CoarseFineMeshPair
@@ -34,3 +34,28 @@ __all__ = [
     "fullscale_schur_complement",
     "solve_with_dirichlet",
 ]
+
+# T4b TrainedPredictor 依赖 torch; 原型其余部分 numpy-only, 故 torch 缺失时
+# 不影响 Exact/Mock 前向管道与 V1/V2 测试导入.
+try:  # pragma: no cover - 依赖可选后端
+    from .trained_predictor import (
+        KsMLP,
+        Standardizer,
+        TrainedPredictor,
+        train_ks_mlp,
+        make_training_data,
+        save_predictor,
+        load_predictor,
+    )
+
+    __all__ += [
+        "KsMLP",
+        "Standardizer",
+        "TrainedPredictor",
+        "train_ks_mlp",
+        "make_training_data",
+        "save_predictor",
+        "load_predictor",
+    ]
+except ImportError:  # torch 未安装
+    pass

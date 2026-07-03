@@ -37,7 +37,7 @@ ai/common/status.md
 | 工作线 | 状态 | 续接文档 | 当前阶段 | 下一步 |
 |---|---|---|---|---|
 | Matrix-Free 结构分析原型 | active | `ai/common/progress-matrix-free.md` | Python/NumPy 数学路径、接口闭环和正确性验证完成 | 单机 GPU/多后端验证与 benchmark |
-| PIML 多尺度原型 | paused | `docs/ai_piml_context.md` | 旧上下文入口保留 | 需要时再整理为独立 progress 文档 |
+| PIML 多尺度原型 | active | `ai/common/progress-frame7_piml.md` | 单步前向闭环打通（分支 codex/piml-multiscale-prototype）；V1 机器精度（L=5: 1.4e-15, L=10: 2.6e-15）；接口解 vs 全尺度直解 ~1e-12；T4b 极小 MLP TrainedPredictor 已训练（‖K̂_s−K_s‖/‖K_s‖ 均值 L=5: 1.6e-3、L=10: 8.2e-3，优于 Mock ~3e-2）；deck 帧 7 ④ 已回填 dut-postdoc | 阶段二：`operator_backend="piml_multiscale"` 接入 `LagrangeFEMAnalyzer`（V3 出图可选缓做） |
 
 ## 全局约定
 
