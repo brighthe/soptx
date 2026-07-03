@@ -17,17 +17,27 @@ date: 2026-06-29
 ## Matrix-Free 高性能求解
 
 - [status.md](../ai/common/status.md) — **AI 工作线总入口**，先读这份
-- [progress-matrix-free.md](../ai/common/progress-matrix-free.md) — Matrix-Free 当前进度和续接入口
+- [progress-frame8_matrix_free.md](../ai/common/progress-frame8_matrix_free.md) — **续接入口**（进度 + 决策），先读这份
+- [frame8_matrix_free_pipeline_results.md](frame8_matrix_free_pipeline_results.md) — 帧 8 验证数值结果快照（deck 上游事实源）
 - [matrix_free_architecture_notes.md](matrix_free_architecture_notes.md) — SOPTX 实现备忘录
-- 总体计划：`dut-postdoc/research/soptx-matrix-free-integration-plan.md`
-- 数学原则：`dut-postdoc/research/matrix_free_math_principles.md`
+- 帧级主入口：`dut-postdoc/research/postdoc-plan/defense-sprint/direction-1-piml-matrix-free/frame8_matrix_free_pipeline_guide.md`
 
 ## PIML 多尺度预测
 
-- [ai_piml_context.md](ai_piml_context.md) — **接续上下文（总入口）**，先读这份
-- [piml_multiscale_architecture_notes.md](piml_multiscale_architecture_notes.md) — SOPTX 实现备忘录
-- 总体计划：`dut-postdoc/research/soptx-piml-multiscale-integration-plan.md`
-- 数学原则：`dut-postdoc/research/piml_multiscale_math_principles.md`
+- [progress-frame7_piml.md](../ai/common/progress-frame7_piml.md) — **续接入口**（进度 + 决策 + 阶段二/三接入设计），先读这份
+- [frame7_piml_pipeline_results.md](frame7_piml_pipeline_results.md) — 帧 7 验证数值结果快照（deck 上游事实源）
+- 帧级主入口：`dut-postdoc/research/postdoc-plan/defense-sprint/direction-1-piml-matrix-free/frame7_piml_pipeline_guide.md`；
+  任务计划 / 数学原则：同目录 `soptx-piml-multiscale-integration-plan.md` / `piml_multiscale_math_principles.md`
+
+> 原 `ai_piml_context.md`（旧续接入口）与 `piml_multiscale_architecture_notes.md`（接入前
+> 架构备忘录）已于 2026-07-02 并入 `progress-frame7_piml.md` 后删除。
+
+## MMC 显式几何高精度离散
+
+- [progress-frame10_mmc.md](../ai/common/progress-frame10_mmc.md) — **续接入口**（进度 + 决策 + 复现命令），先读这份
+- [frame10_mmc_pipeline_results.md](frame10_mmc_pipeline_results.md) — 帧 10 验证数值结果快照（deck 上游事实源）
+- 帧级主入口 / 长期调研：`dut-postdoc/research/postdoc-plan/` 下
+  `defense-sprint/direction-2-mmc-mmv/frame10_mmc_pipeline_guide.md` / `long-term/direction-2-mmc-mmv/mmc-mmv-numerical-discretization-survey.md`
 
 > 两条后端共享 `LagrangeFEMAnalyzer` 状态方程求解的后端选择
 > （`operator_backend = assembled | matrix_free | piml_multiscale`），

@@ -10,5 +10,5 @@ ai/claude/CLAUDE.md
 
 ```text
 ai/common/status.md
-ai/common/progress-matrix-free.md
+ai/common/progress-frame8_matrix_free.md
 ```
