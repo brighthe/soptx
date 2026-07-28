@@ -151,7 +151,7 @@ def calculate_multiresolution_gphi_eg(
     - 首先在父参考单元上生成高斯点, 然后将这些高斯点映射到各子单元的参考区域中，
     - 并把映射后的点仍用 “父参考单元坐标” 表达，从而可直接调用父位移空间的 grad_basis.
     - 最终返回的 gphi_eg_reshaped 形状为 (NC*n_sub, NQ, LDOF, GD), 
-    - 可直接传入 material.strain_displacement_matrix(...) 构造 B 矩阵.
+    - 可直接传入 material.strain_matrix(...) 构造 B 矩阵.
 
     Parameters
     ----------

@@ -293,7 +293,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             lame_lambda=pde.lam, 
                                             shear_modulus=pde.mu,
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
         
@@ -476,7 +476,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
 
@@ -641,7 +641,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
 
@@ -796,7 +796,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
 
@@ -871,7 +871,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         self._log_info(f"开始密度拓扑优化, \n"
                 f"模型名称={pde.__class__.__name__} \n"
-                f"平面类型={material.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+                f"平面类型={material.hypothesis}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
                 f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
                 f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, \n"
                 f"分析算法={analyzer.__class__.__name__} \n" 
@@ -947,7 +947,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
 
@@ -1022,7 +1022,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         
         self._log_info(f"开始密度拓扑优化, \n"
                 f"模型名称={pde.__class__.__name__} \n"
-                f"平面类型={material.plane_type}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
+                f"平面类型={material.hypothesis}, 外载荷类型={pde.load_type}, 杨氏模量={pde.E}, 泊松比={pde.nu} \n"
                 f"网格类型={mesh_type}, 密度类型={density_location}, 空间阶数={space_degree} \n" 
                 f"密度网格尺寸={design_variable_mesh.number_of_cells()}, 密度场自由度={rho.shape}, \n"
                 f"分析算法={analyzer.__class__.__name__} \n" 
@@ -1098,7 +1098,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
         interpolation_method = 'msimp'
@@ -1257,7 +1257,7 @@ class DensityTopOptHuZhangTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
         interpolation_method = 'msimp'

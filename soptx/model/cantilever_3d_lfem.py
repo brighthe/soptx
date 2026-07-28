@@ -33,7 +33,7 @@ class CantileverBeam3d(PDEBase):
                 p: float = -1.0,  # N
                 E: float = 1.0,   # MPa
                 nu: float = 0.3,
-                plane_type: str = '3d',
+                plane_type: str = '3D',
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None
             ) -> None:

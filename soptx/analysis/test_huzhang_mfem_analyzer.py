@@ -27,7 +27,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam, 
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                                 enable_logging=False
                                             )
 
@@ -44,7 +44,7 @@ class HuZhangMFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam, 
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                                 enable_logging=False
                                             )
 

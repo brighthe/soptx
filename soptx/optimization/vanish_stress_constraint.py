@@ -145,7 +145,7 @@ class VanishingStressConstraint(BaseLogged):
         
         # --- 获取应变位移矩阵 B, 刚度矩阵 D, 和 von Mises 投影矩阵 M ---
         # 单分辨率: (NC, NQ, NS, LDOF) | 多分辨率: (NC, n_sub, NQ, NS, LDOF)
-        B = self._analyzer.compute_strain_displacement_matrix(integration_order=1) 
+        B = self._analyzer.compute_strain_matrix(integration_order=1)
         D = material.elastic_matrix()[0, 0]    # (NS, NS)
         M = material.von_mises_matrix()        # (NS, NS)
 

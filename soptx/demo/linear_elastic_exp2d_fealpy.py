@@ -23,22 +23,33 @@
 
 
 
-from typing import List, Callable, Optional, Tuple
+# Python 标准库：类型标注
+from typing import Callable, List, Tuple
 
+# 第三方通用库：结果可视化
 import matplotlib.pyplot as plt
 
+# FEALPy：计算后端、网格、函数空间、变分形式、边界条件和求解器
 from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike, Callable
-from fealpy.mesh import TetrahedronMesh, HexahedronMesh
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.material.elastic_material import LinearElasticMaterial
-from fealpy.fem.bilinear_form import BilinearForm
-from fealpy.fem.linear_form import LinearForm
-from fealpy.fem.linear_elasticity_integrator import LinearElasticityIntegrator
-from fealpy.fem.vector_source_integrator import VectorSourceIntegrator
-from fealpy.fem.dirichlet_bc import DirichletBC
-from fealpy.solver import cg, spsolve
 from fealpy.decorator import cartesian, variantmethod
+from fealpy.fem import (
+    BilinearForm,
+    DirichletBC,
+    LinearForm,
+)
+from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+from fealpy.mesh import TetrahedronMesh
+from fealpy.solver import spsolve
+from fealpy.typing import TensorLike
+
+# SOPTX：线弹性材料、刚度/载荷积分子和误差后处理工具
+from soptx.analysis.integrators.linear_elastic_integrator import (
+    LinearElasticIntegrator,
+)
+from soptx.analysis.integrators.source_integrator import SourceIntegrator
+from soptx.interpolation.linear_elastic_material import (
+    IsotropicLinearElasticMaterial,
+)
 from soptx.utils.show import showmultirate, show_error_table
 
 class PolySolPureDirLagrange3d():
@@ -224,7 +235,7 @@ class PolySolPureDirLagrange3d():
 def test_linear_elasticity_with_fem(p, pde):
     mesh = pde.init_mesh(nx=2, ny=2, nz=2)
 
-    maxit = 4
+    maxit = 5
     errorType = ['$|| \\boldsymbol{u}  - \\boldsymbol{u}_h ||_{L_2}$']
     errorMatrix = bm.zeros((len(errorType), maxit), dtype=bm.float64)
     NDof = bm.zeros(maxit, dtype=bm.int32)
@@ -235,22 +246,21 @@ def test_linear_elasticity_with_fem(p, pde):
         tensor_space = TensorFunctionSpace(space, shape=(-1, mesh.geo_dimension()))
         NDof[i] = tensor_space.number_of_global_dofs()
 
-        linear_elastic_material = LinearElasticMaterial(
-                                        name='E1nu03', 
+        linear_elastic_material = IsotropicLinearElasticMaterial(
                                         lame_lambda=pde.lam, 
                                         shear_modulus=pde.mu,
-                                        hypo=pde._plane_type, 
+                                        hypothesis=pde._plane_type,
                                         device=bm.get_device(mesh)
                                     )
 
-        integrator_K = LinearElasticityIntegrator(
-                            material=linear_elastic_material, 
-                            q=tensor_space.p+3, 
-                            method=None)
+        integrator_K = LinearElasticIntegrator(
+                            material=linear_elastic_material,
+                            q=tensor_space.p+3,
+                            method="standard")
         bform = BilinearForm(tensor_space)
         bform.add_integrator(integrator_K)
         K = bform.assembly(format='csr')
-        integrator_F = VectorSourceIntegrator(
+        integrator_F = SourceIntegrator(
                             source=pde.body_force, 
                             q=tensor_space.p+3
                         )
@@ -258,24 +268,23 @@ def test_linear_elasticity_with_fem(p, pde):
         lform.add_integrator(integrator_F)
         F = lform.assembly()
 
-        dbc = DirichletBC(space=tensor_space, 
-                        gd=pde.dirichlet_bc, 
-                        threshold=None, 
+        dbc = DirichletBC(space=tensor_space,
+                        gd=pde.dirichlet_bc,
                         method='interp')
-        K, F = dbc.apply(A=K, f=F, uh=None, gd=pde.dirichlet_bc, check=True)
+        K, F = dbc.apply(K, F)
 
         uh = tensor_space.function()
 
-        uh[:] = spsolve(K, F, solver='mumps')
-
-        # L2 误差
-        e0 = mesh.error(uh, pde.disp_solution)
-        errorMatrix[0, i] = e0
+        uh[:] = spsolve(K, F, solver='scipy')
 
         h[i] = 1 / N
 
-        u_exact = tensor_space.interpolate(pde.disp_solution)
-        errorMatrix[0, i] = bm.sqrt(bm.sum(bm.abs(uh[:] - u_exact)**2 * (1 / NDof[i])))
+        cell = mesh.Entity("cell")
+        errorMatrix[0, i] = cell.error(
+            pde.disp_solution,
+            uh,
+            q=tensor_space.p + 3,
+        )
 
         if i < maxit-1:
             mesh.uniform_refine()
@@ -287,7 +296,7 @@ def test_linear_elasticity_with_fem(p, pde):
     showmultirate(plt, 2, h, errorMatrix,  errorType, propsize=20)
 
 if __name__ == "__main__":
-    p = 2
+    p = 1
     pde = PolySolPureDirLagrange3d()
 
     test_linear_elasticity_with_fem(p, pde)

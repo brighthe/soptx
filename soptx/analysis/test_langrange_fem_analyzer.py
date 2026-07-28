@@ -33,7 +33,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                     lame_lambda=pde.lam, 
                                     shear_modulus=pde.mu,
-                                    plane_type=pde.plane_type,
+                                    hypothesis=pde.plane_type,
                                     enable_logging=False
                                 )
 
@@ -49,7 +49,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam, 
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                                 enable_logging=False
                                             )
             
@@ -65,7 +65,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam, 
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                                 enable_logging=False
                                             )
         
@@ -81,7 +81,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam, 
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                                 enable_logging=False
                                             )
         
@@ -97,7 +97,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam, 
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                                 enable_logging=False
                                             )
         
@@ -114,7 +114,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 youngs_modulus=pde.E, 
                                                 poisson_ratio=pde.nu, 
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                             )
         
         elif model == 'BoxTriMixed2d':
@@ -130,7 +130,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 youngs_modulus=pde.E, 
                                                 poisson_ratio=pde.nu, 
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                             )
 
         elif model == 'poly_sol_pure_dir_lagrange3d':
@@ -146,7 +146,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam,
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                             )
             
         elif model == 'poly_sol_pure_homo_dir_huzhang_3d':
@@ -163,7 +163,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
             material = IsotropicLinearElasticMaterial(
                                                 lame_lambda=pde.lam,
                                                 shear_modulus=pde.mu,
-                                                plane_type=pde.plane_type,
+                                                hypothesis=pde.plane_type,
                                             )
 
         space_degree = 1
@@ -300,7 +300,7 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E,
                                             poisson_ratio=pde.nu,
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
         
@@ -351,10 +351,10 @@ class LagrangeFEMAnalyzerTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
-        B = material.strain_displacement_matrix(dof_priority=t_space.dof_priority, 
+        B = material.strain_matrix(dof_priority=t_space.dof_priority,
                                                             gphi=gphi)
         D = material.elastic_matrix()
         strain_quadrature = bm.einsum('cqil, cl -> cqi', B, cuh) # (NC, NQ, 3)

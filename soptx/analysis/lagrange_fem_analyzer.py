@@ -613,7 +613,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                         reshape_multiresolution_data_inverse)
         B_eg = reshape_multiresolution_data_inverse(
                     mesh_u,
-                    self._material.strain_displacement_matrix(
+                    self._material.strain_matrix(
                         dof_priority=space.dof_priority,
                         gphi=reshape_multiresolution_data(mesh_u, gphi_eg)  # (NC*n_sub, NQ, NS, TLDOF)
                     ),
@@ -704,7 +704,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             # 计算 B 矩阵
             from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
             gphi_eg_reshaped = reshape_multiresolution_data(mesh=mesh_u, data=gphi_eg) # (NC*n_sub, NQ, NS, TLDOF)
-            B_eg_reshaped = self._material.strain_displacement_matrix(
+            B_eg_reshaped = self._material.strain_matrix(
                                                 dof_priority=self._tensor_space.dof_priority, 
                                                 gphi=gphi_eg_reshaped
                                             ) # (NC*n_sub, NQ, NS, TLDOF)
@@ -747,7 +747,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             D0 = self._material.elastic_matrix()[0, 0] # (NS, NS)
             dof_priority = self._tensor_space.dof_priority
             gphi = u_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
-            B = self._material.strain_displacement_matrix(
+            B = self._material.strain_matrix(
                                     dof_priority=dof_priority, 
                                     gphi=gphi
                                 ) # (NC, NQ, NS, TLDOF)
@@ -765,7 +765,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             return diff_ke
         
-    def compute_strain_displacement_matrix(self, integration_order: Optional[int] = None) -> TensorLike:
+    def compute_strain_matrix(self, integration_order: Optional[int] = None) -> TensorLike:
         """
         计算应变-位移矩阵 B
         
@@ -788,7 +788,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             qf = self._mesh.quadrature_formula(integration_order)
             bcs, _ = qf.get_quadrature_points_and_weights()
             gphi = self._scalar_space.grad_basis(bcs, variable='x')  # (NC, NQ, LDOF, GD)
-            B = self._material.strain_displacement_matrix(
+            B = self._material.strain_matrix(
                                                 dof_priority=self._tensor_space.dof_priority, 
                                                 gphi=gphi
                                             )  # (NC, NQ, NS, TLDOF)
@@ -801,7 +801,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                         q=integration_order,
                                         n_sub=n_sub
                                     )  # (NC*n_sub, NQ, LDOF, GD)
-            B_reshaped = self._material.strain_displacement_matrix(
+            B_reshaped = self._material.strain_matrix(
                                             dof_priority=self._tensor_space.dof_priority, 
                                             gphi=gphi_eg_reshaped
                                         )  # (NC*n_sub, NQ, NS, TLDOF)
@@ -854,7 +854,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         uh_e = uh[cell2dof]
 
         # 1. 计算应变-位移矩阵 B
-        B = self.compute_strain_displacement_matrix(integration_order)
+        B = self.compute_strain_matrix(integration_order)
         
         # 2. 计算实体柯西应力
         stress_tensor = self._material.calculate_stress_vector(B, uh_e)

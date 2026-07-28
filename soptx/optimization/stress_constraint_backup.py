@@ -596,7 +596,7 @@ class StressConstraint(BaseLogged):
         tensor_space = self._analyzer.tensor_space
 
         D0 = material.elastic_matrix()[0, 0]  # (NS, NS)
-        B = self._analyzer.compute_strain_displacement_matrix()  # (NC, NQ, NS, n_ldof)
+        B = self._analyzer.compute_strain_matrix()  # (NC, NQ, NS, n_ldof)
 
         n_points = dg_dsigma_vm.shape[-1]
         NQ = dvm_dsigma.shape[1]
@@ -690,8 +690,3 @@ class StressConstraint(BaseLogged):
                 bm.add_at(L[m], indices, vals)
                 
             return L
-
-
-
-
-        

@@ -485,7 +485,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         NC = mesh.number_of_cells()
         NQ = gphi.shape[1]
         D0 = self._material.elastic_matrix() # 2D: (1, 1, NS, NS)
-        B = self._material.strain_displacement_matrix(dof_priority=space.dof_priority, 
+        B = self._material.strain_matrix(dof_priority=space.dof_priority,
                                                     gphi=gphi) # (NC, NQ, NS, LDOF)
 
         # 单元密度: (NC, ); 节点密度: (NC, NQ)
@@ -581,7 +581,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         # 计算 B 矩阵
         from soptx.analysis.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
         gphi_eg_reshaped = reshape_multiresolution_data(mesh=mesh_u, data=gphi_eg) # (NC*n_sub, NQ, NS, TLDOF)
-        B_eg_reshaped = self._material.strain_displacement_matrix(
+        B_eg_reshaped = self._material.strain_matrix(
                                             dof_priority=space.dof_priority, 
                                             gphi=gphi_eg_reshaped
                                         ) # (NC*n_sub, NQ, NS, TLDOF)

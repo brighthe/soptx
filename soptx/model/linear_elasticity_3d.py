@@ -27,7 +27,7 @@ class PolySolPureHomoDirHuZhang3d(PDEBase):
                 domain: List[float] = [0, 1, 0, 1, 0, 1],
                 mesh_type: str = 'uniform_tet', 
                 lam: float = 1.0, mu: float = 0.5,
-                plane_type: str = '3d',                
+                plane_type: str = '3D',
                 enable_logging: bool = False, 
                 logger_name: Optional[str] = None 
             ) -> None:

@@ -27,7 +27,7 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
         E, nu = 1.0, 0.3
-        plane_type = '3d'
+        plane_type = '3D'
 
         nx, ny, nz = 60, 20, 4
         # nx, ny, nz = 120, 40, 8
@@ -71,7 +71,7 @@ class DensityTopOptTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             device=device,
                                         )
 
@@ -204,7 +204,7 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
         E, nu = 1.0, 0.3
-        plane_type = '3d'
+        plane_type = '3D'
 
         nx, ny, nz = 60, 20, 4
         mesh_type = 'uniform_hex'
@@ -246,7 +246,7 @@ class DensityTopOptTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             device=device,
                                         )
 
@@ -390,7 +390,7 @@ class DensityTopOptTest(BaseLogged):
         domain = [0, 60.0, 0, 20.0, 0, 4.0]
         p = -1.0
         E, nu = 1.0, 0.3
-        plane_type = '3d'
+        plane_type = '3D'
 
         nx, ny, nz = 60, 20, 4
         # nx, ny, nz = 120, 40, 8
@@ -433,7 +433,7 @@ class DensityTopOptTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             device=device,
                                         )
 
@@ -873,7 +873,7 @@ class DensityTopOptTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
 
@@ -1033,7 +1033,7 @@ class DensityTopOptTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
 
@@ -1187,7 +1187,7 @@ class DensityTopOptTest(BaseLogged):
         material = IsotropicLinearElasticMaterial(
                                             youngs_modulus=pde.E, 
                                             poisson_ratio=pde.nu, 
-                                            plane_type=pde.plane_type,
+                                            hypothesis=pde.plane_type,
                                             enable_logging=False
                                         )
 
