@@ -262,10 +262,10 @@ python .\examples\pinn_linear_elasticity_2d\run.py `
 
 ## 正确性验证结果
 
-2026-07-29 在 Python 3.12.13、PyTorch 2.13.0+cu130、CPU、`float64` 下执行默认
-2000 次参数更新，`validation status: passed`。本次使用 Git revision
-`648f747185c67b2e542841afc2b28fe322fdc09e`，但运行时工作树为 `dirty=True`，因此以下
-结果证明当前实现通过既定门禁，尚不构成干净 revision 下的正式可重放证据。
+2026-07-29 在 Python 3.12.13、PyTorch 2.13.0+cu130、CPU、`float64` 下，从干净
+detached worktree 对 Git revision `40a2f83e8358b5b24c8be7d0bee2e1d3a5bab84e` 执行
+默认 2000 次参数更新。运行记录为 `dirty=False`、`validation status: passed`，以下结果
+构成该 revision 的正式可重放基线。
 
 | 门禁 | 状态 | 实测值 | 阈值 |
 |---|---|---:|---:|
@@ -276,13 +276,13 @@ python .\examples\pinn_linear_elasticity_2d\run.py `
 | best 固定 validation loss | 通过 | $3.5441\times10^{-2}$ | $\le 5\times10^{-2}$ |
 | best checkpoint 相对位移 $L^2$ error | 通过 | $3.4686\times10^{-2}$ | $\le 10^{-1}$ |
 
-训练耗时为 `26.68 s`，best checkpoint 位于第 2000 次参数更新；对应绝对位移
+训练耗时为 `30.06 s`，best checkpoint 位于第 2000 次参数更新；对应绝对位移
 $L^2$ error 为 $1.7387\times10^{-2}$，固定点平衡 residual RMS 为
-$9.1778\times10^{-2}$，最大边界位移误差为 $9.8866\times10^{-3}$。这些补充指标用于
+$9.1778\times10^{-2}$，最大边界位移误差为 $9.8866\times10^{-2}$。这些补充指标用于
 描述当前精度，不替代上表门禁。
 
-当前基线可记为“既定正确性门禁已通过”。提交相关实现后，仍需在干净 revision 上以同一
-命令复跑，才能升级为正式可重放基线。
+当前基线可记为“既定正确性门禁已通过，并已在干净 revision 上复现”。该结论只适用于本页
+定义的二维平面应变、全 Dirichlet 制造解问题及当前默认配置。
 
 ## 输出
 
