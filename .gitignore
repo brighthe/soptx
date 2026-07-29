@@ -50,3 +50,6 @@ build
 
 # Python 包元数据目录
 soptx.egg-info
+
+# PINN 2D elasticity training artifacts
+/examples/pinn_linear_elasticity_2d/outputs/
