@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install SOPTX and test tooling
+        run: python -m pip install --upgrade pip && python -m pip install ".[test]"
+
+      - name: Check architecture
+        run: |
+          python tools/check_python_syntax.py
+          python tools/check_architecture.py
+
+      - name: Check deterministic inventories
+        run: python tools/generate_repository_inventory.py --check
+
+      - name: Run maintained tests
+        run: python -m pytest tests -q
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Check wheel contents
+        shell: bash
+        run: python tools/check_wheel_contents.py dist/*.whl
+
+  pinn-fast:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install PINN test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[test,pinn]"
+
+      - name: Run PINN fast tests
+        run: python -m pytest examples/pinn_elasticity/tests -q
+
+  matrix-free-fast:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install OpenMPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libopenmpi-dev openmpi-bin
+
+      - name: Install Matrix-Free test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[test,mpi]"
+
+      - name: Run Matrix-Free fast tests
+        run: python -m pytest examples/matrix_free_elasticity -q

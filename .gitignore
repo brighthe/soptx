@@ -40,16 +40,24 @@
 # Python 与开发环境相关
 #----------------------------------------
 # Python 字节码缓存目录
-__pycache__
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # JetBrains IDE 配置目录
 .idea
 
 # Python 构建目录
-build
+build/
+dist/
 
 # Python 包元数据目录
-soptx.egg-info
+*.egg-info/
 
-# PINN 2D elasticity training artifacts
-/examples/pinn_linear_elasticity_2d/outputs/
+# Matrix-Free 2D/3D elasticity validation artifacts
+/examples/matrix_free_elasticity/outputs/
+!/examples/matrix_free_elasticity/evidence/*.json
+
+# PINN 2D/3D elasticity training artifacts
+/examples/pinn_elasticity/outputs/
+!/examples/pinn_elasticity/evidence/*.json

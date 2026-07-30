@@ -1,0 +1,437 @@
+schema_version = 1
+stage = "soptx/huzhang-topopt-paper/inventory-v1"
+status = "incubating"
+inventory_base_revision = "b5a05298c655a4743b21b99b7442b1f547f0395a"
+default_blockers = [
+  "compatibility-imports",
+  "configuration-embedded-in-driver",
+  "acceptance-baseline-not-selected",
+]
+
+[[sources]]
+path = "legacy_drivers/test_phd_section3.py"
+sha256 = "a1ecd32e62fc2f5bf0881a0f3398ec0a2eadc7ede0b9f44432d0b12864dc3c4c"
+
+[[sources]]
+path = "legacy_drivers/test_phd_section4.py"
+sha256 = "1e19ec4de1fcbab3b4d747e6eaf708ecb1cd1742235af98fd86ba16af7ceac98"
+
+[[sources]]
+path = "legacy_drivers/test_phd_section4_stress_constraint.py"
+sha256 = "a50bef13bca9671f3561a3e8ba6c7ffa796f48c00d07dc47ef0485e0a479e7f0"
+
+[[sources]]
+path = "legacy_drivers/test_phd_section5.py"
+sha256 = "0b376bc244f61185c2f880ee73af07f882ff59978e10b1e3e3905bc0ec441c31"
+
+[[sources]]
+path = "legacy_drivers/test_phd_section5_root.py"
+sha256 = "375bdcb458a0cb7102df22546550cf370c48a4d35269d6fab06212de396dc0e5"
+
+[[sources]]
+path = "legacy_drivers/test_phd_section5_stress_constraint.py"
+sha256 = "72ddae440d6ded1853dc470b5ef0fda79735ba1668b8940019e13b97ca181d97"
+
+[[sources]]
+path = "legacy_drivers/test_phd_section6.py"
+sha256 = "32a6e448ece721062007abd2bc28f9ba38b57c0bb2ce66c44df6d9f3ab6e5e6a"
+
+[[excluded_sources]]
+path = "legacy_drivers/test.py"
+reason = "font and finite-difference utility; contains no variant selector"
+
+[[cases]]
+id = "section3::test_subsec3_6_2_linear_elastic_2d"
+source = "legacy_drivers/test_phd_section3.py"
+selector = "test_subsec3_6_2_linear_elastic_2d"
+chapter = 3
+dimension = 2
+role = "analysis-baseline"
+method = "legacy-mixed"
+output_stem = "section3/test_subsec3_6_2_linear_elastic_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section3::test_mbb_2d_subsection_3_6_2"
+source = "legacy_drivers/test_phd_section3.py"
+selector = "test_mbb_2d_subsection_3_6_2"
+chapter = 3
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section3/test_mbb_2d_subsection_3_6_2"
+execution_status = "blocked"
+
+[[cases]]
+id = "section3::test_subsec3_6_3_half_mbb_right_2d"
+source = "legacy_drivers/test_phd_section3.py"
+selector = "test_subsec3_6_3_half_mbb_right_2d"
+chapter = 3
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section3/test_subsec3_6_3_half_mbb_right_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section3::test_subsec3_6_4_simply_supported_bridge_2d"
+source = "legacy_drivers/test_phd_section3.py"
+selector = "test_subsec3_6_4_simply_supported_bridge_2d"
+chapter = 3
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section3/test_subsec3_6_4_simply_supported_bridge_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section3::test_subsec_3_6_6_disp_inverter_upper_2d"
+source = "legacy_drivers/test_phd_section3.py"
+selector = "test_subsec_3_6_6_disp_inverter_upper_2d"
+chapter = 3
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section3/test_subsec_3_6_6_disp_inverter_upper_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section3::test_subsec3_6_5_cantilever_3d"
+source = "legacy_drivers/test_phd_section3.py"
+selector = "test_subsec3_6_5_cantilever_3d"
+chapter = 3
+dimension = 3
+role = "optimization"
+method = "lfem"
+output_stem = "section3/test_subsec3_6_5_cantilever_3d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section4::test_subsec4_2_2"
+source = "legacy_drivers/test_phd_section4.py"
+selector = "test_subsec4_2_2"
+chapter = 4
+dimension = 2
+role = "analysis-baseline"
+method = "lfem"
+output_stem = "section4/test_subsec4_2_2"
+execution_status = "blocked"
+
+[[cases]]
+id = "section4::test_subsec4_6_2_mbb_beam"
+source = "legacy_drivers/test_phd_section4.py"
+selector = "test_subsec4_6_2_mbb_beam"
+chapter = 4
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section4/test_subsec4_6_2_mbb_beam"
+execution_status = "blocked"
+
+[[cases]]
+id = "section4::test_subsec4_6_3_mbb_beam"
+source = "legacy_drivers/test_phd_section4.py"
+selector = "test_subsec4_6_3_mbb_beam"
+chapter = 4
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section4/test_subsec4_6_3_mbb_beam"
+execution_status = "blocked"
+
+[[cases]]
+id = "section4::test_subsec4_6_5_half_mbb_beam"
+source = "legacy_drivers/test_phd_section4.py"
+selector = "test_subsec4_6_5_half_mbb_beam"
+chapter = 4
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section4/test_subsec4_6_5_half_mbb_beam"
+execution_status = "blocked"
+
+[[cases]]
+id = "section4-stress::test_subsec4_6_4_L_bracket_compliance"
+source = "legacy_drivers/test_phd_section4_stress_constraint.py"
+selector = "test_subsec4_6_4_L_bracket_compliance"
+chapter = 4
+dimension = 2
+role = "optimization"
+method = "lfem-compliance"
+output_stem = "section4-stress/test_subsec4_6_4_L_bracket_compliance"
+execution_status = "blocked"
+
+[[cases]]
+id = "section4-stress::test_subsec4_6_4_L_bracket_stress"
+source = "legacy_drivers/test_phd_section4_stress_constraint.py"
+selector = "test_subsec4_6_4_L_bracket_stress"
+chapter = 4
+dimension = 2
+role = "optimization"
+method = "lfem-stress"
+output_stem = "section4-stress/test_subsec4_6_4_L_bracket_stress"
+execution_status = "blocked"
+
+[[cases]]
+id = "section4-stress::test_subsec4_6_4_cantilever_2d"
+source = "legacy_drivers/test_phd_section4_stress_constraint.py"
+selector = "test_subsec4_6_4_cantilever_2d"
+chapter = 4
+dimension = 2
+role = "optimization"
+method = "lfem-stress"
+output_stem = "section4-stress/test_subsec4_6_4_cantilever_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5::test_linear_elastic_huzhang"
+source = "legacy_drivers/test_phd_section5.py"
+selector = "test_linear_elastic_huzhang"
+chapter = 5
+dimension = 2
+role = "analysis-baseline"
+method = "huzhang"
+output_stem = "section5/test_linear_elastic_huzhang"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5::test_subsec5_6_2_lfem"
+source = "legacy_drivers/test_phd_section5.py"
+selector = "test_subsec5_6_2_lfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section5/test_subsec5_6_2_lfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5::test_subsec5_6_2_hzmfem"
+source = "legacy_drivers/test_phd_section5.py"
+selector = "test_subsec5_6_2_hzmfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "huzhang"
+output_stem = "section5/test_subsec5_6_2_hzmfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5::test_subsec5_6_3_lfem_clapmed_beam_2d"
+source = "legacy_drivers/test_phd_section5.py"
+selector = "test_subsec5_6_3_lfem_clapmed_beam_2d"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section5/test_subsec5_6_3_lfem_clapmed_beam_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5::test_subsec5_6_3_lfem_bearing_device_2d"
+source = "legacy_drivers/test_phd_section5.py"
+selector = "test_subsec5_6_3_lfem_bearing_device_2d"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section5/test_subsec5_6_3_lfem_bearing_device_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5::test_subsec5_6_3_hzmfem_clapmed_beam_2d"
+source = "legacy_drivers/test_phd_section5.py"
+selector = "test_subsec5_6_3_hzmfem_clapmed_beam_2d"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "huzhang"
+output_stem = "section5/test_subsec5_6_3_hzmfem_clapmed_beam_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5::test_subsec5_6_3_hzmfem_bearing_device_2d"
+source = "legacy_drivers/test_phd_section5.py"
+selector = "test_subsec5_6_3_hzmfem_bearing_device_2d"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "huzhang"
+output_stem = "section5/test_subsec5_6_3_hzmfem_bearing_device_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-root::test_linear_elastic_huzhang"
+source = "legacy_drivers/test_phd_section5_root.py"
+selector = "test_linear_elastic_huzhang"
+chapter = 5
+dimension = 2
+role = "analysis-baseline"
+method = "huzhang"
+output_stem = "section5-root/test_linear_elastic_huzhang"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-root::test_subsec5_6_2_lfem"
+source = "legacy_drivers/test_phd_section5_root.py"
+selector = "test_subsec5_6_2_lfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section5-root/test_subsec5_6_2_lfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-root::test_subsec5_6_2_hzmfem"
+source = "legacy_drivers/test_phd_section5_root.py"
+selector = "test_subsec5_6_2_hzmfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "huzhang"
+output_stem = "section5-root/test_subsec5_6_2_hzmfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-root::test_subsec5_6_3_lfem"
+source = "legacy_drivers/test_phd_section5_root.py"
+selector = "test_subsec5_6_3_lfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section5-root/test_subsec5_6_3_lfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-root::test_subsec5_6_3_hzmfem"
+source = "legacy_drivers/test_phd_section5_root.py"
+selector = "test_subsec5_6_3_hzmfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "huzhang"
+output_stem = "section5-root/test_subsec5_6_3_hzmfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-stress::test_subsec5_6_4_canti2d_hzmfem"
+source = "legacy_drivers/test_phd_section5_stress_constraint.py"
+selector = "test_subsec5_6_4_canti2d_hzmfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "huzhang-stress"
+output_stem = "section5-stress/test_subsec5_6_4_canti2d_hzmfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-stress::test_subsec5_6_4_canti2d_lfem"
+source = "legacy_drivers/test_phd_section5_stress_constraint.py"
+selector = "test_subsec5_6_4_canti2d_lfem"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "lfem-stress"
+output_stem = "section5-stress/test_subsec5_6_4_canti2d_lfem"
+execution_status = "blocked"
+
+[[cases]]
+id = "section5-stress::test_subsec5_6_4_L_bracket"
+source = "legacy_drivers/test_phd_section5_stress_constraint.py"
+selector = "test_subsec5_6_4_L_bracket"
+chapter = 5
+dimension = 2
+role = "optimization"
+method = "huzhang-stress"
+output_stem = "section5-stress/test_subsec5_6_4_L_bracket"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_6_2"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_6_2"
+chapter = 6
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section6/test_subsec6_6_2"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_6_3"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_6_3"
+chapter = 6
+dimension = 3
+role = "optimization"
+method = "lfem"
+output_stem = "section6/test_subsec6_6_3"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_6_4"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_6_4"
+chapter = 6
+dimension = 3
+role = "optimization"
+method = "lfem"
+output_stem = "section6/test_subsec6_6_4"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_6_4_plot1"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_6_4_plot1"
+chapter = 6
+dimension = 3
+role = "postprocess"
+method = "plot"
+output_stem = "section6/test_subsec6_6_4_plot1"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_6_4_plot2"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_6_4_plot2"
+chapter = 6
+dimension = 3
+role = "postprocess"
+method = "plot"
+output_stem = "section6/test_subsec6_6_4_plot2"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_5_2_canti2d_corner"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_5_2_canti2d_corner"
+chapter = 6
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section6/test_subsec6_5_2_canti2d_corner"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_6_simple_bridge_2d"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_6_simple_bridge_2d"
+chapter = 6
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section6/test_subsec6_6_simple_bridge_2d"
+execution_status = "blocked"
+
+[[cases]]
+id = "section6::test_subsec6_6_half_wheel_2d"
+source = "legacy_drivers/test_phd_section6.py"
+selector = "test_subsec6_6_half_wheel_2d"
+chapter = 6
+dimension = 2
+role = "optimization"
+method = "lfem"
+output_stem = "section6/test_subsec6_6_half_wheel_2d"
+execution_status = "blocked"

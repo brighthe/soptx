@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "status": "historical-pre-generalization",
+  "dimension": 3,
+  "scope": "cpu-single-rank-fa-ea-correctness",
+  "source_artifacts": [
+    {
+      "role": "ea-4³-with-fa-references",
+      "path": "outputs/coarse-1rank.json",
+      "sha256": "a6e11ae82be83ad59018cefb9209315dfff76dac522aca8154b230b8c117d154"
+    },
+    {
+      "role": "ea-8³-with-fa-references",
+      "path": "outputs/medium-1rank.json",
+      "sha256": "70bc24f2b9567b4dcbacd676da1e5180320de80b7b5e5a37c6821e21266cfddd"
+    },
+    {
+      "role": "ea-16³-with-fa-references",
+      "path": "outputs/fine-1rank.json",
+      "sha256": "b1f44404f159ea907bb3b52b90c9e081651339971f9b950a385b1fb366460d6a"
+    },
+    {
+      "role": "independent-fa-4³",
+      "path": "outputs/elasticity-fa-p1-4x4x4-1ranks.json",
+      "sha256": "0dae7d7466c5c566d79cdb5a33ec1c5f39c5ea2170dceb64c46d551b321ecff1"
+    }
+  ],
+  "ea_cases": [
+    {
+      "label": "4³/1-rank",
+      "grid": "4³",
+      "operator_level": "ea",
+      "mpi_size": 1,
+      "local_passed": true,
+      "solver": {
+        "iterations": 24,
+        "true_relative_residual": 9.2679615432076e-11,
+        "boundary_absolute_error": 0.0
+      },
+      "error": {
+        "l2_relative": 0.6806370362260652
+      },
+      "fa_references": {
+        "raw_matvec_relative_error": 2.714896293684143e-16,
+        "dirichlet_matvec_relative_error": 1.9898186393039106e-16,
+        "explicit_solution_relative_error": 5.770065212810443e-11
+      },
+      "local_gates": {
+        "converged": true,
+        "true_residual": true,
+        "boundary_dofs": true,
+        "raw_matvec": true,
+        "dirichlet_matvec": true,
+        "operator_symmetry": true,
+        "explicit_solution": true
+      }
+    },
+    {
+      "label": "8³/1-rank",
+      "grid": "8³",
+      "operator_level": "ea",
+      "mpi_size": 1,
+      "local_passed": true,
+      "solver": {
+        "iterations": 64,
+        "true_relative_residual": 6.696250585573478e-11,
+        "boundary_absolute_error": 0.0
+      },
+      "error": {
+        "l2_relative": 0.285094861536033
+      },
+      "fa_references": {
+        "raw_matvec_relative_error": 3.17642320768273e-16,
+        "dirichlet_matvec_relative_error": 2.6954366688010523e-16,
+        "explicit_solution_relative_error": 1.938143887399796e-11
+      },
+      "local_gates": {
+        "converged": true,
+        "true_residual": true,
+        "boundary_dofs": true,
+        "raw_matvec": true,
+        "dirichlet_matvec": true,
+        "operator_symmetry": true,
+        "explicit_solution": true
+      }
+    },
+    {
+      "label": "16³/1-rank",
+      "grid": "16³",
+      "operator_level": "ea",
+      "mpi_size": 1,
+      "local_passed": true,
+      "solver": {
+        "iterations": 134,
+        "true_relative_residual": 8.626322704065549e-11,
+        "boundary_absolute_error": 0.0
+      },
+      "error": {
+        "l2_relative": 0.08919220890462531
+      },
+      "fa_references": {
+        "raw_matvec_relative_error": 3.387071943333738e-16,
+        "dirichlet_matvec_relative_error": 2.6323183788278746e-16,
+        "explicit_solution_relative_error": 1.985068174443655e-11
+      },
+      "local_gates": {
+        "converged": true,
+        "true_residual": true,
+        "boundary_dofs": true,
+        "raw_matvec": true,
+        "dirichlet_matvec": true,
+        "operator_symmetry": true,
+        "explicit_solution": true
+      }
+    }
+  ],
+  "observed_relative_l2_orders": [
+    1.2554436195275573,
+    1.6764524379809913
+  ],
+  "independent_fa_case": {
+    "label": "4³/1-rank",
+    "operator_level": "fa",
+    "mpi_size": 1,
+    "local_passed": true,
+    "solver": {
+      "iterations": 24,
+      "true_relative_residual": 9.267959621005508e-11,
+      "boundary_absolute_error": 0.0
+    },
+    "error": {
+      "l2_relative": 0.6806370362260652
+    },
+    "local_gates": {
+      "converged": true,
+      "true_residual": true,
+      "boundary_dofs": true,
+      "raw_matvec": true,
+      "dirichlet_matvec": true,
+      "operator_symmetry": true,
+      "explicit_solution": true
+    }
+  }
+}
