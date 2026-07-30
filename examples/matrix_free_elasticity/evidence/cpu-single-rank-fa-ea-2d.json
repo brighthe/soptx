@@ -1,0 +1,169 @@
+{
+  "schema_version": 2,
+  "dimension": 2,
+  "scope": "cpu-single-rank-fa-ea-correctness",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "Windows-11-10.0.26100-SP0",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "sympy": "1.14.0",
+    "fealpy": "4.0.0",
+    "soptx": "1.1.0.dev0",
+    "mpi4py": "4.1.2",
+    "mpi_library": "Intel(R) MPI Library 2021.18.1 for Windows* OS",
+    "git_revision": "25226611f174041b85610c652cdd7c4d44e2f9ea",
+    "git_dirty": false
+  },
+  "source_artifacts": [
+    {
+      "role": "2d-ea-coarse-with-fa-references",
+      "path": "outputs/2d/ea-coarse-1rank.json",
+      "sha256": "ff1e42d5e9a66446c5dbf9db352c1de01a76b030d672776efe325b5084eec2b0",
+      "generated_at_utc": "2026-07-30T12:42:47.820279+00:00",
+      "git_revision": "25226611f174041b85610c652cdd7c4d44e2f9ea",
+      "git_dirty": false
+    },
+    {
+      "role": "2d-ea-medium-with-fa-references",
+      "path": "outputs/2d/ea-medium-1rank.json",
+      "sha256": "a429da43e015e50a906d9050078ead116d2e06b93fa77ba90c1a645574601d86",
+      "generated_at_utc": "2026-07-30T12:42:49.330107+00:00",
+      "git_revision": "25226611f174041b85610c652cdd7c4d44e2f9ea",
+      "git_dirty": false
+    },
+    {
+      "role": "2d-ea-fine-with-fa-references",
+      "path": "outputs/2d/ea-fine-1rank.json",
+      "sha256": "44544be639f7dd95c2830647e9c1860d0ae48a7b53df50bdf38dec73db3ec37f",
+      "generated_at_utc": "2026-07-30T12:42:50.928670+00:00",
+      "git_revision": "25226611f174041b85610c652cdd7c4d44e2f9ea",
+      "git_dirty": false
+    },
+    {
+      "role": "2d-independent-fa-coarse",
+      "path": "outputs/2d/fa-coarse-1rank.json",
+      "sha256": "7211d665eb033cd9c0f2daea3fcf0b7f9f4263aac0e49bcf6e877a5ca1c796a3",
+      "generated_at_utc": "2026-07-30T12:42:54.092340+00:00",
+      "git_revision": "25226611f174041b85610c652cdd7c4d44e2f9ea",
+      "git_dirty": false
+    }
+  ],
+  "ea_cases": [
+    {
+      "role": "coarse",
+      "grid": "8×8",
+      "operator_level": "ea",
+      "mpi_size": 1,
+      "local_passed": true,
+      "solver": {
+        "iterations": 38,
+        "true_relative_residual": 4.954846132787248e-11,
+        "boundary_absolute_error": 0.0
+      },
+      "error": {
+        "l2_relative": 0.04610569341402649
+      },
+      "fa_references": {
+        "raw_matvec_relative_error": 1.4494937872084408e-16,
+        "dirichlet_matvec_relative_error": 1.4093025182808083e-16,
+        "explicit_solution_relative_error": 8.882895561989642e-12
+      },
+      "local_gates": {
+        "converged": true,
+        "true_residual": true,
+        "boundary_dofs": true,
+        "raw_matvec": true,
+        "dirichlet_matvec": true,
+        "operator_symmetry": true,
+        "explicit_solution": true
+      }
+    },
+    {
+      "role": "medium",
+      "grid": "16×16",
+      "operator_level": "ea",
+      "mpi_size": 1,
+      "local_passed": true,
+      "solver": {
+        "iterations": 89,
+        "true_relative_residual": 8.993082760715544e-11,
+        "boundary_absolute_error": 0.0
+      },
+      "error": {
+        "l2_relative": 0.012031819438411544
+      },
+      "fa_references": {
+        "raw_matvec_relative_error": 1.6257160051715742e-16,
+        "dirichlet_matvec_relative_error": 1.6423433661582408e-16,
+        "explicit_solution_relative_error": 6.678637251050395e-12
+      },
+      "local_gates": {
+        "converged": true,
+        "true_residual": true,
+        "boundary_dofs": true,
+        "raw_matvec": true,
+        "dirichlet_matvec": true,
+        "operator_symmetry": true,
+        "explicit_solution": true
+      }
+    },
+    {
+      "role": "fine",
+      "grid": "32×32",
+      "operator_level": "ea",
+      "mpi_size": 1,
+      "local_passed": true,
+      "solver": {
+        "iterations": 188,
+        "true_relative_residual": 8.95197293472127e-11,
+        "boundary_absolute_error": 0.0
+      },
+      "error": {
+        "l2_relative": 0.003046048818225113
+      },
+      "fa_references": {
+        "raw_matvec_relative_error": 1.5753588197961414e-16,
+        "dirichlet_matvec_relative_error": 1.56085931235964e-16,
+        "explicit_solution_relative_error": 3.0270408819601005e-12
+      },
+      "local_gates": {
+        "converged": true,
+        "true_residual": true,
+        "boundary_dofs": true,
+        "raw_matvec": true,
+        "dirichlet_matvec": true,
+        "operator_symmetry": true,
+        "explicit_solution": true
+      }
+    }
+  ],
+  "observed_relative_l2_orders": [
+    1.9380900927370792,
+    1.981843852939294
+  ],
+  "independent_fa_case": {
+    "role": "coarse",
+    "grid": "8×8",
+    "operator_level": "fa",
+    "mpi_size": 1,
+    "local_passed": true,
+    "solver": {
+      "iterations": 38,
+      "true_relative_residual": 4.974419831100947e-11,
+      "boundary_absolute_error": 0.0
+    },
+    "error": {
+      "l2_relative": 0.04610569341402486
+    },
+    "local_gates": {
+      "converged": true,
+      "true_residual": true,
+      "boundary_dofs": true,
+      "raw_matvec": true,
+      "dirichlet_matvec": true,
+      "operator_symmetry": true,
+      "explicit_solution": true
+    }
+  }
+}
