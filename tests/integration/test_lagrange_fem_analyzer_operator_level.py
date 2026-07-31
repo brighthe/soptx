@@ -279,6 +279,64 @@ def test_a_direct_solve_does_not_fabricate_iteration_counts() -> None:
     assert "niter" not in info
 
 
+class FakeDofComm:
+    """Just enough of EntityMPI for the rank-count guards."""
+
+    def __init__(self, mpi_size: int) -> None:
+        self.mpi_size = mpi_size
+
+
+def test_fa_refuses_a_multi_rank_system() -> None:
+    """Symmetric elimination has no seam for the overlap reduction.
+
+    Without this guard a multi-rank FA run would not fail -- each rank would
+    quietly solve its own local matrix.
+    """
+
+    analyzer = make_analyzer(4, "fa", "scipy")
+    analyzer._dof_comm = FakeDofComm(mpi_size=2)
+
+    with pytest.raises(RuntimeError, match="ea"):
+        analyzer.apply_bc(
+            analyzer.assemble_stiff_matrix(),
+            analyzer.assemble_body_force_vector(),
+        )
+
+
+def test_fa_accepts_a_single_rank_communicator() -> None:
+    """Overlap reduction is the identity on one rank, so FA stays usable.
+
+    The example builds a dof_comm even for one rank, and its FA reference runs
+    through this path.
+    """
+
+    analyzer = make_analyzer(4, "fa", "scipy")
+    analyzer._dof_comm = FakeDofComm(mpi_size=1)
+
+    matrix, load = analyzer.apply_bc(
+        analyzer.assemble_stiff_matrix(),
+        analyzer.assemble_body_force_vector(),
+    )
+
+    assert matrix is not None
+    assert load is not None
+
+
+def test_ea_accepts_a_multi_rank_system_at_the_boundary_step() -> None:
+    """The EA path must stay open: it is the supported distributed level."""
+
+    analyzer = make_analyzer(4, "ea", "cg")
+    analyzer._dof_comm = FakeDofComm(mpi_size=2)
+
+    operator, load = analyzer.apply_bc(
+        analyzer.assemble_stiff_matrix(),
+        analyzer.assemble_body_force_vector(),
+    )
+
+    assert operator is not None
+    assert load is not None
+
+
 def test_a_serial_solver_refuses_a_distributed_system() -> None:
     """dof_comm must be rejected by the solver, not by solve_state."""
 

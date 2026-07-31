@@ -450,7 +450,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 F: TensorLike,
                 adjoint: bool = False
             ) -> tuple[Union[CSRTensor, COOTensor], TensorLike]:
-        """在全局矩阵上施加边界条件 (对称消元)"""
+        """在全局矩阵上施加边界条件 (对称消元)
+
+        Note
+        ----
+        本分支不经过 reduce_load / wrap_operator: 对称消元直接改写一个已经装配好
+        的全局矩阵, 没有可供插入重叠归约的位置。因此 'fa' 只能在单 rank 上用——
+        多 rank 若放行, 各 rank 会在自己的局部矩阵上求解, 不报错但结果是错的。
+        单 rank 下重叠归约本身是恒等操作, 带 dof_comm 也是安全的。
+        """
+        if self._dof_comm is not None and self._dof_comm.mpi_size > 1:
+            self._log_error(
+                f"operator_level='fa' 只支持单 rank, 当前为 "
+                f"{self._dof_comm.mpi_size} 个 rank: 全局矩阵的对称消元没有重叠归约"
+                f"的插入点。多 rank 请使用 operator_level='ea'"
+            )
+
         boundary_type = self._pde.boundary_type
 
         space_uh = self._tensor_space
