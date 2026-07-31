@@ -194,3 +194,66 @@ def test_an_externally_built_space_gives_the_same_solution() -> None:
 def test_an_unknown_operator_level_is_rejected() -> None:
     with pytest.raises(RuntimeError, match="算子层级"):
         make_analyzer(4, "eba", "cg")
+
+
+class TransparentWrapper:
+    """Stands in for distributed.OverlapOperator: forwards without changing it."""
+
+    def __init__(self, form) -> None:
+        self.form = form
+        self.matvec_calls = 0
+
+    def __matmul__(self, vector):
+        self.matvec_calls += 1
+        return self.form @ vector
+
+    def __getattr__(self, name):
+        return getattr(self.form, name)
+
+
+class SeamRecordingAnalyzer(LagrangeFEMAnalyzer):
+    """Overrides the two distributed extension points, keeping them identities."""
+
+    wrapped = None
+    reduced_loads = 0
+
+    def wrap_operator(self, form):
+        self.wrapped = TransparentWrapper(form)
+        return self.wrapped
+
+    def reduce_load(self, F):
+        self.reduced_loads += 1
+        return F
+
+
+def test_distributed_seams_are_used_by_the_ea_path() -> None:
+    """A distributed subclass must be able to reach both extension points."""
+
+    reference = make_analyzer(8, "ea", "cg")
+    baseline = reference.solve_state()["displacement"]
+
+    problem = SinusoidalPlaneStrainElasticity2D()
+    mesh = TriangleMesh.from_box(list(problem.domain), nx=8, ny=8)
+    analyzer = SeamRecordingAnalyzer(
+        disp_mesh=mesh,
+        pde=problem,
+        material=IsotropicLinearElasticMaterial(
+            youngs_modulus=problem.E,
+            poisson_ratio=problem.nu,
+            hypothesis="plane_strain",
+            device=bm.get_device(mesh),
+        ),
+        space_degree=DEGREE,
+        integration_order=INTEGRATION_ORDER,
+        operator_level="ea",
+        solve_method="cg",
+        topopt_algorithm=None,
+    )
+    solution = analyzer.solve_state()["displacement"]
+
+    assert analyzer.reduced_loads == 1
+    assert analyzer.wrapped is not None
+    # 包装必须真的参与 matvec, 而不是被 DirichletBCOperator 绕过
+    assert analyzer.wrapped.matvec_calls > 0
+    # 恒等包装不得改变结果
+    assert relative_difference(solution[:], baseline[:]) < 1.0e-12

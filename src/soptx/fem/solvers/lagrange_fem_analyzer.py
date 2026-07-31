@@ -525,13 +525,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
         elif boundary_type != 'dirichlet':
             self._log_error(f"Unsupported boundary type: {boundary_type}")
 
+        # 载荷必须在施加边界条件之前完成跨 rank 归约
+        F = self.reduce_load(F)
         self._F = F
 
         space_uh = self._tensor_space
         threshold_uh = self._pde.is_dirichlet_boundary()
         isBdDof = space_uh.is_boundary_dof(threshold=threshold_uh, method='interp')
 
-        operator = DirichletBCOperator(K, gd=self._pde.dirichlet_bc, isDDof=isBdDof)
+        operator = DirichletBCOperator(self.wrap_operator(K),
+                                    gd=self._pde.dirichlet_bc,
+                                    isDDof=isBdDof)
 
         # 边界自由度取给定值, 内部自由度取零, 作为消去边界贡献的基准向量
         uh_bd = operator.init_solution(dtype=bm.float64)
@@ -543,7 +547,37 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return operator, F
 
 
-    def solve_state(self, 
+    ##############################################################################################
+    # 分布式扩展点 (串行下均为恒等操作)
+    ##############################################################################################
+
+    def wrap_operator(self, form: BilinearForm):
+        """在施加边界条件之前对单元级算子做一层包装
+
+        串行下原样返回。分布式实现覆盖本方法, 返回一个把 matvec 结果在重叠自由度
+        上求和的包装 (示例中的 `distributed.OverlapOperator`), 之后的边界条件处理
+        和求解都不需要知道它的存在。
+
+        Note
+        ----
+        包装必须发生在 DirichletBCOperator 之前: 先跨 rank 组装出完整的算子作用,
+        再在其上消去 Dirichlet 自由度。顺序反过来会把边界行的置换也带进通信。
+        """
+        return form
+
+    def reduce_load(self, F: TensorLike) -> TensorLike:
+        """把按自由度分布的右端项在重叠自由度上归约
+
+        串行下原样返回。分布式实现覆盖本方法, 通常是 `dof_comm.sync_add(F)`。
+        必须在施加 Dirichlet 边界条件之前调用, 否则边界行会被重复累加。
+        """
+        return F
+
+    ##############################################################################################
+    # 求解
+    ##############################################################################################
+
+    def solve_state(self,
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     adjoint: bool = False,
                     enable_timing: bool = False, 
