@@ -7,7 +7,7 @@ from fealpy.fem import DirichletBCOperator
 from fealpy.solver import spsolve
 
 import contract
-from analyzer import build_analyzer
+from analyzer import build_serial_analyzer
 
 
 def relative_difference(left, right) -> tuple[float, float]:
@@ -30,8 +30,8 @@ def serial_references(space, case, degree: int):
     implementations.
     """
 
-    ea = build_analyzer(space, case, degree, "ea")
-    fa = build_analyzer(space, case, degree, "fa")
+    ea = build_serial_analyzer(space, case, degree, "ea")
+    fa = build_serial_analyzer(space, case, degree, "fa")
 
     element_form = ea.assemble_stiff_matrix()
     fa_matrix = fa.assemble_stiff_matrix()

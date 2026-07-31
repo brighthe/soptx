@@ -27,7 +27,7 @@ from distributed import (
     partition_cells,
     partition_strategy_label,
 )
-from analyzer import build_analyzer
+from analyzer import build_distributed_analyzer
 from postprocess import solution_error, write_solution
 from references import relative_difference, serial_references
 from solve import PreparedLinearSystem, solver_diagnostics
@@ -131,7 +131,7 @@ def execute(
         root=0,
     )
 
-    analyzer = build_analyzer(
+    analyzer = build_distributed_analyzer(
         distributed_space.space,
         case,
         degree,
@@ -162,7 +162,7 @@ def execute(
             system.load,
             solution,
             x0=system.prescribed,
-            max_iterations=config.max_iterations,
+            maxiter=config.max_iterations,
             rtol=config.rtol,
             atol=config.atol,
         )
