@@ -172,11 +172,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if self._topopt_algorithm is None:
             if rho_val is not None:
                 self._log_warning("标准有限元分析模式下忽略相对密度 rho")
-        
-            coef = None
 
-            self._cached_E_rho = None
-            self._cached_coef = None
+            # 标准有限元分析不做材料插值, 积分子直接使用实体材料本构
+            relative_stiffness = None
+
+            self._cached_stiffness_absolute = None
+            self._cached_stiffness_relative = None
         
         elif self._topopt_algorithm == 'density_based':
             if rho_val is None:
