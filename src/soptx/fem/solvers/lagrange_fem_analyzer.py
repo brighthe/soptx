@@ -4,7 +4,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.mesh import SimplexMesh, HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from fealpy.fem import BilinearForm, LinearForm
+from fealpy.fem import BilinearForm, DirichletBCOperator, LinearForm
 from fealpy.decorator import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
@@ -28,13 +28,27 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 space_degree: int = 1,
                 integration_order: int = 4,
                 assembly_method: Literal['standard', 'voigt', 'fast'] = 'standard',
+                operator_level: Literal['fa', 'ea'] = 'fa',
                 solve_method: Literal['mumps', 'cg'] = 'mumps',
+                tensor_space: Optional[TensorFunctionSpace] = None,
+                dof_comm: Optional[object] = None,
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 interpolation_scheme: Optional[MaterialInterpolation] = None,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
-        """初始化拉格朗日有限元分析器"""
+        """初始化拉格朗日有限元分析器
+
+        Parameters
+        ----------
+        operator_level : 离散算子的存储与作用方式
+        - 'fa' : 装配全局稀疏矩阵 (full assembly), 支持直接解法与伴随求解
+        - 'ea' : 只保留单元矩阵 (element assembly), matvec 时 gather-作用-scatter,
+                 不形成全局矩阵, 只能用迭代解法
+        两者对应同一个离散算子 K = Σ_e R_e^T K_e R_e
+        tensor_space : 外部构造的张量函数空间; 为 None 时由 disp_mesh 内部构造
+        dof_comm : 分布式重叠自由度通信器, 当前尚未实现, 仅作为接口预留位
+        """
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
@@ -42,7 +56,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._mesh = disp_mesh
         self._pde = pde
         self._material = material
-       
+
         self._space_degree = space_degree
         self._integration_order = integration_order
         self._assembly_method = assembly_method
@@ -51,17 +65,33 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._interpolation_scheme = interpolation_scheme
 
         self._solve_method = solve_method
+        self._dof_comm = dof_comm
+
+        if operator_level not in ('fa', 'ea'):
+            self._log_error(f"不支持的算子层级: {operator_level}, 可选 'fa' 或 'ea'")
+        self._operator_level = operator_level
 
         self._GD = self._mesh.geo_dimension()
 
         #* (GD, -1): dof_priority (x0, ..., xn, y0, ..., yn)
         #* (-1, GD): gd_priority (x0, y0, ..., xn, yn)
-        self._scalar_space = LagrangeFESpace(self._mesh, p=self._space_degree, ctype='C')
-        self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
+        if tensor_space is None:
+            self._scalar_space = LagrangeFESpace(self._mesh, p=self._space_degree, ctype='C')
+            self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
+        else:
+            if tensor_space.mesh is not self._mesh:
+                self._log_error("外部传入的张量空间必须建立在 disp_mesh 上")
+            self._tensor_space = tensor_space
+            self._scalar_space = tensor_space.scalar_space
+
+        # 注册算子层级变体
+        self.assemble_stiff_matrix.set(self._operator_level)
+        self.apply_bc.set(self._operator_level)
 
         # 缓存的矩阵和向量
         self._K = None
         self._F = None
+        self._prescribed_solution = None  # 'ea' 下满足 Dirichlet 值的基准向量
 
         self._integrator = LinearElasticIntegrator(material=self._material,
                                                 q=self._integration_order,
@@ -117,7 +147,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def assembly_method(self) -> str:
         """获取当前的组装方法"""
         return self._assembly_method
-    
+
+    @property
+    def operator_level(self) -> str:
+        """获取当前的算子层级 ('fa' 或 'ea')"""
+        return self._operator_level
+
     @property
     def topopt_algorithm(self) -> Optional[str]:
         """获取当前的拓扑优化算法"""
@@ -148,11 +183,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 核心方法
     ##############################################################################################
 
-    def assemble_stiff_matrix(self, 
+    def _update_density_coefficient(self,
                             rho_val: Optional[Union[Function, TensorLike]] = None,
-                            enable_timing: bool = False, 
-                        ) -> Union[CSRTensor, COOTensor]:
-        """组装全局刚度矩阵
+                        ) -> None:
+        """按拓扑优化算法更新积分子的相对刚度系数
 
         Parameters
         ----------
@@ -164,11 +198,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
             - 单分辨率 - (NN, )
             - 多分辨率 - (NN, )
         """
-        t = None
-        if enable_timing:
-            t = timer(f"双线性型组装内部")
-            next(t)
-
         if self._topopt_algorithm is None:
             if rho_val is not None:
                 self._log_warning("标准有限元分析模式下忽略相对密度 rho")
@@ -200,13 +229,29 @@ class LagrangeFEMAnalyzer(BaseLogged):
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
             self._log_error(error_msg)
 
-        if enable_timing:
-            t.send('预备')
-
         # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
         # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
         # 更新密度系数
         self._integrator.coef = relative_stiffness
+
+    @variantmethod('fa')
+    def assemble_stiff_matrix(self,
+                            rho_val: Optional[Union[Function, TensorLike]] = None,
+                            enable_timing: bool = False,
+                        ) -> Union[CSRTensor, COOTensor]:
+        """装配全局刚度矩阵 (full assembly)
+
+        rho_val 的形状约定见 `_update_density_coefficient`
+        """
+        t = None
+        if enable_timing:
+            t = timer(f"双线性型组装内部")
+            next(t)
+
+        self._update_density_coefficient(rho_val)
+
+        if enable_timing:
+            t.send('预备')
 
         bform = BilinearForm(self._tensor_space)
         bform.add_integrator(self._integrator)
@@ -220,7 +265,44 @@ class LagrangeFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return K
-    
+
+    @assemble_stiff_matrix.register('ea')
+    def assemble_stiff_matrix(self,
+                            rho_val: Optional[Union[Function, TensorLike]] = None,
+                            enable_timing: bool = False,
+                        ) -> BilinearForm:
+        """构造单元级刚度算子 (element assembly)
+
+        预先算出并缓存单元矩阵 {K_e}, 但不求和成全局矩阵。返回的 BilinearForm
+        未调用 assembly, 其 `@` 运算走 gather-单元作用-scatter-add, 与 'fa'
+        对应同一个离散算子。
+        """
+        t = None
+        if enable_timing:
+            t = timer(f"单元算子构造内部")
+            next(t)
+
+        self._update_density_coefficient(rho_val)
+
+        if enable_timing:
+            t.send('预备')
+
+        # const 预先算出单元矩阵, 之后每次 matvec 不再重复积分
+        const_integrator = self._integrator.const(self._tensor_space)
+
+        bform = BilinearForm(self._tensor_space)
+        bform.dtype = bm.float64
+        bform.add_integrator(const_integrator)
+
+        self._K = bform
+
+        if enable_timing:
+            t.send('单元矩阵缓存')
+            t.send(None)
+
+        return bform
+
+
     def assemble_spring_stiff_matrix(self):
         """组装弹簧刚度矩阵"""
         tspace = self._tensor_space
@@ -251,20 +333,16 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         return F
 
-    def apply_bc(self, 
-                K: Union[CSRTensor, COOTensor], 
-                F: CSRTensor,
-                adjoint: str = False
-            ) -> tuple[CSRTensor, CSRTensor]:
-        """应用边界条件"""        
-        boundary_type = self._pde.boundary_type
+    def _assemble_traction_load(self, adjoint: bool = False) -> TensorLike:
+        """组装 Neumann 边界的等效载荷 (弱形式施加)
+
+        与算子层级无关, 'fa' 与 'ea' 共用。adjoint 为 True 时返回结构载荷与
+        伴随载荷堆叠成的两列右端项。
+        """
         load_type = self._pde.load_type
-
         space_uh = self._tensor_space
-        gdof = space_uh.number_of_global_dofs()
 
-        if boundary_type == 'mixed':
-            #* 1. Neumann 边界条件处理 - 弱形式施加 *#
+        if load_type is not None:
             # 集中载荷 (点力) - 等效节点力方法
             # if load_type == 'concentrated':
             #     gd_sigmah = self._pde.concentrate_load_bc
@@ -349,10 +427,27 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 else:
                     F_adjoint[:] = bm.set_at(F_adjoint[:], isBdTDof, gd_adjoint_val.reshape(-1))
 
-                F += bm.stack([F_sigmah, F_adjoint], axis=1)
-            else:
-                F += F_sigmah
+                return bm.stack([F_sigmah, F_adjoint], axis=1)
 
+            return F_sigmah
+
+        raise NotImplementedError(f"不支持的载荷类型: {load_type}")
+
+    @variantmethod('fa')
+    def apply_bc(self,
+                K: Union[CSRTensor, COOTensor],
+                F: TensorLike,
+                adjoint: bool = False
+            ) -> tuple[Union[CSRTensor, COOTensor], TensorLike]:
+        """在全局矩阵上施加边界条件 (对称消元)"""
+        boundary_type = self._pde.boundary_type
+
+        space_uh = self._tensor_space
+        gdof = space_uh.number_of_global_dofs()
+
+        if boundary_type == 'mixed':
+            #* 1. Neumann 边界条件处理 - 弱形式施加 *#
+            F = F + self._assemble_traction_load(adjoint)
             self._F = F
 
             #* 2. Dirichlet 边界条件处理 - 强形式施加 *#
@@ -365,17 +460,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                         threshold=threshold_uh,
                                                         method='interp'
                                                     )
-            
+
             if adjoint:
                 uh_bd = bm.repeat(uh_bd.reshape(-1, 1), 2, axis=1)
                 F = F - K.matmul(uh_bd[:])
                 F[isBdDof, :] = uh_bd[isBdDof, :]
 
-            else: 
+            else:
                 #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
                 F = F - K.tocoo().matmul(uh_bd[:])
                 F[isBdDof] = uh_bd[isBdDof]
-            
+
             K = self._apply_matrix(K, isDDof=isBdDof)
 
             return K, F
@@ -386,7 +481,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             gd = self._pde.dirichlet_bc
             threshold = self._pde.is_dirichlet_boundary()
-        
+
             uh_bd = bm.zeros(gdof, dtype=bm.float64, device=self._tensor_space.device)
             uh_bd, isBdDof = self._tensor_space.boundary_interpolate(
                                     gd=gd,
@@ -406,7 +501,48 @@ class LagrangeFEMAnalyzer(BaseLogged):
         else:
             error_msg = f"Unsupported boundary type: {boundary_type}"
             self._log_error(error_msg)
-    
+
+    @apply_bc.register('ea')
+    def apply_bc(self,
+                K: BilinearForm,
+                F: TensorLike,
+                adjoint: bool = False
+            ) -> tuple[DirichletBCOperator, TensorLike]:
+        """在单元级算子上施加边界条件
+
+        不改写任何矩阵, 而是把算子包进 DirichletBCOperator: matvec 时先把
+        Dirichlet 自由度置零, 作用后再还原, 等价于 'fa' 的对称消元系统。
+        """
+        if adjoint:
+            self._log_error(
+                "operator_level='ea' 不支持伴随双列右端项, 请改用 operator_level='fa'"
+            )
+
+        boundary_type = self._pde.boundary_type
+
+        if boundary_type == 'mixed':
+            F = F + self._assemble_traction_load(adjoint=False)
+        elif boundary_type != 'dirichlet':
+            self._log_error(f"Unsupported boundary type: {boundary_type}")
+
+        self._F = F
+
+        space_uh = self._tensor_space
+        threshold_uh = self._pde.is_dirichlet_boundary()
+        isBdDof = space_uh.is_boundary_dof(threshold=threshold_uh, method='interp')
+
+        operator = DirichletBCOperator(K, gd=self._pde.dirichlet_bc, isDDof=isBdDof)
+
+        # 边界自由度取给定值, 内部自由度取零, 作为消去边界贡献的基准向量
+        uh_bd = operator.init_solution(dtype=bm.float64)
+        uh_bd = bm.set_at(uh_bd, ~isBdDof, 0.0)
+        F = operator.apply(F, uh_bd)
+
+        self._prescribed_solution = uh_bd
+
+        return operator, F
+
+
     def solve_state(self, 
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     adjoint: bool = False,
@@ -426,6 +562,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if rho_val is None:
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
+
+        if self._dof_comm is not None:
+            raise NotImplementedError(
+                "分布式求解尚未在分析器中实现, 当前请使用 "
+                "examples/matrix_free_elasticity 的 MPI 驱动"
+            )
 
         if adjoint:
             K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
@@ -454,58 +596,16 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             uh = self._tensor_space.function()
 
-        solver_type = kwargs.get('solver', self._solve_method)
+        self._solve_linear_system(K, F, uh, **kwargs)
 
-        if solver_type in ['mumps', 'scipy']:
-            from fealpy.solver import spsolve
+        if enable_timing:
+            t.send('求解')
+            t.send(None)
 
-            uh[:] = spsolve(K, F, solver=solver_type)
-
-            if enable_timing:
-                t.send('求解')
-                t.send(None)
-
-        elif solver_type in ['cg']:
-            from fealpy.solver import cg
-
-            maxiter = kwargs.get('maxiter', 5000)
-            atol = kwargs.get('atol', 1e-12)
-            rtol = kwargs.get('rtol', 1e-12)
-            x0 = kwargs.get('x0', None)
-
-            #? 需要使用 PyTorch 原始的稀疏矩阵, FEALPy 中的 CSRTensor 存在问题
-            K_row, K_col, K_data = K.row, K.col, K.data
-            import torch 
-            K_coo_torch = torch.sparse_coo_tensor(
-                                            indices=bm.stack([K_row, K_col]),
-                                            values=bm.tensor(K_data),
-                                            size=K.shape,
-                                            device=K.data.device
-                                        )
-            K_csr_torch = K_coo_torch.to_sparse_csr()
-
-            if enable_timing:
-                t.send('预备时间')
-            
-            # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
-            #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-            K._values = bm.copy(K._values)
-            uh[:], info = cg(K_csr_torch, F[:], x0=x0,
-                            batch_first=False, 
-                            atol=atol, rtol=rtol, 
-                            maxit=maxiter, returninfo=True)
-            
-            if enable_timing:
-                t.send('求解 1')
-                t.send(None)
-
-        else:
-            self._log_error(f"未知的求解器类型: {solver_type}")
-        
         return {
             'displacement': uh,
             }
-    
+
     def solve_adjoint(self, 
                     rhs: TensorLike,
                     rho_val: Optional[Union[TensorLike, Function]] = None,
@@ -531,30 +631,88 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 再处理刚度矩阵
         K = self._apply_matrix(K0, isDDof=isBdDof)
         
-        # 初始化结果
+        # 初始化结果并求解
         adjoint_lambda = bm.zeros_like(rhs_bc)
-        
-        # 求解
+        self._solve_linear_system(K, rhs_bc, adjoint_lambda, **kwargs)
+
+        return adjoint_lambda
+
+    def _as_iterative_operator(self, K):
+        """把刚度算子转成迭代解法可以直接作用的形式
+
+        'ea' 下 K 本身就支持 @ 运算; 'fa' 下 PyTorch 后端需要绕开 FEALPy 的
+        CSRTensor, 其余后端直接用 COO。
+        """
+        if self._operator_level == 'ea':
+            return K
+
+        if bm.backend_name == 'pytorch':
+            #? 需要使用 PyTorch 原始的稀疏矩阵, FEALPy 中的 CSRTensor 存在问题
+            import torch
+            K_coo_torch = torch.sparse_coo_tensor(
+                                            indices=bm.stack([K.row, K.col]),
+                                            values=bm.tensor(K.data),
+                                            size=K.shape,
+                                            device=K.data.device
+                                        )
+            #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
+            K._values = bm.copy(K._values)
+
+            return K_coo_torch.to_sparse_csr()
+
+        return K.tocoo()
+
+    def _solve_linear_system(self, K, F, out, **kwargs):
+        """在给定算子上求解线性系统, 解就地写入 out
+
+        Parameters
+        ----------
+        K   : 'fa' 下为全局稀疏矩阵, 'ea' 下为支持 @ 运算的算子
+        F   : 右端项, (TGDOF, ) 或批量的 (TGDOF, nrhs)
+        out : 就地写入的解向量
+
+        Note
+        ----
+        这是分布式求解唯一的注入点: 并行只需在此处把 fealpy 的 cg 换成带
+        overlap 加权内积的版本, 上层的组装与边界条件处理不受影响。
+        """
         solver_type = kwargs.get('solver', self._solve_method)
-        
+
         if solver_type in ['mumps', 'scipy']:
+            if self._operator_level == 'ea':
+                self._log_error(
+                    f"operator_level='ea' 下不存在可分解的全局矩阵, "
+                    f"无法使用直接解法 '{solver_type}', 请改用 solver='cg'"
+                )
+
             from fealpy.solver import spsolve
-            adjoint_lambda[:] = spsolve(K, rhs_bc, solver=solver_type)
-            
+
+            out[:] = spsolve(K, F, solver=solver_type)
+
         elif solver_type in ['cg']:
             from fealpy.solver import cg
+
             maxiter = kwargs.get('maxiter', 5000)
             atol = kwargs.get('atol', 1e-12)
             rtol = kwargs.get('rtol', 1e-12)
-            
-            adjoint_lambda[:], _ = cg(K.tocoo(), rhs_bc, 
-                                    batch_first=False,
-                                    atol=atol, rtol=rtol, 
-                                    maxit=maxiter, returninfo=True)
-        
-        return adjoint_lambda
+            x0 = kwargs.get('x0', None)
 
-    
+            # 'ea' 默认从满足 Dirichlet 值的向量起步
+            if self._operator_level == 'ea' and x0 is None:
+                x0 = self._prescribed_solution
+
+            # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
+            out[:], _ = cg(self._as_iterative_operator(K), F[:], x0=x0,
+                            batch_first=False,
+                            atol=atol, rtol=rtol,
+                            maxit=maxiter, returninfo=True)
+
+        else:
+            self._log_error(f"未知的求解器类型: {solver_type}")
+
+        return out
+
+
     ###############################################################################################
     # 外部方法
     ###############################################################################################
@@ -610,7 +768,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         for s_idx in range(n_sub):
             sub_bcs = (bcs_eg_x[s_idx], bcs_eg_y[s_idx])
             gphi_eg[:, s_idx] = s_space.grad_basis(sub_bcs, variable='x')  # (NC, NQ, LDOF, GD)
-            J_sub = mesh_u.jacobi_matrix(sub_bcs)                          # (NC, NQ, GD, GD)
+            J_sub = mesh_u.Entity('cell').jacobi_matrix(sub_bcs)           # (NC, NQ, GD, GD)
             detJ_eg[:, s_idx] = bm.abs(bm.linalg.det(J_sub))              # (NC, NQ)
 
         # --- 计算 B 矩阵, 与 voigt_multiresolution 完全一致 ---
@@ -655,8 +813,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
             diff_coef_element = dE_rho / self._material.youngs_modulus # (NC, )
 
             if self._cached_ke0 is None:
-                ke0 = self.compute_solid_stiffness_matrix()
-            
+                self.compute_solid_stiffness_matrix()
+
             ke0 = self._cached_ke0
 
             diff_ke = bm.einsum('c, cij -> cij', diff_coef_element, ke0) # (NC, TLDOF, TLDOF)
@@ -701,7 +859,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 for s_idx in range(n_sub):
                     sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
                     gphi_sub = s_space_u.grad_basis(sub_bcs, variable='x') # (NC, NQ, LDOF, GD)
-                    J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                    J_sub = mesh_u.Entity('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
                     detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
                     gphi_eg[:, s_idx, :, :, :] = gphi_sub
                     detJ_eg[:, s_idx, :] = detJ_sub
@@ -710,7 +868,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             from soptx.fem.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
             gphi_eg_reshaped = reshape_multiresolution_data(mesh=mesh_u, data=gphi_eg) # (NC*n_sub, NQ, NS, TLDOF)
             B_eg_reshaped = self._material.strain_matrix(
-                                                dof_priority=self._tensor_space.dof_priority, 
+                                                dof_priority=self._tensor_space.dof_priority,
                                                 gphi=gphi_eg_reshaped
                                             ) # (NC*n_sub, NQ, NS, TLDOF)
             B_eg = reshape_multiresolution_data_inverse(mesh=mesh_u, data_flat=B_eg_reshaped, n_sub=n_sub) # (NC, n_sub, NQ, NS, TLDOF)
@@ -742,27 +900,19 @@ class LagrangeFEMAnalyzer(BaseLogged):
             qf = mesh.quadrature_formula(q=self._integration_order)
             # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
             bcs, ws = qf.get_quadrature_points_and_weights()
-            
-            rho_space = rho_val.space
-            u_space = self._scalar_space
 
-            # 高斯积分点处的基函数
-            phi = rho_space.basis(bcs)[0] # (NQ, NCN)
+            # 密度空间在高斯积分点处的基函数
+            phi = rho_val.space.basis(bcs)[0] # (NQ, NCN)
 
             D0 = self._material.elastic_matrix()[0, 0] # (NS, NS)
-            dof_priority = self._tensor_space.dof_priority
-            gphi = u_space.grad_basis(bcs, variable='x') # (NC, NQ, LDOF, GD)
-            B = self._material.strain_matrix(
-                                    dof_priority=dof_priority, 
-                                    gphi=gphi
-                                ) # (NC, NQ, NS, TLDOF)
+            B = self.compute_strain_matrix(self._integration_order) # (NC, NQ, NS, TLDOF)
             BDB = bm.einsum('cqki, kl, cqlj -> cqij', B, D0, B) # (NC, NQ, TLDOF, TLDOF)
 
             if isinstance(mesh, SimplexMesh):
                 cm = mesh.entity_measure('cell')
                 kernel = bm.einsum('q, c, cq, cqij -> cqij', ws, cm, diff_coef_q, BDB)
             else:
-                J = mesh.jacobi_matrix(bcs)
+                J = mesh.Entity('cell').jacobi_matrix(bcs)
                 detJ = bm.abs(bm.linalg.det(J))
                 kernel = bm.einsum('q, cq, cq, cqij -> cqij', ws, detJ, diff_coef_q, BDB)
 
@@ -783,23 +933,20 @@ class LagrangeFEMAnalyzer(BaseLogged):
         B : 应变-位移矩阵
             - 单分辨率: (NC, NQ, NS, TLDOF)
             - 多分辨率: (NC, n_sub, NQ, NS, TLDOF)
+
+        Note
+        ----
+        B 只取决于位移离散和积分点位置, 与密度自由度住在哪里无关; 唯一的区别是
+        多分辨率要在子密度单元的积分点上求值, 因此这里只按是否多分辨率分支。
         """
         if integration_order is None:
             integration_order = self._integration_order
-        
+
         density_location = self._interpolation_scheme.density_location
-        
-        if density_location in ['element']:
-            qf = self._mesh.quadrature_formula(integration_order)
-            bcs, _ = qf.get_quadrature_points_and_weights()
-            gphi = self._scalar_space.grad_basis(bcs, variable='x')  # (NC, NQ, LDOF, GD)
-            B = self._material.strain_matrix(
-                                                dof_priority=self._tensor_space.dof_priority, 
-                                                gphi=gphi
-                                            )  # (NC, NQ, NS, TLDOF)
-            
-        elif density_location in ['element_multiresolution']:
-            from soptx.fem.utils import calculate_multiresolution_gphi_eg, reshape_multiresolution_data_inverse
+
+        if density_location in ['element_multiresolution']:
+            from soptx.fem.utils import (calculate_multiresolution_gphi_eg,
+                                            reshape_multiresolution_data_inverse)
             n_sub = self._interpolation_scheme.n_sub
             gphi_eg_reshaped = calculate_multiresolution_gphi_eg(
                                         s_space_u=self._scalar_space,
@@ -807,18 +954,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                         n_sub=n_sub
                                     )  # (NC*n_sub, NQ, LDOF, GD)
             B_reshaped = self._material.strain_matrix(
-                                            dof_priority=self._tensor_space.dof_priority, 
+                                            dof_priority=self._tensor_space.dof_priority,
                                             gphi=gphi_eg_reshaped
                                         )  # (NC*n_sub, NQ, NS, TLDOF)
             B = reshape_multiresolution_data_inverse(
                             mesh=self._mesh,
-                            data_flat=B_reshaped, 
+                            data_flat=B_reshaped,
                             n_sub=n_sub
                         )  # (NC, n_sub, NQ, NS, TLDOF)
-            
+
         else:
-            self._log_error(f"不支持的密度位置类型: {density_location}")
-        
+            qf = self._mesh.quadrature_formula(integration_order)
+            bcs, _ = qf.get_quadrature_points_and_weights()
+            gphi = self._scalar_space.grad_basis(bcs, variable='x')  # (NC, NQ, LDOF, GD)
+            B = self._material.strain_matrix(
+                                                dof_priority=self._tensor_space.dof_priority,
+                                                gphi=gphi
+                                            )  # (NC, NQ, NS, TLDOF)
+
         return B
     
     def compute_stress_state(self, 

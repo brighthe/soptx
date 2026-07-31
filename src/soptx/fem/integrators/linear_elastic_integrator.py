@@ -74,7 +74,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             J = None
             detJ = None
         else:
-            J = mesh.jacobi_matrix(bcs)
+            J = mesh.Entity('cell').jacobi_matrix(bcs)
             detJ = bm.abs(bm.linalg.det(J))
 
         return cm, bcs, ws, gphi, detJ
@@ -302,7 +302,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
                 gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x') # (NC, NQ, LDOF, GD)
 
-                J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                J_sub = mesh_u.Entity('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
                 detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
 
                 gphi_eg[:, s_idx, :, :, :] = gphi_sub
@@ -472,7 +472,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             J = None
             detJ = None
         else:
-            J = mesh.jacobi_matrix(bcs)
+            J = mesh.Entity('cell').jacobi_matrix(bcs)
             detJ = bm.abs(bm.linalg.det(J))
 
         return cm, ws, bcs, gphi, detJ
@@ -572,7 +572,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
                 gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x') # (NC, NQ, LDOF, GD)
 
-                J_sub = mesh_u.jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                J_sub = mesh_u.Entity('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
                 detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
 
                 gphi_eg[:, s_idx, :, :, :] = gphi_sub
@@ -649,8 +649,10 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         
         elif isinstance(mesh, TensorMesh):
             #TODO 仅仅支持结构四边形网格
+            #TODO fast 变体尚未适配新的 mesh schema/view 接口: jacobi_matrix、
+            #TODO grad_lambda、first_fundamental_form 均已迁到 mesh.Entity('cell') 上
             J = mesh.jacobi_matrix(bcs)                    # (NC, NQ, GD, GD)
-            if not bm.allclose(J[:, 0, ...], J[:, -1, ...]):  
+            if not bm.allclose(J[:, 0, ...], J[:, -1, ...]):
                 raise ValueError("雅可比矩阵 J 在积分点上不恒定, 无法使用快速组装. 请使用传统组装或检查网格类型")
             J = J[:, 0, ...]                               # (NC, GD, GD)
             G = mesh.first_fundamental_form(J)             # (NC, GD, GD)
@@ -660,6 +662,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             return cm, JG, S
         
         else:
+            #TODO 同上, fast 变体未适配新的 mesh schema/view 接口
             J = mesh.jacobi_matrix(bcs)                   # (NC, NQ, GD, GD)
             detJ = bm.linalg.det(J)                       # (NC, NQ)
             G = mesh.first_fundamental_form(J)            # (NC, NQ, GD, GD)
