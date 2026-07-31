@@ -257,3 +257,72 @@ def test_distributed_seams_are_used_by_the_ea_path() -> None:
     assert analyzer.wrapped.matvec_calls > 0
     # 恒等包装不得改变结果
     assert relative_difference(solution[:], baseline[:]) < 1.0e-12
+
+
+def test_cg_reports_solver_diagnostics() -> None:
+    """The example's numerical gates are built on these fields."""
+
+    analyzer = make_analyzer(8, "ea", "cg")
+    info = analyzer.solve_state(rtol=1.0e-10, atol=1.0e-12, maxiter=1000)["solver"]
+
+    assert info["name"] == "cg"
+    assert info["converged"] is True
+    assert 0 < info["niter"] < info["maxit"]
+    assert info["recursive_residual"] > 0.0
+
+
+def test_a_direct_solve_does_not_fabricate_iteration_counts() -> None:
+    analyzer = make_analyzer(8, "fa", "scipy")
+    info = analyzer.solve_state()["solver"]
+
+    assert info["name"] == "scipy"
+    assert "niter" not in info
+
+
+def test_a_serial_solver_refuses_a_distributed_system() -> None:
+    """dof_comm must be rejected by the solver, not by solve_state."""
+
+    analyzer = make_analyzer(4, "ea", "cg")
+    analyzer._dof_comm = object()
+
+    with pytest.raises(NotImplementedError, match="_solve_linear_system"):
+        analyzer.solve_state()
+
+
+def test_overriding_the_solver_lifts_the_distributed_guard() -> None:
+    """A distributed subclass supplies its own solver and must not be blocked."""
+
+    class OwnSolverAnalyzer(LagrangeFEMAnalyzer):
+        def _solve_linear_system(self, K, F, out, **kwargs):
+            from fealpy.solver import cg
+
+            out[:], _ = cg(K, F[:], x0=self._prescribed_solution,
+                           batch_first=False, atol=1e-12, rtol=1e-12,
+                           maxit=1000, returninfo=True)
+            return out, {"name": "overridden"}
+
+    reference = make_analyzer(8, "ea", "cg")
+    baseline = reference.solve_state()["displacement"]
+
+    problem = SinusoidalPlaneStrainElasticity2D()
+    mesh = TriangleMesh.from_box(list(problem.domain), nx=8, ny=8)
+    analyzer = OwnSolverAnalyzer(
+        disp_mesh=mesh,
+        pde=problem,
+        material=IsotropicLinearElasticMaterial(
+            youngs_modulus=problem.E,
+            poisson_ratio=problem.nu,
+            hypothesis="plane_strain",
+            device=bm.get_device(mesh),
+        ),
+        space_degree=DEGREE,
+        integration_order=INTEGRATION_ORDER,
+        operator_level="ea",
+        solve_method="cg",
+        dof_comm=object(),
+        topopt_algorithm=None,
+    )
+    state = analyzer.solve_state()
+
+    assert state["solver"]["name"] == "overridden"
+    assert relative_difference(state["displacement"][:], baseline[:]) < 1.0e-12

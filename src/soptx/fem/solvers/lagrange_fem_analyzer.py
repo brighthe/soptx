@@ -597,12 +597,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
 
-        if self._dof_comm is not None:
-            raise NotImplementedError(
-                "分布式求解尚未在分析器中实现, 当前请使用 "
-                "examples/matrix_free_elasticity 的 MPI 驱动"
-            )
-
         if adjoint:
             K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
             K_spring = self.assemble_spring_stiff_matrix()
@@ -630,7 +624,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             uh = self._tensor_space.function()
 
-        self._solve_linear_system(K, F, uh, **kwargs)
+        _, solver_info = self._solve_linear_system(K, F, uh, **kwargs)
 
         if enable_timing:
             t.send('求解')
@@ -638,6 +632,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return {
             'displacement': uh,
+            'solver': solver_info,
             }
 
     def solve_adjoint(self, 
@@ -670,6 +665,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._solve_linear_system(K, rhs_bc, adjoint_lambda, **kwargs)
 
         return adjoint_lambda
+
 
     def _as_iterative_operator(self, K):
         """把刚度算子转成迭代解法可以直接作用的形式
@@ -705,11 +701,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
         F   : 右端项, (TGDOF, ) 或批量的 (TGDOF, nrhs)
         out : 就地写入的解向量
 
+        Returns
+        -------
+        out  : 就地写入的解向量
+        info : 求解诊断, 至少含 'name'; 迭代解法另含 'niter'、'maxit'、
+               'recursive_residual' 和 'converged'
+
         Note
         ----
         这是分布式求解唯一的注入点: 并行只需在此处把 fealpy 的 cg 换成带
-        overlap 加权内积的版本, 上层的组装与边界条件处理不受影响。
+        overlap 加权内积的版本, 上层的组装与边界条件处理不受影响。覆盖本方法的
+        实现负责自行处理 dof_comm。
         """
+        if self._dof_comm is not None:
+            raise NotImplementedError(
+                "串行求解器不能用于分布式系统。请覆盖 _solve_linear_system, "
+                "提供带 overlap 加权内积的 CG, 参考 examples/matrix_free_elasticity"
+            )
+
         solver_type = kwargs.get('solver', self._solve_method)
 
         if solver_type in ['mumps', 'scipy']:
@@ -722,6 +731,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
             from fealpy.solver import spsolve
 
             out[:] = spsolve(K, F, solver=solver_type)
+
+            # 直接解法没有迭代信息, 不伪造 niter/residual 字段
+            return out, {'name': solver_type}
 
         elif solver_type in ['cg']:
             from fealpy.solver import cg
@@ -736,15 +748,25 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 x0 = self._prescribed_solution
 
             # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
-            out[:], _ = cg(self._as_iterative_operator(K), F[:], x0=x0,
+            out[:], info = cg(self._as_iterative_operator(K), F[:], x0=x0,
                             batch_first=False,
                             atol=atol, rtol=rtol,
                             maxit=maxiter, returninfo=True)
 
+            # cg 报告的是递推残差, 不是真实残差 ||A x - b||; 收敛判据与 cg 内部一致
+            recursive_residual = float(info['residual'])
+            tolerance = max(atol, rtol * float(bm.linalg.norm(F[:])))
+
+            return out, {
+                'name': 'cg',
+                'niter': int(info['niter']),
+                'maxit': maxiter,
+                'recursive_residual': recursive_residual,
+                'converged': recursive_residual < tolerance,
+            }
+
         else:
             self._log_error(f"未知的求解器类型: {solver_type}")
-
-        return out
 
 
     ###############################################################################################
