@@ -171,6 +171,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._F
 
     @property
+    def dof_comm(self):
+        """获取分布式重叠自由度通信器, 串行下为 None"""
+        return self._dof_comm
+
+    @property
     def prescribed_solution(self) -> Optional[TensorLike]:
         """最近一次 apply_bc 得到的 Dirichlet 基准向量
 
@@ -653,6 +658,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             uh = self._tensor_space.function()
 
+        # 'ea' 从刚刚由 apply_bc 得到的 Dirichlet 基准向量起步; 显式传入而非让
+        # solve_system 去读实例状态
+        if self._operator_level == 'ea':
+            kwargs.setdefault('x0', self._prescribed_solution)
+
         _, solver_info = self.solve_system(K, F, uh, **kwargs)
 
         if enable_timing:
@@ -738,6 +748,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         Note
         ----
+        本方法不读取任何由 apply_bc 留下的状态。迭代解法的初值必须由调用方通过
+        kwargs['x0'] 显式给出——对 'ea' 而言通常就是 apply_bc 产生的
+        prescribed_solution, 它已满足 Dirichlet 值。
+
         这是分布式求解唯一的注入点: 并行只需在此处把 fealpy 的 cg 换成带
         overlap 加权内积的版本, 上层的组装与边界条件处理不受影响。覆盖本方法的
         实现负责自行处理 dof_comm。
@@ -771,10 +785,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
             atol = kwargs.get('atol', 1e-12)
             rtol = kwargs.get('rtol', 1e-12)
             x0 = kwargs.get('x0', None)
-
-            # 'ea' 默认从满足 Dirichlet 值的向量起步
-            if self._operator_level == 'ea' and x0 is None:
-                x0 = self._prescribed_solution
 
             # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
             out[:], info = cg(self._as_iterative_operator(K), F[:], x0=x0,

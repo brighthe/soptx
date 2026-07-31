@@ -259,6 +259,43 @@ def test_distributed_seams_are_used_by_the_ea_path() -> None:
     assert relative_difference(solution[:], baseline[:]) < 1.0e-12
 
 
+def test_solve_system_does_not_depend_on_apply_bc_state() -> None:
+    """The initial guess is an argument, not state left behind by apply_bc.
+
+    Called with no x0 the solve must still land on the same displacement; the
+    boundary rows are identities, so the guess only affects iteration count.
+    """
+
+    analyzer = make_analyzer(8, "ea", "cg")
+    operator, load = analyzer.apply_bc(
+        analyzer.assemble_stiff_matrix(),
+        analyzer.assemble_body_force_vector(),
+    )
+
+    from_zero = bm.zeros_like(load)
+    analyzer.solve_system(operator, load, from_zero, rtol=1.0e-12, atol=1.0e-14)
+
+    from_prescribed = bm.zeros_like(load)
+    analyzer.solve_system(
+        operator, load, from_prescribed,
+        x0=analyzer.prescribed_solution,
+        rtol=1.0e-12, atol=1.0e-14,
+    )
+
+    assert relative_difference(from_zero, from_prescribed) < 1.0e-8
+
+
+def test_dof_comm_is_readable_from_the_base_class() -> None:
+    """A distributed subclass must not have to re-expose what it was given."""
+
+    communicator = FakeDofComm(mpi_size=2)
+    analyzer = make_analyzer(4, "ea", "cg")
+    assert analyzer.dof_comm is None
+
+    analyzer._dof_comm = communicator
+    assert analyzer.dof_comm is communicator
+
+
 def test_cg_reports_solver_diagnostics() -> None:
     """The example's numerical gates are built on these fields."""
 

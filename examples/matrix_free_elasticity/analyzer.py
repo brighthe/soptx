@@ -40,7 +40,7 @@ class DistributedElasticityAnalyzer(LagrangeFEMAnalyzer):
             K,
             F,
             dof_comm=self.dof_comm,
-            initial=self.prescribed_solution,
+            initial=kwargs.get("x0"),
             max_iterations=kwargs.get("max_iterations", contract.DEFAULT_MAX_ITERATIONS),
             rtol=kwargs.get("rtol", contract.DEFAULT_RTOL),
             atol=kwargs.get("atol", contract.DEFAULT_ATOL),
@@ -48,10 +48,6 @@ class DistributedElasticityAnalyzer(LagrangeFEMAnalyzer):
         )
         out[:] = solution
         return out, info
-
-    @property
-    def dof_comm(self):
-        return self._dof_comm
 
 
 def build_analyzer(

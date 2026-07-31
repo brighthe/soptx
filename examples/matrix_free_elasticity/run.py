@@ -161,6 +161,7 @@ def execute(
             system.operator,
             system.load,
             solution,
+            x0=system.prescribed,
             max_iterations=config.max_iterations,
             rtol=config.rtol,
             atol=config.atol,
