@@ -27,10 +27,10 @@ from distributed import (
     partition_cells,
     partition_strategy_label,
 )
-from operators import prepare_problem
+from analyzer import build_analyzer
 from postprocess import solution_error, write_solution
 from references import relative_difference, serial_references
-from solve import solve_prepared_problem
+from solve import PreparedLinearSystem, solver_diagnostics
 
 
 def measure_phase(name: str, callback):
@@ -85,8 +85,7 @@ def execute(
         if mpi_size == 1 and not config.benchmark:
             matvec_reference, direct_solution = serial_references(
                 global_vector,
-                problem,
-                case.material,
+                case,
                 degree,
             )
         else:
@@ -132,14 +131,46 @@ def execute(
         root=0,
     )
 
-    prepare_system = lambda: prepare_problem(
+    analyzer = build_analyzer(
         distributed_space.space,
-        problem,
-        case.material,
+        case,
         degree,
-        operator_level=config.operator_level,
+        config.operator_level,
         dof_comm=distributed_space.dof_comm,
     )
+
+    def prepare_system() -> PreparedLinearSystem:
+        operator, load = analyzer.apply_bc(
+            analyzer.assemble_stiff_matrix(),
+            analyzer.assemble_body_force_vector(),
+        )
+        return PreparedLinearSystem(
+            operator=operator,
+            load=load,
+            prescribed=analyzer.prescribed_solution,
+            boundary_dofs=distributed_space.space.is_boundary_dof(
+                threshold=problem.is_dirichlet_boundary(),
+                method="interp",
+            ),
+        )
+
+    def solve(system: PreparedLinearSystem):
+        # 必须是裸数组: Function 持有 DistLagrangeFESpace 引用, gather 时无法 pickle
+        solution = bm.zeros_like(system.load)
+        _, cg_info = analyzer.solve_system(
+            system.operator,
+            system.load,
+            solution,
+            max_iterations=config.max_iterations,
+            rtol=config.rtol,
+            atol=config.atol,
+        )
+        return solution, solver_diagnostics(
+            system,
+            solution,
+            distributed_space.dof_comm,
+            cg_info,
+        )
 
     if config.benchmark:
         system, setup_timing = measure_phase(
@@ -148,13 +179,7 @@ def execute(
         )
         (local_solution, solver), solve_timing = measure_phase(
             "cg_solve",
-            lambda: solve_prepared_problem(
-                system,
-                distributed_space.dof_comm,
-                max_iterations=config.max_iterations,
-                rtol=config.rtol,
-                atol=config.atol,
-            ),
+            lambda: solve(system),
         )
         timing = {
             "mode": "selected-path-only",
@@ -162,13 +187,7 @@ def execute(
         }
     else:
         system = prepare_system()
-        local_solution, solver = solve_prepared_problem(
-            system,
-            distributed_space.dof_comm,
-            max_iterations=config.max_iterations,
-            rtol=config.rtol,
-            atol=config.atol,
-        )
+        local_solution, solver = solve(system)
         timing = None
     global_solution = distributed_space.dof_comm.gather_add(
         local_solution / references,

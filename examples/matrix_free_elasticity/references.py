@@ -7,7 +7,7 @@ from fealpy.fem import DirichletBCOperator
 from fealpy.solver import spsolve
 
 import contract
-from operators import make_operator, prepare_serial_fa_problem
+from analyzer import build_analyzer
 
 
 def relative_difference(left, right) -> tuple[float, float]:
@@ -21,20 +21,25 @@ def relative_difference(left, right) -> tuple[float, float]:
     return absolute, relative
 
 
-def serial_references(space, problem, material, degree: int):
-    """Build correctness-only EA/FA and direct-solve references."""
+def serial_references(space, case, degree: int):
+    """Build correctness-only EA/FA and direct-solve references.
 
-    element_form = make_operator(
-        space,
-        material,
-        degree,
-        cache_elements=True,
-    )
-    fa_system = prepare_serial_fa_problem(
-        space,
-        problem,
-        material,
-        degree,
+    Single-rank only, so plain serial analyzers are used. Both operator levels
+    come from the same class, so any discrepancy below is a genuine difference
+    between the two assembly strategies rather than between two separate
+    implementations.
+    """
+
+    ea = build_analyzer(space, case, degree, "ea")
+    fa = build_analyzer(space, case, degree, "fa")
+
+    element_form = ea.assemble_stiff_matrix()
+    fa_matrix = fa.assemble_stiff_matrix()
+    fa_operator, fa_load = fa.apply_bc(fa_matrix, fa.assemble_body_force_vector())
+
+    boundary_dofs = space.is_boundary_dof(
+        threshold=case.problem.is_dirichlet_boundary(),
+        method="interp",
     )
 
     random = np.random.default_rng(contract.REFERENCE_RANDOM_SEED)
@@ -44,17 +49,17 @@ def serial_references(space, problem, material, degree: int):
     )
     raw_absolute, raw_relative = relative_difference(
         element_form @ first,
-        fa_system.raw_operator @ first,
+        fa_matrix @ first,
     )
 
     element_boundary_operator = DirichletBCOperator(
         element_form,
-        gd=problem.dirichlet_bc,
-        isDDof=fa_system.boundary_dofs,
+        gd=case.problem.dirichlet_bc,
+        isDDof=boundary_dofs,
     )
     boundary_absolute, boundary_relative = relative_difference(
         element_boundary_operator @ first,
-        fa_system.operator @ first,
+        fa_operator @ first,
     )
 
     second = bm.asarray(
@@ -72,11 +77,7 @@ def serial_references(space, problem, material, degree: int):
     )
     energy = float(bm.sum(first * first_action))
 
-    direct_solution = spsolve(
-        fa_system.operator,
-        fa_system.load,
-        solver="scipy",
-    )
+    direct_solution = spsolve(fa_operator, fa_load, solver="scipy")
     return (
         {
             "raw_absolute_error": raw_absolute,

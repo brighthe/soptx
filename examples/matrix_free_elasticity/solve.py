@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from fealpy.backend import backend_manager as bm
 
 import contract
-from cg import OverlapInnerProduct, solve_cg
-from operators import PreparedLinearSystem
+from cg import OverlapInnerProduct
+
+
+@dataclass
+class PreparedLinearSystem:
+    """A boundary-conditioned linear system, as returned by the analyzer."""
+
+    operator: object
+    load: object
+    prescribed: object
+    boundary_dofs: object
 
 
 def weighted_norm(vector, dof_comm) -> float:
@@ -53,26 +64,3 @@ def solver_diagnostics(
         ),
         "breakdown": cg_info["breakdown"],
     }
-
-
-def solve_prepared_problem(
-    system: PreparedLinearSystem,
-    dof_comm,
-    *,
-    max_iterations: int,
-    rtol: float,
-    atol: float,
-):
-    """Run the shared unpreconditioned CG path for either FA or EA."""
-
-    solution, cg_info = solve_cg(
-        system.operator,
-        system.load,
-        dof_comm=dof_comm,
-        initial=system.initial,
-        max_iterations=max_iterations,
-        rtol=rtol,
-        atol=atol,
-        residual_refresh=contract.RESIDUAL_REFRESH,
-    )
-    return solution, solver_diagnostics(system, solution, dof_comm, cg_info)

@@ -285,7 +285,7 @@ def test_a_serial_solver_refuses_a_distributed_system() -> None:
     analyzer = make_analyzer(4, "ea", "cg")
     analyzer._dof_comm = object()
 
-    with pytest.raises(NotImplementedError, match="_solve_linear_system"):
+    with pytest.raises(NotImplementedError, match="solve_system"):
         analyzer.solve_state()
 
 
@@ -293,7 +293,7 @@ def test_overriding_the_solver_lifts_the_distributed_guard() -> None:
     """A distributed subclass supplies its own solver and must not be blocked."""
 
     class OwnSolverAnalyzer(LagrangeFEMAnalyzer):
-        def _solve_linear_system(self, K, F, out, **kwargs):
+        def solve_system(self, K, F, out, **kwargs):
             from fealpy.solver import cg
 
             out[:], _ = cg(K, F[:], x0=self._prescribed_solution,

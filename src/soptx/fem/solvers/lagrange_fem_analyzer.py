@@ -47,7 +47,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
                  不形成全局矩阵, 只能用迭代解法
         两者对应同一个离散算子 K = Σ_e R_e^T K_e R_e
         tensor_space : 外部构造的张量函数空间; 为 None 时由 disp_mesh 内部构造
-        dof_comm : 分布式重叠自由度通信器, 当前尚未实现, 仅作为接口预留位
+        dof_comm : 分布式重叠自由度通信器。本类不提供分布式求解, 传入后必须同时
+                   覆盖 wrap_operator、reduce_load 和 solve_system, 否则
+                   solve_system 会拒绝执行
         """
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
@@ -91,7 +93,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 缓存的矩阵和向量
         self._K = None
         self._F = None
-        self._prescribed_solution = None  # 'ea' 下满足 Dirichlet 值的基准向量
+        self._prescribed_solution = None  # 满足 Dirichlet 值、内部为零的基准向量
 
         self._integrator = LinearElasticIntegrator(material=self._material,
                                                 q=self._integration_order,
@@ -167,6 +169,15 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def force_vector(self) -> Union[TensorLike, COOTensor]:
         """获取当前的载荷向量"""
         return self._F
+
+    @property
+    def prescribed_solution(self) -> Optional[TensorLike]:
+        """最近一次 apply_bc 得到的 Dirichlet 基准向量
+
+        边界自由度取给定值, 内部自由度为零。可用作迭代解法的初值, 以及边界误差
+        的比较基准。apply_bc 之前为 None。
+        """
+        return self._prescribed_solution
 
     @scalar_space.setter
     def scalar_space(self, space: LagrangeFESpace) -> None:
@@ -460,6 +471,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                         threshold=threshold_uh,
                                                         method='interp'
                                                     )
+            self._prescribed_solution = uh_bd
 
             if adjoint:
                 uh_bd = bm.repeat(uh_bd.reshape(-1, 1), 2, axis=1)
@@ -488,6 +500,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                     threshold=threshold,
                                     method='interp'
                                 )
+            self._prescribed_solution = uh_bd
+
             F = F - K.matmul(uh_bd[:])
             F[isBdDof] = uh_bd[isBdDof]
 
@@ -624,7 +638,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             uh = self._tensor_space.function()
 
-        _, solver_info = self._solve_linear_system(K, F, uh, **kwargs)
+        _, solver_info = self.solve_system(K, F, uh, **kwargs)
 
         if enable_timing:
             t.send('求解')
@@ -662,7 +676,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         # 初始化结果并求解
         adjoint_lambda = bm.zeros_like(rhs_bc)
-        self._solve_linear_system(K, rhs_bc, adjoint_lambda, **kwargs)
+        self.solve_system(K, rhs_bc, adjoint_lambda, **kwargs)
 
         return adjoint_lambda
 
@@ -692,7 +706,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return K.tocoo()
 
-    def _solve_linear_system(self, K, F, out, **kwargs):
+    def solve_system(self, K, F, out, **kwargs):
         """在给定算子上求解线性系统, 解就地写入 out
 
         Parameters
@@ -715,7 +729,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """
         if self._dof_comm is not None:
             raise NotImplementedError(
-                "串行求解器不能用于分布式系统。请覆盖 _solve_linear_system, "
+                "串行求解器不能用于分布式系统。请覆盖 solve_system, "
                 "提供带 overlap 加权内积的 CG, 参考 examples/matrix_free_elasticity"
             )
 
