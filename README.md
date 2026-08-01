@@ -83,6 +83,10 @@ python .\experiments\huzhang_topopt_paper\dry_run.py --json
 | `docs/` | 架构、数学模型、验证和引用文档 |
 | `reference_code/` | 待归档且许可证未核实的第三方参考代码 |
 
+各路径的 maintained、incubating、experiment、compatibility 与 archive 分类及其迁移
+政策见
+[`docs/architecture/file-classification.md`](docs/architecture/file-classification.md)。
+
 目标依赖方向是
 `core → materials/problems → fem → topology → visualization`。Problem 只表达
 区域、载荷、边界与精确解；Material 独立；网格由 FEM workflow 或 example case

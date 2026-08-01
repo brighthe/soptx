@@ -22,30 +22,11 @@ core → materials / problems → fem → topology → visualization
 是 `1.1.x` 公共 API 兼容命名空间，不允许被新稳定层导入。已有 maintained
 替代实现的兼容模块必须是薄转发；未登记为公共 API 的历史实现不进入 wheel。
 
-## 仓库目录职责
-
-| 路径 | 状态 | 职责 |
-| --- | --- | --- |
-| `src/soptx/` | maintained | 可安装实现与公共 API |
-| `tests/` | maintained | 快速 unit/integration/regression 测试 |
-| `examples/` | incubating | Matrix-Free、PINN 等短小孵化示例 |
-| `experiments/` | experiment | 论文矩阵、provenance、长期运行 |
-| `docs/` | maintained | 架构、数学模型、验证和引用 |
-| `reference_code/` | archive candidate | 来源和许可证未核实的历史参考代码 |
-
-根 unit/integration、wheel 和架构检查在基础 CI 中运行；PINN 与 Matrix-Free
-各有独立 fast job，只运行快速测试，不运行完整训练、MPI benchmark 或正式
-validation。
-
 ## 公共 API
 
-根包仅公开 `soptx.__version__`。稳定对象从职责子包导入，例如：
-
-```python
-from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import SinusoidalPlaneStrainElasticity2D
-from soptx.fem.integrators import LinearElasticIntegrator
-```
+根包仅公开 `soptx.__version__`，稳定对象一律从职责子包导入。这样层归属在 import
+语句上直接可见，根包也不会退化成跨层的隐式聚合点。导入示例见
+[仓库 README](../../README.md#公共-api)。
 
 `Problem`、`Material` 和网格由调用方显式组合。Problem 的 shape 契约见
 [制造线弹性模型](../models/manufactured-elasticity.md)。
