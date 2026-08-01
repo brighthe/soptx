@@ -10,6 +10,7 @@ from typing import Any
 
 import contract
 import layout
+import schema
 
 
 class EvidenceError(RuntimeError):
@@ -115,17 +116,38 @@ def require_positive_int(
 def require_local_gates(
     payload: dict[str, Any],
     source: Path,
-) -> dict[str, bool]:
+) -> dict[str, str]:
+    """Require every gate to have run and passed.
+
+    Formal evidence does not accept ``GATE_SKIPPED``: a run that skipped the
+    MatVec, symmetry or explicit-solution comparisons cannot back a
+    correctness claim, however green its remaining gates are.
+    """
+
     gates = require_mapping(payload, "local_gates", source)
     if not gates:
         raise EvidenceError(f"{source}: local_gates must not be empty")
-    failed = [name for name, value in gates.items() if value is not True]
+    skipped = sorted(
+        name
+        for name, value in gates.items()
+        if value == schema.GATE_SKIPPED
+    )
+    if skipped:
+        raise EvidenceError(
+            f"{source}: formal evidence rejects skipped gates: "
+            + ", ".join(skipped)
+        )
+    failed = sorted(
+        name
+        for name, value in gates.items()
+        if value != schema.GATE_PASSED
+    )
     if failed:
         raise EvidenceError(
-            f"{source}: local gates are not all true: "
+            f"{source}: local gates did not all pass: "
             + ", ".join(failed)
         )
-    return {str(name): True for name in gates}
+    return {str(name): schema.GATE_PASSED for name in gates}
 
 
 def require_formal_environment(
@@ -161,10 +183,16 @@ def validate_source(
     dimension: int,
     operator_level: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    if payload.get("schema_version") != contract.SCHEMA_VERSION:
+    if payload.get("schema_version") != schema.SCHEMA_VERSION:
         raise EvidenceError(
             f"{source}: expected schema_version="
-            f"{contract.SCHEMA_VERSION}"
+            f"{schema.SCHEMA_VERSION}"
+        )
+    missing = schema.missing_summary_fields(payload)
+    if missing:
+        raise EvidenceError(
+            f"{source}: summary is missing top-level fields: "
+            + ", ".join(missing)
         )
     if payload.get("mpi_size") != 1:
         raise EvidenceError(f"{source}: expected mpi_size=1")
@@ -411,7 +439,7 @@ def build_evidence(dimension: int) -> dict[str, Any]:
         math.log2(l2_errors[1] / l2_errors[2]),
     ]
     return {
-        "schema_version": contract.SCHEMA_VERSION,
+        "schema_version": schema.SCHEMA_VERSION,
         "dimension": dimension,
         "scope": f"{layout.EVIDENCE_SCOPE}-correctness",
         "environment": formal_environment,

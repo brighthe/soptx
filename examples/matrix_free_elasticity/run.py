@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 from mpi4py import MPI
 import numpy as np
@@ -23,6 +25,7 @@ import report
 from cases import ElasticityCase, create_case
 from contract import RunConfig
 from distributed import (
+    DistributedVectorSpace,
     distribute_vector_space,
     partition_cells,
     partition_strategy_label,
@@ -30,7 +33,27 @@ from distributed import (
 from analyzer import build_distributed_analyzer
 from postprocess import solution_error, write_solution
 from references import relative_difference, serial_references
+from schema import RunResult
 from solve import PreparedLinearSystem, solver_diagnostics
+
+
+@dataclass(frozen=True)
+class GlobalContext:
+    """Objects that exist only on the root rank.
+
+    Every field is ``None`` off the root: the global mesh, the undistributed
+    spaces and the serial references are all built before distribution and
+    are never replicated.
+    """
+
+    mesh: Mesh | None
+    scalar_space: LagrangeFESpace | None
+    vector_space: TensorFunctionSpace | None
+    cell_masks: list | None
+    global_cells: int | None
+    global_dofs: int | None
+    matvec_reference: dict | None
+    direct_solution: Any | None
 
 
 def measure_phase(name: str, callback):
@@ -41,75 +64,82 @@ def measure_phase(name: str, callback):
     return result, {"name": name, "seconds": perf_counter() - start}
 
 
-def execute(
+def build_global_context(
     global_mesh: Mesh | None,
     case: ElasticityCase,
     config: RunConfig,
-):
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    mpi_size = comm.Get_size()
-    if mpi_size not in contract.SUPPORTED_RANKS:
-        raise ValueError(
-            f"stage 1 supports only {contract.SUPPORTED_RANKS} MPI ranks"
-        )
-    if config.operator_level == "fa" and mpi_size != 1:
-        raise ValueError("the FA operator level currently supports one MPI rank")
-    if config.benchmark and mpi_size != 1:
-        raise ValueError("benchmark mode currently supports one MPI rank")
+    *,
+    rank: int,
+    mpi_size: int,
+) -> GlobalContext:
+    """Build the root-rank global spaces, partition masks and references."""
 
-    problem = case.problem
-    degree = config.degree
-    split_coordinate = case.partition_split_coordinate()
-    if rank == 0:
-        if global_mesh is None:
-            raise ValueError("root rank requires the global mesh")
-        case.validate_mesh(global_mesh)
-        dimension = int(global_mesh.geo_dimension())
-        global_scalar = LagrangeFESpace(
-            global_mesh,
-            p=degree,
-            ctype="C",
+    if rank != 0:
+        return GlobalContext(
+            mesh=None,
+            scalar_space=None,
+            vector_space=None,
+            cell_masks=None,
+            global_cells=None,
+            global_dofs=None,
+            matvec_reference=None,
+            direct_solution=None,
         )
-        global_vector = TensorFunctionSpace(
-            global_scalar,
-            shape=(-1, dimension),
+    if global_mesh is None:
+        raise ValueError("root rank requires the global mesh")
+
+    case.validate_mesh(global_mesh)
+    dimension = int(global_mesh.geo_dimension())
+    scalar_space = LagrangeFESpace(global_mesh, p=config.degree, ctype="C")
+    vector_space = TensorFunctionSpace(scalar_space, shape=(-1, dimension))
+    cell_masks = partition_cells(
+        global_mesh,
+        mpi_size,
+        split_coordinate=case.partition_split_coordinate(),
+    )
+    if mpi_size == 1 and not config.benchmark:
+        matvec_reference, direct_solution = serial_references(
+            vector_space,
+            case,
+            config.degree,
         )
-        cell_masks = partition_cells(
-            global_mesh,
-            mpi_size,
-            split_coordinate=split_coordinate,
-        )
-        global_cells = global_mesh.number_of_cells()
-        global_dofs = global_vector.number_of_global_dofs()
-        if mpi_size == 1 and not config.benchmark:
-            matvec_reference, direct_solution = serial_references(
-                global_vector,
-                case,
-                degree,
-            )
-        else:
-            matvec_reference = None
-            direct_solution = None
     else:
-        global_scalar = None
-        global_vector = None
-        cell_masks = None
-        global_cells = None
-        global_dofs = None
         matvec_reference = None
         direct_solution = None
 
+    return GlobalContext(
+        mesh=global_mesh,
+        scalar_space=scalar_space,
+        vector_space=vector_space,
+        cell_masks=cell_masks,
+        global_cells=global_mesh.number_of_cells(),
+        global_dofs=vector_space.number_of_global_dofs(),
+        matvec_reference=matvec_reference,
+        direct_solution=direct_solution,
+    )
+
+
+def distribute(
+    context: GlobalContext,
+    case: ElasticityCase,
+    comm,
+) -> tuple[DistributedVectorSpace, list | None, Any]:
+    """Distribute the mesh and vector space, and gather a partition report.
+
+    The per-DOF reference counts are returned alongside: the partition report
+    and the final ``gather_add`` both need them, and they are the same counts.
+    """
+
     distributed_mesh = distribute_mesh(
-        global_mesh,
-        cell_masks,
+        context.mesh,
+        context.cell_masks,
         comm=comm,
     )
     distributed_space = distribute_vector_space(
-        global_scalar,
-        global_vector,
+        context.scalar_space,
+        context.vector_space,
         distributed_mesh,
-        cell_masks,
+        context.cell_masks,
         components=case.dimension,
         root=0,
         comm=comm,
@@ -119,7 +149,7 @@ def execute(
     references = distributed_space.dof_comm.refs(local_size)
     partition_report = comm.gather(
         {
-            "rank": rank,
+            "rank": comm.Get_rank(),
             "local_cells": int(
                 distributed_space.space.mesh.number_of_cells()
             ),
@@ -130,14 +160,20 @@ def execute(
         },
         root=0,
     )
+    return distributed_space, partition_report, references
 
-    analyzer = build_distributed_analyzer(
-        distributed_space.space,
-        case,
-        degree,
-        config.operator_level,
-        dof_comm=distributed_space.dof_comm,
-    )
+
+def run_solver(
+    analyzer,
+    distributed_space: DistributedVectorSpace,
+    problem,
+    config: RunConfig,
+):
+    """Assemble, apply boundary conditions and solve.
+
+    Setup and solve stay behind closures so the benchmark path can time them
+    separately while both paths run exactly the same code.
+    """
 
     def prepare_system() -> PreparedLinearSystem:
         operator, load = analyzer.apply_bc(
@@ -173,45 +209,49 @@ def execute(
             cg_info,
         )
 
-    if config.benchmark:
-        system, setup_timing = measure_phase(
-            "operator_setup",
-            prepare_system,
-        )
-        (local_solution, solver), solve_timing = measure_phase(
-            "cg_solve",
-            lambda: solve(system),
-        )
-        timing = {
-            "mode": "selected-path-only",
-            "phases": [setup_timing, solve_timing],
-        }
-    else:
+    if not config.benchmark:
         system = prepare_system()
         local_solution, solver = solve(system)
-        timing = None
-    global_solution = distributed_space.dof_comm.gather_add(
-        local_solution / references,
-        root=0,
+        return local_solution, solver, None
+
+    system, setup_timing = measure_phase("operator_setup", prepare_system)
+    (local_solution, solver), solve_timing = measure_phase(
+        "cg_solve",
+        lambda: solve(system),
     )
+    return local_solution, solver, {
+        "mode": "selected-path-only",
+        "phases": [setup_timing, solve_timing],
+    }
 
-    if rank != 0:
-        return None
 
-    solution = global_vector.function(dtype=bm.float64)
+def finalize(
+    context: GlobalContext,
+    global_solution,
+    case: ElasticityCase,
+    config: RunConfig,
+    *,
+    solver: dict,
+    timing: dict | None,
+    partition_report: list | None,
+    mpi_size: int,
+) -> RunResult:
+    """Compute errors, write artifacts and assemble the run result."""
+
+    solution = context.vector_space.function(dtype=bm.float64)
     solution[:] = global_solution
     l2_absolute, l2_relative = solution_error(
-        global_mesh,
+        context.mesh,
         solution,
-        problem,
-        degree,
+        case.problem,
+        config.degree,
     )
-    if direct_solution is None:
+    if context.direct_solution is None:
         direct_reference = None
     else:
         direct_absolute, direct_relative = relative_difference(
             solution,
-            direct_solution,
+            context.direct_solution,
         )
         direct_reference = {
             "absolute_error": direct_absolute,
@@ -222,35 +262,105 @@ def execute(
     np.save(config.solution_path, np.asarray(solution))
     write_solution(
         config.output_path,
-        global_mesh,
-        global_vector,
+        context.mesh,
+        context.vector_space,
         solution,
         case,
     )
 
-    return {
-        "global_cells": int(global_cells),
-        "global_dofs": int(global_dofs),
-        "operator": {
+    return RunResult(
+        global_cells=int(context.global_cells),
+        global_dofs=int(context.global_dofs),
+        operator={
             "level": config.operator_level,
             "storage": config.operator_storage,
         },
-        "partition": {
+        partition={
             "strategy": partition_strategy_label(
                 mpi_size,
-                split_coordinate,
+                case.partition_split_coordinate(),
             ),
             "ranks": partition_report,
         },
-        "solver": solver,
-        "timing": timing,
-        "error": {
+        solver=solver,
+        timing=timing,
+        error={
             "l2_absolute": l2_absolute,
             "l2_relative": l2_relative,
         },
-        "matvec_reference": matvec_reference,
-        "explicit_solution_reference": direct_reference,
-    }
+        matvec_reference=context.matvec_reference,
+        explicit_solution_reference=direct_reference,
+    )
+
+
+def check_rank_support(config: RunConfig, mpi_size: int) -> None:
+    """Reject rank counts stage 1 does not support for this run mode."""
+
+    if mpi_size not in contract.SUPPORTED_RANKS:
+        raise ValueError(
+            f"stage 1 supports only {contract.SUPPORTED_RANKS} MPI ranks"
+        )
+    if config.operator_level == "fa" and mpi_size != 1:
+        raise ValueError("the FA operator level currently supports one MPI rank")
+    if config.benchmark and mpi_size != 1:
+        raise ValueError("benchmark mode currently supports one MPI rank")
+
+
+def execute(
+    global_mesh: Mesh | None,
+    case: ElasticityCase,
+    config: RunConfig,
+) -> RunResult | None:
+    """Run one case end to end; only the root rank returns a result."""
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    mpi_size = comm.Get_size()
+    check_rank_support(config, mpi_size)
+
+    context = build_global_context(
+        global_mesh,
+        case,
+        config,
+        rank=rank,
+        mpi_size=mpi_size,
+    )
+    distributed_space, partition_report, references = distribute(
+        context,
+        case,
+        comm,
+    )
+    analyzer = build_distributed_analyzer(
+        distributed_space.space,
+        case,
+        config.degree,
+        config.operator_level,
+        dof_comm=distributed_space.dof_comm,
+    )
+    local_solution, solver, timing = run_solver(
+        analyzer,
+        distributed_space,
+        case.problem,
+        config,
+    )
+
+    global_solution = distributed_space.dof_comm.gather_add(
+        local_solution / references,
+        root=0,
+    )
+    if rank != 0:
+        return None
+
+    return finalize(
+        context,
+        global_solution,
+        case,
+        config,
+        solver=solver,
+        timing=timing,
+        partition_report=partition_report,
+        mpi_size=mpi_size,
+    )
 
 
 def parse_arguments(mpi_size: int) -> tuple[ElasticityCase, RunConfig]:

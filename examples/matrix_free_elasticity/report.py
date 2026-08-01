@@ -14,8 +14,10 @@ from mpi4py import MPI
 
 import contract
 import layout
+import schema
 from cases import ElasticityCase
 from contract import RunConfig
+from schema import RunResult
 
 
 def package_version(name: str) -> str:
@@ -66,47 +68,54 @@ def write_json(path: Path, payload: dict) -> None:
 
 
 def local_gates(
-    result: dict,
+    result: RunResult,
     config: RunConfig,
     mpi_size: int,
-) -> dict[str, bool]:
+) -> dict[str, str]:
     """Evaluate the single-run gates recorded in the summary.
 
     The serial EA/FA references only exist for a non-benchmark single-rank
-    run; the gates that consume them are reported as passing elsewhere so the
-    summary keeps one stable field set across every run mode.
+    run. Gates consuming them are recorded as ``GATE_SKIPPED`` instead of
+    passing, so the field set stays stable across run modes without
+    ``local_passed`` quietly meaning something weaker in benchmark runs.
     """
 
-    solver = result["solver"]
-    matvec = result["matvec_reference"]
-    direct = result["explicit_solution_reference"]
+    solver = result.solver
+    matvec = result.matvec_reference
+    direct = result.explicit_solution_reference
     referenced = not (config.benchmark or mpi_size != 1)
+
+    def referenced_gate(passed: bool) -> str:
+        if not referenced:
+            return schema.GATE_SKIPPED
+        return schema.gate_status(passed)
+
     return {
-        "converged": bool(solver["converged"]),
-        "true_residual": (
+        "converged": schema.gate_status(bool(solver["converged"])),
+        "true_residual": schema.gate_status(
             solver["true_absolute_residual"]
             <= config.residual_limit(solver["rhs_norm"])
         ),
-        "boundary_dofs": (
+        "boundary_dofs": schema.gate_status(
             solver["boundary_absolute_error"]
             <= contract.BOUNDARY_ABSOLUTE_TOL
         ),
-        "raw_matvec": not referenced or (
+        "raw_matvec": referenced_gate(
             matvec is not None
             and matvec["raw_relative_error"] <= contract.MATVEC_RELATIVE_TOL
         ),
-        "dirichlet_matvec": not referenced or (
+        "dirichlet_matvec": referenced_gate(
             matvec is not None
             and matvec["dirichlet_relative_error"]
             <= contract.MATVEC_RELATIVE_TOL
         ),
-        "operator_symmetry": not referenced or (
+        "operator_symmetry": referenced_gate(
             matvec is not None
             and matvec["symmetry_relative_error"]
             <= contract.SYMMETRY_RELATIVE_TOL
             and matvec["random_vector_energy"] > 0.0
         ),
-        "explicit_solution": not referenced or (
+        "explicit_solution": referenced_gate(
             direct is not None
             and direct["relative_error"]
             <= contract.EXPLICIT_SOLUTION_RELATIVE_TOL
@@ -115,16 +124,16 @@ def local_gates(
 
 
 def build_payload(
-    result: dict,
+    result: RunResult,
     config: RunConfig,
     case: ElasticityCase,
     mpi_size: int,
-    gates: dict[str, bool],
+    gates: dict[str, str],
 ) -> dict:
     """Assemble the schema-versioned single-run summary."""
 
     return {
-        "schema_version": contract.SCHEMA_VERSION,
+        "schema_version": schema.SCHEMA_VERSION,
         "stage": contract.STAGE,
         "command": [sys.executable, *sys.argv],
         "environment": environment_record(),
@@ -151,14 +160,14 @@ def build_payload(
         "verification": (
             "skipped-for-benchmark" if config.benchmark else "full"
         ),
-        **result,
+        **result.as_payload_fields(),
         "artifacts": {
             "vtu": str(config.output_path.resolve()),
             "solution_npy": str(config.solution_path.resolve()),
             "summary_json": str(config.summary_path.resolve()),
         },
         "local_gates": gates,
-        "local_passed": all(gates.values()),
+        "local_passed": schema.gates_passed(gates),
     }
 
 

@@ -4,6 +4,9 @@ Every tolerance, default value and supported range used by ``run.py``,
 ``validate.py`` and ``sync_results.py`` is defined here exactly once, so a
 tightened gate can never be applied on one side of the pipeline only.
 
+The *shape* of the summary those numbers end up in belongs to :mod:`schema`,
+which also owns ``SCHEMA_VERSION``.
+
 This module must stay free of FEALPy, SOPTX and mpi4py imports: the evidence
 tooling has to run on machines without an MPI runtime.
 """
@@ -14,7 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-SCHEMA_VERSION = 2
 STAGE = "soptx/matrix-free-elasticity/stage-1"
 
 SUPPORTED_DIMENSIONS = (2, 3)

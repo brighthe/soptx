@@ -11,6 +11,7 @@ import numpy as np
 
 import contract
 import layout
+import schema
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -249,11 +250,18 @@ def check_case(
     failures: list[str] = []
     label = f"{dimension}d/{name}"
     parameters = payload.get("parameters", {})
-    if payload.get("schema_version") != contract.SCHEMA_VERSION:
+    if payload.get("schema_version") != schema.SCHEMA_VERSION:
         failures.append(
             f"{label}: expected schema_version="
-            f"{contract.SCHEMA_VERSION}"
+            f"{schema.SCHEMA_VERSION}"
         )
+    missing = schema.missing_summary_fields(payload)
+    if missing:
+        failures.append(
+            f"{label}: summary is missing top-level fields: "
+            + ", ".join(missing)
+        )
+        return failures
     if parameters.get("dimension") != dimension:
         failures.append(f"{label}: result dimension mismatch")
 
@@ -496,7 +504,7 @@ def main() -> int:
         failures.extend(dimension_failures)
 
     evidence = {
-        "schema_version": contract.SCHEMA_VERSION,
+        "schema_version": schema.SCHEMA_VERSION,
         "stage": contract.STAGE,
         "selected_dimensions": list(
             selected_dimensions(arguments.dim)
