@@ -10,7 +10,7 @@ from fealpy.sparse import CSRTensor, COOTensor
 
 from soptx.core import (
     BaseLogged,
-    ElasticityProblem,
+    DirichletElasticityProblem,
     MaterialInterpolation,
     timer,
 )
@@ -23,7 +23,7 @@ from soptx.materials import LinearElasticMaterial
 class LagrangeFEMAnalyzer(BaseLogged):
     def __init__(self,
                 disp_mesh: HomogeneousMesh,
-                pde: ElasticityProblem,
+                pde: DirichletElasticityProblem,
                 material: LinearElasticMaterial,
                 space_degree: int = 1,
                 integration_order: int = 4,
@@ -116,7 +116,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._mesh
     
     @property
-    def pde(self) -> ElasticityProblem:
+    def pde(self) -> DirichletElasticityProblem:
         """获取当前的 PDE 对象"""
         return self._pde
     

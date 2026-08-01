@@ -13,10 +13,10 @@ from fealpy.backend import backend_manager as bm
 from fealpy.decorator import cartesian
 from fealpy.typing import TensorLike
 
-from ._base import validated_domain
+from ._base import AllDisplacementBoundaryMixin, validated_domain
 
 
-class _AllDirichletElasticity2D:
+class _AllDirichletElasticity2D(AllDisplacementBoundaryMixin):
     dimension = 2
     plane_type = "plane_strain"
     boundary_type = "dirichlet"
@@ -191,6 +191,37 @@ class ExponentialSineManufacturedElasticity2D(
             ],
             axis=-1,
         )
+
+
+class MixedBoundaryExponentialSineElasticity2D(
+    ExponentialSineManufacturedElasticity2D
+):
+    """Mixed-boundary view of the exponential/sine manufactured problem.
+
+    The exact displacement vanishes on the unit-square boundary.  Three sides
+    are treated as displacement boundaries and the right side as a nonzero
+    traction boundary, so the same exact fields exercise strong traction data
+    without introducing a second formula source.
+    """
+
+    boundary_type = "mixed"
+    load_type = "distributed"
+
+    def is_displacement_boundary(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        domain = self.domain
+        return (
+            (bm.abs(x - domain[0]) < self._eps)
+            | (bm.abs(y - domain[2]) < self._eps)
+            | (bm.abs(y - domain[3]) < self._eps)
+        )
+
+    def is_traction_boundary(self, points: TensorLike) -> TensorLike:
+        return bm.abs(points[..., 0] - self.domain[1]) < self._eps
+
+    def traction_bc(self, points: TensorLike) -> TensorLike:
+        return self.stress_solution(points)
+
 
 class SinusoidalPlaneStrainElasticity2D(
     _AllDirichletElasticity2D

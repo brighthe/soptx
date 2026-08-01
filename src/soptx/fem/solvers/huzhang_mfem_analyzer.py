@@ -12,8 +12,8 @@ from fealpy.sparse.ops import bmat, spdiags
 
 from soptx.core import (
     BaseLogged,
-    ElasticityProblem,
     MaterialInterpolation,
+    MixedBoundaryElasticityProblem,
     timer,
 )
 from soptx.fem.integrators import (
@@ -28,13 +28,13 @@ from soptx.materials import LinearElasticMaterial
 class HuZhangMFEMAnalyzer(BaseLogged):
     def __init__(self,
                 disp_mesh: HomogeneousMesh,
-                pde: ElasticityProblem,
+                pde: MixedBoundaryElasticityProblem,
                 material: LinearElasticMaterial,
                 interpolation_scheme: Optional[MaterialInterpolation] = None,
                 space_degree: int = 1,
                 integration_order: int = 4,
                 use_relaxation: bool = True,
-                solve_method: Literal['mumps', 'cg'] = 'mumps',
+                solve_method: Literal['mumps', 'scipy'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
@@ -56,6 +56,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._topopt_algorithm = topopt_algorithm
         self._interpolation_scheme = interpolation_scheme
 
+        # 状态方程是对称不定的鞍点系统, 只能用直接解法, 在构造期就拒绝迭代解法
+        if solve_method not in ['mumps', 'scipy']:
+            self._log_error(f"不支持的求解器类型: {solve_method}, 可选 'mumps' 或 'scipy'")
         self._solve_method = solve_method
 
         node = self._mesh.entity('node')
@@ -86,6 +89,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._lambda1_rho = None
 
         self._cached_K = None  # 缓存施加边界条件后的刚度矩阵，供伴随求解复用
+        self._cached_rhs = None
+        self._cached_state_vector = None
         self._cached_Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space) # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
 
 
@@ -94,7 +99,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     ##############################################################################################
 
     @property
-    def pde(self) -> ElasticityProblem:
+    def pde(self) -> MixedBoundaryElasticityProblem:
         """获取当前的 PDE 对象"""
         return self._pde
 
@@ -518,6 +523,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             K, F = K0, F0
 
         self._cached_K = K
+        self._cached_rhs = F
 
         if enable_timing:
             t.send('本质边界条件处理时间')
@@ -528,8 +534,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             from fealpy.solver import spsolve
             X = spsolve(K, F, solver=solver_type)
 
-        elif solver_type in ['cg']: 
-            pass
+        elif solver_type in ['cg']:
+            # K 为 [[A, B], [B^T, 0]] 或 [[A, B], [B^T, -J]], 对称不定;
+            # CG 只对对称正定矩阵成立, 用在这里会给出不收敛或静默错误的解
+            self._log_error(
+                    "状态方程是对称不定的鞍点系统, 不能用 CG 求解, "
+                    "请改用 solver='mumps' 或 'scipy'"
+                )
 
         else:
             self._log_error(f"未知的求解器类型: {solver_type}")
@@ -539,6 +550,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         sigmaval = X[:gdof_sigmah]
         uval = X[gdof_sigmah:]
+        self._cached_state_vector = X
 
         sigmah = space_sigmah.function()
         sigmah[:] = sigmaval
@@ -551,6 +563,40 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             t.send(None)
 
         return {'stress': sigmah, 'displacement': uh}
+
+    def relative_state_residual(self) -> float:
+        """Return ``||Kx-F||_2 / max(||F||_2, eps)`` for the last state solve.
+
+        The diagnostic is intentionally tied to the fully constrained system
+        cached by :meth:`solve_state`; calling it before a successful state
+        solve is an error rather than silently triggering another assembly.
+        """
+        if (
+            self._cached_K is None
+            or self._cached_rhs is None
+            or self._cached_state_vector is None
+        ):
+            raise RuntimeError("solve_state must complete before residual evaluation")
+        residual = (
+            self._cached_K.matmul(self._cached_state_vector)
+            - self._cached_rhs
+        )
+        numerator = float(bm.linalg.norm(residual))
+        denominator = max(float(bm.linalg.norm(self._cached_rhs)), 1.0e-30)
+        return numerator / denominator
+
+    def state_matrix_symmetry_error(self) -> float:
+        """Return the relative Frobenius symmetry defect of the last state matrix."""
+        if self._cached_K is None:
+            raise RuntimeError("solve_state must complete before symmetry evaluation")
+        matrix = self._cached_K.to_scipy()
+        difference = matrix - matrix.transpose()
+        numerator = float((difference.multiply(difference)).sum() ** 0.5)
+        denominator = max(
+            float((matrix.multiply(matrix)).sum() ** 0.5),
+            1.0e-30,
+        )
+        return numerator / denominator
     
     def solve_adjoint(self, 
                     rhs: TensorLike,

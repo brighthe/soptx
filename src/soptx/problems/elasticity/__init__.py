@@ -2,6 +2,7 @@
 
 from .manufactured_2d import (
     ExponentialSineManufacturedElasticity2D,
+    MixedBoundaryExponentialSineElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
 )
 from .manufactured_3d import DivergenceFreePolynomialElasticity3D
@@ -9,5 +10,6 @@ from .manufactured_3d import DivergenceFreePolynomialElasticity3D
 __all__ = [
     "DivergenceFreePolynomialElasticity3D",
     "ExponentialSineManufacturedElasticity2D",
+    "MixedBoundaryExponentialSineElasticity2D",
     "SinusoidalPlaneStrainElasticity2D",
 ]

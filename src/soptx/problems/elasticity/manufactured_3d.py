@@ -9,10 +9,10 @@ from fealpy.backend import backend_manager as bm
 from fealpy.decorator import cartesian
 from fealpy.typing import TensorLike
 
-from ._base import validated_domain
+from ._base import AllDisplacementBoundaryMixin, validated_domain
 
 
-class DivergenceFreePolynomialElasticity3D:
+class DivergenceFreePolynomialElasticity3D(AllDisplacementBoundaryMixin):
     r"""Polynomial all-Dirichlet manufactured elasticity problem.
 
     The exact displacement is divergence-free, so the forcing depends only on

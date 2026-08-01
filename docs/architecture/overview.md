@@ -49,3 +49,23 @@ from soptx.fem.integrators import LinearElasticIntegrator
 
 `Problem`、`Material` 和网格由调用方显式组合。Problem 的 shape 契约见
 [制造线弹性模型](../models/manufactured-elasticity.md)。
+
+## 问题契约（Protocol 族）
+
+`soptx/core/protocols.py` 定义分析器对 Problem 的结构化要求。它放在 layer 0，
+因此 `fem`（layer 2）不必依赖 `problems`（layer 1）或 `topology`（layer 3）就能
+标注参数类型；Problem 一侧无需继承，满足成员即满足协议。
+
+| 协议 | 语义 | 消费者 |
+| --- | --- | --- |
+| `ElasticityProblem` | 任何弹性问题的公共核心 | 两个分析器共用 |
+| `DirichletElasticityProblem` | 主形式：Dirichlet 数据 + 按 `boundary_type`/`load_type` 分派 | `LagrangeFEMAnalyzer` |
+| `MixedBoundaryElasticityProblem` | 混合形式：位移/牵引边界显式二分 + 角点 | `HuZhangMFEMAnalyzer` |
+
+混合形式的边界划分与主形式相反：位移数据弱施加（自然），牵引数据强施加
+（本质），所以两个谓词必须显式划分边界。全 Dirichlet 问题的退化实现由
+`soptx/problems/elasticity/_base.py` 的 `AllDisplacementBoundaryMixin` 提供。
+
+**规则**：往分析器里新增任何 `self._pde.xxx` 访问，必须同步扩展对应协议。
+`tests/unit/test_problem_protocol_conformance.py` 用 AST 扫描强制这一点 ——
+协议曾经因为无人校验而与实际需求脱节，该测试防止其重演。
