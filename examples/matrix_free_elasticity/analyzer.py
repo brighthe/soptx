@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from typing import Any, Callable, Optional, Protocol
+
 from fealpy.backend import backend_manager as bm
 from fealpy.distributed import EntityMPI
+from fealpy.fem import BilinearForm
 from fealpy.functionspace import TensorFunctionSpace
+from fealpy.typing import TensorLike
 
 from soptx.fem.solvers import LagrangeFEMAnalyzer
 
@@ -12,7 +16,37 @@ from cg import solve_cg
 from distributed import OverlapOperator
 
 
-def _overlap_cg(K, F, *, dof_comm, x0, maxiter, rtol, atol, **options):
+class SupportsMatmul(Protocol):
+    """能被迭代解法作用的算子
+
+    'fa' 下是 CSRTensor/COOTensor, 'ea' 下是层层包装的 DirichletBCOperator。
+    两者唯一的共性就是支持 ``@``, 所以按这个协议标注, 而不是枚举具体类型——
+    枚举会随实现漂移。
+
+    FEALPy 内部有同名协议, 但定义在 ``fealpy/solver/cg.py`` 里且未导出, 不宜依赖。
+    """
+
+    def __matmul__(self, other: TensorLike) -> TensorLike: ...
+
+
+#: 求解器返回 (解, 诊断信息)
+SolverResult = tuple[TensorLike, dict]
+
+#: 登记表里求解器的统一签名。关键字随求解器而异, 所以参数列表用 ``...``。
+SolverRoutine = Callable[..., SolverResult]
+
+
+def _overlap_cg(
+    K: SupportsMatmul,
+    F: TensorLike,
+    *,
+    dof_comm: EntityMPI,
+    x0: Optional[TensorLike],
+    maxiter: int,
+    rtol: float,
+    atol: float,
+    **options: Any,
+) -> SolverResult:
     """把 cg.solve_cg 适配到求解器登记表的统一签名"""
 
     return solve_cg(
@@ -39,7 +73,7 @@ def _overlap_cg(K, F, *, dof_comm, x0, maxiter, rtol, atol, **options):
 #:
 #: 新增求解器的做法: 照 ``cg.py`` 的 ``OverlapInnerProduct`` 写出加权内积版本,
 #: 再按 ``_overlap_cg`` 的签名登记到这里。
-DISTRIBUTED_SOLVERS = {
+DISTRIBUTED_SOLVERS: dict[str, SolverRoutine] = {
     "cg": _overlap_cg,
 }
 
@@ -59,32 +93,32 @@ class DistributedElasticityAnalyzer(LagrangeFEMAnalyzer):
     归约本身就是恒等操作。
     """
 
-    def __init__(self, *args, dof_comm: EntityMPI, **kwargs) -> None:
+    def __init__(self, *args: Any, dof_comm: EntityMPI, **kwargs: Any) -> None:
         if dof_comm is None:
             raise ValueError(
                 "分布式分析器必须提供 dof_comm; 串行请用 build_serial_analyzer"
             )
         super().__init__(*args, dof_comm=dof_comm, **kwargs)
 
-    def reduce_load(self, F):
+    def reduce_load(self, F: TensorLike) -> TensorLike:
         return self.dof_comm.sync_add(F)
 
-    def wrap_operator(self, form):
+    def wrap_operator(self, form: BilinearForm) -> OverlapOperator:
         return OverlapOperator(form, self.dof_comm)
 
     def solve_system(
         self,
-        K,
-        F,
-        out,
+        K: SupportsMatmul,
+        F: TensorLike,
+        out: TensorLike,
         *,
-        x0=None,
+        x0: Optional[TensorLike] = None,
         solver: str = "cg",
         maxiter: int = contract.DEFAULT_MAX_ITERATIONS,
         rtol: float = contract.DEFAULT_RTOL,
         atol: float = contract.DEFAULT_ATOL,
-        **options,
-    ):
+        **options: Any,
+    ) -> SolverResult:
         """派发到重叠加权内积的迭代解法
 
         关键字沿用基类的词汇表 (``x0``、``solver``、``maxiter``、``rtol``、
@@ -119,7 +153,7 @@ def _analyzer_arguments(
     case: ElasticityCase,
     degree: int,
     operator_level: str,
-) -> dict:
+) -> dict[str, Any]:
     """把 problem、material、mesh 和 space 组合成构造参数"""
 
     mesh = space.mesh
