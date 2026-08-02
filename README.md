@@ -30,6 +30,12 @@ python -m pip install -e .
 硬依赖是 `fealpy>=4,<5`，由 `suanhaitech/fealpy` 独立维护，不随本仓库分发，需按上游
 说明单独安装。其余基础依赖为 `numpy`、`scipy`、`sympy`。
 
+> **上游已知回归**：FEALPy `4.0.0-alpha` 的 mesh 重构引入四处回归，其中一处影响所有
+> 网格类型，会使 SOPTX 全部算例在计算误差时抛异常；另三处使四边形、六面体静默给出
+> 错误结果。在这些缺陷修复前，本地以 `fealpy_stable`（官方基线 + 四处修复）支撑研究
+> 工作。检出的选择与判定、缺陷细节与上游进展见
+> [`docs/known-issues/fealpy-tensor-product-mesh.md`](docs/known-issues/fealpy-tensor-product-mesh.md)。
+
 可选 extra 按用途划分：
 
 | Extra | 内容 | 用途 |
@@ -71,6 +77,10 @@ python .\experiments\huzhang_topopt_paper\dry_run.py --json
 不能仅凭命令结束判断成功。dirty worktree 上的运行只能标记为开发证据。正式 evidence
 的记录要求（clean revision、dirty flag、依赖版本、参数与随机种子、产物 SHA-256）见
 [`docs/validation/evidence-policy.md`](docs/validation/evidence-policy.md)。
+
+evidence 记录的 `fealpy` 版本号无法区分官方检出与 `fealpy_stable`，重放前须确认环境
+实际指向哪个检出，见
+[`docs/known-issues/fealpy-tensor-product-mesh.md`](docs/known-issues/fealpy-tensor-product-mesh.md)。
 
 ## 目录入口
 
