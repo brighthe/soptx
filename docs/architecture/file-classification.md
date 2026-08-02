@@ -8,6 +8,7 @@
 | `experiments/legacy/package_archive` | archive candidate | `*_old.py`、`*_backup.py` 和被薄转发替代的完整旧实现，不进入 wheel |
 | `tests/` | maintained | 自动化验证，不进入 wheel |
 | `examples/matrix_free_elasticity`、`examples/pinn_elasticity` | incubating | 严格验证的孵化示例 |
+| `examples/lagrange_elasticity` | incubating | 串行 FA 位移元最小算例，自带收敛阶判据 |
 | `experiments/` | experiment | 论文与长期运行，不进入 wheel |
 | `reference_code/` | archive candidate / unredistributable | 只保留哈希，授权 tag 后退出 main |
 | `docs/`、`tools/`、`.github/` | maintained | 治理、检查与文档 |
