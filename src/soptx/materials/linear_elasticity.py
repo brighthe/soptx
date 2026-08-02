@@ -10,7 +10,7 @@ from ..core import BaseLogged
 
 
 class LinearElasticMaterial(BaseLogged):
-    """Abstract base class for linear-elastic material models."""
+    """线弹性材料模型的抽象基类."""
 
     def __init__(
         self,
@@ -29,8 +29,18 @@ class LinearElasticMaterial(BaseLogged):
             if not isfinite(density) or density < 0.0:
                 raise ValueError("density must be a finite non-negative value")
 
-        self.density = density
-        self.device = device
+        self._density = density
+        self._device = device
+
+    @property
+    def density(self) -> Optional[float]:
+        """材料密度; 构造时已校验为有限非负值."""
+        return self._density
+
+    @property
+    def device(self) -> Optional[str]:
+        """本构矩阵所在的计算设备."""
+        return self._device
 
     def strain_matrix(
         self,
@@ -42,24 +52,20 @@ class LinearElasticMaterial(BaseLogged):
         ws: Optional[TensorLike] = None,
         detJ: Optional[TensorLike] = None,
     ) -> TensorLike:
-        """Construct the engineering-strain matrix.
+        """构造工程应变矩阵 B.
 
         Parameters
         ----------
         dof_priority
-            Whether vector components precede scalar degrees of freedom in the
-            flattened tensor-space ordering.
+            张量空间展平后的排序中, 向量分量是否排在标量自由度之前。
         gphi
-            Physical gradients of scalar basis functions with shape
-            ``(NC, NQ, LDOF, GD)``.
+            标量基函数的物理梯度, 形状为 ``(NC, NQ, LDOF, GD)``。
         shear_order
-            Ordering of the three-dimensional engineering shear components.
+            三维工程剪应变分量的排列顺序。
         correction
-            ``None`` for the standard matrix or ``"BBar"`` for the
-            three-dimensional B-bar correction.
+            ``None`` 表示标准矩阵, ``"BBar"`` 表示三维 B-bar 修正。
         cm, ws, detJ
-            Cell measures, quadrature weights and Jacobian determinants needed
-            by the B-bar correction.
+            B-bar 修正所需的单元测度、积分权重和 Jacobi 行列式。
         """
         if gphi.ndim != 4:
             raise ValueError(
@@ -115,7 +121,7 @@ class LinearElasticMaterial(BaseLogged):
         *,
         out: Optional[TensorLike] = None,
     ) -> TensorLike:
-        """Assemble the normal-strain rows of the strain matrix."""
+        """组装应变矩阵中的正应变行."""
         kwargs = bm.context(gphi)
         ldof, geometric_dimension = gphi.shape[-2:]
         new_shape = gphi.shape[:-2] + (
@@ -146,7 +152,7 @@ class LinearElasticMaterial(BaseLogged):
         detJ: Optional[TensorLike],
         out: Optional[TensorLike] = None,
     ) -> TensorLike:
-        """Assemble the 3D B-bar-corrected normal-strain rows."""
+        """组装经三维 B-bar 修正的正应变行."""
         if any(value is None for value in (cm, ws, detJ)):
             raise ValueError("BBar correction requires cm, ws and detJ")
 
@@ -215,7 +221,7 @@ class LinearElasticMaterial(BaseLogged):
         *,
         out: Optional[TensorLike] = None,
     ) -> TensorLike:
-        """Assemble engineering-shear rows of the strain matrix."""
+        """组装应变矩阵中的工程剪应变行."""
         kwargs = bm.context(gphi)
         ldof, geometric_dimension = gphi.shape[-2:]
         number_of_shear_components = (
@@ -270,15 +276,14 @@ class LinearElasticMaterial(BaseLogged):
         self,
         bcs: Optional[TensorLike] = None,
     ) -> TensorLike:
-        """Return the constitutive matrix at quadrature points."""
+        """返回积分点处的本构矩阵."""
 
 
 class IsotropicLinearElasticMaterial(LinearElasticMaterial):
-    """Homogeneous isotropic linear-elastic material.
+    """均匀各向同性线弹性材料.
 
-    ``lame_lambda`` and ``shear_modulus`` always denote the intrinsic 3D
-    Lamé constants. The selected hypothesis only changes the constitutive
-    reduction used to build the matrix.
+    ``lame_lambda`` 和 ``shear_modulus`` 始终表示三维本征 Lamé 常数。所选的
+    hypothesis 只改变构造本构矩阵时使用的降维方式, 不改变这两个常数的含义。
     """
 
     _VALID_HYPOTHESES = {
@@ -325,41 +330,50 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
             lame_lambda=lame_lambda,
             shear_modulus=shear_modulus,
         )
-        self.D = self._compute_elastic_matrix()
+        self._D = self._compute_elastic_matrix()
+
+    @property
+    def D(self) -> TensorLike:
+        """本构矩阵, 构造时算好后不再变化.
+
+        property 只防止整体重新绑定; 返回的张量本身仍可被原地修改, 调用方
+        不应这样做。
+        """
+        return self._D
 
     @property
     def youngs_modulus(self) -> float:
-        """Young's modulus."""
+        """杨氏模量."""
         return self._youngs_modulus
 
     @property
     def poisson_ratio(self) -> float:
-        """Poisson's ratio."""
+        """泊松比."""
         return self._poisson_ratio
 
     @property
     def lame_lambda(self) -> float:
-        """First Lamé constant."""
+        """第一 Lamé 常数."""
         return self._lame_lambda
 
     @property
     def shear_modulus(self) -> float:
-        """Shear modulus, equal to the second Lamé constant."""
+        """剪切模量, 等于第二 Lamé 常数."""
         return self._shear_modulus
 
     @property
     def bulk_modulus(self) -> float:
-        """Bulk modulus."""
+        """体积模量."""
         return self._bulk_modulus
 
     @property
     def hypothesis(self) -> str:
-        """Constitutive hypothesis."""
+        """本构假设."""
         return self._hypothesis
 
     @property
     def is_incompressible(self) -> bool:
-        """Whether the material is numerically close to incompressible."""
+        """材料在数值上是否接近不可压缩."""
         return self._poisson_ratio >= 0.5 - 1.0e-12
 
     @staticmethod
@@ -590,16 +604,20 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         self,
         bcs: Optional[TensorLike] = None,
     ) -> TensorLike:
-        """Return the homogeneous constitutive matrix.
+        """返回均匀材料的本构矩阵.
 
-        ``bcs`` is accepted for compatibility with FEALPy material protocols
-        and is intentionally unused for a homogeneous material.
+        返回形状为 ``(1, 1, NS, NS)``: 前两维是单元与积分点的占位维, 由调用
+        方按 ``(NC, NQ, NS, NS)`` 广播。均匀材料在所有单元和积分点上的本构
+        相同, 所以这里不实际展开, 避免无谓的内存占用。
+
+        接收 ``bcs`` 是为了兼容 FEALPy 的材料协议; 对均匀材料而言本构矩阵
+        与位置无关, 因此这个参数被有意忽略。
         """
         del bcs
-        return self.D[None, None, ...]
+        return self._D[None, None, ...]
 
     def von_mises_matrix(self) -> TensorLike:
-        """Return the quadratic-form matrix for von Mises stress."""
+        """返回 von Mises 应力对应的二次型矩阵."""
         if self._hypothesis == "3D":
             return bm.tensor(
                 [
@@ -643,7 +661,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         B: TensorLike,
         u_e: TensorLike,
     ) -> TensorLike:
-        """Calculate stress vectors for solid material."""
+        """计算实体材料的应力向量."""
         D = self.elastic_matrix()[0, 0]
         return bm.einsum(
             "ij,c...qjk,ck->c...qi",
@@ -656,7 +674,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         self,
         stress_vector: TensorLike,
     ) -> TensorLike:
-        """Calculate the von Mises equivalent stress."""
+        """计算 von Mises 等效应力."""
         matrix = self.von_mises_matrix()
         squared_stress = bm.einsum(
             "c...qi,ij,c...qj->c...q",
