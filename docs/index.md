@@ -20,6 +20,12 @@
   快速 CI、本地重验证和正式 evidence 要求；
 - [`references/README.md`](references/README.md) — 第三方参考代码治理。
 
+## 已知问题
+
+- [`known-issues/fealpy-tensor-product-mesh.md`](known-issues/fealpy-tensor-product-mesh.md) —
+  FEALPy `4.0.0-alpha` mesh 重构的四处上游回归（一处影响所有网格，三处限张量积
+  网格），含判据、修复方案与 SOPTX 的处置。
+
 ## 可执行示例
 
 - [`examples/matrix_free_elasticity/README.md`](../examples/matrix_free_elasticity/README.md) —
