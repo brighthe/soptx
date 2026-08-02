@@ -34,10 +34,12 @@ from __future__ import annotations
 
 import argparse
 from math import log2
+from pathlib import Path
 import sys
 
 import numpy as np
 
+import fealpy
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import TetrahedronMesh, TriangleMesh
 
@@ -242,6 +244,9 @@ def main() -> int:
     problem, material, domain = create_problem_and_material(dimension)
     base = BASE_SUBDIVISIONS[dimension]
 
+    # 结论依赖于哪一份 FEALPy: 官方检出与打了缺陷修复的检出版本号都是 4.0.0,
+    # 只有解析路径能区分。见 docs/known-issues/fealpy-tensor-product-mesh.md
+    print(f"FEALPy: {Path(fealpy.__file__).resolve().parents[1]}")
     print(
         f"维数={dimension}D, 问题={type(problem).__name__}, "
         f"算子层级=fa, 空间次数={arguments.degree}, "
