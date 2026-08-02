@@ -1,7 +1,6 @@
-"""Two-dimensional manufactured linear-elasticity problems.
+"""二维制造解线弹性问题.
 
-The full equations and derivations are documented in
-``docs/models/manufactured-elasticity.md``.
+完整方程与推导见 ``docs/models/manufactured-elasticity.md``。
 """
 
 from __future__ import annotations
@@ -67,7 +66,7 @@ class _AllDirichletElasticity2D(AllDisplacementBoundaryMixin):
 class ExponentialSineManufacturedElasticity2D(
     _AllDirichletElasticity2D
 ):
-    r"""Plane-strain manufactured problem with exponential/sine displacement.
+    r"""指数/正弦位移的 plane strain 制造解问题.
 
     .. math:: -\nabla\cdot\sigma(u)=b,\quad
        u=(e^{x-y}x(1-x)y(1-y),\sin(\pi x)\sin(\pi y)).
@@ -196,12 +195,11 @@ class ExponentialSineManufacturedElasticity2D(
 class MixedBoundaryExponentialSineElasticity2D(
     ExponentialSineManufacturedElasticity2D
 ):
-    """Mixed-boundary view of the exponential/sine manufactured problem.
+    """指数/正弦制造解问题的混合边界视角.
 
-    The exact displacement vanishes on the unit-square boundary.  Three sides
-    are treated as displacement boundaries and the right side as a nonzero
-    traction boundary, so the same exact fields exercise strong traction data
-    without introducing a second formula source.
+    精确位移在单位正方形边界上为零。三条边按位移边界处理, 右边按非零
+    traction 边界处理, 于是同一组精确场就能检验强 traction 数据, 而不必
+    引入第二套公式来源。
     """
 
     boundary_type = "mixed"
@@ -226,7 +224,7 @@ class MixedBoundaryExponentialSineElasticity2D(
 class SinusoidalPlaneStrainElasticity2D(
     _AllDirichletElasticity2D
 ):
-    r"""Unit-square plane-strain manufactured displacement problem.
+    r"""单位正方形上的 plane strain 制造解位移问题.
 
     .. math:: u=(\sin(\pi x)\sin(\pi y),0),\quad
        -\nabla\cdot\sigma(u)=b.

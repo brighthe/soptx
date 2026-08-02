@@ -1,4 +1,4 @@
-"""Manufactured linear-elasticity problems."""
+"""制造解线弹性问题."""
 
 from .manufactured_2d import (
     ExponentialSineManufacturedElasticity2D,

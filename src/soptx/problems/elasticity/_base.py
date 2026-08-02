@@ -1,4 +1,4 @@
-"""Shared validation and boundary defaults for elasticity problem data."""
+"""弹性问题数据共享的校验函数与边界默认实现."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def validated_domain(
     domain: Sequence[float],
     dimension: int,
 ) -> tuple[float, ...]:
-    """Return validated axis-aligned box bounds."""
+    """校验并返回轴对齐盒形区域的边界值."""
 
     values = tuple(float(value) for value in domain)
     if len(values) != 2 * dimension:
@@ -32,25 +32,23 @@ def validated_domain(
 
 
 class AllDisplacementBoundaryMixin:
-    """Mixed-formulation boundary defaults for an all-Dirichlet box problem.
+    """全 Dirichlet 盒形问题在混合形式下的边界默认实现.
 
-    ``HuZhangMFEMAnalyzer`` partitions the boundary into a displacement part
-    imposed weakly and a traction part imposed strongly.  For a problem whose
-    whole boundary carries prescribed displacement the partition is trivial,
-    and these defaults spell it out so such problems satisfy
-    ``MixedBoundaryElasticityProblem`` without a per-caller adapter.
+    ``HuZhangMFEMAnalyzer`` 把边界划分为弱施加的位移部分和强施加的
+    traction 部分。对整个边界都给定位移的问题, 这个划分是平凡的; 这里把它
+    显式写出来, 使这类问题无需每个调用方各写一层适配就满足
+    ``MixedBoundaryElasticityProblem`` 协议。
 
-    Requires the host class to expose ``domain``, ``dimension`` and
-    ``dirichlet_bc``.
+    要求宿主类提供 ``domain``、``dimension`` 和 ``dirichlet_bc``。
     """
 
     _eps = 1.0e-12
 
     def mark_corners(self, node: TensorLike) -> TensorLike:
-        """Return the corner coordinates of the axis-aligned box domain.
+        """返回轴对齐盒形区域的角点坐标.
 
-        A node is a corner when it sits on a bound of *every* axis, which
-        generalises the 2D square case to any dimension.
+        一个节点在 *每个* 坐标轴上都落在边界值上时即为角点; 这个判据把二维
+        正方形的情形推广到任意维数。
         """
         domain = self.domain
         on_every_axis = None
@@ -66,30 +64,28 @@ class AllDisplacementBoundaryMixin:
         return node[on_every_axis]
 
     def is_displacement_boundary(self, points: TensorLike) -> TensorLike:
-        """The whole boundary prescribes displacement."""
+        """整个边界都给定位移."""
         return bm.ones(points.shape[:-1], dtype=bm.bool)
 
     def is_traction_boundary(self, points: TensorLike) -> TensorLike:
-        """No part of the boundary prescribes traction."""
+        """边界上没有任何部分给定 traction."""
         return bm.zeros(points.shape[:-1], dtype=bm.bool)
 
     def displacement_bc(self, points: TensorLike) -> TensorLike:
-        """Weak displacement data for the mixed formulation.
+        """混合形式下弱施加的位移数据.
 
-        ``HuZhangMFEMAnalyzer`` looks this member up with a ``getattr``
-        default and falls back to homogeneous data when it is missing, which
-        is silently wrong for any problem whose exact displacement does not
-        vanish on the boundary.  Reusing ``dirichlet_bc`` keeps the weak data
-        exact and identical to the primal formulation's strong data.
+        ``HuZhangMFEMAnalyzer`` 用带默认值的 ``getattr`` 查找本成员, 缺失时
+        回退到齐次数据——对精确位移在边界上不为零的问题, 这种回退是静默出错。
+        复用 ``dirichlet_bc`` 使弱数据保持精确, 并与主形式的强数据完全一致。
         """
         return self.dirichlet_bc(points)
 
     def traction_bc(self, points: TensorLike) -> TensorLike:
-        """Reject traction queries instead of inventing zero traction data.
+        """拒绝 traction 查询, 而不是编造零 traction 数据.
 
-        ``is_traction_boundary`` is empty, so no analyzer can reach this on a
-        well-formed path.  Raising keeps the member present for the protocol
-        while refusing to answer a question this problem cannot answer.
+        ``is_traction_boundary`` 为空, 所以任何分析器在正确的路径上都到不了
+        这里。抛异常既让协议要求的成员存在, 又拒绝回答这个问题本身无法回答
+        的询问。
         """
         raise NotImplementedError(
             f"{type(self).__name__} prescribes displacement on the whole "

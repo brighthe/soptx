@@ -1,4 +1,4 @@
-"""Three-dimensional manufactured linear-elasticity problems."""
+"""三维制造解线弹性问题."""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ from ._base import AllDisplacementBoundaryMixin, validated_domain
 
 
 class DivergenceFreePolynomialElasticity3D(AllDisplacementBoundaryMixin):
-    r"""Polynomial all-Dirichlet manufactured elasticity problem.
+    r"""多项式全 Dirichlet 制造解弹性问题.
 
-    The exact displacement is divergence-free, so the forcing depends only on
-    the shear modulus.  See ``docs/models/manufactured-elasticity.md``.
+    精确位移是无散的 (divergence-free), 因此体力只依赖剪切模量。
+    见 ``docs/models/manufactured-elasticity.md``。
     """
 
     dimension = 3
