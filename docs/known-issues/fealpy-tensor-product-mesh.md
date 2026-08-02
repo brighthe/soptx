@@ -17,23 +17,27 @@ FEALPy `4.0.0-alpha` 的 mesh 重构引入四处回归。同一批判据在早�
 只有观测收敛阶和插值一致性能发现。任何在此版本上使用四边形网格的计算都会得到
 错误结果而不自知。
 
-缺陷 2–4 的修复已在本地以 monkey-patch 端到端验证；缺陷 1 的修复以源码改动验证。
-均未向上游提交。`jacobi_matrix` **不需要**单独修改：它消费
-`grad_shape_function_reference`，后者对齐后自动正确。
+四处修复均已作为源码改动落在 `C:\workspace\fealpy_stable` 的 `stable` 分支
+（`0758339`），全部判据通过，尚未向上游提交。`jacobi_matrix` **不需要**单独
+修改：它消费 `grad_shape_function_reference`，后者对齐后自动正确。
 
 ## 环境与版本对照
 
 | 检出 | revision | 日期 | 结果 |
 | --- | --- | --- | --- |
 | `fealpy` | `2f17532`（`v4.0.0-alpha-15`） | 2026-07-26 | 5 项判据 **FAIL** |
+| `fealpy_stable` | `0758339`（基于 `2f17532`） | 2026-08-02 | **ALL PASSED** |
 | `fealpy_heliang` | `18c9afe` | 2026-06-25 | **ALL PASSED** |
 
 Python 3.12.13，NumPy 2.5.1，backend `numpy`。
 
-**复现基线必须先应用缺陷 1 的修复。**本文档所有张量积网格的测量都是在
-「`2f17532` + 缺陷 1 修复」上取得的。在纯净的 `2f17532` 上，`mesh.error` 对
-**三角形**都会先抛出下述异常，根本走不到张量积的判据。上游若在干净检出上复现，
-会先撞上缺陷 1 而看到与本文档不符的现象。
+`fealpy_stable` 是本地维护的可用版本：以 `2f17532` 为基线、只加这四处缺陷修复，
+`origin` 指向个人 fork、`upstream` 指向算海仓库。SOPTX 的 conda 环境
+（`xihe-fealpy`）已 editable 安装该检出。
+
+**在纯净的 `2f17532` 上复现时，会先撞上缺陷 1。**`mesh.error` 对**三角形**就会
+抛出下述异常，根本走不到张量积的判据。因此上游复现时需要先应用缺陷 1 的修复，
+才能观察到缺陷 2–4 的现象。
 
 两版的网格目录结构不同：`4.0.0-alpha` 把全部网格收敛为单个 `Mesh` 类，配
 `factory.py` 工厂与重写 `__instancecheck__` 的 metaclass；早期版本是
@@ -319,22 +323,6 @@ hexahedron   4.6470e-02  1.6810e-02  4.3349e-03   1.467  1.955
 四边形从 `-0.351, -0.089` 恢复到 `1.993, 1.998`，六面体从崩溃恢复到 `1.955`，
 均趋向理论阶 2。四边形误差小于同规模三角形，与 Q1 优于 P1 的预期一致。
 
-## 本地 FEALPy 检出中的其他改动
-
-除缺陷 1 的修复外，本地 `C:\workspace\fealpy` 工作树还有若干未提交改动。它们
-**不在本文档的判据路径上**，未经独立验证，不作为已确认缺陷提交上游，此处仅作
-环境说明：
-
-| 文件 | 内容 | 性质 |
-| --- | --- | --- |
-| `mesher/interval_mesher.py` | 改用 `Box1d().segmentize()`；`uniform` 变体显式抛 `NotImplementedError`，注明 `UniformMesh` 仍是 placeholder | 疑似重构回归 |
-| `ml/__init__.py` | `HelmholtzPINNModel` 导入加 try/except，注明 `still imports fealpy.mesh.MeshDS, removed by the mesh refactor` | 疑似重构回归 |
-| `ml/modules/module.py` | `quadrature_formula(q, etype='cell')` → `(q, 'cell')` | 疑似 API 签名变更 |
-| `backend/pytorch_backend.py` | 新增 `cumulative_sum` | 功能补全，非缺陷 |
-| `mesh/view/fealpy_api.py` | 新增 `edge_to_ipoint` | 功能补全，非缺陷 |
-
-前三项与缺陷 1 同属 mesh 重构的适配问题，若要提交上游需要各自独立复现验证。
-
 ## 建议纳入回归测试
 
 判据 A–E 与具体 PDE 无关，成本很低，可直接作为网格层的回归测试。其中 D 需要一个
@@ -351,24 +339,91 @@ node = [[0.0, 0.0], [1.0, 0.2], [1.3, 1.1], [0.1, 0.9]]
 ## 对 SOPTX 的影响范围
 
 - **缺陷 1 影响单纯形网格**，任何经 `mesh.error` 计算误差的代码都会撞上，
-  包括 SOPTX 的全部二维、三维算例。当前本地 FEALPy 检出已应用该修复，因此
-  `minimal_demo` 与 `matrix_free_elasticity` 可以正常运行；**在未修复的 FEALPy
-  上，SOPTX 的单纯形算例同样跑不通**。
+  包括 SOPTX 的全部二维、三维算例。**在未修复的 FEALPy 上，SOPTX 的单纯形算例
+  同样跑不通**，不只是四边形、六面体。
 - 缺陷 2–4 只影响四边形与六面体。SOPTX 的装配对单纯形走 `entity_measure`
   分支，不调用 `jacobi_matrix`，故现有 evidence 的**数值结论**不受其影响。
 - 四边形一路是静默的错误结果，比六面体的直接崩溃更危险。
-- **evidence 的环境记录需要注意**：`report.py` 记录的是 `fealpy 4.0.0` 版本号，
-  无法体现工作树中未提交的缺陷 1 修复。在纯净的同版本 FEALPy 上重放会失败。
-  重放前需确认 FEALPy 检出是否包含该修复。
+- **evidence 的环境记录需要注意**：`report.py` 记录的 `fealpy` 版本号是
+  `4.0.0`，官方检出与 `fealpy_stable` 无法据此区分，而两者的单纯形结果一个跑不
+  通、一个正常。重放前需确认环境实际指向哪个检出；`fealpy_stable` 的
+  revision 可作为 provenance 的补充记录。
 
 ## SOPTX 侧的处置
 
 - `examples/lagrange_elasticity/minimal_demo.py` 与
   `examples/matrix_free_elasticity` 目前只使用单纯形网格。
-- 在上游修复前**不为 SOPTX 增加四边形、六面体入口**：缺陷会让新入口静默给出
-  错误结果，而 SOPTX 无法在自己这一层判断 `detJ` 是否可信。放开入口的判据是
-  `reproduce_tensor_product_issue.py` 在目标 FEALPy 版本上全部 PASS。
+- **放开四边形、六面体入口的判据**：`reproduce_tensor_product_issue.py` 在目标
+  FEALPy 检出上全部 PASS。`fealpy_stable` 已满足该判据，官方 `fealpy` 未满足。
+  若为 SOPTX 增加张量积网格入口，需同时明确它依赖 `fealpy_stable`——在官方
+  检出上这些入口会静默给出错误结果，而 SOPTX 无法在自己这一层判断 `detJ`
+  是否可信。
 - 顺带记录一处 SOPTX 自身的隐患（当前未致错，但口径应统一）：刚度装配对非单纯
   形用 `detJ`（`src/soptx/fem/integrators/linear_elastic_integrator.py:77`），
   体力装配始终用 `cm`（`src/soptx/fem/integrators/source_integrator.py:50`）。
   即便上游修复，同一个积分由两条不同口径加权仍应收敛到一处。
+
+## 维护 fealpy_stable
+
+`fealpy_stable` 是**过渡性**的：这些缺陷会逐条上报给 FEALPy 维护者，上游修复后
+对应的本地改动即可撤除，最终两个检出归于一致，`fealpy_stable` 退役。上游修复
+周期较长，故先以本地分支支撑研究工作。
+
+三个检出的分工：
+
+| 路径 | 分支 | 定位 |
+| --- | --- | --- |
+| `C:\workspace\fealpy` | `develop` | 官方状态，保持纯净，不做本地修改 |
+| `C:\workspace\fealpy_stable` | `stable` | 官方基线 + 四处缺陷修复，SOPTX 的 conda 环境指向它 |
+
+`fealpy_stable` 配了三个 remote：`origin` → 个人 fork，`upstream` → 算海仓库，
+`local` → `C:\workspace\fealpy`（用于与本地官方检出对比）。
+
+### 查看两者差异
+
+```bash
+git -C C:\workspace\fealpy_stable fetch local
+git -C C:\workspace\fealpy_stable diff --stat local/develop stable
+git -C C:\workspace\fealpy_stable log --oneline local/develop..stable
+```
+
+`stable` 始终保持「官方基线 + 若干修复提交」的形态，因此 `log` 的输出就是尚未
+被上游接受的全部改动。
+
+### 跟进上游更新
+
+```bash
+git -C C:\workspace\fealpy pull
+git -C C:\workspace\fealpy_stable fetch local
+git -C C:\workspace\fealpy_stable rebase local/develop stable
+```
+
+`git rebase <新基线> <要搬的分支>` 的双参数形式：把 `stable` 上不属于
+`local/develop` 的提交摘下来，重新贴到前进后的 `local/develop` 之上（执行时会
+自动切到 `stable`）。这样 `stable` 始终是「最新官方 + 本地修复」，而不会停留在
+旧基线上。
+
+维护者修好某一处后，本地对应改动在 rebase 时会变成空提交，git 提示
+`The previous cherry-pick is now empty`，`git rebase --skip` 跳过即可，差异自动
+缩小。若上游采用了不同的修法则会冲突，此时采纳上游版本、删除本地改动。
+
+两点后果：
+
+- **rebase 会改写提交 hash**。本文档记录的 `stable` revision（`0758339`）在第一次
+  rebase 后即失效，需同步更新「环境与版本对照」表。
+- 若 `stable` 已 push 到 `origin`，rebase 后需要
+  `git push --force-with-lease`，因为历史被改写。
+
+当 `log local/develop..stable` 为空时，两者已一致，`fealpy_stable` 可以退役：
+把 conda 环境改回 `pip install -e C:\workspace\fealpy` 即可。
+
+### 判断上游是否已修复
+
+不必读代码，直接用判据脚本测官方检出：
+
+```bash
+python -c "import sys, runpy; sys.path.insert(0, r'C:\workspace\fealpy'); runpy.run_path(r'C:\workspace\soptx\docs\known-issues\reproduce_tensor_product_issue.py', run_name='__main__')"
+```
+
+输出 `ALL PASSED` 即表示官方版本已不再需要 `fealpy_stable`。同一条命令把路径换成
+`C:\workspace\fealpy_stable` 可以验证本地修复仍然有效。
