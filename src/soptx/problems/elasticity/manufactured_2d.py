@@ -214,11 +214,220 @@ class MixedBoundaryExponentialSineElasticity2D(
             | (bm.abs(y - domain[3]) < self._eps)
         )
 
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        """位移元强施加的边界只有 :math:`\\Gamma_D`.
+
+        基类按全 Dirichlet 判定四条边。混合边界必须收窄到 :math:`\\Gamma_D`,
+        否则 ``apply_bc`` 会把 :math:`\\Gamma_N` 的自由度也强加位移, 于是上一
+        步刚加进右端项的 traction 载荷被整个覆盖 —— 而且因为强加的位移取自
+        精确解, 结果依然正确、收敛阶依然是 2, 属于不报错的静默失效。
+
+        ``is_dirichlet_boundary_dof_y`` 由基类转调本方法, 不必重复覆盖。
+        """
+
+        return self.is_displacement_boundary(points)
+
     def is_traction_boundary(self, points: TensorLike) -> TensorLike:
         return bm.abs(points[..., 0] - self.domain[1]) < self._eps
 
     def traction_bc(self, points: TensorLike) -> TensorLike:
         return self.stress_solution(points)
+
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """位移元视角的自然边界数据: 法向迹 :math:`t=\\sigma\\cdot n`.
+
+        与 ``traction_bc`` 是同一份精确应力的两种形式。混合形式要完整应力,
+        由 Hu--Zhang 应力空间自行投影; 位移元的边界积分要的是已经点乘过法向
+        的牵引向量。区域轴对齐, :math:`\\Gamma_N` 只有右边一条, 外法向恒为
+        :math:`(1,0)`, 于是 :math:`t=(\\sigma_{xx},\\sigma_{xy})`。
+        """
+
+        stress = self.stress_solution(points)
+        x = points[..., 0]
+
+        val = bm.zeros(points.shape, **bm.context(points))
+        flag_right = bm.abs(x - self.domain[1]) < self._eps
+        val = bm.set_at(val, (flag_right, 0), stress[..., 0][flag_right])
+        val = bm.set_at(val, (flag_right, 1), stress[..., 1][flag_right])
+        return val
+
+    def is_neumann_boundary(self) -> Callable:
+        """位移元路径的牵引边界谓词.
+
+        与 ``is_traction_boundary`` 是同一条边界, 只是位移元路径按
+        ``is_neumann_boundary()`` 这个名字查找。
+        """
+
+        return self.is_traction_boundary
+
+
+class MixedBoundarySinusoidalElasticity2D(
+    _AllDirichletElasticity2D
+):
+    r"""论文制造解收敛验证使用的 plane strain 混合边界问题.
+
+    .. math::
+       u_1=u_2=\sin(\pi x)\sin(\pi y),\qquad
+       \Gamma_D=\{x=0\}\cup\{y=0\},\quad
+       \Gamma_N=\{x=1\}\cup\{y=1\}.
+
+    区域固定为单位正方形. ``traction_bc`` 返回精确应力的 Voigt 向量，
+    由 Hu--Zhang 应力空间在牵引边界上投影为法向迹。
+    """
+
+    dimension = 2
+    plane_type = "plane_strain"
+    boundary_type = "mixed"
+    load_type = "distributed"
+
+    def __init__(
+        self,
+        *,
+        lame_lambda: float = 1.0,
+        shear_modulus: float = 0.5,
+    ) -> None:
+        super().__init__((0.0, 1.0, 0.0, 1.0))
+        if not isfinite(lame_lambda):
+            raise ValueError("lame_lambda must be finite")
+        if not isfinite(shear_modulus) or shear_modulus <= 0.0:
+            raise ValueError("shear_modulus must be finite and positive")
+        self._lam = float(lame_lambda)
+        self._mu = float(shear_modulus)
+
+    @property
+    def lam(self) -> float:
+        return self._lam
+
+    @property
+    def mu(self) -> float:
+        return self._mu
+
+    @cartesian
+    def disp_solution(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        value = bm.sin(bm.pi * x) * bm.sin(bm.pi * y)
+        return bm.stack([value, value], axis=-1)
+
+    @cartesian
+    def grad_disp_solution(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        derivative_x = (
+            bm.pi * bm.cos(bm.pi * x) * bm.sin(bm.pi * y)
+        )
+        derivative_y = (
+            bm.pi * bm.sin(bm.pi * x) * bm.cos(bm.pi * y)
+        )
+        row = bm.stack([derivative_x, derivative_y], axis=-1)
+        return bm.stack([row, row], axis=-2)
+
+    def disp_solution_gradient(
+        self,
+        points: TensorLike,
+    ) -> TensorLike:
+        return self.grad_disp_solution(points)
+
+    @cartesian
+    def stress_solution(self, points: TensorLike) -> TensorLike:
+        gradient = self.grad_disp_solution(points)
+        derivative_x = gradient[..., 0, 0]
+        derivative_y = gradient[..., 0, 1]
+        sigma_xx = (
+            (self.lam + 2 * self.mu) * derivative_x
+            + self.lam * derivative_y
+        )
+        sigma_xy = self.mu * (derivative_x + derivative_y)
+        sigma_yy = (
+            self.lam * derivative_x
+            + (self.lam + 2 * self.mu) * derivative_y
+        )
+        return bm.stack([sigma_xx, sigma_xy, sigma_yy], axis=-1)
+
+    @cartesian
+    def div_stress_solution(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        sine_product = bm.sin(bm.pi * x) * bm.sin(bm.pi * y)
+        cosine_product = bm.cos(bm.pi * x) * bm.cos(bm.pi * y)
+        value = bm.pi**2 * (
+            (self.lam + self.mu) * cosine_product
+            - (self.lam + 3 * self.mu) * sine_product
+        )
+        return bm.stack([value, value], axis=-1)
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        return -self.div_stress_solution(points)
+
+    def is_displacement_boundary(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        return (bm.abs(x) < self._eps) | (bm.abs(y) < self._eps)
+
+    @cartesian
+    def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
+        """位移元强施加的边界只有 :math:`\\Gamma_D`.
+
+        基类按全 Dirichlet 判定四条边。混合边界必须收窄到 :math:`\\Gamma_D`,
+        否则 ``apply_bc`` 会把 :math:`\\Gamma_N` 的自由度也强加位移, 于是上一
+        步刚加进右端项的 traction 载荷被整个覆盖 —— 而且因为强加的位移取自
+        精确解, 结果依然正确、收敛阶依然是 2, 属于不报错的静默失效。
+
+        ``is_dirichlet_boundary_dof_y`` 由基类转调本方法, 不必重复覆盖。
+        """
+
+        return self.is_displacement_boundary(points)
+
+    def is_traction_boundary(self, points: TensorLike) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        return (
+            (bm.abs(x - 1.0) < self._eps)
+            | (bm.abs(y - 1.0) < self._eps)
+        )
+
+    @cartesian
+    def traction_bc(self, points: TensorLike) -> TensorLike:
+        return self.stress_solution(points)
+
+    @cartesian
+    def neumann_bc(self, points: TensorLike) -> TensorLike:
+        """位移元视角的自然边界数据: 法向迹 :math:`t=\\sigma\\cdot n`.
+
+        与 ``traction_bc`` 是同一份精确应力的两种形式。混合形式要完整应力,
+        由 Hu--Zhang 应力空间自行投影; 位移元的边界积分要的是已经点乘过法向
+        的牵引向量。区域轴对齐, :math:`\\Gamma_N` 的两条边上外法向分别是
+        :math:`(1,0)` 与 :math:`(0,1)`, 于是
+
+        .. math::
+           t|_{x=1}=(\\sigma_{xx},\\sigma_{xy}),\\qquad
+           t|_{y=1}=(\\sigma_{xy},\\sigma_{yy}).
+
+        角点 :math:`(1,1)` 同时落在两条边上, 这里由后写的上边覆盖。面积分点
+        取在面内部, 落不到角点上, 因此这个选择不影响装配结果。
+        """
+
+        stress = self.stress_solution(points)
+        x, y = points[..., 0], points[..., 1]
+
+        val = bm.zeros(points.shape, **bm.context(points))
+
+        flag_right = bm.abs(x - 1.0) < self._eps
+        val = bm.set_at(val, (flag_right, 0), stress[..., 0][flag_right])
+        val = bm.set_at(val, (flag_right, 1), stress[..., 1][flag_right])
+
+        flag_top = bm.abs(y - 1.0) < self._eps
+        val = bm.set_at(val, (flag_top, 0), stress[..., 1][flag_top])
+        val = bm.set_at(val, (flag_top, 1), stress[..., 2][flag_top])
+
+        return val
+
+    def is_neumann_boundary(self) -> Callable:
+        """位移元路径的牵引边界谓词.
+
+        与 ``is_traction_boundary`` 是同一条边界, 只是位移元路径按
+        ``is_neumann_boundary()`` 这个名字查找。
+        """
+
+        return self.is_traction_boundary
 
 
 class SinusoidalPlaneStrainElasticity2D(

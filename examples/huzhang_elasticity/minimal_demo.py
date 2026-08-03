@@ -4,11 +4,21 @@
 :class:`~soptx.fem.HuZhangMFEMAnalyzer` 能够真正解出线弹性问题, 而不是只
 能构造出函数空间.
 
-问题取 :class:`soptx.problems.ExponentialSineManufacturedElasticity2D`, 单位
-正方形上的平面应变制造解, 全边界施加位移边界条件 (混合形式下是自然边界,
-应力空间上没有本质边界条件). 默认空间次数 ``p=3``, 满足二维胡张元的
-``p >= d + 1``, 因此刚度矩阵是干净的鞍点结构 ``[[A, B], [B^T, 0]]``, 不需要
-低阶稳定化项.
+问题取 :class:`soptx.problems.MixedBoundarySinusoidalElasticity2D`, 与论文制造解
+收敛验证保持一致: 单位正方形上的平面应变问题, 精确位移两个分量均为
+``sin(pi*x)*sin(pi*y)``, 左边和下边施加齐次位移条件, 右边和上边施加精确应力
+法向迹给出的非齐次牵引. 默认空间次数 ``p=3``, 满足二维胡张元的
+``p >= d + 1``, 因此刚度矩阵是干净的鞍点结构 ``[[A, B], [B^T, 0]]``; ``p=1,2``
+时分析器自动启用低阶跳量稳定化.
+
+网格限制: 当前 SOPTX 的 Hu--Zhang 实现仅支持 simplex mesh, 即二维 triangle
+和三维 tetrahedron. 本算例固定使用二维 triangle, 不支持 quadrilateral 或
+hexahedral, 因而不提供 ``--mesh-type`` 选项. 这是当前软件实现的支持范围,
+不是对 Hu--Zhang 方法数学理论的永久限制.
+
+当前二维角点松弛还要求每个几何角点恰好连接两个三角形, 且两者共享一条从角点
+出发的内部边. 因此本算例使用 ``triangle-checkerboard``: 从规则四边形网格按
+棋盘格交替选取对角线. 这项限制属于当前松弛实现, 不是一般 Hu--Zhang 理论限制.
 
 问题类直接取自 ``soptx.problems``, 没有任何本地适配层 —— 这本身就是算例的一
 部分: 它验证维护中的 Problem 满足 ``MixedBoundaryElasticityProblem`` 契约.
@@ -18,31 +28,30 @@
 只打印不判定 —— 该实验目录记录的预期阶目前仍是 ``theory-audit-required``,
 在理论核查完成前不应作为通过条件.
 
+前置: SOPTX 需以 editable 方式安装 (``pip install -e .``, 见仓库 README),
+这样 ``import soptx`` 直接解析到工作树的 ``src/soptx``, 脚本无需注入源码路径.
+
 运行::
 
     python .\\examples\\huzhang_elasticity\\minimal_demo.py
-    python .\\examples\\huzhang_elasticity\\minimal_demo.py --degree 3 --levels 4 --relaxation
+    python .\\examples\\huzhang_elasticity\\minimal_demo.py --degree 2
+    python .\\examples\\huzhang_elasticity\\minimal_demo.py --no-relaxation
 """
 
 from __future__ import annotations
 
 import argparse
 from math import log2
-from pathlib import Path
 import sys
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import TriangleMesh
 
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-SOURCE_ROOT = REPOSITORY_ROOT / "src"
-if str(SOURCE_ROOT) not in sys.path:
-    sys.path.insert(0, str(SOURCE_ROOT))
-
-from soptx.fem import HuZhangMFEMAnalyzer  # noqa: E402
-from soptx.materials import IsotropicLinearElasticMaterial  # noqa: E402
-from soptx.problems import ExponentialSineManufacturedElasticity2D  # noqa: E402
+from soptx.fem import (
+    HuZhangMFEMAnalyzer,
+    create_huzhang_checkerboard_mesh,
+)
+from soptx.materials import IsotropicLinearElasticMaterial
+from soptx.problems import MixedBoundarySinusoidalElasticity2D
 
 
 # 与 cases.toml 的 acceptance 保持一致
@@ -57,7 +66,7 @@ def _as_float(value) -> float:
 def solve_one_level(problem, material, degree: int, subdivisions: int,
                     integration_order: int, use_relaxation: bool) -> dict:
     """在一层网格上求解并返回误差与诊断量."""
-    mesh = TriangleMesh.from_box(
+    mesh = create_huzhang_checkerboard_mesh(
         box=problem.domain,
         nx=subdivisions,
         ny=subdivisions,
@@ -158,12 +167,14 @@ def parse_arguments() -> argparse.Namespace:
         help="应力空间次数, 二维胡张元要求 p >= 3 才无需低阶稳定化 (默认 3)",
     )
     parser.add_argument(
-        "--levels", type=int, default=4,
-        help="加密层数, 第 i 层网格为 2^i x 2^i (默认 4)",
+        "--levels", type=int, default=5,
+        help="加密层数, 第 i 层网格为 2^i x 2^i (默认 5)",
     )
     parser.add_argument(
-        "--relaxation", action="store_true",
-        help="开启角点松弛 (默认关闭)",
+        "--relaxation",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="启用或关闭角点松弛 (默认启用)",
     )
     return parser.parse_args()
 
@@ -179,7 +190,7 @@ def main() -> int:
 
     bm.set_backend("numpy")
 
-    problem = ExponentialSineManufacturedElasticity2D(
+    problem = MixedBoundarySinusoidalElasticity2D(
         lame_lambda=1.0,
         shear_modulus=0.5,
     )
@@ -192,7 +203,8 @@ def main() -> int:
     integration_order = 2 * arguments.degree + 2
 
     print(
-        f"问题={type(problem).__name__}, 平面假设={problem.plane_type}, "
+        f"网格=triangle-checkerboard, 问题={type(problem).__name__}, "
+        f"平面假设={problem.plane_type}, "
         f"空间次数={arguments.degree}, 积分阶={integration_order}, "
         f"角点松弛={arguments.relaxation}"
     )

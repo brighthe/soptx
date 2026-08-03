@@ -12,7 +12,10 @@ from typing import Any, Callable
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import TriangleMesh
 
-from soptx.fem import HuZhangMFEMAnalyzer
+from soptx.fem import (
+    HuZhangMFEMAnalyzer,
+    create_huzhang_checkerboard_mesh,
+)
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import MixedBoundaryExponentialSineElasticity2D
 
@@ -24,7 +27,7 @@ def _as_float(value: Any) -> float:
 
 def _uniform_mesh(level: int) -> TriangleMesh:
     subdivisions = 2**level
-    return TriangleMesh.from_box(
+    return create_huzhang_checkerboard_mesh(
         box=(0.0, 1.0, 0.0, 1.0),
         nx=subdivisions,
         ny=subdivisions,

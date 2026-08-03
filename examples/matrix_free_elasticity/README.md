@@ -81,7 +81,7 @@ $$
 的环境，例如：
 
 ```powershell
-conda activate xihe-fealpy
+conda activate ihpcm
 python -m pip install -e ".[mpi,test]"
 ```
 

@@ -335,7 +335,8 @@ class HuZhangFEDof2d():
         return c2d
 
 class HuZhangFESpace2d(FunctionSpace):
-    def __init__(self, mesh, p: int=1, ctype='C', use_relaxation: bool=False):
+    def __init__(self, mesh, p: int=1, ctype='C', use_relaxation: bool=False,
+                 corners=None):
         self.mesh = mesh
         self.p = p
 
@@ -346,6 +347,9 @@ class HuZhangFESpace2d(FunctionSpace):
 
         # TODO 保持开关状态
         self.use_relaxation = use_relaxation
+
+        # 角点坐标是 PDE 的几何信息, 由调用方直接传入, 不经由 mesh 挂载
+        self._corners = corners
 
         # TODO 仅在需要松弛时计算角点拓扑
         if self.use_relaxation:
@@ -414,7 +418,15 @@ class HuZhangFESpace2d(FunctionSpace):
 
         return TM
     
-    def _get_corner_data(self): 
+    def _get_corner_data(self):
+        """Build topology for corners supported by the two-cell relaxation.
+
+        Every candidate geometric corner must be incident to exactly two
+        triangles.  Those triangles must contain one distinct boundary edge
+        each and share one interior edge incident to the corner.  The current
+        four-DOF construction is not defined for any other vertex fan, so an
+        unsupported candidate is rejected instead of being filtered silently.
+        """
         mesh = self.mesh
         node = mesh.entity('node')     # (NN, 2)
         cell = mesh.entity('cell')     # (NC, 3)
@@ -423,46 +435,131 @@ class HuZhangFESpace2d(FunctionSpace):
 
         isbdedge = mesh.boundary_edge_flag()  # (NE,)
 
-        corners = mesh.meshdata['corner']
-        NCP = len(corners)
+        corners = self._corners
+        if corners is None:
+            raise ValueError(
+                "use_relaxation=True 需要角点坐标, 请通过构造参数 corners 传入, "
+                "例如 pde.mark_corners(mesh.entity('node'))"
+            )
 
-        corner_idx = bm.zeros((NCP,), dtype=bm.int32)
-        corner_to_cell = bm.zeros((NCP, 4), dtype=bm.int32)
-        corner_to_edge = bm.zeros((NCP, 4), dtype=bm.int32)
-        corner_to_midedge = bm.zeros((NCP,), dtype=bm.int32)
-        for p, corner in enumerate(corners):
-            nid = bm.where(bm.max(bm.abs(node - corner[None, :]), axis=-1) < 1e-12)[0]
+        corner_nids = []
+        corner_cells = []
+        corner_edges = []
+        corner_midedges = []
+        seen_nids = set()
 
-            corner_idx[p] = nid
+        node_array = bm.to_numpy(node)
+        cell_array = bm.to_numpy(cell)
+        edge_array = bm.to_numpy(edge)
+        c2e_array = bm.to_numpy(c2e)
+        isbdedge_array = bm.to_numpy(isbdedge)
+        corners_array = bm.to_numpy(corners)
+        if corners_array.ndim != 2 or corners_array.shape[1] != node.shape[1]:
+            raise ValueError(
+                "corners must have shape (N, GD), received "
+                f"{corners_array.shape}"
+            )
 
-            # ====== 单元 ======
-            mask = (cell == nid)              # (NC, 3)
-            cids, locs = mask.nonzero()       # array of indices
+        for corner in corners_array:
+            coordinate = tuple(float(value) for value in corner)
+            matches = np.flatnonzero(
+                np.max(np.abs(node_array - corner[None, :]), axis=-1) < 1e-12
+            )
+            if matches.size != 1:
+                raise ValueError(
+                    f"corner {coordinate} must match exactly one mesh node, "
+                    f"found {matches.size}"
+                )
 
-            # 保证正好取两组
-            corner_to_cell[p, 0] = cids[0]
-            corner_to_cell[p, 1] = locs[0]
-            corner_to_cell[p, 2] = cids[1]
-            corner_to_cell[p, 3] = locs[1]
+            nid = int(matches[0])
+            if nid in seen_nids:
+                raise ValueError(
+                    f"corner {coordinate} duplicates mesh node {nid}"
+                )
+            seen_nids.add(nid)
 
-            # ====== 边 ======
-            loc = bm.where(isbdedge[c2e[cids[0]]])[0]
-            eid = c2e[cids[0], loc]
-            corner_to_edge[p, 0] = eid
-            corner_to_edge[p, 1] = bm.where(edge[eid[0]] == nid[0])[0]
+            cids, locs = np.nonzero(cell_array == nid)
+            incident_count = cids.size
+            if incident_count != 2:
+                raise ValueError(
+                    f"corner {coordinate} has {incident_count} incident cells; "
+                    "the current Hu-Zhang corner relaxation supports exactly "
+                    "two incident cells"
+                )
 
-            loc = bm.where(isbdedge[c2e[cids[1]]])[0]
-            eid = c2e[cids[1], loc]
-            corner_to_edge[p, 2] = eid
-            corner_to_edge[p, 3] = bm.where(edge[eid[0]] == nid[0])[0]
+            cid0, cid1 = (int(value) for value in cids)
+            loc0, loc1 = (int(value) for value in locs)
+            boundary_data = []
+            for cid in (cid0, cid1):
+                candidate_eids = [
+                    int(eid) for eid in c2e_array[cid]
+                    if isbdedge_array[int(eid)]
+                    and nid in edge_array[int(eid)]
+                ]
+                if len(candidate_eids) != 1:
+                    raise ValueError(
+                        f"corner {coordinate}, cell {cid} must contain exactly "
+                        f"one incident boundary edge, found {len(candidate_eids)}"
+                    )
+                eid = candidate_eids[0]
+                endpoint_locs = [
+                    index for index, endpoint in enumerate(edge_array[eid])
+                    if int(endpoint) == nid
+                ]
+                if len(endpoint_locs) != 1:
+                    raise ValueError(
+                        f"corner {coordinate}, edge {eid} must contain node "
+                        f"{nid} exactly once, found {len(endpoint_locs)}"
+                    )
+                boundary_data.extend([eid, endpoint_locs[0]])
 
-            corner_to_midedge[p] = np.intersect1d(c2e[cids[0]], c2e[cids[1]])
-            
-        corner = {'coords' : corners, 'idx'    : corner_idx, 'to_cell':
-                  corner_to_cell, 'to_edge': corner_to_edge, 'to_midedge':
-                  corner_to_midedge}
-        
-        return corner
+            if boundary_data[0] == boundary_data[2]:
+                raise ValueError(
+                    f"corner {coordinate} incident cells must contribute two "
+                    "distinct boundary edges"
+                )
+
+            common_eids = sorted(
+                set(int(eid) for eid in c2e_array[cid0])
+                & set(int(eid) for eid in c2e_array[cid1])
+            )
+            if len(common_eids) != 1:
+                raise ValueError(
+                    f"corner {coordinate} incident cells must share exactly "
+                    f"one edge, found {len(common_eids)}"
+                )
+            midedge = common_eids[0]
+            if isbdedge_array[midedge] or nid not in edge_array[midedge]:
+                raise ValueError(
+                    f"corner {coordinate} shared edge {midedge} must be an "
+                    "interior edge incident to the corner"
+                )
+
+            corner_nids.append(nid)
+            corner_cells.append([cid0, loc0, cid1, loc1])
+            corner_edges.append(boundary_data)
+            corner_midedges.append(midedge)
+
+        corner_idx = bm.array(
+            corner_nids, dtype=bm.int32, device=mesh.device
+        )
+        corner_to_cell = bm.array(
+            corner_cells, dtype=bm.int32, device=mesh.device
+        ).reshape(-1, 4)
+        corner_to_edge = bm.array(
+            corner_edges, dtype=bm.int32, device=mesh.device
+        ).reshape(-1, 4)
+        corner_to_midedge = bm.array(
+            corner_midedges, dtype=bm.int32, device=mesh.device
+        )
+
+        return {
+            'coords': node[corner_idx],
+            'idx': corner_idx,
+            'to_cell': corner_to_cell,
+            'to_edge': corner_to_edge,
+            'to_midedge': corner_to_midedge,
+        }
 
     @property
     def NS(self):
@@ -563,7 +660,8 @@ class HuZhangFESpace2d(FunctionSpace):
         elif dim_gd == 2:
             #* Case B: 输入是牵引力向量 [gn, gt]
             # 获取边界法向 n 和切向 t
-            en = mesh.edge_unit_normal()[ebdflag]   # (NEb, 2)
+            # 二维下 face 即 edge, FEALPy 4.0.0 只保留 face_unit_normal
+            en = mesh.face_unit_normal()[ebdflag]   # (NEb, 2)
             et = mesh.edge_unit_tangent()[ebdflag]  # (NEb, 2)
             
             en = en[:, None, :]
@@ -610,7 +708,8 @@ class HuZhangFESpace2d(FunctionSpace):
         cframe[:, 0] = bm.array([[1, 0]], dtype=mesh.ftype)
         cframe[:, 1] = bm.array([[0, 1]], dtype=mesh.ftype)
 
-        eframe[:, 0] = mesh.edge_unit_normal()
+        # 二维下 face 即 edge, FEALPy 4.0.0 只保留 face_unit_normal
+        eframe[:, 0] = mesh.face_unit_normal()
         eframe[:, 1] = mesh.edge_unit_tangent()
         nframe[edge] = eframe[:, None]
 
