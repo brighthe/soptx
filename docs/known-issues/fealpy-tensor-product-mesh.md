@@ -1,10 +1,11 @@
 # 上游缺陷：FEALPy 4.0.0 mesh 重构回归
 
-FEALPy `4.0.0-alpha` 的 mesh 重构引入四处回归。同一批判据在早期版本
+FEALPy `4.0.0-alpha` 的 mesh 重构引入五处回归。同一批判据在早期版本
 （`fealpy_heliang`）上全部通过，因此这不是设计取舍。
 
-缺陷 1 影响**所有网格类型**，是复现其余三处的前置条件；缺陷 2–4 只影响张量积
-网格（四边形、六面体）。
+缺陷 1 影响**所有网格类型**，是复现缺陷 2–4 的前置条件；缺陷 2–4 只影响张量积
+网格（四边形、六面体）；缺陷 5 影响**所有网格类型**，但只在施加 Neumann/traction
+边界时才走到，与前四处相互独立。
 
 | # | 缺陷 | 位置 | 修复 |
 | --- | --- | --- | --- |
@@ -12,28 +13,32 @@ FEALPy `4.0.0-alpha` 的 mesh 重构引入四处回归。同一批判据在早�
 | 2 | 四边形 `shape_function` 输出顺序与单元节点顺序错位 | `mesh/schema/classic/quadrilateral.py:67-82` | 输出重排 `[0, 1, 3, 2]` |
 | 3 | 四边形 `grad_shape_function_reference` 输出顺序与单元节点顺序错位 | `mesh/schema/classic/quadrilateral.py:106-129` | 输出重排 `[0, 2, 3, 1]` |
 | 4 | 六面体 `bc_to_point` 未展平积分点维 | `mesh/schema/classic/hexahedron.py:53-69` | 返回前展平方向维 |
+| 5 | `face_basis`/`edge_basis` 指向单元的 `shape_function` | `functionspace/lagrange_fe_space.py:150-151` | 改调 `mesh.face_shape_function` / `mesh.edge_shape_function` |
 
 缺陷 2 的四边形一路**不抛异常**：残差合格、刚度矩阵对称、刚体位移零空间正确，
 只有观测收敛阶和插值一致性能发现。任何在此版本上使用四边形网格的计算都会得到
 错误结果而不自知。
 
-四处修复均已作为源码改动落在 `C:\workspace\fealpy_stable` 的 `stable` 分支
-（`0758339`），全部判据通过，尚未向上游提交。`jacobi_matrix` **不需要**单独
-修改：它消费 `grad_shape_function_reference`，后者对齐后自动正确。
+缺陷 1–4 的修复落在 `C:\workspace\fealpy_stable` 的 `stable` 分支
+（`0758339`），全部判据通过；缺陷 5 的修复是其后的 `fbfe39e`，随附
+`tests/functionspace/unit/test_face_basis_entity_dimension.py`。两者均尚未
+向上游提交。
+`jacobi_matrix` **不需要**单独修改：它消费 `grad_shape_function_reference`，
+后者对齐后自动正确。
 
 ## 环境与版本对照
 
 | 检出 | revision | 日期 | 结果 |
 | --- | --- | --- | --- |
 | `fealpy` | `2f17532`（`v4.0.0-alpha-15`） | 2026-07-26 | 5 项判据 **FAIL** |
-| `fealpy_stable` | `0758339`（基于 `2f17532`） | 2026-08-02 | **ALL PASSED** |
+| `fealpy_stable` | `fbfe39e`（缺陷 1–4 在 `0758339`） | 2026-08-03 | **ALL PASSED** |
 | `fealpy_heliang` | `18c9afe` | 2026-06-25 | **ALL PASSED** |
 
 Python 3.12.13，NumPy 2.5.1，backend `numpy`。
 
 `fealpy_stable` 是本地维护的可用版本：以 `2f17532` 为基线、只加这四处缺陷修复，
 `origin` 指向个人 fork、`upstream` 指向算海仓库。SOPTX 的 conda 环境
-（`xihe-fealpy`）已 editable 安装该检出。
+（`ihpcm`）已 editable 安装该检出。
 
 **在纯净的 `2f17532` 上复现时，会先撞上缺陷 1。**`mesh.error` 对**三角形**就会
 抛出下述异常，根本走不到张量积的判据。因此上游复现时需要先应用缺陷 1 的修复，
@@ -261,6 +266,69 @@ return bm.einsum("ia,jb,kc,ncbae->nkjie", u, v, w, points)   # (NC, k, j, i, GD)
 | quadrangle | `(16,)` | `(4, 16, 2)` | `(4, 16, 2)` |
 | hexahedron | `(64,)` | `(8, 4, 4, 4, 3)` ✗ | `(8, 64, 3)` ✓ |
 
+## 缺陷 5：`face_basis` / `edge_basis` 指向单元的 `shape_function`
+
+**影响所有网格类型**，与缺陷 1–4 相互独立。只在位移元施加 Neumann/traction
+边界时才走到，因此纯 Dirichlet 的算例一直没暴露它。
+
+**症状**：单纯形网格装配 traction 边界积分直接抛异常。
+
+```
+soptx/fem/integrators/face_source_integrator_lfem.py:42
+    phi = space.face_basis(bcs, index=index)
+  → functionspace/tensor_space.py:70    self.scalar_space.face_basis(...)
+  → functionspace/lagrange_fe_space.py:147  self.mesh.shape_function(bc, self.p)
+  → mesh/schema/classic/triangle.py:64
+ValueError: triangle shape_function expects last dimension 3, got 2
+```
+
+**根因**：`lagrange_fe_space.py:150-151` 把面/边的基函数直接绑成单元基函数的
+别名：
+
+```python
+face_basis = basis      # basis 调 mesh.shape_function, 即 Entities(-1) = cell
+edge_basis = basis
+```
+
+面上的积分点是**面实体**的重心坐标：三角形的面（边）是 2 分量，四面体的面
+（三角形）是 3 分量。而 `mesh.shape_function` 在 4.0.0 里绑定到
+`Entities(-1)[0]`（单元），对维度做严格校验，于是不匹配。
+
+**为什么早期版本能工作**：`fealpy_heliang` 的单纯形 `shape_function`
+（`mesh_base.py:707`）第一行是
+
+```python
+TD = bcs.shape[-1] - 1
+```
+
+按重心坐标的维度**自适应**决定拓扑维数——传 2 分量就返回边上的基函数。
+`face_basis = basis` 因此隐式成立。4.0.0 把实体维度显式绑定到 schema 之后，
+这个别名就不再等价，但它没跟着更新。
+
+**四边形在这一步不抛异常，而是返回错的东西**：
+
+| 网格 | face 重心坐标 | `face_basis` 结果 |
+| --- | --- | --- |
+| triangle | `(3, 2)` | **抛异常**：expects 3, got 2 |
+| tetrahedron | `(6, 3)` | **抛异常**：expects 4, got 3 |
+| quadrangle | `(3, 2)` | 返回 `(1, 9, 4)` ✗ —— 应为边上的 2 个基函数 |
+
+四边形那一路把 `(3, 2)` 当成张量积**单元**的重心坐标，3×3 展开成 9 个积分点、
+返回 4 个 Q1 单元基函数。**与缺陷 2 不同，它最终不会静默通过**：积分点维
+（9）与 `ws`（3）对不上，边界积分的 `einsum('f, q, qld, fqd -> fl')` 会在下游
+报错。危险之处不在于结果错得无声无息，而在于**报错位置远离根因**——异常出在
+张量收缩，指不到 `face_basis` 这个真正的源头。回归测试因此必须用形状判据
+覆盖四边形：只测单纯形的话，这处缺陷看起来像是"某些网格类型不支持"。
+
+**4.0.0 已经提供了正确入口**，只是没有被用上：`mesh/view/fealpy_api.py:189`
+的 `face_shape_function` 走 `Entities(-2)[0]`，`edge_shape_function` 同理，
+签名与 `shape_function` 完全一致。
+
+**影响范围**：`src/soptx/model/` 下所有 `boundary_type='mixed'` 的 `*_lfem.py`
+模型，以及 `soptx.problems` 的两个 `MixedBoundary*` 制造解——凡是走位移元
+traction 边界积分的都不可用。Hu–Zhang 混合元路径不受影响，它不经过
+`LagrangeFESpace.face_basis`。
+
 ## 统一修复方案
 
 缺陷 1 独立修复（见上）。缺陷 2–4 的思路是把 schema 的输出**统一对齐到单元节点
@@ -278,7 +346,17 @@ gphi = gphi[..., [0, 2, 3, 1], :]
 
 # hexahedron.py  bc_to_point 返回前                                  缺陷 4
 result = bm.reshape(result, (result.shape[0], -1, result.shape[-1]))
+
+# lagrange_fe_space.py  取消 face_basis/edge_basis 的别名             缺陷 5
+def face_basis(self, bc, index=_S):
+    return self.mesh.face_shape_function(bc, self.p, index=index)[None, ...]
+
+def edge_basis(self, bc, index=_S):
+    return self.mesh.edge_shape_function(bc, self.p, index=index)[None, ...]
 ```
+
+缺陷 5 与前四处相互独立，不参与下面"必须整套施加"的讨论：它换的是调用入口，
+不涉及节点顺序对齐。
 
 三点说明：
 
@@ -332,6 +410,24 @@ hexahedron   4.6470e-02  1.6810e-02  4.3349e-03   1.467  1.955
 node = [[0.0, 0.0], [1.0, 0.2], [1.3, 1.1], [0.1, 0.9]]
 ```
 
+缺陷 5 需要一条独立判据，它落在函数空间层而非网格层：**`face_basis` 返回的
+局部基函数个数必须等于面实体的自由度数**，而不是单元的。
+
+| 网格 | `face_basis(...).shape[-1]` 应为 | 修复前 |
+| --- | --- | --- |
+| triangle | 2（边上的 P1） | 抛异常 |
+| tetrahedron | 3（三角形面上的 P1） | 抛异常 |
+| quadrangle | 2（边上的 Q1） | 4 ✗（返回了单元基） |
+
+四边形那一栏是关键：只测单纯形的话，这处缺陷会以"异常"形式暴露，容易误判为
+个别网格的问题；四边形在 `face_basis` 这一步不抛异常，必须用形状判据才能定位
+到真正的源头。
+
+这条判据已随缺陷 5 的修复落地为
+`fealpy_stable:tests/functionspace/unit/test_face_basis_entity_dimension.py`，
+覆盖三种网格的面基函数个数、积分点维与单位分解，并有一组对照断言确认单元基
+函数未受影响。
+
 ---
 
 以上为可直接提交上游的技术事实。以下为 SOPTX 本地专有内容。
@@ -344,6 +440,11 @@ node = [[0.0, 0.0], [1.0, 0.2], [1.3, 1.1], [0.1, 0.9]]
 - 缺陷 2–4 只影响四边形与六面体。SOPTX 的装配对单纯形走 `entity_measure`
   分支，不调用 `jacobi_matrix`，故现有 evidence 的**数值结论**不受其影响。
 - 四边形一路是静默的错误结果，比六面体的直接崩溃更危险。
+- **缺陷 5 影响所有网格类型，但只在位移元施加 Neumann/traction 边界时才走到**。
+  纯 Dirichlet 的算例（此前 SOPTX 的全部数值 evidence）碰不到它，故已有结论
+  不受影响。受影响的是 `src/soptx/model/` 下所有 `boundary_type='mixed'` 的
+  `*_lfem.py`，以及 `soptx.problems` 的两个 `MixedBoundary*` 制造解。
+  Hu–Zhang 混合元路径不经过 `LagrangeFESpace.face_basis`，不受影响。
 - **evidence 的环境记录需要注意**：`report.py` 记录的 `fealpy` 版本号是
   `4.0.0`，官方检出与 `fealpy_stable` 无法据此区分，而两者的单纯形结果一个跑不
   通、一个正常。重放前需确认环境实际指向哪个检出；`fealpy_stable` 的
@@ -351,8 +452,11 @@ node = [[0.0, 0.0], [1.0, 0.2], [1.3, 1.1], [0.1, 0.9]]
 
 ## SOPTX 侧的处置
 
-- `examples/lagrange_elasticity/minimal_demo.py` 与
-  `examples/matrix_free_elasticity` 目前只使用单纯形网格。
+- `examples/matrix_free_elasticity` 目前只使用单纯形网格。
+  `examples/lagrange_elasticity/minimal_demo.py` 已开放四边形与六面体
+  （`--mesh-type quad|hex`）以及混合边界模型（`--model mixed-*`），因此它
+  **依赖 `fealpy_stable`**：在官方检出上，四边形会静默给出错误结果，混合边界
+  会直接抛异常。算例启动时打印 FEALPy 解析路径正是为此。
 - **放开四边形、六面体入口的判据**：`reproduce_tensor_product_issue.py` 在目标
   FEALPy 检出上全部 PASS。`fealpy_stable` 已满足该判据，官方 `fealpy` 未满足。
   若为 SOPTX 增加张量积网格入口，需同时明确它依赖 `fealpy_stable`——在官方

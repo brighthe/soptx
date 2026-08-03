@@ -9,7 +9,7 @@ SOPTX（Structural Optimization Topology Simulation Software）是基于
 以二维线弹性 Matrix-Free EA 基线为例，从仓库根目录执行：
 
 ```powershell
-conda activate xihe-fealpy
+conda activate ihpcm
 python -m pip install -e ".[mpi,test]"
 mpiexec -n 1 python .\examples\matrix_free_elasticity\run.py --dim 2 --operator-level ea --p 1 --nx 8 --ny 8
 ```
@@ -39,8 +39,8 @@ python -m pip install -e .
 | `pinn` | torch | PINN 示例训练 |
 | `test` | pytest、build | 测试与 wheel 构建 |
 
-示例目录各自绑定一个已验证的本机 conda 环境：Matrix-Free/MPI 使用 `xihe-fealpy`，
-PINN 使用 `soptx-gpu`。
+示例目录各自绑定一个已验证的本机 conda 环境：Matrix-Free/MPI 与拉格朗日位移元
+使用 `ihpcm`，PINN 使用 `soptx-gpu`。
 
 ## 公共 API
 

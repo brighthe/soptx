@@ -165,7 +165,11 @@ def test_small_mixed_boundary_state_has_expected_diagnostics():
     )
 
 
-def test_corner_relaxation_never_reduces_stress_dofs():
+@pytest.mark.parametrize(
+    "mesh_factory_name",
+    ["_uniform_mesh", "_irregular_star_mesh"],
+)
+def test_relaxation_meshes_have_four_supported_corners(mesh_factory_name):
     executors = _load_module("executors", "executors.py")
     from fealpy.backend import backend_manager as bm
     from soptx.fem.spaces import HuZhangFESpace
@@ -176,9 +180,13 @@ def test_corner_relaxation_never_reduces_stress_dofs():
         lame_lambda=1.0,
         shear_modulus=0.5,
     )
-    mesh = executors._uniform_mesh(level=1)
-    mesh.meshdata["corner"] = problem.mark_corners(mesh.entity("node"))
+    mesh = getattr(executors, mesh_factory_name)(level=1)
+    corners = problem.mark_corners(mesh.entity("node"))
     conforming = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=False)
-    relaxed = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=True)
-    assert relaxed.number_of_global_dofs() >= conforming.number_of_global_dofs()
+    relaxed = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=True, corners=corners)
+    assert relaxed.NCP == 4
+    assert (
+        relaxed.number_of_global_dofs()
+        == conforming.number_of_global_dofs() + relaxed.NCP
+    )
     assert relaxed.cell_to_dof().shape == conforming.cell_to_dof().shape

@@ -61,11 +61,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             self._log_error(f"不支持的求解器类型: {solve_method}, 可选 'mumps' 或 'scipy'")
         self._solve_method = solve_method
 
-        node = self._mesh.entity('node')
-        self._mesh.meshdata['corner'] = self._pde.mark_corners(node)
+        corners = self._pde.mark_corners(self._mesh.entity('node'))
 
         self._GD = self._mesh.geo_dimension()
-        self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation)
+        self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation, corners=corners)
         self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
@@ -932,8 +931,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             return bm.zeros(gdof, dtype=bm.float64, device=space.device)
 
         # 3. 准备积分数据
-        e2c = mesh.edge_to_cell()[bdedge] 
-        en  = mesh.edge_unit_normal()[bdedge]
+        # 二维下 face 即 edge, FEALPy 4.0.0 只保留 face_to_cell / face_unit_normal
+        e2c = mesh.face_to_cell()[bdedge]
+        en  = mesh.face_unit_normal()[bdedge]
         edge_measure  = mesh.entity_measure('edge')[bdedge]
 
         qf = mesh.quadrature_formula(self._integration_order, 'edge')

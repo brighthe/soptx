@@ -31,6 +31,7 @@ from soptx.problems import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
     MixedBoundaryExponentialSineElasticity2D,
+    MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
 )
 
@@ -39,6 +40,7 @@ MAINTAINED_PROBLEM_CLASSES = (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
     MixedBoundaryExponentialSineElasticity2D,
+    MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
 )
 

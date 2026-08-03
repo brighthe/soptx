@@ -2,12 +2,14 @@ from fealpy.mesh import Mesh
 
 class HuZhangFESpace:
     """Factory class for creating HuZhang finite element spaces."""
-    def __new__(cls, mesh: Mesh, p: int = 1, ctype: str = 'C', use_relaxation: bool = False):
+    def __new__(cls, mesh: Mesh, p: int = 1, ctype: str = 'C', use_relaxation: bool = False,
+                corners=None):
         TD = mesh.top_dimension()
-        
+
         if TD == 2:
             from .huzhang_fe_space_2d import HuZhangFESpace2d
-            return HuZhangFESpace2d(mesh, p=p, ctype=ctype, use_relaxation=use_relaxation)
+            return HuZhangFESpace2d(mesh, p=p, ctype=ctype, use_relaxation=use_relaxation,
+                                    corners=corners)
         elif TD == 3:
             from .huzhang_fe_space_3d import HuZhangFESpace3d
             return HuZhangFESpace3d(mesh, p=p, ctype=ctype, use_relaxation=use_relaxation)
