@@ -12,6 +12,10 @@
 - [`architecture/file-classification.md`](architecture/file-classification.md) —
   maintained、incubating、experiment、compatibility 与 archive 分类。
 
+## 求解器
+
+- [`solvers.md`](solvers.md) — scipy/mumps/cg 三种求解方式、各分析器的可用组合与依赖。
+
 ## 数学模型与验证
 
 - [`models/manufactured-elasticity.md`](models/manufactured-elasticity.md) —
