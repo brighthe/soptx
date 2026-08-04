@@ -39,7 +39,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
-        """初始化胡张混合有限元分析器"""
+        """初始化胡张混合有限元分析器
+
+        Parameters
+        ----------
+        solve_method : 求解方式。状态方程是鞍点系统, 只能用直接法:
+                       'scipy' 与 'mumps', 都经 fealpy.solver.spsolve 分派;
+                       'mumps' 需要环境装有 PyMUMPS 包 (pip install pymumps)
+                       与系统 MUMPS 库。
+        """
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         

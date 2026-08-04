@@ -47,6 +47,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
                  不形成全局矩阵, 只能用迭代解法
         两者对应同一个离散算子 K = Σ_e R_e^T K_e R_e
         tensor_space : 外部构造的张量函数空间; 为 None 时由 disp_mesh 内部构造
+        solve_method : 求解方式。直接法支持 'scipy' 与 'mumps', 都经
+                       fealpy.solver.spsolve 分派到对应后端; 'mumps' 需要环境
+                       装有 PyMUMPS 包 (pip install pymumps) 与系统 MUMPS 库。
+                       'cg' 是迭代解法, 只适用于 'ea' 层级。
         dof_comm : 分布式重叠自由度通信器。本类不提供分布式求解, 传入后必须同时
                    覆盖 wrap_operator、reduce_load 和 solve_system, 否则
                    solve_system 会拒绝执行
