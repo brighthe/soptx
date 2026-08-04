@@ -495,9 +495,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         mesh = self._mesh
         pde = self._pde
         bc = mesh.entity_barycenter('edge')
+        edge = mesh.Entity("edge")
 
-        mesh.edgedata['essential_bc'] = pde.is_traction_boundary(bc)      # σ·n = t (强施加)
-        mesh.edgedata['natural_bc']   = pde.is_displacement_boundary(bc)  # u = u_D (弱施加)
+        # FEALPy 4 stores user metadata on the edge EntityView, rather than
+        # pre-creating an ``edgedata`` dictionary on the mesh object.
+        edge.set_attribute(
+            "essential_bc", pde.is_traction_boundary(bc)
+        )  # σ·n = t (强施加)
+        edge.set_attribute(
+            "natural_bc", pde.is_displacement_boundary(bc)
+        )  # u = u_D (弱施加)
 
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
@@ -523,7 +530,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('源项处理时间')
 
-        has_essential = ('essential_bc' in mesh.edgedata) and bool(mesh.edgedata['essential_bc'].any())
+        essential_bc = edge.get_attribute("essential_bc")
+        has_essential = essential_bc is not None and bool(essential_bc.any())
         if has_essential:
             K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
         else:
@@ -603,6 +611,86 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             float((matrix.multiply(matrix)).sum() ** 0.5),
             1.0e-30,
         )
+        return numerator / denominator
+
+    def normalized_normal_trace_jump(
+        self,
+        stress: Function,
+        integration_order: Optional[int] = None,
+    ) -> float:
+        """Return the normalized internal normal-traction jump of ``stress``.
+
+        Both traces are evaluated through :class:`HuZhangFESpace`, so corner
+        relaxation uses the same coefficient transformation as the state solve.
+        The two outward normal tractions are summed on every internal edge and
+        scaled by ``h_F`` before integration, as specified by the paper's
+        manufactured-solution diagnostic.
+        """
+        space = self._huzhang_space
+        mesh = self._mesh
+        q = self._integration_order if integration_order is None else integration_order
+        if not isinstance(q, int) or q <= 0:
+            raise ValueError("integration_order must be a positive integer")
+
+        face_to_cell = mesh.face_to_cell()
+        internal_faces = bm.nonzero(face_to_cell[:, 0] != face_to_cell[:, 1])[0]
+        if len(internal_faces) == 0:
+            return 0.0
+
+        quadrature = mesh.quadrature_formula(q, "face")
+        face_bcs, weights = quadrature.get_quadrature_points_and_weights()
+        local_bcs = [bm.insert(face_bcs, i, 0, axis=-1) for i in range(3)]
+        edge_to_cell = face_to_cell[internal_faces]
+        edge_centers = mesh.entity_barycenter("edge")[internal_faces]
+        cell_centers = mesh.entity_barycenter("cell")
+        face_count = len(internal_faces)
+        quadrature_count = len(weights)
+        traces = bm.zeros((2, face_count, quadrature_count, 2), dtype=bm.float64)
+
+        for side in range(2):
+            cells = edge_to_cell[:, side]
+            local_faces = edge_to_cell[:, side + 2]
+            for local_face in range(3):
+                locations = bm.nonzero(local_faces == local_face)[0]
+                if len(locations) == 0:
+                    continue
+                selected_cells = cells[locations]
+                sigma = stress(local_bcs[local_face], index=selected_cells)
+                outward_vectors = edge_centers[locations] - cell_centers[selected_cells]
+                outward_normals = outward_vectors / bm.sqrt(
+                    bm.sum(outward_vectors**2, axis=-1, keepdims=True)
+                )
+                outward_normals = outward_normals[:, None, :]
+                traction = bm.stack(
+                    (
+                        sigma[..., 0] * outward_normals[..., 0]
+                        + sigma[..., 1] * outward_normals[..., 1],
+                        sigma[..., 1] * outward_normals[..., 0]
+                        + sigma[..., 2] * outward_normals[..., 1],
+                    ),
+                    axis=-1,
+                )
+                traces = bm.set_at(traces, (side, locations), traction)
+
+        normal_jump_squared = bm.sum((traces[0] + traces[1]) ** 2, axis=-1)
+        edge_measure = mesh.entity_measure("face", index=internal_faces)
+        jump_squared = bm.einsum(
+            "f,q,fq->", edge_measure**2, weights, normal_jump_squared
+        )
+
+        cell_quadrature = mesh.quadrature_formula(q, "cell")
+        cell_bcs, cell_weights = cell_quadrature.get_quadrature_points_and_weights()
+        stress_values = stress(cell_bcs)
+        stress_squared = (
+            stress_values[..., 0] ** 2
+            + 2.0 * stress_values[..., 1] ** 2
+            + stress_values[..., 2] ** 2
+        )
+        stress_norm_squared = bm.einsum(
+            "c,q,cq->", mesh.entity_measure("cell"), cell_weights, stress_squared
+        )
+        numerator = float(bm.sqrt(jump_squared))
+        denominator = max(float(bm.sqrt(stress_norm_squared)), 1.0e-30)
         return numerator / denominator
     
     def solve_adjoint(self, 
@@ -909,13 +997,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         gdof = space.number_of_global_dofs()
         ldof = space.number_of_local_dofs()
+        edge = mesh.Entity("edge")
 
         bd_edge_flag = mesh.boundary_edge_flag()
 
         # 1. 获取自然边界标记 (Natural BC)
-        if 'natural_bc' in mesh.edgedata:
-            disp_edge_flag = mesh.edgedata['natural_bc']
-        else:
+        disp_edge_flag = edge.get_attribute("natural_bc")
+        if disp_edge_flag is None:
             bc_edge = mesh.entity_barycenter('edge')
             disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
 
@@ -924,8 +1012,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         # 2. 排除本质边界 (Essential BC) 的干扰
         # 虽然 PDE 定义中通常互斥，但保留此检查更健壮
-        if 'essential_bc' in mesh.edgedata:
-            essential_bc = mesh.edgedata['essential_bc']
+        essential_bc = edge.get_attribute("essential_bc")
+        if essential_bc is not None:
             # 如果 essential_bc 意外是 2D 的 (旧代码遗留)，将其压缩为 1D
             if essential_bc.ndim == 2:
                 essential_bc_1d = bm.any(essential_bc, axis=1)

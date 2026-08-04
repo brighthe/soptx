@@ -23,10 +23,10 @@ hexahedral, 因而不提供 ``--mesh-type`` 选项. 这是当前软件实现的�
 问题类直接取自 ``soptx.problems``, 没有任何本地适配层 —— 这本身就是算例的一
 部分: 它验证维护中的 Problem 满足 ``MixedBoundaryElasticityProblem`` 契约.
 
-判据只取无歧义的两项: 线性系统的相对平衡残差和状态矩阵的对称性缺陷, 阈值
-沿用 ``experiments/huzhang_topopt_paper/cases.toml`` 里的 acceptance. 收敛阶
-只打印不判定 —— 该实验目录记录的预期阶目前仍是 ``theory-audit-required``,
-在理论核查完成前不应作为通过条件.
+判据只取无歧义的三项: 线性系统的相对平衡残差、状态矩阵的对称性缺陷和内部
+法向迹跳量, 阈值沿用 ``experiments/huzhang_topopt_paper/cases.toml`` 里的
+acceptance. 收敛阶只打印不判定；本脚本只有单一 checkerboard 网格族，不能替代
+``experiments/huzhang_topopt_paper/run.py`` 生成的正式论文 evidence.
 
 前置: SOPTX 需以 editable 方式安装 (``pip install -e .``, 见仓库 README),
 这样 ``import soptx`` 直接解析到工作树的 ``src/soptx``, 脚本无需注入源码路径.
@@ -57,6 +57,7 @@ from soptx.problems import MixedBoundarySinusoidalElasticity2D
 # 与 cases.toml 的 acceptance 保持一致
 RESIDUAL_TOLERANCE = 1.0e-8
 SYMMETRY_TOLERANCE = 1.0e-12
+NORMAL_TRACE_JUMP_TOLERANCE = 1.0e-10
 
 
 def _as_float(value) -> float:
@@ -87,14 +88,12 @@ def solve_one_level(problem, material, degree: int, subdivisions: int,
     state = analyzer.solve_state(rho_val=None)
     sigmah, uh = state["stress"], state["displacement"]
 
-    disp_error = mesh.error(
-        u=uh, v=problem.disp_solution, q=integration_order
-    )
+    disp_error = mesh.error(uh, problem.disp_solution, q=integration_order)
     stress_error = mesh.error(
-        u=sigmah, v=problem.stress_solution, q=integration_order
+        sigmah, problem.stress_solution, q=integration_order
     )
     div_stress_error = mesh.error(
-        u=sigmah.div_value, v=problem.div_stress_solution, q=integration_order
+        sigmah.div_value, problem.div_stress_solution, q=integration_order
     )
     stress_hdiv_error = bm.sqrt(stress_error**2 + div_stress_error**2)
 
@@ -111,6 +110,9 @@ def solve_one_level(problem, material, degree: int, subdivisions: int,
         "stress_hdiv_error": _as_float(stress_hdiv_error),
         "residual": analyzer.relative_state_residual(),
         "symmetry_error": analyzer.state_matrix_symmetry_error(),
+        "normal_trace_jump": analyzer.normalized_normal_trace_jump(
+            sigmah, integration_order=integration_order
+        ),
     }
 
 
@@ -126,7 +128,7 @@ def report(rows: list[dict]) -> None:
         f"{'nx':>4} {'gdof':>8} {'h':>9} "
         f"{'|u-uh|_0':>11} {'|s-sh|_0':>11} "
         f"{'|div(s-sh)|_0':>14} {'|s-sh|_Hdiv':>12} "
-        f"{'residual':>11} {'symmetry':>11}"
+        f"{'residual':>11} {'symmetry':>11} {'J_n':>11}"
     )
     print(header)
     print("-" * len(header))
@@ -137,13 +139,14 @@ def report(rows: list[dict]) -> None:
             f"{row['disp_error']:>11.4e} {row['stress_error']:>11.4e} "
             f"{row['div_stress_error']:>14.4e} "
             f"{row['stress_hdiv_error']:>12.4e} "
-            f"{row['residual']:>11.2e} {row['symmetry_error']:>11.2e}"
+            f"{row['residual']:>11.2e} {row['symmetry_error']:>11.2e} "
+            f"{row['normal_trace_jump']:>11.2e}"
         )
 
     if len(rows) < 2:
         return
 
-    print("\n观测收敛阶 (仅供参考, 预期阶尚未完成理论核查, 不作为判据):")
+    print("\n观测收敛阶 (仅供参考；正式判定由双网格族 runner 完成):")
     names = [
         ("disp_error", "|u-uh|_0    "),
         ("stress_error", "|s-sh|_0    "),
@@ -226,8 +229,10 @@ def main() -> int:
 
     residual_max = max(row["residual"] for row in rows)
     symmetry_max = max(row["symmetry_error"] for row in rows)
+    normal_trace_jump_max = max(row["normal_trace_jump"] for row in rows)
     residual_passed = residual_max <= RESIDUAL_TOLERANCE
     symmetry_passed = symmetry_max <= SYMMETRY_TOLERANCE
+    normal_trace_jump_passed = normal_trace_jump_max <= NORMAL_TRACE_JUMP_TOLERANCE
 
     print(
         f"\n相对平衡残差最大值 = {residual_max:.2e} "
@@ -239,8 +244,13 @@ def main() -> int:
         f"(阈值 {SYMMETRY_TOLERANCE:.0e}) -> "
         f"{'通过' if symmetry_passed else '未通过'}"
     )
+    print(
+        f"归一化法向迹跳量最大值 = {normal_trace_jump_max:.2e} "
+        f"(阈值 {NORMAL_TRACE_JUMP_TOLERANCE:.0e}) -> "
+        f"{'通过' if normal_trace_jump_passed else '未通过'}"
+    )
 
-    if residual_passed and symmetry_passed:
+    if residual_passed and symmetry_passed and normal_trace_jump_passed:
         print("\n结论: SOPTX 的胡张混合有限元求解链在该算例上可用.")
         return 0
 

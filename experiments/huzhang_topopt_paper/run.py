@@ -36,6 +36,7 @@ REQUIRED_ACCEPTANCE_KEYS = {
     "high_order_rate_deficit",
     "relative_equilibrium_residual_max",
     "normalized_normal_trace_jump_max",
+    "state_matrix_symmetry_error_max",
     "finite_difference_relative_error_max",
     "volume_fraction_absolute_error_max",
     "stress_constraint_violation_max",
@@ -196,7 +197,7 @@ def _case_definition(raw: dict[str, Any]) -> CaseDefinition:
         raise ConfigurationError(
             f"{identifier}: parameters and expected_orders must be TOML tables"
         )
-    return CaseDefinition(
+    definition = CaseDefinition(
         identifier=identifier,
         role=role,
         problem=problem,
@@ -211,6 +212,37 @@ def _case_definition(raw: dict[str, Any]) -> CaseDefinition:
         parameters=parameters,
         expected_orders=expected_orders,
     )
+    if definition.identifier == "forward-manufactured":
+        _validate_forward_manufactured_contract(definition)
+    return definition
+
+
+def _validate_forward_manufactured_contract(case: CaseDefinition) -> None:
+    """Keep the formal manufactured-solution matrix explicit and auditable."""
+    if case.problem != "mixed-boundary-sinusoidal-elasticity-2d":
+        raise ConfigurationError("forward-manufactured must use the sinusoidal problem")
+    if case.orders != (1, 2, 3, 4) or case.levels != (1, 2, 3, 4, 5):
+        raise ConfigurationError("forward-manufactured must retain the 4-by-5 order matrix")
+    if case.mesh_families != ("uniform-tri", "irregular-star-refined"):
+        raise ConfigurationError("forward-manufactured must retain both triangle families")
+    expected = case.expected_orders
+    required = {
+        "high_order_gate_orders", "last_fine_grid_count",
+        "displacement_l2_error_order_offset", "stress_l2_error_order_offset",
+        "div_stress_l2_error_order_offset", "stress_hdiv_error_order_offset",
+        "low_order_policy",
+    }
+    if set(expected) != required:
+        raise ConfigurationError("forward-manufactured expected_orders schema is incomplete")
+    if expected["high_order_gate_orders"] != [3, 4]:
+        raise ConfigurationError("forward-manufactured gates must apply to k=3,4")
+    if expected["last_fine_grid_count"] != 3:
+        raise ConfigurationError("forward-manufactured must gate its last three meshes")
+    if expected["low_order_policy"] != "characterization":
+        raise ConfigurationError("forward-manufactured low orders must be characterization")
+    for key in required - {"high_order_gate_orders", "last_fine_grid_count", "low_order_policy"}:
+        if not isinstance(expected[key], int):
+            raise ConfigurationError(f"forward-manufactured {key} must be an integer")
 
 
 def load_configuration(path: Path = DEFAULT_CONFIG) -> ExperimentConfiguration:
@@ -463,6 +495,9 @@ def run_case(
         metrics = result.get("metrics", [])
         history = result.get("history", [])
         status = "completed"
+        if summary.get("acceptance_status") != "passed":
+            status = "failed"
+            exit_code = 1
     except CaseBlocked as error:
         summary = {"status": "blocked", "reason": str(error)}
         metrics = [{"status": "blocked", "reason": str(error)}]

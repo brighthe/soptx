@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+from copy import deepcopy
 
 import pytest
 
@@ -54,7 +55,8 @@ def test_common_configuration_covers_fixed_matrix(runner):
     )
     cases = configuration.by_id()
     assert cases["forward-manufactured"].orders == (1, 2, 3, 4)
-    assert cases["forward-manufactured"].levels == (1, 2, 3)
+    manufactured = cases["forward-manufactured"]
+    assert manufactured.levels == (1, 2, 3, 4, 5)
     assert cases["forward-manufactured"].mesh_families == (
         "uniform-tri",
         "irregular-star-refined",
@@ -69,6 +71,16 @@ def test_common_configuration_covers_fixed_matrix(runner):
     assert stress.orders == (2, 3)
     assert stress.levels == (1, 2)
     assert stress.parameters["huzhang_fine_order"] == 3
+    assert manufactured.problem == "mixed-boundary-sinusoidal-elasticity-2d"
+    assert manufactured.expected_orders == {
+        "high_order_gate_orders": [3, 4],
+        "last_fine_grid_count": 3,
+        "displacement_l2_error_order_offset": 0,
+        "stress_l2_error_order_offset": 1,
+        "div_stress_l2_error_order_offset": 0,
+        "stress_hdiv_error_order_offset": 0,
+        "low_order_policy": "characterization",
+    }
 
 
 def test_acceptance_thresholds_are_explicit(runner):
@@ -77,6 +89,7 @@ def test_acceptance_thresholds_are_explicit(runner):
         "high_order_rate_deficit": 0.35,
         "relative_equilibrium_residual_max": 1.0e-8,
         "normalized_normal_trace_jump_max": 1.0e-10,
+        "state_matrix_symmetry_error_max": 1.0e-12,
         "finite_difference_relative_error_max": 1.0e-5,
         "volume_fraction_absolute_error_max": 1.0e-3,
         "stress_constraint_violation_max": 3.0e-3,
@@ -130,10 +143,10 @@ def test_small_mixed_boundary_state_has_expected_diagnostics():
     from fealpy.backend import backend_manager as bm
     from soptx.fem import HuZhangMFEMAnalyzer
     from soptx.materials import IsotropicLinearElasticMaterial
-    from soptx.problems import MixedBoundaryExponentialSineElasticity2D
+    from soptx.problems import MixedBoundarySinusoidalElasticity2D
 
     bm.set_backend("numpy")
-    problem = MixedBoundaryExponentialSineElasticity2D(
+    problem = MixedBoundarySinusoidalElasticity2D(
         lame_lambda=1.0,
         shear_modulus=0.5,
     )
@@ -155,13 +168,22 @@ def test_small_mixed_boundary_state_has_expected_diagnostics():
         solve_method="scipy",
         topopt_algorithm=None,
     )
-    analyzer.solve_state(rho_val=None)
+    state = analyzer.solve_state(rho_val=None)
     assert analyzer.relative_state_residual() <= 1.0e-8
     assert analyzer.state_matrix_symmetry_error() <= 1.0e-12
-    assert bool(mesh.edgedata["essential_bc"].any())
-    assert bool(mesh.edgedata["natural_bc"].any())
+    assert analyzer.normalized_normal_trace_jump(state["stress"], 8) <= 1.0e-10
+    random_stress = analyzer.huzhang_space.function()
+    random_stress[:] = bm.arange(
+        analyzer.huzhang_space.number_of_global_dofs(), dtype=bm.float64
+    )
+    assert analyzer.normalized_normal_trace_jump(random_stress, 8) <= 1.0e-10
+    edge = mesh.Entity("edge")
+    essential_bc = edge.get_attribute("essential_bc")
+    natural_bc = edge.get_attribute("natural_bc")
+    assert bool(essential_bc.any())
+    assert bool(natural_bc.any())
     assert not bool(
-        (mesh.edgedata["essential_bc"] & mesh.edgedata["natural_bc"]).any()
+        (essential_bc & natural_bc).any()
     )
 
 
@@ -173,10 +195,10 @@ def test_relaxation_meshes_have_four_supported_corners(mesh_factory_name):
     executors = _load_module("executors", "executors.py")
     from fealpy.backend import backend_manager as bm
     from soptx.fem.spaces import HuZhangFESpace
-    from soptx.problems import MixedBoundaryExponentialSineElasticity2D
+    from soptx.problems import MixedBoundarySinusoidalElasticity2D
 
     bm.set_backend("numpy")
-    problem = MixedBoundaryExponentialSineElasticity2D(
+    problem = MixedBoundarySinusoidalElasticity2D(
         lame_lambda=1.0,
         shear_modulus=0.5,
     )
@@ -190,3 +212,54 @@ def test_relaxation_meshes_have_four_supported_corners(mesh_factory_name):
         == conforming.number_of_global_dofs() + relaxed.NCP
     )
     assert relaxed.cell_to_dof().shape == conforming.cell_to_dof().shape
+
+
+def test_formal_rate_gate_rejects_missing_or_invalid_diagnostics(runner):
+    executors = _load_module("executors", "executors.py")
+    case = runner.load_configuration().by_id()["forward-manufactured"]
+    rows = []
+    offsets = {
+        "displacement_l2_error": 0,
+        "stress_l2_error": 1,
+        "div_stress_l2_error": 0,
+        "stress_hdiv_error": 0,
+    }
+    for family in case.mesh_families:
+        for order in case.orders:
+            for level in case.levels:
+                row = {
+                    "mesh_family": family,
+                    "order": order,
+                    "level": level,
+                    "solver_status": "completed",
+                    "relative_equilibrium_residual": 1.0e-10,
+                    "normalized_normal_trace_jump": 1.0e-12,
+                    "state_matrix_symmetry_error": 1.0e-14,
+                }
+                for metric, offset in offsets.items():
+                    row[metric] = 2.0 ** (-(order + offset) * level)
+                    row[f"{metric}_rate"] = (
+                        None if level < 3 else float(order + offset)
+                    )
+                rows.append(row)
+    passed = executors._evaluate_manufactured_acceptance(
+        rows, case, runner.load_configuration().acceptance
+    )
+    assert passed["passed"]
+    assert all(
+        gate["status"] != "gated" or gate["passed"]
+        for gate in passed["rate_gates"]
+    )
+    broken_values = {
+        "normalized_normal_trace_jump": None,
+        "relative_equilibrium_residual": 1.0e-7,
+        "state_matrix_symmetry_error": 1.0e-11,
+        "stress_l2_error": float("nan"),
+    }
+    for name, value in broken_values.items():
+        broken = deepcopy(rows)
+        broken[0][name] = value
+        failed = executors._evaluate_manufactured_acceptance(
+            broken, case, runner.load_configuration().acceptance
+        )
+        assert not failed["passed"], name

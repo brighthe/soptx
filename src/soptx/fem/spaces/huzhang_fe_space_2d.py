@@ -332,7 +332,7 @@ class HuZhangFEDof2d():
                     # 将对应位置的3个标准DOF替换为松弛后的DOF组合
                     c2d[cid, loc*3:loc*3+3] = cp2dpf[local_dof[c]]
                     
-        return c2d
+        return c2d[index]
 
 class HuZhangFESpace2d(FunctionSpace):
     def __init__(self, mesh, p: int=1, ctype='C', use_relaxation: bool=False,
@@ -625,9 +625,8 @@ class HuZhangFESpace2d(FunctionSpace):
         mesh = self.mesh
         p = self.p
 
-        if 'essential_bc' in mesh.edgedata:
-            ebdflag = mesh.edgedata['essential_bc']
-        else:
+        ebdflag = mesh.Entity("edge").get_attribute("essential_bc")
+        if ebdflag is None:
             ebdflag = mesh.boundary_edge_flag()
 
         e2d = self.dof.edge_to_dof()[ebdflag] # (NEb, Nbasis)
@@ -650,8 +649,8 @@ class HuZhangFESpace2d(FunctionSpace):
         # TODO 根据输入类型进行投影
         if dim_gd == 3:
             #* Case A: 输入是应力张量 (Voigt) [xx, xy, yy]
-            # voigt 内积权重
-            eframe[:, 1] *= 2
+            # esframe 的第二行是 sym(n ⊗ t)，其 xy 系数已含 1/2。
+            # 下面的 Voigt 权重 [1, 2, 1] 恰好补足该内积所需的因子。
             num = bm.array([1, 2, 1], dtype=self.ftype)
 
             # 计算应力张量内积
@@ -756,6 +755,10 @@ class HuZhangFESpace2d(FunctionSpace):
     basis_frame_of_S = dof_frame_of_S
 
     def basis(self, bc: TensorLike, index: Index=_S):
+        if isinstance(bc, tuple):
+            if len(bc) != 1:
+                raise ValueError("HuZhangFESpace2d expects one simplex barycentric tensor")
+            bc = bc[0]
         p = self.p
         mesh = self.mesh
         dof = self.dof
@@ -831,6 +834,10 @@ class HuZhangFESpace2d(FunctionSpace):
         return phi
 
     def div_basis(self, bc: TensorLike): 
+        if isinstance(bc, tuple):
+            if len(bc) != 1:
+                raise ValueError("HuZhangFESpace2d expects one simplex barycentric tensor")
+            bc = bc[0]
         p = self.p
         mesh = self.mesh
         dof = self.dof

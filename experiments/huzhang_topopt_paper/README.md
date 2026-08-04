@@ -1,6 +1,6 @@
 # Hu–Zhang topology optimization paper experiment
 
-状态：`common-v1 configured / one native analysis adapter ready / not yet reproducible`。
+状态：`common-v1 configured / forward-manufactured formal-capable / evidence pending user run`。
 
 `legacy_drivers/` 是旧论文和博士论文章节运行脚本的迁移快照，不进入新的执行路径。
 旧结果只用于恢复问题定义和参数，不能作为投稿证据。
@@ -46,11 +46,24 @@ python .\experiments\huzhang_topopt_paper\run.py --check-only --json
 python .\experiments\huzhang_topopt_paper\run.py --case forward-manufactured --output .\experiments\huzhang_topopt_paper\outputs\forward-manufactured --json
 ```
 
-当前只有 `forward-manufactured` 已接入原生数值 adapter；它能够生成误差、自由度、
-墙钟时间、Python 峰值内存、线性残差、矩阵对称性数据和误差—自由度图。法向迹跳量诊断与理论阶表
-仍是明确 blocker，因此该 case 即使完成运行也只会报告 `partial`，不能晋级为正式
-证据。其余六个 case 已有完整配置、指标和 blocker；直接执行会生成 `blocked`
-manifest，并以退出码 2 结束，不会调用 legacy driver。
+当前只有 `forward-manufactured` 已接入原生数值 adapter。它固定运行
+`k=1,2,3,4`、`uniform-tri` checkerboard 和 `irregular-star-refined` 两类三角网格、
+每类五个加密层，因此 `metrics.csv` 必须有 40 行。每行记录位移/应力 DOF、四类
+误差、实际网格尺度、残差、矩阵对称性缺陷、归一化法向迹跳量、墙钟时间和 Python
+traced peak；直接解法的迭代数显式为 `N/A`。
+
+`k=3,4` 的两个网格族均执行正式门禁：最后三个细网格上的观测阶不得低于理论阶减
+`0.35`。位移 $L^2$、`div` 和 $H(div)$ 的理论阶为 `k`，应力 $L^2$ 为 `k+1`。
+`k=1,2` 明确只作 `characterization`，因为当前混合边界并不完全属于低阶定理的原始
+设定。所有行还必须满足残差 `<=1e-8`、`J_n<=1e-10`、对称性缺陷 `<=1e-12`，且
+不得出现缺失值、NaN 或求解失败。高阶依据 Hu (2015, Theorem 3.2 与 Remark 3.1)，
+低阶参考 Chen–Hu–Huang (2017, Theorem 3.3)。
+
+该 executor 的一次通过运行在 dirty revision 上仍只产生 development evidence；只有
+`soptx` 与实际 `fealpy` checkout 都 clean，且 `summary.json` 的
+`acceptance_status=passed` 时 runner 才会标记 formal evidence。其余六个 case 已有完整
+配置、指标和 blocker；直接执行会生成 `blocked` manifest，并以退出码 2 结束，不会调用
+legacy driver。
 
 每个运行目录包含：
 
@@ -74,7 +87,6 @@ manifest，并以退出码 2 结束，不会调用 legacy driver。
 整个公共矩阵晋级条件：
 
 1. 为六个 `configured` case 补齐当前命名空间的原生 adapter；
-2. 补齐制造解的法向迹跳量诊断，并把理论核查结果写入预期阶；
-3. 由用户按明确环境逐条运行，检查退出码、产物和 acceptance；
-4. 在 clean revision 上重跑，记录环境、参数和产物 SHA-256；
-5. 只有全部公共门禁通过后，才根据证据选择数学或力学投稿路线。
+2. 由用户按明确环境逐条运行，检查退出码、40 行产物和 acceptance；
+3. 在 clean revision 上以 revision 命名目录重跑，记录环境、参数和产物 SHA-256；
+4. 只有全部公共门禁通过后，才根据证据选择数学或力学投稿路线。

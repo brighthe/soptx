@@ -13,6 +13,7 @@ random_seed = 0
 high_order_rate_deficit = 0.35
 relative_equilibrium_residual_max = 1.0e-8
 normalized_normal_trace_jump_max = 1.0e-10
+state_matrix_symmetry_error_max = 1.0e-12
 finite_difference_relative_error_max = 1.0e-5
 volume_fraction_absolute_error_max = 1.0e-3
 stress_constraint_violation_max = 3.0e-3
@@ -28,17 +29,19 @@ figures_directory = "figures"
 [[cases]]
 id = "forward-manufactured"
 role = "analysis-baseline"
-problem = "nonhomogeneous-traction-manufactured-elasticity-2d"
+problem = "mixed-boundary-sinusoidal-elasticity-2d"
 methods = ["huzhang"]
 mesh_families = ["uniform-tri", "irregular-star-refined"]
 orders = [1, 2, 3, 4]
-levels = [1, 2, 3]
+levels = [1, 2, 3, 4, 5]
 metrics = [
   "displacement_l2_error",
   "stress_l2_error",
   "div_stress_l2_error",
   "stress_hdiv_error",
   "relative_equilibrium_residual",
+  "state_matrix_symmetry_error",
+  "direct_solver_iterations",
   "normalized_normal_trace_jump",
   "total_dofs",
   "wall_time_seconds",
@@ -56,11 +59,13 @@ use_relaxation = true
 solver = "scipy"
 
 [cases.expected_orders]
-displacement_l2_error = "theory-audit-required"
-stress_l2_error = "theory-audit-required"
-div_stress_l2_error = "theory-audit-required"
-stress_hdiv_error = "theory-audit-required"
-low_order_policy = "characterization-until-theory-audit"
+high_order_gate_orders = [3, 4]
+last_fine_grid_count = 3
+displacement_l2_error_order_offset = 0
+stress_l2_error_order_offset = 1
+div_stress_l2_error_order_offset = 0
+stress_hdiv_error_order_offset = 0
+low_order_policy = "characterization"
 
 [[cases]]
 id = "boundary-ablation"
