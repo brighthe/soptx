@@ -347,20 +347,19 @@ def report(rows: list[dict], solver: str) -> list[float]:
 def solver_unavailable_reason(solver: str) -> str | None:
     """求解器后端不可用时返回原因, 可用则返回 None.
 
-    只有 ``mumps`` 需要探测: 它依赖已编译的 ``fealpy.solver.mumps._dmumps``
-    扩展, 不随 FEALPy 的纯 Python 安装提供。放在入口检查, 免得装配跑完了才在
-    求解那一步炸。
+    只有 ``mumps`` 需要探测: 它依赖外部 ``mumps`` 包 (PyMUMPS), 不是 fealpy
+    自带。放在入口检查, 免得装配跑完了才在求解那一步炸。
     """
 
     if solver != "mumps":
         return None
 
     try:
-        import_module("fealpy.solver.mumps")
+        import_module("mumps")
     except Exception as exc:
         return (
             f"求解器 'mumps' 不可用 ({type(exc).__name__}: {exc}); "
-            "该后端需要已编译的 MUMPS 扩展, 当前环境没有安装。"
+            "该后端需要 PyMUMPS 包 (pip install pymumps) 及系统 MUMPS 库。"
             "请改用 --solver scipy 或 --solver cg."
         )
     return None
@@ -406,7 +405,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--solver", choices=DIRECT_SOLVERS + ITERATIVE_SOLVERS,
         default="scipy",
-        help="求解器 (默认 scipy); mumps 需要已编译的 MUMPS 扩展",
+        help="求解器 (默认 scipy); mumps 需要 PyMUMPS 包",
     )
     # 以下三项只对 cg 生效, 默认值与 LagrangeFEMAnalyzer.solve_system 一致
     parser.add_argument(
