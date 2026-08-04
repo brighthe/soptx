@@ -29,7 +29,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 integration_order: int = 4,
                 assembly_method: Literal['standard', 'voigt', 'fast'] = 'standard',
                 operator_level: Literal['fa', 'ea'] = 'fa',
-                solve_method: Literal['mumps', 'cg'] = 'mumps',
+                solve_method: Literal['mumps', 'scipy', 'cg'] = 'mumps',
                 tensor_space: Optional[TensorFunctionSpace] = None,
                 dof_comm: Optional[object] = None,
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
