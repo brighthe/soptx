@@ -88,13 +88,13 @@ def solve_one_level(problem, material, degree: int, subdivisions: int,
     sigmah, uh = state["stress"], state["displacement"]
 
     disp_error = mesh.error(
-        u=uh, v=problem.disp_solution, q=integration_order
+        uh, problem.disp_solution, q=integration_order
     )
     stress_error = mesh.error(
-        u=sigmah, v=problem.stress_solution, q=integration_order
+        sigmah, problem.stress_solution, q=integration_order
     )
     div_stress_error = mesh.error(
-        u=sigmah.div_value, v=problem.div_stress_solution, q=integration_order
+        sigmah.div_value, problem.div_stress_solution, q=integration_order
     )
     stress_hdiv_error = bm.sqrt(stress_error**2 + div_stress_error**2)
 

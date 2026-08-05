@@ -625,8 +625,10 @@ class HuZhangFESpace2d(FunctionSpace):
         mesh = self.mesh
         p = self.p
 
-        if 'essential_bc' in mesh.edgedata:
-            ebdflag = mesh.edgedata['essential_bc']
+        # FEALPy 4.0.0 的 Mesh 不再挂载 edgedata, 边界标记改由调用方经
+        # threshold 显式传入; 缺省时回退到全部边界边
+        if threshold is not None:
+            ebdflag = threshold
         else:
             ebdflag = mesh.boundary_edge_flag()
 
@@ -679,6 +681,10 @@ class HuZhangFESpace2d(FunctionSpace):
             raise ValueError(f"Unknown gd output dimension: {dim_gd.shape[-1]}")
         
         # 赋值
+        # bcs = multi_index_matrix(p,1)/p 按 λ0 降序排列: q0 在 edge[:,0] 端,
+        # qp 在 edge[:,1] 端, 内部位置也按全局边方向依次排列, 与
+        # e2d = [e0dof(edge0 端), edge2idof(内部), e1dof(edge1 端)] 完全一致,
+        # 直接按列写入即可
         uh[e2d] = val.reshape(NEb, -1)
 
         isDDof = bm.zeros((uh.shape[0],), dtype=bm.bool)
@@ -756,6 +762,9 @@ class HuZhangFESpace2d(FunctionSpace):
     basis_frame_of_S = dof_frame_of_S
 
     def basis(self, bc: TensorLike, index: Index=_S):
+        # FEALPy 4.0.0 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
+        if isinstance(bc, tuple):
+            bc = bc[0] if len(bc) == 1 else bm.stack(list(bc), axis=-1)
         p = self.p
         mesh = self.mesh
         dof = self.dof
@@ -775,8 +784,9 @@ class HuZhangFESpace2d(FunctionSpace):
             cell_indices = index
             NC = len(cell_indices) if hasattr(cell_indices, '__len__') else 1
 
-        cell = mesh.entity('cell')[cell_indices]     
-        c2e = mesh.cell_to_edge()[cell_indices]      
+        cell = mesh.entity('cell')[cell_indices]
+        c2e = mesh.cell_to_edge()[cell_indices]
+        edge = mesh.entity('edge')
 
         nsframe, esframe, csframe = self.basis_frame_of_S()
 
@@ -797,6 +807,10 @@ class HuZhangFESpace2d(FunctionSpace):
             idx += N
 
         # 边界边基函数
+        # 注意: cell_to_dof 对翻转单元 (局部边方向与全局边方向相反) 用
+        # inverse_dofidx 重排边 DOF 列, 基函数列保持局部位置顺序, 两者构成
+        # 补偿性配对 (求值在全局位置 1-j 恢复局部位置 j 的系数), 不可再对
+        # 基函数列做翻转重排, 否则二次错位破坏对偶性
         for e, edof in enumerate(edofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
@@ -830,7 +844,10 @@ class HuZhangFESpace2d(FunctionSpace):
 
         return phi
 
-    def div_basis(self, bc: TensorLike): 
+    def div_basis(self, bc: TensorLike):
+        # FEALPy 4.0.0 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
+        if isinstance(bc, tuple):
+            bc = bc[0] if len(bc) == 1 else bm.stack(list(bc), axis=-1)
         p = self.p
         mesh = self.mesh
         dof = self.dof
@@ -845,6 +862,7 @@ class HuZhangFESpace2d(FunctionSpace):
 
         cell = mesh.entity('cell')
         c2e  = mesh.cell_to_edge()
+        edge = mesh.entity('edge')
 
         NN = mesh.number_of_nodes()
         NE = mesh.number_of_edges()
@@ -852,7 +870,20 @@ class HuZhangFESpace2d(FunctionSpace):
 
         nsframe, esframe, csframe = self.basis_frame_of_S()
 
-        gphi_s = self.mesh.grad_shape_function(bc, self.p) # (NC, ldof, GD)
+        # FEALPy 4.0.0 (fealpy_stable) 的 grad_shape_function 返回参考单元坐标
+        # (x̂, ŷ) 下的导数 (grad_ref = grad_bary @ Dlambda, x̂=λ1, ŷ=λ2), 不是
+        # 物理导数; 用参考 Jacobian 变换: ∇_x φ = J^{-T} · grad_ref,
+        # 其中 J = [P1-P0, P2-P0] 是参考坐标 (x̂,ŷ) 到物理坐标的映射.
+        gphi_s = self.mesh.grad_shape_function(bc, self.p)  # (NQ, LDOF, 2) 参考导数
+        cpts = mesh.entity('cell')  # (NC, 3)
+        p0 = mesh.entity('node')[cpts[:, 0]]
+        J = bm.stack([mesh.entity('node')[cpts[:, 1]] - p0,
+                      mesh.entity('node')[cpts[:, 2]] - p0], axis=-1)  # (NC, GD, 2)
+        JinvT = bm.swapaxes(bm.linalg.inv(J), -1, -2)  # (NC, 2, GD) 的转置形式
+
+        def phys_grad(grad_scalar):
+            """grad_scalar: (NQ, N, 2) 参考导数 -> (NC, NQ, N, GD) 物理导数."""
+            return bm.einsum('qnd, cgd -> cqng', grad_scalar, JinvT)
 
         NQ = bc.shape[0]
         dphi = bm.zeros((NC, NQ, ldof, 2), dtype=self.ftype)
@@ -862,17 +893,18 @@ class HuZhangFESpace2d(FunctionSpace):
         for v, vdof in enumerate(ndofs):
             N = len(vdof)
             scalar_phi_idx = multiindex_to_number(vdof.dof_scalar)
-            grad_scalar = gphi_s[..., scalar_phi_idx, :] # (NC, NQ, N, 2)
+            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :]) # (NC, NQ, N, GD)
             frame = nsframe[cell[:, v]][:, None, vdof.dof_tensor] # (NC, 1, N, 3)
             dphi[..., idx:idx+N, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
             idx += N
 
-        # 边界边基函数
+        # 边界边基函数 (与 basis 相同: 列保持局部位置顺序, 与 cell_to_dof
+        # 的翻转重排构成补偿性配对)
         for e, edof in enumerate(edofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
-            grad_scalar = gphi_s[..., scalar_phi_idx, :]
+            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :])
             frame = esframe[c2e[:, e]][:, None, edof.dof_tensor]
             dphi[..., idx:idx+N, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
@@ -882,7 +914,7 @@ class HuZhangFESpace2d(FunctionSpace):
         for e, edof in enumerate(iedofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
-            grad_scalar = gphi_s[..., scalar_phi_idx, :]
+            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :])
             frame = esframe[c2e[:, e]][:, None, edof.dof_tensor]
             dphi[..., idx:idx+N, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
@@ -892,7 +924,7 @@ class HuZhangFESpace2d(FunctionSpace):
         n = mesh.geo_dimension()
         if p >= n + 1:
             scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-            grad_scalar = gphi_s[..., scalar_phi_idx, :]
+            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :])
             frame = csframe[:, None, icdofs[0].dof_tensor]
             dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
@@ -900,6 +932,8 @@ class HuZhangFESpace2d(FunctionSpace):
         return dphi
 
     def hess_basis(self, bc: TensorLike, index: Index=_S, variable='x'):
+        if isinstance(bc, tuple):
+            bc = bm.stack(list(bc), axis=-1)
         return self.mesh.hess_shape_function(bc, self.p, index=index, variables=variable)
     
     @barycentric

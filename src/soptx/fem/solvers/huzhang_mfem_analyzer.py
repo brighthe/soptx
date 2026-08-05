@@ -98,6 +98,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._cached_K = None  # 缓存施加边界条件后的刚度矩阵，供伴随求解复用
         self._cached_rhs = None
         self._cached_state_vector = None
+        self._essential_bc = None  # 牵引边界边标记 (NE,)，FEALPy 4.0.0 无 mesh.edgedata
+        self._natural_bc = None    # 位移边界边标记 (NE,)，u = u_D 弱施加
         self._cached_Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space) # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
 
 
@@ -306,8 +308,22 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                 )
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')
-            K = bmat([[A,   B],
-                      [B.T, -J]], format='csr')
+
+            # fealpy bmat 在 blocks 全部非 None 时走 hstack/vstack 分支,
+            # 该分支对含 B.T 与 -J 的组合会丢失 J 块 (K 秩亏导致求解失败);
+            # 改用 scipy bmat (显式零块) 构造后转回 CSRTensor
+            import scipy.sparse as sp
+            gdof_sigma = A.shape[0]
+            gdof_u = B.shape[1]
+            Z_ss = sp.csr_matrix((gdof_sigma, gdof_sigma))
+            Z_su = sp.csr_matrix((gdof_sigma, gdof_u))
+            Z_us = sp.csr_matrix((gdof_u, gdof_sigma))
+            K_sp = sp.bmat(
+                [[A.to_scipy(), B.to_scipy()],
+                 [B.to_scipy().T, -J.to_scipy()]],
+                format='csr',
+            )
+            K = CSRTensor.from_scipy(K_sp)
             
             # # ========== 验证 valid_faces_idx ==========
             # face2cell = mesh.face_to_cell()
@@ -390,20 +406,65 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     
     def assemble_displacement_bc_vector(self, enable_timing: bool = False):
         """组装位移边界条件产生的载荷向量 (自然边界条件) <u_D, (tau · n)>_Γ_D
-        
-        当前所有位移边界均为齐次边界条件 (u_D = 0), 故直接返回零向量.
+
+        位移边界 u = u_D 在 Hu-Zhang 混合形式中是自然边界条件, 通过
+        ∫_Γ_D (τ·n)·u_D 进入 σ 方程的右端项. u_D = 0 时该项为零.
         """
         space_sigma = self._huzhang_space
+        mesh = self._mesh
         gdof = space_sigma.number_of_global_dofs()
 
-        F_natural = bm.zeros(gdof, dtype=bm.float64, device=space_sigma.device)
+        # FEALPy 4.0.0 无 mesh.edgedata, 边界标记由分析器持有
+        if self._natural_bc is not None:
+            disp_edge_flag = self._natural_bc
+        else:
+            bc_edge = mesh.entity_barycenter('edge')
+            disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
 
-        #TODO 角点松弛
-        if space_sigma.use_relaxation == True:
-            TM = space_sigma.TM
-            F_natural = TM.T @ F_natural
+        bdedge = mesh.boundary_edge_flag() & disp_edge_flag
+        NBF = int(bdedge.sum())
+        if NBF == 0:
+            return bm.zeros(gdof, dtype=bm.float64, device=space_sigma.device)
 
-        return F_natural
+        gd = getattr(self._pde, "displacement_bc", None)
+        if gd is None or (not callable(gd)):
+            # 未定义位移边界函数, 默认 u_D = 0 (齐次), 直接返回零向量
+            return bm.zeros(gdof, dtype=bm.float64, device=space_sigma.device)
+
+        e2c = mesh.face_to_cell()[bdedge]           # (NBF, 3): [cell, neighbor, loc]
+        en = mesh.face_unit_normal()[bdedge]        # (NBF, GD)
+        edge_measure = mesh.entity_measure('edge')[bdedge]
+
+        qf = mesh.quadrature_formula(self._integration_order, 'edge')
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        NQ = len(bcs)
+        bcsi = [bm.insert(bcs, i, 0, axis=-1) for i in range(3)]
+
+        symidx = [[0, 1], [1, 2]]
+        ldof = space_sigma.number_of_local_dofs()
+        phin = bm.zeros((NBF, NQ, ldof, 2), dtype=space_sigma.ftype)
+        gval = bm.zeros((NBF, NQ, 2), dtype=space_sigma.ftype)
+        for i in range(3):
+            flag = e2c[:, 2] == i
+            if not bool(bm.any(flag)):
+                continue
+            cids = e2c[flag, 0].astype(int)
+            phi = space_sigma.basis(bcsi[i], index=cids)   # (nflag, NQ, ldof, 3)
+            phin[flag, ..., 0] = bm.sum(phi[..., symidx[0]] * en[flag, None, None], axis=-1)
+            phin[flag, ..., 1] = bm.sum(phi[..., symidx[1]] * en[flag, None, None], axis=-1)
+            points = mesh.bc_to_point(bcsi[i], index=cids)  # (nflag, NQ, GD)
+            gval[flag] = gd(points)
+
+        b = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phin, gval)
+        cell2dof = space_sigma.cell_to_dof()[e2c[:, 0].astype(int)]
+        F_vec = bm.zeros(gdof, dtype=space_sigma.ftype, device=space_sigma.device)
+        bm.add.at(F_vec, cell2dof, b)
+
+        # 角点松弛变换
+        if space_sigma.use_relaxation:
+            F_vec = space_sigma.TM.T @ F_vec
+
+        return F_vec
     
     def apply_traction_boundary_condition(self, 
                                         K: CSRTensor, 
@@ -419,8 +480,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if hasattr(self._pde, 'set_load_region'):
             self._pde.set_load_region(self._mesh)
         
-        # 计算边界自由度的值
-        uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
+        # 计算边界自由度的值 (threshold 传入牵引边界标记, 与 solve_state 写入一致)
+        uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(
+            gd_traction, threshold=self._essential_bc
+        )
 
         gdof_total = K.shape[0]
         gdof_sigma = space_sigma.number_of_global_dofs()
@@ -496,8 +559,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         pde = self._pde
         bc = mesh.entity_barycenter('edge')
 
-        mesh.edgedata['essential_bc'] = pde.is_traction_boundary(bc)      # σ·n = t (强施加)
-        mesh.edgedata['natural_bc']   = pde.is_displacement_boundary(bc)  # u = u_D (弱施加)
+        # FEALPy 4.0.0 的 Mesh 不再挂载 edgedata 用户数据字典, 边界标记改由分析器持有
+        self._essential_bc = pde.is_traction_boundary(bc)      # σ·n = t (强施加)
+        self._natural_bc = pde.is_displacement_boundary(bc)    # u = u_D (弱施加)
 
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
@@ -523,13 +587,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('源项处理时间')
 
-        has_essential = ('essential_bc' in mesh.edgedata) and bool(mesh.edgedata['essential_bc'].any())
+        has_essential = (self._essential_bc is not None) and bool(self._essential_bc.any())
         if has_essential:
             K, F = self.apply_traction_boundary_condition(K0, F0, space_sigmah)
         else:
             K, F = K0, F0
 
-        self._cached_K = K
+        # fealpy spsolve 经 to_scipy (共享内存视图) 传给 scipy SuperLU, 会原地
+        # 修改矩阵 (列置换/缩放); 缓存副本供伴随求解复用, 否则缓存的 K 被破坏
+        self._cached_K = K.copy()
         self._cached_rhs = F
 
         if enable_timing:
@@ -651,7 +717,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             self._pde.set_load_region(self._mesh)
 
         gd_traction = self._pde.traction_bc
-        _, is_bd_dof = space_sigma.set_dirichlet_bc(gd_traction)
+        essential_bc = self._essential_bc
+        if essential_bc is None:
+            bc = self._mesh.entity_barycenter('edge')
+            essential_bc = self._pde.is_traction_boundary(bc)
+        _, is_bd_dof = space_sigma.set_dirichlet_bc(
+            gd_traction, threshold=essential_bc
+        )
 
         is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
         is_fixed_dof[:gdof_sigma] = is_bd_dof
@@ -913,8 +985,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         bd_edge_flag = mesh.boundary_edge_flag()
 
         # 1. 获取自然边界标记 (Natural BC)
-        if 'natural_bc' in mesh.edgedata:
-            disp_edge_flag = mesh.edgedata['natural_bc']
+        # FEALPy 4.0.0 不再挂载 edgedata, 优先取分析器持有的标记, 否则按 PDE 谓词重算
+        if self._natural_bc is not None:
+            disp_edge_flag = self._natural_bc
         else:
             bc_edge = mesh.entity_barycenter('edge')
             disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)

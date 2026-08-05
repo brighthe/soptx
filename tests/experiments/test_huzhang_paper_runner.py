@@ -158,11 +158,10 @@ def test_small_mixed_boundary_state_has_expected_diagnostics():
     analyzer.solve_state(rho_val=None)
     assert analyzer.relative_state_residual() <= 1.0e-8
     assert analyzer.state_matrix_symmetry_error() <= 1.0e-12
-    assert bool(mesh.edgedata["essential_bc"].any())
-    assert bool(mesh.edgedata["natural_bc"].any())
-    assert not bool(
-        (mesh.edgedata["essential_bc"] & mesh.edgedata["natural_bc"]).any()
-    )
+    # FEALPy 4.0.0 无 mesh.edgedata, 边界标记由分析器持有
+    assert bool(analyzer._essential_bc.any())
+    assert bool(analyzer._natural_bc.any())
+    assert not bool((analyzer._essential_bc & analyzer._natural_bc).any())
 
 
 @pytest.mark.parametrize(

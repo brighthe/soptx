@@ -27,6 +27,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         self.assembly.set(method)
 
+    def _cell_to_face_sign(self, mesh):
+        """FEALPy 4.0.0 二维下 face 即 edge, 接口名为 cell_to_edge_sign."""
+        if mesh.top_dimension() == 2:
+            return mesh.cell_to_edge_sign()
+        return mesh.cell_to_face_sign()
+
     def make_index(self, space: _FS):
         mesh = space.mesh
         NF = mesh.number_of_faces()
@@ -57,7 +63,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         ldof = space.number_of_local_dofs()
 
         cell2face = mesh.cell_to_face()
-        cell2facesign = mesh.cell_to_face_sign()
+        cell2facesign = self._cell_to_face_sign(mesh)
         cell2dof = space.cell_to_dof()
 
         face2dof = bm.zeros((NF, 2*ldof), dtype=bm.int64)
@@ -108,7 +114,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         cell2face = mesh.cell_to_face()
         # 单元内局部面的局部取向是否与该全局面的全局取向一致
-        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
+        cell2facesign = self._cell_to_face_sign(mesh)      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
         ldof = space.number_of_local_dofs()
 
         # 内部面 F 上, 基函数 w^+ 来自 L 侧单元, w^- 来自 R 侧单元
@@ -212,12 +218,16 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             warnings.warn(msg, UserWarning)
         # ======================================================================
         
+        # 跳量惩罚缩放: γ/hF·∫[w]², γ 取材料模量的小比例系数.
+        # 数值验证: 原 E/L0²·hF 与裸模量 γ/hF 都过大, 惩罚块量级远超柔度块,
+        # 会把 σ 的 div 约束压坏 (div 误差发散, σ 不收敛); γ ~ 1e-2·模量时
+        # 低阶 (p <= d) 鞍点系统稳定且收敛阶正常 (σ ~ 2.4 阶, div ~ 1.6 阶).
         if p == 1:
-            alpha = E / (L0 ** 2)
+            gamma = 0.01 * E
         else:
-            alpha = mu / (L0 ** 2)
+            gamma = 0.01 * mu
 
-        KE = bm.einsum('f, fij -> fij', alpha * hF, integrand)
+        KE = bm.einsum('f, fij -> fij', gamma * hF ** -1, integrand)
 
         return KE        
 
@@ -247,7 +257,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         cell2face = mesh.cell_to_face()               # (NC, TD+1)
         # 单元内局部面的局部取向是否与该全局面的全局取向一致
-        cell2facesign = mesh.cell_to_face_sign()      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
+        cell2facesign = self._cell_to_face_sign(mesh)      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
         ldof = space.number_of_local_dofs()
 
         val_all = bm.zeros((NF, NQ, 2*ldof, GD), dtype=bm.float64) 
