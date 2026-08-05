@@ -42,7 +42,7 @@ class HalfMBBBeamRight2d(PDEBase):
         self._E, self._nu = E, nu
         self._plane_type = plane_type
 
-        self._eps = 1e-8
+        self._eps = 1e-12
         self._load_type = 'concentrated'
         self._boundary_type = 'mixed'
 
@@ -164,27 +164,33 @@ class HalfMBBBeamRight2d(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
     
     @cartesian
-    def concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        """集中载荷 (点力)"""
+    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        """左上角集中载荷 (点力): 竖直向下 P."""
         kwargs = bm.context(points)
         val = bm.zeros(points.shape, **kwargs)
-        val = bm.set_at(val, (..., 1), self._P) 
-        
+        val = bm.set_at(val, (..., 1), self._P)
+
         return val
+
+    def concentrate_load_bc(self) -> List[Callable]:
+        """返回集中载荷值函数列表, 单点情况长度为 1."""
+        return [self._concentrate_load_bc]
     
     @cartesian
     def is_concentrate_load_boundary_dof(self, points: TensorLike) -> TensorLike:
+        """左上角单点载荷的边界谓词."""
         domain = self.domain
-        x, y = points[..., 0], points[..., 1]  
+        x, y = points[..., 0], points[..., 1]
 
         on_top_boundary = bm.abs(y - domain[3]) < self._eps
         on_left_boundary = bm.abs(x - domain[0]) < self._eps
 
         return on_top_boundary & on_left_boundary
 
-    def is_concentrate_load_boundary(self) -> Callable:
+    def is_concentrate_load_boundary(self) -> List[Callable]:
+        """返回集中载荷边界标记函数列表, 与 concentrate_load_bc 一一对应."""
 
-        return self.is_concentrate_load_boundary_dof
+        return [self.is_concentrate_load_boundary_dof]
     
     def get_passive_element_mask(self, 
                                 mesh: HomogeneousMesh,
