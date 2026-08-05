@@ -5,9 +5,10 @@ from fealpy.typing import TensorLike
 from fealpy.decorator import cartesian, variantmethod
 from fealpy.mesh import QuadrangleMesh, TriangleMesh, HomogeneousMesh
 
+from soptx.problems import HalfMBBBeamRight2d as _MaintainedHalfMBBBeamRight2d
 from soptx.model.pde_base import PDEBase  
 
-class HalfMBBBeamRight2d(PDEBase):
+class _LegacyHalfMBBBeamRight2d(PDEBase):
     '''
     对称 MBB 梁右半设计域的 PDE 模型
 
@@ -411,3 +412,43 @@ class MBBBeam2d(PDEBase):
     def is_concentrate_load_boundary(self) -> Callable:
 
         return self.is_concentrate_load_boundary_dof
+
+
+class HalfMBBBeamRight2d(_MaintainedHalfMBBBeamRight2d):
+    """Deprecated adapter retaining the legacy mesh and passive-region API."""
+
+    def __init__(
+        self,
+        domain: List[float] = [0.0, 60.0, 0.0, 20.0],
+        mesh_type: str = "uniform_quad",
+        P: float = -1.0,
+        E: float = 1.0,
+        nu: float = 0.3,
+        plane_type: str = "plane_stress",
+        enable_logging: bool = False,
+        logger_name: Optional[str] = None,
+    ) -> None:
+        super().__init__(domain=domain, P=P, E=E, nu=nu, plane_type=plane_type)
+        self._mesh_type = mesh_type
+        self._enable_logging = enable_logging
+        self._logger_name = logger_name
+
+    def _save_meshdata(self, mesh: HomogeneousMesh, mesh_type: str, **params) -> None:
+        nx = params.get("nx", 10)
+        ny = params.get("ny", 10)
+        mesh.meshdata = getattr(mesh, "meshdata", {})
+        mesh.meshdata.update({
+            "domain": self.domain, "mesh_type": mesh_type, "nx": nx, "ny": ny,
+            "hx": (self.domain[1] - self.domain[0]) / nx,
+            "hy": (self.domain[3] - self.domain[2]) / ny,
+        })
+
+    init_mesh = _LegacyHalfMBBBeamRight2d.init_mesh
+
+    def get_passive_element_mask(
+        self, mesh: HomogeneousMesh, load_region: tuple = (3, 2),
+        support_region: tuple = (3, 3),
+    ) -> TensorLike:
+        return _LegacyHalfMBBBeamRight2d.get_passive_element_mask(
+            self, mesh=mesh, load_region=load_region, support_region=support_region,
+        )

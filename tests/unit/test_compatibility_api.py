@@ -76,6 +76,11 @@ assert (
     ExponentialSineManufacturedElasticity2D.__name__
     == "ExponentialSineManufacturedElasticity2D"
 )
+
+from soptx.model.mbb_beam_2d_lfem import HalfMBBBeamRight2d
+legacy_mbb = HalfMBBBeamRight2d()
+mesh = legacy_mbb.init_mesh(nx=2, ny=1)
+assert mesh.number_of_cells() == 2
 """,
     ),
 )

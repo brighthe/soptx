@@ -18,8 +18,10 @@
 
 ## 数学模型与验证
 
-- [`models/manufactured-elasticity.md`](models/manufactured-elasticity.md) —
-  三个活跃线弹性制造解；
+- [`problems/manufactured-elasticity.md`](problems/manufactured-elasticity.md) —
+  五个活跃线弹性制造解（含混合边界变体）；
+- [`problems/engineering-benchmarks.md`](problems/engineering-benchmarks.md) —
+  无解析解的工程基准算例（集中力等真实载荷）；
 - [`validation/evidence-policy.md`](validation/evidence-policy.md) —
   快速 CI、本地重验证和正式 evidence 要求；
 - [`references/README.md`](references/README.md) — 第三方参考代码治理。
@@ -29,6 +31,9 @@
 - [`known-issues/fealpy-tensor-product-mesh.md`](known-issues/fealpy-tensor-product-mesh.md) —
   FEALPy `4.0.0-alpha` mesh 重构的四处上游回归（一处影响所有网格，三处限张量积
   网格），含判据、修复方案与 SOPTX 的处置。
+- [`known-issues/huzhang-fem-convergence.md`](known-issues/huzhang-fem-convergence.md) —
+  胡张元混合有限元求解链不收敛的定位与修复记录：`grad_shape_function` 参考导数
+  根因、jump-penalty 缩放、bmat 丢块、spsolve 原地修改矩阵等六处问题及验证结果。
 
 ## 可执行示例
 

@@ -3,6 +3,7 @@
 from .elasticity import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
+    HalfMBBBeamRight2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
@@ -11,6 +12,7 @@ from .elasticity import (
 __all__ = [
     "DivergenceFreePolynomialElasticity3D",
     "ExponentialSineManufacturedElasticity2D",
+    "HalfMBBBeamRight2d",
     "MixedBoundaryExponentialSineElasticity2D",
     "MixedBoundarySinusoidalElasticity2D",
     "SinusoidalPlaneStrainElasticity2D",

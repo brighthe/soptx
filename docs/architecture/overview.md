@@ -29,7 +29,7 @@ core → materials / problems → fem → topology → visualization
 [仓库 README](../../README.md#公共-api)。
 
 `Problem`、`Material` 和网格由调用方显式组合。Problem 的 shape 契约见
-[制造线弹性模型](../models/manufactured-elasticity.md)。
+[制造线弹性模型](../problems/manufactured-elasticity.md)。
 
 ## 问题契约（Protocol 族）
 

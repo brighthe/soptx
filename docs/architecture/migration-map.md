@@ -17,6 +17,7 @@
 | `TriSolHomoDirHuZhang2d` | `soptx.problems.ExponentialSineManufacturedElasticity2D` |
 | `BoxTriLagrange2dData` | `soptx.problems.SinusoidalPlaneStrainElasticity2D` |
 | `PolySolPureDirLagrange3d` | `soptx.problems.DivergenceFreePolynomialElasticity3D` |
+| `soptx.model.mbb_beam_2d_lfem.HalfMBBBeamRight2d` | `soptx.problems.HalfMBBBeamRight2d` |
 
 旧 Problem 类仍保留其网格工厂，作为过渡兼容行为；新语义类没有 `init_mesh`，调用方
 必须显式创建并校验网格。

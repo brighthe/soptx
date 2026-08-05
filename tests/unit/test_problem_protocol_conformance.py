@@ -2,8 +2,8 @@
 
 Two layers:
 
-1. Every maintained Problem must satisfy the protocols the analyzers annotate
-   their ``pde`` parameter with.  Note that ``runtime_checkable`` validates
+1. Each maintained Problem must satisfy every analyzer protocol it supports.
+   ``runtime_checkable`` validates
    member *presence* only, never signatures.
 2. Every ``pde`` member an analyzer touches must be declared in its protocol.
    This is the layer that catches drift at the source: adding a new
@@ -30,13 +30,23 @@ from soptx.fem.solvers import huzhang_mfem_analyzer, lagrange_fem_analyzer
 from soptx.problems import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
+    HalfMBBBeamRight2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
 )
 
 
-MAINTAINED_PROBLEM_CLASSES = (
+LAGRANGE_PROBLEM_CLASSES = (
+    DivergenceFreePolynomialElasticity3D,
+    ExponentialSineManufacturedElasticity2D,
+    HalfMBBBeamRight2d,
+    MixedBoundaryExponentialSineElasticity2D,
+    MixedBoundarySinusoidalElasticity2D,
+    SinusoidalPlaneStrainElasticity2D,
+)
+
+HUZHANG_PROBLEM_CLASSES = (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
     MixedBoundaryExponentialSineElasticity2D,
@@ -118,14 +128,23 @@ def accessed_pde_members(module) -> set[str]:
     return members
 
 
-@pytest.mark.parametrize("problem_class", MAINTAINED_PROBLEM_CLASSES)
-def test_maintained_problems_satisfy_both_analyzer_contracts(
+@pytest.mark.parametrize("problem_class", LAGRANGE_PROBLEM_CLASSES)
+def test_maintained_problems_satisfy_lagrange_contract(
     problem_class,
 ) -> None:
     problem = problem_class()
 
     assert isinstance(problem, ElasticityProblem)
     assert isinstance(problem, DirichletElasticityProblem)
+
+
+@pytest.mark.parametrize("problem_class", HUZHANG_PROBLEM_CLASSES)
+def test_huzhang_supported_problems_satisfy_mixed_contract(
+    problem_class,
+) -> None:
+    problem = problem_class()
+
+    assert isinstance(problem, ElasticityProblem)
     assert isinstance(problem, MixedBoundaryElasticityProblem)
 
 

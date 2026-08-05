@@ -1,4 +1,4 @@
-"""集中力 (点载荷) 工程基准算例: 二维 MBB 梁右半域.
+"""集中力 (点载荷) 工程基准算例.
 
 与 ``minimal_demo.py`` 的分工:
 
@@ -6,11 +6,6 @@
   回答"离散是否正确";
 * 本文件走工程基准: 没有解析解, 判据是真相对残差 + 载荷等效性, 回答
   "集中力载荷路径是否被正确装配"。
-
-问题取博士论文算例 3.1 (二维 MBB 梁) 的对称右半域, 由
-``soptx.model.HalfMBBBeamRight2d`` 建模: 60 x 20 mm, 左边界对称约束
-(u_x = 0), 右下角滑移支座 (u_y = 0), 左上角竖直向下集中载荷 P = 1 N,
-E = 1 MPa, nu = 0.3, 平面应力。
 
 为什么没有 L2 收敛阶判据: 二维点载荷在作用点处应力奇异, 位移解光滑性低于
 制造解, 理论收敛阶也随之降低, 沿用制造解的 1.5 门槛会误报。集中力路径的
@@ -22,31 +17,78 @@ E = 1 MPa, nu = 0.3, 平面应力。
   若载荷落在被强加的自由度上, 残差依然为 0, 而载荷会被静默吞掉, 只有
   载荷和校验能抓到这种失效。
 
-注意 ``soptx.model`` 已标记 deprecated (维护中的数学问题在
-``soptx.problems``); 集中力工程问题尚未迁移过去, 本算例暂时直接引用模型类。
-
 运行::
 
     python examples/lagrange_elasticity/concentrated_load_demo.py
+    python examples/lagrange_elasticity/concentrated_load_demo.py --problem cantilever-corner
     python examples/lagrange_elasticity/concentrated_load_demo.py --levels 4
     python examples/lagrange_elasticity/concentrated_load_demo.py --mesh-type tri
     python examples/lagrange_elasticity/concentrated_load_demo.py --solver cg --rtol 1e-12
+    python examples/lagrange_elasticity/concentrated_load_demo.py --save-vtu
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 import sys
+from typing import Any, Callable
 
 import numpy as np
 
 from fealpy.backend import backend_manager as bm
+from fealpy.mesh import QuadrangleMesh, TriangleMesh
+
+from pyevtk.hl import unstructuredGridToVTK
 
 from soptx.fem.solvers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.model.mbb_beam_2d_lfem import HalfMBBBeamRight2d
+from soptx.problems import HalfMBBBeamRight2d
+
+
+# VTK 单元类型常量
+_VTK_QUAD = 9
+_VTK_TRIANGLE = 5
+
+
+# ---------------------------------------------------------------------------
+# 集中力算例注册表
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConcentratedLoadProblemEntry:
+    """集中力工程基准算例的元数据。"""
+
+    name: str
+    label: str
+    factory: Callable[..., Any]
+    default_domain: tuple[float, ...]
+    default_nx: int
+    default_ny: int
+    material_extra: dict[str, Any] | None = None
+    load_attr: str = "P"
+
+
+PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
+    "mbb-half": ConcentratedLoadProblemEntry(
+        name="mbb-half",
+        label="MBB 梁对称右半域",
+        factory=lambda **kw: HalfMBBBeamRight2d(
+            domain=kw.pop("domain", (0.0, 60.0, 0.0, 20.0)),
+            P=kw.pop("P", -1.0),
+            E=kw.pop("E", 1.0),
+            nu=kw.pop("nu", 0.3),
+            plane_type=kw.pop("plane_type", "plane_stress"),
+            **kw,
+        ),
+        default_domain=(0.0, 60.0, 0.0, 20.0),
+        default_nx=60,
+        default_ny=20,
+    ),
+}
 
 
 # 与 minimal_demo.py / matrix_free_elasticity/contract.py 的残差门禁保持一致
@@ -57,38 +99,89 @@ LOAD_TOLERANCE = 1.0e-10
 # 分母里出现范数时的下限
 NORM_FLOOR = 1.0e-30
 
-# 网格类型到模型 init_mesh 变体名的映射
-MESH_VARIANTS = {
-    "quad": "uniform_quad",
-    "tri": "uniform_aligned_tri",
-}
-
 DIRECT_SOLVERS = ("scipy", "mumps")
 ITERATIVE_SOLVERS = ("cg",)
 
 
-def create_problem_and_material():
-    """论文算例 3.1 的物理模型与材料 (参数从模型属性读取, 不重复写字面量)."""
+def export_vtu(
+    mesh,
+    displacement: np.ndarray,
+    filepath: str,
+) -> None:
+    """导出位移场为 ParaView 可读的 VTU 非结构化网格文件。"""
 
-    pde = HalfMBBBeamRight2d(
-        domain=[0.0, 60.0, 0.0, 20.0],
-        P=-1.0,
-        E=1.0,
-        nu=0.3,
-        plane_type="plane_stress",
+    nodes = np.asarray(mesh.entity("node"), dtype=np.float64)
+    cells = np.asarray(mesh.entity("cell"), dtype=np.int32)
+
+    n_nodes = nodes.shape[0]
+    n_cells = cells.shape[0]
+    nodes_per_cell = cells.shape[1]
+
+    if nodes_per_cell == 4:
+        cell_type = _VTK_QUAD
+    elif nodes_per_cell == 3:
+        cell_type = _VTK_TRIANGLE
+    else:
+        raise ValueError(f"不支持的单元类型: {nodes_per_cell} 节点")
+
+    # VTU: 节点坐标分量
+    x = np.ascontiguousarray(nodes[:, 0])
+    y = np.ascontiguousarray(nodes[:, 1])
+    z = np.zeros(n_nodes, dtype=np.float64)
+
+    # 连通性与偏移
+    connectivity = np.ascontiguousarray(cells.flatten())
+    offsets = np.arange(nodes_per_cell, n_cells * nodes_per_cell + 1, nodes_per_cell, dtype=np.int32)
+
+    cell_types = np.full(n_cells, cell_type, dtype=np.int32)
+
+    # 节点数据
+    disp = np.asarray(displacement, dtype=np.float64)
+    if disp.ndim == 1:
+        disp = disp.reshape(n_nodes, -1)
+
+    point_data = {}
+    for d in range(disp.shape[1]):
+        comp = np.ascontiguousarray(disp[:, d])
+        point_data[f"u_{chr(120 + d)}"] = comp
+    # 位移幅值
+    point_data["u_mag"] = np.ascontiguousarray(np.linalg.norm(disp, axis=1))
+
+    unstructuredGridToVTK(
+        filepath, x, y, z, connectivity, offsets, cell_types,
+        pointData=point_data,
     )
+
+
+def create_problem_and_material(
+    entry: ConcentratedLoadProblemEntry,
+    domain_override: tuple[float, ...] | None = None,
+) -> tuple[Any, IsotropicLinearElasticMaterial]:
+    """根据注册表条目创建问题实例和对应的材料对象。"""
+
+    domain = domain_override if domain_override is not None else entry.default_domain
+    problem = entry.factory(domain=domain)
+
     material = IsotropicLinearElasticMaterial(
-        hypothesis="plane_stress",
-        youngs_modulus=pde.E,
-        poisson_ratio=pde.nu,
+        hypothesis=problem.plane_type,
+        youngs_modulus=problem.E,
+        poisson_ratio=problem.nu,
         enable_logging=False,
     )
-    return pde, material
+    return problem, material
+
+
+def create_mesh(problem, mesh_type: str, nx: int, ny: int):
+    """显式创建问题离散网格，保持 Problem 与 Mesh 分离。"""
+
+    constructor = {"quad": QuadrangleMesh, "tri": TriangleMesh}[mesh_type]
+    return constructor.from_box(box=list(problem.domain), nx=nx, ny=ny)
 
 
 def solve_one_level(
-    pde,
+    problem,
     material,
+    entry: ConcentratedLoadProblemEntry,
     mesh_type: str,
     nx: int,
     ny: int,
@@ -96,15 +189,14 @@ def solve_one_level(
     solver: str,
     solver_options: dict,
 ) -> dict:
-    """在一层网格上求解, 返回残差、载荷和与柔顺度等诊断量."""
+    """在一层网格上求解，返回残差、载荷和与柔顺度等诊断量。"""
 
-    pde.init_mesh.set(MESH_VARIANTS[mesh_type])
-    mesh = pde.init_mesh(nx=nx, ny=ny)
+    mesh = create_mesh(problem, mesh_type, nx, ny)
     integration_order = degree + 3
 
     analyzer = LagrangeFEMAnalyzer(
         disp_mesh=mesh,
-        pde=pde,
+        pde=problem,
         material=material,
         space_degree=degree,
         integration_order=integration_order,
@@ -114,44 +206,35 @@ def solve_one_level(
         enable_logging=False,
     )
 
-    # 1. 装配: 全局刚度矩阵与体力右端项 (MBB 无体力, 右端项为 0)
     K0 = analyzer.assemble_stiff_matrix()
     F0 = analyzer.assemble_body_force_vector()
-
-    # 2. 边界条件: mixed + concentrated 先把等效节点力加进右端项,
-    #    再做 Dirichlet 强施加 (对称消元)
     K, F = analyzer.apply_bc(K0, F0)
 
-    # 3. 求解: 'fa' 的 K 已经过对称消元, 迭代解法从零初值起步即可
     uh = analyzer.tensor_space.function()
     _, solver_info = analyzer.solve_system(K, F, uh, **solver_options)
 
     displacement = bm.asarray(uh)
     residual_norm = float(np.linalg.norm(np.asarray(K @ displacement - F)))
     load_norm = float(np.linalg.norm(np.asarray(F)))
-
-    # 载荷等效性: 测量 apply_bc 覆盖 Dirichlet 自由度之前的 traction 向量.
-    # _assemble_traction_load 是分析器内部方法, 这里直接调用是因为载荷和
-    # 必须在这一步测量, 没有等价的公开入口
     traction = analyzer._assemble_traction_load(adjoint=False)
     load_sum = float(bm.sum(bm.asarray(traction)))
-
     compliance = float(np.asarray(displacement) @ np.asarray(F))
+
+    applied_load = getattr(problem, entry.load_attr)
 
     return {
         "nx": nx,
         "ny": ny,
-        "mesh_size": 60.0 / nx,
+        "mesh_size": problem.domain[1] / nx,
         "cells": int(mesh.number_of_cells()),
         "dofs": int(analyzer.tensor_space.number_of_global_dofs()),
         "residual": residual_norm / max(load_norm, NORM_FLOOR),
         "load_sum": load_sum,
-        "load_error": abs(load_sum - pde.P),
+        "load_error": abs(load_sum - applied_load),
         "compliance": compliance,
         "niter": solver_info.get("niter"),
         "converged": solver_info.get("converged"),
     }
-
 
 def report(rows: list[dict], solver: str) -> None:
     """打印结果表."""
@@ -198,15 +281,19 @@ def solver_unavailable_reason(solver: str) -> str | None:
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="集中力载荷路径的工程基准算例 (二维 MBB 梁, 论文算例 3.1)",
+        description="集中力载荷路径的工程基准算例",
     )
     parser.add_argument(
-        "--nx", type=int, default=60,
-        help="最粗档的 x 方向单元数 (默认 60, 与论文一致)",
+        "--problem", choices=list(PROBLEM_REGISTRY), default="mbb-half",
+        help="集中力工程基准算例 (默认 mbb-half)",
     )
     parser.add_argument(
-        "--ny", type=int, default=20,
-        help="最粗档的 y 方向单元数 (默认 20, 与论文一致)",
+        "--nx", type=int, default=None,
+        help="最粗档的 x 方向单元数 (默认由算例决定)",
+    )
+    parser.add_argument(
+        "--ny", type=int, default=None,
+        help="最粗档的 y 方向单元数 (默认由算例决定)",
     )
     parser.add_argument(
         "--levels", type=int, default=3,
@@ -214,11 +301,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mesh-type", choices=("quad", "tri"), default="quad",
-        help="网格类型 (默认 quad, 与论文一致)",
+        help="网格类型 (默认 quad)",
     )
     parser.add_argument(
         "--degree", type=int, default=1,
-        help="位移空间次数 (默认 1, 与论文一致)",
+        help="位移空间次数 (默认 1)",
     )
     parser.add_argument(
         "--solver", choices=DIRECT_SOLVERS + ITERATIVE_SOLVERS,
@@ -236,6 +323,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--maxiter", type=int, default=5000,
         help="cg 最大迭代步数 (默认 5000)",
+    )
+    parser.add_argument(
+        "--save-vtu", action="store_true",
+        help="导出最密层网格的位移场为 VTU 文件 (ParaView 可视化)",
     )
     return parser.parse_args()
 
@@ -256,7 +347,11 @@ def main() -> int:
 
     bm.set_backend("numpy")
 
-    pde, material = create_problem_and_material()
+    entry = PROBLEM_REGISTRY[arguments.problem]
+    nx = arguments.nx if arguments.nx is not None else entry.default_nx
+    ny = arguments.ny if arguments.ny is not None else entry.default_ny
+
+    problem, material = create_problem_and_material(entry)
 
     iterative = arguments.solver in ITERATIVE_SOLVERS
     solver_options = (
@@ -272,7 +367,7 @@ def main() -> int:
     fealpy_root = Path(import_module("fealpy").__file__).resolve().parents[1]
     print(f"FEALPy: {fealpy_root}")
     print(
-        f"问题=HalfMBBBeamRight2d (论文算例 3.1), 网格={arguments.mesh_type}, "
+        f"问题={entry.label}, 网格={arguments.mesh_type}, "
         f"空间次数={arguments.degree}, 求解器={arguments.solver}"
     )
     if iterative:
@@ -285,11 +380,12 @@ def main() -> int:
     for level in range(arguments.levels):
         rows.append(
             solve_one_level(
-                pde=pde,
+                problem=problem,
                 material=material,
+                entry=entry,
                 mesh_type=arguments.mesh_type,
-                nx=arguments.nx * 2**level,
-                ny=arguments.ny * 2**level,
+                nx=nx * 2**level,
+                ny=ny * 2**level,
                 degree=arguments.degree,
                 solver=arguments.solver,
                 solver_options=solver_options,
@@ -297,6 +393,36 @@ def main() -> int:
         )
 
     report(rows, arguments.solver)
+
+    if arguments.save_vtu:
+        vtu_dir = Path(__file__).resolve().parent / "outputs" / "vtu"
+        vtu_dir.mkdir(parents=True, exist_ok=True)
+        finest = rows[-1]
+        finest_nx = finest["nx"]
+        finest_ny = finest["ny"]
+        finest_mesh = create_mesh(problem, arguments.mesh_type, finest_nx, finest_ny)
+        finest_analyzer = LagrangeFEMAnalyzer(
+            disp_mesh=finest_mesh,
+            pde=problem,
+            material=material,
+            space_degree=arguments.degree,
+            integration_order=arguments.degree + 3,
+            operator_level="fa",
+            solve_method=arguments.solver,
+            topopt_algorithm=None,
+            enable_logging=False,
+        )
+        K0_f = finest_analyzer.assemble_stiff_matrix()
+        F0_f = finest_analyzer.assemble_body_force_vector()
+        K_f, F_f = finest_analyzer.apply_bc(K0_f, F0_f)
+        uh_f = finest_analyzer.tensor_space.function()
+        _, _ = finest_analyzer.solve_system(K_f, F_f, uh_f, **solver_options)
+        disp_f = np.asarray(bm.asarray(uh_f)).reshape(-1, 2)
+
+        vtu_stem = f"{arguments.problem}_p{arguments.degree}_{arguments.mesh_type}_{finest_nx}x{finest_ny}"
+        vtu_path = str(vtu_dir / vtu_stem)
+        export_vtu(finest_mesh, disp_f, vtu_path)
+        print(f"\nVTU 已导出: {vtu_path}.vtu")
 
     residual_max = max(row["residual"] for row in rows)
     load_error_max = max(row["load_error"] for row in rows)
@@ -310,7 +436,7 @@ def main() -> int:
     )
     print(
         f"载荷等效性最大偏差 = {load_error_max:.2e} "
-        f"(阈值 {LOAD_TOLERANCE:.0e}, P = {pde.P}) -> "
+        f"(阈值 {LOAD_TOLERANCE:.0e}, P = {getattr(problem, entry.load_attr)}) -> "
         f"{'通过' if load_passed else '未通过'}"
     )
 
