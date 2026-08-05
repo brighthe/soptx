@@ -870,20 +870,10 @@ class HuZhangFESpace2d(FunctionSpace):
 
         nsframe, esframe, csframe = self.basis_frame_of_S()
 
-        # FEALPy 4.0.0 (fealpy_stable) 的 grad_shape_function 返回参考单元坐标
-        # (x̂, ŷ) 下的导数 (grad_ref = grad_bary @ Dlambda, x̂=λ1, ŷ=λ2), 不是
-        # 物理导数; 用参考 Jacobian 变换: ∇_x φ = J^{-T} · grad_ref,
-        # 其中 J = [P1-P0, P2-P0] 是参考坐标 (x̂,ŷ) 到物理坐标的映射.
-        gphi_s = self.mesh.grad_shape_function(bc, self.p)  # (NQ, LDOF, 2) 参考导数
-        cpts = mesh.entity('cell')  # (NC, 3)
-        p0 = mesh.entity('node')[cpts[:, 0]]
-        J = bm.stack([mesh.entity('node')[cpts[:, 1]] - p0,
-                      mesh.entity('node')[cpts[:, 2]] - p0], axis=-1)  # (NC, GD, 2)
-        JinvT = bm.swapaxes(bm.linalg.inv(J), -1, -2)  # (NC, 2, GD) 的转置形式
-
-        def phys_grad(grad_scalar):
-            """grad_scalar: (NQ, N, 2) 参考导数 -> (NC, NQ, N, GD) 物理导数."""
-            return bm.einsum('qnd, cgd -> cqng', grad_scalar, JinvT)
+        # FEALPy 4.0.0 (fealpy_stable) 的 grad_shape_function 默认返回参考单元
+        # 坐标导数 (2D 为物理导数的一半), 必须带 variables='x' 才返回笛卡尔
+        # 物理梯度; 与 3D 空间的 div_basis 调用方式保持一致.
+        gphi_s = self.mesh.grad_shape_function(bc, self.p, variables='x')  # (NC, NQ, LDOF, GD)
 
         NQ = bc.shape[0]
         dphi = bm.zeros((NC, NQ, ldof, 2), dtype=self.ftype)
@@ -893,7 +883,7 @@ class HuZhangFESpace2d(FunctionSpace):
         for v, vdof in enumerate(ndofs):
             N = len(vdof)
             scalar_phi_idx = multiindex_to_number(vdof.dof_scalar)
-            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :]) # (NC, NQ, N, GD)
+            grad_scalar = gphi_s[..., scalar_phi_idx, :] # (NC, NQ, N, GD)
             frame = nsframe[cell[:, v]][:, None, vdof.dof_tensor] # (NC, 1, N, 3)
             dphi[..., idx:idx+N, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
@@ -904,7 +894,7 @@ class HuZhangFESpace2d(FunctionSpace):
         for e, edof in enumerate(edofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
-            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :])
+            grad_scalar = gphi_s[..., scalar_phi_idx, :]
             frame = esframe[c2e[:, e]][:, None, edof.dof_tensor]
             dphi[..., idx:idx+N, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
@@ -914,7 +904,7 @@ class HuZhangFESpace2d(FunctionSpace):
         for e, edof in enumerate(iedofs):
             N = len(edof)
             scalar_phi_idx = multiindex_to_number(edof.dof_scalar)
-            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :])
+            grad_scalar = gphi_s[..., scalar_phi_idx, :]
             frame = esframe[c2e[:, e]][:, None, edof.dof_tensor]
             dphi[..., idx:idx+N, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:idx+N, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
@@ -924,7 +914,7 @@ class HuZhangFESpace2d(FunctionSpace):
         n = mesh.geo_dimension()
         if p >= n + 1:
             scalar_phi_idx = multiindex_to_number(icdofs[0].dof_scalar)
-            grad_scalar = phys_grad(gphi_s[..., scalar_phi_idx, :])
+            grad_scalar = gphi_s[..., scalar_phi_idx, :]
             frame = csframe[:, None, icdofs[0].dof_tensor]
             dphi[..., idx:, 0] = bm.sum(grad_scalar * frame[..., :2], axis=-1)
             dphi[..., idx:, 1] = bm.sum(grad_scalar * frame[..., 1:], axis=-1)
