@@ -25,7 +25,8 @@ matrix-free 的算子层级和并行, 去读那个目录; 想看"有限元怎么
 网格类型与制造解都按维数配对: 网格 2D 是 ``tri``/``quad``、3D 是
 ``tet``/``hex``; 模型 2D 是 ``sinusoidal``/``exp-sine`` (全 Dirichlet) 与
 ``mixed-sinusoidal``/``mixed-exp-sine`` (混合边界), 3D 只有 ``divfree-poly``。
-交叉组合在入口报错。
+交叉组合在入口报错。各制造解的完整数学定义见
+`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__。
 
 两个 ``mixed-`` 模型的右端项多一段 traction 边界积分, 走的是全 Dirichlet 模型
 碰不到的面积分装配路径; 它们的强 Dirichlet 只施加在 Gamma_D 上。``quad`` 与 ``hex`` 是张量积网格, FEALPy 4.0.0 在这两条路上都出过基

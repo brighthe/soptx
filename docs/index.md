@@ -16,6 +16,12 @@
 
 - [`solvers.md`](solvers.md) — scipy/mumps/cg 三种求解方式、各分析器的可用组合与依赖。
 
+## 有限元方法
+
+- [`fem/huzhang-mixed-fem.md`](fem/huzhang-mixed-fem.md) —
+  胡张混合有限元实现：空间构造、次数与稳定化分支、角点松弛、2D/3D 差异、
+  FEALPy 4.0 兼容要点及开放问题。
+
 ## 数学模型与验证
 
 - [`problems/manufactured-elasticity.md`](problems/manufactured-elasticity.md) —
@@ -29,11 +35,8 @@
 ## 已知问题
 
 - [`known-issues/fealpy-tensor-product-mesh.md`](known-issues/fealpy-tensor-product-mesh.md) —
-  FEALPy `4.0.0-alpha` mesh 重构的四处上游回归（一处影响所有网格，三处限张量积
-  网格），含判据、修复方案与 SOPTX 的处置。
-- [`known-issues/huzhang-fem-convergence.md`](known-issues/huzhang-fem-convergence.md) —
-  胡张元混合有限元求解链不收敛的定位与修复记录：`grad_shape_function` 参考导数
-  根因、jump-penalty 缩放、bmat 丢块、spsolve 原地修改矩阵等六处问题及验证结果。
+  FEALPy `4.0.0-alpha` mesh 重构的五处回归缺陷及其在 `fealpy_stable` 中的修复，
+  含复现判据与 SOPTX 影响范围。
 
 ## 可执行示例
 

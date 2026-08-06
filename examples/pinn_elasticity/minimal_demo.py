@@ -13,6 +13,9 @@
 - 2D: ExponentialSineManufacturedElasticity2D (平面应变, lambda=1.0, mu=0.5)
 - 3D: DivergenceFreePolynomialElasticity3D (3D各向同性, lambda=1.0, mu=1.0)
 
+各制造解的完整数学定义见
+`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__。
+
 运行::
 
     python examples/pinn_elasticity/minimal_demo.py

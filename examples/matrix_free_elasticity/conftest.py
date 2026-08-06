@@ -1,7 +1,7 @@
 """Make the flat example modules importable from ``tests/``.
 
 The example deliberately keeps a flat module layout instead of a package, so
-pytest needs both this directory (for ``import cg``) and the repository root
+pytest needs both this directory and the repository root
 (for ``import soptx``) on ``sys.path``.
 """
 

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from fealpy.backend import backend_manager as bm
 
 import contract
-from cg import OverlapInnerProduct
 
 
 @dataclass
@@ -19,7 +18,8 @@ class PreparedLinearSystem:
 
 
 def weighted_norm(vector, dof_comm) -> float:
-    return OverlapInnerProduct(dof_comm, vector.shape[0]).norm(vector)
+    _dot, norm_fn = dof_comm.dot(vector.shape[0])
+    return norm_fn(vector)
 
 
 def solver_diagnostics(
@@ -49,8 +49,8 @@ def solver_diagnostics(
     return {
         "name": "unpreconditioned-cg",
         "converged": bool(cg_info["converged"]),
-        "iterations": int(cg_info["iterations"]),
-        "reported_residual": float(cg_info["true_residual"]),
+        "iterations": int(cg_info["niter"]),
+        "reported_residual": float(cg_info["true_residual"] or cg_info["residual"]),
         "recursive_residual": float(cg_info["recursive_residual"]),
         "true_absolute_residual": residual_norm,
         "rhs_norm": load_norm,

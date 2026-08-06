@@ -12,7 +12,6 @@ from soptx.fem.solvers import LagrangeFEMAnalyzer
 
 import contract
 from cases import ElasticityCase
-from cg import solve_cg
 from distributed import OverlapOperator
 
 
@@ -47,32 +46,32 @@ def _overlap_cg(
     atol: float,
     **options: Any,
 ) -> SolverResult:
-    """把 cg.solve_cg 适配到求解器登记表的统一签名"""
+    """用 fealpy.solver.cg 的 ``dot_product`` 注入重叠修正内积."""
 
-    return solve_cg(
+    from fealpy.solver.cg import cg
+
+    dot_fn, _norm_fn = dof_comm.dot(int(F.shape[0]))
+
+    return cg(
         K,
         F,
-        dof_comm=dof_comm,
-        initial=x0,
-        max_iterations=maxiter,
-        rtol=rtol,
-        atol=atol,
+        x0=x0,
+        dot_product=dot_fn,
         residual_refresh=options.pop(
             "residual_refresh",
             contract.RESIDUAL_REFRESH,
         ),
+        atol=atol,
+        rtol=rtol,
+        maxit=maxiter,
+        returninfo=True,
     )
 
 
 #: 重叠副本布局下可用的求解器。
 #:
-#: 这里不能直接转发到 ``fealpy.solver`` 的 minres/gmres/bicgstab 等: 它们的内积
-#: 和范数都是普通的 ``bm.sum``, 没有注入加权的入口, 而重叠布局下共享自由度在多个
-#: rank 上各有一份副本, 未加权求和会把它们重复计数, 于是 Krylov 空间的正交性从第
-#: 一步起就是错的——迭代仍会"收敛", 只是收敛到别的东西。
-#:
-#: 新增求解器的做法: 照 ``cg.py`` 的 ``OverlapInnerProduct`` 写出加权内积版本,
-#: 再按 ``_overlap_cg`` 的签名登记到这里。
+#: ``fealpy.solver.cg`` 现在接受 ``dot_product`` 参数注入重叠修正内积,
+#: 因此可以直接使用, 不再需要本地 CG 副本。新增其他 Krylov 子空间方法同理。
 DISTRIBUTED_SOLVERS: dict[str, SolverRoutine] = {
     "cg": _overlap_cg,
 }
