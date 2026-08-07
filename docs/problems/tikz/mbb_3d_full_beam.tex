@@ -1,0 +1,100 @@
+\documentclass[tikz,border=12pt]{standalone}
+\usepackage{amsmath}
+\usepackage{tikz}
+\usetikzlibrary{3d,shapes.geometric,arrows.meta,calc}
+
+\begin{document}
+\begin{tikzpicture}[x={(-0.866cm,-0.5cm)}, y={(0.866cm,-0.5cm)}, z={(0cm,1cm)}, scale=1.8, >=latex]
+  % ============================================================
+  % 坐标映射 (与 FullMBBBeam3d 代码坐标系精确一致):
+  %   TikZ x = 代码 x = 长度 Lx
+  %   TikZ y = 代码 z = 宽度 (屏幕右下方向)
+  %   TikZ z = 代码 y = 高度 (屏幕竖直方向)
+  % 因此图中竖直轴标注为 y (代码高度), 宽度轴标注为 z (代码宽度)。
+  % ============================================================
+  % Box Dimensions (Lx=6.0, Ly=1.5, Lz=1.5 for realistic 3D MBB beam proportion)
+  \def\Lx{6.0}
+  \def\Ly{1.5}   % 宽度 (代码 z)
+  \def\Lz{1.5}   % 高度 (代码 y)
+
+  % 1. Draw 3D Box Faces (Back-to-Front ordering for correct 3D occlusion)
+
+  % 左端面 (代码 x=0, TikZ x=0)
+  \draw[thick, fill=blue!6, draw=blue!65!black, opacity=0.75]
+    (0,0,0) -- (0,\Ly,0) -- (0,\Ly,\Lz) -- (0,0,\Lz) -- cycle;
+
+  % 顶面 (代码 y=L_y, TikZ z=\Lz)
+  \draw[thick, fill=blue!10, draw=blue!70!black, opacity=0.85]
+    (0,0,\Lz) -- (\Lx,0,\Lz) -- (\Lx,\Ly,\Lz) -- (0,\Ly,\Lz) -- cycle;
+
+  % 前面 (代码 z=0, TikZ y=0)
+  \draw[thick, fill=blue!15, draw=blue!80!black, opacity=0.9]
+    (0,0,0) -- (\Lx,0,0) -- (\Lx,0,\Lz) -- (0,0,\Lz) -- cycle;
+
+  % 右端面 (代码 x=L_x, TikZ x=\Lx)
+  \draw[thick, fill=blue!22, draw=blue!85!black, opacity=0.92]
+    (\Lx,0,0) -- (\Lx,\Ly,0) -- (\Lx,\Ly,\Lz) -- (\Lx,0,\Lz) -- cycle;
+
+  % 底面后缘棱线 (TikZ y=\Ly, z=0)
+  \draw[thick, draw=blue!70!black] (0,\Ly,0) -- (\Lx,\Ly,0);
+
+  % 2. Domain Label (Center of Domain on Front face with crisp badge)
+  \node[font=\small\bfseries\sffamily, color=blue!90!black,
+        fill=white, fill opacity=0.95, text opacity=1.0, inner sep=3.5pt, rounded corners=3pt, draw=blue!50]
+        at (\Lx*0.5, 0, \Lz*0.5) {Full 3D MBB Domain $\Omega$};
+
+  % 3. Support Lines (Boundary Conditions)
+  % 铰支座线 (代码: ux=0, uy=0 于 x=0, y=0, 沿 z 宽度) —— 与 z 轴同向
+  \draw[line width=3.5pt, red!80!black] (0,0,0) -- (0,\Ly,0);
+  \node[above right=4pt, red!80!black, font=\scriptsize\bfseries, align=left,
+        fill=white, fill opacity=0.95, text opacity=1.0, inner sep=2.5pt, rounded corners=2pt, draw=red!40]
+        at (0, \Ly*0.4, \Lz*0.25) {Pin Support Line\\($u_x=0, u_y=0$)};
+
+  % 滚轴支座线 (代码: uy=0 于 x=Lx, y=0, 沿 z 宽度)
+  \draw[line width=3.5pt, green!60!black] (\Lx,0,0) -- (\Lx,\Ly,0);
+  \node[below left=2pt, green!50!black, font=\scriptsize\bfseries, align=center,
+        fill=white, fill opacity=0.95, text opacity=1.0, inner sep=2.5pt, rounded corners=2pt, draw=green!40]
+        at (\Lx, \Ly*0.5, -0.85) {Roller Support Line ($u_y=0$)};
+
+  % 4. uz = 0 底面中心线 (代码: y=0, z=Lz/2, 沿 x 长度) —— 防止刚体运动
+  \draw[line width=2.2pt, blue!60!black, dashed] (0,\Ly*0.5,0) -- (\Lx,\Ly*0.5,0);
+  \node[blue!70!black, font=\scriptsize\bfseries, align=center,
+        fill=white, fill opacity=0.95, text opacity=1.0, inner sep=2.5pt, rounded corners=2pt, draw=blue!40]
+        at (\Lx*0.7, \Ly*0.5, 0.25) {Centerline $u_z=0$};
+
+  % 5. Concentrated Load P = -1.0 N at Top Center Point (代码: x=Lx/2, y=Ly, z=Lz/2)
+  %    荷载沿 -y 方向 (代码 y = 高度, 屏幕竖直向下)
+  \coordinate (TopCenter) at (\Lx/2, \Ly/2, \Lz);
+  \fill[red!80!black] (TopCenter) circle (2.0pt);
+  \draw[->, ultra thick, red!80!black, line width=2.0pt]
+    (\Lx/2, \Ly/2, \Lz+1.1) -- (\Lx/2, \Ly/2, \Lz+0.08);
+  \node[above=2pt, red!80!black, font=\small\bfseries,
+        fill=white, fill opacity=0.95, text opacity=1.0, inner sep=3pt, rounded corners=2pt, draw=red!40]
+        at (\Lx/2, \Ly/2, \Lz+1.15) {$P = -1.0\text{ N}$ (Top Center Load)};
+
+  % 6. 坐标轴 (原点: 左前下角, 与代码坐标系一致: x=长度, y=高度, z=宽度)
+  % x 轴: 沿底面左前下棱 (长度方向)
+  \draw[->, line width=1.3pt, black!75] (0,0,0) -- (1.7,0,0)
+    node[below left=1pt, black!75, font=\scriptsize\bfseries] {$x$};
+  % y 轴: 沿左前下角竖直棱 (高度方向)
+  \draw[->, line width=1.3pt, black!75] (0,0,0) -- (0,0,1.35)
+    node[above=1pt, black!75, font=\scriptsize\bfseries] {$y$};
+  % z 轴: 沿底面宽度方向 (与铰支座线同向, 用白色光晕与支座线区分)
+  \draw[line width=3.4pt, white] (0,0,0) -- (0,0.9,0);
+  \draw[->, line width=1.3pt, black!75] (0,0,0) -- (0,0.9,0)
+    node[below=1pt, black!75, font=\scriptsize\bfseries] {$z$};
+
+  % 7. Clear Dimension Lines (Positioned completely outside the 3D body)
+  % 长度 Lx 尺寸 (底面下方)
+  \draw[<->, opacity=0.8, semithick] (0,0,-0.75) -- (\Lx,0,-0.75)
+    node[midway, sloped, below=1pt, font=\scriptsize] {$L_x = 120\text{ mm}$};
+
+  % 高度 L_y 尺寸 (右端面左侧竖直棱, 代码 y = 高度)
+  \draw[<->, opacity=0.8, semithick] (\Lx+0.4,0,0) -- (\Lx+0.4,0,\Lz)
+    node[midway, left=1pt, font=\scriptsize] {$L_y = 20\text{ mm}$};
+
+  % 宽度 L_z 尺寸 (右端面下方沿宽度方向, 代码 z = 宽度)
+  \draw[<->, opacity=0.8, semithick] (\Lx,0,-0.35) -- (\Lx,\Ly,-0.35)
+    node[midway, sloped, below=1pt, font=\scriptsize] {$L_z = 20\text{ mm}$};
+\end{tikzpicture}
+\end{document}
