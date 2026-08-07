@@ -292,36 +292,13 @@ def run_minimal_demo(
     # 7. 可选：导出 ParaView 格式的 .vtu 可视化文件 (使用 pyevtk 库机制)
     if save_vtu:
         try:
-            from pyevtk.hl import unstructuredGridToVTK
             import numpy as np
+            from soptx.visualization.vtk_export import write_vtu
 
             vtu_dir = Path(__file__).resolve().parent / "outputs" / "vtu"
             vtu_dir.mkdir(parents=True, exist_ok=True)
             vtu_stem = str(vtu_dir / f"pinn_elasticity_{dim}d")
             vtu_file_path = vtu_dir / f"pinn_elasticity_{dim}d.vtu"
-
-            nodes = np.asarray(mesh.entity("node"), dtype=np.float64)
-            cells = np.asarray(mesh.entity("cell"), dtype=np.int32)
-            n_nodes = nodes.shape[0]
-            n_cells = cells.shape[0]
-            nodes_per_cell = cells.shape[1]
-
-            if dim == 2:
-                cell_type = 5  # VTK_TRIANGLE
-                x = np.ascontiguousarray(nodes[:, 0])
-                y = np.ascontiguousarray(nodes[:, 1])
-                z = np.zeros(n_nodes, dtype=np.float64)
-            else:
-                cell_type = 10  # VTK_TETRA
-                x = np.ascontiguousarray(nodes[:, 0])
-                y = np.ascontiguousarray(nodes[:, 1])
-                z = np.ascontiguousarray(nodes[:, 2])
-
-            connectivity = np.ascontiguousarray(cells.flatten())
-            offsets = np.arange(
-                nodes_per_cell, n_cells * nodes_per_cell + 1, nodes_per_cell, dtype=np.int32
-            )
-            cell_types = np.full(n_cells, cell_type, dtype=np.int32)
 
             def _to_np(t):
                 if hasattr(t, "detach"):
@@ -345,9 +322,7 @@ def run_minimal_demo(
                 point_data[f"u_exact_{axis_name}"] = np.ascontiguousarray(exact_np[:, d])
                 point_data[f"u_diff_{axis_name}"] = np.ascontiguousarray(diff_np[:, d])
 
-            unstructuredGridToVTK(
-                vtu_stem, x, y, z, connectivity, offsets, cell_types, pointData=point_data
-            )
+            write_vtu(mesh, point_data, vtu_stem)
             print(f"已导出 ParaView 格式的可视化文件 (.vtu):\n  {vtu_file_path}")
             print(f"=" * 65)
         except Exception as err:

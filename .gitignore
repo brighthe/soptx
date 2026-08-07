@@ -54,10 +54,11 @@ dist/
 # Python 包元数据目录
 *.egg-info/
 
-# Matrix-Free 2D/3D elasticity validation artifacts
-/examples/matrix_free_elasticity/outputs/
-!/examples/matrix_free_elasticity/evidence/*.json
+# 示例运行产物：各主题 examples/*/outputs/ 整体忽略（纯运行产物，不入库；
+# 证据文档 results_analysis.md 放目录根，随代码追踪）
+/examples/*/outputs/
 
-# PINN 2D/3D elasticity training artifacts
-/examples/pinn_elasticity/outputs/
-!/examples/pinn_elasticity/evidence/*.json
+# LaTeX/TikZ 编译产物（.tex 源码入库，aux/log/pdf 不入库）
+/docs/problems/tikz/*.aux
+/docs/problems/tikz/*.log
+/docs/problems/tikz/*.pdf

@@ -2,7 +2,7 @@
 
 本文档阐述 `soptx/examples/pinn_elasticity` 算例中 Physics-Informed Neural Network (PINN) 求解 2D/3D 各向同性线弹性方程的连续物理模型、自动微分残差算子与离散 Loss 契约。
 
-> **通用范式说明**：关于 PINN 的通用 5 步求解范式、MLP 逐层数学表达与激活函数 $C^k$ 阶数约束等通用理论，请参阅知识库概念页 [PINN 通用概念与范式](file:///C:/workspace/dut-postdoc/concepts/pinn.md)。
+> **通用范式说明**：关于 PINN 的通用 5 步求解范式、MLP 逐层数学表达与激活函数 $C^k$ 阶数约束等通用理论，请参阅知识库概念页 [PINN 通用概念与范式](file:///C:/workspace/dut-postdoc/concepts/pinn-paradigm.md)。
 
 ## 1. 连续介质力学控制方程
 

@@ -1,6 +1,6 @@
-# CLAUDE.md
+# GEMINI.md
 
-本文件指导 Claude Code 在 `soptx` 项目中工作。
+本文件指导 Antigravity (Gemini) 助手在 `soptx` 项目中工作。
 
 ## 交流语言
 
@@ -20,12 +20,14 @@
 | `gpu_elasticity/` | GPU 正确性对比 + 性能 benchmark |
 | `matrix_free_elasticity/` | MPI 并行 matrix-free，FA/EA 双路 |
 | `pinn_elasticity/` | PINN 强形式求解 |
+| `huzhang_elasticity/` | Hu-Zhang 混合有限元求解 |
+| `substructure_elasticity/` | 子结构求解与基线验证 |
 
 新技术栈 → 新目录；同技术栈不同物理问题 → 同目录下新文件。
 
 ### 2. 改 fealpy_stable 必须写 known-issue
 
-对 `fealpy_stable` 的任何修改，必须在 `docs/known-issues/` 下创建 `fealpy-<topic>.md`。格式参照已有的三份文档：概要表 → 逐项详述 → 环境与版本对照。
+对 `fealpy_stable` 的任何修改，必须在 `docs/known-issues/` 下创建 `fealpy-<topic>.md`。格式参照已有的文档：概要表 → 逐项详述 → 环境与版本对照。
 
 ### 3. 通用能力进 fealpy，不复制
 

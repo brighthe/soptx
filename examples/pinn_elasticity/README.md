@@ -12,9 +12,9 @@
 soptx/examples/pinn_elasticity/
 ├── minimal_demo.py         <-- [核心代码] 2D/3D PINN 线弹性单文件自包含求解器
 ├── math_spec.md            <-- [数学规范] 控制方程、Autograd 链与 Shape 契约
+├── results_analysis.md     <-- [实验分析] 2D/3D 消融实验诊断与实测表格报告
 ├── README.md               <-- [使用说明] 算法概述与运行 CLI 指南
 └── outputs/                <-- [测试成果与报告]
-    ├── results_analysis.md <-- [实验分析] 2D/3D 消融实验诊断与实测表格报告
     ├── figures/            <-- 自动生成的 2D 三场对比云图 (.png)
     └── vtu/                <-- 自动导出的 2D/3D ParaView 场文件 (.vtu)
 ```
@@ -72,4 +72,4 @@ python examples/pinn_elasticity/minimal_demo.py --dim 3 --epochs 2000
 ## 实验诊断与多 Case 分析
 
 关于 2D 与 3D 算例的收敛性物理机理诊断、配点加密与网络容量消融实验数据，请参阅专属报告：
-👉 [outputs/results_analysis.md](outputs/results_analysis.md)
+👉 [results_analysis.md](results_analysis.md)
