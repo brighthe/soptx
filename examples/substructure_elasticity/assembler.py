@@ -124,6 +124,48 @@ class GlobalAssembler:
                         sub_global_dofs.extend([3 * gnode, 3 * gnode + 1, 3 * gnode + 2])
         return bm.array(sub_global_dofs, dtype=bm.int64)
 
+    def _compute_fixed_dofs(self, bc_type: str) -> Any:
+        """
+        按边界条件类型计算全尺寸网格上的固定 DOF（全装配与缩聚两条路径共用）。
+
+        - "mbb"（与 ``soptx.problems.elasticity.mbb`` 对应物理模型精确对齐）:
+            2D HalfMBBBeamRight2d: ux=0 at x=0; uy=0 at (Lx, 0)
+            3D FullMBBBeam3d: ux=0 at (x=0, y=0); uy=0 at (y=0) & (x=0 | x=Lx);
+                              uz=0 at (y=0, z=Lz/2)
+        - "cantilever": 左侧全固定 (x=0)
+        """
+        node_coords = self.full_mesh.entity('node')
+        eps = 1e-7
+
+        if bc_type == "mbb":
+            if self.dim == 2:
+                left_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0]) < eps]
+                rb_nodes = [idx for idx, pt in enumerate(node_coords)
+                            if abs(pt[0] - self.Lx) < eps and abs(pt[1]) < eps]
+                return bm.sort(bm.concat([
+                    bm.array([2 * n for n in left_nodes], dtype=bm.int64),
+                    bm.array([2 * n + 1 for n in rb_nodes], dtype=bm.int64),
+                ]))
+            # 3D FullMBBBeam3d
+            z_mid = self.Lz / 2.0
+            return bm.sort(bm.concat([
+                bm.array([3 * n + 0 for n in range(len(node_coords))
+                          if abs(node_coords[n, 0]) < eps and abs(node_coords[n, 1]) < eps],
+                         dtype=bm.int64),
+                bm.array([3 * n + 1 for n in range(len(node_coords))
+                          if (abs(node_coords[n, 0]) < eps or abs(node_coords[n, 0] - self.Lx) < eps)
+                          and abs(node_coords[n, 1]) < eps],
+                         dtype=bm.int64),
+                bm.array([3 * n + 2 for n in range(len(node_coords))
+                          if abs(node_coords[n, 1]) < eps and abs(node_coords[n, 2] - z_mid) < eps],
+                         dtype=bm.int64),
+            ]))
+
+        # cantilever: 左侧全固定 (x = 0)
+        left_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0]) < eps]
+        left_arr = bm.array(left_nodes, dtype=bm.int64)
+        return bm.sort(bm.concat([self.dim * left_arr + k for k in range(self.dim)]))
+
     def solve_fullscale_fea(
         self,
         densities: Union[List[Any], Any],
@@ -169,24 +211,7 @@ class GlobalAssembler:
             K_full = sp.csr_matrix(bm.asarray(K_tensor))
 
         # 边界条件施加
-        node_coords = self.full_mesh.entity('node')
-        eps = 1e-7
-
-        if bc_type == "mbb":
-            # MBB 梁 (Half MBB Beam):
-            # 左侧边界 (x=0) 施加对称约束: ux = 0
-            # 右下角/右底线 (x=Lx, y=0) 施加简支约束: uy = 0
-            left_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0]) < eps]
-            rb_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0] - self.Lx) < eps and abs(pt[1]) < eps]
-            fixed_dofs = bm.sort(bm.concat([
-                bm.array([self.dim * n for n in left_nodes], dtype=bm.int64),
-                bm.array([self.dim * n + 1 for n in rb_nodes], dtype=bm.int64)
-            ]))
-        else:
-            # Cantilever: 左侧全固定 (x = 0)
-            left_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0]) < eps]
-            left_nodes_arr = bm.array(left_nodes, dtype=bm.int64)
-            fixed_dofs = bm.sort(bm.concat([self.dim * left_nodes_arr + k for k in range(self.dim)]))
+        fixed_dofs = self._compute_fixed_dofs(bc_type)
 
         F_full = bm.zeros(self.total_full_dofs, dtype=bm.float64)
         F_full[load_dof] = load_val
@@ -270,44 +295,8 @@ class GlobalAssembler:
         interface_global_dofs, global_to_interface = self.build_interface_dofs(sub_meshes)
         n_interface = len(interface_global_dofs)
 
-        # Step 2: 计算接口系统上的固定 DOF
-        node_coords = self.full_mesh.entity('node')
-        eps = 1e-7
-
-        if bc_type == "mbb":
-            if self.dim == 2:
-                # 2D HalfMBB: ux=0 at x=0; uy=0 at (Lx,0)
-                left_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0]) < eps]
-                rb_nodes = [idx for idx, pt in enumerate(node_coords)
-                           if abs(pt[0] - self.Lx) < eps and abs(pt[1]) < eps]
-                fixed_dofs = bm.sort(bm.concat([
-                    bm.array([2 * n for n in left_nodes], dtype=bm.int64),
-                    bm.array([2 * n + 1 for n in rb_nodes], dtype=bm.int64),
-                ]))
-            else:
-                # 3D FullMBBBeam3d (与路径 A 完全一致):
-                #   ux=0 at (x=0, y=0)          左下底线
-                #   uy=0 at (y=0) & (x=0 | x=Lx) 底部两端底线
-                #   uz=0 at (y=0, z=Lz/2)       底面中心线
-                z_mid = (self.domain_size[2]) / 2.0
-                fixed_dofs = bm.sort(bm.concat([
-                    bm.array([3 * n + 0 for n in range(len(node_coords))
-                              if abs(node_coords[n, 0]) < eps and abs(node_coords[n, 1]) < eps],
-                             dtype=bm.int64),
-                    bm.array([3 * n + 1 for n in range(len(node_coords))
-                              if (abs(node_coords[n, 0]) < eps or abs(node_coords[n, 0] - self.Lx) < eps)
-                              and abs(node_coords[n, 1]) < eps],
-                             dtype=bm.int64),
-                    bm.array([3 * n + 2 for n in range(len(node_coords))
-                              if abs(node_coords[n, 1]) < eps and abs(node_coords[n, 2] - z_mid) < eps],
-                             dtype=bm.int64),
-                ]))
-        else:  # cantilever
-            left_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0]) < eps]
-            left_arr = bm.array(left_nodes, dtype=bm.int64)
-            fixed_dofs = bm.sort(bm.concat(
-                [self.dim * left_arr + k for k in range(self.dim)]
-            ))
+        # Step 2: 计算接口系统上的固定 DOF（与 _compute_fixed_dofs 中物理模型精确对齐）
+        fixed_dofs = self._compute_fixed_dofs(bc_type)
 
         # 过滤到接口系统
         interface_fixed_list = []

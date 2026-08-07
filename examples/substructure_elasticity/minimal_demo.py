@@ -109,8 +109,7 @@ def run_demo_2d(out_dir: str) -> None:
 
     print("[步骤 5] 通过 StaticCondensation.recover() 恢复 2D 内部位移...")
 
-    U_recovered = bm.zeros(assembler.total_full_dofs, dtype=bm.float64)
-    U_recovered[free_dofs] = U_full_ref[free_dofs]
+    U_recovered = bm.copy(U_full_ref)
 
     for sx in range(n_sub_x):
         for sy in range(n_sub_y):
@@ -235,8 +234,7 @@ def run_demo_3d(out_dir: str) -> None:
 
     print("[步骤 5] 通过 StaticCondensation.recover() 恢复 3D 内部位移...")
 
-    U_recovered = bm.zeros(assembler.total_full_dofs, dtype=bm.float64)
-    U_recovered[free_dofs] = U_full_ref[free_dofs]
+    U_recovered = bm.copy(U_full_ref)
 
     for sx in range(n_sub[0]):
         for sy in range(n_sub[1]):

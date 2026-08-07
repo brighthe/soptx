@@ -30,7 +30,6 @@ class SubstructureMesh:
         nu: float = 0.3
     ) -> None:
         self.sub_id: int = sub_id
-        self.sub_id: int = sub_id
 
         # 灵活解析 2D/3D 参数 (支持元组输入及传统 2D/3D 位置参数)
         rest = args
