@@ -6,8 +6,8 @@ from fealpy.backend import backend_manager as bm
 from fealpy.fem import DirichletBCOperator
 from fealpy.solver import spsolve
 
-import contract
-from analyzer import build_serial_analyzer
+from utils import contract
+from utils.analyzer import build_serial_analyzer
 
 
 def relative_difference(left, right) -> tuple[float, float]:

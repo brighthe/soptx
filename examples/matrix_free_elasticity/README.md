@@ -20,60 +20,74 @@ CG。EA 是默认路径；FA 只支持单 rank，用于同条件数值对照。
 `MaterialSpec` 提供，算子构造不再从 PDE 对象隐式读取材料属性。
 
 三个制造解的完整方程、参数与 shape 契约见
-[`docs/models/manufactured-elasticity.md`](../../docs/models/manufactured-elasticity.md)。
+[`docs/problems/manufactured-elasticity.md`](../../docs/problems/manufactured-elasticity.md)。
 Problem 不创建网格；`ElasticityCase.create_mesh()` 显式组合 Problem、Material
 和 Mesh。
 
-> 架构迁移说明：下方已提交 evidence 来自迁移前验证，只作为历史数值基线。切换到
-> `src/soptx` 和语义 Problem 后，必须重新执行验证与 evidence 同步，才能声明为
-> 本次重构结果。
+EA/FA 两级算子的保存与省略对象、重叠副本的向量表示与算子代数、Dirichlet 施加
+方式以及全部数值门禁的数学定义，见 [`math_spec.md`](math_spec.md)。本 README 只
+负责使用说明、运行入口和 evidence 状态。
 
 线弹性理论入口为
 `dut-postdoc:concepts/linear-elasticity.md#线弹性方程变分形式与有限元离散`；
 Matrix-Free 装配层次和 MPI 重叠 DOF 理论入口分别为
 `dut-postdoc:concepts/matrix-free/assembly-levels.md#五级分类` 和
-`dut-postdoc:concepts/matrix-free/distributed-operator-and-shared-dofs.md`。
+`dut-postdoc:concepts/distributed-operator-and-shared-dofs.md`。
 
-## 模块与调用链
+## 目录结构与核心模块
 
-- `run.py`：CLI、case 选择和 MPI 调度；
-- `contract.py`：支持范围、默认值、数值门禁和运行配置；
-- `layout.py`：验证 case、产物路径、文件名和证据区块标记；
-- `cases.py`：PDE、材料、网格、几何维数和输出元数据；
-- `operators.py`：材料实例、载荷、EA 单元缓存和串行 FA CSR；
-- `solve.py`：EA/FA 共用 Dirichlet 后系统与 CG 调用；
-- `distributed.py`、`cg.py`：重叠副本通信和加权 CG；
-- `references.py`：EA/FA MatVec、对称性和 `spsolve` 独立参考；
-- `postprocess.py`、`report.py`：误差与 VTK 后处理、结果 schema 和 JSON 报告；
-- `validate.py`：2D/3D 单 rank、双 rank、FA/EA 与收敛阶门禁；
-- `sync_results.py`：按维度同步验证证据和下方结果区块；
-- `tests/`：CG、路径契约和 2D/3D 分区逻辑的快速单元测试。
+- [`operator.py`](operator.py)：核心。2D/3D EA 矩阵无关算子 (`ElasticityEAOperator`) 与 `OverlapOperator`（MPI 共享自由度同步归约）；
+- [`solver.py`](solver.py)：核心。分布式加权 Krylov 求解器（`weighted_cg` / `solve_matrix_free_system`）与真残差、边界误差诊断；
+- [`cases.py`](cases.py)：2D/3D 物理问题（平面应变与多项式无散场）、材料参数与制造解定义；
+- [`minimal_demo.py`](minimal_demo.py)：极简入口。一键运行 2D/3D Matrix-Free CG 求解（0 繁琐 CLI），可单 rank 或 `mpiexec -n 2` 运行；
+- [`compare_lagrange.py`](compare_lagrange.py)：交叉比对。与全组装 (FA) CSR 矩阵及 Scipy 直解做 $\sim 10^{-16}$ 机器精度级对照；
+- [`math_spec.md`](math_spec.md)：算子代数、重叠副本表示与门禁的 1-to-1 数学定义规范；
+- [`utils/`](utils/)：基础设施胶水包，收拢 `contract`、`schema`、`report`、`layout`、`analyzer`、`distributed`、`references`、`postprocess`、`run`、`validate` 和 `sync_results`。
 
-`contract.py` 和 `layout.py` 不依赖 FEALPy、SOPTX 或 mpi4py，因此
-`sync_results.py` 在没有 MPI Runtime 的机器上也能做证据检查。每个数值阈值只在
-`contract.py` 定义一次，`run.py` 的运行门禁与 `validate.py` 的复核门禁读同一组
-常量；每个产物文件名只由 `layout.py` 生成一次，`validate.py` 写出端与
-`sync_results.py` 读入端不再各持一份字面量。
+## 环境与运行
+
+极简 Demo（一键运行 Matrix-Free CG 求解）：
+
+```bash
+python minimal_demo.py --dim 2
+python minimal_demo.py --dim 3
+mpiexec -n 2 python minimal_demo.py --dim 2
+```
+
+机器精度级交叉比对（校验 Raw MatVec、BC MatVec、算子对称性与 CG/Scipy 直解）：
+
+```bash
+python compare_lagrange.py --dim 2
+python compare_lagrange.py --dim 3
+```
+
+完整自动化验证与证据同步：
+
+```bash
+python validate.py --dim all
+python sync_results.py --dim all
+```
 
 ```text
 main
   → parse_arguments → create_case(dim) + RunConfig
   → execute
-      → partition_cells(split_coordinate=case.partition_split_coordinate())
-      → distribute_mesh / distribute_vector_space
-      → prepare_problem(operator_level=…) → EA 或 FA 装配
-      → solve_prepared_problem → solve_cg
-      → gather_add
-      → solution_error / write_solution
-  → report.local_gates → report.build_payload → report.write_json
+      → build_global_context → partition_cells(split_coordinate=…)
+      → distribute → distribute_mesh / distribute_vector_space / serial_references
+      → build_distributed_analyzer(operator_level=…)
+      → run_solver
+          → analyzer.apply_bc(assemble_stiff_matrix(), assemble_body_force_vector())
+          → analyzer.solve_system → fealpy cg(dot_product=dof_comm.dot)
+          → solver_diagnostics
+      → dof_comm.gather_add(local_solution / references)
+      → finalize
+          → solution_error / write_solution
+          → report.local_gates → report.build_payload → report.write_json
 ```
 
 EA 保存完整单元矩阵集合 $\{\mathbf K_e\}$，每次 MatVec 执行
-gather—单元作用—scatter-add；FA 形成并保存全局 CSR。两者对应同一个离散算子：
-
-$$
-\mathbf K=\sum_e\mathbf R_e^{\mathsf T}\mathbf K_e\mathbf R_e.
-$$
+gather—单元作用—scatter-add；FA 形成并保存全局 CSR。两者对应同一个离散算子，
+代数细节见 [`math_spec.md` 第 2–3 节](math_spec.md)。
 
 ## 环境与运行
 
@@ -136,6 +150,10 @@ python .\examples\matrix_free_elasticity\validate.py --dim all
 - 单/双 rank 解相对差及粗网格 EA/FA 解相对差不超过 `1e-9`；
 - L2 误差严格下降，最后一段观测阶不低于 `1.5`。
 
+每道门禁的精确数学式、所检验的代数等价性及其阈值来源见
+[`math_spec.md` 第 5 节](math_spec.md)；阈值本身只在 [`contract.py`](contract.py)
+定义一次。
+
 驱动还会确认非法维数、2D 携带 `--nz`、非正网格数、非 `p=1` 以及
 FA 多 rank 均以非零状态和对应的明确错误信息退出，且不生成结果产物。
 
@@ -170,31 +188,37 @@ dirty worktree 的验证结果只能作为开发证据。
 
 ## 当前证据状态
 
-重构前的三维数值证据保存在
+下方 2D/3D 结果区块由迁移到 `src/soptx` 与语义 Problem **之后**的
+`608cedf25038ed690f6db3be5b3f24f92329c5ec` 生成，`git_dirty=false`。其后 HEAD
+已经推进，`lagrange_fem_analyzer.py`、`linear_elasticity.py` 和
+`manufactured_2d.py` 都在 evidence 依赖路径上发生过改动，因此这两个区块**待在
+当前目标 revision 上重放**，在重放完成前只作为迁移期基线。1/2-rank 一致性的正式
+证据尚未固化，`evidence/` 下目前只有单 rank 产物。
+
+迁移**之前**的三维数值证据保存在
 [`evidence/cpu-single-rank-fa-ea-3d-historical.json`](evidence/cpu-single-rank-fa-ea-3d-historical.json)，
 只作为原三维实现的历史基线，不作为本次 2D/3D 通用化实现的验收结论。
-以下结果区块必须在新实现完成对应维度验证后再生成。
 
 ### 2D CPU 单 rank FA/EA
 
 <!-- BEGIN GENERATED: cpu-single-rank-fa-ea-2d -->
 
 本节由 `sync_results.py --dim 2` 根据 clean-revision 原始 JSON 生成；精简证据见 `evidence/cpu-single-rank-fa-ea-2d.json`。
-源 revision：`608cedf25038ed690f6db3be5b3f24f92329c5ec`；`git_dirty=false`。
+源 revision：`4cd4e8da17189eb57f9a68cc316bcdf189c084ec`；`git_dirty=false`。
 
 | 网格 | EA-CG 迭代数 | 真相对残差 | 相对 L2 误差 | 边界绝对误差 |
 | --- | ---: | ---: | ---: | ---: |
-| `8×8` | 38 | `4.95485e-11` | `4.61057e-02` | `0` |
-| `16×16` | 89 | `8.99308e-11` | `1.20318e-02` | `0` |
-| `32×32` | 188 | `8.95197e-11` | `3.04605e-03` | `0` |
+| `8×8` | 38 | `5.13210e-11` | `4.61057e-02` | `0` |
+| `16×16` | 89 | `8.96971e-11` | `1.20318e-02` | `0` |
+| `32×32` | 188 | `8.95970e-11` | `3.04605e-03` | `0` |
 
 | 网格 | 原始 EA/FA MatVec | Dirichlet EA/FA MatVec | EA-CG/FA 直接解 |
 | --- | ---: | ---: | ---: |
-| `8×8` | `1.44949e-16` | `1.40930e-16` | `8.88290e-12` |
-| `16×16` | `1.62572e-16` | `1.64234e-16` | `6.67861e-12` |
-| `32×32` | `1.57536e-16` | `1.56086e-16` | `3.02707e-12` |
+| `8×8` | `1.44949e-16` | `1.40930e-16` | `8.67653e-12` |
+| `16×16` | `1.62572e-16` | `1.64234e-16` | `6.57436e-12` |
+| `32×32` | `1.57536e-16` | `1.56086e-16` | `3.03229e-12` |
 
-相对 L2 误差观测阶为 `1.93809`、`1.98184`。独立 FA 粗网格 `8×8` 在 38 步收敛，真相对残差为 `4.97442e-11`。
+相对 L2 误差观测阶为 `1.93809`、`1.98184`。独立 FA 粗网格 `8×8` 在 38 步收敛，真相对残差为 `4.95406e-11`。
 
 <!-- END GENERATED: cpu-single-rank-fa-ea-2d -->
 
@@ -203,7 +227,7 @@ dirty worktree 的验证结果只能作为开发证据。
 <!-- BEGIN GENERATED: cpu-single-rank-fa-ea-3d -->
 
 本节由 `sync_results.py --dim 3` 根据 clean-revision 原始 JSON 生成；精简证据见 `evidence/cpu-single-rank-fa-ea-3d.json`。
-源 revision：`608cedf25038ed690f6db3be5b3f24f92329c5ec`；`git_dirty=false`。
+源 revision：`4cd4e8da17189eb57f9a68cc316bcdf189c084ec`；`git_dirty=false`。
 
 | 网格 | EA-CG 迭代数 | 真相对残差 | 相对 L2 误差 | 边界绝对误差 |
 | --- | ---: | ---: | ---: | ---: |
@@ -215,7 +239,7 @@ dirty worktree 的验证结果只能作为开发证据。
 | --- | ---: | ---: | ---: |
 | `4×4×4` | `2.71490e-16` | `1.98982e-16` | `5.77006e-11` |
 | `8×8×8` | `3.17642e-16` | `2.69544e-16` | `1.93814e-11` |
-| `16×16×16` | `3.38707e-16` | `2.63232e-16` | `1.98506e-11` |
+| `16×16×16` | `3.38707e-16` | `2.63232e-16` | `1.98507e-11` |
 
 相对 L2 误差观测阶为 `1.25544`、`1.67645`。独立 FA 粗网格 `4×4×4` 在 24 步收敛，真相对残差为 `9.26796e-11`。
 

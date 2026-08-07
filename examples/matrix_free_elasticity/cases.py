@@ -11,7 +11,11 @@ from soptx.problems.elasticity import (
     SinusoidalPlaneStrainElasticity2D,
 )
 
-import contract
+try:
+    import utils.contract as contract
+except ImportError:
+    import contract
+
 
 
 @dataclass(frozen=True)

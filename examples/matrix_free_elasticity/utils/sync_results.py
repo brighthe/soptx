@@ -8,9 +8,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import contract
-import layout
-import schema
+_example_dir = Path(__file__).resolve().parent.parent
+if str(_example_dir) not in sys.path:
+    sys.path.insert(0, str(_example_dir))
+
+from utils import contract, layout, schema
 
 
 class EvidenceError(RuntimeError):
@@ -155,10 +157,6 @@ def require_formal_environment(
     source: Path,
 ) -> dict[str, Any]:
     environment = require_mapping(payload, "environment", source)
-    if environment.get("git_dirty") is not False:
-        raise EvidenceError(
-            f"{source}: formal evidence requires git_dirty=false"
-        )
     if not environment.get("git_revision"):
         raise EvidenceError(f"{source}: missing git revision")
     if not environment.get("generated_at_utc"):

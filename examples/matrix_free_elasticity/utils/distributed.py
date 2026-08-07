@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from mpi4py.MPI import Comm
 import numpy as np
@@ -15,7 +16,7 @@ from fealpy.distributed import (
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import Mesh
 
-import contract
+from utils import contract
 
 AXIS_NAMES = ("x", "y", "z")
 
@@ -82,21 +83,15 @@ def partition_strategy_label(
     )
 
 
-class OverlapOperator:
-    """Apply a local operator to equal-status overlapping DOF copies."""
+import importlib.util
 
-    def __init__(self, local_operator, dof_comm: EntityMPI) -> None:
-        self.local_operator = local_operator
-        self.dof_comm = dof_comm
-
-    def __matmul__(self, vector):
-        references = self.dof_comm.refs(vector.shape[-1])
-        consistent_vector = self.dof_comm.sync_add(vector) / references
-        local_result = self.local_operator @ consistent_vector
-        return self.dof_comm.sync_add(local_result)
-
-    def __getattr__(self, name):
-        return getattr(self.local_operator, name)
+_op_spec = importlib.util.spec_from_file_location(
+    "matrix_free_operator",
+    Path(__file__).resolve().parent.parent / "operator.py",
+)
+_op_mod = importlib.util.module_from_spec(_op_spec)
+_op_spec.loader.exec_module(_op_mod)
+OverlapOperator = _op_mod.OverlapOperator
 
 
 def _vector_dof_masks(
@@ -153,12 +148,18 @@ def distribute_vector_space(
     masks = comm.bcast(masks, root=root)
     expected_global_cell_dofs = comm.scatter(cell_dofs_by_rank, root=root)
 
-    local_scalar = distribute_space(
-        scalar_space,
-        distributed_mesh,
-        root=root,
-        comm=comm,
-    ).space
+    if not hasattr(Mesh, "edge_to_ipoint") and hasattr(Mesh, "face_to_ipoint"):
+        setattr(Mesh, "edge_to_ipoint", getattr(Mesh, "face_to_ipoint"))
+
+    if comm.Get_size() == 1:
+        local_scalar = scalar_space
+    else:
+        local_scalar = distribute_space(
+            scalar_space,
+            distributed_mesh,
+            root=root,
+            comm=comm,
+        ).space
     local_vector = TensorFunctionSpace(
         local_scalar,
         shape=(-1, components),

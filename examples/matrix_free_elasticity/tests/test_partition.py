@@ -7,9 +7,9 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-import contract
+import utils.contract as contract
 from cases import create_case
-from distributed import partition_cells, partition_strategy_label
+from utils.distributed import partition_cells, partition_strategy_label
 
 
 def coarse_mesh(dimension: int):

@@ -13,11 +13,12 @@ from pathlib import Path
 
 import pytest
 
-import report
-import schema
+import utils.contract as contract
+import utils.report as report
+import utils.schema as schema
 from cases import create_case
-from contract import RunConfig
-from schema import RunResult
+from utils.contract import RunConfig
+from utils.schema import RunResult
 
 
 def make_config(*, benchmark: bool = False) -> RunConfig:

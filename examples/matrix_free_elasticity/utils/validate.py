@@ -8,10 +8,13 @@ import subprocess
 import sys
 
 import numpy as np
+from pathlib import Path
 
-import contract
-import layout
-import schema
+_example_dir = Path(__file__).resolve().parent.parent
+if str(_example_dir) not in sys.path:
+    sys.path.insert(0, str(_example_dir))
+
+from utils import contract, layout, schema
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -480,7 +483,11 @@ def validate_dimension(
 
 def main() -> int:
     arguments = parse_arguments()
-    mpiexec = shutil.which("mpiexec")
+    env_mpiexec = Path(sys.executable).parent / "mpiexec"
+    if env_mpiexec.is_file():
+        mpiexec = str(env_mpiexec)
+    else:
+        mpiexec = shutil.which("mpiexec")
     if mpiexec is None:
         print(
             "mpiexec was not found; activate an environment containing "

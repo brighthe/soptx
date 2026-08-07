@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-import analyzer
-from analyzer import DISTRIBUTED_SOLVERS, DistributedElasticityAnalyzer
+import utils.analyzer as analyzer
+from utils.analyzer import DISTRIBUTED_SOLVERS, DistributedElasticityAnalyzer
 
 
 class RecordingRoutine:

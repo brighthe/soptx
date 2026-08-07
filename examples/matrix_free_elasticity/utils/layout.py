@@ -13,13 +13,15 @@ from __future__ import annotations
 from pathlib import Path
 
 
-EXAMPLE_DIR = Path(__file__).resolve().parent
+from utils import contract
+
+EXAMPLE_DIR = Path(__file__).resolve().parent.parent
 REPOSITORY_ROOT = EXAMPLE_DIR.parents[1]
 SOURCE_ROOT = REPOSITORY_ROOT / "src"
 OUTPUT_DIR = EXAMPLE_DIR / "outputs"
 EVIDENCE_DIR = EXAMPLE_DIR / "evidence"
 README_PATH = EXAMPLE_DIR / "README.md"
-RUN_SCRIPT = EXAMPLE_DIR / "run.py"
+RUN_SCRIPT = EXAMPLE_DIR / "utils" / "run.py"
 SYNC_SCRIPT_NAME = "sync_results.py"
 
 # (role, operator_level, ranks) for every case validate.py runs per dimension.

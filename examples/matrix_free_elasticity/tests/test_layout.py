@@ -7,8 +7,8 @@ runtime as a missing-artifact error.
 
 from __future__ import annotations
 
-import contract
-import layout
+import utils.contract as contract
+import utils.layout as layout
 
 
 def validation_summaries(dimension: int) -> set:

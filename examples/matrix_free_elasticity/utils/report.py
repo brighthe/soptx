@@ -12,12 +12,10 @@ from typing import Any
 import numpy as np
 from mpi4py import MPI
 
-import contract
-import layout
-import schema
 from cases import ElasticityCase
-from contract import RunConfig
-from schema import RunResult
+from utils import contract, layout, schema
+from utils.contract import RunConfig
+from utils.schema import RunResult
 
 
 def package_version(name: str) -> str:

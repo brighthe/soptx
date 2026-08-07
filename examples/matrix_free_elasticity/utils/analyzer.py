@@ -10,9 +10,9 @@ from fealpy.typing import TensorLike
 
 from soptx.fem.solvers import LagrangeFEMAnalyzer
 
-import contract
 from cases import ElasticityCase
-from distributed import OverlapOperator
+from utils import contract
+from utils.distributed import OverlapOperator
 
 
 class SupportsMatmul(Protocol):
@@ -35,45 +35,11 @@ SolverResult = tuple[TensorLike, dict]
 SolverRoutine = Callable[..., SolverResult]
 
 
-def _overlap_cg(
-    K: SupportsMatmul,
-    F: TensorLike,
-    *,
-    dof_comm: EntityMPI,
-    x0: Optional[TensorLike],
-    maxiter: int,
-    rtol: float,
-    atol: float,
-    **options: Any,
-) -> SolverResult:
-    """用 fealpy.solver.cg 的 ``dot_product`` 注入重叠修正内积."""
-
-    from fealpy.solver.cg import cg
-
-    dot_fn, _norm_fn = dof_comm.dot(int(F.shape[0]))
-
-    return cg(
-        K,
-        F,
-        x0=x0,
-        dot_product=dot_fn,
-        residual_refresh=options.pop(
-            "residual_refresh",
-            contract.RESIDUAL_REFRESH,
-        ),
-        atol=atol,
-        rtol=rtol,
-        maxit=maxiter,
-        returninfo=True,
-    )
-
+from solver import weighted_cg
 
 #: 重叠副本布局下可用的求解器。
-#:
-#: ``fealpy.solver.cg`` 现在接受 ``dot_product`` 参数注入重叠修正内积,
-#: 因此可以直接使用, 不再需要本地 CG 副本。新增其他 Krylov 子空间方法同理。
 DISTRIBUTED_SOLVERS: dict[str, SolverRoutine] = {
-    "cg": _overlap_cg,
+    "cg": weighted_cg,
 }
 
 

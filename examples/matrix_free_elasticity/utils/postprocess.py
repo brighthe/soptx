@@ -7,7 +7,7 @@ import numpy as np
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import Mesh, write_mesh_to_vtu
 
-import contract
+from utils import contract
 from cases import ElasticityCase
 
 

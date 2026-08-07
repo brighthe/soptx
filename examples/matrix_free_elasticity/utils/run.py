@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from time import perf_counter
 from typing import Any
 
 from mpi4py import MPI
 import numpy as np
 
-import layout
+_example_dir = Path(__file__).resolve().parent.parent
+if str(_example_dir) not in sys.path:
+    sys.path.insert(0, str(_example_dir))
+
+from utils import layout
 
 if str(layout.SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(layout.SOURCE_ROOT))
@@ -20,21 +24,20 @@ from fealpy.distributed import distribute_mesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import Mesh
 
-import contract
-import report
 from cases import ElasticityCase, create_case
-from contract import RunConfig
-from distributed import (
+from solver import PreparedLinearSystem, solver_diagnostics
+from utils import contract, report
+from utils.analyzer import build_distributed_analyzer
+from utils.contract import RunConfig
+from utils.distributed import (
     DistributedVectorSpace,
     distribute_vector_space,
     partition_cells,
     partition_strategy_label,
 )
-from analyzer import build_distributed_analyzer
-from postprocess import solution_error, write_solution
-from references import relative_difference, serial_references
-from schema import RunResult
-from solve import PreparedLinearSystem, solver_diagnostics
+from utils.postprocess import solution_error, write_solution
+from utils.references import relative_difference, serial_references
+from utils.schema import RunResult
 
 
 @dataclass(frozen=True)

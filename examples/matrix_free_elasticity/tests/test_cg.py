@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import contract
+import utils.contract as contract
 from fealpy.solver.cg import cg
 
 

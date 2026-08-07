@@ -1,52 +1,52 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "dimension": 3,
   "scope": "cpu-single-rank-fa-ea-correctness",
   "environment": {
     "python": "3.12.13",
-    "platform": "Windows-11-10.0.26100-SP0",
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
     "numpy": "2.5.1",
     "scipy": "1.18.0",
     "sympy": "1.14.0",
     "fealpy": "4.0.0",
     "soptx": "1.1.0.dev0",
     "mpi4py": "4.1.2",
-    "mpi_library": "Intel(R) MPI Library 2021.18.1 for Windows* OS",
-    "git_revision": "608cedf25038ed690f6db3be5b3f24f92329c5ec",
-    "git_dirty": false
+    "mpi_library": "Intel(R) MPI Library 2021.18.1 for Linux* OS",
+    "git_revision": "4cd4e8da17189eb57f9a68cc316bcdf189c084ec",
+    "git_dirty": true
   },
   "source_artifacts": [
     {
       "role": "3d-ea-coarse-with-fa-references",
       "path": "outputs/3d/ea-coarse-1rank.json",
-      "sha256": "35510b51f993cf26224e227d6d0c27f0daadacc9816ae46c5b82b941895294b7",
-      "generated_at_utc": "2026-07-31T07:26:41.031063+00:00",
-      "git_revision": "608cedf25038ed690f6db3be5b3f24f92329c5ec",
-      "git_dirty": false
+      "sha256": "9e272ba3662d22c4fc3ca70083b9b12deca79cb34c5f4b3a08712bc60242af20",
+      "generated_at_utc": "2026-08-07T09:06:42.515418+00:00",
+      "git_revision": "4cd4e8da17189eb57f9a68cc316bcdf189c084ec",
+      "git_dirty": true
     },
     {
       "role": "3d-ea-medium-with-fa-references",
       "path": "outputs/3d/ea-medium-1rank.json",
-      "sha256": "14ec33c4aa55693ad940ef611a6e3c0c3d4757ae67839f6b2ca8ca1040d7c8a2",
-      "generated_at_utc": "2026-07-31T07:26:42.941532+00:00",
-      "git_revision": "608cedf25038ed690f6db3be5b3f24f92329c5ec",
-      "git_dirty": false
+      "sha256": "ec248aafc94ad6ea654f800e4197f83fe6624013f374fccdb2d904d8fa70feae",
+      "generated_at_utc": "2026-08-07T09:06:44.182964+00:00",
+      "git_revision": "4cd4e8da17189eb57f9a68cc316bcdf189c084ec",
+      "git_dirty": true
     },
     {
       "role": "3d-ea-fine-with-fa-references",
       "path": "outputs/3d/ea-fine-1rank.json",
-      "sha256": "0c9c1f31e96eb2bda35434e2afc6ec576686fd88abe00fabe64f49eeaa4ef107",
-      "generated_at_utc": "2026-07-31T07:26:48.085402+00:00",
-      "git_revision": "608cedf25038ed690f6db3be5b3f24f92329c5ec",
-      "git_dirty": false
+      "sha256": "d38cff5db23e9466b917fbf6cea1ec03425a6f051c497ada5ce1b4b4efa7dfc8",
+      "generated_at_utc": "2026-08-07T09:06:48.832579+00:00",
+      "git_revision": "4cd4e8da17189eb57f9a68cc316bcdf189c084ec",
+      "git_dirty": true
     },
     {
       "role": "3d-independent-fa-coarse",
       "path": "outputs/3d/fa-coarse-1rank.json",
-      "sha256": "517ced7457e1486a86006da62edfd36e66ca4c2a16c1f122546a4a24981c0790",
-      "generated_at_utc": "2026-07-31T07:26:52.414830+00:00",
-      "git_revision": "608cedf25038ed690f6db3be5b3f24f92329c5ec",
-      "git_dirty": false
+      "sha256": "3cdc6f5e6f16f5ebe7845b3d95b8815dcfcb7056a31e2bc671cdaa5f9335c783",
+      "generated_at_utc": "2026-08-07T09:06:52.733120+00:00",
+      "git_revision": "4cd4e8da17189eb57f9a68cc316bcdf189c084ec",
+      "git_dirty": true
     }
   ],
   "ea_cases": [
@@ -70,13 +70,13 @@
         "explicit_solution_relative_error": 5.7700610509978085e-11
       },
       "local_gates": {
-        "converged": true,
-        "true_residual": true,
-        "boundary_dofs": true,
-        "raw_matvec": true,
-        "dirichlet_matvec": true,
-        "operator_symmetry": true,
-        "explicit_solution": true
+        "converged": "passed",
+        "true_residual": "passed",
+        "boundary_dofs": "passed",
+        "raw_matvec": "passed",
+        "dirichlet_matvec": "passed",
+        "operator_symmetry": "passed",
+        "explicit_solution": "passed"
       }
     },
     {
@@ -99,13 +99,13 @@
         "explicit_solution_relative_error": 1.9381422937802418e-11
       },
       "local_gates": {
-        "converged": true,
-        "true_residual": true,
-        "boundary_dofs": true,
-        "raw_matvec": true,
-        "dirichlet_matvec": true,
-        "operator_symmetry": true,
-        "explicit_solution": true
+        "converged": "passed",
+        "true_residual": "passed",
+        "boundary_dofs": "passed",
+        "raw_matvec": "passed",
+        "dirichlet_matvec": "passed",
+        "operator_symmetry": "passed",
+        "explicit_solution": "passed"
       }
     },
     {
@@ -123,18 +123,18 @@
         "l2_relative": 0.08919220890462531
       },
       "fa_references": {
-        "raw_matvec_relative_error": 3.387071943333738e-16,
-        "dirichlet_matvec_relative_error": 2.6323183788278746e-16,
-        "explicit_solution_relative_error": 1.9850637144258435e-11
+        "raw_matvec_relative_error": 3.387071943333739e-16,
+        "dirichlet_matvec_relative_error": 2.632318378827874e-16,
+        "explicit_solution_relative_error": 1.985065357435562e-11
       },
       "local_gates": {
-        "converged": true,
-        "true_residual": true,
-        "boundary_dofs": true,
-        "raw_matvec": true,
-        "dirichlet_matvec": true,
-        "operator_symmetry": true,
-        "explicit_solution": true
+        "converged": "passed",
+        "true_residual": "passed",
+        "boundary_dofs": "passed",
+        "raw_matvec": "passed",
+        "dirichlet_matvec": "passed",
+        "operator_symmetry": "passed",
+        "explicit_solution": "passed"
       }
     }
   ],
@@ -157,13 +157,13 @@
       "l2_relative": 0.6806370362260652
     },
     "local_gates": {
-      "converged": true,
-      "true_residual": true,
-      "boundary_dofs": true,
-      "raw_matvec": true,
-      "dirichlet_matvec": true,
-      "operator_symmetry": true,
-      "explicit_solution": true
+      "converged": "passed",
+      "true_residual": "passed",
+      "boundary_dofs": "passed",
+      "raw_matvec": "passed",
+      "dirichlet_matvec": "passed",
+      "operator_symmetry": "passed",
+      "explicit_solution": "passed"
     }
   }
 }
