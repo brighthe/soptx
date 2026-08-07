@@ -120,7 +120,8 @@ class HalfMBBBeamRight3d:
 
     问题定义包含区域、材料参数、体力和边界条件；网格由调用方显式创建。
     左对称面 (x=0) 施加 ``u_x = 0``，右下角底线 (x=Lx, y=0) 施加 ``u_y = 0``，
-    左上角顶线 (x=0, y=Ly) 承受竖直集中力 ``P``。
+    底面中心平面 (y=0, z=Lz/2) 施加 ``u_z = 0``（防止刚体运动），
+    左上角顶线 (x=0, y=Ly, z=Lz/2) 承受竖直集中力 ``P``。
     """
 
     dimension = 3
@@ -194,9 +195,12 @@ class HalfMBBBeamRight3d:
         self,
         points: TensorLike,
     ) -> TensorLike:
-        z = points[..., 2]
+        y, z = points[..., 1], points[..., 2]
         z_mid = (self.domain[4] + self.domain[5]) / 2.0
-        return bm.abs(z - z_mid) < self._eps
+        return (
+            (bm.abs(y - self.domain[2]) < self._eps)
+            & (bm.abs(z - z_mid) < self._eps)
+        )
 
     def is_dirichlet_boundary(self) -> tuple[Callable, Callable, Optional[Callable]]:
         return (
@@ -236,7 +240,8 @@ class FullMBBBeam3d:
     物理问题未利用对称性简化，而是对整体全尺寸 3D 模型求解：
       - 左侧底部 (x=0, y=0): 铰支座 (u_x = 0, u_y = 0)
       - 右侧底部 (x=Lx, y=0): 滚轴支座 (u_y = 0)
-      - 顶面中心线/点 (x=Lx/2, y=Ly): 竖直向下集中荷载 P
+      - 底面两端 (y=0, z=Lz/2): uz = 0（防止刚体运动）
+      - 顶面中心点 (x=Lx/2, y=Ly, z=Lz/2): 竖直向下集中荷载 P
     """
 
     dimension = 3
@@ -314,9 +319,12 @@ class FullMBBBeam3d:
         self,
         points: TensorLike,
     ) -> TensorLike:
-        z = points[..., 2]
+        y, z = points[..., 1], points[..., 2]
         z_mid = (self.domain[4] + self.domain[5]) / 2.0
-        return bm.abs(z - z_mid) < self._eps
+        return (
+            (bm.abs(y - self.domain[2]) < self._eps)
+            & (bm.abs(z - z_mid) < self._eps)
+        )
 
     def is_dirichlet_boundary(self) -> tuple[Callable, Callable, Optional[Callable]]:
         return (
