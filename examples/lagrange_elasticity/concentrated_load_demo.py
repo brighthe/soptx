@@ -19,12 +19,18 @@
 
 运行::
 
+    # 2D: 对称半域 MBB 梁 (默认)
     python examples/lagrange_elasticity/concentrated_load_demo.py
-    python examples/lagrange_elasticity/concentrated_load_demo.py --problem cantilever-corner
     python examples/lagrange_elasticity/concentrated_load_demo.py --levels 4
     python examples/lagrange_elasticity/concentrated_load_demo.py --mesh-type tri
     python examples/lagrange_elasticity/concentrated_load_demo.py --solver cg --rtol 1e-12
     python examples/lagrange_elasticity/concentrated_load_demo.py --save-vtu
+
+    # 3D: 完整全域 MBB 梁 (FullMBBBeam3d, 默认 120x20x20)
+    python examples/lagrange_elasticity/concentrated_load_demo.py --dim 3 --levels 1
+    python examples/lagrange_elasticity/concentrated_load_demo.py --dim 3 --nx 30 --ny 10 --nz 10
+    # 3D: 对称半域 MBB 梁 (HalfMBBBeamRight3d)
+    python examples/lagrange_elasticity/concentrated_load_demo.py --dim 3 --problem mbb-half-3d --levels 1
 """
 
 from __future__ import annotations
@@ -357,27 +363,22 @@ def main() -> int:
 
     bm.set_backend("numpy")
 
-    # 根据维度确定问题和网格类型
+    # 根据问题确定网格类型: 3D 问题 (default_nz 非 None) 强制 hex, 2D 用用户选择
     if arguments.problem is None:
-        if arguments.dim == 2:
-            problem_name = "mbb-half"
-            mesh_type = arguments.mesh_type if arguments.mesh_type != "hex" else "quad"
-        else:  # dim == 3
-            problem_name = "mbb-full-3d"
-            mesh_type = "hex"
+        problem_name = "mbb-full-3d" if arguments.dim == 3 else "mbb-half"
     else:
         problem_name = arguments.problem
-        mesh_type = arguments.mesh_type
-
-    # 3D 问题必须用 hex 网格
-    if arguments.dim == 3 and mesh_type != "hex":
-        print(f"错误: 3D 问题只支持 hex 网格，不支持 {mesh_type}", file=sys.stderr)
-        return 1
 
     entry = PROBLEM_REGISTRY[problem_name]
-    if entry.default_domain != (0.0, 60.0, 0.0, 20.0) and not (arguments.nx or arguments.ny):
-        # 对于非标准问题（如 3D），给出友好提示
-        pass
+    is_3d = entry.default_nz is not None
+
+    if is_3d:
+        mesh_type = "hex"
+    else:
+        mesh_type = arguments.mesh_type
+        if mesh_type == "hex":
+            print(f"错误: 2D 问题只支持 quad/tri 网格，不支持 hex", file=sys.stderr)
+            return 1
 
     nx = arguments.nx if arguments.nx is not None else entry.default_nx
     ny = arguments.ny if arguments.ny is not None else entry.default_ny
@@ -421,7 +422,7 @@ def main() -> int:
             "solver": arguments.solver,
             "solver_options": solver_options,
         }
-        if arguments.dim == 3:
+        if is_3d:
             solve_kwargs["nz"] = nz * 2**level
         rows.append(solve_one_level(**solve_kwargs))
 
@@ -440,7 +441,7 @@ def main() -> int:
             "nx": finest_nx,
             "ny": finest_ny,
         }
-        if arguments.dim == 3:
+        if is_3d:
             vtu_mesh_kwargs["nz"] = finest_nz
 
         finest_mesh = create_mesh(problem, mesh_type, finest_nx, finest_ny, finest_nz)
@@ -464,7 +465,7 @@ def main() -> int:
         disp_f = disp_array.reshape(-1, problem.dimension)
 
         vtu_stem_parts = [problem_name, f"p{arguments.degree}", mesh_type, f"{finest_nx}x{finest_ny}"]
-        if arguments.dim == 3:
+        if is_3d:
             vtu_stem_parts.append(f"x{finest_nz}")
         vtu_stem = "_".join(vtu_stem_parts)
         vtu_path = str(vtu_dir / vtu_stem)
@@ -497,7 +498,7 @@ def main() -> int:
     if residual_passed and load_passed and converged:
         print(
             "\n结论: SOPTX 的拉格朗日位移元集中力载荷路径 "
-            f"({arguments.mesh_type} 网格 + {arguments.solver}) 可用."
+            f"({mesh_type} 网格 + {arguments.solver}) 可用."
         )
         return 0
 
