@@ -39,18 +39,12 @@ from typing import Any, Callable
 import numpy as np
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
-
-from pyevtk.hl import unstructuredGridToVTK
+from fealpy.mesh import HexahedronMesh, QuadrangleMesh, TriangleMesh
 
 from soptx.fem.solvers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import HalfMBBBeamRight2d
-
-
-# VTK 单元类型常量
-_VTK_QUAD = 9
-_VTK_TRIANGLE = 5
+from soptx.problems import FullMBBBeam3d, HalfMBBBeamRight2d, HalfMBBBeamRight3d
+from soptx.visualization.vtk_export import export_vtu
 
 
 # ---------------------------------------------------------------------------
@@ -70,12 +64,13 @@ class ConcentratedLoadProblemEntry:
     default_ny: int
     material_extra: dict[str, Any] | None = None
     load_attr: str = "P"
+    default_nz: int | None = None
 
 
 PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
     "mbb-half": ConcentratedLoadProblemEntry(
         name="mbb-half",
-        label="MBB 梁对称右半域",
+        label="MBB 梁对称右半域 (2D)",
         factory=lambda **kw: HalfMBBBeamRight2d(
             domain=kw.pop("domain", (0.0, 60.0, 0.0, 20.0)),
             P=kw.pop("P", -1.0),
@@ -87,6 +82,36 @@ PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
         default_domain=(0.0, 60.0, 0.0, 20.0),
         default_nx=60,
         default_ny=20,
+    ),
+    "mbb-half-3d": ConcentratedLoadProblemEntry(
+        name="mbb-half-3d",
+        label="MBB 梁对称右半域 (3D)",
+        factory=lambda **kw: HalfMBBBeamRight3d(
+            domain=kw.pop("domain", (0.0, 60.0, 0.0, 20.0, 0.0, 20.0)),
+            P=kw.pop("P", -1.0),
+            E=kw.pop("E", 1.0),
+            nu=kw.pop("nu", 0.3),
+            **kw,
+        ),
+        default_domain=(0.0, 60.0, 0.0, 20.0, 0.0, 20.0),
+        default_nx=60,
+        default_ny=20,
+        default_nz=20,
+    ),
+    "mbb-full-3d": ConcentratedLoadProblemEntry(
+        name="mbb-full-3d",
+        label="MBB 梁完整全域 (3D)",
+        factory=lambda **kw: FullMBBBeam3d(
+            domain=kw.pop("domain", (0.0, 120.0, 0.0, 20.0, 0.0, 20.0)),
+            P=kw.pop("P", -1.0),
+            E=kw.pop("E", 1.0),
+            nu=kw.pop("nu", 0.3),
+            **kw,
+        ),
+        default_domain=(0.0, 120.0, 0.0, 20.0, 0.0, 20.0),
+        default_nx=120,
+        default_ny=20,
+        default_nz=20,
     ),
 }
 
@@ -101,56 +126,6 @@ NORM_FLOOR = 1.0e-30
 
 DIRECT_SOLVERS = ("scipy", "mumps")
 ITERATIVE_SOLVERS = ("cg",)
-
-
-def export_vtu(
-    mesh,
-    displacement: np.ndarray,
-    filepath: str,
-) -> None:
-    """导出位移场为 ParaView 可读的 VTU 非结构化网格文件。"""
-
-    nodes = np.asarray(mesh.entity("node"), dtype=np.float64)
-    cells = np.asarray(mesh.entity("cell"), dtype=np.int32)
-
-    n_nodes = nodes.shape[0]
-    n_cells = cells.shape[0]
-    nodes_per_cell = cells.shape[1]
-
-    if nodes_per_cell == 4:
-        cell_type = _VTK_QUAD
-    elif nodes_per_cell == 3:
-        cell_type = _VTK_TRIANGLE
-    else:
-        raise ValueError(f"不支持的单元类型: {nodes_per_cell} 节点")
-
-    # VTU: 节点坐标分量
-    x = np.ascontiguousarray(nodes[:, 0])
-    y = np.ascontiguousarray(nodes[:, 1])
-    z = np.zeros(n_nodes, dtype=np.float64)
-
-    # 连通性与偏移
-    connectivity = np.ascontiguousarray(cells.flatten())
-    offsets = np.arange(nodes_per_cell, n_cells * nodes_per_cell + 1, nodes_per_cell, dtype=np.int32)
-
-    cell_types = np.full(n_cells, cell_type, dtype=np.int32)
-
-    # 节点数据
-    disp = np.asarray(displacement, dtype=np.float64)
-    if disp.ndim == 1:
-        disp = disp.reshape(n_nodes, -1)
-
-    point_data = {}
-    for d in range(disp.shape[1]):
-        comp = np.ascontiguousarray(disp[:, d])
-        point_data[f"u_{chr(120 + d)}"] = comp
-    # 位移幅值
-    point_data["u_mag"] = np.ascontiguousarray(np.linalg.norm(disp, axis=1))
-
-    unstructuredGridToVTK(
-        filepath, x, y, z, connectivity, offsets, cell_types,
-        pointData=point_data,
-    )
 
 
 def create_problem_and_material(
@@ -171,11 +146,18 @@ def create_problem_and_material(
     return problem, material
 
 
-def create_mesh(problem, mesh_type: str, nx: int, ny: int):
+def create_mesh(problem, mesh_type: str, nx: int, ny: int, nz: int | None = None):
     """显式创建问题离散网格，保持 Problem 与 Mesh 分离。"""
 
-    constructor = {"quad": QuadrangleMesh, "tri": TriangleMesh}[mesh_type]
-    return constructor.from_box(box=list(problem.domain), nx=nx, ny=ny)
+    if problem.dimension == 2:
+        constructor = {"quad": QuadrangleMesh, "tri": TriangleMesh}[mesh_type]
+        return constructor.from_box(box=list(problem.domain), nx=nx, ny=ny)
+    else:  # 3D
+        if mesh_type != "hex":
+            raise ValueError(f"3D 仅支持 hex 网格，不支持 {mesh_type}")
+        if nz is None:
+            raise ValueError("3D 问题必须提供 nz 参数")
+        return HexahedronMesh.from_box(box=list(problem.domain), nx=nx, ny=ny, nz=nz)
 
 
 def solve_one_level(
@@ -188,10 +170,11 @@ def solve_one_level(
     degree: int,
     solver: str,
     solver_options: dict,
+    nz: int | None = None,
 ) -> dict:
     """在一层网格上求解，返回残差、载荷和与柔顺度等诊断量。"""
 
-    mesh = create_mesh(problem, mesh_type, nx, ny)
+    mesh = create_mesh(problem, mesh_type, nx, ny, nz)
     integration_order = degree + 3
 
     analyzer = LagrangeFEMAnalyzer(
@@ -222,7 +205,7 @@ def solve_one_level(
 
     applied_load = getattr(problem, entry.load_attr)
 
-    return {
+    result = {
         "nx": nx,
         "ny": ny,
         "mesh_size": problem.domain[1] / nx,
@@ -235,28 +218,47 @@ def solve_one_level(
         "niter": solver_info.get("niter"),
         "converged": solver_info.get("converged"),
     }
+    if problem.dimension == 3:
+        result["nz"] = nz
+    return result
 
 def report(rows: list[dict], solver: str) -> None:
     """打印结果表."""
 
     iterative = solver in ITERATIVE_SOLVERS
+    is_3d = "nz" in rows[0] if rows else False
 
-    header = (
-        f"{'nx':>5} {'cells':>9} {'gdof':>9} {'h':>9} "
-        f"{'residual':>11} {'load_sum':>10} {'load_err':>10} "
-        f"{'compliance':>12}"
-    )
+    if is_3d:
+        header = (
+            f"{'nx':>5} {'ny':>5} {'nz':>5} {'cells':>9} {'gdof':>9} {'h':>9} "
+            f"{'residual':>11} {'load_sum':>10} {'load_err':>10} "
+            f"{'compliance':>12}"
+        )
+    else:
+        header = (
+            f"{'nx':>5} {'cells':>9} {'gdof':>9} {'h':>9} "
+            f"{'residual':>11} {'load_sum':>10} {'load_err':>10} "
+            f"{'compliance':>12}"
+        )
     if iterative:
         header += f" {'niter':>7} {'conv':>6}"
     print(header)
     print("-" * len(header))
     for row in rows:
-        line = (
-            f"{row['nx']:>5} {row['cells']:>9} {row['dofs']:>9} "
-            f"{row['mesh_size']:>9.4f} {row['residual']:>11.2e} "
-            f"{row['load_sum']:>10.6f} {row['load_error']:>10.2e} "
-            f"{row['compliance']:>12.6e}"
-        )
+        if is_3d:
+            line = (
+                f"{row['nx']:>5} {row['ny']:>5} {row['nz']:>5} {row['cells']:>9} {row['dofs']:>9} "
+                f"{row['mesh_size']:>9.4f} {row['residual']:>11.2e} "
+                f"{row['load_sum']:>10.6f} {row['load_error']:>10.2e} "
+                f"{row['compliance']:>12.6e}"
+            )
+        else:
+            line = (
+                f"{row['nx']:>5} {row['cells']:>9} {row['dofs']:>9} "
+                f"{row['mesh_size']:>9.4f} {row['residual']:>11.2e} "
+                f"{row['load_sum']:>10.6f} {row['load_error']:>10.2e} "
+                f"{row['compliance']:>12.6e}"
+            )
         if iterative:
             line += f" {row['niter']:>7} {str(row['converged']):>6}"
         print(line)
@@ -284,8 +286,12 @@ def parse_arguments() -> argparse.Namespace:
         description="集中力载荷路径的工程基准算例",
     )
     parser.add_argument(
-        "--problem", choices=list(PROBLEM_REGISTRY), default="mbb-half",
-        help="集中力工程基准算例 (默认 mbb-half)",
+        "--dim", type=int, choices=[2, 3], default=2,
+        help="问题维度: 2D 或 3D (默认 2)",
+    )
+    parser.add_argument(
+        "--problem", default=None,
+        help="集中力工程基准算例; 若不指定则自动选择 (2D/3D 默认)",
     )
     parser.add_argument(
         "--nx", type=int, default=None,
@@ -296,8 +302,12 @@ def parse_arguments() -> argparse.Namespace:
         help="最粗档的 y 方向单元数 (默认由算例决定)",
     )
     parser.add_argument(
+        "--nz", type=int, default=None,
+        help="最粗档的 z 方向单元数 (3D 问题专用, 默认由算例决定)",
+    )
+    parser.add_argument(
         "--levels", type=int, default=3,
-        help="加密层数, 每层 nx/ny 加倍 (默认 3)",
+        help="加密层数, 每层 nx/ny/nz 加倍 (默认 3)",
     )
     parser.add_argument(
         "--mesh-type", choices=("quad", "tri"), default="quad",
@@ -347,9 +357,31 @@ def main() -> int:
 
     bm.set_backend("numpy")
 
-    entry = PROBLEM_REGISTRY[arguments.problem]
+    # 根据维度确定问题和网格类型
+    if arguments.problem is None:
+        if arguments.dim == 2:
+            problem_name = "mbb-half"
+            mesh_type = arguments.mesh_type if arguments.mesh_type != "hex" else "quad"
+        else:  # dim == 3
+            problem_name = "mbb-full-3d"
+            mesh_type = "hex"
+    else:
+        problem_name = arguments.problem
+        mesh_type = arguments.mesh_type
+
+    # 3D 问题必须用 hex 网格
+    if arguments.dim == 3 and mesh_type != "hex":
+        print(f"错误: 3D 问题只支持 hex 网格，不支持 {mesh_type}", file=sys.stderr)
+        return 1
+
+    entry = PROBLEM_REGISTRY[problem_name]
+    if entry.default_domain != (0.0, 60.0, 0.0, 20.0) and not (arguments.nx or arguments.ny):
+        # 对于非标准问题（如 3D），给出友好提示
+        pass
+
     nx = arguments.nx if arguments.nx is not None else entry.default_nx
     ny = arguments.ny if arguments.ny is not None else entry.default_ny
+    nz = arguments.nz if arguments.nz is not None else entry.default_nz
 
     problem, material = create_problem_and_material(entry)
 
@@ -367,7 +399,7 @@ def main() -> int:
     fealpy_root = Path(import_module("fealpy").__file__).resolve().parents[1]
     print(f"FEALPy: {fealpy_root}")
     print(
-        f"问题={entry.label}, 网格={arguments.mesh_type}, "
+        f"问题={entry.label}, 网格={mesh_type}, "
         f"空间次数={arguments.degree}, 求解器={arguments.solver}"
     )
     if iterative:
@@ -378,19 +410,20 @@ def main() -> int:
 
     rows = []
     for level in range(arguments.levels):
-        rows.append(
-            solve_one_level(
-                problem=problem,
-                material=material,
-                entry=entry,
-                mesh_type=arguments.mesh_type,
-                nx=nx * 2**level,
-                ny=ny * 2**level,
-                degree=arguments.degree,
-                solver=arguments.solver,
-                solver_options=solver_options,
-            )
-        )
+        solve_kwargs = {
+            "problem": problem,
+            "material": material,
+            "entry": entry,
+            "mesh_type": mesh_type,
+            "nx": nx * 2**level,
+            "ny": ny * 2**level,
+            "degree": arguments.degree,
+            "solver": arguments.solver,
+            "solver_options": solver_options,
+        }
+        if arguments.dim == 3:
+            solve_kwargs["nz"] = nz * 2**level
+        rows.append(solve_one_level(**solve_kwargs))
 
     report(rows, arguments.solver)
 
@@ -400,7 +433,17 @@ def main() -> int:
         finest = rows[-1]
         finest_nx = finest["nx"]
         finest_ny = finest["ny"]
-        finest_mesh = create_mesh(problem, arguments.mesh_type, finest_nx, finest_ny)
+        finest_nz = finest.get("nz")
+
+        vtu_mesh_kwargs = {
+            "mesh_type": mesh_type,
+            "nx": finest_nx,
+            "ny": finest_ny,
+        }
+        if arguments.dim == 3:
+            vtu_mesh_kwargs["nz"] = finest_nz
+
+        finest_mesh = create_mesh(problem, mesh_type, finest_nx, finest_ny, finest_nz)
         finest_analyzer = LagrangeFEMAnalyzer(
             disp_mesh=finest_mesh,
             pde=problem,
@@ -417,9 +460,13 @@ def main() -> int:
         K_f, F_f = finest_analyzer.apply_bc(K0_f, F0_f)
         uh_f = finest_analyzer.tensor_space.function()
         _, _ = finest_analyzer.solve_system(K_f, F_f, uh_f, **solver_options)
-        disp_f = np.asarray(bm.asarray(uh_f)).reshape(-1, 2)
+        disp_array = np.asarray(bm.asarray(uh_f))
+        disp_f = disp_array.reshape(-1, problem.dimension)
 
-        vtu_stem = f"{arguments.problem}_p{arguments.degree}_{arguments.mesh_type}_{finest_nx}x{finest_ny}"
+        vtu_stem_parts = [problem_name, f"p{arguments.degree}", mesh_type, f"{finest_nx}x{finest_ny}"]
+        if arguments.dim == 3:
+            vtu_stem_parts.append(f"x{finest_nz}")
+        vtu_stem = "_".join(vtu_stem_parts)
         vtu_path = str(vtu_dir / vtu_stem)
         export_vtu(finest_mesh, disp_f, vtu_path)
         print(f"\nVTU 已导出: {vtu_path}.vtu")
