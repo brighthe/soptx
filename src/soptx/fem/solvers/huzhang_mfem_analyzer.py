@@ -37,7 +37,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 solve_method: Literal['mumps', 'scipy'] = 'mumps',
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 enable_logging: bool = False,
-                logger_name: Optional[str] = None
+                logger_name: Optional[str] = None,
+                stabilization_scaling: Optional[str] = None,
             ) -> None:
         """初始化胡张混合有限元分析器
 
@@ -63,6 +64,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         self._topopt_algorithm = topopt_algorithm
         self._interpolation_scheme = interpolation_scheme
+
+        # 低阶稳定化缩放律透传给 JumpPenaltyIntegrator;
+        # None 表示采用 integrator 默认 ('physical_h', 论文式物理量纲缩放)
+        self._stabilization_scaling = stabilization_scaling
 
         # 状态方程是对称不定的鞍点系统, 只能用直接解法, 在构造期就拒绝迭代解法
         if solve_method not in ['mumps', 'scipy']:
@@ -228,10 +233,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return A
     
-    def _calculate_mix_matrix(self, enable_timing: bool=True) -> Union[CSRTensor, COOTensor]:
+    def _calculate_mix_matrix(self, enable_timing: bool=False) -> Union[CSRTensor, COOTensor]:
         """组装应力-位移耦合矩阵 B_σu"""
         start_time = time()
-        
+
         space_sigma = self._huzhang_space
         space_u = self._tensor_space
 
@@ -301,10 +306,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             bform3 = BilinearForm(space_u)
             # 默认使用矩阵跳量稳定化项
             jpi_integrator = JumpPenaltyIntegrator(
-                                    q=self._integration_order, 
-                                    threshold=valid_faces_idx, 
+                                    q=self._integration_order,
+                                    threshold=valid_faces_idx,
                                     method='matrix_jump',
                                     material=self._material,
+                                    penalty_scaling=self._stabilization_scaling,
                                 )
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')

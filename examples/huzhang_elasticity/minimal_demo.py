@@ -4,29 +4,39 @@
 :class:`~soptx.fem.HuZhangMFEMAnalyzer` 能够真正解出线弹性问题, 而不是只
 能构造出函数空间.
 
-问题取 :class:`soptx.problems.MixedBoundarySinusoidalElasticity2D`, 与论文制造解
-收敛验证保持一致: 单位正方形上的平面应变问题, 精确位移两个分量均为
-``sin(pi*x)*sin(pi*y)``, 左边和下边施加齐次位移条件, 右边和上边施加精确应力
-法向迹给出的非齐次牵引. 默认空间次数 ``p=3``, 满足二维胡张元的
-``p >= d + 1``, 因此刚度矩阵是干净的鞍点结构 ``[[A, B], [B^T, 0]]``; ``p=1,2``
-时分析器自动启用低阶跳量稳定化.
+问题取 ``soptx.problems`` 的混合边界制造解, 与 ``examples/lagrange_elasticity``
+的分工保持一致: 那里验证拉格朗日位移元, 这里验证胡张元 —— 同一组
+``MixedBoundary*Elasticity2D`` 问题, 两种离散各自验证各自的收敛链. 各制造解的
+完整数学定义见
+`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__. 实测收敛
+数据、判据与诊断见 `结果分析报告 <outputs/results_analysis.md>`__.
 
-网格限制: 当前 SOPTX 的 Hu--Zhang 实现仅支持 simplex mesh, 即二维 triangle
-和三维 tetrahedron. 本算例固定使用二维 triangle, 不支持 quadrilateral 或
-hexahedral, 因而不提供 ``--mesh-type`` 选项. 这是当前软件实现的支持范围,
-不是对 Hu--Zhang 方法数学理论的永久限制.
+当前 ``soptx`` 的胡张元仅支持 2D simplex 网格, 因此本算例不提供 ``--dim``
+与 ``--mesh-type`` 选项, 固定使用二维 ``triangle-checkerboard``: 从规则四边形
+网格按棋盘格交替选取对角线. 这是当前软件实现的支持范围, 不是对胡--张方法数学
+理论的永久限制 (角点松弛要求每个几何角点恰好连接两个三角形, 且两者共享一条
+从角点出发的内部边).
 
-当前二维角点松弛还要求每个几何角点恰好连接两个三角形, 且两者共享一条从角点
-出发的内部边. 因此本算例使用 ``triangle-checkerboard``: 从规则四边形网格按
-棋盘格交替选取对角线. 这项限制属于当前松弛实现, 不是一般 Hu--Zhang 理论限制.
+问题与材料直接取自 ``soptx``, 没有本地适配层 —— 这本身就是算例的一部分:
+它验证维护中的 Problem 满足 ``MixedBoundaryElasticityProblem`` 契约. 可选模型
+两个:
 
-问题类直接取自 ``soptx.problems``, 没有任何本地适配层 —— 这本身就是算例的一
-部分: 它验证维护中的 Problem 满足 ``MixedBoundaryElasticityProblem`` 契约.
+* ``mixed-sinusoidal``: 精确位移 ``u1=u2=sin(pi x) sin(pi y)``, 左边与下边
+  为位移边界, 右边与上边为 traction 边界 (默认);
+* ``mixed-exp-sine``: 指数/正弦制造解, 三条边为位移边界, 右边为 traction
+  边界.
+
+全 Dirichlet 制造解 (``sinusoidal``/``exp-sine``) 在理论上也能走通
+``AllDisplacementBoundaryMixin`` 提供的混合形式边界接口, 但该路径未经充分
+测试, 暂不开放.
 
 判据只取无歧义的两项: 线性系统的相对平衡残差和状态矩阵的对称性缺陷, 阈值
 沿用 ``experiments/huzhang_topopt_paper/cases.toml`` 里的 acceptance. 收敛阶
 只打印不判定 —— 该实验目录记录的预期阶目前仍是 ``theory-audit-required``,
 在理论核查完成前不应作为通过条件.
+
+求解器限制: 胡张元的状态方程是 ``[[A, B], [B^T, 0]]`` 型对称不定鞍点系统,
+不能用 CG (``solve_state`` 对 ``cg`` 直接报错), 只提供 ``scipy`` 与 ``mumps``.
 
 前置: SOPTX 需以 editable 方式安装 (``pip install -e .``, 见仓库 README),
 这样 ``import soptx`` 直接解析到工作树的 ``src/soptx``, 脚本无需注入源码路径.
@@ -34,14 +44,18 @@ hexahedral, 因而不提供 ``--mesh-type`` 选项. 这是当前软件实现的�
 运行::
 
     python .\\examples\\huzhang_elasticity\\minimal_demo.py
+    python .\\examples\\huzhang_elasticity\\minimal_demo.py --model mixed-exp-sine
     python .\\examples\\huzhang_elasticity\\minimal_demo.py --degree 2
     python .\\examples\\huzhang_elasticity\\minimal_demo.py --no-relaxation
+    python .\\examples\\huzhang_elasticity\\minimal_demo.py --solver mumps
 """
 
 from __future__ import annotations
 
 import argparse
+from importlib import import_module
 from math import log2
+from pathlib import Path
 import sys
 
 from fealpy.backend import backend_manager as bm
@@ -51,26 +65,106 @@ from soptx.fem import (
     create_huzhang_checkerboard_mesh,
 )
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import MixedBoundarySinusoidalElasticity2D
+from soptx.problems import (
+    MixedBoundaryExponentialSineElasticity2D,
+    MixedBoundarySinusoidalElasticity2D,
+)
 
 
 # 与 cases.toml 的 acceptance 保持一致
 RESIDUAL_TOLERANCE = 1.0e-8
 SYMMETRY_TOLERANCE = 1.0e-12
 
+# 各维度最粗一档的每方向单元数, 之后逐层加倍; 胡张元角点松弛要求偶数
+BASE_SUBDIVISIONS = {2: 2}
+
+# 直接解法经 fealpy.solver.spsolve 分派到对应后端; 胡张元不支持迭代解法
+DIRECT_SOLVERS = ("scipy", "mumps")
+
 
 def _as_float(value) -> float:
     return float(bm.to_numpy(value).reshape(-1)[0])
 
 
-def solve_one_level(problem, material, degree: int, subdivisions: int,
-                    integration_order: int, use_relaxation: bool) -> dict:
-    """在一层网格上求解并返回误差与诊断量."""
-    mesh = create_huzhang_checkerboard_mesh(
-        box=problem.domain,
+def _mixed_sinusoidal_2d() -> tuple:
+    """u1=u2=sin(pi x) sin(pi y); Gamma_D={x=0}∪{y=0}, Gamma_N={x=1}∪{y=1}.
+
+    与 lagrange 版同一个问题, 但这里通过 Hu--Zhang 混合形式求解: 位移边界
+    ``u=0`` 是自然边界条件 (弱施加), traction 边界 ``sigma.n=t`` 才是本质
+    边界条件 (强施加).
+    """
+
+    problem = MixedBoundarySinusoidalElasticity2D()
+    material = IsotropicLinearElasticMaterial(
+        hypothesis=problem.plane_type,
+        lame_lambda=problem.lam,
+        shear_modulus=problem.mu,
+        enable_logging=False,
+    )
+    return problem, material
+
+
+def _mixed_exponential_sine_2d() -> tuple:
+    """指数/正弦制造解的混合边界视角; 右边为非零 traction 边界."""
+
+    problem = MixedBoundaryExponentialSineElasticity2D()
+    material = IsotropicLinearElasticMaterial(
+        hypothesis=problem.plane_type,
+        lame_lambda=problem.lam,
+        shear_modulus=problem.mu,
+        enable_logging=False,
+    )
+    return problem, material
+
+
+# 胡张元当前只开放经充分测试的混合边界制造解. 材料参数一律从 problem 的
+# 属性读取而不是各写一遍字面量 —— 两者不一致时不会报错, 只会让收敛阶悄悄
+# 塌掉, 是这个算例最难查的错法.
+PROBLEM_FACTORIES = {
+    2: {
+        "mixed-sinusoidal": _mixed_sinusoidal_2d,
+        "mixed-exp-sine": _mixed_exponential_sine_2d,
+    },
+}
+
+
+def create_problem_and_material(dimension: int, model: str):
+    """按模型选择制造解与材料, 二者的弹性参数由 problem 属性保证一致."""
+
+    return PROBLEM_FACTORIES[dimension][model]()
+
+
+def create_mesh(domain: tuple, subdivisions: int):
+    """单位区域上的一致加密 checkerboard 网格.
+
+    ``nx``/``ny`` 必须为正偶数: 角点松弛要求每个几何角点恰好连接两个三角形,
+    且两者共享一条从角点出发的内部边.
+    """
+
+    return create_huzhang_checkerboard_mesh(
+        box=domain,
         nx=subdivisions,
         ny=subdivisions,
     )
+
+
+def solve_one_level(
+    problem,
+    material,
+    degree: int,
+    subdivisions: int,
+    integration_order: int,
+    use_relaxation: bool,
+    solver: str,
+) -> dict:
+    """在一层网格上求解, 返回误差与诊断量.
+
+    胡张元的 ``solve_state`` 内部完成了装配、边界条件与求解三步 —— 与
+    lagrange 版把三步展开不同, 这里是混合形式, 边界条件的语义相反
+    (traction 强施加, 位移弱施加), 展开反而降低可读性, 所以直接调用.
+    """
+
+    mesh = create_mesh(problem.domain, subdivisions)
 
     analyzer = HuZhangMFEMAnalyzer(
         disp_mesh=mesh,
@@ -80,7 +174,7 @@ def solve_one_level(problem, material, degree: int, subdivisions: int,
         space_degree=degree,
         integration_order=integration_order,
         use_relaxation=use_relaxation,
-        solve_method="scipy",
+        solve_method=solver,
         topopt_algorithm=None,
     )
 
@@ -122,6 +216,8 @@ def observed_order(coarse: float, fine: float) -> float | None:
 
 
 def report(rows: list[dict]) -> None:
+    """打印结果表与逐层观测阶 (仅参考, 不判定)."""
+
     header = (
         f"{'nx':>4} {'gdof':>8} {'h':>9} "
         f"{'|u-uh|_0':>11} {'|s-sh|_0':>11} "
@@ -158,9 +254,36 @@ def report(rows: list[dict]) -> None:
         print(f"  {label}: {' '.join(orders)}")
 
 
+def solver_unavailable_reason(solver: str) -> str | None:
+    """求解器后端不可用时返回原因, 可用则返回 None.
+
+    只有 ``mumps`` 需要探测: 它依赖外部 ``mumps`` 包 (PyMUMPS), 不是 fealpy
+    自带. 放在入口检查, 免得装配跑完了才在求解那一步炸.
+    """
+
+    if solver != "mumps":
+        return None
+
+    try:
+        import_module("mumps")
+    except Exception as exc:
+        return (
+            f"求解器 'mumps' 不可用 ({type(exc).__name__}: {exc}); "
+            "该后端需要 PyMUMPS 包 (pip install pymumps) 及系统 MUMPS 库。"
+            "请改用 --solver scipy."
+        )
+    return None
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="胡张混合有限元求解线弹性问题的最小算例",
+    )
+    parser.add_argument(
+        "--model",
+        choices=("mixed-sinusoidal", "mixed-exp-sine"),
+        default="mixed-sinusoidal",
+        help="制造解模型 (默认 mixed-sinusoidal)",
     )
     parser.add_argument(
         "--degree", type=int, default=3,
@@ -169,6 +292,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--levels", type=int, default=5,
         help="加密层数, 第 i 层网格为 2^i x 2^i (默认 5)",
+    )
+    parser.add_argument(
+        "--solver", choices=DIRECT_SOLVERS, default="scipy",
+        help="求解器 (默认 scipy); mumps 需要 PyMUMPS 包",
     )
     parser.add_argument(
         "--relaxation",
@@ -188,25 +315,28 @@ def main() -> int:
         print("levels 必须为正整数", file=sys.stderr)
         return 1
 
+    reason = solver_unavailable_reason(arguments.solver)
+    if reason is not None:
+        print(reason, file=sys.stderr)
+        return 1
+
     bm.set_backend("numpy")
 
-    problem = MixedBoundarySinusoidalElasticity2D(
-        lame_lambda=1.0,
-        shear_modulus=0.5,
-    )
-    material = IsotropicLinearElasticMaterial(
-        lame_lambda=problem.lam,
-        shear_modulus=problem.mu,
-        hypothesis=problem.plane_type,
-        enable_logging=False,
-    )
+    dimension = 2  # 胡张元当前仅支持 2D simplex
+    problem, material = create_problem_and_material(dimension, arguments.model)
+    base = BASE_SUBDIVISIONS[dimension]
     integration_order = 2 * arguments.degree + 2
 
+    # 结论依赖于哪一份 FEALPy: 官方检出与打了缺陷修复的检出版本号都是 4.0.0,
+    # 只有解析路径能区分. 这里用 import_module 而不是模块级 ``import fealpy``:
+    # 后者只在这一行用到, 会被 "移除未使用导入" 的工具删掉
+    fealpy_root = Path(import_module("fealpy").__file__).resolve().parents[1]
+    print(f"FEALPy: {fealpy_root}")
     print(
-        f"网格=triangle-checkerboard, 问题={type(problem).__name__}, "
-        f"平面假设={problem.plane_type}, "
+        f"维数={dimension}D, 网格=triangle-checkerboard, "
+        f"问题={type(problem).__name__}, 平面假设={problem.plane_type}, "
         f"空间次数={arguments.degree}, 积分阶={integration_order}, "
-        f"角点松弛={arguments.relaxation}"
+        f"角点松弛={arguments.relaxation}, 求解器={arguments.solver}"
     )
 
     rows = []
@@ -216,9 +346,10 @@ def main() -> int:
                 problem=problem,
                 material=material,
                 degree=arguments.degree,
-                subdivisions=2**level,
+                subdivisions=base * 2**level,
                 integration_order=integration_order,
                 use_relaxation=arguments.relaxation,
+                solver=arguments.solver,
             )
         )
 

@@ -12,11 +12,12 @@ from soptx.materials import LinearElasticMaterial
 
 class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
-    def __init__(self, 
+    def __init__(self,
                 q: Optional[int]=None,
                 threshold: Optional[Threshold]=None,
                 method: Optional[str]=None,
                 material: Optional[LinearElasticMaterial]=None,
+                penalty_scaling: Optional[str]='physical_h',
             ) -> None:
         super().__init__()
 
@@ -24,6 +25,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         self.threshold = threshold
 
         self.material = material
+
+        # 稳定化项缩放律选择. 默认 'physical_h' 为论文式物理量纲缩放
+        # (α=μ/L0²·hF, 已实测在 k=1,2 恢复细层收敛, 复现论文表 5.2);
+        # 'gamma_hinv' 为旧缩放 (γ/hF, 净效果 O(γ) 无 hF 缩放, 细层发散),
+        # 仅保留作回归/对比.
+        self.penalty_scaling = penalty_scaling
 
         self.assembly.set(method)
 
@@ -218,18 +225,33 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             warnings.warn(msg, UserWarning)
         # ======================================================================
         
-        # 跳量惩罚缩放: γ/hF·∫[w]², γ 取材料模量的小比例系数.
-        # 数值验证: 原 E/L0²·hF 与裸模量 γ/hF 都过大, 惩罚块量级远超柔度块,
-        # 会把 σ 的 div 约束压坏 (div 误差发散, σ 不收敛); γ ~ 1e-2·模量时
-        # 低阶 (p <= d) 鞍点系统稳定且收敛阶正常 (σ ~ 2.4 阶, div ~ 1.6 阶).
-        if p == 1:
-            gamma = 0.01 * E
+        # 跳量惩罚缩放律二选一:
+        #
+        # 1) 'physical_h' (默认, 论文式物理量纲缩放):
+        #    c = Σ_F (μ/L0²)·hF·∫[[u]]:[[v]]ds, hF 幂次为 +1, 系数 α=μ/L0².
+        #    integrand 已含面测度 fm(=hF, 2D), 故此处再乘 hF 一次方对齐论文.
+        #    实测 (sinusoidal 混合边界制造解, k=1,2, nx=2..32) 恢复细层收敛:
+        #    k=1: u→1 阶, σ→1.53 阶 (超收敛), H(div)→1 阶;
+        #    k=2: u→2 阶, σ→2.02 阶, H(div)→1 阶 (降阶, 与论文表 5.2 逐格一致).
+        #
+        # 2) 'gamma_hinv' (旧缩放, 仅回归/对比): γ 取材料模量的小比例系数.
+        #    由于 integrand 含 fm, 净效果是 O(γ) 常数系数、无 hF 缩放 ——
+        #    与论文的 hF¹ 缩放律不同, 细层 (h -> 0) 位移/应力阶塌陷、div 发散.
+        #    调参历史: 原 E/L0²·hF 与裸模量 γ/hF 都过大, 惩罚块量级远超柔度块,
+        #    会压坏 div; γ ~ 1e-2·模量时粗层阶正常 (σ ~ 2.4, div ~ 1.6),
+        #    但该缩放律本身仍不足以支撑细层收敛, 已由 'physical_h' 取代.
+        if self.penalty_scaling == 'gamma_hinv':
+            if p == 1:
+                gamma = 0.01 * E
+            else:
+                gamma = 0.01 * mu
+
+            KE = bm.einsum('f, fij -> fij', gamma * hF ** -1, integrand)
         else:
-            gamma = 0.01 * mu
+            alpha = mu / L0 ** 2
+            KE = bm.einsum('f, fij -> fij', alpha * hF, integrand)
 
-        KE = bm.einsum('f, fij -> fij', gamma * hF ** -1, integrand)
-
-        return KE        
+        return KE
 
     @enable_cache
     def fetch_vector_jump(self, space: _FS):

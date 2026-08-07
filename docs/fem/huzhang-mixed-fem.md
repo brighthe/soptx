@@ -112,8 +112,9 @@ HuZhangMFEMAnalyzer
 积分 `div σ_h · v_h`。在构造器中一次性装配，缓存于 `_cached_mix_matrix`。
 
 **J 块**（`JumpPenaltyIntegrator`）：面循环（内部面 + Dirichlet 边界面），
-矩阵跳量（`method='matrix_jump'`），系数 `0.01·E/h_F`。仅在 `p ≤ GD`
-时参与 K 装配。
+矩阵跳量（`method='matrix_jump'`），系数论文式物理量纲缩放
+`α·h_F`（`α = μ/L₀²`，`penalty_scaling='physical_h'` 默认；旧
+`γ/h_F` 型保留作回归对比）。仅在 `p ≤ GD` 时参与 K 装配。
 
 ## 实现特性
 
@@ -130,12 +131,15 @@ HuZhangMFEMAnalyzer
 | `p <= GD` | `[[A, B], [B^T, -J]]` | 低阶跳量稳定化 |
 
 跳量稳定化施加在内部面和 Dirichlet 边界面上，使用矩阵跳量
-（`method='matrix_jump'`）。penalty 系数为 `0.01·E/h_F`
-（γ/h_F 型 DG 标准缩放，γ 取弹性模量的 1%）。该系数经数值标定，
-理论核查待办。
+（`method='matrix_jump'`）。penalty 系数默认论文式物理量纲缩放
+`α·h_F`（`α = μ/L₀²`，$L_0$ 为计算域特征尺度；`penalty_scaling='physical_h'`），
+整体随 $h_F^2\to0$ 弱一致衰减，细层收敛恢复。早期 `γ/h_F` 型缩放
+（γ 取弹性模量的 1%）乘面测度后净效果 O(γ) 常数、细层阶塌陷，已从默认路径
+弃用，`penalty_scaling='gamma_hinv'` 保留作回归对比。完整数学过程与缩放律论证
+见知识库概念页 `C:\workspace\dut-postdoc\concepts\huzhang-mixed-fem.md`。
 
-已验证收敛的 degree：2（跳量稳定化，σ 约 2.4 阶）、3（无惩罚，σ 4 阶）、
-4（无惩罚，σ 5 阶）。
+已验证收敛的 degree：2（跳量稳定化，σ 2 阶、$H(\mathrm{div})$ 1 阶降阶）、
+3（无惩罚，σ 4 阶）、4（无惩罚，σ 5 阶）。
 
 ### 角点松弛
 
@@ -247,10 +251,8 @@ python examples/huzhang_elasticity/minimal_demo.py --no-relaxation # 关闭松�
 
 ## 开放问题
 
-1. jump-penalty 的 `0.01·E/h_F` 系数为数值标定，degree 2 应力收敛阶
-   约 2.4 而非理论 3 阶——需理论核查。
-2. 3D 无松弛求解链 `div_basis` 已确认正确（有限差分 3.4e-10），但
+1. 3D 无松弛求解链 `div_basis` 已确认正确（有限差分 3.4e-10），但
    端到端验证未完成。
-3. 角点松弛的拓扑限制（checkerboard）是当前实现的软件约束，一般
+2. 角点松弛的拓扑限制（checkerboard）是当前实现的软件约束，一般
    胡张元理论不要求此拓扑——扩展到任意三角形网格需要重新推导
    `_get_corner_data` 的 incident 单元判定逻辑。
