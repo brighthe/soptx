@@ -38,7 +38,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Synchronize dimension-specific CPU FA/EA evidence and "
-            "README result blocks from ignored raw JSON outputs."
+            "results_analysis.md result blocks from ignored raw JSON outputs."
         )
     )
     parser.add_argument(
@@ -49,7 +49,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Check for drift without writing evidence or README files.",
+        help=(
+            "Check for drift without writing evidence or "
+            "results_analysis.md."
+        ),
     )
     return parser.parse_args()
 
@@ -161,6 +164,13 @@ def require_formal_environment(
         raise EvidenceError(f"{source}: missing git revision")
     if not environment.get("generated_at_utc"):
         raise EvidenceError(f"{source}: missing generated_at_utc")
+    if environment.get("git_dirty") is not False:
+        raise EvidenceError(
+            f"{source}: formal evidence requires git_dirty=false, got "
+            f"{environment.get('git_dirty')!r}. A dirty worktree cannot be "
+            "replayed, so the run is development evidence only: commit or "
+            "stash the worktree, re-run utils/validate.py, then sync again."
+        )
     missing = [
         key
         for key in FORMAL_ENVIRONMENT_KEYS
@@ -456,15 +466,16 @@ def zero_or_scientific(value: float) -> str:
     return "0" if value == 0.0 else scientific(value)
 
 
-def render_readme_block(
+def render_results_block(
     dimension: int,
     evidence: dict[str, Any],
 ) -> str:
-    begin_marker, end_marker = layout.readme_markers(dimension)
+    begin_marker, end_marker = layout.results_markers(dimension)
     cases = evidence["ea_cases"]
     independent_fa = evidence["independent_fa_case"]
     orders = evidence["observed_relative_l2_orders"]
     evidence_name = layout.evidence_path(dimension).name
+    git_dirty = evidence["environment"]["git_dirty"]
 
     lines = [
         begin_marker,
@@ -477,7 +488,7 @@ def render_readme_block(
         (
             "源 revision："
             f"`{evidence['environment']['git_revision']}`；"
-            "`git_dirty=false`。"
+            f"`git_dirty={str(bool(git_dirty)).lower()}`。"
         ),
         "",
         "| 网格 | EA-CG 迭代数 | 真相对残差 | 相对 L2 误差 | 边界绝对误差 |",
@@ -526,19 +537,20 @@ def render_readme_block(
 
 
 def replace_generated_block(
-    readme: str,
+    document: str,
     dimension: int,
     generated: str,
 ) -> str:
-    begin_marker, end_marker = layout.readme_markers(dimension)
-    begin = readme.find(begin_marker)
-    end = readme.find(end_marker)
+    begin_marker, end_marker = layout.results_markers(dimension)
+    begin = document.find(begin_marker)
+    end = document.find(end_marker)
     if begin < 0 or end < 0 or end < begin:
         raise EvidenceError(
-            f"README {dimension}d result markers are missing or invalid"
+            f"results_analysis.md {dimension}d result markers are missing "
+            "or invalid"
         )
     end += len(end_marker)
-    return readme[:begin] + generated + readme[end:]
+    return document[:begin] + generated + document[end:]
 
 
 def serialized_evidence(evidence: dict[str, Any]) -> str:
@@ -559,13 +571,13 @@ def check_file(path: Path, expected: str) -> bool:
 def main() -> int:
     arguments = parse_arguments()
     try:
-        readme = layout.README_PATH.read_text(encoding="utf-8")
+        results = layout.RESULTS_PATH.read_text(encoding="utf-8")
         serialized: dict[int, str] = {}
         for dimension in selected_dimensions(arguments.dim):
             evidence = build_evidence(dimension)
-            generated = render_readme_block(dimension, evidence)
-            readme = replace_generated_block(
-                readme,
+            generated = render_results_block(dimension, evidence)
+            results = replace_generated_block(
+                results,
                 dimension,
                 generated,
             )
@@ -581,11 +593,11 @@ def main() -> int:
                     )
                     and passed
                 )
-            passed = check_file(layout.README_PATH, readme) and passed
+            passed = check_file(layout.RESULTS_PATH, results) and passed
             if passed:
                 print(
-                    "Dimension-specific FA/EA evidence and README "
-                    "are in sync."
+                    "Dimension-specific FA/EA evidence and "
+                    "results_analysis.md are in sync."
                 )
                 return 0
             return 1
@@ -595,8 +607,8 @@ def main() -> int:
             path = layout.evidence_path(dimension)
             path.write_text(evidence_text, encoding="utf-8")
             print(f"Wrote evidence: {path}")
-        layout.README_PATH.write_text(readme, encoding="utf-8")
-        print(f"Updated README: {layout.README_PATH}")
+        layout.RESULTS_PATH.write_text(results, encoding="utf-8")
+        print(f"Updated results analysis: {layout.RESULTS_PATH}")
         return 0
     except (EvidenceError, OSError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

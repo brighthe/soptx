@@ -1,13 +1,13 @@
 # 线弹性 Matrix-Free EA/FA 算子与重叠副本代数规范 (Math Spec)
 
 本文档规范 `soptx/examples/matrix_free_elasticity` 中 EA/FA 两级离散算子、重叠
-副本 MPI 布局与加权 CG 的代数约定，并把 [`contract.py`](contract.py) 中的每个
-数值门禁写成可复核的数学式。
+副本 MPI 布局与加权 CG 的代数约定，并把 [`utils/contract.py`](utils/contract.py)
+中的每个数值门禁写成可复核的数学式。
 
 > **理论事实源**（本文档只做映射与判据，不复述这些页面的内容）：
 >
 > - 五级装配层次与框架术语映射：`dut-postdoc:concepts/matrix-free/assembly-levels.md#五级分类`
-> - MPI 共享自由度、同步归约与正确性不变量：`dut-postdoc:concepts/distributed-operator-and-shared-dofs.md`
+> - MPI 共享自由度、同步归约与正确性不变量：`dut-postdoc:concepts/gpu-hpc/distributed-operator-and-shared-dofs.md`
 > - 线弹性变分形式与有限元离散：`dut-postdoc:concepts/linear-elasticity.md#线弹性方程变分形式与有限元离散`
 > - 三个制造解的完整方程、参数与 shape 契约：[制造解文档](../../docs/problems/manufactured-elasticity.md)
 
@@ -103,7 +103,7 @@ $$
 
 是**幂等投影**，且在一致表示上是恒等映射（$\oslash$ 为逐分量除）。
 
-反向的转换出现在结果收集：`run.py` 调用
+反向的转换出现在结果收集：[`utils/run.py`](utils/run.py) 调用
 `dof_comm.gather_add(local_solution / references)`，即 $\boldsymbol x\oslash\boldsymbol r$
 先把一致表示按副本数均分成加和表示，再跨 rank 求和，才能在 rank 0 得到不重复
 计数的全局唯一解向量。
@@ -112,7 +112,7 @@ $$
 
 ### 3.3 `OverlapOperator` 的三步及其恒等性
 
-[`distributed.py:92`](distributed.py:92) 的 `__matmul__` 为
+[`operator.py:33`](operator.py:33) 中 `OverlapOperator.__matmul__` 为
 
 $$
 \boldsymbol x\;\longmapsto\;
@@ -152,8 +152,11 @@ $$
 =(\mathbf K\boldsymbol u,\boldsymbol v)_w .
 $$
 
-这正是 [`analyzer.py:_overlap_cg`](analyzer.py:38) 只向 `fealpy.solver.cg` 注入
-`dot_product` 而不改写 CG 迭代本身的依据：Krylov 递推的全部并行性都集中在内积。
+这正是 [`solver.py:83`](solver.py:83) 的 `weighted_cg` 只向 `fealpy.solver.cg`
+注入 `dot_product` 而不改写 CG 迭代本身的依据：Krylov 递推的全部并行性都集中在
+内积。求解器的派发在
+[`utils/analyzer.py:74`](utils/analyzer.py:74) 的 `solve_system`，它按 `solver`
+名字查 `DISTRIBUTED_SOLVERS` 并把 `dof_comm` 传给对应 routine。
 载荷向量由装配产生时是加和表示，`reduce_load` 用 $\mathcal S$ 把它转成一致表示
 后才进入边界处理与求解。
 
@@ -191,10 +194,10 @@ $\mathcal S$ 没有插入点；若放行，各 rank 会在自己的局部矩阵�
 
 ## 5. 数值门禁的数学定义 (Acceptance Criteria)
 
-阈值全部来自 [`contract.py`](contract.py)，此处只给出对应的数学式；两侧不得各持
-一份字面量。
+阈值全部来自 [`utils/contract.py`](utils/contract.py)，此处只给出对应的数学式；
+两侧不得各持一份字面量。
 
-### 5.1 单次运行门禁（`run.py` 与 `validate.py` 共用）
+### 5.1 单次运行门禁（`utils/run.py` 与 `utils/validate.py` 共用）
 
 | 门禁 | 数学式 | 阈值 |
 |---|---|---|
@@ -215,7 +218,7 @@ $\boldsymbol x_{\mathrm{direct}}$ 由 `spsolve` 在 `fa` 系统上独立求出�
 对称性以随机向量的双线性配对检验，而非逐元素比较矩阵：`ea` 下根本不存在可以逐
 元素比较的矩阵，这是 Matrix-Free 正确性判据必须改写的地方。
 
-### 5.2 跨运行门禁（`validate.py`）
+### 5.2 跨运行门禁（`utils/validate.py`）
 
 记网格加密序列 $h_0>h_1>h_2$（`REFINEMENTS`：2D 为 $8,16,32$；3D 为 $4,8,16$），
 相对 $L^2$ 位移误差

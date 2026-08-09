@@ -1,0 +1,100 @@
+# 线弹性 Matrix-Free 2D/3D 实验证据报告
+
+本报告是 `soptx/examples/matrix_free_elasticity` 数值结果的唯一事实源。
+运行入口与文件职责见 [`README.md`](README.md)；每道门禁的数学式与阈值来源见
+[`math_spec.md`](math_spec.md)，阈值本身只在
+[`utils/contract.py`](utils/contract.py) 定义一次。
+
+下方带 `<!-- BEGIN/END GENERATED -->` 标记的区块由
+`python utils/sync_results.py --dim {2,3}` 从 `outputs/` 下的原始 JSON 生成，
+**不要手工编辑**；`--check` 用于只读比对是否漂移。
+
+## 1. 当前证据状态
+
+**结论：目前没有可用于验收的正式证据。** 下方两个区块只是 dirty worktree 的开发
+证据。
+
+| 项 | 实际值 |
+|---|---|
+| 区块源 revision | `4cd4e8da17189eb57f9a68cc316bcdf189c084ec` |
+| `evidence/*.json` 的 `environment.git_dirty` | **`true`** |
+| 距当前 HEAD | `4cd4e8d..HEAD` 共 9 个提交 |
+| 1/2-rank 一致性正式证据 | 未固化，`evidence/` 下只有单 rank 产物 |
+
+两点说明：
+
+1. 这两个区块生成时，`utils/sync_results.py` 既没有校验 `git_dirty`，又把
+   `git_dirty=false` 当字面量写进正文，因此区块曾错误宣称自己 clean。该缺陷已
+   修复：`require_formal_environment` 现在硬性拒绝 `git_dirty != false` 的原始
+   JSON，渲染时也改为读取 payload 的真实标志。**在 clean revision 上重放之前，
+   `utils/sync_results.py` 会以非零状态退出**，这是预期行为。
+2. `4cd4e8d` 之后，`lagrange_fem_analyzer.py`、`linear_elasticity.py` 和
+   `manufactured_2d.py` 都在 evidence 依赖路径上发生过改动，所以即便忽略 dirty
+   标志，这两个区块也已经不对应当前代码。
+
+因此这两个区块**待在冻结的 clean target revision 上重放**，重放前不得作为验收
+结论、对外表达或申报材料的数值来源。
+
+## 2. 历史基线
+
+迁移到 `src/soptx` 与语义 Problem **之前**的三维数值证据保存在
+[`evidence/cpu-single-rank-fa-ea-3d-historical.json`](evidence/cpu-single-rank-fa-ea-3d-historical.json)，
+只作为原三维实现的历史基线，不作为本次 2D/3D 通用化实现的验收结论。
+
+## 3. 2D CPU 单 rank FA/EA
+
+<!-- BEGIN GENERATED: cpu-single-rank-fa-ea-2d -->
+
+本节由 `utils/sync_results.py --dim 2` 根据 clean-revision 原始 JSON 生成；精简证据见 `evidence/cpu-single-rank-fa-ea-2d.json`。
+源 revision：`4cd4e8da17189eb57f9a68cc316bcdf189c084ec`；`git_dirty=true`。
+
+| 网格 | EA-CG 迭代数 | 真相对残差 | 相对 L2 误差 | 边界绝对误差 |
+| --- | ---: | ---: | ---: | ---: |
+| `8×8` | 38 | `5.13210e-11` | `4.61057e-02` | `0` |
+| `16×16` | 89 | `8.96971e-11` | `1.20318e-02` | `0` |
+| `32×32` | 188 | `8.95970e-11` | `3.04605e-03` | `0` |
+
+| 网格 | 原始 EA/FA MatVec | Dirichlet EA/FA MatVec | EA-CG/FA 直接解 |
+| --- | ---: | ---: | ---: |
+| `8×8` | `1.44949e-16` | `1.40930e-16` | `8.67653e-12` |
+| `16×16` | `1.62572e-16` | `1.64234e-16` | `6.57436e-12` |
+| `32×32` | `1.57536e-16` | `1.56086e-16` | `3.03229e-12` |
+
+相对 L2 误差观测阶为 `1.93809`、`1.98184`。独立 FA 粗网格 `8×8` 在 38 步收敛，真相对残差为 `4.95406e-11`。
+
+<!-- END GENERATED: cpu-single-rank-fa-ea-2d -->
+
+## 4. 3D CPU 单 rank FA/EA
+
+<!-- BEGIN GENERATED: cpu-single-rank-fa-ea-3d -->
+
+本节由 `utils/sync_results.py --dim 3` 根据 clean-revision 原始 JSON 生成；精简证据见 `evidence/cpu-single-rank-fa-ea-3d.json`。
+源 revision：`4cd4e8da17189eb57f9a68cc316bcdf189c084ec`；`git_dirty=true`。
+
+| 网格 | EA-CG 迭代数 | 真相对残差 | 相对 L2 误差 | 边界绝对误差 |
+| --- | ---: | ---: | ---: | ---: |
+| `4×4×4` | 24 | `9.26796e-11` | `6.80637e-01` | `0` |
+| `8×8×8` | 64 | `6.69625e-11` | `2.85095e-01` | `0` |
+| `16×16×16` | 134 | `8.62632e-11` | `8.91922e-02` | `0` |
+
+| 网格 | 原始 EA/FA MatVec | Dirichlet EA/FA MatVec | EA-CG/FA 直接解 |
+| --- | ---: | ---: | ---: |
+| `4×4×4` | `2.71490e-16` | `1.98982e-16` | `5.77006e-11` |
+| `8×8×8` | `3.17642e-16` | `2.69544e-16` | `1.93814e-11` |
+| `16×16×16` | `3.38707e-16` | `2.63232e-16` | `1.98507e-11` |
+
+相对 L2 误差观测阶为 `1.25544`、`1.67645`。独立 FA 粗网格 `4×4×4` 在 24 步收敛，真相对残差为 `9.26796e-11`。
+
+<!-- END GENERATED: cpu-single-rank-fa-ea-3d -->
+
+## 5. 解释边界
+
+- MatVec 机器精度一致只支持「EA 与 FA 是同一个离散算子」，不替代完整 solve
+  时间、真残差与解误差结论。
+- 3D 相对 L2 观测阶为 `1.25544`、`1.67645`，尚未达到 P1 元的理论二阶；当前三档
+  网格（`4/8/16`）还未进入渐近区，不得据此宣称收敛阶达标。
+- 2 ranks 只验证正确性，样本量不支持任何 strong/weak scaling 或可扩展性结论。
+- 本阶段无预条件（`parameters.preconditioner` 恒为 `null`），迭代数只反映
+  $\tilde{\mathbf K}$ 的条件数，不构成任何预条件结论。
+- 本阶段不实现 PA/QA 与 UA/NONE，不得宣称任何低于 EA 的存储层级；GPU 路径尚未
+  实现，本报告不含任何 GPU 结果。

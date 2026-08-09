@@ -1,9 +1,9 @@
 """Filesystem layout and artifact-naming contract.
 
-``validate.py`` writes the raw run artifacts and ``sync_results.py`` reads them
-back to build committed evidence, so both sides must agree on every directory
-and file name. Those names are derived here from a single case table instead of
-being spelled out on each side.
+``utils/validate.py`` writes the raw run artifacts and ``utils/sync_results.py``
+reads them back to build committed evidence, so both sides must agree on every
+directory and file name. Those names are derived here from a single case table
+instead of being spelled out on each side.
 
 Like :mod:`contract`, this module must not import FEALPy, SOPTX or mpi4py.
 """
@@ -20,11 +20,11 @@ REPOSITORY_ROOT = EXAMPLE_DIR.parents[1]
 SOURCE_ROOT = REPOSITORY_ROOT / "src"
 OUTPUT_DIR = EXAMPLE_DIR / "outputs"
 EVIDENCE_DIR = EXAMPLE_DIR / "evidence"
-README_PATH = EXAMPLE_DIR / "README.md"
+RESULTS_PATH = EXAMPLE_DIR / "results_analysis.md"
 RUN_SCRIPT = EXAMPLE_DIR / "utils" / "run.py"
-SYNC_SCRIPT_NAME = "sync_results.py"
+SYNC_SCRIPT_NAME = "utils/sync_results.py"
 
-# (role, operator_level, ranks) for every case validate.py runs per dimension.
+# (role, operator_level, ranks) for every case utils/validate.py runs per dimension.
 VALIDATION_CASES = (
     ("coarse", "ea", 1),
     ("medium", "ea", 1),
@@ -125,18 +125,18 @@ def run_artifact_path(
 
 
 def validation_evidence_path(dim_argument: str) -> Path:
-    """Cross-run evidence written by validate.py for ``--dim``."""
+    """Cross-run evidence written by utils/validate.py for ``--dim``."""
 
     return OUTPUT_DIR / f"stage1-validation-{dim_argument}.json"
 
 
 def evidence_path(dimension: int) -> Path:
-    """Committed per-dimension evidence written by sync_results.py."""
+    """Committed per-dimension evidence written by utils/sync_results.py."""
 
     return EVIDENCE_DIR / f"{EVIDENCE_SCOPE}-{dimension}d.json"
 
 
-def readme_markers(dimension: int) -> tuple[str, str]:
+def results_markers(dimension: int) -> tuple[str, str]:
     key = f"{EVIDENCE_SCOPE}-{dimension}d"
     return (
         f"<!-- BEGIN GENERATED: {key} -->",

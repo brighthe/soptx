@@ -87,13 +87,13 @@ def test_run_artifact_path_encodes_the_dimension():
     assert path.parent == layout.OUTPUT_DIR
 
 
-def test_readme_contains_every_generated_block():
-    readme = layout.README_PATH.read_text(encoding="utf-8")
+def test_results_analysis_contains_every_generated_block():
+    results = layout.RESULTS_PATH.read_text(encoding="utf-8")
     for dimension in contract.SUPPORTED_DIMENSIONS:
-        begin, end = layout.readme_markers(dimension)
-        assert readme.count(begin) == 1
-        assert readme.count(end) == 1
-        assert readme.index(begin) < readme.index(end)
+        begin, end = layout.results_markers(dimension)
+        assert results.count(begin) == 1
+        assert results.count(end) == 1
+        assert results.index(begin) < results.index(end)
 
 
 def test_evidence_and_validation_paths_do_not_collide():
