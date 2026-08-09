@@ -1,93 +1,54 @@
-# 经典子结构有限元与拉格朗日有限元对比实验分析报告 (SOPTX 原生 2D/3D MBB 梁物理模型)
+# 子结构静力缩聚验证、契约与证据报告
 
-> **理论事实源**：通用物理原理与 Schur 补代数推导见知识库概念页：`C:\workspace\dut-postdoc\concepts\substructural-condensation.md`。文献基准源见 `Huang2023-PIML-substructure-zh.md` 第 4.1 节 3D 完整 MBB 梁算例（第 340 行明确强调未利用对称性简化，而是对整体模型求解）及 SOPTX 原生物理模型 `soptx.problems.elasticity.mbb.HalfMBBBeamRight2d` 与 `soptx.problems.elasticity.mbb.FullMBBBeam3d`。代码变量映射见 [math_spec.md](math_spec.md)。
+本报告承载本算例的数学—代码映射契约、两类验证边界、验收阈值与证据产物；数值结论以同一次运行生成的 JSON 为准，避免把不同脚本、网格或边界条件下的历史数值混为一组证据。
 
-本文档记录 `soptx/examples/substructure_elasticity` 纯有限元算例在 2D 与 3D MBB 梁下的静态缩聚精度、内部位移重构效果 ([minimal_demo.py](minimal_demo.py))，以及与 SOPTX 官方标准全装配拉格朗日有限元求解器 (Lagrange FEM) 的交叉对比诊断 ([compare_lagrange.py](compare_lagrange.py))。
+## 1. 数学—代码映射契约
 
----
-
-## 0. 算例物理模型与论文映射 (Problem Setup & Paper Mapping)
-
-1. **2D MBB 梁 (实例化 SOPTX 原生物理模型 `HalfMBBBeamRight2d`)**：
-   - **类路径**：`soptx.problems.elasticity.mbb.HalfMBBBeamRight2d`
-   - **物理几何**：$[0, 60.0]\,\text{mm} \times [0, 20.0]\,\text{mm}$ 对称右半梁。
-   - **边界条件**：左侧对称边 $x=0$ 约束 $u_x=0$，右下角 $(60, 0)$ 简支约束 $u_y=0$。
-   - **荷载**：左上角 $(0, 20)$ 施加 $y$ 向向下集中荷载 $P = -1.0\,\text{N}$。
-2. **3D 完整 MBB 梁 (实例化 SOPTX 原生物理模型 `FullMBBBeam3d`)**：
-   - **类路径**：`soptx.problems.elasticity.mbb.FullMBBBeam3d` (1-to-1 完全精确对齐 Huang2023 论文 4.1 节第 340 行：“未利用对称性简化，而是对整体模型求解”)。
-   - **物理几何**：$[0, 120.0]\,\text{mm} \times [0, 20.0]\,\text{mm} \times [0, 20.0]\,\text{mm}$ 完整三维实体梁。
-   - **边界条件**：左下底线 $(x=0, y=0)$ 铰支座 ($u_x=0, u_y=0$)；底部两端底线 $(y=0, x=0 \vee x=L_x)$ 约束 $u_y=0$；底面中心线 $(y=0, z=L_z/2)$ 约束 $u_z=0$（防止刚体运动）。
-   - **荷载**：顶面中心点 $(x=L_x/2, y=L_y, z=L_z/2)$ 施加向下集中荷载 $P = -1.0\,\text{N}$。
-
-> **注**：`compare_lagrange.py` 中的 3D 对比在缩小的几何域 $[0,6.0]\times[0,1.0]\times[0,1.0]$ 上进行
-> （细分网格 $24\times8\times8$，与论文全尺寸问题同一套边界/荷载语义），以控制算力开销。
-
----
-
-## 1. 测试 1：子结构静态缩聚与位移重构精度 (`minimal_demo.py`)
-
-### 1.1 2D MBB 梁子结构分析 (SOPTX HalfMBBBeamRight2d)
-* **物理几何尺寸**：$L_x = 60.0\,\text{mm}$, $L_y = 20.0\,\text{mm}$，材料参数 $E = 1.0\,\text{MPa}$, $\nu = 0.3$ (平面应力)。
-* **子结构划分**：$6 \times 2$ (共 12 个子结构)，每个子结构包含 $5 \times 5$ 个 Q4 细网格单元。
-* **全局精细网格**：$30 \times 10$ 个 Q4 单元，总节点数 341 个。
-
-| 评估指标 (Metric / Indicator) | 实测数值 (Measured Value) | 物理/代数含义说明 |
+| 数学对象 | 当前代码 | 含义 |
 |---|---|---|
-| **全尺寸精细网格总自由度 ($N_{\text{full\_dofs}}$)** | **682** | 30x10 细网格，341 节点 x 2 DOF/节点 |
-| **仅剩余全局界面自由度 ($N_{\text{interface\_dofs}}$)** | **670** | 施加对称约束与右下角简支后留出的求解自由度 |
-| **细观位移恢复相对 $L_2$ 误差 ($E_{L_2}$)** | **`3.7618e-16`** | **达到双精度浮点数机器精度 ($\sim 10^{-16}$)** |
-| **求解耗时** | **0.0120 s** | 12 个子结构 Schur 补计算与全局解耗时 |
+| $K_{ii}^j$ | `K_local[i_dofs[:, None], i_dofs]` | 子结构内部自由度刚度。 |
+| $K_{ib}^j$ | `K_local[i_dofs[:, None], b_dofs]` | 内部—接口耦合刚度。 |
+| $N^j$ | `-bm.linalg.solve(K_ii, K_ib)` | 内部位移恢复映射：$u_i^j=N^j u_b^j$。 |
+| $K_s^j$ | `K_bb - K_bi @ bm.linalg.solve(K_ii, K_ib)` | Schur 补缩聚刚度。 |
+| $K_\mathcal{B}$ | `K_global` in `solve_condensed_fea` | 全局接口系统的 Scatter-Add 装配结果。 |
 
----
+`bm.linalg.solve(K_ii, K_ib)` 与逐列施加单位接口位移、求解局部 Dirichlet 问题在代数上等价；实现不显式求逆。
 
-### 1.2 3D 完整 MBB 梁子结构分析 (SOPTX FullMBBBeam3d - Huang2023 Section 4.1)
-* **物理几何尺寸**：$L_x = 6.0$, $L_y = 1.0$, $L_z = 1.0$，材料参数 $E = 1.0$, $\nu = 0.3$。
-* **子结构划分**：$6 \times 2 \times 2$ (共 24 个子结构)，每个子结构包含 $4 \times 4 \times 4$ 个 Q8 六面体单元。
-* **全局精细网格**：$24 \times 8 \times 8$ 个 Q8 六面体单元，总节点数 2025 个。
+## 2. 验证对象与职责
 
-| 评估指标 (Metric / Indicator) | 实测数值 (Measured Value) | 物理/代数含义说明 |
-|---|---|---|
-| **全尺寸精细网格总自由度 ($N_{\text{full\_dofs}}$)** | **6075** | 24x8x8 六面体，2025 节点 x 3 DOF/节点 |
-| **仅剩余全局界面自由度 ($N_{\text{interface\_dofs}}$)** | **4079** | 施加 FullMBBBeam3d 边界条件后接口系统的求解自由度 |
-| **细观位移恢复相对 $L_2$ 误差 ($E_{L_2}$)** | **`3.4338e-16`** | **达到双精度浮点数机器精度 ($\sim 10^{-16}$)** |
-| **求解耗时** | **0.6521 s** | 24 个 3D 子结构 Schur 补计算与全局解耗时 |
+| 脚本 | 物理模型 | 验证内容 | 不验证的内容 |
+|---|---|---|---|
+| `minimal_demo.py` | 2D/3D 悬臂梁；分别为 `4×2`、`4×2×2` 子结构 | 已知接口位移下的局部 Schur 补形函数恢复 $u_i=N u_b$ | 全局接口系统求解、接口自由度降阶、Lagrange 交叉验证。 |
+| `compare_lagrange.py --dim 2` | `HalfMBBBeamRight2d`；`6×2` 子结构、每块 `5×5` Q4 单元 | 全局接口缩聚解与 Lagrange 全装配解的一致性 | Matrix-Free、Krylov/GPU 和端到端加速。 |
+| `compare_lagrange.py --dim 3` | `FullMBBBeam3d`；`6×2×2` 子结构、每块 `4×4×4` 六面体单元 | 同上；使用缩小的 $[0,6]×[0,1]×[0,1]$ 计算域 | 对 Huang 2023 全尺寸问题的性能复现。 |
 
----
+两条路径必须使用相同的密度场、荷载和 Dirichlet 固定 DOF 集合。3D MBB 的固定 DOF 由 `GlobalAssembler._compute_fixed_dofs("mbb")` 与 `FullMBBBeam3d` 的语义对齐。
 
-## 2. 测试 2：与传统拉格朗日有限元全装配求解交叉对比 (`compare_lagrange.py`)
+- `minimal_demo.py` 先得到全尺度参考解，再用其接口位移通过 $u_i=N u_b$ 回代内部自由度：仅验证局部缩聚与恢复关系，**不能**报告接口系统降阶或端到端缩聚求解性能。
+- `compare_lagrange.py` 先以精确 $K_s$ 组装并求解接口系统，再恢复全场，并与 `LagrangeFEMAnalyzer` 的全装配解比较：这是全局缩聚正确性的验收脚本。
 
-### 2.1 2D MBB 梁交叉对比表 (SOPTX HalfMBBBeamRight2d vs Substructure Condensation)
+## 3. 验收契约与证据产物
 
-| 对比评估指标 | 传统拉格朗日有限元 (Lagrange FEM) | 子结构静态缩聚 (Substructure Condensation) | 相对误差 / 校验结论 |
-| :--- | :--- | :--- | :--- |
-| **全网格自由度规模 (Global DOFs)** | 682 | 682 | -- |
-| **求解自由度规模 (Solvable DOFs)** | 670 | 670 | -- |
-| **结构总柔度 $C = \boldsymbol{F}^T \boldsymbol{u}$** | **406.92585239** | **406.92585239** | **$\Delta C = 0.0000 \times 10^{0}$ (机器精度)** |
-| **位移场全节点相对误差 $E_{\text{Lagrange}}$** | -- | **$3.1316 \times 10^{-16}$** | **绝对精确一致** |
-| **求解耗时 (Solver Time)** | 0.0287 s | 0.0217 s | -- |
+- 局部恢复：相对 $L_2$ 误差应小于 `1e-12`。
+- 全局交叉验证：柔度相对误差和全节点位移相对误差均应小于等于 `1e-12`。
+- `compare_lagrange.py` 将上述阈值实现为运行时断言；通过后写入 `outputs/lagrange_comparison_{2d,3d}.json`。
+- 文档不保存脱离脚本、commit、运行环境和 JSON 证据的「当前实测值」。
 
----
+运行下列命令：
 
-### 2.2 3D MBB 梁交叉对比表 (SOPTX FullMBBBeam3d vs Substructure Condensation)
+```bash
+python compare_lagrange.py --dim 2 --output-dir outputs
+python compare_lagrange.py --dim 3 --output-dir outputs
+```
 
-| 对比评估指标 | 传统拉格朗日有限元 (Lagrange FEM) | 子结构静态缩聚 (Substructure Condensation) | 相对误差 / 校验结论 |
-| :--- | :--- | :--- | :--- |
-| **全网格自由度规模 (Global DOFs)** | 6075 | 6075 | -- |
-| **求解自由度规模 (Solvable DOFs)** | 6023 | 4079 | 缩聚后接口系统大幅缩减 |
-| **结构总柔度 $C = \boldsymbol{F}^T \boldsymbol{u}$** | **228.78611503** | **228.78611503** | **$\Delta C = 1.8311 \times 10^{-13}$ (机器精度)** |
-| **位移场全节点相对误差 $E_{\text{Lagrange}}$** | -- | **$2.2382 \times 10^{-13}$** | **绝对精确一致** |
-| **求解耗时 (Solver Time)** | 0.7637 s | 1.2619 s | -- |
+脚本在误差超过 `1e-12` 时以异常失败；通过时生成 `outputs/lagrange_comparison_2d.json` 与 `outputs/lagrange_comparison_3d.json`。每份 JSON 记录问题名称、全尺度自由度、Lagrange 自由度、缩聚接口自由度、两条路径的柔度、位移/柔度相对误差、计时与验收阈值。只有这些字段来自同一次运行时，才可写入研究报告或基金材料。
 
----
+## 4. 解释边界
 
-## 3. 分析与结论 (Key Findings & Conclusion)
+- 缩聚接口自由度必须来自 `solve_condensed_fea` 返回的 `interface_free`；全尺度参考解的 `free_dofs` 不得标作接口自由度。
+- 机器精度级一致性支持「同一离散问题上的精确代数等价」，不直接支持性能加速、PIML 可靠性或大规模可扩展性结论。
+- 计时受硬件、依赖版本、预热与计时边界影响；除非同一运行记录完整环境，否则不得用于算法速度归因。
 
-1. **文献细节精准对齐**：
-   - 确认论文 `Huang2023-PIML-substructure-zh.md` 第 4.1 节（第 340 行）明确指出：“未利用对称性简化，而是对整体模型求解”。因此我们在 `soptx.problems.elasticity.mbb` 中专门实现了 `FullMBBBeam3d` 类。
-2. **绝对精确性与等价性**：
-   - 无论在 2D 还是 3D 完整 MBB 梁算例中，子结构静态缩聚与传统拉格朗日有限元求得的结构总柔度 $C$ 的差值均维持在 **$10^{-13} \sim 10^{-16}$（机器极限精度）** 数量级，验证了代码实现的 100% 准确无误。
-3. **边界条件一致性是两路径交叉对比的前提 (关键诊断)**：
-   - 早期 3D 对比曾出现约 6 倍的系统性柔度偏差（1405.03 vs 228.79）。根因**不是** LagrangeFEMAnalyzer 的 3D 求解错误，而是两条路径的 Dirichlet 边界条件不一致：
-     - 路径 A（LagrangeFEMAnalyzer）使用 `FullMBBBeam3d` 定义的 BC（左下底线铰支 + 底部两端约束 $u_y$ + 底面中心线约束 $u_z$）；
-     - 路径 B（`solve_condensed_fea` 的 `bc_type="mbb"`）硬编码了旧的 3D BC（整个左面 $u_x=0$ + 仅右底线 $u_y=0$），约束集明显不同。
-   - 修复方式：将路径 B 的 3D 固定 DOF 集合改为与 `FullMBBBeam3d` 精确对齐，两路径柔度立即在 $10^{-13}$ 量级吻合。该教训推广为 `math_spec.md` 第 2 节的约束：**凡做两路径交叉对比，必须先核对 Dirichlet 固定 DOF 集合一致**。
+## 5. 后续工作
+
+当前模块是精确有限元基线；PIML 数据集、预测器、结构检查/OOD/精确回退，以及 Matrix-Free/Krylov/GPU 接口属于后续工作。

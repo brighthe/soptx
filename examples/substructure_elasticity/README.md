@@ -1,43 +1,34 @@
 # 经典子结构有限元与静力缩聚范例 (Substructure FE Elasticity Demo)
 
-> **理论事实源**：本范例对应的完整物理原理、变分推导与 Schur 补代数性质见知识库概念页：`C:\workspace\dut-postdoc\concepts\substructural-condensation.md`。
+本目录是 2D/3D 线弹性问题的**精确子结构静力缩聚基线**。它只包含经典有限元、SIMP 局部刚度和 Schur 补代数，**不含** PIML 预测器、Matrix-Free、Krylov/GPU 或拓扑优化迭代闭环。
 
-本目录提供 **100% 纯粹的经典子结构有限元 (Substructure FEM) 与静力缩聚 (Static Condensation / Schur Complement)** 端到端自包含代码范例（0 神经网络依赖）。
+## 文件职责
 
----
-
-## 导航与文件职责
-
-| 文件 | 职责说明 |
+| 文件 | 职责 |
 |---|---|
-| **[README.md](README.md)** | 本文件：快速上手、架构设计与快速导航 |
-| **[math_spec.md](math_spec.md)** | 代码映射规范：`substructure.py` 代码变量与数学符号 1-to-1 映射 |
-| **[substructure.py](substructure.py)** | 纯有限元子结构网格剖分 (2D/3D)、SIMP 刚度装配与 Schur 补消元 |
-| **[assembler.py](assembler.py)** | 全局接口 Scatter-Add 装配与全尺寸 FEA 直解基线 (2D/3D) |
-| **[minimal_demo.py](minimal_demo.py)** | 100% 纯有限元自包含测试主程序 (2D & 3D 内部缩聚位移恢复测试) |
-| **[compare_lagrange.py](compare_lagrange.py)** | 与 SOPTX 官方标准全装配拉格朗日有限元 (Lagrange FEM) 的交叉比对测试 |
-| **[results_analysis.md](results_analysis.md)** | 实验诊断分析报告：包含 2D/3D 实测误差数据表格、柔度比对与降阶分析 |
+| `substructure.py` | 局部 2D/3D 网格、SIMP 刚度组装、`N` 与 `K_s` 的精确计算。 |
+| `assembler.py` | 全尺度参考解、接口 DOF、`K_s` Scatter-Add、接口求解与全场恢复。 |
+| `minimal_demo.py` | 局部缩聚的位移恢复验证；用全尺度参考解提供接口位移，**不**求解接口系统。 |
+| `compare_lagrange.py` | 端到端缩聚接口系统与 Lagrange FEM 的 2D/3D MBB 交叉验证；通过时写出 JSON 证据。 |
+| `results_analysis.md` | 数学—代码映射契约、验证边界、验收阈值与证据解释。 |
 
----
-
-## 快速上手
-
-在 Shell 中运行纯有限元测试主程序与拉格朗日有限元对比程序：
+## 运行与验收
 
 ```bash
-# 1. 运行子结构内部缩聚位移恢复与与拉格朗日对比集成 Demo
-python minimal_demo.py
+cd /home/brighthe/workspace/soptx/examples/substructure_elasticity
 
-# 2. 运行与拉格朗日有限元 (Lagrange FEM) 的 2D / 3D 独立比对
-python compare_lagrange.py --dim 2
-python compare_lagrange.py --dim 3
+# 局部 N 回代的细尺度位移恢复检查（悬臂梁）
+python minimal_demo.py --dim 2
+python minimal_demo.py --dim 3
+
+# 真正的全局接口缩聚交叉验证（MBB 梁）
+python compare_lagrange.py --dim 2 --output-dir outputs
+python compare_lagrange.py --dim 3 --output-dir outputs
 ```
 
----
+`compare_lagrange.py` 要求柔度和全节点位移的相对误差均不超过 `1e-12`；不满足时以异常失败。通过时分别生成：
 
-## 验证结果标尺
+- `outputs/lagrange_comparison_2d.json`
+- `outputs/lagrange_comparison_3d.json`
 
-- **2D 子结构缩聚位移恢复误差**：`3.7618e-16`（机器精度，严格数学等价）
-- **3D 子结构缩聚位移恢复误差**：`3.4338e-16`（机器精度，严格数学等价）
-- **2D/3D 与拉格朗日有限元 (Lagrange FEM) 柔度及位移相对误差**：`< 1.0e-14`（机器精度级一致）
-
+这些 JSON 是当前可复核的数值证据；计时仅在相同硬件、依赖版本和计时边界下可比较，不能单独用于性能结论。
