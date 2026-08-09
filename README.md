@@ -27,13 +27,17 @@ SOPTX 当前迁移版本为 `1.1.0.dev0`，Python 最低版本为 3.10：
 python -m pip install -e .
 ```
 
-硬依赖是 `fealpy>=4,<5`，由 `suanhaitech/fealpy` 独立维护，不随本仓库分发，需按上游
-说明单独安装。其余基础依赖为 `numpy`、`scipy`、`sympy`。
+硬依赖是 `fealpy>=4,<5`，不随本仓库分发，需单独安装。其余基础依赖为 `numpy`、
+`scipy`、`sympy`。
+
+实际使用的是一份**长期维护的 vendor fork**，位于 `~/workspace/fealpy`（`origin` =
+`brighthe/fealpy`（私有），上游 `suanhai` = `suanhaitech/fealpy`，工作分支 `main`），
+以 editable 方式安装，`import fealpy` 解析到的就是它。上游 `4.0.0-alpha` 存在多处
+回归缺陷，修复直接落在该 fork 上而非通过 PR 回流，因此 fork 与上游长期分叉。
 
 > **上游已知回归**：FEALPy `4.0.0-alpha` 的 mesh 重构引入四处回归，其中一处影响所有
 > 网格类型，会使 SOPTX 全部算例在计算误差时抛异常；另三处使四边形、六面体静默给出
-> 错误结果。在这些缺陷修复前，本地以 `fealpy_stable`（官方基线 + 四处修复）支撑研究
-> 工作。检出的选择与判定、缺陷细节与上游进展见
+> 错误结果。这些缺陷已在 fork 中修复。缺陷细节、复现脚本与上游进展见
 > [`docs/known-issues/fealpy-tensor-product-mesh.md`](docs/known-issues/fealpy-tensor-product-mesh.md)。
 
 可选 extra 按用途划分：
@@ -78,8 +82,9 @@ python .\experiments\huzhang_topopt_paper\dry_run.py --json
 的记录要求（clean revision、dirty flag、依赖版本、参数与随机种子、产物 SHA-256）见
 [`docs/validation/evidence-policy.md`](docs/validation/evidence-policy.md)。
 
-evidence 记录的 `fealpy` 版本号无法区分官方检出与 `fealpy_stable`，重放前须确认环境
-实际指向哪个检出，见
+evidence 的 `environment.fealpy` 记录的不是静态版本号，而是运行时 `fealpy.__file__`
+所在检出的 `path`、`git_revision`、`git_dirty` 和 `git_remote`，因此可以直接判定该次
+运行用的是上游还是本地 fork、工作区是否干净。缺陷背景见
 [`docs/known-issues/fealpy-tensor-product-mesh.md`](docs/known-issues/fealpy-tensor-product-mesh.md)。
 
 ## 目录入口

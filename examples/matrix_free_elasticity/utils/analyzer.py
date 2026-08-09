@@ -164,3 +164,86 @@ def build_distributed_analyzer(
         dof_comm=dof_comm,
         **_analyzer_arguments(space, case, degree, operator_level),
     )
+
+
+class ElasticityEAOperator:
+    """EA 算例的懒装配缓存门面
+
+    数值本身不在这里: :math:`\\mathbf K_e` 由 FEALPy 的 ``LinearElasticIntegrator``
+    计算, :math:`\\sum_e \\mathbf R_e^\\top \\mathbf K_e \\mathbf R_e` 由
+    ``BilinearForm.__matmul__`` 完成, 边界处理由分析器的 ``apply_bc`` 完成。本类
+    只做三件调用方需要、而分析器不直接提供的事:
+
+    1. 首次访问任一结果时才装配, 之后复用;
+    2. 计算 Dirichlet 自由度掩码 ``boundary_dofs``;
+    3. 提供 ``@``, 让 demo 脚本能把它当算子直接用。
+
+    ``utils/run.py`` 的证据路径不经过本类, 而是直接驱动分析器。
+    """
+
+    def __init__(
+        self,
+        space: TensorFunctionSpace,
+        case: ElasticityCase,
+        degree: int = 1,
+        dof_comm: EntityMPI | None = None,
+    ) -> None:
+        self.space = space
+        self.case = case
+        self.degree = degree
+        self.dof_comm = dof_comm
+
+        if dof_comm is None:
+            self.analyzer = build_serial_analyzer(space, case, degree, "ea")
+        else:
+            self.analyzer = build_distributed_analyzer(
+                space, case, degree, "ea", dof_comm=dof_comm
+            )
+
+        self._system_operator: Any = None
+        self._load_vector: TensorLike | None = None
+        self._prescribed: TensorLike | None = None
+        self._boundary_dofs: TensorLike | None = None
+
+    def assemble(self) -> tuple[SupportsMatmul, TensorLike]:
+        """装配刚度算子与体力向量并施加边界条件"""
+
+        operator, load = self.analyzer.apply_bc(
+            self.analyzer.assemble_stiff_matrix(),
+            self.analyzer.assemble_body_force_vector(),
+        )
+        self._system_operator = operator
+        self._load_vector = load
+        self._prescribed = self.analyzer.prescribed_solution
+        self._boundary_dofs = self.space.is_boundary_dof(
+            threshold=self.case.problem.is_dirichlet_boundary(),
+            method="interp",
+        )
+        return operator, load
+
+    def _ensure_assembled(self) -> None:
+        if self._system_operator is None:
+            self.assemble()
+
+    @property
+    def system_operator(self) -> SupportsMatmul:
+        self._ensure_assembled()
+        return self._system_operator
+
+    @property
+    def load_vector(self) -> TensorLike:
+        self._ensure_assembled()
+        return self._load_vector
+
+    @property
+    def prescribed_solution(self) -> TensorLike:
+        self._ensure_assembled()
+        return self._prescribed
+
+    @property
+    def boundary_dofs(self) -> TensorLike:
+        self._ensure_assembled()
+        return self._boundary_dofs
+
+    def __matmul__(self, vector: TensorLike) -> TensorLike:
+        return self.system_operator @ vector

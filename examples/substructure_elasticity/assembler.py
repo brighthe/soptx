@@ -1,8 +1,8 @@
 """
 SOPTX 全局界面组装与全尺寸有限元求解器
 =========================================================
-基于 SOPTX 原生的 QuadrangleMesh (四边形网格) 与 LinearElasticIntegrator (线弹性积分器)，
-用于全尺寸有限元分析 (FEA) 参考直接求解以及 Scatter-Add 界面组装。
+基于 SOPTX 原生的 QuadrangleMesh (四边形网格) 与 LinearElasticIntegrator (线弹性积分器),
+用于全尺寸有限元分析 (FEA) 参考直接求解以及 Scatter-Add 界面组装.
 
 作者: Liang He (大连理工大学博士后) & Antigravity Assistant
 日期: 2026-08-06
@@ -21,7 +21,7 @@ from soptx.materials import IsotropicLinearElasticMaterial
 
 class GlobalAssembler:
     """
-    使用 SOPTX 原生积分器组装全局界面系统以及全尺寸有限元参考系统（支持 2D 及 3D）。
+    使用 SOPTX 原生积分器组装全局界面系统以及全尺寸有限元参考系统(支持 2D 及 3D).
     """
     def __init__(
         self,
@@ -93,8 +93,8 @@ class GlobalAssembler:
 
     def get_substructure_global_dofs(self, *args: Any) -> Any:
         """
-        将局部子结构的自由度 (DOF) 映射到全局全网格的自由度 (DOF)。
-        支持 2D (sx, sy, sub_mesh) 与 3D (sx, sy, sz, sub_mesh) 或 (sub_pos, sub_mesh)。
+        将局部子结构的自由度 (DOF) 映射到全局全网格的自由度 (DOF).
+        支持 2D (sx, sy, sub_mesh) 与 3D (sx, sy, sz, sub_mesh) 或 (sub_pos, sub_mesh).
         """
         if len(args) == 2:
             sub_pos, sub_mesh = args[0], args[1]
@@ -126,9 +126,9 @@ class GlobalAssembler:
 
     def _compute_fixed_dofs(self, bc_type: str) -> Any:
         """
-        按边界条件类型计算全尺寸网格上的固定 DOF（全装配与缩聚两条路径共用）。
+        按边界条件类型计算全尺寸网格上的固定 DOF(全装配与缩聚两条路径共用).
 
-        - "mbb"（与 ``soptx.problems.elasticity.mbb`` 对应物理模型精确对齐）:
+        - "mbb"(与 ``soptx.problems.elasticity.mbb`` 对应物理模型精确对齐):
             2D HalfMBBBeamRight2d: ux=0 at x=0; uy=0 at (Lx, 0)
             3D FullMBBBeam3d: ux=0 at (x=0, y=0); uy=0 at (y=0) & (x=0 | x=Lx);
                               uz=0 at (y=0, z=Lz/2)
@@ -146,7 +146,7 @@ class GlobalAssembler:
                     bm.array([2 * n for n in left_nodes], dtype=bm.int64),
                     bm.array([2 * n + 1 for n in rb_nodes], dtype=bm.int64),
                 ]))
-            # 3D FullMBBBeam3d
+            # 3D FullMBBBeam3d 边界条件
             z_mid = self.Lz / 2.0
             return bm.sort(bm.concat([
                 bm.array([3 * n + 0 for n in range(len(node_coords))
@@ -161,7 +161,7 @@ class GlobalAssembler:
                          dtype=bm.int64),
             ]))
 
-        # cantilever: 左侧全固定 (x = 0)
+        # 悬臂梁: 左侧全固定 (x = 0)
         left_nodes = [idx for idx, pt in enumerate(node_coords) if abs(pt[0]) < eps]
         left_arr = bm.array(left_nodes, dtype=bm.int64)
         return bm.sort(bm.concat([self.dim * left_arr + k for k in range(self.dim)]))
@@ -174,9 +174,9 @@ class GlobalAssembler:
         bc_type: str = "cantilever"
     ) -> Tuple[Any, Any]:
         """
-        使用 SOPTX 原生的 LinearElasticIntegrator 组装并求解全尺寸精细有限元直接参考解：
+        使用 SOPTX 原生的 LinearElasticIntegrator 组装并求解全尺寸精细有限元直接参考解:
         K_full U_full = F_full
-        支持 'cantilever' (左端固定) 和 'mbb' (MBB 简支梁) 边界条件。
+        支持 'cantilever' (左端固定) 和 'mbb' (MBB 简支梁) 边界条件.
         """
         # 向量化拼接全局密度网格
         if self.dim == 2:
@@ -229,9 +229,9 @@ class GlobalAssembler:
 
     def build_interface_dofs(self, sub_meshes: List[Any]) -> tuple:
         """
-        收集所有子结构边界 DOF 的全局编号，构建接口系统的 DOF 集合。
+        收集所有子结构边界 DOF 的全局编号,构建接口系统的 DOF 集合.
 
-        返回接口 DOF 数组和全局→接口的映射字典。
+        返回接口 DOF 数组和全局->接口的映射字典.
         """
         interface_set = set()
         n_sub_y = self.n_sub[1]
@@ -267,7 +267,6 @@ class GlobalAssembler:
 
     def solve_condensed_fea(
         self,
-        densities: Union[List[Any], Any],
         sub_meshes: List[Any],
         condensors: List[Any],
         load_dof: int,
@@ -275,27 +274,26 @@ class GlobalAssembler:
         bc_type: str = "cantilever"
     ) -> Tuple[Any, Any]:
         """
-        真缩聚求解：组装接口系统并求解。
+        真缩聚求解:组装接口系统并求解.
 
         参数
         -------
-        densities : 保留（暂未使用）
         sub_meshes : 所有子结构网格列表
-        condensors : FEAStaticCondensation 对象列表，已调用 condense()
+        condensors : FEAStaticCondensation 对象列表,已调用 condense()
         load_dof : 荷载作用的全局 DOF 编号
         load_val : 荷载值
         bc_type : "cantilever" 或 "mbb"
 
         返回
         -------
-        U_full : 完整位移向量（包括内部）
+        U_full : 完整位移向量(包括内部)
         interface_free : 接口系统中未固定的 DOF 索引
         """
-        # Step 1: 构建接口 DOF
+        # 步骤 1: 构建接口 DOF
         interface_global_dofs, global_to_interface = self.build_interface_dofs(sub_meshes)
         n_interface = len(interface_global_dofs)
 
-        # Step 2: 计算接口系统上的固定 DOF（与 _compute_fixed_dofs 中物理模型精确对齐）
+        # 步骤 2: 计算接口系统上的固定 DOF(与 _compute_fixed_dofs 中物理模型精确对齐)
         fixed_dofs = self._compute_fixed_dofs(bc_type)
 
         # 过滤到接口系统
@@ -306,7 +304,7 @@ class GlobalAssembler:
                 interface_fixed_list.append(global_to_interface[gd])
         interface_fixed = bm.array(sorted(interface_fixed_list), dtype=bm.int64)
 
-        # Step 3: Scatter-add K_s 到 K_global
+        # 步骤 3: 将 K_s 散加到 K_global
         K_global = sp.lil_matrix((n_interface, n_interface), dtype=bm.float64)
         n_sub_y = self.n_sub[1]
 
@@ -333,8 +331,10 @@ class GlobalAssembler:
             )
             n_b = len(b_dofs_local)
 
-            # Scatter-add K_s
+            # 散加 K_s
             K_s = condensor.K_s
+            if K_s is None:
+                raise RuntimeError("每个 condensor 必须在全局组装前完成 condense()")
             for i_local in range(n_b):
                 i_glob = int(b_interface[i_local])
                 for j_local in range(n_b):
@@ -343,14 +343,14 @@ class GlobalAssembler:
 
         K_global = K_global.tocsr()
 
-        # Step 4: 构建右端项
+        # 步骤 4: 构建右端项
         F_interface = bm.zeros(n_interface, dtype=bm.float64)
         if load_dof in global_to_interface:
             F_interface[global_to_interface[load_dof]] = load_val
         else:
             raise ValueError(f"load_dof {load_dof} not found on any substructure boundary")
 
-        # Step 5: 施加 BC 并求解
+        # 步骤 5: 施加 BC 并求解
         interface_free = bm.setdiff1d(bm.arange(n_interface), interface_fixed)
         K_free = K_global[interface_free[:, None], interface_free]
         F_free = F_interface[interface_free]
@@ -360,7 +360,7 @@ class GlobalAssembler:
         u_b = bm.zeros(n_interface, dtype=bm.float64)
         u_b[interface_free] = u_b_free
 
-        # Step 6: 恢复全场位移
+        # 步骤 6: 恢复全场位移
         U_full = bm.zeros(self.total_full_dofs, dtype=bm.float64)
 
         # 写入接口位移

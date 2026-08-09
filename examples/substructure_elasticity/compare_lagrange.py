@@ -12,14 +12,12 @@
 日期: 2026-08-07
 """
 
-import os
+import json
 import time
 import argparse
 import unicodedata
-from typing import Tuple, List, Any
-import scipy.sparse as sp
-import scipy.sparse.linalg as spla
-import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Tuple, List, Any, Dict
 
 from fealpy.backend import backend_manager as bm
 
@@ -50,10 +48,36 @@ from soptx.topology.interpolation import MaterialInterpolationScheme
 from substructure import SubstructureMesh, FEAStaticCondensation
 from assembler import GlobalAssembler
 
-from soptx.problems.elasticity.mbb import HalfMBBBeamRight2d, HalfMBBBeamRight3d, FullMBBBeam3d
+from soptx.problems.elasticity.mbb import HalfMBBBeamRight2d, FullMBBBeam3d
 
 
-def run_benchmark_2d() -> None:
+RELATIVE_ERROR_TOLERANCE = 1.0e-12
+
+
+def validate_and_write_result(result: Dict[str, Any], output_dir: str | None) -> None:
+    """以统一阈值验收两条求解路径，并可选地落盘机器可读证据。"""
+    if result["compliance_relative_error"] > RELATIVE_ERROR_TOLERANCE:
+        raise AssertionError(
+            f"{result['dimension']} compliance relative error "
+            f"{result['compliance_relative_error']:.4e} exceeds "
+            f"{RELATIVE_ERROR_TOLERANCE:.1e}"
+        )
+    if result["displacement_relative_error"] > RELATIVE_ERROR_TOLERANCE:
+        raise AssertionError(
+            f"{result['dimension']} displacement relative error "
+            f"{result['displacement_relative_error']:.4e} exceeds "
+            f"{RELATIVE_ERROR_TOLERANCE:.1e}"
+        )
+
+    if output_dir is not None:
+        path = Path(output_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        target = path / f"lagrange_comparison_{result['dimension'].lower()}.json"
+        target.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"[证据] 验收通过，结果已写入: {target}")
+
+
+def run_benchmark_2d(output_dir: str | None = None) -> Dict[str, Any]:
     # 实例化 SOPTX 原生 HalfMBBBeamRight2d 物理问题模型 (60 mm x 20 mm 对称半梁)
     pde = HalfMBBBeamRight2d(domain=(0.0, 60.0, 0.0, 20.0), P=-1.0, E=1.0, nu=0.3)
     Lx, Ly = pde.domain[1] - pde.domain[0], pde.domain[3] - pde.domain[2]
@@ -161,7 +185,7 @@ def run_benchmark_2d() -> None:
 
     # 真缩聚求解：接口系统装配与求解
     U_sub_full, interface_free_2d = assembler.solve_condensed_fea(
-        densities, sub_meshes, exact_condensors,
+        sub_meshes, exact_condensors,
         load_dof, load_val, bc_type="mbb"
     )
 
@@ -198,8 +222,25 @@ def run_benchmark_2d() -> None:
                          "--",
                          f"{rel_err_u:.4e}", widths))
 
+    result = {
+        "dimension": "2D",
+        "problem": "HalfMBBBeamRight2d",
+        "full_dofs": int(total_dofs_2d),
+        "lagrange_free_dofs": int(len(free_dofs_lagrange)),
+        "condensed_interface_free_dofs": int(len(interface_free_2d)),
+        "lagrange_compliance": float(C_lagrange),
+        "condensed_compliance": float(C_sub),
+        "compliance_relative_error": float(rel_err_c),
+        "displacement_relative_error": float(rel_err_u),
+        "lagrange_seconds": float(t_lagrange),
+        "condensed_seconds": float(t_sub),
+        "relative_error_tolerance": RELATIVE_ERROR_TOLERANCE,
+    }
+    validate_and_write_result(result, output_dir)
+    return result
 
-def run_benchmark_3d() -> None:
+
+def run_benchmark_3d(output_dir: str | None = None) -> Dict[str, Any]:
     # 实例化 SOPTX 原生 FullMBBBeam3d 物理问题模型 (6.0 x 1.0 x 1.0 完整实体梁，无对称简化)
     pde3d = FullMBBBeam3d(domain=(0.0, 6.0, 0.0, 1.0, 0.0, 1.0), P=-1.0, E=1.0, nu=0.3)
     Lx = pde3d.domain[1] - pde3d.domain[0]
@@ -320,7 +361,7 @@ def run_benchmark_3d() -> None:
 
     # 真缩聚求解：接口系统装配与求解
     U_sub_3d, interface_free_3d = assembler_3d.solve_condensed_fea(
-        densities, sub_meshes, exact_condensors,
+        sub_meshes, exact_condensors,
         load_dof, load_val, bc_type="mbb"
     )
 
@@ -357,17 +398,38 @@ def run_benchmark_3d() -> None:
                          "--",
                          f"{rel_err_u_3d:.4e}", widths))
 
+    result = {
+        "dimension": "3D",
+        "problem": "FullMBBBeam3d",
+        "full_dofs": int(total_dofs_3d),
+        "lagrange_free_dofs": int(len(free_dofs_lagrange_3d)),
+        "condensed_interface_free_dofs": int(len(interface_free_3d)),
+        "lagrange_compliance": float(C_lagrange_3d),
+        "condensed_compliance": float(C_sub_3d),
+        "compliance_relative_error": float(rel_err_c_3d),
+        "displacement_relative_error": float(rel_err_u_3d),
+        "lagrange_seconds": float(t_lagrange_3d),
+        "condensed_seconds": float(t_sub_3d),
+        "relative_error_tolerance": RELATIVE_ERROR_TOLERANCE,
+    }
+    validate_and_write_result(result, output_dir)
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="子结构静态缩聚 VS 传统拉格朗日有限元全方位对比基准")
     parser.add_argument("--dim", type=int, choices=[2, 3], default=2, help="计算维度 (2D 或 3D)")
+    parser.add_argument(
+        "--output-dir",
+        default=str(Path(__file__).with_name("outputs")),
+        help="通过验收后写入 JSON 结果的目录",
+    )
     args = parser.parse_args()
 
     if args.dim == 2:
-        run_benchmark_2d()
+        run_benchmark_2d(args.output_dir)
     else:
-        run_benchmark_3d()
+        run_benchmark_3d(args.output_dir)
 
 
 if __name__ == "__main__":

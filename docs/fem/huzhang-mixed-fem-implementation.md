@@ -203,10 +203,10 @@ SOPTX 未提供。因此，当前实现仅提供直接法，构造期即拒绝
 
 ## FEALPy 3.4 → 4.0 迁移要点
 
-以下 6 项是 SOPTX 从 FEALPy 3.4.0（`fealpy_heliang`）迁移到 4.0.0
-时适配的 API 差异。这些是 4.0.0 自身的 API 变化或行为差异，在
-`fealpy`（官方）和 `fealpy_stable`（本地维护版）中都一样，修复均落在
-SOPTX 侧。`fealpy_stable` 独有的改进（张量积网格 5 缺陷修复）见
+以下 6 项是 SOPTX 从 FEALPy 3.4.0（`fealpy_heliang`，已退役的另一条 fork 线）
+迁移到 4.0.0 时适配的 API 差异。这些是 4.0.0 自身的 API 变化或行为差异，上游
+`suanhai/develop` 和本地 fork 中都一样，修复均落在 SOPTX 侧。本地 fork 独有的
+改进（张量积网格 5 缺陷修复）见
 [`../known-issues/fealpy-tensor-product-mesh.md`](../known-issues/fealpy-tensor-product-mesh.md)。
 
 | # | 要点 | 修复 | 影响范围 |

@@ -18,7 +18,7 @@
 
 ## 有限元方法
 
-- [`fem/huzhang-mixed-fem.md`](fem/huzhang-mixed-fem.md) —
+- [`fem/huzhang-mixed-fem-implementation.md`](fem/huzhang-mixed-fem-implementation.md) —
   胡张混合有限元实现：空间构造、次数与稳定化分支、角点松弛、2D/3D 差异、
   FEALPy 4.0 兼容要点及开放问题。
 
@@ -35,7 +35,7 @@
 ## 已知问题
 
 - [`known-issues/fealpy-tensor-product-mesh.md`](known-issues/fealpy-tensor-product-mesh.md) —
-  FEALPy `4.0.0-alpha` mesh 重构的五处回归缺陷及其在 `fealpy_stable` 中的修复，
+  FEALPy `4.0.0-alpha` mesh 重构的五处回归缺陷及其在本地 fealpy fork 中的修复，
   含复现判据与 SOPTX 影响范围。
 
 ## 可执行示例

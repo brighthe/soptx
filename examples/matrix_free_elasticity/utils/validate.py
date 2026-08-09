@@ -26,6 +26,14 @@ def parse_arguments() -> argparse.Namespace:
         choices=("2", "3", "all"),
         default="all",
     )
+    parser.add_argument(
+        "--include-parallel",
+        action="store_true",
+        help=(
+            "阶段 1b: 追加 2-rank EA 算例与 1/2-rank 一致性门禁。"
+            "默认只跑阶段 1a 的 CPU 串行范围。"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -349,7 +357,12 @@ def relative_solution_difference(left: dict, right: dict) -> float:
     )
 
 
-def compare_cases(dimension: int, results: dict[str, dict]):
+def compare_cases(
+    dimension: int,
+    results: dict[str, dict],
+    *,
+    include_parallel: bool = False,
+):
     coarse_name = layout.case_name("coarse", "ea", 1)
     medium_name = layout.case_name("medium", "ea", 1)
     fine_serial_name = layout.case_name("fine", "ea", 1)
@@ -359,45 +372,53 @@ def compare_cases(dimension: int, results: dict[str, dict]):
     coarse = results[coarse_name]
     medium = results[medium_name]
     fine_serial = results[fine_serial_name]
-    fine_parallel = results[fine_parallel_name]
     fa_coarse = results[fa_name]
 
-    parallel_difference = relative_solution_difference(
-        fine_serial,
-        fine_parallel,
-    )
     fa_difference = relative_solution_difference(coarse, fa_coarse)
     errors = [
         float(coarse["error"]["l2_relative"]),
         float(medium["error"]["l2_relative"]),
         float(fine_serial["error"]["l2_relative"]),
     ]
-    parallel_error = float(fine_parallel["error"]["l2_relative"])
     orders = [
         math.log2(errors[0] / errors[1]),
         math.log2(errors[1] / errors[2]),
     ]
 
     failures: list[str] = []
-    if parallel_difference > contract.PARALLEL_SOLUTION_RELATIVE_TOL:
-        failures.append(
-            f"{dimension}d: fine 1/2-rank solution difference "
-            f"{parallel_difference:.16e} > "
-            f"{contract.PARALLEL_SOLUTION_RELATIVE_TOL:g}"
-        )
     if fa_difference > contract.EA_FA_SOLUTION_RELATIVE_TOL:
         failures.append(
             f"{dimension}d: coarse EA/FA solution difference "
             f"{fa_difference:.16e} > "
             f"{contract.EA_FA_SOLUTION_RELATIVE_TOL:g}"
         )
-    parallel_l2_difference = abs(errors[2] - parallel_error)
-    if parallel_l2_difference > contract.PARALLEL_L2_DIFFERENCE_TOL:
-        failures.append(
-            f"{dimension}d: fine 1/2-rank L2-error difference "
-            f"{parallel_l2_difference:.16e} > "
-            f"{contract.PARALLEL_L2_DIFFERENCE_TOL:g}"
+
+    # 1b（CPU 并行 EA）的跨 rank 门禁; 1a 下这两条不参与判定, 也不记入
+    # comparison, 以免串行证据里出现空占位而被误读为"已检验".
+    parallel_difference: float | None = None
+    parallel_l2_difference: float | None = None
+    parallel_error: float | None = None
+    if include_parallel:
+        fine_parallel = results[fine_parallel_name]
+        parallel_error = float(fine_parallel["error"]["l2_relative"])
+        parallel_difference = relative_solution_difference(
+            fine_serial,
+            fine_parallel,
         )
+        if parallel_difference > contract.PARALLEL_SOLUTION_RELATIVE_TOL:
+            failures.append(
+                f"{dimension}d: fine 1/2-rank solution difference "
+                f"{parallel_difference:.16e} > "
+                f"{contract.PARALLEL_SOLUTION_RELATIVE_TOL:g}"
+            )
+        parallel_l2_difference = abs(errors[2] - parallel_error)
+        if parallel_l2_difference > contract.PARALLEL_L2_DIFFERENCE_TOL:
+            failures.append(
+                f"{dimension}d: fine 1/2-rank L2-error difference "
+                f"{parallel_l2_difference:.16e} > "
+                f"{contract.PARALLEL_L2_DIFFERENCE_TOL:g}"
+            )
+
     if not errors[0] > errors[1] > errors[2]:
         failures.append(
             f"{dimension}d: relative L2 error did not decrease: "
@@ -409,35 +430,41 @@ def compare_cases(dimension: int, results: dict[str, dict]):
             f"{orders[-1]:.8f} < {contract.MINIMUM_FINAL_L2_ORDER}"
         )
 
+    relative_l2_errors = {
+        coarse_name: errors[0],
+        medium_name: errors[1],
+        fine_serial_name: errors[2],
+    }
     comparison = {
-        "fine_solution_1rank_2rank_relative_difference": (
-            parallel_difference
-        ),
+        "stage": "1b" if include_parallel else "1a",
         "coarse_solution_ea_fa_relative_difference": fa_difference,
-        "fine_relative_l2_error_1rank_2rank_difference": (
-            parallel_l2_difference
-        ),
-        "relative_l2_errors": {
-            coarse_name: errors[0],
-            medium_name: errors[1],
-            fine_serial_name: errors[2],
-            fine_parallel_name: parallel_error,
-        },
+        "relative_l2_errors": relative_l2_errors,
         "observed_relative_l2_orders": orders,
         "gated_relative_l2_order": orders[-1],
         "minimum_gated_relative_l2_order": (
             contract.MINIMUM_FINAL_L2_ORDER
         ),
     }
+    if include_parallel:
+        relative_l2_errors[fine_parallel_name] = parallel_error
+        comparison["fine_solution_1rank_2rank_relative_difference"] = (
+            parallel_difference
+        )
+        comparison["fine_relative_l2_error_1rank_2rank_difference"] = (
+            parallel_l2_difference
+        )
     return comparison, failures
 
 
 def validate_dimension(
     mpiexec: str,
     dimension: int,
+    *,
+    include_parallel: bool = False,
 ) -> tuple[dict, list[str]]:
     cases = layout.validation_case_specs(
-        contract.REFINEMENTS[dimension]
+        contract.REFINEMENTS[dimension],
+        include_parallel=include_parallel,
     )
     layout.dimension_output_dir(dimension).mkdir(
         parents=True,
@@ -464,6 +491,7 @@ def validate_dimension(
         comparison, comparison_failures = compare_cases(
             dimension,
             results,
+            include_parallel=include_parallel,
         )
         failures.extend(comparison_failures)
     else:
@@ -506,6 +534,7 @@ def main() -> int:
         result, dimension_failures = validate_dimension(
             mpiexec,
             dimension,
+            include_parallel=arguments.include_parallel,
         )
         dimensions[str(dimension)] = result
         failures.extend(dimension_failures)
@@ -513,6 +542,7 @@ def main() -> int:
     evidence = {
         "schema_version": schema.SCHEMA_VERSION,
         "stage": contract.STAGE,
+        "substage": "1b" if arguments.include_parallel else "1a",
         "selected_dimensions": list(
             selected_dimensions(arguments.dim)
         ),
@@ -528,13 +558,21 @@ def main() -> int:
     )
 
     if failures:
-        print("\nStage 1 elasticity validation: FAILED", flush=True)
+        substage = "1b" if arguments.include_parallel else "1a"
+        print(
+            f"\nStage {substage} elasticity validation: FAILED",
+            flush=True,
+        )
         for failure in failures:
             print(f"  - {failure}", flush=True)
         print(f"Evidence: {evidence_path}", flush=True)
         return 1
 
-    print("\nStage 1 elasticity validation: PASSED", flush=True)
+    print(
+        f"\nStage {'1b' if arguments.include_parallel else '1a'} "
+        "elasticity validation: PASSED",
+        flush=True,
+    )
     summary = {
         dimension: {
             "passed": result["passed"],

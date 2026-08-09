@@ -25,11 +25,11 @@ def package_version(name: str) -> str:
         return "not-installed"
 
 
-def git_value(*arguments: str) -> str | None:
+def git_value(*arguments: str, cwd: Path | None = None) -> str | None:
     try:
         completed = subprocess.run(
             ["git", *arguments],
-            cwd=layout.REPOSITORY_ROOT,
+            cwd=layout.REPOSITORY_ROOT if cwd is None else cwd,
             check=True,
             capture_output=True,
             text=True,
@@ -37,6 +37,45 @@ def git_value(*arguments: str) -> str | None:
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
     return completed.stdout.strip()
+
+
+def fealpy_provenance() -> dict[str, Any]:
+    """Identify the fealpy checkout this run actually imported.
+
+    ``importlib.metadata.version`` only yields the static ``"4.0.0"``, which
+    cannot tell the upstream checkout apart from the local vendor fork, nor
+    detect a dirty worktree. Both distinctions change results: the fork
+    carries mesh-refactor regression fixes without which tensor-product
+    meshes are silently wrong. Resolving the git state at ``fealpy.__file__``
+    records what was executed rather than what was declared.
+    """
+    record: dict[str, Any] = {
+        "version": package_version("fealpy"),
+        "path": None,
+        "git_revision": None,
+        "git_dirty": None,
+        "git_remote": None,
+    }
+    try:
+        import fealpy
+    except ImportError:
+        return record
+
+    source = Path(fealpy.__file__).resolve().parent
+    record["path"] = str(source)
+
+    # Absent when fealpy came from a wheel rather than a checkout.
+    revision = git_value("rev-parse", "HEAD", cwd=source)
+    if revision is None:
+        return record
+
+    status = git_value("status", "--porcelain", cwd=source)
+    record["git_revision"] = revision
+    record["git_dirty"] = None if status is None else bool(status)
+    record["git_remote"] = git_value(
+        "remote", "get-url", "origin", cwd=source
+    )
+    return record
 
 
 def environment_record() -> dict[str, Any]:
@@ -48,7 +87,7 @@ def environment_record() -> dict[str, Any]:
         "numpy": np.__version__,
         "scipy": package_version("scipy"),
         "sympy": package_version("sympy"),
-        "fealpy": package_version("fealpy"),
+        "fealpy": fealpy_provenance(),
         "soptx": package_version("soptx"),
         "mpi4py": package_version("mpi4py"),
         "mpi_library": MPI.Get_library_version().strip(),

@@ -1,14 +1,17 @@
 """
 2D & 3D 线弹性子结构静态缩聚分析 Demo
 ========================================================
-100% 纯有限元 (FEA) 子结构静态缩聚求解与验证流程（全面支持 2D 及 3D）。
+100% 纯有限元 (FEA) 的局部静力缩聚与位移恢复验证（全面支持 2D 及 3D）。
 无任何机器学习或神经网络依赖。
 
 串联模块：
   1. SubstructureMesh       : 二维/三维矩形子结构网格划分与 SIMP 变密度场设置
   2. FEAStaticCondensation  : 维度无关的精确 Schur 补求逆与内部位移恢复
-  3. GlobalAssembler        : 界面系统组装与全尺寸 2D/3D FEA 直接求解
-  4. 基准验证               : 2D & 3D 机器精度误差校验与位移场可视化云图导出
+  3. GlobalAssembler        : 全尺寸 2D/3D FEA 直接参考解与局部—全局 DOF 映射
+  4. 基准验证               : 以参考解接口位移回代局部内部位移，并导出误差与位移云图
+
+本脚本不组装或求解缩聚后的全局接口系统；该端到端验证由
+``compare_lagrange.py`` 负责。
 
 作者: Liang He (大连理工大学博士后) & Antigravity Assistant
 日期: 2026-08-06
@@ -46,7 +49,7 @@ def format_table_row(col1: str, col2: str, widths: Tuple[int, int]) -> str:
 
 def run_demo_2d(out_dir: str) -> None:
     print("\n" + "=" * 80)
-    print("【测试 1】纯 2D 弹性体子结构静态缩聚分析 (2D FEA Baseline)")
+    print("【测试 1】2D 局部静力缩聚与位移恢复验证 (2D FEA Baseline)")
     print("=" * 80)
 
     Lx, Ly = 2.0, 1.0
@@ -132,8 +135,7 @@ def run_demo_2d(out_dir: str) -> None:
     print(format_table_row("统计指标 / 评估项目", "数值", widths_2d))
     print("-" * 85)
     print(format_table_row("2D 全尺寸精细网格总自由度数 (DOFs)", str(assembler.total_full_dofs), widths_2d))
-    print(format_table_row("2D 界面缩聚自由度数 (Condensed DOFs)", str(len(free_dofs)), widths_2d))
-    print(format_table_row("2D 自由度缩聚比例", f"{assembler.total_full_dofs / len(free_dofs):.2f}x", widths_2d))
+    print(format_table_row("2D 全尺度参考系统自由 DOF 数", str(len(free_dofs)), widths_2d))
     print(format_table_row("2D 静态缩聚内部位移恢复相对误差", f"{err_recovery:.4e} (机器精度)", widths_2d))
     print("=" * 85)
 
@@ -166,7 +168,7 @@ def run_demo_2d(out_dir: str) -> None:
 
 def run_demo_3d(out_dir: str) -> None:
     print("\n" + "=" * 80)
-    print("【测试 2】纯 3D 弹性体子结构静态缩聚分析 (3D FEA Baseline)")
+    print("【测试 2】3D 局部静力缩聚与位移恢复验证 (3D FEA Baseline)")
     print("=" * 80)
 
     Lx, Ly, Lz = 2.0, 1.0, 1.0
@@ -258,15 +260,14 @@ def run_demo_3d(out_dir: str) -> None:
     print(format_table_row("统计指标 / 评估项目", "数值", widths_3d))
     print("-" * 85)
     print(format_table_row("3D 全尺寸精细网格总自由度数 (DOFs)", str(assembler.total_full_dofs), widths_3d))
-    print(format_table_row("3D 界面缩聚自由度数 (Condensed DOFs)", str(len(free_dofs)), widths_3d))
-    print(format_table_row("3D 自由度缩聚比例 (DOF Reduction Ratio)", f"{assembler.total_full_dofs / len(free_dofs):.2f}x", widths_3d))
+    print(format_table_row("3D 全尺度参考系统自由 DOF 数", str(len(free_dofs)), widths_3d))
     print(format_table_row("3D 静态缩聚内部位移恢复相对误差", f"{err_recovery:.4e} (机器精度)", widths_3d))
     print("=" * 85)
 
 
 def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser(description="子结构静态缩聚与拉格朗日有限元对比演示")
+    parser = argparse.ArgumentParser(description="局部静力缩聚位移恢复验证")
     parser.add_argument("--dim", type=int, choices=[2, 3], default=None, help="运行维度 (2 或 3; 默认两者都运行)")
     args = parser.parse_args()
 
@@ -279,16 +280,8 @@ def main() -> None:
     if args.dim is None or args.dim == 3:
         run_demo_3d(out_dir)
 
-    # 2. 运行与传统拉格朗日有限元 (Lagrange FEM) 的全方位对比基准
-    from compare_lagrange import run_benchmark_2d, run_benchmark_3d
-    if args.dim is None or args.dim == 2:
-        run_benchmark_2d()
-    if args.dim is None or args.dim == 3:
-        run_benchmark_3d()
-
     dim_str = f"{args.dim}D" if args.dim else "2D 与 3D"
-    print(f"\n[成功] {dim_str} 子结构弹性力学分析及其与传统拉格朗日有限元对比演示完成！")
-
+    print(f"\n[成功] {dim_str} 局部静力缩聚位移恢复验证完成！")
 
 if __name__ == "__main__":
     main()

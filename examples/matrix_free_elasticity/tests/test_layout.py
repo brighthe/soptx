@@ -20,10 +20,28 @@ def validation_summaries(dimension: int) -> set:
     }
 
 
-def test_case_names_are_stable():
+def test_serial_case_names_are_stable():
+    """阶段 1a 的默认范围只有单 rank 算例。"""
+
     assert {
         layout.case_name(role, operator_level, ranks)
-        for role, operator_level, ranks in layout.VALIDATION_CASES
+        for role, operator_level, ranks in layout.validation_cases()
+    } == {
+        "ea-coarse-1rank",
+        "ea-medium-1rank",
+        "ea-fine-1rank",
+        "fa-coarse-1rank",
+    }
+
+
+def test_parallel_case_names_are_stable():
+    """阶段 1b 在 1a 之上恰好追加一个 2-rank 算例。"""
+
+    assert {
+        layout.case_name(role, operator_level, ranks)
+        for role, operator_level, ranks in layout.validation_cases(
+            include_parallel=True,
+        )
     } == {
         "ea-coarse-1rank",
         "ea-medium-1rank",
@@ -33,14 +51,29 @@ def test_case_names_are_stable():
     }
 
 
+def test_serial_scope_uses_a_single_rank_only():
+    assert all(
+        ranks == 1
+        for _, _, ranks in layout.validation_cases()
+    )
+
+
 def test_every_validation_case_has_a_refinement():
     for dimension in contract.SUPPORTED_DIMENSIONS:
-        specs = layout.validation_case_specs(
-            contract.REFINEMENTS[dimension]
-        )
-        assert len(specs) == len(layout.VALIDATION_CASES)
-        assert all(refinement > 0 for _, refinement, _, _ in specs)
-        assert len({name for name, _, _, _ in specs}) == len(specs)
+        for include_parallel in (False, True):
+            specs = layout.validation_case_specs(
+                contract.REFINEMENTS[dimension],
+                include_parallel=include_parallel,
+            )
+            assert len(specs) == len(
+                layout.validation_cases(
+                    include_parallel=include_parallel,
+                )
+            )
+            assert all(
+                refinement > 0 for _, refinement, _, _ in specs
+            )
+            assert len({name for name, _, _, _ in specs}) == len(specs)
 
 
 def test_ea_evidence_sources_are_written_by_validate():

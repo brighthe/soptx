@@ -23,17 +23,10 @@ import numpy as np
 from fealpy.backend import backend_manager as bm
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
-import importlib.util
-
-_spec = importlib.util.spec_from_file_location("matrix_free_operator", example_dir / "operator.py")
-_op_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_op_mod)
-ElasticityEAOperator = _op_mod.ElasticityEAOperator
-
 import utils.contract as contract
 from cases import create_case
 from solver import PreparedLinearSystem, solve_matrix_free_system
-from utils.analyzer import build_serial_analyzer
+from utils.analyzer import ElasticityEAOperator, build_serial_analyzer
 from utils.references import relative_difference, serial_references
 
 

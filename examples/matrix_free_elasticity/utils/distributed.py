@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
 
 from mpi4py.MPI import Comm
 import numpy as np
@@ -15,10 +15,37 @@ from fealpy.distributed import (
 )
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import Mesh
+from fealpy.typing import TensorLike
 
 from utils import contract
 
 AXIS_NAMES = ("x", "y", "z")
+
+
+class OverlapOperator:
+    """把局部算子提升为重叠副本布局下的全局算子
+
+    ``__matmul__`` 的三步对应 math_spec.md 第 3.3 节的
+    :math:`\\mathcal S \\circ K_{\\mathrm{loc}} \\circ \\mathcal C`: 先把加和表示
+    的输入投影成一致表示, 作用局部算子, 再把结果同步归约回加和表示。单 rank 下
+    ``refs`` 恒为 1 且 ``sync_add`` 是恒等, 因此串行与并行走同一段代码。
+
+    ``__getattr__`` 转发未定义属性, 使被包装的 ``BilinearForm`` 在调用方看来
+    与未包装时一致。
+    """
+
+    def __init__(self, local_operator: Any, dof_comm: EntityMPI) -> None:
+        self.local_operator = local_operator
+        self.dof_comm = dof_comm
+
+    def __matmul__(self, vector: TensorLike) -> TensorLike:
+        references = self.dof_comm.refs(vector.shape[-1])
+        consistent_vector = self.dof_comm.sync_add(vector) / references
+        local_result = self.local_operator @ consistent_vector
+        return self.dof_comm.sync_add(local_result)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.local_operator, name)
 
 
 @dataclass(frozen=True)
@@ -81,17 +108,6 @@ def partition_strategy_label(
         "non-overlapping-cells-split-at-"
         f"{AXIS_NAMES[axis]}={split_coordinate:g}"
     )
-
-
-import importlib.util
-
-_op_spec = importlib.util.spec_from_file_location(
-    "matrix_free_operator",
-    Path(__file__).resolve().parent.parent / "operator.py",
-)
-_op_mod = importlib.util.module_from_spec(_op_spec)
-_op_spec.loader.exec_module(_op_mod)
-OverlapOperator = _op_mod.OverlapOperator
 
 
 def _vector_dof_masks(

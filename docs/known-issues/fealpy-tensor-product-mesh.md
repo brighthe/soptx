@@ -119,7 +119,7 @@ def edge_basis(self, bc, index=_S):
   `src/soptx/model/` 下 `boundary_type='mixed'` 的模型和 `MixedBoundary*` 制造解。
   Hu–Zhang 混合元路径不经过 `LagrangeFESpace.face_basis`，不受影响。
 - `examples/lagrange_elasticity/minimal_demo.py` 开放了张量积网格和混合边界入口，
-  因此**依赖 `fealpy_stable`**：官方检出上四边形静默错误，混合边界抛异常。
+  因此**依赖本地 fork 的修复**：上游代码上四边形静默错误，混合边界抛异常。
 
 ---
 
@@ -127,9 +127,12 @@ def edge_basis(self, bc, index=_S):
 
 | 检出 | revision | 结果 |
 | --- | --- | --- |
-| `fealpy` | `2f17532`（`v4.0.0-alpha-15`） | 5 项 FAIL |
-| `fealpy_stable` | `fbfe39e`（缺陷 1–4 在 `0758339`） | ALL PASSED |
-| `fealpy_heliang` | `18c9afe` | ALL PASSED |
+| 上游 `suanhai/develop` | `2f17532`（`v4.0.0-alpha-15`） | 5 项 FAIL |
+| 本地 fork | 缺陷 1–4：`0758339`；缺陷 5：`fbfe39e` | ALL PASSED |
+| `fealpy_heliang`（已退役，另一条 fork 线） | `18c9afe` | ALL PASSED |
+
+revision 列记补丁所在的提交，不记 `main` 的当前 HEAD——分支会前进，写死的分支
+revision 下一次提交就过期，而补丁 SHA 在 merge 前保持有效。
 
 Python 3.12.13，NumPy 2.5.1，backend `numpy`。
 
@@ -142,14 +145,32 @@ quadrangle   7.8988e-03  1.9839e-03  4.9659e-04  1.993  1.998
 hexahedron   4.6470e-02  1.6810e-02  4.3349e-03  1.467  1.955
 ```
 
+## 回归测试
+
+补丁自带的 pytest 用例保存在 fork 内。上游没有同名文件，因此 merge 时不会产生
+冲突提示——补丁连同测试被一起丢掉是静默的，这两个文件是唯一的自动化保护：
+
+| 覆盖 | 文件（fork 内相对路径） |
+| --- | --- |
+| 缺陷 1，`LagrangeFESpace` 与 `TensorFunctionSpace` 四处、三角形与四面体 | `tests/functionspace/unit/test_barycentric_tuple_dimension.py` |
+| 缺陷 5，`face_basis` 走面实体且 `basis` 不受影响 | `tests/functionspace/unit/test_face_basis_entity_dimension.py` |
+
+**缺陷 2–4（四边形两处顺序错位、六面体 `bc_to_point` 未展平）没有 pytest 覆盖**，
+只由下述复现脚本的判据保护，需手工运行。缺陷 2 本身是静默错误，这一段没有自动
+化保护是当前最薄弱的环节。
+
 ## 验证脚本
 
 [`reproduce_tensor_product_issue.py`](reproduce_tensor_product_issue.py) 只依赖
 FEALPy 自身接口，包含五条判据（A–E），可用于判断上游是否已修复：
 
+要在**上游代码**上跑它（判断上游是否已修复），先从 fork 里检出一个临时 worktree，
+不再需要单独维护一份上游检出：
+
 ```bash
-python -c "import sys, runpy; sys.path.insert(0, r'...\fealpy'); \
-  runpy.run_path(r'...\soptx\docs\known-issues\reproduce_tensor_product_issue.py')"
+git -C ~/workspace/fealpy worktree add ~/workspace/upstream-check suanhai/develop
+PYTHONPATH=~/workspace/upstream-check python ~/workspace/soptx/docs/known-issues/reproduce_tensor_product_issue.py
+git -C ~/workspace/fealpy worktree remove ~/workspace/upstream-check
 ```
 
-输出 `ALL PASSED` 即表示官方版本不再需要 `fealpy_stable`。
+输出 `ALL PASSED` 即表示上游已自行修复，对应的 fork 补丁可以在下次 merge 时丢弃。

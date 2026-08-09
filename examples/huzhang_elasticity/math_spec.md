@@ -61,9 +61,9 @@
 | 相对平衡残差 | $\|\mathbf K\mathbf x-\mathbf f\|_2\big/\max(\|\mathbf f\|_2,\epsilon)$ | $<10^{-8}$ | `analyzer.relative_state_residual()` |
 | 状态矩阵对称性缺陷 | $\|\mathbf K-\mathbf K^{\mathsf T}\|_F\big/\max(\|\mathbf K\|_F,\epsilon)$（相对 Frobenius 缺陷） | $<10^{-12}$ | `analyzer.state_matrix_symmetry_error()` |
 
-收敛阶结果（高阶 $k\ge3$ 应力 $h^{k+1}$；低阶表 5.2 的 $k=1$ 为 1/1.5/1、$k=2$ 为 2/2/1 含 $H(\mathrm{div})$ 降阶）与归因见概念页 §5。
-实测在 `MixedBoundarySinusoidalElasticity2D` 上逐格复现论文表 5.2，见
-[results_analysis.md 1.1](outputs/results_analysis.md)。
+收敛阶结果（高阶 $k\ge3$ 独立应力表现出 $h^{k+1}$ 超收敛；低阶 $k=1$ 收敛阶为 1/1.5/1、$k=2$ 收敛阶为 2/2/1 含 $H(\mathrm{div})$ 降阶）与物理归因见概念页 §5。
+实测在 `MixedBoundarySinusoidalElasticity2D` 上的收敛结果见
+[results_analysis.md 1.1](results_analysis.md)。
 
 ---
 

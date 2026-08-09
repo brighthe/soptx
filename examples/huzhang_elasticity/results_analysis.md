@@ -33,16 +33,19 @@ $$
 
 ### 0.2 数值误差指标 (Numerical Error Metrics)
 
-* **位移 / 应力 $L_2$ 误差**（制造解有精确解时）：
+* **位移 / 应力 $L_2$ 误差与组合 $H(\mathrm{div})$ 误差**（制造解有精确解时）：
+
   $$
   \|\boldsymbol{u}-\boldsymbol{u}_h\|_{L_2(\Omega)},\quad
   \|\boldsymbol{\sigma}-\boldsymbol{\sigma}_h\|_{L_2(\Omega)},\quad
-  \|\mathrm{div}(\boldsymbol{\sigma}-\boldsymbol{\sigma}_h)\|_{L_2(\Omega)},\quad
-  \|\boldsymbol{\sigma}-\boldsymbol{\sigma}_h\|_{H(\mathrm{div})}
+  \|\operatorname{div}(\boldsymbol{\sigma}-\boldsymbol{\sigma}_h)\|_{L_2(\Omega)}
   $$
-  其中 $\|\boldsymbol{\sigma}-\boldsymbol{\sigma}_h\|_{H(\mathrm{div})}
-  = \big( \|\boldsymbol{\sigma}-\boldsymbol{\sigma}_h\|_{L_2}^2
-  + \|\mathrm{div}(\boldsymbol{\sigma}-\boldsymbol{\sigma}_h)\|_{L_2}^2 \big)^{1/2}$。
+
+  其中组合 $H(\operatorname{div})$ 误差定义为：
+
+  $$
+  \|\boldsymbol{\sigma}-\boldsymbol{\sigma}_h\|_{H(\operatorname{div})} = \left( \|\boldsymbol{\sigma}-\boldsymbol{\sigma}_h\|_{L_2(\Omega)}^2 + \|\operatorname{div}(\boldsymbol{\sigma}-\boldsymbol{\sigma}_h)\|_{L_2(\Omega)}^2 \right)^{1/2}
+  $$
 * **真相对残差**（线性系统是否真正解开）：
   $$
   r_{\mathrm{res}} = \frac{\|\boldsymbol{R}(\boldsymbol{\sigma}_h, \boldsymbol{u}_h)\|}{\|\boldsymbol{F}\|}

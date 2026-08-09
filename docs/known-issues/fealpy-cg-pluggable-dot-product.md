@@ -78,5 +78,18 @@ class EntityMPI:
 
 | 检出 | 状态 |
 | --- | --- |
-| `fealpy` (`2f17532`, `v4.0.0-alpha-15`) | CG 不支持 `dot_product`、EntityMPI 无 `dot()` |
-| `fealpy_stable` (`stable` 分支) | 已实现 |
+| 上游 `suanhai/develop` (`2f17532`, `v4.0.0-alpha-15`) | CG 不支持 `dot_product`、EntityMPI 无 `dot()` |
+| 本地 fork | 已实现：`4c5887d`（EntityMPI.dot）、`875496d`（CG） |
+
+## 已知回归（待修）
+
+`875496d` 对 `_cg_impl` 的改写相对上游实现引入两处回归：
+
+1. **批量（2-D）输入失效**。`_norm` 内部 `float(_dot(x, x))`，而默认 `_dot` 是
+   `bm.sum(..., axis=0)`，对 `(dof, batch)` 输入返回 `(batch,)` 张量，`batch > 1`
+   时 `float()` 抛异常；`curvature <= 0.0` 同样是数组真值歧义。上游实现通过
+   `alpha[None, ...]` 广播明确支持批量，且 `cg()` 签名至今仍暴露 `batch_first`。
+2. **`maxit=None` 会崩**。循环改成 `range(1, maxit + 1)`，但签名仍写
+   `Optional[int]`；上游用 `while True` 加显式 `maxit is not None` 判断。
+
+soptx 当前全部调用点均为 1-D 单右端项，未触发。修复前不要在 soptx 中使用批量 CG。

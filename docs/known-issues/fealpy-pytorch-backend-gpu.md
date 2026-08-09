@@ -93,9 +93,17 @@ def device(self):
 
 ---
 
+## 回归测试
+
+**三处修复均无 pytest 覆盖。** merge 上游后补丁若被覆盖，只能靠
+`examples/gpu_elasticity/minimal_demo.py` 在 GPU 机器上运行时暴露，CPU CI 检查
+不到。缺陷 1–2 会直接抛 `AttributeError`（不产生假数据），缺陷 3 不影响计算，
+因此暂未补测试；若后续 GPU 路径进入常规验证，应在 fork 内补
+`tests/backend/` 下的最小用例。
+
 ## 环境与版本对照
 
 | 检出 | 状态 |
 | --- | --- |
-| `fealpy` (`2f17532`, `v4.0.0-alpha-15`) | 缺陷 1–3 均存在 |
-| `fealpy_stable` (`stable` 分支) | 全部已修复 |
+| 上游 `suanhai/develop` (`2f17532`, `v4.0.0-alpha-15`) | 缺陷 1–3 均存在 |
+| 本地 fork | 全部已修复：`ceb0c61`（缺陷 1、2）、`88cf4fa`（缺陷 3） |

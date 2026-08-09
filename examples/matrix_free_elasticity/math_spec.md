@@ -21,13 +21,13 @@ $n=\texttt{TGDOF}$。
 
 | 数学符号 | 代码位置 | 代数含义 |
 |---|---|---|
-| $\mathbf K_e\in\mathbb R^{m\times m}$ | [`operator.py:ElasticityEAOperator`](operator.py) 内部单元刚度缓存 | 单元刚度矩阵，$m=(d+1)d$ |
+| $\mathbf K_e\in\mathbb R^{m\times m}$ | `LinearElasticIntegrator` 计算、`BilinearForm` 在 `'ea'` 下保存的单元刚度张量 | 单元刚度矩阵，$m=(d+1)d$ |
 | $\mathbf R_e\in\{0,1\}^{m\times n}$ | `space.cell_to_dof()` | 单元自由度限制算子（gather），$\mathbf R_e^{\mathsf T}$ 为 scatter-add |
 | $\mathbf K\in\mathbb R^{n\times n}$ | `assemble_stiff_matrix.set('fa')` 返回的 `CSRTensor` | 全局刚度矩阵 |
 | $\mathbf E_p\in\{0,1\}^{n\times n_p}$ | [`utils/distributed.py:_vector_dof_masks`](utils/distributed.py) 得到的 DOF 掩码 | rank $p$ 的局部自由度嵌入算子 |
 | $r_i\in\mathbb Z_{>0}$ | `dof_comm.refs(size)` | 自由度 $i$ 的副本数（被多少个 rank 持有） |
 | $w_i=1/r_i$ | `dof_comm.dot(size)` / [`solver.py`](solver.py) 内部 | 重叠内积权重 |
-| $\mathcal S(\cdot)$ | `dof_comm.sync_add(...)` / [`operator.py:OverlapOperator`](operator.py) | 跨 rank 共享分量求和 |
+| $\mathcal S(\cdot)$ | `dof_comm.sync_add(...)` / [`utils/distributed.py:OverlapOperator`](utils/distributed.py) | 跨 rank 共享分量求和 |
 | $\mathbf P_D,\ \mathbf P_I$ | `DirichletBCOperator.is_boundary_dof` 及其补 | Dirichlet／内部自由度上的对角投影，$\mathbf P_D+\mathbf P_I=\mathbf I$ |
 | $\bar{\boldsymbol u}$ | `_prescribed_solution` / `ElasticityEAOperator.prescribed_solution` | 边界取给定值、内部取零的基准向量 |
 
@@ -53,7 +53,11 @@ $$
 
 ---
 
-## 3. 重叠副本布局的向量表示与算子代数
+## 3. 重叠副本布局的向量表示与算子代数（阶段 1b）
+
+> **本节是阶段 1b（CPU 并行 EA）的代数基础，不属于阶段 1a 的验证范围。**
+> 阶段 1a 只跑单 rank，此时本节全部跨 rank 归约都退化为恒等（见 §3.3），串行
+> 路径与并行路径是同一段代码。1a 的证据不包含任何跨 rank 结论。
 
 本模块的并行分布式实现直接继承 FEALPy 的 **EMPI (Entity Message Passing Interface)** 架构（即 `fealpy.distributed.EntityMPI`）：
 - **实体共享与引用计数 ($r_i$)**：使用 `dof_comm.refs(size)` 统计交界面共享实体的副本数；
@@ -112,7 +116,7 @@ $$
 
 ### 3.3 `OverlapOperator` 的三步及其恒等性
 
-[`operator.py:33`](operator.py:33) 中 `OverlapOperator.__matmul__` 为
+[`utils/distributed.py`](utils/distributed.py) 中 `OverlapOperator.__matmul__` 为
 
 $$
 \boldsymbol x\;\longmapsto\;
@@ -220,6 +224,9 @@ $\boldsymbol x_{\mathrm{direct}}$ 由 `spsolve` 在 `fa` 系统上独立求出�
 
 ### 5.2 跨运行门禁（`utils/validate.py`）
 
+下表中标注「1b」的两道门禁只在 `--include-parallel` 下参与判定；阶段 1a 的默认
+范围不含跨 rank 项，`comparison` 里也不写入对应字段，以免空占位被误读为"已检验"。
+
 记网格加密序列 $h_0>h_1>h_2$（`REFINEMENTS`：2D 为 $8,16,32$；3D 为 $4,8,16$），
 相对 $L^2$ 位移误差
 
@@ -233,16 +240,16 @@ $$
 q_k=\log_2\frac{E_{k-1}}{E_k},\qquad k=1,2 .
 $$
 
-| 门禁 | 数学式 | 阈值 |
-|---|---|---|
-| 1/2-rank 解一致 | $\lVert\boldsymbol x^{(1)}-\boldsymbol x^{(2)}\rVert_2/\lVert\boldsymbol x^{(1)}\rVert_2\le\texttt{PARALLEL\_SOLUTION\_RELATIVE\_TOL}$ | $10^{-9}$ |
-| EA/FA 解一致 | $\lVert\boldsymbol x^{\mathrm{EA}}-\boldsymbol x^{\mathrm{FA}}\rVert_2/\lVert\boldsymbol x^{\mathrm{EA}}\rVert_2\le\texttt{EA\_FA\_SOLUTION\_RELATIVE\_TOL}$ | $10^{-9}$ |
-| 1/2-rank 误差一致 | $\bigl\lvert E_2^{(1\,\mathrm{rank})}-E_2^{(2\,\mathrm{rank})}\bigr\rvert\le\texttt{PARALLEL\_L2\_DIFFERENCE\_TOL}$ | $10^{-10}$ |
-| 误差单调 | $E_0>E_1>E_2$ | — |
-| 收敛阶 | $q_2\ge\texttt{MINIMUM\_FINAL\_L2\_ORDER}$ | $1.5$ |
+| 门禁 | 阶段 | 数学式 | 阈值 |
+|---|---|---|---|
+| EA/FA 解一致 | 1a | $\lVert\boldsymbol x^{\mathrm{EA}}-\boldsymbol x^{\mathrm{FA}}\rVert_2/\lVert\boldsymbol x^{\mathrm{EA}}\rVert_2\le\texttt{EA\_FA\_SOLUTION\_RELATIVE\_TOL}$ | $10^{-9}$ |
+| 误差单调 | 1a | $E_0>E_1>E_2$ | — |
+| 收敛阶 | 1a | $q_2\ge\texttt{MINIMUM\_FINAL\_L2\_ORDER}$ | $1.5$ |
+| 1/2-rank 解一致 | **1b** | $\lVert\boldsymbol x^{(1)}-\boldsymbol x^{(2)}\rVert_2/\lVert\boldsymbol x^{(1)}\rVert_2\le\texttt{PARALLEL\_SOLUTION\_RELATIVE\_TOL}$ | $10^{-9}$ |
+| 1/2-rank 误差一致 | **1b** | $\bigl\lvert E_2^{(1\,\mathrm{rank})}-E_2^{(2\,\mathrm{rank})}\bigr\rvert\le\texttt{PARALLEL\_L2\_DIFFERENCE\_TOL}$ | $10^{-10}$ |
 
-前两道是 (3.3) 与第 4 节等价性的直接检验：1/2-rank 差异检验 $\mathcal S$ 与
-$\mathcal C$ 的实现，EA/FA 差异检验 (4.1) 与对称消元的等价性。
+EA/FA 解一致检验 (4.1) 与对称消元的等价性，是 1a 的核心代数判据；两道 1b 门禁
+检验 (3.3) 中 $\mathcal S$ 与 $\mathcal C$ 的实现。
 
 凡分母出现范数处一律用 $\max(\cdot,\texttt{NORM\_FLOOR})$ 兜底，
 $\texttt{NORM\_FLOOR}=10^{-30}$。
@@ -254,7 +261,25 @@ $\texttt{NORM\_FLOOR}=10^{-30}$。
 - 不实现 PA/QA、UA/NONE，不宣称任何低于 EA 的存储层级；
 - 无预条件（`parameters.preconditioner` 恒为 `null`），因此迭代数只反映
   $\tilde{\mathbf K}$ 的条件数，不构成任何预条件结论；
-- 只支持 $p=1$、$d\in\{2,3\}$、1/2 ranks；2 ranks 只验证正确性，不支持任何
-  扩展性结论；
+- 只支持 $p=1$、$d\in\{2,3\}$、1/2 ranks；阶段 1a 只跑单 rank，2 ranks 属阶段
+  1b 且只验证正确性，不支持任何扩展性结论；
 - MatVec 一致不替代完整 solve、真残差与解误差；单 kernel 计时不替代端到端
   时间与峰值内存。
+
+### 6.1 EA 的算术强度边界（后续 GPU 阶段的表述口径）
+
+按 `dut-postdoc:concepts/matrix-free/assembly-levels.md#算术强度：EA 并没有解决 FA 的瓶颈`
+的口径，EA 的 apply 每单元读取 $m^2$ 个 double 并执行 $2m^2$ 次浮点运算：
+
+$$
+\text{算术强度}_{\mathrm{EA}}\approx\frac{2m^2\ \text{flop}}{8m^2\ \text{byte}}
+=0.25\ \text{flop/byte},
+$$
+
+与 FA 的 SpMV（$\approx 0.17$ flop/byte）**同量级**。EA 改善的是访存的规则性
+（连续块读取而非随机间接寻址），不是访存的总量——每次 apply 仍要把整个
+$\{\mathbf K_e\}$ 流过一遍，而这个数组比 FA 的稀疏矩阵更大。
+
+因此，无论 1b 的并行加速还是 1c 的 GPU 加速，其收益来源都是**并行度与访存规则
+性**，而**不是算术强度的提高**。这些结果不得表述为「Matrix-Free 通过提高算术
+强度获得加速」——那要到 PA/QA 与 UA/NONE 才成立，而本阶段明确不实现它们。

@@ -24,14 +24,38 @@ RESULTS_PATH = EXAMPLE_DIR / "results_analysis.md"
 RUN_SCRIPT = EXAMPLE_DIR / "utils" / "run.py"
 SYNC_SCRIPT_NAME = "utils/sync_results.py"
 
-# (role, operator_level, ranks) for every case utils/validate.py runs per dimension.
-VALIDATION_CASES = (
+# (role, operator_level, ranks) per dimension, split by推进阶段。
+#
+# 1a（CPU 串行 EA/FA）是当前的默认验证范围: 三档单 rank EA 加一档单 rank FA
+# 参照, 不涉及任何 MPI 分区与重叠副本归约。
+SERIAL_VALIDATION_CASES = (
     ("coarse", "ea", 1),
     ("medium", "ea", 1),
     ("fine", "ea", 1),
-    ("fine", "ea", 2),
     ("coarse", "fa", 1),
 )
+
+# 1b（CPU 并行 EA）在 1a 之上追加的算例; 由 utils/validate.py 的
+# ``--include-parallel`` 打开, 对应 1/2-rank 一致性门禁。
+PARALLEL_VALIDATION_CASES = (
+    ("fine", "ea", 2),
+)
+
+
+def validation_cases(
+    *,
+    include_parallel: bool = False,
+) -> tuple[tuple[str, str, int], ...]:
+    """当前验证范围内的算例表。
+
+    默认只返回 1a 的串行算例; ``include_parallel`` 追加 1b 的多 rank 算例。
+    两个阶段共享同一份算例定义与同一份阈值, 因此 1b 的跨 rank 门禁始终与 1a
+    的串行结果可比。
+    """
+
+    if include_parallel:
+        return SERIAL_VALIDATION_CASES + PARALLEL_VALIDATION_CASES
+    return SERIAL_VALIDATION_CASES
 
 # EA roles whose summaries feed the committed evidence, in refinement order.
 EA_EVIDENCE_ROLES = ("coarse", "medium", "fine")
@@ -62,6 +86,8 @@ def validation_artifact_paths(
 
 def validation_case_specs(
     refinements: tuple[int, int, int],
+    *,
+    include_parallel: bool = False,
 ) -> tuple[tuple[str, int, int, str], ...]:
     """Pair every validation case with its refinement level."""
 
@@ -78,7 +104,9 @@ def validation_case_specs(
             ranks,
             operator_level,
         )
-        for role, operator_level, ranks in VALIDATION_CASES
+        for role, operator_level, ranks in validation_cases(
+            include_parallel=include_parallel,
+        )
     )
 
 

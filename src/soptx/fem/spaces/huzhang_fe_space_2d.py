@@ -872,7 +872,7 @@ class HuZhangFESpace2d(FunctionSpace):
 
         nsframe, esframe, csframe = self.basis_frame_of_S()
 
-        # FEALPy 4.0.0 (fealpy_stable) 的 grad_shape_function 默认返回参考单元
+        # FEALPy 4.0.0 的 grad_shape_function 默认返回参考单元
         # 坐标导数 (2D 为物理导数的一半), 必须带 variables='x' 才返回笛卡尔
         # 物理梯度; 与 3D 空间的 div_basis 调用方式保持一致.
         gphi_s = self.mesh.grad_shape_function(bc, self.p, variables='x')  # (NC, NQ, LDOF, GD)

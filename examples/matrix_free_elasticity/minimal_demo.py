@@ -27,16 +27,10 @@ from fealpy.backend import backend_manager as bm
 from fealpy.distributed import distribute_mesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
-import importlib.util
-
-_spec = importlib.util.spec_from_file_location("matrix_free_operator", example_dir / "operator.py")
-_op_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_op_mod)
-ElasticityEAOperator = _op_mod.ElasticityEAOperator
-
 import utils.contract as contract
 from cases import create_case
 from solver import PreparedLinearSystem, solve_matrix_free_system
+from utils.analyzer import ElasticityEAOperator
 from utils.distributed import distribute_vector_space, partition_cells
 from utils.postprocess import solution_error
 
