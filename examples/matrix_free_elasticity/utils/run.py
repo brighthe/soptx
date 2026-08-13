@@ -24,17 +24,19 @@ from fealpy.distributed import distribute_mesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import Mesh
 
-from cases import ElasticityCase, create_case
-from solver import PreparedLinearSystem, solver_diagnostics
-from utils import contract, report
-from utils.analyzer import build_distributed_analyzer
-from utils.contract import RunConfig
-from utils.distributed import (
+from soptx.fem.distributed import (
+    SUPPORTED_RANKS,
     DistributedVectorSpace,
     distribute_vector_space,
     partition_cells,
     partition_strategy_label,
 )
+from soptx.fem.solvers import PreparedLinearSystem, solver_diagnostics
+
+from cases import ElasticityCase, create_case
+from utils import contract, report
+from utils.analyzer import build_distributed_analyzer
+from utils.contract import RunConfig
 from utils.postprocess import solution_error, write_solution
 from utils.references import relative_difference, serial_references
 from utils.schema import RunResult
@@ -299,9 +301,9 @@ def finalize(
 def check_rank_support(config: RunConfig, mpi_size: int) -> None:
     """Reject rank counts stage 1 does not support for this run mode."""
 
-    if mpi_size not in contract.SUPPORTED_RANKS:
+    if mpi_size not in SUPPORTED_RANKS:
         raise ValueError(
-            f"stage 1 supports only {contract.SUPPORTED_RANKS} MPI ranks"
+            f"stage 1 supports only {SUPPORTED_RANKS} MPI ranks"
         )
     if config.operator_level == "fa" and mpi_size != 1:
         raise ValueError("the FA operator level currently supports one MPI rank")

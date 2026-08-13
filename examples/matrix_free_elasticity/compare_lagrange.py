@@ -25,7 +25,7 @@ from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 import utils.contract as contract
 from cases import create_case
-from solver import PreparedLinearSystem, solve_matrix_free_system
+from soptx.fem.solvers import PreparedLinearSystem, solve_matrix_free_system
 from utils.analyzer import ElasticityEAOperator, build_serial_analyzer
 from utils.references import relative_difference, serial_references
 

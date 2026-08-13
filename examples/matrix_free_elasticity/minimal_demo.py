@@ -29,9 +29,9 @@ from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 import utils.contract as contract
 from cases import create_case
-from solver import PreparedLinearSystem, solve_matrix_free_system
+from soptx.fem.solvers import PreparedLinearSystem, solve_matrix_free_system
 from utils.analyzer import ElasticityEAOperator
-from utils.distributed import distribute_vector_space, partition_cells
+from soptx.fem.distributed import distribute_vector_space, partition_cells
 from utils.postprocess import solution_error
 
 

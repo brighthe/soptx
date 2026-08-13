@@ -1,4 +1,10 @@
-"""Finite-element spaces, integrators and solver workflows."""
+"""Finite-element spaces, integrators and solver workflows.
+
+``soptx.fem.distributed`` and ``soptx.fem.solvers.matrix_free_analyzer`` are
+deliberately *not* re-exported here: both import ``mpi4py``, which is an
+optional extra, so importing them eagerly would make ``import soptx.fem`` fail
+on an installation without it.  Import those two by their full module path.
+"""
 
 from .integrators import LinearElasticIntegrator, SourceIntegrator
 from .solvers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer

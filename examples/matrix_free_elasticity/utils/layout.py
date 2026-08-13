@@ -13,8 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from utils import contract
-
 EXAMPLE_DIR = Path(__file__).resolve().parent.parent
 REPOSITORY_ROOT = EXAMPLE_DIR.parents[1]
 SOURCE_ROOT = REPOSITORY_ROOT / "src"

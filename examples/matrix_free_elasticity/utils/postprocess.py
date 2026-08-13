@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -8,7 +9,9 @@ from fealpy.backend import backend_manager as bm
 from fealpy.mesh import Mesh, write_mesh_to_vtu
 
 from utils import contract
-from cases import ElasticityCase
+
+if TYPE_CHECKING:
+    from cases import ElasticityCase
 
 
 def solution_error(

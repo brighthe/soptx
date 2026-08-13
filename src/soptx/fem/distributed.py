@@ -1,3 +1,15 @@
+"""Overlapping-copy distribution of meshes, vector spaces and operators.
+
+A DOF on a partition boundary is replicated on every rank that owns one of its
+incident cells, and all copies have equal status.  Vectors therefore carry one
+of two representations — *consistent* (all copies hold the same value) or
+*additive* (the copies sum to the true value) — and every operator here exists
+to move between them.
+
+The partitioner only knows how to bisect along a coordinate axis, so it
+supports one or two ranks.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,15 +29,16 @@ from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import Mesh
 from fealpy.typing import TensorLike
 
-from utils import contract
-
 AXIS_NAMES = ("x", "y", "z")
+
+#: Rank counts the coordinate-bisection partitioner can produce.
+SUPPORTED_RANKS = (1, 2)
 
 
 class OverlapOperator:
     """把局部算子提升为重叠副本布局下的全局算子
 
-    ``__matmul__`` 的三步对应 math_spec.md 第 3.3 节的
+    ``__matmul__`` 的三步是
     :math:`\\mathcal S \\circ K_{\\mathrm{loc}} \\circ \\mathcal C`: 先把加和表示
     的输入投影成一致表示, 作用局部算子, 再把结果同步归约回加和表示。单 rank 下
     ``refs`` 恒为 1 且 ``sync_add`` 是恒等, 因此串行与并行走同一段代码。
@@ -78,7 +91,7 @@ def partition_cells(
         ]
     else:
         raise ValueError(
-            f"stage 1 supports {contract.SUPPORTED_RANKS} ranks, "
+            f"coordinate bisection supports {SUPPORTED_RANKS} ranks, "
             f"received {mpi_size}"
         )
 

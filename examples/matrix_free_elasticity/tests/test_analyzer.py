@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 
 import utils.analyzer as analyzer
-from utils.analyzer import DISTRIBUTED_SOLVERS, DistributedElasticityAnalyzer
+from soptx.fem.solvers.matrix_free_analyzer import (
+    DISTRIBUTED_SOLVERS,
+    DistributedElasticityAnalyzer,
+)
 
 
 class RecordingRoutine:

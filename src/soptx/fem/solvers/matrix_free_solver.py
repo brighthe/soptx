@@ -1,20 +1,31 @@
-"""Distributed Weighted Krylov Solvers & Diagnostics (solver.py).
+"""Distributed weighted Krylov solvers and diagnostics.
 
-Core PCG / GMRES iterative solvers for matrix-free operator systems on
-distributed overlapping-DOF spaces, along with true residual and boundary error diagnostics.
+Iterative solvers for matrix-free operator systems on distributed
+overlapping-DOF spaces, along with true-residual and boundary-error
+diagnostics.  Every inner product goes through ``dof_comm.dot`` so that a
+shared DOF replicated on several ranks is counted once; on a single rank the
+weights degenerate to one and the same code path runs serially.
+
+Defaults come from :mod:`soptx.numerics`, which the evidence tooling can
+import without FEALPy.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from fealpy.backend import backend_manager as bm
-from fealpy.distributed import EntityMPI
 from fealpy.solver.cg import cg
 from fealpy.typing import TensorLike
 
-import utils.contract as contract
+from soptx.numerics import (
+    DEFAULT_ATOL,
+    DEFAULT_MAX_ITERATIONS,
+    DEFAULT_RTOL,
+    NORM_FLOOR,
+    RESIDUAL_REFRESH,
+)
 
 
 @dataclass
@@ -70,11 +81,11 @@ def solver_diagnostics(
         "true_absolute_residual": residual_norm,
         "rhs_norm": load_norm,
         "true_relative_residual": (
-            residual_norm / max(load_norm, contract.NORM_FLOOR)
+            residual_norm / max(load_norm, NORM_FLOOR)
         ),
         "boundary_absolute_error": boundary_absolute,
         "boundary_relative_error": (
-            boundary_absolute / max(boundary_reference_norm, contract.NORM_FLOOR)
+            boundary_absolute / max(boundary_reference_norm, NORM_FLOOR)
         ),
         "breakdown": cg_info.get("breakdown"),
     }
@@ -86,10 +97,10 @@ def weighted_cg(
     *,
     dof_comm: Any,
     x0: Optional[TensorLike] = None,
-    maxiter: int = contract.DEFAULT_MAX_ITERATIONS,
-    rtol: float = contract.DEFAULT_RTOL,
-    atol: float = contract.DEFAULT_ATOL,
-    residual_refresh: int = contract.RESIDUAL_REFRESH,
+    maxiter: int = DEFAULT_MAX_ITERATIONS,
+    rtol: float = DEFAULT_RTOL,
+    atol: float = DEFAULT_ATOL,
+    residual_refresh: int = RESIDUAL_REFRESH,
 ) -> tuple[TensorLike, dict[str, Any]]:
     """Distributed Conjugate Gradient (CG) solver with weighted inner product."""
     if hasattr(dof_comm, "dot"):
@@ -119,9 +130,9 @@ def solve_matrix_free_system(
     system: PreparedLinearSystem,
     dof_comm: Any,
     *,
-    maxiter: int = contract.DEFAULT_MAX_ITERATIONS,
-    rtol: float = contract.DEFAULT_RTOL,
-    atol: float = contract.DEFAULT_ATOL,
+    maxiter: int = DEFAULT_MAX_ITERATIONS,
+    rtol: float = DEFAULT_RTOL,
+    atol: float = DEFAULT_ATOL,
 ) -> tuple[TensorLike, dict[str, Any]]:
     """Solve a prepared matrix-free system and return solution and diagnostics."""
     solution, info = weighted_cg(

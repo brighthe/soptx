@@ -7,15 +7,17 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from mpi4py import MPI
 
-from cases import ElasticityCase
 from utils import contract, layout, schema
 from utils.contract import RunConfig
 from utils.schema import RunResult
+
+if TYPE_CHECKING:
+    from cases import ElasticityCase
 
 
 def package_version(name: str) -> str:

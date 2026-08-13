@@ -7,8 +7,15 @@ tightened gate can never be applied on one side of the pipeline only.
 The *shape* of the summary those numbers end up in belongs to :mod:`schema`,
 which also owns ``SCHEMA_VERSION``.
 
-This module must stay free of FEALPy, SOPTX and mpi4py imports: the evidence
-tooling has to run on machines without an MPI runtime.
+Solver defaults are *not* defined here — they belong to the solver, which now
+lives in ``soptx.fem.solvers``.  They are re-exported below so that every
+consumer in this example keeps reading them from one place, and so that the
+gate helpers can express a convergence criterion in the same numbers the solver
+actually used.
+
+This module must stay free of FEALPy and mpi4py imports: the evidence tooling
+has to run on machines without an MPI runtime.  :mod:`soptx.numerics` is safe
+precisely because it carries no such imports either.
 """
 
 from __future__ import annotations
@@ -16,11 +23,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from soptx.numerics import (
+    DEFAULT_ATOL,
+    DEFAULT_MAX_ITERATIONS,
+    DEFAULT_RTOL,
+    NORM_FLOOR,
+    RESIDUAL_REFRESH,
+)
+
 
 STAGE = "soptx/matrix-free-elasticity/stage-1"
 
 SUPPORTED_DIMENSIONS = (2, 3)
-SUPPORTED_RANKS = (1, 2)
 SUPPORTED_DEGREES = (1,)
 OPERATOR_LEVELS = ("ea", "fa")
 
@@ -33,10 +47,6 @@ DISTRIBUTED_REPRESENTATION = "equal-status-overlapping-copies"
 DEFAULT_DIMENSION = 3
 DEFAULT_DEGREE = 1
 DEFAULT_RESOLUTION = 4
-DEFAULT_MAX_ITERATIONS = 1000
-DEFAULT_RTOL = 1.0e-10
-DEFAULT_ATOL = 1.0e-12
-RESIDUAL_REFRESH = 20
 REFERENCE_RANDOM_SEED = 20260727
 
 # Single-run gates, checked by both run.py and validate.py.
@@ -56,9 +66,6 @@ REFINEMENTS = {
     2: (8, 16, 32),
     3: (4, 8, 16),
 }
-
-# Lower bound used whenever a norm appears in a denominator.
-NORM_FLOOR = 1.0e-30
 
 
 def residual_limit(
