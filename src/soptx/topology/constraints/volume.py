@@ -6,12 +6,13 @@ from fealpy.mesh import SimplexMesh, TensorMesh
 from fealpy.functionspace import Function
 
 from soptx.core import BaseLogged
-from soptx.fem.solvers import LagrangeFEMAnalyzer
+from soptx.fem.solvers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 from soptx.topology.optimizers.utils import compute_volume
 
 class VolumeConstraint(BaseLogged):
     def __init__(self,
-                analyzer: LagrangeFEMAnalyzer,
+                # 体积约束只用到分析器的网格、插值格式和积分阶, 两类分析器都满足
+                analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
                 volume_fraction: float,
                 diff_mode: Literal["auto", "manual"] = "manual",
                 enable_logging: bool = False,

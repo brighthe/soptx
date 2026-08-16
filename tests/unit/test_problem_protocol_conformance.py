@@ -30,6 +30,8 @@ from soptx.fem.solvers import huzhang_mfem_analyzer, lagrange_fem_analyzer
 from soptx.problems import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
+    FixedFixedBeamCenterLoad2d,
+    FullMBBBeam2d,
     HalfMBBBeamRight2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
@@ -40,6 +42,8 @@ from soptx.problems import (
 LAGRANGE_PROBLEM_CLASSES = (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
+    FixedFixedBeamCenterLoad2d,
+    FullMBBBeam2d,
     HalfMBBBeamRight2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
@@ -49,6 +53,7 @@ LAGRANGE_PROBLEM_CLASSES = (
 HUZHANG_PROBLEM_CLASSES = (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
+    FixedFixedBeamCenterLoad2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,

@@ -12,11 +12,11 @@
 |---|---|---|
 | [`lagrange_elasticity/`](lagrange_elasticity/) | CPU 串行全装配，L2 收敛阶验证 | 脚本级，缺文档模板 |
 | [`gpu_elasticity/`](gpu_elasticity/) | GPU 正确性对比 + 性能 benchmark | 脚本级，缺文档模板 |
-| [`matrix_free_elasticity/`](matrix_free_elasticity/) | MPI 并行 matrix-free，FA/EA 双路 | 旧三文档结构，待收敛 |
+| [`matrix_free_elasticity/`](matrix_free_elasticity/) | MPI 并行 matrix-free，FA/EA 双路 | README + results_analysis（已按两文档模板）；证据流水线在 `tools/matrix_free_evidence/` |
 | [`substructure_elasticity/`](substructure_elasticity/) | 精确子结构静力缩聚基线（2D/3D Schur 补） | README + results_analysis（已按两文档模板） |
-| [`piml_elasticity/`](piml_elasticity/) | PIML 预测子结构缩聚表示 + 精确回退（早期原型） | README + results_analysis（已按两文档模板），预测器未进全局接口 |
+| [`piml_substructure_elasticity/`](piml_substructure_elasticity/) | PIML 预测子结构缩聚表示 + 精确回退（早期原型） | README + results_analysis（已按两文档模板），预测器未进全局接口 |
 | [`pinn_elasticity/`](pinn_elasticity/) | 2D/3D 线弹性 PINN 强形式求解 | 旧三文档结构，待收敛 |
-| [`huzhang_elasticity/`](huzhang_elasticity/) | 胡张混合有限元 2D 求解（应力—位移鞍点系统） | 旧三文档结构，待收敛 |
+| [`huzhang_elasticity/`](huzhang_elasticity/) | 胡张混合有限元 2D 求解（应力—位移鞍点系统）：制造解收敛阶 + 集中力工程基准的载荷等效性 | 旧三文档结构，待收敛 |
 
 ## PIML 主题小节
 
@@ -26,14 +26,14 @@ PIML（Problem-Independent Machine Learning）程序按职责链路由，从精�
 ```text
 substructure_elasticity    精确真值 / Schur 补基线（已维护）
         ↓
-piml_elasticity            预测器：K_s / N + 结构检查 + 精确回退（早期原型，文档已对齐）
+piml_substructure_elasticity            预测器：K_s / N + 结构检查 + 精确回退（早期原型，文档已对齐）
         ↓
 matrix_free_elasticity / gpu_elasticity    未来全局接入（规划，非现状）
 ```
 
 - 精确标签、接口系统与细尺度恢复的数学与验收契约见 `substructure_elasticity/`；
 - PIML 学习对象、路线 A/B 与统一比较契约见 `dut-postdoc/concepts/piml/`；
-- 现状：`substructure_elasticity/` 提供精确基线；`piml_elasticity/` 是首个预测器原型，
+- 现状：`substructure_elasticity/` 提供精确基线；`piml_substructure_elasticity/` 是首个预测器原型，
   文档已按两文档模板对齐；代码已知问题见该目录 `results_analysis.md` §3，涉及 PSD 检查、能量一致性与下游评估，修复前不作为正式入口。
 
 ## 目录约定

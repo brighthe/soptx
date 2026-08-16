@@ -13,11 +13,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional, Protocol
 
-from fealpy.distributed import EntityMPI
 from fealpy.fem import BilinearForm
 from fealpy.typing import TensorLike
 
-from soptx.fem.distributed import OverlapOperator
+from soptx.fem.distributed import EntityMPI, OverlapOperator
 from soptx.numerics import DEFAULT_ATOL, DEFAULT_MAX_ITERATIONS, DEFAULT_RTOL
 
 from .lagrange_fem_analyzer import LagrangeFEMAnalyzer

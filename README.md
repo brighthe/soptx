@@ -11,7 +11,7 @@ SOPTX（Structural Optimization Topology Simulation Software）是基于
 ```powershell
 conda activate ihpcm
 python -m pip install -e ".[mpi,test]"
-mpiexec -n 1 python .\examples\matrix_free_elasticity\run.py --dim 2 --operator-level ea --p 1 --nx 8 --ny 8
+mpiexec -n 1 python .\tools\matrix_free_evidence\run.py --dim 2 --operator-level ea --p 1 --nx 8 --ny 8
 ```
 
 完整参数、3D 与 FA 路径、MPI 分区约束见
@@ -71,9 +71,8 @@ from soptx.fem.integrators import LinearElasticIntegrator
 本地重验证入口：
 
 ```powershell
-python .\examples\matrix_free_elasticity\validate.py --dim all
-python .\examples\pinn_elasticity\validate.py --dim all
-python .\examples\matrix_free_elasticity\sync_results.py --dim all --check
+python .\tools\matrix_free_evidence\validate.py --dim all
+python .\tools\matrix_free_evidence\sync_results.py --dim all --check
 python .\experiments\huzhang_topopt_paper\dry_run.py --json
 ```
 
@@ -118,8 +117,9 @@ python tools\generate_repository_inventory.py --check
 python -m pytest tests -q
 ```
 
-CI 另有 PINN 与 Matrix-Free 两个独立 fast job，只运行快速测试，不运行完整训练、
-MPI benchmark 或正式 validation。
+CI 另有一个 Matrix-Free fast job，装上 `mpi4py` 后重跑 `tests -q -k matrix_free`，
+补上 `fast` job 里被 `importorskip` 跳过的那部分；它同样不运行 MPI benchmark
+或正式 validation。
 
 ## 仓库职责与跨仓库边界
 

@@ -122,7 +122,7 @@ PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
 }
 
 
-# 与 minimal_demo.py / matrix_free_elasticity/contract.py 的残差门禁保持一致
+# 与 minimal_demo.py / tools/matrix_free_evidence/contract.py 的残差门禁保持一致
 RESIDUAL_TOLERANCE = 1.0e-10
 # 施加节点力总和与 P 的偏差门禁
 LOAD_TOLERANCE = 1.0e-10
@@ -397,8 +397,10 @@ def main() -> int:
         else {}
     )
 
-    fealpy_root = Path(import_module("fealpy").__file__).resolve().parents[1]
-    print(f"FEALPy: {fealpy_root}")
+    fealpy_file = import_module("fealpy").__file__
+    if fealpy_file is None:
+        raise RuntimeError("无法确定当前导入的 FEALPy 模块文件路径.")
+    print(f"FEALPy: {Path(fealpy_file).resolve().parents[1]}")
     print(
         f"问题={entry.label}, 网格={mesh_type}, "
         f"空间次数={arguments.degree}, 求解器={arguments.solver}"

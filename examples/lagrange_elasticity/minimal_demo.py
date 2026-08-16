@@ -17,7 +17,7 @@ matrix-free 的算子层级和并行, 去读那个目录; 想看"有限元怎么
 
 * 真相对残差 ``||K u - F|| / ||F||`` —— 线性系统是否真的解开了;
 * 最细一档的 L2 观测收敛阶 —— 离散是否正确。P1 与 Q1 元的 L2 误差理论阶都是
-  2, 阈值取 1.5, 与 ``matrix_free_elasticity/contract.py`` 的门禁一致。
+  2, 阈值取 1.5, 与 ``tools/matrix_free_evidence/contract.py`` 的门禁一致。
 
 用 ``cg`` 时额外要求每一层都收敛: 迭代解法的真残差达标只说明这一次侥幸解对了,
 没收敛却残差合格不能算通过。
@@ -78,7 +78,7 @@ from soptx.problems import (
 )
 
 
-# 与 matrix_free_elasticity/contract.py 的对应门禁保持一致
+# 与 tools/matrix_free_evidence/contract.py 的对应门禁保持一致
 RESIDUAL_TOLERANCE = 1.0e-10
 MINIMUM_L2_ORDER = 1.5
 
@@ -482,8 +482,10 @@ def main() -> int:
     # 只有解析路径能区分。见 docs/known-issues/fealpy-tensor-product-mesh.md
     # 这里用 import_module 而不是模块级 ``import fealpy``: 后者只在这一行用到,
     # 会被 "移除未使用导入" 的工具删掉, 而删掉的后果是整个算例起不来
-    fealpy_root = Path(import_module("fealpy").__file__).resolve().parents[1]
-    print(f"FEALPy: {fealpy_root}")
+    fealpy_file = import_module("fealpy").__file__
+    if fealpy_file is None:
+        raise RuntimeError("无法确定当前导入的 FEALPy 模块文件路径.")
+    print(f"FEALPy: {Path(fealpy_file).resolve().parents[1]}")
     print(
         f"维数={dimension}D, 网格={MESH_LABELS[mesh_type]}, "
         f"问题={type(problem).__name__}, 算子层级=fa, "

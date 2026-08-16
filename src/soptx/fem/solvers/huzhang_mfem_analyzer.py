@@ -513,8 +513,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         I_bd = spdiags(fixed_idx, 0, gdof_total, gdof_total)
         I_in = spdiags(1 - fixed_idx, 0, gdof_total, gdof_total)
-        
         K = I_in @ K @ I_in + I_bd
+        if hasattr(K, 'tocsr'):
+            K = CSRTensor.from_scipy(K.tocsr())
+        elif not isinstance(K, CSRTensor):
+            from scipy.sparse import csr_matrix
+            K = CSRTensor.from_scipy(csr_matrix(K))
 
         # # ================ 验证等效分布载荷 ================
         # mesh = space_sigma.mesh
@@ -609,7 +613,14 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         solver_type = kwargs.get('solver', self._solve_method)
         
-        if solver_type in ['mumps', 'scipy']:
+        if solver_type == 'scipy':
+            from scipy.sparse.linalg import spsolve as scipy_spsolve
+            K_sp = K.to_scipy() if hasattr(K, 'to_scipy') else K
+            if hasattr(K_sp, 'tocsr'):
+                K_sp = K_sp.tocsr()
+            X = scipy_spsolve(K_sp, bm.to_numpy(F))
+
+        elif solver_type == 'mumps':
             from fealpy.solver import spsolve
             X = spsolve(K, F, solver=solver_type)
 
@@ -749,7 +760,14 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         solver_type = kwargs.get('solver', self._solve_method)
 
-        if solver_type in ['mumps', 'scipy']:
+        if solver_type == 'scipy':
+            from scipy.sparse.linalg import spsolve as scipy_spsolve
+            K_sp = K.to_scipy() if hasattr(K, 'to_scipy') else K
+            if hasattr(K_sp, 'tocsr'):
+                K_sp = K_sp.tocsr()
+            adjoint_lambda[:] = scipy_spsolve(K_sp, bm.to_numpy(rhs_full))
+
+        elif solver_type == 'mumps':
             from fealpy.solver import spsolve
             adjoint_lambda[:] = spsolve(K, rhs_full, solver=solver_type)
 
@@ -925,16 +943,18 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         材料为均匀各向同性线弹性体时, 
         根据杨氏模量场 E 和泊松比场 nu 计算柔度矩阵系数场 lambda0 和 lambda1
         """
-        d = self._GD  
+        d = self._GD
 
         lambda0 = (1.0 + nu) / E
+        if d == 2 and self._material.hypothesis == "plane_stress":
+            # 平面应力柔度: epsilon_xx = (sigma_xx - nu sigma_yy) / E.
+            lambda1 = nu / E
+        else:
+            # 平面应变及三维情形的各向同性柔度系数.
+            numerator = nu * (1.0 + nu)
+            denominator_factor = 1.0 + (d - 2.0) * nu
+            lambda1 = numerator / (E * denominator_factor)
 
-        numerator = nu * (1.0 + nu)
-        denominator_factor = 1.0 + (d - 2.0) * nu
-        denominator = E * denominator_factor
-        
-        lambda1 = numerator / denominator
-        
         return lambda0, lambda1
 
     def _apply_matrix(self, A: CSRTensor, isDDof: TensorLike) -> CSRTensor:

@@ -41,23 +41,20 @@ from soptx.problems.elasticity import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
 )
+from soptx.ml import MLP
 
 
-class PINNElasticityNet(nn.Module):
+class PINNElasticityNet(MLP):
     """坐标到位移的 MLP 神经网络 (d -> 32 -> 32 -> 16 -> d)."""
 
     def __init__(self, dim: int, hidden_size: tuple[int, ...] = (32, 32, 16)) -> None:
-        super().__init__()
-        layers: list[nn.Module] = []
-        sizes = (dim,) + hidden_size + (dim,)
-        for i in range(len(sizes) - 1):
-            layers.append(nn.Linear(sizes[i], sizes[i + 1], dtype=torch.float64))
-            if i < len(sizes) - 2:
-                layers.append(nn.Tanh())
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, points: torch.Tensor) -> torch.Tensor:
-        return self.net(points)
+        super().__init__(
+            input_dim=dim,
+            output_dim=dim,
+            hidden_dims=hidden_size,
+            activation=nn.Tanh,
+            dtype=torch.float64,
+        )
 
 
 def compute_pinn_residuals(

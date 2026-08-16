@@ -359,3 +359,118 @@ class FullMBBBeam3d:
         return [self.is_concentrate_load_boundary_dof]
 
 
+class FullMBBBeam2d:
+    """完整二维 MBB 梁 (1-to-1 完全精确对齐整体 MBB 梁结构，对应 Huang 2023 第 4.1 节).
+
+    物理问题未利用对称性简化，是对整体全尺寸 2D 模型求解：
+      - 左下角 (x=0, y=0): 铰支座 (u_x = 0, u_y = 0)
+      - 右下角 (x=Lx, y=0): 滚轴支座 (u_y = 0)
+      - 顶面中心点 (x=Lx/2, y=Ly): 竖直向下集中荷载 P
+    """
+
+    dimension = 2
+    boundary_type = "mixed"
+    load_type = "concentrated"
+    _eps = 1.0e-12
+
+    def __init__(
+        self,
+        domain: Sequence[float] = (0.0, 120.0, 0.0, 20.0),
+        *,
+        P: float = -1.0,
+        E: float = 1.0,
+        nu: float = 0.3,
+        plane_type: str = "plane_stress",
+    ) -> None:
+        self._domain = validated_domain(domain, self.dimension)
+        self._P = float(P)
+        self._E = float(E)
+        self._nu = float(nu)
+        self._plane_type = plane_type
+
+    @property
+    def domain(self) -> tuple[float, ...]:
+        return self._domain
+
+    @property
+    def P(self) -> float:
+        return self._P
+
+    @property
+    def E(self) -> float:
+        return self._E
+
+    @property
+    def nu(self) -> float:
+        return self._nu
+
+    @property
+    def plane_type(self) -> str:
+        return self._plane_type
+
+    @cartesian
+    def body_force(self, points: TensorLike) -> TensorLike:
+        return bm.zeros(points.shape, **bm.context(points))
+
+    @cartesian
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        return bm.zeros(points.shape, **bm.context(points))
+
+    @cartesian
+    def is_dirichlet_boundary_dof_x(
+        self,
+        points: TensorLike,
+    ) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        return (
+            (bm.abs(x - self.domain[0]) < self._eps)
+            & (bm.abs(y - self.domain[2]) < self._eps)
+        )
+
+    @cartesian
+    def is_dirichlet_boundary_dof_y(
+        self,
+        points: TensorLike,
+    ) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        return (
+            ((bm.abs(x - self.domain[0]) < self._eps) | (bm.abs(x - self.domain[1]) < self._eps))
+            & (bm.abs(y - self.domain[2]) < self._eps)
+        )
+
+    def is_dirichlet_boundary(self) -> tuple[Callable, Callable]:
+        return (
+            self.is_dirichlet_boundary_dof_x,
+            self.is_dirichlet_boundary_dof_y,
+        )
+
+    @cartesian
+    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
+        value = bm.zeros(points.shape, **bm.context(points))
+        return bm.set_at(value, (..., 1), self.P)
+
+    def concentrate_load_bc(self) -> list[Callable]:
+        return [self._concentrate_load_bc]
+
+    @cartesian
+    def is_concentrate_load_boundary_dof(
+        self,
+        points: TensorLike,
+    ) -> TensorLike:
+        x, y = points[..., 0], points[..., 1]
+        xc = (self.domain[0] + self.domain[1]) / 2.0
+        return (
+            (bm.abs(x - xc) < self._eps)
+            & (bm.abs(y - self.domain[3]) < self._eps)
+        )
+
+    def is_concentrate_load_boundary(self) -> list[Callable]:
+        return [self.is_concentrate_load_boundary_dof]
+
+    def get_load_dof(self, total_fine_x: int, total_fine_y: int) -> int:
+        """根据细网格分割维度 (nx, ny) 导出顶面中心集中荷载 P 作用点自由度 (y 向 DOF)."""
+        top_center_node = (total_fine_x // 2) * (total_fine_y + 1) + total_fine_y
+        return 2 * top_center_node + 1
+
+
+

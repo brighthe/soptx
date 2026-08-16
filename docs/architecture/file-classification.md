@@ -11,6 +11,7 @@
 | `examples/lagrange_elasticity` | incubating | 串行 FA 位移元最小算例，自带收敛阶判据 |
 | `experiments/` | experiment | 论文与长期运行，不进入 wheel |
 | `reference_code/` | archive candidate / unredistributable | 只保留哈希，授权 tag 后退出 main |
+| `tools/matrix_free_evidence` | maintained | Matrix-Free 证据流水线；同时是 fealpy fork 的 merge 前门禁，因此不住在示例目录里 |
 | `docs/`、`tools/`、`.github/` | maintained | 治理、检查与文档 |
 
 `docs/architecture/current-python-files.sha256` 给出当前 Python 文件级清单。

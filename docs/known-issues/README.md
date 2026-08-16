@@ -30,9 +30,13 @@ merge 上游时该检查什么、什么条件下该把补丁丢掉。缺陷的�
 | `4c5887d` | `EntityMPI.dot()` 重叠修正内积工厂 | `distributed/entity_mpi.py` | [cg-pluggable-dot-product](fealpy-cg-pluggable-dot-product.md) | **无** |
 | `875496d` | CG 可插拔内积与真残差刷新 | `solver/cg.py` | [cg-pluggable-dot-product](fealpy-cg-pluggable-dot-product.md) | **无** |
 | `824dc4f` | `quadrature_formula` 接受 `etype` 旧参数名 | `mesh/view/fealpy_api.py` | [mesh-quadrature-etype-alias](fealpy-mesh-quadrature-etype-alias.md) | **无** |
+| *（工作区，未提交）* | backend 层类型标注补齐（6 处缺口） | `backend/base.py`<br>`backend/manager.pyi` | [backend-static-typing](fealpy-backend-static-typing.md) | **无**（判据为诊断数） |
 
 前两条是**修复上游缺陷**，`824dc4f` 是**向后兼容 shim**，其余四条是**能力增强**
 （上游本来就没有）。三类的丢弃判据不同，见下文。
+
+最后一行是**纯静态类型标注**，不产生任何运行期行为，单独成一类：它既不会被 pytest
+捕捉，也不会与上游的功能改动冲突。目前还在 fork 工作区里没有提交，提交后回填 SHA。
 
 ### 测试覆盖现状
 
@@ -64,7 +68,7 @@ fork 内只有两个 pytest 文件保护这批补丁：
 4. merge 后跑 `tests/functionspace/unit/` 下两个测试文件。
 5. 跑 [`reproduce_tensor_product_issue.py`](reproduce_tensor_product_issue.py)，
    它覆盖缺陷 1–5 全部五条判据，是缺陷 2–4 唯一的检查手段。
-6. 跑 SOPTX 侧门禁（`examples/matrix_free_elasticity/utils/validate.py --dim all`
+6. 跑 SOPTX 侧门禁（`tools/matrix_free_evidence/validate.py --dim all`
    等），确认下游没被上游的行为变化打穿。
 7. 更新本页的分叉量、上游基线 SHA 和补丁清单。
 
@@ -100,6 +104,7 @@ SOPTX 的 `OverlapOperator` 都调用 `refs(local_size)`——签名放宽后本
 | `88cf4fa` | 上游 `COOTensor`/`CSRTensor` 自带 `device` property |
 | `875496d` | 上游 `cg()` 签名自带 `dot_product`（或等效的可插拔内积入口） |
 | `4c5887d` | 上游 `EntityMPI` 自带 `dot()` |
+| backend 类型标注 | 上游 `TensorLike` 自带位运算与标量转换 dunder，且 `manager.pyi` 已声明 `random`/`linalg` 与放宽的索引/操作数类型（判据脚本见专题文档） |
 
 在上游代码上跑复现脚本不需要单独维护一份上游检出，从 fork 开临时 worktree 即可：
 

@@ -368,7 +368,9 @@ class HuZhangFEDof3d():
 
         # 单元自由度
         c2d[:, idx:] = cell2idof
-        return c2d
+
+        # 同 2d 版本: 之前这里忽略了 index, 与按子集计算的 basis 不匹配
+        return c2d[index]
 
     def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
         """Get the bool array of the boundary dofs."""

@@ -21,6 +21,7 @@
 | `load_type` | 语义 | 相关接口 |
 |---|---|---|
 | `"concentrated"` | 节点集中力（点载荷） | `is_concentrate_load_boundary()` → 载荷标记列表；`concentrate_load_bc()` → 对应的载荷值函数列表 |
+| `"distributed"` | 边界局部均布牵引 | `is_neumann_boundary()` → 边界标记函数；`neumann_bc(points)` → 牵引值 |
 
 分析器在装配右端向量时检查 `load_type` 并调用对应的载荷接口，而非读取 `traction_bc`。
 
@@ -96,6 +97,43 @@ analyzer.solve()
 
 完整可运行脚本见 `examples/lagrange_elasticity/concentrated_load_demo.py`。
 
+---
+
+## FixedFixedBeamCenterLoad2d
+
+二维两端固支梁全域基准。该问题与博士论文第五章的历史 Hu--Zhang 算例使用相同的物理定义，并且不采用对称半域简化。
+
+### 问题描述
+
+区域为 $[0,160]\times[0,20]$ mm，采用 plane stress（默认 $E=30$ MPa，$\nu=0.4$）。
+
+- **左、右边界**（$x=0$ 与 $x=160$）：完全固支，$u_x=u_y=0$
+- **下边界中点**（$x=80$）：长度 $l=1$ mm 的局部均布竖向牵引，合力 $P=-3$ N
+- **其余上、下边界**：零牵引
+- **优化基准参数**：结构化交叉三角网格 $160\times20$，体积分数 $V=0.4$，密度过滤半径 $r_{\min}=2.4$ mm
+
+### 统一离散接口
+
+`FixedFixedBeamCenterLoad2d` 只定义一个物理问题，不按有限元类型拆分：
+
+- 对 Lagrange 位移元，`neumann_bc` 与 `is_neumann_boundary` 将局部牵引弱施加到右端项；
+- 对 Hu--Zhang 混合元，`traction_bc` 与 `is_traction_boundary` 将同一牵引强施加到应力自由度，`displacement_bc` 与 `is_displacement_boundary` 描述左右固支端；
+- 两条路径共享 `P`、`load_width`、材料参数与完整设计域，避免引入不可审计的半域载荷折算。
+
+```python
+from soptx.problems import FixedFixedBeamCenterLoad2d
+
+problem = FixedFixedBeamCenterLoad2d(
+    domain=(0.0, 160.0, 0.0, 20.0),
+    P=-3.0,
+    load_width=1.0,
+    E=30.0,
+    nu=0.4,
+    plane_type="plane_stress",
+)
+```
+
+投稿论文的参数契约、历史脚本快照与运行证据统一位于 `experiments/huzhang_topopt_paper/`；在原生优化 driver 完成迁移并独立复现前，任何历史结果均不得视为新的论文数值证据。
 ---
 
 ## FullMBBBeam3d

@@ -11,8 +11,7 @@
 ```text
 soptx/examples/pinn_elasticity/
 ├── minimal_demo.py         <-- [核心代码] 2D/3D PINN 线弹性单文件自包含求解器
-├── math_spec.md            <-- [数学规范] 控制方程、Autograd 链与 Shape 契约
-├── results_analysis.md     <-- [实验分析] 2D/3D 消融实验诊断与实测表格报告
+├── results_analysis.md     <-- [实验分析] 2D/3D 消融实验诊断与代码契约
 ├── README.md               <-- [使用说明] 算法概述与运行 CLI 指南
 └── outputs/                <-- [测试成果与报告]
     ├── figures/            <-- 自动生成的 2D 三场对比云图 (.png)
@@ -44,7 +43,7 @@ $$
 各制造解的完整数学定义、体力表达式与边界条件详见：
 👉 [制造解文档](../../docs/problems/manufactured-elasticity.md)
 
-完整物理算子求导链与 Shape 契约规范请参阅：👉 [math_spec.md](math_spec.md)
+完整物理算子求导链、Hessian 残差与理论规范已统一沉淀于：👉 [dut-postdoc/concepts/pinn-paradigm.md Section 5.1](file:///mnt/c/workspace/dut-postdoc/concepts/pinn-paradigm.md)
 
 ---
 

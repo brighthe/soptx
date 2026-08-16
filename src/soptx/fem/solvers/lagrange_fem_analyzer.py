@@ -69,6 +69,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._topopt_algorithm = topopt_algorithm
         self._interpolation_scheme = interpolation_scheme
+        if self._topopt_algorithm in ['density_based', 'level_set'] and self._interpolation_scheme is None:
+            from soptx.topology.interpolation import MaterialInterpolationScheme
+            self._interpolation_scheme = MaterialInterpolationScheme(interpolation_method='simp', enable_logging=False)
 
         self._solve_method = solve_method
         self._dof_comm = dof_comm
@@ -341,17 +344,48 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return K
 
-    def assemble_body_force_vector(self) -> Union[TensorLike, COOTensor]:
+    def assemble_body_force_vector(self) -> TensorLike:
         """组装体力对应的体积分"""
         body_force = self._pde.body_force
 
-        # NOTE F.dtype == COOTensor or TensorLike
         integrator = SourceIntegrator(source=body_force, q=self._integration_order)
         lform = LinearForm(self._tensor_space)
         lform.add_integrator(integrator)
         F = lform.assembly(format='dense')
         
         return F
+
+    def assemble_external_load(self, adjoint: bool = False) -> TensorLike:
+        """组装施加 Dirichlet 条件之前的全局外载向量.
+
+        参数:
+            adjoint: 为 ``True`` 时返回结构载荷与伴随载荷堆叠成的两列右端项.
+
+        返回:
+            F: 体力与 Neumann 等效节点力之和, 形状 ``(n_dof,)``; ``adjoint`` 为
+                ``True`` 时形状 ``(n_dof, 2)``.
+
+        异常:
+            ValueError: 当 ``pde.boundary_type`` 不是 ``'mixed'`` 或 ``'dirichlet'``
+                时由 ``_log_error`` 抛出.
+
+        说明:
+            该向量与 ``apply_bc`` 存入 ``force_vector`` 的是同一个量, 但不需要先
+            装配刚度矩阵. 子结构缩聚等只消费外载, 不求解全尺度系统的调用方应使用
+            本方法: ``force_vector`` 在 ``apply_bc`` 之前为 ``None``.
+
+            本方法不写入 ``self._F``, 因此不会干扰分析器自身的求解状态.
+        """
+        F = self.assemble_body_force_vector()
+
+        boundary_type = self._pde.boundary_type
+        if boundary_type == 'mixed':
+            F = F + self._assemble_traction_load(adjoint)
+        elif boundary_type != 'dirichlet':
+            self._log_error(f"Unsupported boundary type: {boundary_type}")
+
+        # 载荷必须在施加边界条件之前完成跨 rank 归约; 串行下为恒等操作.
+        return self.reduce_load(F)
 
     def _assemble_traction_load(self, adjoint: bool = False) -> TensorLike:
         """组装 Neumann 边界的等效载荷 (弱形式施加)
@@ -768,7 +802,23 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         solver_type = kwargs.get('solver', self._solve_method)
 
-        if solver_type in ['mumps', 'scipy']:
+        if solver_type == 'scipy':
+            if self._operator_level == 'ea':
+                self._log_error(
+                    f"operator_level='ea' 下不存在可分解的全局矩阵, "
+                    f"无法使用直接解法 '{solver_type}', 请改用 solver='cg'"
+                )
+
+            from scipy.sparse.linalg import spsolve as scipy_spsolve
+
+            K_sp = K.to_scipy() if hasattr(K, 'to_scipy') else K
+            if hasattr(K_sp, 'tocsr'):
+                K_sp = K_sp.tocsr()
+            out[:] = scipy_spsolve(K_sp, bm.to_numpy(F))
+
+            return out, {'name': solver_type}
+
+        elif solver_type == 'mumps':
             if self._operator_level == 'ea':
                 self._log_error(
                     f"operator_level='ea' 下不存在可分解的全局矩阵, "
@@ -779,7 +829,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             out[:] = spsolve(K, F, solver=solver_type)
 
-            # 直接解法没有迭代信息, 不伪造 niter/residual 字段
             return out, {'name': solver_type}
 
         elif solver_type in ['cg']:

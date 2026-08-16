@@ -48,7 +48,7 @@ class MaterialInterpolationScheme(BaseLogged):
     #########################################################################################
 
     @property
-    def density_location(self) -> Optional[str]:
+    def density_location(self) -> str:
         """获取当前的密度位置"""
         return self._density_location
 

@@ -1,6 +1,6 @@
 import warnings
 from time import time
-from typing import Optional, Union, Tuple
+from typing import Any, Dict, Optional, Union, Tuple
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -87,7 +87,9 @@ class OCOptimizer(BaseLogged):
                 objective: Union[ComplianceObjective, CompliantMechanismObjective],
                 constraint: VolumeConstraint,
                 filter: Filter,
-                options: OCOptions = None,
+                # 只接受用户级参数字典 (max_iterations, change_tolerance),
+                # 高级参数须通过 self.options.set_advanced_options() 设置
+                options: Optional[Dict[str, Any]] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
             ) -> None:

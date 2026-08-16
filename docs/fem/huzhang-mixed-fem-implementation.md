@@ -104,9 +104,9 @@ HuZhangMFEMAnalyzer
 
 ### 矩阵装配细节
 
-**A 块**（`HuZhangStressIntegrator`）：单元循环，消费柔度张量的
-`lambda0`、`lambda1` 两个不变量（与 Lame 常数一一对应）。支持密度插值
-时更新系数后重新装配。装配结果缓存于 `_cached_stress_matrix`。
+**A 块**（HuZhangStressIntegrator）：单元循环，消费柔度张量的 lambda0、lambda1 两个不变量。支持密度插值时更新系数后重新装配。装配结果缓存于 _cached_stress_matrix。
+
+二维必须与 IsotropicLinearElasticMaterial.hypothesis 保持一致。对于 plane_stress，lambda0 = (1 + nu) / E、lambda1 = nu / E；对于 plane_strain，lambda1 = nu * (1 + nu) / E。不得把平面应力算例沿用平面应变柔度，否则 Hu--Zhang 与位移法会产生系统性的柔顺度偏差。
 
 **B 块**（`HuZhangMixIntegrator`）：位移空间与应力空间的混合双线性型，
 积分 `div σ_h · v_h`。在构造器中一次性装配，缓存于 `_cached_mix_matrix`。
@@ -136,10 +136,18 @@ HuZhangMFEMAnalyzer
 整体随 $h_F^2\to0$ 弱一致衰减，细层收敛恢复。早期 `γ/h_F` 型缩放
 （γ 取弹性模量的 1%）乘面测度后净效果 O(γ) 常数、细层阶塌陷，已从默认路径
 弃用，`penalty_scaling='gamma_hinv'` 保留作回归对比。完整数学过程与缩放律论证
-见知识库概念页 `C:\workspace\dut-postdoc\concepts\huzhang-mixed-fem.md`。
+见知识库概念页 `C:\workspace\dut-postdoc\concepts\huzhang\huzhang-mixed-fem.md`。
 
 已验证收敛的 degree：2（跳量稳定化，σ 2 阶、$H(\mathrm{div})$ 1 阶降阶）、
 3（无惩罚，σ 4 阶）、4（无惩罚，σ 5 阶）。
+
+**k = 1 的适用边界**：k = 1（$P_1$ 应力 / $P_0$ 位移）加跳量稳定化后静力可收敛，
+因此静力算例开放该阶次（`examples/huzhang_elasticity/concentrated_load_demo.py`
+的 `SUPPORTED_ORDERS = 1, 2, 3, 4`）。但 $P_0$ 位移不完备包含刚体位移空间（RM），
+在变密度演化中会使低密度区应变能评估失真、诱发非物理拓扑（博士论文 §5.6.2），
+故拓扑优化侧 `experiments/huzhang_topopt_paper/cases.toml` 的 `comparison_orders`
+下限取 2。完整论证（稳定性 / 静力收敛 / 拓扑可用三层的区分）见知识库概念页
+`C:\workspace\dut-postdoc\concepts\huzhang\huzhang-mixed-fem.md` §3.2 与 §5 末。
 
 ### 角点松弛
 
@@ -183,7 +191,56 @@ DOF 变换来解除这一约束。
 - **牵引边界 $\Gamma_N$**：强施加（本质边界），直接修改刚度矩阵对应行。
   使用 `face_to_cell` / `face_unit_normal` 适配 FEALPy 4.0 API。
 
-纯 Dirichlet 问题是混合边界的退化形式（`AllDisplacementBoundaryMixin`）。
+纯 Dirichlet 问题是混合边界的退化形式（AllDisplacementBoundaryMixin）。
+
+### 工程集中载荷的程序架构
+
+博士论文第五章将理想集中力转换为局部边界上的等效均布牵引 t_bar = P / l。在 SOPTX 中，连续物理定义与有限元离散定义必须分层，不能将含边内跳跃的连续牵引函数直接同时交给两种方法。
+
+    src/soptx/problems/elasticity/fixed_fixed.py
+      FixedFixedBeamCenterLoad2d
+      ├── 连续物理模型：domain, P, load_width=l, E, nu, plane_type
+      ├── 原始局部均布牵引 t_bar=P/l（默认 traction_bc）
+      ├── traction_patch / traction_level / traction_intensity：贴片几何的唯一出处
+      └── traction=...：可选注入，用等价的连续牵引替换 traction_bc/neumann_bc
+
+    src/soptx/fem/boundary_loads.py
+      project_patch_traction_to_p1_trace(line, n_cells, level, patch, intensity)
+      ├── 将 t_bar L2 投影至该边的连续 P1 迹空间，得 t_h（右端项按解析重叠积分）
+      └── 返回 P1TraceLoad：可直接当作牵引函数调用，resultant() 用于核查合力
+
+    experiments/huzhang_topopt_paper/cases.toml
+      └── load_discretization = p1_trace_l2_projection
+
+    experiments/huzhang_topopt_paper/fixed_fixed_beam.py
+      └── build_problem(parameters, n_cells=nx)：投影 + 注入，得到唯一的分析问题
+
+    examples/huzhang_elasticity/concentrated_load_demo.py
+      └── build_problem(nx)：同一投影 + 注入，实体材料下核查载荷等效性
+
+    LagrangeFEMAnalyzer
+      └── Neumann 边界弱积分 t_h
+
+    HuZhangMFEMAnalyzer
+      └── 应力法向迹本质边界强施加 sigma_h*n=t_h
+
+FixedFixedBeamCenterLoad2d 是核心物理模型，不保存网格、边界自由度或投影系数：它只
+把贴片几何以三个属性的形式暴露出来，并接受一个替换牵引。投影本身是与具体物理问题
+无关的通用能力，因此落在 `soptx.fem` 而不是实验目录——它只需要计算域、边界剖分数
+和贴片区间，不需要网格对象。实验层剩下的只是「用哪个 n_cells 去投影」这一个决定。
+
+选择连续 P1 迹空间是有意的：Hu--Zhang 空间在每条边上的法向迹是跨边连续的 k 次多项式，连续 P1 迹空间对任意 k >= 1 都是它的子空间。因此 Hu--Zhang 的边界自由度插值可精确表示 t_h，LFEM 也能对同一 t_h 做 Neumann 积分。直接对原始阶跃牵引做 Hu--Zhang 节点插值会在共享端点扩散载荷，使离散合力偏离 P，不能作为方法对照的载荷。
+
+共同载荷必须满足以下验收条件：
+
+- integral_GammaN t_h ds = P（`tests/unit/test_p1_trace_load_projection.py`）。
+- integral_GammaN x t_h ds = x_mid P，即保持中点载荷的一阶矩（同上）。
+- 结构合力守恒：Hu--Zhang 取 integral_GammaN sigma_h*n ds，LFEM 取支座反力 sum (K u)|_GammaD，两者均等于 P（`examples/huzhang_elasticity/concentrated_load_demo.py`，实体材料 rho=1）。这一条抓的是「载荷落在被强加自由度上被静默吞掉」——此时残差依然为 0，只有它能报警；它同时端到端覆盖了「LFEM 的边界积分与 Hu--Zhang 的迹插值拿到同一个载荷泛函」，因此不再单列。
+- 对固定密度状态，LFEM 验证 fTu = uKu；Hu--Zhang 报告 sigmaAsigma、sigmaBu 和牵引对偶功 sigmaAsigma + sigmaBu（`experiments/huzhang_topopt_paper/run.py --mode state-compare`，rho=0.4）。
+
+P1 投影在贴片外带有几何衰减的振荡尾（P1 质量矩阵 Green 函数，每单元约 0.27）。网格过粗时该尾部触及固支端，那一部分载荷会被 Dirichlet 自由度真实吞掉，量级约 P * 0.27^(nx/2)；demo 将其单列为 `吞掉` 一列，n_x >= 40 时已远在 1e-6 相对容差之下。
+
+Hu--Zhang 的位移变量属于分片不连续 L2 空间，不能直接将其解释为单值边界位移并套用位移法的边界外力功。对于 k >= 3，无跳量稳定化时 sigmaBu 应接近零。对于 k=2，sigmaBu 可反映跳量稳定化对离散能量的贡献，不应与高阶情形混作严格等价基准。
 
 ### 求解器
 
@@ -222,24 +279,27 @@ API 差异的完整清单见 dut-postdoc 的 `fealpy4-api-notes.md`。
 
 ## 示例与测试
 
-**可运行示例**：[`examples/huzhang_elasticity/minimal_demo.py`](../../examples/huzhang_elasticity/minimal_demo.py)
+**可运行示例**：
+* 制造解收敛验证：[`examples/huzhang_elasticity/manufactured_convergence_demo.py`](../../examples/huzhang_elasticity/manufactured_convergence_demo.py)
+* 集中力工程基准：[`examples/huzhang_elasticity/concentrated_load_demo.py`](../../examples/huzhang_elasticity/concentrated_load_demo.py)
 
 ```bash
-python examples/huzhang_elasticity/minimal_demo.py                # p=3, 带松弛
-python examples/huzhang_elasticity/minimal_demo.py --degree 2      # 低阶稳定化
-python examples/huzhang_elasticity/minimal_demo.py --no-relaxation # 关闭松弛
+# 制造解收敛阶与残差验证
+python examples/huzhang_elasticity/manufactured_convergence_demo.py                # degree=3, 带松弛
+python examples/huzhang_elasticity/manufactured_convergence_demo.py --degree 2      # 低阶跳量稳定化
+python examples/huzhang_elasticity/manufactured_convergence_demo.py --no-relaxation # 关闭松弛
+
+# 集中力工程基准载荷路径与合力守恒验证
+python examples/huzhang_elasticity/concentrated_load_demo.py --model fixed-fixed --nx 160 --ny 20 --degrees 2 3
 ```
 
-问题取 `MixedBoundarySinusoidalElasticity2D`，网格为 checkerboard 三角形，
-判据为相对平衡残差（1e-8）和刚度矩阵对称性缺陷（1e-12）。收敛阶只输出
-不判定（`theory-audit-required`）。
-
-**pytest**（5 个测试文件）：
+**pytest**（6 个测试文件）：
 
 | 测试 | 范围 |
 |---|---|
 | `tests/integration/test_huzhang_accepts_maintained_problems.py` | 端到端：分析器驱动维护中的 Problem，松弛开/关 |
 | `tests/unit/test_huzhang_corner_relaxation.py` | 角点松弛的两单元拓扑、变换矩阵行为 |
+| `tests/unit/test_huzhang_compliance_coefficients.py` | 平面应力/平面应变柔度系数分支 |
 | `tests/unit/test_problem_protocol_conformance.py` | `MixedBoundaryElasticityProblem` 协议符合性 |
 | `tests/unit/test_compatibility_api.py` | 旧 `soptx.functionspace` 与新 `soptx.fem.spaces` 兼容 |
 | `tests/experiments/test_huzhang_paper_runner.py` | `run.py` 配置覆盖论文 case matrix |
@@ -249,10 +309,10 @@ python examples/huzhang_elasticity/minimal_demo.py --no-relaxation # 关闭松�
 柔度固定、近不可压缩、悬臂梁应力约束、冻结设计），degree 1–4，统一
 三角形网格。
 
-## 开放问题
+## 已知限制与开放问题
 
-1. 3D 无松弛求解链 `div_basis` 已确认正确（有限差分 3.4e-10），但
-   端到端验证未完成。
-2. 角点松弛的拓扑限制（checkerboard）是当前实现的软件约束，一般
-   胡张元理论不要求此拓扑——扩展到任意三角形网格需要重新推导
-   `_get_corner_data` 的 incident 单元判定逻辑。
+1. **全 Dirichlet 制造解路径**：`sinusoidal` / `exp-sine` 全位移边界问题理论上可走 `AllDisplacementBoundaryMixin` 的混合形式边界接口，但该路径未经充分独立测试，当前算例聚焦于混合边界条件。
+2. **低阶跳量稳定化在混合边界下的行为**：$k\le 2$ 时跳量惩罚项 $c(\boldsymbol{u}_h,\boldsymbol{v}_h)$ 加在内部面与位移边界（$\Gamma_D$）上，不施加于 $\Gamma_N$。这使得 $k=2$ 在混合边界下的 $H(\mathrm{div})$ 误差出现向 1 阶的降阶，属于物理与离散截断的预期现象；惩罚系数采用物理量纲缩放 $\alpha=\mu/L_0^2\cdot h_F$（$\alpha=\mu$ 于单位域）。
+3. **网格拓扑约束**：角点松弛要求每个几何角点恰好连接两个三角形且共享内部边，因此当前实现固定使用 `triangle-checkerboard` 剖分；扩展到任意三角形网格需要重新推导 `_get_corner_data` 的 incident 单元判定逻辑。
+4. **3D 扩展**：3D 无松弛求解链 `div_basis` 已确认正确（有限差分 $3.4\times 10^{-10}$），但 3D 混合边界制造解与端到端松弛集成仍留作后续扩展。
+5. **空间阶次与拓扑优化适用性**：$k=1$ 时的位移空间为 $P_0$（分片常数），无法表达二维刚体旋转模态（线性场 $\boldsymbol{u}=[-\omega y, \omega x]^{\mathsf T}$）。在实体材料单次线弹性求解下由跳量惩罚约束尚能收敛，但在变密度拓扑优化迭代中会导致悬臂细杆等结构出现虚假刚度硬化；因此拓扑优化论文实验矩阵将阶次下限定为 $k\ge 2$（位移空间 $P_1$，具备刚体位移与旋转完备性）。

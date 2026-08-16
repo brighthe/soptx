@@ -1,6 +1,6 @@
 """基于 VTK 的离屏渲染辅助 — Warp By Vector 可视化位移场.
 
-examples 里 lagrange/huzhang 的 ``render_warped.py`` 原为两份重复的 VTK 脚本,
+上层示例与实验入口曾各自维护重复的 VTK 渲染脚本,
 公共渲染管线集中到这里, 各 example 只保留配置常量与入口:
 
 * ``load_vtu``: 读取 VTU (或 VTK) 文件为 unstructured grid;

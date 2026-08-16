@@ -333,8 +333,12 @@ class HuZhangFEDof2d():
                     loc = cp2c[c*2+1]
                     # 将对应位置的3个标准DOF替换为松弛后的DOF组合
                     c2d[cid, loc*3:loc*3+3] = cp2dpf[local_dof[c]]
-                    
-        return c2d
+
+        # 角点松弛按全局单元号覆盖, 因此子集切片必须放在最后一步.
+        # 之前这里直接返回 c2d, 忽略了 index —— 而 basis(bc, index) 是按子集
+        # 计算的, 于是 value(uh, bc, index) 把子集的基函数与全网格的自由度
+        # 映射配在一起, 只有在 index 为全集时才恰好正确
+        return c2d[index]
 
 class HuZhangFESpace2d(FunctionSpace):
     def __init__(self, mesh, p: int=1, ctype='C', use_relaxation: bool=False,

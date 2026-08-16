@@ -12,7 +12,7 @@ only -- never signatures.
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, Sequence, runtime_checkable
+from typing import Any, Callable, Optional, Protocol, Sequence, runtime_checkable
 
 from fealpy.typing import TensorLike
 
@@ -53,12 +53,15 @@ class DirichletElasticityProblem(ElasticityProblem, Protocol):
     test carries these names in its allow list.
     """
 
-    boundary_type: str
-    load_type: Optional[str]
+    @property
+    def boundary_type(self) -> str: ...
+
+    @property
+    def load_type(self) -> Optional[str]: ...
 
     def dirichlet_bc(self, points: TensorLike) -> TensorLike: ...
 
-    def is_dirichlet_boundary(self): ...
+    def is_dirichlet_boundary(self) -> tuple[Callable[..., TensorLike], ...]: ...
 
 
 @runtime_checkable
@@ -83,11 +86,25 @@ class MixedBoundaryElasticityProblem(ElasticityProblem, Protocol):
 
 @runtime_checkable
 class MaterialInterpolation(Protocol):
-    """Interface consumed by FEM analyzers for density interpolation."""
+    """Interface consumed by FEM analyzers for density interpolation.
 
-    density_location: str
-    n_sub: int
+    Every member is declared read-only on purpose.  A mutable attribute would
+    force the implementation to expose it with an invariant type, which rules
+    out the read-only properties the maintained schemes use.  The two
+    interpolation members are read-only members of type ``Any`` rather than
+    methods because the schemes implement them with fealpy's ``variantmethod``
+    descriptor, whose unbound type is neither a function nor a callable object;
+    only the instance-bound handler is callable.
+    """
 
-    def interpolate_material(self, *args, **kwargs): ...
+    @property
+    def density_location(self) -> str: ...
 
-    def interpolate_material_derivative(self, *args, **kwargs): ...
+    @property
+    def n_sub(self) -> int: ...
+
+    @property
+    def interpolate_material(self) -> Any: ...
+
+    @property
+    def interpolate_material_derivative(self) -> Any: ...

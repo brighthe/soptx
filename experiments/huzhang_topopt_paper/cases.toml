@@ -1,0 +1,43 @@
+schema_version = 1
+stage = "soptx/huzhang-topopt-paper/v1"
+
+[[cases]]
+id = "compliance-fixed-fixed"
+title = "中点受载两端固支梁"
+role = "optimization-baseline"
+status = "ready"
+methods = ["lfem", "huzhang"]
+metrics = [
+  "compliance",
+  "volume_fraction",
+  "relative_equilibrium_residual",
+  "optimization_iterations",
+]
+
+[cases.model]
+name = "FixedFixedBeamCenterLoad2d"
+
+[cases.model.parameters]
+load = -3.0
+load_width = 1.0
+load_discretization = "p1_trace_l2_projection"
+youngs_modulus = 30.0
+poisson_ratio = 0.4
+plane_type = "plane_stress"
+
+[cases.discretization]
+nx = 160
+ny = 20
+comparison_orders = [2, 3, 4]
+use_relaxation = true
+solve_method = "mumps"
+
+[cases.optimization]
+volume_fraction = 0.4
+filter_radius = 2.4
+interpolation_method = "msimp"
+penalty_factor = 3.0
+void_youngs_modulus = 1.0e-9
+filter_type = "density"
+max_iterations = 500
+change_tolerance = 1.0e-2

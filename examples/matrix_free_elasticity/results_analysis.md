@@ -1,184 +1,174 @@
-# 线弹性 Matrix-Free 2D/3D 实验证据报告
+# CPU EA Matrix-Free 线弹性验证与性能结论
 
-本报告是 `soptx/examples/matrix_free_elasticity` 数值结果的唯一事实源。
-运行入口与文件职责见 [`README.md`](README.md)；每道门禁的数学式由知识库维护
-（入口见下方第 1 节），阈值本身只在 [`utils/contract.py`](utils/contract.py)
-定义一次。
+本报告是 `examples/matrix_free_elasticity` 的结果事实源。运行入口、命令与文件职责见
+[`README.md`](README.md)。本页记录的是当前 dirty worktree 的人工复现；它可以支撑开发和
+研究基础表述，但不是 clean revision 上由 `tools/matrix_free_evidence` 固化的正式证据。
 
-下方带 `<!-- BEGIN/END GENERATED -->` 标记的区块由
-`python utils/sync_results.py --dim {2,3}` 从 `outputs/` 下的原始 JSON 生成，
-**不要手工编辑**；`--check` 用于只读比对是否漂移。
+## 1. 可直接引用的结论
 
-## 1. 数学—代码映射契约
+### 1.1 已验证的能力
 
-算子代数、边界条件施加形式与门禁的数学式全部由知识库维护，本仓库不复制推导：
-
-| 数学事实 | 事实源 |
-|---|---|
-| 五级装配层次、EA/FA 判定口径、跨层级不变量 | `dut-postdoc:concepts/matrix-free/assembly-levels.md#五级分类` |
-| Dirichlet 条件在各层级下的施加、并行下 FA 对称消元不成立 | `dut-postdoc:concepts/matrix-free/assembly-levels.md#本质边界条件在各层级下的施加` |
-| 五道跨层级门禁的标准数学形式 | `dut-postdoc:concepts/matrix-free/assembly-levels.md#跨层级正确性判据` |
-| EA 的算术强度边界及其表述口径 | `dut-postdoc:concepts/matrix-free/assembly-levels.md#算术强度：EA 并没有解决 FA 的瓶颈` |
-| MPI 共享自由度、同步归约 $\mathcal S$、幂等投影 $\mathcal C$、加权内积 | `dut-postdoc:concepts/gpu-hpc/distributed-operator-and-shared-dofs.md` |
-| 线弹性变分形式与有限元离散 | `dut-postdoc:concepts/linear-elasticity.md#线弹性方程变分形式与有限元离散` |
-| 三个制造解的方程、参数与 shape 契约 | [`docs/problems/manufactured-elasticity.md`](../../docs/problems/manufactured-elasticity.md) |
-
-### 1.1 符号—代码映射
-
-设 $\Omega\subset\mathbb R^d$（$d\in\{2,3\}$）的一致剖分为 $\{\Omega_e\}_{e=1}^{N_e}$，
-一阶连续 Lagrange 向量元空间的全局自由度数为 $n=\texttt{TGDOF}$，单元自由度数
-$m=(d+1)d$。
-
-| 数学符号 | 代码位置 | 代数含义 |
+| 结论 | 直接证据 | 可以表述为 |
 |---|---|---|
-| $\mathbf K_e$ | `LinearElasticIntegrator` 计算、`BilinearForm` 在 `'ea'` 下保存的单元刚度张量 | 单元刚度矩阵 |
-| $\mathbf R_e$ | `space.cell_to_dof()` | 单元自由度限制算子（gather），转置为 scatter-add |
-| $\mathbf K$ | `assemble_stiff_matrix.set('fa')` 返回的 `CSRTensor` | 全局刚度矩阵 |
-| $\tilde{\mathbf K}$ | [`DirichletBCOperator`](utils/analyzer.py) 包裹后的算子 | 施加本质边界条件后的算子 |
-| $\mathbf E_p$ | [`soptx/fem/distributed.py:_vector_dof_masks`](../../src/soptx/fem/distributed.py) 得到的 DOF 掩码 | rank $p$ 的局部自由度嵌入算子 |
-| $r_i$ | `dof_comm.refs(size)` | 自由度 $i$ 的副本数（被多少个 rank 持有） |
-| $w_i=1/r_i$ | `dof_comm.dot(size)` / [`soptx/fem/solvers/matrix_free_solver.py`](../../src/soptx/fem/solvers/matrix_free_solver.py) 内部 | 重叠内积权重 |
-| $\mathcal S(\cdot)$ | `dof_comm.sync_add(...)` / [`soptx/fem/distributed.py:OverlapOperator`](../../src/soptx/fem/distributed.py) | 跨 rank 共享分量求和 |
-| $\boldsymbol\Pi_D,\ \boldsymbol\Pi_I$ | `DirichletBCOperator.is_boundary_dof` 及其补 | Dirichlet／内部自由度上的对角投影 |
-| $\bar{\boldsymbol u}$ | `_prescribed_solution` / `ElasticityEAOperator.prescribed_solution` | 边界取给定值、内部取零的基准向量 |
+| EA 是正确的线弹性离散算子实现 | 2D/3D、`tri/quad/tet/hex` 上 EA/FA MatVec、EA-CG/FA 直接解及 L2 收敛阶均通过 | 已完成线弹性 EA Matrix-Free 算子与 Krylov 求解集成，并与显式全局 CSR 参考离散一致 |
+| MPI EA 保持离散正确性 | 2、4、8 ranks 的并行解与串行 EA、FA 直接解一致，4/8 ranks 也通过 L2 收敛阶门禁 | 已完成重叠自由度、分布式边界处理与并行 Krylov EA 求解 |
+| CPU EA 具备并行单元核基础 | 固定 `128x128` 问题上，4 ranks 的本地单元核加速比为 `3.354`，系统 MatVec 为 `2.452` | 单元级 EA 计算可并行，已具备进一步优化通信、进程绑定和 GPU 单元核的基础 |
+| 当前 CPU 串行 EA 不是端到端加速器 | `32x32` 至 `128x128` 上 EA 构造更快，但 MatVec 与 CG 总时间慢于 FA | EA 的现阶段价值是免全局稀疏矩阵与规则单元计算路径，不应声称 CPU 串行求解已加速 |
 
-`partition_cells` 产生的单元掩码互不相交且完全覆盖（代码中以 `coverage == 1`
-断言），因而知识库中 $\mathbf K=\sum_p\mathbf E_p\mathbf K^{(p)}\mathbf E_p^{\mathsf T}$
-的精确分解前提在本实现中成立。
+### 1.2 当前不能表述的结论
 
-### 1.2 两级算子的保存／省略对象
-
-| 层级 | 保存对象 | 省略对象 | 每次 MatVec |
-|---|---|---|---|
-| `fa` | 全局 CSR $\mathbf K$（`OPERATOR_STORAGE['fa'] = "global-csr"`） | 无 | 稀疏矩阵乘 |
-| `ea` | 单元矩阵集合 $\{\mathbf K_e\}$（`"cached-element-matrices"`） | 全局矩阵 $\mathbf K$ | gather—单元乘—scatter-add |
-
-$\mathbf K_e$ 被完整形成并保存，因此按事实源的判定口径本实现属于 **EA/EbE**，
-不是 PA/QA。`contract.OPERATOR_LEVELS` 相应只有 `("ea", "fa")`。
-
-### 1.3 门禁与阈值来源
-
-阈值只在 [`utils/contract.py`](utils/contract.py) 定义一次，本文档不复制数字，
-知识库侧也不持有字面量。
-
-| 门禁 | 阶段 | 判据类别 | 阈值常量 |
-|---|---|---|---|
-| `converged` | 1a | CG 正常退出且无 breakdown | — |
-| `true_residual` | 1a | 加权范数下的真残差 | `DEFAULT_RTOL` / `DEFAULT_ATOL` |
-| `boundary_dofs` | 1a | Dirichlet 分量与给定值之差 | `BOUNDARY_ABSOLUTE_TOL` |
-| `raw_matvec` | 1a | 裸 MatVec 一致 | `MATVEC_RELATIVE_TOL` |
-| `dirichlet_matvec` | 1a | 边界后 MatVec 一致 | `MATVEC_RELATIVE_TOL` |
-| `operator_symmetry` | 1a | 双线性配对对称且正定 | `SYMMETRY_RELATIVE_TOL` |
-| `explicit_solution` | 1a | CG 解与 FA 直解一致 | `EXPLICIT_SOLUTION_RELATIVE_TOL` |
-| EA/FA 解一致 | 1a | 解一致 | `EA_FA_SOLUTION_RELATIVE_TOL` |
-| 误差单调 | 1a | $E_0>E_1>E_2$ | — |
-| 收敛阶 | 1a | 末段观测阶 | `MINIMUM_FINAL_L2_ORDER` |
-| 1/2-rank 解一致 | 1b | 解一致 | `PARALLEL_SOLUTION_RELATIVE_TOL` |
-| 1/2-rank 误差一致 | 1b | 末档 L2 误差之差 | `PARALLEL_L2_DIFFERENCE_TOL` |
-
-前四道带参照的门禁使用 `REFERENCE_RANDOM_SEED` 生成的固定随机向量，
-$\boldsymbol x_{\mathrm{direct}}$ 由 `spsolve` 在 `fa` 系统上独立求出；这些门禁
-只在单 rank 非 benchmark 运行下有意义，其余情形记为 `GATE_SKIPPED` 而非通过，
-否则 `local_passed` 会在 benchmark 模式下悄悄弱化。加密序列由 `REFINEMENTS`
-给出（2D 为 `8,16,32`，3D 为 `4,8,16`），相邻恰为二等分，故观测阶取 $\log_2$。
-凡分母出现范数处一律以 `NORM_FLOOR` 兜底。
-
-标注 1b 的两道门禁只在 `--include-parallel` 下参与判定；阶段 1a 的 `comparison`
-中不写入对应字段，以免空占位被误读为「已检验」。EA/FA 解一致检验的是对称消元与
-算子包裹两种施加方式的等价性，是 1a 的核心代数判据；两道 1b 门禁检验的是
-$\mathcal S$ 与 $\mathcal C$ 的实现。
-
-## 2. 当前证据状态
-
-**结论：目前没有可用于验收的正式证据。** 下方两个区块只是 dirty worktree 的开发
-证据，且它们是在**阶段 1b 范围**（含 2-rank 算例）下产生的，而当前默认范围已收窄
-为**阶段 1a（CPU 串行 EA/FA）**。重放后区块将只含单 rank 结果。
-
-| 项 | 实际值 |
+| 尚未完成或不应外推的事项 | 原因 |
 |---|---|
-| 区块源 revision | `4cd4e8da17189eb57f9a68cc316bcdf189c084ec` |
-| `evidence/*.json` 的 `environment.git_dirty` | **`true`** |
-| 距当前 HEAD | `4cd4e8d..HEAD` 共 9 个提交 |
-| 1/2-rank 一致性正式证据 | 未固化，`evidence/` 下只有单 rank 产物 |
+| GPU EA 已加速或显存显著降低 | `examples/gpu_elasticity/` 尚未形成同口径正确性、时间和峰值显存对照 |
+| MPI EA 可在更大规模上强/弱扩展 | 仅有单机 1/2/4/8-rank 强扩展和 1/2-rank 弱扩展；未测试跨节点、进程绑定或二维块分区 |
+| EA 比 FA 在 CPU 上更快 | 当前 NumPy CPU EA 的 gather--单元乘--scatter-add 慢于 CSR SpMV |
+| MPI 下 FA 已实现 | 当前多 rank 路径仅支持 EA；FA 的全局矩阵对称消元与分布式组装尚未实现 |
 
-两点说明：
+## 2. CPU EA/FA 功能验证
 
-1. 这两个区块生成时，`utils/sync_results.py` 既没有校验 `git_dirty`，又把
-   `git_dirty=false` 当字面量写进正文，因此区块曾错误宣称自己 clean。该缺陷已
-   修复：`require_formal_environment` 现在硬性拒绝 `git_dirty != false` 的原始
-   JSON，渲染时也改为读取 payload 的真实标志。**在 clean revision 上重放之前，
-   `utils/sync_results.py` 会以非零状态退出**，这是预期行为。
-2. `4cd4e8d` 之后，`lagrange_fem_analyzer.py`、`linear_elasticity.py` 和
-   `manufactured_2d.py` 都在 evidence 依赖路径上发生过改动，所以即便忽略 dirty
-   标志，这两个区块也已经不对应当前代码。
+### 2.1 验证口径与范围
 
-因此这两个区块**待在冻结的 clean target revision 上重放**，重放前不得作为验收
-结论、对外表达或申报材料的数值来源。
+本节回答“EA 是否实现了与 FA 相同的离散问题”。EA 是待验证的 Matrix-Free 路径，FA
+是显式全局 CSR 参考路径；比较均固定制造解、材料、网格、边界条件和 P1 空间。结果来自
+当前 dirty worktree 的 `ihpcm` Conda 环境，`mpi4py 4.1.2` 与 Intel MPI `2021.18.1`。
+`tri`、`quad` 与 `hex` 使用三档网格，`tet` 使用五档网格以进入收敛区间。
 
-## 3. 历史基线
+### 2.2 1/2-rank 验证结果
 
-迁移到 `src/soptx` 与语义 Problem **之前**的三维数值证据保存在
-[`evidence/cpu-single-rank-fa-ea-3d-historical.json`](evidence/cpu-single-rank-fa-ea-3d-historical.json)，
-只作为原三维实现的历史基线，不作为本次 2D/3D 通用化实现的验收结论。
+EA 保存单元刚度矩阵集合 `\{K_e\}`，不形成全局稀疏矩阵；FA 形成全局 CSR `K`，作为
+同一离散、同一材料和同一 Dirichlet 条件下的参考。所有下表算例均通过：EA/FA Raw
+MatVec、EA/FA Dirichlet MatVec、正能量、EA-CG/FA-Direct、CG 真残差、边界误差和末段
+相对 L2 收敛阶。
 
-## 4. 2D CPU 单 rank FA/EA
+| 维数 | 网格 | ranks | 加密次数 | 最细网格 | 最细相对 L2 误差 | 末段阶 | 并行 EA / 串行 EA | 结论 |
+|---:|---|---:|---:|---|---:|---:|---:|---|
+| 2D | `tri` | 1 | 2 | `32x32` | `3.04605e-03` | `1.98184` | — | PASS |
+| 2D | `tri` | 2 | 2 | `32x32` | `3.04605e-03` | `1.98184` | `2.93128e-15` | PASS |
+| 2D | `quad` | 1 | 2 | `32x32` | `9.93180e-04` | `1.99821` | — | PASS |
+| 2D | `quad` | 2 | 2 | `32x32` | `9.93180e-04` | `1.99821` | `4.43987e-16` | PASS |
+| 3D | `tet` | 1 | 4 | `32x32x32` | `2.40547e-02` | `1.89060` | — | PASS |
+| 3D | `tet` | 2 | 4 | `32x32x32` | `2.40547e-02` | `1.89060` | `1.46621e-14` | PASS |
+| 3D | `hex` | 1 | 2 | `8x8x8` | `9.32799e-02` | `1.95524` | — | PASS |
+| 3D | `hex` | 2 | 2 | `8x8x8` | `9.32799e-02` | `1.95524` | `1.56696e-16` | PASS |
 
-<!-- BEGIN GENERATED: cpu-single-rank-fa-ea-2d -->
+`tet` 使用五档 `2, 4, 8, 16, 32` 网格，末段阶 `1.89060` 通过门禁；这说明此前三档
+网格不够细，而不是 EA 算子不正确。其余组合使用三档网格。上述最细档的 EA/FA Raw 与
+Dirichlet MatVec 相对差均约为 `1e-16`，EA-CG/FA-Direct 相对差不大于 `2.50e-11`。
 
-本节由 `utils/sync_results.py --dim 2` 根据 clean-revision 原始 JSON 生成；精简证据见 `evidence/cpu-single-rank-fa-ea-2d.json`。
-源 revision：`4cd4e8da17189eb57f9a68cc316bcdf189c084ec`；`git_dirty=true`。
+### 2.3 4/8-rank 补充验证
 
-| 网格 | EA-CG 迭代数 | 真相对残差 | 相对 L2 误差 | 边界绝对误差 |
-| --- | ---: | ---: | ---: | ---: |
-| `8×8` | 38 | `5.13210e-11` | `4.61057e-02` | `0` |
-| `16×16` | 89 | `8.96971e-11` | `1.20318e-02` | `0` |
-| `32×32` | 188 | `8.95970e-11` | `3.04605e-03` | `0` |
+多条带分区已扩展至任意非空正整数 ranks。对 2D `sinusoidal` / `tri`，运行
+`--n 8 --refinements 2`，4 与 8 ranks 均与串行 EA、FA 直接解一致，并保持同一 L2
+误差和收敛阶。
 
-| 网格 | 原始 EA/FA MatVec | Dirichlet EA/FA MatVec | EA-CG/FA 直接解 |
-| --- | ---: | ---: | ---: |
-| `8×8` | `1.44949e-16` | `1.40930e-16` | `8.67653e-12` |
-| `16×16` | `1.62572e-16` | `1.64234e-16` | `6.57436e-12` |
-| `32×32` | `1.57536e-16` | `1.56086e-16` | `3.03229e-12` |
+| ranks | 真相对残差 | 并行 EA / FA-Direct | 并行 EA / 串行 EA | 相对 L2 误差 | 末段阶 | 结论 |
+|---:|---:|---:|---:|---:|---:|---|
+| 4 | `8.94351e-11` | `3.02926e-12` | `3.25221e-14` | `3.04605e-03` | `1.98184` | PASS |
+| 8 | `9.00497e-11` | `3.02112e-12` | `3.31081e-14` | `3.04605e-03` | `1.98184` | PASS |
 
-相对 L2 误差观测阶为 `1.93809`、`1.98184`。独立 FA 粗网格 `8×8` 在 38 步收敛，真相对残差为 `4.95406e-11`。
+### 2.4 功能验证结论
 
-<!-- END GENERATED: cpu-single-rank-fa-ea-2d -->
+EA 在四类 2D/3D 网格、1/2-rank 以及补充的 4/8-rank 条带分区上均通过 EA/FA 与并行/
+串行交叉验证。因而可以确认：当前实现的 EA 与 FA 表示同一离散算子，重叠自由度同步与
+分布式 Krylov 路径在已测试范围内正确。该结论是功能正确性结论，不包含任何效率判断。
 
-## 5. 3D CPU 单 rank FA/EA
+## 3. CPU EA/FA 效率对照
 
-<!-- BEGIN GENERATED: cpu-single-rank-fa-ea-3d -->
+### 3.1 测量口径与范围
 
-本节由 `utils/sync_results.py --dim 3` 根据 clean-revision 原始 JSON 生成；精简证据见 `evidence/cpu-single-rank-fa-ea-3d.json`。
-源 revision：`4cd4e8da17189eb57f9a68cc316bcdf189c084ec`；`git_dirty=true`。
+本节回答“EA 的构造、算子作用和求解效率如何”。串行对照固定 NumPy CPU、2D
+`sinusoidal` / `tri`、P1 与相同 CG 容差，只切换 FA/EA 算子层级。MPI 对照固定
+`128x128` 2D 三角形网格、无预条件 CG，并以所有 rank 中最大 wall time 的中位数计时。
+两类计时均不等于峰值内存测量。
 
-| 网格 | EA-CG 迭代数 | 真相对残差 | 相对 L2 误差 | 边界绝对误差 |
-| --- | ---: | ---: | ---: | ---: |
-| `4×4×4` | 24 | `9.26796e-11` | `6.80637e-01` | `0` |
-| `8×8×8` | 64 | `6.69625e-11` | `2.85095e-01` | `0` |
-| `16×16×16` | 134 | `8.62632e-11` | `8.91922e-02` | `0` |
+### 3.2 单 rank EA/FA 对照结果
 
-| 网格 | 原始 EA/FA MatVec | Dirichlet EA/FA MatVec | EA-CG/FA 直接解 |
-| --- | ---: | ---: | ---: |
-| `4×4×4` | `2.71490e-16` | `1.98982e-16` | `5.77006e-11` |
-| `8×8×8` | `3.17642e-16` | `2.69544e-16` | `1.93814e-11` |
-| `16×16×16` | `3.38707e-16` | `2.63232e-16` | `1.98507e-11` |
+环境为 NumPy CPU，2D `sinusoidal` / `tri`，P1、相同 CG 容差。时间取预热后多次样本
+中位数；存储仅指算子长期保存数组，不是进程峰值内存。
 
-相对 L2 误差观测阶为 `1.25544`、`1.67645`。独立 FA 粗网格 `4×4×4` 在 24 步收敛，真相对残差为 `9.26796e-11`。
+| 网格 | FA 构造 / s | EA 构造 / s | FA MatVec / ms | EA MatVec / ms | FA CG / s | EA CG / s | FA/EA 存储 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `32x32` | 0.0107 | 0.0074 | 0.0315 | 0.0963 | 0.0073 | 0.0223 | 1.03 |
+| `64x64` | 0.0369 | 0.0268 | 0.1600 | 0.3540 | 0.0651 | 0.1523 | 1.01 |
+| `128x128` | 0.1752 | 0.1280 | 0.6430 | 1.3400 | 0.5906 | 1.1603 | 1.01 |
 
-<!-- END GENERATED: cpu-single-rank-fa-ea-3d -->
+EA 构造时间约低 `27%`，但 EA MatVec 与 CG 总时间仍慢于 FA；两路 CG 迭代数相同，故
+差异来自算子作用实现而非收敛性质。EA 没有形成全局 CSR，但当前 EA 仍缓存 `K_e` 与
+`cell_to_dof`，所以长期保存数组只略少于 COO 参考，不能表述为峰值内存优势。
 
-## 6. 证据边界
+### 3.3 MPI EA 扩展结果
 
-本节只说明**这批数字能支持什么结论**。实现层面的能力边界（不实现 PA/QA、无预
-条件、EA 的算术强度口径等）由 [`README.md`](README.md) 的「本阶段明确不承诺的
-内容」唯一维护，此处不复制。
+#### 强扩展: 4 ranks 最佳，8 ranks 受通信限制
 
-- **收敛阶未进入渐近区。** 3D 相对 $L^2$ 观测阶为 `1.25544`、`1.67645`，低于 P1
-  元的理论二阶。当前三档网格（`4/8/16`）尚未进入渐近区，只能说"误差随加密单调
-  下降且末段观测阶过门禁"，不得宣称"收敛阶达到二阶"。2D 的 `1.93809`、`1.98184`
-  已接近二阶。
-- **一致性结论不等于性能结论。** MatVec 与解的机器精度级一致只支持"EA 与 FA 是
-  同一个离散算子"，不支持任何关于完整 solve 时间、迭代数优劣或内存占用的结论——
-  本报告目前不含任何计时或峰值内存数据。
-- **无跨 rank 结论。** 阶段 1a 只跑单 rank。区块内若出现 2-rank 数字，属于重放前
-  的历史遗留，不得引用。
+环境为 `ihpcm` Conda、`mpi4py 4.1.2`、Intel MPI `2021.18.1`。固定物理域
+`[0,1] x [0,1]`、固定 `128x128` 2D 三角形 P1 网格、无预条件 CG；每项以所有 rank
+中的最大 wall time 计时，取 `--warmup 2 --repeats 5 --matvec-repeats 20` 的中位数。
+四组均为 760 次 CG 迭代，真相对残差约 `1e-10`，边界误差为零。
+
+| ranks | 系统 MatVec / ms | 输入同步 / ms | 本地单元核 / ms | 输出同步 / ms | CG 总时间 / s | 构造 + CG / s | 流水线加速比 | 并行效率 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1.434 | 0.043 | 1.338 | 0.025 | 1.276538 | 1.450758 | 1.000 | 1.000 |
+| 2 | 0.837 | 0.047 | 0.721 | 0.063 | 0.776929 | 0.924955 | 1.568 | 0.784 |
+| 4 | 0.585 | 0.084 | 0.399 | 0.119 | 0.619462 | 0.779117 | 1.862 | 0.465 |
+| 8 | 1.050 | 0.324 | 0.409 | 0.493 | 0.895710 | 0.930547 | 1.559 | 0.195 |
+
+`OverlapOperator` 内部剖析表明，本地单元核在 4 ranks 的加速比达到 `3.354`，接近理想
+二分；但输入与输出同步合计从 1-rank 的 `0.068 ms` 增至 4-rank 的 `0.203 ms`、8-rank
+的 `0.817 ms`。因此 4-rank 是本机本次测量的最佳点，8-rank 的通信和 Krylov 归约开销
+已压过新增并行度。
+
+#### 弱扩展: 几何口径正确，但无预条件 CG 不会保持总时间不变
+
+弱扩展同时按 ranks 沿 x 方向扩展物理区域与网格：1-rank 为 `[0,1] x [0,1]`、
+`128x128`，2-rank 为 `[0,2] x [0,1]`、`256x128`。两者单元尺寸相同，且每 rank 都有
+32768 个三角形单元。
+
+| ranks | CG 迭代数 | 端到端时间 / s | 每迭代时间 / ms | 真相对残差 |
+|---:|---:|---:|---:|---:|
+| 1 | 760 | 1.514133 | 1.992 | `9.612785e-11` |
+| 2 | 958 | 2.408318 | 2.514 | `9.716131e-11` |
+
+总时间变为 `1.591` 倍，其中迭代数变为 `1.261` 倍。全局区域变大时，无预条件椭圆型
+问题的条件数与 CG 迭代数会变化；加上共享 DOF 通信，这一结果验证的是**严格弱扩展的
+运行与正确性**，而不是理想、规模无关的端到端弱扩展效率。
+
+### 3.4 效率对照结论
+
+CPU 串行下，EA 只在构造阶段优于 FA，MatVec 与 CG 总时间没有优势；CPU MPI 下，EA
+单元核可扩展，4 ranks 获得本机最佳 `1.862` 倍流水线加速，但 8 ranks 被同步与归约
+开销限制。因而本节支持“EA 已具备 CPU 并行单元核与通信瓶颈分析基础”，不支持“EA
+已在 CPU 上全面快于 FA”或“已实现理想大规模扩展”。
+
+## 4. 测量口径与代码—数学映射
+
+### 4.1 计时口径
+
+- **系统 MatVec**：施加 Dirichlet 条件后的完整算子作用。
+- **输入/输出同步**：`OverlapOperator` 中 `sync_add / refs` 的输入一致化与输出求和。
+- **本地单元核**：一致化输入上的局部 EA `K_e` 作用，不含 MPI 同步。
+- **CG 总时间**：已构造系统上的加权 CG 与求解后诊断；**构造 + CG**为两项独立中位数之和。
+- **FA/EA 长期存储**：只统计 FA 的 COO 数值/行/列与 EA 的 `K_e`/`cell_to_dof`，不等于峰值内存。
+
+### 4.2 代码—数学对应
+
+| 数学对象或操作 | 实现位置 | 含义 |
+|---|---|---|
+| 单元刚度 `K_e` 与限制映射 `R_e` | `LinearElasticIntegrator`、`space.cell_to_dof()` | EA 的 gather--局部乘--scatter-add |
+| 全局 CSR `K` | FA `assemble_stiff_matrix()` | EA 正确性对照与直接解参考 |
+| Dirichlet 系统算子 | `DirichletBCOperator` | EA 与 FA 使用同一边界条件 |
+| 重叠并行算子 `S K_loc C` | `OverlapOperator` | 输入一致化、局部作用、输出共享自由度归约 |
+| 加权内积 | `dof_comm.dot()`、`weighted_cg()` | 共享自由度只计数一次的 Krylov 代数 |
+
+门禁阈值唯一来源为
+[`tools/matrix_free_evidence/contract.py`](../../tools/matrix_free_evidence/contract.py)。完整数学推导见：
+
+- `dut-postdoc:concepts/matrix-free/assembly-levels.md`
+- `dut-postdoc:concepts/gpu-hpc/distributed-matrix-free-computing.md`
+- [`docs/problems/manufactured-elasticity.md`](../../docs/problems/manufactured-elasticity.md)
+
+## 5. 证据边界与后续工作
+
+本页支持“EA 算子设计、Krylov 求解与 CPU MPI 并行基础已建立”的表述；不支持 GPU、
+跨节点大规模扩展、MPI FA 或可扩展预条件的表述。下一阶段应在
+`examples/gpu_elasticity/` 建立同一制造解和同一容差下的 GPU EA 正确性、时间与峰值显存
+对照；CPU MPI 则优先评估进程绑定、rank 映射和二维块分区。

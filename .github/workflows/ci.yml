@@ -44,25 +44,6 @@ jobs:
         shell: bash
         run: python tools/check_wheel_contents.py dist/*.whl
 
-  pinn-fast:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install PINN test dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ".[test,pinn]"
-
-      - name: Run PINN fast tests
-        run: python -m pytest examples/pinn_elasticity/tests -q
-
   matrix-free-fast:
     runs-on: ubuntu-latest
 
@@ -84,5 +65,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[test,mpi]"
 
+      # fast job 不装 mpi4py, 上面那些用例会被 importorskip 跳过;
+      # 这个 job 装了 mpi4py, 才真正跑到分区与分布式分析器的构造契约。
       - name: Run Matrix-Free fast tests
-        run: python -m pytest examples/matrix_free_elasticity -q
+        run: python -m pytest tests -q -k matrix_free

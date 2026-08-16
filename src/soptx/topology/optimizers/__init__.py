@@ -1,6 +1,20 @@
 """Topology-optimization algorithms."""
 
 from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # 运行期由下面的 ``__getattr__`` 惰性加载; 但静态分析器 (Pyright/Pylance) 不会
+    # 解析模块级 ``__getattr__``, 于是这些类在 IDE 里退化成 ``Any``, 表现为无语义
+    # 高亮、无补全、无类型检查. 这段仅在类型检查期生效的导入把符号还给分析器,
+    # 运行期不执行, 因此惰性加载行为不受影响.
+    from .al_mma import ALMMMAOptimizer as ALMMMAOptimizer
+    from .al_mma import ALMMMAOptions as ALMMMAOptions
+    from .history import OptimizationHistory as OptimizationHistory
+    from .mma import MMAOptimizer as MMAOptimizer
+    from .mma import MMAOptions as MMAOptions
+    from .oc import OCOptimizer as OCOptimizer
+    from .oc import OCOptions as OCOptions
 
 _EXPORTS = {
     "ALMMMAOptimizer": (".al_mma", "ALMMMAOptimizer"),
