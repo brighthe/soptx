@@ -17,7 +17,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import TriangleMesh
 
-from soptx.fem.solvers import LagrangeFEMAnalyzer
+from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems.elasticity import SinusoidalPlaneStrainElasticity2D
 
@@ -309,11 +309,20 @@ def test_cg_reports_solver_diagnostics() -> None:
 
 
 def test_a_direct_solve_does_not_fabricate_iteration_counts() -> None:
+    """LinearSolver 契约要求每条路径都给 niter/relres/converged.
+
+    一步解法记 niter == 1, 使消费方无条件读得到这三个键; 但迭代法专属的诊断
+    (maxit, 递推残差) 不得凭空造出来 -- 直接法没有这两个量。
+    """
     analyzer = make_analyzer(8, "fa", "scipy")
     info = analyzer.solve_state()["solver"]
 
     assert info["name"] == "scipy"
-    assert "niter" not in info
+    assert info["niter"] == 1
+    assert info["converged"] is True
+    assert info["relres"] < 1.0e-10
+    assert "maxit" not in info
+    assert "recursive_residual" not in info
 
 
 class FakeDofComm:
@@ -389,7 +398,7 @@ def test_overriding_the_solver_lifts_the_distributed_guard() -> None:
 
     class OwnSolverAnalyzer(LagrangeFEMAnalyzer):
         def solve_system(self, K, F, out, **kwargs):
-            from fealpy.solver import cg
+            from soptx.solvers import cg
 
             out[:], _ = cg(K, F[:], x0=self._prescribed_solution,
                            batch_first=False, atol=1e-12, rtol=1e-12,

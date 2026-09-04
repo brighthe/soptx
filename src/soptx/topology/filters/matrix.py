@@ -1,63 +1,107 @@
-from typing import Tuple, Set, List
-from math import ceil, sqrt
+from typing import Any, Dict, List, Optional
+from math import ceil
 
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import HomogeneousMesh
-from fealpy.typing import TensorLike
-from fealpy.sparse import COOTensor, CSRTensor
-from soptx.core import timer
+from fealpy.sparse import COOTensor
+from soptx.core import BaseLogged, timer
 
-class FilterMatrixBuilder:
-    """负责构建拓扑优化中使用的稀疏权重矩阵 H"""
-    def __init__(self, 
-                mesh: HomogeneousMesh, 
-                rmin: float, 
-                density_location: str, 
+class FilterMatrixBuilder(BaseLogged):
+    """负责构建拓扑优化中使用的稀疏权重矩阵 H
+
+    权重函数有两套实现:
+
+    - 结构化快路径 (``_compute_weighted_matrix_2d/3d``): 线性锥形权重
+      ``max(0, rmin - d)``, 只对均匀笛卡尔网格成立 (单元按 ``i*ny + j`` 的
+      字典序编号);
+    - 通用路径 (``_compute_weighted_matrix_general``): KD-tree 近邻查询 +
+      ``(1 - d/rmin)**q`` 权重, 对任意网格成立。
+
+    两条路径在 ``q = 1`` 时权重函数一致 (相差常数因子 rmin, 被行归一化
+    ``H / Hs`` 约掉); ``q > 1`` 是 PolyFilter (Giraldo-Londono & Paulino,
+    2020) 的非线性权重, 与结构化路径不可比, 故 q 必须由调用方显式给定。
+    """
+    def __init__(self,
+                mesh: HomogeneousMesh,
+                rmin: float,
+                density_location: str,
+                q: int = 1,
+                enable_logging: bool = False,
+                logger_name: Optional[str] = None,
             ) -> None:
+        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
-        
+        if q < 1:
+            raise ValueError(f"过滤权重幂次 q 必须为正整数, 当前 q={q}")
+
         self._mesh = mesh
         self._rmin = rmin
         self._density_location = density_location
+        self._q = q
 
         self._device = mesh.device
 
-    def build(self) -> CSRTensor:
-        """构建并返回权重矩阵 H"""
-        mesh_type = self._mesh.meshdata['mesh_type']
-        nx, ny, nz = self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata.get('nz', 1)
+    def build(self) -> COOTensor:
+        """构建并返回权重矩阵 H
+
+        按 **网格能否提供结构化元数据** 分派, 而不是按 ``mesh_type`` 字符串:
+        只有当密度定义在单元上、``meshdata`` 同时给出 ``nx/ny(/nz)`` 与
+        ``hx/hy(/hz)``、且单元数恰好等于 ``nx*ny(*nz)`` (设计变量确实排在一张
+        均匀笛卡尔网格上) 时, 才走结构化快路径; 其余一律走 KD-tree 通用路径,
+        后者对任意非结构网格 (gmsh 三角/四面体网格等) 同样成立。
+
+        ``meshdata`` 不是 fealpy 网格的固有属性, 而是各 experiment 的 pipeline
+        手工挂上去的元数据字典, 因此这里一律用 ``get`` 探测: 缺键时安静退回通
+        用路径, 不再直接 KeyError。
+        """
+        meshdata: Dict[str, Any] = dict(getattr(self._mesh, 'meshdata', None) or {})
         NC = self._mesh.number_of_cells()
-        if mesh_type == 'uniform_quad' or nx * ny == NC:
-            H = self._compute_weighted_matrix_2d(
-                                        self._rmin,
-                                        self._mesh.meshdata['nx'], self._mesh.meshdata['ny'],
-                                        self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], 
-                                    )
-            return H
+        cell_centered = self._density_location in ('element', 'element_multiresolution')
 
-        elif mesh_type == 'uniform_hex' or nx * ny * nz == NC:
-            H = self._compute_weighted_matrix_3d(
-                                        self._rmin,
-                                        self._mesh.meshdata['nx'], self._mesh.meshdata['ny'], self._mesh.meshdata['nz'],
-                                        self._mesh.meshdata['hx'], self._mesh.meshdata['hy'], self._mesh.meshdata['hz'], 
-                                    )
-            return H
+        nx, ny, nz = meshdata.get('nx'), meshdata.get('ny'), meshdata.get('nz')
+        hx, hy, hz = meshdata.get('hx'), meshdata.get('hy'), meshdata.get('hz')
 
-        else:
-            H = self._compute_weighted_matrix_general(
-                                        rmin=self._rmin, 
-                                        domain=self._mesh.meshdata['domain']
-                                    )
-            return H
+        if cell_centered and None not in (nx, ny, hx, hy):
+            if nx * ny == NC and nz in (None, 1):
+                return self._compute_weighted_matrix_2d(self._rmin, nx, ny, hx, hy)
+
+            if None not in (nz, hz) and nx * ny * nz == NC:
+                return self._compute_weighted_matrix_3d(self._rmin, nx, ny, nz, hx, hy, hz)
+
+        return self._compute_weighted_matrix_general(
+                                    rmin=self._rmin,
+                                    domain=self._bounding_box(meshdata),
+                                    q=self._q,
+                                )
+
+    def _bounding_box(self, meshdata: Dict[str, Any]) -> List[float]:
+        """计算域包围盒 ``[xmin, xmax, ymin, ymax, ...]``
+
+        ``meshdata['domain']`` 缺失时 (非结构网格的常态) 由节点坐标现算。该值
+        只在 ``bm.query_point`` 打开周期性时才会被用到, 而通用路径固定
+        ``periodic=[False, False, False]``, 因此它当前对结果没有影响。
+        """
+        domain = meshdata.get('domain')
+        if domain is not None:
+            return [float(v) for v in domain]
+
+        node = bm.device_put(self._mesh.entity('node'), 'cpu')
+        box: List[float] = []
+        for d in range(node.shape[1]):
+            box.append(float(bm.min(node[:, d])))
+            box.append(float(bm.max(node[:, d])))
+
+        return box
         
     def _compute_weighted_matrix_general(self, 
                                         rmin: float,
                                         domain: List[float],
-                                        q: int = 3,
+                                        q: int = 1,
                                         periodic: List[bool]=[False, False, False],
                                         enable_timing: bool = False,
-                                    ) -> Tuple[COOTensor, TensorLike]:
+                                    ) -> COOTensor:
             """
             计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
 
@@ -74,7 +118,8 @@ class FilterMatrixBuilder:
             domain: 计算域的边界
             q: 过滤权重的幂次参数, 默认为 1 (线性过滤).
                 当 q=1 时, 权重函数为 w = max(0, 1 - d/rmin), 等价于线性锥形过滤.
-                当 q>1 时, 权重函数为 w = (1 - d/rmin)^q, 提供更集中的过滤效果.
+                当 q>1 时, 权重函数为 w = (1 - d/rmin)^q, 提供更集中的过滤效果,
+                与结构化快路径的线性锥形权重不可比, 故不设非 1 的默认值.
             periodic: 各方向是否周期性, 默认为 [False, False, False]
                 
             Returns
@@ -150,179 +195,12 @@ class FilterMatrixBuilder:
 
             return H
 
-
-            # # 自由度总数
-            # gdof = density_coords.shape[0]
-            
-            # # 预估非零元素的数量
-            # max_nnz = len(density_indices) + gdof
-            # iH = bm.zeros(max_nnz, dtype=bm.int32)
-            # jH = bm.zeros(max_nnz, dtype=bm.int32)
-            # sH = bm.zeros(max_nnz, dtype=bm.float64)
-            
-            # # 首先添加对角线元素 (自身距离为 0, 权重为 1.0^q = 1.0)c
-            # for i in range(gdof):
-            #     iH[i] = i
-            #     jH[i] = i
-            #     sH[i] = 1.0  # (1 - 0/rmin)^q = 1.0
-
-            # # 当前非零元素计数
-            # nnz = gdof
-
-            # if enable_timing:
-            #     t.send('对角线循环计算时间')
-            
-            # # 填充邻居点的权重
-            # for idx in range(len(density_indices)):
-            #     i = density_indices[idx]
-            #     j = neighbor_indices[idx]
-                
-            #     # 计算节点间的物理距离
-            #     physical_dist = bm.sqrt(bm.sum((density_coords[i] - density_coords[j])**2))
-                
-            #     if physical_dist < rmin:
-            #         # 非线性权重: (1 - d/rmin)^q
-            #         w = (1.0 - physical_dist / rmin) ** q
-            #         iH[nnz] = i
-            #         jH[nnz] = j
-            #         sH[nnz] = w
-            #         nnz += 1
-
-            # if enable_timing:
-            #     t.send('非对角线循环计算时间')
-            
-            # # 创建稀疏矩阵
-            # H = COOTensor(
-            #         indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
-            #         values=sH[:nnz],
-            #         spshape=(gdof, gdof)
-            #     )
-
-            # if enable_timing:
-            #     t.send('稀疏矩阵构建时间')
-            #     t.send(None)
-
-            # return H
-        
-    def _compute_weighted_matrix_general_backup(self, 
-                                        rmin: float,
-                                        domain: List[float],
-                                        periodic: List[bool]=[False, False, False],
-                                        enable_timing: bool = False,
-                                    ) -> Tuple[COOTensor, TensorLike]:
-        """
-        计算任意网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
-
-        SRTO - 设计变量 = 单元密度中心点 / 节点密度
-        MRTO - 设计变量 = 子单元密度中心点 / 节点密度  - 要求设计变量网格 = 子单元密度网格
-        
-        Parameters
-        ----------
-        rmin: 过滤半径
-        domain: 计算域的边界, 
-        periodic: 各方向是否周期性, 默认为 [False, False, False]
-            
-        Returns
-        -------
-        H: 过滤矩阵
-        """
-        t = None
-        if enable_timing:
-            t = timer(f"Filter_general")
-            next(t)
-
-        if self._density_location in ['element']:
-            
-            density_mesh = self._mesh
-            density_coords = density_mesh.entity_barycenter('cell') # (NC, GD)
-
-        elif self._density_location in ['element_multiresolution']:
-
-            sub_density_mesh = self._mesh
-            density_coords = sub_density_mesh.entity_barycenter('cell') # (NC*n_sub, GD)
-
-        elif self._density_location in ['node']:
-
-            density_mesh = self._mesh
-            density_coords = density_mesh.entity_barycenter('node') # (NN, GD)
-
-        elif self._density_location in ['node_multiresolution']:
-
-            sub_density_mesh = self._mesh
-            density_coords = sub_density_mesh.entity_barycenter('node') # (NN*, GD)
-
-        # 使用 KD-tree 查询临近点
-        density_coords = bm.device_put(density_coords, 'cpu')        
-        density_indices, neighbor_indices = bm.query_point(
-                                                x=density_coords, y=density_coords, h=rmin, 
-                                                box_size=domain, mask_self=False, periodic=periodic
-                                            )
-        
-        if enable_timing:
-            t.send('KD-tree 查询时间')
-
-        # 自由度总数
-        gdof = density_coords.shape[0]
-        
-        # 准备存储过滤器矩阵的数组
-        # 预估非零元素的数量（包括对角线元素）
-        max_nnz = len(density_indices) + gdof
-        iH = bm.zeros(max_nnz, dtype=bm.int32)
-        jH = bm.zeros(max_nnz, dtype=bm.int32)
-        sH = bm.zeros(max_nnz, dtype=bm.float64)
-        
-        # 首先添加对角线元素
-        for i in range(gdof):
-            iH[i] = i
-            jH[i] = i
-            sH[i] = rmin  # 自身权重为 rmin（最大权重）
-        
-        # 当前非零元素计数
-        nnz = gdof
-
-        if enable_timing:
-            t.send('对角线循环计算时间')
-        
-        # 填充其余非零元素 (邻居点)
-        # TODO 耗时非常久, 需要修改
-        for idx in range(len(density_indices)):
-            i = density_indices[idx]
-            j = neighbor_indices[idx]
-            
-            # 计算节点间的物理距离
-            physical_dist = bm.sqrt(bm.sum((density_coords[i] - density_coords[j])**2))
-            
-            # 计算权重因子
-            fac = rmin - physical_dist
-            
-            if fac > 0:
-                iH[nnz] = i
-                jH[nnz] = j
-                sH[nnz] = fac
-                nnz += 1
-
-        if enable_timing:
-            t.send('非对角线循环计算时间')
-        
-        # 创建稀疏矩阵
-        H = COOTensor(
-                indices=bm.astype(bm.stack((iH[:nnz], jH[:nnz]), axis=0), bm.int32),
-                values=sH[:nnz],
-                spshape=(gdof, gdof)
-            )
-        
-        if enable_timing:
-            t.send('稀疏矩阵构建时间')
-            t.send(None)
-
-        return H        
-
     def _compute_weighted_matrix_2d(self,
                                     rmin: float,
                                     nx: int, ny: int,
                                     hx: float, hy: float,
                                     enable_timing: bool = False,
-                                ) -> CSRTensor:
+                                ) -> COOTensor:
         """
         计算四边形网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
 

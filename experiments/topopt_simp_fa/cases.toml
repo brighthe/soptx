@@ -1,0 +1,304 @@
+# -*- coding: utf-8 -*-
+# FA 变密度拓扑优化验证工况注册表
+#
+# 一条 [[cases]] = 一种模型 (问题 + 几何 + 载荷 + 单元核) 的基准参数, 全参数
+# 显式写全。凡是影响求解的参数 (含 space_degree / assembly_method /
+# solve_method) 一律逐工况显式声明, 代码里不留缺省; config.py 只保留验收
+# 阈值。全部工况为 FA-EA Tier 1 锁步对照的参照侧, 与 experiments/topopt_simp_ea/
+# 同名工况除 operator_level 外参数字面一致: 基准 solve_method 统一为 fealpy cg
+# (rtol = atol = 1e-12), 基准运行因此直接通过 ea/compare.GATE_FIELDS 门禁。
+# FA 另可用直接法 (mumps / scipy, 见 config.VALID_SOLVERS), 走 override:
+#   run.py --case <id> --override solve_method=mumps
+# 这类运行只作 FA 自身的求解器对照, 不与 EA 配对 (EA 没有可分解的全局矩阵,
+# 只能用 cg, 见 ea/config.VALID_SOLVERS)。
+#
+# 参数分类轴 = "改了它, 变的是题目还是解题路径":
+#   A 问题       连续问题本身 (域/载荷/材料/体积上限), 与离散无关;
+#   B 离散       有限维近似 (网格/单元/空间次数/积分阶);
+#   C 拓扑建模   0/1 问题的松弛手段 (插值/void/过滤/projection), 必然改变最优解;
+#   D 算法       求同一问题的不同路径 (优化器/停机/组装/线性解法器),
+#                收敛意义下应给出同一个解;
+#   台账         id/summary/role, 不进求解。
+# FA-EA 锁步对照要求 A+B+C+D 全部字面一致, 唯一自由度是 operator_level
+# (见 ea/compare.GATE_FIELDS)。
+#
+# 工况只按模型种类登记, 参数变化不进注册表: 改过滤/优化器/网格/求解器等一律走
+#   run.py --case <id> --override KEY=VALUE [KEY=VALUE ...]
+# 产物落在 outputs/<id>/ (基准) 或 outputs/<id>__<字段>-<值>[__...]/ (override,
+# 标签按字段名排序、取值取解析后的规范形式), 一次运行一个平级目录。EA 侧用
+# 同一组 override 得到同名目录, ea/compare.py 据此配对, 参数一致性仍由门禁
+# 逐项断言。台账字段 (id/summary/role) 不可 override。
+#
+# 工况一览 (5 个模型, 与 EA 侧同名, 全部参与 FA-EA Tier 1 锁步对照):
+#
+#   1. cantilever_corner_2d_concentrated  2D tri   160x100  concentrated (角点集中力)
+#   2. bearing_2d_distributed             2D quad  120x40   distributed  (顶边均布面力)
+#   3. half_mbb_2d_concentrated           2D quad  60x20    concentrated (左上角集中力)
+#   4. cantilever_edge_3d_concentrated    3D hex   60x20x4  concentrated (右端底边集中力)
+#   5. simply_supported_bridge_2d_distributed  2D quad  120x40   distributed  (顶边均布面力, 桥面被动区)
+#
+# id 只编码 "问题 + 维度 + 载荷路径"; 单元核由 cell_type 字段承载, 不进 id。
+# 覆盖矩阵 = 单元核 (tri/quad/hex) x 载荷路径 (concentrated/distributed),
+# 详见 EA 侧注册表头注释。
+#
+# 2D 工况 void 取 1e-6: 对比度 ~1e6 下无预条件 CG 在 1e-12 容差可行
+# (void 1e-9 对比度 ~1e9 时 CG 迭代数暴涨, 现象记为预条件子任务动机)。
+[meta]
+title = "FA 变密度拓扑优化能力验证"
+topic = "规则盒状区域上的完整组装基线与 FA-EA 对照参照侧"
+date_created = "2026-08-28"
+date_updated = "2026-09-02"
+
+# ---------------------------------------------------------------------
+# 工况 1/5: 2D 悬臂梁, 左端固支, 右下角单位集中载荷。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账与对照 (不进求解) --
+id = "cantilever_corner_2d_concentrated"
+summary = "2D 右下角点载荷 + Triangle 160x100 + sensitivity + OC"
+role = "coverage-tri-concentrated"
+
+# -- A 问题 (连续问题本身; 改了就是换一道题) --
+problem = "cantilever_corner"
+domain = [160.0, 100.0]
+load = -1.0
+emax = 1.0
+nu = 0.3
+volfrac = 0.4
+
+# -- B 离散 (有限维近似; grid 同时决定设计空间分辨率) --
+dimension = 2
+cell_type = "tri"
+grid = [160, 100]
+space_degree = 1
+integration_order = 2
+
+# -- C 拓扑优化建模 (0/1 松弛手段; 改了必然改变最优解) --
+interpolation_method = "msimp"
+simp_penalty = 3.0
+void_youngs_modulus = 1.0e-6
+filter_type = "sensitivity"
+filter_radius = 6.0
+# projection_* 仅在 filter_type = "projection" 时生效, 仍逐工况显式声明。
+projection_beta = 1.0
+projection_eta = 0.5
+projection_beta_max = 512.0
+projection_continuation_iter = 50
+
+# -- D 算法 (求同一问题的不同路径; 收敛意义下应给出同一解) --
+optimizer = "oc"
+move = 0.2
+density_min = 0.0
+max_iter = 200
+tol_change = 1.0e-2
+assembly_method = "standard"
+solve_method = "cg"
+cg_rtol = 1.0e-12
+cg_atol = 1.0e-12
+cg_maxiter = 20000
+
+# ---------------------------------------------------------------------
+# 工况 2/5: 2D 轴承装置, 底边全固支, 顶边整边均布 traction (边界积分
+# 组装的 distributed 载荷路径); load 为牵引强度 t = -0.08 N/mm (非合
+# 力)。几何取该基准的规范 120x40 (3:1), 参数沿用 huzhang_topopt_paper
+# 同款基准 (几何/t/volfrac/filter_radius; 平面假设与求解器不同)。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账与对照 (不进求解) --
+id = "bearing_2d_distributed"
+summary = "2D 轴承顶边均布面力 + Quadrangle 120x40 + sensitivity + OC"
+role = "coverage-quad-distributed"
+
+# -- A 问题 (连续问题本身; 改了就是换一道题) --
+problem = "bearing_device"
+domain = [120.0, 40.0]
+load = -8.0e-2
+emax = 1.0
+nu = 0.3
+volfrac = 0.35
+
+# -- B 离散 (有限维近似; grid 同时决定设计空间分辨率) --
+dimension = 2
+cell_type = "quad"
+grid = [120, 40]
+space_degree = 1
+integration_order = 2
+
+# -- C 拓扑优化建模 (0/1 松弛手段; 改了必然改变最优解) --
+interpolation_method = "msimp"
+simp_penalty = 3.0
+void_youngs_modulus = 1.0e-6
+filter_type = "sensitivity"
+filter_radius = 2.0
+# projection_* 仅在 filter_type = "projection" 时生效, 仍逐工况显式声明。
+projection_beta = 1.0
+projection_eta = 0.5
+projection_beta_max = 512.0
+projection_continuation_iter = 50
+
+# -- D 算法 (求同一问题的不同路径; 收敛意义下应给出同一解) --
+optimizer = "oc"
+move = 0.2
+density_min = 0.0
+max_iter = 200
+tol_change = 1.0e-2
+assembly_method = "standard"
+solve_method = "cg"
+cg_rtol = 1.0e-12
+cg_atol = 1.0e-12
+cg_maxiter = 20000
+
+# ---------------------------------------------------------------------
+# 工况 3/5: 2D 半 MBB 梁 (对称右半域), 左边界对称滚轴 u_x = 0, 右下角
+# 铰支 u_y = 0, 左上角竖直集中力 P。对应博士论文算例 3.1; domain 为半域
+# 尺寸, 整梁跨度是它的两倍。混合 Dirichlet 模式 (整边单向 + 单点单向) 是
+# 既有工况没有的; 单元核 (quad) 与载荷路径 (concentrated) 则与既有工况重合。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账与对照 (不进求解) --
+id = "half_mbb_2d_concentrated"
+summary = "2D 半 MBB 左上角点载荷"
+role = "coverage-quad-concentrated"
+
+# -- A 问题 (连续问题本身; 改了就是换一道题) --
+problem = "half_mbb_beam_right"
+domain = [60.0, 20.0]
+load = -1.0
+emax = 1.0
+nu = 0.3
+volfrac = 0.5
+
+# -- B 离散 (有限维近似; grid 同时决定设计空间分辨率) --
+dimension = 2
+cell_type = "quad"
+grid = [60, 20]
+space_degree = 1
+integration_order = 2
+
+# -- C 拓扑优化建模 (0/1 松弛手段; 改了必然改变最优解) --
+interpolation_method = "msimp"
+simp_penalty = 3.0
+void_youngs_modulus = 1.0e-6
+filter_type = "sensitivity"
+filter_radius = 2.4
+# projection_* 仅在 filter_type = "projection" 时生效, 仍逐工况显式声明。
+projection_beta = 1.0
+projection_eta = 0.5
+projection_beta_max = 512.0
+projection_continuation_iter = 50
+
+# -- D 算法 (求同一问题的不同路径; 收敛意义下应给出同一解) --
+optimizer = "oc"
+move = 0.2
+density_min = 0.0
+max_iter = 200
+tol_change = 1.0e-2
+assembly_method = "standard"
+solve_method = "cg"
+cg_rtol = 1.0e-12
+cg_atol = 1.0e-12
+cg_maxiter = 20000
+
+# ---------------------------------------------------------------------
+# 工况 4/5: 3D 悬臂梁, 左端面固支, 右端底边节点均分总力 P。规则长方体
+# 剖分的 Hexahedron 单元 (张量积核)。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账与对照 (不进求解) --
+id = "cantilever_edge_3d_concentrated"
+summary = "3D 规则 Hexahedron + sensitivity + OC"
+role = "coverage-hex-3d"
+
+# -- A 问题 (连续问题本身; 改了就是换一道题) --
+problem = "cantilever_right_bottom_edge"
+domain = [60.0, 20.0, 4.0]
+load = -1.0
+emax = 1.0
+nu = 0.3
+volfrac = 0.3
+
+# -- B 离散 (有限维近似; grid 同时决定设计空间分辨率) --
+dimension = 3
+cell_type = "hex"
+grid = [60, 20, 4]
+space_degree = 1
+integration_order = 4
+
+# -- C 拓扑优化建模 (0/1 松弛手段; 改了必然改变最优解) --
+interpolation_method = "msimp"
+simp_penalty = 3.0
+void_youngs_modulus = 1.0e-9
+filter_type = "sensitivity"
+filter_radius = 1.5
+# projection_* 仅在 filter_type = "projection" 时生效, 仍逐工况显式声明。
+projection_beta = 1.0
+projection_eta = 0.5
+projection_beta_max = 512.0
+projection_continuation_iter = 50
+
+# -- D 算法 (求同一问题的不同路径; 收敛意义下应给出同一解) --
+optimizer = "oc"
+move = 0.2
+density_min = 0.0
+max_iter = 200
+tol_change = 1.0e-2
+assembly_method = "standard"
+solve_method = "cg"
+cg_rtol = 1.0e-12
+cg_atol = 1.0e-12
+cg_maxiter = 20000
+
+# ---------------------------------------------------------------------
+# 工况 5/5: 2D 简支桥, 左下角固定铰支 (u_x = u_y = 0), 右下角滑动铰支
+# (u_y = 0), 顶边整边均布 traction。顶部 H/10 = 4 mm 的桥面条带是实体
+# 非设计域 (被动区, 密度锁定为 1), 厚度由 pipeline 按 domain 推导, 不进
+# 注册表。对应博士论文算例 3.2 (桥面厚 L/30, E = 350, t = -1, quad 120x40,
+# rmin = 1.5); 论文参考值: 单元密度 + 灵敏度过滤 + OC 下 c = 435.9132,
+# 78 步 (迭代数因收敛准则与线性求解器差异允许不同)。单元核 (quad) 与载荷
+# 路径 (distributed) 与 bearing 重合, 单独注册是为覆盖两点铰支 Dirichlet
+# 模式与被动区机制 (OCOptimizer 经 Filter.design_mesh 向问题类索取掩码)。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账与对照 (不进求解) --
+id = "simply_supported_bridge_2d_distributed"
+summary = "2D 简支桥顶边均布面力 + 桥面被动区"
+role = "coverage-quad-passive-distributed"
+
+# -- A 问题 (连续问题本身; 改了就是换一道题) --
+problem = "simply_supported_bridge"
+domain = [120.0, 40.0]
+load = -1.0
+emax = 350.0
+nu = 0.3
+volfrac = 0.5
+
+# -- B 离散 (有限维近似; grid 同时决定设计空间分辨率) --
+dimension = 2
+cell_type = "quad"
+grid = [120, 40]
+space_degree = 1
+integration_order = 2
+
+# -- C 拓扑优化建模 (0/1 松弛手段; 改了必然改变最优解) --
+interpolation_method = "msimp"
+simp_penalty = 3.0
+void_youngs_modulus = 1.0e-9
+filter_type = "sensitivity"
+filter_radius = 1.5
+# projection_* 仅在 filter_type = "projection" 时生效, 仍逐工况显式声明。
+projection_beta = 1.0
+projection_eta = 0.5
+projection_beta_max = 512.0
+projection_continuation_iter = 50
+
+# -- D 算法 (求同一问题的不同路径; 收敛意义下应给出同一解) --
+optimizer = "oc"
+move = 0.2
+density_min = 1.0e-9
+max_iter = 500
+tol_change = 1.0e-2
+assembly_method = "standard"
+solve_method = "cg"
+cg_rtol = 1.0e-12
+cg_atol = 1.0e-12
+cg_maxiter = 20000

@@ -7,11 +7,14 @@
 
 from typing import Any, Optional
 
-import scipy.sparse.linalg as spla
-
 from fealpy.backend import backend_manager as bm
+from soptx.solvers import create
 
 from .assembler import InterfaceSystem
+
+#: 本函数支持的直接法后端。CG 一类迭代法不在此列: 接口系统规模小且要求一次
+#: 给准, 迭代法在这里没有收益; 旧实现对未知名字会静默回落到 scipy, 现在报错。
+DIRECT_BACKENDS = ("scipy", "mumps")
 
 
 def solve_interface_system(
@@ -20,11 +23,12 @@ def solve_interface_system(
     fixed_dofs: Optional[Any] = None,
     *,
     prescribed: Optional[Any] = None,
+    solver: str = 'scipy',
 ) -> Any:
-    """在接口系统上施加位移约束并用稀疏直接法求解.
+    """在接口系统上施加位移约束并用 soptx.solvers 的 DirectSolver 求解.
 
     参数:
-        system: 已装配的接口系统.
+        system: 已装配的接口系统 (持有 FEALPy ``CSRTensor``).
         load: 接口自由度上的右端项, 形状 ``(n_interface,)``. 可由
             ``GlobalAssembler.project_global_vector`` 从全局载荷投影得到.
         fixed_dofs: 受约束的接口自由度编号. 可由
@@ -33,6 +37,7 @@ def solve_interface_system(
         prescribed: 接口自由度上的给定位移, 形状 ``(n_interface,)``. 只有
             ``fixed_dofs`` 位置上的分量被采用, 其余分量被忽略. 为 ``None`` 时
             视为齐次约束.
+        solver: 底层直接法后端, 取 ``DIRECT_BACKENDS`` 之一, 缺省为 ``'scipy'``.
 
     返回:
         u: 接口自由度上的位移, 形状 ``(n_interface,)``. 约束自由度取给定值,
@@ -45,9 +50,6 @@ def solve_interface_system(
     说明:
         非齐次约束按 ``K_ff u_f = f_f - (K u_c)_f`` 缩减, 其中 ``u_c`` 是只在约束
         自由度上取给定值, 其余为零的向量.
-
-        接口矩阵以 ``scipy`` 稀疏格式持有, 数值在此经 ``bm.to_numpy`` 转出到
-        ``scipy.sparse.linalg``, 这是流程中与第三方求解库对接的边界.
     """
     n_interface = int(len(system.global_dofs))
 
@@ -72,7 +74,7 @@ def solve_interface_system(
             )
         u = bm.set_at(u, fixed, u_c[fixed])
         # 给定位移在未约束自由度上产生的反力, 移到右端项.
-        f = f - bm.asarray(system.stiffness @ bm.to_numpy(u), dtype=bm.float64)
+        f = f - (system.stiffness @ u)
 
     all_dofs: Any = bm.arange(n_interface, dtype=bm.int64)
     free = all_dofs[bm.isin(all_dofs, fixed, invert=True)]
@@ -80,8 +82,27 @@ def solve_interface_system(
         return u
 
     free_np = bm.to_numpy(free)
-    u_free = spla.spsolve(
-        system.stiffness[free_np[:, None], free_np],
-        bm.to_numpy(f[free]),
-    )
-    return bm.set_at(u, free, bm.asarray(u_free, dtype=bm.float64))
+    f_np = bm.to_numpy(f)
+
+    # 提取标准的 CSR 主子矩阵
+    if hasattr(system.stiffness, "to_scipy"):
+        K_scipy = system.stiffness.to_scipy()
+    else:
+        K_scipy = system.stiffness
+
+    K_free_scipy = K_scipy[free_np, :][:, free_np].tocsr()
+
+    if solver not in DIRECT_BACKENDS:
+        raise ValueError(
+            f"未知的直接法后端: {solver!r}; 可选 {DIRECT_BACKENDS}."
+        )
+    # 接口系统在本函数内只解一次, 分解不跨调用复用; MUMPS 上下文用完即释放,
+    # MPI 初始化由 DirectSolver 自己负责, 调用方不必再准备。
+    linear_solver = create(solver)
+    try:
+        u_free, _ = linear_solver.setup(K_free_scipy).solve(f_np[free_np])
+    finally:
+        linear_solver.close()
+    u_free_np = bm.to_numpy(u_free)
+
+    return bm.set_at(u, free, bm.asarray(u_free_np, dtype=bm.float64))

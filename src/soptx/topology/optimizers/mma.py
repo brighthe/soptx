@@ -30,7 +30,7 @@ class MMAOptions:
     change_tolerance: float = 1e-2
     
     # 是否使用惩罚因子连续化 (SIMP)
-    use_penalty_continuation: bool = True
+    use_penalty_continuation: bool = False
 
     # =========================================================================
     # 2. 几何/渐近线控制参数 (Asymptotes)
@@ -169,7 +169,7 @@ class MMAOptimizer(BaseLogged):
     def optimize(self,
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
-                is_store_stress: bool = True,
+                is_store_stress: bool = False,
                 enable_timing: bool = False,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
@@ -249,7 +249,7 @@ class MMAOptimizer(BaseLogged):
                 obj0 = float(obj_val_raw.item()) 
                 denom = max(abs(obj0), 1e-10)
                 # 使用投影滤波 -> 缩放至 10.0
-                if self._filter._filter_type == 'projection':
+                if self._filter.has_projection:
                     target_initial_val = 10.0
                     self._obj_scale_factor = min(1e6, target_initial_val / denom)
                 # 其他情况 -> 默认 1.0 不缩放

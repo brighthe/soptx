@@ -1,0 +1,437 @@
+# 图 2「Matrix-Free 算子 / Krylov 求解」的数据点注册表。
+#
+# 本文件只描述"跑哪一条命令、产物落在哪"; 从产物里取哪些字段、门禁怎么判,
+# 写在 collect.py 里 —— TOML 描述运行, Python 描述读取, 两者不混。
+#
+# 约定:
+#   script       仓库根起算的相对路径, 由 run.py 以子进程调用。
+#   args         传给该脚本的固定参数, 逐项写全, 不依赖脚本缺省值。
+#   output_mode  dir   = 用 --output-dir 重定向到本目录 outputs/, 文件名由脚本决定
+#                file  = 用 --output 指定完整路径
+#                fixed = 脚本落盘位置写死, 无法重定向, 只能就地读
+#   artifact     产物路径; output_mode = fixed 时为仓库根起算的相对路径,
+#                否则为本目录 outputs/ 下的文件名。
+
+[figure]
+id = "fig2"
+title = "Matrix-Free 算子 / Krylov 求解"
+question = "对不对 / 能算多大 / 切得开吗 / 搬得动吗"
+consumer = "dut-postdoc:research/funding/active/china-postdoc-foundation-general-grant/assets/make_figs.py"
+
+# --------------------------------------------------------------------------
+# (a) 对不对 —— 显式组装的收敛阶 + matrix-free 与它同解
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "a-fa-2d"
+panel = "a"
+role = "fa-chain-2d"
+summary = "2D tri sinusoidal p1 五档误差链, MUMPS 稀疏直接解"
+script = "examples/lagrange_elasticity/manufactured_convergence_demo.py"
+# 与 3D 链统一走 MUMPS: 两条链除维数相关项外逐项对应, 表 a-1 的配置表才立得住。
+# --mumps-sym 1 声明对称正定 —— 平面应变全 Dirichlet 的刚度阵与 3D 同样是 SPD。
+# 装配仍走缺省 standard: 2D 最细档只有 8,450 自由度, 不存在 3D 那个内存问题。
+args = [
+    "--dim", "2", "--mesh-type", "tri", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--solver", "mumps", "--mumps-sym", "1",
+]
+output_mode = "dir"
+artifact = "manufactured_convergence_2d_tri_sinusoidal_p1_mumps.json"
+
+[[cases]]
+id = "a-fa-3d"
+panel = "a"
+role = "fa-chain-3d"
+summary = "3D tet divfree-poly p1 五档误差链, MUMPS + fast 装配"
+script = "examples/lagrange_elasticity/manufactured_convergence_demo.py"
+# --assembly-method fast 必须显式给: 缺省 standard 在 n=64 会把被求和掉的
+# 积分点轴物化成九个 (NC, NQ, 4, 4) 临时张量, 单块 3.75 GiB, 本机跑不动。
+# --mumps-sym 1 声明对称正定; 注意脚本目前不把它写进 solver_options,
+# 产物里看不出这一档用的哪个 sym —— 见 results_analysis.md §3 待办。
+args = [
+    "--dim", "3", "--mesh-type", "tet", "--model", "divfree-poly",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--solver", "mumps", "--mumps-sym", "1", "--assembly-method", "fast",
+]
+output_mode = "dir"
+artifact = "manufactured_convergence_3d_tet_divfree-poly_p1_mumps_fast.json"
+
+[[cases]]
+id = "a-ea-rings"
+panel = "a"
+role = "ea-rings"
+summary = "CPU 串行 stage-1 EA/FA 证据, 供 (a) 的空心环取 EA/FA 解相对差"
+script = "examples/matrix_free_elasticity/stage1_evidence.py"
+args = ["--dim", "all"]
+# stage1_evidence.py 支持 --output-dir 重定向, 产物落在本目录 outputs/。
+output_mode = "dir"
+artifact = "stage1_evidence_validation.json"
+
+# --------------------------------------------------------------------------
+# (b) 能算多大 —— FA/EA 进程峰值 RSS
+#
+# ru_maxrss 是进程级高水位, 无法按对象归因, 所以每个数据点必须独占一个进程:
+# 八个 case = 四档 x 两个算子层级, 一个都不能合并。
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "b-fa-n8"
+panel = "b"
+role = "peak-rss"
+level = "fa"
+resolution = 8
+summary = "3D tet polynomial p1, FA, n=8 进程峰值 RSS"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "fa", "--assembly-method", "fast", "--n", "8",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_fa_fast_n8.json"
+
+[[cases]]
+id = "b-fa-n16"
+panel = "b"
+role = "peak-rss"
+level = "fa"
+resolution = 16
+summary = "3D tet polynomial p1, FA, n=16 进程峰值 RSS"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "fa", "--assembly-method", "fast", "--n", "16",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_fa_fast_n16.json"
+
+[[cases]]
+id = "b-fa-n32"
+panel = "b"
+role = "peak-rss"
+level = "fa"
+resolution = 32
+summary = "3D tet polynomial p1, FA, n=32 进程峰值 RSS"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "fa", "--assembly-method", "fast", "--n", "32",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_fa_fast_n32.json"
+
+[[cases]]
+id = "b-fa-n64"
+panel = "b"
+role = "peak-rss"
+level = "fa"
+resolution = 64
+summary = "3D tet polynomial p1, FA, n=64 进程峰值 RSS (约 17 GiB, 最重的一档)"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "fa", "--assembly-method", "fast", "--n", "64",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_fa_fast_n64.json"
+
+[[cases]]
+id = "b-fa-n80"
+panel = "b"
+role = "peak-rss"
+level = "fa"
+resolution = 80
+# 全装配这条路在本机的最后一档: 按 n=64 的 17.02 GiB 线性外推约 32.9 GiB,
+# 占 47 GiB 物理内存的七成。再往上 (n=96 约 57 GiB) 必然 OOM —— (b) 的横轴
+# 到此为止, 不是选择而是这台机器的上限, 这本身就是这一格要说的话。
+summary = "3D tet polynomial p1, FA, n=80 进程峰值 RSS (约 33 GiB, 本机 FA 的最后一档)"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "fa", "--assembly-method", "fast", "--n", "80",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_fa_fast_n80.json"
+
+[[cases]]
+id = "b-ea-n8"
+panel = "b"
+role = "peak-rss"
+level = "ea"
+resolution = 8
+summary = "3D tet polynomial p1, EA, n=8 进程峰值 RSS"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "ea", "--assembly-method", "fast", "--n", "8",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_ea_fast_n8.json"
+
+[[cases]]
+id = "b-ea-n16"
+panel = "b"
+role = "peak-rss"
+level = "ea"
+resolution = 16
+summary = "3D tet polynomial p1, EA, n=16 进程峰值 RSS"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "ea", "--assembly-method", "fast", "--n", "16",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_ea_fast_n16.json"
+
+[[cases]]
+id = "b-ea-n32"
+panel = "b"
+role = "peak-rss"
+level = "ea"
+resolution = 32
+summary = "3D tet polynomial p1, EA, n=32 进程峰值 RSS"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "ea", "--assembly-method", "fast", "--n", "32",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_ea_fast_n32.json"
+
+[[cases]]
+id = "b-ea-n64"
+panel = "b"
+role = "peak-rss"
+level = "ea"
+resolution = 64
+summary = "3D tet polynomial p1, EA, n=64 进程峰值 RSS"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "ea", "--assembly-method", "fast", "--n", "64",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_ea_fast_n64.json"
+
+[[cases]]
+id = "b-ea-n80"
+panel = "b"
+role = "peak-rss"
+level = "ea"
+resolution = 80
+# 同一档上 EA 只需约 11 GiB —— 与上面那条 33 GiB 并排, 才是"同一内存上限下
+# 能算多大"的直接读数。
+summary = "3D tet polynomial p1, EA, n=80 进程峰值 RSS (约 11 GiB)"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+args = [
+    "--mode", "serial-peak-rss", "--model", "polynomial", "--mesh-type", "tet",
+    "--operator-level", "ea", "--assembly-method", "fast", "--n", "80",
+]
+output_mode = "file"
+artifact = "peak_rss_3d_tet_polynomial_p1_ea_fast_n80.json"
+
+# --------------------------------------------------------------------------
+# 数据组 (c) 能不能更快 —— 同一 EA matrix-free 算子的 CPU / 单卡 GPU 耗时对照
+# ⚠️ 这里的 (c) 是数据组标识; 2026-08-24 版式改造后它画在**图面的 (d)**。
+#
+# 横轴与 (b) 同为自由度, 四档剖分逐一对应, 两格才能连起来读成
+# "能算多大 / 算得多快"。
+#
+# 唯一变量是设备: 两侧都走 pytorch 后端, 只切 bm.set_default_device。
+# 若 CPU 侧换用 numpy 后端, 加速比里会混进后端差异, 那就不是设备对照了。
+#
+# 每档一个进程, 但理由与 (b) 不同: (b) 是 ru_maxrss 无法按对象归因, 必须隔离;
+# 这里是四档规模跨度大, 分开跑才能单独重跑失败的一档。CPU 与 GPU 两侧在同一进程
+# 内先后跑 —— 解要留在内存里算相对差, 跨进程就得落盘再读回。
+#
+# 不是多卡强扩展: 一块卡足以回答"算子能搬上加速器", 多卡是另一个题目。
+#
+# 门禁在 collect.py: 两侧解相对差 <= 1e-9, 且 CG 迭代数逐档一致。
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "c-dev-n8"
+panel = "c"
+role = "device-speedup"
+level = "ea"
+resolution = 8
+summary = "3D tet polynomial p1, EA, n=8 CPU/GPU 求解耗时对照"
+script = "examples/matrix_free_elasticity/benchmark_device_ea.py"
+args = [
+    "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "8",
+    "--warmup", "1", "--repeats", "3", "--gap-gate", "1e-9",
+]
+output_mode = "file"
+artifact = "device_speedup_3d_tet_polynomial_p1_ea_fast_n8.json"
+
+[[cases]]
+id = "c-dev-n16"
+panel = "c"
+role = "device-speedup"
+level = "ea"
+resolution = 16
+summary = "3D tet polynomial p1, EA, n=16 CPU/GPU 求解耗时对照"
+script = "examples/matrix_free_elasticity/benchmark_device_ea.py"
+args = [
+    "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "16",
+    "--warmup", "1", "--repeats", "3", "--gap-gate", "1e-9",
+]
+output_mode = "file"
+artifact = "device_speedup_3d_tet_polynomial_p1_ea_fast_n16.json"
+
+[[cases]]
+id = "c-dev-n32"
+panel = "c"
+role = "device-speedup"
+level = "ea"
+resolution = 32
+summary = "3D tet polynomial p1, EA, n=32 CPU/GPU 求解耗时对照"
+script = "examples/matrix_free_elasticity/benchmark_device_ea.py"
+args = [
+    "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "32",
+    "--warmup", "1", "--repeats", "3", "--gap-gate", "1e-9",
+]
+output_mode = "file"
+artifact = "device_speedup_3d_tet_polynomial_p1_ea_fast_n32.json"
+
+[[cases]]
+id = "c-dev-n64"
+panel = "c"
+role = "device-speedup"
+level = "ea"
+resolution = 64
+# 最重的一档: CPU 侧单次 CG 约 34 s, warmup 1 + 计时 3 次合计约 2.5 分钟。
+summary = "3D tet polynomial p1, EA, n=64 CPU/GPU 求解耗时对照"
+script = "examples/matrix_free_elasticity/benchmark_device_ea.py"
+args = [
+    "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "64",
+    "--warmup", "1", "--repeats", "3", "--gap-gate", "1e-9",
+]
+output_mode = "file"
+artifact = "device_speedup_3d_tet_polynomial_p1_ea_fast_n64.json"
+
+# (c) 到此为止, 不再往上加档。曾注册过 c-dev-n80 (159 万自由度) 想让 (c) 跟上正文
+# "三维百万至亿级自由度"的口径, 但它在这张卡上跑不出来: n=64 一档的
+# gpu_peak_allocated_bytes 已是 12.800 GiB / 整卡 15.920 GiB (占 80.4%), 峰值随自由度
+# 近似线性, n=80 需约 24.8 GiB。实跑时 WDDM 不报 OOM 而是把显存分页到主机内存, 于是
+# 卡在 100% 利用率上空转 13 分 41 秒未产出可用结果, 只能杀掉。
+#
+# 这不是把结论砍短: (c) 要证的是"同一算子换到 GPU 即可运行、结果逐位等价、规模越大
+# 收益越大", 四档已经证完, 且 82 万这一档的加速比与带宽饱和曲线都已到位。"能算多大"
+# 是 (b) 的题目, (b) 已经做到 n=80 / 159 万自由度。
+#
+# 真正被这一档暴露出来的事实反而更有用: n=64 的 12.800 GiB 里, 长期持有的 K_e 只有
+# 1.688 GiB, 86.8% 是装配期瞬态 —— 挡住这条路线的是构造过程而不是 matrix-free 本身,
+# 正是研究内容 2 的 PA 路径要消掉的部分。要把 (c) 推过百万, 先做那件事, 而不是加档。
+
+# ---------------------------------------------------------------------------
+# 数据组 (d) 进程级强扩展: 同一个 3D matrix-free 算子, 规模固定在 n=64 / 82.4 万
+# 自由度, 只加进程数。它与数据组 (c) 的单卡 GPU 是两条不同的并行层级 —— (c) 切设备内
+# (SIMT), (d) 切进程 (MPI) —— 两者的加速比不可互相外推, 必须各自成格。
+#
+# panel = "d" 是这组数据的标识, 不是它在成图里的位置。⚠️ 版式改造已于 2026-08-24
+# 完成: **这组数据现在画在图面的 (c)**, 数据组 c 的 GPU 对照画在图面的 (d), 两套编号
+# 正好错开。键名按采集顺序固定、改名会作废历史快照, 故不随图面改。
+#
+# 全部五档共用同一条命令, 只有 mpiexec -n 不同; OMP_NUM_THREADS=1 是必需的:
+# 不锁死线程层, 每个 rank 底下的 OpenBLAS 还会再开线程, 测出来的就不再是进程级
+# 强扩展, 而是进程 x 线程的乘积, 那条曲线无法归因。
+#
+# 计时口径: 现有五份产物跑的是 --warmup 0 --repeats 1 (脚本默认是 1/3)。单次采样
+# 足以定曲线形状 (五档迭代数逐档相同 = 493, 残差逐档一致), 但把数字写进申请书成图
+# 前应按默认口径重跑一遍。collect.py 只门禁五档口径是否一致, 不替单次采样背书。
+# ---------------------------------------------------------------------------
+
+[[cases]]
+id = "d-mpi-p1"
+panel = "d"
+role = "mpi-strong"
+level = "ea"
+ranks = 1
+summary = "3D tet polynomial p1, EA fast, n=64, 1 进程强扩展"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+launcher = ["mpiexec", "-n", "1"]
+env = { OMP_NUM_THREADS = "1" }
+args = [
+    "--mode", "mpi-ea-strong", "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "64",
+    "--warmup", "0", "--repeats", "1",
+]
+output_mode = "file"
+artifact = "mpi/mpi_strong_3d_n64_fast_p1.json"
+
+[[cases]]
+id = "d-mpi-p2"
+panel = "d"
+role = "mpi-strong"
+level = "ea"
+ranks = 2
+summary = "3D tet polynomial p1, EA fast, n=64, 2 进程强扩展"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+launcher = ["mpiexec", "-n", "2"]
+env = { OMP_NUM_THREADS = "1" }
+args = [
+    "--mode", "mpi-ea-strong", "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "64",
+    "--warmup", "0", "--repeats", "1",
+]
+output_mode = "file"
+artifact = "mpi/mpi_strong_3d_n64_fast_p2.json"
+
+[[cases]]
+id = "d-mpi-p4"
+panel = "d"
+role = "mpi-strong"
+level = "ea"
+ranks = 4
+summary = "3D tet polynomial p1, EA fast, n=64, 4 进程强扩展"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+launcher = ["mpiexec", "-n", "4"]
+env = { OMP_NUM_THREADS = "1" }
+args = [
+    "--mode", "mpi-ea-strong", "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "64",
+    "--warmup", "0", "--repeats", "1",
+]
+output_mode = "file"
+artifact = "mpi/mpi_strong_3d_n64_fast_p4.json"
+
+[[cases]]
+id = "d-mpi-p8"
+panel = "d"
+role = "mpi-strong"
+level = "ea"
+ranks = 8
+summary = "3D tet polynomial p1, EA fast, n=64, 8 进程强扩展"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+launcher = ["mpiexec", "-n", "8"]
+env = { OMP_NUM_THREADS = "1" }
+args = [
+    "--mode", "mpi-ea-strong", "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "64",
+    "--warmup", "0", "--repeats", "1",
+]
+output_mode = "file"
+artifact = "mpi/mpi_strong_3d_n64_fast_p8.json"
+
+[[cases]]
+id = "d-mpi-p16"
+panel = "d"
+role = "mpi-strong"
+level = "ea"
+ranks = 16
+summary = "3D tet polynomial p1, EA fast, n=64, 16 进程强扩展"
+script = "examples/matrix_free_elasticity/benchmark_cpu_ea.py"
+launcher = ["mpiexec", "-n", "16"]
+env = { OMP_NUM_THREADS = "1" }
+args = [
+    "--mode", "mpi-ea-strong", "--model", "polynomial", "--mesh-type", "tet",
+    "--assembly-method", "fast", "--n", "64",
+    "--warmup", "0", "--repeats", "1",
+]
+output_mode = "file"
+artifact = "mpi/mpi_strong_3d_n64_fast_p16.json"

@@ -3,7 +3,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 
 from soptx.core import BaseLogged
-from soptx.fem.solvers import LagrangeFEMAnalyzer
+from soptx.fem.analyzers import LagrangeFEMAnalyzer
 
 class VanishingStressConstraint(BaseLogged):
     """

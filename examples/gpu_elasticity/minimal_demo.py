@@ -30,7 +30,7 @@ import numpy as np
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import QuadrangleMesh, TriangleMesh
 
-from soptx.fem.solvers import LagrangeFEMAnalyzer
+from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import (
     SinusoidalPlaneStrainElasticity2D,

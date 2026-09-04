@@ -8,7 +8,7 @@
 批量子结构对应前导维 ``B``, 与 ``condensation`` 模块的形状约定一致.
 """
 
-from typing import Tuple, Any, Optional, Sequence
+from typing import Tuple, Any, Optional, Sequence, List, Dict, Iterator
 
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import QuadrangleMesh, HexahedronMesh
@@ -36,9 +36,10 @@ class SubstructurePrototype:
         cell2dof: 单元到局部自由度的映射, 形状 ``(NC, n_edof)``.
     """
 
-    # 接口自由度上刚体模态基与其正交补的惰性缓存.
+    # 接口自由度上刚体模态基, 其正交补, 以及刚体运动下内部自由度取值的惰性缓存.
     _rigid_basis: Optional[Any] = None
     _deformation_basis: Optional[Any] = None
+    _rigid_interior: Optional[Any] = None
 
     def __init__(
         self,
@@ -47,6 +48,9 @@ class SubstructurePrototype:
         E_base: float = 1.0,
         nu: float = 0.3,
         *,
+        degree: int = 1,
+        p: Optional[int] = None,
+        integration_order: Optional[int] = None,
         penal: float = 3.0,
         rho_min: float = 0.0,
     ) -> None:
@@ -58,13 +62,16 @@ class SubstructurePrototype:
             n_fine: 单个子结构在各方向的细单元数, 长度与 ``cell_size`` 相同.
             E_base: 实体材料的杨氏模量.
             nu: 泊松比.
+            degree: 有限元位移空间的多项式插值次数, 缺省为 ``1``.
+            p: ``degree`` 的别名, 显式给出时优先于 ``degree``.
+            integration_order: 单元数值积分阶数; ``None`` 使用积分器缺省值.
             penal: SIMP 惩罚指数.
             rho_min: SIMP 刚度下限比值, 取 ``0.0`` 时插值为 ``rho**penal``,
                 取正值时为 ``rho_min + (1 - rho_min) * rho**penal``.
 
         异常:
             ValueError: 当维数不是 2 或 3, ``cell_size`` 与 ``n_fine`` 长度不一致,
-                或存在非正的尺寸与单元数时抛出.
+                ``degree`` 非正, 或存在非正的尺寸与单元数时抛出.
             RuntimeError: 当张量函数空间的自由度排布不是节点优先, 或细网格单元
                 无法与结构化网格下标一一对应时抛出.
         """
@@ -80,6 +87,19 @@ class SubstructurePrototype:
             raise ValueError(f"cell_size 的各分量必须为正; 当前为 {tuple(cell_size)}.")
         if any(int(n) <= 0 for n in n_fine):
             raise ValueError(f"n_fine 的各分量必须为正整数; 当前为 {tuple(n_fine)}.")
+
+        self.degree: int = int(p if p is not None else degree)
+        if self.degree <= 0:
+            raise ValueError(f"degree 必须为正整数; 当前为 {self.degree}.")
+        self.p: int = self.degree
+        self.integration_order = (
+            None if integration_order is None else int(integration_order)
+        )
+        if self.integration_order is not None and self.integration_order <= 0:
+            raise ValueError(
+                "integration_order 必须为正整数或 None; "
+                f"当前为 {self.integration_order}."
+            )
 
         self.cell_size: Tuple[float, ...] = tuple(float(s) for s in cell_size)
         self.n_fine: Tuple[int, ...] = tuple(int(n) for n in n_fine)
@@ -107,12 +127,15 @@ class SubstructurePrototype:
                 youngs_modulus=self.E_base, poisson_ratio=self.nu
             )
 
-        self.sspace: LagrangeFESpace = LagrangeFESpace(self.mesh, p=1, ctype='C')
+        self.sspace: LagrangeFESpace = LagrangeFESpace(
+            self.mesh, p=self.degree, ctype='C'
+        )
         self.space: TensorFunctionSpace = TensorFunctionSpace(
             self.sspace, shape=(-1, self.dim)
         )
         self.integrator: LinearElasticIntegrator = LinearElasticIntegrator(
-            material=self.material
+            material=self.material,
+            q=self.integration_order,
         )
 
         # i_dofs/b_dofs 按 dim * node + k 编号, 只有节点优先排布才成立.
@@ -122,8 +145,8 @@ class SubstructurePrototype:
                 "需要 TensorFunctionSpace(shape=(-1, dim))."
             )
 
-        self.n_total_nodes: int = self.mesh.number_of_nodes()
-        self.n_total_dofs: int = self.space.number_of_global_dofs()
+        self.n_total_nodes: int = int(self.sspace.number_of_global_dofs())
+        self.n_total_dofs: int = int(self.space.number_of_global_dofs())
         self.n_cells: int = self.mesh.number_of_cells()
 
         self._classify_nodes()
@@ -141,22 +164,121 @@ class SubstructurePrototype:
         )
         self._scatter_index: Any = bm.reshape(flat_index, (-1,))
 
+        self._corner_nodes: Optional[Any] = None
+        self._linear_boundary_matrix: Optional[Any] = None
+
+    @property
+    def corner_nodes(self) -> Any:
+        """子结构几何角节点的局部编号, 形状 ``(2**dim,)``.
+
+        排布顺序:
+            2D (4 节点): (0,0), (1,0), (1,1), (0,1)
+            3D (8 节点): (0,0,0), (0,0,1), (0,1,0), (0,1,1), (1,0,0), (1,0,1), (1,1,0), (1,1,1)
+        """
+        if self._corner_nodes is not None:
+            return self._corner_nodes
+
+        ipoints = self.sspace.interpolation_points()
+        if self.dim == 2:
+            corners = [
+                (0.0, 0.0),
+                (self.cell_size[0], 0.0),
+                (self.cell_size[0], self.cell_size[1]),
+                (0.0, self.cell_size[1]),
+            ]
+        else:
+            corners = [
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, self.cell_size[2]),
+                (0.0, self.cell_size[1], 0.0),
+                (0.0, self.cell_size[1], self.cell_size[2]),
+                (self.cell_size[0], 0.0, 0.0),
+                (self.cell_size[0], 0.0, self.cell_size[2]),
+                (self.cell_size[0], self.cell_size[1], 0.0),
+                (self.cell_size[0], self.cell_size[1], self.cell_size[2]),
+            ]
+        corner_indices = []
+        for pt in corners:
+            diff = ipoints - bm.asarray(pt, dtype=bm.float64)[None, :]
+            dist = bm.sum(diff ** 2, axis=-1)
+            idx = int(bm.argmin(dist))
+            corner_indices.append(idx)
+
+        self._corner_nodes = bm.asarray(corner_indices, dtype=bm.int64)
+        return self._corner_nodes
+
+    @property
+    def corner_dofs(self) -> Any:
+        """子结构几何角节点的局部自由度编号, 形状 ``(dim * 2**dim,)``."""
+        corners = self.corner_nodes
+        dofs = [self.dim * corners + k for k in range(self.dim)]
+        return bm.concat(dofs, axis=0)
+
+    @property
+    def linear_boundary_matrix(self) -> Any:
+        """线性边界插值矩阵 L, 形状 ``(n_b, dim * 2**dim)`` (Huang 2023 式 16).
+
+        说明:
+            将 8 个角节点 (2D 为 4 个) 的粗尺度位移向量 u_c 线性插值映射至子结构外表面全部
+            n_b 个细边界节点自由度: u_b = L u_c.
+            各行权重严格满足单位分解性 sum(W, axis=1) == 1.
+        """
+        if self._linear_boundary_matrix is not None:
+            return self._linear_boundary_matrix
+
+        ipoints = self.sspace.interpolation_points()
+        b_pts = ipoints[self.boundary_nodes]
+        n_bnodes = len(self.boundary_nodes)
+
+        xi = b_pts[:, 0] / self.cell_size[0]
+        eta = b_pts[:, 1] / self.cell_size[1]
+
+        if self.dim == 2:
+            w0 = (1.0 - xi) * (1.0 - eta)
+            w1 = xi * (1.0 - eta)
+            w2 = xi * eta
+            w3 = (1.0 - xi) * eta
+            W = bm.stack([w0, w1, w2, w3], axis=-1)
+            n_corners = 4
+        else:
+            zeta = b_pts[:, 2] / self.cell_size[2]
+            w0 = (1.0 - xi) * (1.0 - eta) * (1.0 - zeta)
+            w1 = (1.0 - xi) * (1.0 - eta) * zeta
+            w2 = (1.0 - xi) * eta * (1.0 - zeta)
+            w3 = (1.0 - xi) * eta * zeta
+            w4 = xi * (1.0 - eta) * (1.0 - zeta)
+            w5 = xi * (1.0 - eta) * zeta
+            w6 = xi * eta * (1.0 - zeta)
+            w7 = xi * eta * zeta
+            W = bm.stack([w0, w1, w2, w3, w4, w5, w6, w7], axis=-1)
+            n_corners = 8
+
+        L = bm.zeros((self.n_b, self.dim * n_corners), dtype=bm.float64)
+        for c in range(n_corners):
+            for k in range(self.dim):
+                row_idx = bm.arange(n_bnodes, dtype=bm.int64) * self.dim + k
+                col_idx = c * self.dim + k
+                L = bm.set_at(L, (row_idx, col_idx), W[:, c])
+
+        self._linear_boundary_matrix = L
+        return self._linear_boundary_matrix
+
     def _classify_nodes(self) -> None:
         """按几何位置划分内部节点与接口节点, 并展开为自由度索引.
 
         说明:
-            判定容差取最小细单元尺寸的相对量, 使分类不随模型的物理量纲变化;
-            使用绝对容差时, 以毫米建模的大构件会把内部节点误判为接口节点.
+            判定容差取最小细单元高阶步长的相对量, 使分类不随模型的物理量纲变化.
         """
-        node_coords = self.mesh.entity('node')
-        h_min = min(s / n for s, n in zip(self.cell_size, self.n_fine))
+        ipoints = self.sspace.interpolation_points()
+        h_min = min(
+            s / (n * self.degree) for s, n in zip(self.cell_size, self.n_fine)
+        )
         eps = 1.0e-6 * h_min
 
-        # 显式标注为 Any: TensorLike 联合类型不支持 |= 运算符的类型推断.
-        is_boundary: Any = bm.zeros((node_coords.shape[0],), dtype=bm.bool)
+        is_boundary: Any = bm.zeros((ipoints.shape[0],), dtype=bm.bool)
         for d in range(self.dim):
-            is_boundary |= bm.abs(node_coords[:, d]) < eps
-            is_boundary |= bm.abs(node_coords[:, d] - self.cell_size[d]) < eps
+            is_boundary |= bm.abs(ipoints[:, d]) < eps
+            is_boundary |= bm.abs(ipoints[:, d] - self.cell_size[d]) < eps
 
         self.boundary_nodes: Any = bm.nonzero(is_boundary)[0]
         self.internal_nodes: Any = bm.nonzero(~is_boundary)[0]
@@ -171,25 +293,20 @@ class SubstructurePrototype:
         self.n_b: int = len(self.b_dofs)
 
     def _build_node_mapping(self) -> None:
-        """由节点坐标反解每个局部节点的结构化网格下标.
+        """由插值点坐标反解每个局部节点的结构化网格下标.
 
         异常:
-            RuntimeError: 当局部节点无法与 ``n_fine`` 给出的结构化下标一一对应时抛出.
-
-        说明:
-            子结构在全局模型中的自由度编号由它的结构化下标加上子结构偏移得到.
-            这里把局部节点编号到结构化下标的对应关系显式算出来并校验为置换,
-            使装配不依赖网格生成器的节点编号次序.
+            RuntimeError: 当局部节点无法与结构化高阶网格下标一一对应时抛出.
         """
-        node = self.mesh.entity('node')
-        n_nodes_per_dir = tuple(n + 1 for n in self.n_fine)
+        ipoints = self.sspace.interpolation_points()
+        n_nodes_per_dir = tuple(n * self.degree + 1 for n in self.n_fine)
 
         columns = []
         linear_index: Any = bm.zeros((self.n_total_nodes,), dtype=bm.int64)
         for d in range(self.dim):
-            h_d = self.cell_size[d] / self.n_fine[d]
-            idx_d = bm.astype(bm.round(node[:, d] / h_d), bm.int64)
-            idx_d = bm.clip(idx_d, 0, self.n_fine[d])
+            h_d = self.cell_size[d] / (self.n_fine[d] * self.degree)
+            idx_d = bm.astype(bm.round(ipoints[:, d] / h_d), bm.int64)
+            idx_d = bm.clip(idx_d, 0, self.n_fine[d] * self.degree)
             columns.append(idx_d)
             linear_index = linear_index * n_nodes_per_dir[d] + idx_d
 
@@ -200,10 +317,10 @@ class SubstructurePrototype:
             )
         ):
             raise RuntimeError(
-                "局部节点未能与结构化网格下标一一对应, 无法建立子结构到全局的映射."
+                "局部插值节点未能与结构化网格下标一一对应, 无法建立子结构到全局的映射."
             )
 
-        # (n_nodes, dim): 第 n 行是局部节点 n 在子结构结构化网格中的整数下标.
+        # (n_nodes, dim): 第 n 行是局部插值节点 n 在子结构高阶结构化网格中的整数下标.
         self.node_grid_index: Any = bm.stack(columns, axis=-1)
         self.n_nodes_per_dir: Tuple[int, ...] = n_nodes_per_dir
 
@@ -242,7 +359,16 @@ class SubstructurePrototype:
                 "细单元重心未能与结构化网格下标一一对应, "
                 "无法建立密度场到单元编号的映射."
             )
-        self._grid_to_cell: Any = linear_index
+        # ``linear_index[cell_id] = grid_id``. 两个方向都显式保存, 避免调用方
+        # 猜测 FEALPy 单元编号与结构化 C 序是否一致.
+        self._cell_grid_index: Any = linear_index
+        inverse: Any = bm.zeros((self.n_cells,), dtype=bm.int64)
+        inverse = bm.set_at(
+            inverse,
+            linear_index,
+            bm.arange(self.n_cells, dtype=bm.int64),
+        )
+        self._grid_cell_index: Any = inverse
 
     ### 接口自由度上的刚体模态与变形子空间 ###
 
@@ -284,34 +410,49 @@ class SubstructurePrototype:
             self._build_interface_bases()
         return self._deformation_basis
 
-    def _build_interface_bases(self) -> None:
-        """解析构造接口自由度上的刚体模态基及其正交补.
-
-        异常:
-            RuntimeError: 当接口自由度数不足以容纳全部刚体模态时抛出.
+    @property
+    def rigid_interior_modes(self) -> Any:
+        """刚体运动下内部自由度的取值, 形状 ``(n_i, n_rigid)``.
 
         说明:
-            接口自由度按 ``dim * node + k`` 编号, 由此反解每个自由度所属的节点与
-            分量. 平动模态在对应分量上取 1; 转动模态取 ``e_a x (x - x_c)``, 其中
-            ``x_c`` 为接口节点的形心, ``e_a`` 遍历各坐标轴. 形心的选取只影响基的
-            表示, 不影响张成的子空间——平动模态已在基中, 任何常向量平移都被吸收.
+            记 ``R_rigid`` 为接口刚体模态基, 该量满足 ``N R_rigid = Phi_i``, 其中
+            ``N`` 是精确内部位移恢复矩阵: 子结构做刚体运动时内部位移完全由接口位移
+            决定, 且**与密度无关**. 因此它由网格解析给出, 无需任何有限元装配或缩聚.
+
+            该性质是形函数代理参数化 ``N = Phi_i R_rigid^T + M R_perp^T`` 的前提,
+            使刚体分量成为构造性质而不进入网络输出. 与 ``rigid_basis`` 共用同一
+            转动中心, 两者必须来自同一个刚体位移场, 否则该恒等式不成立.
         """
-        if self.n_b < self.n_rigid:
-            raise RuntimeError(
-                f"接口自由度数 {self.n_b} 少于刚体模态数 {self.n_rigid}, "
-                f"无法构造刚体模态基."
-            )
+        if self._rigid_interior is None:
+            self._build_interface_bases()
+        return self._rigid_interior
 
+    def _rigid_modes_on(self, dofs: Any, centroid: Any) -> Any:
+        """构造刚体位移场在给定自由度集合上的取值.
+
+        参数:
+            dofs: 局部自由度编号, 形状 ``(n,)``.
+            centroid: 转动中心, 形状 ``(dim,)``. 接口与内部自由度必须传入同一中心,
+                否则两组取值对应的不是同一个刚体位移场.
+
+        返回:
+            modes: 形状 ``(n, n_rigid)``, 前 ``dim`` 列为平动, 其余为转动.
+
+        说明:
+            自由度按 ``dim * node + k`` 编号, 由此反解每个自由度所属的节点与分量.
+            平动模态在对应分量上取 1; 转动模态取 ``e_a x (x - x_c)``, 每个自由度
+            只取该模态在自身分量方向上的分量.
+        """
         node = self.mesh.entity('node')
-        b_node = self.b_dofs // self.dim
-        b_comp = self.b_dofs % self.dim
-        # 相对形心的坐标; 形心取接口节点而非全部节点, 与基的构造对象一致.
-        offset = node[b_node] - bm.mean(node[self.boundary_nodes], axis=0)[None, :]
+        d_node = dofs // self.dim
+        d_comp = dofs % self.dim
+        offset = node[d_node] - centroid[None, :]
 
-        rows = bm.arange(self.n_b, dtype=bm.int64)
-        columns = [bm.astype(b_comp == k, bm.float64) for k in range(self.dim)]
+        n_dof = len(dofs)
+        rows = bm.arange(n_dof, dtype=bm.int64)
+        columns = [bm.astype(d_comp == k, bm.float64) for k in range(self.dim)]
 
-        zero = bm.zeros((self.n_b,), dtype=bm.float64)
+        zero = bm.zeros((n_dof,), dtype=bm.float64)
         if self.dim == 2:
             # 绕 z 轴转动: u = (-dy, dx).
             rotations = [bm.stack([-offset[:, 1], offset[:, 0]], axis=-1)]
@@ -322,14 +463,95 @@ class SubstructurePrototype:
                 bm.stack([offset[:, 2], zero, -offset[:, 0]], axis=-1),
                 bm.stack([-offset[:, 1], offset[:, 0], zero], axis=-1),
             ]
-        # 每个接口自由度只取该转动模态在自身分量方向上的分量.
-        columns.extend(vec[rows, b_comp] for vec in rotations)
+        columns.extend(vec[rows, d_comp] for vec in rotations)
 
-        modes = bm.stack(columns, axis=-1)
+        return bm.stack(columns, axis=-1)
+
+    def _build_interface_bases(self) -> None:
+        """解析构造接口刚体模态基, 其正交补, 以及刚体运动下的内部自由度取值.
+
+        异常:
+            RuntimeError: 当接口自由度数不足以容纳全部刚体模态时抛出.
+
+        说明:
+            形心取接口节点而非全部节点, 与基的构造对象一致. 形心的选取只影响基的
+            表示, 不影响张成的子空间——平动模态已在基中, 任何常向量平移都被吸收;
+            但接口与内部两组模态必须共用同一形心, 否则 ``N R_rigid = Phi_i`` 不再
+            成立.
+
+            ``Phi_i`` 由 QR 的上三角因子换基得到: 由 ``modes_b = R_rigid R_up`` 与
+            ``N modes_b = modes_i`` 得 ``Phi_i = N R_rigid = modes_i R_up^{-1}``,
+            全程不涉及局部刚度矩阵.
+        """
+        if self.n_b < self.n_rigid:
+            raise RuntimeError(
+                f"接口自由度数 {self.n_b} 少于刚体模态数 {self.n_rigid}, "
+                f"无法构造刚体模态基."
+            )
+
+        node = self.mesh.entity('node')
+        centroid = bm.mean(node[self.boundary_nodes], axis=0)
+        modes_b = self._rigid_modes_on(self.b_dofs, centroid)
+
         # 完整 QR: Q 的前 n_rigid 列张成刚体子空间, 其余列构成其正交补.
-        Q = bm.linalg.qr(modes, mode='complete')[0]
+        Q, R = bm.linalg.qr(modes_b, mode='complete')
         self._rigid_basis = Q[:, :self.n_rigid]
         self._deformation_basis = Q[:, self.n_rigid:]
+
+        # 解 Phi_i R_up = modes_i, 即换到 R_rigid 这组标准正交基下的内部取值.
+        modes_i = self._rigid_modes_on(self.i_dofs, centroid)
+        R_up = R[:self.n_rigid, :]
+        self._rigid_interior = bm.matrix_transpose(
+            bm.linalg.solve(bm.matrix_transpose(R_up), bm.matrix_transpose(modes_i))
+        )
+
+    def grid_to_cell_field(self, grid_field: Any) -> Any:
+        """把局部结构化网格场重排为 prototype FE cell 顺序.
+
+        参数:
+            grid_field: 局部结构化场, 末尾若干维必须为 ``n_fine``; 允许携带
+                任意前导批量维 ``...``.
+
+        返回:
+            cell_field: 形状 ``(..., NC)`` 的场, 最后一维按 FEALPy prototype
+                单元编号排列.
+
+        异常:
+            ValueError: 当末尾维度不是 ``n_fine`` 时抛出.
+        """
+        field = bm.asarray(grid_field)
+        n_grid = len(self.n_fine)
+        if field.ndim < n_grid or tuple(field.shape[-n_grid:]) != self.n_fine:
+            raise ValueError(
+                f"局部结构化场形状 {tuple(field.shape)} 不匹配 n_fine={self.n_fine}."
+            )
+
+        leading = tuple(field.shape[:-n_grid])
+        flat = bm.reshape(field, leading + (self.n_cells,))
+        return flat[..., self._cell_grid_index]
+
+    def cell_to_grid_field(self, cell_field: Any) -> Any:
+        """把 prototype FE cell 顺序的场重排为局部结构化网格场.
+
+        参数:
+            cell_field: 按 FEALPy prototype 单元编号排列的场, 形状
+                ``(..., NC)``.
+
+        返回:
+            grid_field: 末尾若干维为 ``n_fine`` 的局部结构化场, 按 C 序解释.
+
+        异常:
+            ValueError: 当最后一维不是 ``NC`` 时抛出.
+        """
+        field = bm.asarray(cell_field)
+        if field.ndim < 1 or field.shape[-1] != self.n_cells:
+            raise ValueError(
+                f"FE cell 场形状 {tuple(field.shape)} 的末维必须为 NC={self.n_cells}."
+            )
+
+        leading = tuple(field.shape[:-1])
+        grid_flat = field[..., self._grid_cell_index]
+        return bm.reshape(grid_flat, leading + self.n_fine)
 
     def to_cell_density(self, density: Any) -> Any:
         """把密度场统一为按单元编号排列的形式.
@@ -350,9 +572,7 @@ class SubstructurePrototype:
         n_grid = len(grid_shape)
 
         if rho.ndim >= n_grid and tuple(rho.shape[-n_grid:]) == grid_shape:
-            leading = tuple(rho.shape[:-n_grid])
-            flat = bm.reshape(rho, leading + (self.n_cells,))
-            return flat[..., self._grid_to_cell]
+            return self.grid_to_cell_field(rho)
 
         if rho.ndim >= 1 and rho.shape[-1] == self.n_cells:
             return rho
@@ -413,6 +633,43 @@ class SubstructurePrototype:
             stacked, leading + (self.n_total_dofs, self.n_total_dofs)
         )
 
+    def iter_local_stiffness_batches(
+        self,
+        density: Any,
+        *,
+        chunk_size: int,
+    ) -> Iterator[Tuple[int, int, Any]]:
+        """按子结构批次流式装配局部刚度矩阵.
+
+        参数:
+            density: 密度场, 形状约定见 ``to_cell_density``. 去掉密度轴后的
+                全部前导维会按 C 序展平为子结构批量维.
+            chunk_size: 单次装配的最大子结构数, 必须为正整数.
+
+        生成:
+            (start, end, K_local_chunk): 当前批次在展平子结构批量中的半开区间
+            ``[start, end)`` 及其局部刚度矩阵, 后者形状为
+            ``(end - start, n_dof, n_dof)``.
+
+        异常:
+            ValueError: 当 ``chunk_size`` 非正时抛出.
+
+        说明:
+            与 ``assemble_local_stiffness_batch`` 不同, 本方法不保存已生成批次,
+            也不在末尾执行 ``bm.concat``. 调用方消费一个批次后即可释放局部刚度
+            矩阵, 从而把峰值内存限制在 ``chunk_size`` 对应的规模.
+        """
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size 必须为正整数; 当前为 {chunk_size}.")
+
+        rho_cells = self.to_cell_density(density)
+        rho_flat = bm.reshape(rho_cells, (-1, self.n_cells))
+        n_batch = rho_flat.shape[0]
+
+        for start in range(0, n_batch, chunk_size):
+            end = min(start + chunk_size, n_batch)
+            yield start, end, self._assemble_chunk(rho_flat[start:end])
+
     def _assemble_chunk(self, rho_chunk: Any) -> Any:
         """装配一批局部刚度矩阵.
 
@@ -440,7 +697,33 @@ class SubstructurePrototype:
             weights=bm.reshape(KE, (-1,)),
             minlength=n_chunk * n_dof * n_dof,
         )
-        return bm.reshape(accumulated, (n_chunk, n_dof, n_dof))
+        K_local = bm.reshape(accumulated, (n_chunk, n_dof, n_dof))
+
+        return K_local
+
+    def compute_element_strain_energy(
+        self,
+        u_full: Any,
+        cell_to_dof: Any,
+    ) -> Any:
+        """计算全场所有细单元在单位刚度下的变形应变能: (u_e)^T K_0 u_e.
+
+        参数:
+            u_full: 全场细观恢复位移向量, 形状 ``(total_full_dofs,)``.
+            cell_to_dof: 全局细单元到全尺度自由度的映射, 形状 ``(n_elem_total, n_edof)``.
+
+        返回:
+            energy: 各细单元的单位基准变形应变能, 形状 ``(n_elem_total,)``.
+
+        说明:
+            全场所有单元为同构规则单元, 共用单个基准单元刚度矩阵 ``K_0 = self.KE_unit[0]``.
+            通过向量化点乘直接计算应变能, 峰值内存仅取决于 ``uhe`` (数百 MB),
+            彻底避免组装数十 GB 的全场刚度导数张量.
+        """
+        K0 = self.KE_unit[0]
+        uhe = u_full[cell_to_dof]
+        energy = bm.sum((uhe @ K0) * uhe, axis=-1)
+        return energy
 
 
 class SubstructureMesh:
@@ -711,6 +994,11 @@ class SubstructureMesh:
         """刚体子空间的标准正交补."""
         return self.prototype.deformation_basis
 
+    @property
+    def rigid_interior_modes(self) -> Any:
+        """刚体运动下内部自由度的取值, 形状 ``(n_i, n_rigid)``."""
+        return self.prototype.rigid_interior_modes
+
     def assemble_local_stiffness(self, density_field: Any) -> Any:
         """装配本子结构的局部刚度矩阵.
 
@@ -725,3 +1013,71 @@ class SubstructureMesh:
             直接使用 ``prototype.assemble_local_stiffness_batch`` 可避免逐个调用.
         """
         return self.prototype.assemble_local_stiffness_batch(density_field)
+
+
+def build_substructures(
+    assembler: Any,
+    *,
+    integration_order: Optional[int] = None,
+) -> Tuple[SubstructurePrototype, List[SubstructureMesh], List[Tuple[int, ...]]]:
+    """按装配器的布局铺开全部子结构, 共享同一个参考子结构.
+
+    参数:
+        assembler: 已构造的全局装配器, 提供求解域尺寸与子结构划分.
+        integration_order: 单元数值积分阶数; ``None`` 使用积分器缺省值.
+
+    返回:
+        (prototype, sub_meshes, positions): 共享的参考子结构, 按 x 优先字典序排列的
+            子结构列表, 以及各子结构在子结构网格中的整数位置 ``(sx, sy)``. 位置与
+            ``sub_meshes`` 同序, 供 ``get_substructure_global_dofs`` 把局部自由度映射
+            到全局编号. 全部子结构同构, 因此离散结构, 自由度划分与单位密度单元刚度
+            只构造一次.
+    """
+    sub_size = tuple(
+        assembler.domain_size[d] / assembler.n_sub[d] for d in range(assembler.dim)
+    )
+    prototype = SubstructurePrototype(
+        sub_size,
+        assembler.n_fine,
+        assembler.E_base,
+        assembler.nu,
+        degree=assembler.degree,
+        integration_order=integration_order,
+    )
+
+    sub_meshes: List[SubstructureMesh] = []
+    positions: List[Tuple[int, ...]] = []
+    sub_id = 0
+    if assembler.dim == 2:
+        for sx in range(assembler.n_sub[0]):
+            for sy in range(assembler.n_sub[1]):
+                spans = (
+                    (sx * sub_size[0], (sx + 1) * sub_size[0]),
+                    (sy * sub_size[1], (sy + 1) * sub_size[1]),
+                )
+                sub_meshes.append(
+                    SubstructureMesh(
+                        sub_id, *spans, *assembler.n_fine,
+                        E_base=assembler.E_base, nu=assembler.nu, prototype=prototype,
+                    )
+                )
+                positions.append((sx, sy))
+                sub_id += 1
+    elif assembler.dim == 3:
+        for sx in range(assembler.n_sub[0]):
+            for sy in range(assembler.n_sub[1]):
+                for sz in range(assembler.n_sub[2]):
+                    spans = (
+                        (sx * sub_size[0], (sx + 1) * sub_size[0]),
+                        (sy * sub_size[1], (sy + 1) * sub_size[1]),
+                        (sz * sub_size[2], (sz + 1) * sub_size[2]),
+                    )
+                    sub_meshes.append(
+                        SubstructureMesh(
+                            sub_id, *spans, *assembler.n_fine,
+                            E_base=assembler.E_base, nu=assembler.nu, prototype=prototype,
+                        )
+                    )
+                    positions.append((sx, sy, sz))
+                    sub_id += 1
+    return prototype, sub_meshes, positions

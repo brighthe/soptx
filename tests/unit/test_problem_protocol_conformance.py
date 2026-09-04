@@ -21,13 +21,20 @@ from pathlib import Path
 
 import pytest
 
-from soptx.core import (
+from soptx.protocols import (
+    AnalysisStage,
     DirichletElasticityProblem,
     ElasticityProblem,
     MixedBoundaryElasticityProblem,
 )
-from soptx.fem.solvers import huzhang_mfem_analyzer, lagrange_fem_analyzer
+from soptx.fem.analyzers import (
+    HuZhangMFEMAnalyzer,
+    LagrangeFEMAnalyzer,
+    huzhang_mfem_analyzer,
+    lagrange_fem_analyzer,
+)
 from soptx.problems import (
+    CantileverCorner2d,
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
     FixedFixedBeamCenterLoad2d,
@@ -40,6 +47,7 @@ from soptx.problems import (
 
 
 LAGRANGE_PROBLEM_CLASSES = (
+    CantileverCorner2d,
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
     FixedFixedBeamCenterLoad2d,
@@ -59,24 +67,16 @@ HUZHANG_PROBLEM_CLASSES = (
     SinusoidalPlaneStrainElasticity2D,
 )
 
-# Reached only inside a hasattr guard in the analyzer.
-HUZHANG_OPTIONAL_MEMBERS = frozenset({"set_load_region"})
+HUZHANG_OPTIONAL_MEMBERS = frozenset()
 
-# LagrangeFEMAnalyzer dispatches on boundary_type/load_type and each branch
-# needs its own members.  Modelling that tagged union is follow-up work; until
-# then the names live here so the guard neither misses nor over-reports.
+# 伴随右端项和弹簧支承不属于物理外载荷对象, 仍由分析器单独消费.
 LAGRANGE_OPTIONAL_MEMBERS = frozenset(
     {
         "adjoint_load_bc",
-        "concentrate_load_bc",
         "is_adjoint_load_boundary",
-        "is_concentrate_load_boundary",
-        "is_neumann_boundary",
         "is_spring_boundary",
         "k_in",
         "k_out",
-        "neumann_bc",
-        "set_equivalent_traction",
     }
 )
 
@@ -171,6 +171,27 @@ def test_analyzers_only_use_declared_problem_members(
     assert not undeclared, (
         f"{module.__name__} reads {sorted(undeclared)} off its pde, but "
         f"{protocol.__name__} does not declare them. Extend the protocol in "
-        f"src/soptx/core/protocols.py, or add the name to the optional list "
-        f"here when the access is guarded."
+        f"src/soptx/protocols/__init__.py, or add the name to the optional "
+        f"list here when the access is guarded."
+    )
+
+
+# Analyse-stage protocol: both analyzers serve the topology "analysis stage"
+# (state solve + stress + adjoint).  Checked at class level (member presence)
+# rather than by constructing an instance, because HuZhang's 3D constructor
+# currently trips an unrelated FEALPy-space bug.
+ANALYSIS_STAGE_CLASSES = (LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer)
+
+
+@pytest.mark.parametrize(
+    "analyzer_cls", ANALYSIS_STAGE_CLASSES,
+    ids=lambda cls: cls.__name__,
+)
+def test_analyzers_satisfy_analysis_stage_protocol(analyzer_cls) -> None:
+    members = set(getattr(AnalysisStage, "__protocol_attrs__", ()))
+    missing = {name for name in members if not hasattr(analyzer_cls, name)}
+    assert not missing, (
+        f"{analyzer_cls.__name__} does not satisfy {AnalysisStage.__name__}; "
+        f"missing {sorted(missing)}. Declare the member in the protocol or "
+        f"implement it on the analyzer."
     )

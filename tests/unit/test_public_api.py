@@ -11,14 +11,12 @@ def test_root_package_exports_only_version() -> None:
 def test_stable_subpackage_imports() -> None:
     from soptx.fem.integrators import LinearElasticIntegrator
     from soptx.materials import IsotropicLinearElasticMaterial
-    from soptx.problems import SinusoidalPlaneStrainElasticity2D
+    from soptx.problems import SinusoidalElasticity2D, SinusoidalPlaneStrainElasticity2D
 
     assert LinearElasticIntegrator.__name__ == "LinearElasticIntegrator"
     assert (
         IsotropicLinearElasticMaterial.__name__
         == "IsotropicLinearElasticMaterial"
     )
-    assert (
-        SinusoidalPlaneStrainElasticity2D.__name__
-        == "SinusoidalPlaneStrainElasticity2D"
-    )
+    assert SinusoidalElasticity2D.__name__ == "SinusoidalElasticity2D"
+    assert SinusoidalPlaneStrainElasticity2D is SinusoidalElasticity2D

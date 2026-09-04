@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Union
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import cartesian
 from fealpy.typing import TensorLike
+
+from soptx.problems.loads import (
+    BoundaryTractionLoad,
+    LineTractionLoad,
+    PointForceLoad,
+)
 
 from ._base import axis_aligned_box_corners, validated_domain
 
@@ -20,7 +26,6 @@ class CantileverCorner2d:
 
     dimension = 2
     boundary_type = "mixed"
-    load_type = "concentrated"
     _eps = 1.0e-12
 
     def __init__(
@@ -64,11 +69,6 @@ class CantileverCorner2d:
         return self._plane_type
 
     @cartesian
-    def body_force(self, points: TensorLike) -> TensorLike:
-        """返回零体力."""
-        return bm.zeros(points.shape, **bm.context(points))
-
-    @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         """返回左端固支的齐次位移数据."""
         return bm.zeros(points.shape, **bm.context(points))
@@ -82,31 +82,14 @@ class CantileverCorner2d:
         """返回两个位移分量共享的左端边界标记."""
         return (self._on_left_boundary, self._on_left_boundary)
 
-    @cartesian
-    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        """返回右下角沿竖直方向施加的集中力值."""
-        value = bm.zeros(points.shape, **bm.context(points))
-        return bm.set_at(value, (..., 1), self.P)
-
-    def concentrate_load_bc(self) -> list[Callable]:
-        """返回集中力值函数列表."""
-        return [self._concentrate_load_bc]
-
-    @cartesian
-    def is_concentrate_load_boundary_dof(
-        self,
-        points: TensorLike,
-    ) -> TensorLike:
-        """标记右下角节点 ``(xmax, ymin)``."""
-        x, y = points[..., 0], points[..., 1]
+    def loads(self) -> tuple[PointForceLoad, ...]:
+        """返回右下角的集中点力."""
         return (
-            (bm.abs(x - self.domain[1]) < self._eps)
-            & (bm.abs(y - self.domain[2]) < self._eps)
+            PointForceLoad(
+                point=(self.domain[1], self.domain[2]),
+                vector=(0.0, self.P),
+            ),
         )
-
-    def is_concentrate_load_boundary(self) -> list[Callable]:
-        """返回与集中力值函数一一对应的节点标记."""
-        return [self.is_concentrate_load_boundary_dof]
 
 
 class CantileverMiddle2d:
@@ -126,7 +109,6 @@ class CantileverMiddle2d:
 
     dimension = 2
     boundary_type = "mixed"
-    load_type = "distributed"
     _eps = 1.0e-12
 
     def __init__(
@@ -198,11 +180,6 @@ class CantileverMiddle2d:
         return self._plane_type
 
     @cartesian
-    def body_force(self, points: TensorLike) -> TensorLike:
-        """返回零体力."""
-        return bm.zeros(points.shape, **bm.context(points))
-
-    @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         """返回左侧固支的齐次位移数据."""
         return bm.zeros(points.shape, **bm.context(points))
@@ -254,7 +231,7 @@ class CantileverMiddle2d:
 
     @cartesian
     def _in_traction_patch(self, points: TensorLike) -> TensorLike:
-        """标记右端中点加载贴片区域 ``y in [y_mid - l/2, y_mid + l/2]``."""
+        """标记右端中点加载区 ``y in [y_mid - l/2, y_mid + l/2]``."""
         on_right = self._on_right_boundary(points)
         y = points[..., 1]
         y_min_patch, y_max_patch = self.traction_patch
@@ -297,14 +274,6 @@ class CantileverMiddle2d:
         """Hu--Zhang 混合有限元的弱位移边界条件标记 (左边界)."""
         return self._on_left_boundary(points)
 
-    def is_neumann_boundary(
-        self, points: Optional[TensorLike] = None
-    ) -> Union[TensorLike, Callable[[TensorLike], TensorLike]]:
-        """返回或计算 Lagrange 形式的 Neumann 边界标记 (右侧边界)."""
-        if points is None:
-            return self.is_traction_boundary
-        return self.is_traction_boundary(points)
-
     @cartesian
     def is_traction_boundary(self, points: TensorLike) -> TensorLike:
         """Hu--Zhang 混合有限元的本质牵引边界条件标记 (右、顶、底边界)."""
@@ -314,39 +283,55 @@ class CantileverMiddle2d:
         return bm.logical_or(on_right, bm.logical_or(on_top, on_bottom))
 
     @cartesian
-    def neumann_bc(self, points: TensorLike) -> TensorLike:
-        """Lagrange 位移元的外力面力数据."""
+    def _boundary_traction(self, points: TensorLike) -> TensorLike:
+        """返回右端加载区的边界牵引."""
         if self._traction is not None:
             return self._traction(points)
         return self._step_traction(points)
 
-    @cartesian
-    def traction_bc(self, points: TensorLike) -> TensorLike:
-        """Hu--Zhang 混合有限元的本质牵引面力数据."""
-        if self._traction is not None:
-            return self._traction(points)
-        return self._step_traction(points)
+    def loads(self) -> tuple[BoundaryTractionLoad, ...]:
+        """返回右端局部加载区的边界牵引."""
+        return (
+            BoundaryTractionLoad(
+                dimension=self.dimension,
+                marker=self.is_traction_boundary,
+                value=self._boundary_traction,
+            ),
+        )
 
     @cartesian
     def _step_traction(self, points: TensorLike) -> TensorLike:
-        """右端局部加载贴片内的常值均布牵引力 (向下为负).
+        """右端局部加载区内的常值均布牵引力 (向下为负).
 
-        点集按边 (面) 成批传入 ``(..., NP, GD)`` 时做整边选取: 以边中心
-        是否落在贴片内决定整条边取常值强度 ``P/load_width`` 还是全零.
-        贴片端点与网格节点对齐时 (本仓库全部算例如此), 插值/积分后的
-        合力严格等于 ``P``; 逐点阶跃语义则会在贴片端点顶点处向相邻边
-        泄漏二次插值尾巴, 使 Hu--Zhang 本质边界的有效合力偏大
-        ``2|t|h/6`` (80x40 基准算例约 +5.6%). 纯点集 ``(NP, GD)`` 输入
-        退化为逐点判断.
+        点集必须按边 (面) 成批传入 ``(..., NP, GD)``, 做整边选取: 以边中心
+        是否落在载荷区内决定整条边取常值强度 ``P/load_width`` 还是全零.
+        载荷区端点与网格节点对齐时 (本仓库全部算例如此), 插值/积分后的
+        合力严格等于 ``P``.
+
+        不接受纯点集 ``(NP, GD)``: 该输入下只能退化为逐点阶跃判断, 会在载荷区
+        端点顶点处向相邻边泄漏二次插值尾巴, 使 Hu--Zhang 本质边界的有效合力
+        偏大 ``2|t|h/6`` (80x40 基准算例约 +5.6%). 同一个 ``BoundaryTraction``
+        对象在两种输入下给出合力不同的载荷, 是静默的精度损失, 因此显式报错。
+        需要逐点牵引值的调用方应改用 ``soptx.fem.boundary_loads`` 中的 P1 迹
+        投影, 它在两条路径上给出同一个离散载荷泛函。
         """
+        if points.ndim < 3:
+            raise ValueError(
+                "_step_traction 只支持按边 (面) 成批的求值点 (..., NP, GD); "
+                f"实际输入形状 {tuple(points.shape)} 为纯点集, 整边选取语义无法"
+                "定义。逐点牵引请使用 soptx.fem.boundary_loads 的 P1 迹投影."
+            )
+
         result = bm.zeros(points.shape, **bm.context(points))
-        if points.ndim >= 3:
-            centers = bm.mean(points, axis=-2)
-            edge_mask = self._in_traction_patch(centers)
-            mask = bm.broadcast_to(edge_mask[..., None], points.shape[:-1])
-        else:
-            mask = self._in_traction_patch(points)
-        result[mask, 1] = self.traction_intensity
+        centers = bm.mean(points, axis=-2)
+        edge_mask = self._in_traction_patch(centers)
+        mask = bm.broadcast_to(edge_mask[..., None], points.shape[:-1])
+        loaded = bm.where(
+            mask,
+            bm.array(self.traction_intensity, **bm.context(points)),
+            bm.zeros(mask.shape, **bm.context(points)),
+        )
+        result = bm.set_at(result, (..., 1), loaded)
         return result
 
     def mark_corners(self, node: TensorLike) -> TensorLike:
@@ -378,7 +363,6 @@ class CantileverRightBottomEdge3d:
 
     dimension = 3
     boundary_type = "mixed"
-    load_type = "concentrated"
     _eps = 1.0e-12
 
     def __init__(
@@ -422,11 +406,6 @@ class CantileverRightBottomEdge3d:
         return self._plane_type
 
     @cartesian
-    def body_force(self, points: TensorLike) -> TensorLike:
-        """返回零体力."""
-        return bm.zeros(points.shape, **bm.context(points))
-
-    @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         """返回左端固支的齐次位移数据."""
         return bm.zeros(points.shape, **bm.context(points))
@@ -445,17 +424,7 @@ class CantileverRightBottomEdge3d:
         )
 
     @cartesian
-    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        """返回沿负 ``y`` 方向的总力值."""
-        value = bm.zeros(points.shape, **bm.context(points))
-        return bm.set_at(value, (..., 1), self.P)
-
-    def concentrate_load_bc(self) -> list[Callable]:
-        """返回右端底边的总力值函数."""
-        return [self._concentrate_load_bc]
-
-    @cartesian
-    def is_concentrate_load_boundary_dof(
+    def _is_load_line(
         self,
         points: TensorLike,
     ) -> TensorLike:
@@ -466,6 +435,19 @@ class CantileverRightBottomEdge3d:
             & (bm.abs(y - self.domain[2]) < self._eps)
         )
 
-    def is_concentrate_load_boundary(self) -> list[Callable]:
-        """返回与总力值函数一一对应的边界标记."""
-        return [self.is_concentrate_load_boundary_dof]
+    @cartesian
+    def _line_traction(self, points: TensorLike) -> TensorLike:
+        """返回右端底边单位长度上的均布牵引."""
+        value = bm.zeros(points.shape, **bm.context(points))
+        line_length = self.domain[5] - self.domain[4]
+        return bm.set_at(value, (..., 1), self.P / line_length)
+
+    def loads(self) -> tuple[LineTractionLoad, ...]:
+        """返回右端底边的均布线载荷."""
+        return (
+            LineTractionLoad(
+                dimension=self.dimension,
+                marker=self._is_load_line,
+                value=self._line_traction,
+            ),
+        )

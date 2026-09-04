@@ -27,7 +27,17 @@ FILTER_STRATEGY_REGISTRY: Dict[str, Type[_FilterStrategy]] = \
 class Filter(BaseLogged):
     """统一的过滤方法接口类
 
-    该类使用策略模式来动态选择和应用不同的过滤算法
+    该类使用策略模式来动态选择和应用不同的过滤算法。filter_type 的四个取值
+    不是四种并列的过滤器, 而是一条两级的正则化链:
+
+    - 'none'        : 不做正则化 (恒等映射);
+    - 'sensitivity' : 灵敏度过滤, 作用在梯度空间, 密度场本身不被平滑;
+    - 'density'     : 线性密度过滤, 对密度场做加权平均 (卷积矩阵 H);
+    - 'projection'  : 密度过滤 **加** Heaviside 投影 (含 beta 延拓), 即在
+                      'density' 之上再叠一层非线性映射, 而不是它的替代品。
+
+    这一层次关系在实现上由 ``ProjectionStrategy(DensityStrategy)`` 的继承
+    表达; 扁平枚举只是配置层的门面, 读配置时不要把后两者理解成互斥选项。
     """
     def __init__(self,
                 design_mesh: HomogeneousMesh,
@@ -35,6 +45,7 @@ class Filter(BaseLogged):
                 rmin: Optional[float] = None,
                 density_location: Optional[str] = None,
                 disp_mesh: Optional[HomogeneousMesh] = None, 
+                filter_q: int = 1,
                 projection_params: Optional[Dict] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
@@ -47,6 +58,7 @@ class Filter(BaseLogged):
 
         self._rmin = rmin
         self._density_location = density_location
+        self._filter_q = filter_q
 
         self._disp_mesh = disp_mesh
 
@@ -57,10 +69,16 @@ class Filter(BaseLogged):
 
         # 1. 构建过滤矩阵
         if self._filter_type != 'none' and self._rmin is not None and self._rmin > 0:
+            # filter_q 只作用于非结构网格所走的 KD-tree 通用路径 (权重
+            # (1 - d/rmin)^q); 均匀笛卡尔网格走结构化快路径, 权重恒为线性
+            # 锥形, 该参数在那条路径上不起作用。
             builder = FilterMatrixBuilder(
                                     mesh=self._design_mesh, 
                                     rmin=self._rmin, 
                                     density_location=self._density_location,
+                                    q=self._filter_q,
+                                    enable_logging=enable_logging,
+                                    logger_name=logger_name,
                                 )
             self._H = builder.build()
             self._cell_measure = self._design_mesh.entity_measure('cell')
@@ -88,24 +106,34 @@ class Filter(BaseLogged):
                             'logger_name': logger_name
                         }
         
-        if self._filter_type == 'projection':
-            proj_defaults = {
-                'projection_type'       : 'exponential',
-                'beta'                  : 1.0,
-                'eta'                   : 0.5,
-                'beta_max'              : 512.0,
-                'continuation_strategy' : 'multiplicative',
-                'continuation_iter'     : 50,
-                'beta_increment'        : 1.0,
-                'beta_multiplier'       : 2.0,
-            }
-            if projection_params:
-                proj_defaults.update(projection_params)
-            
-            strategy_params.update(proj_defaults)
+        if self._filter_type == 'projection' and projection_params:
+            # 投影参数的默认值只在 ProjectionStrategy 的签名里维护一份。
+            # 曾经这里另有一份门面默认值, 且无条件覆盖签名默认 (例如把
+            # projection_type 从 'tanh' 静默换成 'exponential'), 调用方读签名
+            # 会读到与实际不符的行为, 故这里只透传调用方显式给定的键。
+            strategy_params.update(projection_params)
         
         # 实例化策略
         self._strategy: _FilterStrategy = strategy_class(**strategy_params)
+
+    @property
+    def design_mesh(self) -> HomogeneousMesh:
+        """设计变量所在网格。
+
+        优化器 (如 OC) 据此向问题类索取被动单元掩码
+        (``pde.get_passive_element_mask(mesh=design_mesh)``); 问题类不定义
+        该方法时优化器不设掩码, 现有无被动区的工况不受影响。
+        """
+        return self._design_mesh
+
+    @property
+    def has_projection(self) -> bool:
+        """本过滤链是否含非线性投影。
+
+        算法层 (如 MMA 的目标函数缩放) 需要知道这件事, 但不该去比 filter_type
+        字符串: 那是配置层的门面。这里按策略对象的实际类型回答。
+        """
+        return isinstance(self._strategy, ProjectionStrategy)
 
     @property
     def beta(self) -> Optional[float]:

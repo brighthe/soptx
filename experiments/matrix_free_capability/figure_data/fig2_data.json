@@ -1,0 +1,1055 @@
+{
+  "schema_version": 1,
+  "figure": {
+    "id": "fig2",
+    "title": "Matrix-Free 算子 / Krylov 求解",
+    "question": "对不对 / 能算多大 / 能不能更快",
+    "consumer": "dut-postdoc:research/funding/active/china-postdoc-foundation-general-grant/assets/make_figs.py"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-08-24T00:47:21+00:00",
+    "git_revision": "e07287fb4dddb0d6d8918ebbd017e363d5a5d78b",
+    "git_branch": "main",
+    "git_dirty": true,
+    "hostname": "PC-20260706DAHN",
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "fealpy": "4.0.0",
+    "memory_total_bytes": 50509570048
+  },
+  "reproducible": false,
+  "panels": {
+    "a": {
+      "status": "measured",
+      "question": "对不对",
+      "gate": {
+        "minimum_final_l2_order": 1.5,
+        "ea_fa_solution_relative_tol": 1e-09,
+        "ea_fa_error_chain_relative_tol": 1e-08
+      },
+      "fa": {
+        "2d": {
+          "label": "2DD tri sinusoidal p1",
+          "dimension": "2D",
+          "mesh_type": "tri",
+          "mesh_label": "triangle",
+          "model": "sinusoidal",
+          "problem": "SinusoidalPlaneStrainElasticity2D",
+          "material_hypothesis": "plane_strain",
+          "degree": 1,
+          "solver": "mumps",
+          "solver_options": {
+            "sym": 1
+          },
+          "assembly_method": "standard",
+          "base_subdivisions": 4,
+          "refinement_levels": 5,
+          "theoretical_order": 2.0,
+          "max_residual": 1.2631573897805111e-13,
+          "residual_tolerance": 1e-10,
+          "subdivisions": [
+            4,
+            8,
+            16,
+            32,
+            64
+          ],
+          "mesh_size": [
+            0.25,
+            0.125,
+            0.0625,
+            0.03125,
+            0.015625
+          ],
+          "dofs": [
+            50,
+            162,
+            578,
+            2178,
+            8450
+          ],
+          "l2_relative": [
+            0.16352998695103305,
+            0.04610569341370088,
+            0.012031819438600044,
+            0.003046048818282634,
+            0.0007640618002809002
+          ],
+          "l2_order": [
+            null,
+            1.8265383914095232,
+            1.9380900927042881,
+            1.9818438529346531,
+            1.9951778248708043
+          ],
+          "final_l2_order": 1.9951778248708043,
+          "seconds": [
+            0.0073389879980823025,
+            0.009957105008652434,
+            0.015421550997416489,
+            0.0348052409972297,
+            0.24699133000103757
+          ]
+        },
+        "3d": {
+          "label": "3DD tet divfree-poly p1",
+          "dimension": "3D",
+          "mesh_type": "tet",
+          "mesh_label": "tetrahedron",
+          "model": "divfree-poly",
+          "problem": "DivergenceFreePolynomialElasticity3D",
+          "material_hypothesis": "3D",
+          "degree": 1,
+          "solver": "mumps",
+          "solver_options": {
+            "sym": 1
+          },
+          "assembly_method": "fast",
+          "base_subdivisions": 4,
+          "refinement_levels": 5,
+          "theoretical_order": 2.0,
+          "max_residual": 1.1418910248962432e-13,
+          "residual_tolerance": 1e-10,
+          "subdivisions": [
+            4,
+            8,
+            16,
+            32,
+            64
+          ],
+          "mesh_size": [
+            0.25,
+            0.125,
+            0.0625,
+            0.03125,
+            0.015625
+          ],
+          "dofs": [
+            375,
+            2187,
+            14739,
+            107811,
+            823875
+          ],
+          "l2_relative": [
+            0.6806370362264197,
+            0.2850948615357639,
+            0.08919220890359435,
+            0.02405466146445208,
+            0.006143035549779895
+          ],
+          "l2_order": [
+            null,
+            1.2554372736100068,
+            1.6764524121446291,
+            1.8906011979638286,
+            1.9692928583357303
+          ],
+          "final_l2_order": 1.9692928583357303,
+          "seconds": [
+            0.01591254300728906,
+            0.19808292099332903,
+            0.6305451320076827,
+            8.892945435989532,
+            124.48804245700012
+          ]
+        }
+      },
+      "ea": {
+        "2": {
+          "cg_rtol": 1e-10,
+          "roles": [
+            "ea-coarse-1rank",
+            "ea-medium-1rank",
+            "ea-fine-1rank"
+          ],
+          "refinements": [
+            8,
+            16,
+            32
+          ],
+          "l2_relative": [
+            0.046105693414022104,
+            0.012031819438414387,
+            0.003046048818224975
+          ],
+          "observed_l2_orders": [
+            1.938090092736601,
+            1.9818438529397002
+          ],
+          "gated_l2_order": 1.9818438529397002,
+          "solution_relative_difference_vs_fa": 5.19877592748703e-13,
+          "solution_relative_differences_vs_fa": [
+            5.19877592748703e-13,
+            3.921832024950674e-13,
+            4.1777145393896636e-14
+          ],
+          "max_explicit_solution_relative_error": 8.875634038777215e-12,
+          "explicit_solution_relative_tol": 1e-08
+        },
+        "3": {
+          "cg_rtol": 1e-10,
+          "roles": [
+            "ea-coarse-1rank",
+            "ea-medium-1rank",
+            "ea-fine-1rank"
+          ],
+          "refinements": [
+            8,
+            16,
+            32
+          ],
+          "l2_relative": [
+            0.285094861536033,
+            0.08919220890462531,
+            0.024054661465262427
+          ],
+          "observed_l2_orders": [
+            1.6764524379809913,
+            1.8906011980086015
+          ],
+          "gated_l2_order": 1.8906011980086015,
+          "solution_relative_difference_vs_fa": 3.671674591575115e-14,
+          "solution_relative_differences_vs_fa": [
+            3.671674591575115e-14,
+            2.3979238512990233e-14,
+            1.7456959824956038e-14
+          ],
+          "max_explicit_solution_relative_error": 2.4985207266426527e-11,
+          "explicit_solution_relative_tol": 1e-08
+        }
+      },
+      "chain_cross_check": [
+        {
+          "dimension": 2,
+          "subdivisions": [
+            8,
+            16,
+            32
+          ],
+          "error_relative_differences": [
+            6.9670834924669876e-12,
+            1.5430504608249326e-11,
+            1.8929026530515416e-11
+          ],
+          "maximum": 1.8929026530515416e-11,
+          "matching_significant_digits": [
+            11,
+            10,
+            10
+          ],
+          "minimum_matching_significant_digits": 10
+        },
+        {
+          "dimension": 3,
+          "subdivisions": [
+            8,
+            16,
+            32
+          ],
+          "error_relative_differences": [
+            9.437649930561797e-13,
+            1.1558935372451174e-11,
+            3.3687787184084125e-11
+          ],
+          "maximum": 3.3687787184084125e-11,
+          "matching_significant_digits": [
+            12,
+            10,
+            10
+          ],
+          "minimum_matching_significant_digits": 10
+        }
+      ]
+    },
+    "b": {
+      "status": "measured",
+      "question": "能算多大",
+      "memory_total_bytes": 50509570048,
+      "resolution": [
+        8,
+        16,
+        32,
+        64,
+        80
+      ],
+      "dofs": [
+        2187,
+        14739,
+        107811,
+        823875,
+        1594323
+      ],
+      "cells": [
+        3072,
+        24576,
+        196608,
+        1572864,
+        3072000
+      ],
+      "baseline_bytes": 168960000,
+      "baseline_spread_bytes": 745472,
+      "stage_order": [
+        "baseline",
+        "mesh",
+        "operator",
+        "load",
+        "bc",
+        "solve"
+      ],
+      "fa": {
+        "peak_rss_bytes": [
+          209432576,
+          474279936,
+          2498674688,
+          18277675008,
+          35434106880
+        ],
+        "peak_rss_above_baseline_bytes": [
+          40337408,
+          304824320,
+          2329309184,
+          18108334080,
+          35265146880
+        ],
+        "stored_operator_bytes": [
+          1964952,
+          14463576,
+          110875608,
+          868050648,
+          1688066136
+        ],
+        "stage_bytes": [
+          [
+            169095168,
+            171454464,
+            209432576,
+            209432576,
+            209432576,
+            209432576
+          ],
+          [
+            169455616,
+            186298368,
+            474279936,
+            474279936,
+            474279936,
+            474279936
+          ],
+          [
+            169365504,
+            284659712,
+            2498674688,
+            2498674688,
+            2498674688,
+            2498674688
+          ],
+          [
+            169340928,
+            1053765632,
+            18277675008,
+            18277675008,
+            18277675008,
+            18277675008
+          ],
+          [
+            168960000,
+            1845370880,
+            35434106880,
+            35434106880,
+            35434106880,
+            35434106880
+          ]
+        ],
+        "construction_seconds": [
+          0.09147565199964447,
+          0.376820826999392,
+          2.506428162001612,
+          22.452168530999188,
+          61.70648004900431
+        ],
+        "solve_seconds": [
+          0.005886973000087892,
+          0.11252718099967751,
+          2.5457991679995757,
+          55.91355546900013,
+          138.1522985999909
+        ],
+        "cg_iterations": [
+          64,
+          134,
+          250,
+          493,
+          600
+        ],
+        "true_relative_residual": [
+          6.66730118309063e-11,
+          8.824477560111315e-11,
+          9.899550305335531e-11,
+          1.0530573523027757e-10,
+          1.447552166519396e-10
+        ],
+        "mesh_bytes": [
+          2359296,
+          16842752,
+          115294208,
+          884424704,
+          1676410880
+        ],
+        "floor_bytes": [
+          173419416,
+          200761944,
+          395535320,
+          1921816280,
+          3533437016
+        ],
+        "transient_bytes": [
+          36013160,
+          273517992,
+          2103139368,
+          16355858728,
+          31900669864
+        ],
+        "transient_fraction": [
+          0.17195586612084646,
+          0.5767015874776537,
+          0.8417019542801724,
+          0.8948544451546033,
+          0.900281470957735
+        ],
+        "peak_over_floor": [
+          1.2076650978919223,
+          2.3623995989996986,
+          6.31719738201888,
+          9.510625546371164,
+          10.0282265453009
+        ]
+      },
+      "ea": {
+        "peak_rss_bytes": [
+          184725504,
+          276582400,
+          1000689664,
+          6172991488,
+          11726147584
+        ],
+        "peak_rss_above_baseline_bytes": [
+          15020032,
+          107102208,
+          831021056,
+          6003326976,
+          11557076992
+        ],
+        "stored_operator_bytes": [
+          3833856,
+          30670848,
+          245366784,
+          1962934272,
+          3833856000
+        ],
+        "stage_bytes": [
+          [
+            169705472,
+            172343296,
+            184725504,
+            184725504,
+            184725504,
+            184725504
+          ],
+          [
+            169480192,
+            186146816,
+            276582400,
+            276582400,
+            276582400,
+            276582400
+          ],
+          [
+            169668608,
+            285286400,
+            1000689664,
+            1000689664,
+            1000689664,
+            1000689664
+          ],
+          [
+            169664512,
+            1054023680,
+            6172991488,
+            6172991488,
+            6172991488,
+            6172991488
+          ],
+          [
+            169070592,
+            1845583872,
+            11726147584,
+            11726147584,
+            11726147584,
+            11726147584
+          ]
+        ],
+        "construction_seconds": [
+          0.011608259999775328,
+          0.11322434700014128,
+          0.4979498180000519,
+          3.641813091999211,
+          7.209506251994753
+        ],
+        "solve_seconds": [
+          0.02192941199973575,
+          0.30220399099926,
+          4.704163124000843,
+          84.74003421099951,
+          205.0909012209886
+        ],
+        "cg_iterations": [
+          64,
+          134,
+          250,
+          493,
+          600
+        ],
+        "true_relative_residual": [
+          6.667877510328474e-11,
+          8.811199662090299e-11,
+          9.907480502879771e-11,
+          1.0531234689254253e-10,
+          1.4475337996045374e-10
+        ],
+        "mesh_bytes": [
+          2637824,
+          16666624,
+          115617792,
+          884359168,
+          1676513280
+        ],
+        "floor_bytes": [
+          176177152,
+          216817664,
+          530653184,
+          3016957952,
+          5679439872
+        ],
+        "transient_bytes": [
+          8548352,
+          59764736,
+          470036480,
+          3156033536,
+          6046707712
+        ],
+        "transient_fraction": [
+          0.04627597064236458,
+          0.2160829322473158,
+          0.4697125361734525,
+          0.5112648449516216,
+          0.5156602088353862
+        ],
+        "peak_over_floor": [
+          1.0485213428810565,
+          1.2756451430082745,
+          1.885769640458805,
+          2.046097952378754,
+          2.0646662079848146
+        ]
+      },
+      "floor_ratio_ea_over_fa": [
+        1.0159021179035685,
+        1.0799739217508275,
+        1.3416075813406498,
+        1.5698472238980097,
+        1.6073414769479508
+      ]
+    },
+    "c": {
+      "status": "measured",
+      "question": "能不能更快",
+      "gate": {
+        "solution_relative_tol": 1e-09
+      },
+      "resolution": [
+        8,
+        16,
+        32,
+        64
+      ],
+      "dofs": [
+        2187,
+        14739,
+        107811,
+        823875
+      ],
+      "cells": [
+        3072,
+        24576,
+        196608,
+        1572864
+      ],
+      "warmup": 1,
+      "repeats": 3,
+      "gpu_name": "NVIDIA GeForce RTX 5080",
+      "solution_relative_gap": [
+        3.260723224227827e-13,
+        6.939311536513029e-13,
+        3.2736784686595725e-15,
+        3.398687857170618e-15
+      ],
+      "cg_iterations_match": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "speedup_solve": [
+        0.3547011382929286,
+        1.1941257699203982,
+        8.03609504407943,
+        16.08332740196292
+      ],
+      "speedup_build": [
+        0.5732311110615864,
+        1.5838864913595714,
+        5.110211878735499,
+        5.417787105721445
+      ],
+      "cpu": {
+        "solve_seconds": [
+          0.016297969996230677,
+          0.11807209199469071,
+          2.091433779001818,
+          35.00630799899227
+        ],
+        "build_seconds": [
+          0.010689146001823246,
+          0.029622078000102192,
+          0.23056975001236424,
+          2.1087197169981664
+        ],
+        "solve_samples": [
+          [
+            0.01765139699273277,
+            0.015551819989923388,
+            0.016297969996230677
+          ],
+          [
+            0.1621620069927303,
+            0.11807209199469071,
+            0.1118278259964427
+          ],
+          [
+            2.07085319700127,
+            2.091433779001818,
+            2.129768688988406
+          ],
+          [
+            35.00630799899227,
+            34.3032324329979,
+            35.072003884997685
+          ]
+        ],
+        "build_samples": [
+          [
+            0.01938919600797817,
+            0.010689146001823246,
+            0.010540261006099172
+          ],
+          [
+            0.02560068399179727,
+            0.029622078000102192,
+            0.03197577499668114
+          ],
+          [
+            0.22127883399662096,
+            0.23116727099113632,
+            0.23056975001236424
+          ],
+          [
+            2.1087197169981664,
+            2.14449229100137,
+            2.1072836439998355
+          ]
+        ],
+        "cg_iterations": [
+          64,
+          134,
+          250,
+          493
+        ],
+        "true_relative_residual": [
+          6.54819478352839e-11,
+          8.820471368952119e-11,
+          9.862338110588368e-11,
+          1.0530976902098204e-10
+        ],
+        "torch_threads": [
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "cuda": {
+        "solve_seconds": [
+          0.04594845698738936,
+          0.09887743399303872,
+          0.2602549829898635,
+          2.17655881299288
+        ],
+        "build_seconds": [
+          0.018647183998837136,
+          0.01870214700466022,
+          0.04511941099190153,
+          0.38922159100184217
+        ],
+        "solve_samples": [
+          [
+            0.04594845698738936,
+            0.045967276993906125,
+            0.04510333499638364
+          ],
+          [
+            0.102896865006187,
+            0.0978958540072199,
+            0.09887743399303872
+          ],
+          [
+            0.2637697829923127,
+            0.25708130799466744,
+            0.2602549829898635
+          ],
+          [
+            2.108330725997803,
+            2.17655881299288,
+            2.309912967000855
+          ]
+        ],
+        "build_samples": [
+          [
+            0.017913400995894335,
+            0.018647183998837136,
+            0.018874179004342295
+          ],
+          [
+            0.01837152500229422,
+            0.020305270998505875,
+            0.01870214700466022
+          ],
+          [
+            0.04511941099190153,
+            0.04296557599445805,
+            0.04646035100449808
+          ],
+          [
+            0.24548465300176758,
+            0.38922159100184217,
+            0.6918638850038406
+          ]
+        ],
+        "cg_iterations": [
+          64,
+          134,
+          250,
+          493
+        ],
+        "true_relative_residual": [
+          6.566285632663611e-11,
+          8.817683976645112e-11,
+          9.862535678066812e-11,
+          1.053143487162896e-10
+        ],
+        "gpu_peak_allocated_bytes": [
+          60470784,
+          254234112,
+          1752089600,
+          13743689728
+        ],
+        "gpu_memory_total_bytes": [
+          17094475776,
+          17094475776,
+          17094475776,
+          17094475776
+        ]
+      }
+    },
+    "d": {
+      "status": "measured",
+      "question": "多进程能不能更快",
+      "parallel_level": "process",
+      "gate": {
+        "iterations_identical": true,
+        "residual_relative_tol": 0.001
+      },
+      "ranks": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ],
+      "dofs": 823875,
+      "resolution": 64,
+      "warmup": null,
+      "repeats": null,
+      "cg_seconds": [
+        92.63394158298615,
+        52.52698380302172,
+        36.340790649992414,
+        27.471596388000762,
+        25.12379742701887
+      ],
+      "speedup": [
+        1.0,
+        1.763549605862905,
+        2.549034842834535,
+        3.371989755333165,
+        3.687099525940489
+      ],
+      "efficiency": [
+        1.0,
+        0.8817748029314525,
+        0.6372587107086337,
+        0.42149871941664563,
+        0.23044372037128055
+      ],
+      "construction_seconds": [
+        8.809249375975924,
+        4.675490566994995,
+        2.8923089889867697,
+        2.187957849004306,
+        2.121658930002013
+      ],
+      "pipeline_seconds": [
+        101.44319095896208,
+        57.202474370016716,
+        39.23309963897918,
+        29.659554237005068,
+        27.245456357020885
+      ],
+      "matvec_seconds": [
+        0.16504466570040677,
+        0.09961074820021168,
+        0.06732518740027445,
+        0.05297664770041592,
+        0.047580154350725934
+      ],
+      "local_kernel_seconds": [
+        0.1626477062018239,
+        0.09719187440059614,
+        0.06512017469940475,
+        0.04738400910136988,
+        0.04227212325349683
+      ],
+      "input_sync_seconds": [
+        0.0010825784484040923,
+        0.0008694730480783619,
+        0.0007489304494811222,
+        0.0011414500957471318,
+        0.0016983992987661622
+      ],
+      "output_sync_seconds": [
+        0.0004587649033055641,
+        0.001831994450185448,
+        0.003974119397753384,
+        0.00875756505265599,
+        0.005803089802793693
+      ],
+      "cg_iterations": [
+        493,
+        493,
+        493,
+        493,
+        493
+      ],
+      "true_relative_residual": [
+        1.0531234689254265e-10,
+        1.0531273294031223e-10,
+        1.0531433104801602e-10,
+        1.0531382861943386e-10,
+        1.0530744237150734e-10
+      ]
+    }
+  },
+  "sources": [
+    {
+      "case_id": "a-fa-2d",
+      "role": "fa-chain-2d",
+      "script": "examples/lagrange_elasticity/manufactured_convergence_demo.py",
+      "path": "experiments/matrix_free_capability/outputs/manufactured_convergence_2d_tri_sinusoidal_p1_mumps.json",
+      "sha256": "68ba1244223b5f706d049a4cde5a220cde3f8456f646df0251e1a621f5dd7418",
+      "bytes": 2493
+    },
+    {
+      "case_id": "a-fa-3d",
+      "role": "fa-chain-3d",
+      "script": "examples/lagrange_elasticity/manufactured_convergence_demo.py",
+      "path": "experiments/matrix_free_capability/outputs/manufactured_convergence_3d_tet_divfree-poly_p1_mumps_fast.json",
+      "sha256": "057464f27f2b1271769b6e845426c78268059725c227b940a8195694f00ddec3",
+      "bytes": 2494
+    },
+    {
+      "case_id": "a-ea-rings",
+      "role": "ea-rings",
+      "script": "examples/matrix_free_elasticity/stage1_evidence.py",
+      "path": "experiments/matrix_free_capability/outputs/stage1_evidence_validation.json",
+      "sha256": "5ac5b6bb7731db2146519b95e338091877f4e4fc9695d6c677c56ebd68183543",
+      "bytes": 20304
+    },
+    {
+      "case_id": "b-fa-n8",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_fa_fast_n8.json",
+      "sha256": "bb0c2d272df9aa2bb985237b5bfac5dc70e990f45d0746103daa45c881fc435c",
+      "bytes": 1020
+    },
+    {
+      "case_id": "b-fa-n16",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_fa_fast_n16.json",
+      "sha256": "17dede527513f2a75b2de199583b7a9dc3d4be5ade2970362263d50c23f404e9",
+      "bytes": 1024
+    },
+    {
+      "case_id": "b-fa-n32",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_fa_fast_n32.json",
+      "sha256": "9c0ebb80ae456acbe90015074d469402115567c448115285229bdffbd1b99a41",
+      "bytes": 1032
+    },
+    {
+      "case_id": "b-fa-n64",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_fa_fast_n64.json",
+      "sha256": "b8e4f6890b07e8c0ad5c6b375357f8d7cf2ce263c67ac49e80a86cc8efdb7ee1",
+      "bytes": 1041
+    },
+    {
+      "case_id": "b-fa-n80",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_fa_fast_n80.json",
+      "sha256": "c539c13d8320c69d7ccdd4cf6ef551242ef202c6ef118541c0ca3c4f1650a374",
+      "bytes": 1041
+    },
+    {
+      "case_id": "b-ea-n8",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_ea_fast_n8.json",
+      "sha256": "f2dff0af6e0263679939b7d7ba6a830dfcdb639adb4a58fcc4c2b09877f12b83",
+      "bytes": 1021
+    },
+    {
+      "case_id": "b-ea-n16",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_ea_fast_n16.json",
+      "sha256": "4cac86048c5c10094894a680359ee8c526e744bd25184e3345ca8a0baf43c236",
+      "bytes": 1023
+    },
+    {
+      "case_id": "b-ea-n32",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_ea_fast_n32.json",
+      "sha256": "cb6548c6634edda12149f6341a225cf1f4c5bc0b135b8d7503a36cf7c40262d4",
+      "bytes": 1031
+    },
+    {
+      "case_id": "b-ea-n64",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_ea_fast_n64.json",
+      "sha256": "971e4407f7ac99f9d276795e50208b88a2b50caadfedbe498ce7ab64c4e53ae3",
+      "bytes": 1035
+    },
+    {
+      "case_id": "b-ea-n80",
+      "role": "peak-rss",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/peak_rss_3d_tet_polynomial_p1_ea_fast_n80.json",
+      "sha256": "00daf5b64980da02823724f1f359816ca2dfd413a5fce9f2a46f8d296847f8fd",
+      "bytes": 1042
+    },
+    {
+      "case_id": "c-dev-n8",
+      "role": "device-speedup",
+      "script": "examples/matrix_free_elasticity/benchmark_device_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/device_speedup_3d_tet_polynomial_p1_ea_fast_n8.json",
+      "sha256": "e7b4d5aa67f21d4f16c095a942633f9f76a7549139a7bec58da764259c963770",
+      "bytes": 2133
+    },
+    {
+      "case_id": "c-dev-n16",
+      "role": "device-speedup",
+      "script": "examples/matrix_free_elasticity/benchmark_device_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/device_speedup_3d_tet_polynomial_p1_ea_fast_n16.json",
+      "sha256": "233816425cfd08bb6a25884f6f278d1209dc49f1e2561e2c13a5a508852539c2",
+      "bytes": 2127
+    },
+    {
+      "case_id": "c-dev-n32",
+      "role": "device-speedup",
+      "script": "examples/matrix_free_elasticity/benchmark_device_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/device_speedup_3d_tet_polynomial_p1_ea_fast_n32.json",
+      "sha256": "b23657b3698a64c63304e8139cb13631acb994a1e797438c300a18780e8de569",
+      "bytes": 2118
+    },
+    {
+      "case_id": "c-dev-n64",
+      "role": "device-speedup",
+      "script": "examples/matrix_free_elasticity/benchmark_device_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/device_speedup_3d_tet_polynomial_p1_ea_fast_n64.json",
+      "sha256": "68c77ca82d39c353ea8a60e50ab8f670eb12b2236256f17198d467b5ff9c60f5",
+      "bytes": 2108
+    },
+    {
+      "case_id": "d-mpi-p1",
+      "role": "mpi-strong",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/mpi/mpi_strong_3d_n64_fast_p1.json",
+      "sha256": "c3bd603f1fe196b4e494ec66190ba287d2c328e6cf2bf4e602dd6b7afd3ba819",
+      "bytes": 1187
+    },
+    {
+      "case_id": "d-mpi-p2",
+      "role": "mpi-strong",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/mpi/mpi_strong_3d_n64_fast_p2.json",
+      "sha256": "c217c7086da1330307248b0064fb251423b068d4d027136a7491b3aba775f7c5",
+      "bytes": 1187
+    },
+    {
+      "case_id": "d-mpi-p4",
+      "role": "mpi-strong",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/mpi/mpi_strong_3d_n64_fast_p4.json",
+      "sha256": "2aa2fa0dbc85287ae202a12751e86aa5a1279ff9148f624b52e81320524d7980",
+      "bytes": 1187
+    },
+    {
+      "case_id": "d-mpi-p8",
+      "role": "mpi-strong",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/mpi/mpi_strong_3d_n64_fast_p8.json",
+      "sha256": "d023b572ca75bd580d2f7f4d658b32480e3c82ad355f86b11e8de62110fc55f3",
+      "bytes": 1188
+    },
+    {
+      "case_id": "d-mpi-p16",
+      "role": "mpi-strong",
+      "script": "examples/matrix_free_elasticity/benchmark_cpu_ea.py",
+      "path": "experiments/matrix_free_capability/outputs/mpi/mpi_strong_3d_n64_fast_p16.json",
+      "sha256": "f0ef2b98ba3075f1cc6b69bdbbce9ac5ea0d31ba939f259bf821d220bd6b133d",
+      "bytes": 1189
+    }
+  ],
+  "gate_failures": [],
+  "notes": [
+    "(c) 比 (b) 少 1 档: (b) 最细到 1,594,323 自由度, (c) 止于 823,875 —— 更细的档在单卡显存里装不下, 见 cases.toml 中撤销 c-dev-n80 的说明。"
+  ]
+}

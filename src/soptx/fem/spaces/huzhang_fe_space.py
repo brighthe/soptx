@@ -1,8 +1,8 @@
-from fealpy.mesh import Mesh
+from fealpy.mesh import MeshView
 
 class HuZhangFESpace:
     """Factory class for creating HuZhang finite element spaces."""
-    def __new__(cls, mesh: Mesh, p: int = 1, ctype: str = 'C', use_relaxation: bool = False,
+    def __new__(cls, mesh: MeshView, p: int = 1, ctype: str = 'C', use_relaxation: bool = False,
                 corners=None):
         TD = mesh.top_dimension()
 

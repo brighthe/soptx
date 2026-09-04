@@ -2,7 +2,7 @@ from typing import Optional, Dict
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from soptx.core import BaseLogged
-from soptx.fem.solvers import HuZhangMFEMAnalyzer
+from soptx.fem.analyzers import HuZhangMFEMAnalyzer
 
 class ApparentStressConstraint(BaseLogged):
     """

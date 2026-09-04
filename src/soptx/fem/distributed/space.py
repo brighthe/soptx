@@ -22,7 +22,7 @@ import numpy as np
 
 from fealpy.backend import backend_manager as bm
 from fealpy.functionspace import FunctionSpace, LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import Mesh
+from fealpy.mesh import MeshView
 from fealpy.typing import TensorLike
 
 from . import entity_mpi as _de
@@ -71,15 +71,15 @@ def _mk_distributed_space_type(kind: type[_ST_co]) -> type[_ST_co]:
     return type(f"Dist{kind.__name__}", (kind,), class_namespace)  # type: ignore
 
 
-def _face_entity_name(mesh: Mesh, entity_comms: dict[str, _de.EntityMPI]) -> str:
+def _face_entity_name(mesh: MeshView, entity_comms: dict[str, _de.EntityMPI]) -> str:
     """返回网格最高余维一实体的通信器名称.
 
-    二维网格的 face 为 ``segment``; 三维单纯形网格的 face 为 ``tri``,
+    二维网格的 face 为 ``edge``; 三维单纯形网格的 face 为 ``tri``,
     三维六面体网格的 face 为 ``quad``. 该选择必须由拓扑维数决定, 不能仅依据
     ``quad`` 是否存在, 因为二维四边形网格的 ``quad`` 是根单元而不是 face.
     """
     if mesh.top_dimension() == 2:
-        return "segment"
+        return "edge"
     for name in ("tri", "quad"):
         if name in entity_comms:
             return name
@@ -90,14 +90,14 @@ def _edge_to_dof(space: Any) -> TensorLike:
     """返回全局边与标量自由度的映射.
 
     对 ``p=1`` 连续 Lagrange 空间, 边自由度就是端点节点自由度. 部分 FEALPy
-    结构网格尚未实现 ``Mesh.edge_to_ipoint``; 不能把三维面的 ``face_to_ipoint``
+    结构网格尚未实现 ``MeshView.edge_to_ipoint``; 不能把三维面的 ``face_to_ipoint``
     伪装成边映射, 否则六面体网格会以面索引访问边 DOF 并越界.
     """
     if hasattr(space.mesh, "edge_to_ipoint"):
         return space.edge_to_dof()
     if getattr(space, "p", None) != 1:
         raise NotImplementedError("缺少 edge_to_ipoint 时仅支持 p=1 边 DOF 映射.")
-    return bm.asarray(space.mesh.Entity("segment").indices, copy=True)
+    return bm.asarray(space.mesh.entity_view("edge").indices, copy=True)
 
 
 def distribute_space(
@@ -125,7 +125,7 @@ def distribute_space(
     root_entity = mcomm.entities[mcomm.root_entity_name]
     face_entity_name = _face_entity_name(pmesh, mcomm.entities)
     face_entity = mcomm.entities[face_entity_name]
-    edge_entity = mcomm.entities["segment"]
+    edge_entity = mcomm.entities["edge"]
     all_cell_global_indices = comm.gather(root_entity._global_indices, root=root)
     all_face_global_indices = comm.gather(face_entity._global_indices, root=root)
     all_edge_global_indices = comm.gather(edge_entity._global_indices, root=root)
@@ -170,7 +170,7 @@ def distribute_space(
     dofcomm = _de.dist_from_masks(dof_masks, comm=comm)
 
     space_type = _mk_distributed_space_type(gdata["space_type"])
-    pspace = space_type(pmesh.fealpy_api(), gdata["p"])
+    pspace = space_type(pmesh, gdata["p"])
 
     local_index = _dm._make_local_index(gdata["NDOF"], dof_mask)
     pspace.cell2dof = bm.asarray(local_index[lcell2dof], copy=True)

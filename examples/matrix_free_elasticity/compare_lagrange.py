@@ -35,7 +35,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import TetrahedronMesh, TriangleMesh
 
-from soptx.fem.solvers import solve_ea_system
+from soptx.fem.matrix_free import solve_ea_system
 from soptx.fem.verification import relative_difference, serial_references
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems.elasticity import (

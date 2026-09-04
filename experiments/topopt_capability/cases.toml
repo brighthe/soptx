@@ -1,0 +1,81 @@
+# 申请书图 10「基于 FEALPy 的张量化拓扑优化平台百万级算力与阶段性能实测」的数据点注册表
+#
+# 本图数据全部来自真实运行（topopt_3d_simp_real.py），不含任何硬编码性能数字。
+# 算例为博士论文算例 3.3 的加密版：60x20x4 mm 三维悬臂梁，300x100x20 六面体网格，
+# 191.5 万自由度，SIMP + OC + Sigmund 锥形滤波，volfrac 0.3、penal 3.0、rmin 1.5 mm。
+#
+# 四次运行共同支撑四个面板，产物统一落在 outputs/topopt300/：
+#   1. gpu-converged  GPU 全收敛（90 步）      -> summary.json / history.json / density_final.npy
+#   2. gpu-single     GPU 均匀密度单步计时      -> gpu_single_step.json
+#   3. cpu-baseline   CPU 稀疏装配 + PCG 单步   -> cpu_sparse_single_step.json
+#   4. cpu-vs-gpu     同一设计密度下两侧解对比  -> cpu_vs_gpu_compare.json
+#
+# 精度口径：CPU 侧 scipy 固定 float64；GPU 侧统一 float64。cg_rtol 1e-8 严于 float32
+# 的机器精度（约 1.2e-7），两侧必须同为 float64 才构成对等对比。
+# 由 collect.py 组装为 figure_data/fig4_data.json。
+
+[figure]
+id = "fig4"
+title = "基于 FEALPy 的张量化拓扑优化平台百万级算力与阶段性能实测"
+question = "全流程快不快 / 瓶颈在哪 / 算子阶段如何加速 / 两侧解是否一致"
+consumer = "dut-postdoc:research/funding/active/china-postdoc-foundation-general-grant/scripts/make_figs.py"
+base = "topopt300"
+
+[[cases]]
+id = "topopt-3d-simp-real-gpu-converged"
+panel = "a"
+role = "topopt-convergence"
+summary = "191.5 万自由度三维悬臂梁 SIMP 全收敛运行（GPU 张量化，90 步）"
+script = "examples/topopt_platform/topopt_3d_simp_real.py"
+args = ["--backend", "pytorch", "--nx", "300", "--ny", "100", "--nz", "20",
+        "--Lx", "60", "--Ly", "20", "--Lz", "4",
+        "--rmin", "1.5", "--filter", "cone", "--dtype", "float64",
+        "--max-iters", "300", "--ctol", "1e-2", "--ctol-metric", "density",
+        "--cg-rtol", "1e-8", "--cg-maxiter", "20000",
+        "--checkpoint-every", "20"]
+outdir = "topopt300"
+artifact = "summary.json"
+
+[[cases]]
+id = "topopt-3d-simp-real-gpu-single"
+panel = "b"
+role = "topopt-step-benchmark-gpu"
+summary = "均匀密度下 GPU 张量化单步计时（与 CPU 基线同配置）"
+script = "examples/topopt_platform/topopt_3d_simp_real.py"
+args = ["--backend", "pytorch", "--nx", "300", "--ny", "100", "--nz", "20",
+        "--Lx", "60", "--Ly", "20", "--Lz", "4",
+        "--rmin", "1.5", "--filter", "cone", "--dtype", "float64",
+        "--single-step", "1", "--max-iters", "1", "--ctol", "1e-2",
+        "--cg-rtol", "1e-8", "--cg-maxiter", "20000"]
+# 该运行走 run_simp 分支, 会写出同名的 summary.json, 故先落到独立目录再改名收编,
+# 避免覆盖全收敛运行的产物.
+outdir = "topopt300-single"
+artifact = "summary.json"
+collect_as = "topopt300/gpu_single_step.json"
+
+[[cases]]
+id = "topopt-3d-simp-real-cpu-baseline"
+panel = "b"
+role = "topopt-step-benchmark-cpu"
+summary = "CPU 传统流程（scipy 显式稀疏装配 + 稀疏 PCG）单步计时基线"
+script = "examples/topopt_platform/topopt_3d_simp_real.py"
+args = ["--cpu-baseline", "--nx", "300", "--ny", "100", "--nz", "20",
+        "--Lx", "60", "--Ly", "20", "--Lz", "4",
+        "--rmin", "1.5", "--filter", "cone",
+        "--cg-rtol", "1e-8", "--cg-maxiter", "20000"]
+outdir = "topopt300"
+artifact = "cpu_sparse_single_step.json"
+
+[[cases]]
+id = "topopt-3d-simp-real-cpu-vs-gpu"
+panel = "b"
+role = "topopt-solution-consistency"
+summary = "最终设计密度下 CPU/GPU 求解同一线性系统的解一致性对比"
+script = "examples/topopt_platform/topopt_3d_simp_real.py"
+args = ["--compare", "experiments/topopt_capability/outputs/topopt300/density_final.npy",
+        "--nx", "300", "--ny", "100", "--nz", "20",
+        "--Lx", "60", "--Ly", "20", "--Lz", "4",
+        "--dtype", "float64",
+        "--cg-rtol", "1e-8", "--cg-maxiter", "20000"]
+outdir = "topopt300"
+artifact = "cpu_vs_gpu_compare.json"

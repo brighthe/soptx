@@ -1,0 +1,10 @@
+{
+  "case_prefix": "mbb_3d",
+  "final_compliance_fea": 106.36903841920324,
+  "final_compliance_piml": 451.0441611186915,
+  "relative_compliance_error_percent": 324.0370767864934,
+  "mean_solve_time_ms_fea": 152.6879374444737,
+  "mean_solve_time_ms_piml": 232.42607600210854,
+  "total_iters_fea": 36,
+  "total_iters_piml": 3
+}

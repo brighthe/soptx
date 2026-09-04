@@ -5,7 +5,7 @@ from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
 from soptx.core import BaseLogged, timer
-from soptx.fem.solvers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
+from soptx.fem.analyzers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 
 class ComplianceObjective(BaseLogged):
     def __init__(self,
@@ -86,12 +86,18 @@ class ComplianceObjective(BaseLogged):
             sigmah, uh = state['stress'], state['displacement']
                 
             if self._state_variable == 'u':
-                from fealpy.solver import spsolve
+                from soptx.solvers import create
 
-                B_sigma_u = self._analyzer.get_mix_matrix()
+                B_sigma_u = self._analyzer.mix_matrix
                 B_u_sigma = B_sigma_u.T
                 A = self._analyzer.get_stress_matrix(rho_val=density)
-                x = spsolve(A, B_sigma_u @ uh[:], solver='mumps')
+                # 应力矩阵 A 只在这里解一次, 分解不跨调用复用; MUMPS 上下文
+                # 与 MPI 初始化都由 DirectSolver 自己管, 调用方不必再准备。
+                solver = create('mumps')
+                try:
+                    x, _ = solver.setup(A).solve(B_sigma_u @ uh[:])
+                finally:
+                    solver.close()
                 Ku = B_u_sigma @ x
                 c = bm.einsum('i, i ->', uh[:], Ku)
 

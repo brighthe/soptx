@@ -1,0 +1,9 @@
+{
+  "final_compliance_fea": 115.61025346714193,
+  "final_compliance_piml": 114.07964375329351,
+  "relative_compliance_error_percent": 1.3239394153594182,
+  "mean_solve_time_ms_fea": 7.350104933963546,
+  "mean_solve_time_ms_piml": 133.2879056678697,
+  "total_iters_fea": 30,
+  "total_iters_piml": 30
+}

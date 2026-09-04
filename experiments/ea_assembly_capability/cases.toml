@@ -1,0 +1,82 @@
+# EA 单元装配无矩阵算子与规模能力的数据点注册表。
+#
+# 本文件只描述"跑哪一条命令、产物落在哪"。
+#
+# 约定:
+#   script       仓库根起算的相对路径。
+#   args         传给该脚本的固定参数, 逐项写全, 不依赖脚本缺省值。
+#   output_mode  dir   = 用 --output-dir 重定向到本目录 outputs/
+#                file  = 用 --output 指定完整路径
+#                fixed = 脚本落盘位置写死, 只能就地读
+#   artifact     产物路径; output_mode = fixed 时为仓库根起算的相对路径,
+#                否则为本目录 outputs/ 下的文件名。
+#   panel        "cache" (单元刚度缓存), "matvec" (算子乘积), "solve" (端到端求解).
+#
+# 注意: 每数据点必须独占一个进程 (ru_maxrss 是进程级高水位, 无法按对象归因)。
+
+[figure]
+id = "ea_assembly_capability"
+title = "EA 单元装配无矩阵算子与规模能力"
+question = "EA 算子内存机制与容量极限"
+consumer = "dut-postdoc:research/piml-matrix-free-gpu/project-plan.md"
+
+# --------------------------------------------------------------------------
+# cache —— 阶段 1 单元刚度张量缓存 (Element Stiffness Cache)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "element-cache"
+panel = "cache"
+role = "element-cache-study"
+summary = "3D tet p1, EA 单元刚度张量显式缓存与静态单价测量, 支持 fast/standard/voigt"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--cache", "--method", "fast", "--n", "32"]
+output_mode = "file"
+artifact = "cache_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+methods = ["fast", "standard", "voigt"]
+device = "cpu"
+n = 32
+
+# --------------------------------------------------------------------------
+# matvec —— 阶段 2 算子乘积 (Gather-Apply-Scatter MatVec)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "ea-matvec"
+panel = "matvec"
+role = "matvec-benchmark"
+summary = "3D tet p1, EA 单次及批量矩阵向量乘 (A @ x) 瞬态显存与吞吐测量"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--matvec", "--method", "fast", "--n", "32"]
+output_mode = "file"
+artifact = "matvec_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+device = "cpu"
+n = 32
+
+# --------------------------------------------------------------------------
+# solve —— 端到端 CG 线性求解 (End-to-End CG Solve)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "ea-cg-solve"
+panel = "solve"
+role = "ea-cg-solve-production"
+summary = "3D tet p1, EA 算子搭载无预条件 CG 线性求解端到端峰值内存与容量天花板"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--solve", "--method", "fast", "--n", "32"]
+output_mode = "file"
+artifact = "solve_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+device = "cpu"
+n = 32

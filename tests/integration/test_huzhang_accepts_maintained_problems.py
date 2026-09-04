@@ -20,6 +20,17 @@ from soptx.problems import (
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
 )
+class _LoadObjectOnlyMixedProblem:
+    """仅通过 ``loads()`` 提供物理外载荷的测试 Problem."""
+
+    def __init__(self) -> None:
+        self._base = MixedBoundaryExponentialSineElasticity2D()
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+    def loads(self):
+        return self._base.loads()
 
 
 def _solve_coarsest_state(
@@ -90,3 +101,10 @@ def test_paper_mixed_boundary_problem_needs_no_adapter() -> None:
     assert bool(analyzer._essential_bc.any())
     assert bool(analyzer._natural_bc.any())
     assert not bool((analyzer._essential_bc & analyzer._natural_bc).any())
+
+
+def test_huzhang_consumes_load_objects_instead_of_legacy_load_functions() -> None:
+    analyzer = _solve_coarsest_state(_LoadObjectOnlyMixedProblem())
+
+    assert analyzer.relative_state_residual() <= 1.0e-8
+    assert analyzer.state_matrix_symmetry_error() <= 1.0e-12

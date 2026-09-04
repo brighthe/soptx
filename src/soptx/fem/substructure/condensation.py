@@ -5,8 +5,11 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Tuple, Any, Optional
+from typing import Tuple, Any, Optional, Dict
+import numpy as np
 from fealpy.backend import backend_manager as bm
+
+from .traces import LinearCornerTraceBasis, TraceBasis
 
 
 class StaticCondensationBase(ABC):
@@ -198,3 +201,167 @@ class FEAStaticCondensation(StaticCondensationBase):
         self.K_s = K_bb - bm.matrix_transpose(K_ib) @ invK_ii_K_ib
 
         return self.K_s, self.N
+
+
+class StreamingShapeFunctionCondensation(StaticCondensationBase):
+    """带同质复用与分块流式特性的形函数缩聚容器 (Streaming & Homogeneous Bypass).
+
+    该类专为大规模/超大规模（如数百万自由度）子结构拓扑优化设计：
+    1. 同质子结构（如纯实体/纯孔洞，占全场 80%+）直接按标量因子缩放预计算的基准刚度；
+    2. 异质子结构（边界过渡带）采用流式分块求解，避免在内存中一次性分配数十 GB 的局部矩阵；
+    3. 支持全局装配与全场内部细观位移的流式批量恢复。
+    """
+
+    def __init__(
+        self,
+        i_dofs: Any,
+        b_dofs: Any,
+        Ks_batch: Optional[Any] = None,
+        N_homo: Optional[Any] = None,
+        N_hetero_dict: Optional[Dict[int, Any]] = None,
+        is_homo: Optional[Any] = None,
+        *,
+        Ks_solid: Optional[Any] = None,
+        coef_homo: Optional[Any] = None,
+        Ks_hetero_dict: Optional[Dict[int, Any]] = None,
+        n_sub_total: Optional[int] = None,
+    ) -> None:
+        super().__init__(i_dofs, b_dofs)
+        self.K_s = bm.asarray(Ks_batch) if Ks_batch is not None else None
+        self.N_homo = bm.to_numpy(N_homo) if N_homo is not None else None
+        self.N_hetero_dict = N_hetero_dict or {}
+        self.is_homo = bm.to_numpy(is_homo) if is_homo is not None else None
+
+        # 轻量流式模式属性 (避免全量预分配数十 GB 稠密张量)
+        self.Ks_solid = bm.asarray(Ks_solid) if Ks_solid is not None else None
+        self.coef_homo = bm.asarray(coef_homo) if coef_homo is not None else None
+        self.Ks_hetero_dict = Ks_hetero_dict or {}
+        self.n_sub_total = n_sub_total if n_sub_total is not None else (
+            len(self.is_homo) if self.is_homo is not None else (
+                self.K_s.shape[0] if self.K_s is not None else 0
+            )
+        )
+
+    def condense(self, K_local: Any = None, rho_local: Optional[Any] = None) -> Tuple[Any, Any]:
+        """返回已在流式分块阶段计算完毕的缩聚刚度矩阵 (若未全量存储则返回 None)."""
+        return self.K_s, None
+
+    def get_chunk_stiffness(self, start: int, end: int) -> Any:
+        """流式获取指定切片范围 [start, end) 的子结构缩聚刚度张量."""
+        if self.K_s is not None:
+            return self.K_s[start:end]
+
+        n_chunk = end - start
+        chunk_Ks = bm.zeros((n_chunk, self.n_b, self.n_b), dtype=bm.float64)
+        is_homo_chunk = self.is_homo[start:end]
+
+        # 1. 同质子结构批量广播标量缩放
+        homo_rel_idx = np.where(is_homo_chunk)[0]
+        if len(homo_rel_idx) > 0 and self.Ks_solid is not None and self.coef_homo is not None:
+            coefs = self.coef_homo[start + homo_rel_idx]
+            chunk_Ks = bm.set_at(
+                chunk_Ks,
+                (homo_rel_idx, slice(None), slice(None)),
+                coefs[:, None, None] * self.Ks_solid[None, :, :],
+            )
+
+        # 2. 异质子结构填充
+        hetero_rel_idx = np.where(~is_homo_chunk)[0]
+        for r_idx in hetero_rel_idx:
+            g_idx = start + r_idx
+            if g_idx in self.Ks_hetero_dict:
+                chunk_Ks = bm.set_at(
+                    chunk_Ks,
+                    (r_idx, slice(None), slice(None)),
+                    bm.asarray(self.Ks_hetero_dict[g_idx], dtype=bm.float64),
+                )
+
+        return chunk_Ks
+
+    def get_projected_stiffness(self, trace_basis: TraceBasis) -> Any:
+        """获取指定接口迹空间上的批量子结构刚度.
+
+        参数:
+            trace_basis: 从迹自由度到完整接口自由度的线性映射.
+
+        返回:
+            全场各子结构的迹空间刚度张量, 形状
+            ``(B, n_trace, n_trace)``.
+        """
+        B = self.n_sub_total
+        n_trace = trace_basis.n_trace_dofs
+        if self.K_s is not None:
+            return trace_basis.project_stiffness(self.K_s)
+
+        Ks_reduced = bm.zeros((B, n_trace, n_trace), dtype=bm.float64)
+
+        # 1. 同质子结构基准降维刚度, 仅需算一次.
+        if self.Ks_solid is not None and self.coef_homo is not None and self.is_homo is not None:
+            Ks_solid_reduced = trace_basis.project_stiffness(self.Ks_solid)
+            homo_idx = bm.nonzero(self.is_homo)[0]
+            if len(homo_idx) > 0:
+                coefs = self.coef_homo[homo_idx]
+                Ks_reduced = bm.set_at(
+                    Ks_reduced,
+                    (homo_idx, slice(None), slice(None)),
+                    coefs[:, None, None] * Ks_solid_reduced[None, :, :],
+                )
+
+        # 2. 异质子结构独立降维, 仅极少数边界子结构.
+        if len(self.Ks_hetero_dict) > 0:
+            for idx, Ks_h in self.Ks_hetero_dict.items():
+                Ks_reduced_h = trace_basis.project_stiffness(
+                    bm.asarray(Ks_h, dtype=bm.float64)
+                )
+                Ks_reduced = bm.set_at(Ks_reduced, idx, Ks_reduced_h)
+
+        return Ks_reduced
+
+    def recover_from_trace(
+        self,
+        trace_displacement: Any,
+        trace_basis: TraceBasis,
+    ) -> Tuple[Any, Any]:
+        """由迹自由度位移恢复完整接口位移与内部细观位移.
+
+        参数:
+            trace_displacement: 各子结构迹自由度位移, 形状
+                ``(B, n_trace)``.
+            trace_basis: 当前接口迹空间.
+
+        返回:
+            (u_b_batch, u_i_batch): 细边界位移 (B, n_b) 与内部位移 (B, n_i).
+        """
+        u_b_batch = trace_basis.expand_displacement(trace_displacement)
+        u_i_batch = self.recover(u_b_batch)
+        return u_b_batch, u_i_batch
+
+    def get_macro_stiffness(self, L: Any) -> Any:
+        """兼容旧接口: 使用角点线性迹计算宏观刚度."""
+        return self.get_projected_stiffness(LinearCornerTraceBasis(L))
+
+    def recover_from_macro(self, u_c_batch: Any, L: Any) -> Tuple[Any, Any]:
+        """兼容旧接口: 由角点线性迹位移恢复细尺度位移."""
+        return self.recover_from_trace(
+            u_c_batch,
+            LinearCornerTraceBasis(L),
+        )
+
+    def recover(self, u_b_batch: Any) -> Any:
+        """根据接口位移批量恢复全场子结构内部细观位移."""
+        B = u_b_batch.shape[0]
+        n_i = self.n_i
+        u_i = np.zeros((B, n_i), dtype=np.float64)
+        u_b_np = bm.to_numpy(u_b_batch)
+
+        # 1. 同质子结构位移恢复 (单次矩阵乘法批量广播)
+        if self.is_homo is not None and self.N_homo is not None:
+            homo_idx = np.where(self.is_homo)[0]
+            if len(homo_idx) > 0:
+                u_i[homo_idx] = u_b_np[homo_idx] @ self.N_homo.T
+
+        # 2. 异质子结构位移恢复
+        for idx, N_h in self.N_hetero_dict.items():
+            u_i[idx] = bm.to_numpy(N_h) @ u_b_np[idx]
+
+        return bm.asarray(u_i)

@@ -27,13 +27,16 @@ RUN_SCRIPT = TOOL_DIR / "run.py"
 
 # (role, operator_level, ranks) per dimension, split by推进阶段。
 #
-# 1a（CPU 串行 EA/FA）是当前的默认验证范围: 三档单 rank EA 加一档单 rank FA
-# 参照, 不涉及任何 MPI 分区与重叠副本归约。
+# 1a（CPU 串行 EA/FA）是当前的默认验证范围: EA 与 FA 各三档单 rank,
+# 不涉及任何 MPI 分区与重叠副本归约。FA 与 EA 同档, 使 EA/FA 解相对差
+# 能在每一档上直接比对, 而不是只在最粗档取一个参照。
 SERIAL_VALIDATION_CASES = (
     ("coarse", "ea", 1),
     ("medium", "ea", 1),
     ("fine", "ea", 1),
     ("coarse", "fa", 1),
+    ("medium", "fa", 1),
+    ("fine", "fa", 1),
 )
 
 # 1b（CPU 并行 EA）在 1a 之上追加的算例; 由 validate.py 的
@@ -59,6 +62,13 @@ def validation_cases(
     return SERIAL_VALIDATION_CASES
 
 # EA roles whose summaries feed the committed evidence, in refinement order.
+#
+# 这个元组是加密档数的唯一定义: 它的长度必须与 ``contract.REFINEMENTS`` 每个
+# 维度的元组长度一致, 顺序即由粗到细。要增减档数只改这两处, 下游的收敛阶计算
+# 与产物命名都由它派生。
+#
+# FA 与 EA 同档 (见 ``SERIAL_VALIDATION_CASES``), 逐档比对 EA/FA 解相对差;
+# 向后兼容的单一 FA 参照取最粗档, 见 ``fa_evidence_source``。
 EA_EVIDENCE_ROLES = ("coarse", "medium", "fine")
 
 EVIDENCE_SCOPE = "cpu-single-rank-fa-ea"
@@ -86,18 +96,26 @@ def validation_artifact_paths(
 
 
 def validation_case_specs(
-    refinements: tuple[int, int, int],
+    refinements: tuple[int, ...],
     *,
     include_parallel: bool = False,
 ) -> tuple[tuple[str, int, int, str], ...]:
-    """Pair every validation case with its refinement level."""
+    """Pair every validation case with its refinement level.
 
-    coarse, medium, fine = refinements
-    refinement_by_role = {
-        "coarse": coarse,
-        "medium": medium,
-        "fine": fine,
-    }
+    参数:
+        refinements: 由粗到细的每轴剖分数, 长度必须等于 ``EA_EVIDENCE_ROLES``.
+
+    异常:
+        ValueError: 档数与角色数不一致时抛出. 两者错位会让收敛阶算在错误的
+            网格对上, 而结果仍是一个像模像样的数字, 因此必须显式失败.
+    """
+
+    if len(refinements) != len(EA_EVIDENCE_ROLES):
+        raise ValueError(
+            f"refinements 有 {len(refinements)} 档, 但 EA_EVIDENCE_ROLES 定义了 "
+            f"{len(EA_EVIDENCE_ROLES)} 个角色: {EA_EVIDENCE_ROLES}"
+        )
+    refinement_by_role = dict(zip(EA_EVIDENCE_ROLES, refinements))
     return tuple(
         (
             case_name(role, operator_level, ranks),
@@ -127,11 +145,14 @@ def ea_evidence_sources(dimension: int) -> tuple[tuple[str, Path], ...]:
 
 
 def fa_evidence_source(dimension: int) -> Path:
-    """Single-rank coarse FA summary consumed by the evidence builder."""
+    """Single-rank FA summary consumed by the evidence builder.
+
+    FA 与 EA 同档全跑; 向后兼容的单一参照取最粗档 (``EA_EVIDENCE_ROLES[0]``)。
+    """
 
     return validation_artifact_paths(
         dimension,
-        case_name("coarse", "fa", 1),
+        case_name(EA_EVIDENCE_ROLES[0], "fa", 1),
     )[0]
 
 

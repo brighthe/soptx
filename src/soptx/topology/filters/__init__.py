@@ -14,6 +14,12 @@ if TYPE_CHECKING:
     from .strategies import NoneStrategy as NoneStrategy
     from .strategies import ProjectionStrategy as ProjectionStrategy
     from .strategies import SensitivityStrategy as SensitivityStrategy
+    from .structured import (
+        apply_structured_density_filter as apply_structured_density_filter,
+        apply_structured_density_filter_adjoint as apply_structured_density_filter_adjoint,
+        apply_structured_sensitivity_filter as apply_structured_sensitivity_filter,
+        build_structured_cone_kernel as build_structured_cone_kernel,
+    )
 
 _EXPORTS = {
     "DensityStrategy": (".strategies", "DensityStrategy"),
@@ -22,6 +28,10 @@ _EXPORTS = {
     "NoneStrategy": (".strategies", "NoneStrategy"),
     "ProjectionStrategy": (".strategies", "ProjectionStrategy"),
     "SensitivityStrategy": (".strategies", "SensitivityStrategy"),
+    "apply_structured_density_filter": (".structured", "apply_structured_density_filter"),
+    "apply_structured_density_filter_adjoint": (".structured", "apply_structured_density_filter_adjoint"),
+    "apply_structured_sensitivity_filter": (".structured", "apply_structured_sensitivity_filter"),
+    "build_structured_cone_kernel": (".structured", "build_structured_cone_kernel"),
 }
 
 __all__ = list(_EXPORTS)

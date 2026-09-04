@@ -8,6 +8,8 @@ from typing import Callable, Protocol, Sequence
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 
+from soptx.problems.loads import BodyForceLoad
+
 
 def validated_domain(
     domain: Sequence[float],
@@ -70,6 +72,10 @@ class _AllDisplacementBoundaryHost(Protocol):
         """返回位移本质边界数据."""
         ...
 
+    def _body_force(self, points: TensorLike) -> TensorLike:
+        """返回连续体力场."""
+        ...
+
 
 class AllDisplacementBoundaryMixin:
     """全 Dirichlet 盒形问题在混合形式下的边界默认实现.
@@ -83,6 +89,17 @@ class AllDisplacementBoundaryMixin:
     """
 
     _eps = 1.0e-12
+
+    def loads(
+        self: _AllDisplacementBoundaryHost,
+    ) -> tuple[BodyForceLoad, ...]:
+        """返回全 Dirichlet 制造解的体力载荷."""
+        return (
+            BodyForceLoad(
+                dimension=self.dimension,
+                value=self._body_force,
+            ),
+        )
 
     def mark_corners(
         self: _AllDisplacementBoundaryHost,
@@ -121,16 +138,3 @@ class AllDisplacementBoundaryMixin:
         复用 ``dirichlet_bc`` 使弱数据保持精确, 并与主形式的强数据完全一致.
         """
         return self.dirichlet_bc(points)
-
-    def traction_bc(
-        self: _AllDisplacementBoundaryHost,
-        points: TensorLike,
-    ) -> TensorLike:
-        """拒绝 traction 查询, 而不是编造零 traction 数据.
-
-        ``is_traction_boundary`` 为空, 所以正确的分析器路径不会调用本方法.
-        抛出异常既使协议要求的成员存在, 又明确拒绝这个问题无法回答的查询.
-        """
-        raise NotImplementedError(
-            f"{type(self).__name__} 在整个边界上施加位移条件, 不提供 traction 数据."
-        )

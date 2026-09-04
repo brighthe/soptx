@@ -1,0 +1,105 @@
+# -*- coding: utf-8 -*-
+# PIML 子结构拓扑优化实验工况注册表
+# 对齐 Huang 2023 第 4.1 节 MBB 梁完整拓扑优化基准
+
+[meta]
+title = "PIML 子结构拓扑优化完整迭代验证"
+topic = "拓扑优化多步迭代闭环与耗时/精度评估"
+date_created = "2026-08-28"
+
+[[cases]]
+id = "mbb_piml_route_a"
+solver_mode = "piml_route_a"
+domain = [0.0, 12.0, 0.0, 2.0]
+n_sub = [12, 2]
+n_fine = [5, 5]
+volfrac = 0.5
+filter_radius = 0.3
+filter_type = "sensitivity"
+max_iter = 100
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+summary = "Huang 2023 路线 A (预测形函数 N + 式 17 二阶能量构造) 2D MBB 梁拓扑优化"
+
+[[cases]]
+id = "mbb_fea_baseline"
+solver_mode = "fea_baseline"
+domain = [0.0, 12.0, 0.0, 2.0]
+n_sub = [12, 2]
+n_fine = [5, 5]
+volfrac = 0.5
+filter_radius = 0.3
+filter_type = "sensitivity"
+max_iter = 100
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+summary = "精确子结构有限元 (Schur 补) 2D MBB 梁拓扑优化基准"
+
+[[cases]]
+id = "mbb_3d_piml_route_a"
+solver_mode = "piml_route_a"
+domain = [0.0, 12.0, 0.0, 2.0, 0.0, 2.0]
+n_sub = [12, 2, 2]
+n_fine = [3, 3, 3]
+volfrac = 0.3
+filter_radius = 0.4
+filter_type = "sensitivity"
+max_iter = 50
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+summary = "Huang 2023 路线 A (式 17) 三维实体 MBB 梁拓扑优化 (图 6 对应 3D 算例)"
+
+[[cases]]
+id = "mbb_3d_fea_baseline"
+solver_mode = "fea_baseline"
+domain = [0.0, 12.0, 0.0, 2.0, 0.0, 2.0]
+n_sub = [12, 2, 2]
+n_fine = [3, 3, 3]
+volfrac = 0.3
+filter_radius = 0.4
+filter_type = "sensitivity"
+max_iter = 50
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+summary = "精确子结构有限元 (Schur 补) 三维实体 MBB 梁拓扑优化基准"
+
+[[cases]]
+id = "mbb_3d_5m_piml_route_a"
+solver_mode = "piml_route_a"
+domain = [0.0, 6.0, 0.0, 1.0, 0.0, 1.0]
+n_sub = [78, 13, 13]
+n_fine = [5, 5, 5]
+volfrac = 0.3
+filter_radius = 0.08
+filter_type = "sensitivity"
+max_iter = 60
+tol_change = 0.0002
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+summary = "Huang 2023 5.11M 自由度 (164.775万单元, 13182子结构) 三维实体 MBB 梁拓扑优化"
+
+

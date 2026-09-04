@@ -28,7 +28,7 @@
 
 **凡是能从已有对象问出来的，一律问它，不另存一份。** 区域取
 `problem.domain`，弹性常数取 `problem.lam` / `problem.mu`，维数取
-`problem.dimension`，网格实体名取 `mesh.Entity("cell").schema.name`，算例名取
+`problem.dimension`，网格实体名取 `mesh.entity_view("cell").schema.name`，算例名取
 `type(problem).__name__`——制造解的解析式与刚度算子必须建立在同一组参数上，各存
 一份迟早会漂，而这种漂移 EA/FA 对拍是发现不了的（两边用的是同一个错误常数），
 只有 L2 收敛阶门禁才拦得住。
@@ -51,18 +51,20 @@ MATERIAL_HYPOTHESES = {2: "plane_strain", 3: "3D"}
 ## 文件职责
 
 - [`verify_ea_correctness.py`](verify_ea_correctness.py)：多-rank EA 正确性验证，检查 EA/FA 算子、EA-CG/FA 直接解与并行/串行 EA 解一致性，并可检验单 Rank L2 收敛阶；
+- [`stage1_evidence.py`](stage1_evidence.py)：CPU 串行 stage-1 EA/FA 证据生成（2D/3D 各 EA/FA × 三档），产出逐档 L2 误差、EA/FA 解相对差与观测阶的汇总 JSON，供 `experiments/matrix_free_capability` 表 a-2 使用；
 - [`benchmark_cpu_ea.py`](benchmark_cpu_ea.py)：单 Rank CPU EA/FA 效率对照，只切换算子层级，记录刚度算子构造、裸 MatVec、CG 和算子长期保存数组字节数；
 - [`compare_lagrange.py`](compare_lagrange.py)：交叉比对，与 FA 的 CSR 矩阵及 Scipy 直解做机器精度级对照；
 - [`results_analysis.md`](results_analysis.md)：符号—代码映射契约、实测数值、证据 provenance 与证据边界的唯一事实源；
 
-本目录有三个可执行入口与两份文档。制造解已下沉到
+本目录有四个可执行入口与两份文档。制造解已下沉到
 [`soptx.problems.elasticity`](../../src/soptx/problems/elasticity.py)（见上节）。证据流水线（`run`、`validate`、`sync_results`
 及其 `contract`/`layout`/`schema`/`report`）住在
 [`tools/matrix_free_evidence/`](../../tools/matrix_free_evidence/)，因为它同时是
 fealpy fork 的 merge 前门禁，不只服务于这一个示例。依赖方向是单向的：那个包不导入
 本目录的任何模块，反过来是正确性入口导入它的 `contract`，好让印出的 PASS/FAIL
-与正式门禁用同一批阈值。它们的测试在 [`tests/unit/`](../../tests/unit/)，文件名
-以 `test_matrix_free_` 开头。
+与正式门禁用同一批阈值。`stage1_evidence.py` 也以同一方式导入 `contract`，但它
+不经过那条验证管线，直接产出图 2 用的汇总 JSON。它们的测试在
+[`tests/unit/`](../../tests/unit/)，文件名以 `test_matrix_free_` 开头。
 
 ## 实现住在哪里
 
@@ -71,12 +73,14 @@ fealpy fork 的 merge 前门禁，不只服务于这一个示例。依赖方向�
 | 模块 | 内容 |
 |---|---|
 | [`soptx.problems.elasticity`](../../src/soptx/problems/elasticity.py) | `SinusoidalPlaneStrainElasticity2D` / `DivergenceFreePolynomialElasticity3D`：制造解的单一定义源，自带区域、弹性常数与维数 |
-| [`soptx.fem.solvers.matrix_free_solver`](../../src/soptx/fem/solvers/matrix_free_solver.py) | `weighted_cg` / `solve_matrix_free_system` / `PreparedLinearSystem` 与真残差、边界误差诊断。当前无预条件 |
-| [`soptx.fem.solvers.matrix_free_analyzer`](../../src/soptx/fem/solvers/matrix_free_analyzer.py) | `DistributedElasticityAnalyzer`（`LagrangeFEMAnalyzer` 的重叠副本子类）与 `DISTRIBUTED_SOLVERS` 登记表 |
+| [`soptx.fem.matrix_free.krylov`](../../src/soptx/fem/matrix_free/krylov.py) | `weighted_cg` / `solve_matrix_free_system` / `PreparedLinearSystem` 与真残差、边界误差诊断。当前无预条件 |
+| [`soptx.fem.analyzers.distributed_analyzer`](../../src/soptx/fem/analyzers/distributed_analyzer.py) | `DistributedElasticityAnalyzer`（`LagrangeFEMAnalyzer` 的重叠副本子类）与 `DISTRIBUTED_SOLVERS` 登记表 |
 | [`soptx.fem.distributed`](../../src/soptx/fem/distributed.py) | `OverlapOperator`（MPI 共享自由度同步归约）、单元分区与向量空间分发 |
-| [`soptx.fem.solvers.elasticity_operator`](../../src/soptx/fem/solvers/elasticity_operator.py) | `build_serial_analyzer` / `build_distributed_analyzer` 与 demo 用的 EA 懒装配门面 `ElasticityEAOperator`；只接受 `(space, pde, material)` |
+| [`soptx.fem.analyzers.builders`](../../src/soptx/fem/analyzers/builders.py) | `build_serial_analyzer` / `build_distributed_analyzer`：算子层级无关的分析器构造工厂，`fa` 与 `ea` 共用；只接受 `(space, pde, material)` |
+| [`soptx.fem.matrix_free.operator`](../../src/soptx/fem/matrix_free/operator.py) | demo 用的 EA 懒装配算子门面 `ElasticityEAOperator` |
+| [`soptx.fem.matrix_free.solve`](../../src/soptx/fem/matrix_free/solve.py) | `solve_ea_system`：装配 → 边界条件 → 加权 CG 的一步正向求解门面 |
 | [`soptx.fem.verification`](../../src/soptx/fem/verification.py) | `serial_references`（FA 黄金参考与 Scipy 直解）、`solution_error`、`relative_difference` |
-| [`soptx.numerics`](../../src/soptx/numerics.py) | 求解器默认容差与 `NORM_FLOOR`，由 [`tools/matrix_free_evidence/contract.py`](../../tools/matrix_free_evidence/contract.py) 复出口 |
+| [`soptx.core.numerics`](../../src/soptx/core/numerics.py) | 求解器默认容差与 `NORM_FLOOR`，由 [`tools/matrix_free_evidence/contract.py`](../../tools/matrix_free_evidence/contract.py) 复出口 |
 
 后两者依赖可选的 `mpi4py`，因此**不**从 `soptx.fem` 的包 `__init__` 导出，需按完整模块路径导入。
 
@@ -156,6 +160,38 @@ python examples/matrix_free_elasticity/benchmark_cpu_ea.py \
 索引，EA 为单元矩阵与单元到全局 DOF 映射。它**不是**进程峰值内存，不能代替内存
 分析工具或用于声称实际峰值内存降低。
 
+进程峰值内存另有一个模式。`--mode serial-peak-rss` 一个进程只构造一个算子层级，
+逐阶段读 `resource.getrusage(RUSAGE_SELF).ru_maxrss`，并按 `baseline` /
+`mesh` / `operator` / `load` / `bc` / `solve` 分段报告累计高水位（`load` 为体力
+向量全装配，`bc` 为 Dirichlet 处理，两者曾合并在一个 `bc` 阶段里）：
+
+```bash
+python -u examples/matrix_free_elasticity/benchmark_cpu_ea.py \
+  --mode serial-peak-rss --model polynomial --mesh-type tet --n 64 \
+  --operator-level fa --assembly-method fast \
+  --output examples/matrix_free_elasticity/outputs/peak_rss_3d_tet_polynomial_p1_fa_fast_n64.json
+python -u examples/matrix_free_elasticity/benchmark_cpu_ea.py \
+  --mode serial-peak-rss --model polynomial --mesh-type tet --n 64 \
+  --operator-level ea --assembly-method fast \
+  --output examples/matrix_free_elasticity/outputs/peak_rss_3d_tet_polynomial_p1_ea_fast_n64.json
+```
+
+三条使用约束，缺一条数字就不能用：
+
+- **必须一个进程测一个层级。** 默认的 `serial-fa-ea` 在同一进程里先后建 FA 与
+  EA，其高水位等于两者的较大值，EA 隔离不出来。峰值 RSS 是进程级量，归属只能靠
+  进程隔离。
+- **必须显式选 `--assembly-method`。** 缺省的 `standard` 会把随后要被求和掉的
+  积分点轴物化成中间张量（3D 四面体 $n=64$ 上单块 3.75 GiB、九块同时存活），
+  峰值由此被组装临时量而非算子本身决定；对照见
+  [`lagrange_elasticity/results_analysis.md`](../lagrange_elasticity/results_analysis.md) §4.4。
+- **绝对值不可移植。** 它随机器、BLAS 与分配器变化，只有同机同批次的相对关系可
+  引用；跨档比较也要先减去 `peak_rss_baseline_bytes`（解释器与已导入模块本身即
+  占 0.15 GiB 量级，小自由度档上会淹没算子差异）。
+
+可用 `/usr/bin/time -v` 的 `Maximum resident set size` 交叉校验：两者同源，应逐
+KiB 吻合。
+
 CPU MPI EA 初步强/弱扩展。必须以同一个 MPI 环境中的启动器运行；强扩展固定物理
 区域与全局网格。弱扩展按 rank 数沿 x 方向同时扩大物理区域和网格数，例如 2D 的
 1-rank ``[0, 1] x [0, 1]``、``n x n`` 与 2-rank ``[0, 2] x [0, 1]``、``2n x n``
@@ -207,7 +243,7 @@ main
       → run_solver
           → analyzer.apply_bc(assemble_stiff_matrix(), assemble_body_force_vector())
           → analyzer.solve_system → DISTRIBUTED_SOLVERS["cg"]
-              → matrix_free_solver.weighted_cg
+              → krylov.weighted_cg
                   → fealpy cg(dot_product=dof_comm.dot)
           → solver_diagnostics
       → dof_comm.gather_add(local_solution / references)

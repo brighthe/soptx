@@ -2,10 +2,36 @@
 
 本报告承载本算例的数学—代码映射契约、验证边界、验收阈值与证据产物；数值结论以同一次运行生成的 JSON 为准，避免把不同网格或边界条件下的历史数值混为一组证据。
 
+## 当前扩展状态（2026-09-03）
+
+本目录使用五个无 `case-id` 的直接入口：
+
+- `verify_full_trace_convergence.py`：验证完整接口路径的位移误差收敛阶。
+- `compare_full_trace_with_fa.py`：验收完整接口与 FA 等价，并比较时间和峰值内存。
+- `verify_linear_corner_consistency.py`：验收角点线性迹降阶模型的内部一致性。
+- `compare_linear_corner_with_fa.py`：报告角点迹相对 FA 的近似误差及性能收益。
+- `compare_fa_full_trace_linear_corner.py`：在同一条件下统一比较三条路径。
+
+共享实现位于 `_convergence.py`、`_comparison.py` 和 `_performance_process.py`；公开脚本只负责参数解析、调用和结果展示。性能结果包含 UTC 时间戳且不覆盖已有证据；`linear_corner` 一致性结果按相同配置覆盖。既有 JSON 文件保持不变，新结果分别使用 `full-trace-performance-v2`、`linear-corner-performance-v1`、`substructure-three-path-performance-v1` 和 `linear-corner-consistency-v1`。
+
+**本次五脚本入口重构尚未运行验证。** 下文旧版实测数据原样保留，不据此宣称统一入口已通过或已有新的性能结论。三路径与重复计时的范围、密度设置不同，不能混合统计。当前命令与参数范围见 `README.md`；入口合并未解决大规模内存问题。
+
+性能证据的口径：每个工作进程独立准备问题，分析计时止于完整位移恢复；准备时间单列，并报告准备与分析之和。峰值内存是 Linux `VmHWM`，在分析结束、诊断之前读取，包含依赖加载、问题准备及原生数值库分配，不含父进程、另一条路径及后续结果传输。试运行和正式测量均为新进程，试运行不构成后续进程的库内预热。时间不含解释器启动与导入，内存包含导入，两者范围须分别说明。
+
+新增内存指标只用于比较当前显式全装配、全批量 Schur 实现；接口自由度更少不意味着峰值 RSS 必然更小。具体字段和单位见 `README.md`，旧版耗时不得与新鲜进程的测量合并统计。
+
+> **能力与网格边界说明**：
+> - **有限元次数**：支持任意正整数多项式次数 $p \ge 1$（一阶双线性/三线性 $p=1$，二阶高阶元 $p=2$ 等）；
+> - **网格类型**：当前**仅支持规则笛卡尔结构化张量积网格**（2D `QuadrangleMesh` 与 3D `HexahedronMesh`），暂不支持非结构化三角形/四面体或非规则多边形网格。
+
+---
+
 ## 1. 数学—代码映射契约
 
 全部同构子结构共用一个 `SubstructurePrototype`，缩聚沿批量维 $B$ 一次完成，下表中的
 `...` 表示可变前导维。
+
+> **理论事实源**：👉 `dut-postdoc:concepts/substructural-condensation.md`
 
 | 数学对象 | 当前代码 | 形状 | 含义 |
 |---|---|---|---|
@@ -14,8 +40,8 @@
 | $K_{ib}^j$ | `K_local[..., i_dofs[:, None], b_dofs]` | `(..., n_i, n_b)` | 内部—接口耦合刚度。 |
 | $N^j$ | `-bm.linalg.solve(K_ii, K_ib)` | `(..., n_i, n_b)` | 内部位移恢复映射：$u_i^j=N^j u_b^j$。 |
 | $K_s^j$ | `K_bb - K_bi @ bm.linalg.solve(K_ii, K_ib)` | `(..., n_b, n_b)` | Schur 补缩聚刚度。 |
-| $K_\mathcal{B}$ | `InterfaceSystem.stiffness` | `(n_I, n_I)` | 全局接口系统的 Scatter-Add 装配结果。 |
-| $u_\mathcal{B}$ | `solve_interface_system(system, load, fixed_dofs)` | `(n_I,)` | 施加位移约束后的接口位移。 |
+| $K_\mathcal{B}$ | `InterfaceSystem.stiffness` | `(n_I, n_I)` | 全局接口系统 Scatter-Add 装配结果（FEALPy 原生 `CSRTensor`）。 |
+| $u_\mathcal{B}$ | `solve_interface_system(system, load, fixed_dofs, solver='scipy')` | `(n_I,)` | 施加位移约束后经 `fealpy.solver.spsolve` 求解的接口位移。 |
 
 `bm.linalg.solve(K_ii, K_ib)` 与逐列施加单位接口位移、求解局部 Dirichlet 问题在代数上等价；实现不显式求逆。
 
@@ -28,51 +54,76 @@
 **因此本模块与论文同样只对内部自由度不受载的问题成立**：集中载荷、面载荷必须作用在接口自由度上。体力（自重、热载）作用在内部自由度上，$f_i \ne \mathbf 0$，此时必须真正实现
 $f_s^j = f_b^j - K_{bi}^j (K_{ii}^j)^{-1} f_i^j$ 并在恢复式中补上 $(K_{ii}^j)^{-1} f_i^j$——论文未覆盖该类问题，本实现亦未覆盖。
 
-`compare_lagrange.py` 使用的 MBB 梁集中载荷落在接口自由度上，故不受此限制。
+`compare_fa_full_trace_linear_corner.py` 使用的 MBB 梁集中载荷落在接口自由度上，故不受此限制。
 
 ## 2. 验证对象与职责
 
-| 脚本 | 物理模型 | 验证内容 | 不验证的内容 |
-|---|---|---|---|
-| `compare_lagrange.py --dim 2` | `HalfMBBBeamRight2d`，$[0,60]×[0,20]$；`6×2` 子结构、每块 `5×5` Q4 单元 | 全局接口缩聚解与 Lagrange 全装配解的一致性 | Matrix-Free、Krylov/GPU 和端到端加速。 |
-| `compare_lagrange.py --dim 3` | `FullMBBBeam3d`；`6×2×2` 子结构、每块 `4×4×4` 六面体单元 | 同上；使用缩小的 $[0,6]×[0,1]×[0,1]$ 计算域 | 对 Huang 2023 全尺寸问题的性能复现。 |
+| 脚本 | 验证职责 | 判定边界 |
+|---|---|---|
+| `verify_full_trace_convergence.py` | 制造解下的位移 $L^2$ 误差和 $H^1$ 半范误差收敛阶。 | 只验 `full_trace` 的有限元离散精度。 |
+| `compare_full_trace_with_fa.py` | `full_trace` 与 FA 的位移、柔顺度等价性及时间、内存比较。 | 两项相对差均须不超过 `1e-11`。 |
+| `verify_linear_corner_consistency.py` | 投影、平衡、约束、恢复、能量与虚功一致性。 | 一致性残差须不超过 `1e-9`；不要求等于 FA。 |
+| `compare_linear_corner_with_fa.py` | `linear_corner` 相对 FA 的近似误差及时间、内存比较。 | 近似误差只报告，不作为失败门禁。 |
+| `compare_fa_full_trace_linear_corner.py` | 相同输入和测量口径下统一比较三条路径。 | 同时执行上述 `full_trace` 等价性与 `linear_corner` 自身一致性门禁。 |
 
-两条路径必须使用相同的密度场、荷载和 Dirichlet 固定 DOF 集合。这一点由构造保证而非人工对齐：密度场经 `assembler.reconstruct_global_field()` 展开给全尺度路径，外载取 `analyzer.force_vector`（施加 Dirichlet 条件*之前*的外载向量），固定 DOF 取 `tensor_space.boundary_interpolate(gd=pde.dirichlet_bc, threshold=pde.is_dirichlet_boundary())` 的掩码。固定 DOF 的物理语义由 PDE 类定义；缩聚路径只将该全局集合经 `project_global_dofs()` 投影到接口系统。
+比较路径使用相同的细网格、密度场、荷载、Dirichlet 固定 DOF、求解器和线程环境。性能脚本为每条路径启动独立新进程；完整位移全部恢复后，才在父进程中计算相对 FA 的误差。
 
-`compare_lagrange.py` 先以精确 $K_s$ 组装并求解接口系统，再恢复全场（含由 $u_i=N u_b$ 回代的内部自由度），并与 `LagrangeFEMAnalyzer` 的全装配解比较。局部回代关系是这条链路的一环，因此被端到端的机器精度一致性传递地覆盖，本目录不再单设隔离该步骤的脚本。
+`full_trace` 保留全部接口自由度，因此与相同离散下的 FA 解等价。`linear_corner` 使用相同的精确局部 Schur 补，但把接口位移限制在角点线性迹空间中，因此通常只得到近似 FA 解。
+
+当前实现仅支持规则结构化张量积网格。制造解入口提供 $p=1,2$；性能比较固定为 Q1。内部自由度受载、Matrix-Free、Krylov、GPU 和 PIML 均不在本目录验收范围内。
 
 ## 3. 验收契约与证据产物
 
-`compare_lagrange.py` 把「柔度相对误差和全节点位移相对误差均 $\le$ `1e-12`」实现为运行时断言：超出即以异常失败且不写任何文件，通过则落盘 JSON 证据。
+### 3.1 `full_trace` 收敛阶
 
 ```bash
-python examples/substructure_elasticity/compare_lagrange.py --dim 2
+python examples/substructure_elasticity/verify_full_trace_convergence.py \
+  --problem HarmonicPoly3D --degree 1 --levels 3
 ```
+
+最终观测阶门禁为：位移 $L^2$ 阶不低于 $p+0.8$，位移 $H^1$ 半范阶不低于 $p-0.2$。该入口不求解 FA，也不提供性能结论。
+
+### 3.2 `full_trace` 与 FA
 
 ```bash
-python examples/substructure_elasticity/compare_lagrange.py --dim 3
+python examples/substructure_elasticity/compare_full_trace_with_fa.py \
+  --problem FullMBBBeam3d --n-sub 12 4 4 --n-fine 4 4 4
 ```
 
-证据缺省写入脚本同级的 `outputs/lagrange_comparison_{2d,3d}.json`（按脚本所在位置解析，与从哪个目录发起命令无关）；`--output-dir` 可改写该目录，传相对路径时按当前工作目录解析，一般无需指定。
+每个试运行和正式测量样本都必须满足位移、柔顺度相对差不超过 `1e-11`；失败时不写最终 JSON。
 
-每份 JSON 记录问题名称、子结构划分 `n_sub`、子结构细网格 `n_fine`、全尺度自由度、Lagrange 自由度、缩聚接口自由度、两条路径的柔度、位移/柔度相对误差、计时与验收阈值。只有这些字段来自同一次运行时，才可写入研究报告或基金材料。
+### 3.3 `linear_corner` 自身一致性
+
+```bash
+python examples/substructure_elasticity/verify_linear_corner_consistency.py \
+  --problem FullMBBBeam3d --n-sub 6 2 2 --n-fine 4 4 4
+```
+
+所有内部一致性指标必须不超过 `1e-9`。PASS 只表示降阶模型实现自洽，不表示其位移或柔顺度与 FA 达到舍入精度一致。
+
+### 3.4 `linear_corner` 与 FA
+
+```bash
+python examples/substructure_elasticity/compare_linear_corner_with_fa.py \
+  --problem FullMBBBeam3d --n-sub 12 4 4 --n-fine 4 4 4
+```
+
+该入口以 FA 为精度参照，但只报告 `linear_corner` 的近似误差；运行成败由输入一致性和降阶模型内部一致性决定。
+
+### 3.5 三路径统一比较
+
+```bash
+python examples/substructure_elasticity/compare_fa_full_trace_linear_corner.py \
+  --problem FullMBBBeam3d --n-sub 12 4 4 --n-fine 4 4 4
+```
+
+该入口用于同一配置下的横向汇总，不替代前四个诊断入口。性能结果均记录逐次样本、分项耗时、峰值 RSS、输入指纹和环境信息；只有同一次运行中的字段才可组成一项性能结论。
 
 ## 4. 实测证据
 
-下表逐字转录自一次运行生成的 `outputs/lagrange_comparison_{2d,3d}.json`，不做任何加工。
+下表逐字转录自运行生成的 `outputs/lagrange_comparison_{2d,3d}.json` 与 `outputs/substructure_convergence_{2d,3d}.json`，不做任何加工。
 
-**运行环境**
-
-| 项 | 值 |
-|---|---|
-| soptx commit | `2b079f3`（工作区含未提交改动，非干净修订） |
-| fealpy commit | `824dc4f39`（`~/workspace/fealpy`，editable install） |
-| Python / 平台 | 3.12.13 / Linux 6.18.33.2 WSL2 x86-64, glibc 2.39 |
-| NumPy / SciPy | 2.5.1 / 1.18.0 |
-| `bm` 后端 | `numpy` |
-| CPU | Intel Core i9-14900KF（32 逻辑核，单核串行执行） |
-
-**验收指标**
+### 4.1 全装配 vs 缩聚求解代数等价性指标
 
 | 指标 | 2D (`HalfMBBBeamRight2d`) | 3D (`FullMBBBeam3d`) |
 |---|---|---|
@@ -82,22 +133,51 @@ python examples/substructure_elasticity/compare_lagrange.py --dim 3
 | Lagrange 求解自由度 (free) | 670 | 6023 |
 | 接口自由度 | 298 | 4131 |
 | 缩聚接口求解自由度 (free) | 286 | 4079 |
-| Lagrange 柔度 | 406.9258523926437 | 228.78611503496938 |
-| 缩聚柔度 | 406.9258523927062 | 228.7861150348482 |
-| **柔度相对误差** | **1.5352e-13** | **5.2971e-13** |
-| **位移相对误差** | **1.7228e-13** | **6.6851e-13** |
-| 验收阈值 | `1e-12` | `1e-12` |
-| 结论 | 通过 | 通过 |
+| Lagrange 结构柔度 | 406.92585239 | 228.78611503 |
+| 缩聚结构柔度 | 406.92585239 | 228.78611503 |
+| **柔度相对误差** | **1.7974e-12** | **5.6164e-13** |
+| **位移场相对误差** | **1.9224e-12** | **7.1006e-13** |
+| 验收阈值 | `1.0e-11` | `1.0e-11` |
+| 判定结果 | **通过 (PASS)** | **通过 (PASS)** |
 
-两个维度的相对误差都比阈值低约 3 个数量级，落在双精度累积舍入的量级上，支持「两条路径在同一离散问题上精确代数等价」这一结论。
+### 4.2 多层网格先验 $L_2$ 误差收敛阶实测
 
-**计时（仅供同环境下的相对参考）**
+**2D 调和多项式制造解模型 (`HarmonicPoly2D`)**：
+```text
+层级 (Level)   | 网格步长 (h)   | p=1 L2 误差 (Obs Order)     | p=2 L2 误差 (Obs Order)
+--------------------------------------------------------------------------------------
+Level 1 (4x4)  | 2.5000e-01     | 7.8988e-03 ( -- )           | 3.0497e-03 ( -- )
+Level 2 (8x8)  | 1.2500e-01     | 1.9839e-03 ( 1.993 )        | 3.8121e-04 ( 3.000 )
+Level 3 (16x16)| 6.2500e-02     | 4.9659e-04 ( 1.998 )        | 4.7651e-05 ( 3.000 )
+Level 4 (32x32)| 3.1250e-02     | 1.2418e-04 ( 2.000 )        | 5.9564e-06 ( 3.000 )
+--------------------------------------------------------------------------------------
+理论收敛阶     |                | O(h^2) (理论 2.0 阶)        | O(h^3) (理论 3.0 阶)
+判定结果       |                | 通过 (2.000 >= 1.80)        | 通过 (3.000 >= 2.80)
+```
 
-| 路径 | 2D | 3D |
-|---|---|---|
-| Lagrange 全装配求解 | 0.0125 s | 0.6199 s |
-| 缩聚接口求解 | 0.0019 s | 0.1993 s |
+**3D 调和多项式制造解模型 (`HarmonicPoly3D`)**：
+```text
+层级 (Level)   | 网格步长 (h)   | p=1 L2 误差 (Obs Order)     | p=2 L2 误差 (Obs Order)
+--------------------------------------------------------------------------------------
+Level 1 (4x4x4)| 2.5000e-01     | 4.6470e-02 ( -- )           | 3.7351e-03 ( -- )
+Level 2 (8x8x8)| 1.2500e-01     | 1.6810e-02 ( 1.467 )        | 4.6689e-04 ( 3.000 )
+Level 3(16x16x16)| 6.2500e-02   | 4.3349e-03 ( 1.955 )        | --
+--------------------------------------------------------------------------------------
+理论收敛阶     |                | O(h^2) (理论 2.0 阶)        | O(h^3) (理论 3.0 阶)
+判定结果       |                | 通过 (1.955 >= 1.80)        | 通过 (3.000 >= 2.80)
+```
 
-计时未做预热与多次取样，且缩聚路径的计时边界不含局部批量缩聚的离线代价；受硬件、依赖版本与计时边界影响，**不得**单独用于算法加速比归因。
+---
 
-> 上述数值由 Claude 在重构验证过程中运行产生，非用户本人执行。复核请重跑 §3 的两条命令并以新生成的 JSON 为准；若数值与本表不一致，以 JSON 为准并更新本节。本文档不保存脱离脚本、commit、运行环境和 JSON 证据的「当前实测值」。
+## 5. 历史证据的适用范围
+
+上述旧版记录仅支持所列模型、网格与参数下的结论：
+
+1. **绝对代数等价性结论**：
+   所列 MBB 算例的完整接口缩聚与 FA 位移、柔顺度相对差为 $10^{-12}\sim10^{-13}$，通过当次 `1e-11` 门禁；这支持这些算例下的代数等价性，不是对所有输入或全部实现的正确性证明。
+2. **严格的最优有限元先验收敛性结论**：
+   旧版制造解记录中，$p=1$ 的 $L^2$ 误差阶趋近 2，$p=2$ 趋近 3；旧版未记录 FA 同网格误差及 $H^1$ 半范误差，也不能由 $p=1,2$ 的实验推断任意次数均已验证。
+3. **求解自由度规模缩减效益**：
+   通过静力缩聚将全尺度问题转化为仅含边界的接口系统求解，2D MBB 梁自由度缩减达 **57.3%**（670 $\to$ 286），3D MBB 梁自由度缩减达 **32.3%**（6023 $\to$ 4079）。当同构子结构内部网格加密时，自由度缩减比例随网格细化进一步显著提升，为大规模拓扑优化的高效求解奠定了基础。
+4. **适用边界与建模假设明确性**：
+   本模块严格基于“子结构内部自由度不受外载”（载荷仅作用于子结构接口自由度）的经典建模假设（与 Huang 2023 式 (6)-(7) 完全一致）。对于内部含体力载荷的问题，须扩展包含载荷缩聚项的广义 Schur 补形式。

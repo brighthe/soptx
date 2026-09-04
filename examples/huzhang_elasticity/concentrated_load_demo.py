@@ -52,7 +52,7 @@ def _build_fixed_fixed_problem(
 ) -> tuple[FixedFixedBeamCenterLoad2d, P1TraceLoad]:
     """构造两端固支梁并注入底边 P1 迹投影后的共同牵引.
 
-    贴片几何全部从物理问题自身的属性读取, 本文件不复述几何或载荷常数.
+    载荷区几何全部从物理问题自身的属性读取, 本文件不复述几何或载荷常数.
 
     参数:
         nx: 梁底边的网格单元剖分数.
@@ -467,7 +467,7 @@ def main() -> int:
 
     print(
         f"问题={type(problem).__name__} {problem.domain} {problem.plane_type}, "
-        f"E={problem.E}, nu={problem.nu}, 贴片={problem.traction_patch}, "
+        f"E={problem.E}, nu={problem.nu}, 载荷区={problem.traction_patch}, "
         f"P={problem.P} N (P1 迹投影后合力={common_load.resultant():.12g})"
     )
     print(

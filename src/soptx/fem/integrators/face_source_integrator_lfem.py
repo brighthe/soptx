@@ -61,7 +61,23 @@ class InterFaceSourceIntegrator(_FaceSourceIntegrator):
 
         return index
 
-class BoundaryFaceSourceIntegrator_lfem(_FaceSourceIntegrator): 
+class LagrangeBoundarySourceIntegrator(_FaceSourceIntegrator):
+    """边界面上的自然边界载荷积分器.
+
+    Note
+    ----
+    ``threshold`` 为 callable 时, 判定只在**面重心**上做一次, 因此选面是整面
+    全有或全无的: 重心落在载荷区内, 整个面按 ``source`` 积分; 落在区外, 整个面
+    完全不参与。载荷区边界落在某个面内部时, 该面会被整体计入或整体丢弃, 离散
+    合力随之相对解析合力偏大或偏小最多一个面的贡献, 且没有任何报错。
+
+    因此载荷区端点应与网格面的端点对齐 (本仓库全部基准算例如此); 做不到对齐时,
+    应改用 ``soptx.fem.boundary_loads.project_patch_traction_to_p1_trace`` 把
+    局部牵引先投影到 P1 迹空间 —— 投影精确保持合力与一阶矩, 与网格是否对齐无关。
+    装配后可用 ``soptx.fem.boundary_loads.check_boundary_load_resultant``
+    核对离散合力。
+    """
+
     def make_index(self, space: _FS):
         threshold = self.threshold
 

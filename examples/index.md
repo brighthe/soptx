@@ -10,13 +10,15 @@
 
 | 目录 | 一句话职责 | 文档状态 |
 |---|---|---|
-| [`lagrange_elasticity/`](lagrange_elasticity/) | CPU 串行全装配，L2 收敛阶验证 | 脚本级，缺文档模板 |
+| [`lagrange_elasticity/`](lagrange_elasticity/) | CPU 串行全装配，L2 收敛阶验证 + 集中力载荷等效性 | README + results_analysis（已按两文档模板），门禁通过后落盘 JSON 证据 |
 | [`gpu_elasticity/`](gpu_elasticity/) | GPU 正确性对比 + 性能 benchmark | 脚本级，缺文档模板 |
+| [`parallel_execution/`](parallel_execution/) | 并行层级性能测量：线程级扩展性 benchmark（进程级待补） | README（工具目录，证据不落本目录） |
 | [`matrix_free_elasticity/`](matrix_free_elasticity/) | MPI 并行 matrix-free，FA/EA 双路 | README + results_analysis（已按两文档模板）；证据流水线在 `tools/matrix_free_evidence/` |
 | [`substructure_elasticity/`](substructure_elasticity/) | 精确子结构静力缩聚基线（2D/3D Schur 补） | README + results_analysis（已按两文档模板） |
 | [`piml_substructure_elasticity/`](piml_substructure_elasticity/) | PIML 预测子结构缩聚表示 + 精确回退（早期原型） | README + results_analysis（已按两文档模板），预测器未进全局接口 |
 | [`pinn_elasticity/`](pinn_elasticity/) | 2D/3D 线弹性 PINN 强形式求解 | 旧三文档结构，待收敛 |
 | [`huzhang_elasticity/`](huzhang_elasticity/) | 胡张混合有限元 2D 求解（应力—位移鞍点系统）：制造解收敛阶 + 集中力工程基准的载荷等效性 | 旧三文档结构，待收敛 |
+| [`linear_solvers/`](linear_solvers/) | 求解器层：直接法后端一致性、矩阵不变性、对称性标志；`CGSolver` 按预条件子分 case（无预条件、Jacobi）：与直接法一致、`fa`/`ea` 同解、判据范数、真残差、批量右端项、`info` 契约、逐层迭代数与收敛阶 | README + results_analysis（已按两文档模板），证据待跑 |
 
 ## PIML 主题小节
 

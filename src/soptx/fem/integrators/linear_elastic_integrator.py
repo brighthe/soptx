@@ -74,7 +74,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             J = None
             detJ = None
         else:
-            J = mesh.Entity('cell').jacobi_matrix(bcs)
+            J = mesh.entity_view('cell').jacobi_matrix(bcs)
             detJ = bm.abs(bm.linalg.det(J))
 
         return cm, bcs, ws, gphi, detJ
@@ -302,7 +302,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
                 gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x') # (NC, NQ, LDOF, GD)
 
-                J_sub = mesh_u.Entity('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                J_sub = mesh_u.entity_view('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
                 detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
 
                 gphi_eg[:, s_idx, :, :, :] = gphi_sub
@@ -472,7 +472,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             J = None
             detJ = None
         else:
-            J = mesh.Entity('cell').jacobi_matrix(bcs)
+            J = mesh.entity_view('cell').jacobi_matrix(bcs)
             detJ = bm.abs(bm.linalg.det(J))
 
         return cm, ws, bcs, gphi, detJ
@@ -572,7 +572,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
                 gphi_sub = s_space_u.grad_basis(sub_bcs, index=index, variable='x') # (NC, NQ, LDOF, GD)
 
-                J_sub = mesh_u.Entity('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
+                J_sub = mesh_u.entity_view('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
                 detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
 
                 gphi_eg[:, s_idx, :, :, :] = gphi_sub
@@ -644,33 +644,26 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
         if isinstance(mesh, SimplexMesh):
             glambda_x = mesh.grad_lambda()   # (NC, LDOF, GD)
-            S = bm.einsum('q, qik, qjl -> ijkl', ws, gphi_lambda, gphi_lambda)  # (LDOF, LDOF, BC, BC)
+            # 快速装配用的恒等式是 ``grad(phi_i) = sum_k (d phi_i / d lambda_k) grad(lambda_k)``,
+            # 因此 ``S`` 的后两轴必须是重心坐标轴 (长度 ``BC = GD + 1``), 与 ``glambda_x``
+            # 的重心坐标轴对齐。上面按 ``variable='u'`` 取到的是对物理坐标的导数
+            # (末轴长度 ``GD``), 轴长对不上, 收缩会直接报错
+            gphi_lambda_b = scalar_space.grad_basis(bcs, index=index, variable='b')  # (NQ, LDOF, BC)
+            S = bm.einsum('q, qik, qjl -> ijkl', ws, gphi_lambda_b, gphi_lambda_b)  # (LDOF, LDOF, BC, BC)
             return cm, glambda_x, S
         
-        elif isinstance(mesh, TensorMesh):
-            #TODO 仅仅支持结构四边形网格
-            #TODO fast 变体尚未适配新的 mesh schema/view 接口: jacobi_matrix、
-            #TODO grad_lambda、first_fundamental_form 均已迁到 mesh.Entity('cell') 上
-            J = mesh.jacobi_matrix(bcs)                    # (NC, NQ, GD, GD)
+        else:
+            # 适用于结构/张量积/多边形等非单纯形网格
+            cell_view = mesh.entity_view('cell')
+            J = cell_view.jacobi_matrix(bcs) # (NC, NQ, GD, GD)
             if not bm.allclose(J[:, 0, ...], J[:, -1, ...]):
                 raise ValueError("雅可比矩阵 J 在积分点上不恒定, 无法使用快速组装. 请使用传统组装或检查网格类型")
-            J = J[:, 0, ...]                               # (NC, GD, GD)
-            G = mesh.first_fundamental_form(J)             # (NC, GD, GD)
-            G = bm.linalg.inv(G)                           # (NC, GD, GD)
-            JG = bm.einsum('ckm, cmn -> ckn', J, G)        # (NC, GD, GD)
-            S = bm.einsum('qim, qjn, q -> ijmn', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, BC, BC)
-            return cm, JG, S
-        
-        else:
-            #TODO 同上, fast 变体未适配新的 mesh schema/view 接口
-            J = mesh.jacobi_matrix(bcs)                   # (NC, NQ, GD, GD)
-            detJ = bm.linalg.det(J)                       # (NC, NQ)
-            G = mesh.first_fundamental_form(J)            # (NC, NQ, GD, GD)
-            G = bm.linalg.inv(G)                          # (NC, NQ, GD, GD)
-            JG = bm.einsum('cqkm, cqmn -> cqkn', J, G)    # (NC, NQ, GD, GD)
-            S = bm.einsum('qim, qjn, q -> ijmnq', gphi_lambda, gphi_lambda, ws)  # (LDOF, LDOF, GD, GD, NQ)
-        
-            return cm, detJ, JG, S
+            J_const = J[:, 0, ...] # (NC, GD, GD)
+            invJ = bm.linalg.inv(J_const)
+            invJT = invJ.swapaxes(-1, -2) # (NC, GD, GD)
+            gphi_u = scalar_space.grad_basis(bcs, index=index, variable='u') # (NQ, LDOF, GD)
+            S = bm.einsum('qim, qjn, q -> ijmn', gphi_u, gphi_u, ws) # (LDOF, LDOF, GD, GD)
+            return cm, invJT, S
 
     @assembly.register('fast')
     def assembly(self, 
@@ -705,44 +698,27 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             A_yy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 1], cm)
             A_xy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 1], cm)
             A_yx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 0], cm)
-
-        elif isinstance(mesh, TensorMesh):
-            if enable_timing:
-                t.send('缓存部分')
-            cm, JG, S = self.fetch_fast_assembly(space)
-            A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 0], cm)  # (NC, LDOF, LDOF)
-            A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 1], cm) 
-            A_xy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 1], cm)  
-            A_yx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 0], cm)  
-        
-        else:
-            cm, detJ, JG, S = self.fetch_fast_assembly(space)
-            A_xx = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 0, :], detJ) # (NC, LDOF, LDOF)
-            A_yy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 1, :], JG[..., 1, :], detJ) 
-            A_xy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 1, :], detJ) 
-            A_yx = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 1, :], JG[..., 0, :], detJ) 
-
-        if GD == 3:
-            if isinstance(mesh, SimplexMesh):
+            if GD == 3:
                 A_zz = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 2], cm)
                 A_xz = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 2], cm)
                 A_yz = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 2], cm)
                 A_zx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 0], cm)
                 A_zy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 1], cm)
-            
-            elif isinstance(mesh, TensorMesh):
-                A_zz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 2], cm)
-                A_xz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 0], JG[..., 2], cm)
-                A_yz = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 1], JG[..., 2], cm)
-                A_zx = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 0], cm)
-                A_zy = bm.einsum('ijmn, cm, cn, c -> cij', S, JG[..., 2], JG[..., 1], cm)
-            
-            else:
-                A_zz = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 2, :], JG[..., 2, :], detJ)
-                A_xz = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 0, :], JG[..., 2, :], detJ)
-                A_yz = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 1, :], JG[..., 2, :], detJ)
-                A_zx = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 2, :], JG[..., 0, :], detJ)
-                A_zy = bm.einsum('ijmnq, cqm, cqn, cq -> cij', S, JG[..., 2, :], JG[..., 1, :], detJ)
+
+        else:
+            cm, invJT, S = self.fetch_fast_assembly(space)
+            if enable_timing:
+                t.send('缓存部分')
+            A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 0, :], invJT[..., 0, :], cm) # (NC, LDOF, LDOF)
+            A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 1, :], invJT[..., 1, :], cm)
+            A_xy = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 0, :], invJT[..., 1, :], cm)
+            A_yx = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 1, :], invJT[..., 0, :], cm)
+            if GD == 3:
+                A_zz = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 2, :], invJT[..., 2, :], cm)
+                A_xz = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 0, :], invJT[..., 2, :], cm)
+                A_yz = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 1, :], invJT[..., 2, :], cm)
+                A_zx = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 2, :], invJT[..., 0, :], cm)
+                A_zy = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 2, :], invJT[..., 1, :], cm)
 
         ldof = scalar_space.number_of_local_dofs()
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)

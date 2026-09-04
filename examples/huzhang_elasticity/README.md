@@ -100,7 +100,7 @@ python examples/huzhang_elasticity/manufactured_convergence_demo.py --no-relaxat
 ### 2. 集中力工程基准 (concentrated_load_demo)
 
 无解析解的工程算例：[`FixedFixedBeamCenterLoad2d`](../../docs/problems/engineering-benchmarks.md#fixedfixedbeamcenterload2d)，
-$160\times20$ 全域两端固支梁，底边中点长度 $l=1\,\mathrm{mm}$ 的贴片上作用等效均布牵引
+$160\times20$ 全域两端固支梁，底边中点长度 $l=1\,\mathrm{mm}$ 的载荷区上作用等效均布牵引
 $t=P/l$，合力 $P=-3\,\mathrm{N}$。判据不再是收敛阶，而是**载荷路径**：
 
 * **真相对残差** —— 各自的线性系统确实解开了；
@@ -115,7 +115,7 @@ $t=P/l$，合力 $P=-3\,\mathrm{N}$。判据不再是收敛阶，而是**载荷�
 牵引对偶功）由 [`experiments/huzhang_topopt_paper/run.py --mode state-compare`](../../experiments/huzhang_topopt_paper/run.py)
 报告，本 demo 不重复。
 
-原始阶跃牵引在贴片边缘的跳变一般落在单元内部，跨边连续的胡张元迹空间在跳变点上
+原始阶跃牵引在载荷区边缘的跳变一般落在单元内部，跨边连续的胡张元迹空间在跳变点上
 只有一个单值自由度，加密网格也装不下这个跳跃。因此两条离散链共同使用该牵引在底边
 连续 P1 迹空间上的 L2 投影（[`project_patch_traction_to_p1_trace`](../../src/soptx/fem/boundary_loads.py)）：
 常数落在该空间内，投影精确保持合力；连续分片线性函数又能被胡张元的迹插值精确重现、
@@ -148,7 +148,7 @@ python examples/huzhang_elasticity/concentrated_load_demo.py --solver mumps
 * `--relaxation` / `--no-relaxation`：角点松弛开关（默认开启）；
 * `--solver`：`scipy`（默认）/ `mumps`。
 
-> P1 投影在贴片外有几何衰减的振荡尾（每单元约 $0.27$），网格过粗时尾部会触及固支端，
+> P1 投影在载荷区外有几何衰减的振荡尾（每单元约 $0.27$），网格过粗时尾部会触及固支端，
 > 那部分载荷被强加自由度真实吞掉。报告中的 `被吞载荷` 给出该量，量级约
 > $P\cdot0.27^{n_x/2}$；默认 $n_x=80$ 下它远在容差之下，$n_x\le20$ 时会触发未通过。
 

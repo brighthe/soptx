@@ -1,0 +1,94 @@
+# 装配层级/合并路线的数据点注册表。
+#
+# 本文件只描述"跑哪一条命令、产物落在哪"; 从产物里取哪些字段、怎么对比,
+# 写在 compare.py 里 —— TOML 描述运行, Python 描述读取, 两者不混。
+#
+# measurement 脚本是 run.py (自包含 worker 模式), 由 run.py 调度以独立子进程调用。
+#
+# 约定:
+#   script       仓库根起算的相对路径。
+#   args         传给该脚本的固定参数, 逐项写全, 不依赖脚本缺省值。
+#   output_mode  dir   = 用 --output-dir 重定向到本目录 outputs/
+#                file  = 用 --output 指定完整路径
+#                fixed = 脚本落盘位置写死, 只能就地读
+#   artifact     产物路径; output_mode = fixed 时为仓库根起算的相对路径,
+#                否则为本目录 outputs/ 下的文件名。
+#   panel        "stage1" (单刚, assembly_method) / "stage2" (合并路线) / "full" (端到端).
+#   methods / routes  --method all / --route all 时的展开列表; run.py 按 panel 读取。
+#   产物命名     <kind>_<...>_n<N>[_cuda][_bform].json, 非 cpu 设备加 _cuda 后缀。
+#
+# 注意: 每数据点必须独占一个进程 (RSS 高水位是进程级的, 无法按对象归因);
+#       worker 内部按阶段重置 VmHWM 得到每阶段绝对峰值与净增。
+
+[figure]
+id = "fa_assembly_capability"
+title = "FA 装配合并路线与规模能力"
+question = "各层级/路线能算多大"
+consumer = "dut-postdoc:concepts/matrix-free/assembly-levels.md"
+
+# --------------------------------------------------------------------------
+# stage1 —— 阶段 1 单刚求积计算 (FA/EA 共享上游物理步骤)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "element-stiffness"
+panel = "stage1"
+role = "element-stiffness-study"
+summary = "3D tet p1, 阶段 1 单刚求积计算 (FA/EA共享), 支持 fast/standard/voigt"
+script = "experiments/fa_assembly_capability/run.py"
+args = ["--worker", "--stage1", "--method", "fast", "--n", "32"]
+output_mode = "file"
+artifact = "stage1_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+methods = ["fast", "standard", "voigt"]
+device = "cpu"
+n = 32
+
+# --------------------------------------------------------------------------
+# stage2 —— FA 阶段 2 总刚合并路线对比 (FA 独有全局稀疏矩阵组装)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "global-merge"
+panel = "stage2"
+role = "sparse-matrix-merge-study"
+summary = "3D tet p1, FA 阶段 2 总刚合并路线对比 (合成输入), 支持 coalesce/scipy/pattern/pattern-chunked"
+script = "experiments/fa_assembly_capability/run.py"
+args = ["--worker", "--stage2", "--route", "pattern", "--n", "32"]
+output_mode = "file"
+artifact = "stage2_pattern_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+route = "pattern"
+routes = ["coalesce", "scipy", "pattern", "pattern-chunked"]
+device = "cpu"
+n = 32
+
+# --------------------------------------------------------------------------
+# full —— FA 全流程端到端真组装: 单刚计算 + 总刚合并 (真实生产全流程)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "full-assembly"
+panel = "full"
+role = "full-assembly-production"
+summary = "3D tet p1, FA 全流程端到端真组装 (真实单刚 + 真实合并), 各阶段与全程绝对峰值"
+script = "experiments/fa_assembly_capability/run.py"
+args = ["--worker", "--full", "--method", "fast", "--route", "pattern", "--n", "32"]
+output_mode = "file"
+artifact = "full_fast_pattern_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+methods = ["fast", "standard", "voigt"]
+route = "pattern"
+routes = ["pattern", "coalesce", "scipy"]
+device = "cpu"
+n = 32
+
+

@@ -18,6 +18,14 @@
 *.csv   
 *.pkl   
 
+# 例外: experiments/<name>/figure_data/ 下的成图数据快照必须入库。
+# 这类快照不是运行产物, 而是"图上那几个数字"的唯一机器可读副本: 它由
+# collect.py 从 outputs/ 的原始产物收拢, 附带 git revision、dirty 标记与
+# 各源文件的 sha256, 与产它的代码同一次提交。不入库的话, 图和结论就只能
+# 靠重跑核对 —— 而 outputs/ 是忽略的, 重跑前后无从比对。
+# 同目录下的定稿成图另行放行, 见下面 *.png 规则之后的那条。
+!/experiments/*/figure_data/*.json
+
 #----------------------------------------
 # 可视化与输出文件忽略
 #----------------------------------------
@@ -27,6 +35,17 @@
 *.png   
 *.gif   
 *.txt   
+
+# 例外: experiments/<name>/figure_data/ 下的定稿成图入库。放行的只有"这一张
+# 交付图", 不是 outputs/figures/ 下每次重绘都变的中间产物 —— 后者仍整体忽略。
+# 定稿图重绘频率极低; 而按图面组织的 results_analysis.md 讲"图面画的是什么"
+# 却看不到图, 文档就不成立。
+# 注意规则顺序: 本条必须排在上面的 *.png 之后, 否则被它覆盖。
+!/experiments/*/figure_data/*.png
+
+# 例外: docs/problems/assets/images/ 下的工程基准示意图入库。它们是文档正文
+# 嵌入的稳定小图 (TikZ 源码编译产物, 重绘频率极低), 不入库则 clone 后文档缺图。
+!/docs/problems/assets/images/*.png
 
 #----------------------------------------
 # 取消特定忽略的示例（当前已注释）
@@ -57,6 +76,22 @@ dist/
 # 示例运行产物：各主题 examples/*/outputs/ 整体忽略（纯运行产物，不入库；
 # 证据文档 results_analysis.md 放目录根，随代码追踪）
 /examples/*/outputs/
+
+# 运行日志：*.log 一律是运行产物，不入库
+*.log
+
+# 实验运行产物：experiments/*/outputs/ 与 logs/ 整体忽略，与 examples 同口径；
+# 可入库的证据只有 figure_data/ 下的快照（见上方两条例外）
+/experiments/*/outputs/
+/experiments/*/logs/
+
+# 根目录兜底：figs/、logs/、outputs/、old/ 不是架构目录，正式产物一律放在
+# examples/<topic>/ 或 experiments/<topic>/ 内部；根目录出现的这些目录均为
+# 临时运行残留或历史遗留，整体忽略以免污染 git status
+/figs/
+/logs/
+/outputs/
+/old/
 
 # LaTeX/TikZ 编译产物（.tex 源码入库，aux/log/pdf 不入库）
 /docs/problems/tikz/*.aux

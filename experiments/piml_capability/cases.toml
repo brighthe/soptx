@@ -1,0 +1,68 @@
+# 图 4「PIML 局部力学表示与精确缩聚验证」的数据点注册表。
+#
+# 本文件只描述"跑哪一条命令、产物落在哪"; 从产物里取哪些字段、门禁怎么判,
+# 写在 collect.py 里 —— TOML 描述运行, Python 描述读取, 两者不混。
+#
+# 约定:
+#   script       仓库根起算的相对路径, 由 run.py 以子进程调用。
+#   args         传给该脚本的固定参数, 逐项写全, 不依赖脚本缺省值。
+#   output_mode  dir   = 用 --output-dir 重定向到本目录 outputs/, 文件名由脚本决定
+#                file  = 用 --output 指定完整路径
+#                fixed = 脚本落盘位置写死, 无法重定向, 只能就地读
+#   artifact     产物路径; output_mode = fixed 时为仓库根起算的相对路径,
+#                否则为本目录 outputs/ 下的文件名。
+
+[figure]
+id = "fig3"
+title = "PIML 局部力学表示与精确缩聚验证"
+question = "真值对不对 / 代理准不准 / 靠什么保证"
+consumer = "dut-postdoc:research/funding/active/china-postdoc-foundation-general-grant/assets/make_figs.py"
+
+# --------------------------------------------------------------------------
+# (a) 对不对 —— 静力缩聚求解与 Lagrange 全装配直解的代数等价性
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "a-lagrange-2d"
+panel = "a"
+role = "condensation-equivalence-2d"
+summary = "2D 对称半 MBB 梁, 静力缩聚 vs Lagrange 全装配直解代数等价性"
+script = "examples/substructure_elasticity/compare_lagrange.py"
+args = ["--dim", "2"]
+output_mode = "dir"
+artifact = "lagrange_comparison_2d.json"
+
+[[cases]]
+id = "a-lagrange-3d"
+panel = "a"
+role = "condensation-equivalence-3d"
+summary = "3D 完整 MBB 梁, 静力缩聚 vs Lagrange 全装配直解代数等价性"
+script = "examples/substructure_elasticity/compare_lagrange.py"
+args = ["--dim", "3"]
+output_mode = "dir"
+artifact = "lagrange_comparison_3d.json"
+
+# --------------------------------------------------------------------------
+# (b) 准不准 —— 形函数路线二阶误差压缩 vs 直接预测缩聚刚度路线
+# (c) 靠什么保证 —— 刚体零空间约束与物理防御 (来自 compare_exact.py)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "b-shape-route"
+panel = "b"
+role = "shape-function-route"
+summary = "形函数路线二阶误差压缩扫描与留出集实测"
+script = "examples/piml_substructure_elasticity/verify_shape_function_route.py"
+args = ["--seed", "2026"]
+output_mode = "dir"
+artifact = "eq17_second_order.json"
+
+[[cases]]
+id = "b-piml-exact"
+panel = "b"
+role = "piml-exact-comparison"
+summary = "直接预测缩聚刚度对照与刚体模态零空间伪刚度份额 (支持 panel b 与 c)"
+script = "examples/piml_substructure_elasticity/compare_exact.py"
+args = ["--seed", "2026", "--backend", "numpy"]
+output_mode = "dir"
+artifact = "piml_exact_comparison.json"

@@ -4,8 +4,9 @@ import numpy as np
 
 from fealpy.backend import backend_manager as bm
 
-from soptx.core import DirichletElasticityProblem, ElasticityProblem
+from soptx.protocols import DirichletElasticityProblem, ElasticityProblem
 from soptx.problems import HalfMBBBeamRight2d
+from soptx.problems.loads import PointForceLoad
 
 
 def test_half_mbb_problem_is_mesh_independent_and_satisfies_lagrange_contract() -> None:
@@ -23,12 +24,6 @@ def test_half_mbb_problem_boundary_conditions_and_concentrated_load() -> None:
     points = bm.array([[0.0, 20.0], [60.0, 0.0], [30.0, 10.0]])
 
     np.testing.assert_allclose(
-        bm.to_numpy(problem.body_force(points)),
-        np.zeros((3, 2)),
-        rtol=0.0,
-        atol=0.0,
-    )
-    np.testing.assert_allclose(
         bm.to_numpy(problem.dirichlet_bc(points)),
         np.zeros((3, 2)),
         rtol=0.0,
@@ -45,20 +40,11 @@ def test_half_mbb_problem_boundary_conditions_and_concentrated_load() -> None:
         np.array([False, True, False]),
     )
 
-    load_values = problem.concentrate_load_bc()
-    load_boundaries = problem.is_concentrate_load_boundary()
-    assert len(load_values) == len(load_boundaries) == 1
-    load_mask = load_boundaries[0](points)
-    np.testing.assert_array_equal(
-        bm.to_numpy(load_mask),
-        np.array([True, False, False]),
-    )
-
-    concentrated_vector = load_values[0](points)[load_mask]
-    np.testing.assert_allclose(
-        bm.to_numpy(concentrated_vector),
-        np.array([[0.0, -2.5]]),
-        rtol=0.0,
-        atol=0.0,
-    )
-    assert float(bm.sum(concentrated_vector)) == problem.P
+    loads = problem.loads()
+    assert len(loads) == 1
+    assert isinstance(loads[0], PointForceLoad)
+    assert loads[0].point == (0.0, 20.0)
+    assert loads[0].force() == (0.0, -2.5)
+    assert not hasattr(problem, "body_force")
+    assert not hasattr(problem, "concentrate_load_bc")
+    assert not hasattr(problem, "is_concentrate_load_boundary")

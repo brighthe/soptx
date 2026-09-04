@@ -114,9 +114,9 @@ $[0,1]\times[0,1]$ 单位正方形域, 混合边界条件 (顶底位移弱施加
 工程算例没有解析解, 判据由收敛阶改为**载荷路径**: 真相对残差 + 结构合力守恒 (详见
 [README.md](README.md#2-集中力工程基准-concentrated_load_demo)). 物理问题为
 [`FixedFixedBeamCenterLoad2d`](../../docs/problems/engineering-benchmarks.md#fixedfixedbeamcenterload2d):
-$160\times20$ 全域两端固支梁, 底边中点长度 $l=1$ 的贴片上作用 $t=P/l$, $P=-3\,\mathrm{N}$.
+$160\times20$ 全域两端固支梁, 底边中点长度 $l=1$ 的载荷区上作用 $t=P/l$, $P=-3\,\mathrm{N}$.
 
-两条离散链共用同一载荷函数——原始贴片牵引在底边连续 P1 迹空间上的 L2 投影
+两条离散链共用同一载荷函数——原始局部牵引在底边连续 P1 迹空间上的 L2 投影
 $t_h$ ([`project_patch_traction_to_p1_trace`](../../src/soptx/fem/boundary_loads.py)).
 常数落在该空间内, 故 $\int_{\Gamma_N}t_h\,\mathrm{d}s=P$ 精确成立; 连续分片线性函数
 又能被胡张元迹插值精确重现、被 $q=2k+2$ 的高斯积分精确积分, 因此两种方法
@@ -143,7 +143,7 @@ demo 只在表头打印一次 `common_load.resultant()` 作为对照, 不重复�
 能量诊断 (互补能、耦合项、牵引对偶功) 属于同一批诊断量, 在
 `experiments/huzhang_topopt_paper/run.py --mode state-compare` 中报告, 本目录不重复.
 
-**P1 投影的振荡尾**: 局部贴片的 P1 投影在贴片外按 P1 质量矩阵的 Green 函数几何衰减
+**P1 投影的振荡尾**: 局部牵引的 P1 投影在载荷区外按 P1 质量矩阵的 Green 函数几何衰减
 (每单元约 $0.27$, 正负交替). 网格过粗时尾部触及固支端, 那部分载荷被 Dirichlet 自由度
 真实吞掉, 量级约 $P\cdot0.27^{n_x/2}$. demo 把它作为结果表的最后一列 (该诊断只对 LFEM
 可算, 胡张元行显示 `-`): 上表 $n_x=160$ 下衰减至 $10^{-46}\sim 10^{-60}$, 完全降为 0;

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,24 @@ from pathlib import Path
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
+
+# 本进程只派发子进程, 自身不做任何 MPI 计算, 因此必须保持在 MPI 之外。
+#
+# 历史成因是 ``soptx`` 包根曾为 MUMPS 主动 ``from mpi4py import MPI``, 使得只
+# 导入 ``contract`` 也会连带 ``MPI_Init``; 该副作用已收进
+# ``soptx.core.mpi_runtime.ensure_mpi_initialized``, 本进程不再有这条路径。
+# 保留本设置作兜底: 一旦本进程成为 MPI singleton, 从它内部再启动 ``mpiexec``
+# 就是 "MPI 作业里套 MPI 作业", OpenMPI 的 ``orterun`` 会立刻以 1 退出且不打印
+# 任何诊断, 表现为每个算例都 "process returned 1 / summary was not created",
+# 极难定位。
+#
+# 关掉自动初始化即可 —— 子进程是各自独立的解释器, 照常初始化, 不受影响。
+try:
+    import mpi4py
+
+    mpi4py.rc.initialize = False
+except ImportError:
+    pass
 
 from tools.matrix_free_evidence import contract, layout, schema
 
@@ -358,35 +377,46 @@ def compare_cases(
     *,
     include_parallel: bool = False,
 ):
-    coarse_name = layout.case_name("coarse", "ea", 1)
-    medium_name = layout.case_name("medium", "ea", 1)
-    fine_serial_name = layout.case_name("fine", "ea", 1)
-    fine_parallel_name = layout.case_name("fine", "ea", 2)
-    fa_name = layout.case_name("coarse", "fa", 1)
-
-    coarse = results[coarse_name]
-    medium = results[medium_name]
+    # 档位由 layout.EA_EVIDENCE_ROLES 单点定义, 这里不再写死档数: 增减一档只
+    # 需改那个元组与 contract.REFINEMENTS.
+    ea_names = [
+        layout.case_name(role, "ea", 1)
+        for role in layout.EA_EVIDENCE_ROLES
+    ]
+    fine_serial_name = ea_names[-1]
+    fine_parallel_name = layout.case_name(
+        layout.EA_EVIDENCE_ROLES[-1],
+        "ea",
+        2,
+    )
     fine_serial = results[fine_serial_name]
-    fa_coarse = results[fa_name]
 
-    fa_difference = relative_solution_difference(coarse, fa_coarse)
+    # EA/FA 逐档比对: FA 与 EA 同档, 每个档位都取同一网格的两个算例,
+    # 否则比的是两个不同的离散。``coarse_solution_...`` 字段保留向后兼容,
+    # 值取自最粗档, 新消费方应读逐档字段。
+    fa_differences = {
+        role: relative_solution_difference(
+            results[layout.case_name(role, "ea", 1)],
+            results[layout.case_name(role, "fa", 1)],
+        )
+        for role in layout.EA_EVIDENCE_ROLES
+    }
     errors = [
-        float(coarse["error"]["l2_relative"]),
-        float(medium["error"]["l2_relative"]),
-        float(fine_serial["error"]["l2_relative"]),
+        float(results[name]["error"]["l2_relative"]) for name in ea_names
     ]
     orders = [
-        math.log2(errors[0] / errors[1]),
-        math.log2(errors[1] / errors[2]),
+        math.log2(previous / current)
+        for previous, current in zip(errors, errors[1:])
     ]
 
     failures: list[str] = []
-    if fa_difference > contract.EA_FA_SOLUTION_RELATIVE_TOL:
-        failures.append(
-            f"{dimension}d: coarse EA/FA solution difference "
-            f"{fa_difference:.16e} > "
-            f"{contract.EA_FA_SOLUTION_RELATIVE_TOL:g}"
-        )
+    for role, difference in fa_differences.items():
+        if difference > contract.EA_FA_SOLUTION_RELATIVE_TOL:
+            failures.append(
+                f"{dimension}d: {role} EA/FA solution difference "
+                f"{difference:.16e} > "
+                f"{contract.EA_FA_SOLUTION_RELATIVE_TOL:g}"
+            )
 
     # 1b（CPU 并行 EA）的跨 rank 门禁; 1a 下这两条不参与判定, 也不记入
     # comparison, 以免串行证据里出现空占位而被误读为"已检验".
@@ -406,7 +436,7 @@ def compare_cases(
                 f"{parallel_difference:.16e} > "
                 f"{contract.PARALLEL_SOLUTION_RELATIVE_TOL:g}"
             )
-        parallel_l2_difference = abs(errors[2] - parallel_error)
+        parallel_l2_difference = abs(errors[-1] - parallel_error)
         if parallel_l2_difference > contract.PARALLEL_L2_DIFFERENCE_TOL:
             failures.append(
                 f"{dimension}d: fine 1/2-rank L2-error difference "
@@ -414,7 +444,9 @@ def compare_cases(
                 f"{contract.PARALLEL_L2_DIFFERENCE_TOL:g}"
             )
 
-    if not errors[0] > errors[1] > errors[2]:
+    if not all(
+        previous > current for previous, current in zip(errors, errors[1:])
+    ):
         failures.append(
             f"{dimension}d: relative L2 error did not decrease: "
             + ", ".join(f"{value:.16e}" for value in errors)
@@ -425,14 +457,14 @@ def compare_cases(
             f"{orders[-1]:.8f} < {contract.MINIMUM_FINAL_L2_ORDER}"
         )
 
-    relative_l2_errors = {
-        coarse_name: errors[0],
-        medium_name: errors[1],
-        fine_serial_name: errors[2],
-    }
+    relative_l2_errors = dict(zip(ea_names, errors))
     comparison = {
         "stage": "1b" if include_parallel else "1a",
-        "coarse_solution_ea_fa_relative_difference": fa_difference,
+        # 向后兼容: 旧消费方读单值, 新消费方读逐档字段。
+        "coarse_solution_ea_fa_relative_difference": (
+            fa_differences[layout.EA_EVIDENCE_ROLES[0]]
+        ),
+        "ea_fa_solution_relative_differences": fa_differences,
         "relative_l2_errors": relative_l2_errors,
         "observed_relative_l2_orders": orders,
         "gated_relative_l2_order": orders[-1],
@@ -504,10 +536,67 @@ def validate_dimension(
     }, failures
 
 
+def verify_launcher(mpiexec: str) -> str | None:
+    """探测启动器与 ``mpi4py`` 是否同厂.
+
+    以 ``-n 2`` 起一个只打印 ``COMM_WORLD`` 大小的探针。启动器与 ``mpi4py``
+    链接的 MPI 不是同一实现时, 两个进程不会组成通信域, 而是各自成为
+    ``size=1`` 的独立进程 —— 这不会报错, 只会让后续所有多 rank 断言得到无意义
+    的结果(例如"多 rank 应触发的守卫"因为 ``size`` 恒为 1 而永不触发, 却被报成
+    "expected error message not found", 指向完全错误的方向)。
+
+    参数:
+        mpiexec: 待探测的启动器路径.
+
+    返回:
+        message: 探测失败时的诊断文本; 启动器可用时返回 ``None``.
+    """
+    command = [
+        mpiexec, "-n", "2", sys.executable, "-c",
+        "from mpi4py import MPI; print(MPI.COMM_WORLD.Get_size())",
+    ]
+    try:
+        completed = subprocess.run(
+            command, cwd=layout.REPOSITORY_ROOT, check=False,
+            capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return f"启动探针无法运行: {error}"
+
+    sizes = [line.strip() for line in completed.stdout.splitlines()
+             if line.strip().isdigit()]
+    if completed.returncode != 0 or len(sizes) != 2:
+        return (f"启动探针异常退出(returncode={completed.returncode}):\n"
+                f"{completed.stderr.strip()[:600]}")
+    if any(size != "2" for size in sizes):
+        try:
+            from mpi4py import MPI
+            name, version = MPI.get_vendor()[:2]
+            vendor = f"{name} {'.'.join(str(part) for part in version)}"
+        except Exception:  # noqa: BLE001 - 探测失败时不该再抛
+            vendor = "未知"
+        return (
+            f"启动器与 mpi4py 不同厂: `{mpiexec} -n 2` 起出的进程各自报 "
+            f"COMM_WORLD.size={sizes}, 期望 ['2', '2']。\n"
+            f"两个进程没有组成通信域, 而是各自独立运行, 所有多 rank 断言都会失真。\n"
+            f"mpi4py 链接的是 {vendor}; 请用 SOPTX_MPIEXEC 指定同厂的启动器, 例如\n"
+            f"  SOPTX_MPIEXEC=/usr/bin/mpiexec.openmpi python {Path(__file__).name} ...")
+    return None
+
+
 def main() -> int:
     arguments = parse_arguments()
+    # 优先解释器同目录的 mpiexec, 前提是它与 mpi4py 链接的那份 MPI 是同一实现。
+    # 这个前提会被破坏: 环境里可能同时装着别的 MPI 运行时(例如 pypi 的
+    # ``impi-rt`` 会把 Intel MPI 的 mpiexec 放进 ``bin/``), 而 mpi4py 链的是系统
+    # OpenMPI. 用错启动器时 mpi4py 读不到启动器写入的进程信息, ``mpi_size`` 直接
+    # 是 ``None``, 报错点会落在很远的下游, 因此留一个显式出口:
+    # ``SOPTX_MPIEXEC=/usr/bin/mpiexec`` 指定与 mpi4py 匹配的那一份。
+    override = os.environ.get("SOPTX_MPIEXEC")
     env_mpiexec = Path(sys.executable).parent / "mpiexec"
-    if env_mpiexec.is_file():
+    if override:
+        mpiexec = override
+    elif env_mpiexec.is_file():
         mpiexec = str(env_mpiexec)
     else:
         mpiexec = shutil.which("mpiexec")
@@ -518,6 +607,14 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+
+    # 先探测启动器再跑证据: 用错启动器时下游报的错会指向错误的方向, 这里挡住。
+    launcher_problem = verify_launcher(mpiexec)
+    if launcher_problem is not None:
+        print(f"[mpiexec] {mpiexec}", file=sys.stderr)
+        print(launcher_problem, file=sys.stderr)
+        return 2
+    print(f"[mpiexec] {mpiexec} (COMM_WORLD.size=2 探测通过)", flush=True)
 
     layout.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     parameter_checks, parameter_failures = validate_parameter_checks(

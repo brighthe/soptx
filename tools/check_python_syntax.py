@@ -12,8 +12,9 @@ ROOTS = ("src", "tests", "examples", "tools")
 EXCLUDED_PARTS = {
     "__pycache__",
     "demo",
-    "old",
-    "tests",  # package-internal pre-v2 scripts under src/soptx/tests
+    "old_version1",  # pre-1.0 architecture, kept for reference only
+    "old_version2",  # 1.1 migration-era shims, kept for reference only
+    "tests",  # package-internal pre-v2 scripts under the archives
 }
 EXCLUDED_SUFFIXES = ("_old.py", "_backup.py")
 

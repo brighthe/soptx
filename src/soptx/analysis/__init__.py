@@ -2,7 +2,7 @@
 
 from warnings import warn
 
-from soptx.fem.solvers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
+from soptx.fem.analyzers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 
 warn(
     "soptx.analysis is deprecated; import FEM components from soptx.fem",

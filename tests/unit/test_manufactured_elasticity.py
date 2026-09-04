@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib import import_module
+
 import numpy as np
 import pytest
 
@@ -8,9 +10,46 @@ from fealpy.backend import backend_manager as bm
 from soptx.problems.elasticity import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
+    HarmonicPoly2D,
+    HarmonicPoly3D,
     MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
 )
+from soptx.problems.loads import BodyForceLoad, BoundaryTractionLoad
+
+
+@pytest.mark.parametrize(
+    "dimension, problem_type", [(2, HarmonicPoly2D), (3, HarmonicPoly3D)]
+)
+def test_harmonic_poly_public_names(dimension, problem_type) -> None:
+    """短名称为实际类名, 旧名称在各公开入口保持同一对象."""
+    class_name = f"HarmonicPoly{dimension}D"
+    legacy_name = f"HarmonicPolynomialElasticity{dimension}D"
+    assert problem_type.__name__ == class_name
+    assert type(problem_type()).__name__ == class_name
+    for module_name in (
+        "soptx.problems",
+        "soptx.problems.elasticity",
+        f"soptx.problems.elasticity.manufactured_{dimension}d",
+    ):
+        module = import_module(module_name)
+        assert getattr(module, class_name) is problem_type
+        assert getattr(module, legacy_name) is problem_type
+        if module_name in ("soptx.problems", "soptx.problems.elasticity"):
+            assert class_name in module.__all__
+            assert legacy_name in module.__all__
+
+
+def _body_force(problem, points):
+    load = next(load for load in problem.loads() if isinstance(load, BodyForceLoad))
+    return load.body_force(points)
+
+
+def _boundary_traction(problem, points):
+    load = next(
+        load for load in problem.loads() if isinstance(load, BoundaryTractionLoad)
+    )
+    return load.traction(points)
 
 
 def test_problem_contract_has_no_mesh_factory() -> None:
@@ -50,7 +89,7 @@ def test_problem_output_shapes() -> None:
             problem.dimension,
         )
         assert problem.disp_solution(points).shape == expected_vector_shape
-        assert problem.body_force(points).shape == expected_vector_shape
+        assert _body_force(problem, points).shape == expected_vector_shape
         assert problem.dirichlet_bc(points).shape == expected_vector_shape
         assert (
             problem.grad_disp_solution(points).shape
@@ -86,7 +125,7 @@ def test_mixed_boundary_sinusoidal_problem_exact_values() -> None:
         atol=1.0e-14,
     )
     np.testing.assert_allclose(
-        bm.to_numpy(problem.body_force(center)),
+        bm.to_numpy(_body_force(problem, center)),
         -expected_divergence,
         rtol=1.0e-14,
         atol=1.0e-14,
@@ -117,10 +156,17 @@ def test_mixed_boundary_sinusoidal_problem_boundary_partition() -> None:
         np.array([False, False, True, True]),
     )
     np.testing.assert_allclose(
-        bm.to_numpy(problem.traction_bc(edge_midpoints)),
-        bm.to_numpy(problem.stress_solution(edge_midpoints)),
-        rtol=0.0,
-        atol=0.0,
+        bm.to_numpy(_boundary_traction(problem, edge_midpoints)),
+        np.array(
+            [
+                [0.0, 0.0],
+                [0.0, 0.0],
+                bm.to_numpy(problem.stress_solution(edge_midpoints))[2, :2],
+                bm.to_numpy(problem.stress_solution(edge_midpoints))[3, 1:],
+            ]
+        ),
+        rtol=1.0e-14,
+        atol=1.0e-14,
     )
 
 
@@ -132,11 +178,11 @@ def test_mixed_boundary_sinusoidal_problem_rejects_invalid_material() -> None:
 
 
 def test_new_problem_values_match_pre_v2_problem_values() -> None:
-    from soptx.model.linear_elasticity_2d import (
+    from old.old_version2.model.linear_elasticity_2d import (
         BoxTriLagrange2dData,
         TriSolHomoDirHuZhang2d,
     )
-    from soptx.model.linear_elasticity_3d import (
+    from old.old_version2.model.linear_elasticity_3d import (
         PolySolPureDirLagrange3d,
     )
 
@@ -171,7 +217,7 @@ def test_new_problem_values_match_pre_v2_problem_values() -> None:
             atol=1.0e-14,
         )
         np.testing.assert_allclose(
-            bm.to_numpy(current.body_force(points)),
+            bm.to_numpy(_body_force(current, points)),
             bm.to_numpy(legacy.body_force(points)),
             rtol=1.0e-13,
             atol=1.0e-13,

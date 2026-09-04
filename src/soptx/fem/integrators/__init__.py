@@ -1,10 +1,10 @@
 """Finite-element integral operators."""
 
 from .face_source_integrator_lfem import (
-    BoundaryFaceSourceIntegrator_lfem,
+    LagrangeBoundarySourceIntegrator,
 )
 from .face_source_integrator_mfem import (
-    BoundaryFaceSourceIntegrator_mfem,
+    HuZhangBoundarySourceIntegrator,
 )
 from .huzhang_mix_integrator import HuZhangMixIntegrator
 from .huzhang_stress_integrator import HuZhangStressIntegrator
@@ -14,11 +14,11 @@ from .mass_integrator import MassIntegrator
 from .source_integrator import SourceIntegrator
 
 __all__ = [
-    "BoundaryFaceSourceIntegrator_lfem",
-    "BoundaryFaceSourceIntegrator_mfem",
+    "HuZhangBoundarySourceIntegrator",
     "HuZhangMixIntegrator",
     "HuZhangStressIntegrator",
     "JumpPenaltyIntegrator",
+    "LagrangeBoundarySourceIntegrator",
     "LinearElasticIntegrator",
     "MassIntegrator",
     "SourceIntegrator",

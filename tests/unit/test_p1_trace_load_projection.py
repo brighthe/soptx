@@ -21,7 +21,7 @@ def _projected(n_cells: int, problem: FixedFixedBeamCenterLoad2d):
 
 @pytest.mark.parametrize("n_cells", [16, 40, 160, 161])
 def test_projection_preserves_the_resultant(n_cells: int) -> None:
-    """常数在 P1 迹空间内, 因此 L2 投影必须精确保持合力, 与贴片是否对齐无关."""
+    """常数在 P1 迹空间内, 因此 L2 投影必须精确保持合力, 与载荷区是否对齐无关."""
     bm.set_backend("numpy")
     problem = FixedFixedBeamCenterLoad2d()
 
@@ -67,12 +67,14 @@ def test_injected_traction_replaces_only_the_load() -> None:
         bm.to_numpy(baseline.is_traction_boundary(points)),
     )
 
-    values = bm.to_numpy(problem.traction_bc(points))
-    # 顶边与内部保持零牵引, 底边贴片中心的值被投影抬高, 不再等于 P / load_width
+    load = problem.loads()[0]
+    values = bm.to_numpy(load.traction(points))
+    # 顶边与内部保持零牵引, 底边载荷区中心的值被投影抬高, 不再等于 P / load_width
     np.testing.assert_allclose(values[:3], np.zeros((3, 2)), atol=1.0e-14)
     assert values[3, 0] == 0.0
     assert values[3, 1] < problem.traction_intensity
-    np.testing.assert_allclose(values, bm.to_numpy(problem.neumann_bc(points)))
+    assert not hasattr(problem, "traction_bc")
+    assert not hasattr(problem, "neumann_bc")
 
 
 def test_projection_rejects_inconsistent_geometry() -> None:

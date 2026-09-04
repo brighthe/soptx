@@ -13,7 +13,7 @@ __all__ = [
 ]
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import Mesh
+from fealpy.mesh import MeshView
 from fealpy.typing import TensorLike
 
 AXIS_NAMES = ("x", "y", "z")
@@ -23,7 +23,7 @@ SUPPORTED_RANKS: tuple[int, ...] | None = None
 
 
 def partition_cells(
-    mesh: Mesh,
+    mesh: MeshView,
     mpi_size: int,
     *,
     split_coordinate: float,
@@ -53,7 +53,7 @@ def partition_cells(
     if mpi_size == 1:
         masks: list[TensorLike] = [bm.ones((number_of_cells,), dtype=bm.bool)]
     else:
-        coordinates = mesh.Entity("cell").barycenter()[:, axis]
+        coordinates = mesh.entity_view("cell").barycenter()[:, axis]
         if mpi_size == 2:
             masks = [
                 coordinates < split_coordinate,

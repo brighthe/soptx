@@ -700,6 +700,55 @@ class HuZhangFESpace2d(FunctionSpace):
 
     set_dirichlet_bc = boundary_interpolate
 
+    def set_tangential_traction_bc(self,
+                                   gd: Union[Callable, int, float, TensorLike],
+                                   uh: Optional[TensorLike] = None,
+                                   *, threshold: Optional[Threshold]=None,
+                                 ) -> TensorLike:
+        """只强加边界牵引的切向分量 ``sigma_nt``, 法向分量保持自由.
+
+        用于对称面: 对称面法向牵引 ``sigma_nn`` 自由, 切向牵引 ``sigma_nt`` 由
+        对称性约束为零. ``gd`` 输出牵引向量 ``[g_n, g_t]``, 本方法只取其切向
+        投影 ``g·t`` 并乘以 Voigt 切向迹因子 2, 法向迹自由度不进入边界标记.
+
+        与 ``boundary_interpolate`` 相同, 边界边自由度的排列为
+        ``[q0 法向, q0 切向, q1 法向, q1 切向, ...]``, 故切向自由度是
+        ``edge_to_dof`` 的奇数索引列.
+        """
+        if uh is None:
+            uh = bm.zeros((self.number_of_global_dofs(),), dtype=self.ftype, device=self.device)
+
+        mesh = self.mesh
+        p = self.p
+
+        if threshold is not None:
+            ebdflag = threshold
+        else:
+            ebdflag = mesh.boundary_edge_flag()
+
+        e2d = self.dof.edge_to_dof()[ebdflag]  # (NEb, 2(p+1))
+        NEb = e2d.shape[0]
+
+        bcs = bm.multi_index_matrix(p, 1) / p
+        points = self.mesh.bc_to_point(bcs)[ebdflag]  # (NEb, p+1, 2)
+
+        if callable(gd):
+            gd_vals = gd(points)  # (NEb, p+1, 2) 牵引向量 [g_n, g_t]
+        else:
+            gd_vals = bm.broadcast_to(gd, (NEb, len(bcs), gd.shape[-1]))
+
+        et = mesh.edge_unit_tangent()[ebdflag]  # (NEb, 2)
+        val_t = bm.sum(gd_vals * et[:, None, :], axis=-1)  # (NEb, p+1)
+        val_t = 2.0 * val_t  # Voigt 切向迹因子
+
+        e2d_tangent = e2d[:, 1::2]  # (NEb, p+1) 切向自由度
+        uh[e2d_tangent] = val_t
+
+        isDDof = bm.zeros((uh.shape[0],), dtype=bm.bool)
+        isDDof[e2d_tangent] = True
+
+        return self.function(uh), isDDof
+
     def dof_frame(self) -> TensorLike:
         mesh = self.mesh
 

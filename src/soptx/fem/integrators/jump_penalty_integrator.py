@@ -178,7 +178,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             w = bm.where(is_left[:, None, None, None], w_p, w_m)
 
             # 计算矩阵跳量
-            M = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w))    
+            M = 0.5 * (bm.einsum('fqdi, fj -> fqdij', w, nu) + bm.einsum('fi, fqdj -> fqdij', nu, w))
             
             # 分别存储 L 侧和 R 侧
             left_idx = boundary_idx[is_left]

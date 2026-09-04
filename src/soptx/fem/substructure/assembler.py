@@ -9,13 +9,12 @@
 """
 
 from dataclasses import dataclass
-from typing import Tuple, List, Union, Any, Callable, Optional, Sequence
-
-import scipy.sparse as sp
+from typing import Tuple, List, Union, Any, Callable, Iterable, Optional, Sequence
 
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import QuadrangleMesh, HexahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+from fealpy.sparse import COOTensor, CSRTensor
 from soptx.materials import IsotropicLinearElasticMaterial
 
 
@@ -27,13 +26,13 @@ class InterfaceSystem:
 
     属性:
         stiffness: 接口刚度矩阵, 形状 ``(n_interface, n_interface)``. 采用
-            ``scipy`` 稀疏格式, 供 ``scipy.sparse.linalg`` 直接求解.
+            FEALPy ``CSRTensor`` 格式, 供 ``soptx.solvers.spsolve`` 直接求解.
         global_dofs: 接口自由度对应的全局自由度编号, 升序排列, 形状
             ``(n_interface,)``. 升序是契约的一部分, 全局到接口的反查依赖
             二分定位而非字典.
     """
 
-    stiffness: sp.csr_matrix
+    stiffness: CSRTensor
     global_dofs: Any
 
 
@@ -54,6 +53,8 @@ class GlobalAssembler:
         n_sub: Union[Tuple[int, ...], float, int],
         n_fine: Union[Tuple[int, ...], int],
         *args: Any,
+        degree: int = 1,
+        p: Optional[int] = None,
         E_base: float = 1.0,
         nu: float = 0.3,
     ) -> None:
@@ -66,12 +67,14 @@ class GlobalAssembler:
             n_fine: 单个子结构在各方向的细单元数元组, 或标量形式的第一个分量.
             *args: 标量形式下的其余尺寸, 子结构数和细单元数, 之后可选跟
                 ``E_base`` 与 ``nu``; 元组形式下可选跟 ``E_base`` 与 ``nu``.
+            degree: 有限元位移空间的多项式插值次数, 缺省为 ``1``.
+            p: ``degree`` 的别名, 显式给出时优先于 ``degree``.
             E_base: 实体材料的杨氏模量.
             nu: 泊松比.
 
         异常:
             ValueError: 当参数无法解析为 2D 或 3D 的尺寸, 子结构数与细单元数
-                三元组时抛出.
+                三元组时, 或 ``degree`` 非正时抛出.
 
         说明:
             求解域固定为以原点为下角的长方体 ``[0, Lx] x [0, Ly] (x [0, Lz])``.
@@ -83,10 +86,17 @@ class GlobalAssembler:
         self.domain_size, self.n_sub, self.n_fine, self.E_base, self.nu = parsed
         self.dim: int = len(self.domain_size)
 
+        self.degree: int = int(p if p is not None else degree)
+        if self.degree <= 0:
+            raise ValueError(f"degree 必须为正整数; 当前为 {self.degree}.")
+        self.p: int = self.degree
+
         self.total_fine: Tuple[int, ...] = tuple(
             self.n_sub[d] * self.n_fine[d] for d in range(self.dim)
         )
-        self.n_full_nodes: Tuple[int, ...] = tuple(n + 1 for n in self.total_fine)
+        self.n_full_nodes: Tuple[int, ...] = tuple(
+            n * self.degree + 1 for n in self.total_fine
+        )
         # 单个子结构在各方向的物理尺寸, 用于由 box_span 反解子结构位置.
         self._sub_size: Tuple[float, ...] = tuple(
             self.domain_size[d] / self.n_sub[d] for d in range(self.dim)
@@ -231,8 +241,46 @@ class GlobalAssembler:
     def sspace_full(self) -> LagrangeFESpace:
         """全尺度标量拉格朗日空间; 首次访问时构造."""
         if self._sspace_full is None:
-            self._sspace_full = LagrangeFESpace(self.full_mesh, p=1, ctype='C')
+            self._sspace_full = LagrangeFESpace(
+                self.full_mesh, p=self.degree, ctype='C'
+            )
         return self._sspace_full
+
+    def node_coordinates(self, node_indices: Optional[Any] = None) -> Any:
+        """解析计算结构化全网格节点的物理坐标, 形状 ``(N, dim)``.
+
+        说明:
+            直接基于网格步长解析计算, 彻底避免为了查询坐标而构造全尺度网格与空间.
+        """
+        if node_indices is None:
+            node_indices = bm.arange(self.total_full_nodes, dtype=bm.int64)
+        else:
+            node_indices = bm.asarray(node_indices, dtype=bm.int64)
+
+        if self.dim == 2:
+            ny1 = self.n_full_nodes[1]
+            ix = node_indices // ny1
+            iy = node_indices % ny1
+            hx = self.domain_size[0] / (self.total_fine[0] * self.degree)
+            hy = self.domain_size[1] / (self.total_fine[1] * self.degree)
+            x = bm.astype(ix, bm.float64) * hx
+            y = bm.astype(iy, bm.float64) * hy
+            return bm.stack([x, y], axis=-1)
+        else:
+            ny1 = self.n_full_nodes[1]
+            nz1 = self.n_full_nodes[2]
+            nyz = ny1 * nz1
+            ix = node_indices // nyz
+            rem = node_indices % nyz
+            iy = rem // nz1
+            iz = rem % nz1
+            hx = self.domain_size[0] / (self.total_fine[0] * self.degree)
+            hy = self.domain_size[1] / (self.total_fine[1] * self.degree)
+            hz = self.domain_size[2] / (self.total_fine[2] * self.degree)
+            x = bm.astype(ix, bm.float64) * hx
+            y = bm.astype(iy, bm.float64) * hy
+            z = bm.astype(iz, bm.float64) * hz
+            return bm.stack([x, y, z], axis=-1)
 
     @property
     def space_full(self) -> TensorFunctionSpace:
@@ -246,36 +294,17 @@ class GlobalAssembler:
     ### 全局自由度映射 ###
 
     def _node_of_grid_index(self) -> Any:
-        """返回结构化网格下标到全局节点编号的映射, 形状 ``(total_full_nodes,)``.
-
-        返回:
-            node_of_grid: 以 C 序线性化的结构化下标为索引, 给出对应的全局节点编号.
-
-        异常:
-            RuntimeError: 当全网格节点无法与结构化下标一一对应时抛出.
+        """返回结构化高阶网格下标到全局节点编号的映射, 形状 ``(total_full_nodes,)``.
 
         说明:
-            由节点坐标反解下标而不假定网格生成器的编号次序; 结果缓存复用.
+            FEALPy 标准结构化网格节点按 C 序字典序排布 (x 优先, y 次之, z 内层),
+            节点下标与线性编号自然恒等, 直接由 ``bm.arange`` 给出, 彻底避免构造全尺度
+            网格与插值坐标所造成的数十 GB 内存开销.
         """
         if self._node_of_grid is not None:
             return self._node_of_grid
 
-        node = self.full_mesh.entity('node')
-        linear_index: Any = bm.zeros((self.total_full_nodes,), dtype=bm.int64)
-        for d in range(self.dim):
-            h_d = self.domain_size[d] / self.total_fine[d]
-            idx_d = bm.astype(bm.round(node[:, d] / h_d), bm.int64)
-            idx_d = bm.clip(idx_d, 0, self.total_fine[d])
-            linear_index = linear_index * self.n_full_nodes[d] + idx_d
-
-        arange_nodes = bm.arange(self.total_full_nodes, dtype=bm.int64)
-        if not bool(bm.all(bm.sort(linear_index) == arange_nodes)):
-            raise RuntimeError(
-                "全网格节点未能与结构化下标一一对应, 无法建立子结构到全局的映射."
-            )
-
-        inverse: Any = bm.zeros((self.total_full_nodes,), dtype=bm.int64)
-        self._node_of_grid = bm.set_at(inverse, linear_index, arange_nodes)
+        self._node_of_grid = bm.arange(self.total_full_nodes, dtype=bm.int64)
         return self._node_of_grid
 
     def get_substructure_global_dofs(self, *args: Any) -> Any:
@@ -320,8 +349,9 @@ class GlobalAssembler:
             return cached[1]
 
         node_of_grid = self._node_of_grid_index()
+        sub_degree = getattr(prototype, 'degree', getattr(prototype, 'p', self.degree))
         offset = bm.asarray(
-            [pos[d] * self.n_fine[d] for d in range(self.dim)], dtype=bm.int64
+            [pos[d] * self.n_fine[d] * sub_degree for d in range(self.dim)], dtype=bm.int64
         )
         grid_index = sub_mesh.node_grid_index + offset
 
@@ -383,7 +413,18 @@ class GlobalAssembler:
             positions.append(pos)
         return positions
 
-    def _interface_indices(
+    def substructure_positions(
+        self,
+        sub_meshes: Sequence[Any],
+    ) -> Tuple[Tuple[int, ...], ...]:
+        """返回各子结构在规则分块网格中的位置.
+
+        返回顺序与 ``sub_meshes`` 一致. 该公共只读接口供分析器构造局部到全局
+        位移映射, 避免调用方依赖私有的 ``_substructure_positions``.
+        """
+        return tuple(self._substructure_positions(sub_meshes))
+
+    def interface_indices(
         self,
         sub_meshes: Sequence[Any],
         interface_global_dofs: Any,
@@ -431,10 +472,222 @@ class GlobalAssembler:
             b_global_all.append(sub_global_dofs[sub_mesh.b_dofs])
         return bm.unique(bm.concat(b_global_all))
 
+    @property
+    def n_macro_nodes_per_dir(self) -> Tuple[int, ...]:
+        """宏观粗网格各方向节点数: n_sub[d] + 1."""
+        return tuple(n + 1 for n in self.n_sub)
+
+    @property
+    def total_macro_nodes(self) -> int:
+        """宏观粗网格总节点数."""
+        n = 1
+        for count in self.n_macro_nodes_per_dir:
+            n *= count
+        return n
+
+    @property
+    def total_macro_dofs(self) -> int:
+        """宏观粗网格总自由度数: dim * total_macro_nodes."""
+        return self.dim * self.total_macro_nodes
+
+    def macro_node_coordinates(self, node_indices: Optional[Any] = None) -> Any:
+        """解析计算宏观粗网格节点的物理坐标, 形状 ``(N, dim)``."""
+        if node_indices is None:
+            node_indices = bm.arange(self.total_macro_nodes, dtype=bm.int64)
+        else:
+            node_indices = bm.asarray(node_indices, dtype=bm.int64)
+
+        if self.dim == 2:
+            ny1 = self.n_macro_nodes_per_dir[1]
+            ix = node_indices // ny1
+            iy = node_indices % ny1
+            hx = self.domain_size[0] / self.n_sub[0]
+            hy = self.domain_size[1] / self.n_sub[1]
+            x = bm.astype(ix, bm.float64) * hx
+            y = bm.astype(iy, bm.float64) * hy
+            return bm.stack([x, y], axis=-1)
+        else:
+            ny1 = self.n_macro_nodes_per_dir[1]
+            nz1 = self.n_macro_nodes_per_dir[2]
+            nyz = ny1 * nz1
+            ix = node_indices // nyz
+            rem = node_indices % nyz
+            iy = rem // nz1
+            iz = rem % nz1
+            hx = self.domain_size[0] / self.n_sub[0]
+            hy = self.domain_size[1] / self.n_sub[1]
+            hz = self.domain_size[2] / self.n_sub[2]
+            x = bm.astype(ix, bm.float64) * hx
+            y = bm.astype(iy, bm.float64) * hy
+            z = bm.astype(iz, bm.float64) * hz
+            return bm.stack([x, y, z], axis=-1)
+
+    def macro_corner_indices(self, sub_meshes: Sequence[Any]) -> Any:
+        """给出各子结构角节点在宏观粗网格系统中的全局自由度编号, 形状 ``(B, dim * 2**dim)``.
+
+        参数:
+            sub_meshes: 子结构列表.
+        """
+        positions = self._substructure_positions(sub_meshes)
+        rows = []
+
+        if self.dim == 2:
+            ny1 = self.n_macro_nodes_per_dir[1]
+            for sx, sy in positions:
+                c_nodes = [
+                    sx * ny1 + sy,
+                    (sx + 1) * ny1 + sy,
+                    (sx + 1) * ny1 + (sy + 1),
+                    sx * ny1 + (sy + 1),
+                ]
+                dofs = []
+                for node in c_nodes:
+                    for k in range(2):
+                        dofs.append(2 * node + k)
+                rows.append(bm.asarray(dofs, dtype=bm.int64))
+        else:
+            ny1 = self.n_macro_nodes_per_dir[1]
+            nz1 = self.n_macro_nodes_per_dir[2]
+            nyz = ny1 * nz1
+            for sx, sy, sz in positions:
+                c_nodes = [
+                    sx * nyz + sy * nz1 + sz,
+                    sx * nyz + sy * nz1 + (sz + 1),
+                    sx * nyz + (sy + 1) * nz1 + sz,
+                    sx * nyz + (sy + 1) * nz1 + (sz + 1),
+                    (sx + 1) * nyz + sy * nz1 + sz,
+                    (sx + 1) * nyz + sy * nz1 + (sz + 1),
+                    (sx + 1) * nyz + (sy + 1) * nz1 + sz,
+                    (sx + 1) * nyz + (sy + 1) * nz1 + (sz + 1),
+                ]
+                dofs = []
+                for node in c_nodes:
+                    for k in range(3):
+                        dofs.append(3 * node + k)
+                rows.append(bm.asarray(dofs, dtype=bm.int64))
+
+        return bm.stack(rows, axis=0)
+
+    def assemble_macro_system(
+        self,
+        sub_meshes: List[Any],
+        Ks_macro_batch: Any,
+    ) -> InterfaceSystem:
+        """装配 Huang 2023 线性边界变形降维后的宏观粗网格系统 (Huang 2023 式 16).
+
+        参数:
+            sub_meshes: 子结构列表.
+            Ks_macro_batch: 降维缩聚刚度矩阵, 形状 ``(B, l, l)``, 其中 ``l = dim * 2**dim``
+                (3D 为 24, 2D 为 8).
+
+        返回:
+            system: 宏观刚度矩阵与全局宏观自由度映射.
+        """
+        c_macro = self.macro_corner_indices(sub_meshes)
+        n_batch, l_dim = c_macro.shape
+        shape = (n_batch, l_dim, l_dim)
+
+        rows = bm.reshape(bm.broadcast_to(c_macro[:, :, None], shape), (-1,))
+        cols = bm.reshape(bm.broadcast_to(c_macro[:, None, :], shape), (-1,))
+        vals = bm.reshape(Ks_macro_batch, (-1,))
+
+        indices = bm.stack([rows, cols], axis=0)
+        coo = COOTensor(
+            indices=indices,
+            values=vals,
+            spshape=(self.total_macro_dofs, self.total_macro_dofs),
+        )
+        K_macro = coo.coalesce().tocsr()
+        macro_global_dofs = bm.arange(self.total_macro_dofs, dtype=bm.int64)
+
+        return InterfaceSystem(stiffness=K_macro, global_dofs=macro_global_dofs)
+
+    def assemble_macro_system_batches(
+        self,
+        sub_meshes: Sequence[Any],
+        stiffness_batches: Iterable[Any],
+    ) -> InterfaceSystem:
+        """由连续的迹空间刚度批次流式装配宏观粗网格系统.
+
+        参数:
+            sub_meshes: 按批次编号排列的全部子结构.
+            stiffness_batches: 连续覆盖全部子结构的批次迭代器. 每项提供
+                ``start``, ``end`` 和 ``stiffness`` 属性, 其中刚度形状为
+                ``(end - start, l, l)``.
+
+        返回:
+            system: 宏观刚度矩阵与全局宏观自由度映射.
+
+        异常:
+            ValueError: 当子结构为空, 批次区间不连续, 未完整覆盖子结构, 或
+                批次刚度形状与宏观角点自由度不一致时抛出.
+
+        说明:
+            每批先独立生成规范 CSR 矩阵, 再与当前全局 CSR 做稀疏加法. 因此
+            峰值内存由当前全局稀疏矩阵和单个批次决定, 不保存完整的
+            ``K_trace_batch`` 或全量未合并 COO 三元组.
+        """
+        if not sub_meshes:
+            raise ValueError("sub_meshes 不能为空.")
+
+        c_macro = self.macro_corner_indices(sub_meshes)
+        n_sub_total, n_trace = c_macro.shape
+        next_start = 0
+        K_macro: Optional[CSRTensor] = None
+
+        for batch in stiffness_batches:
+            start = int(batch.start)
+            end = int(batch.end)
+            stiffness = bm.asarray(batch.stiffness)
+
+            if start != next_start or end <= start or end > n_sub_total:
+                raise ValueError(
+                    "stiffness_batches 必须以连续半开区间完整覆盖子结构; "
+                    f"期望 start={next_start}, 当前区间为 [{start}, {end})."
+                )
+
+            expected_shape = (end - start, n_trace, n_trace)
+            if tuple(stiffness.shape) != expected_shape:
+                raise ValueError(
+                    f"批次刚度形状必须为 {expected_shape}; "
+                    f"当前为 {tuple(stiffness.shape)}."
+                )
+
+            indices_chunk = c_macro[start:end]
+            shape = expected_shape
+            rows = bm.reshape(
+                bm.broadcast_to(indices_chunk[:, :, None], shape),
+                (-1,),
+            )
+            cols = bm.reshape(
+                bm.broadcast_to(indices_chunk[:, None, :], shape),
+                (-1,),
+            )
+            values = bm.reshape(stiffness, (-1,))
+            coo = COOTensor(
+                indices=bm.stack([rows, cols], axis=0),
+                values=values,
+                spshape=(self.total_macro_dofs, self.total_macro_dofs),
+            )
+            K_chunk = coo.coalesce().tocsr()
+            K_macro = K_chunk if K_macro is None else K_macro.add(K_chunk)
+            next_start = end
+
+        if next_start != n_sub_total or K_macro is None:
+            raise ValueError(
+                "stiffness_batches 未完整覆盖全部子结构; "
+                f"已覆盖 {next_start}, 总数为 {n_sub_total}."
+            )
+
+        return InterfaceSystem(
+            stiffness=K_macro,
+            global_dofs=bm.arange(self.total_macro_dofs, dtype=bm.int64),
+        )
+
     ### 缩聚结果归一化 ###
 
     @staticmethod
-    def _normalize_condensors(
+    def normalize_condensors(
         condensors: Any,
         n_sub_total: int,
         n_b: int,
@@ -442,9 +695,9 @@ class GlobalAssembler:
         """把逐个或批量给出的缩聚结果统一成批量形式.
 
         参数:
-            condensors: 缩聚器列表, 每个的 ``K_s`` 形状为 ``(n_b, n_b)``; 或单个
-                缩聚器, 其 ``K_s`` 形状为 ``(B, n_b, n_b)`` 或 ``(n_b, n_b)``,
-                后者表示全部子结构共用同一缩聚结果.
+            condensors: 缩聚器列表, 单个旧式批量缩聚器, 或无状态
+                ``LocalReductionBatchResult``. 刚度批量形状为
+                ``(B, n_b, n_b)``; 旧式二维 ``K_s`` 表示全部子结构共用同一结果.
             n_sub_total: 子结构总数 ``B``.
             n_b: 单个子结构的接口自由度数.
 
@@ -478,9 +731,23 @@ class GlobalAssembler:
                     [c.recover(u_b_batch[i]) for i, c in enumerate(condensors)],
                     axis=0,
                 )
+        elif hasattr(condensors, "stiffness") and hasattr(condensors, "recover"):
+            # ``LocalReductionBatchResult`` 是新无状态缩聚契约. 直接消费结果
+            # 快照, 避免先回填旧 condensor 的 K_s/N 可变属性.
+            K_s_batch = condensors.stiffness
+
+            def recover(u_b_batch: Any) -> Any:
+                """由无状态批量缩聚结果恢复内部位移."""
+                return condensors.recover(u_b_batch)
+
         else:
             condensor = condensors
-            if condensor.K_s is None:
+            if getattr(condensor, "K_s", None) is None:
+                if hasattr(condensor, "get_chunk_stiffness"):
+                    # 流式容器模式: 不在内存中持有全局全量张量, 按需由 get_chunk_stiffness 提供
+                    def recover(u_b_batch: Any) -> Any:
+                        return condensor.recover(u_b_batch)
+                    return None, recover
                 raise RuntimeError("condensor 必须在全局装配前完成 condense().")
             K_s_batch = condensor.K_s
             if K_s_batch.ndim == 2:
@@ -493,11 +760,12 @@ class GlobalAssembler:
                 """批量缩聚器的 recover 沿前导维广播, 一次完成全部子结构."""
                 return condensor.recover(u_b_batch)
 
-        if K_s_batch.ndim != 3 or tuple(K_s_batch.shape) != (n_sub_total, n_b, n_b):
-            raise ValueError(
-                f"K_s 的批量形状必须为 ({n_sub_total}, {n_b}, {n_b}); "
-                f"当前为 {tuple(K_s_batch.shape)}."
-            )
+        if K_s_batch is not None:
+            if K_s_batch.ndim != 3 or tuple(K_s_batch.shape) != (n_sub_total, n_b, n_b):
+                raise ValueError(
+                    f"K_s 的批量形状必须为 ({n_sub_total}, {n_b}, {n_b}); "
+                    f"当前为 {tuple(K_s_batch.shape)}."
+                )
         return K_s_batch, recover
 
     ### 装配与投影 ###
@@ -515,7 +783,7 @@ class GlobalAssembler:
         参数:
             sub_meshes: 子结构列表.
             condensors: 缩聚器列表或单个批量缩聚器, 形状约定见
-                ``_normalize_condensors``.
+                ``normalize_condensors``.
             chunk_size: 每批散加的子结构数. 为 ``None`` 时一次散加全部子结构.
                 散加需要 ``B * n_b**2`` 量级的行列索引与数值缓冲, 子结构数很大时
                 用该参数限制峰值内存.
@@ -529,9 +797,8 @@ class GlobalAssembler:
         说明:
             不施加载荷, 边界条件, 也不调用线性求解器.
 
-            散加通过 COO 三元组完成, 重复项由 ``coo_matrix`` 转 CSR 时求和, 取代
-            逐元素累加. 数值在此处经 ``bm.to_numpy`` 转出到 ``scipy``, 这是流程中
-            与第三方求解库对接的边界.
+            散加通过 FEALPy ``COOTensor`` 完成, 重复项由 ``coalesce().tocsr()``
+            求和生成 ``CSRTensor``, 供 ``soptx.solvers.spsolve`` 直接求解.
         """
         if not sub_meshes:
             raise ValueError("sub_meshes 不能为空.")
@@ -542,23 +809,37 @@ class GlobalAssembler:
         n_interface = int(len(interface_global_dofs))
         n_b = int(sub_meshes[0].n_b)
 
-        b_interface = self._interface_indices(sub_meshes, interface_global_dofs)
-        K_s_batch, _ = self._normalize_condensors(condensors, len(sub_meshes), n_b)
+        b_interface = self.interface_indices(sub_meshes, interface_global_dofs)
+        K_s_batch, _ = self.normalize_condensors(condensors, len(sub_meshes), n_b)
 
         n_batch = len(sub_meshes)
         step = n_batch if chunk_size is None else min(chunk_size, n_batch)
-        K_global = sp.csr_matrix((n_interface, n_interface), dtype=float)
+        all_rows: List[Any] = []
+        all_cols: List[Any] = []
+        all_vals: List[Any] = []
         for start in range(0, n_batch, step):
             sl = slice(start, start + step)
             idx = b_interface[sl]
             n_chunk = int(idx.shape[0])
             shape = (n_chunk, n_b, n_b)
-            rows = bm.to_numpy(bm.broadcast_to(idx[:, :, None], shape)).reshape(-1)
-            cols = bm.to_numpy(bm.broadcast_to(idx[:, None, :], shape)).reshape(-1)
-            vals = bm.to_numpy(K_s_batch[sl]).reshape(-1)
-            K_global = K_global + sp.coo_matrix(
-                (vals, (rows, cols)), shape=(n_interface, n_interface)
-            ).tocsr()
+            rows = bm.reshape(bm.broadcast_to(idx[:, :, None], shape), (-1,))
+            cols = bm.reshape(bm.broadcast_to(idx[:, None, :], shape), (-1,))
+            if K_s_batch is None and hasattr(condensors, "get_chunk_stiffness"):
+                chunk_Ks = condensors.get_chunk_stiffness(start, min(start + step, n_batch))
+                vals = bm.reshape(chunk_Ks, (-1,))
+            else:
+                vals = bm.reshape(K_s_batch[sl], (-1,))
+            all_rows.append(rows)
+            all_cols.append(cols)
+            all_vals.append(vals)
+
+        rows_all = all_rows[0] if len(all_rows) == 1 else bm.concat(all_rows, axis=0)
+        cols_all = all_cols[0] if len(all_cols) == 1 else bm.concat(all_cols, axis=0)
+        vals_all = all_vals[0] if len(all_vals) == 1 else bm.concat(all_vals, axis=0)
+
+        indices = bm.stack([rows_all, cols_all], axis=0)
+        coo = COOTensor(indices=indices, values=vals_all, spshape=(n_interface, n_interface))
+        K_global = coo.coalesce().tocsr()
 
         return InterfaceSystem(
             stiffness=K_global,
@@ -612,7 +893,7 @@ class GlobalAssembler:
         参数:
             sub_meshes: 子结构列表.
             condensors: 缩聚器列表或单个批量缩聚器, 形状约定见
-                ``_normalize_condensors``.
+                ``normalize_condensors``.
             system: 接口系统.
             interface_displacement: 接口自由度上的位移, 形状 ``(n_interface,)``.
 
@@ -637,8 +918,8 @@ class GlobalAssembler:
             )
 
         n_b = int(sub_meshes[0].n_b)
-        b_interface = self._interface_indices(sub_meshes, system.global_dofs)
-        _, recover = self._normalize_condensors(condensors, len(sub_meshes), n_b)
+        b_interface = self.interface_indices(sub_meshes, system.global_dofs)
+        _, recover = self.normalize_condensors(condensors, len(sub_meshes), n_b)
 
         U_full: Any = bm.zeros((self.total_full_dofs,), dtype=bm.float64)
         U_full = bm.set_at(U_full, system.global_dofs, u_b)
@@ -685,22 +966,81 @@ class GlobalAssembler:
             )
         return bm.reshape(values[self._node_of_grid_index()], self.n_full_nodes)
 
-    def reconstruct_global_field(self, sub_fields: Union[List[Any], Any]) -> Any:
-        """把各子结构的局部数据场拼接为全局连续数据场.
+    def split_global_cell_field(self, global_field: Any) -> Any:
+        """把全局结构化 cell 场拆成 block-major 子结构局部网格场.
 
         参数:
-            sub_fields: 各子结构的局部场, 每个形状为 ``n_fine``. 必须按 x 优先的
+            global_field: 形状为 ``total_fine`` 的结构化场, 或其 C 序展平向量.
+
+        返回:
+            sub_fields: 形状 ``(B, *n_fine)`` 的局部网格场. ``B`` 按 x 优先
                 字典序排列, 即 2D 下 ``sub_id = sx * n_sub_y + sy``, 3D 下
                 ``sub_id = (sx * n_sub_y + sy) * n_sub_z + sz``.
+
+        异常:
+            ValueError: 当输入形状既不是 ``total_fine`` 也不是对应展平向量时抛出.
+        """
+        field = bm.asarray(global_field)
+        n_total = 1
+        for count in self.total_fine:
+            n_total *= count
+
+        if tuple(field.shape) == self.total_fine:
+            grid = field
+        elif field.ndim == 1 and field.shape[0] == n_total:
+            grid = bm.reshape(field, self.total_fine)
+        else:
+            raise ValueError(
+                f"全局 cell 场形状 {tuple(field.shape)} 无法解释: "
+                f"应为 {self.total_fine} 或 ({n_total},)."
+            )
+
+        if self.dim == 2:
+            blocked = bm.reshape(
+                grid,
+                (self.n_sub[0], self.n_fine[0],
+                 self.n_sub[1], self.n_fine[1]),
+            )
+            blocked = bm.permute_dims(blocked, (0, 2, 1, 3))
+        else:
+            blocked = bm.reshape(
+                grid,
+                (
+                    self.n_sub[0], self.n_fine[0],
+                    self.n_sub[1], self.n_fine[1],
+                    self.n_sub[2], self.n_fine[2],
+                ),
+            )
+            blocked = bm.permute_dims(blocked, (0, 2, 4, 1, 3, 5))
+
+        n_sub_total = 1
+        for count in self.n_sub:
+            n_sub_total *= count
+        return bm.reshape(blocked, (n_sub_total,) + self.n_fine)
+
+    def merge_substructure_cell_field(self, sub_fields: Any) -> Any:
+        """把 block-major 子结构局部网格场拼接为全局结构化 cell 场.
+
+        参数:
+            sub_fields: 形状 ``(B, *n_fine)`` 的局部网格场. 子结构必须按 x 优先
+                字典序排列; 该顺序与 ``split_global_cell_field`` 返回值一致.
 
         返回:
             global_field: 形状为 ``total_fine`` 的全局场.
 
-        说明:
-            本方法只收到数据场, 无从反解子结构位置, 因此次序契约由调用方保证;
-            涉及网格的接口一律由 ``box_span`` 反解位置, 不依赖列表次序.
+        异常:
+            ValueError: 当输入形状不是 ``(B, *n_fine)`` 时抛出.
         """
         field = bm.asarray(sub_fields)
+        n_sub_total = 1
+        for count in self.n_sub:
+            n_sub_total *= count
+        expected = (n_sub_total,) + self.n_fine
+        if tuple(field.shape) != expected:
+            raise ValueError(
+                f"子结构 cell 场形状 {tuple(field.shape)} 必须为 {expected}."
+            )
+
         if self.dim == 2:
             field = bm.reshape(
                 field,
@@ -718,6 +1058,16 @@ class GlobalAssembler:
         )
         field = bm.permute_dims(field, (0, 3, 1, 4, 2, 5))
         return bm.reshape(field, self.total_fine)
+
+    def reconstruct_global_field(self, sub_fields: Union[List[Any], Any]) -> Any:
+        """把各子结构局部网格场拼接为全局结构化 cell 场.
+
+        说明:
+            这是 ``merge_substructure_cell_field`` 的兼容入口. 新代码应使用名称
+            更明确的成对 API ``split_global_cell_field`` 与
+            ``merge_substructure_cell_field``.
+        """
+        return self.merge_substructure_cell_field(sub_fields)
 
     # 向后兼容别名
     reconstruct_full_density = reconstruct_global_field

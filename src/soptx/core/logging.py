@@ -4,6 +4,17 @@ from __future__ import annotations
 
 from abc import ABC
 import logging
+from typing import NoReturn
+
+
+class _MessageFormatter(logging.Formatter):
+    """INFO 及以下只输出消息本体; WARNING 及以上保留来源与级别前缀."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        if record.levelno <= logging.INFO:
+            return message
+        return f"{record.name} - {record.levelname} - {message}"
 
 
 class BaseLogged(ABC):
@@ -15,9 +26,7 @@ class BaseLogged(ABC):
         logger_name: str | None = None,
     ) -> None:
         self._enable_logging = enable_logging
-        self._logger_name = logger_name or (
-            f"{self.__class__.__name__}_{id(self)}"
-        )
+        self._logger_name = logger_name or self.__class__.__name__
         self._setup_logging()
 
     def _setup_logging(self) -> None:
@@ -25,11 +34,7 @@ class BaseLogged(ABC):
             self.logger = logging.getLogger(self._logger_name)
             if not self.logger.handlers:
                 handler = logging.StreamHandler()
-                handler.setFormatter(
-                    logging.Formatter(
-                        "%(name)s - %(levelname)s - %(message)s"
-                    )
-                )
+                handler.setFormatter(_MessageFormatter())
                 self.logger.addHandler(handler)
                 self.logger.setLevel(logging.INFO)
         else:
@@ -58,11 +63,13 @@ class BaseLogged(ABC):
             self.logger.debug(message)
 
     def _log_info(self, message: str, force_log: bool = False) -> None:
-        if (self._enable_logging and self.logger) or force_log:
-            if force_log and not self.logger:
-                print(f"{self._logger_name} - INFO - {message}")
-            else:
+        # 先判 logger 是否存在再判是否该输出: 与原先的嵌套条件等价, 但类型检查器
+        # 能沿这条分支收窄 self.logger, 不再把它当成可能的 None
+        if self.logger is not None:
+            if self._enable_logging or force_log:
                 self.logger.info(message)
+        elif force_log:
+            print(message)
 
     def _log_warning(
         self,
@@ -79,7 +86,19 @@ class BaseLogged(ABC):
         self,
         message: str,
         force_log: bool = True,
-    ) -> None:
+    ) -> NoReturn:
+        """记录错误并抛出 ``RuntimeError``, 永不正常返回.
+
+        参数:
+            message: 错误信息, 同时作为 ``RuntimeError`` 的内容.
+            force_log: 为 ``True`` 时即使关闭日志也输出该错误.
+
+        异常:
+            RuntimeError: 恒抛出.
+
+        返回类型标注为 ``NoReturn``: 调用点之后的代码不可达, 类型检查器
+        因此不会把 ``if/elif`` 末尾调用本方法的分支推断为隐式返回 ``None``.
+        """
         if force_log or (self._enable_logging and self.logger):
             if self.logger:
                 self.logger.error(message)

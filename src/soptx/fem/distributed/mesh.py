@@ -19,7 +19,7 @@ from typing import Any, NamedTuple
 from mpi4py.MPI import Comm, COMM_WORLD
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import EntitySector, Mesh, MeshBlock, Relation
+from fealpy.mesh import EntitySector, MeshBlock, MeshView, Relation
 from fealpy.typing import TensorLike
 
 from . import entity_mpi as _de
@@ -35,7 +35,7 @@ class MeshComm(NamedTuple):
 class DistMeshResult(NamedTuple):
     """分布式网格分发结果包装 (包含当前 rank 的局部网格与通信拓扑)."""
 
-    mesh: Mesh
+    mesh: MeshView
     comm: MeshComm
 
 
@@ -178,7 +178,7 @@ def _build_local_storage(
 
 
 def distribute_mesh(
-    mesh: Mesh | None,
+    mesh: MeshView | None,
     cell_masks: Sequence[TensorLike] | None,
     *,
     root: int = 0,
@@ -187,7 +187,7 @@ def distribute_mesh(
     """基于 MPI 将全局网格切分并分发至各个进程, 自动构建跨进程实体通信拓扑.
 
     参数:
-        mesh (Mesh | None): 待切分的全局网格对象, 仅在 root 进程必须提供, 其余 rank 传入 None.
+        mesh (MeshView | None): 待切分的全局网格对象, 仅在 root 进程必须提供, 其余 rank 传入 None.
         cell_masks (Sequence[TensorLike] | None): 各进程分配的单元布尔掩码序列,
             仅在 root 进程必须提供, 掩码总数必须等于 MPI 进程数, 其余 rank 传入 None.
         root (int, 可选): 负责切分与分发的 Root 进程号. 默认值为 0.
@@ -195,7 +195,7 @@ def distribute_mesh(
 
     返回:
         DistMeshResult (NamedTuple):
-        - mesh (Mesh): 当前进程所分配到的局部子网格对象 (Local Submesh).
+        - mesh (MeshView): 当前进程所分配到的局部子网格对象 (Local Submesh).
         - comm (MeshComm): 当前网格各几何实体的跨进程通信拓扑集合:
             - entities: 包含各实体扇区 (cell, face, edge, node) 对应 EntityMPI 通信器的字典.
             - root_entity_name: 最高维根实体的名称 (通常为 "cell").
@@ -243,7 +243,7 @@ def distribute_mesh(
     # 2. MPI 集合通信: 广播实体掩码元数据, 散射分发各自的局部网格存储
     gdata = comm.bcast(gdata, root)
     lstorage = comm.scatter(local_storage_list, root)
-    pmesh = Mesh(lstorage)
+    pmesh = MeshView(lstorage)
 
     # 3. 基于广播的实体掩码, 各 rank 本地构建各几何实体的跨进程通信拓扑 EntityMPI
     entities_comm: dict[str, _de.EntityMPI] = {}
@@ -251,6 +251,6 @@ def distribute_mesh(
         entities_comm[name] = _de.dist_from_masks(masks, comm=comm)
 
     return DistMeshResult(
-        pmesh.fealpy_api(),
+        pmesh,
         MeshComm(entities_comm, gdata["root_name"]),
     )

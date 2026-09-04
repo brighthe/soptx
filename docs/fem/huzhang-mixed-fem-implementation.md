@@ -49,8 +49,8 @@ src/soptx/fem/
 │   ├── huzhang_stress_integrator.py ← A 块：∫ C⁻¹ σ : τ（柔度双线性型）
 │   ├── huzhang_mix_integrator.py    ← B 块：∫ div σ · u（应力-位移耦合）
 │   └── jump_penalty_integrator.py   ← J 块：低阶跳量稳定化
-└── solvers/
-    └── huzhang_mfem_analyzer.py     ← 求解器：装配、边界条件、求解、后处理
+└── analyzers/
+    └── huzhang_mfem_analyzer.py     ← 分析器：装配、边界条件、求解、后处理
 ```
 
 ### 核心类关系
@@ -115,6 +115,19 @@ HuZhangMFEMAnalyzer
 矩阵跳量（`method='matrix_jump'`），系数论文式物理量纲缩放
 `α·h_F`（`α = μ/L₀²`，`penalty_scaling='physical_h'` 默认；旧
 `γ/h_F` 型保留作回归对比）。仅在 `p ≤ GD` 时参与 K 装配。
+
+### 边界条件与外载荷实现
+
+在 SOPTX 中，线弹性问题的边界条件与外载荷在位移元与混合元中呈现严格的变分对偶性（位移法强位移/弱载荷，混合法强载荷/弱位移）。通用的载荷协议分层、PDE 接口契约、连续分布力与集中力（`boundary_loads.py` 解析重叠 $L^2$ 投影）的程序数据流详见载荷处理架构文档：
+
+> **详细规范**：参见通用有限元文档 [`load-handling-implementation.md`](load-handling-implementation.md)。
+
+#### 胡张元特有的边界与载荷实现要点：
+
+1. **角点松弛变换对边界项的作用**：
+   若启用角点松弛（`space_sigma.use_relaxation == True`），弱施加的位移边界右端项 `F_natural`（$\int_{\Gamma_D} (\boldsymbol{\tau}\cdot\boldsymbol{n})\cdot\boldsymbol{u}_D$）在累加到全局向量后，必须经转置变换矩阵投影：`F_natural = TM.T @ F_natural`。
+2. **拓扑优化中的非齐次牵引提升（Lifting）**：
+   在前向求解与拓扑优化灵敏度分析中，混合法将总应力分解为齐次部分与设计无关的非齐次提升场：$\boldsymbol{\sigma} = \boldsymbol{\sigma}_0 + \boldsymbol{\sigma}_g$。目标函数与灵敏度求导始终基于总应力 $\boldsymbol{s} = \boldsymbol{s}_0 + \boldsymbol{s}_g$ 进行，防止代数消元法遗漏与材料密度相关的提升交叉项。
 
 ## 实现特性
 
@@ -200,9 +213,9 @@ DOF 变换来解除这一约束。
     src/soptx/problems/elasticity/fixed_fixed.py
       FixedFixedBeamCenterLoad2d
       ├── 连续物理模型：domain, P, load_width=l, E, nu, plane_type
-      ├── 原始局部均布牵引 t_bar=P/l（默认 traction_bc）
-      ├── traction_patch / traction_level / traction_intensity：贴片几何的唯一出处
-      └── traction=...：可选注入，用等价的连续牵引替换 traction_bc/neumann_bc
+      ├── 原始局部均布牵引 t_bar=P/l（默认 BoundaryTraction.traction）
+      ├── traction_patch / traction_level / traction_intensity：载荷区几何的唯一出处
+      └── traction=...：可选注入，用等价的连续牵引替换载荷对象的 traction
 
     src/soptx/fem/boundary_loads.py
       project_patch_traction_to_p1_trace(line, n_cells, level, patch, intensity)
@@ -212,8 +225,8 @@ DOF 变换来解除这一约束。
     experiments/huzhang_topopt_paper/cases.toml
       └── load_discretization = p1_trace_l2_projection
 
-    experiments/huzhang_topopt_paper/fixed_fixed_beam.py
-      └── build_problem(parameters, n_cells=nx)：投影 + 注入，得到唯一的分析问题
+    experiments/huzhang_topopt_paper/pipeline.py
+      └── build_fixed_fixed_problem(parameters, n_cells=nx)：投影 + 注入，得到唯一的分析问题
 
     examples/huzhang_elasticity/concentrated_load_demo.py
       └── build_problem(nx)：同一投影 + 注入，实体材料下核查载荷等效性
@@ -225,9 +238,9 @@ DOF 变换来解除这一约束。
       └── 应力法向迹本质边界强施加 sigma_h*n=t_h
 
 FixedFixedBeamCenterLoad2d 是核心物理模型，不保存网格、边界自由度或投影系数：它只
-把贴片几何以三个属性的形式暴露出来，并接受一个替换牵引。投影本身是与具体物理问题
+把载荷区几何以三个属性的形式暴露出来，并接受一个替换牵引。投影本身是与具体物理问题
 无关的通用能力，因此落在 `soptx.fem` 而不是实验目录——它只需要计算域、边界剖分数
-和贴片区间，不需要网格对象。实验层剩下的只是「用哪个 n_cells 去投影」这一个决定。
+和载荷区间，不需要网格对象。实验层剩下的只是「用哪个 n_cells 去投影」这一个决定。
 
 选择连续 P1 迹空间是有意的：Hu--Zhang 空间在每条边上的法向迹是跨边连续的 k 次多项式，连续 P1 迹空间对任意 k >= 1 都是它的子空间。因此 Hu--Zhang 的边界自由度插值可精确表示 t_h，LFEM 也能对同一 t_h 做 Neumann 积分。直接对原始阶跃牵引做 Hu--Zhang 节点插值会在共享端点扩散载荷，使离散合力偏离 P，不能作为方法对照的载荷。
 
@@ -238,7 +251,7 @@ FixedFixedBeamCenterLoad2d 是核心物理模型，不保存网格、边界自�
 - 结构合力守恒：Hu--Zhang 取 integral_GammaN sigma_h*n ds，LFEM 取支座反力 sum (K u)|_GammaD，两者均等于 P（`examples/huzhang_elasticity/concentrated_load_demo.py`，实体材料 rho=1）。这一条抓的是「载荷落在被强加自由度上被静默吞掉」——此时残差依然为 0，只有它能报警；它同时端到端覆盖了「LFEM 的边界积分与 Hu--Zhang 的迹插值拿到同一个载荷泛函」，因此不再单列。
 - 对固定密度状态，LFEM 验证 fTu = uKu；Hu--Zhang 报告 sigmaAsigma、sigmaBu 和牵引对偶功 sigmaAsigma + sigmaBu（`experiments/huzhang_topopt_paper/run.py --mode state-compare`，rho=0.4）。
 
-P1 投影在贴片外带有几何衰减的振荡尾（P1 质量矩阵 Green 函数，每单元约 0.27）。网格过粗时该尾部触及固支端，那一部分载荷会被 Dirichlet 自由度真实吞掉，量级约 P * 0.27^(nx/2)；demo 将其单列为 `吞掉` 一列，n_x >= 40 时已远在 1e-6 相对容差之下。
+P1 投影在载荷区外带有几何衰减的振荡尾（P1 质量矩阵 Green 函数，每单元约 0.27）。网格过粗时该尾部触及固支端，那一部分载荷会被 Dirichlet 自由度真实吞掉，量级约 P * 0.27^(nx/2)；demo 将其单列为 `吞掉` 一列，n_x >= 40 时已远在 1e-6 相对容差之下。
 
 Hu--Zhang 的位移变量属于分片不连续 L2 空间，不能直接将其解释为单值边界位移并套用位移法的边界外力功。对于 k >= 3，无跳量稳定化时 sigmaBu 应接近零。对于 k=2，sigmaBu 可反映跳量稳定化对离散能量的贡献，不应与高阶情形混作严格等价基准。
 
@@ -264,7 +277,7 @@ SOPTX 未提供。因此，当前实现仅提供直接法，构造期即拒绝
 迁移到 4.0.0 时适配的 API 差异。这些是 4.0.0 自身的 API 变化或行为差异，上游
 `suanhai/develop` 和本地 fork 中都一样，修复均落在 SOPTX 侧。本地 fork 独有的
 改进（张量积网格 5 缺陷修复）见
-[`../known-issues/fealpy-tensor-product-mesh.md`](../known-issues/fealpy-tensor-product-mesh.md)。
+[`../known-issues/fealpy-patches.md`](../known-issues/fealpy-patches.md) 第一节。
 
 | # | 要点 | 修复 | 影响范围 |
 |---|---|---|---|

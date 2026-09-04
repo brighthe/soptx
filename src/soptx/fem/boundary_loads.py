@@ -96,7 +96,7 @@ def project_patch_traction_to_p1_trace(
     投影目标是使 ``\\int (\\Pi g - g) v = 0`` 对该空间中所有 ``v`` 成立. 常数函数
     在空间内, 因此 ``\\int \\Pi g = \\int g``, 合力被精确保持.
 
-    右端项按贴片与单元的**解析重叠**积分, 不使用数值积分: 被积函数在单元内部
+    右端项按载荷区与单元的**解析重叠**积分, 不使用数值积分: 被积函数在单元内部
     不连续时, 数值积分本身就是误差来源, 而这正是本函数要消除的东西.
 
     Parameters
@@ -105,7 +105,7 @@ def project_patch_traction_to_p1_trace(
     - n_cells : 该直线上的均匀单元数
     - level : 该直线在垂直方向上的坐标
     - patch : 常值牵引所占的区间 ``(left, right)``, 允许与单元边界不对齐
-    - intensity : 贴片区间内的常值牵引强度 (即合力除以贴片长度)
+    - intensity : 载荷区间内的常值牵引强度 (即合力除以载荷区长度)
     - axis : 直线所沿的坐标轴
     - component : 牵引作用的分量下标
 
@@ -134,7 +134,7 @@ def project_patch_traction_to_p1_trace(
     for cell in range(n_cells):
         x0, x1 = start + cell * h, start + (cell + 1) * h
 
-        # 贴片与本单元的重叠区间, 空重叠时右端项无贡献
+        # 载荷区与本单元的重叠区间, 空重叠时右端项无贡献
         a, b = max(x0, left), min(x1, right)
         if b > a:
             length = b - a
@@ -155,4 +155,98 @@ def project_patch_traction_to_p1_trace(
         level=float(level),
         axis=axis,
         component=component,
+    )
+
+
+@dataclass(frozen=True)
+class LoadResultantReport:
+    """离散载荷合力与期望合力的比对结果.
+
+    Attributes
+    ----------
+    - resultant : 已装配载荷向量按位移分量求和得到的离散合力, 形状 ``(dimension,)``
+    - expected : 解析 (或设计) 合力, 形状 ``(dimension,)``
+    - absolute_error : 逐分量绝对偏差的最大值
+    - relative_error : 以 ``expected`` 的模为基准的相对偏差
+    - within_tolerance : 相对偏差是否在给定容差之内
+    """
+
+    resultant: TensorLike
+    expected: TensorLike
+    absolute_error: float
+    relative_error: float
+    within_tolerance: bool
+
+
+def boundary_load_resultant(
+    force: TensorLike,
+    dimension: int,
+    *,
+    dof_priority: bool = True,
+) -> TensorLike:
+    """把已装配的全局载荷向量按位移分量求和, 得到离散合力.
+
+    参数
+    ----
+    force : 形状 ``(dimension * n_nodes,)`` 的全局载荷向量
+    dimension : 位移分量个数
+    dof_priority : 与 ``TensorFunctionSpace.dof_priority`` 同义。``True`` 表示
+        分量优先 (先排完第 0 分量的全部节点), ``False`` 表示节点优先。
+    """
+    vector = bm.asarray(force, dtype=bm.float64)
+    if len(vector.shape) != 1 or int(vector.shape[0]) % int(dimension) != 0:
+        raise ValueError(
+            "force 应为形状 (dimension * n_nodes,) 的一维向量; "
+            f"实际为 {tuple(vector.shape)}, dimension={dimension}."
+        )
+
+    if dof_priority:
+        components = bm.reshape(vector, (int(dimension), -1))
+    else:
+        components = bm.transpose(bm.reshape(vector, (-1, int(dimension))), (1, 0))
+    return bm.sum(components, axis=-1)
+
+
+def check_boundary_load_resultant(
+    force: TensorLike,
+    dimension: int,
+    expected: TensorLike,
+    *,
+    dof_priority: bool = True,
+    relative_tolerance: float = 1.0e-10,
+) -> LoadResultantReport:
+    """核对已装配载荷向量的离散合力是否等于期望合力.
+
+    边界积分器按面重心整面选取载荷区 (见
+    ``LagrangeBoundarySourceIntegrator``), 载荷区端点与网格不对齐时会静默地
+    多算或少算整个面的贡献。本函数把这种静默偏差变成一个可断言的量: 装配完
+    载荷后调用它, 与解析合力比对即可。
+
+    合力守恒是必要条件而非充分条件: 通过本检查只说明总量对得上, 载荷沿边界的
+    分布仍可能与解析牵引不同。
+    """
+    resultant = boundary_load_resultant(
+        force,
+        dimension,
+        dof_priority=dof_priority,
+    )
+    reference = bm.asarray(expected, dtype=bm.float64)
+    if tuple(reference.shape) != tuple(resultant.shape):
+        raise ValueError(
+            "expected 必须是形状 (dimension,) 的合力向量; "
+            f"期望 {tuple(resultant.shape)}, 实际 {tuple(reference.shape)}."
+        )
+
+    absolute_error = float(bm.max(bm.abs(bm.subtract(resultant, reference))))
+    scale = float(bm.sqrt(bm.sum(bm.multiply(reference, reference))))
+    relative_error = (
+        absolute_error / scale if scale > 0.0 else absolute_error
+    )
+
+    return LoadResultantReport(
+        resultant=resultant,
+        expected=reference,
+        absolute_error=absolute_error,
+        relative_error=relative_error,
+        within_tolerance=relative_error <= relative_tolerance,
     )

@@ -33,11 +33,8 @@ from soptx.fem.distributed import (
     partition_cells,
     partition_strategy_label,
 )
-from soptx.fem.solvers import (
-    PreparedLinearSystem,
-    build_distributed_analyzer,
-    solver_diagnostics,
-)
+from soptx.fem.analyzers import build_distributed_analyzer
+from soptx.fem.matrix_free import PreparedLinearSystem, solver_diagnostics
 from soptx.fem.verification import (
     relative_difference,
     serial_references,
@@ -88,10 +85,10 @@ def write_solution(
         space.value(solution, barycenter)
     )[:, 0, :]
     exact = np.asarray(
-        problem.disp_solution(mesh.Entity("cell").barycenter())
+        problem.disp_solution(mesh.entity_view("cell").barycenter())
     )
-    mesh.Entity("cell").set_attribute("displacement", numerical)
-    mesh.Entity("cell").set_attribute(
+    mesh.entity_view("cell").set_attribute("displacement", numerical)
+    mesh.entity_view("cell").set_attribute(
         "displacement_error",
         numerical - exact,
     )
@@ -99,7 +96,7 @@ def write_solution(
     write_mesh_to_vtu(
         str(filename),
         mesh,
-        entity_names=[mesh.Entity("cell").schema.name],
+        entity_names=[mesh.entity_view("cell").schema.name],
     )
 
 
@@ -370,7 +367,9 @@ def finalize(
 def check_rank_support(config: RunConfig, mpi_size: int) -> None:
     """Reject rank counts stage 1 does not support for this run mode."""
 
-    if mpi_size not in SUPPORTED_RANKS:
+    # 条带分区器放开到任意正整数 rank 后, ``SUPPORTED_RANKS`` 用 ``None`` 表示
+    # "不设白名单"; 此处必须先判 ``None``, 否则 ``in`` 会直接在其上抛 TypeError.
+    if SUPPORTED_RANKS is not None and mpi_size not in SUPPORTED_RANKS:
         raise ValueError(
             f"stage 1 supports only {SUPPORTED_RANKS} MPI ranks"
         )

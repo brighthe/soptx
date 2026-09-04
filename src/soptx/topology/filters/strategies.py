@@ -48,8 +48,9 @@ class _FilterStrategy(ABC):
 class NoneStrategy(_FilterStrategy, BaseLogged):
     """ '无操作' 策略, 当不需要过滤时使用"""
     def __init__(self,
-                mesh: HomogeneousMesh,
+                design_mesh: HomogeneousMesh,
                 density_location: Literal['element', 'node', 'element_multiresolution'],
+                disp_mesh: Optional[HomogeneousMesh] = None,
                 integration_order: int = 4,
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None,
@@ -57,8 +58,9 @@ class NoneStrategy(_FilterStrategy, BaseLogged):
             ) -> None:
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-        self._mesh = mesh
+        self._design_mesh = design_mesh
         self._density_location = density_location
+        self._disp_mesh = disp_mesh
         self._integration_order = integration_order
 
     def get_initial_density(self, 
@@ -111,8 +113,9 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
     """灵敏度过滤策略"""
     def __init__(self, 
                 H: CSRTensor, 
-                mesh: HomogeneousMesh, 
+                design_mesh: HomogeneousMesh, 
                 density_location: Literal['element', 'node', 'element_multiresolution'], 
+                disp_mesh: Optional[HomogeneousMesh] = None, 
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
@@ -120,30 +123,32 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
         H_device = H.data.device
-        if H_device != mesh.device:
-            self._H = H.device_put(mesh.device)
+        if H_device != design_mesh.device:
+            self._H = H.device_put(design_mesh.device)
         else:
             self._H = H
-        self._mesh = mesh
+        self._design_mesh = design_mesh
         self._density_location = density_location
+
+        self._disp_mesh = disp_mesh
 
         # --- 预计算测度权重 ---
         if self._density_location in ['element', 'element_multiresolution']:
             # 单元密度表征：权重即为设计变量网格单元体积/面积
             # shape: (NC, )
-            self._measure_weight = self._mesh.entity_measure('cell')
+            self._measure_weight = self._design_mesh.entity_measure('cell')
             
         elif self._density_location == 'node':
             # 节点密度表征：权重为节点控制体积
             # shape: (NN, )
-            cm = self._mesh.entity_measure('cell')
-            NN = self._mesh.number_of_nodes()
-            cell2node = self._mesh.cell_to_node()
+            cm = self._design_mesh.entity_measure('cell')
+            NN = self._design_mesh.number_of_nodes()
+            cell2node = self._design_mesh.cell_to_node()
             NNE = cell2node.shape[1]
 
             # 将单元测度均分给每个节点
             val = bm.repeat(cm / NNE, NNE)
-            nm = bm.zeros(NN, dtype=bm.float64, device=mesh.device)
+            nm = bm.zeros(NN, dtype=bm.float64, device=design_mesh.device)
             # 累加得到节点测度
             self._measure_weight = bm.add_at(nm, cell2node.reshape(-1), val)
         
@@ -177,8 +182,8 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
             n_sub = physical_density.shape[-1]
             n_sub_x = int(math.sqrt(n_sub))
             n_sub_y = int(math.sqrt(n_sub))
-            nx_displacement = int(self._mesh.meshdata['nx'] / n_sub_x)
-            ny_displacement = int(self._mesh.meshdata['ny'] / n_sub_y)
+            nx_displacement = int(self._design_mesh.meshdata['nx'] / n_sub_x)
+            ny_displacement = int(self._design_mesh.meshdata['ny'] / n_sub_y)
             sub_physical_density = reshape_multiresolution_data_inverse(
                                                     nx=nx_displacement,
                                                     ny=ny_displacement,
@@ -202,7 +207,7 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
             # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
             n_sub = obj_grad_rho.shape[-1]
             n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
-            nx_displacement, ny_displacement = int(self._mesh.meshdata['nx'] / n_sub_x), int(self._mesh.meshdata['ny'] / n_sub_y)
+            nx_displacement, ny_displacement = int(self._design_mesh.meshdata['nx'] / n_sub_x), int(self._design_mesh.meshdata['ny'] / n_sub_y)
             obj_grad_rho = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=obj_grad_rho)  # (NC * n_sub, )
 
         # 1. 准备源项
@@ -228,8 +233,8 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
         if self._density_location == 'element_multiresolution':
             n_sub = con_grad_rho.shape[-1]
             n_sub_x = int(math.sqrt(n_sub))
-            nx_displacement = int(self._mesh.meshdata['nx'] / n_sub_x)
-            ny_displacement = int(self._mesh.meshdata['ny'] / n_sub_x)
+            nx_displacement = int(self._design_mesh.meshdata['nx'] / n_sub_x)
+            ny_displacement = int(self._design_mesh.meshdata['ny'] / n_sub_x)
             con_grad_dv = reshape_multiresolution_data(nx=nx_displacement, ny=ny_displacement, data=con_grad_rho) # (NC * n_sub, )
 
         else:

@@ -121,7 +121,7 @@ class InterFaceSourceIntegrator(_FaceSourceIntegrator):
         index = self.threshold
         return index
 
-class BoundaryFaceSourceIntegrator_mfem(_FaceSourceIntegrator): 
+class HuZhangBoundarySourceIntegrator(_FaceSourceIntegrator):
     def make_index(self, space: _FS):
         threshold = self.threshold
 

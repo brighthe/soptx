@@ -1,0 +1,411 @@
+# -*- coding: utf-8 -*-
+# Hu--Zhang 拓扑优化投稿论文算例注册表
+#
+# 一条 [[cases]] = 一次实验的完整定义, 全参数显式写全, 无继承层;
+# 修改任何参数只改这里。物理模型位于 src/soptx/problems/elasticity/,
+# 本文件只选择模型并给出离散与优化参数; 「数值 -> soptx 对象」的构造在
+# pipeline.py, TOML 不承担构造逻辑。
+#
+# 注册表分两段: 前 4 条 case (共 3 个工况) 是真实载荷工况 (有边界条件与载荷,
+# 走 driver.py 的优化/状态对比链路), 后 2 条是前向制造解验证算例 (无载荷、无优化, 走
+# convergence.py)。后者不是工况, 故不参与工况编号, 单列一段。
+#
+# 命名口径: case id 只标研究对象, 不标参数取值。凡是纯离散层的扫描 (网格加密、
+# 阶次) 一律用命令行覆盖跑, 不另立 id; 只有换模型类或换连续问题 (A 问题层, 如
+# 泊松比从可压缩推到近不可压) 才另立一条 case。
+# 产物目录第二层是参数标签 analyzer-<链>__order-<k>, 覆盖了注册值的字段 (含 nx/ny)
+# 再按字段名追加 __<字段>-<取值>, 因此同一 case 在不同网格下的产物不会互相覆盖。
+#
+# 工况一览 (3 个工况, 4 条 case):
+#
+#   1.  compliance-fixed-fixed-half   两端固支梁       80x20  k=2,3,4    左半域对称降维
+#       论文 5.2.1 节即在左半计算域上求解, 图 5.2 按对称镜像呈现全域构型;
+#       全域 160x20 版本只作对称降维核对的参照, 不再注册
+#
+#   2A. bearing-compressible          轴承装置        120x40  k=2        nu=0.3
+#   2B. bearing-incompressible        轴承装置        120x40  k=2,3,4    nu=0.4999
+#       另立 id 的理由 = nu 属 A 问题层, 改它等于换题目 (可压缩基准组 vs
+#       近不可压实验组, 用于查 LFEM 体积锁定)
+#
+#   3.  cantilever-middle-2d-stress   悬臂梁应力约束   80x40  k=2,3,4    (注册默认网格)
+#       网格加密不另立 id, 用覆盖参数跑:
+#         run.py --case cantilever-middle-2d-stress --nx 160 --ny 80 --order 2 3
+#       注意 run.py --all 只按注册默认网格 80x40 跑, 细网格需单独执行上面这条。
+#
+# 验证算例一览 (2 个, role = convergence-verification):
+#
+#   V1. manufactured-native           论文 5.1.1 节 / 表 5.1  k=3,4  原生鞍点格式
+#   V2. manufactured-stabilized       论文 5.1.2 节 / 表 5.2  k=1,2  矩阵跳量稳定化
+#       变体轴 = 空间次数与稳定化 (k>=GD+1 原生稳定 vs k<=GD 必须加跳量项)
+#
+# 参数分类轴 = "改了它, 变的是题目还是解题路径":
+#   台账         id/title/role/status/methods/metrics/paper_table, 不进求解;
+#   A 问题       [cases.model], 连续问题本身 (模型/载荷/材料/平面假设), 与离散无关;
+#   B 离散       [cases.discretization], 有限维近似 (网格/比较阶次/松弛/稳定化/解法器);
+#   C 拓扑建模   [cases.optimization] 中的插值/void/过滤/体积上限, 必然改变最优解;
+#   D 算法       [cases.optimization] 中的优化器/终止准则/罚参数更新, 求同一问题的不同路径,
+#                收敛意义下应给出同一个解。
+# C 与 D 共用 [cases.optimization] 一张表 (config.flatten_parameters 会把三张表拍平),
+# 故在表内用行内分隔注释区分, 不再拆表。
+#
+# 同一工况内两个变体只允许沿该工况的变体轴取值不同, 其余参数逐项字面一致;
+# 否则观察到的差异归因不到变体轴上。
+
+schema_version = 1
+stage = "soptx/huzhang-topopt-paper/v1"
+
+[meta]
+title = "Hu--Zhang 混合有限元拓扑优化投稿论文复现实验"
+topic = "Hu--Zhang 应力混合元与 LFEM 位移元在柔顺度/近不可压/应力约束拓扑优化下的对照, 及混合元收敛阶验证"
+date_created = "2026-08-01"
+date_updated = "2026-09-01"
+
+# =====================================================================
+# 第一段: 真实载荷工况 (role != convergence-verification, 由 driver.py 驱动)
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# 工况 1/3: 中点受载两端固支梁, 取左半计算域并施加对称边界 (80x20)。
+# 论文 5.2.1 节即在此半域上求解; 全域 160x20 版本只作对称降维核对的参照,
+# 不再注册 (参数见 README「全域固定梁模型」一节)。
+# k=1 单列在 supplementary_orders 里 (供补充失效专题 supp-k1), 不进缺省也不进 --full。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账 (不进求解) --
+id = "compliance-fixed-fixed-half"
+title = "中点受载两端固支梁（左半域对称降维）"
+role = "optimization-baseline"
+status = "ready"
+methods = ["lfem", "huzhang"]
+metrics = [
+  "compliance",
+  "volume_fraction",
+  "relative_equilibrium_residual",
+  "optimization_iterations",
+]
+
+# -- A 问题 (连续问题本身; 与工况 1A 仅差计算域与对称边界, 由模型类给出) --
+[cases.model]
+name = "FixedFixedBeamHalfDomain2d"
+
+[cases.model.parameters]
+load = -3.0
+load_width = 1.0
+load_discretization = "p1_trace_l2_projection"
+youngs_modulus = 30.0
+poisson_ratio = 0.4
+plane_type = "plane_stress"
+
+# -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
+[cases.discretization]
+# 网格类型 (台账字段, --list 显示用): 本文算例一律用 Hu--Zhang 兼容的棋盘格交叉三角形网格.
+mesh_type = "triangle-checkerboard"
+nx = 80
+ny = 20
+# 正文对比组 (--full 展开的就是它); 论文 5.2.1 节排除 k=1: P_0 位移丧失刚体转动 RM 完备性.
+comparison_orders = [2, 3, 4]
+# 补充专题阶次: 只进 --order 白名单, 不进缺省也不进 --full, 供 supp-k1 失效专题取数.
+supplementary_orders = [1]
+use_relaxation = true
+solve_method = "mumps"
+
+# -- C 拓扑建模 (前四项) + D 算法 (其余) --
+[cases.optimization]
+volume_fraction = 0.4
+filter_type = "density"
+filter_radius = 2.4
+interpolation_method = "msimp"
+penalty_factor = 3.0
+void_youngs_modulus = 1.0e-9
+optimizer = "oc"
+max_iterations = 500
+change_tolerance = 1.0e-2
+
+# ---------------------------------------------------------------------
+# 工况 2/3 变体 A: 二维轴承装置, 顶边均布 traction, 平面应变。
+# nu = 0.3 可压缩基准组, 作为近不可压实验组的对照底。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账 (不进求解) --
+id = "bearing-compressible"
+title = "二维轴承装置（可压缩基准组 nu=0.3）"
+role = "incompressible-baseline"
+status = "ready"
+methods = ["lfem", "huzhang"]
+metrics = [
+  "compliance",
+  "volume_fraction",
+  "relative_equilibrium_residual",
+  "optimization_iterations",
+]
+
+# -- A 问题 (连续问题本身; poisson_ratio 即本工况的变体轴) --
+[cases.model]
+name = "BearingDevice2d"
+
+[cases.model.parameters]
+traction = -0.08
+youngs_modulus = 1.0
+poisson_ratio = 0.3
+plane_type = "plane_strain"
+
+# -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
+[cases.discretization]
+mesh_type = "triangle-checkerboard"
+nx = 120
+ny = 40
+comparison_orders = [2]
+use_relaxation = true
+solve_method = "mumps"
+
+# -- C 拓扑建模 (前四项) + D 算法 (其余) --
+[cases.optimization]
+volume_fraction = 0.35
+filter_type = "density"
+filter_radius = 2.0
+interpolation_method = "msimp"
+penalty_factor = 3.0
+void_youngs_modulus = 1.0e-9
+optimizer = "oc"
+max_iterations = 500
+change_tolerance = 1.0e-2
+
+# ---------------------------------------------------------------------
+# 工况 2/3 变体 B: 同工况 2A, 仅把 nu 提到 0.4999 逼近不可压极限。
+# 变体轴 = 泊松比; 另外把比较阶次铺到 k=2,3,4, 用于查 LFEM 体积锁定。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账 (不进求解) --
+id = "bearing-incompressible"
+title = "二维轴承装置（近不可压缩实验组 nu=0.4999）"
+role = "incompressible-study"
+status = "ready"
+methods = ["lfem", "huzhang"]
+metrics = [
+  "compliance",
+  "volume_fraction",
+  "relative_equilibrium_residual",
+  "optimization_iterations",
+]
+
+# -- A 问题 (连续问题本身; poisson_ratio 即本工况的变体轴) --
+[cases.model]
+name = "BearingDevice2d"
+
+[cases.model.parameters]
+traction = -0.08
+youngs_modulus = 1.0
+poisson_ratio = 0.4999
+plane_type = "plane_strain"
+
+# -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
+[cases.discretization]
+mesh_type = "triangle-checkerboard"
+nx = 120
+ny = 40
+comparison_orders = [2, 3, 4]
+use_relaxation = true
+solve_method = "mumps"
+
+# -- C 拓扑建模 (前四项) + D 算法 (其余) --
+[cases.optimization]
+volume_fraction = 0.35
+filter_type = "density"
+filter_radius = 2.0
+interpolation_method = "msimp"
+penalty_factor = 3.0
+void_youngs_modulus = 1.0e-9
+optimizer = "oc"
+max_iterations = 500
+change_tolerance = 1.0e-2
+
+# ---------------------------------------------------------------------
+# 工况 3/3: 二维悬臂梁局部应力约束拓扑优化。
+# 优化器换 AL-MMA (增广拉格朗日 + MMA), 无体积上限, 求的是应力约束下的
+# 体积最小化, 故 metrics 不含 compliance。
+#
+# 本工况只有一条 case: 网格是纯离散参数, 加密不另立 id。注册值是粗网格
+# 80x40 (论文 5.2.3 节插图与 metrics 的默认口径); 论文用到的细网格结果由
+#   run.py --case cantilever-middle-2d-stress --nx 160 --ny 80 --order 2 3
+# 产生, 写入 outputs/cantilever-middle-2d-stress/<method>-k<order>-al_mma-160x80/,
+# 与粗网格产物并存互不覆盖。细网格只跑 k=2,3 (k=4 在该规模下代价过高)。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账 (不进求解) --
+id = "cantilever-middle-2d-stress"
+title = "二维悬臂梁应力约束体积最小化"
+role = "stress-constrained"
+status = "ready"
+methods = ["lfem", "huzhang"]
+metrics = [
+  "volume_fraction",
+  "relative_equilibrium_residual",
+  "optimization_iterations",
+]
+
+# -- A 问题 (连续问题本身; stress_limit/epsilon 属应力约束的问题定义) --
+[cases.model]
+name = "CantileverMiddle2d"
+
+[cases.model.parameters]
+load = -400.0
+load_width = 6.0
+load_discretization = "patch"
+youngs_modulus = 1.0
+poisson_ratio = 0.25
+plane_type = "plane_stress"
+stress_limit = 180.0
+epsilon = 1.0e-4
+
+# -- B 离散 (有限维近似; nx/ny 是注册默认网格, 细网格用 --nx/--ny 覆盖) --
+[cases.discretization]
+mesh_type = "triangle-checkerboard"
+nx = 80
+ny = 40
+comparison_orders = [2, 3, 4]
+use_relaxation = true
+solve_method = "mumps"
+
+# -- C 拓扑建模 (前六项) + D 算法 (其余) --
+[cases.optimization]
+# "projection" = 密度过滤 + tanh 投影 (ProjectionStrategy 继承 DensityStrategy),
+# 投影参数 beta 1.0 -> 10.0 每 5 个外层 +1, 由 pipeline.build_stress_pipeline 写死.
+# 出处: legacy driver test_phd_section5_stress_constraint.py (提交 5b832b6 中删除)
+# 的 test_subsec5_6_4_canti2d_hzmfem / _lfem。论文 5.6.1 节只写了 "密度过滤",
+# 漏记投影这一步; 只留密度过滤会停在灰度局部解 (V=0.58, max_vm=0.92, 应力约束不激活).
+filter_type = "projection"
+filter_radius = 6.0
+interpolation_method = "msimp"
+penalty_factor = 3.5
+void_youngs_modulus = 1.0e-9
+initial_density = 0.5
+optimizer = "al_mma"
+max_al_iterations = 150
+mma_iters_per_al = 5
+change_tolerance = 2.0e-3
+stress_tolerance = 3.0e-3
+# ALM 超参出处同上 legacy driver: 两条悬臂梁均取 mu_0=50, 每外层放大 alpha=1.1,
+# 上限 mu_max=1e4, 内层 5 步 MMA, 最大外层 150 步, 移动限制 0.15。
+# 论文 4.6.4 节写的 mu_0=10 是 L 型件 (test_subsec5_6_4_L_bracket, rmin=10) 的取值,
+# 套到悬臂梁上会让前期罚项过弱、体积冲到 0.17 后再反弹振荡。
+mu_0 = 50.0
+mu_max = 10000.0
+alpha = 1.1
+lambda_0_init_val = 0.0
+move_limit = 0.15
+
+# =====================================================================
+# 第二段: 前向制造解验证算例 (role = convergence-verification, 由
+# convergence.py 驱动)。无载荷、无优化, 不是工况, 故不占工况编号;
+# [cases.optimization] 只写 optimizer = "none", 以满足 config.load_cases
+# 对三张表齐全的校验。
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# 验证算例 V1/2: 正弦位移制造解, k=3,4 原生鞍点格式 (论文表 5.1)。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账 (不进求解) --
+id = "manufactured-native"
+title = "正弦位移制造解收敛阶验证 · 原生高阶格式（论文 5.1.1 节 / 表 5.1）"
+role = "convergence-verification"
+status = "ready"
+methods = ["huzhang"]
+paper_table = "5.1"
+metrics = [
+  "u_l2_error",
+  "u_l2_order",
+  "sigma_l2_error",
+  "sigma_l2_order",
+  "sigma_hdiv_error",
+  "sigma_hdiv_order",
+  "relative_equilibrium_residual",
+]
+
+# -- A 问题 (连续问题本身; 制造解由模型类给出, 无载荷参数) --
+[cases.model]
+name = "MixedBoundarySinusoidalElasticity2D"
+
+[cases.model.parameters]
+youngs_modulus = 1.0
+poisson_ratio = 0.3333333333333333
+lame_lambda = 1.0
+lame_mu = 0.5
+plane_type = "plane_strain"
+
+# -- B 离散 (收敛阶靠 base_nx/base_ny + levels 逐级加密; nx/ny 仅为兼容字段) --
+[cases.discretization]
+mesh_type = "triangle-checkerboard"
+nx = 64
+ny = 64
+base_nx = 4
+base_ny = 4
+levels = 5
+comparison_orders = [3, 4]
+use_relaxation = true
+solve_method = "mumps"
+# k >= GD+1 (二维即 k >= 3) 时原生鞍点格式本身稳定, HuZhangMFEMAnalyzer 忽略本字段.
+# 因此这里只能写 none; 写成 matrix_jump/vector_jump 会被 tools/convergence.py 拒绝,
+# 免得跑出一组名义上加了稳定化、实际没加的数.
+stabilization = "none"
+
+# -- C 拓扑建模 + D 算法 (本算例不做优化, 仅占位以通过配置校验) --
+[cases.optimization]
+optimizer = "none"
+
+# ---------------------------------------------------------------------
+# 验证算例 V2/2: 同 V1 的制造解与网格协议, k=1,2 加矩阵跳量稳定化
+# (论文表 5.2)。变体轴 = 空间次数与稳定化。
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账 (不进求解) --
+id = "manufactured-stabilized"
+title = "正弦位移制造解收敛阶验证 · 低阶跳量稳定化格式（论文 5.1.2 节 / 表 5.2）"
+role = "convergence-verification"
+status = "ready"
+methods = ["huzhang"]
+paper_table = "5.2"
+metrics = [
+  "u_l2_error",
+  "u_l2_order",
+  "sigma_l2_error",
+  "sigma_l2_order",
+  "sigma_hdiv_error",
+  "sigma_hdiv_order",
+  "relative_equilibrium_residual",
+]
+
+# -- A 问题 (连续问题本身; 与 V1 逐项字面一致) --
+[cases.model]
+name = "MixedBoundarySinusoidalElasticity2D"
+
+[cases.model.parameters]
+youngs_modulus = 1.0
+poisson_ratio = 0.3333333333333333
+lame_lambda = 1.0
+lame_mu = 0.5
+plane_type = "plane_strain"
+
+# -- B 离散 (与 V1 仅差 comparison_orders 与 stabilization) --
+[cases.discretization]
+mesh_type = "triangle-checkerboard"
+nx = 64
+ny = 64
+base_nx = 4
+base_ny = 4
+levels = 5
+comparison_orders = [1, 2]
+use_relaxation = true
+solve_method = "mumps"
+# k <= GD (二维即 k <= 2) 时本字段直接驱动 HuZhangMFEMAnalyzer 的 stabilization 入参,
+# 取值 matrix_jump / vector_jump 对应 JumpPenaltyIntegrator 的两种跳量形式 (只作用在
+# 内部面与位移边界面上), none 表示不加稳定化项.
+# 论文表 5.2 用 matrix_jump; 消融请用 run.py --case manufactured-stabilized --stabilization none, 不要改本字段.
+stabilization = "matrix_jump"
+# 论文口径 gamma_0 = 1.0. 当前实现为 alpha = mu / L0**2 (jump_penalty_integrator.py),
+# 式中并无显式 gamma_0 系数, 等价于恒等于 1.0; 此字段只记录论文取值, 暂不可调.
+gamma_0 = 1.0
+
+# -- C 拓扑建模 + D 算法 (本算例不做优化, 仅占位以通过配置校验) --
+[cases.optimization]
+optimizer = "none"

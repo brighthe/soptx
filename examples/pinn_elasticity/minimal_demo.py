@@ -110,7 +110,10 @@ def compute_pinn_residuals(
         div_components.append(div_i)
 
     divergence = torch.stack(div_components, dim=-1)
-    body_force = problem.body_force(interior_points)
+    body_force_load = next(
+        load for load in problem.loads() if load.kind == "body_force"
+    )
+    body_force = body_force_load.body_force(interior_points)
     eq_residual = -divergence - body_force
 
     # 5. 全位移 Dirichlet 边界残差
@@ -290,7 +293,7 @@ def run_minimal_demo(
     if save_vtu:
         try:
             import numpy as np
-            from soptx.visualization.vtk_export import write_vtu
+            from soptx.postprocess.vtk_export import write_vtu
 
             vtu_dir = Path(__file__).resolve().parent / "outputs" / "vtu"
             vtu_dir.mkdir(parents=True, exist_ok=True)

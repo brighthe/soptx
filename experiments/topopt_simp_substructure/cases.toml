@@ -1,0 +1,133 @@
+# -*- coding: utf-8 -*-
+# 子结构缩聚变密度拓扑优化工况注册表
+#
+# 一条 [[cases]] = 一次实验的完整定义, 全参数显式写全, 无继承层;
+# 修改任何参数只改这里。
+#
+# 本目录只跑精确局部 Schur 缩聚 (reduction = "exact_schur"), 不含任何
+# PIML 近似; 唯一的算法轴是接口迹空间 trace:
+#
+#   full_trace     保留全部接口自由度, 与原离散系统代数等价, 是实现门禁;
+#   linear_corner  角点线性迹 (Huang 2023 式 16), 引入迹降阶误差, 是 PIML 的前置基线。
+#
+# 误差阶梯: FA -> full_trace -> linear_corner -> PIML 局部代理。
+#
+# 参数分类轴 (与 experiments/topopt_simp_fa 一致):
+#   A 问题       domain / p_load / nu / emax / volfrac;
+#   B 离散       n_sub / n_fine / integration_order;
+#   C 拓扑建模   simp_penalty / emin / filter_type / filter_radius;
+#   D 算法       trace / reduction / chunk_size / max_iter / tol_change;
+#   台账         id / summary / fa_reference, 不进求解。
+#
+# 工况一览 (4 个):
+#   1. mbb_2d_full_trace   2D MBB  12x2 子结构 x 5x5 细网格
+#   2. mbb_3d_full_trace   3D MBB  12x2x2 子结构 x 3x3x3 细网格
+#   3. mbb_2d_linear_corner   2D MBB  12x2 子结构 x 5x5 细网格
+#   4. mbb_3d_linear_corner   3D MBB  78x13x13 子结构 x 5x5x5 细网格
+#
+# ``mbb_3d_linear_corner`` 直接作为 Huang 2023 §4.1 的论文原规模精确参照;
+# 它与小规模 ``mbb_3d_full_trace`` 不再是只改变 trace 的成对工况。
+#
+# fa_reference 指向 experiments/topopt_simp_fa/cases.toml 中的同工况 FA 参照。
+# 该 MBB 参照工况目前尚未在 FA 侧注册, 因此暂留空字符串; compare.py 在
+# fa_reference 为空时直接报错退出, 不做静默降级。
+
+[meta]
+schema_version = "substructure-topopt-cases-v1"
+experiment = "topopt_simp_substructure"
+
+[[cases]]
+id = "mbb_2d_full_trace"
+trace = "full_trace"
+reduction = "exact_schur"
+role = "fa-equivalence-implementation-gate"
+domain = [0.0, 12.0, 0.0, 2.0]
+n_sub = [12, 2]
+n_fine = [5, 5]
+integration_order = 2
+chunk_size = 8
+volfrac = 0.5
+filter_radius = 0.3
+filter_type = "sensitivity"
+max_iter = 100
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+fa_reference = ""
+summary = "完整接口 (full_trace) 精确子结构缩聚 2D MBB 梁变密度拓扑优化"
+
+[[cases]]
+id = "mbb_3d_full_trace"
+trace = "full_trace"
+reduction = "exact_schur"
+role = "fa-equivalence-implementation-gate"
+domain = [0.0, 12.0, 0.0, 2.0, 0.0, 2.0]
+n_sub = [12, 2, 2]
+n_fine = [3, 3, 3]
+integration_order = 2
+chunk_size = 8
+volfrac = 0.3
+filter_radius = 0.4
+filter_type = "sensitivity"
+max_iter = 50
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+fa_reference = ""
+summary = "完整接口 (full_trace) 精确子结构缩聚 3D MBB 梁变密度拓扑优化"
+
+[[cases]]
+id = "mbb_2d_linear_corner"
+trace = "linear_corner"
+reduction = "exact_schur"
+role = "exact-reference-for-piml"
+domain = [0.0, 12.0, 0.0, 2.0]
+n_sub = [12, 2]
+n_fine = [5, 5]
+integration_order = 2
+chunk_size = 8
+volfrac = 0.5
+filter_radius = 0.3
+filter_type = "sensitivity"
+max_iter = 100
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+fa_reference = ""
+summary = "角点线性迹 (linear_corner) 精确子结构缩聚 2D MBB 梁变密度拓扑优化"
+
+[[cases]]
+id = "mbb_3d_linear_corner"
+trace = "linear_corner"
+reduction = "exact_schur"
+role = "exact-reference-for-piml"
+domain = [0.0, 6.0, 0.0, 1.0, 0.0, 1.0]
+n_sub = [78, 13, 13]
+n_fine = [5, 5, 5]
+integration_order = 2
+chunk_size = 8
+volfrac = 0.12
+filter_radius = 0.046153846153846156
+filter_type = "density"
+max_iter = 200
+tol_change = 0.0002
+simp_penalty = 3.0
+emin = 1e-7
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+fa_reference = ""
+summary = "角点线性迹 (linear_corner) 精确子结构缩聚 3D MBB 梁变密度拓扑优化"

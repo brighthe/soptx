@@ -1,10 +1,16 @@
-"""Generate deterministic SHA-256 inventories for migration governance."""
+"""Generate a deterministic SHA-256 inventory for reference-code governance.
+
+``reference_code/`` is unredistributable and will leave ``main`` once the
+``archive/pre-v2`` tag is authorised, so its manifest is the only record of
+what those files contained.  Repository Python files are deliberately *not*
+inventoried here: git already stores a content hash for every file at every
+commit, so a second manifest would be redundant bookkeeping.
+"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 from pathlib import Path
 import sys
 
@@ -17,20 +23,6 @@ REFERENCE_MANIFEST = (
     / "references"
     / "reference-code-manifest.sha256"
 )
-PYTHON_MANIFEST = (
-    REPOSITORY_ROOT
-    / "docs"
-    / "architecture"
-    / "current-python-files.sha256"
-)
-PYTHON_ROOTS = ("src", "tests", "examples", "experiments", "tools")
-EXCLUDED_DIRECTORY_NAMES = {
-    ".pytest_cache",
-    "__pycache__",
-    "build",
-    "dist",
-    "outputs",
-}
 
 
 def digest(path: Path) -> str:
@@ -49,36 +41,11 @@ def manifest(paths: list[Path]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def python_files_under(root: Path) -> list[Path]:
-    paths: list[Path] = []
-    for directory, directory_names, file_names in os.walk(root):
-        directory_names[:] = [
-            name
-            for name in directory_names
-            if name not in EXCLUDED_DIRECTORY_NAMES
-        ]
-        current = Path(directory)
-        paths.extend(
-            current / name
-            for name in file_names
-            if name.endswith(".py")
-        )
-    return paths
-
-
 def generated_payloads() -> dict[Path, str]:
     reference_files = [
         path for path in REFERENCE_ROOT.rglob("*") if path.is_file()
     ]
-    python_files: list[Path] = []
-    for root_name in PYTHON_ROOTS:
-        root = REPOSITORY_ROOT / root_name
-        if root.exists():
-            python_files.extend(python_files_under(root))
-    return {
-        REFERENCE_MANIFEST: manifest(reference_files),
-        PYTHON_MANIFEST: manifest(python_files),
-    }
+    return {REFERENCE_MANIFEST: manifest(reference_files)}
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -110,7 +77,7 @@ def main(arguments: list[str] | None = None) -> int:
             )
         return 1
     action = "checked" if options.check else "generated"
-    print(f"Repository SHA-256 inventories {action}.")
+    print(f"Reference-code SHA-256 inventory {action}.")
     return 0
 
 

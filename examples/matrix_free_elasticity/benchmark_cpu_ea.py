@@ -5,7 +5,8 @@
 MatVec 和带 Dirichlet 条件的 CG 求解时间, 并统计算子长期保存数组的字节数.
 
 本脚本不承担正确性门禁; 运行性能测试前, 应先运行 ``verify_ea_correctness.py``.
-存储统计不是进程峰值内存, 不包含网格、右端项、解向量和临时工作数组.
+缺省的存储统计不是进程峰值内存, 不包含网格、右端项、解向量和临时工作数组;
+需要进程峰值内存时用 ``--mode serial-peak-rss``, 它一个进程只测一个算子层级.
 
 使用方法:
     python examples/matrix_free_elasticity/benchmark_cpu_ea.py --n 16 --levels 3
@@ -13,6 +14,9 @@ MatVec 和带 Dirichlet 条件的 CG 求解时间, 并统计算子长期保存�
         --model exponential --mesh-type quad --n 16 --levels 3
     python examples/matrix_free_elasticity/benchmark_cpu_ea.py \
         --model polynomial --mesh-type hex --n 2 --levels 3
+    python -u examples/matrix_free_elasticity/benchmark_cpu_ea.py \
+        --mode serial-peak-rss --model polynomial --mesh-type tet --n 64 \
+        --operator-level ea --assembly-method fast
 """
 
 from __future__ import annotations
@@ -41,12 +45,12 @@ from soptx.fem.distributed import (
     distribute_vector_space,
     partition_cells,
 )
-from soptx.fem.solvers import (
+from soptx.fem.analyzers import build_serial_analyzer
+from soptx.fem.matrix_free import (
     ElasticityEAOperator,
     PreparedLinearSystem,
     solve_matrix_free_system,
 )
-from soptx.fem.solvers.elasticity_operator import build_serial_analyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems.elasticity import (
     DivergenceFreePolynomialElasticity3D,
@@ -229,14 +233,20 @@ def build_operator(
     problem: Any,
     material: Any,
     operator_level: str,
+    assembly_method: str = "standard",
 ):
-    """构造指定层级的串行分析器与未施加边界条件的刚度算子."""
+    """构造指定层级的串行分析器与未施加边界条件的刚度算子.
+
+    ``assembly_method`` 只改变单元矩阵的收缩顺序和中间张量规模, 不改变数值;
+    它对进程峰值内存的影响见 ``--mode serial-peak-rss``.
+    """
     analyzer = build_serial_analyzer(
         vector_space,
         problem,
         material,
         degree=DEGREE,
         operator_level=operator_level,
+        assembly_method=assembly_method,
     )
     return analyzer, analyzer.assemble_stiff_matrix()
 
@@ -249,6 +259,7 @@ def benchmark_level(
     warmup: int,
     repeats: int,
     matvec_repeats: int,
+    assembly_method: str = "standard",
 ) -> dict[str, Any]:
     """测量某一网格和算子层级的构造、MatVec、CG 与保存存储.
 
@@ -260,11 +271,13 @@ def benchmark_level(
     )
 
     def construct_once() -> None:
-        build_operator(vector_space, problem, material, operator_level)
+        build_operator(
+            vector_space, problem, material, operator_level, assembly_method
+        )
 
     construction_seconds = measure_seconds(construct_once, warmup, repeats)
     analyzer, raw_operator = build_operator(
-        vector_space, problem, material, operator_level
+        vector_space, problem, material, operator_level, assembly_method
     )
     stored_bytes = operator_storage_bytes(operator_level, raw_operator)
     random_rand = cast(Callable[..., Any], bm.random.rand)
@@ -320,6 +333,7 @@ def benchmark_level(
         "cells": int(mesh.number_of_cells()),
         "dofs": int(vector_space.number_of_global_dofs()),
         "operator_level": operator_level,
+        "assembly_method": assembly_method,
         "construction_seconds": construction_seconds,
         "matvec_seconds": matvec_seconds,
         "solve_seconds": solve_seconds,
@@ -337,15 +351,22 @@ def paired_rows(
     warmup: int,
     repeats: int,
     matvec_repeats: int,
+    assembly_method: str = "standard",
 ) -> list[dict[str, Any]]:
-    """在每档网格上依次执行 FA 与 EA, 并合并为一行对照结果."""
+    """在每档网格上依次执行 FA 与 EA, 并合并为一行对照结果.
+
+    两个层级在同一个进程内先后构造, 因此本函数的结果可以比较时间与算子字节数,
+    但**不能**用来归属进程峰值内存 —— 那需要 ``--mode serial-peak-rss``.
+    """
     rows: list[dict[str, Any]] = []
     for resolution in resolutions:
         fa = benchmark_level(
-            model, mesh_type, resolution, "fa", warmup, repeats, matvec_repeats
+            model, mesh_type, resolution, "fa", warmup, repeats, matvec_repeats,
+            assembly_method,
         )
         ea = benchmark_level(
-            model, mesh_type, resolution, "ea", warmup, repeats, matvec_repeats
+            model, mesh_type, resolution, "ea", warmup, repeats, matvec_repeats,
+            assembly_method,
         )
         rows.append(
             {
@@ -452,6 +473,7 @@ def benchmark_mpi_ea(arguments: argparse.Namespace) -> int:
             material,
             degree=DEGREE,
             dof_comm=distributed_space.dof_comm,
+            assembly_method=arguments.assembly_method,
         )
         operator, load = facade.assemble()
         return PreparedLinearSystem(
@@ -504,6 +526,12 @@ def benchmark_mpi_ea(arguments: argparse.Namespace) -> int:
             "domain": list(problem.domain),
             "resolution": resolution,
             "global_vector_dofs": int(vector_space.number_of_global_dofs()),
+            "assembly_method": arguments.assembly_method,
+            # 计时口径必须随产物一起落盘: 强扩展是跨多次独立运行拼出来的一条
+            # 曲线, 各档 warmup/repeats 不同则中位数之间不可比, 而口径只存在
+            # 于当时的命令行里, 不记下来事后无从复核。
+            "warmup": arguments.warmup,
+            "repeats": arguments.repeats,
             "ea_construction_seconds_max_rank": construction_seconds,
             "ea_system_matvec_seconds_max_rank": matvec_seconds,
             "ea_overlap_matvec_profile_seconds_max_rank": matvec_profile_seconds,
@@ -549,6 +577,163 @@ def benchmark_mpi_ea(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _peak_rss_bytes() -> int:
+    """返回本进程到目前为止的驻留集高水位, 单位为字节.
+
+    Linux 上 ``ru_maxrss`` 以 KiB 计, 与 ``/usr/bin/time -v`` 的
+    ``Maximum resident set size`` 同源, 因此两者可以互相校验. 该值是**进程**
+    高水位, 不是某个数组的大小, 也不会随对象释放而回落.
+    """
+    import resource
+
+    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024
+
+
+def benchmark_peak_rss(arguments: argparse.Namespace) -> int:
+    """在单个进程内只构造一个算子层级, 逐阶段记录进程峰值 RSS.
+
+    与 ``serial-fa-ea`` 的区别是本模式**一个进程只走一条路径**: 后者在同一进程
+    里先后建 FA 与 EA, 其高水位等于两者的较大值, 无法把 EA 单独隔离出来. 峰值
+    内存是进程级量, 只能靠进程隔离来归属, 因此本模式一次只测一个层级.
+
+    阶段划分为 ``mesh`` (网格与空间)、``operator`` (刚度算子构造完成)、
+    ``bc`` (施加 Dirichlet 条件后) 与 ``solve`` (CG 求解结束). 报告的是各阶段
+    结束时的累计高水位, 相邻两阶段之差即该阶段新增的高水位, 可直接读出"峰值由
+    哪一步决定".
+
+    返回:
+        int: 进程退出码, 恒为 ``0``.
+    """
+    resolution = arguments.n
+    # 解释器与已导入模块本身就占几百 MiB, 在小自由度档上会淹没算子的差异,
+    # 因此先记一个基线阶段, 让"算子带来多少"可以从曲线里减掉.
+    stages: list[tuple[str, int]] = [("baseline", _peak_rss_bytes())]
+
+    dimension, problem, vector_space, material, mesh = build_context(
+        arguments.model, arguments.mesh_type, resolution
+    )
+    stages.append(("mesh", _peak_rss_bytes()))
+
+    construction_start = time.perf_counter()
+    analyzer, raw_operator = build_operator(
+        vector_space,
+        problem,
+        material,
+        arguments.operator_level,
+        arguments.assembly_method,
+    )
+    construction_seconds = time.perf_counter() - construction_start
+    stages.append(("operator", _peak_rss_bytes()))
+
+    # 只读取已有张量的 ``nbytes``, 不分配新内存, 因此不需要单独的采样点.
+    stored_bytes = operator_storage_bytes(arguments.operator_level, raw_operator)
+    # 体力向量组装与 Dirichlet 处理分开采样: 前者走 LinearForm 全装配, 与算子层级
+    # 无关; 后者才是 matrix-free 路径特有的边界条件包装. 合并成一个 ``bc`` 阶段会
+    # 把两者的瞬态混在一起, 无法判断峰值究竟由哪一步决定.
+    load = analyzer.assemble_body_force_vector()
+    stages.append(("load", _peak_rss_bytes()))
+
+    system_operator, system_load = analyzer.apply_bc(raw_operator, load)
+    stages.append(("bc", _peak_rss_bytes()))
+
+    solver_info: dict[str, Any] = {}
+    solve_seconds = 0.0
+    true_relative_residual = float("nan")
+    if not arguments.skip_solve:
+        solution = bm.zeros(
+            (vector_space.number_of_global_dofs(),),
+            dtype=bm.float64,
+            device=bm.get_device(mesh),
+        )
+        solve_start = time.perf_counter()
+        solve_result = cast(
+            tuple[Any, dict[str, Any]],
+            analyzer.solve_system(
+                system_operator,
+                system_load,
+                solution,
+                solver="cg",
+                rtol=RTOL,
+                atol=ATOL,
+                maxiter=arguments.maxiter,
+            ),
+        )
+        solve_seconds = time.perf_counter() - solve_start
+        solver_info = solve_result[1]
+        residual = system_operator @ solution - system_load
+        true_relative_residual = float(bm.linalg.norm(residual)) / max(
+            float(bm.linalg.norm(system_load)), 1.0e-30
+        )
+    stages.append(("solve", _peak_rss_bytes()))
+
+    peak_bytes = stages[-1][1]
+    baseline_bytes = stages[0][1]
+    payload = {
+        "mode": "serial-peak-rss",
+        "model": arguments.model,
+        "mesh_type": arguments.mesh_type,
+        "backend": "numpy",
+        "degree": DEGREE,
+        "dimension": dimension,
+        "resolution": resolution,
+        "cells": int(mesh.number_of_cells()),
+        "dofs": int(vector_space.number_of_global_dofs()),
+        "operator_level": arguments.operator_level,
+        "assembly_method": arguments.assembly_method,
+        "solved": not arguments.skip_solve,
+        "cg": {"rtol": RTOL, "atol": ATOL, "maxiter": arguments.maxiter},
+        "construction_seconds": construction_seconds,
+        "solve_seconds": solve_seconds,
+        "stored_operator_bytes": stored_bytes,
+        "peak_rss_bytes": peak_bytes,
+        "peak_rss_baseline_bytes": baseline_bytes,
+        "peak_rss_above_baseline_bytes": peak_bytes - baseline_bytes,
+        "peak_rss_stage_bytes": {name: value for name, value in stages},
+        "peak_rss_scope": (
+            "进程驻留集高水位 (resource.ru_maxrss), 含解释器、网格、算子与全部临时数组; "
+            "与 stored_operator_bytes 的稳态口径不可比"
+        ),
+    }
+    if solver_info:
+        payload["cg_iterations"] = int(solver_info["niter"])
+        payload["cg_converged"] = bool(solver_info["converged"])
+        payload["true_relative_residual"] = true_relative_residual
+
+    gib = 1024.0**3
+    print("=" * 72)
+    print(
+        f" 进程峰值 RSS [{arguments.operator_level.upper()}, "
+        f"{arguments.assembly_method}, {arguments.mesh_type} n={resolution}]"
+    )
+    print("=" * 72)
+    print(f" 单元数 / 自由度        : {payload['cells']} / {payload['dofs']}")
+    print(f" 算子构造 / s           : {construction_seconds:.4f}")
+    previous = 0
+    for name, value in stages:
+        print(
+            f" 峰值 RSS [{name:>8}] / GiB : {value / gib:8.3f}"
+            f"   (较上一阶段 +{(value - previous) / gib:.3f})"
+        )
+        previous = value
+    print(f" 扣除基线后的峰值 / GiB : {(peak_bytes - baseline_bytes) / gib:8.3f}")
+    print(f" 算子长期保存数组 / GiB : {stored_bytes / gib:8.3f}")
+    if solver_info:
+        print(f" CG 迭代 / 收敛         : {payload['cg_iterations']} / {payload['cg_converged']}")
+        print(f" 真相对残差             : {true_relative_residual:.6e}")
+        print(f" CG 求解 / s            : {solve_seconds:.4f}")
+    print("=" * 72)
+    print("口径: 进程高水位, 不是算子字节数; 一次运行只测一个层级, 不与其他层级同进程比较.")
+
+    if arguments.output is not None:
+        arguments.output.parent.mkdir(parents=True, exist_ok=True)
+        arguments.output.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"原始结果已写入: {arguments.output}")
+    return 0
+
+
 def parse_arguments() -> argparse.Namespace:
     """解析 CPU EA/FA 效率对照的命令行参数."""
     parser = argparse.ArgumentParser(description="CPU EA/FA 线弹性效率对照")
@@ -556,8 +741,27 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--mesh-type", choices=tuple(MESH_FACTORIES))
     parser.add_argument(
         "--mode", default="serial-fa-ea",
-        choices=("serial-fa-ea", "mpi-ea-strong", "mpi-ea-weak"),
-        help="serial-fa-ea 为串行 EA/FA 对照; 其余为 CPU MPI EA 扩展基准",
+        choices=("serial-fa-ea", "serial-peak-rss", "mpi-ea-strong", "mpi-ea-weak"),
+        help=(
+            "serial-fa-ea 为串行 EA/FA 对照; serial-peak-rss 只测单个层级的进程"
+            "峰值 RSS (需配 --operator-level); 其余为 CPU MPI EA 扩展基准"
+        ),
+    )
+    parser.add_argument(
+        "--operator-level", choices=("fa", "ea"), default="ea",
+        help="serial-peak-rss 专用: 本次进程只构造该层级的算子",
+    )
+    parser.add_argument(
+        "--assembly-method", choices=("standard", "voigt", "fast"), default="standard",
+        help="单元矩阵的收缩顺序; 只影响中间张量规模与峰值内存, 不影响数值",
+    )
+    parser.add_argument(
+        "--maxiter", type=int, default=MAXITER,
+        help="serial-peak-rss 专用: CG 最大迭代次数; 其余模式固定用 MAXITER",
+    )
+    parser.add_argument(
+        "--skip-solve", action="store_true",
+        help="serial-peak-rss 专用: 只测到施加边界条件为止, 不跑 CG",
     )
     parser.add_argument("--n", type=int, default=16, help="最粗网格每个坐标轴的剖分数")
     parser.add_argument("--levels", type=int, default=3, help="包含最粗网格在内的网格档数")
@@ -570,6 +774,10 @@ def parse_arguments() -> argparse.Namespace:
         parser.error("--n 与 --levels 必须为正整数.")
     if arguments.warmup < 0 or arguments.repeats <= 0 or arguments.matvec_repeats <= 0:
         parser.error("--warmup 不得为负, --repeats 与 --matvec-repeats 必须为正整数.")
+    if arguments.maxiter <= 0:
+        parser.error("--maxiter 必须为正整数.")
+    if arguments.mode != "serial-peak-rss" and arguments.skip_solve:
+        parser.error("--skip-solve 只对 --mode serial-peak-rss 有效.")
     dimension, _ = PROBLEM_FACTORIES[arguments.model]
     if arguments.mesh_type is None:
         arguments.mesh_type = DEFAULT_MESH_TYPES[dimension]
@@ -583,6 +791,8 @@ def main() -> int:
     """执行 CPU EA/FA 效率对照并按需保存 JSON 原始结果."""
     arguments = parse_arguments()
     bm.set_backend("numpy")
+    if arguments.mode == "serial-peak-rss":
+        return benchmark_peak_rss(arguments)
     if arguments.mode != "serial-fa-ea":
         return benchmark_mpi_ea(arguments)
     resolutions = [arguments.n * 2**level for level in range(arguments.levels)]
@@ -593,6 +803,7 @@ def main() -> int:
         arguments.warmup,
         arguments.repeats,
         arguments.matvec_repeats,
+        arguments.assembly_method,
     )
     print_report(rows)
     if arguments.output is not None:
@@ -602,6 +813,7 @@ def main() -> int:
             "mesh_type": arguments.mesh_type,
             "backend": "numpy",
             "degree": DEGREE,
+            "assembly_method": arguments.assembly_method,
             "cg": {"rtol": RTOL, "atol": ATOL, "maxiter": MAXITER},
             "warmup": arguments.warmup,
             "repeats": arguments.repeats,

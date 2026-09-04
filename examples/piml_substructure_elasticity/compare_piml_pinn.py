@@ -18,7 +18,7 @@ PIML 子结构静力缩聚 vs PINN 强形式求解器 跨范式横向对比
     本算例不比较 PIML 路径的位移场, 因为该制造解的位移在四条边上恒为零, 唯一的
     驱动是体力, 而缩聚路径按 Huang 2023 的建模假设只对内部自由度不受载的问题成立,
     在本算例上只能解出零位移场, 位移误差会退化成无意义的 ``0/0``. 带真实外载的
-    位移场验证见同目录 ``compare_exact.py`` (MBB 梁集中载荷).
+    位移场验证见同目录 ``verify_stiffness_route.py`` (MBB 梁集中载荷).
 
 已知口径差异:
     子结构库的平面假设固定为 ``plane_stress``, 而本制造解是 plane strain. 由于
@@ -201,7 +201,7 @@ def compute_pinn_loss(net, int_pts, bnd_pts, bnd_val, problem, lame_lambda, shea
         int_pts: 域内配点, 形状 ``(n_int, 2)``, 需要 ``requires_grad=True``.
         bnd_pts: 边界配点, 形状 ``(n_bnd, 2)``.
         bnd_val: 边界配点上的位移真值, 形状 ``(n_bnd, 2)``.
-        problem: 提供 ``body_force`` 的物理问题对象.
+        problem: 通过 ``loads()`` 提供体力载荷的物理问题对象.
         lame_lambda: Lamé 第一参数.
         shear_modulus: 剪切模量.
 
@@ -237,7 +237,10 @@ def compute_pinn_loss(net, int_pts, bnd_pts, bnd_val, problem, lame_lambda, shea
     div_stress = torch.stack(div_components, dim=-1)
 
     int_pts_bm = bm.asarray(int_pts.detach().cpu().numpy(), dtype=bm.float64)
-    body_force_bm = problem.body_force(int_pts_bm)
+    body_force_load = next(
+        load for load in problem.loads() if load.kind == "body_force"
+    )
+    body_force_bm = body_force_load.body_force(int_pts_bm)
     body_force_t = torch.tensor(bm.to_numpy(body_force_bm), dtype=torch.float64, device=int_pts.device)
 
     pde_residual = div_stress + body_force_t

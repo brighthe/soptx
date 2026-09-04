@@ -4,12 +4,13 @@ import numpy as np
 
 from fealpy.backend import backend_manager as bm
 
-from soptx.core import (
+from soptx.protocols import (
     DirichletElasticityProblem,
     ElasticityProblem,
     MixedBoundaryElasticityProblem,
 )
 from soptx.problems import FixedFixedBeamCenterLoad2d
+from soptx.problems.loads import BoundaryTractionLoad
 
 
 def test_fixed_fixed_problem_satisfies_both_analyzer_contracts() -> None:
@@ -49,9 +50,10 @@ def test_fixed_fixed_problem_shares_one_load_for_both_discretizations() -> None:
         bm.to_numpy(problem.is_traction_boundary(points)),
         expected_traction,
     )
+    load = problem.loads()[0]
+    assert isinstance(load, BoundaryTractionLoad)
     np.testing.assert_array_equal(
-        bm.to_numpy(problem.is_neumann_boundary()(points)),
-        expected_traction,
+        bm.to_numpy(load.is_load_boundary(points)), expected_traction
     )
 
     expected_values = np.array(
@@ -65,14 +67,11 @@ def test_fixed_fixed_problem_shares_one_load_for_both_discretizations() -> None:
         ]
     )
     np.testing.assert_allclose(
-        bm.to_numpy(problem.traction_bc(points)),
+        bm.to_numpy(load.traction(points)),
         expected_values,
         rtol=0.0,
         atol=0.0,
     )
-    np.testing.assert_allclose(
-        bm.to_numpy(problem.neumann_bc(points)),
-        expected_values,
-        rtol=0.0,
-        atol=0.0,
-    )
+    assert not hasattr(problem, "traction_bc")
+    assert not hasattr(problem, "neumann_bc")
+    assert not hasattr(problem, "is_neumann_boundary")

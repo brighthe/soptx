@@ -30,6 +30,8 @@ jobs:
         run: |
           python tools/check_python_syntax.py
           python tools/check_architecture.py
+          python tools/check_comment_style.py
+          python tools/check_repo_layout.py
 
       - name: Check deterministic inventories
         run: python tools/generate_repository_inventory.py --check

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from typing import Callable, Optional, Sequence
 
 from fealpy.backend import backend_manager as bm
 from fealpy.decorator import cartesian
 from fealpy.typing import TensorLike
+
+from soptx.problems.loads import PointForceLoad
 
 from ._base import validated_domain
 
@@ -21,7 +23,6 @@ class HalfMBBBeamRight2d:
 
     dimension = 2
     boundary_type = "mixed"
-    load_type = "concentrated"
     _eps = 1.0e-12
 
     def __init__(
@@ -60,10 +61,6 @@ class HalfMBBBeamRight2d:
         return self._plane_type
 
     @cartesian
-    def body_force(self, points: TensorLike) -> TensorLike:
-        return bm.zeros(points.shape, **bm.context(points))
-
-    @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         return bm.zeros(points.shape, **bm.context(points))
 
@@ -91,28 +88,14 @@ class HalfMBBBeamRight2d:
             self.is_dirichlet_boundary_dof_y,
         )
 
-    @cartesian
-    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        value = bm.zeros(points.shape, **bm.context(points))
-        return bm.set_at(value, (..., 1), self.P)
-
-    def concentrate_load_bc(self) -> list[Callable]:
-        """返回与集中力边界标记一一对应的载荷值函数列表。"""
-        return [self._concentrate_load_bc]
-
-    @cartesian
-    def is_concentrate_load_boundary_dof(
-        self,
-        points: TensorLike,
-    ) -> TensorLike:
-        x, y = points[..., 0], points[..., 1]
+    def loads(self) -> tuple[PointForceLoad, ...]:
+        """返回左上角的集中点力."""
         return (
-            (bm.abs(x - self.domain[0]) < self._eps)
-            & (bm.abs(y - self.domain[3]) < self._eps)
+            PointForceLoad(
+                point=(self.domain[0], self.domain[3]),
+                vector=(0.0, self.P),
+            ),
         )
-
-    def is_concentrate_load_boundary(self) -> list[Callable]:
-        return [self.is_concentrate_load_boundary_dof]
 
 
 class HalfMBBBeamRight3d:
@@ -126,7 +109,6 @@ class HalfMBBBeamRight3d:
 
     dimension = 3
     boundary_type = "mixed"
-    load_type = "concentrated"
     _eps = 1.0e-12
 
     def __init__(
@@ -165,10 +147,6 @@ class HalfMBBBeamRight3d:
         return self._plane_type
 
     @cartesian
-    def body_force(self, points: TensorLike) -> TensorLike:
-        return bm.zeros(points.shape, **bm.context(points))
-
-    @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         return bm.zeros(points.shape, **bm.context(points))
 
@@ -209,33 +187,22 @@ class HalfMBBBeamRight3d:
             self.is_dirichlet_boundary_dof_z,
         )
 
-    @cartesian
-    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        value = bm.zeros(points.shape, **bm.context(points))
-        return bm.set_at(value, (..., 1), self.P)
-
-    def concentrate_load_bc(self) -> list[Callable]:
-        return [self._concentrate_load_bc]
-
-    @cartesian
-    def is_concentrate_load_boundary_dof(
-        self,
-        points: TensorLike,
-    ) -> TensorLike:
-        x, y, z = points[..., 0], points[..., 1], points[..., 2]
-        z_mid = (self.domain[4] + self.domain[5]) / 2.0
+    def loads(self) -> tuple[PointForceLoad, ...]:
+        """返回左上方中心位置的集中点力."""
         return (
-            (bm.abs(x - self.domain[0]) < self._eps)
-            & (bm.abs(y - self.domain[3]) < self._eps)
-            & (bm.abs(z - z_mid) < self._eps)
+            PointForceLoad(
+                point=(
+                    self.domain[0],
+                    self.domain[3],
+                    (self.domain[4] + self.domain[5]) / 2.0,
+                ),
+                vector=(0.0, self.P, 0.0),
+            ),
         )
-
-    def is_concentrate_load_boundary(self) -> list[Callable]:
-        return [self.is_concentrate_load_boundary_dof]
 
 
 class FullMBBBeam3d:
-    """完整三维 MBB 梁 (1-to-1 完全精确对齐 Huang2023 论文 4.1 节)。
+    """完整三维 MBB 梁。
 
     物理问题未利用对称性简化，而是对整体全尺寸 3D 模型求解：
       - 左侧底部 (x=0, y=0): 铰支座 (u_x = 0, u_y = 0)
@@ -246,7 +213,6 @@ class FullMBBBeam3d:
 
     dimension = 3
     boundary_type = "mixed"
-    load_type = "concentrated"
     _eps = 1.0e-12
 
     def __init__(
@@ -285,10 +251,6 @@ class FullMBBBeam3d:
         return self._plane_type
 
     @cartesian
-    def body_force(self, points: TensorLike) -> TensorLike:
-        return bm.zeros(points.shape, **bm.context(points))
-
-    @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         return bm.zeros(points.shape, **bm.context(points))
 
@@ -321,10 +283,25 @@ class FullMBBBeam3d:
     ) -> TensorLike:
         y, z = points[..., 1], points[..., 2]
         z_mid = (self.domain[4] + self.domain[5]) / 2.0
-        return (
-            (bm.abs(y - self.domain[2]) < self._eps)
-            & (bm.abs(z - z_mid) < self._eps)
+        on_bottom = bm.abs(y - self.domain[2]) < self._eps
+        return self._nearest_candidate_mask(
+            distance=bm.abs(z - z_mid),
+            candidates=on_bottom,
         )
+
+    def _nearest_candidate_mask(
+        self,
+        distance: TensorLike,
+        candidates: TensorLike,
+    ) -> TensorLike:
+        """在候选节点中选择到目标几何位置距离最小的全部对称节点."""
+        infinity = bm.full(
+            distance.shape,
+            float("inf"),
+            **bm.context(distance),
+        )
+        nearest = bm.min(bm.where(candidates, distance, infinity))
+        return candidates & (bm.abs(distance - nearest) < self._eps)
 
     def is_dirichlet_boundary(self) -> tuple[Callable, Callable, Optional[Callable]]:
         return (
@@ -333,30 +310,18 @@ class FullMBBBeam3d:
             self.is_dirichlet_boundary_dof_z,
         )
 
-    @cartesian
-    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        value = bm.zeros(points.shape, **bm.context(points))
-        return bm.set_at(value, (..., 1), self.P)
-
-    def concentrate_load_bc(self) -> list[Callable]:
-        return [self._concentrate_load_bc]
-
-    @cartesian
-    def is_concentrate_load_boundary_dof(
-        self,
-        points: TensorLike,
-    ) -> TensorLike:
-        x, y, z = points[..., 0], points[..., 1], points[..., 2]
-        xc = (self.domain[0] + self.domain[1]) / 2.0
-        z_mid = (self.domain[4] + self.domain[5]) / 2.0
+    def loads(self) -> tuple[PointForceLoad, ...]:
+        """返回顶面中心的集中点力."""
         return (
-            (bm.abs(x - xc) < self._eps)
-            & (bm.abs(y - self.domain[3]) < self._eps)
-            & (bm.abs(z - z_mid) < self._eps)
+            PointForceLoad(
+                point=(
+                    (self.domain[0] + self.domain[1]) / 2.0,
+                    self.domain[3],
+                    (self.domain[4] + self.domain[5]) / 2.0,
+                ),
+                vector=(0.0, self.P, 0.0),
+            ),
         )
-
-    def is_concentrate_load_boundary(self) -> list[Callable]:
-        return [self.is_concentrate_load_boundary_dof]
 
 
 class FullMBBBeam2d:
@@ -370,7 +335,6 @@ class FullMBBBeam2d:
 
     dimension = 2
     boundary_type = "mixed"
-    load_type = "concentrated"
     _eps = 1.0e-12
 
     def __init__(
@@ -409,10 +373,6 @@ class FullMBBBeam2d:
         return self._plane_type
 
     @cartesian
-    def body_force(self, points: TensorLike) -> TensorLike:
-        return bm.zeros(points.shape, **bm.context(points))
-
-    @cartesian
     def dirichlet_bc(self, points: TensorLike) -> TensorLike:
         return bm.zeros(points.shape, **bm.context(points))
 
@@ -444,33 +404,19 @@ class FullMBBBeam2d:
             self.is_dirichlet_boundary_dof_y,
         )
 
-    @cartesian
-    def _concentrate_load_bc(self, points: TensorLike) -> TensorLike:
-        value = bm.zeros(points.shape, **bm.context(points))
-        return bm.set_at(value, (..., 1), self.P)
-
-    def concentrate_load_bc(self) -> list[Callable]:
-        return [self._concentrate_load_bc]
-
-    @cartesian
-    def is_concentrate_load_boundary_dof(
-        self,
-        points: TensorLike,
-    ) -> TensorLike:
-        x, y = points[..., 0], points[..., 1]
-        xc = (self.domain[0] + self.domain[1]) / 2.0
+    def loads(self) -> tuple[PointForceLoad, ...]:
+        """返回顶边中心的集中点力."""
         return (
-            (bm.abs(x - xc) < self._eps)
-            & (bm.abs(y - self.domain[3]) < self._eps)
+            PointForceLoad(
+                point=(
+                    (self.domain[0] + self.domain[1]) / 2.0,
+                    self.domain[3],
+                ),
+                vector=(0.0, self.P),
+            ),
         )
-
-    def is_concentrate_load_boundary(self) -> list[Callable]:
-        return [self.is_concentrate_load_boundary_dof]
 
     def get_load_dof(self, total_fine_x: int, total_fine_y: int) -> int:
         """根据细网格分割维度 (nx, ny) 导出顶面中心集中荷载 P 作用点自由度 (y 向 DOF)."""
         top_center_node = (total_fine_x // 2) * (total_fine_y + 1) + total_fine_y
         return 2 * top_center_node + 1
-
-
-

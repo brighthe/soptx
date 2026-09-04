@@ -1,0 +1,10 @@
+{
+  "case_prefix": "mbb",
+  "final_compliance_fea": 1650.311485518745,
+  "final_compliance_piml": 887.3737280542013,
+  "relative_compliance_error_percent": 46.22992472386074,
+  "mean_solve_time_ms_fea": 1.1746609510737471,
+  "mean_solve_time_ms_piml": 1.7508167595951818,
+  "total_iters_fea": 100,
+  "total_iters_piml": 100
+}

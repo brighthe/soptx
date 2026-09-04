@@ -1,0 +1,139 @@
+schema_version = 1
+stage = "soptx/elasticity-paradigm-comparison/v1"
+
+# 四范式受控对比的共享冻结项. 任何一项变化都使已落盘的 manifest.json 失效,
+# 必须同时提升 stage 版本号.
+[protocol]
+# 全部误差以同一细网格上的 Lagrange 全装配解为参考真解.
+reference_method = "lagrange"
+# 四条路径共享同一细网格. 细网格由 n_sub 与 n_fine 张成, 见各 case 的 discretization.
+shared_fine_mesh = true
+random_seed = 20260818
+dtype = "float64"
+# 精确路径 (lagrange, substructure) 的 bm 后端.
+backend = "numpy"
+# 神经网络路径 (pinn, piml) 的 bm 后端; 两者共享同一后端以统一计时边界.
+ml_backend = "pytorch"
+# PINN 一律使用硬约束边界, 消除 loss 权重调参对范式结论的污染.
+pinn_boundary_mode = "hard"
+# 计时边界: 离线训练与在线求解分别计时, 不合并报告.
+timing = ["offline_seconds", "online_seconds"]
+
+[[cases]]
+id = "tier-a-mbb-homogeneous"
+title = "均质完整 MBB 梁 (四范式共同可解档)"
+role = "paradigm-baseline"
+status = "planned"
+tier = "A"
+methods = ["lagrange", "substructure", "pinn", "piml"]
+metrics = [
+  "relative_l2_displacement",
+  "energy_norm_relative_error",
+  "compliance_relative_error",
+  "interface_relative_l2",
+  "offline_seconds",
+  "online_seconds",
+  "breakeven_count",
+]
+# 本档材料均质, PINN 的强形式残差成立, 四条路径产出同一个量: 全场位移.
+notes = "PINN 主场档; 比较精度-成本, 不比较适用边界."
+
+[cases.model]
+name = "FullMBBBeam2d"
+
+[cases.model.parameters]
+domain = [0.0, 12.0, 0.0, 2.0]
+P = -1.0
+E = 1.0
+nu = 0.3
+
+[cases.discretization]
+n_sub = [12, 2]
+n_fine = [5, 5]
+space_degree = 1
+solve_method = "scipy"
+
+[cases.density]
+kind = "homogeneous"
+value = 1.0
+
+[cases.pinn]
+hidden_width = 64
+n_layers = 4
+activation = "tanh"
+n_interior = 4000
+n_boundary = 800
+optimizer = "adam"
+learning_rate = 1.0e-3
+n_epochs = 20000
+
+[cases.piml]
+route = "A"
+n_train = 512
+n_val = 64
+n_epochs = 2000
+learning_rate = 1.0e-3
+fallback = true
+
+[[cases]]
+id = "tier-b-mbb-simp-snapshot"
+title = "SIMP 密度快照 MBB 梁 (适用边界档)"
+role = "paradigm-boundary"
+status = "planned"
+tier = "B"
+methods = ["lagrange", "substructure", "pinn", "piml"]
+metrics = [
+  "relative_l2_displacement",
+  "energy_norm_relative_error",
+  "compliance_relative_error",
+  "interface_relative_l2",
+  "min_eigenvalue",
+  "rigid_mode_residual",
+  "fallback_rate",
+  "offline_seconds",
+  "online_seconds",
+  "breakeven_count",
+]
+# 本档材料对比度大, 应力在单元界面不连续, PINN 强形式预期失效. 该失效本身
+# 是结论, 不是实现缺陷; 报告时必须与 Tier A 成对给出, 否则构成打靶.
+notes = "PIML 主场档; 比较适用边界与结构保持退化."
+
+[cases.model]
+name = "FullMBBBeam2d"
+
+[cases.model.parameters]
+domain = [0.0, 12.0, 0.0, 2.0]
+P = -1.0
+E = 1.0
+nu = 0.3
+
+[cases.discretization]
+n_sub = [12, 2]
+n_fine = [5, 5]
+space_degree = 1
+solve_method = "scipy"
+
+[cases.density]
+kind = "simp_snapshot"
+penalty_factor = 3.0
+rho_min = 1.0e-3
+# 材料对比度扫描: 结构保持指标随对比度的退化曲线取自本列表.
+contrast_sweep = [1.0e1, 1.0e2, 1.0e3]
+
+[cases.pinn]
+hidden_width = 64
+n_layers = 4
+activation = "tanh"
+n_interior = 4000
+n_boundary = 800
+optimizer = "adam"
+learning_rate = 1.0e-3
+n_epochs = 20000
+
+[cases.piml]
+route = "A"
+n_train = 512
+n_val = 64
+n_epochs = 2000
+learning_rate = 1.0e-3
+fallback = true

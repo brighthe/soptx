@@ -3,7 +3,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 from soptx.core import BaseLogged
-from soptx.fem.solvers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
+from soptx.fem.analyzers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 
 class CompliantMechanismObjective(BaseLogged):
     def __init__(self,

@@ -6,12 +6,14 @@ SOPTX（Structural Optimization Topology Simulation Software）是基于
 
 ## 快速开始
 
-以二维线弹性 Matrix-Free EA 基线为例，从仓库根目录执行：
+本仓库位于 WSL（Ubuntu-24.04）的 `~/workspace/soptx`，所有安装、运行与 Git
+操作均在该发行版的 bash 中执行。以二维线弹性 Matrix-Free EA 基线为例，从仓库
+根目录执行：
 
-```powershell
+```bash
 conda activate ihpcm
 python -m pip install -e ".[mpi,test]"
-mpiexec -n 1 python .\tools\matrix_free_evidence\run.py --dim 2 --operator-level ea --p 1 --nx 8 --ny 8
+mpiexec -n 1 python tools/matrix_free_evidence/run.py --dim 2 --operator-level ea --p 1 --nx 8 --ny 8
 ```
 
 完整参数、3D 与 FA 路径、MPI 分区约束见
@@ -23,7 +25,7 @@ PINN 示例入口见
 
 SOPTX 当前迁移版本为 `1.1.0.dev0`，Python 最低版本为 3.10：
 
-```powershell
+```bash
 python -m pip install -e .
 ```
 
@@ -38,7 +40,7 @@ python -m pip install -e .
 > **上游已知回归**：FEALPy `4.0.0-alpha` 的 mesh 重构引入四处回归，其中一处影响所有
 > 网格类型，会使 SOPTX 全部算例在计算误差时抛异常；另三处使四边形、六面体静默给出
 > 错误结果。这些缺陷已在 fork 中修复。缺陷细节、复现脚本与上游进展见
-> [`docs/known-issues/fealpy-tensor-product-mesh.md`](docs/known-issues/fealpy-tensor-product-mesh.md)。
+> [`docs/known-issues/fealpy-patches.md`](docs/known-issues/fealpy-patches.md) 第一节。
 
 可选 extra 按用途划分：
 
@@ -70,10 +72,10 @@ from soptx.fem.integrators import LinearElasticIntegrator
 
 本地重验证入口：
 
-```powershell
-python .\tools\matrix_free_evidence\validate.py --dim all
-python .\tools\matrix_free_evidence\sync_results.py --dim all --check
-python .\experiments\huzhang_topopt_paper\dry_run.py --json
+```bash
+python tools/matrix_free_evidence/validate.py --dim all
+python tools/matrix_free_evidence/sync_results.py --dim all --check
+python experiments/huzhang_topopt_paper/dry_run.py --json
 ```
 
 这些命令必须在明确环境中运行，并检查退出码、预期产物和数值 acceptance criteria，
@@ -84,7 +86,7 @@ python .\experiments\huzhang_topopt_paper\dry_run.py --json
 evidence 的 `environment.fealpy` 记录的不是静态版本号，而是运行时 `fealpy.__file__`
 所在检出的 `path`、`git_revision`、`git_dirty` 和 `git_remote`，因此可以直接判定该次
 运行用的是上游还是本地 fork、工作区是否干净。缺陷背景见
-[`docs/known-issues/fealpy-tensor-product-mesh.md`](docs/known-issues/fealpy-tensor-product-mesh.md)。
+[`docs/known-issues/fealpy-patches.md`](docs/known-issues/fealpy-patches.md) 第一节。
 
 ## 目录入口
 
@@ -102,7 +104,7 @@ evidence 的 `environment.fealpy` 记录的不是静态版本号，而是运行�
 [`docs/architecture/file-classification.md`](docs/architecture/file-classification.md)。
 
 目标依赖方向是
-`core → materials/problems → fem → topology → visualization`。Problem 只表达
+`core/protocols/ml → materials/problems → fem → topology → postprocess`。Problem 只表达
 区域、载荷、边界与精确解；Material 独立；网格由 FEM workflow 或 example case
 显式创建。详细设计见 [`docs/architecture/overview.md`](docs/architecture/overview.md)。
 
@@ -110,10 +112,10 @@ evidence 的 `environment.fealpy` 记录的不是静态版本号，而是运行�
 
 提交前在本地复现 CI 的快速检查：
 
-```powershell
-python tools\check_python_syntax.py
-python tools\check_architecture.py
-python tools\generate_repository_inventory.py --check
+```bash
+python tools/check_python_syntax.py
+python tools/check_architecture.py
+python tools/generate_repository_inventory.py --check
 python -m pytest tests -q
 ```
 

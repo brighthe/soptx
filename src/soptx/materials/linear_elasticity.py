@@ -374,7 +374,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
     @property
     def is_incompressible(self) -> bool:
         """材料在数值上是否接近不可压缩."""
-        return self._poisson_ratio >= 0.5 - 1.0e-12
+        return self._poisson_ratio >= 0.49
 
     @staticmethod
     def _validate_youngs_poisson(

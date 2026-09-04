@@ -7,7 +7,7 @@ EA 路径没有可以打印出来的全局矩阵, 正确性只能靠与 FA 及�
 原先住在 ``examples/matrix_free_elasticity/utils/references.py`` 与
 ``utils/postprocess.py``, demo 脚本和证据工具都要用, 因此上浮到 ``soptx``。
 
-判定阈值不在这里: 按 :mod:`soptx.numerics` 的约定, 验收门禁的数字属于定义该门禁
+判定阈值不在这里: 按 :mod:`soptx.core.numerics` 的约定, 验收门禁的数字属于定义该门禁
 的示例或研究, 本模块只产出被判定的量。随机种子同理, 由调用方显式传入。
 """
 
@@ -21,11 +21,11 @@ from scipy.sparse.linalg import spsolve as scipy_spsolve
 from fealpy.backend import backend_manager as bm
 from fealpy.fem import DirichletBCOperator
 from fealpy.functionspace import TensorFunctionSpace
-from fealpy.mesh import Mesh
+from fealpy.mesh import MeshView
 
-from soptx.numerics import NORM_FLOOR
+from soptx.core.numerics import NORM_FLOOR
 
-from .solvers.elasticity_operator import build_serial_analyzer
+from .analyzers import build_serial_analyzer
 
 
 def relative_difference(left, right) -> tuple[float, float]:
@@ -39,7 +39,7 @@ def relative_difference(left, right) -> tuple[float, float]:
 
 
 def solution_error(
-    mesh: Mesh,
+    mesh: MeshView,
     solution,
     pde: Any,
     degree: int,
@@ -121,6 +121,9 @@ def serial_references(
 
     # SciPy 的 ``spsolve`` 只高效接受 CSR/CSC. ``DirichletBCOperator`` 当前导出
     # 为 COO, 因此在黄金参考路径显式转成 CSR, 避免每次验证时隐式转换并发出警告.
+    # 这里刻意直接用 scipy, 不走 soptx.solvers.spsolve: 本函数是校验 EA 算子的
+    # 黄金参考, 不应依赖同一批被重构的求解代码. COO -> CSR 本身就产生新数组, 不
+    # 存在共享内存被 SuperLU 原地改写的问题.
     direct_solution = scipy_spsolve(
         fa_operator.to_scipy().tocsr(),
         bm.to_numpy(fa_load),

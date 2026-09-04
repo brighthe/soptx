@@ -5,7 +5,7 @@ from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
 from soptx.core import BaseLogged
-from soptx.fem.solvers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
+from soptx.fem.analyzers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 from soptx.topology.optimizers.utils import compute_volume
 
 class VolumeObjective(BaseLogged):

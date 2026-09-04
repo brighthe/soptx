@@ -13,7 +13,7 @@ from math import log
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import TriangleMesh
 
-from soptx.fem.solvers import LagrangeFEMAnalyzer
+from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems.elasticity import SinusoidalPlaneStrainElasticity2D
 

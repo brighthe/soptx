@@ -6,7 +6,7 @@ from fealpy.mesh import SimplexMesh, TensorMesh
 from fealpy.functionspace import Function
 
 from soptx.core import BaseLogged
-from soptx.fem.solvers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
+from soptx.fem.analyzers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 from soptx.topology.optimizers.utils import compute_volume
 
 class VolumeConstraint(BaseLogged):

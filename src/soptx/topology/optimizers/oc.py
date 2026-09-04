@@ -1,6 +1,5 @@
-import warnings
 from time import time
-from typing import Any, Dict, Optional, Union, Tuple
+from typing import Any, Callable, Dict, Optional, Union, Tuple
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -45,9 +44,6 @@ class OCOptions:
             - initial_lambda : 初始 lambda 值
             - bisection_tol : 二分法收敛容差
         """
-        warnings.warn("Modifying advanced options may affect algorithm stability",
-                     UserWarning)
-        
         valid_params = {
             'move_limit': '_move_limit',
             'damping_coef': '_damping_coef',
@@ -81,6 +77,11 @@ class OCOptions:
     def bisection_tol(self) -> float:
         """二分法收敛容差"""
         return self._bisection_tol
+
+    @property
+    def design_variable_min(self) -> float:
+        """设计变量下界 rho_min"""
+        return self._design_variable_min
 
 class OCOptimizer(BaseLogged):
     def __init__(self,
@@ -314,6 +315,84 @@ class OCOptimizer(BaseLogged):
                 
         return rho_phys, history
     
+    @staticmethod
+    def update_design_variable(
+        design_variable: Union[Function, TensorLike],
+        objective_gradient: TensorLike,
+        constraint_gradient: TensorLike,
+        constraint_function: Callable[[TensorLike], Any],
+        *,
+        move_limit: float = 0.2,
+        damping_coef: float = 0.5,
+        initial_lambda: float = 1.0e9,
+        bisection_tol: float = 1.0e-3,
+        design_variable_min: float = 1.0e-9,
+    ) -> Union[Function, TensorLike]:
+        """执行一次完整的 OC 设计变量更新.
+
+        该公共接口供自定义分析流程复用 OC 的二分搜索与密度更新. 调用方提供
+        当前设计变量、目标与约束梯度, 以及候选设计的约束函数; 返回值大于零
+        表示候选设计违反约束.
+        """
+        l1, l2 = 0.0, float(initial_lambda)
+        dv_new = bm.copy(design_variable[:])
+        while (
+            (l2 - l1) / (l2 + l1 + 1.0e-12) > bisection_tol
+            and l2 > 1.0e-40
+        ):
+            lmid = 0.5 * (l2 + l1)
+            dv_new = OCOptimizer._compute_density_candidate(
+                design_variable=design_variable,
+                dc=objective_gradient,
+                dg=constraint_gradient,
+                lmid=lmid,
+                move_limit=move_limit,
+                damping_coef=damping_coef,
+                design_variable_min=design_variable_min,
+            )
+            if float(constraint_function(dv_new)) > 0.0:
+                l1 = lmid
+            else:
+                l2 = lmid
+        return dv_new
+
+    @staticmethod
+    def _compute_density_candidate(
+        design_variable: Union[Function, TensorLike],
+        dc: TensorLike,
+        dg: TensorLike,
+        lmid: float,
+        *,
+        move_limit: float,
+        damping_coef: float,
+        design_variable_min: float,
+        passive_mask: Optional[TensorLike] = None,
+    ) -> Union[Function, TensorLike]:
+        """按给定 Lagrange 乘子计算一个 OC 候选设计."""
+        dv = design_variable
+        kwargs = bm.context(dv)
+        if isinstance(dv, Function):
+            dv_new = dv.space.function(bm.copy(dv[:]))
+        else:
+            dv_new = bm.copy(dv[:])
+
+        B_e = -dc / (dg * lmid)
+        B_e_clipped = bm.maximum(bm.tensor(1.0e-12, **kwargs), B_e)
+        B_e_damped = bm.pow(B_e_clipped, damping_coef)
+        dv_new[:] = bm.maximum(
+            bm.tensor(design_variable_min, **kwargs),
+            bm.maximum(
+                dv - move_limit,
+                bm.minimum(
+                    bm.tensor(1.0, **kwargs),
+                    bm.minimum(dv + move_limit, dv * B_e_damped),
+                ),
+            ),
+        )
+        if passive_mask is not None:
+            dv_new[passive_mask] = 1.0
+        return dv_new
+
     def _update_density(self,
                         design_variable: Union[Function, TensorLike],
                         dc: TensorLike,
@@ -325,9 +404,7 @@ class OCOptimizer(BaseLogged):
         # 获取算法内部参数
         m = self.options.move_limit
         eta = self.options.damping_coef
-        dmin = self.options._design_variable_min
-        kwargs = bm.context(design_variable)
-
+        dmin = self.options.design_variable_min
         dv = design_variable
 
         if (bm.any(bm.isnan(dv[:])) or bm.any(bm.isinf(dv[:])) or
@@ -335,33 +412,14 @@ class OCOptimizer(BaseLogged):
             self._log_error(f"输入设计变量超出合理范围 [0, 1]: "
                             f"range=[{bm.min(dv):.2e}, {bm.max(dv):.2e}]")
 
-        if isinstance(dv, Function):
-            dv_new = dv.space.function(bm.copy(dv[:]))
-        else:
-            dv_new = bm.copy(dv[:])
-
-        B_e = -dc / (dg * lmid)
-        clip_B = 1e-12
-        B_e_clipped = bm.maximum(bm.tensor(clip_B, **kwargs), B_e)
-        B_e_damped = bm.pow(B_e_clipped, eta)
-
-        dv_new[:] = bm.maximum(
-                        bm.tensor(dmin, **kwargs), 
-                        bm.maximum(
-                            dv - m, 
-                            bm.minimum(
-                                bm.tensor(1.0, **kwargs), 
-                                bm.minimum(
-                                    dv + m, 
-                                    dv * B_e_damped
-                                )
-                            )
-                        )
-                    )
-        
-        # 强制被动单元保持密度为 1.0
-        if self._passive_mask is not None:
-            dv_new[self._passive_mask] = 1.0
-
-        return dv_new
+        return self._compute_density_candidate(
+            design_variable=dv,
+            dc=dc,
+            dg=dg,
+            lmid=lmid,
+            move_limit=m,
+            damping_coef=eta,
+            design_variable_min=dmin,
+            passive_mask=self._passive_mask,
+        )
         

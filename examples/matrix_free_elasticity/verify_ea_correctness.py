@@ -45,7 +45,7 @@ from soptx.fem.distributed import (
     distribute_vector_space,
     partition_cells,
 )
-from soptx.fem.solvers import solve_ea_system
+from soptx.fem.matrix_free import solve_ea_system
 from soptx.fem.verification import (
     relative_difference,
     serial_references,
@@ -90,7 +90,7 @@ _MPI_SIZE_ENVIRONMENTS = ("OMPI_COMM_WORLD_SIZE", "PMI_SIZE", "PMIX_SIZE")
 
 def verdict(passed: bool) -> str:
     """将门禁结果格式化为终端输出标签."""
-    return "PASS" if passed else "FAIL"
+    return "通过" if passed else "失败"
 
 
 def build_problem(dimension: int, model: str):
@@ -196,25 +196,29 @@ def run_serial_ea_correctness(
 
     if show_details:
         print("\n" + "=" * 72)
-        print(f" EA Matrix-Free Correctness [{dimension}D - {type(problem).__name__}]")
+        print(f" EA Matrix-Free 正确性 [{dimension}D - {type(problem).__name__}]")
         print("=" * 72)
-        print(f" Grid                  : {mesh_type}, {'x'.join(str(value) for value in resolution)}")
-        print(f" Global Cells           : {mesh.number_of_cells()}")
-        print(f" Global Vector DOFs     : {vector_space.number_of_global_dofs()}")
+        print(f" 网格               : {mesh_type}, {'x'.join(str(value) for value in resolution)}")
+        print(f" 单元总数           : {mesh.number_of_cells()}")
+        print(f" 全局向量自由度     : {vector_space.number_of_global_dofs()}")
         print("-" * 72)
-        print(" [1] EA/FA Operator Agreement")
-        print(f"   Raw MatVec           : {matvec_reference['raw_relative_error']:.5e} -> [{verdict(matvec_gates['raw_matvec'])}]")
-        print(f"   Dirichlet MatVec     : {matvec_reference['dirichlet_relative_error']:.5e} -> [{verdict(matvec_gates['dirichlet_matvec'])}]")
-        print(f"   Positive Energy      : {matvec_reference['random_vector_energy']:.5e} -> [{verdict(matvec_gates['positive_definite'])}]")
-        print(" [2] EA-CG Solve Agreement")
-        print(f"   CG Converged         : {diagnostics['converged']}")
-        print(f"   True Relative Residual: {diagnostics['true_relative_residual']:.5e}")
-        print(f"   Boundary Error       : {diagnostics['boundary_absolute_error']:.5e}")
-        print(f"   EA-CG / FA-Direct    : {solution_relative_error:.5e} -> [{verdict(solution_gate)}]")
-        print(" [3] Manufactured-Solution Accuracy")
-        print(f"   Relative L2 Error    : {l2_relative_error:.5e}")
+        print(" [1] EA/FA 算子作用一致性")
+        print(f"   裸算子 MatVec    : {matvec_reference['raw_relative_error']:.5e} -> [{verdict(matvec_gates['raw_matvec'])}]")
+        print(f"   边界算子 MatVec  : {matvec_reference['dirichlet_relative_error']:.5e} -> [{verdict(matvec_gates['dirichlet_matvec'])}]")
+        # 能量值只有符号有意义(其大小随随机向量范数、网格规模与材料参数漂移,
+        # 不同档之间不可比), 因此通过时只报判定, 失败时才带出数值供定位
+        print(f"   正定性           : [{verdict(matvec_gates['positive_definite'])}]"
+              + ("" if matvec_gates["positive_definite"]
+                 else f"  (能量 {matvec_reference['random_vector_energy']:.5e})"))
+        print(" [2] EA-CG 解与 FA 直接解一致性")
+        print(f"   CG 是否收敛      : {diagnostics['converged']}")
+        print(f"   真实相对残差     : {diagnostics['true_relative_residual']:.5e}")
+        print(f"   边界误差         : {diagnostics['boundary_absolute_error']:.5e}")
+        print(f"   EA-CG / FA 直接解: {solution_relative_error:.5e} -> [{verdict(solution_gate)}]")
+        print(" [3] 制造解精度")
+        print(f"   相对 L2 误差     : {l2_relative_error:.5e}")
         print("-" * 72)
-        print(f" Overall EA Correctness : [{verdict(passed)}]")
+        print(f" EA 正确性总判定    : [{verdict(passed)}]")
         print("=" * 72 + "\n")
     return passed, l2_relative_error
 
@@ -338,18 +342,20 @@ def run_parallel_ea_correctness(
 
     if show_details:
         print("\n" + "=" * 72)
-        print(f" Parallel EA Correctness [{dimension}D, {comm.Get_size()} ranks]")
+        print(f" 并行 EA 正确性 [{dimension}D, {comm.Get_size()} rank]")
         print("=" * 72)
-        print(f" Grid                  : {mesh_type}, {'x'.join(str(value) for value in resolution)}")
-        print(f" True Relative Residual : {diagnostics['true_relative_residual']:.5e}")
-        print(f" Boundary Error         : {diagnostics['boundary_absolute_error']:.5e}")
-        print(f" EA/FA Raw MatVec       : {matvec_reference['raw_relative_error']:.5e} -> [{verdict(matvec_gates['raw_matvec'])}]")
-        print(f" EA/FA Dirichlet MatVec : {matvec_reference['dirichlet_relative_error']:.5e} -> [{verdict(matvec_gates['dirichlet_matvec'])}]")
-        print(f" EA Positive Energy     : {matvec_reference['random_vector_energy']:.5e} -> [{verdict(matvec_gates['positive_definite'])}]")
-        print(f" Parallel EA / FA-Direct: {parallel_direct_error:.5e} -> [{verdict(direct_gate)}]")
-        print(f" Parallel EA / Serial EA: {parallel_serial_error:.5e} -> [{verdict(serial_gate)}]")
-        print(f" Relative L2 Error      : {l2_relative_error:.5e}")
-        print(f" Overall EA Correctness : [{verdict(passed)}]")
+        print(f" 网格                 : {mesh_type}, {'x'.join(str(value) for value in resolution)}")
+        print(f" 真实相对残差         : {diagnostics['true_relative_residual']:.5e}")
+        print(f" 边界误差             : {diagnostics['boundary_absolute_error']:.5e}")
+        print(f" EA/FA 裸算子 MatVec  : {matvec_reference['raw_relative_error']:.5e} -> [{verdict(matvec_gates['raw_matvec'])}]")
+        print(f" EA/FA 边界算子 MatVec: {matvec_reference['dirichlet_relative_error']:.5e} -> [{verdict(matvec_gates['dirichlet_matvec'])}]")
+        print(f" EA 正定性            : [{verdict(matvec_gates['positive_definite'])}]"
+              + ("" if matvec_gates["positive_definite"]
+                 else f"  (能量 {matvec_reference['random_vector_energy']:.5e})"))
+        print(f" 并行 EA / FA 直接解  : {parallel_direct_error:.5e} -> [{verdict(direct_gate)}]")
+        print(f" 并行 EA / 串行 EA    : {parallel_serial_error:.5e} -> [{verdict(serial_gate)}]")
+        print(f" 相对 L2 误差         : {l2_relative_error:.5e}")
+        print(f" EA 正确性总判定      : [{verdict(passed)}]")
         print("=" * 72 + "\n")
     return passed, l2_relative_error
 
@@ -369,15 +375,15 @@ def _evaluate_convergence(
     ]
 
     print("=" * 72)
-    print(f" EA Relative-L2 Convergence [{dimension}D, {model}, {mesh_type}, P1]")
+    print(f" EA 相对 L2 收敛阶 [{dimension}D, {model}, {mesh_type}, P1]")
     print("=" * 72)
-    print(" Resolution       Relative L2 Error      Observed Order")
-    print(f" {resolutions[0]:<16} {relative_errors[0]:.5e}      -")
+    print(" 每轴剖分数    相对 L2 误差           实测收敛阶")
+    print(f" {resolutions[0]:<14}{relative_errors[0]:.5e}{'':<12}-")
     for index, order in enumerate(orders, start=1):
-        print(f" {resolutions[index]:<16} {relative_errors[index]:.5e}      {order:.5f}")
+        print(f" {resolutions[index]:<14}{relative_errors[index]:.5e}{'':<12}{order:.5f}")
     convergence_gate = orders[-1] >= contract.MINIMUM_FINAL_L2_ORDER
     print(
-        f" Final-Order Gate     : {orders[-1]:.5f} "
+        f" 末档收敛阶门禁      : {orders[-1]:.5f} "
         f">= {contract.MINIMUM_FINAL_L2_ORDER:g} -> [{verdict(convergence_gate)}]"
     )
     print("=" * 72 + "\n")

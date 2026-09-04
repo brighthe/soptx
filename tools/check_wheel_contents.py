@@ -11,7 +11,8 @@ BANNED_PARTS = {
     "demo",
     "examples",
     "experiments",
-    "old",
+    "old_version1",
+    "old_version2",
     "reference_code",
     "tests",
 }
