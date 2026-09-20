@@ -22,6 +22,28 @@ class OptimizationHistory:
     start_time: float = field(default_factory=time)
     scalar_histories: Dict[str, List[float]] = field(default_factory=dict)
     field_histories: Dict[str, List[TensorLike]] = field(default_factory=dict)
+    initial_physical_density: Optional[TensorLike] = None
+
+    def log_initial(self, physical_density: TensorLike) -> None:
+        """记录优化开始前的物理密度, 即第 0 步的初始构型.
+
+        Parameters
+        ----------
+        physical_density : TensorLike
+            初始设计变量经滤波与被动单元处理后得到的物理密度.
+
+        Notes
+        -----
+        该记录只写入 ``initial_physical_density``, 不进入 ``iter_indices``,
+        ``changes``, ``physical_densities`` 等按迭代对齐的列表, 因此不影响任何
+        既有消费端的索引对应关系.
+        """
+        if isinstance(physical_density, Function):
+            self.initial_physical_density = physical_density.space.function(
+                bm.copy(physical_density[:])
+            )
+        else:
+            self.initial_physical_density = bm.copy(physical_density[:])
 
     def log_iteration(
         self,

@@ -1,4 +1,4 @@
-from typing import Optional, Literal, Union, Dict, Tuple
+from typing import Optional, Literal, Union, Dict
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
@@ -93,7 +93,6 @@ class VolumeConstraint(BaseLogged):
         
         elif self._density_location in ['node']:
             #* 标准节点密度表征下的体积分数梯度计算
-            # mesh = self._mesh
             density_space = density.space
 
             qf = self._mesh.quadrature_formula(self._integration_order)
@@ -115,12 +114,6 @@ class VolumeConstraint(BaseLogged):
             dg = bm.zeros((NN, ), dtype=bm.float64, device=self._mesh.device) # (NN, )
             dg = bm.add_at(dg, cell2node.reshape(-1), dg_e.reshape(-1)) # (NN, )
             
-            #* 简化节点密度表征下体积分数梯度计算
-            # mesh = self._mesh
-            # NN = mesh.number_of_nodes()
-
-            # dg = bm.full((NN, ), 1.0 / NN, dtype=bm.float64, device=mesh.device)
-
             return dg
 
         elif self._density_location in ['node_multiresolution']:

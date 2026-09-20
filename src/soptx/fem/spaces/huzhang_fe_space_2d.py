@@ -1,10 +1,8 @@
 
-from numbers import Integral
-from typing import Optional, Sequence, Union, Callable
+from typing import Optional, Union, Callable
 from fealpy.typing import TensorLike, Index, _S, Threshold
 
 from fealpy.backend import backend_manager as bm
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
 from fealpy.mesh.mesh_base import Mesh
 from fealpy.sparse import COOTensor
 from fealpy.sparse.ops import spdiags
@@ -13,6 +11,39 @@ from fealpy.functionspace.functional import symmetry_span_array, symmetry_index
 from fealpy.decorator import barycentric
 
 import numpy as np
+
+def boundary_outward_sign(mesh: Mesh, index: Index = _S) -> TensorLike:
+    r"""返回边界边上 ``face_unit_normal()`` 相对于外法向的符号.
+
+    ``mesh.face_unit_normal()`` 由全局边定向决定, 在边界上并不保证朝外: 单位
+    正方形的结构化三角网格里恰有一半的边界边法向朝内 (fealpy 自带的
+    ``TriangleMesh.from_box`` 同样如此). 凡是把"外法向牵引" :math:`t = \sigma
+    \cdot n_{out}` 与该法向配对的计算, 都必须先取回这个符号, 否则朝内的那一半
+    边会整体反号.
+
+    符号按边重心相对于邻接单元重心的位置判定: 边界边只有一侧有单元, 故
+    ``face_to_cell()[:, 0]`` 即该单元.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        提供 ``face_unit_normal`` / ``face_to_cell`` / ``entity_barycenter`` 的网格.
+    index : Index, optional
+        边界边的选取 (布尔标记或下标). 缺省取全部边.
+
+    Returns
+    -------
+    TensorLike
+        形状与所选边一致的 :math:`\pm 1` 数组, 满足
+        ``sign * face_unit_normal() == n_out``.
+    """
+    normal = mesh.face_unit_normal()[index]
+    face2cell = mesh.face_to_cell()[index]
+    face_center = mesh.entity_barycenter('face')[index]
+    cell_center = mesh.entity_barycenter('cell')[face2cell[:, 0]]
+
+    return bm.sign(bm.sum((face_center - cell_center) * normal, axis=-1))
+
 
 def number_of_multiindex(p, d):
     if d == 1:
@@ -666,22 +697,32 @@ class HuZhangFESpace2d(FunctionSpace):
             val = bm.einsum('eid, ejd, d -> eij', gd_vals, eframe, num)
 
         elif dim_gd == 2:
-            #* Case B: 输入是牵引力向量 [gn, gt]
-            # 获取边界法向 n 和切向 t
+            #* Case B: 输入是外法向牵引向量 t = sigma . n_out
+            # 获取边界标架的法向 n_f 和切向 t_f
             # 二维下 face 即 edge, FEALPy 4.0.0 只保留 face_unit_normal
             en = mesh.face_unit_normal()[ebdflag]   # (NEb, 2)
             et = mesh.edge_unit_tangent()[ebdflag]  # (NEb, 2)
-            
+
+            # n_f 未必朝外 (见 boundary_outward_sign), 而自由度定义在标架
+            # (n_f, t_f) 上: 由 t = sigma . n_out = s * sigma . n_f 可得
+            #   sigma : n_f x n_f   = s * (t . n_f),
+            #   sigma : n_f x t_f   = s * (t . t_f),
+            # 即两个分量同乘符号 s. Case A 走 Voigt 内积, n_f 翻转两次自洽,
+            # 不需要这个符号; 唯独本分支的 n_f 只出现一次, 漏掉 s 会让朝内的
+            # 那一半边界边整体反号 —— 这是 O(1) 的数据错误, 不随网格加密消失.
+            sign = boundary_outward_sign(mesh, ebdflag)  # (NEb,)
+
             en = en[:, None, :]
             et = et[:, None, :]
-                        
+
             # 法向投影 (sigma_nn)
             val_n = bm.sum(gd_vals * en, axis=-1)
-            
+
             # 切向投影 (sigma_nt)
             val_t = bm.sum(gd_vals * et, axis=-1)
-            
+
             val = bm.stack([val_n, 2.0 * val_t], axis=-1)
+            val = val * sign[:, None, None]
 
         else:
             raise ValueError(f"Unknown gd output dimension: {dim_gd.shape[-1]}")
@@ -690,13 +731,63 @@ class HuZhangFESpace2d(FunctionSpace):
         # bcs = multi_index_matrix(p,1)/p 按 λ0 降序排列: q0 在 edge[:,0] 端,
         # qp 在 edge[:,1] 端, 内部位置也按全局边方向依次排列, 与
         # e2d = [e0dof(edge0 端), edge2idof(内部), e1dof(edge1 端)] 完全一致,
-        # 直接按列写入即可
-        uh[e2d] = val.reshape(NEb, -1)
+        # 直接按列对应即可.
+        #
+        # 顶点自由度被相邻两条边界边各写一次. 直接 ``uh[e2d] = val`` 是"后写者
+        # 胜": 胜者由全局边编号决定, 与几何无关. 牵引数据在该顶点两侧不连续时,
+        # 端点值被整个判给其中一侧 —— 例如 x=xmax 边上的贴片载荷, 下端点取到满
+        # 载而上端点取到零, 离散载荷失去镜像对称并产生净力矩, 误差是 O(1) 的一
+        # 个节点值, 不随 p 收敛. 这里改为对同一自由度的多次写入取平均: 数据连续
+        # 处各次写入本就相同, 平均是恒等操作; 数据间断处给出唯一的、与边编号无
+        # 关的对称值, 且贴片两端各取半值恰好保住载荷合力.
+        #
+        # 注意角点: 两条边标架不同的几何角点上, 各次写入表达在不同标架里, 取平
+        # 均与后写者胜同样没有良定义的极限. 该情形的正确处理是
+        # ``use_relaxation=True`` 的角点自由度分裂, 分裂后每条边各有独立自由度,
+        # 写入次数为 1, 本分支自动退化为直接赋值.
+        uh = self._average_boundary_writes(uh, e2d, val)
 
         isDDof = bm.zeros((uh.shape[0],), dtype=bm.bool)
         isDDof[e2d] = True
 
         return self.function(uh), isDDof
+
+    def _average_boundary_writes(self,
+                                 uh: TensorLike,
+                                 dof_index: TensorLike,
+                                 values: TensorLike,
+                                ) -> TensorLike:
+        """把边界迹值按自由度取平均写入 ``uh``, 消除重复写入的次序依赖.
+
+        Parameters
+        ----------
+        uh : TensorLike
+            形状 ``(gdof,)`` 的自由度向量, 未被 ``dof_index`` 覆盖的分量保持不变.
+        dof_index : TensorLike
+            形状 ``(NEb, ndof_per_edge)`` 的边界边自由度索引, 顶点自由度会在多
+            条边中重复出现.
+        values : TensorLike
+            与 ``dof_index`` 逐元素对应的迹值, 展平顺序须与之一致.
+
+        Returns
+        -------
+        TensorLike
+            写入后的自由度向量.
+
+        Notes
+        -----
+        对只被写一次的自由度 (边内部矩自由度) 结果与直接赋值相同.
+        """
+        flat_dof = bm.reshape(dof_index, (-1,))
+        flat_val = bm.reshape(values, (-1,))
+
+        accumulated = bm.zeros_like(uh)
+        multiplicity = bm.zeros_like(uh)
+        accumulated = bm.index_add(accumulated, flat_dof, flat_val)
+        multiplicity = bm.index_add(multiplicity, flat_dof, bm.ones_like(flat_val))
+
+        written = multiplicity > 0
+        return bm.set_at(uh, written, accumulated[written] / multiplicity[written])
 
     set_dirichlet_bc = boundary_interpolate
 
@@ -708,8 +799,11 @@ class HuZhangFESpace2d(FunctionSpace):
         """只强加边界牵引的切向分量 ``sigma_nt``, 法向分量保持自由.
 
         用于对称面: 对称面法向牵引 ``sigma_nn`` 自由, 切向牵引 ``sigma_nt`` 由
-        对称性约束为零. ``gd`` 输出牵引向量 ``[g_n, g_t]``, 本方法只取其切向
-        投影 ``g·t`` 并乘以 Voigt 切向迹因子 2, 法向迹自由度不进入边界标记.
+        对称性约束为零. ``gd`` 输出外法向牵引向量 ``t = sigma . n_out``, 本方法
+        只取其切向投影 ``t . t_f`` 并乘以 Voigt 切向迹因子 2, 法向迹自由度不进入
+        边界标记. 与 ``boundary_interpolate`` 的 Case B 同理, 标架法向 ``n_f``
+        未必朝外, 故还要乘上 ``boundary_outward_sign``; 对称面上 ``g_t = 0``,
+        符号错了也看不出来, 但换成非零切向牵引就会反号.
 
         与 ``boundary_interpolate`` 相同, 边界边自由度的排列为
         ``[q0 法向, q0 切向, q1 法向, q1 切向, ...]``, 故切向自由度是
@@ -738,11 +832,15 @@ class HuZhangFESpace2d(FunctionSpace):
             gd_vals = bm.broadcast_to(gd, (NEb, len(bcs), gd.shape[-1]))
 
         et = mesh.edge_unit_tangent()[ebdflag]  # (NEb, 2)
+        sign = boundary_outward_sign(mesh, ebdflag)  # (NEb,)
         val_t = bm.sum(gd_vals * et[:, None, :], axis=-1)  # (NEb, p+1)
-        val_t = 2.0 * val_t  # Voigt 切向迹因子
+        val_t = 2.0 * val_t * sign[:, None]  # Voigt 切向迹因子 x 外法向符号
 
         e2d_tangent = e2d[:, 1::2]  # (NEb, p+1) 切向自由度
-        uh[e2d_tangent] = val_t
+        # 与 boundary_interpolate 同理: 顶点切向自由度被相邻两条边重复写入, 取
+        # 平均以消除次序依赖. 对称面上 g_t 恒为零, 两次写入相同, 平均是恒等操作;
+        # 换成非零切向牵引时才体现差别.
+        uh = self._average_boundary_writes(uh, e2d_tangent, val_t)
 
         isDDof = bm.zeros((uh.shape[0],), dtype=bm.bool)
         isDDof[e2d_tangent] = True
@@ -1032,57 +1130,3 @@ class HuZhangFESpace2d(FunctionSpace):
         val = bm.einsum('cilm, cl -> cim', gphi, uh0[e2dof])
 
         return val
-
-
-def create_huzhang_checkerboard_mesh(
-    box: Sequence[float],
-    nx: int,
-    ny: int,
-    *,
-    device=None,
-) -> TriangleMesh:
-    """Create a rectangular triangle mesh compatible with 2D corner relaxation.
-
-    Each quadrilateral is split along alternating checkerboard diagonals.  For
-    positive even ``nx`` and ``ny``, every rectangular-domain corner is
-    incident to exactly two triangles with one shared interior edge, which is
-    the topology supported by the current Hu--Zhang corner-relaxation code.
-
-    This is a software constraint of the current relaxation implementation,
-    not a general restriction of the Hu--Zhang method.
-    """
-    for name, value in (("nx", nx), ("ny", ny)):
-        if isinstance(value, bool) or not isinstance(value, Integral):
-            raise TypeError(f"{name} must be an integer, received {value!r}")
-        if value <= 0 or value % 2 != 0:
-            raise ValueError(
-                f"{name} must be a positive even integer for Hu-Zhang "
-                f"corner relaxation, received {value}"
-            )
-
-    qmesh = QuadrangleMesh.from_box(
-        box=list(box),
-        nx=int(nx),
-        ny=int(ny),
-        device=device,
-    )
-    node = qmesh.entity("node")
-    quad = qmesh.entity("cell")
-
-    ix = bm.arange(int(nx), dtype=bm.int32, device=qmesh.device)[:, None]
-    iy = bm.arange(int(ny), dtype=bm.int32, device=qmesh.device)[None, :]
-    use_left_diagonal = ((ix + iy) % 2 == 0).reshape(-1)
-    left = quad[use_left_diagonal]
-    right = quad[~use_left_diagonal]
-
-    cell = bm.concatenate(
-        [
-            left[:, [1, 2, 0]],
-            left[:, [3, 0, 2]],
-            right[:, [0, 1, 3]],
-            right[:, [2, 3, 1]],
-        ],
-        axis=0,
-    )
-    return TriangleMesh(node, cell)
-    

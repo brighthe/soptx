@@ -18,6 +18,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
                 method: Optional[str]=None,
                 material: Optional[LinearElasticMaterial]=None,
                 penalty_scaling: Optional[str]='physical_h',
+                density_shear_ratio: Optional[TensorLike]=None,
+                density_coupling: str='harmonic',
             ) -> None:
         super().__init__()
 
@@ -26,6 +28,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         self.material = material
 
+        # 逐单元相对剪切模量 mu(rho)/mu_0, 形状 (NC,); None 表示不做密度定标,
+        # 惩罚系数退化为基材常数 (非密度型拓扑优化的原有行为). 详见
+        # _face_penalty_scale 的 Notes.
+        self.density_shear_ratio = density_shear_ratio
+        self.density_coupling = density_coupling
+
         # 稳定化项缩放律选择. 默认 'physical_h' 为论文式物理量纲缩放
         # (α=μ/L0²·hF, 已实测在 k=1,2 恢复细层收敛, 复现论文表 5.2);
         # 'gamma_hinv' 为旧缩放 (γ/hF, 净效果 O(γ) 无 hF 缩放, 细层发散),
@@ -33,6 +41,72 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         self.penalty_scaling = penalty_scaling
 
         self.assembly.set(method)
+
+    def _face_penalty_scale(self, space: _FS) -> Optional[TensorLike]:
+        """按相邻单元的相对剪切模量给每个待积分面的惩罚系数定标.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            位移空间, 提供网格与待积分面的索引.
+
+        Returns
+        -------
+        TensorLike or None
+            形状 ``(NF[index],)`` 的无量纲标度; ``density_shear_ratio`` 为 None
+            时返回 None, 此时惩罚系数保持基材常数.
+
+        Notes
+        -----
+        稳定化项必须与柔度块同步随密度缩放: 同一装配中柔度块为 ``O(1/E(rho))``,
+        惩罚块应为 ``O(mu(rho))``. 若惩罚系数固定取基材值, SIMP 空区
+        (``E(rho) ~ 1e-9 E_0``) 会被一个高出局部物理量级约 ``1/void_ratio`` 倍的
+        惩罚项过约束, 产生虚假应力.
+
+        惩罚系数逐面而相对刚度逐单元, 故需把两侧单元的相对剪切模量合成为面上的
+        一个标度, 由 ``density_coupling`` 选取:
+
+        - ``'harmonic'`` (默认): 调和平均 ``2 m_L m_R / (m_L + m_R)``, 异质界面的
+          标准加权; 任一侧趋零则整体趋零, 实体-空区界面按弱侧定标.
+        - ``'min'``: 取两侧较小者, 与调和平均同阶且更保守.
+        - ``'mean'``: 算术平均; 实体-空区界面上仍保留约一半的基材惩罚, 不足以
+          消除空区虚假应力, 仅供对照.
+
+        边界面的 ``face_to_cell`` 两列相同, 三种规则都退化为该单元自身的值.
+        ``rho ≡ 1`` 时三种规则均给出 1, 本方法逐位退化为原有的基材常数系数,
+        故制造解算例的收敛阶不受影响.
+        """
+        if self.density_shear_ratio is None:
+            return None
+
+        mesh = space.mesh
+        ratio = bm.asarray(self.density_shear_ratio)
+        NC = mesh.number_of_cells()
+        if ratio.shape[0] != NC:
+            raise ValueError(
+                f"density_shear_ratio 长度 {ratio.shape[0]} 与单元数 {NC} 不符"
+            )
+
+        index, _ = self.make_index(space)
+        face2cell = mesh.face_to_cell()[index]
+        m_left = ratio[face2cell[:, 0]]
+        m_right = ratio[face2cell[:, 1]]
+
+        if self.density_coupling == 'min':
+            return bm.minimum(m_left, m_right)
+
+        if self.density_coupling == 'mean':
+            return 0.5 * (m_left + m_right)
+
+        if self.density_coupling != 'harmonic':
+            raise ValueError(
+                f"不支持的密度耦合规则: {self.density_coupling}, "
+                "可选 'harmonic' / 'min' / 'mean'"
+            )
+
+        total = m_left + m_right
+        safe = bm.where(total > 0, total, bm.ones_like(total))
+        return 2.0 * m_left * m_right / safe
 
     def _cell_to_face_sign(self, mesh):
         """FEALPy 4.0.0 二维下 face 即 edge, 接口名为 cell_to_edge_sign."""
@@ -246,10 +320,18 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             else:
                 gamma = 0.01 * mu
 
-            KE = bm.einsum('f, fij -> fij', gamma * hF ** -1, integrand)
+            coefficient = gamma * hF ** -1
         else:
             alpha = mu / L0 ** 2
-            KE = bm.einsum('f, fij -> fij', alpha * hF, integrand)
+            coefficient = alpha * hF
+
+        # 两条缩放律的系数都取自基材; 密度型拓扑优化下再按两侧单元的相对剪切
+        # 模量逐面定标, 使惩罚块与柔度块同步随密度缩放 (见 _face_penalty_scale).
+        scale = self._face_penalty_scale(space)
+        if scale is not None:
+            coefficient = coefficient * scale
+
+        KE = bm.einsum('f, fij -> fij', coefficient, integrand)
 
         return KE
 

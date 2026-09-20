@@ -1,25 +1,39 @@
-"""Topology-optimization constraints."""
+"""拓扑优化约束的公共入口."""
 
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # 运行期由下面的 ``__getattr__`` 惰性加载; 但静态分析器 (Pyright/Pylance) 不会
-    # 解析模块级 ``__getattr__``, 于是这些类在 IDE 里退化成 ``Any``, 表现为无语义
-    # 高亮、无补全、无类型检查. 这段仅在类型检查期生效的导入把符号还给分析器,
-    # 运行期不执行, 因此惰性加载行为不受影响.
-    from .apparent_stress import ApparentStressConstraint as ApparentStressConstraint
-    from .vanishing_stress import VanishingStressConstraint as VanishingStressConstraint
+    from .exemption import (
+        apply_exemption as apply_exemption,
+        apply_passive_solid as apply_passive_solid,
+        build_exemption_mask as build_exemption_mask,
+        validate_exemption_mask as validate_exemption_mask,
+    )
+    from .huzhang_stress import HuZhangStressConstraint as HuZhangStressConstraint
+    from .lagrange_stress import LagrangeStressConstraint as LagrangeStressConstraint
+    from .stress_formulation import (
+        EpsilonRelaxedStressFormulation as EpsilonRelaxedStressFormulation,
+        PolynomialVanishingStressFormulation as PolynomialVanishingStressFormulation,
+        StressConstraintProtocol as StressConstraintProtocol,
+        StressRelaxationFormulation as StressRelaxationFormulation,
+    )
     from .volume import VolumeConstraint as VolumeConstraint
 
 _EXPORTS = {
-    "ApparentStressConstraint": (
-        ".apparent_stress",
-        "ApparentStressConstraint",
+    "apply_exemption": (".exemption", "apply_exemption"),
+    "apply_passive_solid": (".exemption", "apply_passive_solid"),
+    "build_exemption_mask": (".exemption", "build_exemption_mask"),
+    "validate_exemption_mask": (".exemption", "validate_exemption_mask"),
+    "HuZhangStressConstraint": (".huzhang_stress", "HuZhangStressConstraint"),
+    "LagrangeStressConstraint": (".lagrange_stress", "LagrangeStressConstraint"),
+    "StressConstraintProtocol": (".stress_formulation", "StressConstraintProtocol"),
+    "StressRelaxationFormulation": (".stress_formulation", "StressRelaxationFormulation"),
+    "PolynomialVanishingStressFormulation": (
+        ".stress_formulation", "PolynomialVanishingStressFormulation",
     ),
-    "VanishingStressConstraint": (
-        ".vanishing_stress",
-        "VanishingStressConstraint",
+    "EpsilonRelaxedStressFormulation": (
+        ".stress_formulation", "EpsilonRelaxedStressFormulation",
     ),
     "VolumeConstraint": (".volume", "VolumeConstraint"),
 }

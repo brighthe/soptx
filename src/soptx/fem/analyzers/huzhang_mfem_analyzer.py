@@ -27,7 +27,7 @@ from soptx.fem.integrators import (
     JumpPenaltyIntegrator,
     SourceIntegrator,
 )
-from soptx.fem.spaces import HuZhangFESpace
+from soptx.fem.spaces import HuZhangFESpace, boundary_outward_sign
 from soptx.materials import LinearElasticMaterial
 
 class HuZhangMFEMAnalyzer(BaseLogged):
@@ -257,6 +257,35 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return A
     
+    def _density_shear_ratio(self) -> Optional[TensorLike]:
+        """逐单元相对剪切模量 ``mu(rho) / mu_0``, 供跳量稳定化项定标.
+
+        Returns
+        -------
+        TensorLike or None
+            形状 ``(NC,)``; ``_E_rho`` 未缓存 (非密度型拓扑优化) 时返回 None.
+
+        Notes
+        -----
+        ``_calculate_stress_matrix`` 在密度型拓扑优化下缓存 ``_E_rho`` 与
+        ``_nu_rho``, 且在 ``assemble_stiff_matrix`` 中先于稳定化块执行, 故此处
+        读到的始终是当前密度对应的值. 只插值 E 时 ``nu_rho`` 等于基材泊松比,
+        本式退化为 ``E(rho) / E_0``.
+        """
+        E_rho = self._E_rho
+        if E_rho is None:
+            return None
+
+        nu_rho = self._nu_rho
+        if nu_rho is None:
+            nu_rho = self._material.poisson_ratio
+
+        E0 = self._material.youngs_modulus
+        nu0 = self._material.poisson_ratio
+
+        # mu = E / (2 (1 + nu)); 取比值时系数 2 相消
+        return (E_rho / (1.0 + nu_rho)) * ((1.0 + nu0) / E0)
+
     def _calculate_mix_matrix(self, enable_timing: bool=False) -> Union[CSRTensor, COOTensor]:
         """组装应力-位移耦合矩阵 B_σu"""
         start_time = time()
@@ -330,13 +359,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             valid_faces_idx = bm.nonzero(valid_faces_bool)[0]
 
             bform3 = BilinearForm(space_u)
-            # 跳量形式由构造参数 stabilization 决定, 默认矩阵跳量
+            # 跳量形式由构造参数 stabilization 决定, 默认矩阵跳量.
+            # density_shear_ratio 使惩罚块与柔度块同步随密度缩放; 非密度型拓扑
+            # 优化时为 None, 惩罚系数保持基材常数 (与历史行为一致).
             jpi_integrator = JumpPenaltyIntegrator(
                                     q=self._integration_order,
                                     threshold=valid_faces_idx,
                                     method=self._stabilization,
                                     material=self._material,
                                     penalty_scaling=self._stabilization_scaling,
+                                    density_shear_ratio=self._density_shear_ratio(),
                                 )
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr')
@@ -557,7 +589,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             return bm.zeros(gdof, dtype=bm.float64, device=space_sigma.device)
 
         e2c = mesh.face_to_cell()[bdedge]           # (NBF, 3): [cell, neighbor, loc]
-        en = mesh.face_unit_normal()[bdedge]        # (NBF, GD)
+        # <u_D, tau . n> 要的是外法向; face_unit_normal() 由全局边定向决定,
+        # 边界上有一半朝内, 必须乘回符号 (u_D = 0 时看不出来, 非齐次位移边界会反号)
+        en = mesh.face_unit_normal()[bdedge] * boundary_outward_sign(mesh, bdedge)[:, None]  # (NBF, GD)
         edge_measure = mesh.entity_measure('edge')[bdedge]
 
         qf = mesh.quadrature_formula(self._integration_order, 'edge')
@@ -856,7 +890,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         ----------
         rhs : (gdofs_stress,)
             仅包含应力自由度部分的伴随载荷向量，
-            由 ApparentStressConstraint.compute_adjoint_load 计算得到.
+            由 HuZhangStressConstraint.compute_adjoint_load 计算得到.
         rho_val : 密度场（仅在缓存失效时重新组装矩阵时使用）
         
         Returns
@@ -920,6 +954,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         state : 状态字典，包含位移场等信息
         rho_val : 密度场（用于应力惩罚，拓扑优化时需要）
         integration_order : 积分阶次
+            默认为 1, 单纯形上即单元形心单点. 局部应力约束不传该参数, 故此
+            默认值就是约束的评价位置, 属问题定义而非数值参数; 与
+            LagrangeFEMAnalyzer 同口径, 保证两族在相同位置比较.
         
         Returns
         -------
@@ -927,6 +964,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             - 'stress_apparent': 积分点处的表观应力张量 (NC, NQ, NS)
         """
         if integration_order is None:
+            # 单点 = 单元形心; 这是应力约束的评价位置定义, 见上方 docstring.
             integration_order = 1
 
         if state is None:
@@ -1039,12 +1077,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         qf = mesh.quadrature_formula(integration_order, 'cell')
         bcs, ws = qf.get_quadrature_points_and_weights()
                 
-        phi = space.basis(bcs) # (NC, NQ, LDOF, NS)
-        
-        cell2dof = space.cell_to_dof()  # (NC, LDOF)
-        stress_cell = stress_dof[cell2dof]  # (NC, LDOF)
-        
-        stress_vector = bm.einsum('cqls, cl -> cqs', phi, stress_cell) # (NC, NQ, NS)
+        # 原生 value 负责松弛坐标到基函数坐标的变换, 避免遗漏 TM.
+        stress_vector = space.value(stress_dof[:], bcs) # (NC, NQ, NS)
 
         if stress_vector.shape[-1] == 3:
             perm_indices = [0, 2, 1]

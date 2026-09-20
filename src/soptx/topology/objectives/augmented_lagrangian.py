@@ -1,13 +1,11 @@
+import math
 from typing import Optional, Literal, Union, Dict, TYPE_CHECKING
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.functionspace import Function
 
 from soptx.core import BaseLogged, timer
-from soptx.topology.constraints import (
-    ApparentStressConstraint,
-    VanishingStressConstraint,
-)
+from soptx.topology.constraints.stress_formulation import StressConstraintProtocol
 from soptx.topology.objectives.volume import VolumeObjective
 
 # 使用 TYPE_CHECKING 避免循环导入，仅用于类型提示
@@ -17,7 +15,7 @@ if TYPE_CHECKING:
 class AugmentedLagrangianObjective(BaseLogged):
     def __init__(self,
                 volume_objective: VolumeObjective, 
-                stress_constraint: Union[VanishingStressConstraint, ApparentStressConstraint],
+                stress_constraint: StressConstraintProtocol,
                 options: 'ALMMMAOptions',
                 initial_lambda: Optional[TensorLike] = None,
                 diff_mode: Literal["auto", "manual"] = "manual",
@@ -40,8 +38,6 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         self._volume_objective = volume_objective
         self._stress_constraint = stress_constraint
-
-        self._is_apparent = isinstance(stress_constraint, ApparentStressConstraint)
 
         self._options = options
 
@@ -67,6 +63,19 @@ class AugmentedLagrangianObjective(BaseLogged):
         self.mu = float(options.mu_0)
         # 最大罚因子 μ_max
         self.mu_max = float(options.mu_max)
+        # 乘子安全阈 λ_max (None 表示不设上限, 复现无阈更新); 用 getattr 读取,
+        # 使单测可用 SimpleNamespace 注入不含该字段的选项对象。
+        lambda_max = getattr(options, 'lambda_max', None)
+        self.lambda_max = None if lambda_max is None else float(lambda_max)
+        if self.lambda_max is not None and not (
+                math.isfinite(self.lambda_max) and self.lambda_max > 0):
+            raise ValueError("lambda_max 必须是有限正数或 None.")
+        # 最近一次 update_multipliers() 中被 λ_max 截断的乘子个数 (诊断量)
+        self.last_capped_count = 0
+
+        # 罚因子条件放大所需的违反度缓存 (由优化器通过 set_current_violation 推入)
+        self._prev_violation = None
+        self._pending_violation = None
 
         # 拉格朗日乘子 lambda 的初始化
         if initial_lambda is not None:
@@ -152,19 +161,13 @@ class AugmentedLagrangianObjective(BaseLogged):
         if state is None:
             state = {}
         
-        # --- 确保正向计算已完成，缓存 g、h 及 state 中间量 ---
-        if self._is_apparent:
-            if self._cache_g is None or 'stiffness_ratio' not in state:
-                self.fun(density, state)
-        else:
-            if self._cache_g is None or 'stiffness_ratio' not in state \
-                    or 'stress_deviation' not in state:
-                self.fun(density, state)
+        # 每次刷新当前状态下的约束值与 AL 权重, 不检查具体模型的状态键.
+        # 有限元状态应由调用方提供; 约束对象负责准备应力中间量.
+        self.fun(density=density, state=state)
 
         # ------------------------------------------------------------------ #
         # 第一步：准备公共中间量
         # ------------------------------------------------------------------ #
-        slim = self._stress_constraint._stress_limit
         g    = self._cache_g   # (NC, NQ) 或 (NC, n_sub, NQ)
         h    = self._cache_h   # (NC, NQ) 或 (NC, n_sub, NQ)
 
@@ -172,19 +175,10 @@ class AugmentedLagrangianObjective(BaseLogged):
         mask = g > (-self.lamb / self.mu)  # 与 g、h 同形
 
         # ------------------------------------------------------------------ #
-        # 第二步：计算 dP/d(σ^vM)，用于构造伴随载荷
-        #   位移元: ∂g/∂σ^vM = m_E · (3Λ² + 1) / σ_lim
-        #   混合元: ∂g/∂σ^vM = 1 / σ_lim
+        # 第二步：计算 dP/d(σ^vM)，用于构造伴随载荷. 具体约束模型
+        # 的 ∂g/∂σ^vM 由约束对象给出, 避免按有限元类型猜测约束形式.
         # ------------------------------------------------------------------ #
-        if self._is_apparent:
-            dhdVM_val = bm.ones_like(g) / slim
-        else:
-            s = state['stress_deviation']
-            m_E = state['stiffness_ratio']
-            if self._is_multiresolution:
-                dhdVM_val = m_E[:, :, None] * (3 * s**2 + 1) / slim
-            else:
-                dhdVM_val = m_E[:, None] * (3 * s**2 + 1) / slim
+        dhdVM_val = self._stress_constraint.compute_gradient_wrt_von_mises(state)
 
         dPenaldVM = (self.lamb + self.mu * h) * bm.where(mask, dhdVM_val, 0.0)
 
@@ -192,9 +186,8 @@ class AugmentedLagrangianObjective(BaseLogged):
             t.send('罚函数偏导数')
 
         # ------------------------------------------------------------------ #
-        # 第三步：计算显式偏导数 ∂P/∂m_E|_explicit
-        #   位移元: ∂g/∂m_E = Λ³ + Λ
-        #   混合元: ∂g/∂m_E = -(1 - ε)
+        # 第三步: 由约束接口计算固定状态时的显式偏导数 dP/dm_E.
+        # 松弛形式及原生应力表示的差异由约束对象处理.
         # ------------------------------------------------------------------ #
         dgdm_E = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state)
         dPenaldm_E_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdm_E, 0.0)  # (NC, NQ) 或 (NC, n_sub, NQ)
@@ -237,16 +230,9 @@ class AugmentedLagrangianObjective(BaseLogged):
                                                             material=self._material, rho_val=density
                                                         ) / self._material.youngs_modulus  # (NC,) 或 (NC, n_sub)
 
-        if self._is_apparent:
-            # 混合元:
-            #   显式项: (∂P/∂m_E|_explicit) · dm_E/dρ
-            #   隐式项: (1/m_E²) · λ_σ^T A⁰ Σ · m_E' = dPenaldm_E_implicit · dm_E_drho
-            #           (compute_implicit_sensitivity_term 已预除 m_E²，外部只需乘 m_E')
-            dP_drho = dPenaldm_E_explicit_reduced * dm_E_drho + dPenaldm_E_implicit * dm_E_drho           # (NC,)
-        else:
-            # 位移元: 显式与隐式通过同一 dm_E/dρ 串联
-            dP_drho = (dPenaldm_E_explicit_reduced + dPenaldm_E_implicit) * dm_E_drho  # (NC,) 或 (NC, n_sub)
-            
+        # 隐式项已由有限元适配器统一为对 m_E 的贡献, 包括混合元的 m_E^-2 因子.
+        dP_drho = (dPenaldm_E_explicit_reduced + dPenaldm_E_implicit) * dm_E_drho
+
         # ------------------------------------------------------------------ #
         # 第六步：归一化并组装总梯度
         #   dJ/dρ = ∂f/∂ρ + (1/N) · dP/dρ
@@ -267,6 +253,64 @@ class AugmentedLagrangianObjective(BaseLogged):
 
         return dJ_drho
 
+    def lagrangian_jac(
+        self,
+        density: Union[Function, TensorLike],
+        state: Optional[dict] = None,
+    ) -> TensorLike:
+        """计算原约束问题 Lagrangian 对物理密度的梯度.
+
+        使用
+
+        ``L = f_V + (1 / N_c) * sum(lambda_j * g_j)``
+
+        中的当前 AL 乘子 ``lambda``. 该梯度不含增广罚项 ``mu`` 和截断函数
+        ``h``，用于原问题的一阶最优性诊断，不能以 AL 子问题梯度替代.
+
+        Parameters
+        ----------
+        density : Function or TensorLike
+            当前物理密度.
+        state : dict, optional
+            与当前物理密度一致的状态解.
+
+        Returns
+        -------
+        TensorLike
+            原 Lagrangian 关于物理密度的梯度.
+        """
+        if state is None:
+            state = {}
+        self.fun(density=density, state=state)
+
+        g = self._cache_g
+        weights = bm.ones_like(g) * self.lamb
+        dL_dVM = weights * self._stress_constraint.compute_gradient_wrt_von_mises(state)
+        dL_dm_explicit = weights * self._stress_constraint.compute_partial_gradient_wrt_mE(
+            state=state
+        )
+
+        adjoint_load = self._stress_constraint.compute_adjoint_load(
+            dPenaldVM=dL_dVM,
+            state=state,
+        )
+        adjoint_vector = self._analyzer.solve_adjoint(rhs=adjoint_load, rho_val=density)
+        dL_dm_implicit = self._stress_constraint.compute_implicit_sensitivity_term(
+            adjoint_vector,
+            state,
+        )
+
+        dL_dm_explicit = bm.sum(dL_dm_explicit, axis=-1)
+        dm_E_drho = self._interpolation_scheme.interpolate_material_derivative(
+            material=self._material,
+            rho_val=density,
+        ) / self._material.youngs_modulus
+        dconstraint_drho = (dL_dm_explicit + dL_dm_implicit) * dm_E_drho
+
+        dvolume_drho = self._volume_objective.jac(density=density, state=state)
+        n_constraints = g.numel() if hasattr(g, 'numel') else g.size
+        return dvolume_drho + dconstraint_drho / n_constraints
+
     def _check_gradient_magnitude_balance(self, 
                                           dVol_drho: TensorLike, 
                                           dP_drho_norm: TensorLike, 
@@ -281,7 +325,8 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 计算比值 (加入极小数避免除零报错)
         ratio = max_pen_grad / (max_vol_grad + 1e-12)
         
-        print(f"\n[{'混合元' if self._is_apparent else '位移元'}] --- ALM 迭代步 {step_k} 梯度量级诊断 ---")
+        discretization = getattr(self._stress_constraint, "discretization_name", "应力约束")
+        print(f"\n[{discretization}] --- ALM 迭代步 {step_k} 梯度量级诊断 ---")
         print(f"最大体积梯度 ||dVol_drho||_inf   : {max_vol_grad:.4e}")
         print(f"最大惩罚梯度 ||dP_drho_norm||_inf: {max_pen_grad:.4e}")
         print(f"梯度量级比值 (Penal / Vol)       : {ratio:.4f}")
@@ -298,92 +343,21 @@ class AugmentedLagrangianObjective(BaseLogged):
             print("💡 调整建议：保持当前 mu_0 不变。")
         print("-" * 50 + "\n")
 
-    # def _manual_differentiation_backup(self, 
-    #                     density: Union[Function, TensorLike],
-    #                     state: Optional[dict] = None, 
-    #                     enable_timing: bool = False, 
-    #                     **kwargs
-    #                 ) -> TensorLike:
-    #     # --- 缓存检查与状态同步 ---
-    #     if (self._cache_g is None) or ('stiffness_ratio' not in state) or ('stress_deviation' not in state):
-    #         self.fun(density, state)
-        
-    #     # --- 获取缓存的物理量 ---
-    #     slim = self._stress_constraint._stress_limit
-    #     E = state['stiffness_ratio']  # 单分辨率: (NC,)         | 多分辨率: (NC, n_sub)
-    #     s = state['stress_deviation'] # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
-
-    #     g = self._cache_g             # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
-    #     h = self._cache_h             # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
-
-    #     # --- 确定激活集 a1 (Mask) ---
-    #     #  逻辑: 当 g > -lambda/mu 时，h = g, 此时约束激活（或违反）
-    #     limit_term = -self.lamb / self.mu
-    #     mask = g > limit_term         # 单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
-
-    #     # --- 计算显式灵敏度 ---
-    #     #  计算 dPenaldVM (罚函数对 Von Mises 应力的偏导数)
-    #     #  单分辨率: (NC, NQ)      | 多分辨率: (NC, n_sub, NQ)
-    #     if self._is_multiresolution:
-    #         dhdVM_val = E[:, :, None] * (3 * s**2 + 1) / slim  # (NC, n_sub, NQ)
-    #     else:
-    #         dhdVM_val = E[:, None] * (3 * s**2 + 1) / slim     # (NC, NQ)
-    #     # dhdVM_val = E[:, None] * (3 * s**2 + 1) / slim
-    #     dhdVM = bm.where(mask, dhdVM_val, 0.0)
-    #     dPenaldVM = (self.lamb + self.mu * h) * dhdVM  
-
-    #     #  计算 dPenal/dE 的显式部分
-    #     #  单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
-    #     dgdE = self._stress_constraint.compute_partial_gradient_wrt_mE(state=state)
-    #     dPenaldE_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdE, 0.0) 
-
-    #     # --- 伴随法 ---        
-    #     #  计算伴随载荷 F_adj = - (dVM/dU)^T * dPenaldVM
-    #     adjoint_load = self._stress_constraint.compute_adjoint_load(dPenaldVM=dPenaldVM, state=state) # (gdofs, )
-        
-    #     # 解伴随方程: K * psi = F_adj
-    #     adjoint_vector = self._analyzer.solve_adjoint(rhs=adjoint_load, rho_val=density) # (gdofs, )
-        
-    #     # --- 计算隐式灵敏度 ---
-    #     # dPenal/dE_implicit = psi^T * (dF_int / dE)
-    #     dPenaldE_implicit = self._stress_constraint.compute_implicit_sensitivity_term(adjoint_vector, state)  # (NC, )
-
-    #     # --- 显式项归约: 对 NQ 维度求和 (NQ 始终在最后一维) ---
-    #     dPenaldE_explicit_reduced = bm.sum(dPenaldE_explicit, axis=-1) # 单分辨率: (NC,) | 多分辨率: (NC, n_sub)
-
-    #     # --- 总灵敏度 (关于刚度变量 E) ---
-    #     if self._is_multiresolution:
-    #         dPenaldE_total = dPenaldE_explicit_reduced + dPenaldE_implicit[:, None]  # (NC, n_sub)
-    #     else:
-    #         dPenaldE_total = dPenaldE_explicit_reduced + dPenaldE_implicit  # (NC,)
-    #     # dPenaldE_total = dPenaldE_explicit_reduced + dPenaldE_implicit # 单分辨率: (NC,) | 多分辨率: (NC, n_sub)
-
-    #     # --- 链式法则: dPenal/drho = dPenal/dE * dE/drho ---
-    #     # 获取 dE/drho (取决于具体的插值模型)
-    #     dE_drho_absolute = self._interpolation_scheme.interpolate_material_derivative(
-    #                                                 material=self._material, 
-    #                                                 rho_val=density
-    #                                             )  # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
-    #     E0 = self._material.youngs_modulus
-    #     dE_drho = dE_drho_absolute / E0    # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
-
-    #     dP_drho = dPenaldE_total * dE_drho # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
-
-    #     # 计算主目标函数 (体积) 的梯度
-    #     dVol_drho = self._volume_objective.jac(density=density, state=state) # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
-
-    #     # 归一化处理
-    #     dP_drho_normalized = dP_drho / self._NC  # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
-
-    #     # 组装总拉格朗日函数的梯度 (关于物理密度 rho)
-    #     dJ_drho = dVol_drho + dP_drho_normalized # 单分辨率: (NC, ) | 多分辨率: (NC*n_sub, )
-
-    #     return dJ_drho
-    
     def update_multipliers(self) -> None:
         """更新拉格朗日乘子 λ 和 罚因子 μ.
-        
+
         此方法应在每一轮 ALM 外层迭代结束时调用.
+
+        乘子更新采用带安全阈的投影形式 (safeguarded augmented Lagrangian,
+        Andreani, Birgin, Martinez & Schuverdt 2007; Birgin & Martinez 2014):
+
+            λ^(k+1) = P_[0, λ_max](λ^(k) + μ^(k) h),
+
+        其中 h = max(g, -λ/μ) 保证 λ^(k) + μ^(k) h >= 0, 下界投影自动成立, 只需
+        对上界截断. ``lambda_max`` 为 None 时退化为无阈更新 (今日行为). 有阈时,
+        被约束长期轻微违反且设计无法改动的单元 (滤波尾部灰度单元) 上 λ 不再随
+        外层步线性爬升: 若约束可满足, 极限点仍是 KKT 点; 若不可满足, 迭代收敛到
+        不可行度的驻点而非发散.
         """
         if self._cache_h is None:
             raise RuntimeError(
@@ -394,7 +368,46 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 1. 更新拉格朗日乘子 λ
         # λ^(k+1) = λ^(k) + μ^(k) · h
         self.lamb = self.lamb + self.mu * self._cache_h
-        
+        lambda_max = getattr(self, 'lambda_max', None)
+        if lambda_max is not None:
+            capped = self.lamb > lambda_max
+            self.last_capped_count = int(bm.sum(capped))
+            self.lamb = bm.minimum(self.lamb, lambda_max)
+        else:
+            self.last_capped_count = 0
+
         # 2. 更新罚因子 μ
         # μ^(k+1) = min(α · μ^(k), μ_max) [cite: 303]
-        self.mu = min(self._options.alpha * self.mu, self.mu_max)
+        if self._should_grow_penalty():
+            self.mu = min(self._options.alpha * self.mu, self.mu_max)
+
+    def set_current_violation(self, value) -> None:
+        """由优化器在 update_multipliers() 之前推入本外层步的最大相对超限量.
+
+        目标函数自身没有 rho / state, 无法调用 compute_relative_violation,
+        故违反度必须从优化器侧推入, 而不是在此重建. 取值在 0 处截断:
+        真正可行后 v = 0, 条件规则下 mu 冻结.
+        """
+        self._pending_violation = None if value is None else max(float(value), 0.0)
+
+    def _should_grow_penalty(self) -> bool:
+        """判断本外层步是否放大罚因子 mu.
+
+        'unconditional' (默认) 复现今日行为: 每个外层步无条件放大.
+        'conditional': 仅当不可行度未取得足够下降 (v > tau * v_prev) 时放大.
+        """
+        rule = getattr(self._options, 'mu_update_rule', 'unconditional')
+        if rule != 'conditional':
+            return True
+
+        viol = self._pending_violation
+        prev = self._prev_violation
+        self._prev_violation = viol if viol is not None else prev
+        self._pending_violation = None
+
+        if viol is None or prev is None:
+            return True
+
+        tau = getattr(self._options, 'mu_violation_ratio', 0.5)
+
+        return viol > tau * prev

@@ -8,7 +8,10 @@ import pytest
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import TriangleMesh
 
-from soptx.fem import create_huzhang_checkerboard_mesh
+from soptx.fem import (
+    create_huzhang_checkerboard_mesh,
+    create_huzhang_symmetric_single_diagonal_mesh,
+)
 from soptx.fem.spaces import HuZhangFESpace
 
 
@@ -48,11 +51,7 @@ def test_checkerboard_mesh_has_alternating_diagonals_and_two_cell_corners() -> N
         assert matches.size == 1
         assert np.count_nonzero(cells == int(matches[0])) == 2
 
-    edges = bm.to_numpy(mesh.entity("edge"))
-    geometric_edges = {
-        tuple(sorted(tuple(nodes[node_id]) for node_id in edge))
-        for edge in edges
-    }
+    geometric_edges = _geometric_edges(mesh)
     for ix in range(2):
         for iy in range(2):
             x0, x1 = ix / 2, (ix + 1) / 2
@@ -62,7 +61,113 @@ def test_checkerboard_mesh_has_alternating_diagonals_and_two_cell_corners() -> N
                 if (ix + iy) % 2 == 0
                 else ((x0, y1), (x1, y0))
             )
-            assert tuple(sorted(diagonal)) in geometric_edges
+            assert _edge_key(diagonal) in geometric_edges
+
+
+_COORD_DECIMALS = 12
+
+
+def _edge_key(points) -> tuple:
+    """把一条边的两个端点坐标量化成可用于集合比较的键.
+
+    ``QuadrangleMesh.from_box`` 的结点坐标由 ``linspace`` 生成, 与测试侧按
+    ``i / n`` 直接算出的期望坐标走的是不同浮点路径; 当步长不可精确表示
+    (``n`` 取 3、6 等) 时两者相差 1 ULP, 直接做元组相等比较会漏判。两侧统一
+    量化到 12 位小数后再比较, 结果与 ``nx``、``ny`` 的取值无关。
+
+    Parameters
+    ----------
+    points : iterable of (float, float)
+        边的两个端点坐标。
+
+    Returns
+    -------
+    tuple
+        排序后的量化端点对。
+    """
+    return tuple(sorted(
+        (round(float(x), _COORD_DECIMALS), round(float(y), _COORD_DECIMALS))
+        for x, y in points
+    ))
+
+
+def _geometric_edges(mesh: TriangleMesh) -> set:
+    nodes = bm.to_numpy(mesh.entity("node"))
+    edges = bm.to_numpy(mesh.entity("edge"))
+    return {
+        _edge_key(nodes[node_id] for node_id in edge)
+        for edge in edges
+    }
+
+
+@pytest.mark.parametrize(("nx", "ny"), [(2, 2), (4, 3), (6, 4)])
+def test_symmetric_single_diagonal_mesh_is_mirror_symmetric_with_two_cell_corners(
+    nx: int, ny: int
+) -> None:
+    bm.set_backend("numpy")
+    mesh = create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
+    assert mesh.number_of_cells() == 2 * nx * ny
+
+    geometric_edges = _geometric_edges(mesh)
+    for ix in range(nx):
+        for iy in range(ny):
+            x0, x1 = ix / nx, (ix + 1) / nx
+            y0, y1 = iy / ny, (iy + 1) / ny
+            slash = _edge_key(((x0, y0), (x1, y1)))
+            backslash = _edge_key(((x0, y1), (x1, y0)))
+            use_slash = ix < nx // 2
+            if (ix, iy) in ((0, ny - 1), (nx - 1, ny - 1)):
+                use_slash = not use_slash
+            assert (slash if use_slash else backslash) in geometric_edges
+            assert (backslash if use_slash else slash) not in geometric_edges
+
+    # 镜像 x -> 1 - x 后的边集合与原边集合相同 (端点坐标已由 _edge_key 量化)
+    def mirror(edge):
+        return _edge_key((1.0 - x, y) for x, y in edge)
+
+    assert {mirror(edge) for edge in geometric_edges} == geometric_edges
+
+    nodes = bm.to_numpy(mesh.entity("node"))
+    cells = bm.to_numpy(mesh.entity("cell"))
+    for corner in bm.to_numpy(_box_corners()):
+        matches = np.flatnonzero(np.all(np.isclose(nodes, corner), axis=1))
+        assert matches.size == 1
+        assert np.count_nonzero(cells == int(matches[0])) == 2
+
+
+@pytest.mark.parametrize(("nx", "ny"), [(3, 2), (5, 4)])
+def test_symmetric_single_diagonal_mesh_requires_even_nx(nx: int, ny: int) -> None:
+    bm.set_backend("numpy")
+    with pytest.raises(ValueError, match="even"):
+        create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
+
+
+@pytest.mark.parametrize(("nx", "ny"), [(0, 2), (2, 1), (2, 0)])
+def test_symmetric_single_diagonal_mesh_requires_at_least_two_subdivisions(nx: int, ny: int) -> None:
+    bm.set_backend("numpy")
+    with pytest.raises(ValueError, match=">= 2"):
+        create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
+
+
+def test_symmetric_single_diagonal_mesh_supports_two_cell_corner_relaxation() -> None:
+    bm.set_backend("numpy")
+    mesh = create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=4, ny=2)
+    conforming = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=False)
+    relaxed = HuZhangFESpace(
+        mesh=mesh,
+        p=2,
+        use_relaxation=True,
+        corners=_box_corners(),
+    )
+    assert relaxed.NCP == 4
+    assert relaxed.number_of_global_dofs() == conforming.number_of_global_dofs() + 4
+    assert relaxed.TM.shape == (
+        relaxed.number_of_global_dofs(),
+        relaxed.number_of_global_dofs(),
+    )
+    boundary_edges = bm.to_numpy(mesh.boundary_edge_flag())
+    for middle_edge in bm.to_numpy(relaxed.corner["to_midedge"]):
+        assert not boundary_edges[int(middle_edge)]
 
 
 @pytest.mark.parametrize(
