@@ -26,6 +26,9 @@
 #   2B. bearing-incompressible        轴承装置        120x40  k=2,3,4    nu=0.4999
 #       另立 id 的理由 = nu 属 A 问题层, 改它等于换题目 (可压缩基准组 vs
 #       近不可压实验组, 用于查 LFEM 体积锁定)
+#       两条 case 注册网格均为 triangle-single-diagonal-symmetric (对称单向对角,
+#       P1 位移元的经典闭锁构型), 优化器均为 OC (工况 1 为 MMA);
+#       supplementary_orders = [1] 放开 lfem p=1 作同位移阶次的闭锁对照。
 #
 #   3.  cantilever-middle-2d-stress   悬臂梁应力约束   80x40  k=2,3,4    (注册默认网格)
 #       网格加密不另立 id, 用覆盖参数跑:
@@ -98,7 +101,9 @@ plane_type = "plane_stress"
 
 # -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
 [cases.discretization]
-# 网格类型 (台账字段, --list 显示用): 本文算例一律用 Hu--Zhang 兼容的棋盘格交叉三角形网格.
+# 网格类型 (进 config, 具名开关 --mesh-type): triangle-checkerboard = 棋盘格交替对角
+# (nx, ny 须为偶数; 本文算例默认); triangle-single-diagonal-symmetric = 左半 / 右半 \
+# 镜像对称单向对角 + 两个顶角落翻转 (nx 须为偶数), 低阶位移元体积闭锁对照用它.
 mesh_type = "triangle-checkerboard"
 nx = 80
 ny = 20
@@ -109,7 +114,7 @@ supplementary_orders = [1]
 use_relaxation = true
 solve_method = "mumps"
 
-# -- C 拓扑建模 (前四项) + D 算法 (其余) --
+# -- C 拓扑建模 + D 算法 (optimizer 起) --
 [cases.optimization]
 volume_fraction = 0.4
 filter_type = "density"
@@ -117,7 +122,15 @@ filter_radius = 2.4
 interpolation_method = "msimp"
 penalty_factor = 3.0
 void_youngs_modulus = 1.0e-9
-optimizer = "oc"
+# nu_0 = 0.4 为可压缩材料, 只插值 Young 模量。显式登记而不留给 auto: auto 按材料
+# 自动决定, 若日后把 poisson_ratio 调到 0.4999 做变体, 会静默切成 E+nu, 而本条是
+# 柔顺度基准, 插值对象不应随材料变。
+interpolation_variables = "E"
+optimizer = "mma"   # 论文 5.2.1 节正文用 MMA; OC 对照用 --optimizer oc, 取值进目录名
+# 与 MMAOptions 现行缺省同值, 显式登记是为了钉住: 上游改缺省时本条运行语义不变,
+# 且 results_analysis.md 5.2.1 节所记取值有注册表兜底。扫描仍走 --override。
+move_limit = 0.2
+asymp_init = 0.5
 max_iterations = 500
 change_tolerance = 1.0e-2
 
@@ -151,14 +164,19 @@ plane_type = "plane_strain"
 
 # -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
 [cases.discretization]
-mesh_type = "triangle-checkerboard"
+# 对称单向对角网格: 左半 /, 右半 \, 与左右对称的轴承问题同对称性;
+# lfem p=1 在该剖分上出现经典体积闭锁, 棋盘格剖分 (triangle-checkerboard) 则基本不闭锁,
+# 棋盘格对照用 --mesh-type triangle-checkerboard 覆盖, 取值进产物目录名。
+mesh_type = "triangle-single-diagonal-symmetric"
 nx = 120
 ny = 40
 comparison_orders = [2]
+# lfem p=1 只作闭锁对照, 不进缺省也不进 --full; huzhang k=1 拓扑优化不可用 (P0 位移无刚体转动)。
+supplementary_orders = [1]
 use_relaxation = true
 solve_method = "mumps"
 
-# -- C 拓扑建模 (前四项) + D 算法 (其余) --
+# -- C 拓扑建模 + D 算法 (optimizer 起) --
 [cases.optimization]
 volume_fraction = 0.35
 filter_type = "density"
@@ -166,8 +184,15 @@ filter_radius = 2.0
 interpolation_method = "msimp"
 penalty_factor = 3.0
 void_youngs_modulus = 1.0e-9
+# 插值对象只有 Young 模量, Poisson 比固定为 0.3 (论文 5.2.2 节: 可压缩基准组不插值 nu)
+interpolation_variables = "E"
+# 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 产物见
+# outputs/archive/bearing-incompressible-20260914-mma/); MMA 对照用 --optimizer mma, 取值进目录名。
 optimizer = "oc"
-max_iterations = 500
+# 与 OCOptions 现行缺省同值, 显式登记是为了钉住上游缺省变动 (论文 5.2.2 节: m = 0.2)。
+# 阻尼指数 eta_OC = 0.5 不经注册表, 硬编码于 pipeline.py; asymp_init 仅 MMA 读取, 不登记。
+move_limit = 0.2
+max_iterations = 1000
 change_tolerance = 1.0e-2
 
 # ---------------------------------------------------------------------
@@ -200,14 +225,19 @@ plane_type = "plane_strain"
 
 # -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
 [cases.discretization]
-mesh_type = "triangle-checkerboard"
+# 注册网格为对称单向对角 (同 2A): lfem p=1 / lfem p=2 / huzhang k=2,3 在同一网格上并排跑。
+# 棋盘格对照用 --mesh-type triangle-checkerboard 覆盖, 取值进产物目录名。
+# 注册值切换前 (棋盘格 + OC) 的全部产物已移至 outputs/archive/bearing-*-20260914-legacy/,
+# 两条 case 的 outputs/ 目录自 2026-09-14 起只含新注册值下的结果。
+mesh_type = "triangle-single-diagonal-symmetric"
 nx = 120
 ny = 40
 comparison_orders = [2, 3, 4]
+supplementary_orders = [1]
 use_relaxation = true
 solve_method = "mumps"
 
-# -- C 拓扑建模 (前四项) + D 算法 (其余) --
+# -- C 拓扑建模 + D 算法 (optimizer 起) --
 [cases.optimization]
 volume_fraction = 0.35
 filter_type = "density"
@@ -215,8 +245,18 @@ filter_radius = 2.0
 interpolation_method = "msimp"
 penalty_factor = 3.0
 void_youngs_modulus = 1.0e-9
+# 论文 5.2.2 节: 近不可压缩组 E 与 nu 双参数插值, 式 (4.3) 取 nu_void=0.3, p_nu=1;
+# LFEM 与 Hu--Zhang 同一材料模型. 想对照 "只插值 E" 的旧做法用 --interpolation E.
+interpolation_variables = "E+nu"
+nu_penalty_factor = 1.0
+void_poisson_ratio = 0.3
+# 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 产物见
+# outputs/archive/bearing-incompressible-20260914-mma/); MMA 对照用 --optimizer mma, 取值进目录名。
 optimizer = "oc"
-max_iterations = 500
+# 与 OCOptions 现行缺省同值, 显式登记是为了钉住上游缺省变动 (论文 5.2.2 节: m = 0.2)。
+# 阻尼指数 eta_OC = 0.5 不经注册表, 硬编码于 pipeline.py; asymp_init 仅 MMA 读取, 不登记。
+move_limit = 0.2
+max_iterations = 1000
 change_tolerance = 1.0e-2
 
 # ---------------------------------------------------------------------
@@ -251,18 +291,75 @@ name = "CantileverMiddle2d"
 load = -400.0
 load_width = 6.0
 load_discretization = "patch"
+# 论文算例 5.4 正文 (chapter05.tex:1040) 的物理值是 E=70000 MPa, 但此处必须取 1.0,
+# 原因是本 case 的 LFEM 与 Hu-Zhang 两个 analyzer 共用这一组模型参数, 而带跳量稳定化
+# 的胡张混合元不允许代入真实高模量: 柔度块 O(1/E) 与稳定化惩罚块 O(E) 使鞍点系统
+# 条件数达 O(E^2), E=70000 时 MUMPS 直接报 error -9 (见 jump_penalty_integrator.py:225
+# 的运行时警告, 已实测复现)。第五章统一框架 chapter05.tex:807 写的 E_0=1 MPa 正是
+# 这条数值约束的记录。
+# 出图用的旧程序对两种方法分别取值, 未共用:
+#   soptx-thesis/.../test_phd_section5_stress_constraint.py:234 LFEM  -> E = 7e4
+#   同文件 :37                                                  HZ    -> E = 1.0 (7e4 已注释)
+# 归一化不影响应力约束评估: 纯 traction + 齐次 Dirichlet 下 Sigma 与 E 无关,
+# 仅位移/柔顺度需按 U_real = U_calc / E_real 还原。
+# 遗留差异: void_youngs_modulus 是绝对值, 旧程序 LFEM 的 (7e4, 1e-9) 刚度比为 1.4e-14,
+# 此处 (1.0, 1e-9) 为 1e-9, 两者并非严格等价, 属已知偏差。
 youngs_modulus = 1.0
 poisson_ratio = 0.25
 plane_type = "plane_stress"
 stress_limit = 180.0
-epsilon = 1.0e-4
+# 2026-09-15: 1e-4 -> 1e-3。epsilon 要与过渡区单元的 m_E (rho 0.2-0.3 时约 0.002-0.03) 同量级
+# 才起松弛作用: 取 1e-4 时滤波尾部单元 (design 已到下界 0, rho_phys 由邻域决定, 实体应力比
+# 1.3-2.7) 的 g 钉在 0.003 附近, mu 饱和后 AL 只能靠往其邻域加材料慢慢压 (LFEM k=3 为此多花
+# 434 步, 体积反涨 0.003), 且阶次越高越重。1e-3 使这些单元直接满足约束 (k=3: 423 步, 拓扑不变,
+# 实体区 rho>0.7 应力比上限 1.004 不变, 仅 rho 0.5-0.7 灰度带放宽到 1.011)。
+# 论文 (4.7) 与 §5 参数段须同步改为 1e-3; 旧值对照走 --override epsilon=1e-4。
+epsilon = 1.0e-3
+# 2026-09-16: 载荷引入垫片半径 (mm)。右端牵引在贴片端点 (80, 17) 与 (80, 23) 处
+# 跳变 P/l, 该间断点的应力奇异性是载荷模型自带的, 载荷分布化只消除点载荷的 r^-1
+# 奇异, 消不掉端点奇异 (实测实体应力比随阶次单调升: LFEM k=1..4 为 2.77/3.94/4.19/4.50,
+# HZ k=2 为 4.31, 无收敛迹象), 设计也消不掉。不处理时 HZ k=2 的端点外侧单元
+# (79.33, 16.33) 在第 200-250 步成形后 750 步不动, 第 400 步后是全域唯一违反约束的
+# 单元, 迫使 1000 步撞上限。
+#
+# 该半径同时定义两件事, 必须成对施加, 只做其一会出错:
+#   1) 应力豁免 —— 邻域内不施加局部应力约束;
+#   2) 实体保留 (passive solid) —— 邻域内物理密度钉为 1, 密度灵敏度置零。
+# 只豁免不保留的对照 (2026-09-16, HZ k=2): 确实从 1000 步不收敛变为 536 步收敛,
+# 但优化器发现该邻域不再受约束, 把原本被应力约束逼着保持 rho~0.98 的单元减到
+# 0.67 换体积, 实体应力比从 0.68 涨到 1.45, max_solid_stress_ratio_solid_region
+# 由历年稳定的 1.01-1.03 跳到 1.452。豁免只要留下设计自由度就会被利用。
+#
+# 取 1.5 = l/4, 按固定物理尺寸定义, 不随网格加密缩小; 80x40 网格下两端各 8 个
+# 单元, 共 16/6400 = 0.25%, 贴片内部 y in (18.5, 21.5) 仍受约束且仍是设计域。
+# 四个 LFEM 阶次在 R<=4.0 时结果不受影响 (其起作用单元在固支端 x~8), 但两条路径
+# 必须在同一验收区域上比较, 故统一施加。0 表示关闭 (历史行为)。
+# 依据: 博士论文 2.3.3 节; dut-postdoc concepts/density-topopt/stress-constrained-topopt.md 5.2 节。
+load_pad_radius = 1.5
+
+# 固支角点垫片半径 (mm). 左端固支边的两个端点 (0, 0) 与 (0, 40) 是
+# Dirichlet--Neumann 混合边界角点: 位移边界与自由边在此相接, 应力按 r^(lambda-1)
+# 奇异, lambda 为 Williams 特征值, 只依赖楔角与泊松比. 直角楔平面应力 nu=0.25 时
+# lambda = 0.78107, 即 sigma ~ r^(-0.2189): 幂律发散, 网格每加密一倍读数放大
+# 2^0.219 ~ 1.16 倍, 不收敛到有限值, 符合 exemption 模块的豁免判据.
+#
+# 与载荷侧的关键区别: 载荷侧先做了"载荷分布化"(集中力改为宽度 l 的分布牵引),
+# 把奇点削弱到对数型, 豁免只需收拾残留; 固支角点的奇异性由边界条件类型的改变
+# 产生, 数据再光滑也不消失, 没有分布化这一步可做, 豁免 + 实体保留是仅有的两步.
+# 因此支撑侧的残留奇点比载荷侧强, 半径不能沿用 load_pad_radius = 1.5.
+#
+# 取 0 表示不处置 (2026-09-16 之前的历史行为, 亦即 §5.2.3 旧结果的口径)。
+# 非零取值必须由 h-加密探针标定: 在冻结构型上按到角点的距离分环做 h 细化, 取
+# 第一个读数随 h 收敛的环的内径. 拍脑袋取小值只会把热点搬到掩码边界, 机理同
+# 2026-09-16 那次只豁免不保留的事故。
+support_pad_radius = 0.0
 
 # -- B 离散 (有限维近似; nx/ny 是注册默认网格, 细网格用 --nx/--ny 覆盖) --
 [cases.discretization]
 mesh_type = "triangle-checkerboard"
 nx = 80
 ny = 40
-comparison_orders = [2, 3, 4]
+comparison_orders = [1, 2, 3, 4]
 use_relaxation = true
 solve_method = "mumps"
 
@@ -270,29 +367,108 @@ solve_method = "mumps"
 [cases.optimization]
 # "projection" = 密度过滤 + tanh 投影 (ProjectionStrategy 继承 DensityStrategy),
 # 投影参数 beta 1.0 -> 10.0 每 5 个外层 +1, 由 pipeline.build_stress_pipeline 写死.
-# 出处: legacy driver test_phd_section5_stress_constraint.py (提交 5b832b6 中删除)
-# 的 test_subsec5_6_4_canti2d_hzmfem / _lfem。论文 5.6.1 节只写了 "密度过滤",
-# 漏记投影这一步; 只留密度过滤会停在灰度局部解 (V=0.58, max_vm=0.92, 应力约束不激活).
+# 出处: 论文 chapter04.tex:955, 第 4.6 节 (subsec:lfem_stress_constraint) 的节级
+# 统一配置 —— "投影策略采用连续延续策略, 初始投影参数取 beta=1.0, 每 5 个迭代步
+# 递增 1.0, 上限取 beta_max=10.0", 与此处取值逐项一致, 论文并未漏记。
+# 第五章算例 5.4 只重复了密度过滤半径, 其 ALM/投影/收敛判据实际继承第 4.6 节。
+# 佐证: 只留密度过滤会停在灰度局部解 (V=0.58, max_vm=0.92, 应力约束不激活)。
 filter_type = "projection"
 filter_radius = 6.0
 interpolation_method = "msimp"
 penalty_factor = 3.5
 void_youngs_modulus = 1.0e-9
+# 两条分析链统一采用 g=sigma_app/stress_limit-[m_E+epsilon(1-m_E)].
+# LFEM 原多项式消失约束保留为 --override stress_constraint_formulation=vanishing;
+# 该字段恒进应力算例的产物目录名, 因而不会覆盖旧的无标签结果.
+stress_constraint_formulation = "apparent"
 initial_density = 0.5
 optimizer = "al_mma"
-max_al_iterations = 150
+# 2026-09-11: 150 -> 200。09-09/09-10 四次 k=2 运行均在 150 步达上限未收敛。
+max_al_iterations = 200
 mma_iters_per_al = 5
 change_tolerance = 2.0e-3
-stress_tolerance = 3.0e-3
-# ALM 超参出处同上 legacy driver: 两条悬臂梁均取 mu_0=50, 每外层放大 alpha=1.1,
-# 上限 mu_max=1e4, 内层 5 步 MMA, 最大外层 150 步, 移动限制 0.15。
-# 论文 4.6.4 节写的 mu_0=10 是 L 型件 (test_subsec5_6_4_L_bracket, rmin=10) 的取值,
-# 套到悬臂梁上会让前期罚项过弱、体积冲到 0.17 后再反弹振荡。
+# 2026-09-17: 3.0e-3 -> 5.0e-3。3.0e-3 下 LFEM p=2 与 HuZhang k=2 的内层提前
+# 退出过于频繁, delta_g 经 al_mma.py:585 反馈进轨迹, 使两条链在 mu_max 触顶后
+# 仍无法满足 C2。5.0e-3 下 LFEM p=1/2/3 与 HuZhang k=2/3 五条臂均以
+# criterion-met 收敛 (外层 53/59/57/66/54), 故按本文件协议提升为默认值。
+# HuZhang k=4 尚未确认, 该臂仍需单独诊断。
+stress_tolerance = 5.0e-3
+# 停止准则 C3: 需连续 hold_steps 个 ALM 外层步同时满足 C0-C2 才判收敛,
+# 用于排除乘子更新与 MMA 渐近线调整造成的振幅穿越阈值的偶然命中。
+hold_steps = 3
+# alpha=1.1, 内层 5 步 MMA, 移动限制 0.15 (mu_max 与最大外层步数见下方各注)
+# 均与论文 chapter04.tex:941-951 第 4.6 节节级统一配置逐项一致。
+# 唯一偏离论文正文的是 mu_0: 论文 §4.6 统一写 mu_0=10.0, 但出图用的旧程序
+# soptx-thesis/soptx/optimization/test_phd_section5_stress_constraint.py 中
+# test_subsec5_6_4_canti2d_lfem / _hzmfem 两条悬臂梁实取 mu_0 = 50.0。
+# 即论文正文的 10.0 与实际产出图 5.4 的运行配置不符, 应以 50.0 为准并修订论文。
 mu_0 = 50.0
+# 2026-09-11 曾 1e4 -> 1e5: Hu-Zhang k=2 在 mu 饱和 1e4 后 g_max 以每外层步约 1e-4
+# 缓慢下降 (0.007 -> 0.0033, 外层步 109-151), 当时把饱和当成 C2 的瓶颈。2026-09-15 查明
+# 该慢尾来自滤波尾部单元 (见 epsilon 注), 根因是 epsilon 过小与渐近线下限过高, 与 mu 上限无关,
+# 故退回论文 §4.6 / PolyStress 的 1e4; 若某阶次在 1e4 下拖尾, 对照走 --override mu_max=1e5。
 mu_max = 10000.0
 alpha = 1.1
 lambda_0_init_val = 0.0
 move_limit = 0.15
+# MMA 渐近线距当前点的下限 (相对设计区间)。PolyStress 无此下限: 两值振荡的变量
+# 按 AsymDecr=0.7 逐步收缩渐近线, 步幅几何衰减后停在约束折点上。2026-09-11 因
+# Hu-Zhang k=2 渐近线塌缩触发候选点公式相消崩溃而设 0.01, 但它高于末期移动限
+# 0.005, 等于关掉了这一逐变量阻尼, 灰度带单元被钉在 0.005 幅度上翻转 (2026-09-15
+# LFEM k=1 1000 步不收敛)。相消已由稳定候选点公式解决, 2026-09-15 起退回 1e-4
+# 只防下溢; 旧值对照用 --override asymptote_min_distance=0.01。
+asymptote_min_distance = 1.0e-4
+# 以下三组开关的消融与修复验证一律走 --override, 使输出目录被 _run_label 分开
+# 而不覆盖基线; 确证有效后再提升为此处的默认值。
+# 1) 末期移动限制衰减: decay = 1.0 关闭。启用时仅在连续化终止 (C0) 之后,
+#    且窗口 W 内的运动被判为非相干 (相干行程份额 < ratio) 才收缩移动限制,
+#    仍在单调重组的轨迹不收缩, 以免冻在非驻点上误报收敛。
+# 2026-09-11 曾默认启用 (0.8) 以压住灰度带单元的两值翻转; 2026-09-15 查明该翻转
+# 源于渐近线下限 0.01 关掉了 MMA 自带的振荡收缩, 下限退回 1e-4 后 LFEM k=1 有无
+# 衰减都收敛 (437 步 V=0.3637 / 416 步 V=0.3626, 拓扑只差 15 个单元), 衰减既不改
+# 结果也不加速, 故关闭, 与 PolyStress (无衰减) 及论文 Algorithm 2 对齐。
+# 后四项仅在 decay < 1.0 时生效; 对照用 --override move_limit_decay=0.8。
+move_limit_decay = 1.0
+move_limit_min = 5.0e-3
+move_limit_progress_window = 10
+move_limit_progress_ratio = 0.3
+move_limit_progress_cell = 0.7
+# 2) 停止准则 C1 的度量对象: "mean" 为外层步首末设计变量的平均绝对变化
+#    (PolyStress 口径, 2026-09-11 起默认); "design" / "physical" 为逐 MMA 步的
+#    设计变量 / 物理密度最大绝对变化 (09-09 至 09-10 用 "design", 被移动限制钉死)。
+change_measure = "mean"
+# 3) 罚因子放大规则: "unconditional" 为每外层步无条件放大;
+#    "conditional" 时仅当 max_e r_e > tau * 上一步值 (不可行度下降不足) 才放大。
+mu_update_rule = "unconditional"
+mu_violation_ratio = 0.5
+# 4) 乘子安全阈 (safeguarded AL, Andreani-Birgin-Martinez 2007): 外层更新改为
+#    lambda <- P_[0, lambda_max](lambda + mu h)。2026-09-18 依据: 统一协议下带垫片的
+#    五个已收敛臂 (LFEM k=1/2/3, HZ k=2/3) 终止 max lambda 为 372-1344, 无垫片六臂为
+#    828-4119 (HZ k=4 为 4119, 只落在 2 个 rho~0.21 的滤波尾部单元上); 带垫片 HZ k=4
+#    在 mu 触顶 1e4 后 lambda 无界爬升到 10082, AL 项压过体积目标, 850 步后进入极限环
+#    (1000 步不收敛)。3000 高于带垫片已收敛臂终值一倍以上, 不改变它们的极限点; 被它
+#    截断的只有无垫片 k=4 那两个灰度单元, 它们在 C2 实体子集之外 (见下一项)。
+#    对照 (无阈, 复现 09-17 之前行为): --override lambda_max=1e20。
+lambda_max = 3000.0
+# 5) 停止准则 C2 的验收子集: 只在 rho_phys >= 阈值的 (未豁免) 单元上取最大相对
+#    违反度; 全域值仍作诊断记录 (history 的 max_relative_violation、summary 的
+#    max_relative_violation)。2026-09-18 依据: k4 被钉住的是滤波尾部 rho 0.13-0.30
+#    的不承载灰度单元 (g 停在 0.005 附近略偏正, 设计无法改动); 老程序 (soptx-thesis)
+#    k4 复跑 182 步"收敛"也只因其判据不看中间密度单元, 但复评后实体单元上
+#    g_max=0.048 并不可用, 故实体子集验收与乘子安全阈须同时启用。取值与 driver 报告
+#    未加权实体应力比的 solid_region_threshold 同为 0.5。该字段恒进目录名
+#    (acceptance_solid_threshold-0.5), 09-17 之前的全域口径产物保留在旧目录作对照;
+#    命令行给 none 可复原全域口径 (--override acceptance_solid_threshold=none)。
+acceptance_solid_threshold = 0.5
+# 原问题 KKT 默认仅作终态诊断: 终态增加一次伴随求解, 不改变停止准则.
+# 可显式关闭: --override kkt_diagnostics_enabled=false
+# 参与 C4 验收还须同时开启 kkt_acceptance_enabled 并显式给出三个正容差;
+# 容差没有预设论文值, 不按现有结果反向调节.
+kkt_diagnostics_enabled = true
+kkt_acceptance_enabled = false
+kkt_stationarity_tolerance = 0.0
+kkt_complementarity_tolerance = 0.0
+kkt_dual_tolerance = 0.0
 
 # =====================================================================
 # 第二段: 前向制造解验证算例 (role = convergence-verification, 由

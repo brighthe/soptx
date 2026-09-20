@@ -1,7 +1,7 @@
 """``plots/`` 下各成图模块的共用底座.
 
 中英文字体口径、vtu 读取、产物目录定位与统一落盘口径 (dpi、输出格式、论文插图同步
-目录) 只有一处定义, 八个成图模块都从这里取; 改一次插图口径不必逐个模块翻找.
+目录) 只有一处定义, 十个成图模块都从这里取; 改一次插图口径不必逐个模块翻找.
 
 下划线开头有两重作用: 标明它不是一件可整理的产物, 且 ``compare.py:discover_cases()``
 按 ``_`` 前缀跳过本模块, 扫描逻辑无须为它开特例.
@@ -42,8 +42,10 @@ def chinese_font() -> font_manager.FontProperties:
 def academic_rcparams() -> None:
     """学术英文排版口径: sans-serif 字族 + stix 数学字体 + 正常负号.
 
-    四个成图模块原先各自逐字重复这四行, 收在这里只留一处. 用 :func:`chinese_font`
-    的三个应力模块不调用它, 外观维持原样; ``bearing_highorder_topologies`` 只设
+    四个成图模块原先各自逐字重复这四行, 收在这里只留一处; 2026-09-17 起
+    ``stress_convergence`` 也调用它 —— 该图改用 ``compliance_convergence`` 的排版与
+    配色口径, 中文仍靠 ``fontproperties`` 逐处指定, 与本函数的字族设置不冲突.
+    余下的 ``stress_topologies`` 不调用它, 外观维持原样; ``bearing_highorder_topologies`` 只设
     ``axes.unicode_minus``, 同样不并进来 —— 并了会改动它已定稿的插图外观.
 
     pyplot 放在函数体内 import: 各模块都先 ``matplotlib.use("Agg")`` 再导入 pyplot,

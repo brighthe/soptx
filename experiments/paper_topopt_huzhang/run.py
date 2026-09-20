@@ -11,7 +11,7 @@
                 插图数据导出);
 - ``plots/``    唯一子目录: 每张图一个模块, 文件名是 ``<算例族>_<产物>`` 语义名
                 (论文图号只写在各模块 docstring 首行的括注里); ``_base.py`` 是
-                八个成图模块的共用底座 (字体/vtu 读取/产物定位/落盘口径)
+                九个成图模块的共用底座 (字体/vtu 读取/产物定位/落盘口径)
                 (成图落在 ``outputs/figures/``, 与之同名会混淆, 故不叫 figures).
 
 算例一律由 ``--case`` 驱动, 参数默认取自 ``cases.toml``; case 归属哪个驱动由其 ``role``
@@ -30,7 +30,7 @@
 
 具名开关之外的配置字段走通用覆盖通道 ``--override KEY=VALUE`` (可重复给出)::
 
-    python run.py --case compliance-fixed-fixed-half --override optimizer=mma
+    python run.py --case compliance-fixed-fixed-half --override optimizer=oc
 
 作用在已有产物上的后处理 (插图 / 论文表 / 冻结指标) 一律归 ``compare.py``::
 
@@ -87,17 +87,16 @@ def pad(text: str, width: int) -> str:
     return text + " " * max(width - display_width(text), 0)
 
 
-# 网格类型的显示缩写; 未登记的取值原样显示, 免得新网格被静默显示成三角形.
-MESH_ABBREVIATIONS = {"triangle-checkerboard": "tri"}
+# 网格配置对应的完整类名; 未登记的取值原样显示.
+# --list 的 mesh 列: fealpy 网格类 + 剖分方式 (两种都是 TriangleMesh, 只差对角线规则)
+MESH_CLASS_NAMES = {
+    "triangle-checkerboard": "TriangleMesh/checkerboard",
+    "triangle-single-diagonal-symmetric": "TriangleMesh/single-diagonal-sym",
+}
 
 # 阶次记号随方法走: Hu--Zhang 的 k 是应力空间次数 (位移阶为 k-1), LFEM 的 p 是位移
 # 阶。两者数值同源但含义不同, 统一写成 p 会把应力阶读成位移阶; 未登记的方法退回 p.
 ORDER_SYMBOLS = {"huzhang": "k", "lfem": "p"}
-
-
-def with_kind(kind: str, size: str) -> str:
-    """拼成 ``tri 80x20``; 注册表没声明网格类型时只显示剖分."""
-    return f"{kind} {size}" if kind else size
 
 
 def with_radius(kind: str, radius) -> str:
@@ -115,7 +114,7 @@ def with_radius(kind: str, radius) -> str:
 
 
 def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
-    """把 case 缺省跑的组合压成 (网格, 分析链, 阶次, 过滤器, 解法器, 优化器) 六个显示串.
+    """把 case 缺省跑的组合压成 (网格类名, 剖分数, 分析链, 阶次, 过滤器, 优化器) 六个显示串.
 
     阶次单列, 记号按各方法的惯用写法 (``huzhang`` 的 k 是应力阶, ``lfem`` 的 p 是
     位移阶, 见 ORDER_SYMBOLS), 因此列里带记号而不是裸数字: 同一个 2 在两条链上不是
@@ -124,7 +123,7 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
 
     收敛验证由 base_nx/base_ny + levels 逐级加密, nx/ny 只是兼容字段, 因此按加密
     区间显示; 这两条 case 不注册过滤器, optimizer = "none" 也只是满足 schema 的占位,
-    两列一并显示成 "-"; 解法器它们照样要用, 所以 solver 列照常填。
+    两列一并显示成 "-".
     字段一律 get: 骨架状态的 planned case 允许缺项, --list 不该因此崩掉.
     """
     discretization = case.get("discretization", {})
@@ -136,8 +135,7 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
         f"{symbol}={min(int(order) for order in orders)}" if orders else "-"
     )
     mesh_type = str(discretization.get("mesh_type", ""))
-    kind = MESH_ABBREVIATIONS.get(mesh_type, mesh_type)
-    solver = str(discretization.get("solve_method", "-"))
+    kind = MESH_CLASS_NAMES.get(mesh_type, mesh_type) or "-"
     if runner_for(case) == "convergence":
         base_nx = discretization.get("base_nx")
         base_ny = discretization.get("base_ny")
@@ -147,7 +145,7 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
             size = f"{base_nx}x{base_ny}->{int(base_nx) * factor}x{int(base_ny) * factor}"
         else:
             size = "-"
-        return with_kind(kind, size), analyzer, order_text, "-", solver, "-"
+        return kind, size, analyzer, order_text, "-", "-"
     nx = discretization.get("nx")
     ny = discretization.get("ny")
     size = f"{nx}x{ny}" if nx and ny else "-"
@@ -157,7 +155,7 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
     )
     optimizer = str(optimization.get("optimizer", "-"))
     return (
-        with_kind(kind, size), analyzer, order_text, filter_text, solver, optimizer
+        kind, size, analyzer, order_text, filter_text, optimizer
     )
 
 
@@ -165,12 +163,16 @@ def list_cases() -> int:
     """打印每条算例缺省会跑的那个组合, 让调用方拿到 id 就知道裸跑会跑出什么."""
     cases = load_cases(CASES_FILE)
     header = (
-        "case-id", "mesh", "analyzer", "order", "filter", "solver", "optimizer", "role"
+        "case-id", "mesh", "grid", "analyzer", "order", "load-discretization", "filter", "optimizer"
     )
-    rows = [
-        (case["id"], *registered_defaults(case), str(case.get("role", "-")))
-        for case in cases
-    ]
+    rows = []
+    for case in cases:
+        mesh, grid, analyzer, order, filter_text, optimizer = registered_defaults(case)
+        load_discretization = str(
+            case.get("model", {}).get("parameters", {}).get("load_discretization", "-")
+        )
+        rows.append((case["id"], mesh, grid, analyzer, order,
+                     load_discretization, filter_text, optimizer))
     widths = [
         max(display_width(row[i]) for row in (header, *rows)) for i in range(len(header))
     ]

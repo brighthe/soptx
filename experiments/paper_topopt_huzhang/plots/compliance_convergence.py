@@ -11,7 +11,7 @@
 共用一套刻度, 否则 (a)(b) 横着对出来的差是缩放差而不是柔顺度差。
 
 输出: outputs/figures/ 下三张 —— 合并图 compliance_convergence 与两幅单图
-compliance_convergence_{lfem,hzmfem}, 均自动同步至 papers/figures/
+compliance_convergence_{lfem,hzmfem}, 均自动同步至 papers/huzhang-topopt/figures/
 
 论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
 """

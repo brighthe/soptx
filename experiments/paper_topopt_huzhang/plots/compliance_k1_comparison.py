@@ -3,7 +3,7 @@
 产物 case ``compliance-k1-comparison``: 2x2 四格, 上排 k=1 下排 k=2, 左 LFEM 右 HZMFEM,
 运行目录见 REQUIRED_RUNS。
 
-输出: outputs/figures/compliance_k1_comparison.png, 自动同步至 papers/figures/
+输出: outputs/figures/compliance_k1_comparison.png, 自动同步至 papers/huzhang-topopt/figures/
 """
 
 from __future__ import annotations

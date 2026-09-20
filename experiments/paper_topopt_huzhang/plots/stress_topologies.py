@@ -2,9 +2,10 @@
 """悬臂梁应力约束拓扑与应力分布对比 (论文图 5.7).
 
 产物 case ``stress-topologies``: 依赖见 REQUIRED_RUNS —— 不是运行目录而是 postprocess/
-下的 npz, 由 ``compare.py export`` 从 density_final.vtu 冻结求解导出。
+lfem_constraint-apparent/ 下的 npz, 由 ``compare.py export`` 从带统一约束标签的
+density_final.vtu 冻结求解导出。
 
-输出 png/pdf/eps 三种格式至 papers/figures 与本地 outputs/figures.
+仅输出 PNG 至 papers/huzhang-topopt/figures 与本地 outputs/figures.
 """
 import numpy as np
 import matplotlib
@@ -21,14 +22,15 @@ from ._base import chinese_font, save_figure
 # ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
-    "postprocess/fig_data_lfem-k2.npz",
-    "postprocess/fig_data_huzhang-k2.npz",
+    "postprocess/lfem_constraint-apparent/fig_data_lfem-k2.npz",
+    "postprocess/lfem_constraint-apparent/fig_data_huzhang-k2.npz",
 )
 
 
 def main() -> None:
     # 1. 加载 SOPTX 计算数据
-    data_dir = config.OUTPUT_DIR / SOURCE_CASE / "postprocess"
+    data_dir = (config.OUTPUT_DIR / SOURCE_CASE / "postprocess"
+                / "lfem_constraint-apparent")
     lf_data = np.load(data_dir / "fig_data_lfem-k2.npz")
     hz_data = np.load(data_dir / "fig_data_huzhang-k2.npz")
 
@@ -63,13 +65,13 @@ def main() -> None:
     ax_a.tripcolor(triang, facecolors=1.0 - lf_rho, cmap="gray", vmin=0, vmax=1, edgecolors="none")
     ax_a.set_aspect("equal")
     ax_a.axis("off")
-    ax_a.set_title(f"(a) 标准位移法 ($k = 2$) 最终拓扑构型 ($V^* = {lf_vol * 100:.2f}\\%$) ", fontsize=11, fontproperties=ZH, pad=8)
+    ax_a.set_title(f"(a) 标准位移法 ($p = 2$) 最终拓扑构型 ($V^* = {lf_vol * 100:.2f}\\%$) ", fontsize=11, fontproperties=ZH, pad=8)
 
     # (b) LFEM 应力
     im_b = ax_b.tripcolor(triang, facecolors=lf_vm, cmap="jet", vmin=0, vmax=1, edgecolors="none")
     ax_b.set_aspect("equal")
     ax_b.axis("off")
-    ax_b.set_title("(b) 标准位移法 ($k = 2$) 归一化 von Mises 应力", fontsize=11, fontproperties=ZH, pad=8)
+    ax_b.set_title("(b) 标准位移法 ($p = 2$) 表观 von Mises 应力比", fontsize=11, fontproperties=ZH, pad=8)
 
     # (c) HZMFEM 拓扑
     ax_c.tripcolor(triang, facecolors=1.0 - hz_rho, cmap="gray", vmin=0, vmax=1, edgecolors="none")
@@ -81,7 +83,7 @@ def main() -> None:
     im_d = ax_d.tripcolor(triang, facecolors=hz_vm, cmap="jet", vmin=0, vmax=1, edgecolors="none")
     ax_d.set_aspect("equal")
     ax_d.axis("off")
-    ax_d.set_title("(d) 胡张混合法 ($k = 2$) 归一化 von Mises 应力", fontsize=11, fontproperties=ZH, pad=8)
+    ax_d.set_title("(d) 胡张混合法 ($k = 2$) 表观 von Mises 应力比", fontsize=11, fontproperties=ZH, pad=8)
 
     norm = Normalize(vmin=0.0, vmax=1.0)
     cb1 = ColorbarBase(ax_cb1, cmap=cm.jet, norm=norm, orientation="vertical")
@@ -92,8 +94,8 @@ def main() -> None:
     cb2.set_ticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     cb2.set_ticklabels(["0", "0.2", "0.4", "0.6", "0.8", "1.0"], fontproperties=ZH, fontsize=9)
 
-    # 4. 输出 png/pdf/eps 三种格式
-    save_figure(fig, "stress_topologies", formats=("png", "pdf", "eps"))
+    # 4. 输出 PNG, 与 bearing-topologies 保持一致
+    save_figure(fig, "stress_topologies")
 
 
 if __name__ == "__main__":

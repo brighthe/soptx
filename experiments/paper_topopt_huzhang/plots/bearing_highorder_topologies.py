@@ -2,7 +2,7 @@
 
 产物 case ``bearing-highorder-topologies``: 左右两格 k=3/4, 运行目录见 REQUIRED_RUNS。
 
-输出: outputs/figures/bearing_highorder_topologies.png, 自动同步至 papers/figures/
+输出: outputs/figures/bearing_highorder_topologies.png, 自动同步至 papers/huzhang-topopt/figures/
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def main():
         fontproperties=ZH,
     )
     fig.subplots_adjust(left=0.03, right=0.96, top=0.88, bottom=0.05, wspace=0.08)
-    save_figure(fig, "bearing_highorder_topologies")
+    save_figure(fig, "bearing_highorder_topologies", formats=("png", "pdf", "eps"))
     plt.close(fig)
 
 

@@ -7,7 +7,7 @@
 - manufactured-native     -> 表 5.1 (k = 3, 4, 原生格式)
 - manufactured-stabilized -> 表 5.2 (k = 1, 2, 矩阵跳量稳定化)
 
-产物按阶次增量写入 outputs/manufactured_convergence/summary.json, 供 ``run.py table``
+产物按阶次增量写入 outputs/manufactured_convergence/summary.json, 供 ``compare.py table``
 (report.py) 一键生成论文表格: 单独重算某个 k 只覆盖该 k 的记录, 不会丢掉其余阶次的既有结果.
 
 增量写入的代价是同一份 summary.json 可能横跨多次运行: 若代码在两次运行之间变动,
@@ -340,7 +340,7 @@ def write_summary(
     """按阶次合并写入汇总文件, 保留本次未重算的其余阶次记录并盖上运行戳记.
 
     消融运行 (稳定化取值偏离注册表声明) 写入独立的 ablation_<方法>.json:
-    summary.json 是 run.py table 生成论文表 5.1 / 5.2 的唯一数据源, 按阶次为键
+    summary.json 是 compare.py table 生成论文表 5.1 / 5.2 的唯一数据源, 按阶次为键
     增量合并, 若让消融结果落进去会静默替换掉同阶次的论文数值.
     """
     directory = OUTPUT_DIR / "manufactured_convergence"

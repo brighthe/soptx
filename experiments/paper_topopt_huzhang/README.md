@@ -1,11 +1,11 @@
 # Hu--Zhang 拓扑优化投稿论文复现实验
 
-本目录保存投稿论文的可执行拓扑优化算例。物理模型位于 `src/soptx/problems/elasticity/`, 本目录只通过 `cases.toml` 选择模型、配置离散与优化参数, 并调用当前 `soptx.topology` 的公共接口。
-
-## 多算例结构
+## 目录结构
 
 ```text
-experiments/huzhang_topopt_paper/
+experiments/paper_topopt_huzhang/
+|-- README.md                   # 本文件: 目录结构、参数注册约定、调用方式
+|-- results_analysis.md         # 实测数据、机理分析与全部复现命令 (端到端流水线见其 §7)
 |-- run.py                      # 执行入口: 按 --case 跑算例, 写运行产物
 |-- compare.py                  # 后处理入口: 插图 / 论文表 / 冻结指标
 |-- cases.toml                  # [[cases]] 算例参数注册表
@@ -16,242 +16,168 @@ experiments/huzhang_topopt_paper/
 |-- provenance.py               # Git revision、环境与产物摘要
 |-- report.py                   # 产出: 论文表 5.1 / 5.2 (由 compare.py table 调用)
 |-- metrics.py                  # 产出: 梯度校验 / 冻结设计指标 / 插图 npz 导出
+|-- bearing_reanalysis.py       # 产出: 轴承冻结设计交叉再分析 + nu 扫描 (论文表 5.3 / 5.4)
+|-- stress_cross_evaluation.py  # 产出: 应力算例一份构型 x 七条离散的应力比与可行性余量交叉表
+|-- discretization_probe.py     # 产出: 应力算例冻结构型的离散敏感性探针 (实验 A)
+|-- edge_jump.py                # 内边法向牵引跳量 [[sigma.n]]; 仅被 discretization_probe 调用
 |-- plots/                      # 唯一子目录: 每张图一个模块, 文件名为 <算例族>_<产物>
 |                               # (成图落在 outputs/figures/, 故不与之同名)
-|   |-- _base.py                # 八个成图模块的共用底座: 字体/vtu/产物定位/落盘
+|   |-- _base.py                # 十个成图模块的共用底座: 字体/vtu/产物定位/落盘
+|   |-- manufactured_mesh.py    # 唯一不读运行产物的一张: 制造解算例的棋盘格剖分示意
 |   |-- compliance_topology.py compliance_convergence.py compliance_k1_comparison.py
 |   |-- bearing_topologies.py bearing_highorder_topologies.py
-|   `-- stress_topologies.py stress_convergence.py stress_highorder_topologies.py
+|   `-- stress_topologies.py stress_convergence.py stress_max_ratio_history.py
 |                               # 论文图号只在各模块 docstring 首行的括注里
 `-- outputs/                    # 运行产物, 不提交
 ```
 
-模块平铺在实验根目录, 与 `experiments/` 下其余八个实验同构 (`run.py` / `config.py` /
-`provenance.py` / `pipeline.py` / `report.py` / `metrics.py` 等名字全部沿用
-`experiments/` 下其它实验已有的词汇, 不新造模块名); 只有 `plots/` 单独成目录, 因为它是八个
-同构模块的集合, 且成图落在 `outputs/figures/`, 与之同名会混淆。
+## 已注册算例
 
-三族物理算例的构造合在 `pipeline.py` 一个文件里, 与 `topopt_simp_ea/pipeline.py` 同构:
-`cases.toml` 只存数值, 「数值 -> soptx 对象」的构造 (各物理类构造签名不同、跨字段校验、
-局部牵引的 P1 迹投影、AL-MMA 选项) 是代码, TOML 表达不了。两族柔顺度算例共有的 17 个字段
-由 `compliance_config_fields` / `validate_compliance_config` 统一解析校验, 各族只写自己的
-载荷字段。
+| case id | `role` | 模型 | 组装入口 | 论文位置 |
+| --- | --- | --- | --- | --- |
+| `manufactured-native` | `convergence-verification` | `MixedBoundarySinusoidalElasticity2D` | `convergence.py: run_convergence_suite` | 表 5.1 ($k=3,4$ 原生格式) |
+| `manufactured-stabilized` | `convergence-verification` | `MixedBoundarySinusoidalElasticity2D` | `convergence.py: run_convergence_suite` | 表 5.2 ($k=1,2$ 矩阵跳量稳定化) |
+| `compliance-fixed-fixed-half` | `optimization-baseline` | `FixedFixedBeamHalfDomain2d` | `pipeline.py: build_fixed_fixed_*` | 5.2.1 节 / 图 5.2~5.3 |
+| `bearing-compressible` | `incompressible-baseline` | `BearingDevice2d` | `pipeline.py: build_bearing_*` | 5.2.2 节 / 图 5.5、表 5.3~5.4 |
+| `bearing-incompressible` | `incompressible-study` | `BearingDevice2d` | `pipeline.py: build_bearing_*` | 5.2.2 节 / 图 5.5、表 5.3~5.4 |
+| `cantilever-middle-2d-stress` | `stress-constrained` | `CantileverMiddle2d` | `pipeline.py: build_stress_*` | 5.2.3 节 / 图 5.7~5.9、表 5.5 |
 
-产出层按「作用在已有产物上」聚合, 而不是一个动词一个文件: `report.py` 出论文表,
-`plots/_base.py` 收拢八个成图模块的共用成图口径,
-`metrics.py` 的三个入口 (`run_gradient_check` / `run_frozen_metrics` / `run_export`) 共用同一条
-`pipeline` 悬臂梁装配器给出的分析链。`compare.py` 的 `COMMAND_MODULES` 用
-`"模块:入口函数"` 记录派发, 故子命令与模块不必一一对应。
-
-`sys.path` 由两个入口通过 `config.bootstrap_source_path()` 统一注入, 顶层各模块一律用
-`from config import ...` 这类绝对导入, `plots/` 内部改用 `from ._base import ...`
-的包内相对导入, **不支持按文件路径直接执行**（如
-`python plots/compliance_topology.py`）, 一切经 `run.py` 或 `compare.py`.
-
-算例一律由 `--case` 驱动。case 归属哪个驱动由其 `role` 决定
-(`convergence-verification` -> `convergence.py`, 其余 -> `driver.py`),
-调用方拿到 id 即可运行, 不必先知道用哪个动词:
-
-```text
-run.py --list                    # 列出全部算例: id / mesh / analyzer / order / optimizer / role
-run.py --case <id>               # 单跑一个 case, 可重复指定
-run.py --case <id> <id> ...      # 一次给出多个 case id (也可重复 --case)
-run.py --all                     # 跑全部 ready 算例, 按 cases.toml 顺序
-run.py --all --dry-run           # 只打印派发计划, 不执行
-run.py --case <id> --full        # 展开成注册表声明的完整对比组
-```
-
-不带其它参数时参数取自 `cases.toml`, 且**只跑一个组合**。`--case` 之后可直接追加该驱动
-认识的覆盖参数, `run.py` 原样转交, 由驱动自身的 argparse 校验:
-
-```text
-run.py --case manufactured-stabilized --stabilization none
-run.py --case compliance-fixed-fixed-half --analyzer all --order 2
-```
-
-具名开关只覆盖最常用的那几个字段; 其余字段走通用通道 `--override KEY=VALUE`, 可重复
-给出, 字段名就是 `cases.toml` 里 `[cases.discretization]` / `[cases.optimization]` 的键,
-另加运行组合维度 `analyzer` / `order` (多值用逗号分隔), 与 `topopt_simp_fa` /
-`topopt_simp_ea` 的 `--override` 同一口径:
-
-```text
-run.py --case compliance-fixed-fixed-half --override optimizer=mma
-run.py --case compliance-fixed-fixed-half --override penalty_factor=4.0 filter_radius=3.0
-run.py --case compliance-fixed-fixed-half --override analyzer=huzhang order=2
-run.py --case compliance-fixed-fixed-half --override analyzer=all order=2,3
-```
-
-取值按配置对象里现有取值的类型转换; 字段名写错、类型不对, 或与具名开关重复指定同一字段,
-都直接报错而不是静默取一边。产物目录第二层是参数标签: `analyzer` 与 `order` 恒进,
-其余字段只在覆盖了注册值时按字段名追加 `__<字段>-<取值>`, 探索性运行不会盖掉注册运行的
-产物; 实际生效的覆盖同时记进 `summary.json` 的 `overrides` 字段。
-
-**缺省是单值, 不是全集。** 优化算例的 `--analyzer` / `--order` 与收敛算例的 `--degree`
-省略时只展开一个组合: 方法取 `huzhang` (该 case 未注册时退回 `methods` 首项), 阶次取
-`comparison_orders` 的最小值 —— 裸跑一条 case 就是一次运行, 便于探索与调试。论文那套
-方法/阶次对比是显式动作, 用 `--full` 展开成 `methods x comparison_orders` 全集 (如
-`compliance-fixed-fixed-half` 的 `2 x [2,3,4] = 6` 组), 也可以用 `--analyzer all` /
-`--order 2 3` 精确指定。注册表里的 `methods` / `comparison_orders` 同时是这两个选项的
-白名单, 越界直接报错。`summary.json` 按方法与阶次为键增量合并, 因此分多次单跑与一次
-`--full` 得到的论文表一致。
-
-两个驱动认的参数并不重叠 (`--stabilization` / `--degree` / `--levels` 只属于收敛验证,
-`--analyzer` / `--order` / `--nx` / `--optimizer` 只属于优化), 因此覆盖参数只允许配合
-**单个** `--case`; 选中多条时无法确定按哪个驱动解释, 直接报错而不是猜。
-
-**case id 只标研究对象, 不标参数取值。** 纯离散层的扫描 (网格加密、阶次) 不另立 case,
-一律用覆盖参数跑; 只有换模型类 (如固支梁的半域对称版) 或换连续问题 (如泊松比从可压缩推到
-近不可压) 才另立一条 case。论文里悬臂梁应力算例的细网格结果就是这样产生的:
-
-```text
-run.py --case cantilever-middle-2d-stress                              # 注册默认网格 80x40
-run.py --case cantilever-middle-2d-stress --nx 160 --ny 80 --order 2 3  # 细网格 160x80
-```
-
-网格偏离注册值时进产物目录标签 (`analyzer-<链>__nx-<值>__ny-<值>__order-<k>`),
-两套网格的产物并存互不覆盖;
-但 `run.py --all` 只按各 case 的注册默认网格跑缺省组合, 上面第二条命令必须单独执行。
-
-作用在已有产物上的后处理归另一个入口 `compare.py`, 与算例选择无关:
-
-```text
-compare.py --list             # 列出产物 case: case-id / source-case / 说明
-compare.py --case <case-id>   # 整理出一件产物, 如 compliance-topology
-compare.py figure <图号>      # 尚未迁成产物 case 的图: 5.5 / 5.7 / 5.8 / 5.9 / supp-*, 或 --all
-compare.py table              # 由 summary.json 重算论文表 5.1 / 5.2
-compare.py export [--check]   # 冻结重分析导出插图场数据
-compare.py gradients          # 伴随灵敏度的有限差分校验
-compare.py metrics            # 冻结设计的论文口径指标复算
-```
-
-其中 `export` / `gradients` / `metrics` 会按冻结设计重新组装并求解, 不是纯读产物, 但它们
-产出的是论文校验数字而非运行产物 (不写 `outputs/<case>/<run>/`), 故归在 `compare.py`;
-`--help` 用 `[重分析]` 标出这三个。老写法 `run.py figure ...` 会被 `run.py`
-接住并提示改用 `compare.py`。
-
-一件产物 = 一条 `--case`, 与 `run.py --case` 同一个词: 那边一条 case 是一道要解的题,
-这边一条 case 是一件要整理出来的产物。产物 case 不另立注册表, 由 `plots/` 下声明了
-`SOURCE_CASE` / `REQUIRED_RUNS` 的模块自描述, case id 取模块文件名, 论文图号只留在各
-模块 docstring 首行的括注里, 排版改号不波及命令行。未声明的图仍走 `figure <图号>`,
-迁一个删一条, 迁完 `figure` 子命令一并去掉。
-
-配置层的回归测试在 `tests/experiments/test_huzhang_paper_config.py`, 只覆盖不启动求解的纯配置逻辑。
+## 参数注册约定
 
 每个 `[[cases]]` 必须包含三类独立参数:
 
 - `[cases.model]`: `name` 和 `parameters`, 选择 `soptx.problems` 中的物理模型并给出载荷、材料、平面假设等参数。
-- `[cases.discretization]`: 网格类型 `mesh_type`（台账字段, 供 `--list` 显示；实际网格由 `pipeline.create_huzhang_checkerboard_mesh` 构造）、网格剖分、受控比较阶次 `comparison_orders`、可选的 `supplementary_orders`（只放宽 `--order` 白名单, 不进缺省与 `--full`）、角点松弛和线性求解器。
-- `[cases.optimization]`: 体积分数、过滤器、材料插值和 OC 迭代参数。
+- `[cases.discretization]`: 三角剖分方式 `mesh_type` (取值见 `pipeline.MESH_TYPES`, 由 `pipeline.create_mesh` 分派)、网格剖分、受控比较阶次 `comparison_orders`、可选的 `supplementary_orders` (只放宽 `--order` 白名单, 不进缺省与 `--full`)、角点松弛和线性求解器。
+- `[cases.optimization]`: 体积分数、过滤器、材料插值、优化器 (`oc` / `mma` / `al_mma`) 及其迭代参数。
 
-`pipeline.py` 的 `ASSEMBLERS` 把模型名映射到装配器, 当前注册四个模型:
+`mesh_type` 的两种取值:
 
-| 模型 | 装配器 | case id |
-| --- | --- | --- |
-| `FixedFixedBeamCenterLoad2d` | `build_fixed_fixed_*` | —（不再注册, 见「全域固定梁模型」） |
-| `FixedFixedBeamHalfDomain2d` | `build_fixed_fixed_*` | `compliance-fixed-fixed-half` |
-| `BearingDevice2d` | `build_bearing_*` | `bearing-compressible` / `bearing-incompressible` |
-| `CantileverMiddle2d` | `build_stress_*` | `cantilever-middle-2d-stress` |
+| 取值 | 对角线规则 | 用途 |
+|---|---|---|
+| `triangle-checkerboard` | `(i+j)` 偶数 `/`, 奇数 `\` | 固支梁、悬臂梁与制造解算例的注册值; 轴承算例的棋盘格对照 |
+| `triangle-single-diagonal-symmetric` | 左半 `/`, 右半 `\`, 两个顶角落翻转 | 两条轴承 case 的注册值; 低阶位移元体积闭锁对照 (与左右对称问题同对称性) |
 
-每个装配器是一组 `build_config` / `build_analysis_pipeline` / `build_pipeline`, 由 `CaseAssembler`
-打包; `driver.py` 只调 `pipeline.assembler_for(model_name)`, 不关心内部布局。新增论文算例时,
-先在核心库实现模型, 再增加 `[[cases]]`，最后在 `ASSEMBLERS` 注册装配器。未注册模型会明确报错,
-不会隐式复用固定梁参数。
+生成器见 `soptx.mesh.create_huzhang_checkerboard_mesh` / `create_huzhang_symmetric_single_diagonal_mesh`。
 
-例外: `manufactured-native` (表 5.1, k=3/4 原生格式) 与 `manufactured-stabilized` (表 5.2, k=1/2 矩阵跳量稳定化) 描述的是前向制造解验证参数, 由 `convergence.py` 读取并驱动, 不走 `driver.py` 的算例组装器链路; `run.py` 按 `role` 把它们派给 `convergence.py`, 因此 `--case` / `--all` 都能正常涵盖; 只有直接以模块方式调用 `driver.py` 时才需要注意绕开这两条。
+材料插值对象 `interpolation` 取三值: `E` 只插值 Young 模量 (Poisson 比固定为实体值), `E+nu` 同时按论文式 (4.3) 插值 Poisson 比 (只允许近不可压缩材料 `nu >= 0.49`, 可压缩材料上直接报错), `auto` 按材料自动决定。两条轴承 case 已显式登记 (`bearing-compressible` 为 `E`, `bearing-incompressible` 为 `E+nu`), 参数 `nu_penalty_factor` / `void_poisson_ratio` 走 `--override`。
 
-两条 case 的 `stabilization` 字段**直接驱动** `HuZhangMFEMAnalyzer` 的同名入参, 取值 `none` / `matrix_jump` / `vector_jump`。该参数只在 `p <= GD` 时生效; `p >= GD+1` 的原生格式本身稳定, 分析器忽略它, 因此 `manufactured-native` 只能声明 `none`, 写别的会被 `convergence.py` 直接拒绝, 免得跑出一组名义上加了稳定化、实际没加的数。
+两条 `manufactured-*` 的 `stabilization` 字段直接驱动 `HuZhangMFEMAnalyzer` 的同名入参, 取值 `none` / `matrix_jump` / `vector_jump`, 只在 $p \le GD$ 时生效; `manufactured-native` 只能声明 `none`, 写别的会被 `convergence.py` 拒绝。
 
-低阶失稳消融:
+## 调用方式
+
+`run.py` 解题并落盘, `compare.py` 在其产物之上做二次数值试验与成图: 八个动词里只有 `table` 是纯
+格式化 (由 `summary.json` 重算论文表 5.1 / 5.2), 其余七个都会按冻结设计重新组装并求解 (代码中
+的 `REANALYSIS` 集合), 给出 `run.py` 不产的数据 —— 表 5.3 / 5.4 的轴承交叉再分析与 $\nu$ 扫描、
+应力算例的七条离散交叉表与离散敏感性探针、伴随灵敏度的有限差分校验, 都只能由这里产生。两者都以 `--case` 驱动,
+但 case 是两套命名:
+
+| | `run.py` | `compare.py` |
+|---|---|---|
+| 一条 case | 一道要解的题 | 一件要产出的成果 (多数需重新求解) |
+| id 来源 | `cases.toml` 的 `[[cases]]` | `plots/` 下声明了 `SOURCE_CASE` / `REQUIRED_RUNS` 的模块, id 取模块文件名 |
+| 派发 | 由 `role` 决定 (`convergence-verification` 归 `convergence.py`, 其余归 `driver.py`) | 由模块自描述决定, 绘图数据缺失或过期时自行触发冻结重分析 |
+| 列出 | `run.py --list` | `compare.py --list` |
+
+调用方拿到 id 即可运行, 不必先知道用哪个动词; 不支持按文件路径直接执行 `driver.py` / `convergence.py`。
+
+省略 `--analyzer` / `--order` / `--degree` 时只展开一个组合: 方法取 `huzhang` (该 case 未注册时退回 `methods` 首项), 阶次取 `comparison_orders` 的最小值。论文那套方法/阶次对比是显式动作, 用 `--full` 展开成 `methods x comparison_orders` 全集, 也可以用 `--analyzer all` / `--order 2 3` 精确指定; 注册表里的 `methods` / `comparison_orders` 同时是白名单, 越界直接报错。`summary.json` 按方法与阶次为键增量合并, 因此分多次单跑与一次 `--full` 得到的论文表一致。
+
+覆盖参数有两个通道:
+
+| 通道 | 覆盖的字段 | 直接报错的情形 |
+|---|---|---|
+| 具名开关 `--mesh-type` / `--interpolation` / `--analyzer` / `--order` / `--nx` / `--ny` / `--optimizer` / `--stabilization` / `--load-discretization` | 最常用的字段 | 与 `--override` 重复指定同一字段 |
+| `--override KEY=VALUE` (可重复) | `[cases.discretization]` / `[cases.optimization]` 的键, 另加运行组合维度 `analyzer` / `order` (多值用逗号分隔) | 字段名写错、类型转换失败 |
+
+取值按配置对象现有取值的类型转换, 不静默取一边。两个驱动认的参数并不重叠 (`--stabilization` / `--degree` / `--levels` 只属于收敛验证, `--analyzer` / `--order` / `--nx` / `--optimizer` 只属于优化), 因此覆盖参数只允许配合单个 `--case`。`--load-discretization` 在固支梁上默认 `p1_trace_l2_projection`; `point_force` 用节点集中力替换分布牵引, 仅允许 `--analyzer lfem`, 不支持 `--mode state-compare`, 此时 `load_width` 不参与载荷计算, 产物标签含 `load_discretization-point_force`。
+
+## 载荷引入垫片 (应力算例)
+
+右端牵引在贴片端点 `(80, 17)` 与 `(80, 23)` 处跳变 `P/l`, 这是载荷模型自带的混合边界
+间断点: 载荷分布化只消除点载荷的 `r^-1` 奇异, 消不掉端点奇异, 密度设计也消不掉。实测
+该处实体应力比随阶次单调上升 (LFEM `k=1..4` 为 2.77 / 3.94 / 4.19 / 4.50, Hu--Zhang
+`k=2` 为 4.31), 无收敛迹象。
+
+`cases.toml` 的 `load_pad_radius` (默认 `1.5 = l/4`) 把这两个端点的固定物理半径邻域
+划为"载荷引入垫片": 载荷总要通过一块实体传入结构, 该处的奇异性是边界条件的性质而
+非设计的缺陷, 既约束不了, 也不该让优化器去动它。掩码按单元重心判定
+(`soptx.topology.constraints.exemption`), 两条分析链施加同一份掩码, 保证对照在同一
+验收区域上进行。掩码有两个用途, **必须成对施加**:
+
+1. **应力豁免** —— 垫片内不施加局部应力约束 (`apply_exemption`);
+2. **实体保留 (passive solid)** —— 垫片内物理密度钉为 1, 密度灵敏度置零
+   (`apply_passive_solid`)。
+
+只做第 1 条会被优化器利用。2026-09-16 的对照 (Hu--Zhang `k=2`): 只豁免不保留时确实从
+1000 步不收敛变为 536 步收敛, 但优化器发现该邻域不再受约束, 把原本被应力约束逼着保持
+`rho ~ 0.98` 的单元减到 0.67 以换体积, 实体应力比从 0.68 涨到 1.45,
+`max_solid_stress_ratio_solid_region` 由历年稳定的 1.01-1.03 跳到 1.452 —— 豁免掩盖了
+真实过应力。故实体保留不是可选项。
+
+实现上的四条边界:
+
+- 实体保留施加在**过滤/投影之后** (`Filter._enforce_passive_solid`)。只钉设计变量是
+  不够的: `rmin = 6 >> h = 1`, 宽过滤下保留单元的物理密度仍由邻域决定, 达不到满密度;
+- `rho_phys` 在垫片内与设计变量无关, 故链式法则中 `d rho_phys / d z = 0`, 过滤器在
+  委托给策略之前先把这些行的密度灵敏度清零;
+- 豁免只改约束集合的成员, 不改 AL 的归一化基数 —— `fun` 返回张量的形状不变, 带垫片
+  与不带垫片的两次运行罚项量级严格可比。豁免点的约束值取严格可行的常值 (`-1.0`),
+  对目标与灵敏度的贡献恒为 0; 真实值仍可由 `compute_unexempted_constraint` 取回,
+  `summary.json` 单列 `max_constraint_pad` 与 `max_solid_stress_ratio_pad`, 并把受约束
+  区域单列为 `max_solid_stress_ratio_constrained`, 垫片掩盖了多大的应力可直接读出;
+- 非零半径恒进产物目录名 (`__load_pad_radius-1.5`), 2026-09-16 之前的产物不会被覆盖;
+  `--override load_pad_radius=0` 复原旧行为与旧目录名。
+
+核对用 `compare.py stress-cross-eval`: 把一份构型冻结, 用 LFEM `k=1..4` 与 Hu--Zhang
+`k=2..4` 各前向求解一次, 在同一密度场上读同一批单元, 把"离散"与"构型"两个变量分开,
+并按 `eta = rho / rho_crit - 1` 报可行性余量。
+
+## 离散敏感性探针 (实验 A)
+
+`stress-cross-eval` 回答"同一构型换一条离散, 读出的应力比差多少"; `discretization-probe`
+在同一批前向解上继续追问这个差**从哪来、是否大到让约束判定失效**。设计冻结, 只让离散变,
+四件事各自独立成表:
+
+1. **离散间散布, 按密度带分解** —— $\rho$ 分 10 档, 逐档报各离散的 $\max g$ 与散布
+   $\Delta = \max - \min$, 同时报 $\Delta / \delta_g$ ($\delta_g = 5\times 10^{-3}$,
+   即停止容差)。散布按**逐单元**取差再取最大, 比直接差两条离散的全局最大值严格: 后者
+   的两个最大值可能落在不同单元上。另出 argmax 单元身份表与两两交集大小 —— 若各离散把
+   $g_\max$ 放在不同单元上, 横比本身就无意义。全部 7 条与"可信子集"
+   {`lfem-3`, `lfem-4`, `huzhang-3`, `huzhang-4`} 各算一遍; `huzhang-2` 如实报出但不进
+   可信子集 (见 `docs/known-issues/`: 跳量稳定化的惩罚系数不随密度插值);
+2. **胞内采样敏感性** —— 两族 analyzer 的 `compute_stress_state` 默认
+   `integration_order=1`, 三角形上即形心一个点, 于是**约束只读一个形心样本, 与 $k$ 无关**。
+   探针用同一 `state` 重采样 $q \in \{1, 3, 4\}$ (不重解), 报
+   $\max_q g_e - g_e(\text{形心})$ 随 $k$ 的走势, 即高阶单元的胞内起伏被形心采样丢了多少;
+3. **内边法向牵引跳量** ($\texttt{edge\_jump.py}$) —— 逐单元应力约束要有意义, 前提是
+   "该单元的应力"良定义。Hu--Zhang 的应力是 $H(\mathrm{div}, S)$ 协调的原始变量,
+   $[[\sigma \cdot n]] \equiv 0$; LFEM 的应力由位移求导, 跨边有跳。报相对跳量的
+   中位数 / P95 / 最大值并按密度带分解, 重点与实体带的可行余量 (1%--4%) 对照。
+   跳量一律测**表观应力**: 连续介质中真实牵引跨面连续, 而实体应力
+   $\sigma^{\mathrm{sol}} = \sigma^{\mathrm{app}} / m_E$ 因 $m_E$ 逐单元常值必然跳,
+   测它没有意义;
+4. **细网格双参考** (`--reference`, 默认关) —— 在 160x80 上建 `huzhang-4` 与 `lfem-4`
+   两条参考, 密度用 `singularity_h_probe.map_density_to_mesh` 作面积保持的分片常数延拓,
+   细单元 $g$ 按父单元取 max 归约。除各粗离散相对参考的 $\Delta$ 外, 一并报**两条参考彼此
+   的分歧**: 若它已超 $\delta_g$, 参考解自身不可信, 该块结论作废。
+
+两条硬门, 不过则进程返回码为 1:
+
+- Hu--Zhang 的相对跳量必须 $< 10^{-10}$ (协调性的直接后果)。不满足即判定 `edge_jump.py`
+  有错, 第 3 项无效;
+- $q = 1$ 重采样出的 $g_e$ 必须与 `constraint.fun` 的结果逐单元相等 —— 证明重采样路径与
+  生产路径同口径, 第 2 项的差值才归因于采样而非归因于旁路。
 
 ```bash
-# k=1,2 不加稳定化项, 用于验证论文中「低阶必须稳定化」的论断
-python run.py --case manufactured-stabilized --stabilization none
-
-# 换用向量跳量形式
-python run.py --case manufactured-stabilized --stabilization vector_jump
+# 默认对两份 k=3 无 pad 构型 (huzhang / lfem 各一) 交叉跑, 避免交叉表那种来源偏置
+~/miniconda3/envs/ihpcm/bin/python compare.py discretization-probe
+# 加细网格双参考; 分钟级
+~/miniconda3/envs/ihpcm/bin/python compare.py discretization-probe --reference
+# 指定构型 (可重复), 跳过牵引跳量
+~/miniconda3/envs/ihpcm/bin/python compare.py discretization-probe --design <运行目录名> --no-jump
 ```
 
-消融产物写入 `outputs/manufactured_convergence/ablation_<方法>.json`, **不进 `summary.json`**: 后者是 `compare.py table` 生成论文表 5.1 / 5.2 的唯一数据源, 按阶次为键增量合并, 消融结果落进去会静默顶掉同阶次的论文数值。`--stabilization` 只允许配合单个 `--case`。
-
-## 命令
-
-```bash
-# 列出全部算例及其缺省组合
-python experiments/huzhang_topopt_paper/run.py --list
-
-# 只校验指定 case 的配置和组合, 不运行优化 (--full 才校验完整对比组)
-python experiments/huzhang_topopt_paper/run.py \
-  --case compliance-fixed-fixed-half --full --check-only
-
-# 固定初始密度下的 LFEM/Hu--Zhang 单次状态对比, 不更新设计变量
-python experiments/huzhang_topopt_paper/run.py \
-  --case compliance-fixed-fixed-half --analyzer all \
-  --mode state-compare --solver scipy
-
-# 单条 Hu--Zhang 计算链
-python experiments/huzhang_topopt_paper/run.py \
-  --case compliance-fixed-fixed-half --analyzer huzhang --order 3
-
-# 全部论文离散组合 (methods x comparison_orders)
-python experiments/huzhang_topopt_paper/run.py --case compliance-fixed-fixed-half --full
-```
-
-临时调试可覆盖网格、迭代次数和求解器, 覆盖结果不能作为默认投稿证据:
-
-```bash
-python experiments/huzhang_topopt_paper/run.py \
-  --case compliance-fixed-fixed-half --analyzer huzhang --order 2 \
-  --nx 8 --ny 2 --max-iterations 1 --solver scipy
-```
-
-优化模式的每个组合写入 `outputs/<case-id>/analyzer-<链>__order-<k>[__<字段>-<取值>...]/`，包含 `density_final.vtu`、`history.json` 和 `summary.json`。`state-compare` 写入 `outputs/<case-id>/state-comparison-<nx>x<ny>/state_comparison.json`，只包含一次状态分析比较数据。结果一律以各组合目录下的 `summary.json` 为准。
-
-## 证据与成图
-
-运行产物 `outputs/` 整体不入版本控制, 论文数字的溯源依据是产物自带的戳记: 每次落盘时
-`provenance.run_stamp()` 把本仓库与 fealpy 副本的 revision/dirty 写进该次运行的
-`summary.json` (收敛验证写进 `provenance_by_degree`), 因此过期目录会自报版本, 不会被
-后来的汇总统一改标成最新版本。
-
-```bash
-# 制造解收敛阶: 按阶次增量写入, 单独重算某个 k 不会覆盖其余阶次
-python experiments/huzhang_topopt_paper/run.py --case manufactured-native --degree 3
-
-# 应力算例插图数据: 对每次运行的 density_final.vtu 做冻结重分析并落盘 npz
-python experiments/huzhang_topopt_paper/compare.py export
-python experiments/huzhang_topopt_paper/compare.py export --check   # 只校验, 不覆盖
-```
-
-`provenance.py` 记录 Git revision、工作区是否 dirty、环境与产物 sha256; 快照的 `reproducible` 字段为 `false` 时（工作区不干净或取不到 revision）该批数字不能直接作为定稿证据。插图统一经 `report.save_figure` 落盘到 `outputs/figures/`, 论文图件目录存在时同步一份, 可用环境变量 `HUZHANG_PAPER_FIGDIR` 覆盖。
-
-## 全域固定梁模型（不再注册, 仅作对称降维参照）
-
-论文 5.2.1 节在左半计算域上求解, 故全域 case 已从注册表移除; `FixedFixedBeamCenterLoad2d` 仍留在 `pipeline.ASSEMBLERS` 中, 作对称降维一致性核对的参照, 需要重跑时按下述参数临时注册一条 case 即可。它使用全域 `160 mm x 20 mm`、两端固定、底边中点载荷 `P=-3 N`、`E=30 MPa`、`nu=0.4`、平面应力、`Vbar=0.4`、`rmin=2.4 mm`。每个受控比较阶次取 `comparison_orders = [2, 3, 4]`（$k=1$ 因位移空间为 $P_0$ 缺失刚体旋转模态不适用于拓扑演化，详见 [`docs/fem/huzhang-mixed-fem-implementation.md`](../../docs/fem/huzhang-mixed-fem-implementation.md)），均成对运行 `LFEM p=k` 与 `Hu--Zhang k=k`，并统一使用积分阶 `q=2k+2`。
-
-默认 `hx=1 mm`, 而 `load_width=1 mm` 的连续载荷以中点为中心，会切过相邻两条底边的半边。Hu--Zhang 的牵引强施加不能精确表达边内跳变，网格对齐也救不了（跳变点上的顶点自由度是单值的）。因此两条分析链使用的不是原始阶跃牵引，而是它在底边连续 P1 迹空间上的 L2 投影：`build_problem(parameters, n_cells=nx)` 调用 `soptx.fem.project_patch_traction_to_p1_trace` 得到该投影，再注入 `FixedFixedBeamCenterLoad2d(traction=...)`。投影精确保持合力 `P`，且能被 LFEM 的边界积分与 Hu--Zhang 的迹插值同时精确重现，所以两种方法的差异可以归因于离散格式本身。
-
-结构合力核查（从解出的场反算真正传进结构的力：Hu--Zhang 取 $\int_{\Gamma_N}\sigma_h\cdot n$，LFEM 取支座反力）与密度无关，因此不在本目录重复：它由 [`examples/huzhang_elasticity/concentrated_load_demo.py`](../../examples/huzhang_elasticity/concentrated_load_demo.py) 在实体材料（`rho=1`、无材料插值）下承担。本目录的 `--mode state-compare` 只保留与密度相关的部分：`rho=0.4` + msimp 插值下的柔顺度对比、体积分数、真相对残差与能量恒等式诊断。
-
-## 左半域对称降维算例
-
-`compliance-fixed-fixed-half` 显式选择 `FixedFixedBeamHalfDomain2d`，采用左半设计域对称降维设置。它把完整域关于竖直中线 `x=80 mm` 对称降维为左半域 `80 mm x 20 mm`：左端 `x=0` 完全固支，对称面 `x=80` 施加对称约束（法向位移 `u_x=0` 与切向牵引 `sigma_xy=0`），底部对称面底端施加局部牵引。
-
-对称面的离散处理：
-
-- LFEM 走分量级 Dirichlet：`is_dirichlet_boundary_dof_x` 同时标记左端与对称面（`u_x=0`），`is_dirichlet_boundary_dof_y` 只标记左端（`u_y=0`），对称面切向位移自由。
-- Hu--Zhang 走分量级本质边界：`is_symmetry_boundary` 标记对称面，`HuZhangMFEMAnalyzer` 仅强加对称面切向牵引分量 `sigma_nt=0`，法向牵引 `sigma_nn` 自由；法向位移 `u_n=0` 在切向牵引固定后由变分自然满足，位移边界项贡献为零。
-
-载荷名义区间 `load_width=1 mm` 关于对称面对称，左半域只保留其左半边，因此合力自动为完整域的一半 `P/2=1.5 N`；左半域柔顺度为完整域的一半。`run.py` 的终端输出、`history.json`、`summary.json` 与 `state-compare` 均保存计算域（半域）柔顺度，与半域 `density_final.vtu` 对应；摘要以 `compliance_domain = "half"`、`full_structure_factor = 2.0` 标明口径。仅在 `compliance-convergence` 和 `compliance-topology` 中将柔顺度显式乘以 2 展示完整结构，后者同时镜像补全拓扑，密度值与体积分数不变，且不回写运行产物。旧摘要若缺少口径字段，需先核查迁移，不能直接当成半域值再次乘 2；已启动或暂停的旧进程不会自动加载此协议。网格剖分 `80 x 20`（对应完整域 `160 x 20` 的一半），`filter_radius=2.4 mm` 保持物理长度不变。受控比较阶次、积分阶、材料与优化参数与全域参照完全一致，两组结果应给出相同的完整结构柔顺度（LFEM `C≈31.94–32.07`、Hu--Zhang `C≈32.32–33.17`，差异仅来自对称边界处理的离散误差；实测收敛值见 `results_analysis.md`）。
-
-### 对称降维的一致性验证
-
-对称面稳定化在均匀密度与收敛设计下表现不同，分两层验证：
-
-**单次状态分析（`--mode state-compare`，`rho=0.4` 均匀密度）**：
-
-- `k=3, 4`（高阶原生格式，无跳量稳定化）与 LFEM 全阶：左半域结果与完整域**逐位一致**（`k=3` 下 LFEM `184.017`、Hu--Zhang `184.080` 均与完整域相同）。
-- `k=2`（低阶跳量稳定化）：Hu--Zhang 左半域与完整域存在约 `3%` 的偏差。根源是稳定化格式下的对称降维不等价：完整域把对称面 `x=80` 当作内部面，跳量惩罚施加的是两侧对称梯度之差（对称时仅法向位移 `u_x` 有跳量，切向为零）；左半域把对称面当作边界，仅强加切向牵引 `sigma_nt=0`，未施加等价的分量级跳量惩罚（只惩罚法向位移跳量 `u_x`），因此均匀密度诊断下缺少对称面稳定化。曾尝试补全对称面分量级跳量惩罚（仅法向位移）与法向位移 `u_x=0` 的强加，两者均无法消除该偏差；且 `u_x` 强加会破坏 `k=3,4` 左半域与完整域的逐位一致性，已回退。诊断确认完整域解本身完全对称、对称面内部面稳定化对柔顺度无贡献，故该偏差是低阶稳定化格式下对称降维的固有数值差异，不是可单点修复的缺陷。
-
-**完整 OC 优化（收敛设计）**：`k=2` Hu--Zhang 左半域与完整域各跑一条优化链（`--max-iterations 200 --solver scipy`），收敛柔顺度分别为 `33.071` 与 `33.171`（相对差异 `0.30%`），体积分数均为 `0.400`；以 `rho>0.5` 二值化的最终拓扑**3200/3200 单元完全一致**（最大密度差 `0.019`，平均差 `1.6e-4`）。优化收敛到 0/1 密度后，对称面附近由实体/空腔结构自身承载法向位移约束，均匀密度下的稳定化偏差不再放大，因此 `k=2` 的收敛设计与完整域一致。
-
-结论：左半域 case 的 `k=2,3,4` 收敛设计均可作为投稿证据；均匀密度诊断下 `k=2` 的约 `3%` 偏差仅存在于优化前的固定密度分析，不影响收敛设计。
+产物落在 `outputs/cantilever-middle-2d-stress/postprocess/discretization_probe/`:
+`<design>__probe.json` (全部聚合表 + provenance + 构型 sha256)、`<design>__fields.npz`
+(逐单元原始场, 所有离散 x 所有采样阶次, 使求解成为一次性成本)、
+`<design>__<disc>.vtu` ($g$ / 各阶采样的 $g$ / 相对跳量, 供出图)。

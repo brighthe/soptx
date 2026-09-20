@@ -9,6 +9,8 @@
     python compare.py export [--check]
     python compare.py gradients
     python compare.py metrics
+    python compare.py bearing-reanalysis
+    python compare.py stress-cross-eval
 
 一件产物 = 一条 ``--case``, 与 ``run.py --case`` 同一个词: 那边一条 case 是一道要解的
 题, 这边一条 case 是一件要整理出来的产物。产物 case 不另立注册表, 由 ``plots/`` 下声明
@@ -48,13 +50,20 @@ COMMAND_MODULES: dict[str, str] = {
     "export": "metrics:run_export",
     "gradients": "metrics:run_gradient_check",
     "metrics": "metrics:run_frozen_metrics",
+    "audit-final-stress": "metrics:run_audit_final_stress",
+    "bearing-reanalysis": "bearing_reanalysis:run_bearing_reanalysis",
+    "stress-cross-eval": "stress_cross_evaluation:run_stress_cross_evaluation",
+    "discretization-probe": "discretization_probe:run_discretization_probe",
 }
 
 # 需要把子命令之后的参数透传下去的模块 (其余不接受参数)
-FORWARDS_ARGV = {"export"}
+FORWARDS_ARGV = {"export", "stress-cross-eval", "discretization-probe"}
 
 # 会按冻结设计重新组装并求解的动词: 比纯读产物慢, --help 里标出来免得误当作秒回
-REANALYSIS = {"export", "gradients", "metrics"}
+REANALYSIS = {
+    "export", "gradients", "metrics", "audit-final-stress",
+    "bearing-reanalysis", "stress-cross-eval", "discretization-probe",
+}
 
 # 动词的说明; 产物 case 的说明取自各 plots 模块自己的 docstring, 不在此重复
 DESCRIPTIONS: dict[str, str] = {
@@ -62,6 +71,10 @@ DESCRIPTIONS: dict[str, str] = {
     "export": "冻结重分析导出插图场数据 (npz)",
     "gradients": "伴随灵敏度的有限差分校验",
     "metrics": "冻结设计的论文口径指标复算",
+    "audit-final-stress": "核查两组 k=2 最终密度的实际约束, 不覆盖结果",
+    "bearing-reanalysis": "轴承算例冻结设计交叉再分析与 nu 扫描 (论文表 5.3 / 5.4)",
+    "stress-cross-eval": "应力算例: 一份构型 x 七条离散的应力比与可行性余量交叉表",
+    "discretization-probe": "应力算例: 冻结构型的离散敏感性探针 (散布/采样/牵引跳量)",
 }
 
 
@@ -283,6 +296,18 @@ def run_case(identifier: str) -> int:
             print(f"未知产物 case: {identifier}", file=sys.stderr)
             print("可用: " + ("  ".join(sorted(cases)) or "(无)"), file=sys.stderr)
         return 1
+    # 吃 postprocess/ npz 的 case 只准备自己那几组, 不触发其它阶次的批量导出.
+    EXPORTS_BY_CASE = {
+        "stress-topologies": ["lfem-k2", "huzhang-k2"],
+        "stress-cubic-convergence": ["lfem-k3", "huzhang-k3"],
+    }
+    if identifier in EXPORTS_BY_CASE:
+        from metrics import prepare_exports
+        try:
+            prepare_exports(EXPORTS_BY_CASE[identifier])
+        except FileNotFoundError as error:
+            print(str(error), file=sys.stderr)
+            return 1
     missing = case.missing_runs()
     if missing:
         print(f"{identifier} 缺 {len(missing)} 个产物:", file=sys.stderr)

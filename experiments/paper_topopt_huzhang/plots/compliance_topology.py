@@ -6,7 +6,7 @@
   Row 2: (c) LFEM k=3   | (d) HZMFEM k=3
   Row 3: (e) LFEM k=4   | (f) HZMFEM k=4
 
-输出: outputs/figures/compliance_topology.png, 自动同步至 papers/figures/
+输出: outputs/figures/compliance_topology.png, 自动同步至 papers/huzhang-topopt/figures/
 
 论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
 """

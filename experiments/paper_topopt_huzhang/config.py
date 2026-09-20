@@ -21,7 +21,7 @@ FIGURE_DIR = OUTPUT_DIR / "figures"
 # 论文插图目录属于另一个仓库 (dut-postdoc), 默认取 WSL 下的挂载路径; 可用环境变量
 # HUZHANG_PAPER_FIGDIR 覆盖, 目录不存在时同步步骤自动跳过而非报错.
 PAPER_FIGURE_DIR = Path(
-    os.environ.get("HUZHANG_PAPER_FIGDIR", "/mnt/c/workspace/dut-postdoc/papers/figures")
+    os.environ.get("HUZHANG_PAPER_FIGDIR", "/mnt/c/workspace/dut-postdoc/papers/huzhang-topopt/figures")
 )
 
 
