@@ -61,7 +61,7 @@ import config  # noqa: E402
 T_TET4 = 288  # tet4 线弹性: 每自由度对应的三元组数 (144 * NC / Ndof 的渐近值)
 DEFAULT_MEMORY_TOTAL = 47.04 * 2**30  # WSL 来宾 MemTotal (字节), 仅作事实记录
 MEMORY_BUDGET = 45 * 2**30  # 峰值内存预算 (字节): 容量结论以进程绝对峰值 RSS 不超过此值为界
-ROUTE_NAMES = ("coalesce", "scipy", "pattern", "pattern-chunked")
+ROUTE_NAMES = ("coalesce", "scipy", "pattern")
 FULL_ROUTE_NAMES = ("pattern", "coalesce", "scipy")
 METHOD_NAMES = ("standard", "voigt", "fast")
 PROBLEM_NAME = "DivergenceFreePolynomialElasticity3D"
@@ -216,18 +216,38 @@ def cell_to_dof_gd(cell: np.ndarray) -> np.ndarray:
     return (3 * cell[:, :, None] + np.arange(3, dtype=np.int64)).reshape(NC, 12)
 
 
-class _CellSpace:
-    """只暴露 ``cell_to_dof`` / ``number_of_global_dofs`` 的鸭子类型空间.
-
-    供生产 ``build_csr_pattern`` 直接消费, 不构建 mesh / 函数空间对象, 避免其高水位污染阶段 2 测量.
-    """
+class _ScalarCellSpace:
+    """标量层鸭子类型空间: ``cell_to_dof`` 即节点级 ``cell``."""
 
     def __init__(self, cell: np.ndarray, NN: int) -> None:
-        self._c2d = cell_to_dof_gd(cell)
-        self._gdof = 3 * NN
+        self._c2d = cell
+        self._gdof = int(NN)
 
     def cell_to_dof(self) -> np.ndarray:
         return self._c2d
+
+    def number_of_global_dofs(self) -> int:
+        return self._gdof
+
+
+class _CellSpace:
+    """鸭子类型的张量函数空间, 供生产 ``build_csr_pattern`` 直接消费.
+
+    暴露 ``scalar_space`` / ``dof_numel`` / ``dof_priority``, 使其走与
+    ``TensorFunctionSpace(shape=(-1, 3))`` 完全相同的标量级骨架路径; 不构建
+    mesh / 函数空间对象, 避免其高水位污染阶段 2 测量.
+    """
+
+    dof_numel = 3
+    dof_priority = False  # 3*node+comp, 与 shape=(-1, 3) 一致
+
+    def __init__(self, cell: np.ndarray, NN: int) -> None:
+        self._cell = cell
+        self._gdof = 3 * int(NN)
+        self.scalar_space = _ScalarCellSpace(cell, NN)
+
+    def cell_to_dof(self) -> np.ndarray:
+        return cell_to_dof_gd(self._cell)
 
     def number_of_global_dofs(self) -> int:
         return self._gdof
@@ -253,70 +273,6 @@ def synthetic_element_matrices(cell: np.ndarray) -> np.ndarray:
     """合成单刚 (NC, 12, 12) float64, 数值与 ``full_triplets`` 的 V 一致, 作为 pattern 路线的输入."""
     e2 = cell_to_dof_gd(cell)
     return det_val(e2[:, :, None], e2[:, None, :])
-
-
-def route_pattern_chunked(
-    cell: np.ndarray, NN: int, chunk: int
-) -> Tuple[Tuple[np.ndarray, np.ndarray, np.ndarray], Dict[str, Any]]:
-    """实验原型: 分块 searchsorted + bincount 的模式先行合并 (非生产代码).
-
-    与生产 ``CSRPattern`` 的区别: 不物化 NC*144 长度的 slot_map, 数值按块生成并累加,
-    因此单价远低于生产实现; 保留它只为标定「模式先行的理论下界」.
-    """
-    NC = cell.shape[0]
-
-    # -- 符号阶段: 节点级邻接图
-    t0 = time.perf_counter()
-    pa = np.broadcast_to(cell[:, :, None], (NC, 4, 4)).ravel()
-    pb = np.broadcast_to(cell[:, None, :], (NC, 4, 4)).ravel()
-    A = sp.coo_matrix(
-        (np.ones(pa.size, dtype=np.int16), (pa, pb)), shape=(NN, NN)
-    ).tocsr()
-    del pa, pb
-    indptr_n = A.indptr.astype(np.int64)
-    indices_n = A.indices.astype(np.int64)
-    del A
-    nnz_n = indices_n.size
-    deg = np.diff(indptr_n)
-
-    rows_n = np.repeat(np.arange(NN, dtype=np.int64), deg)
-    key_n = rows_n * NN + indices_n
-    del rows_n
-
-    # -- 节点级模式按 GD x GD 块展开成 dof 级 CSR 骨架
-    lens = np.repeat(3 * deg, 3)
-    indptr_d = np.concatenate([[0], np.cumsum(lens)]).astype(np.int64)
-    nnz_d = int(indptr_d[-1])
-    expand = (3 * indices_n[:, None] + np.arange(3, dtype=np.int64)).reshape(-1)
-    node_of_row = np.arange(3 * NN, dtype=np.int64) // 3
-    pos_within = np.arange(nnz_d, dtype=np.int64) - np.repeat(indptr_d[:-1], lens)
-    src = np.repeat(3 * indptr_n[node_of_row], lens) + pos_within
-    indices_d = expand[src]
-    del expand, src, pos_within, node_of_row, lens
-    data = np.zeros(nnz_d)
-    t1 = time.perf_counter()
-
-    # -- 数值阶段: 分块生成贡献并累加
-    for c0 in range(0, NC, chunk):
-        cc = cell[c0 : c0 + chunk]
-        nc = cc.shape[0]
-        ni = np.broadcast_to(cc[:, :, None], (nc, 4, 4)).ravel()
-        nj = np.broadcast_to(cc[:, None, :], (nc, 4, 4)).ravel()
-        pos_in_row = np.searchsorted(key_n, ni * NN + nj) - indptr_n[ni]
-        for ci in range(3):
-            idof = 3 * ni + ci
-            rowptr = indptr_d[idof]
-            for cj in range(3):
-                slot = rowptr + 3 * pos_in_row + cj
-                v = det_val(idof, 3 * nj + cj)
-                data += np.bincount(slot, weights=v, minlength=nnz_d)
-    t2 = time.perf_counter()
-
-    return (indptr_d, indices_d, data), {
-        "t_symbolic": t1 - t0,
-        "t_numeric": t2 - t1,
-        "nnz_node": int(nnz_n),
-    }
 
 
 def _is_cuda(device_str: str) -> bool:
@@ -447,6 +403,11 @@ def measure_stage1(method: str, n: int, device_str: str = "cpu") -> dict:
         Ke = integrator.assembly(vs)
 
     Ke = np.asarray(Ke)
+    gc.collect()
+    base_kib = meter.records["stage1"].before_kib
+    retained_kib = max(0, cur_rss_kib() - base_kib)
+    trimmed = _malloc_trim()
+    after_kib = max(0, cur_rss_kib() - base_kib) if trimmed else retained_kib
     facts = _mesh_facts(mesh, vs)
     Ndof = facts["Ndof"]
     net_bytes = meter.net_bytes("stage1")
@@ -465,11 +426,294 @@ def measure_stage1(method: str, n: int, device_str: str = "cpu") -> dict:
         "stage1_B_per_dof": round(net_bytes / Ndof, 1),
         "stage1_KB_per_dof": round(net_bytes / Ndof / 1000, 2),
         "stage1_peak_KB_per_dof": round(meter.peak_bytes("stage1") / Ndof / 1000, 2),
+        "stage1_retained_MiB": round(retained_kib / 1024, 1),
+        "stage1_retained_KB_per_dof": round(retained_kib * 1024 / Ndof / 1000, 2),
+        "malloc_trim_supported": trimmed,
+        "stage1_retained_after_trim_MiB": round(after_kib / 1024, 1),
+    }
+
+
+def _probe_obj_attr(obj: Any, name: str, make_wrapper) -> Any:
+    """把 ``obj.name`` 替换为探针包装, 返回可调用的还原句柄; 属性不存在时返回 None."""
+    original = getattr(obj, name, None)
+    if original is None or not callable(original):
+        return None
+    had_own = name in getattr(obj, "__dict__", {})
+    setattr(obj, name, make_wrapper(name, original))
+
+    def restore() -> None:
+        if had_own:
+            setattr(obj, name, original)
+        else:
+            try:
+                delattr(obj, name)
+            except AttributeError:
+                setattr(obj, name, original)
+
+    return restore
+
+
+def _result_bytes(value: Any) -> Tuple[int, Any]:
+    """返回 (字节数, 形状); 元组按元素求和, 非数组返回 (0, None)."""
+    if isinstance(value, tuple):
+        total = 0
+        shapes = []
+        for item in value:
+            size, shape = _result_bytes(item)
+            total += size
+            shapes.append(shape)
+        return total, shapes
+    nbytes = getattr(value, "nbytes", None)
+    if nbytes is None:
+        return 0, None
+    return int(nbytes), [int(s) for s in getattr(value, "shape", ())]
+
+
+def _run_stage1_probe(integrator: Any, vs: Any, material: Any, snapshot_at: Tuple[str, str] | None):
+    """在 tracemalloc 下跑一次 ``integrator.assembly(vs)``, 逐调用记录调用前存活量与调用内峰值.
+
+    Parameters
+    ----------
+    snapshot_at : tuple of (str, str), optional
+        若给定 ``(调用名, 调用点)``, 在最后一次匹配该调用发生前拍一张快照, 用于分解此刻的存活构成.
+    """
+    import tracemalloc
+
+    calls: list[dict] = []
+    state = {"index": 0, "depth": 0, "snapshot": None}
+
+    def make_wrapper(name, original):
+        def wrapper(*args, **kwargs):
+            if state["depth"] > 0:  # 只记最外层, 避免嵌套重复计数
+                return original(*args, **kwargs)
+            index = state["index"]
+            state["index"] = index + 1
+            frame = sys._getframe(1)
+            site = f"{Path(frame.f_code.co_filename).name}:{frame.f_lineno}"
+            if snapshot_at is not None and (name, site) == snapshot_at:
+                state["snapshot"] = tracemalloc.take_snapshot()
+            live_before, _ = tracemalloc.get_traced_memory()
+            tracemalloc.reset_peak()
+            state["depth"] += 1
+            try:
+                result = original(*args, **kwargs)
+            finally:
+                state["depth"] -= 1
+            live_after, peak_in = tracemalloc.get_traced_memory()
+            out_bytes, out_shape = _result_bytes(result)
+            calls.append({
+                "index": index,
+                "call": name,
+                "site": site,
+                "out_shape": out_shape,
+                "out_MiB": round(out_bytes / 2**20, 1),
+                "live_before_MiB": round(live_before / 2**20, 1),
+                "peak_in_MiB": round(peak_in / 2**20, 1),
+                "live_after_MiB": round(live_after / 2**20, 1),
+                "transient_MiB": round(max(0, peak_in - max(live_before, live_after)) / 2**20, 1),
+            })
+            return result
+
+        return wrapper
+
+    from fealpy.backend import backend_manager as bm
+
+    scalar_space = getattr(vs, "scalar_space", vs)
+    restores = [
+        _probe_obj_attr(bm.get_current_backend(), name, make_wrapper)
+        for name in ("einsum", "zeros", "set_at", "concat", "tensordot")
+    ]
+    restores.append(_probe_obj_attr(material, "strain_matrix", make_wrapper))
+    restores.append(_probe_obj_attr(scalar_space, "grad_basis", make_wrapper))
+
+    gc.collect()
+    tracemalloc.start(20)
+    try:
+        t0 = time.perf_counter()
+        Ke = integrator.assembly(vs)
+        t1 = time.perf_counter()
+        live_end, traced_peak = tracemalloc.get_traced_memory()
+        snapshot = state["snapshot"]
+    finally:
+        tracemalloc.stop()
+        for restore in restores:
+            if restore is not None:
+                restore()
+    del Ke
+    gc.collect()
+    # 每次被测调用前都做过 reset_peak, 故 get_traced_memory 的峰值只覆盖最后一段;
+    # 阶段峰值取全部调用内峰值与该尾段峰值的最大者。
+    stage_peak = max([traced_peak] + [c["peak_in_MiB"] * 2**20 for c in calls])
+    return {
+        "calls": calls,
+        "t_assembly_s": round(t1 - t0, 4),
+        "traced_peak_MiB": round(stage_peak / 2**20, 1),
+        "traced_live_end_MiB": round(live_end / 2**20, 1),
+    }, snapshot
+
+
+def _snapshot_lines(snapshot: Any, limit: int = 24) -> list[dict]:
+    """把快照按 traceback 归并, 取最大的若干条, 每条报告最靠近被测代码的一帧."""
+    self_file = Path(__file__).resolve()
+    stats = snapshot.statistics("traceback")
+    rows = []
+    for stat in stats[:limit]:
+        preferred = None
+        fallback = None
+        for frame in stat.traceback:
+            if Path(frame.filename).resolve() == self_file:
+                continue
+            site = f"{Path(frame.filename).name}:{frame.lineno}"
+            if "linear_elastic_integrator" in frame.filename:
+                preferred = site
+            elif fallback is None and ("/src/soptx/" in frame.filename or "/fealpy/" in frame.filename):
+                fallback = site
+        top = stat.traceback[0]
+        rows.append({
+            "site": preferred or fallback or f"{Path(top.filename).name}:{top.lineno}",
+            "MiB": round(stat.size / 2**20, 1),
+            "count": stat.count,
+        })
+    return rows
+
+
+def measure_stage1_probe(method: str, n: int) -> dict:
+    """阶段 1 峰值归因: 直接在目标规模上用 ``tracemalloc`` 实测单刚计算内部的分配构成.
+
+    对 ``bm.einsum`` / ``bm.zeros`` / ``bm.set_at`` / ``bm.concat`` / ``bm.tensordot`` /
+    ``material.strain_matrix`` / ``space.grad_basis`` 打桩, 逐调用记录:
+    调用前已存活的分配量 (co-resident)、调用内峰值、调用内临时量 (peak 减两端存活量的较大者)。
+    跑两遍: 第一遍定位峰值所在调用, 第二遍在该调用前拍快照以分解此刻的存活构成。
+
+    Parameters
+    ----------
+    method : str
+        单刚组装方式 (standard/voigt/fast).
+    n : int
+        网格每方向段数.
+    """
+    from soptx.fem.integrators import LinearElasticIntegrator
+
+    _import_fe_stack_cpu()
+    _, mesh, vs, material = _build_problem_space(n)
+    integrator = LinearElasticIntegrator(material, method=method)
+
+    first, _ = _run_stage1_probe(integrator, vs, material, snapshot_at=None)
+    target = max(first["calls"], key=lambda c: c["peak_in_MiB"])
+
+    integrator = LinearElasticIntegrator(material, method=method)
+    second, snapshot = _run_stage1_probe(
+        integrator, vs, material, snapshot_at=(target["call"], target["site"])
+    )
+    peak_call = max(second["calls"], key=lambda c: c["peak_in_MiB"])
+
+    facts = _mesh_facts(mesh, vs)
+    return {
+        "stage": 1,
+        "pipeline": "stage1_probe",
+        "device": "CPU",
+        "device_type": "cpu",
+        "memory_kind": "tracemalloc",
+        "method": method,
+        "n": n,
+        **facts,
+        "traced_peak_MiB": second["traced_peak_MiB"],
+        "traced_peak_MiB_pass1": first["traced_peak_MiB"],
+        "traced_live_end_MiB": second["traced_live_end_MiB"],
+        "t_assembly_s": second["t_assembly_s"],
+        "peak_call": peak_call,
+        "peak_live_composition": _snapshot_lines(snapshot) if snapshot is not None else [],
+        "calls": second["calls"],
+    }
+
+def _malloc_trim() -> bool:
+    """把 glibc 持有但未归还内核的空闲页归还; 非 glibc 平台返回 False."""
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(ctypes.c_size_t(0))
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
+def measure_mesh(n: int, device_str: str = "cpu") -> dict:
+    """建网格与空间: 只跑 ``_build_problem_space``, 不做任何装配.
+
+    这是 FA/EA/PA/UA 全部装配层级共享的下游前提, 因此它的峰值是与装配层级无关的公共容量上界.
+    ``meshbuild`` 阶段为 ``TetrahedronMesh.from_box``; ``space`` 阶段为 ``LagrangeFESpace`` +
+    ``TensorFunctionSpace`` + ``IsotropicLinearElasticMaterial``; ``mesh`` 是两者的合成,
+    与 stage1/full 产物的 ``mesh_*`` 字段同口径, 可直接横比.
+    ``retained`` 是构建结束 (gc 后) 仍驻留的 RSS 净增, 与峰值之比即"建"与"持有"的代价差.
+
+    Parameters
+    ----------
+    n : int
+        网格每方向段数.
+    device_str : str, default="cpu"
+        计算设备; 本用例只做 CPU RSS 口径.
+    """
+    if _is_cuda(device_str):
+        raise SystemExit("mesh 用例只测 CPU RSS 口径, 不支持 --device cuda")
+
+    _import_fe_stack_cpu()
+    from fealpy.backend import backend_manager as bm
+    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+    from fealpy.mesh import TetrahedronMesh
+    from soptx.materials import IsotropicLinearElasticMaterial
+    from soptx.problems.elasticity import DivergenceFreePolynomialElasticity3D
+
+    problem = DivergenceFreePolynomialElasticity3D()
+    meter = StageMeter()
+    with meter.stage("meshbuild"):
+        mesh = TetrahedronMesh.from_box(list(problem.domain), nx=n, ny=n, nz=n)
+    with meter.stage("space"):
+        scalar = LagrangeFESpace(mesh, p=1, ctype="C")
+        vs = TensorFunctionSpace(scalar, shape=(-1, 3))
+        material = IsotropicLinearElasticMaterial(
+            hypothesis="3D",
+            lame_lambda=problem.lam,
+            shear_modulus=problem.mu,
+            device=bm.get_device(mesh),
+        )
+    meter.combine("mesh", ("meshbuild", "space"))
+
+    facts = _mesh_facts(mesh, vs)
+    Ndof = facts["Ndof"]
+    base_kib = meter.records["meshbuild"].before_kib
+
+    gc.collect()
+    retained_kib = max(0, cur_rss_kib() - base_kib)
+    trimmed = _malloc_trim()
+    after_kib = max(0, cur_rss_kib() - base_kib) if trimmed else retained_kib
+    assert material is not None  # 保持引用, 使 retained 反映真实驻留
+
+    peak_bytes = meter.peak_bytes("mesh")
+    return {
+        "pipeline": "mesh_only",
+        "stage": 0,
+        "device": "CPU",
+        "device_type": "cpu",
+        "memory_kind": "rss",
+        "n": n,
+        **facts,
+        **meter.fields(),
+        "base_before_MiB": round(base_kib / 1024, 1),
+        "mesh_net_KB_per_dof": round(meter.net_bytes("mesh") / Ndof / 1000, 2),
+        "mesh_peak_KB_per_dof": round(peak_bytes / Ndof / 1000, 2),
+        "retained_MiB": round(retained_kib / 1024, 1),
+        "retained_KB_per_dof": round(retained_kib * 1024 / Ndof / 1000, 2),
+        "malloc_trim_supported": trimmed,
+        "retained_after_trim_MiB": round(after_kib / 1024, 1),
+        "retained_after_trim_KB_per_dof": round(after_kib * 1024 / Ndof / 1000, 2),
+        "final_peak_MiB": round(peak_bytes / 2**20, 1),
+        "final_peak_GiB": round(peak_bytes / 2**30, 2),
+        "final_peak_KB_per_dof": round(peak_bytes / Ndof / 1000, 2),
     }
 
 
 def measure_stage2(
-    route: str, n: int, chunk: int, free_inputs: bool = True, device_str: str = "cpu"
+    route: str, n: int, free_inputs: bool = True, device_str: str = "cpu"
 ) -> dict:
     """阶段 2 合并: 用合成输入 (与网格拓扑一致) 单独测量总刚合并路线的内存单价.
 
@@ -479,12 +723,9 @@ def measure_stage2(
     Parameters
     ----------
     route : str
-        合并路线 (coalesce/scipy/pattern/pattern-chunked); 其中 pattern 为生产 ``CSRPattern``,
-        pattern-chunked 为实验原型.
+        合并路线 (coalesce/scipy/pattern); pattern 为生产 ``CSRPattern``.
     n : int
         网格每方向段数.
-    chunk : int
-        pattern-chunked 路线的分块大小.
     free_inputs : bool, default=True
         coalesce 路线在 stack 出 indices 后是否立即释放 I/J.
     device_str : str, default="cpu"
@@ -539,7 +780,6 @@ def measure_stage2(
         return {
             "stage": 2,
             "route": route,
-            "production": True,
             "device": torch.cuda.get_device_name(device),
             "device_type": "cuda",
             "memory_kind": "vram",
@@ -589,7 +829,7 @@ def measure_stage2(
             K = sp.coo_matrix((V, (I, J)), shape=(Ndof, Ndof)).tocsr()
         nnz = int(K.nnz)
 
-    elif route == "pattern":
+    else:  # pattern
         from fealpy.backend import backend_manager as bm
 
         bm.set_backend("numpy")
@@ -604,15 +844,15 @@ def measure_stage2(
             K = assemble_csr(K_e, pattern)
         meter.combine("merge", ("symbolic", "numeric"))
         nnz = int(pattern.nnz)
-        extra["slot_map_MiB"] = round(ntri * 8 / 2**20, 1)
+        # 跨迭代常驻的映射: 标量级槽位基址 + 标量行度数 (回退路径下即自由度级 slot_map)
+        resident = pattern.slot_base.nbytes
+        if pattern.row_deg is not None:
+            resident += pattern.row_deg.nbytes
+        extra["resident_map_MiB"] = round(resident / 2**20, 1)
+        extra["scalar_nnz"] = int(pattern.scalar_nnz)
 
-    else:  # pattern-chunked
-        with meter.stage("merge"):
-            K, times = route_pattern_chunked(cell, NN, chunk)
-        nnz = int(K[2].size)
-        extra["chunk"] = chunk
-        extra["t_symbolic_s"] = round(times["t_symbolic"], 3)
-        extra["t_numeric_s"] = round(times["t_numeric"], 3)
+    # 保留当前输入与输出对象, 记录合并完成后的常驻 RSS.
+    extra["merge_after_MiB"] = round(cur_rss_kib() / 1024, 1)
 
     merge_net = meter.net_bytes("merge")
     first_stage = "inputs" if "inputs" in meter.records else "merge"
@@ -620,7 +860,6 @@ def measure_stage2(
     return {
         "stage": 2,
         "route": route,
-        "production": route != "pattern-chunked",
         "device": "CPU",
         "device_type": "cpu",
         "memory_kind": "rss",
@@ -801,6 +1040,9 @@ def measure_full(
             "stage2_B_per_triplet": round(meter.net_bytes("stage2") / (144 * facts["NC"]), 2),
         }
 
+    # 保留当前装配对象, 记录求解前的常驻 RSS 与最高峰值所在阶段.
+    assembly_after_mib = round(cur_rss_kib() / 1024, 1)
+    final_peak_stage = max(meter.records, key=lambda name: meter.records[name].peak_kib)
     final_peak_bytes = meter.max_peak_kib() * 1024
     assembly_net = max(0, final_peak_bytes - meter.before_bytes(first_stage))
     return {
@@ -816,6 +1058,8 @@ def measure_full(
         "nnz": nnz,
         **per_stage,
         **meter.fields(),
+        "assembly_after_MiB": assembly_after_mib,
+        "final_peak_stage": final_peak_stage,
         "assembly_net_MiB": round(assembly_net / 2**20, 1),
         "assembly_net_KB_per_dof": round(assembly_net / Ndof / 1000, 2),
         "final_peak_MiB": round(final_peak_bytes / 2**20, 1),
@@ -879,6 +1123,35 @@ def print_dashboard(out: dict[str, Any]) -> None:
         print(f"  ├── Assembly Net  : {_fmt_mib(out.get('assembly_net_MiB'))} ({out.get('assembly_net_KB_per_dof', 0):.2f} KB/dof)")
         print(f"  └── Absolute Peak : {_fmt_mib(out.get('final_peak_MiB'))} ({out.get('final_peak_KB_per_dof', 0):.2f} KB/dof)\n")
 
+    elif out.get("pipeline") == "mesh_only":
+        print(f"\n● [mesh-build] {PROBLEM_NAME}")
+        print(f"  ├── Mesh & DOFs   : {mesh_line} | {out.get('NN', 0):,} nodes")
+        print(f"  ├── Configuration : device = {dev_label} | 只建网格与空间, 不做装配")
+        print(f"  ├── {_stage_line(out, 'meshbuild', 'TetrahedronMesh')}")
+        print(f"  ├── {_stage_line(out, 'space', 'Space & Material')}")
+        print(f"  ├── {_stage_line(out, 'mesh', 'Mesh & Space', 'mesh_net_KB_per_dof')}")
+        trim = (
+            f" | malloc_trim 后 {_fmt_mib(out.get('retained_after_trim_MiB'))}"
+            if out.get("malloc_trim_supported") else ""
+        )
+        print(f"  ├── Retained      : {_fmt_mib(out.get('retained_MiB'))} ({out.get('retained_KB_per_dof', 0):.2f} KB/dof){trim}")
+        print(f"  └── Absolute Peak : {_fmt_mib(out.get('final_peak_MiB'))} ({out.get('final_peak_KB_per_dof', 0):.2f} KB/dof)\n")
+
+    elif out.get("pipeline") == "stage1_probe":
+        pc = out.get("peak_call", {})
+        print(f"\n● [stage1-probe] {PROBLEM_NAME}")
+        print(f"  ├── Mesh & DOFs   : {mesh_line}")
+        print(f"  ├── Configuration : method = {out.get('method')} | tracemalloc 打桩 | {_fmt_s(out.get('t_assembly_s'))}")
+        print(f"  ├── Traced Peak   : {_fmt_mib(out.get('traced_peak_MiB'))} | 结束存活 {_fmt_mib(out.get('traced_live_end_MiB'))}")
+        print(f"  ├── Peak Call     : #{pc.get('index')} {pc.get('call')} @ {pc.get('site')} -> {pc.get('out_shape')}")
+        print(f"  │   ├── live before : {_fmt_mib(pc.get('live_before_MiB'))}")
+        print(f"  │   ├── peak in call: {_fmt_mib(pc.get('peak_in_MiB'))}")
+        print(f"  │   └── transient   : {_fmt_mib(pc.get('transient_MiB'))} (调用内中间量)")
+        print(f"  ├── Live Composition @ peak call:")
+        for row in out.get("peak_live_composition", [])[:12]:
+            print(f"  │   ├── {row['site']:<40} {row['MiB']:>9,.1f} MiB  x{row['count']}")
+        print(f"  └── Calls         : {len(out.get('calls', []))} 次被测调用 (完整明细见 JSON)\n")
+
     elif out.get("stage") == 1:
         print(f"\n● [element-stiffness] {PROBLEM_NAME}")
         print(f"  ├── Mesh & DOFs   : {mesh_line}")
@@ -890,10 +1163,9 @@ def print_dashboard(out: dict[str, Any]) -> None:
 
     elif out.get("stage") == 2:
         ntri = out.get("triplets", 0)
-        prod = "生产代码" if out.get("production") else "实验原型 (非生产)"
         print(f"\n● [global-merge] {PROBLEM_NAME}")
         print(f"  ├── Mesh & DOFs   : {mesh_line} | {ntri:,} triplets")
-        print(f"  ├── Sparse Merge  : route = {out.get('route')} ({prod}) | nnz = {out.get('nnz', 0):,} | device = {dev_label}")
+        print(f"  ├── Sparse Merge  : route = {out.get('route')} | nnz = {out.get('nnz', 0):,} | device = {dev_label}")
         if "inputs_peak_MiB" in out:
             print(f"  ├── {_stage_line(out, 'inputs', 'Inputs')}")
         print(f"  ├── {_stage_line(out, 'merge', 'Merge')}")
@@ -1346,7 +1618,6 @@ def resolve_runs(
     for case in cases:
         n = overrides.get("n", case.extra.get("n", 32))
         device = overrides.get("device", case.extra.get("device", "cpu"))
-        chunk = overrides.get("chunk", case.extra.get("chunk", 65536))
         via_bform = bool(overrides.get("via_bilinearform", False))
         env = case.subprocess_env()
         common = [sys.executable, str(case.script_path), "--worker"]
@@ -1373,10 +1644,16 @@ def resolve_runs(
                 routes = [r for r in routes if r in ("coalesce", "pattern")]
             for r in routes:
                 out_p = config.OUTPUT_DIR / artifact_name("stage2", [r], n, device)
-                argv = [*common, "--stage2", "--route", r, *tail, "--chunk", str(chunk), "--output", str(out_p)]
+                argv = [*common, "--stage2", "--route", r, *tail, "--output", str(out_p)]
                 label = f"{case.id} [{r}]"
                 summary = f"{case.summary} (route={r}, n={n}, device={device})"
                 runs.append((label, argv, out_p, summary, env))
+
+        elif case.panel == "mesh":
+            out_p = config.OUTPUT_DIR / artifact_name("mesh", ["build"], n, device)
+            argv = [*common, "--mesh", *tail, "--output", str(out_p)]
+            summary = f"{case.summary} (n={n}, device={device})"
+            runs.append((case.id, argv, out_p, summary, env))
 
         elif case.panel == "full":
             methods = _expand(
@@ -1517,7 +1794,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cases", nargs="+", help="指定要跑的一个或多个 case id (如 --cases element-stiffness)")
     parser.add_argument("--case", help="指定单个 case id (等价于 --cases <id>)")
     parser.add_argument(
-        "--panel", choices=config.PANELS, help="只跑指定阶段 (stage1/stage2/full) 数据点"
+        "--panel", choices=config.PANELS, help="只跑指定阶段 (stage1/stage2/full/mesh) 数据点"
     )
     parser.add_argument("--check-only", action="store_true", help="只打印将执行的子进程命令")
     parser.add_argument("--skip-existing", action="store_true", help="产物已存在时跳过")
@@ -1536,7 +1813,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # 2. 工况动态覆盖参数 (Overrides)
     parser.add_argument("-n", "--n", "--grid", dest="n", type=int, default=None, help="动态覆盖网格剖分段数 (如 -n 32 或 --grid 32)")
-    parser.add_argument("--chunk", type=int, default=None, help="动态覆盖 pattern-chunked 路线的分块大小 (默认 65536)")
     parser.add_argument(
         "--device", type=str, default="cpu", help="指定计算设备 ('cpu' 或 'cuda' 等, 默认 'cpu'); 非 cpu 产物名加 _cuda 后缀"
     )
@@ -1555,8 +1831,10 @@ def main(argv: list[str] | None = None) -> int:
     # 3. Worker 测量层底层参数 (供子进程调用)
     parser.add_argument("--worker", action="store_true", help="进入子进程 worker 测量模式")
     parser.add_argument("--stage1", action="store_true", help="阶段 1 单刚测量")
+    parser.add_argument("--stage1-probe", action="store_true", help="阶段 1 峰值归因: tracemalloc 逐调用打桩")
     parser.add_argument("--stage2", action="store_true", help="阶段 2 合并路线测量 (需 --route)")
     parser.add_argument("--full", action="store_true", help="全流程端到端真组装测量 (阶段 1 + 阶段 2)")
+    parser.add_argument("--mesh", action="store_true", help="只建网格与空间的公共前提测量 (不做装配)")
     parser.add_argument("--output", type=Path, default=None, help="产物落盘路径")
 
     args = parser.parse_args(argv)
@@ -1564,12 +1842,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--monitor-interval 必须大于 0")
 
     # ------------------------------------------------ Worker 测量分支
-    if args.worker or args.stage1 or args.stage2 or args.full:
+    if args.worker or args.stage1 or args.stage1_probe or args.stage2 or args.full or args.mesh:
         if args.n is None:
             parser.error("Worker 模式必须指定 --n")
         if args.method == "all" or args.route == "all":
             parser.error("Worker 模式不接受 --method all / --route all, 由调度层展开")
-        if args.full:
+        if args.mesh:
+            out = measure_mesh(args.n, device_str=args.device)
+        elif args.full:
             out = measure_full(
                 args.method or "fast",
                 args.route or "pattern",
@@ -1577,15 +1857,16 @@ def main(argv: list[str] | None = None) -> int:
                 device_str=args.device,
                 via_bilinearform=args.via_bilinearform,
             )
+        elif args.stage1_probe:
+            out = measure_stage1_probe(args.method or "fast", args.n)
         elif args.stage1:
             out = measure_stage1(args.method or "fast", args.n, device_str=args.device)
         elif args.stage2:
             if args.route is None:
                 parser.error("--stage2 必须指定 --route")
-            chunk = args.chunk if args.chunk is not None else 65536
-            out = measure_stage2(args.route, args.n, chunk, device_str=args.device)
+            out = measure_stage2(args.route, args.n, device_str=args.device)
         else:
-            parser.error("Worker 模式需指定 --full, --stage1 或 --stage2")
+            parser.error("Worker 模式需指定 --full, --stage1, --stage1-probe, --stage2 或 --mesh")
 
         print_dashboard(out)
         if args.output is not None:
@@ -1618,6 +1899,8 @@ def main(argv: list[str] | None = None) -> int:
         "merge": "global-merge",
         "matrix-merge": "global-merge",
         "fa-full": "full-assembly",
+        "mesh-only": "mesh-build",
+        "build-mesh": "mesh-build",
     }
 
     def resolve_case_id(name: str) -> str:
@@ -1667,8 +1950,6 @@ def main(argv: list[str] | None = None) -> int:
     overrides: dict[str, Any] = {}
     if args.n is not None:
         overrides["n"] = args.n
-    if args.chunk is not None:
-        overrides["chunk"] = args.chunk
     if args.device != "cpu":
         overrides["device"] = args.device
     if args.method is not None:

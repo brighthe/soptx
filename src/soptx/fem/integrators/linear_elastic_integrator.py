@@ -44,6 +44,21 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         """设置材料密度系数"""
         self._coef = value
 
+    @property
+    def material(self) -> LinearElasticMaterial:
+        """本积分子使用的材料, 只读"""
+        return self._material
+
+    @property
+    def q(self) -> Optional[int]:
+        """外部指定的积分阶; 为 None 时由 fetch_assembly 取 p + 3"""
+        return self._q
+
+    @property
+    def index(self) -> Index:
+        """参与装配的单元子集, 默认 _S 表示全体"""
+        return self._index
+
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
         return space.cell_to_dof()[self._index]
@@ -100,16 +115,34 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         GD = mesh.geo_dimension()
         NQ = len(ws)
         D0 = self._material.elastic_matrix()  # (1, 1, NS, NS)
-        
-        # 不考虑相对密度: None; 相对单元密度: (NC, ); 相对节点密度: (NC, NQ)      
+        NS = D0.shape[-1]
+
+        # coef 的四种约定:
+        #   None          不考虑相对密度, D 为实体本构矩阵
+        #   (NC, )        相对单元密度, D_e = coef_e * D0
+        #   (NC, NS, NS)  逐单元本构矩阵, 由调用方直接给出: 泊松比随密度变化时
+        #                 D_e 不再是 D0 的标量倍 (见 LagrangeFEMAnalyzer)
+        #   (NC, NQ)      相对节点密度, D 在积分点上变化
+        # 下面的组装公式只读 D 的 (0,0)/(0,1)/(2,2) 或 (5,5) 元, 即假定各向同性结构
         coef = self._coef
 
         if coef is None:
+            D_mode = 'constant'
             D = D0[0, 0] # (NS, NS)
         elif coef.shape == (NC, ):
+            D_mode = 'cell'
             D = bm.einsum('c, kl -> ckl', coef, D0[0, 0])  # (NC, NS, NS)
+        elif coef.shape == (NC, NS, NS):
+            D_mode = 'cell'
+            D = coef                                       # (NC, NS, NS)
         elif coef.shape == (NC, NQ):
+            D_mode = 'quadrature'
             D = bm.einsum('cq, cqkl -> cqkl', coef, D0)    # (NC, NQ, NS, NS)
+        else:
+            raise ValueError(
+                f"coef 形状 {tuple(coef.shape)} 不在支持的约定内: None, "
+                f"(NC,)={(NC,)}, (NC, NS, NS)={(NC, NS, NS)}, (NC, NQ)={(NC, NQ)}"
+            )
 
         if isinstance(mesh, SimplexMesh):
             A_xx = bm.einsum('q, cqi, cqj, c -> cqij', ws, gphi[..., 0], gphi[..., 0], cm)
@@ -141,7 +174,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         KK = bm.zeros((NC, GD * ldof, GD * ldof), dtype=bm.float64, device=mesh.device)
 
         # 区域内的相对密度恒定都为 1, D 为全局常数矩阵
-        if coef is None:
+        if D_mode == 'constant':
             if GD == 2:
                 D00 = D[0, 0] # 2D: E/(1-ν²) 或 2μ+λ
                 D01 = D[0, 1] # 2D: νE/(1-ν²) 或 λ
@@ -163,8 +196,8 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_23 = D01 * bm.einsum('cqij -> cij', A_yz) + D55 * bm.einsum('cqij -> cij', A_zy)
                 KK_31 = D01 * bm.einsum('cqij -> cij', A_zx) + D55 * bm.einsum('cqij -> cij', A_xz)
                 KK_32 = D01 * bm.einsum('cqij -> cij', A_zy) + D55 * bm.einsum('cqij -> cij', A_yz)
-        # 单元密度情况, D 为单元均匀矩阵
-        elif coef.shape == (NC, ):
+        # 单元密度情况 (含逐单元本构矩阵), D 为单元均匀矩阵
+        elif D_mode == 'cell':
             if GD == 2:
                 D00 = D[:, 0, 0] # 2D: E/(1-ν²) 或 2μ+λ
                 D01 = D[:, 0, 1] # 2D: νE/(1-ν²) 或 λ
@@ -187,7 +220,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 KK_31 = bm.einsum('c, cqij -> cij', D01, A_zx) + bm.einsum('c, cqij -> cij', D55, A_xz)
                 KK_32 = bm.einsum('c, cqij -> cij', D01, A_zy) + bm.einsum('c, cqij -> cij', D55, A_yz)
         # 节点密度情况, 区域内的相对密度在单元内变化, D 为节点变化矩阵
-        elif coef.shape == (NC, NQ):
+        elif D_mode == 'quadrature':
             if GD == 2:
                 D00 = D[..., 0, 0] # 2D: E/(1-ν²) 或 2μ+λ
                 D01 = D[..., 0, 1] # 2D: νE/(1-ν²) 或 λ

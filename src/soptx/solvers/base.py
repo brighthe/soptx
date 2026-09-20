@@ -151,10 +151,61 @@ def operator_capabilities(op: Any) -> frozenset:
     # to_scipy: fealpy 稀疏张量; tocsr: 已经是 scipy 稀疏矩阵
     if hasattr(op, "to_scipy") or hasattr(op, "tocsr"):
         caps.add(CAP_MATRIX)
-    # diags: fealpy 稀疏张量的对角; diagonal: EA 算子将来自报对角的入口
-    if hasattr(op, "diagonal") or hasattr(op, "diags"):
+    # diagonal: 算子自报对角, 一维向量 (SOPTX 的算子包装, scipy 稀疏, numpy
+    # 稠密都是这个口径); tocoo: fealpy 稀疏张量自己给不出一维对角, 但能扫 COO
+    # 取出来.
+    #
+    # 刻意不认 fealpy 的 ``diags()``: 它返回的是只保留对角的稀疏矩阵而不是一
+    # 维向量, 认了会让 CAP_DIAGONAL 通过, 而下游拿到一个形状不对的东西.
+    if hasattr(op, "diagonal") or hasattr(op, "tocoo"):
         caps.add(CAP_DIAGONAL)
     return frozenset(caps)
+
+
+def operator_diagonal(op: Any) -> TensorLike:
+    """取出算子的主对角, 一维张量.
+
+    与 :func:`operator_capabilities` 的 ``CAP_DIAGONAL`` 分支一一对应: 那里判断
+    能不能取, 这里真取. 两条路径按算子自己的形态选:
+
+    - 算子有 ``diagonal()``: 直接问它. matrix-free 一侧走这条 -- 对角怎么算是
+      算子自己的事 (逐单元取小矩阵对角再散加, 边界自由度置 1, 分布式下跨 rank
+      归约), 求解层不必知道.
+    - 算子只是个稀疏矩阵: 扫一遍 COO 取主对角, 重复元按散加求和.
+
+    Parameters
+    ----------
+    op : Any
+        待取对角的算子.
+
+    Returns
+    -------
+    TensorLike
+        (n, ) 的主对角.
+
+    Raises
+    ------
+    OperatorCapabilityError
+        算子两条路径都给不出对角.
+    """
+    diagonal = getattr(op, "diagonal", None)
+    if diagonal is not None:
+        return diagonal()
+
+    tocoo = getattr(op, "tocoo", None)
+    if tocoo is not None:
+        coo = tocoo()
+        row, col, values = coo.row, coo.col, coo.values
+        on_diagonal = (row == col)
+        diag = bm.zeros((op.shape[0], ), **bm.context(values))
+
+        return bm.index_add(diag, row[on_diagonal], values[on_diagonal])
+
+    raise OperatorCapabilityError(
+        f"{type(op).__name__} 给不出对角: 既没有 diagonal(), 也不是可扫 COO 的"
+        f"稀疏矩阵. 需要对角的求解器 (Jacobi, Chebyshev) 在其上不可用, "
+        f"或由调用方显式把对角传进去."
+    )
 
 
 def _finalize_info(info: SolveInfo, owner: str) -> SolveInfo:

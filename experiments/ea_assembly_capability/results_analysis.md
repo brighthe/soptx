@@ -1,70 +1,241 @@
-# EA (Element Assembly) 单元装配无矩阵算子内存机制与容量极限分析报告
+# EA 单元装配无矩阵算子的内存机制与容量能力
 
-本报告系统分析与评测 **EA (Element Assembly / Element-by-Element，单元装配无矩阵算子)** 在三维线弹性分析中的内存组成机理、单价模型 $b_{\text{EA}}$、单机与单卡容量极限 $N_{\max}$，并与 FA（全组装）的各历史及生产路线展开严密横向对比。
+## 实验设置与测量口径
 
----
+### 运行环境
 
-## 1. EA 算子机理与内存模型
 
-在三维四面体 P1 有限元离散中（$N_C \approx 6 N_{\text{node}}$，$N_{\text{dof}} = 3 N_{\text{node}}$）：
+| 项目     | 配置                                                           |
+| ------ | ------------------------------------------------------------ |
+| 宿主系统   | Windows 11 Pro，物理内存 64 GB                                    |
+| 实验系统   | WSL2 Ubuntu 24.04 LTS，内核 `6.18.33.2-microsoft-standard-WSL2` |
+| CPU    | Intel Core i9-14900KF，WSL 可见 32 个逻辑核                         |
+| WSL 内存 | 配置上限 `memory=48GB`，系统报告总内存约 47 GiB（`MemTotal`），swap 12 GiB   |
+| 软件版本   | Python 3.12.13，numpy 2.5.1，scipy 1.18.0，torch 2.13.0+cu130   |
 
-### 1.1 静态常驻存储（Static Cache Footprint）
 
-EA 算子预先计算并持久化保存每个单元的局部刚度矩阵 $\mathbf{K}_e$（$12 \times 12$ 浮点数），但不进行全局总刚稀疏矩阵的组装。其静态常驻内存由两部分构成：
+GPU 为 NVIDIA GeForce RTX 5080，显存 16 GB；相关结果以 `_cuda` 标记，不纳入本文 CPU 容量分析。
 
-1. **单元刚度张量** $\{\mathbf{K}_e\}_{e=1}^{N_C}$：$N_C \times 144 \times 8\text{ 字节} = 6 N_{\text{node}} \times 1152\text{ B} = \mathbf{2.304\text{ KB/dof}}$；
-2. **单元自由度映射** `cell_to_dof`：$N_C \times 12 \times 8\text{ 字节} = 6 N_{\text{node}} \times 96\text{ B} = \mathbf{0.192\text{ KB/dof}}$；
+### 问题与执行方式
 
-$$\text{理论静态单价 } b_{\text{static}} = 2.304 + 0.192 = \mathbf{2.496\text{ KB/dof}} \approx \mathbf{2.50\text{ KB/dof}}.$$
+采用三维线弹性制造解问题，使用 FEALPy 的 `TetrahedronMesh.from_box` 构建四节点四面体网格，采用 $p=1$ 的 Lagrange 有限元，积分参数取默认值 $q=p+3=4$。三个坐标方向均划分为 $n$ 份，单元数为 $N_C = 6n^3$，位移自由度数为 $N_{dof} = 3(n+1)^3$。实验采用单进程 CPU 执行方式，每个数据点在独立进程中测量。
 
-### 1.2 动态算子乘积（MatVec Transient Footprint）
+### 测量口径
 
-在执行矩阵向量乘 $\mathbf{y} = \mathbf{A}\mathbf{x}$ 时，数据流沿因子链往返：
-1. **Gather**：提取单元位移 $\mathbf{x}_e = \mathbf{x}[\text{cell\_to\_dof}]$（开销 $N_C \times 12 \times 8\text{ B} = 0.192\text{ KB/dof}$）；
-2. **Local MatVec**：批量张量收缩 $\mathbf{y}_e = \mathbf{K}_e \mathbf{x}_e$（开销 $0.192\text{ KB/dof}$）；
-3. **Scatter-Add**：原子累加回填至全局向量 $\mathbf{y}[\text{cell\_to\_dof}] += \mathbf{y}_e$；
-
-算子作用期间无任何全局稀疏矩阵遍历，瞬态临时缓冲极低（$< 0.4\text{ KB/dof}$）。
-
-### 1.3 求解器常驻与容量天花板
-
-搭载无预条件共轭梯度法（CG）时，常驻存储为：
-$$\text{总内存 } M_{\text{total}} = M_{\text{cache}} + 5 \times 8\text{ B} \times N_{\text{dof}} \approx 2.536\text{ KB/dof} \approx \mathbf{2.54\text{ KB/dof}}.$$
-
-* **单机 47.04 GiB 内存容量天花板**：
-  $$N_{\max, \text{47G}} = \frac{47.04 \times 1024^3\text{ 字节}}{2.54 \times 1000\text{ 字节/dof}} \approx \mathbf{1988\text{ 万自由度}}.$$
-* **单卡 16.0 GiB GPU 显存容量天花板**：
-  $$N_{\max, \text{GPU}} = \frac{16.0 \times 1024^3\text{ 字节}}{2.54 \times 1000\text{ 字节/dof}} \approx \mathbf{677\text{ 万自由度}}.$$
+- **内存统计**：以 `VmRSS` 记录常驻内存，以逐阶段重置的 `VmHWM` 记录阶段峰值；阶段净增为阶段峰值与阶段起始 `VmRSS` 之差，全程绝对峰值取各阶段峰值的最大值。
+- **表头约定**：凡标「峰值」的列取 `VmHWM`，其余 RSS 列一律为 `VmRSS` 常驻读数，列名中的「构建后」「计算后」「缓存后」「结束」指该读数所处的时刻；常驻读数均在对象未释放、未调用垃圾回收或内存归还的状态下读取。
+- **容量预算**：以进程绝对峰值 RSS 不超过 45 GiB 为容量评估条件。
+- **数值精度**：本文关注内存量级与占比，不追求逐字节精确。内存数值统一按「不小于 1 GiB 者保留一位小数、小于 1 GiB 者取整数 MiB」给出，耗时统一保留两位有效数字；同一表中各列为独立读数，舍入后按「起点 + 净增 = 峰值」相加可有 0.1 GiB 的偏差。
 
 ---
 
-## 2. 实测数据与横向对比表
 
-基于三维线弹性制造解算例（DivergenceFreePolynomialElasticity3D），实测数据如下：
 
-### 2.1 阶段 1: 单元刚度张量缓存 (n = 32, 10.8 万 DOFs)
+## 一、装配前：import 底座与网格构建
 
-| 单刚算法 | 净峰值内存 | 缓存张量大小 | 单刚单价 $b_1$ | 计算耗时 | 归因说明 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **`fast`** | **$247.3\text{ MiB}$** | **$216.0\text{ MiB}$** | **$2.3\text{ KB/dof}$** | **$12.3\text{ ms}$** | 不变张量预计算, 消除高维缓冲 (生产推荐) |
-| **`standard`** | $4.77\text{ GiB}$ | $216.0\text{ MiB}$ | $47.5\text{ KB/dof}$ | $5.68\text{ s}$ | 9 个分块梯度张量分别累加 |
-| **`voigt`** | $9.00\text{ GiB}$ | $216.0\text{ MiB}$ | $89.7\text{ KB/dof}$ | $412.7\text{ ms}$ | `einsum` 隐式物化 6 维应变张量 |
+本节测量 EA 算子装配前的内存开销，即固定网格下只需支付一次、后续各轮计算可直接复用的部分，与每轮重复支付的单刚计算相区分。EA 与 FA 的前置成本存在明确分流：
 
-### 2.2 FA vs EA 跨层级全景综合对比
+- **公共基础**：模块导入，以及网格、有限元空间和材料对象的构建（第 1、2 小节）。
+- **CSR 符号结构免除**：FA 的 `pattern` 路线必须通过 `build_csr_pattern` 预先建立 CSR 骨架与槽位映射；EA 算子直接在局部单元级进行矩阵向量乘并累加，从根本上省去了这一阶段（第 3 小节）。
 
-| 装配层级与路线 | 存储范式 | 全长三元组 | 内存单价 $b$ | 47G 自由度天花板 | GPU 吞吐与特性 |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **FA (FEALPy coalesce)** | 历史 COO 排序 | 是 | $22.2\text{ KB/dof}$ | 约 230 万 | 受制于 COO 排序墙 |
-| **FA (SciPy csr)** | 过渡 COO 压缩 | 是 | $4.0\text{ KB/dof}$ | 约 382 万 | 仍需物化三元组过渡态 |
-| **FA (模式先行 CSRPattern)** | 原地原子累加 | **否** | **$2.0\text{ KB/dof}$** | **约 3580 万** | **单机容量最大**, 需符号骨架 |
-| **EA (单元装配 Matrix-Free)** | 缓存单元矩阵 $\{K_e\}$ | **否** | **$2.54\text{ KB/dof}$** | **约 1980 万** | **零稀疏图构建**, 极高 GPU MatVec 并行吞吐 |
+
+
+### 1. import 底座（不随 n）
+
+`run.py` 在模块顶部导入 numpy，随后在 `_build_facade()` 中通过 `import_fe_stack_cpu()` 加载有限元依赖与弹性无矩阵算子 `ElasticityEAOperator`。主要调用如下：
+
+```python
+import numpy as np
+from _common.fe_problem import import_fe_stack_cpu
+
+import_fe_stack_cpu()
+from soptx.fem.matrix_free import ElasticityEAOperator
+```
+
+导入完成、网格构建开始前的 RSS 为 **607 MiB**（实测 606.9 MiB），取自 `outputs/mesh_build_staged_n32.json` 的 `mesh_before_MiB`。这一底座由 Python 解释器、NumPy、SciPy、PyTorch、FEALPy 与 SOPTX 等共享依赖共同构成，不随网格规模 $n$ 变化，与 FA 实测底座（606 MiB）完全一致。
+
+### 2. 网格与空间构建（随 n）
+
+探针按 `build_problem_space()` 的构建顺序，将网格构建与空间、材料构建分别记为 `meshbuild` 和 `space`。主要代码如下：
+
+```python
+# meshbuild 阶段
+mesh = TetrahedronMesh.from_box(list(problem.domain), nx=n, ny=n, nz=n)
+
+# space 阶段
+scalar = LagrangeFESpace(mesh, p=1, ctype="C")
+vs = TensorFunctionSpace(scalar, shape=(-1, 3))
+material = IsotropicLinearElasticMaterial(
+    hypothesis="3D", lame_lambda=problem.lam, shear_modulus=problem.mu,
+    device=bm.get_device(mesh),
+)
+```
+
+下表统计上述构建过程的内存与耗时，不包含单刚计算。峰值 RSS 与构建后 RSS 均为进程绝对量；构建后 RSS 净增以各次测量的 import 底座为基准。
+
+
+| n   | $N_{dof}$ | 构建期峰值 RSS（GiB） | 构建后 RSS（MiB） | 构建后 RSS 净增（MiB） | 构建耗时（s） |
+| --- | --------- | -------------- | ------------ | --------------- | ------- |
+| 32  | 107,811   | 1.3            | 779          | 172             | 15      |
+| 48  | 352,947   | 3.0            | 1059         | 452             | 53      |
+| 64  | 823,875   | 6.2            | 1391         | 784             | 120     |
+| 96  | 2,738,019 | 19.5           | 3059         | 2452            | 420     |
+| 124 | 5,859,375 | **41.0**       | 5880         | 5273            | 880     |
+
+
+五档测量的峰值均出现在网格构建阶段，`space` 阶段的内存净增与耗时在当前记录精度下均为零。以 $n=124$ 为例，构建期峰值约 41.0 GiB，构建后 RSS 约 5.7 GiB，表明构建期峰值显著高于最终常驻量；容量评估需计入这一峰值。
+
+数据来源：`outputs/mesh_build_staged_n{32,48,64,96,124}.json`。
+
+### 3. 与 FA 路线对比（免 CSR 符号结构）
+
+FA 的模式先行装配路线（`fast + pattern`）在进入单刚计算前，必须针对有限元空间调用 `build_csr_pattern`，构建张量级 CSR 骨架及分量块槽位映射，在 $n=32, 48, 64$ 时分别引入 47、215、519 MiB 的常驻开销（FA 报告第一章第 3 小节）。
+
+EA 算子属于无矩阵范式（Matrix-Free），在整个生命周期内不显式组装全局 CSR 矩阵，因而**完全免除 CSR 符号结构的构建与常驻开销**。网格与空间构建完成后，即可直接进入单刚计算与算子缓存。
 
 ---
 
-## 3. 核心学术结论与物理启示
 
-1. **为什么低阶 Tet4 下 EA 静态单价略高于 FA CSR？**
-   在低阶四面体网格中，单元节点共享度高（$N_C / N_N \approx 6$），EA 独立存储每个单元的 144 个浮点数带来了局部冗余（$2.30\text{ KB/dof}$），而 FA 的 CSR 压缩存储每行仅存约 43 个非零元（$1.14\text{ KB/dof}$）。
-2. **EA 的核心战略价值**：
-   * **彻底免除稀疏矩阵符号装配**：在大规模动态演化网格中，EA 无需耗时构建与遍历 CSR 拓扑图；
-   * **GPU 极致并行化**：局部单元张量乘天然规避了稀疏矩阵 SpMV 的非规则内存访问，可直接映射至 GPU Tensor Core 或高效原子指令，在大规模 Krylov 迭代求解中具备极高的 FLOPs 吞吐。
+
+## 二、阶段 1：单刚计算与缓存（随 n）
+
+
+
+### 1. 算子构建与单刚缓存机制
+
+`ElasticityEAOperator` 通过分析器调用 `assemble_stiff_matrix()` 完成单刚计算，并在内部构建常驻算子实例，缓存单刚张量 $K_e$ 与自由度映射 `cell2dof`。相关代码如下：
+
+```python
+# 创建 EA 算子
+ea_op = ElasticityEAOperator(vs, problem, material, degree=1, assembly_method="fast")
+
+# 单刚计算与缓存入口
+ea_op.analyzer.assemble_stiff_matrix()
+
+# 分析器内部调用：self._integrator.const()
+const_integrator = self._integrator.const(self._tensor_space)
+
+# Integrator.const() 内部核心逻辑：
+value = self.assembly(space)        # 计算并缓存单刚张量 K_e, 形状 (NC, 12, 12)
+to_gdof = self.to_global_dof(space)  # 计算并缓存全局自由度映射 cell2dof, 形状 (NC, 12)
+```
+
+
+
+### 2. 峰值 RSS 与常驻 RSS 实测对比（随 n）
+
+单刚计算采用 `fast` 算法。与 FA 阶段 1 仅保留 $K_e$ 不同，EA 算子在计算完成后，不仅保留单刚张量 $K_e$（float64，$(N_C, 12, 12)$），还长期常驻保留全局自由度映射 `cell2dof`（int64，$(N_C, 12)$），供后续算子乘重复调用。三档规模下 `cell2dof` 的理论存储量分别为 18、61、144 MiB；与 $K_e$（216、729、1728 MiB）相加，两者理论存储量合计分别为 234、790、1872 MiB。
+
+下表统计三档规模下单刚阶段的内存与耗时。各内存列统一换算为 GiB，保留一位小数：
+
+
+| n   | $N_C$     | $N_{dof}$ | `cell2dof`（MiB） | 起点 RSS（GiB） | 峰值净增（GiB） | 阶段峰值 RSS（GiB） | 缓存后常驻 RSS（GiB） | 缓存耗时（s） |
+| --- | --------- | --------- | --------------- | ----------- | --------- | ------------- | -------------- | ------- |
+| 32  | 196,608   | 107,811   | 18              | 0.7         | 0.7       | 1.4           | 1.0            | 0.69    |
+| 48  | 663,552   | 352,947   | 61              | 0.9         | 2.3       | 3.3           | 1.9            | 2.1     |
+| 64  | 1,572,864 | 823,875   | 144             | 1.3         | 5.4       | 6.7           | 3.5            | 5.0     |
+
+
+表中呈现了两个核心特征：
+
+1. **峰值 RSS 与常驻 RSS 的落差**：计算期间由于中间梯度缩并分块与刚度分块同时存活，形成了高于常驻量的阶段瞬时峰值（机制与 FA 完全同源，详见 FA 报告第二章第 2 小节）；计算完成后临时分块释放，常驻 RSS 回落并沉淀为后续算子的常驻基线。以 $n=64$ 为例，阶段峰值为 6.7 GiB，缓存后常驻为 3.5 GiB。
+2. **随网格规模的线性缩放**：从 $n=32$ 增至 $n=64$，单元数增至 8 倍，峰值净增约为 7.7 倍，耗时约为 7.2 倍，峰值净增严格随单元数 $N_C$ 线性增长。与 FA 相比，两者的峰值净增基本一致（$n=64$ 为 5.4 对 5.3 GiB），而缓存后常驻 RSS 略高于 FA（3.5 对 3.1 GiB），差额主要源于常驻保留的 `cell2dof` 映射（$n=64$ 时理论占 144 MiB）。
+
+数据来源：`outputs/cache_fast_n{32,48,64}.json`。
+
+---
+
+
+
+## 三、阶段 2：算子乘的内存机制与执行效率（随 n）
+
+
+
+### 1. 算子乘机制与理论工作区构成
+
+FA 的阶段 2 是装配全局稀疏矩阵。EA 彻底舍弃了全局总刚的组装与存储，在求解过程中直接以无矩阵算子乘替代：
+
+$$
+y = K x = \sum_{e=1}^{N_C} P_e^T K_e P_e x
+$$
+
+其中 $P_e$ 为由 `cell2dof` 确定的限制算子（$x_e = P_e x$）。算子类 `ElementAssembly`（`soptx.fem.levels.element`）实现 `operator @ x` 的核心代码如下：
+
+```python
+class ElementAssembly:
+    def __matmul__(self, x: TensorLike) -> TensorLike:
+        # 1. Gather: 根据 cell2dof 提取每个单元的局部自由度向量 x_e
+        x_E = self._restriction.gather(x)
+
+        # 2. Einsum: 并行计算单元级矩阵向量积 y_e = K_e @ x_e
+        y_E = bm.einsum('cij, cj... -> ci...', self._K_e, x_E)
+
+        # 3. Scatter-add: 将单元贡献累加回全局向量 y
+        return self._restriction.scatter_add(y_E)
+```
+
+在执行过程中，步骤 1 提取的单元位移张量 $x_E$ 与步骤 2 计算的单元力张量 $y_E$ 形状均为 $(N_C, 12)$，类型为 float64，理论大小各为 $96 N_C\text{ 字节}$（单块大小在三档规模下分别为 18、61、144 MiB）。在 einsum 缩并与 scatter-add 累加期间，底层还存在同等规模的中间临时张量，使得计算期存活的局部张量理论容量合计约为 **36~54、122~182、288~432 MiB**。
+
+### 2. 算子乘多档实测对比（随 n）
+
+三档规模下的实测数据如下：
+
+
+| n   | $N_C$     | $N_{dof}$ | 工作区峰值净增（MiB） | 稳态常驻净增（MiB） | 首次耗时（ms） | 稳态耗时（ms） |
+| --- | --------- | --------- | ------------ | ----------- | -------- | -------- |
+| 32  | 196,608   | 107,811   | 36.7         | **0**       | 22       | 20.3     |
+| 48  | 663,552   | 352,947   | 181.5        | **0**       | 62       | 63.7     |
+| 64  | 1,572,864 | 823,875   | 430.8        | **0**       | 153      | 154.4    |
+
+
+数据来源：`outputs/cache_matvec_continuous_fast_n{32,48,64}.json`。
+
+---
+
+
+
+## 四、求解前内存汇总
+
+EA 路线在进入 Krylov 迭代求解器（如 Jacobi-PCG）之前，全流程包含网格与空间构建、单刚与自由度映射缓存以及算子乘应用，执行顺序如下：
+
+```python
+# 1. 构建问题、网格、有限元空间与材料
+problem, mesh, vs, material = build_problem_space(n)
+
+# 2. 构造 EA 算子实例并缓存单刚 K_e 与自由度映射 cell2dof (阶段 1)
+ea_op = ElasticityEAOperator(vs, problem, material, degree=1, assembly_method="fast")
+operator = ea_op.analyzer.assemble_stiff_matrix()
+
+# 3. 无矩阵算子乘应用 (阶段 2)
+y = operator @ x
+```
+
+
+
+### 1. 内存的累积方式（以 n=64 为例）
+
+与 FA 一致，EA 的全流程同样严格遵循两条规则：**常驻内存累积，阶段峰值不累积**。
+
+下表以最大规模 $n=64$（157.3 万单元、82.4 万自由度）连续实测记录走完全程，三个阶段按执行顺序排列。每行满足「起点常驻 + 自身净增 = 阶段峰值」，每行的结束常驻即下一行的起点常驻。
+
+
+| 阶段      | 起点常驻（GiB） | 自身净增（GiB） | 阶段峰值（GiB） | 结束常驻（GiB） |
+| ------- | --------- | --------- | --------- | --------- |
+| 网格构建    | 0.6       | 5.6       | 6.2       | 1.3       |
+| 单刚与映射缓存 | 1.3       | 5.4       | **6.7**   | 3.5       |
+| 算子乘应用   | 3.5       | 0.4       | 3.9       | 3.5       |
+
+
+### 2. 多档汇总
+
+下表汇总三档规模下容量评估直接用到的两个核心量：
+
+
+| n   | $N_{dof}$ | 全过程峰值 RSS（GiB） | 准备后常驻 RSS（GiB） | 峰值所在阶段    |
+| --- | --------- | -------------- | -------------- | --------- |
+| 32  | 107,811   | 1.4            | 1.0            | 阶段 1：单刚缓存 |
+| 48  | 352,947   | 3.3            | 1.9            | 阶段 1：单刚缓存 |
+| 64  | 823,875   | 6.7            | 3.5            | 阶段 1：单刚缓存 |
+
+
+数据来源： `outputs/mesh_build_staged_n{32,48,64}.json`、`outputs/cache_fast_n{32,48,64}.json` 与 `outputs/cache_matvec_continuous_fast_n{32,48,64}.json`。

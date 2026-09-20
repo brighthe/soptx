@@ -21,25 +21,61 @@ from .boundary_loads import (
     project_patch_traction_to_p1_trace,
 )
 from .integrators import LinearElasticIntegrator, SourceIntegrator
+from .kernels import (
+    DofToQuad,
+    ElementRestriction,
+    LinearElasticQFunction,
+    QFunction,
+)
+from .levels import (
+    AssemblyLevelExtension,
+    ElementAssembly,
+    FullAssembly,
+    PartialAssembly,
+    available_levels,
+    create_level,
+    register_level,
+)
 from .matrix import CSRPattern, assemble_csr, build_csr_pattern
-from .spaces import HuZhangFESpace, create_huzhang_checkerboard_mesh
+from .operators import ConstrainedOperator
+from .spaces import HuZhangFESpace
+
+# 向后兼容别名: 结构网格生成器已迁至 soptx.mesh.structured_triangle,
+# 此处保留旧导入路径, 新代码请直接从 soptx.mesh 导入。
+from ..mesh import (
+    create_huzhang_checkerboard_mesh,
+    create_huzhang_symmetric_single_diagonal_mesh,
+)
 
 __all__ = [
+    "AssemblyLevelExtension",
     "BilinearForm",
     "CSRPattern",
+    "ConstrainedOperator",
+    "DofToQuad",
+    "ElementAssembly",
+    "ElementRestriction",
+    "FullAssembly",
     "FullInterfaceAnalysisResult",
     "FullInterfaceSubstructureAnalyzer",
     "HuZhangFESpace",
     "HuZhangMFEMAnalyzer",
     "LagrangeFEMAnalyzer",
     "LinearElasticIntegrator",
+    "LinearElasticQFunction",
     "LoadResultantReport",
     "P1TraceLoad",
+    "PartialAssembly",
+    "QFunction",
     "SourceIntegrator",
     "assemble_csr",
+    "available_levels",
     "boundary_load_resultant",
     "build_csr_pattern",
     "check_boundary_load_resultant",
     "create_huzhang_checkerboard_mesh",
+    "create_huzhang_symmetric_single_diagonal_mesh",
+    "create_level",
     "project_patch_traction_to_p1_trace",
+    "register_level",
 ]

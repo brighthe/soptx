@@ -121,6 +121,21 @@ convergence_module = _direct.convergence_module
 
 DEFAULT_OPERATOR_LEVEL = "fa"
 
+# 本脚本一次最多验证两个槽位: 一个 'fa', 一个矩阵自由层级. 'both' 固定取 'ea';
+# 三个层级放在一张表里横比不在这里做, 那是
+# experiments/assembly_level_capability 的事.
+MATRIX_FREE_LEVELS = ("ea", "pa")
+
+
+def matrix_free_level(operator_level: str) -> str | None:
+    """给定 --operator-level, 返回要建的矩阵自由层级; 'fa' 下没有"""
+    if operator_level in MATRIX_FREE_LEVELS:
+        return operator_level
+    if operator_level == "both":
+        return "ea"
+
+    return None
+
 # --------------------------------------------------------------------------
 # case 注册表: 一个 case 一个预条件子
 # --------------------------------------------------------------------------
@@ -760,8 +775,9 @@ def solve_level_pair(
         context["dimension"], subdivisions, context["order"],
         context["model"], context["mesh_type"],
     )
+    mf_level = matrix_free_level(op_level)
     fa = build_level(*arguments, "fa") if op_level in ("both", "fa") else None
-    ea = build_level(*arguments, "ea") if op_level in ("both", "ea") else None
+    ea = build_level(*arguments, mf_level) if mf_level is not None else None
     primary = fa if fa is not None else ea
     x0 = primary["prescribed"]
 
@@ -825,9 +841,10 @@ def print_iteration_table(
             f"{'n':>5} {'gdof':>9} {'niter(fa)':>9} {'relres':>10}"
             f" {'true relres':>11} {'||u-u_h||_0':>13} {'order':>7}"
         )
-    else:  # ea
+    else:  # 矩阵自由层级, 'ea' 或 'pa'
+        niter_column = f"niter({operator_level})"
         header = (
-            f"{'n':>5} {'gdof':>9} {'niter(ea)':>9} {'relres':>10}"
+            f"{'n':>5} {'gdof':>9} {niter_column:>9} {'relres':>10}"
             f" {'true relres':>11} {'||u-u_h||_0':>13} {'order':>7}"
         )
     print(header)
@@ -992,9 +1009,10 @@ def main() -> int:
         "--operator-level",
         "-L",
         dest="operator_level",
-        choices=("fa", "ea", "both"),
+        choices=("fa", "ea", "pa", "both"),
         default=DEFAULT_OPERATOR_LEVEL,
-        help="要验证的算子形态: 'fa' 仅完全装配, 'ea' 仅无矩阵算子, 'both' 同时验证两者, 默认 fa",
+        help="要验证的算子形态: 'fa' 完全装配, 'ea' 单元装配, 'pa' 部分装配, "
+        "'both' 同时验证 fa 与 ea, 默认 fa",
     )
     parser.add_argument("--dim", type=int, default=2, choices=(2, 3), help="空间维数, 默认 2")
     parser.add_argument(
@@ -1057,14 +1075,15 @@ def main() -> int:
     print("cases: " + " ".join(case["id"] for case in cases))
 
     op_level = arguments.operator_level
+    mf_level = matrix_free_level(op_level)
     fa = (
         build_level(dimension, arguments.n, arguments.order, model, mesh_type, "fa")
         if op_level in ("both", "fa")
         else None
     )
     ea = (
-        build_level(dimension, arguments.n, arguments.order, model, mesh_type, "ea")
-        if op_level in ("both", "ea")
+        build_level(dimension, arguments.n, arguments.order, model, mesh_type, mf_level)
+        if mf_level is not None
         else None
     )
 
@@ -1110,7 +1129,7 @@ def main() -> int:
         "number_of_dofs": number_of_dofs,
         "operator_types": {
             k: type(v["operator"]).__name__
-            for k, v in [("fa", fa), ("ea", ea)]
+            for k, v in [("fa", fa), (mf_level, ea)]
             if v is not None
         },
         "reference_true_relres": true_relative_residual(

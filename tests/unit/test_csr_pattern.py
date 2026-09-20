@@ -128,7 +128,7 @@ def test_csr_pattern_pytorch_cuda_equivalence():
     assert pattern.device == device
     assert pattern.crow.is_cuda
     assert pattern.col.is_cuda
-    assert pattern.slot_map.is_cuda
+    assert pattern.slot_base.is_cuda
 
     # 2. 数值阶段直接在 GPU 显存中装配
     K_pattern_cuda = assemble_csr(K_e_cuda, pattern)

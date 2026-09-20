@@ -90,7 +90,7 @@ class ElasticityEAOperator:
 
         返回:
             tuple[Any, TensorLike]: 包含以下两项的二元组:
-                - operator (DirichletBCOperator | OverlapOperator): 施加边界条件后的系统刚度算子.
+                - operator (ConstrainedOperator): 施加边界条件后的系统刚度算子.
                 - load (TensorLike): 施加边界条件修正后的等效右端载荷向量.
         """
         # 1. 刚度算子: 走 EA 多态路径, 预计算单元矩阵集并封装为无矩阵 BilinearForm

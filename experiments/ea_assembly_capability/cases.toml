@@ -1,34 +1,31 @@
-# EA 单元装配无矩阵算子与规模能力的数据点注册表。
+# ea_assembly_capability 数据点注册表.
 #
-# 本文件只描述"跑哪一条命令、产物落在哪"。
+# 约定 (与 fa_assembly_capability 一致):
+#   script       仓库根起算的脚本路径, 三个数据点都由 run.py 的 Worker 模式测量.
+#   args         Worker 固定参数; 调度层按 methods / n / repeats / maxiter / tol 展开与覆盖.
+#   output_mode  "file": 调度层把 --output <outputs/artifact> 追加到 argv.
+#   artifact     代表性产物名; 实际文件名由调度层按 <kind>_<method>_n<N>.json 生成.
+#   panel        cache (单刚缓存 K_e) / matvec (核心 EA 刚度算子乘 K x) / solve (核心 Jacobi-PCG 求解, 每步 facade @ x)
+#                / baseline (单核硬件基线, 与网格无关, env 限制线程数为 1).
+#   method       单刚组装方式, 三个阶段 (panel) 默认只跑 fast; --method standard/voigt/all 可手动复现 fa 阶段 1, 不进正文.
 #
-# 约定:
-#   script       仓库根起算的相对路径。
-#   args         传给该脚本的固定参数, 逐项写全, 不依赖脚本缺省值。
-#   output_mode  dir   = 用 --output-dir 重定向到本目录 outputs/
-#                file  = 用 --output 指定完整路径
-#                fixed = 脚本落盘位置写死, 只能就地读
-#   artifact     产物路径; output_mode = fixed 时为仓库根起算的相对路径,
-#                否则为本目录 outputs/ 下的文件名。
-#   panel        "cache" (单元刚度缓存), "matvec" (算子乘积), "solve" (端到端求解).
-#
-# 注意: 每数据点必须独占一个进程 (ru_maxrss 是进程级高水位, 无法按对象归因)。
+# 被测对象是仓库核心代码 soptx.fem.matrix_free.ElasticityEAOperator (LagrangeFEMAnalyzer 'ea' 路径 +
+# soptx.fem.BilinearForm 的 @ + DirichletBCOperator) 与 soptx.solvers.cg; run.py 不含自有算子 / 求解器实现.
+# 注意: 每个数据点独占一个子进程. Worker 内每阶段重置 VmHWM 取绝对峰值, 全程峰值 = 各阶段峰值最大值.
+# 问题、网格、空间与材料的构建和 fa_assembly_capability 完全相同 (experiments/_common/fe_problem.py);
+# 阶段 1 (panel cache) 的 K_e 与 fa 阶段 1 是否逐位一致由 `run.py --verify-fa` 核对, 两目录的 K_e 阶段数字可直接对照.
 
 [figure]
 id = "ea_assembly_capability"
-title = "EA 单元装配无矩阵算子与规模能力"
-question = "EA 算子内存机制与容量极限"
+title = "EA 单元装配无矩阵算子的内存机制与容量能力"
+question = "缓存 K_e 的 EA 算子: 常驻多大、算子乘多快、Jacobi-PCG 迭代数如何随 n 增长"
 consumer = "dut-postdoc:research/piml-matrix-free-gpu/project-plan.md"
-
-# --------------------------------------------------------------------------
-# cache —— 阶段 1 单元刚度张量缓存 (Element Stiffness Cache)
-# --------------------------------------------------------------------------
 
 [[cases]]
 id = "element-cache"
 panel = "cache"
-role = "element-cache-study"
-summary = "3D tet p1, EA 单元刚度张量显式缓存与静态单价测量, 支持 fast/standard/voigt"
+role = "element-stiffness-cache"
+summary = "assemble_stiff_matrix('ea') 缓存 K_e (NC, 12, 12) 与 cell2dof 的阶段峰值 / 净增 (fast), 与 fa 阶段 1 同口径"
 script = "experiments/ea_assembly_capability/run.py"
 args = ["--worker", "--cache", "--method", "fast", "--n", "32"]
 output_mode = "file"
@@ -37,46 +34,69 @@ mesh_type = "TetrahedronMesh"
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
-methods = ["fast", "standard", "voigt"]
-device = "cpu"
 n = 32
-
-# --------------------------------------------------------------------------
-# matvec —— 阶段 2 算子乘积 (Gather-Apply-Scatter MatVec)
-# --------------------------------------------------------------------------
 
 [[cases]]
 id = "ea-matvec"
 panel = "matvec"
-role = "matvec-benchmark"
-summary = "3D tet p1, EA 单次及批量矩阵向量乘 (A @ x) 瞬态显存与吞吐测量"
+role = "ea-operator-matvec"
+summary = "核心 EA 刚度算子乘 K x (operator.form @ x, soptx.fem.BilinearForm 的 @), 重复计时取中位数与有效带宽下界"
 script = "experiments/ea_assembly_capability/run.py"
-args = ["--worker", "--matvec", "--method", "fast", "--n", "32"]
+args = ["--worker", "--matvec", "--method", "fast", "--n", "32", "--repeats", "20"]
 output_mode = "file"
 artifact = "matvec_fast_n32.json"
 mesh_type = "TetrahedronMesh"
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
-device = "cpu"
 n = 32
+repeats = 20
 
-# --------------------------------------------------------------------------
-# solve —— 端到端 CG 线性求解 (End-to-End CG Solve)
-# --------------------------------------------------------------------------
+[[cases]]
+id = "ea-continuous"
+panel = "continuous"
+role = "ea-matvec-continuous-study"
+summary = "同一进程连续测量: 单刚缓存 -> 输入准备 -> 首次算子乘 (工作区物化) -> 稳态重复算子乘 (零内存增长)"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--continuous", "--method", "fast", "--n", "32", "--repeats", "20"]
+output_mode = "file"
+artifact = "cache_matvec_continuous_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+n = 32
+repeats = 20
 
 [[cases]]
 id = "ea-cg-solve"
 panel = "solve"
-role = "ea-cg-solve-production"
-summary = "3D tet p1, EA 算子搭载无预条件 CG 线性求解端到端峰值内存与容量天花板"
+role = "jacobi-pcg-iteration-growth"
+summary = "核心 EA 算子 + soptx.solvers.cg (Jacobi) 求解制造解问题: 迭代数、单步耗时与全程峰值"
 script = "experiments/ea_assembly_capability/run.py"
-args = ["--worker", "--solve", "--method", "fast", "--n", "32"]
+args = ["--worker", "--solve", "--method", "fast", "--n", "32", "--maxiter", "5000", "--tol", "1e-6"]
 output_mode = "file"
 artifact = "solve_fast_n32.json"
 mesh_type = "TetrahedronMesh"
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
-device = "cpu"
 n = 32
+preconditioner = "jacobi"
+maxiter = 5000
+tol = 1e-6
+
+[[cases]]
+id = "cpu-baseline"
+panel = "baseline"
+role = "hardware-baseline"
+summary = "单核硬件基线: memcpy 带宽 (2 GiB x2, 读 + 写) 与 dgemm 算力 (n = 4096), 供阶段 2 换算带宽 / 算力占比"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--baseline"]
+output_mode = "file"
+artifact = "baseline_cpu.json"
+env = { OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1", MKL_NUM_THREADS = "1" }
+mesh_type = "-"
+grid = "-"
+problem = "-"
+method = "-"

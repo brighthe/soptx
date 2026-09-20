@@ -18,7 +18,7 @@ class SupportsMatmul(Protocol):
     """能被迭代解法作用的算子: 稀疏矩阵, matrix-free 算子或预条件子.
 
     'fa' 层级下是 CSRTensor/COOTensor, 'ea' 层级下是层层包装的
-    DirichletBCOperator. 两者唯一的共性就是支持 ``@``, 所以按该协议
+    ConstrainedOperator. 两者唯一的共性就是支持 ``@``, 所以按该协议
     标注, 而不是枚举具体类型 -- 枚举会随实现漂移.
     """
 

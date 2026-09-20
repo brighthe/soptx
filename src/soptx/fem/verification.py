@@ -19,11 +19,11 @@ import numpy as np
 from scipy.sparse.linalg import spsolve as scipy_spsolve
 
 from fealpy.backend import backend_manager as bm
-from fealpy.fem import DirichletBCOperator
 from fealpy.functionspace import TensorFunctionSpace
 from fealpy.mesh import MeshView
 
 from soptx.core.numerics import NORM_FLOOR
+from soptx.fem.operators import ConstrainedOperator
 
 from .analyzers import build_serial_analyzer
 
@@ -103,7 +103,7 @@ def serial_references(
         fa_matrix @ first,
     )
 
-    element_boundary_operator = DirichletBCOperator(
+    element_boundary_operator = ConstrainedOperator(
         element_form,
         gd=pde.dirichlet_bc,
         isDDof=boundary_dofs,
@@ -119,7 +119,7 @@ def serial_references(
     # 对不对无关, 而且复用已经算出的 first_action, 不额外花钱
     energy = float(bm.sum(first * (element_boundary_operator @ first)))
 
-    # SciPy 的 ``spsolve`` 只高效接受 CSR/CSC. ``DirichletBCOperator`` 当前导出
+    # SciPy 的 ``spsolve`` 只高效接受 CSR/CSC. ``ConstrainedOperator`` 当前导出
     # 为 COO, 因此在黄金参考路径显式转成 CSR, 避免每次验证时隐式转换并发出警告.
     # 这里刻意直接用 scipy, 不走 soptx.solvers.spsolve: 本函数是校验 EA 算子的
     # 黄金参考, 不应依赖同一批被重构的求解代码. COO -> CSR 本身就产生新数组, 不

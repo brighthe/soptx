@@ -1,639 +1,885 @@
 # -*- coding: utf-8 -*-
-"""EA (Element Assembly) 单元装配无矩阵算子与规模能力统一驱动.
+"""EA 单元级无矩阵算子三个数据点的自包含调度与测量入口.
 
-本模块自包含实现:
-1. Worker 测量层:
-   - 阶段 1 (cache): 单元刚度张量显式缓存与静态单价测量
-   - 阶段 2 (matvec): 单次及批量 MatVec (A @ x) 瞬态显存与吞吐测量
-   - 全流程 (solve): EA 算子搭载无预条件 CG 线性求解端到端峰值内存与容量天花板
-2. 调度与编排层: 读取 cases.toml, 启动独立子进程跑指定数据点
-3. 终端看板: Style B (Modern Tree Card) 树状卡片输出
+本脚本同时承担「调度器」与「独立子进程测量器」两个角色, 结构与
+``experiments/fa_assembly_capability/run.py`` 一致, 共用代码在 ``experiments/_common/``.
+
+1. 调度模式 (默认入口, 每个数据点独占一个子进程):
+   - python run.py --list                                   # 列出已注册数据点
+   - python run.py --all --check-only                       # 只打印将执行的子进程命令
+   - python run.py --case element-cache --grid 32 --monitor
+   - python run.py --case ea-matvec --grid 32 --repeats 20 --monitor
+   - python run.py --case ea-continuous --grid 32 --monitor
+   - python run.py --case ea-cg-solve --grid 32 --monitor
+   - python run.py --case cpu-baseline --monitor                # 单核硬件基线 (memcpy 带宽 + dgemm 算力)
+   - python run.py --verify-fa --n 8                        # 逐位核对 K_e / cell2dof 与 fa 构建路径一致
+
+2. Worker 模式 (由调度器在独立进程中调用, 保证内存高水位严格隔离):
+   - python run.py --worker --cache  --method fast --n 32 --output outputs/cache_fast_n32.json
+   - python run.py --worker --matvec --method fast --n 32 --repeats 20 --output outputs/matvec_fast_n32.json
+   - python run.py --worker --continuous --method fast --n 32 --repeats 20 --output outputs/cache_matvec_continuous_fast_n32.json
+   - python run.py --worker --solve  --method fast --n 32 --maxiter 5000 --tol 1e-6 \
+         --output outputs/solve_fast_n32.json
+   - python run.py --worker --baseline --output outputs/baseline_cpu.json
+
+被测对象是仓库核心代码 ``soptx.fem.matrix_free.ElasticityEAOperator`` (门面) 及其底层:
+``LagrangeFEMAnalyzer.assemble_stiff_matrix('ea')`` 用 ``LinearElasticIntegrator.const`` 缓存 K_e 与
+cell2dof 并装进未 assembly 的 ``soptx.fem.BilinearForm``; ``@`` 走 ``BilinearForm.__matmul__``
+(gather -> einsum -> index_add) 外包 ``DirichletBCOperator`` (Pi_I K Pi_I + Pi_D); Jacobi-PCG 用
+``soptx.solvers.cg`` 与 ``DiagonalPreconditioner``, 对角由 ``assemble_operator_diagonal`` 给出.
+本脚本不含任何算子或求解器的自有实现.
+
+问题、网格、空间、材料的构建路径与 fa 完全相同 (``_common.fe_problem``); 分析器的积分阶
+``degree + 3 = 4`` 与 fa 直接调用 ``LinearElasticIntegrator`` 的默认阶 ``p + 3`` 相同, 阶段 1 的 K_e
+与 fa 阶段 1 是否逐位一致由 ``--verify-fa`` 在同一进程内用 ``np.array_equal`` 核对, 不靠代码同源推断.
+
+内存口径 (CPU): 每个阶段先记 before = 当前 VmRSS, 再向 /proc/self/clear_refs 写 5 重置 VmHWM,
+阶段结束读 VmHWM 作为该阶段的绝对峰值 peak, net = peak - before. 全程峰值 (process_max_rss)
+= 各阶段峰值的最大值.
+
+阶段划分:
+  cache  面板: mesh (网格 + 空间 + 材料 + 分析器) -> cache (assemble_stiff_matrix: K_e + cell2dof)
+  matvec 面板: mesh -> assemble (facade.assemble(): K_e + 体力右端 + Dirichlet 投影) -> warmup
+               -> matvec (刚度算子乘 K x = operator.form @ x, 重复 repeats 次)
+  solve  面板: mesh -> assemble -> setup_solve (对角 + 预条件子) -> solve (cg, 每步调用 facade @ x = (P_I K P_I + P_D) x)
+  baseline 面板: 与网格无关, 单线程 (cases.toml 的 env 限制) memcpy 带宽与 dgemm 算力, 供阶段 2 换算占比
+matvec / solve 面板不单列 cache 阶段: ``ElasticityEAOperator.assemble()`` 内部会再次调用
+``assemble_stiff_matrix``, 单列会把 K_e 算两遍, 阶段 1 的数字以 cache 面板为准.
+
+产物命名: <kind>_<method>_n<N>.json; 后处理与对比表见 compare.py.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
-import resource
-import subprocess
+import statistics
 import sys
 import time
-import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Sequence
 
 import numpy as np
-import scipy.sparse as sp
 
 _THIS_DIR = Path(__file__).resolve().parent
 _OUTPUT_DIR = _THIS_DIR / "outputs"
-if str(_THIS_DIR) not in sys.path:
-    sys.path.insert(0, str(_THIS_DIR))
+for _p in (_THIS_DIR, _THIS_DIR.parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import config  # noqa: E402
-
-T_TET4 = 288
-DEFAULT_MEMORY_TOTAL = 47.04 * 2**30  # 本机可用内存上限 (47.04 GiB)
-DEFAULT_GPU_VRAM_TOTAL = 16.0 * 2**30  # 本机 RTX 5080 显存上限 (16.0 GiB)
-
+from _common import scheduler  # noqa: E402
+from _common.fe_problem import (  # noqa: E402
+    MESH_TYPE,
+    METHOD_NAMES,
+    PROBLEM_NAME,
+    build_problem_space,
+    import_fe_stack_cpu,
+    mesh_facts,
+)
+from _common.baseline import measure_baseline, print_baseline  # noqa: E402
+from _common.metrology import StageMeter, cur_rss_kib, peak_rss_kib, reset_peak_rss  # noqa: E402
 
 # -----------------------------------------------------------------------------
-# 1. 测量与物理构件 (Worker 核心)
+# 1. 核心算子的构建与测量 (Worker 核心)
 # -----------------------------------------------------------------------------
 
-def get_peak_rss_bytes() -> int:
-    """获取当前进程生命周期的最高内存水位 (ru_maxrss)."""
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    if sys.platform == "darwin":
-        return usage.ru_maxrss
-    return usage.ru_maxrss * 1024
+LOCAL_DOFS = 12  # tet4 向量 P1: 4 节点 x 3 分量
+FLOPS_PER_CELL = 2 * LOCAL_DOFS * LOCAL_DOFS  # y_e = K_e x_e 的乘加次数
+DEGREE = 1
+DEVICE = "cpu"
 
 
-def detect_device_display(device_str: str) -> str:
-    """根据 device_str 与硬件状态生成准确的设备展示名称."""
-    dev = device_str.lower()
-    if dev in ("cpu", "none"):
-        return "CPU"
+def _element_data(facade: Any) -> tuple[np.ndarray, np.ndarray]:
+    """从分析器持有的 const 积分子取出缓存的 K_e (NC, 12, 12) 与 cell2dof (NC, 12).
+
+    ``assemble_stiff_matrix('ea')`` 把两者都放在 ``analyzer._const_integrator`` 里,
+    ``assemble_operator_diagonal`` 也从这里复用; 本脚本只读不写.
+    """
+    const = getattr(facade.analyzer, "_const_integrator", None)
+    if const is None:
+        raise RuntimeError("K_e 尚未缓存: 需先调用 assemble_stiff_matrix() 或 assemble()")
+    return np.asarray(const.value), np.asarray(const.to_gdof)
+
+
+def _reference_kx(Ke: np.ndarray, cell2dof: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """核对用的纯 numpy 参考 y = sum_e G_e^T K_e G_e x (assembly-levels.md §2.3), 不计时."""
+    y = np.zeros(x.shape[0], dtype=x.dtype)
+    np.add.at(y, cell2dof.ravel(), np.einsum("cij,cj->ci", Ke, x[cell2dof]).ravel())
+    return y
+
+
+def _relerr(y: np.ndarray, y_ref: np.ndarray) -> float:
+    return float(np.max(np.abs(y - y_ref)) / max(float(np.max(np.abs(y_ref))), 1e-300))
+
+
+def _build_facade(method: str, n: int) -> tuple[Dict[str, Any], StageMeter]:
+    """构建网格 / 空间 / 材料与 ``ElasticityEAOperator`` 门面 (mesh 阶段), 不触发装配.
+
+    Parameters
+    ----------
+    method : str
+        单刚组装方式 (standard/voigt/fast), 透传给门面的 ``assembly_method``.
+    n : int
+        网格每方向段数.
+
+    Returns
+    -------
+    ctx : dict
+        含 mesh / vs / problem / material / facade / facts.
+    meter : StageMeter
+        已记录 mesh 阶段.
+    """
+    import_fe_stack_cpu()
+    from soptx.fem.matrix_free import ElasticityEAOperator
+
+    meter = StageMeter()
+    with meter.stage("mesh"):
+        problem, mesh, vs, material = build_problem_space(n)
+        facade = ElasticityEAOperator(vs, problem, material, degree=DEGREE, assembly_method=method)
+
+    ctx: Dict[str, Any] = {
+        "mesh": mesh,
+        "vs": vs,
+        "problem": problem,
+        "material": material,
+        "facade": facade,
+        "facts": mesh_facts(mesh, vs),
+    }
+    return ctx, meter
+
+
+def _assemble_system(ctx: Dict[str, Any], meter: StageMeter) -> None:
+    """assemble 阶段: ``facade.assemble()`` 一次给出 K_e 缓存、体力右端与 Dirichlet 投影算子."""
+    facade = ctx["facade"]
+    with meter.stage("assemble"):
+        operator, load = facade.assemble()
+    Ke, cell2dof = _element_data(facade)
+    ctx.update(
+        {
+            "operator": operator,  # DirichletBCOperator, 即 facade.system_operator
+            "load": np.asarray(load),
+            "Ke": Ke,
+            "cell2dof": cell2dof,
+            "is_bd": np.asarray(facade.boundary_dofs, dtype=bool),
+        }
+    )
+
+
+def _finish(panel: str, ctx: Dict[str, Any], method: str, n: int, meter: StageMeter) -> Dict[str, Any]:
+    """在全部阶段结束后组装公共字段 (网格事实、K_e 理论量、算子常驻、各阶段峰值 / 净增与单价)."""
+    facts = ctx["facts"]
+    Ndof = facts["Ndof"]
+    Ke = ctx["Ke"]
+    c2d = ctx["cell2dof"]
+    ke_shape = [int(s) for s in Ke.shape]
+    ke_theory = int(np.prod(ke_shape)) * 8
+    persistent = int(Ke.nbytes + c2d.nbytes)
+
+    def kb_per_dof(nbytes: float) -> float:
+        return round(nbytes / Ndof / 1000, 2)
+
+    out: Dict[str, Any] = {
+        "panel": panel,
+        "device": "CPU",
+        "device_type": "cpu",
+        "memory_kind": meter.memory_kind,
+        "problem": PROBLEM_NAME,
+        "mesh_type": MESH_TYPE,
+        "operator_impl": "soptx.fem.matrix_free.ElasticityEAOperator",
+        "method": method,
+        "n": n,
+        **facts,
+        "Ke_shape": ke_shape,
+        "Ke_theory_MiB": round(ke_theory / 2**20, 1),
+        "cell2dof_MiB": round(int(c2d.nbytes) / 2**20, 1),
+        "operator_persistent_MiB": round(persistent / 2**20, 1),
+        "operator_persistent_KB_per_dof": kb_per_dof(persistent),
+        **meter.fields(),
+        "process_max_rss_KB_per_dof": kb_per_dof(meter.max_peak_kib() * 1024),
+    }
+    if "cache" in meter.records:
+        out.update(
+            {
+                "cache_KB_per_dof": kb_per_dof(meter.net_bytes("cache")),
+                "cache_peak_KB_per_dof": kb_per_dof(meter.peak_bytes("cache")),
+                "cache_net_over_Ke_theory": round(meter.net_bytes("cache") / ke_theory, 2),
+            }
+        )
+    return out
+
+
+def _malloc_trim() -> bool:
+    """把 glibc 持有但未归还内核的空闲页归还; 非 glibc 平台返回 False."""
     try:
-        import torch
-        if torch.cuda.is_available() and ("cuda" in dev or dev == "gpu"):
-            dev_idx = 0
-            if ":" in dev:
-                try:
-                    dev_idx = int(dev.split(":")[1])
-                except Exception:
-                    dev_idx = 0
-            gpu_name = torch.cuda.get_device_name(dev_idx)
-            return f"{gpu_name} (PyTorch CUDA)"
-    except Exception:
-        pass
-    return device_str.upper()
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(ctypes.c_size_t(0))
+        return True
+    except (OSError, AttributeError):
+        return False
 
 
-def _setup_mesh_and_spaces(n: int, device_str: str = "cpu"):
-    """构建三维四面体网格与位移张量有限元空间."""
-    from fealpy.backend import backend_manager as bm
-    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-    from fealpy.mesh import TetrahedronMesh
+def measure_cache(method: str, n: int) -> dict:
+    """阶段 1 (panel cache): 只测 ``assemble_stiff_matrix('ea')`` 缓存 K_e 与 cell2dof (与 fa 阶段 1 同口径).
 
-    if device_str.lower() != "cpu":
-        try:
-            bm.set_backend("pytorch")
-        except Exception:
-            pass
+    常驻量与 fa ``measure_stage1`` 同一套动作: 阶段开始前先 ``gc`` 并归还建网格留下的 glibc 空闲页
+    (否则它们被本阶段大块临时量占用后随 munmap 一起还给内核, 使"结束 RSS - 起点 RSS"不闭合),
+    阶段结束后再取一次 RSS 增量, ``malloc_trim`` 前后各记一个值. EA 比 fa 多常驻一个 cell2dof.
+    """
+    import gc
 
-    mesh = TetrahedronMesh.from_box(box=[0, 1, 0, 1, 0, 1], nx=n, ny=n, nz=n)
-    scalar_space = LagrangeFESpace(mesh, p=1, ctype="C")
-    tensor_space = TensorFunctionSpace(scalar_space=scalar_space, shape=(-1, 3))
-    return mesh, scalar_space, tensor_space
+    from _common.metrology import cur_rss_kib
+
+    ctx, meter = _build_facade(method, n)
+    facade = ctx["facade"]
+    rss_before_trim_kib = cur_rss_kib()
+    gc.collect()
+    trimmed = _malloc_trim()
+    with meter.stage("cache"):
+        facade.analyzer.assemble_stiff_matrix()
+    Ke, cell2dof = _element_data(facade)
+    ctx.update({"Ke": Ke, "cell2dof": cell2dof})
+
+    gc.collect()
+    base_kib = meter.records["cache"].before_kib
+    retained_kib = max(0, cur_rss_kib() - base_kib)
+    if trimmed:
+        _malloc_trim()
+    after_kib = max(0, cur_rss_kib() - base_kib) if trimmed else retained_kib
+
+    out = _finish("cache", ctx, method, n, meter)
+    Ndof = out["Ndof"]
+    out.update(
+        {
+            "cache_before_no_trim_MiB": round(rss_before_trim_kib / 1024, 1),
+            "malloc_trim_supported": trimmed,
+            "cache_retained_MiB": round(retained_kib / 1024, 1),
+            "cache_retained_KB_per_dof": round(retained_kib * 1024 / Ndof / 1000, 2),
+            "cache_retained_after_trim_MiB": round(after_kib / 1024, 1),
+        }
+    )
+    return out
 
 
-def measure_cache(method: str, n: int, device_str: str = "cpu") -> dict:
-    """阶段 1: 测量 EA 单元刚度张量显式缓存的常驻显存/内存与单价."""
-    dev = device_str.lower()
-    use_gpu = dev != "cpu"
+def measure_matvec_allocations(method: str, n: int) -> dict:
+    """独立跟踪一次预热后算子乘的分配, 不测性能耗时.
 
-    if use_gpu:
-        import torch
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-        dev_obj = torch.device(device_str if ":" in device_str or "cuda" in device_str else "cuda:0")
-    else:
-        dev_obj = None
+    Parameters
+    ----------
+    method : str
+        单刚组装方式.
+    n : int
+        网格每方向段数.
 
-    t0 = time.perf_counter()
-    from soptx.materials import IsotropicLinearElasticMaterial
-    from soptx.fem import LinearElasticIntegrator
+    Returns
+    -------
+    dict
+        NumPy 跟踪校验, 可跟踪分配峰值及保留量, 探针 RSS.
+        未接入 tracemalloc 的底层分配不在跟踪范围内.
+    """
+    import gc
+    import tracemalloc
 
-    mesh, scalar_space, tensor_space = _setup_mesh_and_spaces(n, device_str)
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3)
-    integrator = LinearElasticIntegrator(material=material, q=3, method=method)
+    from _common.metrology import cur_rss_kib, peak_rss_kib, reset_peak_rss
 
-    if use_gpu:
-        import torch
-        torch.cuda.synchronize()
-        mem_before = torch.cuda.memory_allocated(dev_obj)
+    if tracemalloc.is_tracing():
+        raise RuntimeError("请在未启用 tracemalloc 的独立进程中运行探针")
+    ctx, meter = _build_facade(method, n)
+    _assemble_system(ctx, meter)
+    bform = ctx["operator"].form
+    x = np.random.default_rng(0).standard_normal(ctx["facts"]["Ndof"])
+    warmup = bform @ x
+    del warmup
+    gc.collect()
 
-    # const 构造预先算出单元矩阵 {K_e}
-    const_integrator = integrator.const(tensor_space)
-    K_e = const_integrator.assembly(tensor_space)
+    # 已知大小的 NumPy 分配校验不计入算子乘.
+    tracemalloc.start()
+    try:
+        check_before, _ = tracemalloc.get_traced_memory()
+        check = np.empty(2**20, dtype=np.float64)
+        check_current, _ = tracemalloc.get_traced_memory()
+        expected = int(check.nbytes)
+        observed = check_current - check_before
+        check_ok = expected <= observed <= expected + 64 * 1024
+        del check
+    finally:
+        tracemalloc.stop()
+    if not check_ok:
+        raise RuntimeError(f"NumPy 跟踪校验失败: 期望 {expected} B, 捕获 {observed} B")
 
-    if use_gpu:
-        import torch
-        if not isinstance(K_e, torch.Tensor):
-            K_e = torch.as_tensor(K_e, device=dev_obj, dtype=torch.float64)
-        else:
-            K_e = K_e.to(dev_obj)
-        torch.cuda.synchronize()
-        elapsed = time.perf_counter() - t0
-        peak_bytes = int(torch.cuda.max_memory_allocated(dev_obj))
-        net_cache_bytes = int(torch.cuda.memory_allocated(dev_obj) - mem_before)
-    else:
-        elapsed = time.perf_counter() - t0
-        peak_bytes = get_peak_rss_bytes()
-        net_cache_bytes = int(K_e.nbytes if hasattr(K_e, "nbytes") else sys.getsizeof(K_e))
-
-    n_cells = int(mesh.number_of_cells())
-    n_dofs = int(tensor_space.number_of_global_dofs())
-
-    # 理论单价推导:
-    # 单元刚度矩阵: NC * 12 * 12 * 8 Bytes
-    # cell2dof 索引: NC * 12 * 8 Bytes
-    element_tensor_bytes = n_cells * 144 * 8
-    cell2dof_bytes = n_cells * 12 * 8
-    theoretical_static_bytes = element_tensor_bytes + cell2dof_bytes
-
-    unit_cost_bytes = peak_bytes / n_dofs
-    unit_cost_cell = peak_bytes / n_cells
-    capacity_ceiling = int(DEFAULT_MEMORY_TOTAL / unit_cost_bytes) if unit_cost_bytes > 0 else 0
-    gpu_ceiling = int(DEFAULT_GPU_VRAM_TOTAL / unit_cost_bytes) if unit_cost_bytes > 0 else 0
-
-    dev_display = detect_device_display(device_str)
-
+    gc.collect()
+    rss_before = cur_rss_kib()
+    rss_reset = reset_peak_rss()
+    tracemalloc.start()
+    try:
+        before, _ = tracemalloc.get_traced_memory()
+        tracemalloc.reset_peak()
+        y = bform @ x
+        current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    rss_after = cur_rss_kib()
+    rss_peak = peak_rss_kib()
     return {
-        "case_id": "element-cache",
-        "panel": "cache",
-        "role": "element-cache-study",
-        "problem": "DivergenceFreePolynomialElasticity3D",
-        "mesh_type": "TetrahedronMesh",
-        "grid": f"{n}^3",
-        "n": n,
-        "n_cells": n_cells,
-        "n_dofs": n_dofs,
+        "panel": "matvec_allocations",
         "method": method,
-        "device": dev_display,
-        "device_raw": device_str,
-        "elapsed_seconds": elapsed,
-        "peak_memory_bytes": peak_bytes,
-        "peak_memory_mib": peak_bytes / (1024**2),
-        "net_cache_bytes": net_cache_bytes,
-        "net_cache_mib": net_cache_bytes / (1024**2),
-        "theoretical_static_bytes": theoretical_static_bytes,
-        "theoretical_static_mib": theoretical_static_bytes / (1024**2),
-        "unit_cost_bytes_per_dof": unit_cost_bytes,
-        "unit_cost_kb_per_dof": unit_cost_bytes / 1000,
-        "unit_cost_bytes_per_cell": unit_cost_cell,
-        "capacity_ceiling_47g_dofs": capacity_ceiling,
-        "capacity_ceiling_gpu_16g_dofs": gpu_ceiling,
+        "n": n,
+        **ctx["facts"],
+        "numpy_tracking_check_passed": check_ok,
+        "numpy_tracking_expected_bytes": expected,
+        "numpy_tracking_observed_bytes": observed,
+        "allocation_peak_increment_bytes": peak - before,
+        "allocation_retained_increment_bytes": current - before,
+        "allocation_peak_minus_retained_bytes": peak - current,
+        "output_bytes": int(y.nbytes),
+        "probe_rss_before_MiB": rss_before / 1024,
+        "probe_rss_after_MiB": rss_after / 1024,
+        "probe_rss_peak_MiB": rss_peak / 1024 if rss_reset else None,
+        "probe_rss_peak_increment_MiB": max(0, rss_peak - rss_before) / 1024 if rss_reset else None,
+        "probe_rss_reset_supported": rss_reset,
+        "allocation_scope": "一次预热后的 form @ x; 包含输出; 非累计分配量; 不含未接入跟踪的底层分配",
+        "rss_scope": "探针 RSS 含跟踪器开销, 不用于无跟踪器性能结论",
     }
 
 
-class EAMatVecOperator:
-    """EA 单元装配算子向量乘 (Gather-Apply-Scatter)."""
-
-    def __init__(self, K_e: Any, cell2dof: Any, use_gpu: bool = False, device: Any = None):
-        self.use_gpu = use_gpu
-        self.device = device
-        if use_gpu:
-            import torch
-            self.K_e = torch.as_tensor(K_e, device=device, dtype=torch.float64)
-            self.cell2dof = torch.as_tensor(cell2dof, device=device, dtype=torch.int64)
-            self.flat_cell2dof = self.cell2dof.reshape(-1)
-        else:
-            self.K_e = np.asarray(K_e, dtype=np.float64)
-            self.cell2dof = np.asarray(cell2dof, dtype=np.int64)
-            self.flat_cell2dof = self.cell2dof.reshape(-1)
-
-    def __matmul__(self, x: Any) -> Any:
-        if self.use_gpu:
-            import torch
-            x_e = x[self.cell2dof]
-            y_e = torch.bmm(self.K_e, x_e.unsqueeze(-1)).squeeze(-1)
-            y = torch.zeros_like(x)
-            y.scatter_add_(0, self.flat_cell2dof, y_e.reshape(-1))
-            return y
-        else:
-            x_e = x[self.cell2dof]
-            y_e = np.einsum("cij,cj->ci", self.K_e, x_e)
-            y = np.zeros_like(x)
-            np.add.at(y, self.flat_cell2dof, y_e.ravel())
-            return y
-
-
-def measure_matvec(method: str, n: int, num_matvecs: int = 20, device_str: str = "cpu") -> dict:
-    """阶段 2: 测量 EA 算子单次及批量 MatVec (A @ x) 的耗时、吞吐与瞬态显存."""
-    dev = device_str.lower()
-    use_gpu = dev != "cpu"
-
-    if use_gpu:
-        import torch
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-        dev_obj = torch.device(device_str if ":" in device_str or "cuda" in device_str else "cuda:0")
-    else:
-        dev_obj = None
-
-    from soptx.materials import IsotropicLinearElasticMaterial
-    from soptx.fem import LinearElasticIntegrator
-
-    mesh, scalar_space, tensor_space = _setup_mesh_and_spaces(n, device_str)
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3)
-    integrator = LinearElasticIntegrator(material=material, q=3, method=method)
-
-    const_integrator = integrator.const(tensor_space)
-    K_e = const_integrator.assembly(tensor_space)
-    cell2dof = tensor_space.cell_to_dof()
-
-    op = EAMatVecOperator(K_e, cell2dof, use_gpu=use_gpu, device=dev_obj)
-
-    n_cells = int(mesh.number_of_cells())
-    n_dofs = int(tensor_space.number_of_global_dofs())
-
-    # 构建随机测试向量
-    if use_gpu:
-        import torch
-        x = torch.randn(n_dofs, dtype=torch.float64, device=dev_obj)
-        # Warmup
-        y = op @ x
-        torch.cuda.synchronize()
-
+def _timed(fn: Any, repeats: int) -> tuple[list[float], Any]:
+    times: list[float] = []
+    y = None
+    for _ in range(repeats):
         t0 = time.perf_counter()
-        for _ in range(num_matvecs):
-            y = op @ x
-        torch.cuda.synchronize()
-        elapsed_total = time.perf_counter() - t0
-        peak_bytes = int(torch.cuda.max_memory_allocated(dev_obj))
-    else:
-        x = np.random.randn(n_dofs)
-        # Warmup
-        y = op @ x
-        t0 = time.perf_counter()
-        for _ in range(num_matvecs):
-            y = op @ x
-        elapsed_total = time.perf_counter() - t0
-        peak_bytes = get_peak_rss_bytes()
+        y = fn()
+        times.append(time.perf_counter() - t0)
+    return times, y
 
-    avg_matvec_ms = (elapsed_total / num_matvecs) * 1000
-    throughput_mdofs_per_sec = (n_dofs / (elapsed_total / num_matvecs)) / 1e6
-    gflops_per_sec = (288 * n_cells / (elapsed_total / num_matvecs)) / 1e9
 
-    unit_cost_bytes = peak_bytes / n_dofs
-    dev_display = detect_device_display(device_str)
+def measure_matvec(method: str, n: int, repeats: int = 20, seed: int = 0) -> dict:
+    """阶段 2 (panel matvec): 预热后重复 ``repeats`` 次刚度算子乘 K x, 记录中位 / 最小耗时与有效带宽下界.
 
-    return {
-        "case_id": "ea-matvec",
-        "panel": "matvec",
-        "role": "matvec-benchmark",
-        "problem": "DivergenceFreePolynomialElasticity3D",
-        "mesh_type": "TetrahedronMesh",
-        "grid": f"{n}^3",
+    计时对象是 ``operator.form @ x``, 即 ``soptx.fem.BilinearForm.__matmul__``: gather ``x[cell2dof]`` ->
+    ``einsum("cij, cj -> ci", K_e, x_e)`` -> ``index_add`` scatter-add, 对应 assembly-levels.md §2.3 的
+    EA MatVec, 与 fa 的 CSR ``K @ x`` 同口径. 含 Dirichlet 投影的系统算子乘 ``facade @ x`` 只在阶段 3
+    由 cg 调用, 不在本阶段单独计时. 结果与纯 numpy 参考实现核对 (相对误差).
+
+    带宽下界按每次算子乘至少搬运 K_e + cell2dof + 读 x 写 y (16 B/dof) 计, 不含 gather 与
+    scatter 的随机访问放大, 因此是真实带宽的下界.
+    """
+    ctx, meter = _build_facade(method, n)
+    _assemble_system(ctx, meter)
+    bform = ctx["operator"].form
+    Ke, cell2dof = ctx["Ke"], ctx["cell2dof"]
+    Ndof = ctx["facts"]["Ndof"]
+    NC = ctx["facts"]["NC"]
+
+    x = np.random.default_rng(seed).standard_normal(Ndof)
+
+    with meter.stage("warmup"):
+        y = bform @ x
+
+    with meter.stage("matvec"):
+        times, y = _timed(lambda: bform @ x, repeats)
+
+    y = np.asarray(y)
+    y_ref = _reference_kx(Ke, cell2dof, x)
+
+    t_med = statistics.median(times)
+    bytes_moved_min = Ke.nbytes + cell2dof.nbytes + 16 * Ndof
+
+    out = _finish("matvec", ctx, method, n, meter)
+    out.update(
+        {
+            "repeats": repeats,
+            "seed": seed,
+            "matvec_impl": "soptx.fem.BilinearForm.__matmul__ (inherited from fealpy): gather -> einsum -> index_add",
+            "matvec_seconds_median": round(t_med, 6),
+            "matvec_seconds_min": round(min(times), 6),
+            "matvec_seconds_all": [round(t, 6) for t in times],
+            "bytes_moved_min_per_matvec": int(bytes_moved_min),
+            "effective_gbps_lower_bound": round(bytes_moved_min / t_med / 1e9, 2),
+            "gflops": round(FLOPS_PER_CELL * NC / t_med / 1e9, 2),
+            "y_norm": float(np.linalg.norm(y)),
+            "matvec_vs_reference_relerr": _relerr(y, y_ref),
+        }
+    )
+    return out
+
+
+def measure_solve(method: str, n: int, maxiter: int = 5000, tol: float = 1e-6) -> dict:
+    """阶段 3 (panel solve): 核心 Jacobi-PCG (``soptx.solvers.cg`` + ``DiagonalPreconditioner``) 求解制造解问题.
+
+    系统 A = Pi_I K Pi_I + Pi_D 与右端来自 ``facade.assemble()`` (体力 + Dirichlet 消去), 初值取
+    ``prescribed_solution`` (边界为给定位移、内部为零), 对角由 ``assemble_operator_diagonal`` 给出
+    (Dirichlet 处为 1). 停机判据为 cg 的 'natural' 口径 ||r_k||_{M^-1} <= tol ||r_0||_{M^-1};
+    另报告求解后的真残差 ||b - A x|| / ||b||.
+    """
+    from soptx.solvers import DiagonalPreconditioner, cg
+
+    ctx, meter = _build_facade(method, n)
+    _assemble_system(ctx, meter)
+    facade = ctx["facade"]
+    operator = ctx["operator"]
+    load = ctx["load"]
+
+    with meter.stage("setup_solve"):
+        diag = facade.analyzer.assemble_operator_diagonal(operator)
+        precond = DiagonalPreconditioner(diag)
+        x0 = facade.prescribed_solution
+
+    with meter.stage("solve"):
+        x, info = cg(
+            operator, load, x0, precond,
+            atol=0.0, rtol=tol, maxit=maxiter, returninfo=True, print_level=0,
+        )
+
+    it_count = int(info["niter"])
+    residual = float(info["residual"])
+    reference = float(info["reference_norm"])
+    true_res = float(np.linalg.norm(np.asarray(operator @ x) - load))
+    load_norm = float(np.linalg.norm(load))
+    solve_s = meter.seconds("solve")
+    reason = info.get("reason")
+
+    out = _finish("solve", ctx, method, n, meter)
+    out.update(
+        {
+            "solver_impl": "soptx.solvers.cg + DiagonalPreconditioner",
+            "preconditioner": "jacobi",
+            "boundary": "pde-dirichlet",
+            "rhs": "pde-body-force",
+            "tolerance": tol,
+            "maxiter": maxiter,
+            "iterations": it_count,
+            "converged": bool(info["converged"]),
+            "reason": str(getattr(reason, "name", reason)),
+            "final_relres": residual / reference if reference > 0 else float("nan"),
+            "true_relres": true_res / load_norm if load_norm > 0 else float("nan"),
+            "iterations_per_n": round(it_count / n, 3),
+            "solve_seconds": round(solve_s, 3),
+            "seconds_per_iteration": round(solve_s / it_count, 6) if it_count else 0.0,
+            "n_boundary_dofs": int(ctx["is_bd"].sum()),
+        }
+    )
+    return out
+
+
+def measure_continuous(method: str, n: int, repeats: int = 20) -> dict:
+    """连续测量面板: 同一进程内测量 cache -> input -> first_matvec -> repeat_matvec.
+
+    用于观测工作区缓冲的初次物化净增 (首次算子乘) 以及稳态重复调用的零内存增长,
+    同时提供跨阶段连续水位演进数据.
+    """
+    import gc
+
+    ctx, mesh_meter = _build_facade(method, n)
+    stages = {}
+    rng = np.random.default_rng(0)
+    times = [0.0] * repeats
+
+    @contextlib.contextmanager
+    def stage(name: str):
+        before = cur_rss_kib()
+        reset = reset_peak_rss()
+        start = time.perf_counter()
+        yield
+        seconds = time.perf_counter() - start
+        after = cur_rss_kib()
+        peak = max(before, after, peak_rss_kib())
+        stages[name] = {
+            "before_kib": before,
+            "peak_kib": peak,
+            "after_kib": after,
+            "net_kib": peak - before,
+            "t_s": seconds,
+            "reset_supported": reset,
+        }
+
+    gc.collect()
+    trim_supported = _malloc_trim()
+    with stage("cache"):
+        operator = ctx["facade"].analyzer.assemble_stiff_matrix()
+    with stage("input"):
+        x = rng.standard_normal(ctx["facts"]["Ndof"])
+    with stage("first_matvec"):
+        y = operator @ x
+    with stage("repeat_matvec"):
+        for i in range(repeats):
+            start = time.perf_counter()
+            y = operator @ x
+            times[i] = time.perf_counter() - start
+
+    # 正确性核对
+    Ke = np.asarray(operator.element_matrices)
+    c2d = np.asarray(operator.const_integrator.to_gdof)
+    ref = _reference_kx(Ke, c2d, x)
+    error = _relerr(y, ref)
+    med = statistics.median(times)
+    peak = max(mesh_meter.max_peak_kib(), *(r["peak_kib"] for r in stages.values()))
+    facts = ctx["facts"]
+    persistent_bytes = int(Ke.nbytes + c2d.nbytes)
+    result = {
+        "panel": "continuous",
         "n": n,
-        "n_cells": n_cells,
-        "n_dofs": n_dofs,
+        **facts,
         "method": method,
-        "device": dev_display,
-        "device_raw": device_str,
-        "num_matvecs": num_matvecs,
-        "elapsed_total_seconds": elapsed_total,
-        "avg_matvec_ms": avg_matvec_ms,
-        "throughput_mdofs_per_sec": throughput_mdofs_per_sec,
-        "gflops_per_sec": gflops_per_sec,
-        "peak_memory_bytes": peak_bytes,
-        "peak_memory_mib": peak_bytes / (1024**2),
-        "unit_cost_bytes_per_dof": unit_cost_bytes,
-        "unit_cost_kb_per_dof": unit_cost_bytes / 1000,
+        "operator_impl": type(operator).__module__ + "." + type(operator).__name__,
+        "measured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "scope": "同一进程: cache -> input -> first_matvec -> repeat_matvec; 无右端与边界处理; 阶段间不额外 gc/trim; 保留输入与输出",
+        "trim_before_cache_supported": trim_supported,
+        "stages": stages,
+        "mesh_fields": mesh_meter.fields(),
+        "process_peak_kib": peak,
+        "operator_persistent_bytes": persistent_bytes,
+        "matvec_seconds_median": med,
+        "matvec_seconds_all": times,
+        "effective_gbps_lower_bound": (persistent_bytes + 16 * facts["Ndof"]) / med / 1e9,
+        "gflops": 288 * facts["NC"] / med / 1e9,
+        "reference_relerr": error,
     }
+    if error > 1e-12 or not all(r["reset_supported"] for r in stages.values()):
+        raise RuntimeError("连续测量核对失败, 请检查原始记录")
+    return result
 
-
-def measure_solve(
-    method: str,
-    n: int,
-    maxiter: int = 200,
-    tol: float = 1e-6,
-    device_str: str = "cpu",
-) -> dict:
-    """全流程: 测量 EA 算子搭载无预条件 CG 线性求解的端到端峰值内存与容量天花板."""
-    dev = device_str.lower()
-    use_gpu = dev != "cpu"
-
-    if use_gpu:
-        import torch
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-        dev_obj = torch.device(device_str if ":" in device_str or "cuda" in device_str else "cuda:0")
-    else:
-        dev_obj = None
-
-    t0 = time.perf_counter()
-    from soptx.materials import IsotropicLinearElasticMaterial
-    from soptx.fem import LinearElasticIntegrator
-
-    mesh, scalar_space, tensor_space = _setup_mesh_and_spaces(n, device_str)
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3)
-    integrator = LinearElasticIntegrator(material=material, q=3, method=method)
-
-    const_integrator = integrator.const(tensor_space)
-    K_e = const_integrator.assembly(tensor_space)
-    cell2dof = tensor_space.cell_to_dof()
-
-    op = EAMatVecOperator(K_e, cell2dof, use_gpu=use_gpu, device=dev_obj)
-
-    n_cells = int(mesh.number_of_cells())
-    n_dofs = int(tensor_space.number_of_global_dofs())
-
-    # 提取边界条件与右端载荷
-    is_bd_dof = tensor_space.is_boundary_dof()
-    if use_gpu:
-        import torch
-        is_bd_mask = torch.as_tensor(is_bd_dof, device=dev_obj, dtype=torch.bool)
-        is_int_mask = ~is_bd_mask
-
-        b_vec = torch.zeros(n_dofs, dtype=torch.float64, device=dev_obj)
-        b_vec[is_int_mask] = 1.0
-        x = torch.zeros(n_dofs, dtype=torch.float64, device=dev_obj)
-
-        def A_op(v):
-            Av = op @ v
-            return torch.where(is_int_mask, Av, v)
-
-        r = b_vec - A_op(x)
-        r[is_bd_mask] = 0.0
-        p = r.clone()
-        rsold = torch.dot(r, r)
-        b_norm = torch.norm(b_vec)
-        if b_norm == 0:
-            b_norm = 1.0
-
-        it_count = 0
-        t_solve_start = time.perf_counter()
-        for k in range(maxiter):
-            it_count += 1
-            Ap = A_op(p)
-            alpha = rsold / (torch.dot(p, Ap) + 1e-30)
-            x += alpha * p
-            r -= alpha * Ap
-            r[is_bd_mask] = 0.0
-            rsnew = torch.dot(r, r)
-            rel_res = (torch.sqrt(rsnew) / b_norm).item()
-            if rel_res < tol:
-                break
-            p = r + (rsnew / rsold) * p
-            rsold = rsnew
-
-        torch.cuda.synchronize()
-        solve_elapsed = time.perf_counter() - t_solve_start
-        total_elapsed = time.perf_counter() - t0
-        peak_bytes = int(torch.cuda.max_memory_allocated(dev_obj))
-    else:
-        is_bd_mask = np.asarray(is_bd_dof, dtype=bool)
-        is_int_mask = ~is_bd_mask
-
-        b_vec = np.zeros(n_dofs, dtype=np.float64)
-        b_vec[is_int_mask] = 1.0
-        x = np.zeros(n_dofs, dtype=np.float64)
-
-        def A_op(v):
-            Av = op @ v
-            return np.where(is_int_mask, Av, v)
-
-        r = b_vec - A_op(x)
-        r[is_bd_mask] = 0.0
-        p = r.copy()
-        rsold = np.dot(r, r)
-        b_norm = np.linalg.norm(b_vec)
-        if b_norm == 0:
-            b_norm = 1.0
-
-        it_count = 0
-        t_solve_start = time.perf_counter()
-        for k in range(maxiter):
-            it_count += 1
-            Ap = A_op(p)
-            alpha = rsold / (np.dot(p, Ap) + 1e-30)
-            x += alpha * p
-            r -= alpha * Ap
-            r[is_bd_mask] = 0.0
-            rsnew = np.dot(r, r)
-            rel_res = float(np.sqrt(rsnew) / b_norm)
-            if rel_res < tol:
-                break
-            p = r + (rsnew / rsold) * p
-            rsold = rsnew
-
-        solve_elapsed = time.perf_counter() - t_solve_start
-        total_elapsed = time.perf_counter() - t0
-        peak_bytes = get_peak_rss_bytes()
-
-    unit_cost_bytes = peak_bytes / n_dofs
-    capacity_ceiling = int(DEFAULT_MEMORY_TOTAL / unit_cost_bytes) if unit_cost_bytes > 0 else 0
-    gpu_ceiling = int(DEFAULT_GPU_VRAM_TOTAL / unit_cost_bytes) if unit_cost_bytes > 0 else 0
-    dev_display = detect_device_display(device_str)
-
-    return {
-        "case_id": "ea-cg-solve",
-        "panel": "solve",
-        "role": "ea-cg-solve-production",
-        "problem": "DivergenceFreePolynomialElasticity3D",
-        "mesh_type": "TetrahedronMesh",
-        "grid": f"{n}^3",
-        "n": n,
-        "n_cells": n_cells,
-        "n_dofs": n_dofs,
-        "method": method,
-        "device": dev_display,
-        "device_raw": device_str,
-        "cg_iterations": it_count,
-        "relative_residual": rel_res,
-        "solve_time_seconds": solve_elapsed,
-        "total_time_seconds": total_elapsed,
-        "time_per_iteration_ms": (solve_elapsed / it_count) * 1000 if it_count > 0 else 0,
-        "peak_memory_bytes": peak_bytes,
-        "peak_memory_mib": peak_bytes / (1024**2),
-        "unit_cost_bytes_per_dof": unit_cost_bytes,
-        "unit_cost_kb_per_dof": unit_cost_bytes / 1000,
-        "capacity_ceiling_47g_dofs": capacity_ceiling,
-        "capacity_ceiling_gpu_16g_dofs": gpu_ceiling,
-    }
 
 
 # -----------------------------------------------------------------------------
-# 2. 控制台树状卡片看板 (Style B Dashboard)
+# 1b. 与 fa 的逐位一致性核对
 # -----------------------------------------------------------------------------
 
-def print_dashboard(out: Dict[str, Any]) -> None:
-    """以统一 Style B 树状卡片格式在控制台打印 EA 算子性能测量报告."""
-    case_id = out.get("case_id", "ea-metric")
-    problem = out.get("problem", "Elasticity3D")
-    mesh_type = out.get("mesh_type", "TetrahedronMesh")
-    grid = out.get("grid", "-")
-    n_cells = out.get("n_cells", 0)
-    n_dofs = out.get("n_dofs", 0)
-    method = out.get("method", "fast")
-    device = out.get("device", "CPU")
-    peak_bytes = out.get("peak_memory_bytes", 0)
-    unit_cost_kb = out.get("unit_cost_kb_per_dof", 0.0)
-    unit_cost_b = out.get("unit_cost_bytes_per_dof", 0.0)
+def verify_against_fa(n: int, methods: Sequence[str]) -> int:
+    """逐位核对核心路径缓存的 K_e / cell2dof 与 fa 构建路径生成的是否完全相同.
 
-    # 格式化内存
-    if peak_bytes >= 1024**3:
-        mem_str = f"{peak_bytes / (1024**3):.2f} GiB ({peak_bytes / (1024**2):,.1f} MiB)"
-    else:
-        mem_str = f"{peak_bytes / (1024**2):.1f} MiB"
+    同一进程内用 ``fa_assembly_capability/run.py`` 的 ``_build_problem_space`` 建问题并直接调用
+    ``LinearElasticIntegrator(material, method).assembly(vs)`` (fa 阶段 1 的做法), 再用本目录的
+    ``ElasticityEAOperator(...).analyzer.assemble_stiff_matrix()`` 取 const 积分子缓存的 K_e 与
+    cell2dof, 用 ``np.array_equal`` 逐位比较 (形状、dtype、数值). 只在 CPU 上核对, 不落盘.
 
-    # 卡片头部
-    print(f"\n● [{case_id}] {problem}")
-    print(f"  ├── Mesh & DOFs   : {mesh_type} (grid = {grid}) | {n_cells:,} cells | {n_dofs:,} DOFs")
+    Parameters
+    ----------
+    n : int
+        网格每方向段数, 默认 8 即可 (秒级).
+    methods : sequence of str
+        要核对的单刚组装方式.
 
-    panel = out.get("panel", "")
+    Returns
+    -------
+    int
+        全部一致返回 0, 任一不一致返回 1.
+    """
+    import importlib.util
+
+    fa_path = config.REPOSITORY_ROOT / "experiments" / "fa_assembly_capability" / "run.py"
+    spec = importlib.util.spec_from_file_location("_fa_run", fa_path)
+    fa_run = importlib.util.module_from_spec(spec)
+    sys.modules["_fa_run"] = fa_run  # dataclass 装饰器要求模块已注册
+    spec.loader.exec_module(fa_run)
+
+    import_fe_stack_cpu()
+    from soptx.fem.integrators import LinearElasticIntegrator
+    from soptx.fem.matrix_free import ElasticityEAOperator
+
+    _, _, vs_fa, mat_fa = fa_run._build_problem_space(n)
+    problem, _, vs_ea, mat_ea = build_problem_space(n)
+
+    def same_array(a: np.ndarray, b: np.ndarray) -> bool:
+        return a.shape == b.shape and a.dtype == b.dtype and np.array_equal(a, b)
+
+    ok = True
+    c_fa = np.asarray(vs_fa.cell_to_dof())
+    for m in methods:
+        k_fa = np.asarray(LinearElasticIntegrator(mat_fa, method=m).assembly(vs_fa))
+        facade = ElasticityEAOperator(vs_ea, problem, mat_ea, degree=DEGREE, assembly_method=m)
+        facade.analyzer.assemble_stiff_matrix()
+        k_ea, c_ea = _element_data(facade)
+
+        same_c = same_array(c_fa, c_ea)
+        same_k = same_array(k_fa, k_ea)
+        ok &= same_c and same_k
+        if same_k:
+            verdict = "identical (bitwise)"
+        elif k_fa.shape == k_ea.shape:
+            verdict = f"DIFFER, max|diff| = {float(np.max(np.abs(k_fa - k_ea))):.3e}"
+        else:
+            verdict = f"DIFFER, shape {k_fa.shape} vs {k_ea.shape}"
+        print(
+            f"n={n} method={m:<8} K_e {k_fa.shape} {k_fa.dtype}: {verdict} | "
+            f"cell2dof {c_fa.shape} {c_fa.dtype}: {'identical' if same_c else 'DIFFER'}"
+        )
+
+    print("RESULT:", "ALL IDENTICAL" if ok else "MISMATCH")
+    return 0 if ok else 1
+
+
+# -----------------------------------------------------------------------------
+# 2. 控制台树状卡片看板
+# -----------------------------------------------------------------------------
+
+def _fmt_mib(mib: float | None) -> str:
+    if mib is None:
+        return "--"
+    if mib >= 1024:
+        return f"{mib / 1024:.2f} GiB ({mib:,.1f} MiB)"
+    return f"{mib:,.1f} MiB"
+
+
+def _fmt_s(t: float | None) -> str:
+    if t is None:
+        return "--"
+    return f"{t * 1000:.1f} ms" if t < 1.0 else f"{t:.2f} s"
+
+
+def _stage_line(out: dict, name: str, label: str, unit_key: str | None = None, unit: str = "KB/dof") -> str:
+    peak = out.get(f"{name}_peak_MiB")
+    net = out.get(f"{name}_net_MiB")
+    text = f"{label:<16}: peak {_fmt_mib(peak)} | net {_fmt_mib(net)}"
+    if unit_key and out.get(unit_key) is not None:
+        text += f" | {out[unit_key]:.2f} {unit}"
+    t = out.get(f"t_{name}_s")
+    if t is not None:
+        text += f" | {_fmt_s(t)}"
+    return text
+
+
+def print_dashboard(out: dict[str, Any]) -> None:
+    """打印树状卡片式实测摘要 (每阶段绝对峰值 / 净增)."""
+    n = out.get("n", 0)
+    nc = out.get("NC", 0)
+    ndof = out.get("Ndof", 0)
+    mesh_line = f"{MESH_TYPE} (grid = {n}^3) | {nc:,} cells | {ndof:,} DOFs"
+    panel = out.get("panel")
+    titles = {"cache": "element-cache", "matvec": "ea-matvec", "solve": "ea-cg-solve"}
+    rep = out.get("repeats", 0)
+
+    print(f"\n● [{titles.get(panel, panel)}] {PROBLEM_NAME}")
+    print(f"  ├── Mesh & DOFs   : {mesh_line}")
+    print(
+        f"  ├── Operator      : {out.get('operator_impl')} | method = {out.get('method')} | "
+        f"K_e theory = {out.get('Ke_theory_MiB', 0):,.1f} MiB | "
+        f"persistent = {_fmt_mib(out.get('operator_persistent_MiB'))} "
+        f"({out.get('operator_persistent_KB_per_dof', 0):.2f} KB/dof)"
+    )
+    print(f"  ├── {_stage_line(out, 'mesh', 'Mesh & Space')}")
     if panel == "cache":
-        elapsed = out.get("elapsed_seconds", 0.0)
-        time_str = f"{elapsed:.2f} s" if elapsed >= 1.0 else f"{elapsed * 1000:.1f} ms"
-        print(f"  ├── Cache Engine  : method = {method} | device = {device}")
-        print(f"  ├── Time Elapsed  : {time_str}")
-        print(f"  ├── Peak Memory   : {mem_str}")
-        print(f"  └── Unit Cost     : {unit_cost_kb:.1f} KB/dof ({unit_cost_b:,.1f} B/dof)")
-
-    elif panel == "matvec":
-        avg_ms = out.get("avg_matvec_ms", 0.0)
-        throughput = out.get("throughput_mdofs_per_sec", 0.0)
-        gflops = out.get("gflops_per_sec", 0.0)
-        print(f"  ├── MatVec Engine : method = {method} | device = {device}")
-        print(f"  ├── MatVec Latency: {avg_ms:.2f} ms / call (Throughput: {throughput:.2f} MDOFs/s, {gflops:.2f} GFLOPs)")
-        print(f"  ├── Peak Memory   : {mem_str}")
-        print(f"  └── Unit Cost     : {unit_cost_kb:.1f} KB/dof ({unit_cost_b:,.1f} B/dof)")
-
+        print(f"  ├── {_stage_line(out, 'cache', 'Cache (K_e)', 'cache_KB_per_dof')}")
+    else:
+        print(f"  ├── {_stage_line(out, 'assemble', 'Assemble (bc)')}")
+    if panel == "matvec":
+        print(f"  ├── {_stage_line(out, 'warmup', 'Warmup')}")
+        print(f"  ├── {_stage_line(out, 'matvec', f'K x (form@x) x{rep}')}")
+        print(
+            f"  ├── Per K x       : median {_fmt_s(out.get('matvec_seconds_median'))} | "
+            f"min {_fmt_s(out.get('matvec_seconds_min'))} | "
+            f"eff >= {out.get('effective_gbps_lower_bound', 0):.2f} GB/s | "
+            f"{out.get('gflops', 0):.2f} GFLOP/s | relerr {out.get('matvec_vs_reference_relerr', 0):.1e}"
+        )
     elif panel == "solve":
-        it_count = out.get("cg_iterations", 0)
-        solve_s = out.get("solve_time_seconds", 0.0)
-        ms_per_it = out.get("time_per_iteration_ms", 0.0)
-        rel_res = out.get("relative_residual", 0.0)
-        ceiling_47g = out.get("capacity_ceiling_47g_dofs", 0)
-        print(f"  ├── CG Solver     : {it_count} iters (rel_res = {rel_res:.2e}) | solve_time = {solve_s:.2f} s ({ms_per_it:.2f} ms/iter)")
-        print(f"  ├── Peak Memory   : {mem_str}")
-        print(f"  ├── Unit Cost     : {unit_cost_kb:.1f} KB/dof ({unit_cost_b:,.1f} B/dof)")
-        print(f"  └── 47G Ceiling   : 约 {ceiling_47g / 1e4:,.1f} 万 DOFs")
-    print()
+        print(f"  ├── {_stage_line(out, 'setup_solve', 'Solve setup')}")
+        print(f"  ├── {_stage_line(out, 'solve', 'Jacobi-PCG')}")
+        status = "converged" if out.get("converged") else f"NOT converged ({out.get('reason')})"
+        print(
+            f"  ├── Iterations    : {out.get('iterations', 0):,} ({status}, relres {out.get('final_relres', 0):.2e}, "
+            f"true {out.get('true_relres', 0):.2e}) | "
+            f"{out.get('iterations_per_n', 0):.2f} it/n | {_fmt_s(out.get('seconds_per_iteration'))} per it"
+        )
+    print(
+        f"  └── Absolute Peak : {_fmt_mib(out.get('process_max_rss_MiB'))} "
+        f"({out.get('process_max_rss_KB_per_dof', 0):.2f} KB/dof)\n"
+    )
 
 
 # -----------------------------------------------------------------------------
-# 3. 调度层与子进程控制
+# 3. 调度: Case -> 子进程执行计划
 # -----------------------------------------------------------------------------
 
-def command_list(cases: Tuple[config.Case, ...], figure: dict) -> int:
-    """列出已注册的 EA 数据点."""
-    headers = ["case-id", "mesh", "grid", "problem", "method", "device"]
-    rows = []
-    for c in cases:
-        rows.append([c.id, c.mesh_type, c.grid, c.problem, c.method, c.device])
-
-    col_widths = [len(h) for h in headers]
-    for r in rows:
-        for i, val in enumerate(r):
-            col_widths[i] = max(col_widths[i], len(str(val)))
-
-    header_line = "  ".join(f"{h:<{col_widths[i]}}" for i, h in enumerate(headers))
-    sep_line = "  ".join("-" * col_widths[i] for i in range(len(headers)))
-    print(f"\n{header_line}\n{sep_line}")
-    for r in rows:
-        print("  ".join(f"{str(v):<{col_widths[i]}}" for i, v in enumerate(r)))
-    print()
-    return 0
+LIST_COLUMNS = (
+    ("panel", "panel", "-"),
+    ("mesh", "mesh_type", MESH_TYPE),
+    ("grid", "grid", "-"),
+    ("problem", "problem", PROBLEM_NAME),
+    ("method", "method", "fast"),
+)
 
 
-def command_run(
-    selected: Tuple[config.Case, ...],
-    is_all: bool = False,
-    check_only: bool = False,
-    skip_existing: bool = False,
-    overrides: Optional[Dict[str, Any]] = None,
-) -> int:
-    """按独立子进程调度执行已选工况."""
-    repo_root = Path(__file__).resolve().parents[2]
-    total = len(selected)
-    failed = 0
+def resolve_runs(
+    cases: tuple[config.Case, ...],
+    is_all: bool,
+    overrides: dict[str, Any],
+) -> list[scheduler.Run]:
+    """将选中的 Case 与参数覆盖解析为具体的单次子进程执行计划.
 
-    print(f"\n==================== EA Capability 调度执行 ({total} 个任务) ====================")
-    for idx, case in enumerate(selected, 1):
-        artifact_path = case.artifact_path
-        if overrides:
-            n_val = overrides.get("n", case.n)
-            method_val = overrides.get("method", case.method)
-            dev_str = overrides.get("device", case.device)
-            dev_tag = f"_{dev_str}" if dev_str != "cpu" else ""
-            artifact_path = _OUTPUT_DIR / f"{case.panel}_{method_val}_n{n_val}{dev_tag}.json"
-
-        if skip_existing and artifact_path.is_file():
-            print(f"[{idx}/{total}] 跳过已存在产物: {artifact_path.name}")
+    三个面板默认只跑 case 的 method (fast); 仅显式 --method all 时展开 METHOD_NAMES, --all 不展开 (is_all 仅保留签名).
+    """
+    runs: list[scheduler.Run] = []
+    for case in cases:
+        if case.panel == "baseline":
+            out_p = config.OUTPUT_DIR / case.artifact
+            argv = [sys.executable, str(case.script_path), "--worker", "--baseline", "--output", str(out_p)]
+            runs.append((case.id, argv, out_p, case.summary, case.subprocess_env()))
             continue
+        n = overrides.get("n", case.extra.get("n", 32))
+        env = case.subprocess_env()
+        common = [sys.executable, str(case.script_path), "--worker"]
+        tail = ["--n", str(n)]
+        methods = scheduler.expand(
+            overrides.get("method"),
+            False,
+            list(METHOD_NAMES),
+            case.extra.get("method", "fast"),
+        )
 
-        cmd = case.to_command(repo_root, overrides)
-        cmd.extend(["--output", str(artifact_path)])
-
-        if check_only:
-            print(f"[{idx}/{total}] [dry-run] {' '.join(cmd)}")
-            continue
-
-        print(f"[{idx}/{total}] 调度子进程: {case.id} (输出 -> {artifact_path.name})")
-        t_start = time.perf_counter()
-        completed = subprocess.run(cmd, env=None)
-        elapsed = time.perf_counter() - t_start
-
-        if completed.returncode != 0:
-            failed += 1
-            print(f"  失败: 退出码 {completed.returncode}, 用时 {elapsed:.1f} s")
-        elif not artifact_path.is_file():
-            failed += 1
-            print(f"  失败: 进程正常退出但产物未生成 -> {artifact_path}")
-
-    if failed:
-        print(f"\n{failed} 个任务执行失败。")
-    return failed
+        for m in methods:
+            if case.panel == "cache":
+                out_p = config.OUTPUT_DIR / scheduler.artifact_name("cache", [m], n, DEVICE)
+                argv = [*common, "--cache", "--method", m, *tail, "--output", str(out_p)]
+                detail = f"method={m}, n={n}"
+            elif case.panel == "matvec":
+                repeats = overrides.get("repeats", case.extra.get("repeats", 20))
+                out_p = config.OUTPUT_DIR / scheduler.artifact_name("matvec", [m], n, DEVICE)
+                argv = [*common, "--matvec", "--method", m, *tail, "--repeats", str(repeats), "--output", str(out_p)]
+                detail = f"method={m}, n={n}, repeats={repeats}"
+                if overrides.get("probe_allocations"):
+                    out_p = config.OUTPUT_DIR / scheduler.artifact_name("matvec_allocations", [m], n, DEVICE)
+                    argv = [*common, "--matvec", "--probe-allocations", "--method", m, *tail, "--output", str(out_p)]
+                    detail = f"method={m}, n={n}, allocation probe"
+            elif case.panel == "continuous":
+                repeats = overrides.get("repeats", case.extra.get("repeats", 20))
+                out_p = config.OUTPUT_DIR / scheduler.artifact_name("cache_matvec_continuous", [m], n, DEVICE)
+                argv = [*common, "--continuous", "--method", m, *tail, "--repeats", str(repeats), "--output", str(out_p)]
+                detail = f"method={m}, n={n}, repeats={repeats}"
+            else:  # solve
+                maxiter = overrides.get("maxiter", case.extra.get("maxiter", 5000))
+                tol = overrides.get("tol", case.extra.get("tol", 1e-6))
+                out_p = config.OUTPUT_DIR / scheduler.artifact_name("solve", [m], n, DEVICE)
+                argv = [
+                    *common, "--solve", "--method", m, *tail,
+                    "--maxiter", str(maxiter), "--tol", str(tol), "--output", str(out_p),
+                ]
+                detail = f"method={m}, n={n}, maxiter={maxiter}, tol={tol}"
+            label = f"{case.id} [{m}]"
+            runs.append((label, argv, out_p, f"{case.summary} ({detail})", env))
+    return runs
 
 
 # -----------------------------------------------------------------------------
 # 4. 主入口与参数路由
 # -----------------------------------------------------------------------------
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
+    """调度与测量的主入口函数.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        命令行参数列表, 缺省使用 sys.argv[1:].
+
+    Returns
+    -------
+    int
+        程序退出状态码.
+    """
     parser = argparse.ArgumentParser(
         prog="run.py",
-        description="ea_assembly_capability 实验驱动: 测量 EA 单元装配无矩阵算子的内存机制与容量极限",
+        description="ea_assembly_capability 实验图面驱动: 测量核心 EA 算子的内存开销、算子乘耗时与 Jacobi-PCG 迭代",
     )
 
     # 1. 调度与工况选择参数
     parser.add_argument("--list", action="store_true", help="列出已注册数据点")
-    parser.add_argument("--all", action="store_true", help="跑全部工况")
-    parser.add_argument("--cases", nargs="+", help="指定要跑的一个或多个 case id")
-    parser.add_argument("--case", help="指定单个 case id")
-    parser.add_argument("--panel", choices=config.PANELS, help="只跑指定阶段 (cache/matvec/solve) 数据点")
+    parser.add_argument("--all", action="store_true", help="跑全部工况 (每个 case 一条, method 取 cases.toml 的 fast)")
+    parser.add_argument("--cases", nargs="+", help="指定要跑的一个或多个 case id (如 --cases element-cache)")
+    parser.add_argument("--case", help="指定单个 case id (等价于 --cases <id>)")
+    parser.add_argument("--panel", choices=config.PANELS, help="只跑指定面板 (cache/matvec/solve/baseline) 数据点")
     parser.add_argument("--check-only", action="store_true", help="只打印将执行的子进程命令")
     parser.add_argument("--skip-existing", action="store_true", help="产物已存在时跳过")
+    parser.add_argument("--monitor", action="store_true", help="运行时实时显示独立 Worker 的 CPU 与内存占用")
+    parser.add_argument(
+        "--monitor-interval", type=float, default=0.5, metavar="SECONDS",
+        help="实时监控刷新间隔, 单位为秒 (默认 0.5)",
+    )
 
-    # 2. 工况动态覆盖参数
-    parser.add_argument("-n", "--n", "--grid", dest="n", type=int, default=None, help="动态覆盖网格剖分段数")
-    parser.add_argument("--device", type=str, default="cpu", help="指定计算设备 ('cpu' 或 'cuda' 等)")
-    parser.add_argument("--method", choices=config.METHODS, default=None, help="指定或覆盖单刚算法 (fast/standard/voigt)")
+    # 2. 工况动态覆盖参数 (Overrides)
+    parser.add_argument("-n", "--n", "--grid", dest="n", type=int, default=None, help="动态覆盖网格剖分段数 (如 -n 32 或 --grid 32)")
+    parser.add_argument("--method", choices=METHOD_NAMES + ("all",), default=None, help="指定或覆盖单刚算法")
+    parser.add_argument("--repeats", type=int, default=None, help="matvec: 计时重复次数 (默认 20)")
+    parser.add_argument("--maxiter", type=int, default=None, help="solve: PCG 最大迭代数 (默认 5000)")
+    parser.add_argument("--tol", type=float, default=None, help="solve: 相对残差收敛阈值 (默认 1e-6)")
 
-    # 3. Worker 测量层底层参数
+    # 3. Worker 测量层底层参数 (供子进程调用)
     parser.add_argument("--worker", action="store_true", help="进入子进程 worker 测量模式")
-    parser.add_argument("--cache", action="store_true", help="阶段 1 单元刚度张量显式缓存测量")
-    parser.add_argument("--matvec", action="store_true", help="阶段 2 算子乘积 MatVec 测量")
-    parser.add_argument("--solve", action="store_true", help="全流程端到端 CG 线性求解测量")
+    parser.add_argument("--cache", action="store_true", help="cache 面板: K_e 与 cell2dof 缓存")
+    parser.add_argument("--matvec", action="store_true", help="matvec 面板: 核心 EA 刚度算子乘 K x 计时")
+    parser.add_argument("--solve", action="store_true", help="solve 面板: 核心 Jacobi-PCG 求解")
+    parser.add_argument("--continuous", action="store_true", help="continuous 面板: 同一进程连续测量 cache -> input -> first_matvec -> repeat_matvec")
+    parser.add_argument("--baseline", action="store_true", help="baseline 面板: 单核 memcpy 带宽与 dgemm 算力")
     parser.add_argument("--output", type=Path, default=None, help="产物落盘路径")
 
+    # 4. 一致性核对 (进程内, 不落盘)
+    parser.add_argument(
+        "--verify-fa", action="store_true",
+        help="逐位核对核心路径缓存的 K_e / cell2dof 与 fa_assembly_capability 的构建路径一致 (默认 --n 8, --method all)",
+    )
+
+    parser.add_argument("--probe-allocations", action="store_true", help="matvec: 独立测一次预热后的分配峰值, 不计时, 单独落盘")
     args = parser.parse_args(argv)
+    if args.probe_allocations and (args.cache or args.solve or args.baseline or args.verify_fa or args.continuous):
+        parser.error("--probe-allocations 仅适用于 matvec")
+    if args.monitor_interval <= 0:
+        parser.error("--monitor-interval 必须大于 0")
+
+    # ------------------------------------------------ 与 fa 的逐位核对
+    if args.verify_fa:
+        methods = list(METHOD_NAMES) if args.method in (None, "all") else [args.method]
+        return verify_against_fa(args.n if args.n is not None else 8, methods)
 
     # ------------------------------------------------ Worker 测量分支
-    if args.worker or args.cache or args.matvec or args.solve:
-        if args.n is None:
-            parser.error("Worker 模式必须指定 --n")
-        method = args.method or "fast"
-
-        if args.cache:
-            out = measure_cache(method, args.n, device_str=args.device)
-        elif args.matvec:
-            out = measure_matvec(method, args.n, device_str=args.device)
-        elif args.solve:
-            out = measure_solve(method, args.n, device_str=args.device)
-        else:
-            parser.error("Worker 模式需指定 --cache, --matvec 或 --solve")
-
-        print_dashboard(out)
+    if args.baseline:
+        out = measure_baseline()
+        print_baseline(out)
         if args.output is not None:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(
-                json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            args.output.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        else:
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.worker or args.cache or args.matvec or args.solve or args.continuous:
+        if args.n is None:
+            parser.error("Worker 模式必须指定 --n")
+        if args.method == "all":
+            parser.error("Worker 模式不接受 --method all, 由调度层展开")
+        method = args.method or "fast"
+        if args.continuous:
+            out = measure_continuous(method, args.n, repeats=args.repeats or 20)
+        elif args.matvec:
+            out = (measure_matvec_allocations(method, args.n) if args.probe_allocations
+                   else measure_matvec(method, args.n, repeats=args.repeats or 20))
+        elif args.solve:
+            out = measure_solve(
+                method, args.n,
+                maxiter=args.maxiter or 5000,
+                tol=args.tol if args.tol is not None else 1e-6,
             )
+        elif args.cache:
+            out = measure_cache(method, args.n)
+        else:
+            parser.error("Worker 模式需指定 --cache, --matvec, --solve 或 --continuous")
+
+        if args.continuous:
+            print(f"EA 连续测量面板 (cache -> input -> first_matvec -> repeat_matvec x {args.repeats or 20})")
+            for stage_name, sinfo in out["stages"].items():
+                print(f"  [{stage_name}] before: {sinfo['before_kib']/1024:.1f} MiB | peak: {sinfo['peak_kib']/1024:.1f} MiB | net: {sinfo['net_kib']/1024:.1f} MiB | time: {sinfo['t_s']:.3f} s")
+            print(f"  稳态耗时中位数: {out['matvec_seconds_median']*1000:.2f} ms | 有效带宽下界: {out['effective_gbps_lower_bound']:.2f} GB/s")
+        elif args.probe_allocations:
+            print("EA 分配探针 (不计时, NumPy 跟踪校验通过)")
+            for key in ("allocation_peak_increment_bytes", "allocation_retained_increment_bytes",
+                        "allocation_peak_minus_retained_bytes", "output_bytes"):
+                print(f"  {key}: {out[key] / 2**20:.3f} MiB")
+            print(f"  RSS peak: {out['probe_rss_peak_MiB']} MiB | increment: {out['probe_rss_peak_increment_MiB']} MiB")
+        else:
+            print_dashboard(out)
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         else:
             print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
@@ -646,25 +892,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     if args.list:
-        return command_list(cases, figure)
+        return scheduler.print_case_table(cases, LIST_COLUMNS)
 
-    # 组装与解析 case_ids
-    target_case_ids: List[str] = []
-    panel_filter: Optional[str] = args.panel
+    target_case_ids: list[str] = []
+    panel_filter: str | None = args.panel
     known_ids = {c.id for c in cases}
     is_all = args.all
 
     alias_map = {
-        "cache": "element-cache",
-        "element-cache": "element-cache",
-        "matvec": "ea-matvec",
-        "ea-matvec": "ea-matvec",
-        "solve": "ea-cg-solve",
-        "ea-solve": "ea-cg-solve",
-        "ea-cg-solve": "ea-cg-solve",
+        "elem-cache": "element-cache",
+        "cg": "ea-cg-solve",
+        "cg-solve": "ea-cg-solve",
+        "continuous": "ea-continuous",
     }
 
-    raw_cases: List[str] = []
+    def resolve_case_id(name: str) -> str:
+        if name in known_ids:
+            return name
+        return alias_map.get(name.lower(), name)
+
+    raw_cases: list[str] = []
     if args.cases:
         raw_cases.extend(args.cases)
     if args.case:
@@ -676,21 +923,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             is_all = True
         elif item_lower in config.PANELS:
             panel_filter = item_lower
-        elif item_lower in alias_map:
-            target_case_ids.append(alias_map[item_lower])
-        elif item in known_ids:
-            target_case_ids.append(item)
         else:
-            target_case_ids.append(item)
+            target_case_ids.append(resolve_case_id(item))
 
     if not (is_all or target_case_ids or panel_filter):
         print(
-            "错误: 必须通过 --case / --cases / --all 指定要运行的工况。\n"
+            "错误: 必须通过 --case/--cases/--panel/--all 指定要运行的工况或面板。\n"
             "  常用示例:\n"
-            "    python run.py --case element-cache\n"
-            "    python run.py --case ea-matvec\n"
-            "    python run.py --case ea-cg-solve\n"
-            "    python run.py --all\n"
+            "    python run.py --case element-cache --grid 32 --monitor\n"
+            "    python run.py --case ea-matvec --grid 32 --repeats 20\n"
+            "    python run.py --case cpu-baseline --monitor\n"
+            "    python run.py --all --check-only\n"
             "  查看全部工况列表请使用: python run.py --list",
             file=sys.stderr,
         )
@@ -706,20 +949,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(str(error), file=sys.stderr)
         return 2
 
-    overrides: Dict[str, Any] = {}
+    if args.probe_allocations and any(case.panel != "matvec" for case in selected):
+        parser.error("--probe-allocations 只能选择 matvec 工况")
+    overrides: dict[str, Any] = {"probe_allocations": args.probe_allocations}
     if args.n is not None:
         overrides["n"] = args.n
-    if args.device != "cpu":
-        overrides["device"] = args.device
     if args.method is not None:
         overrides["method"] = args.method
+    if args.repeats is not None:
+        overrides["repeats"] = args.repeats
+    if args.maxiter is not None:
+        overrides["maxiter"] = args.maxiter
+    if args.tol is not None:
+        overrides["tol"] = args.tol
 
-    failed = command_run(
-        selected,
-        is_all=is_all,
+    runs = resolve_runs(selected, is_all=is_all, overrides=overrides)
+    failed = scheduler.command_run(
+        runs,
+        cwd=config.REPOSITORY_ROOT,
         check_only=args.check_only,
         skip_existing=args.skip_existing,
-        overrides=overrides if overrides else None,
+        monitor=args.monitor,
+        monitor_interval=args.monitor_interval,
     )
     return 1 if failed else 0
 

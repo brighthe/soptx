@@ -22,7 +22,7 @@ OUTPUT_DIR = EXPERIMENT_DIR / "outputs"
 OUTPUT_MODES = ("dir", "file", "fixed")
 
 # 装配测量的阶段分格.
-PANELS = ("stage1", "stage2", "full")
+PANELS = ("stage1", "stage2", "full", "mesh")
 
 
 class ConfigError(RuntimeError):
@@ -79,7 +79,7 @@ class Case:
         """构造完整的子进程 argv, 含产物重定向参数与动态覆盖参数.
 
         参数:
-            overrides: 可选的参数覆盖映射 (如 `{'n': 48, 'chunk': 1024}`).
+            overrides: 可选的参数覆盖映射 (如 `{'n': 48}`).
 
         返回:
             argv: 以 ``sys.executable`` 开头的参数列表.

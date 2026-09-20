@@ -62,7 +62,7 @@ def weighted_cg(
     """基于重叠加权内积的分布式共轭梯度法 (PCG/CG) 迭代求解器.
 
     参数:
-        operator (Any): 线性刚度算子 (如 ``ElasticityEAOperator`` 或 ``DirichletBCOperator``).
+        operator (Any): 线性刚度算子 (如 ``ElasticityEAOperator`` 或 ``ConstrainedOperator``).
         load (TensorLike): 局部右端项载荷向量.
         dof_comm (EntityMPI | None): 自由度通信器 (提供重叠加权点积 ``dot``).
         x0 (TensorLike | None, 可选): 初始猜测解向量. 默认值为 None (全零或由 CG 初始化).

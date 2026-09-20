@@ -4,12 +4,11 @@ from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
 from fealpy.mesh import SimplexMesh, HomogeneousMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from fealpy.fem import DirichletBCOperator, LinearForm
+from fealpy.fem import LinearForm
 from fealpy.decorator import variantmethod
 from fealpy.sparse import CSRTensor, COOTensor
 
 from soptx.core import BaseLogged, timer
-from soptx.fem.bilinear_form import BilinearForm
 from soptx.protocols import (
     BodyForce,
     BoundaryTraction,
@@ -23,7 +22,13 @@ from soptx.fem.integrators import (
     LinearElasticIntegrator,
     SourceIntegrator,
 )
+from soptx.fem.levels import (
+    AssemblyLevelExtension,
+    available_levels,
+    create_level,
+)
 from soptx.fem.load_projection import project_nodal_loads
+from soptx.fem.operators import ConstrainedOperator
 from soptx.materials import LinearElasticMaterial
 
 class LagrangeFEMAnalyzer(BaseLogged):
@@ -34,7 +39,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 space_degree: int = 1,
                 integration_order: int = 4,
                 assembly_method: Literal['standard', 'voigt', 'fast'] = 'standard',
-                operator_level: Literal['fa', 'ea'] = 'fa',
+                operator_level: Literal['fa', 'ea', 'pa', 'ua'] = 'fa',
+                preconditioner_level: Optional[Literal['fa', 'ea', 'pa', 'ua']] = None,
                 solve_method: Literal['mumps', 'scipy', 'cg'] = 'mumps',
                 solver_options: Optional[Dict] = None,
                 tensor_space: Optional[TensorFunctionSpace] = None,
@@ -52,7 +58,16 @@ class LagrangeFEMAnalyzer(BaseLogged):
         - 'fa' : 装配全局稀疏矩阵 (full assembly), 支持直接解法与伴随求解
         - 'ea' : 只保留单元矩阵 (element assembly), matvec 时 gather-作用-scatter,
                  不形成全局矩阵, 只能用迭代解法
-        两者对应同一个离散算子 K = Σ_e R_e^T K_e R_e
+        - 'pa' : 只保留积分点上的几何与材料数据 (partial assembly), matvec 时
+                 gather-B-D-B^T-scatter, 高阶下比 'ea' 省内存, 只能用迭代解法
+        三者对应同一个离散算子 K = Σ_e R_e^T K_e R_e, 只差在以什么形式常驻
+        preconditioner_level : 预条件子所用的装配层级, 取值同 operator_level
+        - None : 预条件子绑主算子本身, 不另建层级 (默认, 与本参数出现之前行为一致)
+        - 其余 : 另建一个该层级的算子, 只供预条件子使用
+        主算子与预条件子的常驻形式本是两件独立的事: 主算子为省内存走 matrix-free,
+        预条件子只求近似逆, 允许更重的常驻形式。分开之后
+        operator_level='pa' + preconditioner_level='fa' 成为合法组合, 需要显式矩阵
+        的预条件子 (直接法, 将来的 AMG) 不再被主算子的层级挡在门外
         tensor_space : 外部构造的张量函数空间; 为 None 时由 disp_mesh 内部构造
         solve_method : 求解方式。直接法支持 'scipy' 与 'mumps', 都经
                        soptx.solvers.registry 分派到对应后端; 'mumps' 需要环境
@@ -94,9 +109,29 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._solver_options = dict(solver_options) if solver_options else {}
         self._dof_comm = dof_comm
 
-        if operator_level not in ('fa', 'ea'):
-            self._log_error(f"不支持的算子层级: {operator_level}, 可选 'fa' 或 'ea'")
+        if operator_level not in available_levels():
+            self._log_error(
+                f"不支持的算子层级: {operator_level}, "
+                f"可选 {available_levels()}"
+            )
         self._operator_level = operator_level
+
+        if preconditioner_level is not None:
+            if preconditioner_level not in available_levels():
+                self._log_error(
+                    f"不支持的预条件子层级: {preconditioner_level}, "
+                    f"可选 {available_levels()}"
+                )
+            # 与 apply_bc('fa') 的多 rank 拒绝同因: 对称消元没有重叠归约的插入点
+            if (preconditioner_level == 'fa'
+                    and self._dof_comm is not None
+                    and self._dof_comm.mpi_size > 1):
+                self._log_error(
+                    f"preconditioner_level='fa' 只支持单 rank, 当前为 "
+                    f"{self._dof_comm.mpi_size} 个 rank: 全局矩阵的对称消元没有重叠"
+                    f"归约的插入点。多 rank 请使用 preconditioner_level='ea' 或 'pa'"
+                )
+        self._preconditioner_level = preconditioner_level
 
         self._GD = self._mesh.geo_dimension()
 
@@ -111,17 +146,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
             self._tensor_space = tensor_space
             self._scalar_space = tensor_space.scalar_space
 
-        # 注册算子层级变体
-        self.assemble_stiff_matrix.set(self._operator_level)
-        self.apply_bc.set(self._operator_level)
+        # 注册算子层级变体: 'fa' 直接改写矩阵, 其余层级都只是把算子包起来,
+        # 与常驻形式无关, 因此共用同一个变体
+        self.apply_bc.set('fa' if self._operator_level == 'fa' else 'matrix_free')
 
         # 缓存的矩阵和向量
         self._K = None
         self._F = None
         self._prescribed_solution = None  # 满足 Dirichlet 值、内部为零的基准向量
         self._csr_pattern = None  # 模式先行 (Pattern-First) 静态拓扑骨架缓存
-        # 'ea' 下持有 const 积分子, 单元矩阵与 cell2dof 都在其中, 供对角提取复用
-        self._const_integrator = None
+        # 当前的装配层级对象, self._operator_level 是它的名字
+        self._level = None
 
         self._integrator = LinearElasticIntegrator(material=self._material,
                                                 q=self._integration_order,
@@ -133,6 +168,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._cached_stiffness_absolute = None # 绝对刚度 (带量纲)
         self._cached_stiffness_relative = None # 相对刚度 (无量纲)
+
+        # 泊松比随密度插值 (近不可压缩算例) 时的缓存: 逐单元泊松比, 以及
+        # K_e = λ*_e K_e^λ + μ_e K_e^μ 中与设计无关的两个基矩阵
+        self._cached_nu_rho = None
+        self._cached_ke_lambda = None
+        self._cached_ke_mu = None
 
     ##############################################################################################
     # 属性相关函数
@@ -184,15 +225,46 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._operator_level
 
     @property
+    def preconditioner_level(self) -> Optional[str]:
+        """预条件子所用的装配层级; None 表示绑主算子本身"""
+        return self._preconditioner_level
+
+    @property
     def topopt_algorithm(self) -> Optional[str]:
         """获取当前的拓扑优化算法"""
         return self._topopt_algorithm
+
+    @property
+    def poisson_ratio_interpolated(self) -> bool:
+        """最近一次装配中泊松比是否随密度插值
+
+        为 True 时 K_e 不再是实体单元刚度的标量倍, 依赖 K_e = E(ρ)/E0 · K_e^0
+        的外部路径 (自动微分、应力约束的隐式项) 不再成立。
+        """
+        return self._cached_nu_rho is not None
     
     @property
     def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
         """获取当前的刚度矩阵"""
         return self._K
     
+    @property
+    def assembly_level(self) -> Optional[AssemblyLevelExtension]:
+        """最近一次 assemble_stiff_matrix 构造出的装配层级对象
+
+        'fa' 下它持有全局稀疏矩阵与 CSR 骨架, 'ea' 下它就是刚度算子本身 (与
+        stiffness_matrix 同一个对象)。assemble_stiff_matrix 之前为 None。
+        """
+        return self._level
+
+    @property
+    def _const_integrator(self):
+        """'ea' 下的 const 积分子, 单元矩阵与 cell2dof 都在其中, 供外部工具复用
+
+        对象本身归 ElementAssembly 持有, 这里只做转发; 其余层级为 None。
+        """
+        return getattr(self._level, 'const_integrator', None)
+
     @property
     def force_vector(self) -> Union[TensorLike, COOTensor]:
         """获取当前的载荷向量"""
@@ -248,10 +320,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 self._log_warning("标准有限元分析模式下忽略相对密度 rho")
 
             # 标准有限元分析不做材料插值, 积分子直接使用实体材料本构
-            relative_stiffness = None
+            coef = None
 
             self._cached_stiffness_absolute = None
             self._cached_stiffness_relative = None
+            self._cached_nu_rho = None
         
         elif self._topopt_algorithm == 'density_based':
             if rho_val is None:
@@ -263,37 +336,53 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                             integration_order=self._integration_order,
                                             displacement_mesh=self._mesh,
                                         )
+            # interpolate_material 只在材料近不可压缩且 target_variables 含 'nu' 时
+            # 返回 (E_rho, nu_rho) 二元组, 否则只返回 E_rho
             if isinstance(material_params, tuple):
-                E_rho = material_params[0]
+                E_rho, nu_rho = material_params[0], material_params[1]
             else:
-                E_rho = material_params
+                E_rho, nu_rho = material_params, None
             E0 = self._material.youngs_modulus
             relative_stiffness = E_rho / E0
 
             self._cached_stiffness_absolute = E_rho               # 绝对刚度 (带量纲)
             self._cached_stiffness_relative = relative_stiffness  # 相对刚度 (无量纲)
+            self._cached_nu_rho = nu_rho
+
+            if nu_rho is None:
+                # 只插值 E: D_e = E(ρ)/E0 · D0, 积分子按标量系数处理
+                coef = relative_stiffness
+            else:
+                # E 与 ν 同时插值: D_e 不再是 D0 的标量倍, 把逐单元本构矩阵交给积分子
+                self._check_poisson_interpolation_support()
+                coef = self._elastic_matrix_from(E_rho, nu_rho)   # (NC, NS, NS)
         
         else:
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
             self._log_error(error_msg)
 
-        # TODO 这里的 coef 也和材料有关, 可能需要进一步处理,
-        # TODO coef 是应该在 LinearElasticIntegrator 中, 还是在 MaterialInterpolationScheme 中处理 ?
-        # 更新密度系数
-        self._integrator.coef = relative_stiffness
+        # 更新积分子的材料系数, 形状约定见 LinearElasticIntegrator.assembly('standard')
+        self._integrator.coef = coef
 
-    @variantmethod('fa')
     def assemble_stiff_matrix(self,
                             rho_val: Optional[Union[Function, TensorLike]] = None,
                             enable_timing: bool = False,
-                        ) -> Union[CSRTensor, COOTensor]:
-        """装配全局刚度矩阵 (full assembly)
+                        ) -> Union[CSRTensor, COOTensor, AssemblyLevelExtension]:
+        """按当前算子层级构造刚度算子
+
+        层级名到类的分派由 soptx.fem.levels.registry 完成, 本方法不再按 'fa'/'ea'
+        分支: 两者只差在同一个离散算子以什么形式常驻, 那是层级类自己的事。
 
         rho_val 的形状约定见 `_update_density_coefficient`
+
+        Returns
+        -------
+        'fa' 下为全局稀疏矩阵 K; 其余层级下为对应的 AssemblyLevelExtension 算子,
+        其 `@` 运算与 'fa' 对应同一个离散算子。
         """
         t = None
         if enable_timing:
-            t = timer(f"双线性型组装内部")
+            t = timer(f"刚度算子构造内部 ({self._operator_level})")
             next(t)
 
         self._update_density_coefficient(rho_val)
@@ -301,56 +390,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('预备')
 
-        bform = BilinearForm(self._tensor_space, pattern=self._csr_pattern)
-        bform.add_integrator(self._integrator)
+        level = create_level(self._operator_level,
+                            space=self._tensor_space,
+                            integrator=self._integrator,
+                            pattern=self._csr_pattern)
 
-        K = bform.assembly(format='csr')
-        self._csr_pattern = bform.pattern
+        # 'fa' 下层级把首次装配建好的 CSR 骨架交回来供下次复用; 其余层级没有骨架
+        pattern = getattr(level, 'pattern', None)
+        if pattern is not None:
+            self._csr_pattern = pattern
 
-        self._K = K
+        self._level = level
+        self._K = level.operator
 
         if enable_timing:
             t.send('组装')
             t.send(None)
 
-        return K
-
-    @assemble_stiff_matrix.register('ea')
-    def assemble_stiff_matrix(self,
-                            rho_val: Optional[Union[Function, TensorLike]] = None,
-                            enable_timing: bool = False,
-                        ) -> BilinearForm:
-        """构造单元级刚度算子 (element assembly)
-
-        预先算出并缓存单元矩阵 {K_e}, 但不求和成全局矩阵。返回的 BilinearForm
-        未调用 assembly, 其 `@` 运算走 gather-单元作用-scatter-add, 与 'fa'
-        对应同一个离散算子。
-        """
-        t = None
-        if enable_timing:
-            t = timer(f"单元算子构造内部")
-            next(t)
-
-        self._update_density_coefficient(rho_val)
-
-        if enable_timing:
-            t.send('预备')
-
-        # const 预先算出单元矩阵, 之后每次 matvec 不再重复积分
-        const_integrator = self._integrator.const(self._tensor_space)
-        self._const_integrator = const_integrator
-
-        bform = BilinearForm(self._tensor_space)
-        bform.dtype = bm.float64
-        bform.add_integrator(const_integrator)
-
-        self._K = bform
-
-        if enable_timing:
-            t.send('单元矩阵缓存')
-            t.send(None)
-
-        return bform
+        return self._K
 
 
     def assemble_spring_stiff_matrix(self):
@@ -579,20 +636,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return K, F
 
-    @apply_bc.register('ea')
+    @apply_bc.register('matrix_free')
     def apply_bc(self,
-                K: BilinearForm,
+                K: AssemblyLevelExtension,
                 F: TensorLike,
                 adjoint: bool = False
-            ) -> tuple[DirichletBCOperator, TensorLike]:
-        """在单元级算子上施加边界条件
+            ) -> tuple[ConstrainedOperator, TensorLike]:
+        """在矩阵自由算子上施加边界条件
 
-        不改写任何矩阵, 而是把算子包进 DirichletBCOperator: matvec 时先把
+        不改写任何矩阵, 而是把算子包进 ConstrainedOperator: matvec 时先把
         Dirichlet 自由度置零, 作用后再还原, 等价于 'fa' 的对称消元系统。
+
+        本变体只用到 AssemblyLevelExtension 的接口, 不碰常驻形式, 因此 'ea' 与
+        'pa' 共用它。
         """
         if adjoint:
             self._log_error(
-                "operator_level='ea' 不支持伴随双列右端项, 请改用 operator_level='fa'"
+                f"operator_level={self._operator_level!r} 不支持伴随双列右端项, "
+                "请改用 operator_level='fa'"
             )
 
         F_non_body = self._non_body_loads_by_boundary_type(adjoint=False)
@@ -607,7 +668,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         threshold_uh = self._pde.is_dirichlet_boundary()
         isBdDof = space_uh.is_boundary_dof(threshold=threshold_uh, method='interp')
 
-        operator = DirichletBCOperator(self.wrap_operator(K),
+        operator = ConstrainedOperator(self.wrap_operator(K),
                                     gd=self._pde.dirichlet_bc,
                                     isDDof=isBdDof)
 
@@ -625,7 +686,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 分布式扩展点 (串行下均为恒等操作)
     ##############################################################################################
 
-    def wrap_operator(self, form: BilinearForm):
+    def wrap_operator(self, form: AssemblyLevelExtension):
         """在施加边界条件之前对单元级算子做一层包装
 
         串行下原样返回。分布式实现覆盖本方法, 返回一个把 matvec 结果在重叠自由度
@@ -634,7 +695,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         Note
         ----
-        包装必须发生在 DirichletBCOperator 之前: 先跨 rank 组装出完整的算子作用,
+        包装必须发生在 ConstrainedOperator 之前: 先跨 rank 组装出完整的算子作用,
         再在其上消去 Dirichlet 自由度。顺序反过来会把边界行的置换也带进通信。
         """
         return form
@@ -698,9 +759,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             uh = self._tensor_space.function()
 
-        # 'ea' 从刚刚由 apply_bc 得到的 Dirichlet 基准向量起步; 显式传入而非让
-        # solve_system 去读实例状态
-        if self._operator_level == 'ea':
+        # 矩阵自由层级从刚刚由 apply_bc 得到的 Dirichlet 基准向量起步; 显式传入
+        # 而非让 solve_system 去读实例状态
+        if self._operator_level != 'fa':
             kwargs.setdefault('x0', self._prescribed_solution)
 
         _, solver_info = self.solve_system(K, F, uh, **kwargs)
@@ -749,10 +810,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def _as_iterative_operator(self, K):
         """把刚度算子转成迭代解法可以直接作用的形式
 
-        'ea' 下 K 本身就支持 @ 运算; 'fa' 下 PyTorch 后端需要绕开 FEALPy 的
-        CSRTensor, 其余后端直接用 COO。
+        矩阵自由层级下 K 本身就支持 @ 运算; 'fa' 下 PyTorch 后端需要绕开 FEALPy
+        的 CSRTensor, 其余后端直接用 COO。
         """
-        if self._operator_level == 'ea':
+        if self._operator_level != 'fa':
             return K
 
         if bm.backend_name == 'pytorch':
@@ -774,51 +835,69 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def assemble_operator_diagonal(self, K) -> TensorLike:
         """取已施加 Dirichlet 条件的系统算子对角, 供 Jacobi 类预条件使用
 
-        'ea' 下 apply_bc 给出的是 A = Pi_I K Pi_I + Pi_D, 故对角在 Dirichlet
-        自由度上恒为 1, 其余为 diag(K): 逐单元取小矩阵对角再按 cell2dof 散加,
-        与 matvec 共享同一套 gather/scatter 语义, 代价是一次批量取对角加一次
-        散加, 不作用算子。
-        'fa' 下 apply_bc 已完成对称消元, 直接从稀疏矩阵读对角。
+        取对角已下沉到求解层的 ``soptx.solvers.operator_diagonal``, 按算子实际
+        能提供什么分派: 'ea' 下 ConstrainedOperator 自报 (Dirichlet 自由度上恒
+        为 1, 其余转发内层算子, 跨 rank 归约由 OverlapOperator 完成), 'fa' 下扫
+        对称消元后稀疏矩阵的 COO 取主对角。
+
+        analyzer 内部已不再调用本方法: ``_build_solver`` 把算子直接交给
+        ``DiagonalPreconditioner``, 由它在 setup 时取。本方法保留为一层转发,
+        供 examples 与 experiments 里的既有脚本沿用。
 
         Parameters
         ----------
-        K : 'fa' 下为全局稀疏矩阵, 'ea' 下为 DirichletBCOperator
+        K : 'fa' 下为全局稀疏矩阵, 'ea' 下为 ConstrainedOperator
 
         Returns
         -------
         diag : (TGDOF, ) 的算子对角, SPD 系统下逐元严格为正
         """
-        if self._operator_level == 'ea':
-            if self._const_integrator is None:
-                self._log_error(
-                    "取 'ea' 算子对角前必须先调用 assemble_stiff_matrix 缓存单元矩阵"
-                )
+        from soptx.solvers import operator_diagonal
 
-            KE = self._const_integrator.value                      # (NC, ldof, ldof)
-            cell2dof = self._const_integrator.to_global_dof(self._tensor_space)
-            diag_e = bm.einsum('cii -> ci', KE)                     # (NC, ldof)
+        return operator_diagonal(K)
 
-            gdof = self._tensor_space.number_of_global_dofs()
-            diag = bm.zeros((gdof, ), **bm.context(KE))
-            diag = bm.index_add(diag,
-                                bm.reshape(cell2dof, (-1, )),
-                                bm.reshape(diag_e, (-1, )))
 
-            # 重叠自由度需跨 rank 求和; 对角与右端项同为可加的自由度向量, 复用
-            # 同一个归约扩展点 (串行下恒等)
-            diag = self.reduce_load(diag)
+    def _preconditioner_operator(self):
+        """按 preconditioner_level 另建一个算子, 供预条件子使用
 
-            return bm.set_at(diag, K.is_boundary_dof, 1.0)
+        主算子在 solve_system 拿到时已经施加过边界条件 (solve_state 里
+        ``K, F = self.apply_bc(K0, F0)``), 预条件层级不走一遍同样的处理就是在给
+        奇异矩阵做分解, 因此本方法负责补上矩阵侧的边界条件。
 
-        K_coo = K.tocoo()
-        row, col = K_coo.row, K_coo.col
-        values = K_coo.values
-        on_diagonal = (row == col)
+        不复用 ``apply_bc``: 它是按 ``operator_level`` 定死变体的 variantmethod,
+        预条件层级可能属于另一个变体; 它还同时做载荷侧的事 (累加非体力载荷, 跨
+        rank 归约, 写 ``_F`` 与 ``_prescribed_solution``), 二次调用会重复加载荷并
+        覆盖状态。这里只取两个变体的矩阵侧, 各自都已经是现成的单句。
 
-        diag = bm.zeros((K.shape[0], ), **bm.context(values))
+        Returns
+        -------
+        'fa' 下为对称消元后的全局稀疏矩阵, 其余层级下为 ConstrainedOperator
 
-        return bm.index_add(diag, row[on_diagonal], values[on_diagonal])
+        Notes
+        -----
+        必须在 ``assemble_stiff_matrix`` 之后调用: 层级从 ``self._integrator``
+        构造, 而密度系数是 ``_update_density_coefficient`` 在装配时写进积分子的,
+        提前调用会读到上一步的密度。``_build_solver`` 的调用点天然满足这一点。
 
+        结果刻意不缓存: 拓扑优化每步都改密度, 缓存必然读到陈旧的刚度。代价是每次
+        求解多一次装配 —— 这是第一版的取舍, 把失效管理与本轴解耦。
+        """
+        space_uh = self._tensor_space
+        threshold_uh = self._pde.is_dirichlet_boundary()
+        isBdDof = space_uh.is_boundary_dof(threshold=threshold_uh, method='interp')
+
+        # 不传 pattern: self._csr_pattern 是主算子的 CSR 骨架缓存,
+        # assemble_stiff_matrix 会回写它, 共用会让两根轴互相干扰
+        level = create_level(self._preconditioner_level,
+                            space=space_uh,
+                            integrator=self._integrator)
+
+        if self._preconditioner_level == 'fa':
+            return self._apply_matrix(level.operator, isDDof=isBdDof)
+
+        return ConstrainedOperator(self.wrap_operator(level.operator),
+                                gd=self._pde.dirichlet_bc,
+                                isDDof=isBdDof)
 
     def _build_solver(self, solver_type, K, **kwargs):
         """按名字造出求解器, 并选定它要绑定的算子
@@ -855,10 +934,48 @@ class LagrangeFEMAnalyzer(BaseLogged):
             M = None
             # 无预条件子时三个 norm_type 数值等价, 取默认的 natural
             norm_type = 'natural'
-            if precond in ('jacobi', 'diagonal'):
-                from soptx.solvers import DiagonalPreconditioner
+            if precond is not None:
+                from soptx.solvers import (
+                    DiagonalPreconditioner,
+                    OperatorCapabilityError,
+                )
 
-                M = DiagonalPreconditioner(self.assemble_operator_diagonal(K))
+                # 预条件子的算子源: 默认就是主算子本身, 给了 preconditioner_level
+                # 就另建一个。两者都是已施加边界条件的算子, 对预条件子而言等价。
+                #
+                # 先在 fem 侧的算子上 setup 再交给 CG (CG 只对未 setup 的预条件子
+                # 做级联): 一是 _as_iterative_operator 的产物在 pytorch 后端是原生
+                # torch 稀疏张量, 取对角要另说; 二是级联用的是主算子, 那样
+                # preconditioner_level 就白设了
+                pc_level = self._preconditioner_level or self._operator_level
+                if self._preconditioner_level is None:
+                    K_pc = K
+                else:
+                    K_pc = self._preconditioner_operator()
+
+                if precond in ('jacobi', 'diagonal'):
+                    M = DiagonalPreconditioner()
+                elif precond in ('scipy', 'mumps'):
+                    # 直接法当预条件子: LinearSolver.__matmul__ 本就是"零初值解一
+                    # 次"的预条件子模式, 不需要适配层。它是精确逆, CG 应一步收敛,
+                    # 因此主要用途是验证两个层级确实是同一个离散算子
+                    M = create(precond)
+                else:
+                    self._log_error(
+                        f"未知的预条件子类型: {precond}; "
+                        f"可选 'jacobi'/'diagonal', 'scipy', 'mumps'"
+                    )
+
+                try:
+                    M.setup(K_pc)
+                except OperatorCapabilityError as exc:
+                    self._log_error(
+                        f"预条件子 {precond!r} 无法绑定到 {pc_level!r} 层级的算子 "
+                        f"(operator_level={self._operator_level!r}, "
+                        f"preconditioner_level={self._preconditioner_level!r}): "
+                        f"{exc} 请把 preconditioner_level 设为 'fa'"
+                    )
+
                 # 判据范数与下游口径对齐: cg 默认在 natural 范数
                 # sqrt(r^T M^-1 r) 下停机, 而本方法返回的 relres 是 2-范数,
                 # Jacobi 的 diag^-1 可达 1e6 量级, 两个口径能差几个数量级。
@@ -868,8 +985,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 # 校正。撤掉它需要单独的数值证据, 故与 M 绑定保持开启
                 if residual_refresh <= 0:
                     residual_refresh = 50
-            elif precond is not None:
-                self._log_error(f"未知的预条件子类型: {precond}")
 
             # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
             solver = create('cg', M=M, atol=atol, rtol=rtol, maxit=maxiter,
@@ -940,15 +1055,20 @@ class LagrangeFEMAnalyzer(BaseLogged):
             except OperatorCapabilityError as exc:
                 self._log_error(
                     f"operator_level={self._operator_level!r} 下无法使用求解器 "
-                    f"'{solver_type}': {exc} 请改用 solver='cg'"
+                    f"'{solver_type}': {exc} 请改用 solver='cg'; "
+                    f"若是想要显式矩阵上的预条件, 可保留 solver='cg' 并设 "
+                    f"preconditioner_level='fa'"
                 )
 
             out[:], raw = solver.solve(F[:], kwargs.get('x0', None))
         finally:
-            # 直接法持有 SuperLU 分解或 MUMPS 上下文, 用完即释放
-            close = getattr(solver, 'close', None)
-            if close is not None:
-                close()
+            # 直接法持有 SuperLU 分解或 MUMPS 上下文, 用完即释放。预条件子位上的
+            # 直接法 (preconditioner_level 配 precond='scipy'/'mumps') 持有的是
+            # 另一份, 一并释放, 否则 MUMPS 侧的内存不回收
+            for owner in (solver, getattr(solver, 'M', None)):
+                close = getattr(owner, 'close', None)
+                if close is not None:
+                    close()
 
         info = {'name': solver_type, **extra,
                 'niter': int(raw['niter']),
@@ -987,6 +1107,129 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._cached_ke0 = ke0
 
         return ke0
+
+    # ------------------------------------------------------------------
+    # 泊松比随密度插值 (近不可压缩算例)
+    #
+    # 各向同性本构矩阵总可写成 D = λ* D_λ + μ D_μ, D_λ、D_μ 为常数矩阵:
+    #   平面应变 / 3D : λ* = λ = E ν / ((1+ν)(1-2ν))
+    #   平面应力      : λ* = λ̄ = E ν / (1-ν²) = 2λμ / (λ+2μ)
+    #   μ = E / (2(1+ν))
+    # 于是 K_e = λ*_e K_e^λ + μ_e K_e^μ, 两个基矩阵与设计无关; 对 ρ 求导只需
+    # 对 λ*、μ 做链式法则, 不必重新积分。
+    # ------------------------------------------------------------------
+
+    def _lame_basis_matrices(self) -> tuple:
+        """返回常数矩阵 (D_λ, D_μ), 满足 D = λ* D_λ + μ D_μ"""
+        kwargs = dict(dtype=bm.float64, device=self._mesh.device)
+        if self._GD == 2:
+            D_lam = bm.tensor([[1.0, 1.0, 0.0],
+                               [1.0, 1.0, 0.0],
+                               [0.0, 0.0, 0.0]], **kwargs)
+            D_mu = bm.tensor([[2.0, 0.0, 0.0],
+                              [0.0, 2.0, 0.0],
+                              [0.0, 0.0, 1.0]], **kwargs)
+        else:
+            D_lam = bm.zeros((6, 6), **kwargs)
+            D_lam = bm.set_at(D_lam, (slice(0, 3), slice(0, 3)), 1.0)
+            D_mu = bm.tensor([[2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                              [0.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+                              [0.0, 0.0, 2.0, 0.0, 0.0, 0.0],
+                              [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                              [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                              [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]], **kwargs)
+        return D_lam, D_mu
+
+    def _lame_parameters(self, E: TensorLike, nu: TensorLike) -> tuple:
+        """由逐单元 (E, ν) 计算 (λ*, μ, ∂λ*/∂E, ∂λ*/∂ν, ∂μ/∂E, ∂μ/∂ν)
+
+        λ* 按材料的 hypothesis 取 λ (平面应变、3D) 或 λ̄ (平面应力)。
+        """
+        one_plus = 1.0 + nu
+        mu = E / (2.0 * one_plus)
+        dmu_dE = 1.0 / (2.0 * one_plus)
+        dmu_dnu = -E / (2.0 * one_plus**2)
+
+        if self._material.hypothesis == 'plane_stress':
+            denom = 1.0 - nu**2
+            lam = E * nu / denom
+            dlam_dE = nu / denom
+            dlam_dnu = E * (1.0 + nu**2) / denom**2
+        else:
+            denom = one_plus * (1.0 - 2.0 * nu)
+            lam = E * nu / denom
+            dlam_dE = nu / denom
+            dlam_dnu = E * (1.0 + 2.0 * nu**2) / denom**2
+
+        return lam, mu, dlam_dE, dlam_dnu, dmu_dE, dmu_dnu
+
+    def _elastic_matrix_from(self, E_rho: TensorLike, nu_rho: TensorLike) -> TensorLike:
+        """由逐单元 (E, ν) 构造逐单元本构矩阵 D_e, 形状 (NC, NS, NS)"""
+        lam, mu = self._lame_parameters(E_rho, nu_rho)[:2]
+        D_lam, D_mu = self._lame_basis_matrices()
+        return (bm.einsum('c, kl -> ckl', lam, D_lam)
+                + bm.einsum('c, kl -> ckl', mu, D_mu))
+
+    def _check_poisson_interpolation_support(self) -> None:
+        """泊松比插值只在逐单元本构矩阵能进入装配的组合下允许, 其余组合直接报错"""
+        density_location = self._interpolation_scheme.density_location
+        if density_location != 'element':
+            self._log_error(
+                f"泊松比随密度插值只支持 density_location='element', "
+                f"当前为 '{density_location}'"
+            )
+        if self._assembly_method != 'standard':
+            self._log_error(
+                f"泊松比随密度插值只支持 assembly_method='standard' (只有它接受"
+                f"逐单元本构矩阵), 当前为 '{self._assembly_method}'"
+            )
+        if 'pa' in (self._operator_level, self._preconditioner_level):
+            self._log_error(
+                "泊松比随密度插值不支持 'pa' 层级: partial assembly 的 QFunction "
+                "假定 coef 为实体本构矩阵的标量倍"
+            )
+
+    def compute_lame_basis_matrices(self) -> tuple:
+        """计算与设计无关的单元基矩阵 (K_e^λ, K_e^μ), 满足 K_e = λ*_e K_e^λ + μ_e K_e^μ
+
+        Returns
+        -------
+        (ke_lambda, ke_mu) : 各为 (NC, TLDOF, TLDOF)
+        """
+        NC = self._mesh.number_of_cells()
+        ones = bm.ones((NC, ), dtype=bm.float64, device=self._mesh.device)
+        results = []
+        for D_basis in self._lame_basis_matrices():
+            lea = LinearElasticIntegrator(material=self._material,
+                                coef=bm.einsum('c, kl -> ckl', ones, D_basis),
+                                q=self._integration_order,
+                                method='standard')
+            results.append(lea.assembly(space=self.tensor_space))
+
+        self._cached_ke_lambda, self._cached_ke_mu = results
+
+        return tuple(results)
+
+    def _stiffness_derivative_with_poisson(self,
+                                        material_params: tuple,
+                                        material_derivs: tuple,
+                                    ) -> TensorLike:
+        """E 与 ν 同时插值时的 ∂K_e/∂ρ_e (单元密度)
+
+        ∂K_e/∂ρ = (∂λ*/∂E E' + ∂λ*/∂ν ν') K_e^λ + (∂μ/∂E E' + ∂μ/∂ν ν') K_e^μ
+        """
+        E_rho, nu_rho = material_params[0], material_params[1]
+        dE_rho, dnu_rho = material_derivs[0], material_derivs[1]
+
+        _, _, dlam_dE, dlam_dnu, dmu_dE, dmu_dnu = self._lame_parameters(E_rho, nu_rho)
+        dlam = dlam_dE * dE_rho + dlam_dnu * dnu_rho   # (NC, )
+        dmu = dmu_dE * dE_rho + dmu_dnu * dnu_rho      # (NC, )
+
+        if self._cached_ke_lambda is None or self._cached_ke_mu is None:
+            self.compute_lame_basis_matrices()
+
+        return (bm.einsum('c, cij -> cij', dlam, self._cached_ke_lambda)
+                + bm.einsum('c, cij -> cij', dmu, self._cached_ke_mu))
     
     def compute_sub_element_stiffness_matrix(self) -> TensorLike:
         """计算各子单元对位移单元刚度矩阵的贡献 (单位弹性模量 E=1)
@@ -1069,9 +1312,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
             dE_rho = material_derivs[0]
         else:
             dE_rho = material_derivs
+
+        # 泊松比是否随密度插值以 interpolate_material 的返回为准: 可压缩材料下
+        # interpolate_material_derivative 仍会返回 dν, 但 ν 本身并未插值
+        material_params = self._interpolation_scheme.interpolate_material(
+                                            material=self._material,
+                                            rho_val=rho_val,
+                                            integration_order=self._integration_order,
+                                            displacement_mesh=self._mesh,
+                                        )
+        nu_interpolated = isinstance(material_params, tuple)
         
         if density_location in ['element']:
             # rho_val.shape = (NC, )
+            if nu_interpolated:
+                return self._stiffness_derivative_with_poisson(material_params, material_derivs)
+
             diff_coef_element = dE_rho / self._material.youngs_modulus # (NC, )
 
             if self._cached_ke0 is None:
@@ -1085,6 +1341,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         elif density_location in ['element_multiresolution']:
             # rho_val.shape = (NC, n_sub)
+            if nu_interpolated:
+                self._log_error("泊松比随密度插值不支持 density_location='element_multiresolution'")
+
             diff_coef_sub_element = dE_rho / self._material.youngs_modulus # (NC, n_sub)
 
             mesh_u = self._mesh
@@ -1248,7 +1507,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         state : dict
             状态字典, 必须包含 'displacement' (位移场).
         integration_order : int, optional
-            积分阶次. 默认为 1 (中心点积分), 这对 Q4 单元足以避免棋盘格效应.
+            积分阶次. 默认为 1, 单纯形上即单元形心单点. 局部应力约束不传该
+            参数, 故此默认值就是约束的评价位置, 属问题定义而非数值参数;
+            考察胞内起伏应显式传高阶, 不要改默认值.
 
         Returns
         -------
@@ -1264,7 +1525,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
               -------------------------------------------
         """        
         if integration_order is None:
-            integration_order = 1 # 默认使用中心点积分
+            # 单点 = 单元形心; 这是应力约束的评价位置定义, 见上方 docstring.
+            integration_order = 1
 
         if state is None:
             self._log_error("compute_stress_state 需要传入有效的 state 字典")

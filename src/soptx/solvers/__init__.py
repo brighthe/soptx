@@ -24,6 +24,7 @@ from .base import (
     SolveInfo,
     as_tensor,
     operator_capabilities,
+    operator_diagonal,
     reason_text,
 )
 from .amg import AMGSolver
@@ -51,6 +52,7 @@ __all__ = [
     "SupportsMatmul",
     "as_tensor",
     "operator_capabilities",
+    "operator_diagonal",
     "reason_text",
     # 注册表
     "available",

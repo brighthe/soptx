@@ -30,14 +30,17 @@ summary = "2D tri sinusoidal p1 五档误差链, MUMPS 稀疏直接解"
 script = "examples/lagrange_elasticity/manufactured_convergence_demo.py"
 # 与 3D 链统一走 MUMPS: 两条链除维数相关项外逐项对应, 表 a-1 的配置表才立得住。
 # --mumps-sym 1 声明对称正定 —— 平面应变全 Dirichlet 的刚度阵与 3D 同样是 SPD。
-# 装配仍走缺省 standard: 2D 最细档只有 8,450 自由度, 不存在 3D 那个内存问题。
+# --assembly-method fast 显式写出: 上游 demo 的缺省已从 standard 改成 fast, 这里不吃
+# 缺省值 —— 缺省一变产物名就跟着变 (method_tag 挂在 "standard" 这个名字上), 注册表里
+# 写全才不会出现"文件还在、内容口径已换"的哑故障。2D 这点规模两条路径都跑得动,
+# 取 fast 是与 a-fa-3d 及 ../assembly_level_consistency/ 的四条链统一口径。
 args = [
     "--dim", "2", "--mesh-type", "tri", "--model", "sinusoidal",
     "--degree", "1", "--base", "4", "--levels", "5",
-    "--solver", "mumps", "--mumps-sym", "1",
+    "--solver", "mumps", "--mumps-sym", "1", "--assembly-method", "fast",
 ]
 output_mode = "dir"
-artifact = "manufactured_convergence_2d_tri_sinusoidal_p1_mumps.json"
+artifact = "manufactured_convergence_2d_tri_sinusoidal_p1_mumps_fast.json"
 
 [[cases]]
 id = "a-fa-3d"

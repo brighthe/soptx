@@ -1,78 +1,346 @@
 # FA 显式装配内存机制与容量能力
 
-## 实验环境
+## 实验设置与测量口径
 
-| 项目 | 值 |
+### 运行环境
+
+| 项目 | 配置 |
 |:---|:---|
-| 宿主 | Windows 11 Pro，64 GB 物理内存 |
-| 运行环境 | WSL2 Ubuntu 24.04 LTS，内核 `6.18.33.2-microsoft-standard-WSL2` |
-| CPU | Intel Core i9-14900KF，WSL 视图 32 逻辑核 |
-| WSL 内存 | `.wslconfig` `memory=48GB`，来宾 `MemTotal` 47.04 GiB，swap 12 GiB |
-| **峰值内存预算** | **45 GiB**：全部容量结论以进程绝对峰值 RSS 不超过 45 GiB 为界，`compare.py` 的天花板外推按此计算 |
-| GPU | NVIDIA GeForce RTX 5080，16 GB 显存（仅 `_cuda` 产物，不进入 CPU 容量结论） |
-| Python 栈 | Python 3.12.13，numpy 2.5.1，scipy 1.18.0，torch 2.13.0+cu130 |
+| 宿主系统 | Windows 11 Pro，物理内存 64 GB |
+| 实验系统 | WSL2 Ubuntu 24.04 LTS，内核 `6.18.33.2-microsoft-standard-WSL2` |
+| CPU | Intel Core i9-14900KF，WSL 可见 32 个逻辑核 |
+| WSL 内存 | 配置上限 `memory=48GB`，系统报告总内存约 47 GiB（`MemTotal`），swap 12 GiB |
+| 软件版本 | Python 3.12.13，numpy 2.5.1，scipy 1.18.0，torch 2.13.0+cu130 |
 
-## 测量口径
+GPU 为 NVIDIA GeForce RTX 5080，显存 16 GB；相关结果以 `_cuda` 标记，不纳入本文 CPU 容量分析。
 
-- 受控单进程 CPU，3D tet4 线弹性制造解问题，`n^3` 剖分，`NC = 6n^3`，`Ndof = 3(n+1)^3`。
-- 每阶段记录开始时 `VmRSS`、阶段内 `VmHWM` 峰值（`/proc/self/clear_refs` 逐阶段重置）与净增；进程绝对峰值取全部阶段峰值的最大值。
-- OOM 由绝对峰值决定，容量天花板以端到端绝对峰值 KB/dof 外推，并以 `.failed.json` 中内核 OOM 记录作上界。
-- 所有数字均可在 `outputs/` 的产物文件中反查，产物命名 `<kind>_<method|route>_n<N>[_cuda][_bform].json`。
+### 问题与执行方式
+
+采用三维线弹性制造解问题，使用 FEALPy 的 `TetrahedronMesh.from_box` 构建四节点四面体网格，采用 $p=1$ 的 Lagrange 有限元，积分参数取默认值 $q=p+3=4$。三个坐标方向均划分为 $n$ 份，单元数为 $N_C = 6n^3$，位移自由度数为 $N_{dof} = 3(n+1)^3$。实验采用单进程 CPU 执行方式，每个数据点在独立进程中测量。
+
+### 测量口径
+
+- **内存统计**：以 `VmRSS` 记录常驻内存，以逐阶段重置的 `VmHWM` 记录阶段峰值；阶段净增为阶段峰值与阶段起始 `VmRSS` 之差，全程绝对峰值取各阶段峰值的最大值。
+- **表头约定**：凡标「峰值」的列取 `VmHWM`，其余 RSS 列一律为 `VmRSS` 常驻读数，列名中的「构建后」「计算后」「生成前/后」指该读数所处的时刻；常驻读数均在对象未释放、未调用垃圾回收或内存归还的状态下读取。
+- **容量预算**：以进程绝对峰值 RSS 不超过 45 GiB 为容量评估条件。
+- **数值精度**：本文关注内存量级与占比，不追求逐字节精确。内存数值统一按「不小于 1 GiB 者保留一位小数、小于 1 GiB 者取整数 MiB」给出，耗时统一保留两位有效数字；同一表中各列为独立读数，舍入后按「起点 + 净增 = 峰值」相加可有 0.1 GiB 的偏差。
 
 ---
 
-## 一、阶段 1：单刚计算内存对比
+## 一、装配前：import 底座、网格构建与符号结构
 
-复现命令（在 `experiments/fa_assembly_capability/` 下）：
+本节测量装配前的内存开销，即固定网格下只需支付一次、后续各轮装配可直接复用的部分，与每轮装配都要重复支付的单刚计算和总刚累加相区分。前置成本分两类：
 
-```bash
-python run.py --case element-stiffness --method all --grid 32
-python compare.py --case stage1
+- **各路线公共**：模块导入，以及网格、有限元空间和材料对象的构建（第 1、2 小节）。
+- **`pattern` 路线专有**：CSR 符号结构（第 3 小节）。它由 `build_csr_pattern` 建成后作为装配的输入资源反复复用，`coalesce` 与 `scipy` 路线没有可前置的对应部分，每次装配都需从零物化三元组。
+
+### 1. import 底座（不随 n）
+
+`run.py` 已在模块顶部导入 numpy/scipy，随后通过 `_import_fe_stack_cpu()` 加载 FEALPy 与 SOPTX。相关导入代码如下，torch 和 sympy 由依赖链间接加载：
+
+```python
+# run.py 模块顶部
+import numpy as np
+import scipy.sparse as sp
+
+# _import_fe_stack_cpu()
+from fealpy.backend import backend_manager as bm
+bm.set_backend("numpy")
+import fealpy.functionspace
+import fealpy.mesh
+import fealpy.sparse
+import soptx.fem.integrators
+import soptx.fem.matrix.csr_pattern
+import soptx.materials
+import soptx.problems.elasticity
 ```
 
-产物：`outputs/stage1_fast_n32.json`、`outputs/stage1_standard_n32.json`、`outputs/stage1_voigt_n32.json`。
+下表按 numpy/scipy、torch、sympy、FEALPy/SOPTX 的顺序显式分步导入，统计各阶段 RSS 增量；首项包含进程初始内存，合计按未舍入值计算。
 
-测量对象：`LinearElasticIntegrator(material, method=<m>).assembly(vs)`，输出 $K_e$ 形状 `(NC, 12, 12)` float64。n=32：`NC` = 196,608，`Ndof` = 107,811，$K_e$ 理论体积 216.0 MiB。峰值为阶段内 `VmHWM`，含网格与空间的常驻；净增 = 峰值 − 阶段开始 RSS。
+| 导入阶段 | RSS 增量（MiB） |
+|:---|---:|
+| Python、探针 + numpy + scipy.sparse | 48 |
+| `torch` | 458 |
+| `sympy` | 30 |
+| FEALPy + SOPTX 后续导入 | 69 |
+| **合计 / 最终 RSS** | **606** |
 
-| method | 实现 | 阶段内峰值 RSS | 相对 fast | 耗时 |
-|:---|:---|:---:|:---:|:---:|
-| `fast` | 参考单元上预计算 `S(LDOF, LDOF, BC, BC)`，逐单元用 $\nabla\lambda$ 缩并 | 1.41 GiB | $1.00\times$ | 0.80 s |
-| `standard` | 9 个 `(NC, NQ, 4, 4)` 分块梯度张量 `A_xx ... A_zz` 分别求积后按 $D$ 系数组合 | 5.84 GiB | $7.88\times$ | 6.3 s |
-| `voigt` | 物化应变矩阵 `B(NC, NQ, 6, 12)`，单次 `einsum` 完成 $B^{T} D B$ | 11.90 GiB | $17.30\times$ | 9.7 s |
+数据来源：`outputs/import_baseline_20260909T021748Z.json`。
 
-`fast` 的净增是 $K_e$ 理论体积的 3 倍，来自求积与缩并的中间张量；`standard` 与 `voigt` 的膨胀分别来自 9 个逐求积点分块张量和 `(NC, NQ, 6, 12)` 应变矩阵的全量物化。阶段 1 单价不单独决定容量天花板，天花板见第三部分端到端峰值。
+### 2. 网格与空间构建（随 n）
+
+`measure_mesh()` 先通过 `TetrahedronMesh.from_box` 构建网格，再创建有限元空间与材料对象。相关代码如下：
+
+```python
+# meshbuild 阶段
+mesh = TetrahedronMesh.from_box(list(problem.domain), nx=n, ny=n, nz=n)
+
+# space 阶段
+scalar = LagrangeFESpace(mesh, p=1, ctype="C")
+vs = TensorFunctionSpace(scalar, shape=(-1, 3))
+material = IsotropicLinearElasticMaterial(
+    hypothesis="3D", lame_lambda=problem.lam, shear_modulus=problem.mu,
+    device=bm.get_device(mesh),
+)
+```
+
+下表统计上述构建过程的内存与耗时，不包含装配。峰值 RSS 与构建后 RSS 均为进程绝对量；构建后 RSS 净增以各次测量的 import 底座为基准。
+
+| n | $N_{dof}$ | 构建期峰值 RSS（GiB） | 构建后 RSS（MiB） | 构建后 RSS 净增（MiB） | 构建耗时（s） |
+|:---:|---:|---:|---:|---:|---:|
+| 32 | 107,811 | 1.3 | 782 | 172 | 11 |
+| 48 | 352,947 | 3.0 | 1067 | 458 | 37 |
+| 64 | 823,875 | 6.2 | 1393 | 783 | 86 |
+| 96 | 2,738,019 | 19.5 | 3064 | 2454 | 300 |
+| 124 | 5,859,375 | **41.1** | 5883 | 5273 | 660 |
+
+五档测量的峰值均出现在网格构建阶段，`space` 阶段的内存净增与耗时在当前记录精度下均为零。以 $n=124$ 为例，峰值约 41 GiB，构建后 RSS 约 5.7 GiB，表明构建期峰值显著高于最终常驻量；容量评估需计入这一峰值。
+
+数据来源：`outputs/mesh_build_n{32,48,64,96,124}.json`。
+
+### 3. 符号结构构建（pattern 路线专有，随 n）
+
+`build_csr_pattern` 在标量空间上建立 CSR 骨架与槽位映射，产出的 `CSRPattern` 是后续装配的输入资源。生产入口 `soptx.fem.BilinearForm` 通过构造参数 `pattern` 接收它，并提供同名 property 供读写；`LagrangeFEMAnalyzer` 在每轮迭代中把上一轮建好的骨架经 `create_level(..., pattern=self._csr_pattern)` 传入，装配后再取回缓存。`BilinearForm.assembly()` 内的
+
+```python
+if self._pattern is None:
+    self._pattern = build_csr_pattern(self._spaces[0])
+```
+
+只是首次调用的惰性兜底，在固定网格的多轮装配中仅执行一次。因此符号结构属于前置成本，而非每轮装配的组成部分；其内部对象构成见第三章第 2 节。
+
+下表提取 `full_fast_pattern_n{32,48,64}.json` 中的 `symbolic` 阶段。起点 RSS 沿用第 2 小节的构建后 RSS —— 两者来自独立运行但测的是同一状态（网格与空间已建成），读数相差 1~2 MiB；构建期峰值按「起点 + 峰值净增」给出。峰值净增含构建期瞬时量，常驻增量为建成后留下的部分。
+
+| n | $N_{dof}$ | 起点 RSS（MiB） | 构建期峰值（MiB） | 峰值净增（MiB） | 常驻增量（MiB） | 构建耗时（s） |
+|:---:|---:|---:|---:|---:|---:|---:|
+| 32 | 107,811 | 782 | 829 | 47 | 47 | 0.17 |
+| 48 | 352,947 | 1067 | 1282 | 215 | 215 | 0.52 |
+| 64 | 823,875 | 1393 | 2128 | 735 | 519 | 1.5 |
+
+三档的常驻增量约为 50、200、500 MiB；$n=64$ 的峰值净增高出常驻增量约 200 MiB，是构建期的瞬时量，建成即释放。常驻增量会计入后续阶段的起点 RSS，是第二章与第四章同规模峰值不同的原因。这几个读数受分配器空闲页复用影响，宜按量级理解，逐字节对账的口径见第三章第 2 小节。
+
+数据来源：`outputs/full_fast_pattern_n{32,48,64}_presolver_rss.json`。
 
 ---
 
-## 二、阶段 2：总刚合并路线对比
- 
-> 复现命令：`python experiments/fa_assembly_capability/run.py --case global-merge --route all`
- 
-| 合并路线与载体 | 装配机制 | 是否物化全长三元组 | 每三元组内存 | 每自由度内存 $b$ | 47G 天花板 $N_{\max}$ | 生产状态 |
-|:---|:---|:---:|:---:|:---:|:---:|:---:|
-| **FEALPy `COOTensor.coalesce`** | 全长三元组张量排序去重 | 是 | $51.9\sim 77.2\text{ B}$ | $14.9\sim 22.2\text{ KB}$ | **约 230 万** | 传统历史基准 |
-| **SciPy `coo_matrix.tocsr`** | 全长三元组 C++ 计数分桶去重 | 是 | $46.0\text{ B}$ | $13.3\text{ KB}$ | 约 381 万 | 未接入 |
-| **SOPTX `CSRPattern` + 模式先行** | 预建 CSR 骨架 + 原地 scatter-add | **否** | **$6.9\text{ B}$** | **$2.0\text{ KB}$** | **约 3580 万** | **当前生产默认** |
- 
-* **归因**：传统 COO 路线必须在内存中物化全长三元组数组，排序/分桶将传统 FA 锁死在 230 万；**SOPTX 当前生产默认的模式先行路线在符号阶段锁定 CSR 骨架、数值阶段原地累加**，彻底消灭全长 COO 数组，单价暴降至 $2.0\text{ KB/dof}$。
- 
+## 二、阶段 1：单刚计算内存对比（随 n）
+
+### 1. 三种方法对比（n=32）
+
+`measure_stage1()` 在已构建的网格、有限元空间与材料对象上调用 `LinearElasticIntegrator.assembly()`，生成单元刚度矩阵，不执行总刚生成。相关代码如下：
+
+```python
+# method = fast / standard / voigt
+integrator = LinearElasticIntegrator(material, method=method)
+Ke = integrator.assembly(vs)  # (NC, 12, 12), float64
+```
+
+下表采用 $n=32$，单元数 $N_C=196608$，位移自由度数 $N_{dof}=107811$。阶段峰值 RSS 为进程绝对量，峰值净增以单刚计算开始时的 RSS 为基准；耗时仅包含单刚计算。
+
+| method | 阶段峰值 RSS（GiB） | 峰值净增（GiB） | 单刚耗时（s） |
+|:---|---:|---:|---:|
+| `fast` | 1.4 | 0.6 | 0.65 |
+| `standard` | 5.8 | 5.1 | 4.1 |
+| `voigt` | 11.9 | 11.1 | 6.2 |
+
+三种方法生成的 $K_e$ 尺寸相同，理论存储量均为 216 MiB。在当前工况与实现下，`fast` 的峰值内存最低、耗时最短，以下集中分析其峰值来源及随网格规模的变化。
+
+数据来源：`outputs/stage1_{fast,standard,voigt}_n32.json`。
+
+### 2. fast 的峰值归因
+
+`fast` 在参考单元上预计算张量 `S`，通过重心坐标梯度缩并得到 `A_ab`，组合成刚度分块 `KK_ab`，再写入 $K_e$。相关实现位于 `src/soptx/fem/integrators/linear_elastic_integrator.py`，以下摘录一个分量块的计算与写入：
+
+```python
+cm, glambda_x, S = self.fetch_fast_assembly(space)
+A_xx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 0], cm)
+# 其余 A_ab 同理计算，此处省略
+KK_11 = D00 * A_xx + D55 * (A_yy + A_zz)
+# 其余 KK_ab 同理计算，此处省略
+KK = bm.set_at(KK, (slice(None), slice(0, KK.shape[1], GD), slice(0, KK.shape[2], GD)), KK_11)
+```
+
+| 对象 | 形状 / 数量 | 存储量（MiB） |
+|:---|:---|---:|
+| 梯度缩并分块 `A_ab` | 9 个 `(NC, 4, 4)` | 216 |
+| 刚度分块 `KK_ab` | 9 个 `(NC, 4, 4)` | 216 |
+| 单元刚度矩阵 $K_e$（代码中为 `KK`） | `(NC, 12, 12)` | 216 |
+| 重心坐标梯度 `glambda_x` | `(NC, 4, 3)` | 18 |
+| **主要数组合计** | | **666** |
+
+峰值由这些数组同时存活形成，其中两组分块共占 432 MiB，为最终 $K_e$ 的两倍。该表统计数组存储量，与前表的进程 RSS 净增属于不同口径，不要求数值完全一致。
+
+数据来源：`outputs/stage1_probe_fast_n32.json`。
+
+### 3. fast 随网格规模的变化
+
+下表统一提取 `full_fast_coalesce_n{32,48,64}.json` 中的单刚阶段数据。该路线在单刚计算前不建立 CSR 符号结构，测量窗口仅覆盖 `integrator.assembly(vs)`；表中不包含后续 `coalesce` 合并的内存与耗时。各内存列统一换算为 GiB，保留一位小数，含义如下：
+
+- **起点 RSS**：进入单刚计算时的进程常驻内存，此处为 import 底座与网格、空间、材料对象之和，取 `stage1_before_MiB`。
+- **峰值净增**：单刚计算自身引入的内存增量，取 `stage1_net_MiB`，反映该操作的固有开销。
+- **阶段峰值 RSS**：进程绝对量，等于起点 RSS 与峰值净增之和（舍入后可有 0.1 的偏差），取 `stage1_peak_MiB`。
+- **计算后 RSS**：进入总刚生成前的进程常驻内存，取 `stage2_before_MiB`。
+
+| n | $N_C$ | $N_{dof}$ | 起点 RSS（GiB） | 峰值净增（GiB） | 阶段峰值 RSS（GiB） | 计算后 RSS（GiB） | 单刚耗时（s） |
+|:---:|---:|---:|---:|---:|---:|---:|---:|
+| 32 | 196,608 | 107,811 | 0.8 | 0.6 | 1.4 | 1.0 | 0.68 |
+| 48 | 663,552 | 352,947 | 1.0 | 2.2 | 3.2 | 1.8 | 2.5 |
+| 64 | 1,572,864 | 823,875 | 1.4 | 5.3 | 6.6 | 3.1 | 4.9 |
+
+从 $n=32$ 增至 $n=64$，单元数增至 8 倍，峰值净增约为 8 倍，单刚耗时约为 7 倍。在已测范围内，峰值净增大致随单元数增长，与主要数组长度正比于 $N_C$ 的结构一致。
+
+本表的起点 RSS 不含 CSR 符号结构，第四章的 `fast + pattern` 路线则已含，起点高出约 0.05、0.2、0.5 GiB（第一章第 3 小节），故同规模的阶段峰值高于本表，$n=64$ 为 7.1 对 6.6 GiB。两表可比的是峰值净增，两次测量一致（均约 5.3 GiB），说明单刚计算自身的开销与起点无关。
+
+数据来源：`outputs/full_fast_coalesce_n{32,48,64}.json`。
+
+---
+
+## 三、阶段 2：总刚生成路线对比（随 n）
+
+### 1. 三条路线对比（n=32）
+
+`measure_stage2()` 使用与网格拓扑一致的合成输入，单独测量总刚生成。`coalesce` 与 `scipy` 接收全长三元组 `I, J, V`，`pattern` 接收合成单刚 `K_e`；输入准备不计入测量窗口。三条路线的主要调用如下：
+
+```python
+# coalesce
+indices = np.stack([I, J])
+del I, J
+K = COOTensor(indices, V, spshape=(Ndof, Ndof)).coalesce().tocsr()
+
+# scipy
+K = sp.coo_matrix((V, (I, J)), shape=(Ndof, Ndof)).tocsr()
+
+# pattern：符号阶段 + 数值阶段
+pattern = build_csr_pattern(space)
+K = assemble_csr(K_e, pattern)
+```
+
+下表采用 $n=32$，$N_C=196608$，$N_{dof}=107811$，三元组数为 28,311,552，最终非零元数为 4,619,817。峰值 RSS 为进程绝对量，峰值净增以各自开始时的 RSS 为基准。两种口径的区别在于符号结构：
+
+- **首轮**：`pattern` 的窗口包含符号与数值两阶段，即第一次装配需从零建立 CSR 骨架的情形。
+- **稳态每轮**：符号结构已按第一章第 3 小节前置并复用，窗口仅含数值阶段。`coalesce` 与 `scipy` 没有可前置的部分，两种口径相同。
+
+| route | 生成机制 | 峰值 RSS（GiB） | 首轮净增（MiB） | 稳态每轮净增（MiB） | 首轮耗时（s） | 稳态每轮耗时（s） |
+|:---|:---|---:|---:|---:|---:|---:|
+| `coalesce` | 全长三元组排序、去重与累加 | 2.1 | 1435 | 1435 | 1.8 | 1.8 |
+| `scipy` | 按行分桶后合并重复项 | 1.3 | 593 | 593 | 0.30 | 0.30 |
+| `pattern` | 标量 CSR 骨架与分量块槽位累加 | 0.9 | 140 | **35** | 0.43 | **0.29** |
+
+三条路线的输入载体和导入底座不同，绝对峰值不能直接解释为同一完整装配流程的路线收益。独立测量中，`pattern` 在两种口径下的峰值净增均最低；按稳态每轮计，其净增为 `scipy` 的约 1/17、`coalesce` 的约 1/41。`scipy` 的单次耗时在首轮最短，稳态下 `pattern` 略快于 `scipy`，但两者仅差约 0.01 s，实际可视为持平；耗时上的明确差距只在与 `coalesce` 之间（约 6 倍）。拓扑优化等固定网格的多轮装配以稳态口径为准，以下集中分析 `pattern`。
+
+数据来源：`outputs/stage2_{coalesce,scipy,pattern}_n32.json`。
+
+### 2. pattern 的峰值归因
+
+`pattern` 先在标量空间上构建 CSR 骨架和槽位映射，再按 $3\times3$ 分量块累加单刚。相关接口位于 `src/soptx/fem/matrix/csr_pattern.py`：
+
+```python
+# 符号阶段：固定网格与空间下可复用
+pattern = build_csr_pattern(space)
+
+# 数值阶段：按分量块累加至 CSR
+K = assemble_csr(K_e, pattern)
+```
+
+下表按数组理论长度给出 $n=32$ 的名义存储量。骨架建在标量空间上（$snnz=513313$），再按 $3\times3$ 分量块展开为张量自由度级，故 `crow` 与 `col` 的长度按张量级计（$N_{dof}+1$ 与 $\text{nnz}=9\,snnz=4619817$）；槽位映射只保留标量级的 `slot_base` 与 `row_deg`，不物化张量级槽位数组。
+
+| 对象 | 类型与长度 | 存储量（MiB） | 生命周期 |
+|:---|:---|---:|:---|
+| CSR 行指针 `crow` | int64，$N_{dof}+1$ | 1 | 符号阶段建成后常驻 |
+| CSR 列索引 `col` | int64，nnz | 35 | 符号阶段建成后常驻 |
+| 槽位基址 `slot_base` | int64，$16N_C$ | 24 | 符号阶段建成后常驻 |
+| 行度数 `row_deg` | int64，$4N_C$ | 6 | 符号阶段建成后常驻 |
+| 数值缓冲区 `buffer` | float64，nnz | 35 | 符号阶段申请，数值阶段首次写入后常驻 |
+| 块内槽位 `slot` | int64，$16N_C$ | 24 | 数值阶段瞬时，每个分量块一份，用完即弃 |
+| `_slot_of` 内部瞬时量 | — | 6 | 数值阶段瞬时 |
+| **主要对象合计** | | **131** | 其中常驻 101、瞬时 30 |
+
+本表按数组理论长度计算，与全文其余表格的 RSS 读数属不同口径，用于说明峰值由哪些对象构成，不宜与 RSS 逐项对账，原因有二。
+
+其一，`buffer` 由 `np.zeros(nnz)` 申请，calloc 返回的零页在首次写入前不计入 RSS，这 35 MiB 因而不落在符号阶段，而在数值阶段首次写入时才显现 —— $n=32$ 的数值阶段净增实测 35 MiB，与其名义大小几乎相等。
+
+其二，RSS 净增只统计新向系统申请的页面，能否复用前序阶段释放的空闲页会同向影响读数。符号阶段扣除 `buffer` 后名义常驻 66 MiB，而两次独立测量分别记到 47 MiB（第一章第 3 小节的完整运行，紧邻其前的网格构建刚释放大块内存）与 104 MiB（本节的单独测量，符号阶段自身的瞬时量未归还系统），跨在名义值两侧。槽位映射本身可直接核对：`resident_map_MiB` 记录 `slot_base` 与 `row_deg` 之和为 30 MiB，与名义值一致。
+
+数据来源：`outputs/stage2_pattern_n32.json`。
+
+### 3. pattern 随网格规模的变化
+
+先准备与网格拓扑一致的合成单刚 $K_e$，再统一测量符号构建与总刚累加。相关代码如下：
+
+```python
+# 输入准备，不计入测量窗口
+K_e = synthetic_element_matrices(cell)
+
+# 测量窗口：符号构建 + 总刚累加
+pattern = build_csr_pattern(space)
+K = assemble_csr(K_e, pattern)
+```
+
+下表的生成前常驻 RSS 为输入准备完成后的进程常驻内存，峰值覆盖符号构建与总刚累加，峰值净增为峰值与起点之差。生成后常驻 RSS 在保留 $K_e$、符号结构和总刚矩阵的情况下读取。
+
+| n | $N_{dof}$ | 生成前常驻 RSS（GiB） | 峰值 RSS（GiB） | 峰值净增（MiB） | 生成后常驻 RSS（GiB） | 生成耗时（s） |
+|:---:|---:|---:|---:|---:|---:|---:|
+| 32 | 107,811 | 0.8 | 0.9 | 140 | 0.9 | 0.42 |
+| 48 | 352,947 | 1.5 | 1.8 | 404 | 1.8 | 1.3 |
+| 64 | 823,875 | 2.3 | 3.4 | 1058 | 3.1 | 3.3 |
+
+在已有单刚输入的基础上，三档总刚生成首轮额外需要的峰值内存分别约为 140、404、1058 MiB，其中包含首次符号构建。
+
+符号结构复用后，稳态每轮的窗口仅含数值阶段，数据如下。稳态起点 RSS 为符号结构已常驻时的进程内存，取 `numeric_before_MiB`。
+
+| n | $N_{dof}$ | 稳态起点 RSS（GiB） | 数值阶段净增（MiB） | 数值阶段峰值（GiB） | 数值阶段耗时（s） |
+|:---:|---:|---:|---:|---:|---:|
+| 32 | 107,811 | 0.9 | 35 | 0.9 | 0.28 |
+| 48 | 352,947 | 1.7 | 197 | 1.8 | 0.98 |
+| 64 | 823,875 | 2.9 | 515 | 3.4 | 2.4 |
+
+稳态每轮的净增约为首轮的 1/4 至 1/2，差额即前置的符号结构。需要注意两阶段的净增不可直接相加得到首轮净增：以 $n=64$ 为例，符号阶段净增 739 MiB、数值阶段净增 515 MiB，而首轮净增为 1058 MiB，因为符号阶段峰值中约 196 MiB 的内部瞬时量在进入数值阶段前已释放。生成耗时均不含输入准备。
+
+数据来源：`outputs/stage2_pattern_n{32,48,64}_complete_rss.json`。
+
 ---
  
-## 三、实测阶梯验证与三档组合天花板
- 
-> 复现命令：`python experiments/fa_assembly_capability/run.py --case full-assembly --grid <32|80|96>`
- 
-| 网格规模 $n$ | 自由度数 $N_{\text{dof}}$ | 传统历史基准 (`fast + coalesce`) | 中间过渡 (`fast + scipy`) | 当前生产默认 (`fast + pattern`) | 运行状态与物理定论 |
-|:---:|:---:|:---:|:---:|:---:|:---|
-| **$n = 32$** | 10.8 万 | $1.51\text{ GiB}$ ($15.1\text{ KB/dof}$) | $1.38\text{ GiB}$ ($13.3\text{ KB/dof}$) | **$0.20\text{ GiB}$** ($2.0\text{ KB/dof}$) | 极速完成 |
-| **$n = 80$** | 159.4 万 | **$22.83\text{ GiB}$** ($15.4\text{ KB/dof}$) | $20.4\text{ GiB}$ | **$3.04\text{ GiB}$** | 传统基准安全上限（占内存 43~48%） |
-| **$n = 96$** | 273.8 万 | **$> 52\text{ GiB}$ (击穿 47G 物理红线)** | $35.1\text{ GiB}$ (逼近物理红线) | **$5.22\text{ GiB}$** | **传统基准被 Linux OOM 强杀**；当前生产模式先行仍极宽裕 |
-| **天花板** | — | **极限约 230 万自由度** ($n \le 90$) | **极限约 382 万自由度** ($n \le 105$) | **极限约 3580 万自由度** ($n \approx 225$) | **模式先行实现 $15.6\times$ 规模跃升** |
- 
----
- 
-## 参考
- 
-* 测量执行与单点看板：`python experiments/fa_assembly_capability/run.py --case <id> [--method <m>] [--route <r>]`（全量运行：`--all`）
-* 后处理综合对比报表：`python experiments/fa_assembly_capability/compare.py --case all [-n 32]`
-* 产物数据读取：直接消费 `outputs/*.json` 即可进行绘图或下游分析。
+## 四、求解前内存汇总
+
+采用 `fast + pattern` 在真实网格上完成单刚计算与总刚生成，执行顺序如下：
+
+```python
+pattern = build_csr_pattern(vs)
+K_e = integrator.assembly(vs)
+K = assemble_csr(K_e, pattern)
+```
+
+该顺序复刻生产入口 `soptx.fem.BilinearForm.assembly(method="pattern")`。符号结构是前置成本（第一章第 3 小节），稳态下先于装配存在，故单刚计算的起点必然包含它；本章虽测首轮，但把 `build_csr_pattern` 显式置于单刚之前，使首轮峰值与稳态一致，容量预算不会低估。
+
+### 1. 内存的累积方式（以 n=64 为例）
+
+两条规则贯穿全章：**常驻内存累积，阶段峰值不累积**。每个阶段结束时未释放的对象会抬高下一阶段的起点，形成单调上升的水位；阶段峰值则是各自水位之上的一次涨落，阶段结束即回落，因此全过程峰值取各阶段峰值的最大值，而不是求和。
+
+下表以 $n=64$ 走完全程，四个阶段按执行顺序排列。每行满足「起点常驻 + 自身净增 = 阶段峰值」（舍入后可有 0.1 的偏差，如单刚计算行），每行的结束常驻即下一行的起点常驻。
+
+| 阶段 | 起点常驻（GiB） | 自身净增（GiB） | 阶段峰值（GiB） | 结束常驻（GiB） |
+|:---|---:|---:|---:|---:|
+| 网格构建 | 0.6 | 5.6 | 6.2 | 1.4 |
+| 符号构建 | 1.4 | 0.7 | 2.1 | 1.9 |
+| 单刚计算 | 1.9 | 5.3 | **7.1** | 3.6 |
+| 总刚累加 | 3.6 | 0.5 | 4.1 | 3.9 |
+
+「起点常驻」列单调上升（0.6 → 1.4 → 1.9 → 3.6），「阶段峰值」列上下起伏，其最大值 7.1 GiB 即求解前的全过程峰值。网格构建一行最能说明二者的区别：该阶段涨了 5.6 GiB，结束时只留下 0.8 GiB，其余约 4.8 GiB 的瞬时量全部归还，所以下一阶段从 1.4 GiB 而非 6.2 GiB 起步 —— 峰值若能累积，这里就该是 6.2 GiB 了。
+
+### 2. 三档汇总
+
+上节的逐阶段结构对三档网格均成立，全过程峰值都落在单刚计算阶段，瓶颈是 `A_ab`、`KK_ab` 与 $K_e$ 三组数组同时存活（第二章第 2 小节）。下表汇总容量评估直接用到的两个量：
+
+| n | $N_{dof}$ | 全过程峰值 RSS（GiB） | 生成后常驻 RSS（GiB） |
+|:---:|---:|---:|---:|
+| 32 | 107,811 | 1.5 | 1.1 |
+| 48 | 352,947 | 3.5 | 2.2 |
+| 64 | 823,875 | 7.1 | 3.9 |
+
+生成后常驻 RSS 含 import 底座、网格与空间、单刚矩阵、符号结构与总刚矩阵，三档均只有峰值的一半到七成，且规模越大差距越明显。容量评估必须按峰值而非按常驻量估算，否则 $n=64$ 时会低估 3.2 GiB。
+
+重复装配时起点始终包含符号结构，故容量评估按本章取值。后续求解测量应明确是否沿用这一对象保留状态 —— $K_e$ 本身约占 1.7 GiB（$n=64$），求解前若将其释放，起跑线最多可降低这一数额，实际归还量取决于分配器行为。
+
+数据来源：`outputs/full_fast_pattern_n{32,48,64}_presolver_rss.json`。
+
+

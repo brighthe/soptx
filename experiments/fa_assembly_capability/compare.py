@@ -2,6 +2,7 @@
 """fa_assembly_capability 产物对比表: 只从 outputs/*.json 计算, 不含任何硬编码结论数字.
 
 用法:
+  python compare.py --case mesh             # 只建网格与空间: 公共容量上界 (与装配层级无关)
   python compare.py --case stage1           # 阶段 1 单刚: 各 method 的绝对峰值 / 净增 / KB/dof
   python compare.py --case stage2 -n 32     # 阶段 2 合并: 四条路线的 B/triplet (含生产/原型标记)
   python compare.py --case full             # 端到端: 行 = n, 列 = 路线, 格 = 绝对峰值 GiB (KB/dof); OOM 行来自 .failed.json
@@ -29,7 +30,7 @@ DEFAULT_MEMORY_TOTAL = 47.04 * 2**30  # WSL 来宾 MemTotal, 与 run.py 保持�
 MEMORY_BUDGET = 45 * 2**30  # 峰值内存预算, 与 run.py 保持一致
 T_TET4 = 288
 METHOD_ORDER = ("fast", "standard", "voigt")
-STAGE2_ROUTE_ORDER = ("pattern", "coalesce", "scipy", "pattern-chunked")
+STAGE2_ROUTE_ORDER = ("pattern", "coalesce", "scipy")
 FULL_ROUTE_ORDER = ("pattern", "coalesce", "scipy")
 
 
@@ -100,6 +101,38 @@ def peak_kb_per_dof(d: dict[str, Any]) -> float | None:
     return None
 
 
+# ----------------------------------------------------------------------------- 建网格
+def show_mesh_table() -> None:
+    items = cpu_artifacts("mesh_build_n*.json")
+    print("\n[mesh] 只建网格与空间 (TetrahedronMesh.from_box + LagrangeFESpace/TensorFunctionSpace), CPU RSS")
+    if not items:
+        print("  (无产物; 需先跑 --case mesh-build --grid <N>)")
+        return
+    header = ["n", "NC", "Ndof", "建网格峰值", "空间峰值", "合计绝对峰值", "峰值 KB/dof", "构建后常驻", "常驻 KB/dof", "耗时"]
+    rows = []
+    ceilings = []
+    for _, d in sorted(items, key=lambda kv: int(kv[1]["n"])):
+        kb = peak_kb_per_dof(d)
+        ceilings.append((int(d["n"]), kb))
+        rows.append([
+            str(d["n"]), f"{d.get('NC', 0):,}", f"{d.get('Ndof', 0):,}",
+            fmt_mib(d.get("meshbuild_peak_MiB")), fmt_mib(d.get("space_peak_MiB")),
+            fmt_mib(d.get("final_peak_MiB")), fmt_num(kb),
+            fmt_mib(d.get("retained_MiB")), fmt_num(d.get("retained_KB_per_dof")),
+            fmt_s(d.get("t_mesh_s")),
+        ])
+    print_table(header, rows, right_cols=set(range(1, len(header))))
+    print("  峰值 = 阶段内 VmHWM 绝对高水位; 常驻 = 构建结束 gc 后相对进程基线的 RSS 净增 (只持有网格与空间的代价).")
+    print(f"\n  {MEMORY_BUDGET / 2**30:.0f} GiB 预算下的公共上界外推 (只建网格, 不含任何装配):")
+    for n, kb in ceilings:
+        if not kb:
+            continue
+        ceiling = MEMORY_BUDGET / (kb * 1000)
+        n_ceiling = round((ceiling / 3) ** (1 / 3)) - 1
+        print(f"    n={n:<4}: 以 {kb:.2f} KB/dof 外推 -> 约 {ceiling / 1e6:.2f} M dof (n≈{n_ceiling})")
+    print("  该上界与装配层级无关: FA/EA/PA/UA 都要先建出网格与空间, 任何层级都不可能突破它.")
+
+
 # ----------------------------------------------------------------------------- 阶段 1
 def show_stage1_table(n: int | None) -> None:
     items = cpu_artifacts("stage1_*_n*.json")
@@ -151,7 +184,7 @@ def show_stage2_table(n: int | None) -> None:
     if not by_n:
         print("  (无新口径产物; 需先跑 --case global-merge --route all)")
         return
-    header = ["n", "Ndof", "route", "代码", "合并绝对峰值", "合并净增", "B/triplet", "KB/dof", "含输入 B/triplet", "nnz", "耗时"]
+    header = ["n", "Ndof", "route", "合并绝对峰值", "合并净增", "B/triplet", "KB/dof", "含输入 B/triplet", "nnz", "耗时"]
     rows = []
     for nn in sorted(by_n):
         for r in STAGE2_ROUTE_ORDER:
@@ -159,16 +192,16 @@ def show_stage2_table(n: int | None) -> None:
             if d is None:
                 continue
             rows.append([
-                str(nn), f"{d['Ndof']:,}", r, "生产" if d.get("production") else "原型",
+                str(nn), f"{d['Ndof']:,}", r,
                 fmt_mib(d.get("merge_peak_MiB")), fmt_mib(d.get("merge_net_MiB")),
                 fmt_num(d.get("merge_B_per_triplet")), fmt_num(d.get("merge_KB_per_dof")),
                 fmt_num(d.get("merge_incl_inputs_B_per_triplet")), f"{d.get('nnz', 0):,}",
                 fmt_s(d.get("t_merge_s")),
             ])
-    print_table(header, rows, right_cols={0, 1, 4, 5, 6, 7, 8, 9, 10})
+    print_table(header, rows, right_cols={0, 1, 3, 4, 5, 6, 7, 8, 9})
     print(
         "  B/triplet = 合并净增 / (144*NC); '含输入' 把 I/J/V 或 K_e 的生成也算进净增."
-        " pattern = 生产 CSRPattern (build_csr_pattern + assemble_csr), pattern-chunked = 分块原型 (非生产)."
+        " pattern = 生产 CSRPattern (build_csr_pattern + assemble_csr)."
     )
 
 
@@ -276,7 +309,7 @@ def show_full_table(method: str = "fast") -> None:
 # ----------------------------------------------------------------------------- 入口
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="compare.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--case", default="all", help="stage1 | stage2 | full | all")
+    parser.add_argument("--case", default="all", help="mesh | stage1 | stage2 | full | all")
     parser.add_argument("-n", type=int, default=None, help="stage1/stage2 表只看指定 n")
     parser.add_argument("--method", default="fast", help="full 表的单刚方法 (默认 fast)")
     parser.add_argument("--list", action="store_true", help="列出 outputs/ 下的产物")
@@ -288,13 +321,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     case = args.case.lower()
+    if case in ("mesh", "mesh-build", "all"):
+        show_mesh_table()
     if case in ("stage1", "element-stiffness", "all"):
         show_stage1_table(args.n)
     if case in ("stage2", "global-merge", "all"):
         show_stage2_table(args.n)
     if case in ("full", "full-assembly", "all"):
         show_full_table(args.method)
-    if case not in ("stage1", "element-stiffness", "stage2", "global-merge", "full", "full-assembly", "all"):
+    if case not in ("mesh", "mesh-build", "stage1", "element-stiffness", "stage2", "global-merge", "full", "full-assembly", "all"):
         parser.error(f"未知 --case {args.case!r}")
     print()
     return 0

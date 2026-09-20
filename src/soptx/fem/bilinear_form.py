@@ -7,7 +7,8 @@
    - 符号阶段: 自动惰性构建并复用 CSR 拓扑骨架与槽位映射;
    - 数值阶段: 利用 CPU ``np.add.at`` 或 GPU ``scatter_add_`` 原地原子累加;
    - 性能收益: 彻底消灭 FEALPy 传统 COO 排序瓶颈;
-3. 保持 EA (无矩阵算子) 下 ``@`` 矩阵向量乘接口完全不变.
+3. 只负责 FA (全装配) 层级: EA 及以下的无矩阵算子在 ``soptx.fem.levels`` 中,
+   不再复用本类继承自 FEALPy 的 ``@`` 实现.
 """
 
 from __future__ import annotations

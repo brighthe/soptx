@@ -1,0 +1,266 @@
+# 线弹性矩阵组装层级横向对比 (stored-B / EA / FA / PA / shared-Ke) 的数据点注册表。
+#
+# 本文件只描述"跑哪一条命令、产物落在哪"。
+#
+# 约定:
+#   script       仓库根起算的相对路径。
+#   args         传给该脚本的固定参数, 逐项写全, 不依赖脚本缺省值。
+#   output_mode  file  = 用 --output 指定完整路径
+#   产物名        不在此声明: 一律为 outputs/<id>.json, 由 id 推导。
+#   panel        "bandwidth" (memcpy 带宽基线), "matvec" (单次 MatVec 内存与耗时),
+#                "solve" (Jacobi-PCG 迭代数随 n 增长)。
+#   scheme       "stored-b" (逐单元逐积分点存物理 B_q 与 D_q),
+#                "ea" (逐单元存 K_e), "fa" (全局 CSR), "pa" (逐积分点存 J^{-1} 与 w·detJ),
+#                "shared-ke" (均匀网格共享一份 K_e); bandwidth 用 "memcpy"。
+#   repeats      MatVec 计时重复次数, 取中位数。
+#
+# 注意:
+#   1. 每数据点必须独占一个进程 (ru_maxrss 是进程级高水位, 无法按对象归因)。
+#   2. 全部工况在 numpy 单线程口径下运行 (OMP/OPENBLAS/MKL_NUM_THREADS=1, 由 config.THREAD_ENV 注入)。
+#   3. n = 104 对应约 347 万 DOF (与臧昕禹 344 万 DOF 同量级); stored-b 常驻约 13 GB, 只在 47 GiB 机器上跑。
+
+[figure]
+id = "assembly_level_capability"
+title = "线弹性矩阵组装层级横向对比: 内存与 MatVec 耗时"
+question = "同一 hex Q1 网格下 stored-B / EA / FA / PA / shared-Ke 的常驻内存、峰值内存与单次 MatVec 时间"
+consumer = "dut-postdoc:entities/zang-xinyu/zang-xinyu.md"
+
+# --------------------------------------------------------------------------
+# bandwidth —— memcpy 带宽基线 (2 GiB float64 数组拷贝)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "bandwidth_memcpy"
+panel = "bandwidth"
+role = "machine-baseline"
+summary = "np.copyto 2 GiB float64, 重复 10 次取中位数, 报告读+写 GB/s"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--bandwidth", "--scheme", "memcpy", "--repeats", "10"]
+output_mode = "file"
+mesh_type = "-"
+grid = "-"
+problem = "-"
+scheme = "memcpy"
+device = "cpu"
+n = 0
+repeats = 10
+
+# --------------------------------------------------------------------------
+# matvec —— n = 48 (约 34.6 万 DOF), 五方案全跑
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "matvec_stored-b_n48"
+panel = "matvec"
+role = "matvec-benchmark"
+summary = "3D hex Q1, n=48, 逐单元逐积分点存物理 B_q 与 D_q (臧昕禹推断方案)"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "stored-b", "--n", "48", "--repeats", "20"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "48^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "stored-b"
+device = "cpu"
+n = 48
+repeats = 20
+
+[[cases]]
+id = "matvec_ea_n48"
+panel = "matvec"
+role = "matvec-benchmark"
+summary = "3D hex Q1, n=48, EA 逐单元存 K_e"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "ea", "--n", "48", "--repeats", "20"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "48^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "ea"
+device = "cpu"
+n = 48
+repeats = 20
+
+[[cases]]
+id = "matvec_fa_n48"
+panel = "matvec"
+role = "matvec-benchmark"
+summary = "3D hex Q1, n=48, FA 全局 CSR (模式先行装配), scipy csr_matrix MatVec"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "fa", "--n", "48", "--repeats", "20"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "48^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "fa"
+device = "cpu"
+n = 48
+repeats = 20
+
+[[cases]]
+id = "matvec_pa_n48"
+panel = "matvec"
+role = "matvec-benchmark"
+summary = "3D hex Q1, n=48, PA 逐积分点存 J^{-1} 与 w·detJ, 共享参考梯度, 不落 B"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "pa", "--n", "48", "--repeats", "20"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "48^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "pa"
+device = "cpu"
+n = 48
+repeats = 20
+
+[[cases]]
+id = "matvec_shared-ke_n48"
+panel = "matvec"
+role = "matvec-benchmark"
+summary = "3D hex Q1, n=48, 均匀网格 + 均匀材料共享一份 K_e (24x24)"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "shared-ke", "--n", "48", "--repeats", "20"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "48^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "shared-ke"
+device = "cpu"
+n = 48
+repeats = 20
+
+# --------------------------------------------------------------------------
+# matvec —— n = 104 (约 347 万 DOF, 对应臧昕禹规模), 五种方案全跑
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "matvec_stored-b_n104"
+panel = "matvec"
+role = "matvec-benchmark-student-scale"
+summary = "3D hex Q1, n=104, stored-B 方案在学生规模下的常驻/峰值内存与单次 MatVec 时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "stored-b", "--n", "104", "--repeats", "5"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "104^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "stored-b"
+device = "cpu"
+n = 104
+repeats = 5
+
+[[cases]]
+id = "matvec_ea_n104"
+panel = "matvec"
+role = "matvec-benchmark-student-scale"
+summary = "3D hex Q1, n=104, EA 逐单元 K_e 在学生规模下的常驻/峰值内存与单次 MatVec 时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "ea", "--n", "104", "--repeats", "5"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "104^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "ea"
+device = "cpu"
+n = 104
+repeats = 5
+
+[[cases]]
+id = "matvec_fa_n104"
+panel = "matvec"
+role = "matvec-benchmark-student-scale"
+summary = "3D hex Q1, n=104, FA 全局 CSR 在学生规模下的常驻/峰值内存与单次 MatVec 时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "fa", "--n", "104", "--repeats", "5"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "104^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "fa"
+device = "cpu"
+n = 104
+repeats = 5
+
+[[cases]]
+id = "matvec_pa_n104"
+panel = "matvec"
+role = "matvec-benchmark-student-scale"
+summary = "3D hex Q1, n=104, PA 逐积分点 J^{-1} 在学生规模下的常驻/峰值内存与单次 MatVec 时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "pa", "--n", "104", "--repeats", "5"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "104^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "pa"
+device = "cpu"
+n = 104
+repeats = 5
+
+[[cases]]
+id = "matvec_shared-ke_n104"
+panel = "matvec"
+role = "matvec-benchmark-student-scale"
+summary = "3D hex Q1, n=104, shared-Ke 在学生规模下的常驻/峰值内存与单次 MatVec 时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--matvec", "--scheme", "shared-ke", "--n", "104", "--repeats", "5"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "104^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "shared-ke"
+device = "cpu"
+n = 104
+repeats = 5
+
+# --------------------------------------------------------------------------
+# solve —— Jacobi-PCG 迭代数随 n 增长 (shared-ke 算子, 全边界 Dirichlet, 内部 b = 1)
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "solve_shared-ke_n32"
+panel = "solve"
+role = "jacobi-pcg-iteration-growth"
+summary = "3D hex Q1, n=32, Jacobi-PCG 相对残差 1e-6, 记录迭代数与单步时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--solve", "--scheme", "shared-ke", "--n", "32"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "32^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "shared-ke"
+device = "cpu"
+n = 32
+repeats = 1
+
+[[cases]]
+id = "solve_shared-ke_n48"
+panel = "solve"
+role = "jacobi-pcg-iteration-growth"
+summary = "3D hex Q1, n=48, Jacobi-PCG 相对残差 1e-6, 记录迭代数与单步时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--solve", "--scheme", "shared-ke", "--n", "48"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "48^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "shared-ke"
+device = "cpu"
+n = 48
+repeats = 1
+
+[[cases]]
+id = "solve_shared-ke_n64"
+panel = "solve"
+role = "jacobi-pcg-iteration-growth"
+summary = "3D hex Q1, n=64, Jacobi-PCG 相对残差 1e-6, 记录迭代数与单步时间"
+script = "experiments/assembly_level_capability/run.py"
+args = ["--worker", "--solve", "--scheme", "shared-ke", "--n", "64"]
+output_mode = "file"
+mesh_type = "HexahedronMesh"
+grid = "64^3"
+problem = "LinearElasticity3D_UnitCube"
+scheme = "shared-ke"
+device = "cpu"
+n = 64
+repeats = 1

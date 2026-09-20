@@ -96,5 +96,17 @@ class OverlapOperator:
         self._profile_output_sync_seconds += output_sync_seconds
         return result
 
+    def diagonal(self) -> TensorLike:
+        """算子对角, 已按重叠自由度跨 rank 求和.
+
+        必须显式写出来, 不能靠 ``__getattr__`` 转发: 转发拿到的是局部算子未归约
+        的对角, 与本类 ``__matmul__`` 交出的全局作用不同口径, 调用方会在不知情
+        的情况下拿到只含本 rank 贡献的对角.
+
+        返回:
+            TensorLike: (gdof, ) 的全局算子对角。
+        """
+        return self.dof_comm.sync_add(self.local_operator.diagonal())
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self.local_operator, name)

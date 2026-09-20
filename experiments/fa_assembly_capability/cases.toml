@@ -55,7 +55,7 @@ n = 32
 id = "global-merge"
 panel = "stage2"
 role = "sparse-matrix-merge-study"
-summary = "3D tet p1, FA 阶段 2 总刚合并路线对比 (合成输入), 支持 coalesce/scipy/pattern/pattern-chunked"
+summary = "3D tet p1, FA 阶段 2 总刚合并路线对比 (合成输入), 支持 coalesce/scipy/pattern"
 script = "experiments/fa_assembly_capability/run.py"
 args = ["--worker", "--stage2", "--route", "pattern", "--n", "32"]
 output_mode = "file"
@@ -64,7 +64,7 @@ mesh_type = "TetrahedronMesh"
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 route = "pattern"
-routes = ["coalesce", "scipy", "pattern", "pattern-chunked"]
+routes = ["coalesce", "scipy", "pattern"]
 device = "cpu"
 n = 32
 
@@ -91,4 +91,21 @@ routes = ["pattern", "coalesce", "scipy"]
 device = "cpu"
 n = 32
 
+# --------------------------------------------------------------------------
+# mesh —— 只建网格与空间 (FA/EA/PA/UA 共享的下游前提, 与装配层级无关的公共上界)
+# --------------------------------------------------------------------------
 
+[[cases]]
+id = "mesh-build"
+panel = "mesh"
+role = "mesh-capacity-study"
+summary = "3D tet p1, 只建网格与函数空间 (不做任何装配), 测公共容量上界与常驻代价"
+script = "experiments/fa_assembly_capability/run.py"
+args = ["--worker", "--mesh", "--n", "32"]
+output_mode = "file"
+artifact = "mesh_build_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+device = "cpu"
+n = 32

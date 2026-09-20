@@ -1,0 +1,454 @@
+# 线弹性矩阵组装层级 (FA / EA / PA / UA) 正确性的数据点注册表。
+#
+# 本目录只收装配层级分类法里的层级。_common 另有 stored-b / shared-ke 两个对照实现,
+# 它们不是层级, 故不在此注册; 用到它们的是 ../assembly_level_capability/, 由那边
+# 自行负责其前提与正确性。
+#
+# 全部工况都调 examples/lagrange_elasticity/manufactured_convergence_demo.py, 本目录
+# 不自产数值代码, 只负责"跑哪条命令、产物落在哪"与验收口径。
+#
+# 本文件只描述"跑哪一条命令、产物落在哪"。
+#
+# 约定:
+#   id           一律 <panel>_<scheme> 两段, **网格不进 id**: 网格是工况的另一个坐标,
+#                由使用者在命令行上用 --mesh 选 (不给就跑该工况注册的全部网格)。于是
+#                注册表就是分类法那张 (层级 x 网格) 表: 行是 id, 列是 [cases.mesh.*]。
+#                scheme 固定第二段, 不设缺省 —— convergence 的 fa 也要写出来, 不沿用
+#                上游脚本"缺省档不进文件名"那套 (那是为兼容已冻结的 FA 产物名, case id
+#                没有这个包袱)。config.py 会校验 id 恰为这两段, 防止再漂。
+#   [cases.mesh.<网格>]
+#                一个 (id, 网格) 组合才是一个数据点: 一个进程、一个产物、一行状态。
+#                子表内可覆盖 args / artifact / summary / grid / problem / n 等任何字段,
+#                未覆盖的沿用 [[cases]] 上的共用值。网格标签是单段, 不含 "_" (段内用 "-",
+#                如 hex-distorted), 且不重复写维度 (quad 必是 2D, hex 必是 3D)。
+#   script       仓库根起算的相对路径。
+#   args         传给该脚本的固定参数, 逐项写全, 不依赖脚本缺省值。
+#   output_mode  file = 用 --output 指定完整路径 (本目录 run.py 自产的工况)
+#                dir  = 只用 --output-dir 给目录, 文件名由上游脚本自己拼 (外部脚本工况)
+#   产物名        自产工况不声明: 一律为 outputs/<id>_<网格>.json, 由 id 与网格推导。用
+#                --n 临时跑别的 n 时另存为 <id>_<网格>_n<n>.json, 不覆盖正规产物。外部
+#                脚本工况反过来必须显式写 artifact —— 文件名由上游脚本决定, 推导不出来。
+#   panel        眼下只有 "convergence" (该层级求解链的制造解收敛阶) 一个取值。字段保留而不
+#                去掉, 是因为 id 的命名规则 <panel>_<scheme> 靠它, 且将来若再开面板不必改 id 格式。
+#   scheme       该工况的装配层级, 取值 fa / ea / pa / ua, 一层级一条工况。
+#   problem      写上游脚本实例化的制造解类名 (soptx.problems.elasticity 下), 照抄类名而不
+#                另起描述性标签, 免得改了类名这里还留着旧说法。
+#   min_l2_order convergence 的 L2 收敛阶下限, 与上游脚本的 MINIMUM_L2_ORDER 保持一致。
+#
+# 注意:
+#   0. 一条链证两件事, 不需要额外的"算子一致性"面板。曾经另有一个 correctness 面板, 在单
+#      一 hex 网格 n=16 上拿 EA / PA 与 FA 对同一随机向量的作用结果比相对误差 (门禁
+#      1e-12)。它在 convergence 只有 FA 一条链时是必要的; 现在三个层级各有四格, 逐档
+#      比 convergence_<层级> 与 convergence_fa 的 L2 误差, 本身就是一次跨层级一致性
+#      检验, 且覆盖 4 族网格共 19 个规模, 严格包含"hex 单网格单向量"。故该面板整体删除。
+#      删除时评估过它仅存的三点差异, 结论是都不足以支撑一个常备面板:
+#        - 门禁 2.97e-16 比这里的 ~1e-11 (CG rtol 1e-12 经 κ 放大的地板) 紧五个数量级,
+#          但真实缺陷 (索引错、权重错、漏项) 是 O(1) 量级, 多出的分辨率无人需要;
+#        - 它打的是随机向量、无边界条件、无右端项, 能把装配核与 BC 路径切开, 但那是排障
+#          时的二分手段, 不是常备证据 —— 真要排障, 照 git 历史把 worker 捞回来即可;
+#        - 常驻字节 / B per cell 那几列该由 ../assembly_level_capability/ 的 matvec_* 出证,
+#          存储主张归那边, 不归本目录。
+#   1. 一层级一工况便于单独重跑与失败隔离: 改了 PartialAssembly 只需重跑 convergence_pa,
+#      某个层级崩了也不影响其余工况落盘。
+#   2. 全部工况在 numpy 单线程口径下运行 (OMP/OPENBLAS/MKL_NUM_THREADS=1, 由 config.THREAD_ENV 注入)。
+#   3. 判读顺序: 先横向对 niter 列, 再看 L2 阶。同一档上 ea 与 pa 的迭代数应逐项相等:
+#      二者是同一离散算子的两种存法, 对同一初值与同一右端张成同一个 Krylov 子空间, 迭代
+#      序列因而逐步相同, 只差舍入, 与用哪种 Krylov 方法无关。这比 L2 阶门禁灵敏得多 ——
+#      阶是四位有效数字的钝器, 迭代数是整数的硬等号。
+#      ua 对 pa 的判据还要再硬一档: 两者的几何量同出 levels/_quadrature.py 的
+#      quadrature_geometry, 之后走同一串 einsum, 作用结果逐位相同 (探针实测最大绝对差
+#      严格为 0), 于是 L2 误差列也应逐位相同, 而不只是吻合到求解容差。哪怕末位有差,
+#      都说明两条路径已经岔开。
+
+[figure]
+id = "assembly_level_consistency"
+title = "线弹性矩阵组装层级的正确性"
+question = "FA / EA / PA / UA 四个装配层级的求解链, 是否各自以理论阶收敛到制造解, 且逐档给出同一个离散解"
+consumer = "dut-postdoc:research/piml-matrix-free-gpu/project-plan.md"
+
+# --------------------------------------------------------------------------
+# convergence —— 各算子层级求解链的制造解收敛阶 (验"与连续问题一致")
+#
+# 复用 examples/lagrange_elasticity/manufactured_convergence_demo.py, 本目录不重写数值代码。
+#
+# 一个层级的收敛阶证据要盖住四族网格 (单纯形 tri/tet 与张量积 quad/hex): 两族的形函数、
+# Jacobian 与积分点数都不同, 单纯形上的收敛阶盖不住张量积。tri 那格与 ../matrix_free_capability/ 的 a-fa-2d 是同一条命令 (产物也
+# 同名, 只是各落各的 outputs/): 那边把它当作 matrix-free 叙事的基线, 这里则是 FA 这一
+# 层级自己的证据, 两处的用途不同, 故各自注册。tet 那格只借了 a-fa-3d 的模型与装配路径,
+# 档位改成与 hex 对齐, 见下面那格的注释。
+#
+# 这个面板不只跑 FA: --operator-level 让同一条链换上 ea / pa 算子, 于是每个层级都有
+# 自己的收敛阶证据, 同时逐档与 fa 那条对比又给出跨层级一致性 (见头部注意 0)。
+# ea / pa 无显式矩阵, 只能配 --solver cg。
+#
+# 产物文件名由上游脚本按 (dim, mesh_type, model, degree, solver, assembly_method,
+# operator_level) 拼成, 故这些工况显式声明 artifact, 且 output_mode 取 "dir"。
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "convergence_fa"
+panel = "convergence"
+role = "chain-convergence"
+scheme = "fa"
+script = "examples/lagrange_elasticity/manufactured_convergence_demo.py"
+output_mode = "dir"
+device = "cpu"
+min_l2_order = 1.5
+
+# --mumps-sym 1 声明对称正定: 平面应变全 Dirichlet 的刚度阵是 SPD。
+# --assembly-method fast 与 3D 两格取齐: 2D 这点规模本来 standard 也跑得动, 但四格
+# 用同一条装配路径, 表里的耗时列才是可比的, 也少一个解释起来没意义的差异项。
+# 注册表里一律写全, 不吃缺省值 —— 缺省改了产物名会跟着改, 证据文件不该这么飘。
+[cases.mesh.quad]
+summary = "2D quad Q1 sinusoidal 制造解五档误差链, MUMPS 直接解, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "quad", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--solver", "mumps", "--mumps-sym", "1", "--assembly-method", "fast",
+]
+artifact = "manufactured_convergence_2d_quad_sinusoidal_p1_mumps_fast.json"
+mesh_type = "QuadrangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 与 quad 那格逐项对应, 只换 --mesh-type: P1 与 Q1 的 L2 理论阶同为 2.0, 两格可直接并读。
+[cases.mesh.tri]
+summary = "2D tri P1 sinusoidal 制造解五档误差链, MUMPS 直接解, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "tri", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--solver", "mumps", "--mumps-sym", "1", "--assembly-method", "fast",
+]
+artifact = "manufactured_convergence_2d_tri_sinusoidal_p1_mumps_fast.json"
+mesh_type = "TriangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 从 n=4 起步而不是 n=2: n=2 的六面体网格是退化档 —— 3^3 = 27 个节点里 26 个在边界,
+# 只剩正中心 1 个内部节点 (3 个自由度), 体力在它上面按对称性积分为零, Dirichlet 数据
+# 也是零, 于是施加边界条件后 ||F|| 落在舍入量级。真解 u_h 恒为零 (rel L2 整好是 1.0),
+# 相对残差成了 0/0: FA 走 MUMPS 侥幸报出 4.5e-17, EA 走 CG 则第 0 步就判收敛、返回
+# u=0, 相对残差恒等于 1 而误触残差门禁。那一档本来也提供不了任何收敛信息, 直接不收。
+#
+# 起点右移后 levels 取 4 而非 5, 最细一档仍停在 n=32: 六面体每行约 81 个非零, 是同规模
+# 四面体的近两倍, 再往上收到 n=64 (823,875 自由度) MUMPS 的填入会把内存打爆 —— 同规模
+# 的四面体链在 n=64 就已经吃到近 19 GiB。四档给三个观测阶, 定阶够用。
+# --assembly-method fast 与 3D 四面体链一致, 避免 standard 把被求和掉的积分点轴物化。
+[cases.mesh.hex]
+summary = "3D hex Q1 divfree-poly 制造解四档误差链, MUMPS + fast 装配, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "3", "--mesh-type", "hex", "--model", "divfree-poly",
+    "--degree", "1", "--base", "4", "--levels", "4",
+    "--solver", "mumps", "--mumps-sym", "1", "--assembly-method", "fast",
+]
+artifact = "manufactured_convergence_3d_hex_divfree-poly_p1_mumps_fast.json"
+mesh_type = "HexahedronMesh"
+grid = "4->32"
+problem = "DivergenceFreePolynomialElasticity3D"
+n = 32
+
+# base 与 hex 那格取齐 (2 -> 32), 不用 ../matrix_free_capability/ a-fa-3d 的 4 -> 64:
+# 两个 3D 格档位一致才能并读, 差一档时误差是网格族与分辨率两个因素混在一起。n=64 那档
+# 单点就要 225 s (MUMPS 分解 823,875 自由度, 常驻近 19 GiB), 而定阶只看末档观测阶 ——
+# 收到 n=32 (107,811 自由度) 同样是五档, 已足够压住 >= 1.5 的门禁。
+# 注意由此这一格与 a-fa-3d 已非同一条命令, 但产物同名 (文件名不含 base/levels), 各落各的
+# outputs/ 互不覆盖; 跨目录并读这份 JSON 时须先核对 levels 段的档位。
+# --assembly-method fast 保留: 缺省 standard 会把被求和掉的积分点轴物化成九个
+# (NC, NQ, 4, 4) 临时张量, 3D 上是纯浪费。
+[cases.mesh.tet]
+summary = "3D tet P1 divfree-poly 制造解五档误差链, MUMPS + fast 装配, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "3", "--mesh-type", "tet", "--model", "divfree-poly",
+    "--degree", "1", "--base", "2", "--levels", "5",
+    "--solver", "mumps", "--mumps-sym", "1", "--assembly-method", "fast",
+]
+artifact = "manufactured_convergence_3d_tet_divfree-poly_p1_mumps_fast.json"
+mesh_type = "TetrahedronMesh"
+grid = "2->32"
+problem = "DivergenceFreePolynomialElasticity3D"
+n = 32
+
+[[cases]]
+id = "convergence_ea"
+panel = "convergence"
+role = "chain-convergence"
+scheme = "ea"
+script = "examples/lagrange_elasticity/manufactured_convergence_demo.py"
+output_mode = "dir"
+device = "cpu"
+min_l2_order = 1.5
+
+# 与 convergence_fa 的 quad 那格逐项对应, 只换 --operator-level 与随之被迫更换的求解器:
+# EA 不持有显式矩阵, MUMPS 无从分解, 只能走 CG。判据是绝对的 (L2 阶 >= 1.5), 不是
+# 拿 EA 与 FA 比, 所以换求解器不影响结论成立。
+# rtol 取缺省 1e-12: 最细一档的离散误差在 1e-4 量级, 求解误差要远低于它才不污染定阶。
+# --preconditioner none 显式写出: 这条链要的就是"裸 CG 能不能撑住", 迭代数按
+# O(h^-1) 翻倍 (5/24/54/110/220) 正是无预条件下 κ ~ h^-2 的特征。不写死就只能靠读
+# 源码反推缺省, 而 niter 那一列离了这个前提没法判读。
+# 四格的网格与档位与 convergence_fa 逐项取齐 (quad/tri 4->64, hex/tet 2->32), 只换
+# --operator-level 与求解器: 同一格两个层级并排放, 差异才只剩"算子怎么存", 别的都一样。
+# 裸 CG 的代价可控 —— ../matrix_free_capability/ 的 3D tet EA 实测 (n=8/16/32/64) 是
+# 64/134/250/493 次迭代、0.02/0.12/2.09/35.01 s, 收到 n=32 那档只要 2 s 量级。
+# 迭代数逐档翻倍是 κ ~ h^-2 的必然, 不是异常; 若哪天要收到 n=64 以上再考虑
+# --preconditioner jacobi。
+[cases.mesh.quad]
+summary = "2D quad Q1 sinusoidal 制造解五档误差链, EA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "quad", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--operator-level", "ea", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_2d_quad_sinusoidal_p1_cg_fast_ea.json"
+mesh_type = "QuadrangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 与上面 quad 那格只差 --mesh-type: P1 与 Q1 的 L2 理论阶同为 2.0。单纯形上每单元
+# 只有 12 个自由度 (Q1 是 24), K_e 小一半, 但单元数是 quad 的两倍, EA 的每次作用
+# 总工作量相当。
+[cases.mesh.tri]
+summary = "2D tri P1 sinusoidal 制造解五档误差链, EA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "tri", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--operator-level", "ea", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_2d_tri_sinusoidal_p1_cg_fast_ea.json"
+mesh_type = "TriangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 档位与 convergence_fa 的 hex 格一致 (4 -> 32, 四档): EA 这边既没有 MUMPS 的填入问题,
+# n=2 那个退化档对 CG 又是硬伤 (||F|| 在舍入量级, 第 0 步即判收敛, 相对残差恒为 1),
+# 两个理由都指向同一个起点。两个层级要能逐档并读, 就必须同档。
+[cases.mesh.hex]
+summary = "3D hex Q1 divfree-poly 制造解四档误差链, EA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "3", "--mesh-type", "hex", "--model", "divfree-poly",
+    "--degree", "1", "--base", "4", "--levels", "4",
+    "--operator-level", "ea", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_3d_hex_divfree-poly_p1_cg_fast_ea.json"
+mesh_type = "HexahedronMesh"
+grid = "4->32"
+problem = "DivergenceFreePolynomialElasticity3D"
+n = 32
+
+# 四格里最重的一条, 但也只是 2 s 量级 (见上面段首注释引的实测迭代数与耗时)。
+[cases.mesh.tet]
+summary = "3D tet P1 divfree-poly 制造解五档误差链, EA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "3", "--mesh-type", "tet", "--model", "divfree-poly",
+    "--degree", "1", "--base", "2", "--levels", "5",
+    "--operator-level", "ea", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_3d_tet_divfree-poly_p1_cg_fast_ea.json"
+mesh_type = "TetrahedronMesh"
+grid = "2->32"
+problem = "DivergenceFreePolynomialElasticity3D"
+n = 32
+
+[[cases]]
+id = "convergence_pa"
+panel = "convergence"
+role = "chain-convergence"
+scheme = "pa"
+script = "examples/lagrange_elasticity/manufactured_convergence_demo.py"
+output_mode = "dir"
+device = "cpu"
+min_l2_order = 1.5
+
+# 四格与 convergence_fa / convergence_ea 逐项取齐 (quad/tri 4->64, hex/tet 2->32,
+# 同样的制造解与 --assembly-method fast), 只换 --operator-level。三个层级同档并排,
+# 差异才只剩"算子怎么存"。PA 与 EA 一样不持有显式矩阵, MUMPS 无从分解, 必须走 CG;
+# --preconditioner none 的理由同 EA 那条, 见上一段。
+#
+# 迭代数应与 convergence_ea 逐档相同: PA 与 EA 是同一个离散算子的两种存法, 对同一初值
+# 与同一右端张成同一个 Krylov 子空间, 迭代序列因而逐步相同, 只差舍入; 这不依赖用的是哪
+# 种 Krylov 方法, 本链取的是 CG。若某档 niter 与 EA 明显不等, 那是 PA 的 B / D 算子出了
+# 问题, 不是求解器的随机性 —— 这条对照比 L2 阶门禁更灵敏, 判读时先看它。
+#
+# 本链证的是"PA 算得对", 不是"PA 更划算", 两点原因:
+#   1. p = 1 下 PA 是反向取舍。PA 每单元存 O(NQ * GD^2), EA 存 (GD*ldof)^2, 交叉点在
+#      p = 2 (quad 与 hex 皆然, 见 src/soptx/fem/levels/partial.py 头部), p = 1 时 PA
+#      反而更费; 且本实现按稠密 einsum 写, 没做张量积单元的和分解 (sum factorization),
+#      速度优势一分也没兑现。存储/速度的取证要另开 --degree 2 的链, 不在本条。
+#   2. from_box 的均匀网格对 PA 是退化算例。PA 的前提是"逐积分点存 J^{-1}", 而均匀
+#      quad / hex 的 Jacobian 逐单元为常数且各单元相同, 这条路径根本没被压到 (单纯形
+#      稍好: J 各单元不同, 但单元内仍是常数)。变 Jacobian 的取证要等 [cases.mesh.hex-distorted],
+#      前提是 _common 的 setup_problem 支持扭曲网格, 见文件末尾记账第 3 条。
+[cases.mesh.quad]
+summary = "2D quad Q1 sinusoidal 制造解五档误差链, PA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "quad", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--operator-level", "pa", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_2d_quad_sinusoidal_p1_cg_fast_pa.json"
+mesh_type = "QuadrangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 与上面 quad 那格只差 --mesh-type。单纯形上 PA 的 J^{-1} 逐单元不同 (quad/hex 的均匀
+# 网格上则各单元全同), 所以这两格是四格里唯一稍微碰到几何因子的, 虽然单元内仍是常数。
+[cases.mesh.tri]
+summary = "2D tri P1 sinusoidal 制造解五档误差链, PA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "tri", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--operator-level", "pa", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_2d_tri_sinusoidal_p1_cg_fast_pa.json"
+mesh_type = "TriangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 档位与 fa / ea 的 hex 格一致 (4 -> 32, 四档): n = 2 是退化档 (27 个节点里 26 个在
+# 边界, ||F|| 落在舍入量级, CG 第 0 步即判收敛, 相对残差恒为 1), 三个层级同弃。
+[cases.mesh.hex]
+summary = "3D hex Q1 divfree-poly 制造解四档误差链, PA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "3", "--mesh-type", "hex", "--model", "divfree-poly",
+    "--degree", "1", "--base", "4", "--levels", "4",
+    "--operator-level", "pa", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_3d_hex_divfree-poly_p1_cg_fast_pa.json"
+mesh_type = "HexahedronMesh"
+grid = "4->32"
+problem = "DivergenceFreePolynomialElasticity3D"
+n = 32
+
+# 四格里最重的一条: 迭代数与 convergence_ea[tet] 相同 (末档 261 次), 但 PA 每次作用
+# 是两次张量收缩加逐点作用, 按稠密 einsum 写, 单次比 EA 的一次稠密矩阵向量乘更费,
+# 故墙钟时间应高于 EA 那条的 2 s 量级。这是 p = 1 下的预期, 不是异常。
+[cases.mesh.tet]
+summary = "3D tet P1 divfree-poly 制造解五档误差链, PA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "3", "--mesh-type", "tet", "--model", "divfree-poly",
+    "--degree", "1", "--base", "2", "--levels", "5",
+    "--operator-level", "pa", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_3d_tet_divfree-poly_p1_cg_fast_pa.json"
+mesh_type = "TetrahedronMesh"
+grid = "2->32"
+problem = "DivergenceFreePolynomialElasticity3D"
+n = 32
+
+[[cases]]
+id = "convergence_ua"
+panel = "convergence"
+role = "chain-convergence"
+scheme = "ua"
+script = "examples/lagrange_elasticity/manufactured_convergence_demo.py"
+output_mode = "dir"
+device = "cpu"
+min_l2_order = 1.5
+
+# UA 走 PA 的同一条数据流, 只是不把几何量常驻: J^{-1} 与 w_q detJ_q 在每次作用里现算。
+# 两个层级的几何量同出 src/soptx/fem/levels/_quadrature.py 的 quadrature_geometry, 之后
+# 喂进同一个 DofToQuad 与同一个 LinearElasticQFunction, 浮点运算次序字面上一致, 因此
+# 作用结果逐位相同 (小规模探针实测最大绝对差严格为 0), 误差链与 niter 列也应逐位复现
+# convergence_pa。这条链因而不产出新的数值结论, 它兑现的是"层级矩阵不留空格"与耗时列。
+#
+# 只注册 quad / tri / hex 三格, 不收 tet。UA 每次作用要重算 NC * NQ 个 GD x GD 的逆,
+# 小规模探针上 ua/pa 的单次 matvec 比在 3 ~ 6 倍之间, 而 convergence_pa[tet] 本身已是
+# 225 s, 折算过去是 11 ~ 23 min —— 整条链里唯一一格就要盖过其余全部工况之和。既然
+# 那一格的数值内容可由逐位相等推知, 这笔墙钟时间买不到信息, 故暂缺, 待 PA 做完张量积
+# 单元的和分解 (sum factorization) 再补。tet 那一格的空缺不影响定阶: quad / tri / hex
+# 已覆盖张量积与单纯形两族, 2D 与 3D 两个维数。
+[cases.mesh.quad]
+summary = "2D quad Q1 sinusoidal 制造解五档误差链, UA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "quad", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--operator-level", "ua", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_2d_quad_sinusoidal_p1_cg_fast_ua.json"
+mesh_type = "QuadrangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 与上面 quad 那格只差 --mesh-type。单纯形上每次作用现算的 J^{-1} 逐单元不同, 而均匀
+# quad / hex 上各单元全同 —— 对 UA 这点无关紧要 (它反正每次都重算), 但对读数有意义:
+# 这两格是唯一能看出"重算几何量"确实在做实事的地方。
+[cases.mesh.tri]
+summary = "2D tri P1 sinusoidal 制造解五档误差链, UA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "2", "--mesh-type", "tri", "--model", "sinusoidal",
+    "--degree", "1", "--base", "4", "--levels", "5",
+    "--operator-level", "ua", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_2d_tri_sinusoidal_p1_cg_fast_ua.json"
+mesh_type = "TriangleMesh"
+grid = "4->64"
+problem = "SinusoidalPlaneStrainElasticity2D"
+n = 64
+
+# 档位与 fa / ea / pa 的 hex 格一致 (4 -> 32, 四档), 起点右移的理由三个层级同弃 (n = 2
+# 是退化档)。这是本工况唯一的 3D 格, 也是 UA 常驻优势最明显的一格: 探针上 3D 的
+# pa/ua 常驻比是 17.7 倍, 2D 只有 11.3 倍 —— PA 压着的 J^{-1} 是 GD^2 的。
+[cases.mesh.hex]
+summary = "3D hex Q1 divfree-poly 制造解四档误差链, UA 算子 + CG, L2 阶须 >= 1.5 (理论 2.0)"
+args = [
+    "--dim", "3", "--mesh-type", "hex", "--model", "divfree-poly",
+    "--degree", "1", "--base", "4", "--levels", "4",
+    "--operator-level", "ua", "--solver", "cg", "--assembly-method", "fast",
+    "--preconditioner", "none",
+]
+artifact = "manufactured_convergence_3d_hex_divfree-poly_p1_cg_fast_ua.json"
+mesh_type = "HexahedronMesh"
+grid = "4->32"
+problem = "DivergenceFreePolynomialElasticity3D"
+n = 32
+
+# --------------------------------------------------------------------------
+# 待扩充的数据点 (接口尚未具备, 先在此记账)
+# --------------------------------------------------------------------------
+#
+# 1. 分类法里尚未落地的层级 (FA/TA -> LA -> EA/EbE -> PA/QA -> UA/NONE 共五级,
+#    斜杠两侧是同一级的别名: PA 与 QA 是一级, 不是两级)
+#
+#    LA (每 rank 的局部稀疏矩阵, 求和切在 P 这一层)
+#      不是本目录能取证的层级: 单 rank 时局部矩阵即全局矩阵, 与 FA 在精确算术下等价,
+#      而本目录整套是单线程 CPU。要成为独立数据点得等 MPI 上来, 届时归属并行那边的
+#      实验目录, 不是这里。按原文 LA "通常不算 Matrix-Free", 省的是全局编号而非矩阵。
+#
+#    UA / NONE (连 D_e 也不存, 每次 apply 从几何与材料即时构造, 零常驻)
+#      已落地 (src/soptx/fem/levels/unassembled.py), convergence_ua 已注册 quad / tri / hex
+#      三格。尚缺 tet 那一格, 理由见该工况段首注释: 折算耗时 11 ~ 23 min, 而其数值内容
+#      可由 UA 对 PA 的逐位相等推知, 买不到信息。补这一格的前置条件是 PA 侧做完张量积
+#      单元的和分解 (见下面第 2 条), 把基数压下来。
+#
+# 2. p >= 2 的 PA 链 (存储与速度的取证)
+#    convergence 面板的 (层级 x 网格) 矩阵已满: fa / ea / pa 各四格 (quad / tri / hex / tet),
+#    共 12 个数据点, 三个层级逐档可并排读。但三条链都是 p = 1, 而 PA 相对 EA 的存储
+#    交叉点在 p = 2 (quad 与 hex 皆然, 见 src/soptx/fem/levels/partial.py 头部), p = 1
+#    下 PA 反而更费。所以现有 pa 链只证"PA 算得对", 证不了"PA 更划算"。
+#    取证要另开 --degree 2 的一条, 四格模板照抄 convergence_pa 只改 --degree, 并在产物
+#    里读 PA / EA 的常驻字节数与单次作用耗时。注意本实现按稠密 einsum 写, 没做张量积
+#    单元的和分解 (sum factorization), 因此即便到 p = 2 也只兑现存储优势, 速度仍会输给
+#    EA —— 那是实现选择, 不是层级本身的结论, 记账时要写清楚, 别把它读成 PA 的上限。
+#
+# 3. 非均匀网格下的 PA
+#    三条链的 quad / hex 两格都用 from_box 的均匀网格, 其 Jacobian 不但逐单元为常数,
+#    各单元还全同, 对"PA 逐积分点存 J^{-1}"这一前提是退化算例 —— 跑绿了并不说明变
+#    Jacobian 的路径是对的。tri / tet 两格稍好 (J 各单元不同, 但单元内仍是常数), 仍不
+#    足以压住。需给 convergence_pa 加一格 [cases.mesh.hex-distorted] —— 前提是上游脚本
+#    的 --mesh-type 支持扭曲六面体网格。

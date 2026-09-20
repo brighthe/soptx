@@ -302,3 +302,51 @@ solve_method = "cg"
 cg_rtol = 1.0e-12
 cg_atol = 1.0e-12
 cg_maxiter = 20000
+
+
+# ---------------------------------------------------------------------
+# 工况 6: 2D 悬臂梁, 左端固支, 右下角单位集中载荷 (Quad 80x50, 子结构 ft/lc 对照基准)
+# ---------------------------------------------------------------------
+[[cases]]
+# -- 台账与对照 (不进求解) --
+id = "cantilever_2d_fa"
+summary = "2D 右下角点载荷 + Quadrangle 80x50 + sensitivity + OC (子结构缩聚对照参照)"
+role = "substructure-reference-quad"
+
+# -- A 问题 (连续问题本身; 改了就是换一道题) --
+problem = "cantilever_corner"
+domain = [160.0, 100.0]
+load = -1.0
+emax = 1.0
+nu = 0.3
+volfrac = 0.5
+
+# -- B 离散 (有限维近似; grid 同时决定设计空间分辨率) --
+dimension = 2
+cell_type = "quad"
+grid = [80, 50]
+space_degree = 1
+integration_order = 2
+
+# -- C 拓扑优化建模 (0/1 松弛手段; 改了必然改变最优解) --
+interpolation_method = "msimp"
+simp_penalty = 3.0
+void_youngs_modulus = 1.0e-6
+filter_type = "sensitivity"
+filter_radius = 3.0
+projection_beta = 1.0
+projection_eta = 0.5
+projection_beta_max = 512.0
+projection_continuation_iter = 50
+
+# -- D 算法 (求同一问题的不同路径; 收敛意义下应给出同一解) --
+optimizer = "oc"
+move = 0.2
+density_min = 1.0e-3
+max_iter = 100
+tol_change = 0.001
+assembly_method = "standard"
+solve_method = "cg"
+cg_rtol = 1.0e-12
+cg_atol = 1.0e-12
+cg_maxiter = 20000

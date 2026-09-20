@@ -1,0 +1,98 @@
+# pa_assembly_capability 数据点注册表.
+#
+# 约定 (与 ea_assembly_capability / fa_assembly_capability 一致):
+#   script       仓库根起算的脚本路径, 各数据点由 run.py 的 Worker 模式测量.
+#   args         Worker 固定参数; 调度层按 methods / n / repeats / maxiter / tol 展开与覆盖.
+#   output_mode  "file": 调度层把 --output <outputs/artifact> 追加到 argv.
+#   artifact     代表性产物名; 实际文件名由调度层按 <kind>_<method>_n<N>.json 生成.
+#   panel        cache (积分点几何与材料数据缓存) / matvec (核心 PA 刚度算子乘 K x) / solve (核心 Jacobi-PCG 求解)
+#                / continuous (连续测量) / baseline (单核硬件基线).
+#   method       单刚组装方式/方法名, 默认 fast.
+#
+# 被测对象是仓库核心代码 soptx.fem.levels.partial.PartialAssembly 与 soptx.fem.analyzers.lagrange_fem_analyzer.LagrangeFEMAnalyzer(operator_level='pa'); run.py 不含自有算子 / 求解器实现.
+# 注意: 每个数据点独占一个子进程. Worker 内每阶段重置 VmHWM 取绝对峰值, 全程峰值 = 各阶段峰值最大值.
+# 问题、网格、空间与材料的构建和 fa / ea 完全相同 (experiments/_common/fe_problem.py).
+
+[figure]
+id = "pa_assembly_capability"
+title = "PA 部分装配无矩阵算子的内存机制与容量能力"
+question = "缓存积分点数据的 PA 算子: 常驻多大、算子乘多快、Jacobi-PCG 迭代数如何随 n 增长"
+consumer = "dut-postdoc:research/piml-matrix-free-gpu/project-plan.md"
+
+[[cases]]
+id = "element-cache"
+panel = "cache"
+role = "partial-geometry-cache"
+summary = "assemble_stiff_matrix('pa') 缓存积分点几何与材料数据及 cell2dof 的阶段峰值 / 净增 (fast)"
+script = "experiments/pa_assembly_capability/run.py"
+args = ["--worker", "--cache", "--method", "fast", "--n", "32"]
+output_mode = "file"
+artifact = "cache_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+n = 32
+
+[[cases]]
+id = "pa-matvec"
+panel = "matvec"
+role = "pa-operator-matvec"
+summary = "核心 PA 刚度算子乘 K x = G^T B^T D B G x, 重复计时取中位数与有效带宽下界"
+script = "experiments/pa_assembly_capability/run.py"
+args = ["--worker", "--matvec", "--method", "fast", "--n", "32", "--repeats", "20"]
+output_mode = "file"
+artifact = "matvec_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+n = 32
+repeats = 20
+
+[[cases]]
+id = "pa-continuous"
+panel = "continuous"
+role = "pa-matvec-continuous-study"
+summary = "同一进程连续测量: PA 缓存 -> 输入准备 -> 首次算子乘 (工作区物化) -> 稳态重复算子乘 (零内存增长)"
+script = "experiments/pa_assembly_capability/run.py"
+args = ["--worker", "--continuous", "--method", "fast", "--n", "32", "--repeats", "20"]
+output_mode = "file"
+artifact = "cache_matvec_continuous_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+n = 32
+repeats = 20
+
+[[cases]]
+id = "pa-cg-solve"
+panel = "solve"
+role = "jacobi-pcg-iteration-growth"
+summary = "核心 PA 算子 + Jacobi-PCG 求解制造解问题: 迭代数、单步耗时与全程峰值"
+script = "experiments/pa_assembly_capability/run.py"
+args = ["--worker", "--solve", "--method", "fast", "--n", "32", "--maxiter", "5000", "--tol", "1e-6"]
+output_mode = "file"
+artifact = "solve_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+n = 32
+preconditioner = "jacobi"
+maxiter = 5000
+tol = 1e-6
+
+[[cases]]
+id = "cpu-baseline"
+panel = "baseline"
+role = "hardware-baseline"
+summary = "单核硬件基线: memcpy 带宽 (2 GiB x2, 读 + 写) 与 dgemm 算力 (n = 4096), 供阶段 2 换算带宽 / 算力占比"
+script = "experiments/pa_assembly_capability/run.py"
+args = ["--worker", "--baseline"]
+output_mode = "file"
+artifact = "baseline_cpu.json"
+env = { OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1", MKL_NUM_THREADS = "1" }
+mesh_type = "-"
+grid = "-"

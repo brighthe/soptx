@@ -4,6 +4,10 @@
 ``_analyzer_arguments``; ``operator_level`` 取 ``"fa"`` (全局稀疏矩阵全装配) 或
 ``"ea"`` (无矩阵单元装配), 两个层级都由本模块产出, 因此本模块不隶属于任何单一算子层级.
 
+``preconditioner_level`` 是与 ``operator_level`` 平行的第二根轴, 决定预条件子在哪个
+层级上取算子; 为 ``None`` (默认) 时预条件子绑主算子本身. 两根轴可以取不同的值 ——
+主算子走 matrix-free 省内存, 预条件子仍可落在 ``"fa"`` 上供需要显式矩阵的后端使用.
+
 本模块导入时不依赖 ``mpi4py``: 仅在构造分布式分析器时延迟导入分布式实现,
 确保无 MPI 环境下依然可以安全导入本模块执行单机串行分析.
 
@@ -27,6 +31,7 @@ def _analyzer_arguments(
     degree: int = 1,
     operator_level: str = "ea",
     assembly_method: str = "standard",
+    preconditioner_level: str | None = None,
 ) -> dict[str, Any]:
     """将物理问题、材料本构与有限元空间组合为标准分析器构造参数字典."""
     return {
@@ -36,6 +41,7 @@ def _analyzer_arguments(
         "space_degree": degree,
         "integration_order": degree + 3,
         "operator_level": operator_level,
+        "preconditioner_level": preconditioner_level,
         "assembly_method": assembly_method,
         "tensor_space": space,
     }
@@ -48,6 +54,7 @@ def build_serial_analyzer(
     degree: int = 1,
     operator_level: str = "ea",
     assembly_method: str = "standard",
+    preconditioner_level: str | None = None,
 ) -> LagrangeFEMAnalyzer:
     """构造不含跨进程通信的串行拉格朗日有限元分析器.
 
@@ -62,6 +69,8 @@ def build_serial_analyzer(
         operator_level (str, 可选): 算子装配级别, 可选 "ea" (无矩阵单元装配) 或 "fa" (全局稀疏矩阵全装配). 默认值为 "ea".
         assembly_method (str, 可选): 单元矩阵的收缩顺序, 可选 ``"standard"``、``"voigt"`` 或 ``"fast"``. 它只改变
             中间张量的规模与峰值内存, 不改变单元矩阵的数值. 默认值为 ``"standard"``.
+        preconditioner_level (str | None, 可选): 预条件子取算子的层级, 取值同 ``operator_level``;
+            为 ``None`` 时预条件子绑主算子本身. 默认值为 ``None``.
 
     返回:
         LagrangeFEMAnalyzer: 初始化的串行有限元分析器实例.
@@ -69,7 +78,8 @@ def build_serial_analyzer(
     return LagrangeFEMAnalyzer(
         solve_method="scipy",
         **_analyzer_arguments(
-            space, pde, material, degree, operator_level, assembly_method
+            space, pde, material, degree, operator_level, assembly_method,
+            preconditioner_level,
         ),
     )
 
@@ -81,6 +91,7 @@ def build_distributed_analyzer(
     degree: int = 1,
     operator_level: str = "ea",
     assembly_method: str = "standard",
+    preconditioner_level: str | None = None,
     *,
     dof_comm: Any,
 ) -> Any:
@@ -96,6 +107,8 @@ def build_distributed_analyzer(
         degree (int, 可选): 有限元插值多项式阶数. 默认值为 1.
         operator_level (str, 可选): 算子装配级别 ("ea" 或 "fa"). 默认值为 "ea".
         assembly_method (str, 可选): 单元矩阵的收缩顺序, 含义同 ``build_serial_analyzer``. 默认值为 ``"standard"``.
+        preconditioner_level (str | None, 可选): 预条件子取算子的层级, 含义同 ``build_serial_analyzer``.
+            多 Rank 下不能取 ``"fa"`` —— 对称消元没有重叠归约的插入点. 默认值为 ``None``.
         dof_comm (EntityMPI): 自由度跨进程通信器 (关键字参数).
 
     返回:
@@ -108,7 +121,8 @@ def build_distributed_analyzer(
     return DistributedElasticityAnalyzer(
         dof_comm=dof_comm,
         **_analyzer_arguments(
-            space, pde, material, degree, operator_level, assembly_method
+            space, pde, material, degree, operator_level, assembly_method,
+            preconditioner_level,
         ),
     )
 

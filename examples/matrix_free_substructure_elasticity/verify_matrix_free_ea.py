@@ -101,7 +101,7 @@ NITER_TOLERANCE = 1
 # 求解级: 两条 CG 解相互一致的阈值, 见模块 docstring.
 SOLUTION_MUTUAL_TOL = 1e-8
 
-# 密度场取值区间, 与 piml_substructure_elasticity/deployment_config.py 的
+# 密度场取值区间, 与 piml_substructure_elasticity/_common.py 的
 # DENSITY_RANGE 保持一致, 使本目录与该目录的证据落在同一密度场族上可对照.
 DENSITY_RANGE = (0.3, 1.0)
 

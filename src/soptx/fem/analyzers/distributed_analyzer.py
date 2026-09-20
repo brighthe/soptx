@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from fealpy.fem import BilinearForm
 from fealpy.typing import TensorLike
 
 from soptx.fem.distributed import EntityMPI, OverlapOperator
+from soptx.fem.levels import AssemblyLevelExtension
 from soptx.core.numerics import DEFAULT_ATOL, DEFAULT_MAX_ITERATIONS, DEFAULT_RTOL
 
 from .lagrange_fem_analyzer import LagrangeFEMAnalyzer
@@ -61,7 +61,7 @@ class DistributedElasticityAnalyzer(LagrangeFEMAnalyzer):
     def reduce_load(self, F: TensorLike) -> TensorLike:
         return self.dof_comm.sync_add(F)
 
-    def wrap_operator(self, form: BilinearForm) -> OverlapOperator:
+    def wrap_operator(self, form: AssemblyLevelExtension) -> OverlapOperator:
         return OverlapOperator(form, self.dof_comm)
 
     def solve_system(
