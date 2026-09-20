@@ -11,9 +11,7 @@
 
 ## 为什么在 `experiments/` 而不是 `examples/`
 
-[`CLAUDE.md`](../../CLAUDE.md) 规则 1 规定 example 目录不能交叉污染，「新技术栈 → 新目录」。本实验横跨四个技术栈，放进任何一个 `examples/` 子目录都会违规——这种污染已经发生过一次：[`examples/piml_substructure_elasticity/compare_piml_pinn.py`](../../examples/piml_substructure_elasticity/compare_piml_pinn.py) 位于 PIML 目录却自带一份 `PINNElasticityNet`，与 [`examples/pinn_elasticity/minimal_demo.py`](../../examples/pinn_elasticity/minimal_demo.py) 的同名实现重复。
-
-`examples/` 承担单技术栈的入口演示，`experiments/` 承担论文级、多方法、冻结算例的证据流水线，目录约定对齐既有的 [`experiments/huzhang_topopt_paper/`](../huzhang_topopt_paper/)。
+本实验承担多方法研究对比。历史 PIML/PINN 对照现归档于 `legacy/compare_piml_pinn.py`, 其中保留的 PINN 实现尚未并入统一求解接口。示例目录仅维护方法演示与正确性验证。
 
 ## 目录结构
 
@@ -69,3 +67,7 @@ python experiments/elasticity_paradigm_comparison/run.py --case tier-a-mbb-homog
 ## 当前状态
 
 框架已建立，四个适配器与上下文组装均未接线，`--list` 与 `--check-only` 可用，求解调用返回退出码 `2` 并给出阻塞原因。逐项阻塞与解除顺序见 [`results_analysis.md`](results_analysis.md) §3。
+
+## 历史对照
+
+`legacy/compare_piml_pinn.py` 保留原 PIML/PINN 对照实现, 未接入上面的四范式受控协议, 不代表四个适配器已完成。迁移后未运行, 默认新输出位于 legacy/outputs/。

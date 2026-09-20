@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """运行溯源的采集 (子结构缩聚变密度拓扑优化实验).
 
-与 experiments/piml_substructure_topopt/provenance.py 同构, 但本目录不依赖
+与 experiments/topopt_simp_piml_substructure/provenance.py 同构, 但本目录不依赖
 torch, 因此不采集 CUDA 信息。
 """
 

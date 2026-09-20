@@ -2,7 +2,7 @@
 """子结构缩聚变密度拓扑优化执行器 (精确缩聚, 接口迹可选; 2D/3D MBB).
 
 优化循环 (modified SIMP + 灵敏度锥形滤波 + OC) 与
-experiments/piml_substructure_topopt/run.py 的 FEA 基线逐参数一致
+experiments/topopt_simp_piml_substructure/run.py 的 FEA 基线逐参数一致
 (move=0.2, damping=0.5, initial_lambda=1e9, bisection_tol=1e-4,
 design_variable_min=1e-3, 收敛判据为连续 5 步 |dC|/C < tol_change 且 it >= 10),
 因此同工况的柔度历史可以直接与该目录及 experiments/topopt_simp_fa 对照。
@@ -12,7 +12,7 @@ design_variable_min=1e-3, 收敛判据为连续 5 步 |dC|/C < tol_change 且 it
 
 用法:
     python run.py --list
-    python run.py --case mbb_2d_full_trace
+    python run.py --case mbb_2d_ft
     python run.py --case all --max-iter 5
 """
 
@@ -138,6 +138,45 @@ def _save_topology_png(
     print(f"[run] 拓扑云图: {figure_path}")
 
 
+def print_run_banner(case: TopOptCase, ctx: CaseContext, output_dir: Path) -> None:
+    """按计算力学体系分层打印物理问题、离散网格、子结构、拓扑建模与算法配置."""
+    mesh = ctx.assembler.full_mesh
+    n_cells = ctx.n_elem_total
+    n_nodes = int(mesh.number_of_nodes())
+    mesh_class = "QuadrangleMesh" if case.dim == 2 else "HexahedronMesh"
+    grid_str = "x".join(str(n) for n in ctx.n_elem_grid)
+    sub_str = "x".join(str(n) for n in case.n_sub)
+    fine_str = "x".join(str(n) for n in case.n_fine)
+    domain_desc = " x ".join(
+        f"[{case.domain[2 * d]}, {case.domain[2 * d + 1]}]"
+        for d in range(case.dim)
+    )
+    hypo = "plane_stress" if case.dim == 2 else "3D"
+
+    print(f"[run] {case.id} | {case.summary}")
+    print(
+        f"[problem] model={case.problem}, domain={domain_desc}, "
+        f"E={case.emax:g}, nu={case.nu:g}, hypothesis={hypo}, P={case.p_load:g}"
+    )
+    print(f"[mesh] {mesh_class} grid={grid_str}, {n_cells} 单元, {n_nodes} 节点")
+    print(
+        f"[substructure] {sub_str}={ctx.n_sub_total} 子结构 (单块 {fine_str}={ctx.prototype.n_cells} 单元), "
+        f"trace={case.trace}, reduction={case.reduction}, "
+        f"内部自由度 u_int={ctx.prototype.n_i}, 接口自由度 u_bnd={ctx.prototype.n_b}, "
+        f"全局迹自由度 u_trace={ctx.n_global_trace_dofs}"
+    )
+    print(
+        f"[topopt] SIMP (penalty={case.simp_penalty:g}, emin={case.emin:g}), "
+        f"filter={case.filter_type} (filter_radius={case.filter_radius:g}), "
+        f"volfrac={case.volfrac:g}, 设计变量 {n_cells} 个, 初值均匀 rho_0={case.volfrac:g}"
+    )
+    print(
+        f"[algorithm] optimizer=oc, move_limit={OC_OPTIONS['move_limit']:g}, "
+        f"damping={OC_OPTIONS['damping_coef']:g}, tol_change={case.tol_change:g}, max_iter={case.max_iter}"
+    )
+    print(f"[output] {output_dir} (VTU 序列、history.json、summary.json、topology.png)")
+
+
 def run_case(
     case: TopOptCase,
     *,
@@ -154,18 +193,15 @@ def run_case(
         for stale in vtu_dir.glob("density_iter_*.vtu"):
             stale.unlink()
 
-    print(f"[run] {case.id}: {case.summary}")
     t_setup = time.perf_counter()
     ctx = build_components(case)
     setup_time = time.perf_counter() - t_setup
-    print(
-        f"[run] trace={case.trace} reduction={case.reduction} "
-        f"子结构 {ctx.n_sub_total} 个, 单元 {ctx.n_elem_total} 个, "
-        f"全局迹自由度 {ctx.n_global_trace_dofs}, 组装耗时 {setup_time:.2f} s"
-    )
+
+    print_run_banner(case, ctx, output_dir)
+
     header = (
         f"{'iter':>5} | {'compliance':>12} | {'volfrac':>8} | "
-        f"{'change':>10} | {'solve/ms':>10}"
+        f"{'change':>10} | {'t_cond/s':>9} | {'t_solve/s':>10} | {'t_it/s':>8}"
     )
     print(header)
     print("-" * len(header))
@@ -223,14 +259,18 @@ def run_case(
             else rho_new
         )
         volfrac_current = float(bm.mean(rho_new_physical))
+        step_time = time.perf_counter() - t_step
         history.append(
             {
                 "iter": it,
                 "compliance": float(forward.compliance),
                 "volfrac": volfrac_current,
                 "change": change,
-                "iteration_time": time.perf_counter() - t_step,
+                "iteration_time": step_time,
+                "cond_time_ms": float(forward.cond_time_ms),
                 "solve_time_ms": float(forward.solve_time_ms),
+                "recover_time_ms": float(forward.recover_time_ms),
+                "total_forward_ms": float(forward.total_time_ms),
             }
         )
 
@@ -242,11 +282,13 @@ def run_case(
             if len(recent_relative_changes) > CONVERGENCE_WINDOW:
                 recent_relative_changes.pop(0)
 
-        if it % 5 == 0 or it == 1 or it == case.max_iter:
-            print(
-                f"{it:5d} | {forward.compliance:12.4f} | {volfrac_current:8.4f} | "
-                f"{change:10.5f} | {forward.solve_time_ms:10.2f}"
-            )
+        t_cond_s = forward.cond_time_ms / 1000.0
+        t_solve_s = forward.solve_time_ms / 1000.0
+        print(
+            f"{it:5d} | {forward.compliance:12.4f} | {volfrac_current:8.4f} | "
+            f"{change:10.5f} | {t_cond_s:9.3f} | "
+            f"{t_solve_s:10.3f} | {step_time:8.2f}"
+        )
 
         rho = bm.copy(rho_new)
 
@@ -256,13 +298,38 @@ def run_case(
             and it >= CONVERGENCE_MIN_ITER
         ):
             converged = True
-            print(
-                f"[run] 满足收敛判据 (连续 {CONVERGENCE_WINDOW} 步 "
-                f"|dC|/C < {case.tol_change}), 迭代结束于第 {it} 步"
-            )
             break
 
     total_time = time.perf_counter() - t_total
+    total_cond = sum(h["cond_time_ms"] for h in history) / 1000.0
+    total_solve = sum(h["solve_time_ms"] for h in history) / 1000.0
+    total_rec = sum(h["recover_time_ms"] for h in history) / 1000.0
+    total_opt = max(total_time - total_cond - total_solve - total_rec, 0.0)
+
+    last = history[-1]
+    if converged:
+        print(
+            f"[converge] 满足收敛判据 (连续 {CONVERGENCE_WINDOW} 步 "
+            f"|dC|/C < {case.tol_change}), 迭代结束于第 {len(history)} 步"
+        )
+    else:
+        print(f"[converge] 达到最大迭代步数 {case.max_iter}, 优化流程终止")
+
+    print(
+        f"[summary] 最终柔度: {last['compliance']:.6f}, "
+        f"最终体积分数: {last['volfrac']:.4f}, 总耗时: {total_time:.2f} s"
+    )
+    pct_cond = (total_cond / total_time * 100.0) if total_time > 0 else 0.0
+    pct_solve = (total_solve / total_time * 100.0) if total_time > 0 else 0.0
+    pct_rec = (total_rec / total_time * 100.0) if total_time > 0 else 0.0
+    pct_opt = (total_opt / total_time * 100.0) if total_time > 0 else 0.0
+    print(
+        f"[profile] 子结构数值缩聚: {total_cond:.2f} s ({pct_cond:.1f}%), "
+        f"界面系统求解: {total_solve:.2f} s ({pct_solve:.1f}%), "
+        f"位移与能量恢复: {total_rec:.2f} s ({pct_rec:.1f}%), "
+        f"滤波与 OC 更新: {total_opt:.2f} s ({pct_opt:.1f}%)"
+    )
+
     rho_final = _filter_density(ctx, rho) if case.filter_type == "density" else rho
     rho_final_np = np.asarray(bm.to_numpy(rho_final), dtype=np.float64)
     np.save(output_dir / "density_final.npy", rho_final_np)
@@ -279,8 +346,8 @@ def run_case(
         )
     if case.dim == 2:
         _save_topology_png(ctx, rho_final_np, history, output_dir)
+    print(f"[artifact] VTU: {vtu_dir} | 产物目录: {output_dir}")
 
-    last = history[-1]
     summary = {
         "case_id": case.id,
         "method": "substructure-condensation-SIMP",
@@ -288,7 +355,7 @@ def run_case(
         "reduction": case.reduction,
         "backend": "fealpy-numpy",
         "dimension": case.dim,
-        "problem": "full_mbb_beam",
+        "problem": case.problem,
         "domain": list(case.domain),
         "n_sub": list(case.n_sub),
         "n_fine": list(case.n_fine),
@@ -321,22 +388,23 @@ def run_case(
         "final_compliance": float(last["compliance"]),
         "final_volume_fraction": float(last["volfrac"]),
         "final_change": float(last["change"]),
-        "setup_time": setup_time,
-        "total_time": total_time,
-        "mean_iteration_time": float(
-            np.mean([record["iteration_time"] for record in history])
-        ),
+        "timing": {
+            "setup_time_s": setup_time,
+            "total_time_s": total_time,
+            "cond_time_s": total_cond,
+            "solve_time_s": total_solve,
+            "recover_time_s": total_rec,
+            "update_time_s": total_opt,
+            "mean_iteration_time_s": float(
+                np.mean([record["iteration_time"] for record in history])
+            ),
+        },
         "provenance": provenance.capture((CASES_FILE,)),
     }
     for name, payload in (("history.json", history), ("summary.json", summary)):
         (output_dir / name).write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-    print(
-        f"[run] 完成: 迭代 {len(history)} 步, 最终柔度 "
-        f"{last['compliance']:.6f}, 体积分数 {last['volfrac']:.4f}, "
-        f"总耗时 {total_time:.2f} s -> {output_dir}"
-    )
     return summary
 
 
@@ -359,31 +427,33 @@ def _format_shape(shape: Tuple[int, ...]) -> str:
 def _print_case_table(cases: Tuple[TopOptCase, ...]) -> None:
     """按问题规模、分析链与算法轴列出注册工况."""
     header = (
-        "id",
+        "case-id",
         "mesh",
+        "grid",
         "n_sub",
         "n_fine",
         "trace",
         "analyzer",
+        "order",
         "optimizer",
-        "role",
     )
     rows = []
     for case in cases:
         global_mesh = tuple(
             case.n_sub[d] * case.n_fine[d] for d in range(case.dim)
         )
-        cell_type = "quad" if case.dim == 2 else "hex"
+        mesh_class = "QuadrangleMesh" if case.dim == 2 else "HexahedronMesh"
         rows.append(
             (
                 case.id,
-                f"{cell_type} {_format_shape(global_mesh)}",
+                mesh_class,
+                _format_shape(global_mesh),
                 _format_shape(case.n_sub),
                 _format_shape(case.n_fine),
                 case.trace,
-                "lfem-p1",
+                "lfem",
+                "p=1",
                 "oc",
-                case.role,
             )
         )
     widths = [

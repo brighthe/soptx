@@ -47,7 +47,7 @@
 1. **误差完全由预测主导**: 两条路径相对精确 Matrix-Free 解的误差在每个后端内**逐位相同**
    (numpy 3.474e-02, pytorch 5.119e-02), 互差仅 1e-13 量级 —— Matrix-Free 化对
    解的贡献为零, 整条链路的误差可全部归因于代理预测。误差为百分量级, 与
-   `../piml_substructure_elasticity/results_analysis.md` §9 记录的路线 B 直接
+   `../../experiments/analysis_capability_piml_substructure/legacy_examples_results.md` §9 记录的路线 B 直接
    预测水平 (接口位移约 2%) 同量级; 两后端及与该目录的数值不严格相等是预期内的:
    训练随机源不同 (numpy 后端采样走 `bm.random`, pytorch 后端走 torch RNG,
    且各脚本训练前的随机数消耗顺序不同), 同 seed 下得到不同的网络。注意 pytorch

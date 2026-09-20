@@ -105,11 +105,11 @@ def test_registered_cases_have_positive_chunk_size() -> None:
     assert all(case.chunk_size > 0 for case in cases)
     assert all(case.integration_order > 0 for case in cases)
 
-    paper_case = experiment_config.get_case("mbb_3d_linear_corner")
-    assert paper_case.domain == (0.0, 6.0, 0.0, 1.0, 0.0, 1.0)
-    assert paper_case.n_sub == (78, 13, 13)
-    assert paper_case.n_fine == (5, 5, 5)
-    assert paper_case.filter_type == "density"
+    case_3d = experiment_config.get_case("mbb_3d_lc")
+    assert case_3d.domain == (0.0, 12.0, 0.0, 2.0, 0.0, 2.0)
+    assert case_3d.n_sub == (12, 2, 2)
+    assert case_3d.n_fine == (4, 4, 4)
+    assert case_3d.filter_type == "sensitivity"
 
 
 def test_linear_corner_pipeline_matches_full_batch_without_calling_batch_api(
@@ -117,7 +117,7 @@ def test_linear_corner_pipeline_matches_full_batch_without_calling_batch_api(
 ) -> None:
     """实验流式路径应匹配旧批量结果且不调用完整局部刚度 API."""
     bm.set_backend("numpy")
-    registered = experiment_config.get_case("mbb_2d_linear_corner")
+    registered = experiment_config.get_case("cantilever_2d_lc")
     case = replace(
         registered,
         domain=(0.0, 2.0, 0.0, 1.0),

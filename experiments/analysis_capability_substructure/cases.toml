@@ -1,0 +1,147 @@
+[meta]
+name = "analysis_capability_substructure"
+description = "精确子结构分析的正确性、收敛性与计算成本工况"
+
+[[cases]]
+id = "full_trace_convergence_2d"
+summary = "HarmonicPoly2D 上的 full_trace 制造解收敛验证"
+task = "full_trace_convergence"
+problem = "HarmonicPoly2D"
+degree = 1
+levels = 4
+solve_method = "mumps"
+
+[[cases]]
+id = "full_trace_convergence_3d"
+summary = "HarmonicPoly3D 上的 full_trace 制造解收敛验证"
+task = "full_trace_convergence"
+problem = "HarmonicPoly3D"
+degree = 1
+levels = 3
+solve_method = "mumps"
+
+[[cases]]
+id = "linear_corner_consistency_2d"
+summary = "HarmonicPoly2D 上的 linear_corner 一致性与收敛验证"
+task = "linear_corner_convergence"
+problem = "HarmonicPoly2D"
+degree = 1
+levels = 4
+solve_method = "mumps"
+
+[[cases]]
+id = "linear_corner_consistency_3d"
+summary = "HarmonicPoly3D 上的 linear_corner 一致性与收敛验证"
+task = "linear_corner_convergence"
+problem = "HarmonicPoly3D"
+degree = 1
+levels = 3
+solve_method = "mumps"
+
+[[cases]]
+id = "full_trace_density_update_2d"
+summary = "CantileverCorner2d 上的 full_trace 密度更新一致性验证"
+task = "density_update_consistency"
+problem = "CantileverCorner2d"
+n_sub = [8, 4]
+n_fine = [5, 5]
+degree = 1
+solve_method = "mumps"
+routes = ["full_trace"]
+monitor_interval = 0.5
+
+[[cases]]
+id = "full_trace_density_update_3d"
+summary = "FullMBBBeam3d 上的 full_trace 密度更新一致性验证"
+task = "density_update_consistency"
+problem = "FullMBBBeam3d"
+n_sub = [6, 2, 2]
+n_fine = [4, 4, 4]
+degree = 1
+solve_method = "mumps"
+routes = ["full_trace"]
+monitor_interval = 0.5
+
+[[cases]]
+id = "linear_corner_density_update_2d"
+summary = "CantileverCorner2d 上的 linear_corner 密度更新一致性验证"
+task = "density_update_consistency"
+problem = "CantileverCorner2d"
+n_sub = [8, 4]
+n_fine = [5, 5]
+degree = 1
+solve_method = "mumps"
+routes = ["linear_corner"]
+monitor_interval = 0.5
+
+[[cases]]
+id = "linear_corner_density_update_3d"
+summary = "FullMBBBeam3d 上的 linear_corner 密度更新一致性验证"
+task = "density_update_consistency"
+problem = "FullMBBBeam3d"
+n_sub = [6, 2, 2]
+n_fine = [4, 4, 4]
+degree = 1
+solve_method = "mumps"
+routes = ["linear_corner"]
+monitor_interval = 0.5
+[[cases]]
+id = "full_trace_cost_2d"
+summary = "CantileverCorner2d 上的 full_trace 独立进程计算成本测量"
+task = "route_cost"
+problem = "CantileverCorner2d"
+n_sub = [640, 320]
+n_fine = [5, 5]
+degree = 1
+density = "pattern_a"
+solve_method = "mumps"
+routes = ["full_trace"]
+warmup = 1
+repeat = 3
+monitor_interval = 0.5
+[[cases]]
+id = "full_trace_reference_2d"
+summary = "CantileverCorner2d 上的 full_trace 大规模位移参考"
+task = "route_cost"
+problem = "CantileverCorner2d"
+n_sub = [640, 320]
+n_fine = [5, 5]
+degree = 1
+density = "pattern_a"
+solve_method = "mumps"
+routes = ["full_trace"]
+warmup = 0
+repeat = 1
+monitor_interval = 0.5
+expected_displacement_sha256 = "ac4f86f584fb2898f41fe5a87dd886d497400e7ec16d24da7531630cec05c5d3"
+expected_strain_energy = 82.37255563788909
+
+[[cases]]
+id = "fa_cost_2d"
+summary = "CantileverCorner2d 上的 FA 独立进程计算成本测量"
+task = "route_cost"
+problem = "CantileverCorner2d"
+n_sub = [640, 320]
+n_fine = [5, 5]
+degree = 1
+density = "pattern_a"
+solve_method = "mumps"
+routes = ["fa"]
+warmup = 1
+repeat = 3
+monitor_interval = 0.5
+
+[[cases]]
+id = "linear_corner_cost_2d"
+summary = "CantileverCorner2d 上的 linear_corner 独立进程计算成本测量"
+task = "route_cost"
+problem = "CantileverCorner2d"
+n_sub = [640, 320]
+n_fine = [5, 5]
+degree = 1
+density = "pattern_a"
+solve_method = "mumps"
+routes = ["linear_corner"]
+warmup = 1
+repeat = 3
+monitor_interval = 0.5

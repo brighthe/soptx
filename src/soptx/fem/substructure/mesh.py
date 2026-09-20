@@ -41,6 +41,10 @@ class SubstructurePrototype:
     _deformation_basis: Optional[Any] = None
     _rigid_interior: Optional[Any] = None
 
+    # 迹空间表示刚体模态的相对残量上限. 容许迹空间下该残量是舍入量级, 阈值只用于
+    # 拦截不容许的迹空间, 不参与任何精度判定.
+    _TRACE_RIGID_TOL: float = 1.0e-10
+
     def __init__(
         self,
         cell_size: Sequence[float],
@@ -426,6 +430,80 @@ class SubstructurePrototype:
         if self._rigid_interior is None:
             self._build_interface_bases()
         return self._rigid_interior
+
+    def trace_interface_bases(
+        self,
+        trace: Optional[Any] = None,
+    ) -> Tuple[Any, Any, Any]:
+        """构造给定接口迹空间上的刚体基, 变形子空间基与刚体内部取值.
+
+        参数:
+            trace: ``TraceBasis`` 实例, 提供形状 ``(n_b, n_q)`` 的迹矩阵 ``T``,
+                迹坐标 ``q`` 与完整接口位移满足 ``u_b = T q``. 为 ``None`` 时取
+                完整接口 ``T = I``, 返回值即 ``rigid_basis``,
+                ``deformation_basis`` 与 ``rigid_interior_modes`` 三个属性本身.
+
+        返回:
+            (R_q, R_perp, Phi_i): 形状分别为 ``(n_q, n_rigid)``,
+                ``(n_q, n_q - n_rigid)`` 与 ``(n_i, n_rigid)``. 三者满足
+                ``B R_q = Phi_i``, 其中 ``B = N T`` 是迹空间下的内部延拓.
+
+        异常:
+            ValueError: ``T`` 的行数与接口自由度数 ``n_b`` 不符时抛出.
+            RuntimeError: 迹自由度数少于刚体模态数, 或迹空间不能精确表示刚体
+                运动时抛出. 后者意味着该迹空间不是容许的宏观位移空间, 装配后
+                子结构无法自由做刚体运动, 缩聚刚度的零空间结构随之失效.
+
+        说明:
+            迹空间下的刚体坐标由 ``T Q = R_rigid`` 解出并校验残量: 完整接口上的
+            刚体模态必须落在 ``T`` 的列空间内. 角点线性迹满足这一条件, 因为刚体
+            位移在每条棱上是线性的, 而双线性插值沿棱退化为线性插值.
+
+            ``Phi_i`` 不经任何求逆得到: ``T R_q`` 仍是刚体边界场, 它在标准正交基
+            ``R_rigid`` 下的坐标为 ``R_rigid^T T R_q``, 于是
+            ``Phi_i = N T R_q = (N R_rigid)(R_rigid^T T R_q)``, 括号内即完整接口
+            上的 ``rigid_interior_modes``, 与密度无关.
+        """
+        if trace is None:
+            return (
+                self.rigid_basis,
+                self.deformation_basis,
+                self.rigid_interior_modes,
+            )
+
+        T = bm.asarray(trace.matrix, dtype=bm.float64)
+        if int(T.shape[0]) != self.n_b:
+            raise ValueError(
+                f"迹矩阵的行数应为接口自由度数 {self.n_b}; "
+                f"当前形状为 {tuple(T.shape)}."
+            )
+        n_q = int(T.shape[1])
+        if n_q < self.n_rigid:
+            raise RuntimeError(
+                f"迹自由度数 {n_q} 少于刚体模态数 {self.n_rigid}, "
+                f"无法构造迹空间刚体基."
+            )
+
+        full_rigid = self.rigid_basis
+        q_rigid = bm.linalg.pinv(T) @ full_rigid
+        residual = float(
+            bm.linalg.norm(T @ q_rigid - full_rigid)
+            / bm.linalg.norm(full_rigid)
+        )
+        if not residual <= self._TRACE_RIGID_TOL:
+            raise RuntimeError(
+                f"迹空间不能精确表示接口刚体模态, 相对残量 {residual:.3e} "
+                f"超过 {self._TRACE_RIGID_TOL:.3e}."
+            )
+
+        # 完整 QR: 前 n_rigid 列张成迹空间的刚体子空间, 其余列构成其正交补.
+        Q, _ = bm.linalg.qr(q_rigid, mode="complete")
+        R_q = Q[:, :self.n_rigid]
+        R_perp = Q[:, self.n_rigid:]
+        Phi_i = self.rigid_interior_modes @ (
+            bm.matrix_transpose(full_rigid) @ T @ R_q
+        )
+        return R_q, R_perp, Phi_i
 
     def _rigid_modes_on(self, dofs: Any, centroid: Any) -> Any:
         """构造刚体位移场在给定自由度集合上的取值.

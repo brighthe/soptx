@@ -283,7 +283,7 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 
 ### 节点分类约定
 
-对规则矩形/六面体子结构与 Q4/六面体细网格，采用节点级分类：
+对规则矩形/六面体子结构与一阶四边形/六面体细网格，采用节点级分类：
 
 - 节点坐标到子结构任一边界面距离 < $\varepsilon = 10^{-7}$ → **接口（边界）节点**
 - 其余 → **内部节点**

@@ -46,7 +46,11 @@ from soptx.fem.substructure import (  # noqa: E402
     project_problem_conditions_to_macro_system,
     solve_interface_system,
 )
-from soptx.problems.elasticity import FullMBBBeam2d, FullMBBBeam3d  # noqa: E402
+from soptx.problems.elasticity import (  # noqa: E402
+    CantileverCorner2d,
+    FullMBBBeam2d,
+    FullMBBBeam3d,
+)
 
 from config import TopOptCase
 
@@ -97,21 +101,33 @@ class ForwardResult:
 
     compliance: float
     energy: Any                 # (n_elem_total,) 各单元应变能 u_e^T K0 u_e
-    solve_time_ms: float
+    cond_time_ms: float         # 局部数值缩聚与全局系统组装耗时 (ms)
+    solve_time_ms: float        # 全局界面线性系统求解耗时 (ms)
+    recover_time_ms: float      # 内部细观位移恢复与能量计算耗时 (ms)
+    total_time_ms: float        # 正问题总耗时 (ms)
 
 
 def _build_problem(case: TopOptCase) -> Tuple[Any, Tuple[float, ...]]:
-    """构造 MBB 问题与物理域尺寸."""
-    if case.dim == 2:
+    """构造弹性问题与物理域尺寸."""
+    prob_name = getattr(case, "problem", "")
+    if not prob_name:
+        prob_name = "CantileverCorner2d" if case.dim == 2 else "FullMBBBeam3d"
+
+    if prob_name == "CantileverCorner2d":
+        problem = CantileverCorner2d(
+            domain=case.domain, P=case.p_load, E=case.emax, nu=case.nu
+        )
+    elif prob_name == "FullMBBBeam2d":
         problem = FullMBBBeam2d(
             domain=case.domain, P=case.p_load, E=case.emax, nu=case.nu
         )
-    elif case.dim == 3:
+    elif prob_name == "FullMBBBeam3d":
         problem = FullMBBBeam3d(
             domain=case.domain, P=case.p_load, E=case.emax, nu=case.nu
         )
     else:
-        raise ValueError(f"不支持的维数: {case.dim}")
+        raise ValueError(f"不支持的问题模型: {prob_name}")
+
     domain_size = tuple(
         case.domain[2 * d + 1] - case.domain[2 * d] for d in range(case.dim)
     )
@@ -245,13 +261,14 @@ def build_components(case: TopOptCase) -> CaseContext:
 
 
 def solve_forward(ctx: CaseContext, rho: Any) -> ForwardResult:
-    """给定全场单元密度, 完成一次精确缩聚正问题求解并返回单元应变能."""
+    """给定全场单元密度, 完成一次精确缩聚正问题求解并返回单元应变能与分项耗时."""
     t_start = time.perf_counter()
 
     # (a) 全场密度 -> 子结构局部密度
     rho_subs_grid = ctx.assembler.split_global_cell_field(rho)
 
     # (b) 接口系统装配与求解
+    t_cond_start = time.perf_counter()
     if ctx.case.trace == "full_trace":
         # 完整接口门禁暂时保留原批量 Exact 路径. chunk_size 只限制局部装配
         # 临时缓冲, 尚不等价于端到端流式完整接口装配.
@@ -267,29 +284,16 @@ def solve_forward(ctx: CaseContext, rho: Any) -> ForwardResult:
             condensor,
             chunk_size=ctx.case.chunk_size,
         )
+        t_cond_ms = (time.perf_counter() - t_cond_start) * 1000.0
+
+        t_solve_start = time.perf_counter()
         u_global_trace = solve_interface_system(
             system, ctx.load, ctx.fixed_dofs
         )
-    else:
-        stiffness_batches = iter_exact_trace_stiffness_batches(
-            ctx.prototype,
-            rho_subs_grid,
-            ctx.trace_basis,
-            chunk_size=ctx.case.chunk_size,
-        )
-        system = ctx.assembler.assemble_macro_system_batches(
-            ctx.sub_meshes,
-            stiffness_batches,
-        )
-        u_global_trace = solve_interface_system(
-            system, ctx.load, ctx.fixed_dofs
-        )
+        t_solve_ms = (time.perf_counter() - t_solve_start) * 1000.0
 
-    solve_time_ms = (time.perf_counter() - t_start) * 1000.0
-
-    # (c) 迹位移 -> 内部细观位移 -> 单元应变能
-    u_trace_batch = u_global_trace[ctx.trace_indices]
-    if ctx.case.trace == "full_trace":
+        t_rec_start = time.perf_counter()
+        u_trace_batch = u_global_trace[ctx.trace_indices]
         u_b_batch = ctx.trace_basis.expand_displacement(u_trace_batch)
         u_i_batch = result.recover(u_b_batch)
         u_local_batch = bm.zeros(
@@ -304,7 +308,28 @@ def solve_forward(ctx: CaseContext, rho: Any) -> ForwardResult:
         K0 = ctx.prototype.KE_unit[0]
         u_elem = u_local_batch[:, ctx.prototype.cell2dof]
         energy_sub_cell = bm.sum((u_elem @ K0) * u_elem, axis=-1)
+        t_recover_ms = (time.perf_counter() - t_rec_start) * 1000.0
     else:
+        stiffness_batches = iter_exact_trace_stiffness_batches(
+            ctx.prototype,
+            rho_subs_grid,
+            ctx.trace_basis,
+            chunk_size=ctx.case.chunk_size,
+        )
+        system = ctx.assembler.assemble_macro_system_batches(
+            ctx.sub_meshes,
+            stiffness_batches,
+        )
+        t_cond_ms = (time.perf_counter() - t_cond_start) * 1000.0
+
+        t_solve_start = time.perf_counter()
+        u_global_trace = solve_interface_system(
+            system, ctx.load, ctx.fixed_dofs
+        )
+        t_solve_ms = (time.perf_counter() - t_solve_start) * 1000.0
+
+        t_rec_start = time.perf_counter()
+        u_trace_batch = u_global_trace[ctx.trace_indices]
         # 只保存最终必要的 (B, NC) 能量场; 局部刚度、恢复矩阵和位移均逐批释放.
         energy_sub_cell = bm.zeros(
             (ctx.n_sub_total, ctx.prototype.n_cells),
@@ -322,6 +347,7 @@ def solve_forward(ctx: CaseContext, rho: Any) -> ForwardResult:
                 (slice(batch.start, batch.end), slice(None)),
                 batch.energy,
             )
+        t_recover_ms = (time.perf_counter() - t_rec_start) * 1000.0
 
     energy_sub_grid = ctx.prototype.cell_to_grid_field(energy_sub_cell)
     energy_global_grid = ctx.assembler.merge_substructure_cell_field(
@@ -330,10 +356,14 @@ def solve_forward(ctx: CaseContext, rho: Any) -> ForwardResult:
     energy_flat = bm.reshape(energy_global_grid, (-1,))
 
     compliance = float(bm.dot(ctx.load, u_global_trace))
+    total_time_ms = (time.perf_counter() - t_start) * 1000.0
     return ForwardResult(
         compliance=compliance,
         energy=energy_flat,
-        solve_time_ms=solve_time_ms,
+        cond_time_ms=t_cond_ms,
+        solve_time_ms=t_solve_ms,
+        recover_time_ms=t_recover_ms,
+        total_time_ms=total_time_ms,
     )
 
 

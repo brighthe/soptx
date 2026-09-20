@@ -10,7 +10,7 @@ import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 EXPERIMENT_ROOT = (
-    REPOSITORY_ROOT / "experiments" / "piml_substructure_topopt"
+    REPOSITORY_ROOT / "experiments" / "topopt_simp_piml_substructure"
 )
 if str(EXPERIMENT_ROOT) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_ROOT))

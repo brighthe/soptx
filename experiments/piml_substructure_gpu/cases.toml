@@ -1,0 +1,49 @@
+[meta]
+title = "子结构 PIML GPU 完整链路性能实验"
+implemented_stages = ["training"]
+planned_stages = ["data_generation", "inference", "operator_construction", "global_solve", "recovery", "end_to_end"]
+
+[[cases]]
+id = "training_linear_corner_2d_cpu"
+pair_id = "training_linear_corner_2d"
+device = "cpu"
+summary = "2D linear_corner 形函数代理离线训练 CPU 探索工况（未通过精度验收）"
+
+[[cases]]
+id = "training_linear_corner_2d_cuda"
+pair_id = "training_linear_corner_2d"
+device = "cuda"
+summary = "2D linear_corner 形函数代理离线训练 CUDA 探索对照"
+
+[training_linear_corner_2d]
+dim = 2
+sub_size = [1.0, 1.0]
+n_fine = [5, 5]
+samples = 2048
+validation_fraction = 0.2
+design_min = 0.001
+epochs = 400
+batch_size = 128
+learning_rate = 0.005
+hidden_dim = 128
+seed = 2026
+cpu_threads = 1
+emax = 1.0
+nu = 0.3
+simp_penalty = 3.0
+
+[[cases]]
+id = "training_full_trace_2d_cpu"
+pair_id = "training_full_trace_2d"
+device = "cpu"
+summary = "复用 examples 历史形函数精度基线 CPU"
+
+[[cases]]
+id = "training_full_trace_2d_cuda"
+pair_id = "training_full_trace_2d"
+device = "cuda"
+summary = "同一 full_trace 精度基线 CUDA 对照"
+
+[training_full_trace_2d]
+baseline = "example_full_trace"
+cpu_threads = 1

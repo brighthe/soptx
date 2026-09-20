@@ -9,7 +9,7 @@
 | `linear_corner` | 角点线性迹（Huang 2023 式 16） | 迹降阶误差 |
 
 误差阶梯：**FA → `full_trace` → `linear_corner` → PIML 局部代理**。
-本目录负责中间两级，PIML 两条路线由 `experiments/piml_substructure_topopt/` 负责。
+本目录负责中间两级，PIML 两条路线由 `experiments/topopt_simp_piml_substructure/` 负责。
 `full_trace` 是整条链路的实现门禁：它与 FA 求解的是同一个离散系统，同工况下
 逐迭代柔度、体积分数与最终拓扑应一致到舍入精度；一旦对不上，问题必定在
 缩聚—恢复—伴随的实现里，与迹降阶和代理模型无关。
@@ -35,12 +35,12 @@ topopt_simp_substructure/
 
 ```bash
 python run.py --list
-python run.py --case mbb_2d_full_trace
-python run.py --case mbb_3d_full_trace
-python run.py --case mbb_2d_linear_corner
-python run.py --case mbb_3d_linear_corner
+python run.py --case cantilever_2d_ft
+python run.py --case cantilever_2d_lc
+python run.py --case mbb_3d_ft
+python run.py --case mbb_3d_lc
 python collect.py
-python compare.py --case mbb_2d_full_trace     # 需先在 FA 侧注册同工况
+python compare.py --case cantilever_2d_ft     # 需先在 FA 侧注册同工况
 ```
 
 `--max-iter` / `--volfrac` 可临时覆盖注册表取值（会记入 `summary.json` 的
@@ -54,13 +54,13 @@ python compare.py --case mbb_2d_full_trace     # 需先在 FA 侧注册同工况
   `compare.py` 在字段为空时直接报错退出，不做静默降级。补齐 FA 侧 MBB 工况时
   需注意：本目录 OC 固定 `design_variable_min = 1e-3`，FA 侧同工况必须以
   `density_min = 1.0e-3` 注册，否则两条轨迹不可比（`compare.py` 的门禁会拦下）。
-- **`experiments/piml_substructure_topopt/`**：下游。那里的 PIML 路线 A/B 与
+- **`experiments/topopt_simp_piml_substructure/`**：下游。那里的 PIML 路线 A/B 与
   FEA 基线共用同一套 `linear_corner` 缩聚设置；本目录已注册的 `linear_corner`
   工况作为其精确参照。两个目录之间没有代码依赖，本目录不 import torch。
 
 ## 约定
 
-- 优化循环参数与 `piml_substructure_topopt` 的 FEA 基线逐项一致：
+- 优化循环参数与 `topopt_simp_piml_substructure` 的 FEA 基线逐项一致：
   `move = 0.2`、`damping = 0.5`、`initial_lambda = 1e9`、`bisection_tol = 1e-4`、
   `design_variable_min = 1e-3`，收敛判据为连续 5 步 `|dC|/C < tol_change` 且
   `it >= 10`。改这些参数会同时破坏与 FA 侧和 PIML 侧的可比性。

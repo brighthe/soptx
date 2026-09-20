@@ -3,21 +3,27 @@
 说明:
     本模块存放供 `examples/` 与验证脚本复用的算例辅助搭建与训练胶水代码.
     通用的有限元网格铺设请使用 `soptx.fem.substructure.mesh.build_substructures`,
-    神经网络模型请使用 `soptx.ml.substructure_nets`.
+    神经网络模型与训练循环请使用 `soptx.ml.substructure`.
 """
 
 from typing import Any, Callable, List, Sequence, Tuple, cast
 
 import torch
-import torch.nn as nn
-import torch.optim as optim
 
 from fealpy.backend import backend_manager as bm
 
+from soptx.ml.substructure import (
+    PIMLSurrogateNet,
+    TrainingConfig,
+    train_surrogate as _train_surrogate,
+)
+
 from .mesh import SubstructureMesh, SubstructurePrototype, build_substructures
 from .condensation import FEAStaticCondensation
-from .piml_surrogate import PIMLSurrogateNet
 from .assembler import GlobalAssembler
+
+#: 降阶刚度代理网络的各隐藏层宽度. 当前不随工况配置.
+_REDUCED_STIFFNESS_HIDDEN_DIMS = (128, 128)
 
 
 def set_random_seed(seed: int) -> None:
@@ -199,7 +205,7 @@ def _to_torch_training_tensor(values: List[Any]) -> torch.Tensor:
     return torch.from_numpy(bm.to_numpy(stacked)).to(dtype=torch.float32)
 
 
-def train_surrogate(
+def train_reduced_stiffness_surrogate(
     prototype: SubstructurePrototype,
     n_train: int,
     n_epochs: int,
@@ -218,6 +224,11 @@ def train_surrogate(
     返回:
         (net, final_loss): 训练完毕并置于 ``eval`` 模式的网络, 以及最后一轮的
             训练 MSE.
+
+    说明:
+        训练循环本身由 ``soptx.ml.substructure.train_surrogate`` 提供; 本函数只负责
+        有限元侧的数据集构造. 当前尚无独立验证集, 传入训练集仅用于记录逐轮验证
+        损失, 因 ``select_final_state=True`` 不参与选模.
 
     说明:
         训练集一次批量生成: ``n_train`` 组随机密度共用同一套离散结构, 局部刚度装配
@@ -250,18 +261,19 @@ def train_surrogate(
         [L_train[i][tril_mask] for i in range(n_train)]
     )
 
-    net = PIMLSurrogateNet(input_dim=n_fine[0] * n_fine[1], output_dim=n_tril)
-    optimizer = optim.Adam(net.parameters(), lr=learning_rate)
-    criterion = nn.MSELoss()
+    net = PIMLSurrogateNet(
+        input_dim=n_fine[0] * n_fine[1],
+        output_dim=n_tril,
+        hidden_dims=_REDUCED_STIFFNESS_HIDDEN_DIMS,
+    )
+    # 全批量固定轮数: batch_size 取满训练集即单批梯度下降, select_final_state
+    # 取末轮权重而非按验证集选模, 与本函数的历史行为一致.
+    config = TrainingConfig(
+        epochs=n_epochs,
+        batch_size=n_train,
+        learning_rate=learning_rate,
+        select_final_state=True,
+    )
+    result = _train_surrogate(net, X_train, Y_train, X_train, Y_train, config)
 
-    net.train()
-    final_loss = float("nan")
-    for _ in range(n_epochs):
-        optimizer.zero_grad()
-        loss = criterion(net(X_train), Y_train)
-        loss.backward()
-        optimizer.step()
-        final_loss = float(loss.item())
-
-    net.eval()
-    return net, final_loss
+    return net, result.final_training_loss

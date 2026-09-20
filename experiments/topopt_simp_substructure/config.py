@@ -17,10 +17,6 @@ FA_EXPERIMENT_DIR = REPOSITORY_ROOT / "experiments" / "topopt_simp_fa"
 
 SUPPORTED_TRACES = ("full_trace", "linear_corner")
 SUPPORTED_REDUCTIONS = ("exact_schur",)
-SUPPORTED_ROLES = (
-    "fa-equivalence-implementation-gate",
-    "exact-reference-for-piml",
-)
 SUPPORTED_FILTERS = ("sensitivity", "density")
 
 
@@ -31,10 +27,10 @@ class ConfigError(RuntimeError):
 @dataclass(frozen=True)
 class TopOptCase:
     id: str
+    problem: str
     dim: int
     trace: str          # "full_trace" | "linear_corner"
     reduction: str      # "exact_schur"
-    role: str
     domain: tuple[float, ...]
     n_sub: tuple[int, ...]
     n_fine: tuple[int, ...]
@@ -76,6 +72,8 @@ def _parse_case(raw: dict[str, Any]) -> TopOptCase:
         raise ConfigError(f"工况 {case_id} 的 domain 长度必须为 4 (2D) 或 6 (3D).")
     dim = 3 if len(domain) == 6 else 2
 
+    problem = str(raw.get("problem", "CantileverCorner2d" if dim == 2 else "FullMBBBeam3d"))
+
     n_sub = tuple(int(x) for x in _require(raw, "n_sub", case_id))
     n_fine = tuple(int(x) for x in _require(raw, "n_fine", case_id))
     if len(n_sub) != dim or len(n_fine) != dim:
@@ -95,14 +93,7 @@ def _parse_case(raw: dict[str, Any]) -> TopOptCase:
         raise ConfigError(
             f"工况 {case_id} 的 reduction={reduction!r} 不受支持; "
             f"本目录只跑精确缩聚, 可选值为 {SUPPORTED_REDUCTIONS}. "
-            "PIML 近似路径由 experiments/piml_substructure_topopt 维护."
-        )
-
-    role = str(_require(raw, "role", case_id))
-    if role not in SUPPORTED_ROLES:
-        raise ConfigError(
-            f"工况 {case_id} 的 role={role!r} 不受支持; "
-            f"可选值为 {SUPPORTED_ROLES}."
+            "PIML 近似路径由 experiments/topopt_simp_piml_substructure 维护."
         )
 
     filter_type = str(_require(raw, "filter_type", case_id))
@@ -126,10 +117,10 @@ def _parse_case(raw: dict[str, Any]) -> TopOptCase:
 
     return TopOptCase(
         id=str(case_id),
+        problem=problem,
         dim=dim,
         trace=trace,
         reduction=reduction,
-        role=role,
         domain=domain,
         n_sub=n_sub,
         n_fine=n_fine,

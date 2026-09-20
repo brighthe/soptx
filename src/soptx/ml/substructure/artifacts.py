@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -48,6 +49,84 @@ class ModelSignature:
             raise ValueError("output_dim 必须等于 n_interior_dofs * n_reduced。")
 
 
+@dataclass(frozen=True)
+class ArchitectureSignature:
+    """网络结构的登记形式。
+
+    与 ModelSignature 的分工: 后者是调用方给出的物理签名 (输入输出维数、
+    采样与标签版本), 前者是网络自身的结构, 由模型实例读出, 调用方不书写,
+    以免登记值与实际构造的网络产生漂移。
+    """
+
+    hidden_dims: tuple[int, ...]
+    activation: str
+
+    @classmethod
+    def from_model(cls, model: nn.Module) -> "ArchitectureSignature":
+        """从模型实例读取结构。
+
+        参数:
+            model: 已构造的网络, 须带 hidden_dims 与 activation_name
+                属性 (MLP 及其子类在 __init__ 中登记)。
+
+        返回:
+            该模型的架构签名。
+
+        异常:
+            TypeError: 模型未登记架构属性时抛出。
+        """
+        try:
+            hidden_dims = tuple(int(value) for value in model.hidden_dims)
+            activation = str(model.activation_name)
+        except AttributeError as error:
+            raise TypeError(
+                f"{type(model).__name__} 未登记 hidden_dims/activation_name, "
+                "无法写入架构签名; 请改用 MLP 及其子类。"
+            ) from error
+        return cls(hidden_dims=hidden_dims, activation=activation)
+
+
+def _check_architecture(
+    recorded: Any,
+    model: nn.Module,
+    source: Path,
+) -> None:
+    """比对 checkpoint 登记的架构与当前构造的网络。
+
+    参数:
+        recorded: checkpoint 中的架构字典; None 表示该文件早于架构登记。
+        model: 由 model_factory 构造的网络。
+        source: checkpoint 路径, 仅用于消息。
+
+    异常:
+        ArtifactCompatibilityError: 登记的架构与当前网络不一致时抛出。
+
+    说明:
+        缺少架构登记时只发警告: 旧 checkpoint 的层数与激活无从校验, 但权重
+        形状仍由 load_state_dict 把关, 因此不阻断加载。
+    """
+    if recorded is None:
+        warnings.warn(
+            f"checkpoint {source} 未登记网络架构: 该文件早于架构签名的引入, "
+            "层数与激活无法校验 (激活不含参数, 配错不会触发形状错误); "
+            "请自行确认与训练时一致, 或重新训练以补齐登记。",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return
+    if not isinstance(recorded, dict):
+        raise ArtifactCompatibilityError("checkpoint 的 architecture 必须是映射。")
+    expected = ArchitectureSignature.from_model(model)
+    actual = ArchitectureSignature(
+        hidden_dims=tuple(int(value) for value in recorded.get("hidden_dims", ())),
+        activation=str(recorded.get("activation", "")),
+    )
+    if actual != expected:
+        raise ArtifactCompatibilityError(
+            f"网络架构不匹配: artifact={asdict(actual)}, expected={asdict(expected)}。"
+        )
+
+
 ModelT = TypeVar("ModelT", bound=nn.Module)
 
 
@@ -76,6 +155,7 @@ def save_checkpoint(
     payload = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "signature": asdict(signature),
+        "architecture": asdict(ArchitectureSignature.from_model(model)),
         "model_state_dict": model.state_dict(),
         "training_summary": dict(training_summary),
     }
@@ -116,6 +196,7 @@ def load_checkpoint(
     if not isinstance(state_dict, dict):
         raise ArtifactCompatibilityError("checkpoint 缺少 model_state_dict。")
     model = model_factory()
+    _check_architecture(payload.get("architecture"), model, source)
     model.load_state_dict(state_dict)
     model.eval()
     summary = payload.get("training_summary", {})

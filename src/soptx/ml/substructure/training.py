@@ -83,8 +83,8 @@ def train_surrogate(
     """训练给定代理网络，并恢复 MSE 或 physics 最优的参数快照。
 
     本函数只处理已经构造好的 ``(X, Y)``，不导入 FEM，也不负责生成物理标签。
-    当 ``physics_eval_interval > 0`` 时，``evaluator`` 必须返回有限的
-    ``selection_score``；模型只在固定 physics 检查点参与选模，``patience``
+    当 ``physics_eval_interval > 0`` 时，evaluator 必须返回有限的
+    selection_score；模型只在固定 physics 检查点参与选模，patience
     也按连续未改善的 physics 检查次数计。否则保持按验证 MSE 选模的旧行为。
     """
     x_train_tensor = _as_float_tensor(x_train, "x_train")

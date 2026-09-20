@@ -1,0 +1,117 @@
+# PIML 子结构分析的工况注册表。
+#
+# 本文件描述"跑哪个研究任务、用什么配置、产物落在哪"; 从产物里取哪些字段、门禁
+# 怎么判, 写在 collect.py 里 —— TOML 描述运行, Python 描述读取, 两者不混。
+#
+# 组织键是 task (研究任务), 不是图件分格。panels 只是可选的成图归属标注: 声明了
+# panels 的工况会进入 figure_data/fig3_data.json, 未声明的不进图, 但仍是本目录的
+# 正式工况。
+#
+# 约定:
+#   task     研究任务, 决定哪些配置字段合法以及命令行如何组装; 脚本路径写在
+#            config.py 的 _SCRIPTS 里, 同一 task 的工况共用一个脚本。
+#   source   可选; 声明后表示该工况的计算归其他实验目录所有, 本目录不产出、
+#            run.py 不执行, 只把已有产物作为图件输入引用。
+#   artifact 产物文件名, 相对本目录 outputs/。
+#   panels   可选; 该工况供给的图件分格, 缺省表示不进图。
+
+[meta]
+name = "analysis_capability_piml_substructure"
+description = "PIML 子结构分析的正确性与精度工况"
+
+[figure]
+id = "fig3"
+title = "PIML 局部力学表示与精确缩聚验证"
+question = "真值对不对 / 代理准不准 / 靠什么保证"
+consumer = "dut-postdoc:research/funding/active/china-postdoc-foundation-general-grant/assets/make_figs.py"
+
+# --------------------------------------------------------------------------
+# 精确缩聚等价性 —— 静力缩聚与 Lagrange 全装配直解的代数等价性。
+#
+# 该任务的实现与结论归 experiments/analysis_capability_substructure/, 本目录不
+# 产出、不重跑、不写结论; 登记它只有两个用途: 作为图件 panel (a) 的数据源, 以及
+# 作为 PIML 代理精度的"真值对不对"前提。
+#
+# 现有产物由已删除的 examples/substructure_elasticity/compare_lagrange.py 于
+# 2026-08-23 产出, 该脚本的能力已并入 analysis_capability_substructure 的
+# route_comparison 任务。因此这两条声明 source 而不声明可执行配置。
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "exact_condensation_2d"
+task = "exact_condensation_equivalence"
+summary = "2D 对称半 MBB 梁: 静力缩聚与 Lagrange 全装配直解的代数等价性"
+problem = "HalfMBBBeamRight2d"
+dim = 2
+source = "experiments/analysis_capability_substructure"
+panels = ["a"]
+
+[[cases]]
+id = "exact_condensation_3d"
+task = "exact_condensation_equivalence"
+summary = "3D 完整 MBB 梁: 静力缩聚与 Lagrange 全装配直解的代数等价性"
+problem = "FullMBBBeam3d"
+dim = 3
+source = "experiments/analysis_capability_substructure"
+panels = ["a"]
+
+# --------------------------------------------------------------------------
+# 形函数预测 —— 网络预测多尺度形函数, 局部刚度由式 (17) 变分构造。
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "shape_function_full_trace_2d"
+task = "shape_function_route"
+summary = "full_trace 形函数预测: 式 (17) 二阶误差压缩与解层精度"
+problem = "FullMBBBeam2d"
+trace_basis = "full_trace"
+n_train = 2000
+n_eval = 200
+epochs = 4000
+lr = 0.005
+hidden_dim = 256
+seed = 2026
+panels = ["b"]
+
+# 现有产物 eq17_second_order_linear_corner.json 由 300 组 / 300 轮的欠拟合配置
+# 产出, 与下列声明不符, 不认作本工况的产物; 该格的解层误差不构成能力判定。
+# 需按本配置重跑后才可与 full_trace 一格并列比较。
+[[cases]]
+id = "shape_function_linear_corner_2d"
+task = "shape_function_route"
+summary = "linear_corner 形函数预测: 角点线性迹下的式 (17) 二阶误差压缩与解层精度"
+problem = "FullMBBBeam2d"
+trace_basis = "linear_corner"
+n_train = 2000
+n_eval = 200
+epochs = 4000
+lr = 0.005
+hidden_dim = 256
+seed = 2026
+
+# --------------------------------------------------------------------------
+# 降阶刚度直接预测 —— 网络直接输出缩聚刚度, Cholesky 零空间参数化。
+#
+# 覆盖矩阵的第四格 (linear_corner x 降阶刚度) 不登记: verify_stiffness_route.py
+# 的 --trace-basis 只接受 full_trace, 尚无可执行实现。
+#
+# 本路线的网络宽度不可配: PIMLSurrogateNet 的层数与宽度由调用点的 hidden_dims
+# 给出 (src/soptx/ml/substructure_nets.py 不设默认值), case_setup.py 固定传入模块
+# 常量 _REDUCED_STIFFNESS_HIDDEN_DIMS = (128, 128), 与形函数网络的 256 不同,
+# 因此本条不设 hidden_dim 字段, 由 config.py 记入只读属性。
+# --------------------------------------------------------------------------
+
+[[cases]]
+id = "reduced_stiffness_full_trace_2d"
+task = "reduced_stiffness_route"
+summary = "full_trace 降阶刚度直接预测: 与精确缩聚的解层误差对照及刚体零空间诊断"
+problem = "FullMBBBeam2d"
+trace_basis = "full_trace"
+n_train = 2000
+n_eval = 100
+epochs = 4000
+lr = 0.005
+seed = 2026
+backend = "numpy"
+panels = ["b", "c"]
+

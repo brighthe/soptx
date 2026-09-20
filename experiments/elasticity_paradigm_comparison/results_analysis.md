@@ -82,7 +82,7 @@ outputs/
 
 ### 3.1 PINN 求解器未下沉（阻塞 `pinn` 适配器）
 
-`PINNElasticityNet` 与残差构造目前只存在于 [`examples/pinn_elasticity/minimal_demo.py`](../../examples/pinn_elasticity/minimal_demo.py)（`:47`），并在 [`examples/piml_substructure_elasticity/compare_piml_pinn.py`](../../examples/piml_substructure_elasticity/compare_piml_pinn.py)（`:253`）被重复实现一次；后者还在 `:93` 重造了一个 `gradient`，而 `fealpy.ml.grad.gradient` 已有该能力。`src/soptx/ml/` 当前仅含 `networks.py`。
+`PINNElasticityNet` 与残差构造目前只存在于 [`examples/pinn_elasticity/minimal_demo.py`](../../examples/pinn_elasticity/minimal_demo.py)（`:47`），并在 [`experiments/elasticity_paradigm_comparison/legacy/compare_piml_pinn.py`](legacy/compare_piml_pinn.py)（`:253`）被重复实现一次；后者还在 `:93` 重造了一个 `gradient`，而 `fealpy.ml.grad.gradient` 已有该能力。`src/soptx/ml/` 当前仅含 `networks.py`。
 
 解除方式：按 `CLAUDE.md` 规则 3 将网络、残差与训练循环下沉至 `src/soptx/ml/`，消除两处重复，本目录只作薄适配。
 

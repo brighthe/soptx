@@ -14,7 +14,12 @@ from .base import (
 
 
 class PIMLShapeReduction(CondensationReductionAdapter):
-    """路线 A 的规范适配器：预测形函数并按式 (17) 构造刚度."""
+    """路线 A 的规范适配器：预测内部延拓并按变分式构造降阶刚度.
+
+    ``trace`` 为 ``None`` 时结果落在完整接口上, 与其余 ``LocalReduction`` 实现
+    一致; 给出 ``trace`` 时结果直接落在该迹空间上。这不是事后投影: 网络的输出
+    维数定义在迹空间中, 详见 ``ShapeFunctionCondensation`` 的类文档。
+    """
 
     def __init__(
         self,
@@ -27,6 +32,7 @@ class PIMLShapeReduction(CondensationReductionAdapter):
         rigid_tol: float = 1.0e-10,
         excess_rtol: float = 2.0e-2,
         rcond_min: float = 1.0e-8,
+        trace: Optional[Any] = None,
     ) -> None:
         super().__init__(
             ShapeFunctionCondensation(
@@ -39,6 +45,7 @@ class PIMLShapeReduction(CondensationReductionAdapter):
                 rigid_tol=rigid_tol,
                 excess_rtol=excess_rtol,
                 rcond_min=rcond_min,
+                trace=trace,
             ),
             requested_method="piml_shape",
             stiffness_source="piml_shape",
@@ -53,9 +60,11 @@ class PIMLShapeReduction(CondensationReductionAdapter):
         reason: str,
         metrics: Optional[dict[str, Any]] = None,
     ) -> LocalReductionBatchResult:
-        """以一次 Exact Schur 批量调用回退整个输入批次."""
-        stiffness, recovery = self.legacy.fallback_solver.condense(
-            local_stiffness_batch, density_batch
+        """以一次 Exact Schur 批量调用回退整个输入批次, 并降到当前迹空间."""
+        stiffness, recovery = self.legacy._reduce_exact(
+            self.legacy.fallback_solver.condense(
+                local_stiffness_batch, density_batch
+            )
         )
         diagnostics = tuple(
             ReductionDiagnostics(
@@ -100,8 +109,9 @@ class PIMLShapeReduction(CondensationReductionAdapter):
     ) -> LocalReductionBatchResult:
         """批量执行路线 A，并对未通过门禁的子结构集中 Exact 回退.
 
-        网络只调用一次；式 (17) 在 FEALPy 后端上向量化计算。门禁仍按子结构
-        独立判断，使 diagnostics 和回退范围保持局部性。
+        网络只调用一次；变分式在 FEALPy 后端上向量化计算。门禁仍按子结构
+        独立判断，使 diagnostics 和回退范围保持局部性。返回的刚度与延拓落在
+        构造时给定的迹空间上，``trace=None`` 时即完整接口。
         """
         if getattr(local_stiffness_batch, "ndim", 0) != 3:
             raise ValueError(
@@ -162,27 +172,12 @@ class PIMLShapeReduction(CondensationReductionAdapter):
             self.legacy.n_reduced,
         )
         deformation_component = bm.reshape(prediction, reduced_shape)
-        rigid_component = (
-            self.legacy.rigid_interior
-            @ bm.matrix_transpose(self.legacy.rigid_basis)
-        )
-        recovery = (
-            rigid_component[None, :, :]
-            + deformation_component
-            @ bm.matrix_transpose(self.legacy.deformation_basis)
-        )
+        recovery = self.legacy.assemble_recovery(deformation_component)
 
-        i_dofs = self.legacy.i_dofs
-        b_dofs = self.legacy.b_dofs
-        K_ii = local_stiffness_batch[:, i_dofs[:, None], i_dofs]
-        K_ib = local_stiffness_batch[:, i_dofs[:, None], b_dofs]
-        K_bb = local_stiffness_batch[:, b_dofs[:, None], b_dofs]
-        cross_term = bm.transpose(K_ib, (0, 2, 1)) @ recovery
-        stiffness = (
-            K_bb
-            + cross_term
-            + bm.transpose(cross_term, (0, 2, 1))
-            + bm.transpose(recovery, (0, 2, 1)) @ K_ii @ recovery
+        # 切片与变分构造都走核心的批量实现, 迹投影由 legacy 的迹矩阵承担.
+        K_ii, K_ib_t, K_bb_t = self.legacy._trace_blocks(local_stiffness_batch)
+        stiffness = self.legacy._variational_stiffness(
+            K_ii, K_ib_t, K_bb_t, recovery
         )
 
         diagnostics: list[ReductionDiagnostics] = []
@@ -197,7 +192,7 @@ class PIMLShapeReduction(CondensationReductionAdapter):
 
             self.legacy.gate_report = {}
             try:
-                self.legacy._check_gates(stiffness[index], K_bb[index])
+                self.legacy._check_gates(stiffness[index], K_bb_t[index])
                 diagnostics.append(
                     self._successful_diagnostics(dict(self.legacy.gate_report))
                 )
@@ -212,8 +207,10 @@ class PIMLShapeReduction(CondensationReductionAdapter):
         if fallback_indices:
             fallback_index = bm.asarray(fallback_indices, dtype=bm.int64)
             fallback_density = density_batch[fallback_index]
-            exact_stiffness, exact_recovery = self.legacy.fallback_solver.condense(
-                local_stiffness_batch[fallback_index], fallback_density
+            exact_stiffness, exact_recovery = self.legacy._reduce_exact(
+                self.legacy.fallback_solver.condense(
+                    local_stiffness_batch[fallback_index], fallback_density
+                )
             )
             stiffness = bm.set_at(stiffness, fallback_index, exact_stiffness)
             recovery = bm.set_at(recovery, fallback_index, exact_recovery)

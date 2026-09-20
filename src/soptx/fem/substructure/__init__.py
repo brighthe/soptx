@@ -7,9 +7,7 @@ from .condensation import (
     StreamingShapeFunctionCondensation,
 )
 from .piml_surrogate import (
-    PIMLSurrogateNet,
     PIMLStaticCondensation,
-    ShapeFunctionSurrogateNet,
     ShapeFunctionCondensation,
     SurrogateContractError,
 )
@@ -39,12 +37,16 @@ from .problem_adapter import (
     project_problem_conditions_to_macro_system,
     project_problem_conditions_to_nodes,
 )
-from .solve import solve_interface_system
+from .solve import (
+    ConstrainedSolveResult,
+    solve_constrained_system,
+    solve_interface_system,
+)
 from .case_setup import (
     set_random_seed,
     make_density_fields,
     sample_random_density,
-    train_surrogate,
+    train_reduced_stiffness_surrogate,
 )
 
 __all__ = [
@@ -53,9 +55,7 @@ __all__ = [
     "StaticCondensationBase",
     "FEAStaticCondensation",
     "StreamingShapeFunctionCondensation",
-    "PIMLSurrogateNet",
     "PIMLStaticCondensation",
-    "ShapeFunctionSurrogateNet",
     "ShapeFunctionCondensation",
     "SurrogateContractError",
     "LocalReduction",
@@ -81,10 +81,12 @@ __all__ = [
     "project_problem_conditions_to_interface_system",
     "project_problem_conditions_to_macro_system",
     "project_problem_conditions_to_nodes",
+    "ConstrainedSolveResult",
+    "solve_constrained_system",
     "solve_interface_system",
     "set_random_seed",
     "build_substructures",
     "make_density_fields",
     "sample_random_density",
-    "train_surrogate",
+    "train_reduced_stiffness_surrogate",
 ]

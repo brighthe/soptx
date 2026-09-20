@@ -320,7 +320,7 @@ def test_registered_piml_and_fea_cases_project_identical_system_data(
     bm.set_backend("numpy")
     repository_root = Path(__file__).resolve().parents[2]
     cases_path = (
-        repository_root / "experiments" / "piml_substructure_topopt" / "cases.toml"
+        repository_root / "experiments" / "topopt_simp_piml_substructure" / "cases.toml"
     )
     with cases_path.open("rb") as stream:
         cases = {case["id"]: case for case in tomllib.load(stream)["cases"]}

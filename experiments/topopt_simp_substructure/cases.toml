@@ -20,34 +20,33 @@
 #   台账         id / summary / fa_reference, 不进求解。
 #
 # 工况一览 (4 个):
-#   1. mbb_2d_full_trace   2D MBB  12x2 子结构 x 5x5 细网格
-#   2. mbb_3d_full_trace   3D MBB  12x2x2 子结构 x 3x3x3 细网格
-#   3. mbb_2d_linear_corner   2D MBB  12x2 子结构 x 5x5 细网格
-#   4. mbb_3d_linear_corner   3D MBB  78x13x13 子结构 x 5x5x5 细网格
+#   1. cantilever_2d_ft   2D 悬臂梁  8x5 子结构 x 10x10 细网格 (80x50 全局, 4000 单元)
+#   2. cantilever_2d_lc   2D 悬臂梁  8x5 子结构 x 10x10 细网格 (80x50 全局, 4000 单元)
+#   3. mbb_3d_ft          3D MBB 梁  12x2x2 子结构 x 4x4x4 细网格 (48x8x8 全局, 3072 单元)
+#   4. mbb_3d_lc          3D MBB 梁  12x2x2 子结构 x 4x4x4 细网格 (48x8x8 全局, 3072 单元)
 #
-# ``mbb_3d_linear_corner`` 直接作为 Huang 2023 §4.1 的论文原规模精确参照;
-# 它与小规模 ``mbb_3d_full_trace`` 不再是只改变 trace 的成对工况。
+# 成对对比协议:
+#   cantilever_2d_ft vs cantilever_2d_lc: 仅 trace 改变, 验证 2D 角点迹降阶误差
+#   mbb_3d_ft vs mbb_3d_lc: 仅 trace 改变, 验证 3D 六面体角点迹降阶误差
 #
 # fa_reference 指向 experiments/topopt_simp_fa/cases.toml 中的同工况 FA 参照。
-# 该 MBB 参照工况目前尚未在 FA 侧注册, 因此暂留空字符串; compare.py 在
-# fa_reference 为空时直接报错退出, 不做静默降级。
 
 [meta]
 schema_version = "substructure-topopt-cases-v1"
 experiment = "topopt_simp_substructure"
 
 [[cases]]
-id = "mbb_2d_full_trace"
+id = "cantilever_2d_ft"
+problem = "CantileverCorner2d"
 trace = "full_trace"
 reduction = "exact_schur"
-role = "fa-equivalence-implementation-gate"
-domain = [0.0, 12.0, 0.0, 2.0]
-n_sub = [12, 2]
-n_fine = [5, 5]
+domain = [0.0, 160.0, 0.0, 100.0]
+n_sub = [8, 5]
+n_fine = [10, 10]
 integration_order = 2
-chunk_size = 8
+chunk_size = 40
 volfrac = 0.5
-filter_radius = 0.3
+filter_radius = 3.0
 filter_type = "sensitivity"
 max_iter = 100
 tol_change = 0.001
@@ -57,19 +56,43 @@ emax = 1.0
 nu = 0.3
 p_load = -1.0
 seed = 2026
-fa_reference = ""
-summary = "完整接口 (full_trace) 精确子结构缩聚 2D MBB 梁变密度拓扑优化"
+fa_reference = "cantilever_2d_fa"
+summary = "完整接口 (full_trace) 精确子结构缩聚 2D 悬臂梁变密度拓扑优化"
 
 [[cases]]
-id = "mbb_3d_full_trace"
+id = "cantilever_2d_lc"
+problem = "CantileverCorner2d"
+trace = "linear_corner"
+reduction = "exact_schur"
+domain = [0.0, 160.0, 0.0, 100.0]
+n_sub = [8, 5]
+n_fine = [10, 10]
+integration_order = 2
+chunk_size = 40
+volfrac = 0.5
+filter_radius = 3.0
+filter_type = "sensitivity"
+max_iter = 100
+tol_change = 0.001
+simp_penalty = 3.0
+emin = 1e-6
+emax = 1.0
+nu = 0.3
+p_load = -1.0
+seed = 2026
+fa_reference = "cantilever_2d_fa"
+summary = "角点线性迹 (linear_corner) 精确子结构缩聚 2D 悬臂梁变密度拓扑优化"
+
+[[cases]]
+id = "mbb_3d_ft"
+problem = "FullMBBBeam3d"
 trace = "full_trace"
 reduction = "exact_schur"
-role = "fa-equivalence-implementation-gate"
 domain = [0.0, 12.0, 0.0, 2.0, 0.0, 2.0]
 n_sub = [12, 2, 2]
-n_fine = [3, 3, 3]
+n_fine = [4, 4, 4]
 integration_order = 2
-chunk_size = 8
+chunk_size = 48
 volfrac = 0.3
 filter_radius = 0.4
 filter_type = "sensitivity"
@@ -85,46 +108,22 @@ fa_reference = ""
 summary = "完整接口 (full_trace) 精确子结构缩聚 3D MBB 梁变密度拓扑优化"
 
 [[cases]]
-id = "mbb_2d_linear_corner"
+id = "mbb_3d_lc"
+problem = "FullMBBBeam3d"
 trace = "linear_corner"
 reduction = "exact_schur"
-role = "exact-reference-for-piml"
-domain = [0.0, 12.0, 0.0, 2.0]
-n_sub = [12, 2]
-n_fine = [5, 5]
+domain = [0.0, 12.0, 0.0, 2.0, 0.0, 2.0]
+n_sub = [12, 2, 2]
+n_fine = [4, 4, 4]
 integration_order = 2
-chunk_size = 8
-volfrac = 0.5
-filter_radius = 0.3
+chunk_size = 48
+volfrac = 0.3
+filter_radius = 0.4
 filter_type = "sensitivity"
-max_iter = 100
+max_iter = 50
 tol_change = 0.001
 simp_penalty = 3.0
 emin = 1e-6
-emax = 1.0
-nu = 0.3
-p_load = -1.0
-seed = 2026
-fa_reference = ""
-summary = "角点线性迹 (linear_corner) 精确子结构缩聚 2D MBB 梁变密度拓扑优化"
-
-[[cases]]
-id = "mbb_3d_linear_corner"
-trace = "linear_corner"
-reduction = "exact_schur"
-role = "exact-reference-for-piml"
-domain = [0.0, 6.0, 0.0, 1.0, 0.0, 1.0]
-n_sub = [78, 13, 13]
-n_fine = [5, 5, 5]
-integration_order = 2
-chunk_size = 8
-volfrac = 0.12
-filter_radius = 0.046153846153846156
-filter_type = "density"
-max_iter = 200
-tol_change = 0.0002
-simp_penalty = 3.0
-emin = 1e-7
 emax = 1.0
 nu = 0.3
 p_load = -1.0

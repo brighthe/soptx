@@ -9,13 +9,25 @@
 """
 
 from dataclasses import dataclass
+import hashlib
 from typing import Tuple, List, Union, Any, Callable, Iterable, Optional, Sequence
+
+import numpy as np
+from scipy.sparse import coo_matrix
 
 from fealpy.backend import backend_manager as bm
 from fealpy.mesh import QuadrangleMesh, HexahedronMesh
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.sparse import COOTensor, CSRTensor
 from soptx.materials import IsotropicLinearElasticMaterial
+from soptx.fem.matrix.csr_pattern import (
+    CSRPattern,
+    assemble_csr_chunks,
+    build_csr_pattern_from_dofmap,
+)
+
+from .streaming import TraceStiffnessBatch
+from .traces import FullTraceBasis, LinearCornerTraceBasis, TraceBasis
 
 
 @dataclass(frozen=True)
@@ -134,6 +146,7 @@ class GlobalAssembler:
         self._node_of_grid: Optional[Any] = None
         # 子结构全局自由度按 (位置, 参考子结构) 缓存; 同一子结构会被多个方法重复查询.
         self._dof_cache: dict = {}
+        self._interface_pattern_cache: Optional[Tuple[Any, CSRPattern]] = None
 
     @staticmethod
     def _parse_layout(
@@ -602,6 +615,67 @@ class GlobalAssembler:
 
         return InterfaceSystem(stiffness=K_macro, global_dofs=macro_global_dofs)
 
+    def build_linear_corner_projection(
+        self,
+        sub_meshes: Sequence[Any],
+        interface_system: InterfaceSystem,
+        trace_basis: Any,
+    ) -> Any:
+        """构造全局角点线性迹投影 ``u_interface = P q``.
+
+        参数:
+            sub_meshes: 参与接口装配的子结构.
+            interface_system: 完整接口系统或至少具有 ``global_dofs`` 属性的视图.
+            trace_basis: 局部角点迹基, 其矩阵把局部宏观角点自由度映射为
+                完整局部边界位移.
+
+        返回:
+            scipy.sparse.csr_matrix: 形状为
+                ``(n_interface_dofs, total_macro_dofs)`` 的全局投影 ``P``.
+
+        异常:
+            ValueError: 当局部维度不匹配, 投影未覆盖完整接口, 或相邻子结构
+                在共享接口上给出不一致的插值时抛出.
+        """
+        if not sub_meshes:
+            raise ValueError("sub_meshes 不能为空.")
+
+        interface_dofs = bm.asarray(interface_system.global_dofs, dtype=bm.int64)
+        boundary = np.asarray(
+            bm.to_numpy(self.interface_indices(sub_meshes, interface_dofs)),
+            dtype=np.int64,
+        )
+        corners = np.asarray(
+            bm.to_numpy(self.macro_corner_indices(sub_meshes)), dtype=np.int64
+        )
+        local = np.asarray(bm.to_numpy(trace_basis.matrix), dtype=np.float64)
+        if local.shape != (boundary.shape[1], corners.shape[1]):
+            raise ValueError(
+                "trace_basis.matrix 的形状必须为 "
+                f"({boundary.shape[1]}, {corners.shape[1]}); 当前为 {local.shape}."
+            )
+
+        row, col = np.nonzero(local)
+        n_batch, n_boundary = boundary.shape
+        candidates = coo_matrix(
+            (
+                np.tile(local[row, col], n_batch),
+                (
+                    (np.arange(n_batch)[:, None] * n_boundary + row).ravel(),
+                    corners[:, col].ravel(),
+                ),
+            ),
+            shape=(n_batch * n_boundary, self.total_macro_dofs),
+        ).tocsr()
+        global_rows, first = np.unique(boundary.ravel(), return_index=True)
+        if not np.array_equal(global_rows, np.arange(len(interface_dofs))):
+            raise ValueError("角点线性迹投影未覆盖完整接口.")
+        projection = candidates[first].tocsr()
+        difference = candidates - projection[boundary.ravel()]
+        if difference.nnz and np.max(np.abs(difference.data)) > 1.0e-12:
+            raise ValueError("相邻子结构在共享接口上给出了不一致的角点插值.")
+        return projection
+
     def assemble_macro_system_batches(
         self,
         sub_meshes: Sequence[Any],
@@ -684,7 +758,102 @@ class GlobalAssembler:
             global_dofs=bm.arange(self.total_macro_dofs, dtype=bm.int64),
         )
 
-    ### 缩聚结果归一化 ###
+    def assemble_trace_system(
+        self,
+        sub_meshes: Sequence[Any],
+        condensors: Any,
+        *,
+        trace_basis: TraceBasis,
+        chunk_size: Optional[int] = None,
+    ) -> InterfaceSystem:
+        """按指定迹空间装配全局子结构系统.
+
+        Parameters
+        ----------
+        sub_meshes : sequence
+            参与装配的全部子结构.
+        condensors : Any
+            已缩聚的批量结果、逐块结果, 或提供 get_chunk_stiffness 的流式对象.
+        trace_basis : TraceBasis
+            当前支持 FullTraceBasis 和 LinearCornerTraceBasis.
+        chunk_size : int, optional
+            每批装配的子结构数. full_trace 委托给接口 pattern 路径;
+            linear_corner 在指定该参数或使用流式缩聚结果时按批投影.
+
+        Returns
+        -------
+        InterfaceSystem
+            full_trace 返回完整接口系统, linear_corner 返回宏观角点迹系统.
+
+        Raises
+        ------
+        TypeError
+            当 trace_basis 不是当前具有明确全局映射的迹基类型时抛出.
+        ValueError
+            当子结构为空、迹基维度不匹配或 chunk_size 非正时抛出.
+
+        Notes
+        -----
+        full_trace 直接复用完整接口装配, 不对缩聚刚度执行恒等投影;
+        linear_corner 先计算 T^T K_s T, 再装配宏观角点系统.
+        """
+        if not sub_meshes:
+            raise ValueError("sub_meshes 不能为空.")
+        if chunk_size is not None and chunk_size <= 0:
+            raise ValueError(f"chunk_size 必须为正整数; 当前为 {chunk_size}.")
+        if not isinstance(
+            trace_basis, (FullTraceBasis, LinearCornerTraceBasis)
+        ):
+            raise TypeError(
+                "trace_basis 当前仅支持 FullTraceBasis 或 "
+                "LinearCornerTraceBasis; "
+                f"当前为 {type(trace_basis).__name__}."
+            )
+
+        n_sub_total = len(sub_meshes)
+        n_b = int(sub_meshes[0].n_b)
+        if trace_basis.n_boundary_dofs != n_b:
+            raise ValueError(
+                "trace_basis 的完整接口自由度数必须与子结构 n_b 一致; "
+                f"当前为 {trace_basis.n_boundary_dofs} 与 {n_b}."
+            )
+
+        if isinstance(trace_basis, FullTraceBasis):
+            return self.assemble_interface_system(
+                list(sub_meshes), condensors, chunk_size=chunk_size
+            )
+
+        K_s_batch, _ = self.normalize_condensors(
+            condensors, n_sub_total, n_b
+        )
+        if K_s_batch is not None and chunk_size is None:
+            return self.assemble_macro_system(
+                list(sub_meshes), trace_basis.project_stiffness(K_s_batch)
+            )
+
+        step = min(
+            64 if chunk_size is None else chunk_size,
+            n_sub_total,
+        )
+
+        def projected_batches() -> Iterable[TraceStiffnessBatch]:
+            """逐批读取完整 Schur 刚度并投影到角点迹空间."""
+            for start in range(0, n_sub_total, step):
+                stop = min(start + step, n_sub_total)
+                stiffness = (
+                    condensors.get_chunk_stiffness(start, stop)
+                    if K_s_batch is None
+                    else K_s_batch[start:stop]
+                )
+                yield TraceStiffnessBatch(
+                    start=start,
+                    end=stop,
+                    stiffness=trace_basis.project_stiffness(stiffness),
+                )
+
+        return self.assemble_macro_system_batches(
+            sub_meshes, projected_batches()
+        )
 
     @staticmethod
     def normalize_condensors(
@@ -770,6 +939,76 @@ class GlobalAssembler:
 
     ### 装配与投影 ###
 
+    def _prepare_interface_pattern(
+        self,
+        b_interface: Any,
+        n_interface: int,
+        dtype: Any,
+    ) -> CSRPattern:
+        """校验节点优先向量映射, 并构建或复用接口 CSR 符号模式."""
+        mapping = np.asarray(bm.to_numpy(b_interface), dtype=np.int64)
+        if n_interface % self.dim != 0 or mapping.shape[1] % self.dim != 0:
+            raise ValueError("接口自由度数必须按空间分量完整分组.")
+
+        grouped = mapping.reshape(mapping.shape[0], -1, self.dim)
+        base = grouped[:, :, 0]
+        expected = base[:, :, None] + np.arange(self.dim, dtype=np.int64)
+        if np.any(base % self.dim) or not np.array_equal(grouped, expected):
+            raise ValueError(
+                "接口映射必须采用节点优先排列: dof = dim * node + component."
+            )
+
+        scalar_mapping = b_interface[:, ::self.dim] // self.dim
+        scalar_np = np.ascontiguousarray(base // self.dim)
+        digest = hashlib.blake2b(
+            memoryview(scalar_np).cast("B"), digest_size=16
+        ).digest()
+        key = (
+            tuple(scalar_np.shape),
+            n_interface,
+            self.dim,
+            digest,
+            bm.backend_name,
+            str(getattr(b_interface, "device", "cpu")),
+            str(dtype),
+        )
+        cached = self._interface_pattern_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        pattern = build_csr_pattern_from_dofmap(
+            scalar_mapping,
+            n_interface,
+            dof_numel=self.dim,
+            dof_priority=False,
+            device=getattr(b_interface, "device", None),
+            dtype=dtype,
+            allocate_buffer=False,
+        )
+        self._interface_pattern_cache = (key, pattern)
+        return pattern
+
+    @staticmethod
+    def _assemble_interface_values(
+        pattern: CSRPattern,
+        K_s_batch: Any,
+        condensors: Any,
+        n_batch: int,
+        step: int,
+    ) -> CSRTensor:
+        """把完整或流式缩聚刚度按批次累加到独立数值缓冲区."""
+        def chunks() -> Iterable[Tuple[int, Any]]:
+            for start in range(0, n_batch, step):
+                stop = min(start + step, n_batch)
+                if K_s_batch is None:
+                    values = condensors.get_chunk_stiffness(start, stop)
+                else:
+                    values = K_s_batch[start:stop]
+                yield start, values
+                del values
+
+        return assemble_csr_chunks(chunks(), pattern)
+
     def assemble_interface_system(
         self,
         sub_meshes: List[Any],
@@ -777,28 +1016,21 @@ class GlobalAssembler:
         *,
         chunk_size: Optional[int] = None,
     ) -> InterfaceSystem:
-        """
-        对各子结构的缩聚刚度矩阵执行散加, 构造全局接口刚度矩阵.
+        """以缓存的 CSR pattern 散加各子结构缩聚刚度.
 
-        参数:
-            sub_meshes: 子结构列表.
-            condensors: 缩聚器列表或单个批量缩聚器, 形状约定见
-                ``normalize_condensors``.
-            chunk_size: 每批散加的子结构数. 为 ``None`` 时一次散加全部子结构.
-                散加需要 ``B * n_b**2`` 量级的行列索引与数值缓冲, 子结构数很大时
-                用该参数限制峰值内存.
+        Parameters
+        ----------
+        sub_meshes : list
+            子结构列表, 边界自由度按节点优先分量顺序排列.
+        condensors : Any
+            已缩聚的批量结果、逐块结果, 或提供 get_chunk_stiffness 的对象.
+        chunk_size : int, optional
+            每次数值累加的子结构数. 不限制首次符号构建的内存.
 
-        返回:
-            system: 接口刚度矩阵及其全局自由度映射.
-
-        异常:
-            ValueError: 当子结构与缩聚器不匹配或 ``chunk_size`` 非正时抛出.
-
-        说明:
-            不施加载荷, 边界条件, 也不调用线性求解器.
-
-            散加通过 FEALPy ``COOTensor`` 完成, 重复项由 ``coalesce().tocsr()``
-            求和生成 ``CSRTensor``, 供 ``soptx.solvers.spsolve`` 直接求解.
+        Returns
+        -------
+        InterfaceSystem
+            接口 CSR 矩阵与自由度映射. 数值缓冲独立, 符号结构可复用.
         """
         if not sub_meshes:
             raise ValueError("sub_meshes 不能为空.")
@@ -808,39 +1040,23 @@ class GlobalAssembler:
         interface_global_dofs = self.build_interface_dofs(sub_meshes)
         n_interface = int(len(interface_global_dofs))
         n_b = int(sub_meshes[0].n_b)
-
         b_interface = self.interface_indices(sub_meshes, interface_global_dofs)
-        K_s_batch, _ = self.normalize_condensors(condensors, len(sub_meshes), n_b)
-
+        K_s_batch, _ = self.normalize_condensors(
+            condensors, len(sub_meshes), n_b
+        )
+        dtype = (
+            getattr(K_s_batch, "dtype", None)
+            if K_s_batch is not None
+            else bm.float64
+        )
+        pattern = self._prepare_interface_pattern(
+            b_interface, n_interface, dtype
+        )
         n_batch = len(sub_meshes)
         step = n_batch if chunk_size is None else min(chunk_size, n_batch)
-        all_rows: List[Any] = []
-        all_cols: List[Any] = []
-        all_vals: List[Any] = []
-        for start in range(0, n_batch, step):
-            sl = slice(start, start + step)
-            idx = b_interface[sl]
-            n_chunk = int(idx.shape[0])
-            shape = (n_chunk, n_b, n_b)
-            rows = bm.reshape(bm.broadcast_to(idx[:, :, None], shape), (-1,))
-            cols = bm.reshape(bm.broadcast_to(idx[:, None, :], shape), (-1,))
-            if K_s_batch is None and hasattr(condensors, "get_chunk_stiffness"):
-                chunk_Ks = condensors.get_chunk_stiffness(start, min(start + step, n_batch))
-                vals = bm.reshape(chunk_Ks, (-1,))
-            else:
-                vals = bm.reshape(K_s_batch[sl], (-1,))
-            all_rows.append(rows)
-            all_cols.append(cols)
-            all_vals.append(vals)
-
-        rows_all = all_rows[0] if len(all_rows) == 1 else bm.concat(all_rows, axis=0)
-        cols_all = all_cols[0] if len(all_cols) == 1 else bm.concat(all_cols, axis=0)
-        vals_all = all_vals[0] if len(all_vals) == 1 else bm.concat(all_vals, axis=0)
-
-        indices = bm.stack([rows_all, cols_all], axis=0)
-        coo = COOTensor(indices=indices, values=vals_all, spshape=(n_interface, n_interface))
-        K_global = coo.coalesce().tocsr()
-
+        K_global = self._assemble_interface_values(
+            pattern, K_s_batch, condensors, n_batch, step
+        )
         return InterfaceSystem(
             stiffness=K_global,
             global_dofs=interface_global_dofs,

@@ -51,7 +51,7 @@ from soptx.fem.substructure import (
     build_substructures,
     make_density_fields,
     set_random_seed,
-    train_surrogate,
+    train_reduced_stiffness_surrogate,
 )
 
 
@@ -80,7 +80,7 @@ NITER_TOLERANCE = 1
 # 算子/显式两条路径解相互一致的阈值.
 SOLUTION_MUTUAL_TOL = 1e-8
 
-# 算例与训练配置, 与 piml_substructure_elasticity/deployment_config.py 及
+# 算例与训练配置, 与 piml_substructure_elasticity/_common.py 及
 # verify_stiffness_route.py 的默认值保持一致, 使各目录证据可对照.
 DOMAIN = (0.0, 12.0, 0.0, 2.0)
 N_SUB = (12, 2)
@@ -164,7 +164,7 @@ def run_verification(
     # 代理训练与逐子结构预测缩聚.
     # ------------------------------------------------------------------
     print("[训练] Cholesky 因子代理网络...")
-    net, final_loss = train_surrogate(
+    net, final_loss = train_reduced_stiffness_surrogate(
         prototype, n_train, n_epochs, learning_rate, DENSITY_RANGE
     )
     print(f"       最终训练 MSE: {final_loss:.3e}")

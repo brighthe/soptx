@@ -27,7 +27,7 @@ class PINNSolver(ParadigmSolver):
     BLOCKER = (
         "求解器待下沉: PINNElasticityNet 与残差构造目前只存在于 "
         "examples/pinn_elasticity/minimal_demo.py, 且在 "
-        "examples/piml_substructure_elasticity/compare_piml_pinn.py 中被重复实现一次; "
+        "experiments/elasticity_paradigm_comparison/legacy/compare_piml_pinn.py 中被重复实现一次; "
         "src/soptx/ml/ 当前仅有 networks.py. 需先下沉到 src/soptx/ml/ 并消除重复"
     )
 

@@ -1,138 +1,139 @@
-"""形函数路径与直接预测路径的缩聚刚度精度对比.
+"""形函数预测路线的二维力学验证与精度评估.
 
-Huang 2023 在第 3.4 节给出两条构造缩聚刚度的在线路径: 一条由网络直接预测
-``K_s``, 另一条只预测子结构形函数 ``N``, 再经该文式 (17) 计算
-``K_tilde = N_full^T K_local N_full``. 论文的大规模算例 (第 4.1, 4.3 节) 全部走后者,
-理由是"即便预测的形函数包含相当大的误差, 由式 (17) 计算得到的刚度矩阵仍十分接近
-精确解", 而直接预测路径在柔顺机构算例上给出 7.56% / 7.65% 的输出位移误差, 并被论文
-自己列为破坏应变能一致性的待解决问题.
+支持两种子结构接口迹空间模式:
+- full_trace: 完整周边接口 (保留全部 20 个边界节点, 40 个接口自由度, 输出 1184 维, 对应 Huang 2023 组 1)
+- linear_corner: 角点线性迹接口 (边界向 4 个角点线性插值, 8 个角点自由度, 输出 160 维, 对应 Huang 2023 式 (16) 及组 2)
 
-本脚本把这一论断在本仓库的离散上定量复现, 分三步:
-
-1. **恒等式**: 记 ``N = N* + E``, 则式 (17) 的误差有精确闭式
-
-       ``N_full(N)^T K N_full(N) - K_s = E^T K_ii E``.
-
-   一阶项被 ``K_ii N* = -K_ib`` 精确抵消, 因此式 (17) 是二阶的; 且因 ``K_ii`` 正定,
-   误差项半正定, 式 (17) 只会高估刚度, 与变分原理一致. 该步不含训练, 直接校验恒等式
-   与半正定性.
-
-2. **受控扰动**: 向精确 ``N*`` 注入不同量级的随机扰动, 在 log-log 上拟合
-   ``eps_N -> eps_K17`` 的斜率, 期望为 2, 并定出放大系数 ``C``.
-
-3. **真实网络**: 训练一个预测 ``N`` 的网络, 把它落在上述曲线上, 与直接预测 ``K_s``
-   的路径在同一训练预算下逐项对比.
-
-``N`` 的刚体约束按构造满足. 子结构做刚体运动时内部位移完全由接口位移决定且与密度无关,
-即 ``N* R_rigid = Phi_i`` 对一切密度成立 (实测 ``5e-16``). 因此参数化取
-
-    ``N_hat = Phi_i R_rigid^T + M R_perp^T``,
-
-网络只输出变形子空间上的 ``M``, 形状 ``(n_i, m)``. 这与 ``PIMLStaticCondensation``
-对 ``K_s`` 的 Cholesky-on-``R_perp`` 参数化同构, 也是 Huang 2023 式 (13)(14) 几何约束
-的等价实现: 那里用求和约束逐条消元, 这里用刚体模态正交补一次性消掉.
+本脚本验证 Huang 2023 式 (17) 的二阶误差性质, 不代表完整论文复现:
+1. 刚体分量密度无关性与解析构造校验;
+2. 式 (17) 误差闭式与误差矩阵半正定性验证;
+3. 受控扰动扫描 (拟合 log-log 理论二阶斜率 2.0);
+4. 形函数神经网络训练 (变形子空间投影分量 M) 与留出集两层误差评估;
+5. 固定密度 MBB 梁 (12x2 子结构) 解层精度评估, 不启用运行时回退;
+6. full_trace 独立门禁诊断与故障注入检查.
 
 使用方法:
+    # 默认 full_trace (组 1)
     python examples/piml_substructure_elasticity/verify_shape_function_route.py
 
-    # 对齐 verify_stiffness_route.py 的既有训练预算, 便于两条路径逐项对比.
-    python examples/piml_substructure_elasticity/verify_shape_function_route.py \
-        --n-train 2000 --epochs 4000 --lr 0.005
+    # 切换为 linear_corner (组 2, 8 个角点自由度, 160 维输出)
+    python examples/piml_substructure_elasticity/verify_shape_function_route.py --trace-basis linear_corner
 
-随机性统一由 ``--seed`` (缺省 ``2026``) 固定, 与 ``verify_stiffness_route.py`` 一致, 同一组参数
-逐位可复现.
+    # 解析恒等式与二阶受控扫描 (跳过网络训练与解层验证)
+    python examples/piml_substructure_elasticity/verify_shape_function_route.py --trace-basis linear_corner --skip-train
 """
 
-import sys
-import json
+from __future__ import annotations
+
 import argparse
+import json
+import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, cast
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from fealpy.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
-from soptx.problems.elasticity import FullMBBBeam2d
-from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.fem.substructure import (
     FEAStaticCondensation,
     GlobalAssembler,
+    LinearCornerTraceBasis,
+    LocalReductionBatchResult,
+    ReductionDiagnostics,
     ShapeFunctionCondensation,
-    ShapeFunctionSurrogateNet,
     SubstructurePrototype,
     SurrogateContractError,
     build_substructures,
     make_density_fields,
+    solve_constrained_system,
+    solve_interface_system,
 )
+from soptx.ml.substructure import ShapeFunctionSurrogateNet
+from soptx.problems.elasticity import FullMBBBeam2d
+from soptx.topology.interpolation import MaterialInterpolationScheme
 
-# 解层对比复用 verify_stiffness_route.py 已建立的求解链路, 避免重复实现全局接口系统,
-# 并保证两条路径面对逐位相同的外载, 约束与子结构编号.
-sys.path.insert(0, str(Path(__file__).parent))
-from verify_stiffness_route import solve_with_condensors  # noqa: E402
+_SCRIPT_DIR = Path(__file__).resolve().parent
+
+# --- 几何与物理模型 ---
+DOMAIN = (0.0, 12.0, 0.0, 2.0)
+N_SUB = (12, 2)
+N_FINE = (5, 5)
+P_LOAD = -1.0
+E_BASE = 1.0
+NU = 0.3
+
+# --- 训练与评估区间 ---
+DENSITY_RANGE = (0.3, 1.0)
+DOMAIN_SIZE = (DOMAIN[1] - DOMAIN[0], DOMAIN[3] - DOMAIN[2])
+SUB_SIZE = (DOMAIN_SIZE[0] / N_SUB[0], DOMAIN_SIZE[1] / N_SUB[1])
+
+# --- 形函数训练超参数 ---
+SHAPE_N_TRAIN = 2000
+SHAPE_N_EVAL = 200
+SHAPE_EPOCHS = 4000
+SHAPE_LEARNING_RATE = 0.005
+SHAPE_SEED = 2026
+SHAPE_HIDDEN_DIM = 256
+SHAPE_SIMP_PENALTY = 3.0
+SHAPE_RHO_MIN = 0.0
 
 
-# 训练密度区间与子结构几何统一取自 deployment_config.py, 保证两条路径的训练分布与
-# 网格划分严格一致; SUB_SIZE 在那里由 DOMAIN 与 N_SUB 派生, 不再本地手写.
-from deployment_config import (  # noqa: E402
-    DENSITY_RANGE,
-    DOMAIN,
-    E_BASE,
-    N_FINE,
-    N_SUB,
-    NU,
-    P_LOAD,
-    SUB_SIZE,
-)
+def display_width(s: str) -> int:
+    """计算字符串在等宽终端下的显示宽度, 东亚全角字符按两列计."""
+    return sum(2 if unicodedata.east_asian_width(char) in ("F", "W") else 1 for char in s)
 
 
 def set_random_seed(seed: int) -> None:
-    """统一固定 numpy, torch 与 bm 后端的随机数种子.
-
-    参数:
-        seed: 随机数种子.
-    """
+    """统一固定 numpy, torch 与 bm 后端的随机数种子."""
     np.random.seed(seed)
     torch.manual_seed(seed)
     bm.random.seed(seed)
 
 
 def sample_random_density(n_sample: int, seed_offset: int = 0) -> Any:
-    """按训练分布采样一批随机局部密度.
-
-    参数:
-        n_sample: 采样组数.
-        seed_offset: 叠加在全局种子上的偏移, 用于让留出集与训练集不重合.
-
-    返回:
-        rho: 形状 ``(n_sample, nx, ny)`` 的密度, 各分量在 ``DENSITY_RANGE`` 上独立
-            均匀采样.
-    """
-    rng = np.random.default_rng(2026 + seed_offset)
+    """按训练分布采样一批随机局部密度."""
+    rng = np.random.default_rng(SHAPE_SEED + seed_offset)
     lo, hi = DENSITY_RANGE
     return bm.asarray(
         lo + (hi - lo) * rng.random((n_sample, *N_FINE)), dtype=bm.float64
     )
 
 
+def solve_with_condensors(
+    assembler: Any,
+    sub_meshes: List[Any],
+    condensors: Any,
+    global_load: Any,
+    fixed_global_dofs: Any,
+) -> Tuple[Any, Any, int]:
+    """用给定的缩聚结果装配并求解全局接口系统, 再恢复全场位移 (full_trace 路径)."""
+    system = assembler.assemble_interface_system(sub_meshes, condensors)
+    interface_fixed = assembler.project_global_dofs(system, fixed_global_dofs)
+    u_interface = solve_interface_system(
+        system,
+        assembler.project_global_vector(system, global_load),
+        interface_fixed,
+    )
+    u_full = assembler.recover_full_displacement(
+        sub_meshes, condensors, system, u_interface
+    )
+    n_free = int(len(system.global_dofs)) - int(len(interface_fixed))
+    return u_interface, u_full, n_free
+
+
 class Eq17Evaluator:
-    """在固定子结构原型上评估式 (17) 与两条缩聚路径的精度.
+    """在固定子结构原型上评估式 (17) 与两条缩聚路径的精度 (支持 full_trace 与 linear_corner)."""
 
-    属性:
-        prototype: 共享参考子结构.
-        n_i, n_b: 内部与接口自由度数.
-        n_reduced: 变形子空间维数 ``m = n_b - n_rigid``.
-        Phi_i: 刚体模态在内部自由度上的取值, 形状 ``(n_i, n_rigid)``, 与密度无关.
-    """
-
-    def __init__(self) -> None:
-        """构造原型并缓存刚体/变形基与刚体部分 ``Phi_i``."""
+    def __init__(self, trace_basis: str = "full_trace") -> None:
+        self.trace_basis = trace_basis
         self.prototype = SubstructurePrototype(
-            SUB_SIZE, N_FINE, E_base=1.0, nu=0.3
+            SUB_SIZE, N_FINE, E_base=E_BASE, nu=NU,
+            penal=SHAPE_SIMP_PENALTY, rho_min=SHAPE_RHO_MIN,
         )
         self.condensor = FEAStaticCondensation(
             self.prototype.i_dofs, self.prototype.b_dofs
@@ -143,72 +144,158 @@ class Eq17Evaluator:
         self.n_b = int(self.prototype.n_b)
         self.n_dof = self.n_i + self.n_b
 
-        self.R_rigid = bm.to_numpy(self.prototype.rigid_basis)      # (n_b, n_rigid)
-        self.R_perp = bm.to_numpy(self.prototype.deformation_basis)  # (n_b, m)
+        # full_trace 即 T = I, 核心库以 trace=None 表示, 从而完全绕开迹矩阵乘法.
+        if trace_basis == "full_trace":
+            self.trace: Optional[Any] = None
+        elif trace_basis == "linear_corner":
+            self.trace = LinearCornerTraceBasis.from_prototype(self.prototype)
+        else:
+            raise ValueError(f"未知的接口空间模式: {trace_basis!r}")
+        self.L = None if self.trace is None else bm.to_numpy(self.trace.matrix)
+
+        # 迹空间刚体基 R_q, 变形子空间基 R_perp 与刚体内部取值 Phi_i 全部由核心库
+        # 按维数无关的方式构造, 脚本不再自行做 pinv/QR/特征分解.
+        R_q, R_perp, Phi_i = self.prototype.trace_interface_bases(self.trace)
+        self.R_rigid = bm.to_numpy(R_q)
+        self.R_perp = bm.to_numpy(R_perp)
+        self.Phi_i = bm.to_numpy(Phi_i)
+        self.n_interface = int(self.R_rigid.shape[0])
         self.n_rigid = int(self.R_rigid.shape[1])
         self.n_reduced = int(self.R_perp.shape[1])
 
-        # 刚体运动下内部位移由接口位移唯一决定且与密度无关, 因此 Phi_i 由网格解析
-        # 给出, 不含任何有限元装配. 步骤 0 用有限元结果反查该解析值.
-        self.Phi_i = bm.to_numpy(self.prototype.rigid_interior_modes)  # (n_i, n_rigid)
+        # 无网络的核心缩聚器, 只借用其参数化与变分式实现; 脚本中所有 K_r 构造都
+        # 经由它, 与生产路径 PIMLShapeReduction 共用同一份代码.
+        self.core = ShapeFunctionCondensation(
+            self.prototype.i_dofs,
+            self.prototype.b_dofs,
+            rigid_basis=R_q,
+            deformation_basis=R_perp,
+            rigid_interior=Phi_i,
+            trace=self.trace,
+        )
+        # 完整接口上的同一构造, 供解层把迹空间延拓重新摊回全边界时复用.
+        self.core_full = self.core if self.trace is None else (
+            ShapeFunctionCondensation(
+                self.prototype.i_dofs,
+                self.prototype.b_dofs,
+                rigid_basis=self.prototype.rigid_basis,
+                deformation_basis=self.prototype.deformation_basis,
+                rigid_interior=self.prototype.rigid_interior_modes,
+            )
+        )
 
     def exact_batch(self, rho: Any) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """对一批密度做精确缩聚.
-
-        参数:
-            rho: 形状 ``(B, nx, ny)`` 的批量密度.
-
-        返回:
-            (K_local, K_s, N): 分别为 ``(B, n_dof, n_dof)``, ``(B, n_b, n_b)`` 与
-                ``(B, n_i, n_b)`` 的 numpy 数组.
-        """
+        """批量求解精确缩聚刚度与内部延拓, 并降到当前迹空间."""
         K_batch = self.prototype.assemble_local_stiffness_batch(rho)
         K_s, N = self.condensor.condense(K_batch)
-        return bm.to_numpy(K_batch), bm.to_numpy(K_s), bm.to_numpy(N)
+        if self.trace is None:
+            return bm.to_numpy(K_batch), bm.to_numpy(K_s), bm.to_numpy(N)
+        return (
+            bm.to_numpy(K_batch),
+            bm.to_numpy(self.trace.project_stiffness(K_s)),
+            bm.to_numpy(self.trace.reduce_recovery(N)),
+        )
 
-    def eq17(self, K_local: np.ndarray, N: np.ndarray) -> np.ndarray:
-        """按 Huang 2023 式 (17) 由形函数计算缩聚刚度.
+    def reduced_stiffness(
+        self, K_local: np.ndarray, recovery: np.ndarray
+    ) -> np.ndarray:
+        """由内部延拓构造迹空间降阶刚度, 直接调用核心库的变分式实现."""
+        return bm.to_numpy(self.core.assemble_reduced_stiffness(
+            bm.asarray(K_local, dtype=bm.float64),
+            bm.asarray(recovery, dtype=bm.float64),
+        ))
 
-        参数:
-            K_local: 局部刚度矩阵, 形状 ``(..., n_dof, n_dof)``.
-            N: 形函数的内部分块, 形状 ``(..., n_i, n_b)``.
+    def assemble_recovery(self, M: np.ndarray) -> np.ndarray:
+        """由变形子空间分量 M 合成内部延拓 B (满足刚体不变性约束)."""
+        return bm.to_numpy(
+            self.core.assemble_recovery(bm.asarray(M, dtype=bm.float64))
+        )
 
-        返回:
-            K_tilde: ``N_full^T K_local N_full``, 形状 ``(..., n_b, n_b)``.
+    def project_deformation(self, B: np.ndarray) -> np.ndarray:
+        """把内部延拓投影到变形子空间, 提取训练目标 M."""
+        return bm.to_numpy(
+            self.core.project_deformation(bm.asarray(B, dtype=bm.float64))
+        )
 
-        说明:
-            ``N_full`` 在接口自由度行上是单位阵 (Huang 记号中的 ``N_j1``), 在内部
-            自由度行上是 ``N`` (即 ``N_j2``). 这里按批量显式构造 ``N_full`` 而不做
-            分块展开, 以保证与恒等式校验使用完全相同的表达式.
-        """
-        lead = N.shape[:-2]
-        N_full = np.zeros((*lead, self.n_dof, self.n_b), dtype=np.float64)
-        N_full[..., self.b_dofs, :] = np.eye(self.n_b)
-        N_full[..., self.i_dofs, :] = N
-        return np.einsum('...ji,...jk,...kl->...il', N_full, K_local, N_full)
 
-    def assemble_N(self, M: np.ndarray) -> np.ndarray:
-        """由变形子空间分量合成完整形函数.
+def prepare_training_arrays(ev: Eq17Evaluator, n_train: int):
+    """生成训练集输入与标签张量."""
+    rho = sample_random_density(n_train, seed_offset=0)
+    _, _, N = ev.exact_batch(rho)
+    target = ev.project_deformation(N)
+    return (
+        torch.tensor(bm.to_numpy(rho).reshape(n_train, -1), dtype=torch.float32),
+        torch.tensor(target.reshape(n_train, -1), dtype=torch.float32),
+    )
 
-        参数:
-            M: 网络输出, 形状 ``(..., n_i, m)``.
 
-        返回:
-            N_hat: ``Phi_i R_rigid^T + M R_perp^T``, 形状 ``(..., n_i, n_b)``.
-                按构造满足 ``N_hat R_rigid = Phi_i``, 即刚体运动被精确复现.
-        """
-        return self.Phi_i @ self.R_rigid.T + M @ self.R_perp.T
+def fit_full_batch(net, X, Y, n_epochs: int, learning_rate: float):
+    """全批量 Adam 训练循环."""
+    if n_epochs <= 0 or learning_rate <= 0:
+        raise ValueError("训练轮数与学习率必须为正。")
+    optimizer = optim.Adam(net.parameters(), lr=learning_rate)
+    criterion = nn.MSELoss()
+    net.train()
+    losses = []
+    for _ in range(n_epochs):
+        optimizer.zero_grad()
+        loss = criterion(net(X), Y)
+        loss.backward()
+        optimizer.step()
+        losses.append(float(loss.item()))
+    net.eval()
+    return tuple(losses)
 
-    def project_M(self, N: np.ndarray) -> np.ndarray:
-        """把精确形函数投影到变形子空间, 得到训练目标.
 
-        参数:
-            N: 精确形函数, 形状 ``(..., n_i, n_b)``.
+def relative_frobenius(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    num = np.linalg.norm(a - b, axis=(-2, -1))
+    den = np.linalg.norm(b, axis=(-2, -1))
+    return num / den
 
-        返回:
-            M: ``N R_perp``, 形状 ``(..., n_i, m)``.
-        """
-        return N @ self.R_perp
+
+def step3_trained_network(
+    ev: Eq17Evaluator, net: ShapeFunctionSurrogateNet, n_eval: int
+) -> Dict[str, Any]:
+    """在留出集上评估形函数路径的两层误差."""
+    rho = sample_random_density(n_eval, seed_offset=555)
+    K_local, K_s, N = ev.exact_batch(rho)
+
+    with torch.no_grad():
+        X = torch.tensor(
+            bm.to_numpy(rho).reshape(n_eval, -1),
+            dtype=torch.float32,
+            device=next(net.parameters()).device,
+        )
+        M_pred = net(X).detach().cpu().numpy().reshape(n_eval, ev.n_i, ev.n_reduced)
+
+    N_hat = ev.assemble_recovery(M_pred.astype(np.float64))
+    K_tilde = ev.reduced_stiffness(K_local, N_hat)
+
+    eps_N = relative_frobenius(N_hat, N)
+    eps_K17 = relative_frobenius(K_tilde, K_s)
+
+    rigid_dev = np.linalg.norm(
+        N_hat @ ev.R_rigid - ev.Phi_i, axis=(-2, -1)
+    ) / np.linalg.norm(ev.Phi_i)
+
+    diff = K_tilde - K_s
+    min_eig = np.array([
+        np.linalg.eigvalsh(0.5 * (d + d.T))[0] for d in diff
+    ])
+    scale = np.linalg.norm(K_s, axis=(-2, -1))
+
+    return {
+        "n_eval": int(n_eval),
+        "eps_N_mean": float(eps_N.mean()),
+        "eps_N_max": float(eps_N.max()),
+        "eps_N_p95": float(np.quantile(eps_N, 0.95)),
+        "eps_K17_mean": float(eps_K17.mean()),
+        "eps_K17_max": float(eps_K17.max()),
+        "eps_K17_p95": float(np.quantile(eps_K17, 0.95)),
+        "rigid_constraint_deviation_max": float(rigid_dev.max()),
+        "eq17_error_min_eigenvalue_min": float(min_eig.min()),
+        "eq17_error_relative_min_eigenvalue_min": float((min_eig / scale).min()),
+    }
 
 
 def make_condensor(
@@ -217,49 +304,26 @@ def make_condensor(
     b_dofs: Any,
     model: Optional[nn.Module],
 ) -> ShapeFunctionCondensation:
-    """构造一个接入库内形函数缩聚器的实例.
+    """构造适配当前接口模式的形函数缩聚器.
 
-    参数:
-        ev: 评估器, 提供与库内实现同源的原型.
-        i_dofs: 子结构内部自由度的局部编号.
-        b_dofs: 子结构接口自由度的局部编号.
-        model: 预测变形子空间分量 ``M`` 的代理网络.
-
-    返回:
-        condensor: 已绑定三组基与门禁阈值的 ``ShapeFunctionCondensation``.
-
-    说明:
-        三组基一律取自同一个 ``SubstructurePrototype``; 该缩聚器要求它们同源, 否则
-        ``N R_rigid = Phi_i`` 不成立. 门禁阈值取库内缺省值, 使本脚本报告的回退计数
-        与生产配置一致.
+    两种迹基走同一条构造路径, 区别只在传入的 ``trace``: ``full_trace`` 传
+    ``None`` (即 ``T = I``), ``linear_corner`` 传 ``LinearCornerTraceBasis``.
     """
-    proto = ev.prototype
     return ShapeFunctionCondensation(
-        i_dofs, b_dofs,
+        i_dofs,
+        b_dofs,
         model=model,
-        rigid_basis=proto.rigid_basis,
-        deformation_basis=proto.deformation_basis,
-        rigid_interior=proto.rigid_interior_modes,
+        rigid_basis=bm.asarray(ev.R_rigid),
+        deformation_basis=bm.asarray(ev.R_perp),
+        rigid_interior=bm.asarray(ev.Phi_i),
+        trace=ev.trace,
     )
 
 
 def step4_solution_layer(
     ev: Eq17Evaluator, net: ShapeFunctionSurrogateNet
 ) -> Dict[str, Any]:
-    """在完整 MBB 梁上比较形函数路径与精确缩聚的解层误差.
-
-    参数:
-        ev: 评估器.
-        net: 已训练的形函数代理网络.
-
-    返回:
-        result: 接口位移, 全场位移与柔度的相对误差, 以及算子层误差, 口径与
-            ``verify_stiffness_route.py`` 完全一致以便逐项对照.
-
-    说明:
-        物理问题, 子结构划分, 密度场与外载均取自 ``verify_stiffness_route.py``, 因此本函数
-        输出的解层指标可与该脚本的直接预测路径直接并列比较.
-    """
+    """在完整 MBB 梁上比较形函数路径与精确缩聚的解层误差 (适配 full_trace 与 linear_corner)."""
     problem = FullMBBBeam2d(domain=DOMAIN, P=P_LOAD, E=E_BASE, nu=NU)
     domain_size = (problem.domain[1], problem.domain[3])
     assembler = GlobalAssembler(
@@ -293,29 +357,120 @@ def step4_solution_layer(
 
     K_local_batch = prototype.assemble_local_stiffness_batch(density)
 
+    # 1. 精确缩聚基线
     exact_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
-    K_s_exact, _ = exact_condensor.condense(K_local_batch)
-    u_b_exact, u_full_exact, _ = solve_with_condensors(
-        assembler, sub_meshes, exact_condensor, global_load, fixed_global_dofs
+    exact_condensor.condense(K_local_batch)
+    K_s_exact_full = exact_condensor.K_s
+
+    # 2. 预测形函数并由此构造缩聚刚度
+    with torch.no_grad():
+        X = torch.tensor(
+            bm.to_numpy(density).reshape(len(sub_meshes), -1),
+            dtype=torch.float32,
+            device=next(net.parameters()).device,
+        )
+        M_pred = net(X).detach().cpu().numpy().reshape(len(sub_meshes), ev.n_i, ev.n_reduced)
+    N_pred = ev.assemble_recovery(M_pred.astype(np.float64))
+    K_s_route_np = ev.reduced_stiffness(bm.to_numpy(K_local_batch), N_pred)
+    K_s_route = bm.asarray(K_s_route_np, dtype=bm.float64)
+
+    # 将角点恢复关系延拓到完整边界, 仅在 u_b = L q 上使用该延拓.
+    # N_boundary @ L = N_pred; 完整边界刚度按同一个恢复关系构造,
+    # 因而满足公共批量结果契约, 不借用精确刚度或伪造流式接口.
+    N_boundary = N_pred if ev.L is None else N_pred @ np.linalg.pinv(ev.L)
+    K_boundary = bm.to_numpy(ev.core_full.assemble_reduced_stiffness(
+        K_local_batch, bm.asarray(N_boundary, dtype=bm.float64)
+    ))
+    predicted_result = LocalReductionBatchResult(
+        stiffness=bm.asarray(K_boundary, dtype=bm.float64),
+        recovery=bm.asarray(N_boundary, dtype=bm.float64),
+        diagnostics=tuple(
+            ReductionDiagnostics(
+                requested_method="shape_function",
+                stiffness_source="variational_boundary_extension",
+                recovery_source="predicted_shape_function",
+            )
+            for _ in sub_meshes
+        ),
     )
+    if ev.trace is None:
+        projected_K, projected_N = K_boundary, N_boundary
+    else:
+        projected_K = bm.to_numpy(ev.trace.project_stiffness(K_boundary))
+        projected_N = bm.to_numpy(ev.trace.reduce_recovery(N_boundary))
+    recovery_consistency = float(np.max(relative_frobenius(projected_N, N_pred)))
+    stiffness_consistency = float(np.max(relative_frobenius(projected_K, K_s_route_np)))
+    solve_diagnostics: Dict[str, float] = {}
 
-    condensors: List[ShapeFunctionCondensation] = []
-    for idx, sub_mesh in enumerate(sub_meshes):
-        c = make_condensor(ev, sub_mesh.i_dofs, sub_mesh.b_dofs, net)
-        c.condense(K_local_batch[idx], density[idx])
-        condensors.append(c)
-    K_s_route = bm.stack([c.K_s for c in condensors], axis=0)
+    # 解层使用原始预测, 与独立留出门禁诊断分开.
+    n_fallback = 0
 
-    # 在役门禁读数: 与留出集分开报告, 因为在役密度来自实际场而非训练分布.
-    gate_rows = [c.gate_report for c in condensors]
+    if ev.trace_basis == "full_trace":
+        # 全边界系统求解
+        u_b_exact, u_full_exact, _ = solve_with_condensors(
+            assembler, sub_meshes, exact_condensor, global_load, fixed_global_dofs
+        )
+        # 组装预测系统
+        u_b_route, u_full_route, _ = solve_with_condensors(
+            assembler, sub_meshes, predicted_result, global_load, fixed_global_dofs
+        )
+        K_s_ref = K_s_exact_full
+    else:
+        # linear_corner 系统求解
+        trace_basis = LinearCornerTraceBasis.from_prototype(prototype)
+        interface_dofs = assembler.build_interface_dofs(sub_meshes)
+        interface_view = SimpleNamespace(global_dofs=interface_dofs)
+        projection = assembler.build_linear_corner_projection(
+            sub_meshes, interface_view, trace_basis
+        )
 
-    u_b_route, u_full_route, _ = solve_with_condensors(
-        assembler, sub_meshes, condensors, global_load, fixed_global_dofs
-    )
+        interface_force = np.asarray(bm.to_numpy(
+            assembler.project_global_vector(interface_view, global_load)
+        ))
+        fixed_interface = np.asarray(bm.to_numpy(
+            assembler.project_global_dofs(interface_view, fixed_global_dofs)
+        ), dtype=np.int64)
+        force = projection.T @ interface_force
+        constraints = projection[fixed_interface]
+
+        # 精确宏观角点系统
+        K_s_exact_corner = bm.to_numpy(
+            trace_basis.project_stiffness(K_s_exact_full)
+        )
+        exact_macro = assembler.assemble_macro_system(sub_meshes, bm.asarray(K_s_exact_corner))
+        exact_solve = solve_constrained_system(exact_macro, force, constraints)
+        q_exact = exact_solve.displacement
+        interface_u_exact = bm.asarray(projection @ bm.to_numpy(q_exact), dtype=bm.float64)
+        u_full_exact = assembler.recover_full_displacement(
+            sub_meshes, exact_condensor, interface_view, interface_u_exact
+        )
+        u_b_exact = interface_u_exact
+
+        # 代理宏观角点系统
+        route_macro = assembler.assemble_macro_system(sub_meshes, K_s_route)
+        route_solve = solve_constrained_system(route_macro, force, constraints)
+        q_route = route_solve.displacement
+        interface_u_route = bm.asarray(projection @ bm.to_numpy(q_route), dtype=bm.float64)
+
+        u_full_route = assembler.recover_full_displacement(
+            sub_meshes, predicted_result, interface_view, interface_u_route
+        )
+        solve_diagnostics = {
+            "equilibrium_relative_residual_max": max(
+                exact_solve.equilibrium_relative_residual,
+                route_solve.equilibrium_relative_residual,
+            ),
+            "constraint_relative_residual_max": max(
+                exact_solve.constraint_relative_residual,
+                route_solve.constraint_relative_residual,
+            ),
+        }
+        u_b_route = interface_u_route
+        K_s_ref = bm.asarray(K_s_exact_corner)
 
     err_ks = bm.linalg.norm(
-        K_s_route - K_s_exact, axis=(-2, -1)
-    ) / bm.linalg.norm(K_s_exact, axis=(-2, -1))
+        K_s_route - K_s_ref, axis=(-2, -1)
+    ) / bm.linalg.norm(K_s_ref, axis=(-2, -1))
 
     c_exact = float(bm.dot(global_load, u_full_exact))
     c_route = float(bm.dot(global_load, u_full_route))
@@ -332,42 +487,16 @@ def step4_solution_layer(
         "compliance_exact": c_exact,
         "compliance_route": c_route,
         "compliance_relative_error": abs(c_route - c_exact) / abs(c_exact),
-        "n_fallback": sum(1 for c in condensors if c.used_fallback),
-        "gate_rigid_residual_max": max(r["rigid_residual"] for r in gate_rows),
-        "gate_excess_ratio_max": max(r["excess_ratio"] for r in gate_rows),
-        "gate_reduced_rcond_min": min(r["reduced_rcond"] for r in gate_rows),
+        "n_fallback": n_fallback,
+        "gate_enabled": False,
+        "trace_recovery_relative_error": recovery_consistency,
+        "trace_stiffness_relative_error": stiffness_consistency,
+        **solve_diagnostics,
     }
 
 
-def relative_frobenius(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """逐样本相对 Frobenius 误差.
-
-    参数:
-        a: 待测量, 形状 ``(B, r, c)``.
-        b: 参考量, 形状 ``(B, r, c)``.
-
-    返回:
-        err: 形状 ``(B,)`` 的相对误差.
-    """
-    num = np.linalg.norm(a - b, axis=(-2, -1))
-    den = np.linalg.norm(b, axis=(-2, -1))
-    return num / den
-
-
 def step0_rigid_part(ev: Eq17Evaluator) -> Dict[str, Any]:
-    """校验 ``N* R_rigid`` 与密度无关, 且等于网格解析给出的 ``Phi_i``.
-
-    参数:
-        ev: 评估器.
-
-    返回:
-        result: 密度无关性偏差, 以及有限元结果与解析构造的偏差.
-
-    说明:
-        两项分别对应参数化的两个前提: 前者说明刚体分量可以固定, 后者说明它可以不经
-        任何有限元装配直接由网格给出. 库内 ``SubstructurePrototype.rigid_interior_modes``
-        走的正是后一条路径, 本步是它的独立复核.
-    """
+    """步骤 0: 校验刚体模态解析不变性与密度无关性."""
     rho = sample_random_density(8, seed_offset=31)
     _, _, N = ev.exact_batch(rho)
     Phi = N @ ev.R_rigid
@@ -382,14 +511,7 @@ def step0_rigid_part(ev: Eq17Evaluator) -> Dict[str, Any]:
 
 
 def step1_identity(ev: Eq17Evaluator) -> Dict[str, Any]:
-    """校验式 (17) 的误差闭式 ``E^T K_ii E`` 及其半正定性.
-
-    参数:
-        ev: 评估器.
-
-    返回:
-        result: 各扰动量级下闭式的相对偏差与误差矩阵的最小特征值.
-    """
+    """步骤 1: 验证式 (17) 二阶误差闭式与半正定性."""
     rng = np.random.default_rng(11)
     rho = sample_random_density(1, seed_offset=17)
     K_local, K_s, N = ev.exact_batch(rho)
@@ -401,7 +523,7 @@ def step1_identity(ev: Eq17Evaluator) -> Dict[str, Any]:
     for scale in (1.0e-1, 1.0e-2, 1.0e-3):
         E = rng.standard_normal(Nstar.shape)
         E *= scale * norm_N / np.linalg.norm(E)
-        lhs = ev.eq17(K, Nstar + E) - Ks
+        lhs = ev.reduced_stiffness(K, Nstar + E) - Ks
         rhs = E.T @ K_ii @ E
         rows.append({
             "eps_N": float(scale),
@@ -411,24 +533,19 @@ def step1_identity(ev: Eq17Evaluator) -> Dict[str, Any]:
             "min_eigenvalue_of_error": float(
                 np.linalg.eigvalsh(0.5 * (lhs + lhs.T))[0]
             ),
+            "relative_min_eigenvalue_of_error": float(
+                np.linalg.eigvalsh(0.5 * (lhs + lhs.T))[0] / np.linalg.norm(Ks)
+            ),
         })
 
     exact_err = float(
-        np.linalg.norm(ev.eq17(K, Nstar) - Ks) / np.linalg.norm(Ks)
+        np.linalg.norm(ev.reduced_stiffness(K, Nstar) - Ks) / np.linalg.norm(Ks)
     )
     return {"eq17_at_exact_N_relative_error": exact_err, "identity_checks": rows}
 
 
 def step2_controlled_sweep(ev: Eq17Evaluator, n_dir: int = 8) -> Dict[str, Any]:
-    """受控扰动扫描, 拟合 ``eps_N -> eps_K17`` 的 log-log 斜率与放大系数.
-
-    参数:
-        ev: 评估器.
-        n_dir: 每个量级上随机扰动方向的重复次数, 用于抑制方向抖动.
-
-    返回:
-        result: 扫描点, 拟合斜率与放大系数 ``C``, 满足 ``eps_K17 ~ C eps_N^2``.
-    """
+    """步骤 2: 受控扰动扫描, 拟合理论二阶斜率 (期望为 2.00)."""
     rng = np.random.default_rng(101)
     rho = sample_random_density(1, seed_offset=17)
     K_local, K_s, N = ev.exact_batch(rho)
@@ -436,13 +553,17 @@ def step2_controlled_sweep(ev: Eq17Evaluator, n_dir: int = 8) -> Dict[str, Any]:
     norm_N = np.linalg.norm(Nstar)
     norm_Ks = np.linalg.norm(Ks)
 
+    # 各扰动幅值复用相同方向, 避免方向变化污染二阶斜率.
+    directions = rng.standard_normal((n_dir, *Nstar.shape))
+    directions *= norm_N / np.linalg.norm(directions, axis=(-2, -1))[:, None, None]
     points: List[Dict[str, float]] = []
     for eps in np.logspace(-4.0, -0.5, 12):
         vals = []
-        for _ in range(n_dir):
-            E = rng.standard_normal(Nstar.shape)
-            E *= eps * norm_N / np.linalg.norm(E)
-            vals.append(np.linalg.norm(ev.eq17(K, Nstar + E) - Ks) / norm_Ks)
+        for direction in directions:
+            E = eps * direction
+            vals.append(
+                np.linalg.norm(ev.reduced_stiffness(K, Nstar + E) - Ks) / norm_Ks
+            )
         points.append({"eps_N": float(eps), "eps_K17": float(np.mean(vals))})
 
     x = np.log10([p["eps_N"] for p in points])
@@ -456,130 +577,28 @@ def step2_controlled_sweep(ev: Eq17Evaluator, n_dir: int = 8) -> Dict[str, Any]:
 
 
 def train_shape_function_net(
-    ev: Eq17Evaluator, n_train: int, n_epochs: int, learning_rate: float
+    ev: Eq17Evaluator, n_train: int, n_epochs: int, learning_rate: float,
+    hidden_dim: int = SHAPE_HIDDEN_DIM,
 ) -> Tuple[ShapeFunctionSurrogateNet, float]:
-    """在随机密度样本上训练形函数代理网络.
-
-    参数:
-        ev: 评估器, 提供原型与投影基.
-        n_train: 随机密度训练样本数.
-        n_epochs: 全批量梯度下降轮数.
-        learning_rate: Adam 学习率.
-
-    返回:
-        (net, final_loss): 训练完毕并置于 ``eval`` 模式的网络与最后一轮训练 MSE.
-
-    说明:
-        拟合目标是 ``M = N* R_perp``, 即精确形函数在变形子空间上的分量. 刚体分量
-        ``Phi_i`` 与密度无关, 由构造提供, 不进入网络输出.
-    """
-    rho = sample_random_density(n_train, seed_offset=0)
-    _, _, N = ev.exact_batch(rho)
-    M_target = ev.project_M(N)
-
-    X = torch.tensor(
-        bm.to_numpy(rho).reshape(n_train, -1), dtype=torch.float32
-    )
-    Y = torch.tensor(
-        M_target.reshape(n_train, -1), dtype=torch.float32
-    )
-
+    """步骤 3: 训练形函数代理网络 (针对当前接口空间维度)."""
+    X, Y = prepare_training_arrays(ev, n_train)
     net = ShapeFunctionSurrogateNet(
         input_dim=N_FINE[0] * N_FINE[1],
         output_dim=ev.n_i * ev.n_reduced,
+        hidden_dims=(hidden_dim, hidden_dim),
     )
-    optimizer = optim.Adam(net.parameters(), lr=learning_rate)
-    criterion = nn.MSELoss()
-
-    net.train()
-    final_loss = float("nan")
-    for _ in range(n_epochs):
-        optimizer.zero_grad()
-        loss = criterion(net(X), Y)
-        loss.backward()
-        optimizer.step()
-        final_loss = float(loss.item())
-
-    net.eval()
-    return net, final_loss
-
-
-def step3_trained_network(
-    ev: Eq17Evaluator, net: ShapeFunctionSurrogateNet, n_eval: int
-) -> Dict[str, Any]:
-    """在留出集上评估形函数路径的两层误差.
-
-    参数:
-        ev: 评估器.
-        net: 已训练的形函数代理网络.
-        n_eval: 留出样本数.
-
-    返回:
-        result: 形函数自身误差 ``eps_N`` 与经式 (17) 后的 ``eps_K17`` 的统计量,
-            以及由受控扫描的 ``C`` 给出的预测值以供对照.
-    """
-    rho = sample_random_density(n_eval, seed_offset=555)
-    K_local, K_s, N = ev.exact_batch(rho)
-
-    with torch.no_grad():
-        X = torch.tensor(
-            bm.to_numpy(rho).reshape(n_eval, -1), dtype=torch.float32
-        )
-        M_pred = net(X).numpy().reshape(n_eval, ev.n_i, ev.n_reduced)
-
-    N_hat = ev.assemble_N(M_pred.astype(np.float64))
-    K_tilde = ev.eq17(K_local, N_hat)
-
-    eps_N = relative_frobenius(N_hat, N)
-    eps_K17 = relative_frobenius(K_tilde, K_s)
-
-    # 刚体约束按构造满足, 在此作为运行期校验而非拟合目标.
-    rigid_dev = np.linalg.norm(
-        N_hat @ ev.R_rigid - ev.Phi_i, axis=(-2, -1)
-    ) / np.linalg.norm(ev.Phi_i)
-
-    # 式 (17) 的误差应半正定: 逐样本取对称化后的最小特征值.
-    diff = K_tilde - K_s
-    min_eig = np.array([
-        np.linalg.eigvalsh(0.5 * (d + d.T))[0] for d in diff
-    ])
-    scale = np.linalg.norm(K_s, axis=(-2, -1))
-
-    return {
-        "n_eval": int(n_eval),
-        "eps_N_mean": float(eps_N.mean()),
-        "eps_N_max": float(eps_N.max()),
-        "eps_K17_mean": float(eps_K17.mean()),
-        "eps_K17_max": float(eps_K17.max()),
-        "rigid_constraint_deviation_max": float(rigid_dev.max()),
-        "eq17_error_min_eigenvalue_min": float(min_eig.min()),
-        "eq17_error_relative_min_eigenvalue_min": float((min_eig / scale).min()),
-    }
+    losses = fit_full_batch(net, X, Y, n_epochs, learning_rate)
+    return net, losses[-1]
 
 
 class _CorruptedNet(nn.Module):
-    """把已训练网络的输出按给定方式破坏, 用于门禁的故障注入测试.
-
-    仅供本脚本的步骤 5 使用: 门禁若从未触发, 无法区分"预测一直合格"与"门禁根本不
-    会响", 因此必须构造确定会被拦下的输入.
-    """
-
     def __init__(self, net: nn.Module, mode: str, scale: float = 1.0) -> None:
-        """初始化故障注入包装器.
-
-        参数:
-            net: 被包装的已训练网络.
-            mode: 破坏方式, 取 ``scale`` (整体放大), ``nan`` (注入非有限值) 或
-                ``truncate`` (截短输出维, 触发契约错误).
-            scale: ``mode`` 为 ``scale`` 时的放大倍数.
-        """
         super().__init__()
         self.net = net
         self.mode = mode
         self.scale = scale
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """按 ``mode`` 破坏底层网络的输出."""
         y = self.net(x)
         if self.mode == "scale":
             return y * self.scale
@@ -591,21 +610,7 @@ class _CorruptedNet(nn.Module):
 def step5_gate_calibration(
     ev: Eq17Evaluator, net: ShapeFunctionSurrogateNet, n_eval: int
 ) -> Dict[str, Any]:
-    """标定三道门禁的裕度, 并用故障注入确认它们确实会触发.
-
-    参数:
-        ev: 评估器.
-        net: 已训练的形函数代理网络.
-        n_eval: 留出样本数.
-
-    返回:
-        result: 留出集上三个门禁读数的极值与相对阈值的裕度, 以及故障注入的结果.
-
-    说明:
-        留出集上的读数给出"门禁不误伤"的证据, 故障注入给出"门禁会响"的证据; 两者
-        缺一不可. 放大倍数由受控扫描的二阶律反推: 刚化读数按 ``eps_N`` 的平方增长,
-        因此把输出整体放大即可越过阈值.
-    """
+    """步骤 5: 门禁阈值标定与故障注入测试."""
     rho = sample_random_density(n_eval, seed_offset=555)
     K_local, _, _ = ev.exact_batch(rho)
 
@@ -617,9 +622,9 @@ def step5_gate_calibration(
         if c.used_fallback:
             rows[-1]["fallback"] = 1.0
 
-    excess = np.array([r["excess_ratio"] for r in rows])
-    rigid = np.array([r["rigid_residual"] for r in rows])
-    rcond = np.array([r["reduced_rcond"] for r in rows])
+    excess = np.array([r.get("excess_ratio", np.nan) for r in rows])
+    rigid = np.array([r.get("rigid_residual", np.nan) for r in rows])
+    rcond = np.array([r.get("reduced_rcond", np.nan) for r in rows])
 
     faults: Dict[str, Any] = {}
     for tag, mode, scale in (
@@ -637,7 +642,6 @@ def step5_gate_calibration(
             "excess_ratio": bad.gate_report.get("excess_ratio"),
         }
 
-    # 契约错误必须上抛而非回退: 输出维不符是配置问题, 回退只会把它伪装成精度损失.
     contract_raised = False
     try:
         bad = make_condensor(
@@ -649,9 +653,6 @@ def step5_gate_calibration(
         contract_raised = True
     faults["truncate_raises_contract_error"] = contract_raised
 
-    # 边界扫描: 逐步放大输出直到门禁翻转, 用以确认它切在声明的位置, 而不是只能拦下
-    # 粗差. 放大量与形函数误差不是简单的平方关系 (扰动方向与 M 相关而非随机), 因此
-    # 翻转点由实测给出而非解析外推.
     boundary: Dict[str, Any] = {"flip_scale": None}
     for scale in np.arange(1.05, 3.01, 0.05):
         probe = make_condensor(
@@ -661,67 +662,200 @@ def step5_gate_calibration(
         probe.condense(bm.asarray(K_local[0]), rho[0])
         if probe.used_fallback:
             boundary["flip_scale"] = float(scale)
-            boundary["flip_excess_ratio"] = probe.gate_report["excess_ratio"]
+            boundary["flip_excess_ratio"] = probe.gate_report.get("excess_ratio")
             break
         boundary["last_pass_scale"] = float(scale)
-        boundary["last_pass_excess_ratio"] = probe.gate_report["excess_ratio"]
+        boundary["last_pass_excess_ratio"] = probe.gate_report.get("excess_ratio")
+
+    ex_finite = excess[np.isfinite(excess)]
+    ex_max = float(ex_finite.max()) if len(ex_finite) else float("nan")
+    ex_mean = float(ex_finite.mean()) if len(ex_finite) else float("nan")
+    rg_finite = rigid[np.isfinite(rigid)]
+    rg_max = float(rg_finite.max()) if len(rg_finite) else float("nan")
+    rc_finite = rcond[np.isfinite(rcond)]
+    rc_min = float(rc_finite.min()) if len(rc_finite) else float("nan")
 
     return {
         "n_eval": int(n_eval),
         "boundary_scan": boundary,
-        "excess_ratio_max": float(excess.max()),
-        "excess_ratio_mean": float(excess.mean()),
+        "excess_ratio_max": ex_max,
+        "excess_ratio_mean": ex_mean,
         "excess_rtol": c.excess_rtol,
-        "excess_margin_factor": float(c.excess_rtol / excess.max()),
-        "rigid_residual_max": float(rigid.max()),
+        "excess_margin_factor": float(c.excess_rtol / max(ex_max, 1e-300)) if np.isfinite(ex_max) else float("nan"),
+        "rigid_residual_max": rg_max,
         "rigid_tol": c.rigid_tol,
-        "reduced_rcond_min": float(rcond.min()),
+        "reduced_rcond_min": rc_min,
         "rcond_min": c.rcond_min,
         "n_fallback_holdout": int(sum(1 for r in rows if "fallback" in r)),
         "fault_injection": faults,
     }
 
 
-def main() -> None:
-    """脚本入口: 依次执行三步验证并落盘证据."""
-    parser = argparse.ArgumentParser(
-        description="Huang 2023 式 (17) 二阶效应的定量复现"
-    )
-    parser.add_argument("--n-train", type=int, default=2000,
-                        help="随机密度训练样本数, 缺省对齐 verify_stiffness_route.py")
-    parser.add_argument("--epochs", type=int, default=4000, help="训练轮数")
-    parser.add_argument("--lr", type=float, default=0.005, help="Adam 学习率")
-    parser.add_argument("--n-eval", type=int, default=200, help="留出评估样本数")
-    parser.add_argument("--seed", type=int, default=2026, help="随机数种子")
-    parser.add_argument("--verbose", action="store_true", help="打印详细开发期自检与故障注入日志")
-    parser.add_argument("--skip-train", action="store_true",
-                        help="只跑 [0][1][2] 三步解析验证, 不训练网络, 不进入解层")
-    parser.add_argument("--output-dir", type=str, default=None,
-                        help="证据输出目录, 缺省为本脚本同级 outputs/")
-    args = parser.parse_args()
+def evaluate_validation(result: Dict[str, Any], args: Any) -> Dict[str, Any]:
+    """汇总数学验收与用户指定的网络精度验收.
 
+    Parameters
+    ----------
+    result : dict
+        已计算的解析、留出和解层指标.
+    args : argparse.Namespace
+        CLI 配置, 精度阈值使用相对误差小数.
+
+    Returns
+    -------
+    dict
+        各检查的数值、阈值、通过状态及总状态.
+        未设置精度阈值时不宣称网络精度通过验收.
+    """
+    checks: Dict[str, Any] = {}
+
+    def check(name: str, value: float, lower: float, upper: Optional[float]) -> None:
+        """记录有限值区间检查."""
+        checks[name] = {
+            "value": float(value),
+            "lower": lower,
+            "upper": upper,
+            "passed": bool(np.isfinite(value) and value >= lower and (upper is None or value <= upper)),
+        }
+
+    for key in (
+        "rigid_part_density_independence_max",
+        "rigid_part_analytic_deviation_max",
+        "eq17_at_exact_N_relative_error",
+    ):
+        check(key, result[key], 0.0, 1.0e-10)
+    for index, identity in enumerate(result["identity_checks"]):
+        check(
+            f"identity_{index}_relative_deviation",
+            identity["closed_form_relative_deviation"], 0.0, 1.0e-7,
+        )
+        check(
+            f"identity_{index}_relative_min_eigenvalue",
+            identity["relative_min_eigenvalue_of_error"], -1.0e-10, None,
+        )
+    check("loglog_slope", result["loglog_slope"], 1.98, 2.02)
+
+    if not args.skip_train:
+        solution = result["solution_layer"]
+        finite_values = [
+            result[key] for key in (
+                "final_train_mse", "eps_N_mean", "eps_N_max", "eps_N_p95",
+                "eps_K17_mean", "eps_K17_max", "eps_K17_p95",
+            )
+        ] + [
+            value for value in solution.values()
+            if isinstance(value, (int, float))
+        ]
+        check("finite_training_and_solution_metrics", float(
+            all(np.isfinite(value) for value in finite_values)
+        ), 1.0, 1.0)
+        check(
+            "predicted_rigid_constraint",
+            result["rigid_constraint_deviation_max"], 0.0, 1.0e-10,
+        )
+        check(
+            "predicted_relative_min_eigenvalue",
+            result["eq17_error_relative_min_eigenvalue_min"], -1.0e-10, None,
+        )
+        for key in ("trace_recovery_relative_error", "trace_stiffness_relative_error"):
+            check(key, solution[key], 0.0, 1.0e-10)
+        for key in ("equilibrium_relative_residual_max", "constraint_relative_residual_max"):
+            if key in solution:
+                check(key, solution[key], 0.0, 1.0e-8)
+        if "gate_calibration" in result:
+            faults = result["gate_calibration"]["fault_injection"]
+            check("nan_prediction_falls_back", float(faults["nan"]["used_fallback"]), 1.0, 1.0)
+            check("truncated_prediction_raises", float(
+                faults["truncate_raises_contract_error"]
+            ), 1.0, 1.0)
+
+    precision: Dict[str, Any] = {}
+    if not args.skip_train:
+        candidates = (
+            ("ks", args.max_ks_error, (
+                result["eps_K17_max"], solution["in_service_ks_relative_error_max"],
+            )),
+            ("displacement", args.max_displacement_error, (
+                solution["interface_displacement_relative_error"],
+                solution["displacement_relative_error"],
+            )),
+            ("compliance", args.max_compliance_error, (
+                solution["compliance_relative_error"],
+            )),
+        )
+        for name, limit, values in candidates:
+            if limit is not None:
+                precision[name] = {
+                    "values": list(values),
+                    "limit": limit,
+                    "passed": bool(all(
+                        np.isfinite(value) and 0.0 <= value <= limit for value in values
+                    )),
+                }
+
+    mathematics_passed = all(item["passed"] for item in checks.values())
+    precision_passed = all(item["passed"] for item in precision.values())
+    return {
+        "mathematics": {"passed": mathematics_passed, "checks": checks},
+        "precision": {
+            "status": ("passed" if precision_passed else "failed") if precision else "not_requested",
+            "checks": precision,
+        },
+        "passed": mathematics_passed and precision_passed,
+    }
+
+
+def run_verification(args) -> None:
     bm.set_backend("numpy")
     set_random_seed(args.seed)
 
-    ev = Eq17Evaluator()
+    ev = Eq17Evaluator(trace_basis=args.trace_basis)
+    mode_name = "full_trace (未降阶完整接口, 40 自由度)" if args.trace_basis == "full_trace" else \
+                "linear_corner (角点线性迹降阶接口, 8 自由度, 式 16)"
+
+    print("\n【配置摘要】")
+    print(f"组别 / 路线 : {1 if args.trace_basis == 'full_trace' else 2} / shape_function")
+    print(f"问题 / 材料 : FullMBBBeam2d, domain={DOMAIN_SIZE}, "
+          f"{ev.prototype.material.hypothesis}, E0={E_BASE:g}, nu={NU:g}, SIMP penalty={SHAPE_SIMP_PENALTY:g}")
+    print(f"载荷        : 顶边中点竖向集中力 P={P_LOAD:g}")
+    print(f"网格 / 接口 : Q1, 子结构={N_SUB}, 每块细单元={N_FINE}, "
+          f"{args.trace_basis}; 每块内部={ev.n_i}, 接口={ev.n_interface}")
+    print(f"全局细网格  : {N_SUB[0] * N_FINE[0]} x {N_SUB[1] * N_FINE[1]} 单元")
+    print(f"网络        : {N_FINE[0] * N_FINE[1]} -> {args.hidden_dim} -> "
+          f"{args.hidden_dim} -> {ev.n_i * ev.n_reduced}, SiLU")
+    if args.skip_train:
+        print("训练 / 留出 : 未执行 (--skip-train); 全局解层未执行")
+    else:
+        print(f"训练        : {args.n_train} 样本, {args.epochs} epochs, Adam, lr={args.lr:g}, full-batch")
+        print(f"目标 / 留出 : 形函数变形分量 M 的 MSE / {args.n_eval} 样本")
+    print(f"密度        : 训练和留出为随机场 {DENSITY_RANGE}; 在役为光滑场")
+    print(f"种子 / 求解 : 初始化={args.seed}, 训练采样={SHAPE_SEED}, "
+          f"留出采样={SHAPE_SEED + 555}, backend=numpy, scipy")
+    print(f"比较基准    : 同网格、密度、载荷与支承的精确 {args.trace_basis} 缩聚", flush=True)
+
     if args.verbose:
         print("=" * 78)
-        print("Huang 2023 式 (17): 形函数路径 vs 直接预测路径")
+        print(f"Huang 2023 式 (17): 形函数路径实测 ({mode_name})")
         print("=" * 78)
-        print(f"子结构        : {N_FINE[0]}x{N_FINE[1]} Q4, "
-              f"n_i={ev.n_i}, n_b={ev.n_b}, n_dof={ev.n_dof}")
-        print(f"刚体/变形子空间: n_rigid={ev.n_rigid}, m={ev.n_reduced}")
-        print(f"网络输出维    : N 路径 {ev.n_i * ev.n_reduced} "
-              f"(对照: K_s 路径 {ev.n_reduced * (ev.n_reduced + 1) // 2})")
+        print(f"子结构        : {N_FINE[0]}x{N_FINE[1]} Q1, "
+              f"n_i={ev.n_i}, 接口维度 n_b={ev.n_interface}, n_dof={ev.n_dof}")
+        print(f"刚体/变形子空间: n_rigid={ev.n_rigid}, 变形维数 m={ev.n_reduced}")
+        print(f"网络输出维    : {ev.n_i * ev.n_reduced}")
         print(f"随机数种子    : {args.seed}")
         print("-" * 78)
 
     result: Dict[str, Any] = {
+        "trace_basis": args.trace_basis,
         "substructure": {
-            "n_fine": list(N_FINE), "n_i": ev.n_i, "n_b": ev.n_b,
+            "n_fine": list(N_FINE), "n_i": ev.n_i, "n_interface": ev.n_interface,
             "n_rigid": ev.n_rigid, "n_reduced": ev.n_reduced,
+            "network_output_dim": ev.n_i * ev.n_reduced,
         },
         "seed": args.seed,
+        "hidden_dim": args.hidden_dim,
+        "density_range": list(DENSITY_RANGE),
+        "skip_train": args.skip_train,
+        "comparison_reference": f"exact_{args.trace_basis}",
     }
 
     r0 = step0_rigid_part(ev)
@@ -758,10 +892,10 @@ def main() -> None:
             print("\n[3][4] --skip-train: 跳过网络训练与解层验证")
     else:
         if args.verbose:
-            print(f"\n[3] 训练形函数网络 "
+            print(f"\n[3] 训练形函数网络 (输出维={ev.n_i * ev.n_reduced}) "
                   f"(n_train={args.n_train}, epochs={args.epochs}, lr={args.lr})")
         net, final_loss = train_shape_function_net(
-            ev, args.n_train, args.epochs, args.lr
+            ev, args.n_train, args.epochs, args.lr, args.hidden_dim
         )
         result["final_train_mse"] = final_loss
         result["n_train"] = args.n_train
@@ -794,7 +928,7 @@ def main() -> None:
         r4 = step4_solution_layer(ev, net)
         result["solution_layer"] = r4
         if args.verbose:
-            print("\n[4] 解层: 完整 MBB 梁 (12x2 子结构), 口径对齐 verify_stiffness_route.py")
+            print(f"\n[4] 解层: 完整 MBB 梁 (12x2 子结构), {args.trace_basis} 接口")
             print(f"      在役 K_s 误差 (max/mean) : "
                   f"{r4['in_service_ks_relative_error_max'] * 100:.4f}% / "
                   f"{r4['in_service_ks_relative_error_mean'] * 100:.4f}%")
@@ -806,76 +940,150 @@ def main() -> None:
                   f"{r4['compliance_exact']:.6f} / {r4['compliance_route']:.6f}")
             print(f"      柔度相对误差             : "
                   f"{r4['compliance_relative_error'] * 100:.4f}%")
-            print(f"      回退子结构数             : {r4['n_fallback']}/24")
-            print(f"      在役门禁 刚化幅度 (max)  : "
-              f"{r4['gate_excess_ratio_max']:.3e}")
-            print(f"      在役门禁 刚体残量 (max)  : "
-              f"{r4['gate_rigid_residual_max']:.3e}")
-            print(f"      在役门禁 条件数 (min)    : "
-              f"{r4['gate_reduced_rcond_min']:.3e}")
+            print("      全局解层门禁             : 未启用")
 
-        r5 = step5_gate_calibration(ev, net, args.n_eval)
-        result["gate_calibration"] = r5
-        if args.verbose:
-            print("\n[5] 门禁标定与故障注入")
-            print(f"      留出集刚化幅度 max/mean  : "
-                  f"{r5['excess_ratio_max']:.3e} / {r5['excess_ratio_mean']:.3e}")
-            print(f"      阈值 excess_rtol         : {r5['excess_rtol']:.3e}  "
-                  f"(裕度 {r5['excess_margin_factor']:.1f} 倍)")
-            print(f"      刚体残量 max / 阈值      : "
-                  f"{r5['rigid_residual_max']:.3e} / {r5['rigid_tol']:.3e}")
-            print(f"      条件数 min / 阈值        : "
-                  f"{r5['reduced_rcond_min']:.3e} / {r5['rcond_min']:.3e}")
-            print(f"      留出集回退数             : "
-                  f"{r5['n_fallback_holdout']}/{r5['n_eval']}")
-            bs = r5["boundary_scan"]
-            print(f"      门禁翻转点               : 放大 {bs['last_pass_scale']:.2f} 倍通过 "
-                  f"({bs['last_pass_excess_ratio']:.3e}), "
-                  f"{bs['flip_scale']:.2f} 倍回退 ({bs['flip_excess_ratio']:.3e})")
-            print("      故障注入 (应全部回退):")
-            for tag, row in r5["fault_injection"].items():
-                if tag == "truncate_raises_contract_error":
-                    print(f"        {tag:24s}: {row}")
-                else:
-                    print(f"        {tag:24s}: 回退={row['used_fallback']}  "
-                          f"刚化幅度={row['excess_ratio']}")
+        # 仅 full_trace 支持完整的式 17 门禁标定步骤
+        if args.trace_basis == "full_trace":
+            r5 = step5_gate_calibration(ev, net, args.n_eval)
+            result["gate_calibration"] = r5
+            if args.verbose:
+                print("\n[5] 门禁标定与故障注入")
+                print(f"      留出集刚化幅度 max/mean  : "
+                      f"{r5['excess_ratio_max']:.3e} / {r5['excess_ratio_mean']:.3e}")
+                print(f"      阈值 excess_rtol         : {r5['excess_rtol']:.3e}  "
+                      f"(裕度 {r5['excess_margin_factor']:.1f} 倍)")
+                print(f"      刚体残量 max / 阈值      : "
+                      f"{r5['rigid_residual_max']:.3e} / {r5['rigid_tol']:.3e}")
+                print(f"      条件数 min / 阈值        : "
+                      f"{r5['reduced_rcond_min']:.3e} / {r5['rcond_min']:.3e}")
+                print(f"      留出集回退数             : "
+                      f"{r5['n_fallback_holdout']}/{r5['n_eval']}")
+                bs = r5["boundary_scan"]
+                print(f"      门禁翻转扫描 : {bs}")
+                print("      故障注入 (NaN 必须回退, 缩放仅诊断):")
+                for tag, row in r5["fault_injection"].items():
+                    if tag == "truncate_raises_contract_error":
+                        print(f"        {tag:24s}: {row}")
+                    else:
+                        print(f"        {tag:24s}: 回退={row['used_fallback']}  "
+                              f"刚化幅度={row['excess_ratio']}")
 
+    validation = evaluate_validation(result, args)
+    result["validation"] = validation
     out_dir = Path(args.output_dir) if args.output_dir else \
         Path(__file__).parent / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
-    # 解析步与完整验证写不同文件, 避免 --skip-train 的部分证据覆盖完整证据.
-    out_path = out_dir / (
-        "eq17_second_order_analytic.json" if args.skip_train
-        else "eq17_second_order.json"
-    )
+    suffix = "_analytic" if args.skip_train else ""
+    out_path = out_dir / f"eq17_second_order_{args.trace_basis}{suffix}.json"
     out_path.write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    if not args.verbose:
-        print("\n【图 3(b) 变分二阶误差响应机理】PIML 多尺度形函数路径实测")
-        print("=" * 88)
-        print(f"{'评估指标与实验环节':<34} | {'理论期望 / 标称基准':<22} | {'实测结果':<20}")
-        print("-" * 88)
-        print(f"{'受控扰动 Log-Log 误差响应斜率':<34} | {'2.00 (严格二阶)':<22} | {r2['loglog_slope']:.4f}")
-        if not args.skip_train:
-            print(f"{'形函数自身预测误差 eps_N (留出集)':<34} | {'--':<22} | {r3['eps_N_mean'] * 100:.2f}% (max {r3['eps_N_max'] * 100:.2f}%)")
-            print(f"{'式 (17) 变分构造缩聚刚度误差 eps_K':<34} | {'eps_K ~ C * eps_N^2':<22} | {r3['eps_K17_mean'] * 100:.2f}% (max {r3['eps_K17_max'] * 100:.2f}%)")
-            reduction = r3['eps_N_mean'] / max(r3['eps_K17_mean'], 1e-300)
-            print(f"{'变分抗噪机理平方压缩降幅':<34} | {'--':<22} | {reduction:.1f} 倍 (误差压缩 {int(round(reduction))} 倍)")
-            print("-" * 88)
-            print("【图 3(c) 全系统装配求解精度】(FullMBBBeam2d, 24 子结构装配系统)")
-            print("-" * 88)
-            print(f"{'在役局部缩聚刚度相对差 (max)':<34} | {'--':<22} | {r4['in_service_ks_relative_error_max'] * 100:.2f}%")
-            print(f"{'接口位移相对误差':<34} | {'--':<22} | {r4['interface_displacement_relative_error'] * 100:.2f}%")
-            print(f"{'全场回填位移相对误差':<34} | {'--':<22} | {r4['displacement_relative_error'] * 100:.2f}%")
-            print(f"{'结构总柔度相对误差':<34} | {'--':<22} | {r4['compliance_relative_error'] * 100:.2f}%")
-            print(f"{'回退到精确缩聚子结构数':<34} | {'0/24 (门禁拦截)':<22} | {r4['n_fallback']}/24")
-        print("=" * 88)
-        print(f"[证据] 验收通过, 结果已写入: {out_path}\n")
+    print("\n【公共误差表】")
+    def row(label: str, value: str) -> None:
+        """按终端显示宽度打印单项指标."""
+        print(f"{label}{' ' * max(1, 46 - display_width(label))} : {value}")
+
+    if args.skip_train:
+        for label in (
+            "留出刚度误差 (mean / max)", "在役刚度误差 (mean / max)",
+            "接口位移相对误差", "全场位移相对误差",
+            "柔度 (精确 / 代理)", "柔度相对误差",
+        ):
+            row(label, "未执行")
     else:
-        print(f"\n[out] {out_path}")
+        row("留出刚度误差 (mean / max)", f"{r3['eps_K17_mean']:.2%} / {r3['eps_K17_max']:.2%}")
+        row("在役刚度误差 (mean / max)", f"{r4['in_service_ks_relative_error_mean']:.2%} / {r4['in_service_ks_relative_error_max']:.2%}")
+        row("接口位移相对误差", f"{r4['interface_displacement_relative_error']:.2%}")
+        row("全场位移相对误差", f"{r4['displacement_relative_error']:.2%}")
+        row("柔度 (精确 / 代理)", f"{r4['compliance_exact']:.8f} / {r4['compliance_route']:.8f}")
+        row("柔度相对误差", f"{r4['compliance_relative_error']:.2%}")
+    print("\n【路线专项诊断】")
+    row("受控扰动 log-log 斜率 (理论 2)", f"{r2['loglog_slope']:.4f}")
+    row("精确形函数代入变分式的相对误差", f"{r1['eq17_at_exact_N_relative_error']:.4e}")
+    row("刚体解析分量相对偏差", f"{r0['rigid_part_analytic_deviation_max']:.4e}")
+    if args.skip_train:
+        row("形函数误差 (mean / max)", "未执行")
+    else:
+        row("最终训练 MSE", f"{final_loss:.4e}")
+        row("形函数误差 (mean / max)", f"{r3['eps_N_mean']:.2%} / {r3['eps_N_max']:.2%}")
+        row("形函数 / 刚度平均相对误差之比", f"{r3['eps_N_mean'] / max(r3['eps_K17_mean'], 1e-300):.2f}")
+        row("预测形函数刚体约束相对偏差", f"{r3['rigid_constraint_deviation_max']:.4e}")
+    print("\n【门禁与结果文件】")
+    print("全局解层 : 未执行" if args.skip_train else "全局解层 : 已评估原始代理, 回退门禁未启用")
+    if not args.skip_train and args.trace_basis == "full_trace":
+        print(f"留出门禁 : 独立诊断已执行, 回退 {r5['n_fallback_holdout']}/{r5['n_eval']}")
+        print("公共误差表使用原始代理预测; 独立门禁回退不参与该表.")
+    else:
+        print("留出门禁 : 未执行" + (" (--skip-train)" if args.skip_train else " (linear_corner 尚未接入标定)"))
+    print("数学验收 : " + ("通过" if validation["mathematics"]["passed"] else "失败"))
+    precision_status = validation["precision"]["status"]
+    print("精度验收 : " + (
+        "未执行 (未设置精度阈值, 不代表网络精度通过)"
+        if precision_status == "not_requested" else
+        ("指定指标通过" if precision_status == "passed" else "失败")
+    ))
+    for name, item in validation["precision"]["checks"].items():
+        print(f"  {name}: max={max(item['values']):.4e}, limit={item['limit']:.4e}")
+    print(f"[证据] 结果已写入: {out_path}")
+    if not validation["passed"]:
+        failed = [
+            name for name, item in validation["mathematics"]["checks"].items()
+            if not item["passed"]
+        ] + [
+            name for name, item in validation["precision"]["checks"].items()
+            if not item["passed"]
+        ]
+        raise AssertionError("验收失败: " + ", ".join(failed))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Huang 2023 式 (17) 二维能力验证 (支持 full_trace 与 linear_corner)",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--trace-basis", "--interface", choices=("full_trace", "linear_corner"),
+        default="full_trace", dest="trace_basis",
+        help="子结构接口迹空间模式. 默认 full_trace (组 1); 可选 linear_corner (组 2, 8 角点自由度).",
+    )
+    parser.add_argument("--n-train", type=int, default=SHAPE_N_TRAIN,
+                        help="随机密度训练样本数, 缺省对齐 verify_stiffness_route.py")
+    parser.add_argument("--epochs", type=int, default=SHAPE_EPOCHS, help="训练轮数")
+    parser.add_argument("--lr", type=float, default=SHAPE_LEARNING_RATE, help="Adam 学习率")
+    parser.add_argument("--n-eval", type=int, default=SHAPE_N_EVAL, help="留出评估样本数")
+    parser.add_argument("--hidden-dim", type=int, default=SHAPE_HIDDEN_DIM, help="网络隐藏层宽度")
+    parser.add_argument("--seed", type=int, default=SHAPE_SEED, help="网络初始化种子; 密度采样保持配置中的固定种子")
+    parser.add_argument("--verbose", action="store_true", help="打印详细开发期自检与故障注入日志")
+    parser.add_argument("--skip-train", action="store_true",
+                        help="只跑 [0][1][2] 三步解析验证, 不训练网络, 不进入解层")
+    parser.add_argument("--max-ks-error", type=float, default=None,
+                        help="可选留出/在役最大刚度相对误差上限, 0.01 表示 1%%")
+    parser.add_argument("--max-displacement-error", type=float, default=None,
+                        help="可选接口/全场位移相对误差上限")
+    parser.add_argument("--max-compliance-error", type=float, default=None,
+                        help="可选柔度相对误差上限")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="证据输出目录, 缺省为本脚本同级 outputs/")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    for name in ("n_train", "n_eval", "epochs", "lr", "hidden_dim"):
+        if not np.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
+            parser.error(name.replace("_", "-") + " 必须为有限正数.")
+    for name in ("max_ks_error", "max_displacement_error", "max_compliance_error"):
+        value = getattr(args, name)
+        if value is not None:
+            if not np.isfinite(value) or value < 0.0:
+                parser.error(name.replace("_", "-") + " 必须为有限非负数.")
+            if args.skip_train:
+                parser.error("--skip-train 不执行网络精度评估, 不能设置精度阈值.")
+    run_verification(args)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

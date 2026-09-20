@@ -1,131 +1,114 @@
-# PIML 二维线弹性子结构静力缩聚示例 (PIML Substructure Elasticity Demo)
+# PIML 子结构力学验证 (PIML Substructure Elasticity)
 
-本目录提供 **Problem-Independent Machine Learning (PIML)** 范式在二维线弹性子结构静力缩聚的端到端代码范例，完全基于 **FEALPy 后端管理器 (`fealpy.backend.backend_manager as bm`)** 构建，算例基准与文献 [Huang 2023](../../literature/topology-opt/translations/Huang2023-PIML-substructure-zh.md) 第 4.1 节 MBB 梁问题设定完全对齐。
+本目录验证 Huang et al. (2023) 的问题无关机器学习 (problem-independent machine learning, PIML)
+子结构方法在二维固定密度弹性分析中的基本性质, 并演示公共接口的调用.
+脚本随代码维护; 完整论文训练、拓扑优化轨迹和性能证据由 `experiments/` 组织.
 
----
+## 验证范围
 
-## 核心内容
+| 文件 | 接口空间 | 内容 |
+|---|---|---|
+| [`verify_shape_function_route.py`](verify_shape_function_route.py) | `full_trace`、`linear_corner` | 刚体不变性、式 (17) 二阶误差恒等式、半正定性、受控扰动斜率, 以及留出集和固定密度 MBB 梁的代理误差. |
+| [`verify_stiffness_route.py`](verify_stiffness_route.py) | 仅 `full_trace` | 刚度预测参数化自检, 留出集及 MBB 梁上的刚度、位移、柔度误差, 刚体模态伪刚度诊断. |
 
-1. **统一 `bm` 后端**：阵列操作、代数求解与特征值校验全面基于 `fealpy.backend.backend_manager as bm`，在保持与 PyTorch 模型对接的同时，确保与 `soptx.fem.substructure` 核心库后端一致；
-2. **对齐 Huang 2023 第 4.1 节完整 MBB 梁算例**：基于 `soptx.problems.elasticity.FullMBBBeam2d` 物理模型，几何尺寸 [$12.0 \times 2.0$]、$12 \times 2$ 子结构网格 (共 24 个子结构)、顶面中心集中荷载及完整 MBB 梁简支约束 (不利用对称性裁剪)；
-3. **PIML 全局接口组装与下游评估**：PIML 预测的缩聚刚度 $\widehat{\mathbf K}_s$ 进入 `GlobalAssembler` 全局接口系统，计算结构柔度及全场位移恢复误差；
-4. **变形子空间上的 Cholesky 参数化**：自由漂浮子结构的 $\mathbf K_s$ 以刚体模态为精确零空间，代理按 $\widehat{\mathbf K}_s=\mathbf R_\perp\mathbf L\mathbf L^{\mathsf T}\mathbf R_\perp^{\mathsf T}$ 重构，秩亏结构由构造保证，无需正则化，详见 [results_analysis.md](results_analysis.md) 第 1.2 节；
-5. **两条 PIML 路线并列可选**：`PIMLStaticCondensation` 直接预测 $\mathbf K_s$（路线 B），`ShapeFunctionCondensation` 预测形函数 $\mathbf N$ 再经 Huang 2023 式 (17) 导出 $\mathbf K_s$（路线 A）。两者同源于 `soptx.fem.substructure`，各自带回退门禁；同预算消融见 [results_analysis.md](results_analysis.md) §9。
+当前子结构为二维 $5 \times 5$ 个 Q1 单元:
+`full_trace` 保留 20 个边界节点的 40 个自由度;
+`linear_corner` 通过式 (16) 的 $\mathbf{L}$ 将 8 个角点自由度映射到完整边界.
+形函数网络在当前刚体补空间参数化下分别输出 $32 \times 37 = 1184$ 和 $32 \times 5 = 160$ 个分量.
 
----
+两个脚本均以**同接口空间的精确缩聚**为比较基准.
+`linear_corner` 的误差衡量代理预测的影响, 不包含角点降阶相对细网格 FEA 的误差.
+基础子结构验证入口见 [`substructure_elasticity/`](../substructure_elasticity/README.md).
 
-## 目录结构
+## 与论文的对应边界
 
-```text
-soptx/examples/piml_substructure_elasticity/
-├── deployment_config.py              <-- [配置单一来源] 几何/材料/训练分布，下列脚本共用
-│
-│   ── verify_*: 断言某条数学契约成立 ──
-├── verify_stiffness_route.py         <-- [核心对比] 路线 B，直接预测 K_s：代理缩聚 vs 精确 Schur 补缩聚
-├── verify_shape_function_route.py    <-- [路线消融] 路线 A，预测形函数 N + 式(17)：二阶效应与门禁标定
-│
-│   ── collect_* / benchmark_*: 产生数据与性能基准，本身不下结论 ──
-├── collect_ood_probe_trajectory.py   <-- [OOD 测试集] 纯精确拓扑优化密度轨迹，全程不含 PIML 推理
-├── benchmark_gpu_speedup.py          <-- [硬件评测] 同一 PIML 链路下批量张量缩聚的 GPU 加速比
-│
-│   ── 对照与制图 ──
-├── convergence_rate.py               <-- [基线核验] 缩聚解与全装配直解的等价性及网格收敛阶
-├── compare_piml_pinn.py              <-- [跨范式对比] PIML 子结构静力缩聚 vs PINN 强形式
-├── plot_local_recovery.py            <-- [制图原型] 局部响应恢复云图，⚠️ (c)(d) 为合成数据，不可引用
-│
-├── results_analysis.md               <-- [契约与报告] 代码—数学映射契约、验证边界与已知问题
-├── README.md                         <-- [使用说明] 本文档
-└── outputs/                          <-- [运行产物，由 .gitignore 忽略]
-    ├── piml_exact_comparison.json / .png             <-- 路线 B 代理 vs 精确的证据与四格对比图
-    ├── eq17_second_order.json                        <-- 路线 A 的闭式恒等式、扫描与解层证据
-    ├── convergence_rate_2d / _3d.json                <-- 收敛阶证据
-    ├── piml_gpu_speedup.json                         <-- GPU 加速比证据
-    ├── ood_probe_trajectory_<tag>.npz                <-- OOD 密度轨迹，<tag> 由滤波类型与 rmin 生成
-    └── piml_vs_pinn_comparison.png                   <-- PIML vs PINN 跨范式四格对比图
-```
+- 两条路线分别对应直接预测缩聚刚度、预测形函数后使用式 (17) 构造刚度的思路,
+  不表示论文的网络参数化、训练配置和全部算例已复现.
+- 当前形函数网络学习刚体补空间中的分量 $M$; 刚度网络学习变形子空间上的 Cholesky 条目.
+  这些是当前实现的选择, 不能将输出维数与训练损失直接当作论文原始设置.
+- 当前训练使用各自预测分量的 MSE, 未实现论文描述的训练末期双网络一致性损失.
+- 训练和留出采样的密度范围为 $[0.3, 1.0]$, 使用 SIMP 映射;
+  不等同于论文中的归一化杨氏模量随机采样, 也不证明接近空洞材料时的预测能力.
+- 全局评估使用一个固定密度二维 MBB 梁, 不证明跨几何、载荷和支承的泛化,
+  也不验证拓扑优化灵敏度或优化收敛.
+- 刚度路线的内部位移恢复使用精确形函数, 局部计时不表示纯网络推理加速比.
+  `linear_corner` 刚度预测、三维算例和完整优化不在当前覆盖范围内.
 
-> 精确缩聚与全局组装模块 (`SubstructurePrototype`、`SubstructureMesh`、
-> `FEAStaticCondensation`、`GlobalAssembler`、`solve_interface_system`)
-> 由 [`src/soptx/fem/substructure/`](../../src/soptx/fem/substructure/) 提供。
+## 实现职责
 
-> EA 级 Matrix-Free 算子在精确 `K_s` 上的正确性验证已迁至
-> [`../matrix_free_substructure_elasticity/`](../matrix_free_substructure_elasticity/)；
-> PIML 预测 `K_s` 与 Matrix-Free 的组合验证见
-> [`../piml_matrix_free_substructure_elasticity/`](../piml_matrix_free_substructure_elasticity/)。
+子结构构造、角点投影、约束求解与全场恢复调用 `src/soptx/fem/substructure/` 公共接口.
+示例保留工况、训练设置、独立变分公式及误差检查, 不维护投影或求解算法副本.
 
-> **命名与归属约定**：脚本名以动词前缀标明角色——`verify_` 断言契约、`collect_` 产数据、
-> `benchmark_` 测性能，其余为对照与制图（`convergence_rate.py` 属历史命名，暂未统一）。
-> 目录按**研究对象**划分，而非按「是否调用 PIML」划分。因此
-> `collect_ood_probe_trajectory.py` 虽然全程只跑纯精确拓扑优化、不做任何 PIML 推理，
-> 仍归属于本算例：它落盘的 `rho_sub (n_iter, 24, 5, 5)` 按
-> `sub_id = sx * n_sub_y + sy` 排列，schema 由子结构缩聚契约决定；几何参数取自本目录的
-> `deployment_config.py`；唯一消费者也是本目录的 OOD 评估脚本。
+形函数路线以 `LocalReductionBatchResult` 传递预测结果.
+角点预测的恢复矩阵先延拓到完整边界, 再交给公共恢复接口;
+该延拓仅在 $u_b = Lq$ 上使用, 不作为完整接口预测模型.
+脚本检查延拓前后的恢复关系和投影刚度一致性.
 
-> **配置改动须知**：`deployment_config.py` 是本目录全部脚本的唯一配置来源。改动其中任何
-> 基准量都会同时改变两条验证路线与 OOD 轨迹的结果，务必重跑
-> `verify_shape_function_route.py` 与 `verify_stiffness_route.py` 并同步
-> [results_analysis.md](results_analysis.md) 中记录的数值。不要在脚本内复制字面量绕开它。
+## 验收与输出
 
----
+两条路线区分数学/有限性检查、网络精度验收和运行时回退门禁.
+输出按“配置摘要 → 公共误差表 → 路线专项诊断 → 门禁与结果文件”组织.
+公共误差使用百分数, 微小残差使用科学计数法; `--verbose` 显示详细诊断.
 
-## 调用范式
+形函数路线的硬性数学检查包括:
 
-全部子结构同构，因此两个脚本都构造**一个** `SubstructurePrototype` 并让所有
-`SubstructureMesh` 通过 `prototype=proto` 共享它：
+| 指标 | 验收条件 |
+|---|---|
+| 刚体密度无关性、解析刚体分量、精确形函数代入式 (17) 的相对偏差 | 不超过 $10^{-10}$ |
+| 二阶误差闭式的相对偏差 | 不超过 $10^{-7}$ |
+| 误差矩阵最小特征值除以精确刚度范数 | 不低于 $-10^{-10}$ |
+| 固定扰动方向的 log-log 斜率 | $[1.98, 2.02]$ |
+| 预测刚体约束、恢复延拓和刚度投影的相对偏差 | 不超过 $10^{-10}$ |
+| 角点约束求解的平衡与约束相对残差 | 不超过 $10^{-8}$ |
 
-- **精确路径批量化**：`prototype.assemble_local_stiffness_batch(density)` 一次得到
-  `(B, n_dof, n_dof)` 局部刚度，交给**单个** `FEAStaticCondensation` 沿前导维一次缩聚。
-  离线训练样本（250~300 组随机密度）同样只走一次批量装配 + 一次批量缩聚。
-- **PIML 路径仍为列表**：`PIMLStaticCondensation` 的代理网络只接受单个子结构的密度输入，
-  因此保持逐子结构推理，但复用已经批量装配好的 `K_local_batch[idx]`。
+刚度路线要求刚体基相对残差不超过 $10^{-10}$、完美代理参数化相对误差不超过 $10^{-4}$,
+且完美代理不得回退; 所有数值结果必须有限.
 
-## 快速运行
+训练后还检查主要训练和解层指标的有限性.
+`full_trace` 独立故障注入要求 NaN 预测触发回退、输出维数截断触发契约异常;
+倍数缩放与门禁翻转扫描仅作诊断, 不假定任意网络放大后都必须回退.
+上述容差是数值一致性标准, 不是论文报告的代理精度.
 
-PIML 代理缩聚与精确 Schur 补缩聚对比（MBB 梁集中载荷，报告算子层与解层两层误差，以及误差归因诊断）：
+两个入口均支持可选精度阈值, 使用相对误差小数, 如 `0.01` 表示 1%:
 
-```bash
-python examples/piml_substructure_elasticity/verify_stiffness_route.py
-```
+| 参数 | 检查指标 |
+|---|---|
+| `--max-ks-error` | 留出集和在役子结构的最大刚度相对误差 |
+| `--max-displacement-error` | 接口位移和全场位移相对误差 |
+| `--max-compliance-error` | 柔度相对误差 |
 
-要求代理全程生效（在役子结构或留出集出现回退即失败）：
+未设置的精度项仅报告, 不宣称通过验收.
+数学检查通过也不等于代理精度达标.
+形函数 `--skip-train` 不执行训练、留出和全局解层, 不能同时指定精度阈值.
 
-```bash
-python examples/piml_substructure_elasticity/verify_stiffness_route.py --strict --epochs 800
-```
+形函数全局解层使用原始预测, 不启用回退门禁;
+`full_trace` 的留出门禁独立诊断, 其回退不混入公共误差表.
+`linear_corner` 尚未接入独立门禁诊断.
+刚度路线的公共误差包含实际回退结果;
+`--strict` 要求留出和全局均零回退, 本身不设置精度阈值.
+刚度路线一旦指定任一精度阈值, 同样要求零回退, 避免精确回退掩盖预测误差.
 
-加大训练预算与留出集，用于判定精度瓶颈在欠拟合还是训练分布：
+结果 JSON 记录验收状态与阈值; 完成评估后的验收失败会先保存证据, 再以非零状态退出.
+默认输出到本目录的 `outputs/`; 需要保留多次运行时请分别指定 `--output-dir`.
+输入或求解过程中提前发生异常时, 不保证产生完整结果文件.
 
-```bash
-python examples/piml_substructure_elasticity/verify_stiffness_route.py --epochs 4000 --train-samples 2000 --val-samples 200
-```
+## 运行入口
 
-随机性由 `--seed`（缺省 `2026`）统一固定，覆盖训练采样、留出采样与网络初始化；比较不同训练配置时应保持种子不变，否则观测差异混有采样噪声。
-
-形函数路线消融（验证式 (17) 的二阶误差压缩，与直接预测 $\mathbf K_s$ 正面对比，并标定门禁）：
+在仓库根目录、已安装 SOPTX 和本地 FEALPy 的环境中执行.
+训练耗时取决于硬件、线程配置及样本数; 以下小规模训练命令用于演示流程, 不承诺精度.
 
 ```bash
-python examples/piml_substructure_elasticity/verify_shape_function_route.py --n-train 2000 --epochs 4000
+# 1. full_trace 解析检查, 不训练网络
+python examples/piml_substructure_elasticity/verify_shape_function_route.py --skip-train
+
+# 2. linear_corner 解析检查, 不训练网络
+python examples/piml_substructure_elasticity/verify_shape_function_route.py --trace-basis linear_corner --skip-train
+
+# 3. 形函数路线的小规模训练和解层评估
+python examples/piml_substructure_elasticity/verify_shape_function_route.py --trace-basis linear_corner --n-train 500 --epochs 500
+
+# 4. 刚度路线的小规模训练和解层评估
+python examples/piml_substructure_elasticity/verify_stiffness_route.py --train-samples 500 --epochs 500
 ```
 
-脚本分六步：刚体分量的密度无关性与解析构造 → 闭式恒等式 → 受控扰动扫描 → 训练网络 →
-解层对比 → 门禁标定与故障注入。前三步不含训练，可用 `--skip-train` 单独复核。
-
-第六步同时给出两类证据：留出集与在役子结构上三道门禁的读数与裕度（"不误伤"），以及
-对网络输出做放大／注入 NaN／截短维数后门禁确实触发（"会响"）。缺任何一类，都无法把
-"从未回退"与"门禁根本不会响"区分开。
-
-PIML vs PINN 跨范式对比：
-
-```bash
-python examples/piml_substructure_elasticity/compare_piml_pinn.py --pinn-epochs 400
-```
-
-`verify_stiffness_route.py` 的 `--output-dir` 缺省为脚本同级的 `outputs/`（按脚本位置解析，与从哪个目录发起命令无关）；传相对路径会按当前工作目录解析，可能落到 `.gitignore` 覆盖范围之外。
-
-## 运行产物
-
-- `outputs/piml_exact_comparison.json`：问题配置、训练配置（含 `seed`、`n_reduced_dofs`）、算子层与解层全部误差、回退计数与耗时，以及误差归因诊断（`rigid_basis_residual`、`parameterization_error_ceiling`、留出集误差、零空间伪刚度与能量归因）。
-- `outputs/piml_exact_comparison.png`：上排为精确与 PIML 的 $U_y$ 场，下排为首个子结构的
-  $\mathbf K_s$ 与 $\widehat{\mathbf K}_s$ 热图。
-- `outputs/piml_vs_pinn_comparison.png`：上排为制造解与 PINN 位移场，下排为精确 Schur 补
-  $\mathbf K_s$ 与 PIML 预测的 $\widehat{\mathbf K}_s$。
+完整论文复现实验见 [`experiments/topopt_simp_piml_substructure/`](../../experiments/topopt_simp_piml_substructure/).
