@@ -8,7 +8,7 @@ from fealpy.backend import backend_manager as bm
 from fealpy.decorator import cartesian
 from fealpy.typing import TensorLike
 
-from soptx.problems.loads import BoundaryTractionLoad
+from soptx.problems.loads import BoundaryTractionLoad, PointForceLoad
 
 from ._base import axis_aligned_box_corners, validated_domain
 
@@ -30,6 +30,7 @@ class FixedFixedBeamCenterLoad2d:
     投影出来的 P1 迹载荷): 几何、材料与边界标记全部不变, 只替换牵引函数.
     """
 
+    # point_force=True 时通过 loads 返回点力, load_width 不参与载荷计算.
     dimension = 2
     boundary_type = "mixed"
     _eps = 1.0e-12
@@ -44,6 +45,7 @@ class FixedFixedBeamCenterLoad2d:
         nu: float = 0.4,
         plane_type: str = "plane_stress",
         traction: Optional[Callable[[TensorLike], TensorLike]] = None,
+        point_force: bool = False,
     ) -> None:
         self._domain = validated_domain(domain, self.dimension)
         self._P = float(P)
@@ -52,6 +54,9 @@ class FixedFixedBeamCenterLoad2d:
         self._nu = float(nu)
         self._plane_type = plane_type
         self._traction = traction
+        self._point_force = bool(point_force)
+        if self._point_force and traction is not None:
+            raise ValueError("点力与非零牵引输入不可同时指定.")
         if self._load_width <= 0.0:
             raise ValueError("load_width 必须为正数.")
 
@@ -210,8 +215,13 @@ class FixedFixedBeamCenterLoad2d:
         traction = bm.set_at(traction, (..., 1), self.traction_intensity)
         return bm.where(bm.expand_dims(in_patch, axis=-1), traction, bm.zeros_like(traction))
 
-    def loads(self) -> tuple[BoundaryTractionLoad, ...]:
-        """返回底边局部加载区的边界牵引."""
+    def loads(self) -> tuple[BoundaryTractionLoad | PointForceLoad, ...]:
+        """返回底边局部牵引, 或中点合力为 P 的节点集中力."""
+        if self._point_force:
+            return (PointForceLoad(
+                point=((self.domain[0] + self.domain[1]) / 2, self.domain[2]),
+                vector=(0.0, self.P),
+            ),)
         return (
             BoundaryTractionLoad(
                 dimension=self.dimension,
@@ -235,6 +245,7 @@ class FixedFixedBeamHalfDomain2d:
     投影出的 P1 迹载荷, 消除强施加与弱积分的几何不对齐误差.
     """
 
+    # point_force=True 时通过 loads 返回点力, load_width 不参与载荷计算.
     dimension = 2
     boundary_type = "mixed"
     _eps = 1.0e-12
@@ -249,6 +260,7 @@ class FixedFixedBeamHalfDomain2d:
         nu: float = 0.4,
         plane_type: str = "plane_stress",
         traction: Optional[Callable[[TensorLike], TensorLike]] = None,
+        point_force: bool = False,
     ) -> None:
         self._domain = validated_domain(domain, self.dimension)
         self._P = float(P)
@@ -257,6 +269,9 @@ class FixedFixedBeamHalfDomain2d:
         self._nu = float(nu)
         self._plane_type = plane_type
         self._traction = traction
+        self._point_force = bool(point_force)
+        if self._point_force and traction is not None:
+            raise ValueError("点力与非零牵引输入不可同时指定.")
         if self._load_width <= 0.0:
             raise ValueError("load_width 必须为正数.")
         half_width = self._load_width / 2.0
@@ -437,8 +452,13 @@ class FixedFixedBeamHalfDomain2d:
         traction = bm.set_at(traction, (..., 1), self.traction_intensity)
         return bm.where(bm.expand_dims(in_patch, axis=-1), traction, bm.zeros_like(traction))
 
-    def loads(self) -> tuple[BoundaryTractionLoad, ...]:
-        """返回半域底边局部加载区的边界牵引."""
+    def loads(self) -> tuple[BoundaryTractionLoad | PointForceLoad, ...]:
+        """返回半域局部牵引, 或对称面底端合力为 P/2 的节点集中力."""
+        if self._point_force:
+            return (PointForceLoad(
+                point=(self.domain[1], self.domain[2]),
+                vector=(0.0, self.P / 2),
+            ),)
         return (
             BoundaryTractionLoad(
                 dimension=self.dimension,

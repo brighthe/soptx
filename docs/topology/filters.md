@@ -212,7 +212,7 @@ filters 只发信号，重置由优化器完成：`MMAOptimizer` / `ALMMAOptimiz
 
 基于 `scipy.ndimage.convolve` 的规则三维网格过滤器，直接处理 `(nx, ny, nz)` 形状的 NumPy 数组，
 提供灵敏度过滤、密度过滤及其伴随与锥形核构造，核按真实物理距离构造，`lru_cache` 缓存核与边界
-截断后的权重和。消费者为 `experiments/{piml_substructure_topopt, topopt_simp_substructure}` 与
+截断后的权重和。消费者为 `experiments/{topopt_simp_piml_substructure, topopt_simp_substructure}` 与
 `examples/topopt_platform/topopt_3d_simp_real.py`，测试在 `tests/unit/test_structured_topology_filter.py`。
 需要稀疏 $\mathbf H$、非结构网格或投影链时用 `Filter`，只在规则数组上做一次锥形过滤时用它。
 

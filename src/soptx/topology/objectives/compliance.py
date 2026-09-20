@@ -261,6 +261,12 @@ class ComplianceObjective(BaseLogged):
             uh = state.get('displacement')
 
             if density_location in ['element']:
+                if getattr(self._analyzer, 'poisson_ratio_interpolated', False):
+                    self._log_error(
+                        "自动微分路径按 K_e = E(ρ)/E0 · K_e^0 求导, 不支持泊松比随密度插值; "
+                        "请使用 diff_mode='manual'"
+                    )
+
                 cell2dof = self._analyzer.tensor_space.cell_to_dof()
                 
                 if self._analyzer._cached_ke0 is None:

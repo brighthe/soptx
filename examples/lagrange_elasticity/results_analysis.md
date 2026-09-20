@@ -11,13 +11,13 @@
 
 当前结果仅适用于：
 
-- CPU 串行全组装，即 `operator_level="fa"`；
+- CPU 串行，缺省 `operator_level="fa"`（全组装）；脚本另支持 `--operator-level ea/pa`，这两个层级无显式矩阵，只能配 `--solver cg`，其实测结果不在本页，见 `experiments/assembly_level_consistency/`；
 - `float64`，FEALPy vendor fork 路径 `/home/brighthe/workspace/fealpy`；
 - 2D `tri/quad`、3D `tet/hex` 规则加密网格；
 - 任意正整数多项式次数 $p\ge1$，已实测 $p=1,2$；
 - `scipy`、`mumps` 直接法和无预条件 `cg` 迭代法。
 
-Matrix-Free、GPU、MPI、子结构、PIML 和拓扑优化不属于本目录的验证范围。
+GPU、MPI、子结构、PIML 和拓扑优化不属于本目录的验证范围。
 
 ## 2. 制造解 Demo 结果
 

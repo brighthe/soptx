@@ -247,8 +247,8 @@ SOPTX 的 `--degree` 默认为 1，子结构模块本身也基于 $p=1$：缺陷
 | `src/soptx/topology/objectives/compliance.py` | `:171`、`:183` | 节点密度柔顺度灵敏度 |
 | `src/soptx/topology/objectives/mechanism.py` | `:112` | 机构位移目标灵敏度 |
 | `src/soptx/topology/constraints/volume.py` | `:116` | 体积约束梯度 |
-| `src/soptx/topology/constraints/apparent_stress.py` | `:131` | 表观应力约束梯度 |
-| `src/soptx/topology/constraints/vanishing_stress.py` | `:200` | 消失应力约束梯度 |
+| `src/soptx/topology/constraints/huzhang_stress.py` | `compute_adjoint_load` | HuZhang 应力约束梯度 |
+| `src/soptx/topology/constraints/lagrange_stress.py` | `compute_adjoint_load` | Lagrange 应力约束梯度 |
 | `src/soptx/filters/strategies.py` | `:153`、`:283` | 密度过滤的节点侧散射累加 |
 
 即 `density_location` 取 `node` / `node_multiresolution` 时，pytorch 后端下这些梯度是

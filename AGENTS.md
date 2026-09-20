@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本文件是 `soptx` 面向所有 AI 助手的唯一指令正文；`CLAUDE.md` 与 `GEMINI.md` 只是指向本文件的入口。主题目录（`examples/`、`experiments/` 的各子目录）与带自述规则的目录（如 `docs/known-issues/`）各以其 `README.md` 为专项细则的权威来源，动手前先读；`src/`、`tests/`、`tools/` 不设 README，自述载体是代码 docstring。
+本文件是 `soptx` 面向所有 AI 助手的唯一指令正文；`CLAUDE.md` 与 `GEMINI.md` 只是指向本文件的入口。主题目录（`experiments/` 的各子目录）与带自述规则的目录（如 `docs/known-issues/`）各以其 `README.md` 为专项细则的权威来源，动手前先读；`src/`、`tests/`、`tools/` 不设 README，自述载体是代码 docstring。
 
 ## 开始工作前
 
@@ -17,5 +17,3 @@
 
 - SOPTX 基于 FEALPy 开发；`import fealpy` 解析到本地 editable 安装的 vendor fork `~/workspace/fealpy`，而非 PyPI 发行版。修改该 fork 必须记入 `docs/known-issues/`，记账细则见该目录 `README.md`。
 - 实现前先检索 fealpy 与 soptx 中已有的能力，优先复用或扩展现有接口，不重复造轮子。
-- `examples/` 与 `experiments/` 按目的划分，不按复杂度：`examples/` 是能力验证与用法演示，随代码长期维护，脚本失效必须修复；`experiments/` 是研究证据产出（benchmark、论文数据），结论写入 `results_analysis.md` 归档后冻结，不随接口演进维护。
-- `examples/` 新增脚本以目的前缀命名：`demo_`（用法演示）、`verify_`（正确性/收敛验证）、`compare_`（与基线对比）、`benchmark_`（性能测量），前缀后接对象，如 `verify_ea_correctness.py`、`demo_concentrated_load.py`；存量不合规文件另行集中改名。

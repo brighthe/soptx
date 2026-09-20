@@ -1,14 +1,19 @@
-"""拉格朗日位移元求解线弹性问题的制造解收敛阶算例 (CPU 串行, 全装配).
+"""拉格朗日位移元求解线弹性问题的制造解收敛阶算例 (CPU 串行).
 
-目的是用尽量少的代码走通一条完整的求解链: 装配全局刚度矩阵 -> 施加边界条件
--> 直接解 -> 与制造解比较, 并观察 L2 误差的收敛阶。二维和三维共用同一段流程,
-只有网格类型、问题类和材料假设按维数选择。
+目的是用尽量少的代码走通一条完整的求解链: 装配 -> 施加边界条件 -> 求解 ->
+与制造解比较, 并观察 L2 误差的收敛阶。二维和三维共用同一段流程, 只有网格类型、
+问题类和材料假设按维数选择。
+
+``--operator-level`` 决定这条链上的离散算子怎么存、怎么作用 (``fa`` 全局 CSR、
+``ea`` 逐单元 K_e、``pa`` 逐积分点几何量), 缺省 ``fa``。三者描述同一个离散算子,
+收敛阶必须一致, 因此各跑一条误差链就是各自的正确性证据 —— 这比"与 FA 的作用
+结果相同"更强: 后者在 K_e 本身算错时会一致通过。``ea``/``pa`` 没有显式矩阵,
+只能配 ``--solver cg``。
 
 与 ``examples/matrix_free_elasticity`` 的关系: 那里同时承担 MPI 重叠副本、
 FA/EA 双路对照和可重放 evidence 三件事, 因此有十余个模块。本算例只保留 CPU
-串行 FA 这一条主路径, 不导入那个目录的任何模块, 也不生成 evidence。想看
-matrix-free 的算子层级和并行, 去读那个目录; 想看"有限元怎么把方程解出来",
-读这一个文件就够。
+串行这一条主路径, 不导入那个目录的任何模块, 也不生成 evidence。想看并行,
+去读那个目录; 想看"有限元怎么把方程解出来", 读这一个文件就够。
 
 问题类和材料类直接取自 ``soptx``, 没有本地适配层 —— 这本身就是算例的一部分:
 它验证维护中的 Problem 满足 ``DirichletElasticityProblem`` 契约。
@@ -48,6 +53,7 @@ matrix-free 的算子层级和并行, 去读那个目录; 想看"有限元怎么
     python examples/lagrange_elasticity/manufactured_convergence_demo.py --model exp-sine
     python examples/lagrange_elasticity/manufactured_convergence_demo.py --model mixed-sinusoidal
     python examples/lagrange_elasticity/manufactured_convergence_demo.py --solver cg --rtol 1e-12
+    python examples/lagrange_elasticity/manufactured_convergence_demo.py --operator-level ea --solver cg
 
 全部门禁在 ``run_manufactured_convergence_benchmark`` 内以运行时断言实现: 任一项不达标
 即抛 ``AssertionError`` 且不写任何文件, 全部通过才落盘 JSON 证据。契约与实测证据见同目录
@@ -133,9 +139,34 @@ DIRECT_SOLVERS: tuple[SolverName, ...] = ("scipy", "mumps")
 ITERATIVE_SOLVERS: tuple[SolverName, ...] = ("cg",)
 
 # 与 LagrangeFEMAnalyzer 的 assembly_method 形参取值域保持一致。三条路径描述的是
-# 同一个双线性型, 只是收缩次序不同, 因此解必须逐位一致; 差别在装配期的临时数组规模。
+# 同一个双线性型, 只是收缩次序不同, 差别在装配期的临时数组规模。
+#
+# 注意是"同一个数学量", 不是"逐位相同的浮点数": 收缩次序变了舍入就变, 再经刚度阵
+# (2D 上 κ ~ h^-2) 放大。实测 standard 与 fast 在 quad / tri 两条链上的 L2 误差
+# 逐档相对偏差约 1e-11 ~ 1e-15 量级, 最细一档最大 (quad 1.6e-11, tri 6.6e-11),
+# 观测收敛阶到小数点后四位完全相同。所以判等要用相对误差阈值, 不能用 ==。
 AssemblyMethodName = Literal["standard", "voigt", "fast"]
 ASSEMBLY_METHODS: tuple[AssemblyMethodName, ...] = ("standard", "voigt", "fast")
+
+# 与 LagrangeFEMAnalyzer 的 operator_level 形参取值域保持一致。四个层级描述的是同一个
+# 离散算子, 只是存储与作用方式不同 (fa 持有全局 CSR, ea 逐单元 K_e, pa 逐积分点几何量,
+# ua 零常驻、每次作用现算几何量), 因此收敛阶必须一致 —— 这正是拿它们各跑一条误差链要验
+# 的东西。ua 与 pa 更强: 两者的几何量同出 levels/_quadrature.py 的 quadrature_geometry,
+# 之后走同一串 einsum, 作用结果逐位相同, 因此误差链与 niter 列也应逐位相同, 不只是吻合。
+OperatorLevelName = Literal["fa", "ea", "pa", "ua"]
+OPERATOR_LEVELS: tuple[OperatorLevelName, ...] = ("fa", "ea", "pa", "ua")
+
+# 与 LagrangeFEMAnalyzer.solve_system 的 precond 取值域保持一致, 另加一个显式的
+# "none" —— 缺省不带预条件子这件事必须落在纸面上: 无预条件 cg 的迭代数按 O(h^-1)
+# 翻倍 (κ ~ h^-2), 一条收敛链的 niter 列是 5/24/54/110/220 还是常数, 结论完全不同,
+# 产物里不记就无从判读。'jacobi' 取对角逆; 'scipy'/'mumps' 是把直接法当预条件子
+# (精确逆, cg 应一步收敛), 只用于验证两个层级确实是同一个离散算子。
+PreconditionerName = Literal["none", "jacobi", "scipy", "mumps"]
+PRECONDITIONERS: tuple[PreconditionerName, ...] = ("none", "jacobi", "scipy", "mumps")
+
+# ea / pa / ua 都不组装全局矩阵 (ea 只持有逐单元的 K_e, pa 与 ua 连单元矩阵也不存),
+# 直接解法无从分解, 只能配迭代解法。
+MATRIX_FREE_LEVELS: tuple[OperatorLevelName, ...] = ("ea", "pa", "ua")
 
 
 def _sinusoidal_2d() -> tuple:
@@ -277,6 +308,8 @@ def solve_one_level(
     solver: SolverName,
     solver_options: dict[str, Any],
     assembly_method: AssemblyMethodName,
+    operator_level: OperatorLevelName,
+    preconditioner_level: OperatorLevelName | None,
 ) -> dict:
     """在一层网格上求解, 返回误差与诊断量.
 
@@ -293,7 +326,8 @@ def solve_one_level(
         material=material,
         space_degree=degree,
         integration_order=integration_order,
-        operator_level="fa",
+        operator_level=operator_level,
+        preconditioner_level=preconditioner_level,
         assembly_method=assembly_method,
         solve_method=solver,
         topopt_algorithm=None,
@@ -307,12 +341,13 @@ def solve_one_level(
     K0 = analyzer.assemble_stiff_matrix()
     F0 = analyzer.assemble_body_force_vector()
 
-    # 2. 边界条件: 'fa' 走对称消元, 直接改写已装配好的矩阵; 混合边界模型还会
-    #    先把 Gamma_N 的 traction 等效载荷加进右端项
+    # 2. 边界条件: 'fa' 走对称消元, 直接改写已装配好的矩阵; 'ea'/'pa' 没有显式矩阵,
+    #    走 matrix_free 变体。混合边界模型还会先把 Gamma_N 的 traction 等效载荷加进右端项
     K, F = analyzer.apply_bc(K0, F0)
 
-    # 3. 求解: 直接解法或 cg。'fa' 的 K 已经过对称消元, 迭代解法从零初值起步
-    #    即可; 只有 'ea' 需要把 apply_bc 留下的 prescribed_solution 传成 x0
+    # 3. 求解: 直接解法或 cg。'fa' 的 K 已经过对称消元, 迭代解法从零初值起步即可;
+    #    非 'fa' 需要把 apply_bc 留下的 prescribed_solution 传成 x0, 这一步由
+    #    LagrangeFEMAnalyzer.solve_system 自己补, 这里不必显式传
     uh = analyzer.tensor_space.function()
     _, solver_info = analyzer.solve_system(K, F, uh, **solver_options)
 
@@ -467,14 +502,36 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--assembly-method", choices=ASSEMBLY_METHODS,
-        default="standard",
+        "--operator-level", choices=OPERATOR_LEVELS, default="fa",
         help=(
-            "单元刚度阵装配路径 (默认 standard); 三者是同一双线性型的不同收缩"
-            "次序, 解应逐位一致, 差别在装配期临时数组规模"
+            "离散算子的存储与作用方式 (默认 fa); ea/pa 无显式矩阵, 必须配 --solver cg"
         ),
     )
-    # 以下三项只对 cg 生效, 默认值与 LagrangeFEMAnalyzer.solve_system 一致
+    parser.add_argument(
+        "--assembly-method", choices=ASSEMBLY_METHODS,
+        default="fast",
+        help=(
+            "单元刚度阵装配路径 (默认 fast); 三者是同一双线性型的不同收缩"
+            "次序, 解在舍入量级上一致 (非逐位), 差别在装配期临时数组规模。缺省取 fast 是因为"
+            "standard 会把被求和掉的积分点轴物化成临时张量, 三维细网格上直接吃爆内存, "
+            "而收缩次序不影响结果, 没有理由把最费内存的那条设成缺省"
+        ),
+    )
+    # 以下五项只对 cg 生效, 默认值与 LagrangeFEMAnalyzer.solve_system 一致
+    parser.add_argument(
+        "--preconditioner", choices=PRECONDITIONERS, default="none",
+        help=(
+            "cg 的预条件子 (默认 none, 即不加预条件); jacobi 取对角逆; "
+            "scipy/mumps 把直接法当预条件子, 是精确逆, cg 应一步收敛"
+        ),
+    )
+    parser.add_argument(
+        "--preconditioner-level", choices=OPERATOR_LEVELS, default=None,
+        help=(
+            "预条件子取算子的层级 (默认跟随 --operator-level); scipy/mumps 需要显式"
+            "矩阵, 在 ea/pa 链上必须显式设为 fa"
+        ),
+    )
     parser.add_argument(
         "--rtol", type=float, default=1.0e-12,
         help="cg 相对收敛容差 (默认 1e-12)",
@@ -503,8 +560,11 @@ def run_manufactured_convergence_benchmark(
     levels: int = 3,
     base: int | None = None,
     solver: SolverName = "scipy",
-    assembly_method: AssemblyMethodName = "standard",
+    assembly_method: AssemblyMethodName = "fast",
+    operator_level: OperatorLevelName = "fa",
     mumps_sym: int = 0,
+    preconditioner: PreconditionerName = "none",
+    preconditioner_level: OperatorLevelName | None = None,
     rtol: float = 1.0e-12,
     atol: float = 1.0e-12,
     maxiter: int = 5000,
@@ -521,8 +581,14 @@ def run_manufactured_convergence_benchmark(
         base: 最粗一档的每方向单元数; 为 ``None`` 时取 ``BASE_SUBDIVISIONS[dim]``.
         solver: 求解器名, 见 ``DIRECT_SOLVERS`` 与 ``ITERATIVE_SOLVERS``.
         assembly_method: 单元刚度阵的装配路径, 见 ``ASSEMBLY_METHODS``.
+        operator_level: 离散算子的存储与作用方式, 见 ``OPERATOR_LEVELS``.
+            ``ea``/``pa``/``ua`` 都不组装全局矩阵, 必须配 ``solver='cg'``.
         mumps_sym: MUMPS 对称性标志, 只对 ``solver='mumps'`` 生效. ``0`` 按一般
             非对称矩阵分解, ``1`` 对称正定, ``2`` 一般对称.
+        preconditioner: ``cg`` 的预条件子, 见 ``PRECONDITIONERS``. ``'none'`` 表示
+            不加预条件, 只对迭代解法生效.
+        preconditioner_level: 预条件子取算子的层级, 见 ``OPERATOR_LEVELS``;
+            为 ``None`` 时跟随 ``operator_level``.
         rtol: ``cg`` 相对收敛容差, 只对迭代解法生效.
         atol: ``cg`` 绝对收敛容差, 只对迭代解法生效.
         maxiter: ``cg`` 最大迭代步数, 只对迭代解法生效.
@@ -532,7 +598,8 @@ def run_manufactured_convergence_benchmark(
         summary: 逐层误差、观测收敛阶、门禁阈值与判定结果的汇总记录.
 
     异常:
-        ValueError: 当次数或层数非法, 或模型与网格类型同维数不匹配时抛出.
+        ValueError: 当次数或层数非法, 模型与网格类型同维数不匹配, 或算子层级与
+            求解器不兼容时抛出.
         AssertionError: 当任一门禁不达标时抛出; 此时不写任何文件.
     """
     if degree < 1:
@@ -541,6 +608,13 @@ def run_manufactured_convergence_benchmark(
         raise ValueError(f"levels 至少为 2, 否则无法观测收敛阶; 收到 levels={levels}.")
     if base is not None and base < 1:
         raise ValueError(f"base 必须为正整数; 收到 base={base}.")
+
+    # 放在入口拦: 否则要等第一档装配跑完, 才在 solve_system 里因算子不支持分解而报错
+    if operator_level in MATRIX_FREE_LEVELS and solver in DIRECT_SOLVERS:
+        raise ValueError(
+            f"operator_level='{operator_level}' 不组装全局矩阵, 直接解法 '{solver}' "
+            f"无从分解; 请改用 --solver cg."
+        )
 
     # 网格类型按维数配对, 不给就取该维数的单纯形网格
     available_mesh_types = MESH_CONSTRUCTORS[dim]
@@ -566,9 +640,18 @@ def run_manufactured_convergence_benchmark(
 
     iterative = solver in ITERATIVE_SOLVERS
     if iterative:
+        # precond 显式落成 None 而不是干脆不传: 不传时 solve_system 也回落到 None,
+        # 但那样产物的 solver_options 里就看不出"到底加没加预条件子", 只能靠读源码
+        # 反推缺省。这一项是判读 niter 列的前提, 必须自述。
         solver_options: dict[str, Any] = {
-            "rtol": rtol, "atol": atol, "maxiter": maxiter
+            "rtol": rtol, "atol": atol, "maxiter": maxiter,
+            "precond": None if preconditioner == "none" else preconditioner,
         }
+    elif preconditioner != "none" or preconditioner_level is not None:
+        raise ValueError(
+            f"--preconditioner / --preconditioner-level 只对迭代解法生效, "
+            f"当前 --solver {solver} 是直接解法."
+        )
     elif solver == "mumps":
         # 只有 mumps 认这个开关; scipy 后端没有对应参数, 传了会被忽略, 干脆不传
         solver_options = {"sym": mumps_sym}
@@ -576,23 +659,29 @@ def run_manufactured_convergence_benchmark(
         solver_options = {}
 
     # 结论依赖于哪一份 FEALPy: 官方检出与打了缺陷修复的检出版本号都是 4.0.0,
-    # 只有解析路径能区分。见 docs/known-issues/fealpy-patches.md 第一节
+    # 只有解析路径能区分。见 docs/known-issues/fealpy-patches.md 第一节。不印在控制台,
+    # 而是记进产物的 fealpy_path 字段 —— 复核时看产物, 跑的时候不必每次刷这一行。
     # 这里用 import_module 而不是模块级 ``import fealpy``: 后者只在这一行用到,
     # 会被 "移除未使用导入" 的工具删掉, 而删掉的后果是整个算例起不来
     fealpy_file = import_module("fealpy").__file__
     if fealpy_file is None:
         raise RuntimeError("无法确定当前导入的 FEALPy 模块文件路径.")
     fealpy_path = str(Path(fealpy_file).resolve().parents[1])
-    print(f"FEALPy: {fealpy_path}")
+    # 这一行印的是命令行开关原样, 不是中文标签: 照抄就能复跑同一条链, 不必回头
+    # 查"quadrangle 对应 --mesh-type 填什么"。维数不单列 —— 网格类型已经定死了它
+    # (quad/tri 必是 2D, hex/tet 必是 3D); mumps 的 sym 同理, 随 --solver mumps
+    # 一并记进产物。
     print(
-        f"维数={dim}D, 网格={MESH_LABELS[mesh_type]}, "
-        f"问题={type(problem).__name__}, 算子层级=fa, "
-        f"空间次数={degree}, 求解器={solver}, 装配方法={assembly_method}"
+        f"--mesh-type {mesh_type} --model {model} --operator-level {operator_level} "
+        f"--degree {degree} --solver {solver} --assembly-method {assembly_method}"
     )
-    if solver == "mumps":
-        print(f"mumps 参数: sym={mumps_sym}")
     if iterative:
-        print(f"cg 参数: rtol={rtol:.1e}, atol={atol:.1e}, maxiter={maxiter}")
+        pc_line = f"--preconditioner {preconditioner}"
+        if preconditioner_level is not None:
+            pc_line += f" --preconditioner-level {preconditioner_level}"
+        print(
+            f"{pc_line} --rtol {rtol:.1e} --atol {atol:.1e} --maxiter {maxiter}"
+        )
 
     rows = []
     for level in range(levels):
@@ -608,6 +697,8 @@ def run_manufactured_convergence_benchmark(
                 solver=solver,
                 solver_options=solver_options,
                 assembly_method=assembly_method,
+                operator_level=operator_level,
+                preconditioner_level=preconditioner_level,
             )
         )
 
@@ -627,24 +718,15 @@ def run_manufactured_convergence_benchmark(
         for coarse, fine in zip(rows[:-1], rows[1:])
     )
 
-    print(
-        f"\n真相对残差最大值 = {residual_max:.2e} "
-        f"(阈值 {RESIDUAL_TOLERANCE:.0e}) -> "
-        f"{'通过' if residual_passed else '未通过'}"
-    )
-    print(
-        f"最细一档 L2 观测阶 = {final_order:.3f} "
-        f"(阈值 {MINIMUM_L2_ORDER}) -> "
-        f"{'通过' if order_passed else '未通过'}"
-    )
-    print(f"L2 误差逐层下降 -> {'通过' if decreasing else '未通过'}")
-
+    # 三项门禁只判不印: 逐项"-> 通过"与表格是同一批数字的复述, 通过时是噪音。
+    # 未通过才有信息量, 由下面的 AssertionError 连同超标值一起报出来 (退出码非零);
+    # 要看阈值与逐项判定就读产物或走 experiments/*/compare.py。
+    #
     # 迭代解法多一项: 真残差达标不能代替收敛判定, 没收敛而残差碰巧合格
-    # 只说明这一次侥幸, 不能作为求解链可用的证据
+    # 只说明这一次侥幸, 不能作为求解链可用的证据。逐层的 conv 列已在表里。
     converged = True
     if iterative:
         converged = all(bool(row["converged"]) for row in rows)
-        print(f"cg 每层均收敛 -> {'通过' if converged else '未通过'}")
 
     failures = []
     if not residual_passed:
@@ -664,11 +746,6 @@ def run_manufactured_convergence_benchmark(
             f"{dim}D {MESH_LABELS[mesh_type]} 网格 + {solver}: " + "; ".join(failures)
         )
 
-    print(
-        f"\n结论: SOPTX 的拉格朗日位移元串行 FA 求解链在 "
-        f"{dim}D {MESH_LABELS[mesh_type]} 网格 + {solver} 上可用."
-    )
-
     summary: dict[str, Any] = {
         "script": Path(__file__).name,
         "fealpy_path": fealpy_path,
@@ -677,7 +754,7 @@ def run_manufactured_convergence_benchmark(
         "model": model,
         "mesh_type": mesh_type,
         "mesh_label": MESH_LABELS[mesh_type],
-        "operator_level": "fa",
+        "operator_level": operator_level,
         "assembly_method": assembly_method,
         "space_degree": degree,
         # 加密序列自述: 文件名不带这两项, 判读 JSON 时靠它们确认口径
@@ -686,6 +763,10 @@ def run_manufactured_convergence_benchmark(
         "material_hypothesis": material.hypothesis,
         "solver": solver,
         "solver_options": solver_options,
+        # 与 solver_options["precond"] 同源, 单列一份是为了让直接解法那几条链也有
+        # 这两个字段 (取 None), 跨链并读时列是齐的
+        "preconditioner": preconditioner if iterative else None,
+        "preconditioner_level": preconditioner_level if iterative else None,
         "residual_tolerance": RESIDUAL_TOLERANCE,
         "minimum_l2_order_gate": MINIMUM_L2_ORDER,
         "theoretical_order": float(degree + 1),
@@ -703,18 +784,26 @@ def run_manufactured_convergence_benchmark(
         path.mkdir(parents=True, exist_ok=True)
         # 文件名带全部判别项: 不同网格、模型、次数与求解器的结果不能互相覆盖,
         # 否则同一份 JSON 会把不同口径的历史数值混成一组证据
-        # 缺省装配路径不进文件名, 已冻结的证据文件因此保持原名; 非缺省路径各占
-        # 一个文件, 免得不同收缩次序的结果互相覆盖。判读时以 JSON 内的
-        # ``assembly_method`` 字段为准, 文件名只是去重手段
+        # 后缀规则钉在 "standard" 这个名字上, 不跟着缺省值走: 缺省值改过一次
+        # (standard -> fast), 若规则写成"缺省的不进文件名", 每改一次缺省就要把
+        # 已冻结的证据文件全部重命名一遍。判读时以 JSON 内的 ``assembly_method``
+        # 字段为准, 文件名只是去重手段
         method_tag = "" if assembly_method == "standard" else f"_{assembly_method}"
+        # 缺省算子层级同样不进文件名, 理由与装配路径一致: 已冻结的 FA 证据文件保持原名,
+        # ea / pa 各占一个文件, 免得同一网格上不同层级的结果互相覆盖
+        level_tag = "" if operator_level == "fa" else f"_{operator_level}"
+        # 同一条链加不加预条件子是两组不同的 niter, 不能互相覆盖; 缺省的 none 不进
+        # 文件名, 已冻结的无预条件证据因此保持原名
+        pc_tag = "" if preconditioner == "none" else f"_pc-{preconditioner}"
+        if preconditioner_level is not None:
+            pc_tag += f"-{preconditioner_level}"
         target = path / (
             f"manufactured_convergence_{dim}d_{mesh_type}_{model}"
-            f"_p{degree}_{solver}{method_tag}.json"
+            f"_p{degree}_{solver}{method_tag}{level_tag}{pc_tag}.json"
         )
         target.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
-        print(f"[证据] 验收通过, 结果已写入: {target}")
 
     return summary
 
@@ -737,7 +826,10 @@ def main() -> int:
             base=arguments.base,
             solver=arguments.solver,
             assembly_method=arguments.assembly_method,
+            operator_level=arguments.operator_level,
             mumps_sym=arguments.mumps_sym,
+            preconditioner=arguments.preconditioner,
+            preconditioner_level=arguments.preconditioner_level,
             rtol=arguments.rtol,
             atol=arguments.atol,
             maxiter=arguments.maxiter,

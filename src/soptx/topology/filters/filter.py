@@ -6,6 +6,11 @@ from fealpy.functionspace import Function
 from fealpy.typing import TensorLike
 
 from soptx.core import BaseLogged
+from soptx.topology.constraints.exemption import (
+                                apply_exemption,
+                                apply_passive_solid,
+                                validate_exemption_mask,
+                            )
 
 from .matrix import FilterMatrixBuilder
 from .strategies import (
@@ -47,6 +52,7 @@ class Filter(BaseLogged):
                 disp_mesh: Optional[HomogeneousMesh] = None, 
                 filter_q: int = 1,
                 projection_params: Optional[Dict] = None,
+                passive_mask: Optional[TensorLike] = None,
                 enable_logging: bool = True,
                 logger_name: Optional[str] = None,
             ) -> None:
@@ -55,6 +61,13 @@ class Filter(BaseLogged):
         
         self._design_mesh = design_mesh
         self._filter_type = filter_type
+
+        # 实体保留 (passive solid) 掩码: 该批单元的物理密度在过滤/投影之后被
+        # 覆写为 1, 相应的密度灵敏度置零。施加点必须在过滤之后 —— 只钉设计
+        # 变量时, 宽过滤下保留单元的物理密度仍由邻域决定, 达不到实体保留。
+        self._passive_mask = validate_exemption_mask(
+            passive_mask, design_mesh.number_of_cells()
+        )
 
         self._rmin = rmin
         self._density_location = density_location
@@ -127,6 +140,30 @@ class Filter(BaseLogged):
         return self._design_mesh
 
     @property
+    def passive_mask(self) -> Optional[TensorLike]:
+        """实体保留单元的布尔掩码; 无保留区时为 None。
+
+        消费端 (驱动层的产物汇总、冻结评价) 需要知道哪些单元的密度不是设计
+        结果而是硬约束, 否则会把垫片的体积算成优化得到的体积。
+        """
+        return self._passive_mask
+
+    def _enforce_passive_solid(self,
+                        physical_density: Union[TensorLike, Function],
+                    ) -> Union[TensorLike, Function]:
+        """把实体保留单元的物理密度覆写为满密度。"""
+        if self._passive_mask is None:
+            return physical_density
+
+        if isinstance(physical_density, Function):
+            physical_density[:] = apply_passive_solid(
+                physical_density[:], self._passive_mask
+            )
+            return physical_density
+
+        return apply_passive_solid(physical_density, self._passive_mask)
+
+    @property
     def has_projection(self) -> bool:
         """本过滤链是否含非线性投影。
 
@@ -141,24 +178,43 @@ class Filter(BaseLogged):
         # 探测底层策略对象是否具有 beta 属性
         return getattr(self._strategy, 'beta', None)
 
+    @property
+    def beta_max(self) -> Optional[float]:
+        """当前策略的 beta 上限; 无投影连续化时为 None。
+
+        停止准则要求先判定连续化已终止再判定收敛 (否则把连续化中途的停滞
+        记为收敛), 该判定需要上限而不只是当前值, 故与 beta 成对暴露。
+        """
+        return getattr(self._strategy, 'beta_max', None)
+
     # 3. 委托公共方法到具体策略
     def get_initial_density(self, 
                         density:  Union[TensorLike, Function], 
                     ) ->  Union[TensorLike, Function]:
 
-        return self._strategy.get_initial_density(density=density)
+        return self._enforce_passive_solid(
+            self._strategy.get_initial_density(density=density)
+        )
 
     def filter_design_variable(self,
                         design_variable: Union[TensorLike, Function], 
                         physical_density: Union[TensorLike, Function]
                     ) -> Union[TensorLike, Function]:
 
-        return self._strategy.filter_design_variable(design_variable=design_variable, physical_density=physical_density)
+        return self._enforce_passive_solid(
+            self._strategy.filter_design_variable(
+                design_variable=design_variable, physical_density=physical_density
+            )
+        )
 
     def filter_objective_sensitivities(self, 
                                     design_variable: Union[TensorLike, Function], 
                                     obj_grad_rho: TensorLike
                                 ) -> TensorLike:
+
+        # 保留单元的 rho_phys 是常数, d rho_phys / d z = 0, 故先把这些行清零
+        # 再走链式法则; 否则梯度里会留下一份并不存在的下降方向。
+        obj_grad_rho = apply_exemption(obj_grad_rho, self._passive_mask, 0.0)
 
         return self._strategy.filter_objective_sensitivities(design_variable=design_variable, obj_grad_rho=obj_grad_rho)
 
@@ -166,6 +222,8 @@ class Filter(BaseLogged):
                                     design_variable: Union[TensorLike, Function], 
                                     con_grad_rho: TensorLike
                                 ) -> TensorLike:
+
+        con_grad_rho = apply_exemption(con_grad_rho, self._passive_mask, 0.0)
 
         return self._strategy.filter_constraint_sensitivities(design_variable=design_variable, con_grad_rho=con_grad_rho)
 

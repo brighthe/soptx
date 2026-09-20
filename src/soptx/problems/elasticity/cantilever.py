@@ -131,6 +131,9 @@ class CantileverMiddle2d:
         self._traction = traction
         if self._load_width <= 0.0:
             raise ValueError("load_width 必须为正数.")
+        # 实体保留单元掩码由装配层按算例配置注入 (见 set_passive_element_mask),
+        # 模型本身不含半径参数: 垫片尺寸是数值处置的选择, 不是物理问题的属性.
+        self._passive_element_mask: Optional[TensorLike] = None
 
     @property
     def domain(self) -> tuple[float, ...]:
@@ -155,9 +158,81 @@ class CantileverMiddle2d:
         return (y_mid - half_width, y_mid + half_width)
 
     @property
+    def traction_patch_endpoints(self) -> tuple[tuple[float, float], ...]:
+        """受载区间两个端点的坐标 ``((x, y_min_patch), (x, y_max_patch))``.
+
+        右端面上的牵引在这两点处发生跳变, 是混合边界间断点, 其应力奇异性不能
+        由载荷分布化消除, 也不能由密度设计消除. 局部应力豁免以这两点为中心,
+        半径由算例配置给定, 掩码构造见 ``soptx.topology.constraints.exemption``.
+        """
+        y_min_patch, y_max_patch = self.traction_patch
+        level = self.traction_level
+        return ((level, y_min_patch), (level, y_max_patch))
+
+    @property
     def traction_level(self) -> float:
         """受载边所在的横坐标, 即右边界的 ``x``."""
         return self._domain[1]
+
+    @property
+    def clamped_corner_points(self) -> tuple[tuple[float, float], ...]:
+        """固支边两端角点的坐标 ``((x_left, y_min), (x_left, y_max))``.
+
+        左端面施加位移边界条件, 上下两边为自由边, 故这两点是 Dirichlet--Neumann
+        混合边界角点. 该处应力按 ``r^(lambda - 1)`` 奇异, ``lambda`` 为 Williams
+        特征值, 只依赖楔角与泊松比 (与载荷大小和分布方式无关): 直角楔在平面应力
+        ``nu = 0.25`` 时 ``lambda = 0.78107``, 即 ``sigma ~ r^(-0.2189)``.
+
+        与 ``traction_patch_endpoints`` 的区别在于奇异性的来源: 牵引间断端点由
+        数据的集中产生, 可由载荷分布化削弱 (集中力改为分布牵引后退化为对数型);
+        固支角点由边界条件类型的改变产生, 数据再光滑也不消失, 因此没有"分布化"
+        这一步可做, 局部应力豁免与实体保留是仅有的两步处置. 半径由算例配置给定,
+        且不应沿用载荷侧半径 —— 幂律奇点的污染区比对数型宽.
+
+        Notes
+        -----
+        本属性服务于密度侧的豁免掩码, 与 ``corner_points`` 无关: 后者返回计算域
+        的四个角点, 供 Hu--Zhang 应力空间的顶点自由度松弛使用, 作用在离散自由度
+        上而非单元密度上.
+        """
+        x_left = self._domain[0]
+        return ((x_left, self._domain[2]), (x_left, self._domain[3]))
+
+    def set_passive_element_mask(self, mask: Optional[TensorLike]) -> None:
+        """注入实体保留 (passive solid) 单元掩码.
+
+        引入垫片的密度不是设计结果而是硬约束: 这些单元的物理密度被钉为 1,
+        且不参与设计更新. 掩码按单元几何判定, 由装配层用 ``build_exemption_mask``
+        以 ``traction_patch_endpoints`` (载荷侧) 与 ``clamped_corner_points``
+        (支撑侧) 为中心分别构造后取并集, 两侧半径各自独立;
+        与应力约束豁免共用同一批单元 —— 只豁免不保留时, 优化器会把该处减料
+        以换体积, 反而制造出不受约束的过应力.
+
+        Parameters
+        ----------
+        mask : TensorLike, optional
+            形状 ``(NC,)`` 的布尔张量; None 表示无实体保留区.
+        """
+        self._passive_element_mask = mask
+
+    def get_passive_element_mask(self, mesh=None) -> Optional[TensorLike]:
+        """返回实体保留单元掩码, 供优化器固定这些设计变量.
+
+        优化器按 ``hasattr(pde, 'get_passive_element_mask')`` 探测该接口, 因此
+        未注入掩码时返回 None 即可让优化器走无保留区的原路径.
+
+        Parameters
+        ----------
+        mesh : HomogeneousMesh, optional
+            设计变量所在网格; 本实现的掩码在注入时已绑定网格, 故忽略该参数,
+            仅保留以匹配优化器的调用约定.
+
+        Returns
+        -------
+        TensorLike or None
+            形状 ``(NC,)`` 的布尔张量, 或 None.
+        """
+        return self._passive_element_mask
 
     @property
     def traction_intensity(self) -> float:

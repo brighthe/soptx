@@ -59,6 +59,7 @@ python examples/lagrange_elasticity/concentrated_load_demo.py \
 
 - 两个脚本共同支持 `--degree`、`--levels`、`--solver` 和 `--output-dir`；`cg` 的容差与迭代上限通过 `--rtol`、`--atol` 和 `--maxiter` 设置。
 - 制造解脚本通过 `--dim`、`--mesh-type`、`--model` 和 `--base` 选择验证路径；`--assembly-method` 与 `--mumps-sym` 用于比较装配和 MUMPS 配置。
+- 制造解脚本的 `--operator-level` 取 `fa`（缺省）、`ea` 或 `pa`，在同一条误差链上换算子层级；`ea` 与 `pa` 不持有显式矩阵，只能配 `--solver cg`，其他组合在入口即被拒。缺省档 `fa` 不进产物文件名，`ea`/`pa` 各占一个文件。
 - 集中力脚本通过 `--problem`、`--dim`、`--mesh-type` 和 `--nx/--ny/--nz` 选择算例与网格；`--save-vtu` 可导出最密层位移场。
 - 完整参数和缺省值以脚本的 `--help` 为准。
 

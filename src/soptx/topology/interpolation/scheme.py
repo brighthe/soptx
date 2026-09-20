@@ -73,6 +73,11 @@ class MaterialInterpolationScheme(BaseLogged):
         return self._options['penalty_factor']
     
     @property
+    def options(self) -> dict:
+        """插值选项 (含默认值补齐后的完整字典, 只读视图)"""
+        return dict(self._options)
+
+    @property
     def stress_penalty_factor(self) -> float:
         """获取当前的应力惩罚因子"""
         return self._options['stress_penalty_factor']
