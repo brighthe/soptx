@@ -7,7 +7,7 @@ from .condensation import (
     StreamingShapeFunctionCondensation,
 )
 from .piml_surrogate import (
-    PIMLStaticCondensation,
+    ReducedStiffnessCondensation,
     ShapeFunctionCondensation,
     SurrogateContractError,
 )
@@ -55,7 +55,7 @@ __all__ = [
     "StaticCondensationBase",
     "FEAStaticCondensation",
     "StreamingShapeFunctionCondensation",
-    "PIMLStaticCondensation",
+    "ReducedStiffnessCondensation",
     "ShapeFunctionCondensation",
     "SurrogateContractError",
     "LocalReduction",

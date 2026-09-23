@@ -2,7 +2,7 @@
 
 接口基线: 基于完整周边接口 full_trace (单块 5x5 Q1 单元周边 20 个边界节点, 共 40 个接口自由度全保留, 无角点降阶投影).
 本脚本在同一物理问题, 同一密度场与同一接口系统上比较两条缩聚路径:
-精确 FEAStaticCondensation 批量 Schur 补, 与 PIMLStaticCondensation 逐子结构代理预测.
+精确 FEAStaticCondensation 批量 Schur 补, 与 ReducedStiffnessCondensation 逐子结构代理预测.
 1. 算子层: K_s 的相对 Frobenius 误差;
 2. 解层: 接口位移, 全场位移与结构柔度的相对误差;
 3. 误差归因诊断: 参数化上限校验、训练同分布留出集评估与零空间模态伪刚度污染分析.
@@ -40,7 +40,7 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import (
     FEAStaticCondensation,
     GlobalAssembler,
-    PIMLStaticCondensation,
+    ReducedStiffnessCondensation,
     SubstructureMesh,
     SubstructurePrototype,
     build_substructures,
@@ -50,7 +50,7 @@ from soptx.fem.substructure import (
     solve_interface_system,
     train_reduced_stiffness_surrogate,
 )
-from soptx.ml.substructure import PIMLSurrogateNet
+from soptx.ml.substructure import ReducedStiffnessSurrogateNet
 from soptx.problems.elasticity import FullMBBBeam2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
@@ -156,7 +156,7 @@ def verify_parameterization_parity(
     L = bm.linalg.cholesky(basis.T @ K_s @ basis)
     tril_mask = bm.tril(bm.ones((n_reduced, n_reduced), dtype=bm.bool))
 
-    condensor = PIMLStaticCondensation(
+    condensor = ReducedStiffnessCondensation(
         prototype.i_dofs, prototype.b_dofs,
         model=_ExactCholeskyStub(L[tril_mask]), is_cholesky=True,
         range_basis=basis,
@@ -173,7 +173,7 @@ def verify_parameterization_parity(
 
 def evaluate_holdout(
     prototype: SubstructurePrototype,
-    net: PIMLSurrogateNet,
+    net: ReducedStiffnessSurrogateNet,
     n_val: int,
 ) -> Dict[str, Any]:
     """在与训练同分布的留出集上评估代理的算子层精度."""
@@ -184,7 +184,7 @@ def evaluate_holdout(
     ref_condensor.condense(K_val_batch)
     K_s_ref = ref_condensor.K_s
 
-    piml_condensor = PIMLStaticCondensation(
+    piml_condensor = ReducedStiffnessCondensation(
         prototype.i_dofs, prototype.b_dofs, model=net, is_cholesky=True,
         range_basis=prototype.deformation_basis,
     )
@@ -634,9 +634,9 @@ def run_comparison(
     if verbose:
         print("[路径 B] PIML 代理逐子结构缩聚...")
     t0 = time.time()
-    piml_condensors: List[PIMLStaticCondensation] = []
+    piml_condensors: List[ReducedStiffnessCondensation] = []
     for idx, sub_mesh in enumerate(sub_meshes):
-        condensor = PIMLStaticCondensation(
+        condensor = ReducedStiffnessCondensation(
             sub_mesh.i_dofs, sub_mesh.b_dofs, model=net, is_cholesky=True,
             range_basis=sub_mesh.deformation_basis,
         )

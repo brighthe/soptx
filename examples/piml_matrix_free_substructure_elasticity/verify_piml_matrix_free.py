@@ -47,7 +47,7 @@ from soptx.fem.substructure import (
     FEAStaticCondensation,
     GlobalAssembler,
     InterfaceOperator,
-    PIMLStaticCondensation,
+    ReducedStiffnessCondensation,
     build_substructures,
     make_density_fields,
     set_random_seed,
@@ -171,9 +171,9 @@ def run_verification(
     print("-" * 78)
 
     K_local_batch = prototype.assemble_local_stiffness_batch(density)
-    piml_condensors: List[PIMLStaticCondensation] = []
+    piml_condensors: List[ReducedStiffnessCondensation] = []
     for idx, sub_mesh in enumerate(sub_meshes):
-        condensor = PIMLStaticCondensation(
+        condensor = ReducedStiffnessCondensation(
             sub_mesh.i_dofs, sub_mesh.b_dofs, model=net, is_cholesky=True,
             range_basis=sub_mesh.deformation_basis,
         )

@@ -13,7 +13,7 @@ import torch
 from fealpy.backend import backend_manager as bm
 
 from soptx.ml.substructure import (
-    PIMLSurrogateNet,
+    ReducedStiffnessSurrogateNet,
     TrainingConfig,
     train_surrogate as _train_surrogate,
 )
@@ -211,7 +211,7 @@ def train_reduced_stiffness_surrogate(
     n_epochs: int,
     learning_rate: float,
     density_range: Tuple[float, float],
-) -> Tuple[PIMLSurrogateNet, float]:
+) -> Tuple[ReducedStiffnessSurrogateNet, float]:
     """在随机密度样本上训练 Cholesky 因子代理网络.
 
     参数:
@@ -236,9 +236,8 @@ def train_reduced_stiffness_surrogate(
         ``cholesky(R^T K_s R)`` 的下三角独立条目, ``R`` 为刚体模态的正交补. 限制后
         的算子严格正定, 无需正则项, 因此目标不带正偏置; 推理侧按
         ``R L L^T R^T`` 重构, 刚体零空间由构造精确保持. 详见
-        ``PIMLStaticCondensation`` 的类说明.
+        ``ReducedStiffnessCondensation`` 的类说明.
     """
-    n_fine = tuple(prototype.n_fine)
     basis = prototype.deformation_basis
     n_reduced = int(basis.shape[1])
     tril_mask = bm.tril(bm.ones((n_reduced, n_reduced), dtype=bm.bool))
@@ -261,8 +260,8 @@ def train_reduced_stiffness_surrogate(
         [L_train[i][tril_mask] for i in range(n_train)]
     )
 
-    net = PIMLSurrogateNet(
-        input_dim=n_fine[0] * n_fine[1],
+    net = ReducedStiffnessSurrogateNet(
+        input_dim=prototype.n_cells,
         output_dim=n_tril,
         hidden_dims=_REDUCED_STIFFNESS_HIDDEN_DIMS,
     )

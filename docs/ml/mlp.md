@@ -52,12 +52,12 @@ for (d_in, d_out) in zip(dimensions[:-1], dimensions[1:]):
 | 调用方 | 配置 | 输入和输出语义 |
 | --- | --- | --- |
 | [`PINNElasticityNet`](../../examples/pinn_elasticity/minimal_demo.py) | `Tanh`，`float64`，默认隐藏层 `(32, 32, 16)` | 坐标映射到位移；自动微分残差由 PINN 算例定义。 |
-| [`PIMLSurrogateNet`](../../src/soptx/fem/substructure/piml_surrogate.py) | `SiLU`，隐藏层 `(128, 128)` | 子结构密度映射到变形子空间上 Cholesky 因子的下三角独立条目；秩亏刚度重构与精确回退由 `PIMLStaticCondensation` 定义。 |
+| [`SubstructureSurrogateNet`](../../src/soptx/ml/substructure/nets.py) 及其子类 `ShapeFunctionSurrogateNet` / `ReducedStiffnessSurrogateNet` | `SiLU`，隐藏层 `(128, 128)` | 子结构密度映射到变形子空间上 Cholesky 因子的下三角独立条目；秩亏刚度重构与精确回退由 `ReducedStiffnessCondensation` 定义。 |
 
-例如，PIML 调用 `PIMLSurrogateNet(input_dim=n_fine_x * n_fine_y, output_dim=n_tril)` 时，实际层链为：
+例如，PIML 调用 `ReducedStiffnessSurrogateNet(input_dim=prototype.n_cells, output_dim=n_tril)` 时，实际层链为：
 
 ```text
-(n_fine_x * n_fine_y) -> 128 -> 128 -> n_tril
+n_cells -> 128 -> 128 -> n_tril
 ```
 
-若输入为 `(B, n_fine_x * n_fine_y)`，网络输出为 `(B, n_tril)`。`n_tril` 是下三角矩阵的独立条目数；其具体物理解释不属于 `MLP`。
+若输入为 `(B, n_cells)`，网络输出为 `(B, n_tril)`。`n_cells` 是子结构原型的块内细单元总数，与空间维数无关。`n_tril` 是下三角矩阵的独立条目数；其具体物理解释不属于 `MLP`。

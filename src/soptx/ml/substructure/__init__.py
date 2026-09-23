@@ -8,7 +8,11 @@ from .artifacts import (
     load_legacy_state_dict,
     save_checkpoint,
 )
-from .nets import PIMLSurrogateNet, ShapeFunctionSurrogateNet
+from .nets import (
+    ReducedStiffnessSurrogateNet,
+    ShapeFunctionSurrogateNet,
+    SubstructureSurrogateNet,
+)
 from .sampling import (
     SAMPLER_VERSION,
     DensitySamples,
@@ -25,9 +29,10 @@ __all__ = [
     "DensitySamples",
     "DensitySamplingConfig",
     "ModelSignature",
-    "PIMLSurrogateNet",
+    "ReducedStiffnessSurrogateNet",
     "SamplingFractions",
     "ShapeFunctionSurrogateNet",
+    "SubstructureSurrogateNet",
     "TrainingConfig",
     "TrainingResult",
     "load_checkpoint",

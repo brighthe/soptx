@@ -2,7 +2,7 @@
 
 提供两条在线构造缩聚刚度的代理路径, 分工相反:
 
-- ``PIMLStaticCondensation`` 直接预测 ``K_s``, 内部位移恢复矩阵 ``N`` 恒由局部刚度
+- ``ReducedStiffnessCondensation`` 直接预测 ``K_s``, 内部位移恢复矩阵 ``N`` 恒由局部刚度
   精确导出;
 - ``ShapeFunctionCondensation`` 预测形函数 ``N``, 再由 Huang 2023 式 (17)
   ``K_s = N_full^T K_local N_full`` 导出缩聚刚度. 该式的误差是形函数误差的**二阶**
@@ -32,7 +32,7 @@ class SurrogateContractError(RuntimeError):
     """
 
 
-class PIMLStaticCondensation(StaticCondensationBase):
+class ReducedStiffnessCondensation(StaticCondensationBase):
     """基于 PIML 神经网络代理的子结构静力缩聚.
 
     ``is_cholesky=True`` 时按变形子空间上的 Cholesky 因子参数化:
@@ -87,7 +87,7 @@ class PIMLStaticCondensation(StaticCondensationBase):
             ValueError: ``is_cholesky`` 为 ``True`` 而未给出 ``range_basis``, 或
                 ``range_basis`` 的行数与 ``n_b`` 不符时抛出.
         """
-        super(PIMLStaticCondensation, self).__init__(i_dofs, b_dofs)
+        super(ReducedStiffnessCondensation, self).__init__(i_dofs, b_dofs)
         self.model = model
         self.is_cholesky = is_cholesky
         self.rcond_min = float(rcond_min)
@@ -219,7 +219,7 @@ class PIMLStaticCondensation(StaticCondensationBase):
 class ShapeFunctionCondensation(StaticCondensationBase):
     """由代理内部延拓经 Huang 2023 式 (17) 构造降阶刚度的子结构缩聚器.
 
-    与 ``PIMLStaticCondensation`` 分工相反: 后者预测 ``K_s`` 而 ``N`` 恒取精确值,
+    与 ``ReducedStiffnessCondensation`` 分工相反: 后者预测 ``K_s`` 而 ``N`` 恒取精确值,
     本类预测内部延拓 ``B`` 而降阶刚度 ``K_r`` 由
 
         ``K_r = (H^T)^T K_local H^T``,    ``H^T = [B; T]``
@@ -267,7 +267,7 @@ class ShapeFunctionCondensation(StaticCondensationBase):
       余量; 预测延拓下超出部分恰是 ``E^T K_ii E`` 在最坏方向上的刚化能量. 这是唯一
       一道实质门禁, 且方向与性质 1 允许的误差方向一致.
     - **变形子空间条件数**: ``lambda_min / lambda_max >= rcond_min``. 性质 2 只保证
-      定性非零, 比值仍可能退化到使全局接口系统病态, 故按与 ``PIMLStaticCondensation``
+      定性非零, 比值仍可能退化到使全局接口系统病态, 故按与 ``ReducedStiffnessCondensation``
       相同的口径复核.
 
     每次调用后 ``gate_report`` 记录上述三个实测比值, 供门禁标定与证据留存; 回退时

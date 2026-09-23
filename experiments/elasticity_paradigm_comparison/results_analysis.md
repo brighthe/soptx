@@ -13,7 +13,7 @@
 | `lagrange` | 全局位移 $\mathbf U$，解 $\mathbf{KU}=\mathbf F$ | `soptx.fem.analyzers.LagrangeFEMAnalyzer` | 参考真解 $\mathbf U_\text{full}$、全局刚度 $\mathbf K$ |
 | `substructure` | 局部 $\mathbf K_s^j=\mathbf K_{bb}^j-\mathbf K_{bi}^j(\mathbf K_{ii}^j)^{-1}\mathbf K_{ib}^j$ | `soptx.fem.substructure.FEAStaticCondensation` | $\mathbf U_\text{full}$、批量 $\mathbf K_s$ |
 | `pinn` | 连续解场 $\hat u_\theta(x)$ | 待下沉至 `soptx.ml` | 细网格节点采样位移 |
-| `piml` | 代理映射 $\rho^j\mapsto\widehat{\mathbf K}_s^j$ 或 $\widehat{\mathbf N}^j$ | `soptx.fem.substructure.PIMLStaticCondensation` | $\mathbf U_\text{full}$、批量 $\widehat{\mathbf K}_s$、回退统计 |
+| `piml` | 代理映射 $\rho^j\mapsto\widehat{\mathbf K}_s^j$ 或 $\widehat{\mathbf N}^j$ | `soptx.fem.substructure.ReducedStiffnessCondensation` | $\mathbf U_\text{full}$、批量 $\widehat{\mathbf K}_s$、回退统计 |
 
 ### 1.2 统一度量
 
@@ -94,7 +94,7 @@ outputs/
 
 ### 3.3 PIML 训练循环未下沉（阻塞 `piml` 适配器）
 
-预测器 `PIMLSurrogateNet` 与 `PIMLStaticCondensation` 已在 `soptx.fem.substructure` 中，但密度快照采样与训练循环只存在于 `verify_stiffness_route.py` 脚本内部，无法被本目录复用。
+预测器 `ReducedStiffnessSurrogateNet` 与 `ReducedStiffnessCondensation` 已在 `soptx.fem.substructure` 中，但密度快照采样与训练循环只存在于 `verify_stiffness_route.py` 脚本内部，无法被本目录复用。
 
 解除方式：将采样与训练循环下沉至核心库，脚本与本实验共同调用。
 

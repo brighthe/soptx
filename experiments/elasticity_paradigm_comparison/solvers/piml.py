@@ -10,8 +10,8 @@ from .base import ExperimentContext, ParadigmSolver, SolveResult
 class PIMLSolver(ParadigmSolver):
     """PIML 代理缩聚路径.
 
-    实现时调用 ``soptx.ml`` 的 ``PIMLSurrogateNet`` 与 ``soptx.fem.substructure``
-    的 ``PIMLStaticCondensation``: 离线阶段在随机密度快照上训练 ``rho -> K_s`` (路线 B)
+    实现时调用 ``soptx.ml`` 的 ``ReducedStiffnessSurrogateNet`` 与 ``soptx.fem.substructure``
+    的 ``ReducedStiffnessCondensation``: 离线阶段在随机密度快照上训练 ``rho -> K_s`` (路线 B)
     或 ``rho -> N`` (路线 A) 的代理, 在线阶段推理后经特征值门禁与精确回退进入全局
     接口装配, 其余环节与 ``substructure`` 路径完全一致.
 
@@ -28,8 +28,8 @@ class PIMLSolver(ParadigmSolver):
     NATURE = "surrogate"
     READY = False
     BLOCKER = (
-        "训练循环待下沉: 预测器 PIMLSurrogateNet 在 soptx.ml, "
-        "PIMLStaticCondensation 在 soptx.fem.substructure, 但数据采样与训练循环目前只存在于 "
+        "训练循环待下沉: 预测器 ReducedStiffnessSurrogateNet 在 soptx.ml, "
+        "ReducedStiffnessCondensation 在 soptx.fem.substructure, 但数据采样与训练循环目前只存在于 "
         "examples/piml_substructure_elasticity/verify_stiffness_route.py 脚本内部"
     )
 

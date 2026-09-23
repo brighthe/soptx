@@ -82,7 +82,7 @@ src/soptx/fem/substructure/              ← 核心库 (成熟)
 ├── mesh.py                               ← SubstructureMesh: 2D/3D 子结构网格管理
 ├── condensation.py                       ← StaticCondensationBase, FEAStaticCondensation
 ├── piml_surrogate.py                     ← 路线 A: ShapeFunctionSurrogateNet, ShapeFunctionCondensation
-│                                            路线 B: PIMLSurrogateNet, PIMLStaticCondensation
+│                                            路线 B: ReducedStiffnessSurrogateNet, ReducedStiffnessCondensation
 │                                            共用: SurrogateContractError
 └── assembler.py                          ← GlobalAssembler, InterfaceSystem
 
@@ -129,7 +129,7 @@ GlobalAssembler                           (soptx.fem.substructure.assembler)
 StaticCondensationBase                   (soptx.fem.substructure.condensation, 抽象基类)
   └── condense(K_local, rho_local=None) → (K_s, N)   (统一接口)
       ├── FEAStaticCondensation             → 精确 Schur 补消元
-      └── PIMLStaticCondensation           → 网络推理 + 结构检查 + 失败回退
+      └── ReducedStiffnessCondensation           → 网络推理 + 结构检查 + 失败回退
 ```
 
 ### 求解流程（8 个完整步骤与代码映射）
@@ -260,7 +260,7 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 1. **唯一替换点：步骤 5**  
    PIML 代理模型（无论是预测形函数的路线 A，还是直接预测缩聚刚度的路线 B）**只替换步骤 5 中的数值消元**。步骤 1～4 的网格构建与局部刚度提取、步骤 6～8 的全局接口装配、稀疏求解与细尺度位移恢复 **100% 完全复用**。
 2. **多态基类统一契约**  
-   抽象基类 [`StaticCondensationBase`](../../src/soptx/fem/substructure/condensation.py) 统一了 `condense(K_local, rho_local)` 与 `recover(u_b)` 接口。`FEAStaticCondensation` 负责精确求解并产出训练标签，`PIMLStaticCondensation` 负责极速推理并在异常时无缝回退精确基线。
+   抽象基类 [`StaticCondensationBase`](../../src/soptx/fem/substructure/condensation.py) 统一了 `condense(K_local, rho_local)` 与 `recover(u_b)` 接口。`FEAStaticCondensation` 负责精确求解并产出训练标签，`ReducedStiffnessCondensation` 负责极速推理并在异常时无缝回退精确基线。
 
 ---
 
@@ -295,7 +295,7 @@ $\mathbf{K}_s^j \in \mathbb{R}^{n_b \times n_b}$ 的维度与此一致。
 ### PIML 路线 A 实现机制（多尺度形函数预测）
 
 路线 A 以多尺度形函数 $\mathbf{N} \in \mathbb{R}^{n_i \times n_b}$ 为学习目标，由
-`ShapeFunctionCondensation` 实现，与路线 B 的 `PIMLStaticCondensation` 并列。
+`ShapeFunctionCondensation` 实现，与路线 B 的 `ReducedStiffnessCondensation` 并列。
 
 **参数化。** 子结构做刚体运动时内部位移完全由接口位移决定且与密度无关，即
 $\mathbf{N}\mathbf{R}_{\text{rigid}} = \boldsymbol{\Phi}_i$ 对一切密度成立。因此取
@@ -371,7 +371,7 @@ $8.1\times10^{-3}$，裕度 $2.5$ 倍。故障注入确认门禁切在声明位�
 代理按 $\widehat{\mathbf{K}}_s = \mathbf{R}_\perp\mathbf{L}\mathbf{L}^{\mathsf T}\mathbf{R}_\perp^{\mathsf T}$ 重构，$\mathbf{R}_\perp$ 即 `deformation_basis`。由此秩亏成为构造性质：$\widehat{\mathbf{K}}_s$ 在刚体子空间上恒为零，在变形子空间上正定；训练目标 $\operatorname{cholesky}(\mathbf{R}_\perp^{\mathsf T}\mathbf{K}_s\mathbf{R}_\perp)$ 无需正则。
 
 **门禁机制与精确回退**：
-`PIMLStaticCondensation` 判定 $\mathbf{L}$ 的对角线相对尺度（$\min\lvert\operatorname{diag}\rvert / \max\lvert\operatorname{diag}\rvert > 10^{-8}$）。预测异常或退化时自动回退到 `FEAStaticCondensation`，保证求解闭环绝对安全。
+`ReducedStiffnessCondensation` 判定 $\mathbf{L}$ 的对角线相对尺度（$\min\lvert\operatorname{diag}\rvert / \max\lvert\operatorname{diag}\rvert > 10^{-8}$）。预测异常或退化时自动回退到 `FEAStaticCondensation`，保证求解闭环绝对安全。
 
 ---
 

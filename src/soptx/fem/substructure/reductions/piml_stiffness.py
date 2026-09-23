@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from ..piml_surrogate import PIMLStaticCondensation
+from ..piml_surrogate import ReducedStiffnessCondensation
 from .base import CondensationReductionAdapter
 
 
@@ -19,7 +19,7 @@ class PIMLStiffnessReduction(CondensationReductionAdapter):
         rcond_min: float = 1.0e-8,
     ) -> None:
         super().__init__(
-            PIMLStaticCondensation(
+            ReducedStiffnessCondensation(
                 i_dofs,
                 b_dofs,
                 model=model,

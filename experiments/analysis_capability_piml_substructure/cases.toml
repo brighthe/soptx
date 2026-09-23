@@ -95,8 +95,8 @@ seed = 2026
 # 覆盖矩阵的第四格 (linear_corner x 降阶刚度) 不登记: verify_stiffness_route.py
 # 的 --trace-basis 只接受 full_trace, 尚无可执行实现。
 #
-# 本路线的网络宽度不可配: PIMLSurrogateNet 的层数与宽度由调用点的 hidden_dims
-# 给出 (src/soptx/ml/substructure_nets.py 不设默认值), case_setup.py 固定传入模块
+# 本路线的网络宽度不可配: ReducedStiffnessSurrogateNet 的层数与宽度由调用点的 hidden_dims
+# 给出 (src/soptx/ml/substructure/nets.py 不设默认值), case_setup.py 固定传入模块
 # 常量 _REDUCED_STIFFNESS_HIDDEN_DIMS = (128, 128), 与形函数网络的 256 不同,
 # 因此本条不设 hidden_dim 字段, 由 config.py 记入只读属性。
 # --------------------------------------------------------------------------

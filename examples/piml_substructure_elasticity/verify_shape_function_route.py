@@ -583,7 +583,7 @@ def train_shape_function_net(
     """步骤 3: 训练形函数代理网络 (针对当前接口空间维度)."""
     X, Y = prepare_training_arrays(ev, n_train)
     net = ShapeFunctionSurrogateNet(
-        input_dim=N_FINE[0] * N_FINE[1],
+        input_dim=ev.prototype.n_cells,
         output_dim=ev.n_i * ev.n_reduced,
         hidden_dims=(hidden_dim, hidden_dim),
     )
@@ -839,7 +839,7 @@ def run_verification(args) -> None:
         print("=" * 78)
         print(f"子结构        : {N_FINE[0]}x{N_FINE[1]} Q1, "
               f"n_i={ev.n_i}, 接口维度 n_b={ev.n_interface}, n_dof={ev.n_dof}")
-        print(f"刚体/变形子空间: n_rigid={ev.n_rigid}, 变形维数 m={ev.n_reduced}")
+        print(f"刚体/变形子空间: n_rigid={ev.n_rigid}, 变形维数 n_r={ev.n_reduced}")
         print(f"网络输出维    : {ev.n_i * ev.n_reduced}")
         print(f"随机数种子    : {args.seed}")
         print("-" * 78)
