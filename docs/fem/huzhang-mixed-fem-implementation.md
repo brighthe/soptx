@@ -151,6 +151,7 @@ $$
 角点松弛的网格拓扑前提与两种可用生成器见下文「角点松弛」；理论依据见 `dut-postdoc:concepts/huzhang/huzhang-mixed-fem.md` §3.4 与 §2.5.3。
 
 ### 次数与稳定化分支
+分析器参数 `stabilization_coefficient` 默认取 `"fixed"`, 使用基材剪切模量 $\mu_0$ 定标, 不随密度更新. 若需复现密度相关对照, 在构造 `HuZhangMFEMAnalyzer` 时显式传入 `stabilization_coefficient="density_dependent"`, 惩罚系数再乘面两侧相对剪切模量 $\mu(\rho)/\mu_0$ 的调和平均. 该参数与跳量形式 `stabilization`、网格缩放律 `stabilization_scaling` 独立; 原生高阶分支不受影响.
 
 | 条件 | 刚度矩阵 | 说明 |
 |---|---|---|

@@ -45,6 +45,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 logger_name: Optional[str] = None,
                 stabilization_scaling: Optional[str] = None,
                 stabilization: Literal['none', 'matrix_jump', 'vector_jump'] = 'matrix_jump',
+                stabilization_coefficient: Literal['fixed', 'density_dependent'] = 'fixed',
             ) -> None:
         """初始化胡张混合有限元分析器
 
@@ -58,7 +59,18 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                         'vector_jump' 对应 JumpPenaltyIntegrator 的两种跳量形式;
                         'none' 则不加稳定化项, 用于消融验证低阶失稳。
                         p >= GD + 1 时原生格式本身稳定, 本参数被忽略。
+        stabilization_coefficient : {'fixed', 'density_dependent'}, optional
+            低阶稳定化系数模式. 默认 'fixed' 使用基材常数, 不随密度更新;
+            'density_dependent' 额外乘逐单元相对剪切模量的面调和平均.
+            无密度插值或原生高阶格式下, 两种模式不产生差别.
         """
+
+        if stabilization_coefficient not in ('fixed', 'density_dependent'):
+            raise ValueError(
+                "stabilization_coefficient 必须为 'fixed' 或 'density_dependent', "
+                f"收到 {stabilization_coefficient!r}"
+            )
+        self._stabilization_coefficient = stabilization_coefficient
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
@@ -162,6 +174,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         return self._stabilization
 
     @property
+    def stabilization_coefficient(self) -> str:
+        """低阶稳定化系数模式, 默认固定基材系数."""
+        return self._stabilization_coefficient
+
+    @property
     def integration_order(self) -> int:
         """获取当前的数值积分阶次"""
         return self._integration_order
@@ -263,7 +280,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         Returns
         -------
         TensorLike or None
-            形状 ``(NC,)``; ``_E_rho`` 未缓存 (非密度型拓扑优化) 时返回 None.
+            密度相关模式返回形状 ``(NC,)`` 的数组; 固定模式或无密度缓存时返回 None.
 
         Notes
         -----
@@ -272,6 +289,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         读到的始终是当前密度对应的值. 只插值 E 时 ``nu_rho`` 等于基材泊松比,
         本式退化为 ``E(rho) / E_0``.
         """
+        if self._stabilization_coefficient == 'fixed':
+            return None
         E_rho = self._E_rho
         if E_rho is None:
             return None
@@ -360,8 +379,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
             bform3 = BilinearForm(space_u)
             # 跳量形式由构造参数 stabilization 决定, 默认矩阵跳量.
-            # density_shear_ratio 使惩罚块与柔度块同步随密度缩放; 非密度型拓扑
-            # 优化时为 None, 惩罚系数保持基材常数 (与历史行为一致).
+            # 默认使用固定基材系数; 只有显式 density_dependent 模式才传密度比.
             jpi_integrator = JumpPenaltyIntegrator(
                                     q=self._integration_order,
                                     threshold=valid_faces_idx,

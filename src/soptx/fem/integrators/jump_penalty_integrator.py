@@ -1,5 +1,6 @@
 import warnings
 
+from itertools import permutations
 from typing import Optional
 
 from fealpy.backend import backend_manager as bm
@@ -114,6 +115,81 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             return mesh.cell_to_edge_sign()
         return mesh.cell_to_face_sign()
 
+    def _oriented_cell_basis(self, space: _FS, bcs: TensorLike, i: int) -> TensorLike:
+        """把面上的积分点按各单元自身的局部面定向映入单元, 再取基函数值.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            位移空间.
+        bcs : TensorLike
+            面参考域上的重心坐标, 形状 ``(NQ, TD)``.
+        i : int
+            单元的局部面编号.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, NQ, ldof, GD)`` 的基函数值.
+
+        Notes
+        -----
+        ``bm.insert(bcs, i, 0, axis=1)`` 把面重心坐标按 **局部顶点索引递增** 的
+        次序填入单元重心坐标, 得到的是该单元自己看到的局部面定向. 共享同一条内部
+        面的两个单元, 这个局部定向与全局面的顶点次序未必一致 (实测结构化三角网格
+        上约 1/3 的内部面不一致), 若两侧都直接套用同一组 ``bcs``, 则 ``w^+`` 与
+        ``w^-`` 落在面上互为镜像的物理点, 装配出来的就不是跳量: 全局连续场的
+        ``[[v]]`` 不为零, 稳定化项失去相容性. 该不相容误差进入离散平衡方程的右端,
+        使 ``div sigma_h`` 掉一阶, 而位移与应力的 L2 阶不受影响, 故不易察觉.
+
+        因此这里逐单元求出把"局部面顶点次序"对齐到"全局面顶点次序"的置换, 按其逆
+        置换重排 ``bcs`` 的分量后再插值. 置换只有 ``TD!`` 种 (2D 为 2, 3D 为 6),
+        按种类分组批量求值, 开销与原实现同阶.
+
+        位移空间取 ``P_0`` 时单元内为常数, 镜像取点给出同一值, 本方法退化为恒等
+        操作; 这也是 Hu-Zhang 次数 ``k = 1`` 未受上述缺陷影响的原因.
+        """
+        mesh = space.mesh
+        TD = mesh.top_dimension()
+        GD = mesh.geo_dimension()
+        NC = mesh.number_of_cells()
+        NQ = bcs.shape[0]
+        ldof = space.number_of_local_dofs()
+
+        cell = mesh.entity('cell')
+        face = mesh.entity('face')
+        face_idx = mesh.cell_to_face()[:, i]
+
+        # bm.insert 在局部面上的填充次序: 除 i 以外的局部顶点索引递增
+        local_slots = [j for j in range(TD + 1) if j != i]
+        local_vertices = cell[:, local_slots]      # (NC, TD)
+        face_vertices = face[face_idx]             # (NC, TD)
+
+        phi = bm.zeros((NC, NQ, ldof, GD), dtype=bm.float64)
+        matched = bm.zeros(NC, dtype=bm.bool)
+
+        for perm in permutations(range(TD)):
+            # perm 满足 local_vertices[:, perm] == face_vertices;
+            # 于是全局面第 m 个分量应落到局部槽位 perm[m], 即按逆置换重排 bcs
+            sel = bm.all(local_vertices[:, list(perm)] == face_vertices, axis=1)
+            sel = sel & (~matched)
+            if not bool(bm.any(sel)):
+                continue
+
+            inv = [perm.index(j) for j in range(TD)]
+            b = bm.insert(bcs[:, inv], i, 0, axis=1)
+            phi_perm = bm.broadcast_to(space.basis(b), (NC, NQ, ldof, GD))
+            phi = bm.where(sel[:, None, None, None], phi_perm, phi)
+            matched = matched | sel
+
+        if not bool(bm.all(matched)):
+            raise RuntimeError(
+                f"局部面 {i} 上有单元的顶点集合与其全局面不匹配, "
+                "无法确定积分点定向; 请检查网格的 cell/face 拓扑一致性"
+            )
+
+        return phi
+
     def make_index(self, space: _FS):
         mesh = space.mesh
         NF = mesh.number_of_faces()
@@ -209,9 +285,9 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             L = bm.nonzero(pos)[0]   # 左侧：pos=True，这是 w^+
             R = bm.nonzero(~pos)[0]  # 右侧：pos=False，这是 w^-
             
-            b = bm.insert(bcs, i, 0, axis=1)
-            phi_ref = space.basis(b)
-            phi = bm.broadcast_to(phi_ref, (NC, NQ, ldof, GD))
+            # 按各单元自身的局部面定向映射积分点, 使面两侧取到同一物理点,
+            # 否则装配出的不是跳量, 见 _oriented_cell_basis 的 Notes
+            phi = self._oriented_cell_basis(space, bcs, i)
             
             # 存储原始基函数值（不带符号）
             if L.size > 0:
@@ -375,11 +451,9 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             L = bm.nonzero(pos)[0]                          
             R = bm.nonzero(~pos)[0]                         
 
-            # 面上的积分点是定义在 "面参考域" 里，而基函数评估需要 "单元参考域" 的重心坐标
-            b = bm.insert(bcs, i, 0, axis=1)                # (NQ, TD+1)
-
-            phi_ref = space.basis(b)                           # (1, NQ, LDOF, GD)
-            phi = bm.broadcast_to(phi_ref, (NC, NQ, ldof, GD)) # (NC, NQ, LDOF, GD)
+            # 面上的积分点定义在 "面参考域", 基函数评估需要 "单元参考域" 的重心坐标;
+            # 该映射按各单元自身的局部面定向进行, 见 _oriented_cell_basis 的 Notes
+            phi = self._oriented_cell_basis(space, bcs, i)     # (NC, NQ, LDOF, GD)
 
             # [w] = w^+ - w^-，构建算子 [ -φ_R, +φ_L ]
             if R.size > 0:
