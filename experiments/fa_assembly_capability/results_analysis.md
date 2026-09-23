@@ -36,26 +36,7 @@ GPU 为 NVIDIA GeForce RTX 5080，显存 16 GB；相关结果以 `_cuda` 标记�
 
 ### 1. import 底座（不随 n）
 
-`run.py` 已在模块顶部导入 numpy/scipy，随后通过 `_import_fe_stack_cpu()` 加载 FEALPy 与 SOPTX。相关导入代码如下，torch 和 sympy 由依赖链间接加载：
-
-```python
-# run.py 模块顶部
-import numpy as np
-import scipy.sparse as sp
-
-# _import_fe_stack_cpu()
-from fealpy.backend import backend_manager as bm
-bm.set_backend("numpy")
-import fealpy.functionspace
-import fealpy.mesh
-import fealpy.sparse
-import soptx.fem.integrators
-import soptx.fem.matrix.csr_pattern
-import soptx.materials
-import soptx.problems.elasticity
-```
-
-下表按 numpy/scipy、torch、sympy、FEALPy/SOPTX 的顺序显式分步导入，统计各阶段 RSS 增量；首项包含进程初始内存，合计按未舍入值计算。
+显式分步加载 Python、NumPy/SciPy、PyTorch、SymPy、FEALPy 与 SOPTX 等依赖栈，统计各阶段常驻 RSS 增量（首项包含进程初始内存）：
 
 | 导入阶段 | RSS 增量（MiB） |
 |:---|---:|
@@ -69,22 +50,7 @@ import soptx.problems.elasticity
 
 ### 2. 网格与空间构建（随 n）
 
-`measure_mesh()` 先通过 `TetrahedronMesh.from_box` 构建网格，再创建有限元空间与材料对象。相关代码如下：
-
-```python
-# meshbuild 阶段
-mesh = TetrahedronMesh.from_box(list(problem.domain), nx=n, ny=n, nz=n)
-
-# space 阶段
-scalar = LagrangeFESpace(mesh, p=1, ctype="C")
-vs = TensorFunctionSpace(scalar, shape=(-1, 3))
-material = IsotropicLinearElasticMaterial(
-    hypothesis="3D", lame_lambda=problem.lam, shear_modulus=problem.mu,
-    device=bm.get_device(mesh),
-)
-```
-
-下表统计上述构建过程的内存与耗时，不包含装配。峰值 RSS 与构建后 RSS 均为进程绝对量；构建后 RSS 净增以各次测量的 import 底座为基准。
+下表统计网格、空间与材料构建过程的内存与耗时，不包含装配。峰值 RSS 与构建后 RSS 均为进程绝对量；构建后 RSS 净增以各次测量的 import 底座为基准。
 
 | n | $N_{dof}$ | 构建期峰值 RSS（GiB） | 构建后 RSS（MiB） | 构建后 RSS 净增（MiB） | 构建耗时（s） |
 |:---:|---:|---:|---:|---:|---:|

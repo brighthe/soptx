@@ -69,22 +69,27 @@ def project_solution_to_finer_mesh(pde: Any,
     return uh
 
 def map_bcs_to_sub_elements(bcs_e: Tuple[TensorLike, TensorLike], n_sub: int):
-    """将位移单元的积分点的重心坐标映射成各个子密度单元的积分点的重心坐标
-    
-    Parameters:
-    -----------
-    bcs_e : 位移单元积分点的重心坐标, 结构为 ( (NQ, GD), (NQ, GD) )
-    n_sub : 子密度单元的总数
-    子密度的顺序 (先列后行)
-    +-------+-------+
-    |   1   |   3   |  
-    +-------+-------+
-    |   0   |   2   |  
-    +-------+-------+
+    """将位移单元的积分点的重心坐标映射成各个子密度单元的积分点的重心坐标.
 
-    Returns:
-    --------
-    bcs_g : 子密度单元积分点的重心坐标, 结构为 ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) )
+    Parameters
+    ----------
+    bcs_e : 位移单元积分点的重心坐标, 结构为 ( (NQ, GD), (NQ, GD) ).
+    n_sub : 子密度单元的总数.
+
+    Returns
+    -------
+    bcs_g : 子密度单元积分点的重心坐标, 结构为
+        ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) ).
+
+    Notes
+    -----
+    子密度单元的编号先列后行::
+
+        +-------+-------+
+        |   1   |   3   |
+        +-------+-------+
+        |   0   |   2   |
+        +-------+-------+
     """
     if not isinstance(bcs_e, tuple):
         raise TypeError(
@@ -196,15 +201,16 @@ def calculate_multiresolution_gphi_eg(
     return gphi_eg_reshaped
 
 def reshape_multiresolution_data(mesh, data: TensorLike) -> TensorLike:
-    """
-    Parameters:
-    -----------
-    mesh     : 位移网格对象
-    data     : (NC, n_sub, ...)
+    """将多分辨率数据从位移单元布局映射到密度单元布局.
 
-    Returns:
-    --------
-    data_reordered : (NC * n_sub, ...)
+    Parameters
+    ----------
+    mesh : 位移网格对象.
+    data : (NC, n_sub, ...) 的位移单元布局数据.
+
+    Returns
+    -------
+    data_reordered : (NC * n_sub, ...) 的密度单元布局数据.
     """
     original_shape = data.shape
     NC, n_sub = original_shape[0], original_shape[1]
@@ -260,18 +266,17 @@ def reshape_multiresolution_data(mesh, data: TensorLike) -> TensorLike:
     return data_reshaped[reorder_indices]
 
 def reshape_multiresolution_data_inverse(mesh, data_flat: TensorLike, n_sub: int) -> TensorLike:
-    """
-    将多分辨率数据从密度单元布局映射回位移单元布局
+    """将多分辨率数据从密度单元布局映射回位移单元布局.
 
-    Parameters:
-    -----------
-    mesh       : 位移网格对象
-    data_flat  : (NC*n_sub, ...)
-    n_sub      : 每个位移单元的子密度单元数量
+    Parameters
+    ----------
+    mesh : 位移网格对象.
+    data_flat : (NC * n_sub, ...) 的密度单元布局数据.
+    n_sub : 每个位移单元的子密度单元数量.
 
-    Returns:
-    --------
-    data_restored : (NC, n_sub, ...)
+    Returns
+    -------
+    data_restored : (NC, n_sub, ...) 的位移单元布局数据.
     """
     original_shape = data_flat.shape
     extra_dims = original_shape[1:]
@@ -328,21 +333,20 @@ def reshape_multiresolution_data_inverse(mesh, data_flat: TensorLike, n_sub: int
     return data_restored_flat.reshape(NC, n_sub, *extra_dims)
 
 def reshape_multiresolution_data_bcakup(nx: int, ny: int, data: TensorLike) -> TensorLike:
-    """
-    将多分辨率数据从位移单元布局映射到密度单元布局
-    
-    将 (NC, n_sub, ...) 形状的数据重新排列为 (NC*n_sub, ...) 形状，
-    其中数据按照空间位置顺序重新排列。
+    """将多分辨率数据从位移单元布局映射到密度单元布局.
 
-    Parameters:
-    -----------
-    nx: 位移单元在 x 方向的数量
-    ny: 位移单元在 y 方向的数量  
-    data : (NC, n_sub, ...)
+    将 (NC, n_sub, ...) 形状的数据重新排列为 (NC * n_sub, ...) 形状, 其中数据按照
+    空间位置顺序重新排列.
 
-    Returns:
-    --------
-    data_reordered : (NC * n_sub, ...)
+    Parameters
+    ----------
+    nx : 位移单元在 x 方向的数量.
+    ny : 位移单元在 y 方向的数量.
+    data : (NC, n_sub, ...) 的位移单元布局数据.
+
+    Returns
+    -------
+    data_reordered : (NC * n_sub, ...) 的密度单元布局数据.
     """
     original_shape = data.shape
     NC, n_sub = original_shape[0], original_shape[1]
@@ -377,22 +381,21 @@ def reshape_multiresolution_data_bcakup(nx: int, ny: int, data: TensorLike) -> T
     return data_reordered
 
 def reshape_multiresolution_data_inverse_backup(nx: int, ny: int, data_flat: TensorLike, n_sub: int) -> TensorLike:
-    """
-    将多分辨率数据从密度单元布局映射到位移单元布局
+    """将多分辨率数据从密度单元布局映射到位移单元布局.
 
-    将 (NC*n_sub, ...) 形状的数据重新排列为 (NC, n_sub, ...) 形状,
-    其中数据按照空间位置顺序重新排列
+    将 (NC * n_sub, ...) 形状的数据重新排列为 (NC, n_sub, ...) 形状, 其中数据按照
+    空间位置顺序重新排列.
 
-    Parameters:
-    -----------
-    nx: 位移单元在 x 方向的数量
-    ny: 位移单元在 y 方向的数量  
-    data_flat : (NC*n_sub, ...)
-    n_sub : 每个位移单元的子密度单元数量
+    Parameters
+    ----------
+    nx : 位移单元在 x 方向的数量.
+    ny : 位移单元在 y 方向的数量.
+    data_flat : (NC * n_sub, ...) 的密度单元布局数据.
+    n_sub : 每个位移单元的子密度单元数量.
 
-    Returns:
-    --------
-    data_reordered : (NC, n_sub, ...)
+    Returns
+    -------
+    data_reordered : (NC, n_sub, ...) 的位移单元布局数据.
     """
     NC = nx * ny
     original_shape = data_flat.shape

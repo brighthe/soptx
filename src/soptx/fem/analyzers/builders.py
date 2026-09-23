@@ -61,18 +61,18 @@ def build_serial_analyzer(
     供单 Rank 下的 EA (无矩阵单元装配) 或 FA (全矩阵装配) 求解与基线对比使用,
     直接建立在未经分布式切分的全局空间上.
 
-    参数:
+    Args:
         space (TensorFunctionSpace): 全局向量有限元空间.
         pde (Any): 物理模型或制造解对象 (提供几何区域、体力荷载与边界条件).
         material (Any): 弹性力学本构材料模型 (提供材料常数与计算设备 device).
-        degree (int, 可选): 有限元插值多项式阶数. 默认值为 1.
-        operator_level (str, 可选): 算子装配级别, 可选 "ea" (无矩阵单元装配) 或 "fa" (全局稀疏矩阵全装配). 默认值为 "ea".
-        assembly_method (str, 可选): 单元矩阵的收缩顺序, 可选 ``"standard"``、``"voigt"`` 或 ``"fast"``. 它只改变
+        degree (int, optional): 有限元插值多项式阶数. 默认值为 1.
+        operator_level (str, optional): 算子装配级别, 可选 "ea" (无矩阵单元装配) 或 "fa" (全局稀疏矩阵全装配). 默认值为 "ea".
+        assembly_method (str, optional): 单元矩阵的收缩顺序, 可选 ``"standard"``、``"voigt"`` 或 ``"fast"``. 它只改变
             中间张量的规模与峰值内存, 不改变单元矩阵的数值. 默认值为 ``"standard"``.
-        preconditioner_level (str | None, 可选): 预条件子取算子的层级, 取值同 ``operator_level``;
+        preconditioner_level (str | None, optional): 预条件子取算子的层级, 取值同 ``operator_level``;
             为 ``None`` 时预条件子绑主算子本身. 默认值为 ``None``.
 
-    返回:
+    Returns:
         LagrangeFEMAnalyzer: 初始化的串行有限元分析器实例.
     """
     return LagrangeFEMAnalyzer(
@@ -100,18 +100,18 @@ def build_distributed_analyzer(
     本函数内部对 ``soptx.fem.analyzers.distributed_analyzer.DistributedElasticityAnalyzer``
     采用延迟导入 (Lazy Import), 确保在未安装 MPI 运行时的环境中仍能正常导入本模块的串行能力.
 
-    参数:
+    Args:
         space (TensorFunctionSpace): 局部子域上的向量有限元空间.
         pde (Any): 物理模型或制造解对象.
         material (Any): 弹性力学本构材料模型.
-        degree (int, 可选): 有限元插值多项式阶数. 默认值为 1.
-        operator_level (str, 可选): 算子装配级别 ("ea" 或 "fa"). 默认值为 "ea".
-        assembly_method (str, 可选): 单元矩阵的收缩顺序, 含义同 ``build_serial_analyzer``. 默认值为 ``"standard"``.
-        preconditioner_level (str | None, 可选): 预条件子取算子的层级, 含义同 ``build_serial_analyzer``.
+        degree (int, optional): 有限元插值多项式阶数. 默认值为 1.
+        operator_level (str, optional): 算子装配级别 ("ea" 或 "fa"). 默认值为 "ea".
+        assembly_method (str, optional): 单元矩阵的收缩顺序, 含义同 ``build_serial_analyzer``. 默认值为 ``"standard"``.
+        preconditioner_level (str | None, optional): 预条件子取算子的层级, 含义同 ``build_serial_analyzer``.
             多 Rank 下不能取 ``"fa"`` —— 对称消元没有重叠归约的插入点. 默认值为 ``None``.
-        dof_comm (EntityMPI): 自由度跨进程通信器 (关键字参数).
+        dof_comm (Any): 自由度跨进程通信器 (关键字参数).
 
-    返回:
+    Returns:
         DistributedElasticityAnalyzer: 初始化的分布式有限元分析器实例.
     """
     from soptx.fem.analyzers.distributed_analyzer import (

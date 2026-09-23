@@ -55,10 +55,10 @@
 #      二者是同一离散算子的两种存法, 对同一初值与同一右端张成同一个 Krylov 子空间, 迭代
 #      序列因而逐步相同, 只差舍入, 与用哪种 Krylov 方法无关。这比 L2 阶门禁灵敏得多 ——
 #      阶是四位有效数字的钝器, 迭代数是整数的硬等号。
-#      ua 对 pa 的判据还要再硬一档: 两者的几何量同出 levels/_quadrature.py 的
-#      quadrature_geometry, 之后走同一串 einsum, 作用结果逐位相同 (探针实测最大绝对差
-#      严格为 0), 于是 L2 误差列也应逐位相同, 而不只是吻合到求解容差。哪怕末位有差,
-#      都说明两条路径已经岔开。
+#      ua 对 pa 的判据还要再硬一档: ua 每次作用现调一次 PartialAssembly.build 造出
+#      一个 pa 算子再丢掉, 内核构造与数据流走的都是 pa 那一份代码, 作用结果逐位相同
+#      (探针实测最大绝对差严格为 0), 于是 L2 误差列也应逐位相同, 而不只是吻合到求解
+#      容差。哪怕末位有差, 都说明两条路径已经岔开。
 
 [figure]
 id = "assembly_level_consistency"
@@ -359,8 +359,8 @@ device = "cpu"
 min_l2_order = 1.5
 
 # UA 走 PA 的同一条数据流, 只是不把几何量常驻: J^{-1} 与 w_q detJ_q 在每次作用里现算。
-# 两个层级的几何量同出 src/soptx/fem/levels/_quadrature.py 的 quadrature_geometry, 之后
-# 喂进同一个 DofToQuad 与同一个 LinearElasticQFunction, 浮点运算次序字面上一致, 因此
+# ua 每次作用现调一次 PartialAssembly.build, 走的是 pa 那一份代码本身而不是它的副本,
+# 浮点运算次序字面上一致, 因此
 # 作用结果逐位相同 (小规模探针实测最大绝对差严格为 0), 误差链与 niter 列也应逐位复现
 # convergence_pa。这条链因而不产出新的数值结论, 它兑现的是"层级矩阵不留空格"与耗时列。
 #

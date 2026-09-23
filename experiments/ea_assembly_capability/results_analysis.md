@@ -42,36 +42,13 @@ GPU 为 NVIDIA GeForce RTX 5080，显存 16 GB；相关结果以 `_cuda` 标记�
 
 ### 1. import 底座（不随 n）
 
-`run.py` 在模块顶部导入 numpy，随后在 `_build_facade()` 中通过 `import_fe_stack_cpu()` 加载有限元依赖与弹性无矩阵算子 `ElasticityEAOperator`。主要调用如下：
+`run.py` 显式加载 FEALPy、SOPTX 及底层依赖栈（NumPy、SciPy、PyTorch、SymPy），静态导入底座产生的常驻内存为 **607 MiB**。该底座由共享依赖共同构成，不随网格规模 $n$ 变化，与 FA 实测底座（606 MiB）完全一致。
 
-```python
-import numpy as np
-from _common.fe_problem import import_fe_stack_cpu
-
-import_fe_stack_cpu()
-from soptx.fem.matrix_free import ElasticityEAOperator
-```
-
-导入完成、网格构建开始前的 RSS 为 **607 MiB**（实测 606.9 MiB），取自 `outputs/mesh_build_staged_n32.json` 的 `mesh_before_MiB`。这一底座由 Python 解释器、NumPy、SciPy、PyTorch、FEALPy 与 SOPTX 等共享依赖共同构成，不随网格规模 $n$ 变化，与 FA 实测底座（606 MiB）完全一致。
+数据来源：`outputs/mesh_build_staged_n32.json`。
 
 ### 2. 网格与空间构建（随 n）
 
-探针按 `build_problem_space()` 的构建顺序，将网格构建与空间、材料构建分别记为 `meshbuild` 和 `space`。主要代码如下：
-
-```python
-# meshbuild 阶段
-mesh = TetrahedronMesh.from_box(list(problem.domain), nx=n, ny=n, nz=n)
-
-# space 阶段
-scalar = LagrangeFESpace(mesh, p=1, ctype="C")
-vs = TensorFunctionSpace(scalar, shape=(-1, 3))
-material = IsotropicLinearElasticMaterial(
-    hypothesis="3D", lame_lambda=problem.lam, shear_modulus=problem.mu,
-    device=bm.get_device(mesh),
-)
-```
-
-下表统计上述构建过程的内存与耗时，不包含单刚计算。峰值 RSS 与构建后 RSS 均为进程绝对量；构建后 RSS 净增以各次测量的 import 底座为基准。
+下表统计网格、空间与材料构建过程的内存与耗时，不包含单刚计算。峰值 RSS 与构建后 RSS 均为进程绝对量；构建后 RSS 净增以各次测量的 import 底座为基准。
 
 
 | n   | $N_{dof}$ | 构建期峰值 RSS（GiB） | 构建后 RSS（MiB） | 构建后 RSS 净增（MiB） | 构建耗时（s） |
@@ -83,7 +60,7 @@ material = IsotropicLinearElasticMaterial(
 | 124 | 5,859,375 | **41.0**       | 5880         | 5273            | 880     |
 
 
-五档测量的峰值均出现在网格构建阶段，`space` 阶段的内存净增与耗时在当前记录精度下均为零。以 $n=124$ 为例，构建期峰值约 41.0 GiB，构建后 RSS 约 5.7 GiB，表明构建期峰值显著高于最终常驻量；容量评估需计入这一峰值。
+五档测量的峰值均出现在网格构建阶段，`space` 阶段的内存净增与耗时在当前记录精度下均为零。
 
 数据来源：`outputs/mesh_build_staged_n{32,48,64,96,124}.json`。
 
@@ -103,21 +80,38 @@ EA 算子属于无矩阵范式（Matrix-Free），在整个生命周期内不显
 
 ### 1. 算子构建与单刚缓存机制
 
-`ElasticityEAOperator` 通过分析器调用 `assemble_stiff_matrix()` 完成单刚计算，并在内部构建常驻算子实例，缓存单刚张量 $K_e$ 与自由度映射 `cell2dof`。相关代码如下：
+EA 算子通过分析器调用 `assemble_stiff_matrix()` 完成单刚计算，并在内部构建常驻算子实例，缓存单刚张量 $K_e$ 与自由度映射 `cell2dof`。
+
+相关源码实现：
+
+- 分析器工厂与装配入口：
+  - [`src/soptx/fem/analyzers/builders.py`](../../src/soptx/fem/analyzers/builders.py) 中的 `build_serial_analyzer` 
+  - [`src/soptx/fem/analyzers/lagrange_fem_analyzer.py`](../../src/soptx/fem/analyzers/lagrange_fem_analyzer.py) 中的 `assemble_stiff_matrix`
+- EA 算子构建与单刚缓存逻辑：
+  - [`src/soptx/fem/levels/element.py`](../../src/soptx/fem/levels/element.py) 中的 `ElementAssembly.build`
+- 算子限制类：
+  - [`src/soptx/fem/kernels/restriction.py`](../../src/soptx/fem/kernels/restriction.py) 中的 `ElementRestriction`
+
+核心代码如下：
 
 ```python
-# 创建 EA 算子
-ea_op = ElasticityEAOperator(vs, problem, material, degree=1, assembly_method="fast")
+# 1. 创建 EA 分析器（内部根据 material, degree 等自动实例化 self._integrator = LinearElasticIntegrator(...)）
+analyzer = build_serial_analyzer(vs, problem, material, degree=1, operator_level="ea", assembly_method="fast")
 
-# 单刚计算与缓存入口
-ea_op.analyzer.assemble_stiff_matrix()
+# 2. 单刚计算与缓存入口
+ea_op = analyzer.assemble_stiff_matrix()
 
-# 分析器内部调用：self._integrator.const()
-const_integrator = self._integrator.const(self._tensor_space)
+# 3. 分析器内部的分派逻辑：
+#    level = create_level('ea', space=self._tensor_space, integrator=self._integrator)
+#    分派至 ElementAssembly.build(space, integrator) 内部执行：
+integrator = analyzer._integrator
+const_integrator = integrator.const(space)  # 计算并缓存单刚张量 K_e, 形状 (NC, 12, 12)
 
-# Integrator.const() 内部核心逻辑：
-value = self.assembly(space)        # 计算并缓存单刚张量 K_e, 形状 (NC, 12, 12)
-to_gdof = self.to_global_dof(space)  # 计算并缓存全局自由度映射 cell2dof, 形状 (NC, 12)
+# 构造限制算子 (G 算子，缓存全局自由度映射 cell2dof)
+restriction = ElementRestriction(
+    cell2dof=const_integrator.to_global_dof(space),
+    global_dofs=space.number_of_global_dofs(),
+)
 ```
 
 
@@ -132,14 +126,14 @@ to_gdof = self.to_global_dof(space)  # 计算并缓存全局自由度映射 cell
 | n   | $N_C$     | $N_{dof}$ | `cell2dof`（MiB） | 起点 RSS（GiB） | 峰值净增（GiB） | 阶段峰值 RSS（GiB） | 缓存后常驻 RSS（GiB） | 缓存耗时（s） |
 | --- | --------- | --------- | --------------- | ----------- | --------- | ------------- | -------------- | ------- |
 | 32  | 196,608   | 107,811   | 18              | 0.7         | 0.7       | 1.4           | 1.0            | 0.69    |
-| 48  | 663,552   | 352,947   | 61              | 0.9         | 2.3       | 3.3           | 1.9            | 2.1     |
-| 64  | 1,572,864 | 823,875   | 144             | 1.3         | 5.4       | 6.7           | 3.5            | 5.0     |
+| 48  | 663,552   | 352,947   | 61              | 0.9         | 2.3       | 3.2           | 1.9            | 2.1     |
+| 64  | 1,572,864 | 823,875   | 144             | 1.3         | 5.3       | 6.6           | 3.4            | 5.0     |
 
 
 表中呈现了两个核心特征：
 
-1. **峰值 RSS 与常驻 RSS 的落差**：计算期间由于中间梯度缩并分块与刚度分块同时存活，形成了高于常驻量的阶段瞬时峰值（机制与 FA 完全同源，详见 FA 报告第二章第 2 小节）；计算完成后临时分块释放，常驻 RSS 回落并沉淀为后续算子的常驻基线。以 $n=64$ 为例，阶段峰值为 6.7 GiB，缓存后常驻为 3.5 GiB。
-2. **随网格规模的线性缩放**：从 $n=32$ 增至 $n=64$，单元数增至 8 倍，峰值净增约为 7.7 倍，耗时约为 7.2 倍，峰值净增严格随单元数 $N_C$ 线性增长。与 FA 相比，两者的峰值净增基本一致（$n=64$ 为 5.4 对 5.3 GiB），而缓存后常驻 RSS 略高于 FA（3.5 对 3.1 GiB），差额主要源于常驻保留的 `cell2dof` 映射（$n=64$ 时理论占 144 MiB）。
+1. **峰值 RSS 与常驻 RSS 的落差**：计算期间由于中间梯度缩并分块与刚度分块同时存活，形成了高于常驻量的阶段瞬时峰值（机制与 FA 完全同源，详见 FA 报告第二章第 2 小节）；计算完成后临时分块释放，常驻 RSS 回落并沉淀为后续算子的常驻基线。以 $n=64$ 为例，阶段峰值为 6.6 GiB，缓存后常驻为 3.4 GiB。
+2. **随网格规模的线性缩放**：从 $n=32$ 增至 $n=64$，单元数增至 8 倍，峰值净增约为 7.4 倍，耗时约为 7.3 倍，峰值净增近似随单元数 $N_C$ 线性增长，增幅略低于单元数本身。与 FA 相比，两者的峰值净增几乎相同（$n=64$ 均为 5.3 GiB），而缓存后常驻 RSS 略高于 FA（3.4 对 3.1 GiB），差额约 0.3 GiB，其中常驻保留的 `cell2dof` 映射占 144 MiB，其余为分配器未归还的残留。
 
 数据来源：`outputs/cache_fast_n{32,48,64}.json`。
 
@@ -159,7 +153,7 @@ $$
 y = K x = \sum_{e=1}^{N_C} P_e^T K_e P_e x
 $$
 
-其中 $P_e$ 为由 `cell2dof` 确定的限制算子（$x_e = P_e x$）。算子类 `ElementAssembly`（`soptx.fem.levels.element`）实现 `operator @ x` 的核心代码如下：
+其中 $P_e$ 为由 `cell2dof` 确定的限制算子（$x_e = P_e x$）。算子类 `ElementAssembly`（[`src/soptx/fem/levels/element.py`](../../src/soptx/fem/levels/element.py)）实现 `operator @ x` 的核心代码如下：
 
 ```python
 class ElementAssembly:
@@ -183,9 +177,9 @@ class ElementAssembly:
 
 | n   | $N_C$     | $N_{dof}$ | 工作区峰值净增（MiB） | 稳态常驻净增（MiB） | 首次耗时（ms） | 稳态耗时（ms） |
 | --- | --------- | --------- | ------------ | ----------- | -------- | -------- |
-| 32  | 196,608   | 107,811   | 36.7         | **0**       | 22       | 20.3     |
+| 32  | 196,608   | 107,811   | 35.9         | **0**       | 22       | 20.3     |
 | 48  | 663,552   | 352,947   | 181.5        | **0**       | 62       | 63.7     |
-| 64  | 1,572,864 | 823,875   | 430.8        | **0**       | 153      | 154.4    |
+| 64  | 1,572,864 | 823,875   | 430.8        | **0**       | 153      | 154.3    |
 
 
 数据来源：`outputs/cache_matvec_continuous_fast_n{32,48,64}.json`。
@@ -203,11 +197,11 @@ EA 路线在进入 Krylov 迭代求解器（如 Jacobi-PCG）之前，全流程�
 problem, mesh, vs, material = build_problem_space(n)
 
 # 2. 构造 EA 算子实例并缓存单刚 K_e 与自由度映射 cell2dof (阶段 1)
-ea_op = ElasticityEAOperator(vs, problem, material, degree=1, assembly_method="fast")
-operator = ea_op.analyzer.assemble_stiff_matrix()
+analyzer = build_serial_analyzer(vs, problem, material, degree=1, operator_level="ea", assembly_method="fast")
+ea_op = analyzer.assemble_stiff_matrix()
 
 # 3. 无矩阵算子乘应用 (阶段 2)
-y = operator @ x
+y = ea_op @ x
 ```
 
 
@@ -222,8 +216,10 @@ y = operator @ x
 | 阶段      | 起点常驻（GiB） | 自身净增（GiB） | 阶段峰值（GiB） | 结束常驻（GiB） |
 | ------- | --------- | --------- | --------- | --------- |
 | 网格构建    | 0.6       | 5.6       | 6.2       | 1.3       |
-| 单刚与映射缓存 | 1.3       | 5.4       | **6.7**   | 3.5       |
-| 算子乘应用   | 3.5       | 0.4       | 3.9       | 3.5       |
+| 单刚与映射缓存 | 1.3       | 5.3       | **6.6**   | 3.4       |
+| 算子乘应用   | 3.4       | 0.4       | 3.8       | 3.4       |
+
+
 
 
 ### 2. 多档汇总
@@ -234,8 +230,8 @@ y = operator @ x
 | n   | $N_{dof}$ | 全过程峰值 RSS（GiB） | 准备后常驻 RSS（GiB） | 峰值所在阶段    |
 | --- | --------- | -------------- | -------------- | --------- |
 | 32  | 107,811   | 1.4            | 1.0            | 阶段 1：单刚缓存 |
-| 48  | 352,947   | 3.3            | 1.9            | 阶段 1：单刚缓存 |
-| 64  | 823,875   | 6.7            | 3.5            | 阶段 1：单刚缓存 |
+| 48  | 352,947   | 3.2            | 1.9            | 阶段 1：单刚缓存 |
+| 64  | 823,875   | 6.6            | 3.4            | 阶段 1：单刚缓存 |
 
 
 数据来源： `outputs/mesh_build_staged_n{32,48,64}.json`、`outputs/cache_fast_n{32,48,64}.json` 与 `outputs/cache_matvec_continuous_fast_n{32,48,64}.json`。

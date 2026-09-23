@@ -6,53 +6,25 @@
     A = P^T G^T B^T D B G P
 
 中的 D 一项: 它在每个积分点上独立作用, 把 B 交出的量 (对位移元是 grad u) 换成与之
-共轭的量 (乘上积分权重的应力). 物理只出现在这一层 -- ``DofToQuad`` 只管几何与基
-函数, ``PartialAssembly`` 只管数据流, 换一个方程只需换一个 QFunction.
+共轭的量 (乘上积分权重的应力). 物理只出现在这一层 -- ``ReferenceBasis`` 与
+``GeometricFactors`` 只管基函数与几何, ``PartialAssembly`` 只管数据流.
+
+与 ``gradients`` 模块同一分工: ``weighted_stress`` 与 ``weighted_stress_diagonal`` 是
+只吃数组的计算核, ``LinearElasticQFunction`` 只持有并更新它们要的数组.
+
+目前只有线弹性一种实现, 故不设抽象基类; 出现第二种方程时, 再按两者的共同部分抽出
+接口.
 
 与 libCEED 的 ``CeedQFunction`` 对应. 逐点意味着它不含任何跨积分点的耦合, 因此随
-设计变量更新时只改每积分点一个标量, 不需要重新积分 -- 这是 PA 相对 EA 在拓扑优化
-循环里的另一处优势 (EA 每次迭代要重算全部单元矩阵).
+设计变量更新时只改每积分点一个标量, 不需要重新积分. 单元密度 (NC, ) 下 EA 同样不必
+重新积分: 单元矩阵对 rho_e 线性, 由实体单元矩阵逐单元缩放即得; 只有逐点密度
+(NC, NQ) 使单元矩阵无法由缩放得到, 这时 EA 要重新积分, 而 PA 的更新代价不变.
 """
 
 from typing import Optional, Sequence
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike
-
-
-class QFunction:
-    """积分点逐点算子的抽象基类.
-
-    Notes
-    -----
-    梯度类量的下标约定与 ``DofToQuad`` 一致: ``[c, q, d, b]`` 表示 d u_d / d x_b,
-    多列右端项的批量维在最后.
-    """
-
-    def __call__(self, grad_u: TensorLike) -> TensorLike:
-        """逐点作用, 输入输出同形状"""
-        raise NotImplementedError
-
-    def diagonal(self, basis_gradients: TensorLike) -> TensorLike:
-        """由物理基函数梯度算出单元矩阵的对角.
-
-        Parameters
-        ----------
-        basis_gradients : (NC, NQ, ldof, GD) 的物理基函数梯度.
-
-        Returns
-        -------
-        diag : (NC, ldof, GD) 的单元矩阵对角, 下标为 (标量自由度, 分量).
-        """
-        raise NotImplementedError
-
-    def update(self, coef: Optional[TensorLike]) -> None:
-        """随设计变量更新逐点系数, 不重新积分"""
-        raise NotImplementedError
-
-    def persistent_bytes(self) -> int:
-        """常驻内存字节数"""
-        raise NotImplementedError
 
 
 def strain_map(geo_dimension: int,
@@ -103,8 +75,78 @@ def strain_map(geo_dimension: int,
     return bm.tensor(rows, **kwargs)
 
 
-class LinearElasticQFunction(QFunction):
-    """线弹性的逐点算子: grad u -> 乘了积分权重的应力.
+def weighted_stress(grad_u: TensorLike,
+                *,
+                weighted_coef: TensorLike,
+                elastic_matrix: TensorLike,
+                strain_map: TensorLike,
+            ) -> TensorLike:
+    """逐点作用 D: grad u -> w |J| rho S^T D S grad u.
+
+    每个积分点上是一个 GD^2 x GD^2 的小矩阵乘向量, 全体积分点拼起来即块对角矩阵 D;
+    这里不展开该矩阵, 由三次收缩逐点完成.
+
+    Parameters
+    ----------
+    grad_u : (NC, NQ, GD, GD[, NB]) 的位移物理梯度.
+    weighted_coef : (NC, NQ) 的逐点标量 w |J| rho.
+    elastic_matrix : (NS, NS) 的本构矩阵.
+    strain_map : (NS, GD, GD) 的工程应变映射 S.
+
+    Returns
+    -------
+    s_Q : 与 ``grad_u`` 同形状, 与 grad u 共轭的量, 即乘了积分权重的对称应力张量.
+    """
+    # Voigt 工程应变 eps = S grad u: (NC, NQ, NS[, NB])
+    strain = bm.einsum('sdb, cqdb... -> cqs...', strain_map, grad_u)
+
+    # Voigt 应力乘逐点标量 w |J| rho D eps: (NC, NQ, NS[, NB])
+    stress = bm.einsum('cq, st, cqt... -> cqs...',
+                    weighted_coef, elastic_matrix, strain)
+
+    # 加权应力张量 S^T sigma, 与 grad u 共轭: (NC, NQ, GD, GD[, NB])
+    s_Q = bm.einsum('sdb, cqs... -> cqdb...', strain_map, stress)
+
+    return s_Q
+
+
+def weighted_stress_diagonal(basis_gradients: TensorLike,
+                            *,
+                            weighted_coef: TensorLike,
+                            quadratic_form: TensorLike,
+                        ) -> TensorLike:
+    """由物理基函数梯度算单元矩阵 B^T D B 的对角.
+
+    第 (i, d) 个单元自由度上的对角元是
+
+        sum_q wc[c, q] sum_{b, e} M[d, b, e] gphi[c, q, i, b] gphi[c, q, i, e]
+
+    其中 wc 即 ``weighted_coef``, M 即 ``quadratic_form``. 按分量 d 逐个算, 中间量
+    始终不超过 gphi 本身的规模, 循环最多 3 次.
+
+    Parameters
+    ----------
+    basis_gradients : (NC, NQ, ldof, GD) 的物理基函数梯度.
+    weighted_coef : (NC, NQ) 的逐点标量 w |J| rho.
+    quadratic_form : (GD, GD, GD) 的二次型常量, 见
+        ``LinearElasticQFunction.quadratic_form``.
+
+    Returns
+    -------
+    diag : (NC, ldof, GD) 的单元矩阵对角.
+    """
+    blocks = []
+    for d in range(quadratic_form.shape[0]):
+        projected = bm.einsum('cqib, be -> cqie', basis_gradients, quadratic_form[d])
+        blocks.append(bm.einsum('cq, cqie, cqie -> ci',
+                            weighted_coef, projected, basis_gradients))
+
+    return bm.stack(blocks, axis=-1)
+
+
+class LinearElasticQFunction:
+    """线弹性逐点算子 D 的常驻数据, 由 ``weighted_stress`` 与
+    ``weighted_stress_diagonal`` 按数组取用.
 
     Parameters
     ----------
@@ -156,7 +198,7 @@ class LinearElasticQFunction(QFunction):
                                         self._strain_map, self._D, self._strain_map)
 
         self._coef = None
-        self._scale = None
+        self._weighted_coef = None
         self.update(coef)
 
     @property
@@ -170,14 +212,19 @@ class LinearElasticQFunction(QFunction):
         return self._strain_map
 
     @property
+    def quadratic_form(self) -> TensorLike:
+        """取对角用的二次型常量 M, 形状 (GD, GD, GD)"""
+        return self._quadratic_form
+
+    @property
     def coef(self) -> Optional[TensorLike]:
         """当前的相对密度系数"""
         return self._coef
 
     @property
-    def scale(self) -> TensorLike:
-        """逐积分点的标量因子, 形状 (NC, NQ), 即积分权重乘相对密度"""
-        return self._scale
+    def weighted_coef(self) -> TensorLike:
+        """``weighted_measure * coef``, 即逐积分点的 w |J| rho, 形状 (NC, NQ)"""
+        return self._weighted_coef
 
     @property
     def geo_dimension(self) -> int:
@@ -198,11 +245,11 @@ class LinearElasticQFunction(QFunction):
         n_cells, n_quad = weighted_measure.shape
 
         if coef is None:
-            scale = weighted_measure
+            weighted_coef = weighted_measure
         elif tuple(coef.shape) == (n_cells, ):
-            scale = weighted_measure * coef[:, None]
+            weighted_coef = weighted_measure * coef[:, None]
         elif tuple(coef.shape) == (n_cells, n_quad):
-            scale = weighted_measure * coef
+            weighted_coef = weighted_measure * coef
         else:
             raise ValueError(
                 f"coef 的形状必须是 None, ({n_cells}, ) 或 ({n_cells}, {n_quad}), "
@@ -210,64 +257,17 @@ class LinearElasticQFunction(QFunction):
             )
 
         self._coef = coef
-        self._scale = scale
-
-    def __call__(self, grad_u: TensorLike) -> TensorLike:
-        """逐点作用: grad u -> w |J| rho D eps(grad u), 再送回梯度的下标形式.
-
-        Parameters
-        ----------
-        grad_u : (NC, NQ, GD, GD) 或 (NC, NQ, GD, GD, B) 的物理梯度, 批量维在后.
-
-        Returns
-        -------
-        s_Q : 与输入同形状, 与 grad u 共轭的量.
-        """
-        strain = bm.einsum('sdb, cqdb... -> cqs...', self._strain_map, grad_u)
-        stress = bm.einsum('st, cqt... -> cqs...', self._D, strain)
-
-        # scale 是 (NC, NQ); 补足到 stress 的秩再相乘, 单列与多列共用一条语句
-        scale = bm.reshape(self._scale,
-                        tuple(self._scale.shape) + (1, ) * (stress.ndim - 2))
-        stress = stress * scale
-
-        return bm.einsum('sdb, cqs... -> cqdb...', self._strain_map, stress)
-
-    def diagonal(self, basis_gradients: TensorLike) -> TensorLike:
-        """由物理基函数梯度算单元矩阵对角.
-
-        第 (i, d) 个单元自由度上的对角元是
-
-            sum_q scale[c, q] sum_{b, e} M[d, b, e] gphi[c, q, i, b] gphi[c, q, i, e]
-
-        按分量 d 逐个算, 中间量始终不超过 gphi 本身的规模, 循环最多 3 次.
-
-        Parameters
-        ----------
-        basis_gradients : (NC, NQ, ldof, GD) 的物理基函数梯度.
-
-        Returns
-        -------
-        diag : (NC, ldof, GD) 的单元矩阵对角.
-        """
-        blocks = []
-        for d in range(self._geo_dim):
-            projected = bm.einsum('cqib, be -> cqie',
-                                basis_gradients, self._quadratic_form[d])
-            blocks.append(bm.einsum('cq, cqie, cqie -> ci',
-                                self._scale, projected, basis_gradients))
-
-        return bm.stack(blocks, axis=-1)
+        self._weighted_coef = weighted_coef
 
     def persistent_bytes(self) -> int:
-        """常驻内存字节数: 逐点标量因子是主项, 本构矩阵与应变映射是 O(1)"""
-        total = int(self._scale.nbytes) + int(self._D.nbytes)
+        """常驻内存字节数: 逐点的 weighted_coef 是主项, 本构矩阵与应变映射是 O(1)"""
+        total = int(self._weighted_coef.nbytes) + int(self._D.nbytes)
         total += int(self._strain_map.nbytes) + int(self._quadratic_form.nbytes)
 
         return total
 
     def __repr__(self) -> str:
-        n_cells, n_quad = self._scale.shape
+        n_cells, n_quad = self._weighted_coef.shape
 
         return (f"LinearElasticQFunction(n_cells={n_cells}, n_quad={n_quad}, "
                 f"geo_dim={self._geo_dim})")

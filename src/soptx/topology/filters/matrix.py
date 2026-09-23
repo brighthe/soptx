@@ -354,22 +354,26 @@ class FilterMatrixBuilder(BaseLogged):
                                     hx: float, hy: float, hz: float,
                                     enable_timing: bool = False,
                                 ) -> COOTensor:
+        """计算六面体网格的过滤权重矩阵.
+
+        Parameters
+        ----------
+        rmin : 过滤半径.
+        nx, ny, nz : 设计变量网格在三个方向的剖分数.
+        hx, hy, hz : 设计变量网格单元在三个方向的尺寸.
+        enable_timing : 是否输出各阶段细分计时.
+
+        Returns
+        -------
+        H : 过滤矩阵.
+
+        Notes
+        -----
+        即使设备选为 GPU, 本函数也会先把数据转到 CPU 上计算.
+
+        设计变量的取法随分辨率策略而异: SRTO 取单元密度中心点; MRTO 取密度子单元中心
+        点, 因此要求设计变量网格与密度子单元网格一致.
         """
-        计算六面体网格的过滤权重矩阵, 即使设备选取为 GPU, 该函数也会先将其转移到 CPU 进行计算
-
-        SRTO - 设计变量 = 单元密度中心点
-        MRTO - 设计变量 = 密度子单元中心点 - 要求设计变量网格 = 密度子单元网格
-
-        Parameters:
-        -----------
-        rmin: 过滤半径
-        nx, ny, nz : 设计变量网格剖分数
-        hx, hy, hz : 设计变量网格单元大小 
-            
-        Returns:
-        --------
-        H: 过滤矩阵
-        """        
         t = None
         if enable_timing:
             t = timer(f"Filter_3d_{self._density_location}")

@@ -11,7 +11,7 @@ from .base import AssemblyLevelExtension
 from .registry import available_levels, create_level, register_level
 from .element import ElementAssembly
 from .full import FullAssembly
-from .partial import PartialAssembly
+from .partial import PartialAssembly, quadrature_geometry
 from .unassembled import UnassembledAssembly
 
 __all__ = [
@@ -22,5 +22,6 @@ __all__ = [
     "UnassembledAssembly",
     "available_levels",
     "create_level",
+    "quadrature_geometry",
     "register_level",
 ]

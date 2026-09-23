@@ -1,5 +1,5 @@
 
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from fealpy.backend import backend_manager as bm
 from fealpy.typing import TensorLike, Index, _S
@@ -13,6 +13,43 @@ from ...materials import LinearElasticMaterial
 from soptx.fem.integrators.utils import LinearSymbolicIntegration
 
 from soptx.core import timer
+
+
+def cell_jacobi_det(mesh: HomogeneousMesh, bcs: TensorLike, index: Index = _S) -> Optional[TensorLike]:
+    """积分点上的 Jacobi 行列式绝对值 |det J|, 形状 (NC, NQ); 单纯形网格返回 None.
+
+    单纯形上仿射映射的 |det J| 是常数, 已并入 ``cell_measure``, 各条装配路径按
+    ``detJ is None`` 走单纯形分支; 张量网格 (四边形 / 六面体) 上 J 随积分点变化,
+    须逐点取行列式. 本函数把原先散在各 ``fetch_*`` 变体里的这段分支收成一处.
+    """
+    if isinstance(mesh, SimplexMesh):
+        return None
+    J = mesh.entity_view("cell").jacobi_matrix(bcs, index=index)
+    return bm.abs(bm.linalg.det(J))
+
+
+class IntegrationContext(NamedTuple):
+    """单元积分所需的共用上下文: 校验过的句柄加求积数据.
+
+    Attributes
+    ----------
+    scalar_space : 张量空间背后的标量空间.
+    mesh : 空间所在的齐次网格.
+    index : 参与装配的单元子集.
+    q : 实际使用的积分阶.
+    bcs : 积分点的重心坐标.
+    ws : 积分权重, 形状 (NQ, ).
+    cell_measure : 单元测度, 形状 (NC, ).
+    """
+
+    scalar_space: FunctionSpace
+    mesh: HomogeneousMesh
+    index: Index
+    q: int
+    bcs: TensorLike
+    ws: TensorLike
+    cell_measure: TensorLike
+
 
 class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     """The linear elastic integrator for function spaces based on homogeneous meshes."""
@@ -51,7 +88,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @property
     def q(self) -> Optional[int]:
-        """外部指定的积分阶; 为 None 时由 fetch_assembly 取 p + 3"""
+        """外部指定的积分阶; 为 None 时由 fetch_context 取 p + 3"""
         return self._q
 
     @property
@@ -67,30 +104,77 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     # 变体方法
     ########################################################################################
 
-    @enable_cache
-    def fetch_assembly(self, space: TensorFunctionSpace):
+    def quadrature_order(self, space: TensorFunctionSpace) -> int:
+        """本积分子在该空间上实际使用的积分阶.
+
+        Parameters
+        ----------
+        space : 该双线性型所在的张量函数空间.
+
+        Returns
+        -------
+        q : 积分阶, 构造时未指定则取默认的 ``p + 3``.
+
+        Notes
+        -----
+        单独开这个方法, 是为了让只需要积分阶的调用方 (矩阵自由层级的 build 阶段,
+        它只在参考单元上取积分点) 不必走 ``fetch_context``: 后者附带算一次 O(NC)
+        的单元测度, 而 build 阶段的代价必须与网格规模无关.
+        """
+        return space.scalar_space.p + 3 if self._q is None else self._q
+
+    def fetch_context(self, space: TensorFunctionSpace) -> IntegrationContext:
+        """取积分公式、单元测度与常用句柄, 供各条装配路径共用.
+
+        默认积分阶 ``q = p + 3`` 与单元测度的取法只在这里写一次: 各 ``fetch_*``
+        变体都从这里取, 于是矩阵自由层级与显式装配用的是字面上同一个积分公式, 改一
+        处即可, 不会出现某条路径悄悄换了积分阶而其余路径没跟上.
+
+        Parameters
+        ----------
+        space : 该双线性型所在的张量函数空间.
+
+        Returns
+        -------
+        IntegrationContext
+
+        Raises
+        ------
+        RuntimeError
+            空间所在的网格不是齐次网格.
+
+        Notes
+        -----
+        本方法刻意不加 ``enable_cache``: 它只做 O(NC) 的轻量取数, 而缓存会把 ``bcs``
+        / ``ws`` / ``cell_measure`` 钉在积分子上常驻, 改变 PA 等矩阵自由层级的常驻
+        内存口径. 需要缓存的是各 ``fetch_*`` 变体的最终结果, 那一层已经加了.
+        """
         index = self._index
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
-    
+
         if not isinstance(mesh, HomogeneousMesh):
             raise RuntimeError("The LinearElasticIntegrator only support spaces on"
                                f"homogeneous meshes, but {type(mesh).__name__} is"
                                "not a subclass of HomoMesh.")
-    
-        cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self._q is None else self._q
+
+        q = self.quadrature_order(space)
         qf = mesh.quadrature_formula(q)
         bcs, ws = qf.get_quadrature_points_and_weights()
-        
-        gphi = scalar_space.grad_basis(bcs, index=index, variable='x')
+        cell_measure = mesh.entity_measure('cell', index=index)
 
-        if isinstance(mesh, SimplexMesh):
-            J = None
-            detJ = None
-        else:
-            J = mesh.entity_view('cell').jacobi_matrix(bcs)
-            detJ = bm.abs(bm.linalg.det(J))
+        return IntegrationContext(scalar_space=scalar_space, mesh=mesh,
+                            index=index, q=q, bcs=bcs, ws=ws,
+                            cell_measure=cell_measure)
+
+    @enable_cache
+    def fetch_assembly(self, space: TensorFunctionSpace):
+        ctx = self.fetch_context(space)
+        scalar_space, mesh, index = ctx.scalar_space, ctx.mesh, ctx.index
+        bcs, ws, cm = ctx.bcs, ctx.ws, ctx.cell_measure
+
+        gphi = scalar_space.grad_basis(bcs, index=index, variable='x')
+        detJ = cell_jacobi_det(mesh, bcs, index)
 
         return cm, bcs, ws, gphi, detJ
 
@@ -486,27 +570,12 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def fetch_voigt_assembly(self, space: TensorFunctionSpace):
-        index = self._index
-        scalar_space = space.scalar_space
-        mesh = getattr(scalar_space, 'mesh', None)
-    
-        if not isinstance(mesh, HomogeneousMesh):
-            raise RuntimeError("The LinearElasticIntegrator only support spaces on"
-                               f"homogeneous meshes, but {type(mesh).__name__} is"
-                               "not a subclass of HomoMesh.")
-    
-        cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self._q is None else self._q
-        qf = mesh.quadrature_formula(q)
-        bcs, ws = qf.get_quadrature_points_and_weights()
-        gphi = scalar_space.grad_basis(bcs, index=index, variable='x')
+        ctx = self.fetch_context(space)
+        scalar_space, mesh, index = ctx.scalar_space, ctx.mesh, ctx.index
+        bcs, ws, cm = ctx.bcs, ctx.ws, ctx.cell_measure
 
-        if isinstance(mesh, SimplexMesh):
-            J = None
-            detJ = None
-        else:
-            J = mesh.entity_view('cell').jacobi_matrix(bcs)
-            detJ = bm.abs(bm.linalg.det(J))
+        gphi = scalar_space.grad_basis(bcs, index=index, variable='x')
+        detJ = cell_jacobi_det(mesh, bcs, index)
 
         return cm, ws, bcs, gphi, detJ
 
@@ -660,19 +729,10 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def fetch_fast_assembly(self, space: TensorFunctionSpace):
-        index = self._index
-        scalar_space = space.scalar_space
-        mesh = getattr(scalar_space, 'mesh', None)
-    
-        if not isinstance(mesh, HomogeneousMesh):
-            raise RuntimeError("The LinearElasticIntegrator only support spaces on"
-                               f"homogeneous meshes, but {type(mesh).__name__} is"
-                               "not a subclass of HomoMesh.")
-    
-        cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self._q is None else self._q
-        qf = mesh.quadrature_formula(q)
-        bcs, ws = qf.get_quadrature_points_and_weights()
+        ctx = self.fetch_context(space)
+        scalar_space, mesh, index = ctx.scalar_space, ctx.mesh, ctx.index
+        bcs, ws, cm = ctx.bcs, ctx.ws, ctx.cell_measure
+
         gphi_lambda = scalar_space.grad_basis(bcs, index=index, variable='u')    # (NQ, LDOF, BC)
 
         if isinstance(mesh, SimplexMesh):
@@ -854,19 +914,10 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             t = timer(f"参考单元解析预计算组装(缓存)")
             next(t)
 
-        index = self._index
-        scalar_space = space.scalar_space
-        mesh = getattr(scalar_space, 'mesh', None)
-    
-        if not isinstance(mesh, HomogeneousMesh):
-            raise RuntimeError("The LinearElasticIntegrator only support spaces on"
-                               f"homogeneous meshes, but {type(mesh).__name__} is"
-                               "not a subclass of HomoMesh.")
-    
-        cm = mesh.entity_measure('cell', index=index)
-        q = scalar_space.p+3 if self._q is None else self._q
-        qf = mesh.quadrature_formula(q)
-        bcs, ws = qf.get_quadrature_points_and_weights()
+        ctx = self.fetch_context(space)
+        scalar_space, mesh = ctx.scalar_space, ctx.mesh
+        bcs, cm = ctx.bcs, ctx.cell_measure
+
         node = mesh.entity('node')
         cell = mesh.entity('cell')
         cell_vertices = node[cell]

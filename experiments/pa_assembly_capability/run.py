@@ -24,8 +24,8 @@
 
 被测对象是仓库核心代码 ``soptx.fem.levels.partial.PartialAssembly`` 及其底层:
 ``LagrangeFEMAnalyzer.assemble_stiff_matrix('pa')`` 构造并缓存积分点几何量 (jacobi_inverse, weighted_measure,
-grad_ref) 与 cell2dof, 不组装也不常驻任何单元刚度矩阵; ``@`` 走 ``PartialAssembly.__matmul__``
-(gather -> dof_to_quad -> qfunction -> quad_to_dof -> scatter_add) 外包 ``ConstrainedOperator``;
+reference_basis.grad) 与 cell2dof, 不组装也不常驻任何单元刚度矩阵; ``@`` 走 ``PartialAssembly.__matmul__``
+(gather -> physical_gradient -> qfunction -> physical_gradient_transpose -> scatter_add) 外包 ``ConstrainedOperator``;
 Jacobi-PCG 用 ``soptx.solvers.cg`` 与 ``DiagonalPreconditioner``, 对角由 ``PartialAssembly.diagonal()`` 闭式给出.
 本脚本不含任何算子或求解器的自有实现.
 
@@ -146,7 +146,7 @@ class ElasticityPAOperator:
 def _partial_data(operator: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """从 PartialAssembly 算子提取核心常驻数组: cell2dof, jacobi_inverse, weighted_measure."""
     cell2dof = np.asarray(operator.restriction.cell2dof)
-    jacobi_inverse = np.asarray(operator.dof_to_quad._jacobi_inverse)
+    jacobi_inverse = np.asarray(operator.geometric_factors.jacobi_inverse)
     weighted_measure = np.asarray(operator.qfunction._weighted_measure)
     return cell2dof, jacobi_inverse, weighted_measure
 
@@ -330,7 +330,7 @@ def measure_matvec(method: str, n: int, repeats: int = 20, seed: int = 0) -> dic
         {
             "repeats": repeats,
             "seed": seed,
-            "matvec_impl": "soptx.fem.levels.partial.PartialAssembly.__matmul__: gather -> dof_to_quad -> qfunction -> quad_to_dof -> scatter_add",
+            "matvec_impl": "soptx.fem.levels.partial.PartialAssembly.__matmul__: gather -> physical_gradient -> qfunction -> physical_gradient_transpose -> scatter_add",
             "matvec_seconds_median": round(t_med, 6),
             "matvec_seconds_min": round(min(times), 6),
             "matvec_seconds_all": [round(t, 6) for t in times],

@@ -151,8 +151,9 @@ ASSEMBLY_METHODS: tuple[AssemblyMethodName, ...] = ("standard", "voigt", "fast")
 # 与 LagrangeFEMAnalyzer 的 operator_level 形参取值域保持一致。四个层级描述的是同一个
 # 离散算子, 只是存储与作用方式不同 (fa 持有全局 CSR, ea 逐单元 K_e, pa 逐积分点几何量,
 # ua 零常驻、每次作用现算几何量), 因此收敛阶必须一致 —— 这正是拿它们各跑一条误差链要验
-# 的东西。ua 与 pa 更强: 两者的几何量同出 levels/_quadrature.py 的 quadrature_geometry,
-# 之后走同一串 einsum, 作用结果逐位相同, 因此误差链与 niter 列也应逐位相同, 不只是吻合。
+# 的东西。ua 与 pa 更强: ua 每次作用现调一次 PartialAssembly.build 再把算子丢掉, 内核
+# 构造与数据流走的都是 pa 那一份代码, 作用结果逐位相同, 因此误差链与 niter 列也应逐位
+# 相同, 不只是吻合。
 OperatorLevelName = Literal["fa", "ea", "pa", "ua"]
 OPERATOR_LEVELS: tuple[OperatorLevelName, ...] = ("fa", "ea", "pa", "ua")
 

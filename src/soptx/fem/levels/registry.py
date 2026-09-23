@@ -14,17 +14,21 @@ analyzer 侧只认字符串 (配置里的 ``operator_level``), 不认类. 注册
 matvec 的层级同时登记进来是安全的.
 """
 
-from typing import Any, Callable, Dict, Tuple, Type
+from typing import Any, Callable, Dict, Tuple, Type, TypeVar
 
 from .base import AssemblyLevelExtension
 
 # 键 -> 层级类. 由各层级模块导入时通过 register_level 填充.
 _REGISTRY: Dict[str, Type[AssemblyLevelExtension]] = {}
 
+# 装饰器要原样透传被装饰的类型: 写成 Type[AssemblyLevelExtension] 会把子类擦成基类,
+# 调用方拿到的 PartialAssembly.build 就只剩基类签名, 层级特有的属性全部报未知.
+_LevelType = TypeVar("_LevelType", bound=AssemblyLevelExtension)
+
 
 def register_level(
     name: str,
-) -> Callable[[Type[AssemblyLevelExtension]], Type[AssemblyLevelExtension]]:
+) -> Callable[[Type[_LevelType]], Type[_LevelType]]:
     """把层级类注册到 ``name`` 键下的类装饰器.
 
     Parameters
@@ -33,14 +37,14 @@ def register_level(
 
     Returns
     -------
-    接收类并原样返回的装饰器.
+    接收类并原样返回的装饰器, 返回类型与传入类型相同.
 
     Raises
     ------
     KeyError
         该键已被占用 (重复注册通常意味着模块被重复导入或键名撞车).
     """
-    def _decorate(cls: Type[AssemblyLevelExtension]) -> Type[AssemblyLevelExtension]:
+    def _decorate(cls: Type[_LevelType]) -> Type[_LevelType]:
         if name in _REGISTRY:
             raise KeyError(
                 f"装配层级键 {name!r} 已被 {_REGISTRY[name].__name__} 占用, "

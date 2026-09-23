@@ -16,6 +16,7 @@ from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
 from fealpy.mesh import HexahedronMesh, TriangleMesh
 
 from soptx.fem.integrators import LinearElasticIntegrator
+from soptx.fem.kernels import physical_basis_gradients
 from soptx.fem.levels import available_levels, create_level
 from soptx.materials import IsotropicLinearElasticMaterial
 
@@ -43,14 +44,17 @@ class TestAssemblyLevelEquivalence(unittest.TestCase):
             return HexahedronMesh.from_box([0, 1, 0, 1, 0, 1], nx=n, ny=n, nz=n)
         raise ValueError(f"未知网格类型 {kind!r}")
 
-    def _make_fixture(self, kind: str, dimension: int, n: int, p: int) -> dict:
+    def _make_fixture(self, kind: str, dimension: int, n: int, p: int,
+                    shape=None) -> dict:
         """造出一套空间, 材料与确定性测试数据.
 
         测试向量与 coef 都用固定的三角函数生成而不用随机数, 失败时可以直接复现.
+        ``shape`` 决定张量空间的自由度排序, 默认 (-1, GD); 传 (GD, -1) 得到另一种.
         """
         mesh = self._build_mesh(kind, n)
         scalar_space = LagrangeFESpace(mesh, p=p, ctype='C')
-        space = TensorFunctionSpace(scalar_space, shape=(-1, dimension))
+        space = TensorFunctionSpace(scalar_space,
+                                    shape=(-1, dimension) if shape is None else shape)
         material = IsotropicLinearElasticMaterial(
                         hypothesis=self.HYPOTHESES[dimension],
                         lame_lambda=1.0,
@@ -124,7 +128,7 @@ class TestAssemblyLevelEquivalence(unittest.TestCase):
     def test_basis_gradients_match_space(self) -> None:
         """PA 由参考梯度加 J^{-1} 合成的物理梯度, 必须等于空间直接给的.
 
-        这是 PA 存储方案的前提: 常驻的是 (NQ, ldof, R) 的参考梯度加每单元 J^{-1},
+        这是 PA 存储方案的前提: 常驻的是 (NQ, ldof, TD) 的参考梯度加每单元 J^{-1},
         而不是每单元的物理梯度 (NC, NQ, ldof, GD).
         """
         for kind, p, fixture in self._iterate_fixtures():
@@ -133,8 +137,11 @@ class TestAssemblyLevelEquivalence(unittest.TestCase):
                                 p + 3).get_quadrature_points_and_weights()
                 levels = self._make_levels(fixture, None)
 
+                pa = levels['pa']
                 difference = self._relative_difference(
-                                levels['pa'].dof_to_quad.basis_gradients(),
+                                physical_basis_gradients(
+                                    reference_grad=pa.reference_basis.grad,
+                                    jacobi_inverse=pa.geometric_factors.jacobi_inverse),
                                 fixture['scalar_space'].grad_basis(bcs, variable='x'))
 
                 self.assertLessEqual(difference, self.RTOL)
@@ -178,6 +185,34 @@ class TestAssemblyLevelEquivalence(unittest.TestCase):
                             difference = self._relative_difference(
                                             actual[:, j], levels[name] @ column)
                             self.assertLessEqual(difference, self.RTOL)
+
+    def test_pa_matches_ea_for_both_dof_orderings(self) -> None:
+        """两种自由度排序下, PA 的作用与对角都必须等于 EA.
+
+        PA 的 E 向量是 (NC, ldof, GD) 的分量布局, 由 ``ElementRestriction`` 按
+        ``dof_priority`` 重排 ``cell2dof`` 得到; EA 仍用扁平布局直接乘 K_e. 重排方向一
+        旦弄反, 只有其中一种排序会暴露, 因此两种都要测.
+        """
+        for kind, dimension, n in self.MESHES:
+            for p in self.DEGREES:
+                for shape in ((-1, dimension), (dimension, -1)):
+                    fixture = self._make_fixture(kind, dimension, n, p, shape=shape)
+                    levels = self._make_levels(fixture, fixture['coef_cell'])
+                    priority = fixture['space'].dof_priority
+
+                    with self.subTest(mesh=kind, p=p, dof_priority=priority,
+                                    quantity='matvec'):
+                        difference = self._relative_difference(
+                                        levels['pa'] @ fixture['x'],
+                                        levels['ea'] @ fixture['x'])
+                        self.assertLessEqual(difference, self.RTOL)
+
+                    with self.subTest(mesh=kind, p=p, dof_priority=priority,
+                                    quantity='diagonal'):
+                        difference = self._relative_difference(
+                                        levels['pa'].diagonal(),
+                                        levels['ea'].diagonal())
+                        self.assertLessEqual(difference, self.RTOL)
 
     def test_diagonal_matches_element_assembly(self) -> None:
         """三个层级取出的对角必须一致.

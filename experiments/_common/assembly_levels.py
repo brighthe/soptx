@@ -142,12 +142,12 @@ def reference_K_e(ctx) -> np.ndarray:
 
     Notes
     -----
-    与 create_level 共用 ctx["integrator"] 是安全的: Integrator.const 每次调用都重算并
-    返回一个新的 ConstIntegrator, 积分子本身不留缓存, 因此层级的 build 不会白捡这一次
-    结果, matvec 面板 build_seconds 的口径不受影响。
+    与 create_level 共用 ctx["integrator"] 是安全的: assembly 每次调用都重算, 积分子
+    本身不留缓存, 因此层级的 build 不会白捡这一次结果, matvec 面板 build_seconds 的
+    口径不受影响。
     """
     integrator = ctx["integrator"]
-    K_e = integrator.const(ctx["tensor_space"]).assembly(ctx["tensor_space"])
+    K_e = integrator.assembly(ctx["tensor_space"])
     return np.ascontiguousarray(np.asarray(K_e), dtype=np.float64)
 
 

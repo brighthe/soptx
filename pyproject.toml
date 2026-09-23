@@ -67,6 +67,11 @@ exclude = [
 ]
 namespaces = false
 
+[tool.pyright]
+include = ["src", "tests", "experiments", "examples", "tools"]
+extraPaths = ["src", "../fealpy"]
+pythonVersion = "3.12"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-config", "--strict-markers"]

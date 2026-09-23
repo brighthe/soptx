@@ -50,39 +50,38 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None
             ) -> None:
-        """初始化拉格朗日有限元分析器
+        """初始化拉格朗日有限元分析器.
 
         Parameters
         ----------
-        operator_level : 离散算子的存储与作用方式
-        - 'fa' : 装配全局稀疏矩阵 (full assembly), 支持直接解法与伴随求解
-        - 'ea' : 只保留单元矩阵 (element assembly), matvec 时 gather-作用-scatter,
-                 不形成全局矩阵, 只能用迭代解法
-        - 'pa' : 只保留积分点上的几何与材料数据 (partial assembly), matvec 时
-                 gather-B-D-B^T-scatter, 高阶下比 'ea' 省内存, 只能用迭代解法
-        三者对应同一个离散算子 K = Σ_e R_e^T K_e R_e, 只差在以什么形式常驻
-        preconditioner_level : 预条件子所用的装配层级, 取值同 operator_level
-        - None : 预条件子绑主算子本身, 不另建层级 (默认, 与本参数出现之前行为一致)
-        - 其余 : 另建一个该层级的算子, 只供预条件子使用
-        主算子与预条件子的常驻形式本是两件独立的事: 主算子为省内存走 matrix-free,
-        预条件子只求近似逆, 允许更重的常驻形式。分开之后
-        operator_level='pa' + preconditioner_level='fa' 成为合法组合, 需要显式矩阵
-        的预条件子 (直接法, 将来的 AMG) 不再被主算子的层级挡在门外
-        tensor_space : 外部构造的张量函数空间; 为 None 时由 disp_mesh 内部构造
-        solve_method : 求解方式。直接法支持 'scipy' 与 'mumps', 都经
-                       soptx.solvers.registry 分派到对应后端; 'mumps' 需要环境
-                       装有 PyMUMPS 包 (pip install pymumps) 与系统 MUMPS 库。
-                       'cg' 是迭代解法 (soptx.solvers.cg, 本仓库自有实现),
-                       'fa' 与 'ea' 层级都可用; 'ea' 只能用它。
-        solver_options : 迭代解法的默认参数, 支持 'maxiter'、'atol'、'rtol' 键。
-                       solve_system 的 kwargs 优先于这里的默认值; 两者都未给出时
-                       落到内部硬编码默认 (maxiter=5000, atol=rtol=1e-12)。
-        interpolation_scheme : 密度插值方案。topopt_algorithm 取 'density_based'
-                       或 'level_set' 时必须由调用方显式传入: fem (layer 2) 不构造
-                       topology (layer 3) 的插值方案, 缺省即报错, 不静默回落到 SIMP
-        dof_comm : 分布式重叠自由度通信器。本类不提供分布式求解, 传入后必须同时
-                   覆盖 wrap_operator、reduce_load 和 solve_system, 否则
-                   solve_system 会拒绝执行
+        disp_mesh : 位移有限元网格.
+        pde : 弹性力学边值问题或制造解对象.
+        material : 弹性材料本构模型.
+        space_degree : 有限元基函数多项式阶数.
+        integration_order : 数值求积公式的代数精度阶数.
+        assembly_method : 单元刚度矩阵缩并算法.
+        operator_level : 离散算子的存储与作用方式.
+
+            - 'fa': 装配全局稀疏矩阵 (full assembly), 支持直接解法与伴随求解;
+            - 'ea': 只保留单元矩阵 (element assembly), matvec 时 gather-作用-scatter,
+              不形成全局矩阵, 只能用迭代解法;
+            - 'pa': 只保留积分点上的几何与材料数据 (partial assembly), matvec 时
+              gather-B-D-B^T-scatter, 高阶下比 'ea' 省内存, 只能用迭代解法;
+            - 'ua': 什么都不常驻 (unassembled), 每次 matvec 现算几何与材料, 只用于取证.
+
+            四者对应同一个离散算子 K = sum_e R_e^T K_e R_e, 只差在以什么形式常驻.
+        preconditioner_level : 预条件子所用的装配层级.
+
+            - None: 预条件子绑主算子本身, 不另建层级;
+            - 其余: 另建一个该层级的算子, 只供预条件子使用.
+        solve_method : 求解方式.
+        solver_options : 迭代解法的默认参数 (maxiter, atol, rtol).
+        tensor_space : 外部构造的张量函数空间; 为 None 时内部自动构造.
+        dof_comm : 分布式重叠自由度通信器.
+        topopt_algorithm : 拓扑优化算法类型.
+        interpolation_scheme : 密度插值方案.
+        enable_logging : 是否开启日志记录.
+        logger_name : 日志记录器名称.
         """
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
@@ -368,17 +367,21 @@ class LagrangeFEMAnalyzer(BaseLogged):
                             rho_val: Optional[Union[Function, TensorLike]] = None,
                             enable_timing: bool = False,
                         ) -> Union[CSRTensor, COOTensor, AssemblyLevelExtension]:
-        """按当前算子层级构造刚度算子
+        """按当前算子层级构造刚度算子.
 
         层级名到类的分派由 soptx.fem.levels.registry 完成, 本方法不再按 'fa'/'ea'
-        分支: 两者只差在同一个离散算子以什么形式常驻, 那是层级类自己的事。
+        分支: 两者只差在同一个离散算子以什么形式常驻, 那是层级类自己的事.
 
-        rho_val 的形状约定见 `_update_density_coefficient`
+        Parameters
+        ----------
+        rho_val : 材料物理密度场分布, 用于变密度拓扑优化中的刚度矩阵插值; 为 None 时
+            取基准实体刚度. 形状约定见 ``_update_density_coefficient``.
+        enable_timing : 是否输出装配过程细分计时.
 
         Returns
         -------
-        'fa' 下为全局稀疏矩阵 K; 其余层级下为对应的 AssemblyLevelExtension 算子,
-        其 `@` 运算与 'fa' 对应同一个离散算子。
+        operator : 'fa' 层级下为全局稀疏矩阵 K, 其余层级下为对应的
+            ``AssemblyLevelExtension`` 算子, 其 ``@`` 运算与 'fa' 对应同一个离散算子.
         """
         t = None
         if enable_timing:
@@ -1549,15 +1552,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ##############################################################################################
 
     def _apply_matrix(self, matrix, isDDof, check=True):
-        """Apply Dirichlet boundary condition to left-hand-size matrix only.
+        """只对左端矩阵施加 Dirichlet 边界条件.
 
-        Parameters:
-            matrix (SparseTensor): The original left-hand-size sparse matrix\
-                of the linear system.
-            check (bool, optional): Whether to check the matrix. Defaults to True.
+        Parameters
+        ----------
+        matrix : 线性系统原始的左端稀疏矩阵.
+        isDDof : (gdof, ) 的布尔掩码, 标记 Dirichlet 自由度.
+        check : 是否检查矩阵.
 
-        Returns:
-            SparseTensor: New adjusted left-hand-size matrix.
+        Returns
+        -------
+        A : 施加边界条件后的左端稀疏矩阵.
         """
         A = matrix
         kwargs = A.values_context()

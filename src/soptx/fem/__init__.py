@@ -22,10 +22,10 @@ from .boundary_loads import (
 )
 from .integrators import LinearElasticIntegrator, SourceIntegrator
 from .kernels import (
-    DofToQuad,
     ElementRestriction,
+    GeometricFactors,
     LinearElasticQFunction,
-    QFunction,
+    ReferenceBasis,
 )
 from .levels import (
     AssemblyLevelExtension,
@@ -36,6 +36,7 @@ from .levels import (
     create_level,
     register_level,
 )
+from .linear_form import LinearForm
 from .matrix import CSRPattern, assemble_csr, build_csr_pattern
 from .operators import ConstrainedOperator
 from .spaces import HuZhangFESpace
@@ -52,10 +53,10 @@ __all__ = [
     "BilinearForm",
     "CSRPattern",
     "ConstrainedOperator",
-    "DofToQuad",
     "ElementAssembly",
     "ElementRestriction",
     "FullAssembly",
+    "GeometricFactors",
     "FullInterfaceAnalysisResult",
     "FullInterfaceSubstructureAnalyzer",
     "HuZhangFESpace",
@@ -63,10 +64,11 @@ __all__ = [
     "LagrangeFEMAnalyzer",
     "LinearElasticIntegrator",
     "LinearElasticQFunction",
+    "LinearForm",
     "LoadResultantReport",
     "P1TraceLoad",
     "PartialAssembly",
-    "QFunction",
+    "ReferenceBasis",
     "SourceIntegrator",
     "assemble_csr",
     "available_levels",
