@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""三次离散下悬臂梁应力约束拓扑与应力分布 (论文图 5.12).
+"""三次离散下悬臂梁应力约束拓扑与应力分布 (论文图 5.8).
 
 产物 case ``stress-cubic-topologies``: 依赖 postprocess/discretization_probe/ 下的
 两份 fields.npz, 由 ``compare.py discretization-probe`` 产出 (不是 ``compare.py

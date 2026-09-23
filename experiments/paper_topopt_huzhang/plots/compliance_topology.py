@@ -95,8 +95,9 @@ def main():
             ax.set_yticks([])
 
             method_name = "LFEM" if method == "LFEM" else "HZMFEM"
+            symbol = "p" if method == "LFEM" else "k"
             ax.set_title(
-                f"{tag} {method_name} ($k = {k}$), full $C = {full_compliance:.2f}$",
+                f"{tag} {method_name} (${symbol} = {k}$), full $C = {full_compliance:.2f}$",
                 fontsize=11, fontweight="bold", pad=4,
             )
 

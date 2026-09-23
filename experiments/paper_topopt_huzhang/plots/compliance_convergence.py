@@ -59,7 +59,10 @@ COLORS = ["#d62728", "#1f77b4", "#2ca02c"]  # 阶次 2: 红色, 3: 蓝色, 4: �
 LINESTYLES = ["-", "--", ":"]
 
 # 横轴上界两幅子图共用 (最长的一次运行 222 步), 不随子图各自的最大迭代数浮动。
-XMAX = 230
+def xmax() -> int:
+    """按全部运行的实际步数设置共同横轴上限, 并留出末步标记空间."""
+    longest = max(len(compliance(folder)) for folder in REQUIRED_RUNS)
+    return int(np.ceil((longest + 5) / 10.0) * 10)
 # inset 从第 100 步框起: 六次运行最短的一条 152 步, 此后全在收敛段。
 INSET_XMIN = 100
 # inset 在主轴里的位置 (axes 坐标 x0,y0,w,h): 避开左上的瞬态、右上的图例与中部的 V_f 线。
@@ -148,13 +151,13 @@ def plot_single_method(
     ax.set_ylabel("Full-structure compliance $C$", fontsize=11)
     ax2.set_ylabel("Volume fraction $V_f$", fontsize=11, color="#555555")
     ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
-    ax.set_xlim(0, XMAX)
+    ax.set_xlim(0, xmax())
     ax.set_ylim(*main_ylim())
     ax2.set_ylim(0.38, 0.42)
     ax.grid(True, ls=":", alpha=0.5)
 
     # 3. 收敛段 inset: 主轴里被压成一条线的末值差, 在这里才分得开
-    axins.set_xlim(INSET_XMIN, XMAX)
+    axins.set_xlim(INSET_XMIN, xmax())
     axins.set_ylim(*inset_ylim())
     axins.grid(True, ls=":", alpha=0.5)
     axins.tick_params(labelsize=7.5)

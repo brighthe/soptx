@@ -1,5 +1,22 @@
 # Hu--Zhang 拓扑优化投稿论文复现实验
 
+## 论文固定稳定化系数入口
+
+论文第 5.2 节的 HZMFEM `k=2` 优化、冻结设计再分析和应力后处理统一使用固定系数. `HuZhangMFEMAnalyzer` 默认采用 `stabilization_coefficient="fixed"`, 普通 `run.py`/`compare.py` 也使用固定系数. `fixed_coefficient.py` 只负责选择论文结果目录及组织后处理, 不再覆盖分析器方法. 对照实验可在构造分析器时显式指定 `stabilization_coefficient="density_dependent"`; 该选项独立于跳量形式 `stabilization` 和网格缩放律 `stabilization_scaling`.
+
+当前论文结果集为 `outputs/fixed_coefficient_optimization/20260923T013529873586Z/`, 四个低阶优化结果实际保存在该目录; 未受影响的 LFEM 和高阶结果以链接复用历史运行. 原 `outputs/<case>/` 的低阶结果保留用于历史对比. 系数与源码摘要见结果集内 `manifest.json` 和 `paper_refresh_manifest.json`.
+
+```bash
+# 在实验目录运行; 新优化应给一个新的独立 output-root, 保留既有结果.
+~/miniconda3/envs/ihpcm/bin/python fixed_coefficient.py --output-root outputs/fixed_coefficient_optimization/<new-run> run --case compliance-fixed-fixed-half --analyzer huzhang --order 2
+# 另外三条 case: bearing-compressible, bearing-incompressible, cantilever-middle-2d-stress.
+# 四条优化都完成后, 重算表 5.3/5.4、k=2 应力探针, 同步图 5.2/5.3/5.6/5.10/5.11.
+~/miniconda3/envs/ihpcm/bin/python fixed_coefficient.py --output-root outputs/fixed_coefficient_optimization/<new-run> refresh
+# 对已选结果集单独重绘, 仍由固定系数入口转发.
+~/miniconda3/envs/ihpcm/bin/python fixed_coefficient.py --output-root outputs/fixed_coefficient_optimization/<new-run> compare --case bearing-topologies
+```
+
+`refresh` 要求四次优化已收敛, 并检查柔顺度对角线复现、应力判据复现和牵引连续性; 检查失败时不发布图件. 全实体收敛图及不含稳定化项的高阶优化结果不因系数切换重算. 本入口不修改目标或约束的灵敏度实现; 结果一致性检查不等于灵敏度公式验证.
 ## 目录结构
 
 ```text
@@ -16,16 +33,19 @@ experiments/paper_topopt_huzhang/
 |-- provenance.py               # Git revision、环境与产物摘要
 |-- report.py                   # 产出: 论文表 5.1 / 5.2 (由 compare.py table 调用)
 |-- metrics.py                  # 产出: 梯度校验 / 冻结设计指标 / 插图 npz 导出
-|-- bearing_reanalysis.py       # 产出: 轴承冻结设计交叉再分析 + nu 扫描 (论文表 5.3 / 5.4)
+|-- compliance_reanalysis.py    # 产出: 固支梁六个冻结设计 x 六种离散的柔顺度交叉再分析 (论文 5.2.1 节)
+|-- bearing_reanalysis.py       # 产出: 轴承冻结设计交叉再分析 + nu 扫描 + 全实体域 nu 扫描 (论文表 5.4; nu 扫描仅存档)
+|-- bearing_h_locking_probe.py  # 产出: 轴承全实体域 h 收敛闭锁考察, 两档 nu x 四级网格 x 四种离散 (论文图 5.5)
 |-- stress_cross_evaluation.py  # 产出: 应力算例一份构型 x 七条离散的应力比与可行性余量交叉表
 |-- discretization_probe.py     # 产出: 应力算例冻结构型的离散敏感性探针 (实验 A)
 |-- edge_jump.py                # 内边法向牵引跳量 [[sigma.n]]; 仅被 discretization_probe 调用
 |-- plots/                      # 唯一子目录: 每张图一个模块, 文件名为 <算例族>_<产物>
 |                               # (成图落在 outputs/figures/, 故不与之同名)
-|   |-- _base.py                # 十个成图模块的共用底座: 字体/vtu/产物定位/落盘
+|   |-- _base.py                # 十一个成图模块的共用底座: 字体/vtu/产物定位/落盘
 |   |-- manufactured_mesh.py    # 唯一不读运行产物的一张: 制造解算例的棋盘格剖分示意
 |   |-- compliance_topology.py compliance_convergence.py compliance_k1_comparison.py
-|   |-- bearing_topologies.py bearing_highorder_topologies.py
+|   |-- bearing_topologies.py bearing_highorder_topologies.py bearing_solid_h_convergence.py
+|   |-- bearing_solid_locking.py   # 存档: 固定网格扫 nu 的旧图 5.5, 已被 h 收敛图取代
 |   `-- stress_topologies.py stress_convergence.py stress_max_ratio_history.py
 |                               # 论文图号只在各模块 docstring 首行的括注里
 `-- outputs/                    # 运行产物, 不提交
@@ -38,9 +58,9 @@ experiments/paper_topopt_huzhang/
 | `manufactured-native` | `convergence-verification` | `MixedBoundarySinusoidalElasticity2D` | `convergence.py: run_convergence_suite` | 表 5.1 ($k=3,4$ 原生格式) |
 | `manufactured-stabilized` | `convergence-verification` | `MixedBoundarySinusoidalElasticity2D` | `convergence.py: run_convergence_suite` | 表 5.2 ($k=1,2$ 矩阵跳量稳定化) |
 | `compliance-fixed-fixed-half` | `optimization-baseline` | `FixedFixedBeamHalfDomain2d` | `pipeline.py: build_fixed_fixed_*` | 5.2.1 节 / 图 5.2~5.3 |
-| `bearing-compressible` | `incompressible-baseline` | `BearingDevice2d` | `pipeline.py: build_bearing_*` | 5.2.2 节 / 图 5.5、表 5.3~5.4 |
-| `bearing-incompressible` | `incompressible-study` | `BearingDevice2d` | `pipeline.py: build_bearing_*` | 5.2.2 节 / 图 5.5、表 5.3~5.4 |
-| `cantilever-middle-2d-stress` | `stress-constrained` | `CantileverMiddle2d` | `pipeline.py: build_stress_*` | 5.2.3 节 / 图 5.7~5.9、表 5.5 |
+| `bearing-compressible` | `incompressible-baseline` | `BearingDevice2d` | `pipeline.py: build_bearing_*` | 5.2.2 节 / 图 5.5~5.6、表 5.4 |
+| `bearing-incompressible` | `incompressible-study` | `BearingDevice2d` | `pipeline.py: build_bearing_*` | 5.2.2 节 / 图 5.5~5.6、表 5.4 |
+| `cantilever-middle-2d-stress` | `stress-constrained` | `CantileverMiddle2d` | `pipeline.py: build_stress_*` | 5.2.3 节 / 图 5.8~5.11 |
 
 ## 参数注册约定
 

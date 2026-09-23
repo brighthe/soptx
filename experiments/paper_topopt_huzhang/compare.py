@@ -9,6 +9,7 @@
     python compare.py export [--check]
     python compare.py gradients
     python compare.py metrics
+    python compare.py compliance-reanalysis
     python compare.py bearing-reanalysis
     python compare.py stress-cross-eval
 
@@ -51,7 +52,9 @@ COMMAND_MODULES: dict[str, str] = {
     "gradients": "metrics:run_gradient_check",
     "metrics": "metrics:run_frozen_metrics",
     "audit-final-stress": "metrics:run_audit_final_stress",
+    "compliance-reanalysis": "compliance_reanalysis:run_compliance_reanalysis",
     "bearing-reanalysis": "bearing_reanalysis:run_bearing_reanalysis",
+    "bearing-h-locking": "bearing_h_locking_probe:run",
     "stress-cross-eval": "stress_cross_evaluation:run_stress_cross_evaluation",
     "discretization-probe": "discretization_probe:run_discretization_probe",
 }
@@ -62,7 +65,8 @@ FORWARDS_ARGV = {"export", "stress-cross-eval", "discretization-probe"}
 # 会按冻结设计重新组装并求解的动词: 比纯读产物慢, --help 里标出来免得误当作秒回
 REANALYSIS = {
     "export", "gradients", "metrics", "audit-final-stress",
-    "bearing-reanalysis", "stress-cross-eval", "discretization-probe",
+    "compliance-reanalysis", "bearing-reanalysis", "bearing-h-locking", "stress-cross-eval",
+    "discretization-probe",
 }
 
 # 动词的说明; 产物 case 的说明取自各 plots 模块自己的 docstring, 不在此重复
@@ -72,7 +76,9 @@ DESCRIPTIONS: dict[str, str] = {
     "gradients": "伴随灵敏度的有限差分校验",
     "metrics": "冻结设计的论文口径指标复算",
     "audit-final-stress": "核查两组 k=2 最终密度的实际约束, 不覆盖结果",
-    "bearing-reanalysis": "轴承算例冻结设计交叉再分析与 nu 扫描 (论文表 5.3 / 5.4)",
+    "compliance-reanalysis": "固支梁算例六个冻结设计 x 六种离散的柔顺度交叉再分析 (论文 5.2.1 节)",
+    "bearing-reanalysis": "轴承算例冻结设计交叉再分析、nu 扫描与全实体域扫描 (论文表 5.4)",
+    "bearing-h-locking": "轴承算例全实体域 h 收敛闭锁考察: 两档 nu x 四级网格 x 四种离散 (论文图 5.5)",
     "stress-cross-eval": "应力算例: 一份构型 x 七条离散的应力比与可行性余量交叉表",
     "discretization-probe": "应力算例: 冻结构型的离散敏感性探针 (散布/采样/牵引跳量)",
 }
