@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""PA 部分装配走查: 构建四个内核, 再走一遍 y = G^T B^T D B G x."""
+"""PA 部分装配走查: 构建四个内核, 走一遍 y = G^T B^T D B G x, 再演示更新."""
 
 import argparse
 
@@ -40,15 +40,15 @@ material = IsotropicLinearElasticMaterial(hypothesis='plane_strain',
 coef = bm.ones(mesh.number_of_cells(), dtype=bm.float64)  
 integrator = LinearElasticIntegrator(material=material, coef=coef)
 
-# build 阶段: 只依赖 (单元形状, p, q), 与网格无关, 一次算定
+# build 阶段: 只依赖单元类型、阶次与积分规则, 与网格无关, 一次算定
 ref_basis = ReferenceBasis.build(space.scalar_space,
                                 integrator.quadrature_order(space))
 
-# 只依赖网格拓扑 (cell2dof) 与自由度排序, 与节点坐标和设计变量都无关, 不必经由 pa 取;
-# 自由度排序在这里一次换成 (NC, ldof, GD) 的分量布局
+# setup 阶段: 依赖网格几何与拓扑, 每张网格算一次
+# 单元限制 G: 分量布局 (NC, ldof, GD), 只依赖网格拓扑 (cell2dof)
 g = ElementRestriction.from_integrator(integrator, space, layout='component')
 
-# setup: 依赖网格坐标与设计变量, 每张网格算一次; 与 PartialAssembly.build 调同一个函数
+# 几何因子与逐点算子: 与 PartialAssembly.build 调同一个函数; qf 的初值含 coef, 按阶段属于第一次 update
 ctx = integrator.fetch_context(space)
 jacobi_inverse, weighted_measure = quadrature_geometry(ctx)
 
@@ -60,7 +60,7 @@ qf = LinearElasticQFunction(elastic_matrix=material.elastic_matrix()[0, 0],
                             weighted_measure=weighted_measure,
                             coef=coef)
 
-# 四个内核拼成 PA 算子; PartialAssembly.build 内部做的正是上面这几步
+# 四个内核拼成 PA 算子
 pa = PartialAssembly(space, restriction=g, reference_basis=ref_basis,
                     geometric_factors=geo, qfunction=qf)
 
@@ -74,43 +74,46 @@ print('ref grad      ', ref_basis.grad.shape)      # 参考基函数梯度 B_hat
 print('elastic_matrix', qf.elastic_matrix.shape)   # 本构矩阵 D
 print('strain_map    ', qf.strain_map.shape)       # Voigt 对称化 S
 
-# apply: 每次 MatVec
+# apply 阶段: 每次 MatVec
 x = bm.arange(space.number_of_global_dofs(), dtype=bm.float64)
 
-# G: 全局 -> 单元, (NC, ldof, GD[, NB])
-x_E = g.gather(x)
+# G: 全局 -> 单元
+x_E = g.gather(x)  # (NC, ldof, GD[, NB])
 
-# B: 单元 -> 积分点, (NC, NQ, GD, GD[, NB])
+# B: 单元 -> 积分点
 grad_u = physical_gradient(
                 x_E,
                 reference_grad=ref_basis.grad,
                 jacobi_inverse=geo.jacobi_inverse
-            )
+            )  # (NC, NQ, GD, GD[, NB])
 
-# D: 逐点块对角矩阵乘向量, 形状不变
+# D: 逐点块对角矩阵乘向量
 s_Q = weighted_stress(
                 grad_u,
                 weighted_coef=qf.weighted_coef,
                 elastic_matrix=qf.elastic_matrix,
                 strain_map=qf.strain_map
-            )
+            )  # (NC, NQ, GD, GD[, NB])
 
-# B^T: 积分点 -> 单元, (NC, ldof, GD[, NB])
+# B^T: 积分点 -> 单元
 y_E = physical_gradient_transpose(
                 s_Q,
                 reference_grad=ref_basis.grad,
                 jacobi_inverse=geo.jacobi_inverse
-            )
+            )  # (NC, ldof, GD[, NB])
 
 # G^T: 单元 -> 全局
 y = g.scatter_add(y_E)
 
 print('y == pa @ x   ', bool(bm.all(y == pa @ x)))
 
-# update: 每次设计更新; 只重算 weighted_coef, 其余内核一个都不动
+# update 阶段: 单元密度 (NC, ) 下只重算 weighted_coef, 其余内核一个都不动; 逐点密度 (NC, NQ) 同理
 j_before, gr_before = geo.jacobi_inverse, ref_basis.grad
 wc_before = qf.weighted_coef
 pa.update(0.5 * coef)
 print('weighted_coef 重算', bool(bm.allclose(qf.weighted_coef, 0.5 * wc_before)))
 print('jacobi 未动       ', geo.jacobi_inverse is j_before)
 print('参考基未动         ', ref_basis.grad is gr_before)
+
+# update 之后算子作用随之改变: weighted_coef 整体减半, y 也减半
+print('pa @ x ~ 0.5 y    ', bool(bm.allclose(pa @ x, 0.5 * y)))

@@ -69,6 +69,23 @@ n = 32
 repeats = 20
 
 [[cases]]
+id = "ea-update"
+panel = "update"
+role = "ea-density-update-cost"
+summary = "单元密度 update 的峰值 / 常驻 / 耗时: scale (别名 K_e0 + 新分配) / inplace (副本 K_e0 + 原地写回) / reassemble (重新积分), 各一个子进程"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--update", "--update-mode", "scale", "--method", "fast", "--n", "32", "--rounds", "5"]
+output_mode = "file"
+artifact = "update_scale_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+n = 32
+update_mode = "all"
+rounds = 5
+
+[[cases]]
 id = "ea-cg-solve"
 panel = "solve"
 role = "jacobi-pcg-iteration-growth"

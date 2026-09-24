@@ -22,8 +22,8 @@ if str(EXPERIMENT_DIR.parent) not in sys.path:
 from _common import casefile as _casefile  # noqa: E402
 from _common.casefile import OUTPUT_MODES, Case, ConfigError, select  # noqa: E402,F401
 
-# EA 数据点的分格: 单刚缓存 / 算子乘 / Jacobi-PCG 求解 / 连续测量, 另加单核硬件基线 (memcpy 带宽 + dgemm 算力).
-PANELS = ("cache", "matvec", "solve", "baseline", "continuous")
+# EA 数据点的分格: 单刚缓存 / 算子乘 / Jacobi-PCG 求解 / 连续测量 / 密度更新, 另加单核硬件基线 (memcpy 带宽 + dgemm 算力).
+PANELS = ("cache", "matvec", "solve", "baseline", "continuous", "update")
 
 
 def load_cases(path: Path | None = None) -> tuple[dict, tuple[Case, ...]]:

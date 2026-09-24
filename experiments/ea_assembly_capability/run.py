@@ -11,6 +11,7 @@
    - python run.py --case ea-matvec --grid 32 --repeats 20 --monitor
    - python run.py --case ea-continuous --grid 32 --monitor
    - python run.py --case ea-cg-solve --grid 32 --monitor
+   - python run.py --case ea-update --grid 32 --monitor               # scale / inplace / reassemble 各一个子进程
    - python run.py --case cpu-baseline --monitor                # 单核硬件基线 (memcpy 带宽 + dgemm 算力)
    - python run.py --verify-fa --n 8                        # 逐位核对 K_e / cell2dof 与 fa 构建路径一致
 
@@ -21,6 +22,8 @@
    - python run.py --worker --solve  --method fast --n 32 --maxiter 5000 --tol 1e-6 \
          --output outputs/solve_fast_n32.json
    - python run.py --worker --baseline --output outputs/baseline_cpu.json
+   - python run.py --worker --update --update-mode scale --method fast --n 32 --rounds 5 \
+         --output outputs/update_scale_fast_n32.json
 
 被测对象是仓库核心代码 ``soptx.fem.matrix_free.ElasticityEAOperator`` (门面) 及其底层:
 ``LagrangeFEMAnalyzer.assemble_stiff_matrix('ea')`` 用 ``LinearElasticIntegrator.const`` 缓存 K_e 与
@@ -42,6 +45,8 @@ cell2dof 并装进未 assembly 的 ``soptx.fem.BilinearForm``; ``@`` 走 ``Bilin
   matvec 面板: mesh -> assemble (facade.assemble(): K_e + 体力右端 + Dirichlet 投影) -> warmup
                -> matvec (刚度算子乘 K x = operator.form @ x, 重复 repeats 次)
   solve  面板: mesh -> assemble -> setup_solve (对角 + 预条件子) -> solve (cg, 每步调用 facade @ x = (P_I K P_I + P_D) x)
+  update 面板: mesh -> setup (assemble_stiff_matrix, K_e = K_e^0) -> keep_K0 -> update_first -> update_rest,
+               单元密度下 scale / inplace / reassemble 三种 update 写法各一个子进程, 见 ``measure_update``
   baseline 面板: 与网格无关, 单线程 (cases.toml 的 env 限制) memcpy 带宽与 dgemm 算力, 供阶段 2 换算占比
 matvec / solve 面板不单列 cache 阶段: ``ElasticityEAOperator.assemble()`` 内部会再次调用
 ``assemble_stiff_matrix``, 单列会把 K_e 算两遍, 阶段 1 的数字以 cache 面板为准.
@@ -93,15 +98,15 @@ DEVICE = "cpu"
 
 
 def _element_data(facade: Any) -> tuple[np.ndarray, np.ndarray]:
-    """从分析器持有的 const 积分子取出缓存的 K_e (NC, 12, 12) 与 cell2dof (NC, 12).
+    """从分析器持有的 EA 算子取出常驻的 K_e (NC, 12, 12) 与 cell2dof (NC, 12).
 
-    ``assemble_stiff_matrix('ea')`` 把两者都放在 ``analyzer._const_integrator`` 里,
-    ``assemble_operator_diagonal`` 也从这里复用; 本脚本只读不写.
+    ``assemble_stiff_matrix('ea')`` 构造的 ``ElementAssembly`` 即 ``analyzer.assembly_level``,
+    K_e 在其 ``element_matrices``, cell2dof 在其单元限制 ``restriction`` 中; 本脚本只读不写.
     """
-    const = getattr(facade.analyzer, "_const_integrator", None)
-    if const is None:
+    ea = facade.analyzer.assembly_level
+    if ea is None:
         raise RuntimeError("K_e 尚未缓存: 需先调用 assemble_stiff_matrix() 或 assemble()")
-    return np.asarray(const.value), np.asarray(const.to_gdof)
+    return np.asarray(ea.element_matrices), np.asarray(ea.restriction.cell2dof)
 
 
 def _reference_kx(Ke: np.ndarray, cell2dof: np.ndarray, x: np.ndarray) -> np.ndarray:
@@ -464,6 +469,139 @@ def measure_solve(method: str, n: int, maxiter: int = 5000, tol: float = 1e-6) -
     return out
 
 
+UPDATE_MODES = ("scale", "inplace", "reassemble")
+
+
+def measure_update(method: str, n: int, mode: str, rounds: int = 5) -> dict:
+    """update 面板: 同一进程内测量 setup -> keep_K0 -> update_first -> update_rest.
+
+    单元密度 rho_e (NC, ) 下 EA 的三种 update 写法, 每种一个独立进程:
+
+    - scale: ``K_e0`` 取 setup 所得 K_e 的别名, 每轮 ``ea.set_element_matrices(rho[:, None, None] * K_e0)``,
+      右边新分配一块 (NC, 12, 12).
+    - inplace: ``K_e0`` 为 K_e 的副本, 每轮 ``np.multiply(K_e0, rho[:, None, None], out=K_e)`` 原地写回.
+    - reassemble: 不存 K_e0, 每轮 ``integrator.coef = rho`` 后 ``integrator.assembly`` 重新积分.
+      分析器处于标准有限元模式, ``assemble_stiff_matrix(rho_val)`` 会忽略密度, 故直接走积分子.
+
+    Parameters
+    ----------
+    method : 单刚组装方式, 透传给门面.
+    n : 网格每方向段数.
+    mode : update 写法, 取 ``UPDATE_MODES`` 之一.
+    rounds : update 轮数, 第 1 轮单列为 update_first, 其余计入 update_rest.
+
+    Returns
+    -------
+    result : 各阶段 before / peak / after / net 与逐轮耗时.
+
+    Notes
+    -----
+    setup 时 ``coef`` 为 None, 所得 K_e 即 K_e^0. 正确性核对只取前 ``n_check`` 个单元: setup 后
+    另存这些单元的 K_e^0 小副本, 每轮核对 ``ea.element_matrices[:n_check]`` 与 ``rho * K_e^0`` 一致,
+    小副本约 1 MiB, 不影响水位. 每轮的 rho 在计时区间外生成.
+    """
+    import gc
+
+    if mode not in UPDATE_MODES:
+        raise ValueError(f"mode 必须是 {UPDATE_MODES} 之一, 得到 {mode!r}")
+    if rounds < 2:
+        raise ValueError("rounds 至少为 2, 以区分首轮与稳态")
+
+    ctx, mesh_meter = _build_facade(method, n)
+    analyzer = ctx["facade"].analyzer
+    integrator = analyzer._integrator
+    space = analyzer._tensor_space
+    stages: Dict[str, Dict[str, Any]] = {}
+    rng = np.random.default_rng(0)
+    times = [0.0] * rounds
+    max_error = 0.0
+
+    @contextlib.contextmanager
+    def stage(name: str):
+        before = cur_rss_kib()
+        reset = reset_peak_rss()
+        start = time.perf_counter()
+        yield
+        seconds = time.perf_counter() - start
+        after = cur_rss_kib()
+        peak = max(before, after, peak_rss_kib())
+        stages[name] = {
+            "before_kib": before,
+            "peak_kib": peak,
+            "after_kib": after,
+            "net_kib": peak - before,
+            "t_s": seconds,
+            "reset_supported": reset,
+        }
+
+    gc.collect()
+    trim_supported = _malloc_trim()
+    with stage("setup"):
+        ea = analyzer.assemble_stiff_matrix()
+
+    NC = int(ea.element_matrices.shape[0])
+    n_check = min(NC, 1000)
+    K0_check = np.array(ea.element_matrices[:n_check], copy=True)
+
+    K_e0 = None
+    if mode != "reassemble":
+        with stage("keep_K0"):
+            # scale 只取别名, 翻倍推迟到第一次 update; inplace 要原地写回, 必须先复制
+            K_e0 = ea.element_matrices if mode == "scale" else np.array(ea.element_matrices, copy=True)
+
+    def one_round(i: int) -> None:
+        nonlocal max_error
+        rho = rng.uniform(1e-3, 1.0, NC)
+        start = time.perf_counter()
+        if mode == "scale":
+            ea.set_element_matrices(rho[:, None, None] * K_e0)
+        elif mode == "inplace":
+            np.multiply(K_e0, rho[:, None, None], out=ea.element_matrices)
+        else:
+            integrator.coef = rho
+            ea.set_element_matrices(integrator.assembly(space))
+        times[i] = time.perf_counter() - start
+        ref = rho[:n_check, None, None] * K0_check
+        err = float(np.max(np.abs(np.asarray(ea.element_matrices[:n_check]) - ref)) / np.max(np.abs(ref)))
+        max_error = max(max_error, err)
+
+    with stage("update_first"):
+        one_round(0)
+    with stage("update_rest"):
+        for i in range(1, rounds):
+            one_round(i)
+
+    facts = ctx["facts"]
+    Ke_bytes = int(ea.element_matrices.nbytes)
+    c2d_bytes = int(ea.restriction.persistent_bytes())
+    peak = max(mesh_meter.max_peak_kib(), *(r["peak_kib"] for r in stages.values()))
+    result = {
+        "panel": "update",
+        "mode": mode,
+        "n": n,
+        **facts,
+        "method": method,
+        "operator_impl": type(ea).__module__ + "." + type(ea).__name__,
+        "measured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "scope": "同一进程: setup -> keep_K0 (reassemble 无) -> update_first -> update_rest; 单元密度 U(1e-3, 1); 阶段间不额外 gc/trim",
+        "rounds": rounds,
+        "trim_before_setup_supported": trim_supported,
+        "mesh_fields": mesh_meter.fields(),
+        "stages": stages,
+        "process_peak_kib": peak,
+        "Ke_MiB": round(Ke_bytes / 2**20, 1),
+        "cell2dof_MiB": round(c2d_bytes / 2**20, 1),
+        "update_seconds_first": times[0],
+        "update_seconds_rest_median": statistics.median(times[1:]),
+        "update_seconds_all": times,
+        "check_cells": n_check,
+        "check_relerr_max": max_error,
+    }
+    if max_error > 1e-12 or not all(r["reset_supported"] for r in stages.values()):
+        raise RuntimeError("update 测量核对失败, 请检查原始记录")
+    return result
+
+
 def measure_continuous(method: str, n: int, repeats: int = 20) -> dict:
     """连续测量面板: 同一进程内测量 cache -> input -> first_matvec -> repeat_matvec.
 
@@ -511,7 +649,7 @@ def measure_continuous(method: str, n: int, repeats: int = 20) -> dict:
 
     # 正确性核对
     Ke = np.asarray(operator.element_matrices)
-    c2d = np.asarray(operator.const_integrator.to_gdof)
+    c2d = np.asarray(operator.restriction.cell2dof)
     ref = _reference_kx(Ke, c2d, x)
     error = _relerr(y, ref)
     med = statistics.median(times)
@@ -552,7 +690,7 @@ def verify_against_fa(n: int, methods: Sequence[str]) -> int:
 
     同一进程内用 ``fa_assembly_capability/run.py`` 的 ``_build_problem_space`` 建问题并直接调用
     ``LinearElasticIntegrator(material, method).assembly(vs)`` (fa 阶段 1 的做法), 再用本目录的
-    ``ElasticityEAOperator(...).analyzer.assemble_stiff_matrix()`` 取 const 积分子缓存的 K_e 与
+    ``ElasticityEAOperator(...).analyzer.assemble_stiff_matrix()`` 取 EA 算子常驻的 K_e 与
     cell2dof, 用 ``np.array_equal`` 逐位比较 (形状、dtype、数值). 只在 CPU 上核对, 不落盘.
 
     Parameters
@@ -742,6 +880,18 @@ def resolve_runs(
                     out_p = config.OUTPUT_DIR / scheduler.artifact_name("matvec_allocations", [m], n, DEVICE)
                     argv = [*common, "--matvec", "--probe-allocations", "--method", m, *tail, "--output", str(out_p)]
                     detail = f"method={m}, n={n}, allocation probe"
+            elif case.panel == "update":
+                rounds = overrides.get("rounds", case.extra.get("rounds", 5))
+                # 覆盖值优先, 否则取 case 的 update_mode; 二者为 'all' 时展开全部写法
+                modes = scheduler.expand(overrides.get("update_mode", case.extra.get("update_mode", "all")),
+                                         False, list(UPDATE_MODES), "scale")
+                for mode in modes:
+                    out_p = config.OUTPUT_DIR / scheduler.artifact_name("update", [mode, m], n, DEVICE)
+                    argv = [*common, "--update", "--update-mode", mode, "--method", m, *tail,
+                            "--rounds", str(rounds), "--output", str(out_p)]
+                    detail = f"mode={mode}, method={m}, n={n}, rounds={rounds}"
+                    runs.append((f"{case.id} [{mode}, {m}]", argv, out_p, f"{case.summary} ({detail})", env))
+                continue
             elif case.panel == "continuous":
                 repeats = overrides.get("repeats", case.extra.get("repeats", 20))
                 out_p = config.OUTPUT_DIR / scheduler.artifact_name("cache_matvec_continuous", [m], n, DEVICE)
@@ -803,6 +953,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int, default=None, help="matvec: 计时重复次数 (默认 20)")
     parser.add_argument("--maxiter", type=int, default=None, help="solve: PCG 最大迭代数 (默认 5000)")
     parser.add_argument("--tol", type=float, default=None, help="solve: 相对残差收敛阈值 (默认 1e-6)")
+    parser.add_argument("--update-mode", choices=UPDATE_MODES + ("all",), default=None, help="update: 写法 (默认 all, 由调度层展开)")
+    parser.add_argument("--rounds", type=int, default=None, help="update: 轮数 (默认 5, 至少 2)")
 
     # 3. Worker 测量层底层参数 (供子进程调用)
     parser.add_argument("--worker", action="store_true", help="进入子进程 worker 测量模式")
@@ -811,6 +963,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--solve", action="store_true", help="solve 面板: 核心 Jacobi-PCG 求解")
     parser.add_argument("--continuous", action="store_true", help="continuous 面板: 同一进程连续测量 cache -> input -> first_matvec -> repeat_matvec")
     parser.add_argument("--baseline", action="store_true", help="baseline 面板: 单核 memcpy 带宽与 dgemm 算力")
+    parser.add_argument("--update", action="store_true", help="update 面板: 单元密度下 scale / inplace / reassemble 三种 update 的峰值、常驻与耗时")
     parser.add_argument("--output", type=Path, default=None, help="产物落盘路径")
 
     # 4. 一致性核对 (进程内, 不落盘)
@@ -842,13 +995,17 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
 
-    if args.worker or args.cache or args.matvec or args.solve or args.continuous:
+    if args.worker or args.cache or args.matvec or args.solve or args.continuous or args.update:
         if args.n is None:
             parser.error("Worker 模式必须指定 --n")
         if args.method == "all":
             parser.error("Worker 模式不接受 --method all, 由调度层展开")
         method = args.method or "fast"
-        if args.continuous:
+        if args.update:
+            if args.update_mode in (None, "all"):
+                parser.error("Worker 模式的 --update 需指定单个 --update-mode, all 由调度层展开")
+            out = measure_update(method, args.n, args.update_mode, rounds=args.rounds or 5)
+        elif args.continuous:
             out = measure_continuous(method, args.n, repeats=args.repeats or 20)
         elif args.matvec:
             out = (measure_matvec_allocations(method, args.n) if args.probe_allocations
@@ -862,9 +1019,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cache:
             out = measure_cache(method, args.n)
         else:
-            parser.error("Worker 模式需指定 --cache, --matvec, --solve 或 --continuous")
+            parser.error("Worker 模式需指定 --cache, --matvec, --solve, --continuous 或 --update")
 
-        if args.continuous:
+        if args.update:
+            print(f"EA update 面板 (mode = {out['mode']}, rounds = {out['rounds']}, K_e = {out['Ke_MiB']} MiB)")
+            for stage_name, sinfo in out["stages"].items():
+                print(f"  [{stage_name}] before: {sinfo['before_kib']/1024:.1f} MiB | peak: {sinfo['peak_kib']/1024:.1f} MiB | after: {sinfo['after_kib']/1024:.1f} MiB | net: {sinfo['net_kib']/1024:.1f} MiB | time: {sinfo['t_s']:.3f} s")
+            print(f"  每轮耗时: 首轮 {_fmt_s(out['update_seconds_first'])} | 稳态中位数 {_fmt_s(out['update_seconds_rest_median'])} | 核对 relerr {out['check_relerr_max']:.1e}")
+        elif args.continuous:
             print(f"EA 连续测量面板 (cache -> input -> first_matvec -> repeat_matvec x {args.repeats or 20})")
             for stage_name, sinfo in out["stages"].items():
                 print(f"  [{stage_name}] before: {sinfo['before_kib']/1024:.1f} MiB | peak: {sinfo['peak_kib']/1024:.1f} MiB | net: {sinfo['net_kib']/1024:.1f} MiB | time: {sinfo['t_s']:.3f} s")
@@ -962,6 +1124,10 @@ def main(argv: list[str] | None = None) -> int:
         overrides["maxiter"] = args.maxiter
     if args.tol is not None:
         overrides["tol"] = args.tol
+    if args.update_mode is not None:
+        overrides["update_mode"] = args.update_mode
+    if args.rounds is not None:
+        overrides["rounds"] = args.rounds
 
     runs = resolve_runs(selected, is_all=is_all, overrides=overrides)
     failed = scheduler.command_run(

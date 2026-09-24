@@ -168,7 +168,7 @@ def show_cache_table(n: int | None) -> None:
     print_table(header, rows, right_cols=set(range(len(header))) - {2})
     print("  峰值 = 阶段内 VmHWM (含网格、空间与分析器的常驻), 净增 = 峰值 - 阶段开始 RSS; 净增/理论 > 1 表示中间张量膨胀.")
     print("  常驻 RSS = 阶段结束 (gc + malloc_trim 后) 相对阶段起点的 RSS 净增, 与 fa stage1_retained_after_trim 同口径; 未 trim 的值见 cache_retained_MiB.")
-    print("  算子常驻 = const 积分子缓存的 K_e + cell2dof 的字节数, 与 method 无关.")
+    print("  算子常驻 = EA 算子常驻的单元矩阵 K_e + cell2dof 的字节数, 与 method 无关.")
 
 
 # ----------------------------------------------------------------------------- matvec
