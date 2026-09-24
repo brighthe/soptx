@@ -1,6 +1,5 @@
 """Finite-element integral operators."""
 
-from .const_integrator import ConstIntegrator
 from .face_source_integrator_lfem import (
     LagrangeBoundarySourceIntegrator,
 )
@@ -18,7 +17,6 @@ from .mass_integrator import MassIntegrator
 from .source_integrator import SourceIntegrator
 
 __all__ = [
-    "ConstIntegrator",
     "HuZhangBoundarySourceIntegrator",
     "HuZhangMixIntegrator",
     "HuZhangStressIntegrator",

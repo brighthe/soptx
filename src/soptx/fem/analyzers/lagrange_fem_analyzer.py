@@ -156,6 +156,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._csr_pattern = None  # 模式先行 (Pattern-First) 静态拓扑骨架缓存
         # 当前的装配层级对象, self._operator_level 是它的名字
         self._level = None
+        # self._level 建在哪个张量空间上; 空间换了层级就不能复用
+        self._level_space = None
 
         self._integrator = LinearElasticIntegrator(material=self._material,
                                                 q=self._integration_order,
@@ -257,14 +259,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._level
 
     @property
-    def _const_integrator(self):
-        """'ea' 下的 const 积分子, 单元矩阵与 cell2dof 都在其中, 供外部工具复用
-
-        对象本身归 ElementAssembly 持有, 这里只做转发; 其余层级为 None。
-        """
-        return getattr(self._level, 'const_integrator', None)
-
-    @property
     def force_vector(self) -> Union[TensorLike, COOTensor]:
         """获取当前的载荷向量"""
         return self._F
@@ -293,6 +287,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """设置张量函数空间"""
         self._tensor_space = space
         self._csr_pattern = None
+        # 层级与 K_e^0 都依赖空间, 换空间后作废, 下次装配重建
+        self._level = None
+        self._level_space = None
+        self._cached_ke0 = None
 
     
     ##############################################################################################
@@ -393,15 +391,31 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('预备')
 
-        level = create_level(self._operator_level,
-                            space=self._tensor_space,
-                            integrator=self._integrator,
-                            pattern=self._csr_pattern)
+        if self._level_reusable():
+            # 'ea' / 'pa' / 'ua' 的拓扑与几何数据不随密度变, 只按新系数更新
+            self._level.update(self._integrator.coef)
+            level = self._level
+        else:
+            level_kwargs = {}
+            coef = self._integrator.coef
+            if (self._operator_level == 'ea'
+                and self._topopt_algorithm == 'density_based'
+                and coef is not None and coef.ndim == 1):
+                # 单元密度下 EA 由 K_e^0 逐单元缩放, 与敏度共用分析器缓存的这一份;
+                # 多分辨率、泊松比插值等其余形状仍重新积分, 不必多算一份 K_e^0
+                level_kwargs['reference_matrices'] = self._solid_stiffness_matrix()
 
-        # 'fa' 下层级把首次装配建好的 CSR 骨架交回来供下次复用; 其余层级没有骨架
-        pattern = getattr(level, 'pattern', None)
-        if pattern is not None:
-            self._csr_pattern = pattern
+            level = create_level(self._operator_level,
+                                space=self._tensor_space,
+                                integrator=self._integrator,
+                                pattern=self._csr_pattern,
+                                **level_kwargs)
+            self._level_space = self._tensor_space
+
+            # 'fa' 下层级把首次装配建好的 CSR 骨架交回来供下次复用; 其余层级没有骨架
+            pattern = getattr(level, 'pattern', None)
+            if pattern is not None:
+                self._csr_pattern = pattern
 
         self._level = level
         self._K = level.operator
@@ -412,6 +426,29 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return self._K
 
+
+    def _level_reusable(self) -> bool:
+        """当前层级能否只按新系数原地更新, 而不重建.
+
+        Returns
+        -------
+        reusable : 已有层级, 空间未变, 且层级为 'ea' / 'pa' / 'ua' 时为 True.
+
+        Notes
+        -----
+        'fa' 每次重建: 它的 ``update`` 接受的是装配好的全局矩阵而非系数, 骨架复用
+        已由 ``self._csr_pattern`` 负责.
+        """
+        return (self._level is not None
+                and self._level_space is self._tensor_space
+                and self._operator_level in ('ea', 'pa', 'ua'))
+
+    def _solid_stiffness_matrix(self) -> TensorLike:
+        """取缓存的实体单元矩阵 K_e^0, 未缓存时现算一次"""
+        if self._cached_ke0 is None:
+            return self.compute_solid_stiffness_matrix()
+
+        return self._cached_ke0
 
     def assemble_spring_stiff_matrix(self):
         """组装弹簧刚度矩阵"""
