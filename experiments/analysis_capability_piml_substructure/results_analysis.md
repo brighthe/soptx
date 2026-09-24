@@ -268,7 +268,7 @@ $\widehat{\mathbf{K}}_r^j=\mathbf{R}_{\perp}^j\mathbf{C}_j\mathbf{C}_j^{\mathsf{
 | 配置项 | 具体设置 |
 |---|---|
 | 空间维数与块内划分 | 三维，$5\times5\times5$ 个细单元 |
-| 网络输入 | 125 个细单元的归一化杨氏模量（由设计密度经材料插值得到），泊松比固定为 0.3 |
+| 网络输入 | 125 个细单元的归一化杨氏模量，泊松比固定为 0.3；训练时直接采样归一化杨氏模量，采样范围见第 3.2 节 |
 | 形函数路线输出 | 内部形函数的独立分量，经平移、转动约束补全为内部形函数矩阵 |
 | 直接刚度路线输出 | 独立刚度条目，经对称性与刚体零空间约束补全为缩聚刚度矩阵 |
 | 网络数量与输出拆分 | 每条路线通过 `num_networks` 设置，独立输出按连续索引均衡拆分；默认形函数 4 个网络、直接刚度 1 个网络 |
@@ -288,7 +288,7 @@ $\widehat{\mathbf{K}}_r^j=\mathbf{R}_{\perp}^j\mathbf{C}_j\mathbf{C}_j^{\mathsf{
 | 刚度独立输出数 | $18\times19/2=171$ | $450\times451/2=101475$ |
 | 补全后的缩聚刚度矩阵 | $24\times24$ | $456\times456$ |
 
-以下保留 [independent_training.py](../../src/soptx/ml/substructure/independent_training.py) 中 `build_network()` 的核心构造逻辑。
+以下代码展示 [independent_training.py](../../src/soptx/ml/substructure/independent_training.py) 中的 `build_network()` 如何根据预测路线和网络数量构建模型。
 
 ```python
 from numbers import Integral
@@ -335,14 +335,22 @@ def build_network(provider_metadata, *, route="shape", seed=2026, num_networks=N
         stop = start + size + (i < remainder)
         groups.append(tuple(range(start, stop)))
         start = stop
-    kwargs = dict(
-        input_dim=widths["inputs"], output_dim=output_dim,
-        hidden_dims=HIDDEN_DIMS, activation=ACTIVATIONS,
-    )
     # 保留原单网络刚度模型的权重键格式.
     model = (
-        DirectStiffnessNet(**kwargs) if route == "stiffness" and count == 1
-        else SplitOutputNet(output_groups=tuple(groups), **kwargs)
+        DirectStiffnessNet(
+            input_dim=widths["inputs"],
+            output_dim=output_dim,
+            hidden_dims=HIDDEN_DIMS,
+            activation=ACTIVATIONS,
+        )
+        if route == "stiffness" and count == 1
+        else SplitOutputNet(
+            input_dim=widths["inputs"],
+            output_dim=output_dim,
+            hidden_dims=HIDDEN_DIMS,
+            output_groups=tuple(groups),
+            activation=ACTIVATIONS,
+        )
     )
     return model.to(dtype=torch.float64)
 ```
@@ -364,22 +372,23 @@ stiffness_net = build_network(provider.metadata(), route="stiffness", seed=2026)
 
 ### 3.2 样本生成与训练方法
 
-形函数路线的样本规模与两条路线的损失形式沿用文献描述；本实验为两条路线采用相同的样本划分和下表训练参数。直接刚度路线的样本规模以及优化器、学习率、batch size、最大训练轮数、验证集规模、学习率调整、提前停止和随机种子为本实验选定的设置。
+本节说明 `linear_corner` 与 `full_trace` 两种接口空间下的样本生成与监督训练方法。两条路线采用相同的材料样本及训练集、验证集划分，并分别生成对应接口空间的监督标签。形函数与直接刚度两条路线分别训练、分别选取最佳权重。训练参数如下表所示。
 
 | 配置项 | 具体设置 |
 |---|---|
-| 训练样本 | 400,000 个随机样本；本次归一化杨氏模量在 $[10^{-6},1)$ 内均匀采样, 避免零刚度奇异 |
-| 形函数路线监督损失 | 约束补全后的预测形函数与精确形函数之间的均方误差 |
-| 直接刚度路线监督损失 | 对称性与刚体零空间约束补全后的预测刚度与精确刚度之间的均方误差 |
-| 形函数路线训练后期的一致性损失 | 由预测形函数构造的刚度与直接刚度预测网络输出之间的均方误差；本次未启用 |
+| 训练样本 | 400,000 个随机样本；各细单元的归一化杨氏模量在 $[10^{-6},1)$ 内独立均匀采样，避免零刚度奇异 |
+| 形函数路线监督损失 | 约束补全后的预测内部延拓矩阵与精确内部延拓矩阵之间的均方误差 |
+| 直接刚度路线监督损失 | 对称性与刚体零空间约束补全后的预测缩聚刚度矩阵与精确缩聚刚度矩阵之间的均方误差 |
 | 优化器 | Adam |
 | 初始学习率 | $10^{-3}$ |
 | batch size | 256 |
 | 最大训练轮数 | 500 |
-| 验证集 | 另生成 40,000 个样本，与训练集独立，用于调参和提前停止 |
+| 验证集 | 另生成 40,000 个样本，与训练集独立，用于学习率调整、提前停止和最佳权重选择 |
 | 学习率调整 | 验证损失连续 10 轮未改善时减半，最低 $10^{-6}$ |
 | 提前停止 | 验证损失连续 40 轮未改善时停止，保留验证损失最低的权重 |
 | 随机种子 | 2026 |
+
+本次未启用训练后期的一致性损失。该损失可定义为由预测内部延拓构造的刚度与直接刚度路线经约束补全所得刚度之间的均方误差。
 
 ```python
 from pathlib import Path
@@ -389,12 +398,14 @@ from soptx.ml.substructure.independent_training import (
 )
 from soptx.ml.substructure.training import TrainingConfig
 
-# 定义子结构与所选路线.
+# 定义子结构、接口空间与所选路线.
 dim, n_fine = 3, 5
+trace_kind = "linear_corner"  # 可选 "linear_corner" 或 "full_trace", 两者需分别生成标签和训练网络.
 route = "shape"  # 可选 "shape"、"stiffness"、"both".
 provider = IndependentTargetProvider(
     cell_size=(1.0,) * dim,
     n_fine=(n_fine,) * dim,
+    trace_kind=trace_kind,
 )
 routes = ("shape", "stiffness") if route == "both" else (route,)
 networks = {
@@ -431,19 +442,25 @@ results = train_networks(
 
 本次三维 $m=5$、`linear_corner` 工况已完成 400,000 个训练样本和 40,000 个验证样本的生成，并完成两条路线的监督训练：
 
-| 路线 | 网络数量 | 实际训练轮数 | 最佳轮次 | 最佳验证 MSE | 停止原因 |
-|---|---:|---:|---:|---:|---|
-| 形函数 | 4 | 500 | 498 | $6.409\times10^{-6}$ | 达到最大训练轮数 |
-| 直接刚度 | 1 | 46 | 6 | $9.765\times10^{-7}$ | 连续 40 轮未改善 |
+| 接口空间 | 路线 | 网络数量 | 实际训练轮数 | 最佳轮次 | 最佳验证 MSE | 停止原因 / 登记状态 |
+|---|---|---:|---:|---:|---:|---|
+| `linear_corner` | 形函数 | 4 | 500 | 498 | $6.409\times10^{-6}$ | 达到最大训练轮数 |
+| `linear_corner` | 直接刚度 | 1 | 46 | 6 | $9.765\times10^{-7}$ | 连续 40 轮未改善 |
+| `full_trace` | 形函数 | — | — | — | — | 尚未登记 |
+| `full_trace` | 直接刚度 | — | — | — | — | 尚未登记 |
+
+`full_trace` 工况的 15 隐藏层训练结果尚未登记；现有产物中未找到对应的样本与训练记录，表中“—”表示缺少记录。第 2 节的二维 `full_trace` 结果属于不同网络配置，不列入本表。
+
+两条路线的监督对象不同，验证 MSE 不宜直接比较，也不能据此判断整体结构求解精度。验证集用于训练过程中的模型选择，不作为独立测试集。
 
 
 
-运行命令：
+以下命令在本实验目录下运行，显式选择 `linear_corner`；使用 `full_trace` 时，将三处 `--trace-kind` 的值改为 `full_trace`，并将 `DATASET` 替换为对应接口空间的数据集路径。训练时的接口空间、维度和块内划分必须与数据集一致。
 
 ```bash
 # 1. 生成训练集和验证集.
 python run.py --generate-samples \
-  --dim 3 --n-fine 5 \
+  --dim 3 --n-fine 5 --trace-kind linear_corner \
   --n-train 400000 --n-validation 40000 \
   --generation-batch-size 32 --min-modulus 1e-6 \
   --seed 2026
@@ -452,14 +469,14 @@ python run.py --generate-samples \
 # 将路径替换为样本生成时输出的实际目录.
 DATASET="outputs/independent_15_layer/samples/20260922T065924289373Z"
 python run.py --train --dataset "$DATASET" \
-  --dim 3 --n-fine 5 \
+  --dim 3 --n-fine 5 --trace-kind linear_corner \
   --route shape --num-networks 4 \
   --epochs 500 --batch-size 256 --lr 1e-3 \
   --patience 40 --seed 2026 --device cpu
 
 # 3. 一次完成样本生成与形函数网络训练.
 python run.py --all \
-  --dim 3 --n-fine 5 \
+  --dim 3 --n-fine 5 --trace-kind linear_corner \
   --n-train 400000 --n-validation 40000 \
   --generation-batch-size 32 --min-modulus 1e-6 \
   --route shape --num-networks 4 \
@@ -467,43 +484,58 @@ python run.py --all \
   --patience 40 --seed 2026 --device cpu
 ```
 
-数据来源：样本保存在 [samples/20260922T065924289373Z](outputs/independent_15_layer/samples/20260922T065924289373Z/)，最佳权重与训练记录保存在 [training/20260922T065924289373Z](outputs/independent_15_layer/training/20260922T065924289373Z/)，汇总见 [summary.json](outputs/independent_15_layer/training/20260922T065924289373Z/summary.json)。
+数据来源
+
+- `linear_corner` 工况：样本保存在 [samples/20260922T065924289373Z](outputs/independent_15_layer/samples/20260922T065924289373Z/)，最佳权重与训练记录保存在 [training/20260922T065924289373Z](outputs/independent_15_layer/training/20260922T065924289373Z/)，汇总见 [summary.json](outputs/independent_15_layer/training/20260922T065924289373Z/summary.json)。
 
 ### 3.3 刚度构造与结构求解
 
-以下采用第 3.2 节保存的最佳网络权重，在 `linear_corner` 接口空间下分别构造局部刚度，再装配求解整体角点位移。两条路线均考虑子结构内部无外载的情形。
+本节说明 `linear_corner` 与 `full_trace` 两种接口空间下的局部刚度构造、整体接口求解与内部位移恢复。
+#### 1. 形函数预测路线
 
-#### 形函数预测路线
+网络预测内部形函数的独立分量，并按平移、转动约束补全内部延拓 $\widehat{\mathbf{B}}_j$。令 $\mathbf{T}_j$ 为接口位移到完整边界位移的映射，两种接口空间分别为：
 
-网络预测内部形函数的独立分量，并按平移、转动约束补全内部延拓 $\widehat{\mathbf{B}}_j$。令 $\mathbf{L}_j$ 为角点位移到边界位移的线性插值矩阵，按内部、边界自由度顺序构造
+| 接口空间 | 接口映射 $\mathbf{T}_j$ | 局部接口位移 $\mathbf{q}_j$ |
+|---|---|---|
+| `linear_corner` | 角点到边界的插值矩阵 $\mathbf{L}_j$ | 角点位移 |
+| `full_trace` | 单位矩阵 $\mathbf{I}$ | 全部边界节点位移 |
+
+按内部、边界自由度顺序构造
 
 $$
 \widehat{\mathbf{H}}_j=
 \begin{bmatrix}
 \widehat{\mathbf{B}}_j\\
-\mathbf{L}_j
+\mathbf{T}_j
 \end{bmatrix},\qquad
 \widetilde{\mathbf{K}}_r^j=\widehat{\mathbf{H}}_j^{\mathsf{T}}\mathbf{K}^j\widehat{\mathbf{H}}_j,
 $$
 
-其中 $\mathbf{K}^j$ 为相同自由度顺序下的局部有限元刚度矩阵。将各块刚度装配为整体角点系统，施加边界条件并求解后，取出各块角点位移 $\mathbf{q}_j$，用同一预测延拓恢复内部位移：
+其中 $\mathbf{K}^j$ 为相同自由度顺序下的局部有限元刚度矩阵。将各块刚度装配为整体接口系统，施加边界条件并求解后，取出各块接口位移 $\mathbf{q}_j$，用同一预测延拓恢复内部位移：
 
 $$
 \widehat{\mathbf{u}}_i^j=\widehat{\mathbf{B}}_j\mathbf{q}_j.
 $$
 
-该构造使角点系统的应变能与由同一预测形函数恢复的细网格位移场的应变能一致。
+该构造使接口系统的应变能与由同一预测形函数恢复的细网格位移场的应变能一致。
 
-#### 直接刚度预测路线
+#### 2. 直接刚度预测路线
 
-刚度网络预测 171 个独立条目，补全得到 $24\times24$ 的 $\widehat{\mathbf{K}}_r^j$，满足
+三维 $m=5$ 时，两种接口空间的直接刚度输出规模如下：
+
+| 接口空间 | 独立条目数 | 补全后的缩聚刚度矩阵尺寸 |
+|---|---:|---|
+| `linear_corner` | 171 | $24\times24$ |
+| `full_trace` | 101475 | $456\times456$ |
+
+补全后的 $\widehat{\mathbf{K}}_r^j$ 满足
 
 $$
 \widehat{\mathbf{K}}_r^j=(\widehat{\mathbf{K}}_r^j)^{\mathsf{T}},\qquad
 \widehat{\mathbf{K}}_r^j\mathbf{R}_q^j=\mathbf{0},
 $$
 
-其中 $\mathbf{R}_q^j$ 为角点接口上的 6 个刚体模态。将预测刚度直接装配为整体角点系统，施加相同边界条件并求解角点位移。
+其中 $\mathbf{R}_q^j$ 为所选接口空间中的 6 个刚体模态，分别具有 $24\times6$ 或 $456\times6$ 的尺寸。约束补全保证对称性与刚体零空间约束，不自动保证半正定性。将预测刚度直接装配为整体接口系统，施加相同边界条件并求解接口位移。
 
 需要内部位移时，另调用形函数网络，补全得到 $\widehat{\mathbf{B}}_j$，并使用 $\widehat{\mathbf{u}}_i^j=\widehat{\mathbf{B}}_j\mathbf{q}_j$ 恢复。两条路线的区别在于局部刚度的来源，直接刚度路线仍可使用形函数网络恢复内部位移。
 
@@ -513,81 +545,97 @@ $$
 \widehat{\mathbf{K}}_r^j=\widehat{\mathbf{H}}_j^{\mathsf{T}}\mathbf{K}^j\widehat{\mathbf{H}}_j,
 $$
 
-因此不自动保证角点系统与恢复的细网格位移场之间的应变能一致性。
+因此不自动保证接口系统与恢复的细网格位移场之间的应变能一致性。
 
 #### 核心代码
 
-以下是调用现有接口的流程示例，尚未接入 `run.py`。约束补全来自 [independent_targets.py](../../src/soptx/fem/substructure/independent_targets.py)，变分刚度构造来自 [piml_surrogate.py](../../src/soptx/fem/substructure/piml_surrogate.py)，稀疏装配与求解分别来自 [assembler.py](../../src/soptx/fem/substructure/assembler.py) 和 [solve.py](../../src/soptx/fem/substructure/solve.py)。
-
-示例采用 NumPy 有限元后端与 CPU、float64 网络。`provider` 沿用样本生成时的配置；`networks` 已加载各路线的最佳权重。`assembler` 和 `sub_meshes` 描述待分析结构，各子结构须与训练原型的几何、材料和离散设置一致。`E` 按 `sub_meshes` 顺序排列，每行采用训练时的细单元编号；`load` 和 `fixed_dofs` 使用整体角点系统编号。直接刚度路线恢复内部位移时也需要 `networks["shape"]`。
+**网络预测与局部刚度构造**
 
 ```python
-import torch
-from fealpy.backend import backend_manager as bm
-from soptx.fem.substructure.piml_surrogate import ShapeFunctionCondensation
-from soptx.fem.substructure.solve import solve_interface_system
+# 两条路线均使用预测的内部延拓恢复内部位移.
+shape_prediction = _predict(
+    networks["shape"], modulus, "shape"
+)
+# 根据刚体约束补全内部延拓矩阵.
+shape_recovery = provider.shape_codec.decode(shape_prediction)
+# 将补全结果转换为 float64 NumPy 数组.
+shape_recovery = np.asarray(shape_recovery, dtype=np.float64)
 
+# 仅构造所选路线的局部缩聚刚度.
+predicted = {}
 
-@torch.no_grad()
-def analyze_structure(
-    provider, networks, assembler, sub_meshes, E, load, fixed_dofs,
-    *, route="shape",
-):
-    """调用已有接口构造刚度, 求解角点位移并恢复局部位移.
+if "shape" in routes:
+    # 形函数路线: 由预测延拓与细网格刚度进行变分构造.
+    builder = ShapeFunctionCondensation(
+        provider.prototype.i_dofs,
+        provider.prototype.b_dofs,
+        rigid_basis=rigid,
+        deformation_basis=bm.asarray(deformation, dtype=bm.float64),
+        rigid_interior=rigid_interior,
+        trace=provider.trace,
+    )
 
-    Returns
-    -------
-    dict
-        局部刚度、整体角点位移及各块内部和边界位移.
-    """
-    if route not in ("shape", "stiffness"):
-        raise ValueError("route 必须为 shape 或 stiffness")
+    local_stiffness_backend = bm.asarray(
+        local_stiffness, dtype=bm.float64
+    )
+    shape_recovery_backend = bm.asarray(
+        shape_recovery, dtype=bm.float64
+    )
+    shape_stiffness = builder.assemble_reduced_stiffness(
+        local_stiffness_backend, shape_recovery_backend
+    )
+    predicted["shape"] = np.asarray(
+        bm.to_numpy(shape_stiffness), dtype=np.float64
+    )
 
-    prototype, trace = provider.prototype, provider.trace
-    inputs = torch.as_tensor(bm.to_numpy(E), dtype=torch.float64)
-
-    # 利用平移、转动约束, 将预测的独立分量补全为内部形函数矩阵 B.
-    shape_net = networks["shape"]
-    # 设置网络状态为评估模式，不进行预测.
-    shape_net.eval()
-    values = shape_net(inputs)               # 预测独立分量
-    B = provider.shape_codec.decode(values)  # 根据平移、转动约束补全矩阵
-    B = bm.asarray(B.cpu().numpy(), dtype=bm.float64)
-
-    if route == "shape":
-        rigid, deformation, interior = prototype.trace_interface_bases(trace)
-        constructor = ShapeFunctionCondensation(
-            prototype.i_dofs, prototype.b_dofs,
-            rigid_basis=rigid,
-            deformation_basis=deformation,
-            rigid_interior=interior,
-            trace=trace,
-        )
-        K_local = prototype.assemble_local_stiffness_batch(E)
-        K_reduced = constructor.assemble_reduced_stiffness(K_local, B)
-    else:
-        stiffness_net = networks["stiffness"]
-        stiffness_net.eval()
-        values = stiffness_net(inputs)  # 预测独立刚度条目
-        K_reduced = provider.stiffness_codec.decode(values)  # 根据对称性和刚体约束补全矩阵
-        K_reduced = bm.asarray(K_reduced.cpu().numpy(), dtype=bm.float64)
-
-    # K_reduced 已位于角点空间, 直接装配, 不再进行迹空间投影.
-    system = assembler.assemble_macro_system(sub_meshes, K_reduced)
-    q = solve_interface_system(system, load, fixed_dofs, solver="scipy")
-
-    # 从整体角点位移提取各块位移, 再恢复内部和边界位移.
-    corner_indices = assembler.macro_corner_indices(sub_meshes)
-    q_local = q[corner_indices]
-    u_internal = bm.einsum("bij,bj->bi", B, q_local)
-    u_boundary = trace.expand_displacement(q_local)
-    return {
-        "local_stiffness": K_reduced,
-        "corner_displacement": q,
-        "internal_displacement": u_internal,
-        "boundary_displacement": u_boundary,
-    }
+if "stiffness" in routes:
+    # 直接刚度路线: 预测独立条目, 再补全缩聚刚度矩阵.
+    stiffness_prediction = _predict(
+        networks["stiffness"], modulus, "stiffness"
+    )
+    stiffness_matrix = provider.stiffness_codec.decode(
+        stiffness_prediction
+    )
+    predicted["stiffness"] = np.asarray(
+        stiffness_matrix, dtype=np.float64
+    )
 ```
+
+**接口装配、求解与位移恢复**
+
+```python
+# 1. 按接口空间装配整体刚度.
+system = _assemble(
+    assembler, sub_meshes, provider.trace_kind, stiffness
+)
+
+# 2. 转换载荷与约束, 求解接口位移.
+solution = _solve(
+    assembler, sub_meshes, provider.trace,
+    provider.trace_kind, system, load, fixed,
+)
+
+# 3. 恢复各块内部位移, 并散射为完整全局位移.
+internal, full = _recover(
+    assembler, sub_meshes, positions,
+    trace_matrix, shape_recovery, solution,
+)
+```
+
+#### 实现与运行入口
+
+以下命令在本实验目录下执行, 加载主工作区中已有的 `linear_corner` 权重, 不重新生成样本或训练网络:
+
+```bash
+CHECKPOINT_DIR="/home/brighthe/workspace/soptx/experiments/analysis_capability_piml_substructure/outputs/independent_15_layer/training/20260922T065924289373Z"
+python run.py --analyze --checkpoint-dir "$CHECKPOINT_DIR" \
+  --dim 3 --n-fine 5 --trace-kind linear_corner \
+  --n-sub 2 1 1 --route both --seed 2026 --device cpu
+```
+
+选择 `full_trace` 时须同时指定 `--trace-kind full_trace` 和对应空间的权重目录. 当前尚无已登记的三维 `full_trace` 权重, 不能复用 `linear_corner` 权重. `--route shape` 只需形函数权重; `--route stiffness` 和 `both` 还需直接刚度权重, 两者均以形函数权重恢复内部位移.
+
+结果保存于 `outputs/independent_15_layer/analysis/<UTC timestamp>/`, 包括配置、权重来源及校验值、材料输入、位移和误差汇总. 评价分别记录局部刚度、接口位移、内部位移和柔度误差, 并检查接口平衡残差. 同接口空间的比较不评价 `linear_corner` 相对完整细网格的接口降维误差. 本入口已接入代码, 尚未执行数值验证, 本节不据此新增精度结论.
 
 ---
 

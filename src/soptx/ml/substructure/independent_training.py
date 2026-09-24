@@ -71,14 +71,22 @@ def build_network(provider_metadata, *, route="shape", seed=2026, num_networks=N
         stop = start + size + (i < remainder)
         groups.append(tuple(range(start, stop)))
         start = stop
-    kwargs = dict(
-        input_dim=widths["inputs"], output_dim=output_dim,
-        hidden_dims=HIDDEN_DIMS, activation=ACTIVATIONS,
-    )
     # 保留原单网络刚度模型的权重键格式.
     model = (
-        DirectStiffnessNet(**kwargs) if route == "stiffness" and count == 1
-        else SplitOutputNet(output_groups=tuple(groups), **kwargs)
+        DirectStiffnessNet(
+            input_dim=widths["inputs"],
+            output_dim=output_dim,
+            hidden_dims=HIDDEN_DIMS,
+            activation=ACTIVATIONS,
+        )
+        if route == "stiffness" and count == 1
+        else SplitOutputNet(
+            input_dim=widths["inputs"],
+            output_dim=output_dim,
+            hidden_dims=HIDDEN_DIMS,
+            output_groups=tuple(groups),
+            activation=ACTIVATIONS,
+        )
     )
     return model.to(dtype=torch.float64)
 

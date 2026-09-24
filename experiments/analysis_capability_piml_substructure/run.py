@@ -1,4 +1,4 @@
-"""二维/三维 PIML 子结构: 构建网络、准备样本、监督训练."""
+"""二维/三维 PIML 子结构: 样本生成、监督训练与结构求解验证."""
 
 import argparse
 from datetime import datetime, timezone
@@ -19,8 +19,15 @@ def parse_args():
                          const="samples", help="仅生成样本")
     actions.add_argument("--train", dest="stage", action="store_const",
                          const="train", help="使用已有样本训练")
+    actions.add_argument("--analyze", dest="stage", action="store_const",
+                         const="analyze", help="加载最佳权重并与同接口精确缩聚比较")
+    parser.add_argument("--checkpoint-dir", type=Path, help="--analyze 使用的最佳权重目录")
+    parser.add_argument("--n-sub", type=int, nargs="+",
+                        help="--analyze 的各方向子结构数, 默认 2 1 或 2 1 1")
     parser.add_argument("--dim", type=int, choices=(2, 3), default=3)
     parser.add_argument("--n-fine", type=int, default=5, help="每个方向的细单元数, 至少为 2")
+    parser.add_argument("--trace-kind", choices=("linear_corner", "full_trace"),
+                        default="linear_corner", help="接口空间, 默认 linear_corner")
     parser.add_argument("--dataset", type=Path, help="已有数据集目录")
     parser.add_argument("--output-dir", type=Path, default=CURRENT_DIR / "outputs")
     parser.add_argument("--n-train", type=int, default=400_000)
@@ -39,6 +46,19 @@ def parse_args():
     args = parser.parse_args()
     if (args.stage == "train") != (args.dataset is not None):
         parser.error("--train 必须指定 --dataset, 其他入口不接受 --dataset")
+    if (args.stage == "analyze") != (args.checkpoint_dir is not None):
+        parser.error("--analyze 必须指定 --checkpoint-dir, 其他入口不接受该参数")
+    if args.n_sub is not None and args.stage != "analyze":
+        parser.error("--n-sub 仅用于 --analyze")
+    if args.stage == "analyze":
+        if args.device != "cpu":
+            parser.error("--analyze 当前仅支持 --device cpu")
+        if args.num_networks is not None:
+            parser.error("--analyze 从权重读取网络数量, 不接受 --num-networks")
+        if args.n_sub is None:
+            args.n_sub = [2] + [1] * (args.dim - 1)
+        if len(args.n_sub) != args.dim or min(args.n_sub) <= 0:
+            parser.error("--n-sub 须为与 --dim 同长度的正整数列表")
     if min(args.n_train, args.n_validation, args.generation_batch_size,
            args.epochs, args.batch_size) <= 0:
         parser.error("样本数、批量大小与训练轮数必须为正数")
@@ -54,7 +74,7 @@ def parse_args():
 
 
 def main():
-    """按网络、样本、训练的顺序调用各模块."""
+    """分派结构求解或按网络、样本、训练的顺序调用各模块."""
     args = parse_args()
     from soptx.fem.substructure.independent_targets import IndependentTargetProvider
     from soptx.ml.substructure.independent_training import (
@@ -65,10 +85,33 @@ def main():
     output_root = args.output_dir / "independent_15_layer"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
+    if args.stage == "analyze":
+        from fealpy.backend import backend_manager as bm
+        bm.set_backend("numpy")
+
     provider = IndependentTargetProvider(
         cell_size=(1.0,) * args.dim, n_fine=(args.n_fine,) * args.dim,
+        trace_kind=args.trace_kind,
     )
     metadata = provider.metadata()
+
+    if args.stage == "analyze":
+        from analysis import run_analysis
+        from checkpoints import load_analysis_networks
+
+        networks, sources = load_analysis_networks(
+            args.checkpoint_dir, metadata, route=args.route,
+        )
+        routes = ("shape", "stiffness") if args.route == "both" else (args.route,)
+        output = output_root / "analysis" / stamp
+        summary = run_analysis(
+            provider, networks, output, n_sub=tuple(args.n_sub),
+            seed=args.seed, routes=routes, checkpoint_sources=sources,
+        )
+        print(f"结构求解结果: {output}")
+        if summary["status"] != "COMPLETED":
+            raise SystemExit("结构求解未全部完成, 请检查输出目录中的 summary.json")
+        return
 
     # 1. 构建网络.
     if args.stage != "samples":
