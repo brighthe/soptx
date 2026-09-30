@@ -43,6 +43,7 @@ class ElasticityEAOperator:
         degree: int = 1,
         dof_comm: Any = None,
         assembly_method: str = "standard",
+        integration_order: Optional[int] = None,
     ) -> None:
         """初始化 EA 算子门面.
 
@@ -54,6 +55,8 @@ class ElasticityEAOperator:
             dof_comm (EntityMPI | None, 可选): 自由度跨进程通信器. 串行传入 None. 默认值为 None.
             assembly_method (str, 可选): 单元矩阵的收缩顺序, 可选 ``"standard"``、``"voigt"`` 或 ``"fast"``.
                 它只改变中间张量的规模与峰值内存, 不改变单元矩阵的数值. 默认值为 ``"standard"``.
+            integration_order (int | None, 可选): 积分参数 q, 张量积单元为每方向点数; 为 None 时取
+                ``degree + 3``. 默认值为 None.
         """
         self.space = space
         self.pde = pde
@@ -64,12 +67,13 @@ class ElasticityEAOperator:
         self.analyzer: LagrangeFEMAnalyzer
         if dof_comm is None:
             self.analyzer = build_serial_analyzer(
-                space, pde, material, degree, "ea", assembly_method
+                space, pde, material, degree, "ea", assembly_method,
+                integration_order=integration_order,
             )
         else:
             self.analyzer = build_distributed_analyzer(
                 space, pde, material, degree, "ea", assembly_method,
-                dof_comm=dof_comm,
+                dof_comm=dof_comm, integration_order=integration_order,
             )
 
         self._system_operator: Any = None

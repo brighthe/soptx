@@ -32,14 +32,18 @@ def _analyzer_arguments(
     operator_level: str = "ea",
     assembly_method: str = "standard",
     preconditioner_level: str | None = None,
+    integration_order: int | None = None,
 ) -> dict[str, Any]:
-    """将物理问题、材料本构与有限元空间组合为标准分析器构造参数字典."""
+    """将物理问题、材料本构与有限元空间组合为标准分析器构造参数字典.
+
+    ``integration_order`` 为 ``None`` 时取 ``degree + 3``.
+    """
     return {
         "disp_mesh": space.mesh,
         "pde": pde,
         "material": material,
         "space_degree": degree,
-        "integration_order": degree + 3,
+        "integration_order": degree + 3 if integration_order is None else integration_order,
         "operator_level": operator_level,
         "preconditioner_level": preconditioner_level,
         "assembly_method": assembly_method,
@@ -55,6 +59,8 @@ def build_serial_analyzer(
     operator_level: str = "ea",
     assembly_method: str = "standard",
     preconditioner_level: str | None = None,
+    *,
+    integration_order: int | None = None,
 ) -> LagrangeFEMAnalyzer:
     """构造不含跨进程通信的串行拉格朗日有限元分析器.
 
@@ -71,6 +77,8 @@ def build_serial_analyzer(
             中间张量的规模与峰值内存, 不改变单元矩阵的数值. 默认值为 ``"standard"``.
         preconditioner_level (str | None, optional): 预条件子取算子的层级, 取值同 ``operator_level``;
             为 ``None`` 时预条件子绑主算子本身. 默认值为 ``None``.
+        integration_order (int | None, optional): 积分参数 q (关键字参数); 张量积单元为每方向点数.
+            为 ``None`` 时取 ``degree + 3``. 默认值为 ``None``.
 
     Returns:
         LagrangeFEMAnalyzer: 初始化的串行有限元分析器实例.
@@ -79,7 +87,7 @@ def build_serial_analyzer(
         solve_method="scipy",
         **_analyzer_arguments(
             space, pde, material, degree, operator_level, assembly_method,
-            preconditioner_level,
+            preconditioner_level, integration_order,
         ),
     )
 
@@ -94,6 +102,7 @@ def build_distributed_analyzer(
     preconditioner_level: str | None = None,
     *,
     dof_comm: Any,
+    integration_order: int | None = None,
 ) -> Any:
     """构造重叠副本布局下的分布式线弹性分析器 (支持单 Rank 与多 Rank).
 
@@ -110,6 +119,7 @@ def build_distributed_analyzer(
         preconditioner_level (str | None, optional): 预条件子取算子的层级, 含义同 ``build_serial_analyzer``.
             多 Rank 下不能取 ``"fa"`` —— 对称消元没有重叠归约的插入点. 默认值为 ``None``.
         dof_comm (Any): 自由度跨进程通信器 (关键字参数).
+        integration_order (int | None, optional): 积分参数 q, 含义同 ``build_serial_analyzer``. 默认值为 ``None``.
 
     Returns:
         DistributedElasticityAnalyzer: 初始化的分布式有限元分析器实例.
@@ -122,7 +132,7 @@ def build_distributed_analyzer(
         dof_comm=dof_comm,
         **_analyzer_arguments(
             space, pde, material, degree, operator_level, assembly_method,
-            preconditioner_level,
+            preconditioner_level, integration_order,
         ),
     )
 

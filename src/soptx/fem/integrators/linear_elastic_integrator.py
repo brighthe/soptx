@@ -195,7 +195,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         if enable_timing:
             t.send('缓存部分')
 
-        NC = mesh.number_of_cells()
+        NC = gphi.shape[0]  # 按 index 截取后的单元数, 输出与 coef 均以此为准
         GD = mesh.geo_dimension()
         NQ = len(ws)
         D0 = self._material.elastic_matrix()  # (1, 1, NS, NS)
@@ -584,7 +584,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         mesh = getattr(space, 'mesh', None)
         cm, ws, bcs, gphi, detJ = self.fetch_voigt_assembly(space)
 
-        NC = mesh.number_of_cells()
+        NC = gphi.shape[0]  # 按 index 截取后的单元数, 输出与 coef 均以此为准
         NQ = gphi.shape[1]
         D0 = self._material.elastic_matrix() # 2D: (1, 1, NS, NS)
         B = self._material.strain_matrix(dof_priority=space.dof_priority,
@@ -736,7 +736,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         gphi_lambda = scalar_space.grad_basis(bcs, index=index, variable='u')    # (NQ, LDOF, BC)
 
         if isinstance(mesh, SimplexMesh):
-            glambda_x = mesh.grad_lambda()   # (NC, LDOF, GD)
+            glambda_x = mesh.grad_lambda(index=index)   # (NC, LDOF, GD)
             # 快速装配用的恒等式是 ``grad(phi_i) = sum_k (d phi_i / d lambda_k) grad(lambda_k)``,
             # 因此 ``S`` 的后两轴必须是重心坐标轴 (长度 ``BC = GD + 1``), 与 ``glambda_x``
             # 的重心坐标轴对齐。上面按 ``variable='u'`` 取到的是对物理坐标的导数
@@ -748,7 +748,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
         else:
             # 适用于结构/张量积/多边形等非单纯形网格
             cell_view = mesh.entity_view('cell')
-            J = cell_view.jacobi_matrix(bcs) # (NC, NQ, GD, GD)
+            J = cell_view.jacobi_matrix(bcs, index=index) # (NC, NQ, GD, GD)
             if not bm.allclose(J[:, 0, ...], J[:, -1, ...]):
                 raise ValueError("雅可比矩阵 J 在积分点上不恒定, 无法使用快速组装. 请使用传统组装或检查网格类型")
             J_const = J[:, 0, ...] # (NC, GD, GD)
@@ -769,8 +769,13 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             next(t)
         scalar_space = space.scalar_space
         mesh = getattr(scalar_space, 'mesh', None)
-                
-        NC = mesh.number_of_cells()
+
+        # 单纯形取 (cm, glambda_x, S), 其余取 (cm, invJT, S); 先取出以便按 index 截取后的单元数定 NC
+        cm, G, S = self.fetch_fast_assembly(space)
+        if enable_timing:
+            t.send('缓存部分')
+
+        NC = cm.shape[0]  # 按 index 截取后的单元数, 输出与 coef 均以此为准
         GD = mesh.geo_dimension()
         D0 = self._material.elastic_matrix()  # (1, 1, NS, NS)
 
@@ -784,9 +789,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             raise NotImplementedError("The fast assembly currently only supports")
         
         if isinstance(mesh, SimplexMesh):
-            cm, glambda_x, S = self.fetch_fast_assembly(space)
-            if enable_timing:
-                t.send('缓存部分')
+            glambda_x = G
             A_xx = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 0], cm) # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 1], glambda_x[..., 1], cm)
             A_xy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 0], glambda_x[..., 1], cm)
@@ -799,9 +802,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 A_zy = bm.einsum('ijkl, ck, cl, c -> cij', S, glambda_x[..., 2], glambda_x[..., 1], cm)
 
         else:
-            cm, invJT, S = self.fetch_fast_assembly(space)
-            if enable_timing:
-                t.send('缓存部分')
+            invJT = G
             A_xx = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 0, :], invJT[..., 0, :], cm) # (NC, LDOF, LDOF)
             A_yy = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 1, :], invJT[..., 1, :], cm)
             A_xy = bm.einsum('ijmn, cm, cn, c -> cij', S, invJT[..., 0, :], invJT[..., 1, :], cm)

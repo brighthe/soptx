@@ -22,8 +22,10 @@ from soptx.fem.integrators import (
     LinearElasticIntegrator,
     SourceIntegrator,
 )
+from soptx.fem.kernels import ElementRestriction
 from soptx.fem.levels import (
     AssemblyLevelExtension,
+    SharedReferenceElementAssembly,
     available_levels,
     create_level,
 )
@@ -64,7 +66,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             - 'fa': 装配全局稀疏矩阵 (full assembly), 支持直接解法与伴随求解;
             - 'ea': 只保留单元矩阵 (element assembly), matvec 时 gather-作用-scatter,
-              不形成全局矩阵, 只能用迭代解法;
+              不形成全局矩阵, 只能用迭代解法; 单元密度下只常驻 K_e^0 (与敏度共用) 与
+              逐单元标量 s_e, 不另存 K_e;
             - 'pa': 只保留积分点上的几何与材料数据 (partial assembly), matvec 时
               gather-B-D-B^T-scatter, 高阶下比 'ea' 省内存, 只能用迭代解法;
             - 'ua': 什么都不常驻 (unassembled), 每次 matvec 现算几何与材料, 只用于取证.
@@ -391,25 +394,28 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if enable_timing:
             t.send('预备')
 
-        if self._level_reusable():
+        coef = self._integrator.coef
+        if self._level_reusable(coef):
             # 'ea' / 'pa' / 'ua' 的拓扑与几何数据不随密度变, 只按新系数更新
-            self._level.update(self._integrator.coef)
+            self._level.update(coef)
             level = self._level
+        elif self._scaled_reference_ea(coef):
+            # 单元密度下 K_e = s_e K_e^0: 只常驻 K_e^0 与 s_e, K_e^0 与敏度共用分析器
+            # 缓存的这一份, 不另存 K_e; update 只换 s_e
+            restriction = ElementRestriction.from_integrator(self._integrator,
+                                                            self._tensor_space,
+                                                            layout='flat')
+            level = SharedReferenceElementAssembly(self._tensor_space,
+                                                restriction=restriction,
+                                                reference_matrices=self._solid_stiffness_matrix(),
+                                                scale=coef)
+            self._level_space = self._tensor_space
         else:
-            level_kwargs = {}
-            coef = self._integrator.coef
-            if (self._operator_level == 'ea'
-                and self._topopt_algorithm == 'density_based'
-                and coef is not None and coef.ndim == 1):
-                # 单元密度下 EA 由 K_e^0 逐单元缩放, 与敏度共用分析器缓存的这一份;
-                # 多分辨率、泊松比插值等其余形状仍重新积分, 不必多算一份 K_e^0
-                level_kwargs['reference_matrices'] = self._solid_stiffness_matrix()
-
+            # 多分辨率、逐点、泊松比插值等系数不是单元标量, 'ea' 走标准 EA 逐单元积分
             level = create_level(self._operator_level,
                                 space=self._tensor_space,
                                 integrator=self._integrator,
-                                pattern=self._csr_pattern,
-                                **level_kwargs)
+                                pattern=self._csr_pattern)
             self._level_space = self._tensor_space
 
             # 'fa' 下层级把首次装配建好的 CSR 骨架交回来供下次复用; 其余层级没有骨架
@@ -427,21 +433,48 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._K
 
 
-    def _level_reusable(self) -> bool:
+    def _level_reusable(self, coef: Optional[TensorLike]) -> bool:
         """当前层级能否只按新系数原地更新, 而不重建.
+
+        Parameters
+        ----------
+        coef : 积分子的新系数.
 
         Returns
         -------
-        reusable : 已有层级, 空间未变, 且层级为 'ea' / 'pa' / 'ua' 时为 True.
+        reusable : 已有层级, 空间未变, 层级为 'ea' / 'pa' / 'ua', 且 'ea' 下已有实例的
+            形式 (逐单元参考或标准) 与新系数相符时为 True.
 
         Notes
         -----
         'fa' 每次重建: 它的 ``update`` 接受的是装配好的全局矩阵而非系数, 骨架复用
         已由 ``self._csr_pattern`` 负责.
         """
-        return (self._level is not None
-                and self._level_space is self._tensor_space
-                and self._operator_level in ('ea', 'pa', 'ua'))
+        if (self._level is None
+                or self._level_space is not self._tensor_space
+                or self._operator_level not in ('ea', 'pa', 'ua')):
+            return False
+
+        if self._operator_level == 'ea':
+            scaled = isinstance(self._level, SharedReferenceElementAssembly)
+            return scaled == self._scaled_reference_ea(coef)
+
+        return True
+
+    def _scaled_reference_ea(self, coef: Optional[TensorLike]) -> bool:
+        """'ea' 层级能否取逐单元参考形式, 即只常驻 K_e^0 与 s_e.
+
+        Parameters
+        ----------
+        coef : 积分子的系数.
+
+        Returns
+        -------
+        scaled : 'ea' 层级、密度拓扑优化且系数为单元密度 (NC, ) 时为 True.
+        """
+        return (self._operator_level == 'ea'
+                and self._topopt_algorithm == 'density_based'
+                and coef is not None and coef.ndim == 1)
 
     def _solid_stiffness_matrix(self) -> TensorLike:
         """取缓存的实体单元矩阵 K_e^0, 未缓存时现算一次"""
