@@ -9,13 +9,18 @@ HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑)。位
 参考值不是任一离散在某网格上的值: 120x40 上 $k=4$ 自身仍高出真值 0.3% 至 0.4%, 与被评估
 离散的误差同量级。这里取 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken delta^2, 按实测差比,
 不假定收敛阶), 与 ``bearing_h_locking_probe.py`` 终端表同一公式; 改用其余序列外推, 参考值变化
-不超过 0.02%, 即其不确定度, 因此 $p=2$ 在 $\\nu_0 = 0.3$ 最细两级的点 (0.016%, 0.013%) 不可信。
+不超过 0.06% (实测 0.01% 至 0.05%), 即其不确定度, 因此 $p=2$ 在 $\\nu_0 = 0.3$ 最细两级的点
+(0.016%, 0.013%) 不可信。
 
 数据不重解方程, 只读 ``bearing_h_locking_probe.py`` 落盘的
 ``outputs/bearing-incompressible/postprocess/solid_h_sweep.json``; 缺文件即报错。
 
-输出: outputs/figures/bearing_solid_h_convergence.{png,pdf,eps}, 自动同步至
+输出: outputs/figures/bearing_solid_h_convergence.{pdf,png}, 自动同步至
 papers/huzhang-topopt/figures/。
+
+2026-09-28 起按版心尺寸出图: 宽 6.3 in, 论文里以 ``width=\\textwidth`` (5.9 in) 嵌入,
+字号按 9 pt 底稿定; 字体走 ``paper_rcparams`` 的 Palatino 口径, 轴名改英文 (投稿稿用),
+输出 PDF 矢量与 PNG, 不再出 EPS。
 
 论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
 """
@@ -30,9 +35,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import config
-from ._base import academic_rcparams, chinese_font, save_figure
+from ._base import paper_rcparams, save_figure
 
-academic_rcparams()
+paper_rcparams()
 
 # ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "bearing-incompressible"
@@ -72,8 +77,7 @@ def main() -> None:
     if len(nus) != 2:
         raise RuntimeError(f"期望两档 nu, 实得 {nus}")
 
-    ZH = chinese_font()
-    fig, axes = plt.subplots(1, 2, figsize=(10.0, 4.0), dpi=300, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(6.3, 2.6), sharey=True)
     panel = ("(a)", "(b)")
 
     for ax, tag, nu in zip(axes, panel, nus):
@@ -84,30 +88,31 @@ def main() -> None:
                    for r in block if key in r["compliance"]]
             h = np.array([p[0] for p in pts])
             err = np.array([p[1] for p in pts])
-            ax.loglog(h, err, color=color, lw=1.8, ls=ls, marker=marker, ms=5.5,
-                      mec="white", mew=0.7, label=label, zorder=3)
+            ax.loglog(h, err, color=color, lw=1.2, ls=ls, marker=marker, ms=3.5,
+                      mec="white", mew=0.5, label=label, zorder=3)
         # 一阶参考斜率: 放在右下, 不压任何曲线
         h0, h1 = 1.6, 3.2
         e0 = 0.008
-        ax.loglog([h0, h1, h1, h0], [e0, e0 * 2.0, e0, e0], color="#555555", lw=0.9, zorder=2)
-        ax.text(h1 * 1.05, e0 * 1.3, "1", fontsize=8.5, color="#555555", va="center")
+        ax.loglog([h0, h1, h1, h0], [e0, e0 * 2.0, e0, e0], color="#555555", lw=0.7, zorder=2)
+        ax.text(h1 * 1.05, e0 * 1.3, "1", fontsize=7.5, color="#555555", va="center")
 
         ax.set_xscale("log")
         ax.set_xticks([0.5, 1.0, 2.0, 4.0])
-        ax.set_xticklabels(["0.5", "1", "2", "4"], fontsize=9)
+        ax.set_xticklabels(["0.5", "1", "2", "4"], fontsize=8)
         ax.minorticks_off()
         ax.set_xlim(0.38, 5.2)
-        ax.set_xlabel("单元尺寸 $h$ (mm)", fontsize=11, fontproperties=ZH)
-        ax.grid(True, which="major", ls=":", alpha=0.5)
-        ax.set_title(f"{tag} $\\nu_0 = {nu:g}$", fontsize=11, pad=6)
-        ax.tick_params(axis="y", labelsize=9)
+        ax.set_xlabel("Element size $h$ (mm)", fontsize=9)
+        ax.grid(True, which="major", ls=":", lw=0.5, alpha=0.5)
+        ax.set_title(f"{tag} $\\nu_0 = {nu:g}$", fontsize=9.5, pad=4)
+        ax.tick_params(axis="y", labelsize=8)
 
     axes[0].set_ylim(5e-3, 100.0)
-    axes[0].set_ylabel("柔顺度相对误差 $|\\Delta C / C|$ (%)", fontsize=11, fontproperties=ZH)
-    axes[0].legend(loc="upper left", fontsize=9.5, framealpha=0.95, edgecolor="#cccccc")
+    axes[0].set_ylabel("Compliance deviation $|\\Delta C / C|$ (%)", fontsize=9)
+    axes[0].legend(loc="upper left", fontsize=8, framealpha=0.95, edgecolor="#cccccc",
+                   borderpad=0.4, labelspacing=0.3, handlelength=2.0)
 
-    fig.subplots_adjust(left=0.08, right=0.985, top=0.91, bottom=0.15, wspace=0.08)
-    save_figure(fig, "bearing_solid_h_convergence", formats=("png", "pdf", "eps"))
+    fig.subplots_adjust(left=0.10, right=0.985, top=0.90, bottom=0.17, wspace=0.08)
+    save_figure(fig, "bearing_solid_h_convergence", formats=("pdf", "png"), dpi=600)
     plt.close(fig)
 
 

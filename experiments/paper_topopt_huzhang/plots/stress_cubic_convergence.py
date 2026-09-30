@@ -17,7 +17,15 @@
 <= delta_g; 全域 (含灰度单元) 的 ``max_relative_violation`` 不画, 正文亦不引.
 参考线取 summary 记录的 ``relative_stress_tolerance``, 不另写常数。
 
-输出 png/pdf/eps 三种格式至 papers/huzhang-topopt/figures 与本地 outputs/figures.
+输出 PDF 矢量与 600 dpi PNG 至 papers/huzhang-topopt/figures 与本地 outputs/figures, 不再出 EPS。
+
+2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
+原尺寸嵌入, 面板标题字号即纸面字号; 字体走 ``paper_rcparams`` 的 Palatino 口径, 标题与轴名
+改英文 (投稿稿用)。面板标题只写编号、方法与阶次, 体积分数等数值由正文给出。图例放在各面板内:
+收敛历史三项单列放右上角 (框底在左轴 0.57 之上、框左缘在第 160 步之后, 该段 f_V 已低于 0.38,
+g_max 低于 0.15, 不压数据; 图例挂在 twin 上, 免得被后画的 g_max 曲线盖住), 只写符号, 全名在
+同色轴名上; 主应力面两项放左上角, 纵轴上限由 1.5 抬到 1.9 留出图例带 (屈服椭圆顶 1.155 在框底
+1.20 之下, 满应力点全在 sigma_1 >= sigma_2 半平面), 色标改挂 inset_axes 以与非正方形面板等高。
 """
 import json
 
@@ -28,9 +36,16 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 import config
-from ._base import academic_rcparams, chinese_font, require_run_dir, save_figure
+from ._base import paper_rcparams, require_run_dir, save_figure
 
-academic_rcparams()
+paper_rcparams()
+
+# 版心宽 150 mm; 左列收敛历史 (双纵轴), 右列主应力平面 (正方形 + 色标), 两行.
+FIG_SIZE_IN = (5.9, 5.0)
+TITLE_PT = 9.5
+LABEL_PT = 9.0
+TICK_PT = 8.0
+DPI = 600
 
 # 配色与图 5.8 一致: 体积分数走蓝实线, 违反量走绿虚线, 容差线取同色点线, 屈服面走红.
 COLOR_PRIMARY = "#1f77b4"
@@ -38,7 +53,8 @@ COLOR_SECONDARY = "#2ca02c"
 COLOR_YIELD = "#d62728"
 COLOR_REFERENCE = "#aaaaaa"
 STRESS_CMAP = "jet"
-LEGEND_STYLE = dict(fontsize=9.5, framealpha=0.95, edgecolor="#cccccc")
+LEGEND_STYLE = dict(fontsize=7.5, framealpha=0.95, edgecolor="#cccccc",
+                    borderpad=0.4, labelspacing=0.3, handlelength=2.0)
 
 # ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
@@ -109,35 +125,31 @@ def main() -> None:
     lf_fields = load_fields(base, REQUIRED_RUNS[2])
     hz_fields = load_fields(base, REQUIRED_RUNS[3])
 
-    ZH = chinese_font()
-
     def plot_convergence(axes, volfrac, g_max, tolerance, title):
         iterations = np.arange(1, len(volfrac) + 1)
-        line_volume, = axes.plot(iterations, volfrac, color=COLOR_PRIMARY, lw=1.8,
-                                 label="体积分数 $f_V$")
-        axes.set_xlabel("迭代步", fontsize=11, fontproperties=ZH)
-        axes.set_ylabel("体积分数 $f_V$", fontsize=11, fontproperties=ZH,
-                        color=COLOR_PRIMARY)
-        axes.tick_params(axis="both", labelsize=9)
+        line_volume, = axes.plot(iterations, volfrac, color=COLOR_PRIMARY, lw=1.2,
+                                 label="$f_V$")
+        axes.set_xlabel("Iteration", fontsize=LABEL_PT)
+        axes.set_ylabel("Volume fraction $f_V$", fontsize=LABEL_PT, color=COLOR_PRIMARY)
+        axes.tick_params(axis="both", labelsize=TICK_PT)
         axes.set_ylim(0.30, 0.70)
 
         twin = axes.twinx()
-        line_violation, = twin.plot(iterations, g_max, color=COLOR_SECONDARY, lw=1.6,
-                                    ls="--", label="最大局部约束值 $g_{\\max}$")
-        line_tolerance = twin.axhline(tolerance, color=COLOR_SECONDARY, ls=":", lw=1.0,
-                                      alpha=0.7,
-                                      label=f"应力容差 $\\delta_g = {tolerance:g}$")
+        line_violation, = twin.plot(iterations, g_max, color=COLOR_SECONDARY, lw=1.1,
+                                    ls="--", label="$g_{\\max}$")
+        line_tolerance = twin.axhline(tolerance, color=COLOR_SECONDARY, ls=":", lw=0.9,
+                                      alpha=0.7, label=f"$\\delta_g = {tolerance:g}$")
         twin.set_yscale("log")
-        twin.set_ylabel("最大局部约束值 $g_{\\max}$", fontsize=11, fontproperties=ZH,
+        twin.set_ylabel("Max. local constraint $g_{\\max}$", fontsize=LABEL_PT,
                         color=COLOR_SECONDARY)
-        twin.tick_params(axis="y", labelsize=9)
+        twin.tick_params(axis="y", labelsize=TICK_PT)
         twin.set_ylim(min(tolerance, float(g_max.min())) * 0.5,
                       float(g_max.max()) * 2.0)
 
-        axes.legend(handles=[line_volume, line_violation, line_tolerance],
-                    loc="upper right", prop=ZH, **LEGEND_STYLE)
-        axes.set_title(title, fontsize=11, fontproperties=ZH, y=-0.30)
-        axes.grid(True, ls=":", alpha=0.5)
+        twin.legend(handles=[line_volume, line_violation, line_tolerance], loc="upper right",
+                    **{**LEGEND_STYLE, "handlelength": 1.6})
+        axes.set_title(title, fontsize=TITLE_PT, pad=4)
+        axes.grid(True, ls=":", lw=0.5, alpha=0.5)
 
     def plot_yield_surface(axes, fields, title):
         # 只画判据集合: 空洞单元的表观应力被 m_E 压到接近零, 全堆在原点; 被动实体区
@@ -151,50 +163,51 @@ def main() -> None:
         th = np.linspace(0.0, 2.0 * np.pi, 400)
         ct, st = np.cos(th), np.sin(th)
         scale = 1.0 / np.sqrt(ct ** 2 - ct * st + st ** 2)
-        yield_line, = axes.plot(ct * scale, st * scale, color=COLOR_YIELD, lw=1.6,
-                                label="von Mises 许用应力边界")
+        yield_line, = axes.plot(ct * scale, st * scale, color=COLOR_YIELD, lw=1.1,
+                                label="$\\sigma_{\\mathrm{vm}} = \\bar{\\sigma}$")
 
         # 色标固定在 [0, 1], 两图可直接对比.
         sc = axes.scatter(sig1, sig2, c=vm, cmap=STRESS_CMAP, vmin=0.0, vmax=1.0,
-                          s=5, alpha=0.85, linewidths=0)
+                          s=2.5, alpha=0.85, linewidths=0)
 
-        marker_proxy = Line2D([], [], linestyle="none", marker="o", markersize=4.5,
+        marker_proxy = Line2D([], [], linestyle="none", marker="o", markersize=3.5,
                               markerfacecolor=plt.get_cmap(STRESS_CMAP)(0.75),
                               markeredgecolor="none",
-                              label=r"表观应力点（$\mathcal{E}_{\mathrm{acc}}$ 内单元）")
+                              label=r"Solid elements ($\mathcal{E}_{\mathrm{acc}}$)")
 
-        axes.axhline(0.0, color=COLOR_REFERENCE, lw=0.8, ls=":")
-        axes.axvline(0.0, color=COLOR_REFERENCE, lw=0.8, ls=":")
+        axes.axhline(0.0, color=COLOR_REFERENCE, lw=0.6, ls=":")
+        axes.axvline(0.0, color=COLOR_REFERENCE, lw=0.6, ls=":")
         axes.set_xlim(-1.5, 1.5)
-        axes.set_ylim(-1.5, 1.5)
+        axes.set_ylim(-1.5, 1.9)
         axes.set_aspect("equal")
-        axes.set_xlabel("归一化第一表观主应力 $\\bar{\\sigma}_1$", fontsize=11, fontproperties=ZH)
-        axes.set_ylabel("归一化第二表观主应力 $\\bar{\\sigma}_2$", fontsize=11, fontproperties=ZH)
-        axes.tick_params(labelsize=9)
-        axes.legend(handles=[yield_line, marker_proxy], loc="upper left", prop=ZH,
-                    **LEGEND_STYLE)
-        axes.set_title(title, fontsize=11, fontproperties=ZH, y=-0.36)
-        axes.grid(True, ls=":", alpha=0.5)
+        axes.legend(handles=[yield_line, marker_proxy], loc="upper left",
+                    **{**LEGEND_STYLE, "fontsize": 7.0, "handlelength": 1.2,
+                       "borderpad": 0.3})
+        axes.set_xlabel(r"$\sigma_1 / \bar{\sigma}$", fontsize=LABEL_PT)
+        axes.set_ylabel(r"$\sigma_2 / \bar{\sigma}$", fontsize=LABEL_PT)
+        axes.tick_params(labelsize=TICK_PT)
+        axes.set_title(title, fontsize=TITLE_PT, pad=4)
+        axes.grid(True, ls=":", lw=0.5, alpha=0.5)
 
-        cbar = axes.figure.colorbar(sc, ax=axes, fraction=0.046, pad=0.04)
+        cax = axes.inset_axes([1.05, 0.0, 0.05, 1.0])
+        cbar = axes.figure.colorbar(sc, cax=cax)
         cbar.set_ticks(np.linspace(0.0, 1.0, 6))
-        cbar.ax.tick_params(labelsize=9)
-        cbar.set_label("表观 von Mises 应力比 $\\sigma_{\\mathrm{vm}} / \\bar{\\sigma}$",
-                       fontsize=10, fontproperties=ZH)
+        cbar.ax.tick_params(labelsize=TICK_PT)
+        cbar.set_label(r"$\sigma_{\mathrm{vm}} / \bar{\sigma}$", fontsize=LABEL_PT)
 
-    fig = plt.figure(figsize=(12.0, 9.6), dpi=300)
-    gs = fig.add_gridspec(2, 2, width_ratios=[1.35, 1.0], wspace=0.32, hspace=0.55)
+    # MMA 更新次数由正文给出, 标题不写.
+    fig = plt.figure(figsize=FIG_SIZE_IN)
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.25, 1.0], wspace=0.55, hspace=0.42,
+                          left=0.10, right=0.93, top=0.95, bottom=0.08)
 
     plot_convergence(fig.add_subplot(gs[0, 0]), lf_vf, lf_g, lf_tol,
-                     f"(a) 标准位移法 ($p = 3$) 收敛历史（{len(lf_vf)} 次 MMA 更新）")
-    plot_yield_surface(fig.add_subplot(gs[0, 1]), lf_fields,
-                       "(b) 标准位移法 ($p = 3$) 主应力空间内的单元应力分布")
+                     "(a) LFEM, $p = 3$")
+    plot_yield_surface(fig.add_subplot(gs[0, 1]), lf_fields, "(b) LFEM, $p = 3$")
     plot_convergence(fig.add_subplot(gs[1, 0]), hz_vf, hz_g, hz_tol,
-                     f"(c) 胡张混合法 ($k = 3$) 收敛历史（{len(hz_vf)} 次 MMA 更新）")
-    plot_yield_surface(fig.add_subplot(gs[1, 1]), hz_fields,
-                       "(d) 胡张混合法 ($k = 3$) 主应力空间内的单元应力分布")
+                     "(c) HZMFEM, $k = 3$")
+    plot_yield_surface(fig.add_subplot(gs[1, 1]), hz_fields, "(d) HZMFEM, $k = 3$")
 
-    save_figure(fig, "stress_cubic_convergence", formats=("png", "pdf", "eps"))
+    save_figure(fig, "stress_cubic_convergence", formats=("pdf", "png"), dpi=DPI)
 
 
 if __name__ == "__main__":

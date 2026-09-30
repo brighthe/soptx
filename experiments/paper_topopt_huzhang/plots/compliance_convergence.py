@@ -13,6 +13,10 @@
 输出: outputs/figures/ 下三张 —— 合并图 compliance_convergence 与两幅单图
 compliance_convergence_{lfem,hzmfem}, 均自动同步至 papers/huzhang-topopt/figures/
 
+2026-09-28 起合并图按版心尺寸出图: 宽 6.3 in, 论文里以 ``width=\\textwidth`` (5.9 in)
+嵌入, 缩放 0.94, 字号按 9 pt 底稿定, 纸面约 8.5 pt; 字体走 ``paper_rcparams`` 的
+Palatino 口径, 与正文同族; 合并图同时输出 PDF 矢量与 PNG。
+
 论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
 """
 
@@ -27,9 +31,9 @@ import numpy as np
 from matplotlib.lines import Line2D
 
 import config
-from ._base import academic_rcparams, require_run_dir, save_figure
+from ._base import paper_rcparams, require_run_dir, save_figure
 
-academic_rcparams()
+paper_rcparams()
 
 # ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
 # 这张图吃哪个算例的哪几次运行, 本就是绘图代码自己的事实, 故写在模块身上而
@@ -65,8 +69,10 @@ def xmax() -> int:
     return int(np.ceil((longest + 5) / 10.0) * 10)
 # inset 从第 100 步框起: 六次运行最短的一条 152 步, 此后全在收敛段。
 INSET_XMIN = 100
-# inset 在主轴里的位置 (axes 坐标 x0,y0,w,h): 避开左上的瞬态、右上的图例与中部的 V_f 线。
-INSET_BOUNDS = (0.35, 0.12, 0.60, 0.30)
+# inset 在主轴里的位置 (axes 坐标 x0,y0,w,h): 避开左上的瞬态、右上的图例与中部的 V_f 线,
+# 下沿抬到 0.17 让 inset 的横轴刻度不压在主轴曲线的收敛段上; inset 不写标题, 上沿
+# 再高就撞到 0.40 处的 V_f 线, 其含义由论文题注说明。
+INSET_BOUNDS = (0.36, 0.17, 0.60, 0.28)
 
 _HISTORY_CACHE: dict[str, dict] = {}
 
@@ -117,8 +123,14 @@ def plot_single_method(
     runs: list[tuple[str, int]],
     title: str,
     method: str,
+    left_label: bool = True,
+    right_label: bool = True,
 ) -> None:
-    """绘制单种离散方法的宏观收敛曲线 (主轴 + 收敛段 inset)."""
+    """绘制单种离散方法的宏观收敛曲线 (主轴 + 收敛段 inset).
+
+    ``left_label`` / ``right_label`` 控制是否写出左右纵轴的轴名: 合并图两幅子图共用
+    一套刻度, 轴名只写在最外侧 (左图的左轴、右图的右轴), 中缝里的两条轴名会互相压住。
+    """
     ax2 = ax.twinx()
     symbol = ORDER_SYMBOLS.get(method, "p")
     axins = ax.inset_axes(INSET_BOUNDS)
@@ -127,13 +139,13 @@ def plot_single_method(
     for (folder, order), color, ls in zip(runs, COLORS, LINESTYLES):
         c = compliance(folder)
         it = np.arange(1, len(c) + 1)
-        for target, lw in ((ax, 1.8), (axins, 1.4)):
+        for target, lw in ((ax, 1.2), (axins, 0.9)):
             target.plot(it, c, color=color, lw=lw, ls=ls)
             # 末步端点: 三次运行迭代数不同 (152~222), 不标端点的话曲线尾部只剩「上层
             # 画完露出下层」, 看着像柔顺度分级下跌, 其实是绘制顺序造成的假象。
             target.plot(
-                it[-1], c[-1], marker="o", ms=4.5, color=color,
-                mec="white", mew=0.7, zorder=5, clip_on=False,
+                it[-1], c[-1], marker="o", ms=3.2, color=color,
+                mec="white", mew=0.5, zorder=5, clip_on=False,
             )
 
     # 2. 绘制体积分数曲线 (右 Y 轴，灰色虚线)
@@ -144,42 +156,48 @@ def plot_single_method(
     for folder, _ in runs:
         v = np.array(load_history(folder)["scalar_histories"]["volfrac"])
         it0 = np.arange(1, len(v) + 1)
-        ax2.plot(it0, v, color="#777777", lw=1.3, ls="--", alpha=0.9)
-    ax2.axhline(0.40, color="#aaaaaa", lw=0.8, ls=":")
+        ax2.plot(it0, v, color="#777777", lw=0.9, ls="--", alpha=0.9)
+    ax2.axhline(0.40, color="#aaaaaa", lw=0.6, ls=":")
 
-    ax.set_xlabel("Iteration step", fontsize=11)
-    ax.set_ylabel("Full-structure compliance $C$", fontsize=11)
-    ax2.set_ylabel("Volume fraction $V_f$", fontsize=11, color="#555555")
-    ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
+    ax.set_xlabel("Iteration", fontsize=9)
+    if left_label:
+        ax.set_ylabel("Full-structure compliance $C$", fontsize=9)
+    if right_label:
+        ax2.set_ylabel("Volume fraction $V_f$", fontsize=9, color="#555555")
+    ax.set_title(title, fontsize=9.5, pad=5)
+    ax.tick_params(labelsize=8)
+    ax2.tick_params(labelsize=8, colors="#555555")
     ax.set_xlim(0, xmax())
     ax.set_ylim(*main_ylim())
     ax2.set_ylim(0.38, 0.42)
-    ax.grid(True, ls=":", alpha=0.5)
+    ax.grid(True, ls=":", lw=0.5, alpha=0.5)
 
     # 3. 收敛段 inset: 主轴里被压成一条线的末值差, 在这里才分得开
     axins.set_xlim(INSET_XMIN, xmax())
     axins.set_ylim(*inset_ylim())
-    axins.grid(True, ls=":", alpha=0.5)
-    axins.tick_params(labelsize=7.5)
-    axins.set_title("Converged branch", fontsize=8, pad=3)
-    ax.indicate_inset_zoom(axins, edgecolor="#555555", lw=0.8, alpha=0.85)
+    axins.grid(True, ls=":", lw=0.5, alpha=0.5)
+    axins.tick_params(labelsize=7)
+    ax.indicate_inset_zoom(axins, edgecolor="#555555", lw=0.6, alpha=0.85)
 
     # 4. 优雅图例设置 (放置在右上角空白区域，主次分明)
     handles = [
-        Line2D([], [], color=c, lw=1.8, ls=ls) for c, ls in zip(COLORS, LINESTYLES)
+        Line2D([], [], color=c, lw=1.2, ls=ls) for c, ls in zip(COLORS, LINESTYLES)
     ]
     labels = [fr"${symbol}={order}$" for _, order in runs]
-    handles += [Line2D([], [], color="#777777", lw=1.3, ls="--")]
-    labels += [r"$V_f$ (Target 0.40)"]
+    handles += [Line2D([], [], color="#777777", lw=0.9, ls="--")]
+    labels += [r"$V_f$ (target 0.40)"]
 
     ax.legend(
         handles,
         labels,
         loc="upper right",
-        bbox_to_anchor=(0.95, 0.95),
-        fontsize=9.5,
+        bbox_to_anchor=(0.97, 0.96),
+        fontsize=8,
         framealpha=0.95,
         edgecolor="#cccccc",
+        borderpad=0.4,
+        labelspacing=0.3,
+        handlelength=2.0,
     )
 
 
@@ -194,12 +212,12 @@ def make_single(title: str, runs: list[tuple[str, int]], method: str, stem: str)
 
 def make_combined() -> None:
     """生成一张 1 行 2 列并排横幅大图."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.5, 4.5), dpi=300)
-    plot_single_method(ax1, LFEM_RUNS, "(a) Standard Displacement Method (LFEM)", "lfem")
-    plot_single_method(ax2, HZ_RUNS, "(b) Hu–Zhang Mixed Method (HZMFEM)", "huzhang")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.3, 2.75))
+    plot_single_method(ax1, LFEM_RUNS, "(a) LFEM", "lfem", right_label=False)
+    plot_single_method(ax2, HZ_RUNS, "(b) HZMFEM", "huzhang", left_label=False)
 
-    fig.subplots_adjust(left=0.07, right=0.93, top=0.90, bottom=0.12, wspace=0.28)
-    save_figure(fig, "compliance_convergence")
+    fig.subplots_adjust(left=0.085, right=0.915, top=0.90, bottom=0.16, wspace=0.30)
+    save_figure(fig, "compliance_convergence", formats=("pdf", "png"), dpi=600)
     plt.close(fig)
 
 

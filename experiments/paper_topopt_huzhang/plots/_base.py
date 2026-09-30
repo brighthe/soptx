@@ -1,7 +1,7 @@
 """``plots/`` 下各成图模块的共用底座.
 
 中英文字体口径、vtu 读取、产物目录定位与统一落盘口径 (dpi、输出格式、论文插图同步
-目录) 只有一处定义, 十一个成图模块都从这里取; 改一次插图口径不必逐个模块翻找.
+目录) 只有一处定义, 十五个成图模块都从这里取; 改一次插图口径不必逐个模块翻找.
 
 下划线开头有两重作用: 标明它不是一件可整理的产物, 且 ``compare.py:discover_cases()``
 按 ``_`` 前缀跳过本模块, 扫描逻辑无须为它开特例.
@@ -57,6 +57,58 @@ def academic_rcparams() -> None:
     plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Helvetica", "Arial"]
     plt.rcParams["mathtext.fontset"] = "stix"
     plt.rcParams["axes.unicode_minus"] = False
+
+
+# 论文正文字体候选: CICP 类以 mathpazo 选项排版, 正文为 Palatino。WSL 下优先借用
+# Windows 的 Palatino Linotype (TrueType, PDF 后端可按 Type 42 嵌入), 其次 TeX Live
+# 自带的 TeX Gyre Pagella (OpenType CFF, PNG 可用, PDF 嵌入不保证)。
+_PAPER_FONT_CANDIDATES = (
+    (
+        "Palatino Linotype",
+        tuple(f"/mnt/c/Windows/Fonts/{f}.ttf" for f in ("pala", "palab", "palai", "palabi")),
+    ),
+    (
+        "TeX Gyre Pagella",
+        tuple(
+            f"/usr/share/texmf/fonts/opentype/public/tex-gyre/texgyrepagella-{s}.otf"
+            for s in ("regular", "bold", "italic", "bolditalic")
+        ),
+    ),
+)
+
+
+def paper_rcparams(base_size: float = 9.0) -> str:
+    """论文插图排版口径: 与 CICP 正文同族的 Palatino 衬线字体 + 同字体的 mathtext.
+
+    与 :func:`academic_rcparams` 并存: 后者是 DejaVu Sans 口径, 仍供已定稿的图使用;
+    本函数只被 2026-09-28 起改按版心尺寸出图的 ``compliance_topology``、
+    ``compliance_convergence``、``bearing_solid_h_convergence``、``bearing_topologies``
+    与四个 ``stress_*`` 绘图模块调用。这两张图按 ``\\textwidth`` (150 mm, 5.9 in)
+    原尺寸嵌入, 字号不再经缩放, 故 ``base_size`` 就是纸面字号 (正文 10 pt, 题注 9 pt)。
+    返回实际选中的字族名; 候选字体都不存在时回退到 DejaVu Serif。
+    """
+    import matplotlib.pyplot as plt
+
+    family = "DejaVu Serif"
+    for name, files in _PAPER_FONT_CANDIDATES:
+        present = [f for f in files if Path(f).is_file()]
+        if present:
+            for f in present:
+                font_manager.fontManager.addfont(f)
+            family = name
+            break
+
+    plt.rcParams["font.family"] = "serif"
+    plt.rcParams["font.serif"] = [family, "DejaVu Serif"]
+    plt.rcParams["font.size"] = base_size
+    plt.rcParams["mathtext.fontset"] = "custom"
+    plt.rcParams["mathtext.rm"] = family
+    plt.rcParams["mathtext.it"] = f"{family}:italic"
+    plt.rcParams["mathtext.bf"] = f"{family}:bold"
+    plt.rcParams["mathtext.cal"] = f"{family}:italic"  # 不用花体; 缺省 cursive 找不到会告警
+    plt.rcParams["axes.unicode_minus"] = False
+    plt.rcParams["pdf.fonttype"] = 42
+    return family
 
 
 def save_figure(

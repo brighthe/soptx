@@ -6,6 +6,11 @@ REQUIRED_RUNS。
 
 输出: outputs/figures/bearing_topologies.png, 自动同步至 papers/huzhang-topopt/figures/
 
+2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
+原尺寸嵌入, 面板标题字号即纸面字号; 高度按 3 行 120x40 面板加 3 行标题算出。面板标题只写
+编号、方法、阶次与泊松比, 柔顺度数值由论文表 (优化所得柔顺度列) 给出。密度场是分片常数,
+矢量输出会显出三角形接缝, 故只出 600 dpi 的 PNG。
+
 论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
 """
 
@@ -18,14 +23,18 @@ from matplotlib.tri import Triangulation
 
 import config
 from ._base import (
-    academic_rcparams,
-    compliance_label,
     load_density,
+    paper_rcparams,
     resolve_run_dir,
     save_figure,
 )
 
-academic_rcparams()
+paper_rcparams()
+
+# 版心宽 150 mm; 高度 = 3 行面板 (每行约 0.95 in) + 3 行 9 pt 标题 + 行距。
+FIG_SIZE_IN = (5.9, 3.55)
+TITLE_PT = 9.0
+DPI = 600
 
 # ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
 # 可压缩基准组与近不可压实验组按 cases.toml 的口径是两条 case (nu 属 A 问题层, 改它
@@ -62,7 +71,8 @@ PANELS = [
 
 
 def main():
-    fig, axes = plt.subplots(3, 2, figsize=(12.0, 7.4), dpi=300)
+    fig, axes = plt.subplots(3, 2, figsize=FIG_SIZE_IN, layout="constrained")
+    fig.get_layout_engine().set(w_pad=0.02, h_pad=0.02, wspace=0.03, hspace=0.06)
     axes = axes.flat
 
     for idx, (tag, method, order_label, nu_label, case_id, folder_name) in enumerate(PANELS):
@@ -74,9 +84,9 @@ def main():
         if vtu_path is None or not vtu_path.is_file():
             ax.text(
                 0.5, 0.5, f"{case_id}/{folder_name}\n(Pending calculation)",
-                ha="center", va="center", transform=ax.transAxes, fontsize=11, color="gray"
+                ha="center", va="center", transform=ax.transAxes, fontsize=8, color="gray"
             )
-            ax.set_title(f"{tag} {method} (${order_label}$, ${nu_label}$)", fontsize=11, fontweight="bold")
+            ax.set_title(f"{tag} {method}, ${order_label}$, ${nu_label}$", fontsize=TITLE_PT, pad=2.5)
             ax.set_xticks([])
             ax.set_yticks([])
             continue
@@ -95,15 +105,11 @@ def main():
         # 边框美化
         for spine in ax.spines.values():
             spine.set_edgecolor("#444444")
-            spine.set_linewidth(0.8)
+            spine.set_linewidth(0.6)
 
-        c_str = compliance_label(run_dir)
-        ax.set_title(f"{tag} {method} (${order_label}$, ${nu_label}${c_str})", fontsize=11, fontweight="bold", pad=5)
+        ax.set_title(f"{tag} {method}, ${order_label}$, ${nu_label}$", fontsize=TITLE_PT, pad=2.5)
 
-    # 紧凑优雅排版 (完全无 Colorbar 遮挡)
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.92, bottom=0.04, wspace=0.08, hspace=0.28)
-
-    save_figure(fig, "bearing_topologies", formats=("png", "pdf", "eps"))
+    save_figure(fig, "bearing_topologies", dpi=DPI)
     plt.close(fig)
 
 

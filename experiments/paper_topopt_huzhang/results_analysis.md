@@ -330,7 +330,7 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 4. 稳定化 HZ $k=2$ 的偏差 ($+2.7\%$ 至 $+5.0\%$) 大于 LFEM $p=2$ ($-1.2\%$ 至 $-2.6\%$), 且在 $p=1$ 设计 (中间密度多、边界锯齿) 上最大: 该偏差来自跳量稳定化的相容性误差, 不是闭锁。论文 5.2.2 节据实写出, 不把 $k=2$ 相对 $p=2$ 的精度作为优势; HZMFEM 的优势限定为"$k=2$ 不提阶次即无闭锁, 设计质量与 $p=2$ 相当、明显优于 $p=1$"。
 5. 作废的旧论证: 旧稿以 $k=2$ 列为分母的表 5.4、"迭代次数较少并不必然导致较大柔顺度差异"一段, 以及 $\nu$ 扫描不能跨插值切换比较的保留语, 均已由参考列与全实体域扫描取代。
 
-## 5. 算例 3：二维悬臂梁局部应力约束拓扑优化（论文 5.2.3 节 / 图 5.8~5.11、表 5.5）
+## 5. 算例 3：二维悬臂梁局部应力约束拓扑优化（论文 5.2.3 节 / 图 5.8~5.11；示意图 5.7 为 dut-postdoc 侧 TikZ 图件，不由本流水线产出）
 
 ### 5.1 算例参数与代码映射契约
 
@@ -339,27 +339,32 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 | 设计域 | 矩形域 $80\,\mathrm{mm} \times 40\,\mathrm{mm}$ ($2L \times L, L=40\,\mathrm{mm}$) | 模型 `CantileverMiddle2d` | 全域结构化网格 |
 | 边界条件 | 左侧边界全固支 $\boldsymbol{u}=\mathbf{0}$；右侧中点局部受载 $y \in [17, 23]\,\mathrm{mm}$ | 分量级固支约束与中点局部载荷 | 上下边界自由 |
 | 外载荷 | 右端中点竖直向下均布外力 $P = 400\,\mathrm{N}$ ($l=6.0\,\mathrm{mm}$) | `load = -400.0`, `load_width = 6.0`, `load_discretization = "patch"` | 等效均布面力强度 $\bar{t}_l = 66.67\,\mathrm{N/mm}$ |
-| 材料与应力 | $E_0 = 1\,\mathrm{MPa}$，$E_{\min} = 10^{-9}\,\mathrm{MPa}$（论文 5.6.1 节统一数值设置；5.2.3 节正文写 $70\,000\,\mathrm{MPa}$ 与之冲突，取 5.6.1 节口径）, $\nu_0 = 0.25$, 许用应力 $\bar{\sigma} = 180.0\,\mathrm{MPa}$ | `youngs_modulus = 1.0`, `void_youngs_modulus = 1.0e-9`, `poisson_ratio = 0.25`, `stress_limit = 180.0` | $\sigma = E\varepsilon$ 而 $\varepsilon \propto P/E$，$E_0$ 在归一化应力中相消，故取 1 与取 $70\,000$ 的最优解一致（$E_{\min}/E_0 = 10^{-9}$ 比值不变）；legacy driver 注释另给出归一化的直接动机：直接代入真实 $E$ 会使跳量惩罚项与柔度项量级跨度达 $O(E^2)$，引发 MUMPS 内存溢出 |
-| 应力松弛 | 无分母表观应力松弛模型 $\eta(\widetilde{\rho}_e) = \widetilde{\rho}_e^p + \epsilon(1 - \widetilde{\rho}_e^p)$ | $\epsilon = 10^{-4}$，$p = 3.5$（`penalty_factor`；论文 5.6.1 节：应力约束问题取 3.5，柔顺度问题取 3） | 消除低密度孔洞区奇异性 |
-| 网格与过滤 | $80 \times 40$ 交叉三角形网格（6 400 单元），**密度过滤**半径 $r_{\min} = 6.0\,\mathrm{mm}$，均匀初始密度 $\rho_0 = 0.5$；**正文未记载**：过滤后另施 tanh 投影，$\beta: 1 \to 10$（每 5 个外层 $+1$，$\eta = 0.5$） | `nx = 80`, `ny = 40`, `filter_type = "projection"`（= 密度过滤 + tanh 投影）, `filter_radius = 6.0`, `initial_density = 0.5` | 投影参数出自 legacy driver（见 §5.2 前的「参数出处」）；只留密度过滤会停在灰度局部解 |
-| 优化算法 | 增广拉格朗日法 (ALM) + 移动渐近线法 (MMA)，$\mu_0 = 50.0$，$\alpha = 1.1$，$\mu_{\max} = 10^4$，内层 5 步 MMA / 最大外层 150 步，移动限制 0.15 | `mu_0 = 50.0`, `alpha = 1.1`, `mu_max = 10000.0`, `mma_iters_per_al = 5`, `max_al_iterations = 150`, `move_limit = 0.15` | 超参出自 legacy driver 的两条悬臂梁；论文 4.6.4 节写的 $\mu_0 = 10$ 是 L 型件的取值，不适用于本算例 |
+| 材料与应力 | 铝合金 $E_0 = 70\,000\,\mathrm{MPa}$，$E_{\min}=10^{-9}E_0$，$\nu_0 = 0.25$，许用应力 $\bar{\sigma} = 180\,\mathrm{MPa}$；正文说明载荷与设计无关且位移边界齐次，应力不依赖模量量级，计算取 $E_0^{\mathrm{calc}}=1\,\mathrm{MPa}$，$E_{\min}$ 与 $k=2$ 稳定化系数同比缩放，载荷与 $\bar\sigma$ 保持物理值 | `youngs_modulus = 1.0`, `void_youngs_modulus = 1.0e-9`, `poisson_ratio = 0.25`, `stress_limit = 180.0` | 正文与配置一致（2026-09-28 正文改写后）；legacy driver 注释另给出归一化的直接动机：直接代入真实 $E$ 会使跳量惩罚项与柔度项量级跨度达 $O(E^2)$，引发 MUMPS 内存溢出 |
+| 应力松弛 | 无分母表观应力松弛模型 $\eta(\widetilde{\rho}_e) = \widetilde{\rho}_e^p + \epsilon(1 - \widetilde{\rho}_e^p)$ | $\epsilon = 10^{-3}$（`epsilon`，全过程固定），$p = 3.5$（`penalty_factor`） | 消除低密度孔洞区奇异性 |
+| 网格与过滤 | $80 \times 40$ 交叉三角形网格（6 400 单元），**密度过滤**半径 $r_{\min} = 6.0\,\mathrm{mm}$，均匀初始密度 $\rho_0 = 0.5$；过滤后另施 tanh 投影，$\eta_{\mathrm p}=0.5$，$\beta: 1 \to 10$（每 5 个外层 $+1$），正文已记载 | `nx = 80`, `ny = 40`, `filter_type = "projection"`（= 密度过滤 + tanh 投影）, `filter_radius = 6.0`, `initial_density = 0.5` | 投影参数出自 legacy driver（见 §5.2 前的「参数出处」）；只留密度过滤会停在灰度局部解 |
+| 优化算法 | 增广拉格朗日法 (ALM) + 移动渐近线法 (MMA)，$\mu_0 = 50.0$，$\alpha = 1.1$，$\mu_{\max} = 10^4$，$\lambda_{\max}=3000$，内层 $N_{\mathrm{in}}^{\max}=5$ 步 MMA / 最大外层 $N_{\mathrm{out}}^{\max}=200$ 步，移动限制 0.15，渐近线最小间距 $10^{-4}$；停止判据 $\delta_\rho=0.002$、$\delta_g=0.005$、$N_{\mathrm{hold}}=3$ | `mu_0 = 50.0`, `alpha = 1.1`, `mu_max = 10000.0`, `lambda_max = 3000.0`, `mma_iters_per_al = 5`, `max_al_iterations = 200`, `move_limit = 0.15`, `asymptote_min_distance = 1.0e-4`, `change_tolerance = 2.0e-3`, `stress_tolerance = 5.0e-3`, `hold_steps = 3` | 超参出自 legacy driver 的两条悬臂梁；论文 4.6.4 节写的 $\mu_0 = 10$ 是 L 型件的取值，不适用于本算例 |
+| 被动实体区与判据集合 | 以接触区两端点为中心、半径 $r_{\mathrm{pad}}=1.5\,\mathrm{mm}$ 的被动实体区 $\Omega_{\mathrm{pad}}$（16 单元，占设计域 $0.25\%$）：$\overline\rho_e=1$、导数置零、不施加应力约束、体积计入；判据集合 $\mathcal E_{\mathrm{acc}}=\{e\notin\Omega_{\mathrm{pad}}:\overline\rho_e\ge0.5\}$ | `load_pad_radius = 1.5`, `support_pad_radius = 0.0`, `acceptance_solid_threshold = 0.5`（summary 记 `pad_cells = 16`） | 正文主对比 LFEM $p=3$ / HZMFEM $k=3$，另有 HZMFEM $k=2$（跳量稳定化）与 $k=4$；牵引跳量图另含 LFEM $p=2,4$；`comparison_orders = [1, 2, 3, 4]` 中 $p=1$ 不进论文 |
 
-> **参数出处**：本节参数以 legacy driver `test_phd_section5_stress_constraint.py`（`test_subsec5_6_4_canti2d_hzmfem` / `_lfem`，已在提交 `5b832b6` 中删除，可由 git 历史取回）为准，而非论文正文字面。两处正文与实际配置的落差已在上表标注：①「统一采用密度过滤」漏记了其后的 tanh 投影；② 5.2.3 节的 $E = 70\,000\,\mathrm{MPa}$ 与实际使用的归一化 $E = 1.0$ 不一致。若据论文正文复现，会得到体积分数约 0.58、最大归一化应力约 0.92（应力约束不激活）的灰度解。
+> **参数出处**：本节参数以 `cases.toml` 注册值为准。早期以 legacy driver `test_phd_section5_stress_constraint.py`（已在提交 `5b832b6` 中删除，可由 git 历史取回）为据时，正文有两处落差（漏记 tanh 投影；$E = 70\,000\,\mathrm{MPa}$ 与归一化 $E = 1.0$ 不一致），2026-09-28 正文改写后已消除，上表按当前正文核对。
 
-### 5.2 实测优化结果汇总 (论文表 5.5 实测数据)
+### 5.2 实测优化结果汇总 (论文 5.2.3 节正文数字)
 
-> **论文原文参照值**：位移法 $V^* = 0.3499$、$\max(\tilde{\sigma}_{\mathrm{vm}}) = 1.0008$、实体单元 2266、平均归一化应力 0.6067、约 230 步；混合法 $V^* = 0.3877$、$0.9978$、实体单元 2549、平均 0.5509、约 110 步。
+正文不设表，数字直接写入 5.2.3 节段落；下表按各运行目录 `summary.json` 抄录，$g_{\max}$ 为判据集合 $\mathcal E_{\mathrm{acc}}$ 上的 `max_relative_violation_solid_region`。HZMFEM $k=2$ 取固定稳定化系数结果集 `outputs/fixed_coefficient_optimization/20260923T013529873586Z/`（`git_revision` `8d6092f`），其余五组取 `outputs/cantilever-middle-2d-stress/` 下 `load_pad_radius-1.5__order-*__solid_thr-0.5` 目录（`ad95594`）；六次运行 `provenance.git_dirty` 均为 `true`。
 
-| 离散方法 | 空间阶次 | 最终体积分数 $V^*$ | 最大归一化应力 $\max(\tilde{\sigma}_{\mathrm{vm}})$ | 收敛迭代步数 | 构型特征与机理分析 |
+| 离散方法 | 阶次 | MMA 更新次数 | 最终体积分数 $f_V$ | $g_{\max}$（$\mathcal E_{\mathrm{acc}}$） | 论文位置 |
 |---|---|---|---|---|---|
-| **标准位移法 (LFEM)** | $k=2$ | $35.42\%$ | $1.0014$ (微小越界) | 192 步 | **求导降阶抹平峰值**：单元交界应力跳跃，低估局部峰值导致过度挖除材料陷入过优化 |
-| **Hu–Zhang 混合法 (HZMFEM)** | $k=2$ | $38.81\%$ | $\mathbf{1.0018}$ (容差内收敛) | **169 步** | **原生应力协调连续**：应力天然 $H(\mathrm{div})$ 协调，精准捕捉危险区域，共同分担载荷 |
+| LFEM | $p=2$ | 245 | $35.28\%$ | $3.75\times10^{-3}$ | 图 5.11 |
+| LFEM | $p=3$ | 248 | $34.39\%$ | $3.92\times10^{-3}$ | 图 5.8、5.9、5.11 |
+| LFEM | $p=4$ | 256 | $34.95\%$ | $4.70\times10^{-3}$ | 图 5.11 |
+| HZMFEM | $k=2$ | 250 | $34.70\%$ | $1.96\times10^{-3}$ | 图 5.10、5.11 |
+| HZMFEM | $k=3$ | 256 | $35.01\%$ | $2.82\times10^{-3}$ | 图 5.8、5.9、5.11 |
+| HZMFEM | $k=4$ | 258 | $35.30\%$ | $4.92\times10^{-3}$ | 图 5.10、5.11 |
 
 ### 5.3 关键结论与机理分析
 
-1. **宏观构型的一致性**：位移法与胡张混合法均成功演化出双跨 Warren 桁架交叉承载结构（包含外侧主弦杆与内侧交叉斜撑杆），验证了混合有限元驱动局部应力约束拓扑演化的有效性；
-2. **应力场光滑度与局部保真性**：位移法通过求导恢复应力，单元交界面上的法向应力不连续并产生数值锯齿；胡张混合元直接以对称应力为基本变量，跨单元法向应力天然协调连续，杆件内部与交叉节点处的应力场平滑过渡；
-3. **安全承载与收敛效率**：位移法因应力后处理抹平效应低估局部危险峰值而过度削减材料（$V^* = 35.42\%$ 且最大应力微小超界 $1.0014$）；胡张混合元精准识别应力集中并保留更多材料分担载荷（$V^* = 38.81\%$），且平滑的梯度使迭代收敛平稳稳健。
+1. LFEM $p=3$ 与 HZMFEM $k=3$ 得到相近的桁架状拓扑，主要承载路径由上下缘杆件与内部交叉斜杆构成，高应力区沿该路径分布（图 5.8）；HZMFEM $k=2,3,4$ 三个阶次构型相近（图 5.10），流程适用于低阶稳定化与高阶原生离散。
+2. 六次运行均按算法 2 的停止准则终止，$g_{\max}$ 均低于 $\delta_g=0.005$；主应力散点沿单轴拉、压方向成支（图 5.9），与桁架状构型相符。两类离散的体积分数与迭代步数接近。
+3. 在实体带（$\overline\rho_e>0.9$ 且 $e\notin\Omega_{\mathrm{pad}}$）上，HZMFEM 三个阶次的逐单元牵引跳量 $A_e$ 均在舍入量级（最大 $2.2\times10^{-16}$）；LFEM $p=2,3,4$ 的中位数依次为 $2.4\times10^{-2}$、$1.6\times10^{-2}$、$1.1\times10^{-2}$，第 95 百分位数依次为 $0.13$、$0.086$、$0.072$，随阶次降低但明显非零，集中于杆件边缘（图 5.11）。这是两类离散在跨单元界面平衡上的差别：Hu–Zhang 应力场保持法向牵引连续，位移梯度逐单元恢复的应力不满足该连续性。
 
 ## 6. 算例 4：优化构型的独立高阶重分析与安全性复核（论文 5.3 节）
 
@@ -407,9 +412,12 @@ done
 python experiments/paper_topopt_huzhang/compare.py bearing-reanalysis
 python experiments/paper_topopt_huzhang/compare.py bearing-h-locking
 
-# 5.2.3 悬臂梁局部应力约束 + 5.3 独立高阶重分析
+# 5.2.3 悬臂梁局部应力约束 (独立高阶重分析见本文 §6, 当前正文未收录)
+# 图 5.8~5.11 的数据由离散敏感性探针从冻结构型导出 (不是 export); k=2 优化与探针由固定系数入口
+# fixed_coefficient.py run/refresh 在独立结果集上产出, 见 README 首节
 python experiments/paper_topopt_huzhang/run.py --case cantilever-middle-2d-stress --full
 python experiments/paper_topopt_huzhang/compare.py export
+python experiments/paper_topopt_huzhang/compare.py discretization-probe
 python experiments/paper_topopt_huzhang/compare.py metrics
 
 # 全部插图
@@ -417,10 +425,10 @@ python experiments/paper_topopt_huzhang/compare.py --case compliance-topology
 python experiments/paper_topopt_huzhang/compare.py --case compliance-convergence
 python experiments/paper_topopt_huzhang/compare.py --case bearing-topologies
 python experiments/paper_topopt_huzhang/compare.py --case bearing-solid-h-convergence
-python experiments/paper_topopt_huzhang/compare.py --case stress-topologies
-python experiments/paper_topopt_huzhang/compare.py --case stress-convergence
-python experiments/paper_topopt_huzhang/compare.py --case stress-max-ratio-history
-python experiments/paper_topopt_huzhang/compare.py --case stress-highorder-topologies
+python experiments/paper_topopt_huzhang/compare.py --case stress-cubic-topologies
+python experiments/paper_topopt_huzhang/compare.py --case stress-cubic-convergence
+python experiments/paper_topopt_huzhang/compare.py --case stress-hz-orders-topologies
+python experiments/paper_topopt_huzhang/compare.py --case stress-traction-jump
 ```
 
 证据口径: 论文数字一律以各 run 目录下的 `summary.json` 为准, 其 `provenance` 字段是该次运行落盘时盖的戳记; `reproducible` 为 `false` 时（工作区不干净或取不到 Git revision）该次运行不能作为定稿证据。戳记随运行写入, 不事后补盖, 故未重跑的过期目录会保留旧 revision。

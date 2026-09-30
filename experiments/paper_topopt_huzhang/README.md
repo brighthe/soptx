@@ -41,13 +41,15 @@ experiments/paper_topopt_huzhang/
 |-- edge_jump.py                # 内边法向牵引跳量 [[sigma.n]]; 仅被 discretization_probe 调用
 |-- plots/                      # 唯一子目录: 每张图一个模块, 文件名为 <算例族>_<产物>
 |                               # (成图落在 outputs/figures/, 故不与之同名)
-|   |-- _base.py                # 十一个成图模块的共用底座: 字体/vtu/产物定位/落盘
+|   |-- _base.py                # 十五个成图模块的共用底座: 字体/vtu/产物定位/落盘 (论文口径: Palatino, 版心 5.9 in; 分片常值云图只出 PNG 600 dpi, 线图出 PDF+PNG)
 |   |-- manufactured_mesh.py    # 唯一不读运行产物的一张: 制造解算例的棋盘格剖分示意
 |   |-- compliance_topology.py compliance_convergence.py compliance_k1_comparison.py
 |   |-- bearing_topologies.py bearing_highorder_topologies.py bearing_solid_h_convergence.py
 |   |-- bearing_solid_locking.py   # 存档: 固定网格扫 nu 的旧图 5.5, 已被 h 收敛图取代
+|   |-- stress_cubic_topologies.py stress_cubic_convergence.py   # 图 5.8 / 5.9: LFEM p=3 与 HZMFEM k=3 主对比
+|   |-- stress_hz_orders_topologies.py stress_traction_jump.py   # 图 5.10 / 5.11: HZMFEM k=2,4 构型; 六个构型实体带的牵引跳量
 |   `-- stress_topologies.py stress_convergence.py stress_max_ratio_history.py
-|                               # 论文图号只在各模块 docstring 首行的括注里
+|                               # 存档: k=2 主对比时期的旧图 5.7~5.9, 已被上两行取代; 图号以各模块 docstring 首行括注为准
 `-- outputs/                    # 运行产物, 不提交
 ```
 

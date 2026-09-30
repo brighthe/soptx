@@ -2,11 +2,16 @@
 
 产物 case ``compliance-topology``: 3 行 2 列, 左半域算得的密度按对称镜像成全域::
 
-  Row 1: (a) LFEM k=2   | (b) HZMFEM k=2
-  Row 2: (c) LFEM k=3   | (d) HZMFEM k=3
-  Row 3: (e) LFEM k=4   | (f) HZMFEM k=4
+  Row 1: (a) LFEM p=2   | (b) HZMFEM k=2
+  Row 2: (c) LFEM p=3   | (d) HZMFEM k=3
+  Row 3: (e) LFEM p=4   | (f) HZMFEM k=4
 
 输出: outputs/figures/compliance_topology.png, 自动同步至 papers/huzhang-topopt/figures/
+
+2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以
+``width=\\textwidth`` 原尺寸嵌入, 面板标题字号即纸面字号; 高度按 3 行 160x20 面板加
+3 行标题算出, 不再留大片空白。面板标题只写编号、方法与阶次, 柔顺度数值由论文表给出。
+密度场是分片常数, 矢量输出在多数阅读器里会显出三角形接缝, 故只出 600 dpi 的 PNG。
 
 论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
 """
@@ -22,14 +27,14 @@ from matplotlib.tri import Triangulation
 
 import config
 from ._base import (
-    academic_rcparams,
     load_density,
     mirror_half_beam,
+    paper_rcparams,
     require_run_dir,
     save_figure,
 )
 
-academic_rcparams()
+paper_rcparams()
 
 # ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
 # 这张图吃哪个算例的哪几次运行, 本就是绘图代码自己的事实, 故写在模块身上而
@@ -58,9 +63,15 @@ PANELS = [
     for row, order in enumerate((2, 3, 4))
 ]
 
+# 版心宽 150 mm; 高度 = 3 行面板 (每行约 0.36 in) + 3 行 9 pt 标题 + 行距。
+FIG_SIZE_IN = (5.9, 1.85)
+TITLE_PT = 9.0
+DPI = 600
+
 
 def main():
-    fig, axes = plt.subplots(3, 2, figsize=(12.0, 5.2), dpi=300)
+    fig, axes = plt.subplots(3, 2, figsize=FIG_SIZE_IN, layout="constrained")
+    fig.get_layout_engine().set(w_pad=0.02, h_pad=0.02, wspace=0.03, hspace=0.06)
 
     for row_idx, row in enumerate(PANELS):
         for col_idx, (method, k, folder, tag) in enumerate(row):
@@ -73,8 +84,6 @@ def main():
                     f"{run_dir}: summary.json 未明确采用半域柔顺度口径, "
                     "请先核查并迁移旧摘要, 或使用当前 driver 重新运行."
                 )
-            # 与下方镜像拓扑采用相同的完整结构展示口径, 不回写原始摘要.
-            full_compliance = 2.0 * float(summary["compliance"])
             pts, conn, rho = load_density(run_dir / "density_final.vtu")
 
             pts_full, conn_full, rho_full = mirror_half_beam(pts, conn, rho)
@@ -86,27 +95,20 @@ def main():
             ax.set_xlim(0, 160)
             ax.set_ylim(0, 20)
 
-            # 边框美化与标题
             for spine in ax.spines.values():
                 spine.set_edgecolor("#444444")
-                spine.set_linewidth(0.8)
+                spine.set_linewidth(0.6)
 
             ax.set_xticks([])
             ax.set_yticks([])
 
-            method_name = "LFEM" if method == "LFEM" else "HZMFEM"
+            # 阶次记号随方法走: LFEM 的 p 是位移阶, HZMFEM 的 k 是应力阶 (与题注一致)。
             symbol = "p" if method == "LFEM" else "k"
-            ax.set_title(
-                f"{tag} {method_name} (${symbol} = {k}$), full $C = {full_compliance:.2f}$",
-                fontsize=11, fontweight="bold", pad=4,
-            )
+            ax.set_title(f"{tag} {method}, ${symbol} = {k}$", fontsize=TITLE_PT, pad=2.5)
 
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.94, bottom=0.04, wspace=0.06, hspace=0.35)
-
-    save_figure(fig, "compliance_topology")
+    save_figure(fig, "compliance_topology", dpi=DPI)
     plt.close(fig)
 
 
 if __name__ == "__main__":
     main()
-
