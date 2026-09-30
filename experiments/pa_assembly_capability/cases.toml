@@ -6,7 +6,7 @@
 #   output_mode  "file": 调度层把 --output <outputs/artifact> 追加到 argv.
 #   artifact     代表性产物名; 实际文件名由调度层按 <kind>_<method>_n<N>.json 生成.
 #   panel        cache (积分点几何与材料数据缓存) / matvec (核心 PA 刚度算子乘 K x) / solve (核心 Jacobi-PCG 求解)
-#                / continuous (连续测量) / baseline (单核硬件基线).
+#                / continuous (连续测量) / update (单元密度更新) / baseline (单核硬件基线).
 #   method       单刚组装方式/方法名, 默认 fast.
 #
 # 被测对象是仓库核心代码 soptx.fem.levels.partial.PartialAssembly 与 soptx.fem.analyzers.lagrange_fem_analyzer.LagrangeFEMAnalyzer(operator_level='pa'); run.py 不含自有算子 / 求解器实现.
@@ -83,6 +83,22 @@ n = 32
 preconditioner = "jacobi"
 maxiter = 5000
 tol = 1e-6
+
+[[cases]]
+id = "pa-update"
+panel = "update"
+role = "pa-density-update-cost"
+summary = "单元密度 update 的峰值 / 常驻 / 耗时: PartialAssembly.update 只重算 weighted_coef (NC, NQ), 不碰几何因子"
+script = "experiments/pa_assembly_capability/run.py"
+args = ["--worker", "--update", "--method", "fast", "--n", "32", "--rounds", "5"]
+output_mode = "file"
+artifact = "update_fast_n32.json"
+mesh_type = "TetrahedronMesh"
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+n = 32
+rounds = 5
 
 [[cases]]
 id = "cpu-baseline"

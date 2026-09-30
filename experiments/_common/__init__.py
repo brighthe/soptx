@@ -8,7 +8,7 @@
 
 - ``metrology``   CPU RSS 分阶段测量 (``StageMeter``, 基于 VmHWM 重置) 与 CUDA 对应物 (``CudaStageMeter``),
                   以及全局内存事实常量 ``DEFAULT_MEMORY_TOTAL`` / ``MEMORY_BUDGET``.
-- ``fe_problem``  制造解线弹性问题 + tet4 向量 P1 空间 + 材料的统一构建, CPU/CUDA 后端切换.
+- ``fe_problem``  制造解线弹性问题 + from_box 网格 (四种, 默认六面体) 向量 p 次空间 + 材料的统一构建, CPU/CUDA 后端切换.
 - ``casefile``    ``cases.toml`` 的加载、校验与 ``Case`` 对象.
 - ``scheduler``   独立子进程调度: 实时资源监控、OOM 归因、失败侧车、算例表打印.
 - ``baseline``    单核硬件基线 (memcpy 带宽、dgemm 算力), 供算子乘指标换算占比.

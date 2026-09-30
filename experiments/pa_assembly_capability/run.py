@@ -11,6 +11,7 @@
    - python run.py --case pa-matvec --grid 32 --repeats 20 --monitor
    - python run.py --case pa-continuous --grid 32 --monitor
    - python run.py --case pa-cg-solve --grid 32 --monitor
+   - python run.py --case pa-update --grid 32 --monitor
    - python run.py --case cpu-baseline --monitor            # 单核硬件基线 (memcpy 带宽 + dgemm 算力)
    - python run.py --verify-ea --n 8                        # 逐位核对 PA 与 EA 算子乘代数等价性
 
@@ -18,6 +19,7 @@
    - python run.py --worker --cache  --method fast --n 32 --output outputs/cache_fast_n32.json
    - python run.py --worker --matvec --method fast --n 32 --repeats 20 --output outputs/matvec_fast_n32.json
    - python run.py --worker --continuous --method fast --n 32 --repeats 20 --output outputs/cache_matvec_continuous_fast_n32.json
+   - python run.py --worker --update --method fast --n 32 --rounds 5 --output outputs/update_fast_n32.json
    - python run.py --worker --solve  --method fast --n 32 --maxiter 5000 --tol 1e-6 \
          --output outputs/solve_fast_n32.json
    - python run.py --worker --baseline --output outputs/baseline_cpu.json
@@ -40,6 +42,8 @@ Jacobi-PCG 用 ``soptx.solvers.cg`` 与 ``DiagonalPreconditioner``, 对角由 ``
   cache  面板: mesh (网格 + 空间 + 材料 + 分析器) -> cache (assemble_stiff_matrix: 积分点几何 + cell2dof)
   matvec 面板: mesh -> assemble (facade.assemble(): 几何数据 + 体力右端 + Dirichlet 投影) -> warmup
                -> matvec (刚度算子乘 K x, 重复 repeats 次)
+  update 面板: mesh -> setup (assemble_stiff_matrix, coef 为 None) -> update_first -> update_rest,
+               每轮 PartialAssembly.update(rho) 只重算 weighted_coef (NC, NQ)
   solve  面板: mesh -> assemble -> setup_solve (对角 + 预条件子) -> solve (cg, 每步调用系统算子)
   baseline 面板: 与网格无关, 单线程 memcpy 带宽与 dgemm 算力, 供阶段 2 换算占比
 
@@ -412,6 +416,126 @@ def measure_continuous(method: str, n: int, repeats: int = 20) -> dict:
     }
 
 
+def measure_update(method: str, n: int, rounds: int = 5) -> dict:
+    """update 面板: 同一进程内测量 setup -> update_first -> update_rest.
+
+    单元密度 rho_e (NC, ) 下每轮调用 ``PartialAssembly.update(rho)``, 与分析器复用层级时的路径相同:
+    只重算 ``weighted_coef = weighted_measure * rho[:, None]``, 形状 (NC, NQ), 不碰 jacobi_inverse
+    与参考梯度, 也不重新积分. PA 只有这一种写法, 不分模式.
+
+    Parameters
+    ----------
+    method : 单刚组装方式, 透传给门面.
+    n : 网格每方向段数.
+    rounds : update 轮数, 第 1 轮单列为 update_first, 其余计入 update_rest.
+
+    Returns
+    -------
+    result : 各阶段 before / peak / after / net 与逐轮耗时.
+
+    Notes
+    -----
+    setup 时 ``coef`` 为 None, ``weighted_coef`` 是 ``weighted_measure`` 的别名; 首轮 update 断开别名,
+    新分配一块 (NC, NQ), 且 qfunction 持有本轮的 rho (NC, ). 正确性核对只取前 ``n_check`` 个单元,
+    核对 ``weighted_coef[:n_check]`` 与 ``weighted_measure[:n_check] * rho[:n_check, None]`` 一致.
+    每轮的 rho 在计时区间外生成. 分析器处于标准有限元模式, ``assemble_stiff_matrix(rho_val)`` 会忽略
+    密度, 故直接调用层级的 ``update``.
+    """
+    import gc
+
+    if rounds < 2:
+        raise ValueError("rounds 至少为 2, 以区分首轮与稳态")
+
+    ctx, mesh_meter = _build_facade(method, n)
+    analyzer = ctx["facade"].analyzer
+    stages: Dict[str, Dict[str, Any]] = {}
+    rng = np.random.default_rng(0)
+    times = [0.0] * rounds
+    max_error = 0.0
+
+    @contextlib.contextmanager
+    def stage(name: str):
+        before = cur_rss_kib()
+        reset = reset_peak_rss()
+        start = time.perf_counter()
+        yield
+        seconds = time.perf_counter() - start
+        after = cur_rss_kib()
+        peak = max(before, after, peak_rss_kib())
+        stages[name] = {
+            "before_kib": before,
+            "peak_kib": peak,
+            "after_kib": after,
+            "net_kib": peak - before,
+            "t_s": seconds,
+            "reset_supported": reset,
+        }
+
+    gc.collect()
+    trim_supported = _malloc_trim()
+    with stage("setup"):
+        pa_op = analyzer.assemble_stiff_matrix()
+
+    qfunction = pa_op.qfunction
+    weighted_measure = np.asarray(qfunction._weighted_measure)
+    NC = int(weighted_measure.shape[0])
+    n_check = min(NC, 1000)
+    alias_before = qfunction.weighted_coef is qfunction._weighted_measure
+
+    def one_round(i: int) -> None:
+        nonlocal max_error
+        rho = rng.uniform(1e-3, 1.0, NC)
+        start = time.perf_counter()
+        pa_op.update(rho)
+        times[i] = time.perf_counter() - start
+        ref = weighted_measure[:n_check] * rho[:n_check, None]
+        got = np.asarray(qfunction.weighted_coef[:n_check])
+        err = float(np.max(np.abs(got - ref)) / np.max(np.abs(ref)))
+        max_error = max(max_error, err)
+
+    with stage("update_first"):
+        one_round(0)
+    with stage("update_rest"):
+        for i in range(1, rounds):
+            one_round(i)
+
+    facts = ctx["facts"]
+    j_inv = np.asarray(pa_op.geometric_factors.jacobi_inverse)
+    c2d_bytes = int(pa_op.restriction.persistent_bytes())
+    peak = max(mesh_meter.max_peak_kib(), *(r["peak_kib"] for r in stages.values()))
+    result = {
+        "panel": "update",
+        "device": "CPU",
+        "device_type": "cpu",
+        "problem": PROBLEM_NAME,
+        "mesh_type": MESH_TYPE,
+        "operator_impl": "soptx.fem.levels.partial.PartialAssembly",
+        "method": method,
+        "n": n,
+        **facts,
+        "measured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "scope": "同一进程: setup -> update_first -> update_rest; 单元密度 U(1e-3, 1); 阶段间不额外 gc/trim",
+        "rounds": rounds,
+        "trim_before_setup_supported": trim_supported,
+        "mesh_fields": mesh_meter.fields(),
+        "stages": stages,
+        "process_peak_kib": peak,
+        "weighted_coef_MiB": round(int(qfunction.weighted_coef.nbytes) / 2**20, 1),
+        "weighted_measure_MiB": round(int(weighted_measure.nbytes) / 2**20, 1),
+        "jacobi_inverse_MiB": round(int(j_inv.nbytes) / 2**20, 1),
+        "cell2dof_MiB": round(c2d_bytes / 2**20, 1),
+        "weighted_coef_alias_before_update": bool(alias_before),
+        "update_seconds_first": times[0],
+        "update_seconds_rest_median": statistics.median(times[1:]),
+        "update_seconds_all": times,
+        "check_cells": n_check,
+        "check_relerr_max": max_error,
+    }
+    if max_error > 1e-12 or not all(r["reset_supported"] for r in stages.values()):
+        raise RuntimeError("update 测量核对失败, 请检查原始记录")
+    return result
+
+
 def measure_solve(method: str, n: int, maxiter: int = 5000, tol: float = 1e-6) -> dict:
     """阶段 3 (panel solve): 核心 Jacobi-PCG 求解制造解问题."""
     from soptx.solvers import DiagonalPreconditioner, cg
@@ -505,6 +629,7 @@ def _build_worker_parser() -> argparse.ArgumentParser:
     p.add_argument("--matvec", action="store_true", help="运行阶段 2 算子乘计时测量")
     p.add_argument("--continuous", action="store_true", help="运行连续内存观测")
     p.add_argument("--solve", action="store_true", help="运行阶段 3 Jacobi-PCG 求解测量")
+    p.add_argument("--update", action="store_true", help="运行单元密度 update 测量")
     p.add_argument("--baseline", action="store_true", help="运行单核硬件基线测试")
     p.add_argument("--method", default="fast", choices=METHOD_NAMES)
     p.add_argument("--n", type=int, default=32)
@@ -512,6 +637,7 @@ def _build_worker_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--maxiter", type=int, default=5000)
     p.add_argument("--tol", type=float, default=1e-6)
+    p.add_argument("--rounds", type=int, default=5, help="update: 轮数, 至少 2")
     p.add_argument("--output", type=str, default="")
     return p
 
@@ -527,8 +653,10 @@ def _dispatch_worker(args: argparse.Namespace) -> int:
         payload = measure_continuous(args.method, args.n, repeats=args.repeats)
     elif args.solve:
         payload = measure_solve(args.method, args.n, maxiter=args.maxiter, tol=args.tol)
+    elif args.update:
+        payload = measure_update(args.method, args.n, rounds=args.rounds)
     else:
-        print("未指定 worker 测量任务 (--cache / --matvec / --continuous / --solve / --baseline)", file=sys.stderr)
+        print("未指定 worker 测量任务 (--cache / --matvec / --continuous / --solve / --update / --baseline)", file=sys.stderr)
         return 2
 
     if args.output:
@@ -546,7 +674,7 @@ def _build_scheduler_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="PA 部分装配评测调度器")
     p.add_argument("--list", action="store_true", help="打印已注册工况列表")
     p.add_argument("--all", action="store_true", help="执行全部工况")
-    p.add_argument("--case", choices=list(config.PANELS) + ["element-cache", "pa-matvec", "pa-continuous", "pa-cg-solve", "cpu-baseline"], help="指定要跑的 panel 或 case-id")
+    p.add_argument("--case", choices=list(config.PANELS) + ["element-cache", "pa-matvec", "pa-continuous", "pa-cg-solve", "pa-update", "cpu-baseline"], help="指定要跑的 panel 或 case-id")
     p.add_argument("--method", default="", help="覆盖单刚方法")
     p.add_argument("--grid", type=int, default=0, help="覆盖网格 n")
     p.add_argument("--repeats", type=int, default=0, help="覆盖 matvec 重复次数")
@@ -617,6 +745,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             out_p = config.OUTPUT_DIR / f"cache_matvec_continuous_{m_val}_n{n_val}.json"
         elif c.panel == "solve":
             out_p = config.OUTPUT_DIR / f"solve_{m_val}_n{n_val}.json"
+        elif c.panel == "update":
+            out_p = config.OUTPUT_DIR / f"update_{m_val}_n{n_val}.json"
         else:
             out_p = c.artifact_path
         cmd.extend(["--output", str(out_p)])

@@ -1,80 +1,103 @@
 # -*- coding: utf-8 -*-
-"""EA 单元装配走查: 构建单元矩阵, 走一遍 y = G^T K_e G x, 再演示更新."""
+"""EA 单元装配走查: 在同一网格上依次走标准 EA 与参考 EA 的 setup / update / apply.
+
+只考虑单元密度 s_e (NC, ), 此时 K_e = s_e K_e^0.
+
+1. 标准 EA (ElementAssembly): 常驻 K_e, update 带新系数重新积分, apply 走 y = sum_e G_e^T K_e G_e x;
+2. 参考 EA (SharedReferenceElementAssembly): 同一平移类的单元共用一份参考单元矩阵, 常驻 N_k 份 K_k^0
+   与 s_e, update 只换 s_e, apply 走 y = sum_e s_e G_e^T K_k(e)^0 G_e x, k(e) = e mod N_k;
+   依赖 from_box 的单元编号约定.
+
+单元矩阵一律用 fast 装配, 要求单元仿射, from_box 网格满足.
+"""
 
 import argparse
 
 from fealpy.backend import backend_manager as bm
 from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
+from fealpy.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
 
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.fem.kernels import ElementRestriction
-from soptx.fem.levels import ElementAssembly
+from soptx.fem.levels import ElementAssembly, SharedReferenceElementAssembly
 from soptx.materials import IsotropicLinearElasticMaterial
 
 bm.set_backend('numpy')
 
-MESHES = {'tri': TriangleMesh, 'quad': QuadrangleMesh}
+MESHES = {'tri': TriangleMesh, 'quad': QuadrangleMesh,
+          'tet': TetrahedronMesh, 'hex': HexahedronMesh}
+
+# 平移类数 N_k: 三角形每格 2 个, 四面体每格 6 个, 四边形与六面体每格 1 个
+NUM_CLASSES = {'tri': 2, 'quad': 1, 'tet': 6, 'hex': 1}
 
 parser = argparse.ArgumentParser(description='EA 单元装配走查')
-parser.add_argument('-m', default='tri', choices=list(MESHES), help='网格类型')
-parser.add_argument('-n', type=int, default=2, help='每方向网格剖分数')
-parser.add_argument('-p', type=int, default=1, help='拉格朗日元次数')
+parser.add_argument('--mesh', default='tri', choices=list(MESHES), help='网格类型')
+parser.add_argument('-n', '--n', type=int, default=2, help='每方向网格剖分数')
+parser.add_argument('-p', '--p', type=int, default=1, help='拉格朗日元次数')
 args = parser.parse_args()
 n, p = args.n, args.p
 
-mesh = MESHES[args.m].from_box([0, 1, 0, 1], nx=n, ny=n)
-GD = mesh.geo_dimension()
+GD = 2 if args.mesh in ('tri', 'quad') else 3
+mesh = MESHES[args.mesh].from_box([0, 1] * GD, *(n, ) * GD)
 space = TensorFunctionSpace(LagrangeFESpace(mesh, p=p, ctype='C'), shape=(-1, GD))
-material = IsotropicLinearElasticMaterial(hypothesis='plane_strain',
+material = IsotropicLinearElasticMaterial(hypothesis='plane_strain' if GD == 2 else '3D',
                                         lame_lambda=1.0, shear_modulus=0.75,
                                         device=bm.get_device(mesh))
-coef = bm.ones(mesh.number_of_cells(), dtype=bm.float64)   
-integrator = LinearElasticIntegrator(material=material, coef=coef)
 
-# setup 阶段: 依赖网格几何与拓扑, 每张网格算一次
-# 单元矩阵 K_e: EA 没有独立的 build 段, 参考基在 assembly 内部现算, 与几何、材料、密度一起积进 K_e;
-# K_e 的初值含 coef, 按阶段属于第一次 update
-K_e = integrator.assembly(space)  # (NC, ldof * GD, ldof * GD)
 
-# 单元限制 G: 扁平布局 (NC, ldof * GD), 只依赖网格拓扑 (cell2dof), 单元内自由度顺序与 K_e 的行列一致
-g = ElementRestriction.from_integrator(integrator, space, layout='flat')
-
-# G 与 K_e 拼成 EA 算子
-ea = ElementAssembly(space, restriction=g, element_matrices=K_e)
-
-# 逐单元存储: 随网格规模线性增长
-print('cell2dof      ', g.cell2dof.shape)            # 单元限制 G
-print('K_e           ', ea.element_matrices.shape)   # 单元矩阵 K_e
-
-# 全网格共享: 无, 参考基与本构矩阵都已积进 K_e, 不单独保留
-
-# apply 阶段: 每次 MatVec
+# 共用的输入: 单元密度 s_e 取非均匀值, 均匀缩放核对不出 s_e 的逐单元顺序; x 为 MatVec 的输入向量
+NC = mesh.number_of_cells()
+coef = bm.linspace(0.2, 1.0, NC, dtype=bm.float64)  # (NC, )
 x = bm.arange(space.number_of_global_dofs(), dtype=bm.float64)
 
-# G: 全局 -> 单元
-x_E = g.gather(x)  # (NC, ldof * GD[, NB])
 
-# K_e: 逐单元小矩阵乘向量
-y_E = bm.einsum('cij, cj... -> ci...', K_e, x_E)  # (NC, ldof * GD[, NB])
+# ============================================================================
+# 标准 EA: 常驻逐单元的 K_e
+# ============================================================================
+# setup 阶段: 每张网格一次
+# 积分子暂不带 coef, assembly 逐单元积分出 K_e^0 (s_e = 1 时的 K_e; 下标 e 逐单元各异, 上标 0 指实体材料)
+# keep_data 缓存积分所需的几何数据, update 重新积分时直接复用
+integrator_sEA = LinearElasticIntegrator(material=material, method='fast').keep_data(True)
+K_e0 = integrator_sEA.assembly(space)  # (NC, ldof * GD, ldof * GD)
 
-# G^T: 单元 -> 全局
-y = g.scatter_add(y_E)
+# 单元限制 G: 扁平布局 (NC, ldof * GD), 单元内顺序与 K_e 行列一致
+g = ElementRestriction.from_integrator(integrator_sEA, space, layout='flat')
+ea = ElementAssembly(space, restriction=g, element_matrices=K_e0, integrator=integrator_sEA)
 
-print('y == ea @ x   ', bool(bm.all(y == ea @ x)))
+# update 阶段: 每个设计步一次; 带 coef 重新积分, 常驻 K_e = s_e K_e^0
+ea.update(coef)
+K_e = ea.element_matrices  # (NC, ldof * GD, ldof * GD)
 
-# update 阶段: 单元密度 (NC, ) 下 K_e 对 rho_e 线性, EA 由 K_e^0 逐单元缩放即可, 不必重新积分
-# K_e^0: coef 全为 1 时的单元矩阵; 这里初始 coef 全为 1, K_e 即 K_e^0, 但 update 会原地写 K_e,
-# 故另存一份作基准 (分析器里这一份就是敏度用的实体单元矩阵缓存)
-K_e0 = bm.copy(K_e)
-ea = ElementAssembly(space, restriction=g, element_matrices=K_e,
-                    reference_matrices=K_e0, integrator=integrator)
-new_coef = 0.5 * coef
-ea.update(new_coef)  # 原地: K_e <- new_coef_e * K_e^0
+# apply 阶段: 每次 MatVec, y = sum_e G_e^T K_e G_e x
+x_E = g.gather(x)                             # G: 全局 -> 单元, (NC, ldof * GD)
+y_E = bm.einsum('cij, cj -> ci', K_e, x_E)    # 逐单元小矩阵乘向量
+y = g.scatter_add(y_E)                        # G^T: 单元 -> 全局
 
-integrator.coef = new_coef
-print('单元密度: 缩放 ~ 重新积分',
-      bool(bm.allclose(ea.element_matrices, integrator.assembly(space))))
+print('标准 EA       y == ea @ x ', bool(bm.all(y == ea @ x)))
 
-# update 之后算子作用随之改变: K_e 整体减半, y 也减半
-print('单元密度: ea @ x ~ 0.5 y  ', bool(bm.allclose(ea @ x, 0.5 * y)))
+
+# ============================================================================
+# 参考 EA: 常驻 N_k 份 K_k^0 与 s_e, 不另存 K_e
+# ============================================================================
+# setup 阶段: 只积第一个格子的 N_k 个单元, 按 from_box 编号每类恰有一个, 作为该类的代表
+# 分析器在单元密度下也用本类, 但取 N_k = NC 直接引用 K_e^0 (K_k0 = K_e0), 其余流程不变
+N_k = NUM_CLASSES[args.mesh]
+integrator_rEA = LinearElasticIntegrator(material=material, index=bm.arange(N_k), method='fast')
+K_k0 = integrator_rEA.assembly(space)  # (N_k, ldof * GD, ldof * GD)
+
+# G 复用标准 EA 的
+ref = SharedReferenceElementAssembly(space, restriction=g, reference_matrices=K_k0)
+
+# update 阶段: 只换 s_e, 不积分也不缩放矩阵
+ref.update(coef)
+
+# apply 阶段: y = sum_e s_e G_e^T K_k(e)^0 G_e x
+x_E = g.gather(x)                                                      # (NC, ldof * GD)
+x_G = bm.reshape(x_E, (NC // N_k, N_k, -1))                            # 单元 e = g * N_k + k, 第 1 维即 k(e)
+y_G = bm.einsum('kij, gkj -> gki', K_k0, x_G)                          # 同类单元共用 K_k^0 批量乘
+y_E = bm.reshape(y_G, (NC, -1)) * bm.reshape(ref.scale, (NC, 1))       # 再乘 s_e
+y_ref = g.scatter_add(y_E)
+
+# s_e 后乘, 且同类单元坐标只在舍入意义下相等, 与标准 EA 只一致到舍入
+print(f'参考 EA N_k={N_k}  y == ref @ x', bool(bm.all(y_ref == ref @ x)),
+      '| ~ 标准 EA', bool(bm.allclose(y_ref, y)))

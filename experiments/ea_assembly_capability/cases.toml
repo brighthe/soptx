@@ -4,16 +4,23 @@
 #   script       仓库根起算的脚本路径, 三个数据点都由 run.py 的 Worker 模式测量.
 #   args         Worker 固定参数; 调度层按 methods / n / repeats / maxiter / tol 展开与覆盖.
 #   output_mode  "file": 调度层把 --output <outputs/artifact> 追加到 argv.
-#   artifact     代表性产物名; 实际文件名由调度层按 <kind>_<method>_n<N>.json 生成.
+#   artifact     代表性产物名; 实际文件名由调度层按 <kind>_<method>_<mesh>_p<P>_n<N>.json 生成.
+#   mesh, p      网格类型 (tri / quad / tet / hex, 均为 from_box 结构化网格) 与空间次数; --mesh / --p 可覆盖.
+#                积分参数 q 由 experiments/_common/fe_problem.py 的 integration_order 给出 (单纯形 p + 3, 张量积 p + 1).
 #   panel        cache (单刚缓存 K_e) / matvec (核心 EA 刚度算子乘 K x) / solve (核心 Jacobi-PCG 求解, 每步 facade @ x)
 #                / baseline (单核硬件基线, 与网格无关, env 限制线程数为 1).
 #   method       单刚组装方式, 三个阶段 (panel) 默认只跑 fast; --method standard/voigt/all 可手动复现 fa 阶段 1, 不进正文.
+#   variant      EA 变体, 缺省 standard (门面分析器 'ea' 路径的 ElementAssembly, 常驻 K_e, update 重新积分);
+#                per_element 与 shared 为显式构造的 SharedReferenceElementAssembly, 分别取 N_k = NC (常驻 K_e^0,
+#                即分析器单元密度下的形式) 与 N_k < NC (每个平移类常驻一份 K_k^0), 另常驻逐单元 s_e;
+#                后两者只有 cache / continuous / update 三个面板, 产物名在 method 段前多一个变体段,
+#                update 写法只有 rescale (只换 s_e).
 #
 # 被测对象是仓库核心代码 soptx.fem.matrix_free.ElasticityEAOperator (LagrangeFEMAnalyzer 'ea' 路径 +
 # soptx.fem.BilinearForm 的 @ + DirichletBCOperator) 与 soptx.solvers.cg; run.py 不含自有算子 / 求解器实现.
 # 注意: 每个数据点独占一个子进程. Worker 内每阶段重置 VmHWM 取绝对峰值, 全程峰值 = 各阶段峰值最大值.
-# 问题、网格、空间与材料的构建和 fa_assembly_capability 完全相同 (experiments/_common/fe_problem.py);
-# 阶段 1 (panel cache) 的 K_e 与 fa 阶段 1 是否逐位一致由 `run.py --verify-fa` 核对, 两目录的 K_e 阶段数字可直接对照.
+# 问题、网格、空间与材料由 experiments/_common/fe_problem.py 构建, 默认六面体 p = 1; 取 tet、p = 1 时与
+# fa_assembly_capability 完全相同, 阶段 1 (panel cache) 的 K_e 与 fa 阶段 1 是否逐位一致由 `run.py --verify-fa` 核对.
 
 [figure]
 id = "ea_assembly_capability"
@@ -25,12 +32,14 @@ consumer = "dut-postdoc:research/piml-matrix-free-gpu/project-plan.md"
 id = "element-cache"
 panel = "cache"
 role = "element-stiffness-cache"
-summary = "assemble_stiff_matrix('ea') 缓存 K_e (NC, 12, 12) 与 cell2dof 的阶段峰值 / 净增 (fast), 与 fa 阶段 1 同口径"
+summary = "assemble_stiff_matrix('ea') 缓存 K_e (NC, LDOF, LDOF) 与 cell2dof 的阶段峰值 / 净增 (fast), 与 fa 阶段 1 同口径"
 script = "experiments/ea_assembly_capability/run.py"
-args = ["--worker", "--cache", "--method", "fast", "--n", "32"]
+args = ["--worker", "--cache", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32"]
 output_mode = "file"
-artifact = "cache_fast_n32.json"
-mesh_type = "TetrahedronMesh"
+artifact = "cache_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
@@ -42,10 +51,12 @@ panel = "matvec"
 role = "ea-operator-matvec"
 summary = "核心 EA 刚度算子乘 K x (operator.form @ x, soptx.fem.BilinearForm 的 @), 重复计时取中位数与有效带宽下界"
 script = "experiments/ea_assembly_capability/run.py"
-args = ["--worker", "--matvec", "--method", "fast", "--n", "32", "--repeats", "20"]
+args = ["--worker", "--matvec", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--repeats", "20"]
 output_mode = "file"
-artifact = "matvec_fast_n32.json"
-mesh_type = "TetrahedronMesh"
+artifact = "matvec_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
@@ -58,10 +69,12 @@ panel = "continuous"
 role = "ea-matvec-continuous-study"
 summary = "同一进程连续测量: 单刚缓存 -> 输入准备 -> 首次算子乘 (工作区物化) -> 稳态重复算子乘 (零内存增长)"
 script = "experiments/ea_assembly_capability/run.py"
-args = ["--worker", "--continuous", "--method", "fast", "--n", "32", "--repeats", "20"]
+args = ["--worker", "--continuous", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--repeats", "20"]
 output_mode = "file"
-artifact = "cache_matvec_continuous_fast_n32.json"
-mesh_type = "TetrahedronMesh"
+artifact = "cache_matvec_continuous_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
@@ -72,17 +85,19 @@ repeats = 20
 id = "ea-update"
 panel = "update"
 role = "ea-density-update-cost"
-summary = "单元密度 update 的峰值 / 常驻 / 耗时: scale (别名 K_e0 + 新分配) / inplace (副本 K_e0 + 原地写回) / reassemble (重新积分), 各一个子进程"
+summary = "标准 EA 单元密度 update 的峰值 / 常驻 / 耗时: reassemble (op.update 按新系数重新积分 K_e)"
 script = "experiments/ea_assembly_capability/run.py"
-args = ["--worker", "--update", "--update-mode", "scale", "--method", "fast", "--n", "32", "--rounds", "5"]
+args = ["--worker", "--update", "--update-mode", "reassemble", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--rounds", "5"]
 output_mode = "file"
-artifact = "update_scale_fast_n32.json"
-mesh_type = "TetrahedronMesh"
+artifact = "update_reassemble_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
 n = 32
-update_mode = "all"
+update_mode = "reassemble"
 rounds = 5
 
 [[cases]]
@@ -91,10 +106,12 @@ panel = "solve"
 role = "jacobi-pcg-iteration-growth"
 summary = "核心 EA 算子 + soptx.solvers.cg (Jacobi) 求解制造解问题: 迭代数、单步耗时与全程峰值"
 script = "experiments/ea_assembly_capability/run.py"
-args = ["--worker", "--solve", "--method", "fast", "--n", "32", "--maxiter", "5000", "--tol", "1e-6"]
+args = ["--worker", "--solve", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--maxiter", "5000", "--tol", "1e-6"]
 output_mode = "file"
-artifact = "solve_fast_n32.json"
-mesh_type = "TetrahedronMesh"
+artifact = "solve_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
 grid = "32^3"
 problem = "DivergenceFreePolynomialElasticity3D"
 method = "fast"
@@ -102,6 +119,120 @@ n = 32
 preconditioner = "jacobi"
 maxiter = 5000
 tol = 1e-6
+
+[[cases]]
+id = "element-cache-per-element"
+panel = "cache"
+role = "per-element-reference-cache"
+summary = "逐单元参考 EA 的 setup: 积分 K_e^0 (NC, LDOF, LDOF) + cell2dof + s_e 的阶段峰值 / 净增 (fast), 与 element-cache 同口径"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--cache", "--variant", "per_element", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32"]
+output_mode = "file"
+artifact = "cache_per_element_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+variant = "per_element"
+n = 32
+
+[[cases]]
+id = "ea-continuous-per-element"
+panel = "continuous"
+role = "per-element-reference-matvec-continuous-study"
+summary = "逐单元参考 EA 的同一进程连续测量: setup -> 输入准备 -> 首次算子乘 -> 稳态重复算子乘, 与 ea-continuous 同口径"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--continuous", "--variant", "per_element", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--repeats", "20"]
+output_mode = "file"
+artifact = "cache_matvec_continuous_per_element_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+variant = "per_element"
+n = 32
+repeats = 20
+
+[[cases]]
+id = "ea-update-per-element"
+panel = "update"
+role = "per-element-reference-density-update-cost"
+summary = "逐单元参考 EA 单元密度 update 的峰值 / 常驻 / 耗时: rescale (op.update 只换 s_e, K_e^0 不动)"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--update", "--variant", "per_element", "--update-mode", "rescale", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--rounds", "5"]
+output_mode = "file"
+artifact = "update_rescale_per_element_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+variant = "per_element"
+n = 32
+update_mode = "rescale"
+rounds = 5
+
+[[cases]]
+id = "element-cache-shared"
+panel = "cache"
+role = "shared-reference-cache"
+summary = "共享参考 EA 的 setup: 代表单元积分 K_k^0 (N_k, LDOF, LDOF) + cell2dof + s_e 的阶段峰值 / 净增 (fast), 与 element-cache 同口径"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--cache", "--variant", "shared", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32"]
+output_mode = "file"
+artifact = "cache_shared_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+variant = "shared"
+n = 32
+
+[[cases]]
+id = "ea-continuous-shared"
+panel = "continuous"
+role = "shared-reference-matvec-continuous-study"
+summary = "共享参考 EA 的同一进程连续测量: setup -> 输入准备 -> 首次算子乘 -> 稳态重复算子乘, 与 ea-continuous 同口径"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--continuous", "--variant", "shared", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--repeats", "20"]
+output_mode = "file"
+artifact = "cache_matvec_continuous_shared_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+variant = "shared"
+n = 32
+repeats = 20
+
+[[cases]]
+id = "ea-update-shared"
+panel = "update"
+role = "shared-reference-density-update-cost"
+summary = "共享参考 EA 单元密度 update 的峰值 / 常驻 / 耗时: rescale (op.update 只换 s_e, K_k^0 不动)"
+script = "experiments/ea_assembly_capability/run.py"
+args = ["--worker", "--update", "--variant", "shared", "--update-mode", "rescale", "--method", "fast", "--mesh", "hex", "--p", "1", "--n", "32", "--rounds", "5"]
+output_mode = "file"
+artifact = "update_rescale_shared_fast_hex_p1_n32.json"
+mesh_type = "HexahedronMesh"
+mesh = "hex"
+p = 1
+grid = "32^3"
+problem = "DivergenceFreePolynomialElasticity3D"
+method = "fast"
+variant = "shared"
+n = 32
+update_mode = "rescale"
+rounds = 5
 
 [[cases]]
 id = "cpu-baseline"

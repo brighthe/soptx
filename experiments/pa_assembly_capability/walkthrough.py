@@ -25,14 +25,14 @@ bm.set_backend('numpy')
 MESHES = {'tri': TriangleMesh, 'quad': QuadrangleMesh}
 
 parser = argparse.ArgumentParser(description='PA 部分装配走查')
-parser.add_argument('-m', default='tri', choices=list(MESHES), help='网格类型')
-parser.add_argument('-n', type=int, default=2, help='每方向网格剖分数')
-parser.add_argument('-p', type=int, default=1, help='拉格朗日元次数')
+parser.add_argument('--mesh', default='tri', choices=list(MESHES), help='网格类型')
+parser.add_argument('-n', '--n', type=int, default=2, help='每方向网格剖分数')
+parser.add_argument('-p', '--p', type=int, default=1, help='拉格朗日元次数')
 args = parser.parse_args()
 n, p = args.n, args.p
 
 GD = 2
-mesh = MESHES[args.m].from_box([0, 1, 0, 1], nx=n, ny=n)
+mesh = MESHES[args.mesh].from_box([0, 1, 0, 1], nx=n, ny=n)
 space = TensorFunctionSpace(LagrangeFESpace(mesh, p=p, ctype='C'), shape=(-1, GD))
 material = IsotropicLinearElasticMaterial(hypothesis='plane_strain',
                                         lame_lambda=1.0, shear_modulus=0.75,
