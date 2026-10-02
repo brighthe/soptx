@@ -170,7 +170,7 @@ def _train(case, data, np, torch):
     _sync(torch, case.device)
     setup_s = time.perf_counter() - t0
     config = TrainingConfig(epochs=case.epochs, batch_size=case.batch_size,
-                            learning_rate=case.learning_rate, seed=case.seed,
+                            optimizer_params={"lr": case.learning_rate}, seed=case.seed,
                             patience=0, select_final_state=True)
     if case.device == "cuda":
         torch.cuda.reset_peak_memory_stats()

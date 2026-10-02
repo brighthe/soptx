@@ -10,7 +10,7 @@ import pytest
 from fealpy.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
     SubstructurePrototype,
     build_substructures,
@@ -112,7 +112,7 @@ def _macro_compliance_and_gradient(rho_flat: np.ndarray) -> tuple[float, np.ndar
     rho_sub_cell = prototype.grid_to_cell_field(rho_sub_grid)
     stiffness = prototype.assemble_local_stiffness_batch(rho_sub_cell)
 
-    condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     stiffness_s, recovery = condensor.condense(stiffness)
     interpolation = prototype.linear_boundary_matrix
     interpolation_t = bm.matrix_transpose(interpolation)

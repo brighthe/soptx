@@ -17,6 +17,32 @@ from soptx.fem.integrators.linear_elastic_integrator import LinearElasticIntegra
 from soptx.materials import IsotropicLinearElasticMaterial
 
 
+def resolve_material_hypothesis(dim: int, hypothesis: Optional[str]) -> str:
+    """解析与空间维数一致的材料假设.
+
+    Parameters
+    ----------
+    dim : int
+        空间维数, 为 2 或 3.
+    hypothesis : str or None
+        二维允许 plane_stress 或 plane_strain, 默认 plane_stress.
+        三维允许 3D 或 None.
+
+    Returns
+    -------
+    str
+        传给材料类的假设名称.
+    """
+    if dim not in (2, 3):
+        raise ValueError("材料假设仅支持二维或三维")
+    if hypothesis is None:
+        return "plane_stress" if dim == 2 else "3D"
+    allowed = ("plane_stress", "plane_strain") if dim == 2 else ("3D",)
+    if hypothesis not in allowed:
+        raise ValueError(f"{dim}D 的 hypothesis 必须为 {allowed}")
+    return hypothesis
+
+
 class SubstructurePrototype:
     """
     参考子结构: 同构子结构共享的离散结构与单位密度单元刚度阵.
@@ -57,6 +83,7 @@ class SubstructurePrototype:
         integration_order: Optional[int] = None,
         penal: float = 3.0,
         rho_min: float = 0.0,
+        hypothesis: Optional[str] = None,
     ) -> None:
         """
         构造参考子结构.
@@ -66,6 +93,7 @@ class SubstructurePrototype:
             n_fine: 单个子结构在各方向的细单元数, 长度与 ``cell_size`` 相同.
             E_base: 实体材料的杨氏模量.
             nu: 泊松比.
+            hypothesis: 二维为 plane_stress 或 plane_strain, 默认前者; 三维为 3D 或 None.
             degree: 有限元位移空间的多项式插值次数, 缺省为 ``1``.
             p: ``degree`` 的别名, 显式给出时优先于 ``degree``.
             integration_order: 单元数值积分阶数; ``None`` 使用积分器缺省值.
@@ -105,6 +133,7 @@ class SubstructurePrototype:
                 f"当前为 {self.integration_order}."
             )
 
+        self.hypothesis = resolve_material_hypothesis(self.dim, hypothesis)
         self.cell_size: Tuple[float, ...] = tuple(float(s) for s in cell_size)
         self.n_fine: Tuple[int, ...] = tuple(int(n) for n in n_fine)
         self.E_base: float = float(E_base)
@@ -121,7 +150,7 @@ class SubstructurePrototype:
             self.material = IsotropicLinearElasticMaterial(
                 youngs_modulus=self.E_base,
                 poisson_ratio=self.nu,
-                hypothesis='plane_stress',
+                hypothesis=self.hypothesis,
             )
         else:
             self.mesh = HexahedronMesh.from_box(
@@ -1096,32 +1125,73 @@ class SubstructureMesh:
 def build_substructures(
     assembler: Any,
     *,
+    prototype: Optional[SubstructurePrototype] = None,
     integration_order: Optional[int] = None,
+    penal: float = 3.0,
+    rho_min: float = 0.0,
 ) -> Tuple[SubstructurePrototype, List[SubstructureMesh], List[Tuple[int, ...]]]:
-    """按装配器的布局铺开全部子结构, 共享同一个参考子结构.
+    """按结构化布局铺开子结构, 共享一个参考子结构.
 
-    参数:
-        assembler: 已构造的全局装配器, 提供求解域尺寸与子结构划分.
-        integration_order: 单元数值积分阶数; ``None`` 使用积分器缺省值.
+    Parameters
+    ----------
+    assembler : GlobalAssembler
+        提供整体尺寸、划分、材料和有限元次数的装配器.
+    prototype : SubstructurePrototype or None
+        已有参考子结构. 传入时校验与布局相容并直接复用;
+        None 时根据布局及下列构造参数新建.
+    integration_order : int or None
+        仅新建原型时生效; None 使用积分器缺省值.
+        复用时忽略此参数, 沿用原型的积分阶数.
+    penal : float
+        仅新建原型时生效的 SIMP 指数, 默认 3.0.
+        复用时忽略此参数, 沿用原型的材料插值.
+    rho_min : float
+        仅新建原型时生效的 SIMP 刚度下限比值, 默认 0.0.
+        复用时忽略此参数, 沿用原型的材料插值.
 
-    返回:
-        (prototype, sub_meshes, positions): 共享的参考子结构, 按 x 优先字典序排列的
-            子结构列表, 以及各子结构在子结构网格中的整数位置 ``(sx, sy)``. 位置与
-            ``sub_meshes`` 同序, 供 ``get_substructure_global_dofs`` 把局部自由度映射
-            到全局编号. 全部子结构同构, 因此离散结构, 自由度划分与单位密度单元刚度
-            只构造一次.
+    Returns
+    -------
+    prototype : SubstructurePrototype
+        新建或传入的参考子结构, 与全部子结构共享同一实例.
+    sub_meshes : list of SubstructureMesh
+        按各方向循环嵌套顺序排列的子结构, 最后一个方向变化最快.
+    positions : list of tuple of int
+        与 sub_meshes 同序的二维或三维子结构网格位置.
+
+    Raises
+    ------
+    ValueError
+        已有原型与布局的维数、尺寸、细划分、材料、次数或材料假设不相容.
     """
     sub_size = tuple(
         assembler.domain_size[d] / assembler.n_sub[d] for d in range(assembler.dim)
     )
-    prototype = SubstructurePrototype(
-        sub_size,
-        assembler.n_fine,
-        assembler.E_base,
-        assembler.nu,
-        degree=assembler.degree,
-        integration_order=integration_order,
-    )
+    if prototype is None:
+        prototype = SubstructurePrototype(
+            sub_size,
+            assembler.n_fine,
+            assembler.E_base,
+            assembler.nu,
+            degree=assembler.degree,
+            penal=penal, rho_min=rho_min,
+            hypothesis=getattr(assembler, "hypothesis", None),
+            integration_order=integration_order,
+        )
+    else:
+        # 先校验维数, 避免尺寸比较中的 zip 截断不相容的方向.
+        if prototype.dim != assembler.dim:
+            raise ValueError("原型与装配器的空间维数不一致.")
+        SubstructureMesh._check_prototype(
+            prototype, sub_size, tuple(assembler.n_fine),
+            assembler.E_base, assembler.nu,
+        )
+        if prototype.degree != assembler.degree:
+            raise ValueError("原型与装配器的有限元次数不一致.")
+        hypothesis = resolve_material_hypothesis(
+            assembler.dim, getattr(assembler, "hypothesis", None),
+        )
+        if prototype.hypothesis != hypothesis:
+            raise ValueError("原型与装配器的材料假设不一致.")
 
     sub_meshes: List[SubstructureMesh] = []
     positions: List[Tuple[int, ...]] = []
@@ -1159,3 +1229,38 @@ def build_substructures(
                     positions.append((sx, sy, sz))
                     sub_id += 1
     return prototype, sub_meshes, positions
+
+def build_modulus_substructures(
+    layout: Any,
+    *,
+    integration_order: Optional[int] = None,
+) -> Tuple[SubstructurePrototype, List[SubstructureMesh], List[Tuple[int, ...]]]:
+    """为归一化杨氏模量输入创建同构子结构.
+
+    Parameters
+    ----------
+    layout : StructuredSubstructureLayout
+        提供整体尺寸、子结构划分、材料参数和有限元次数的结构化布局.
+    integration_order : int or None
+        单元数值积分阶数; None 使用积分器缺省值.
+
+    Returns
+    -------
+    prototype : SubstructurePrototype
+        对输入模量作线性刚度缩放的共享参考子结构.
+    sub_meshes : list of SubstructureMesh
+        引用同一参考子结构的整体子结构列表.
+    positions : list of tuple of int
+        与 sub_meshes 同序的子结构网格位置.
+
+    Notes
+    -----
+    输入须为已经完成材料插值的 E / E_base. 本入口固定使用线性缩放,
+    防止在线分析对设计密度重复执行 SIMP 惩罚.
+    """
+    return build_substructures(
+        layout,
+        integration_order=integration_order,
+        penal=1.0,
+        rho_min=0.0,
+    )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
+from math import isfinite
 from types import MappingProxyType
 from typing import Any, Optional
 
@@ -16,26 +17,80 @@ from torch.utils.data import DataLoader, TensorDataset
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    """监督回归训练配置。"""
+    """监督回归训练配置.
+
+    Parameters
+    ----------
+    epochs, batch_size : int
+        最大训练轮数与批量大小.
+    optimizer : str
+        adam、adamw 或 sgd, 默认 adam.
+    optimizer_params : dict
+        优化器参数. 共同支持 lr、weight_decay; sgd 额外支持 momentum.
+        缺省值为 lr=1e-3、weight_decay=0.0, SGD 的 momentum=0.0.
+    seed : int
+        训练随机种子.
+    patience : int
+        连续未改善的提前停止次数, 0 表示不启用.
+    physics_eval_interval : int
+        物理指标评估间隔, 0 表示不启用.
+    select_final_state : bool
+        是否保留最后一轮参数, 默认按验证指标选模.
+    """
 
     epochs: int
     batch_size: int
-    learning_rate: float
+    optimizer: str = "adam"
+    optimizer_params: dict[str, float] = field(default_factory=dict)
     seed: int = 2026
     patience: int = 0
-    weight_decay: float = 0.0
     physics_eval_interval: int = 0
     select_final_state: bool = False
 
     def __post_init__(self) -> None:
         if self.epochs <= 0 or self.batch_size <= 0:
-            raise ValueError("epochs 与 batch_size 必须为正整数。")
-        if self.learning_rate <= 0.0:
-            raise ValueError("learning_rate 必须为正数。")
-        if self.patience < 0 or self.weight_decay < 0.0:
-            raise ValueError("patience 与 weight_decay 不能为负数。")
-        if self.physics_eval_interval < 0:
-            raise ValueError("physics_eval_interval 不能为负数。")
+            raise ValueError("epochs 与 batch_size 必须为正整数.")
+        if self.patience < 0 or self.physics_eval_interval < 0:
+            raise ValueError("patience 与 physics_eval_interval 不能为负数.")
+        if self.optimizer not in ("adam", "adamw", "sgd"):
+            raise ValueError("optimizer 必须为 adam, adamw 或 sgd.")
+        if not isinstance(self.optimizer_params, Mapping):
+            raise ValueError("optimizer_params 必须为参数映射.")
+        defaults = {"lr": 1e-3, "weight_decay": 0.0}
+        if self.optimizer == "sgd":
+            defaults["momentum"] = 0.0
+        if any(key not in defaults for key in self.optimizer_params):
+            raise ValueError(f"{self.optimizer} 的 optimizer_params 仅支持 {tuple(defaults)}.")
+        params = {**defaults, **self.optimizer_params}
+        for key, value in params.items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not isfinite(value) or value < 0 or (key == "lr" and value == 0)):
+                raise ValueError(f"optimizer_params[{key!r}] 必须为有限{'正' if key == 'lr' else '非负'}数.")
+        # 复制输入映射, 避免调用者修改原字典影响已登记配置.
+        object.__setattr__(self, "optimizer_params", params)
+
+
+def build_optimizer(model: nn.Module, config: TrainingConfig) -> torch.optim.Optimizer:
+    """按统一配置创建优化器.
+
+    Parameters
+    ----------
+    model : nn.Module
+        待训练的网络.
+    config : TrainingConfig
+        优化器类型、学习率、权重衰减和 SGD 动量配置.
+
+    Returns
+    -------
+    torch.optim.Optimizer
+        绑定网络参数的 Adam、AdamW 或 SGD 优化器.
+    """
+    optimizer_type = {
+        "adam": torch.optim.Adam,
+        "adamw": torch.optim.AdamW,
+        "sgd": torch.optim.SGD,
+    }[config.optimizer]
+    return optimizer_type(model.parameters(), **config.optimizer_params)
 
 
 @dataclass(frozen=True)
@@ -112,11 +167,7 @@ def train_surrogate(
         generator=generator,
     )
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay,
-    )
+    optimizer = build_optimizer(model, config)
     best_state = deepcopy(model.state_dict())
     best_validation_loss = float("inf")
     best_selection_score: Optional[float] = None

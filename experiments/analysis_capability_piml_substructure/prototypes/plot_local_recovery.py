@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 
 from fealpy.backend import backend_manager as bm
 from soptx.fem.substructure.mesh import SubstructurePrototype
-from soptx.fem.substructure.condensation import FEAStaticCondensation
+from soptx.fem.substructure.condensation import ExactSchurCondensation
 
 
 def make_four_inclusion_density(
@@ -102,7 +102,7 @@ def run_local_recovery_pipeline(save_subfigs: bool = False) -> Dict[str, Any]:
     # 3. 有限元精确 Schur 补求解真值 (Ground Truth)
     print("[1/3] 计算精确有限元静力缩聚形函数与参考解...")
     K_local = prototype.assemble_local_stiffness_batch(density_batch)[0]
-    exact_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    exact_condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     exact_condensor.condense(K_local)
     assert exact_condensor.N is not None
     N_exact = exact_condensor.N

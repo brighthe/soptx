@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from ..condensation import FEAStaticCondensation
+from ..condensation import ExactSchurCondensation
 from .base import (
     CondensationReductionAdapter,
     LocalReductionBatchResult,
@@ -14,7 +14,7 @@ class ExactSchurReduction(CondensationReductionAdapter):
 
     def __init__(self, i_dofs: Any, b_dofs: Any) -> None:
         super().__init__(
-            FEAStaticCondensation(i_dofs, b_dofs),
+            ExactSchurCondensation(i_dofs, b_dofs),
             requested_method="exact_schur",
             stiffness_source="exact_schur",
             recovery_source="exact_schur",

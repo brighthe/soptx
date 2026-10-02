@@ -1,9 +1,10 @@
 """全局角点投影的仿射位移再现测试."""
-from types import SimpleNamespace
 
 import numpy as np
 from fealpy.backend import backend_manager as bm
-from soptx.fem.substructure import GlobalAssembler, LinearCornerTraceBasis, build_substructures
+from soptx.fem.substructure import (
+    GlobalAssembler, InterfaceDofsView, LinearCornerTraceBasis, build_substructures,
+)
 
 
 def test_shared_interface_reproduces_affine_displacement():
@@ -13,7 +14,7 @@ def test_shared_interface_reproduces_affine_displacement():
     prototype, meshes, _ = build_substructures(assembler)
     interface = assembler.build_interface_dofs(meshes)
     projection = assembler.build_linear_corner_projection(
-        meshes, SimpleNamespace(global_dofs=interface),
+        meshes, InterfaceDofsView(global_dofs=interface),
         LinearCornerTraceBasis.from_prototype(prototype),
     )
     def affine(nodes):

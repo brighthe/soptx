@@ -7,7 +7,7 @@ import numpy as np
 from fealpy.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
     SubstructurePrototype,
     build_substructures,
@@ -80,7 +80,7 @@ def test_3d_exact_condensation_satisfies_huang_equation_16_energy_identity() -> 
     )
     density_cell = prototype.grid_to_cell_field(density_grid)
     stiffness = prototype.assemble_local_stiffness_batch(density_cell)
-    condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     stiffness_s, recovery = condensor.condense(stiffness)
 
     n_boundary = len(prototype.b_dofs)

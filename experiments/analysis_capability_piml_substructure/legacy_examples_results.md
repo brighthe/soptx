@@ -10,7 +10,7 @@
 
 ## 1. 脚本总览
 
-精确缩聚由 [`src/soptx/fem/substructure/`](../../src/soptx/fem/substructure) 的 `FEAStaticCondensation` 提供；`StaticCondensationBase` 为 FEA 与 PIML 提供基于 FEALPy `bm` 后端的统一接口：`condense(K_local, rho_local=None)` → `(K_s, N)`；`recover(u_b)` → `u_i`。
+精确缩聚由 [`src/soptx/fem/substructure/`](../../src/soptx/fem/substructure) 的 `ExactSchurCondensation` 提供；`StaticCondensationBase` 为 FEA 与 PIML 提供基于 FEALPy `bm` 后端的统一接口：`condense(K_local, rho_local=None)` → `(K_s, N)`；`recover(u_b)` → `u_i`。
 
 | 脚本 | 验证对象 | 证据产物（`outputs/`） | 本报告 |
 |---|---|---|---|
@@ -51,7 +51,7 @@ $$\widehat{\mathbf K}_s \;=\; \mathbf R_\perp\,\mathbf L\mathbf L^{\mathsf T}\,\
 
 采用 Huang 2023 第 4.1 节完整 MBB 梁物理问题 (`soptx.problems.elasticity.FullMBBBeam2d`)，$12 \times 2$ 子结构划分（共 24 个子结构），每个子结构 $5 \times 5$ Q1 单元（全网格 600 单元）。两条路径共用同一批 `SubstructureMesh`，因此接口自由度编号一致，接口位移可逐分量直接相减：
 
-- **路径 A**：`FEAStaticCondensation` 批量 Schur 补，一次装配 + 一次缩聚；
+- **路径 A**：`ExactSchurCondensation` 批量 Schur 补，一次装配 + 一次缩聚；
 - **路径 B**：`PIMLStaticCondensation` 逐子结构代理预测，复用路径 A 已装配的 `K_local_batch`。
 
 误差**分两层**报告，两层之比即误差在求解链路上的放大倍率：
@@ -250,7 +250,7 @@ PINN 学的是绑定单个定解问题的位移场，PIML 学的是与外载、�
 
 ### 10.2 内部自由度不受载假设（继承自论文，非实现缺陷）
 
-`FEAStaticCondensation` 只缩聚刚度，恢复关系固定为 $u_i^j = \mathbf N^j u_b^j$。这与 Huang 2023 一致：论文式 (6) 的右端项直接写成 $(f_{jb}^h, \mathbf 0)^{\mathsf T}$，并明言"不失一般性地假设与 $u_{ji}^h$ 相关的外部载荷为零"，其式 (7) 的"缩聚载荷"在 $f_{ji}^h = \mathbf 0$ 下退化为 $f_{jb}^h$ 本身，恢复式同样无 $(\mathbf K_{ii}^j)^{-1}f_i^j$ 项。
+`ExactSchurCondensation` 只缩聚刚度，恢复关系固定为 $u_i^j = \mathbf N^j u_b^j$。这与 Huang 2023 一致：论文式 (6) 的右端项直接写成 $(f_{jb}^h, \mathbf 0)^{\mathsf T}$，并明言"不失一般性地假设与 $u_{ji}^h$ 相关的外部载荷为零"，其式 (7) 的"缩聚载荷"在 $f_{ji}^h = \mathbf 0$ 下退化为 $f_{jb}^h$ 本身，恢复式同样无 $(\mathbf K_{ii}^j)^{-1}f_i^j$ 项。
 
 因此当前实现与论文同样只对**内部自由度不受载**的问题成立：集中载荷、面载荷必须落在接口自由度上，体力问题无法表达。**这正是 §4 中 PIML 路径无法求解制造解算例的原因**——该算例唯一的驱动恰是体力。若要覆盖，需真正实现 $f_s^j = f_b^j - \mathbf K_{bi}^j(\mathbf K_{ii}^j)^{-1}f_i^j$ 并在恢复式中补项，这是超出论文覆盖范围的扩展。
 

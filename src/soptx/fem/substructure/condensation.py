@@ -146,45 +146,26 @@ class StaticCondensationBase(ABC):
         return bm.einsum('...ij, ...j -> ...i', self.N, u_b_bm)
 
 
-class FEAStaticCondensation(StaticCondensationBase):
-    """
-    有限元精确 Schur 补静态缩聚器.
-
-    该实现显式消去子结构内部自由度, 为 PIML 代理缩聚和全局接口装配提供
-    精确有限元基线. 单个子结构与同构子结构批次共用同一份实现.
-    """
+class ExactSchurCondensation(StaticCondensationBase):
+    """精确 Schur 补静力缩聚器."""
 
     def condense(self, K_local: Any, rho_local: Optional[Any] = None) -> Tuple[Any, Any]:
         """计算精确 Schur 补缩聚刚度矩阵与内部位移恢复矩阵.
 
-        参数:
-            K_local: 局部刚度矩阵, 形状 ``(..., n_dof, n_dof)``. 其行列编号必须与
-                ``i_dofs`` 和 ``b_dofs`` 使用的局部自由度编号一致, 无需重排为内部
-                自由度在前, 接口自由度在后的块顺序. 末两维必须对称.
-            rho_local: 为与代理缩聚器保持统一方法签名而保留. 精确 Schur 补不使用
-                该参数.
+        Parameters
+        ----------
+        K_local : TensorLike
+            局部刚度矩阵, 形状 ``(..., n_dof, n_dof)``. 行列编号必须与 ``i_dofs``
+            和 ``b_dofs`` 使用的局部自由度编号一致.
+        rho_local : TensorLike or None, optional
+            为与代理缩聚器保持统一方法签名而保留; 精确 Schur 补不使用该参数.
 
-        返回:
-            (K_s, N): 形状 ``(..., n_b, n_b)`` 的缩聚刚度矩阵和形状
-                ``(..., n_i, n_b)`` 的内部位移恢复矩阵.
-
-        异常:
-            ValueError: 当 ``K_local`` 的形状与当前自由度划分不一致时抛出.
-
-        说明:
-            内部刚度块 ``K_ii`` 必须可逆; 不可逆时由 ``bm.linalg.solve`` 抛出当前
-            后端对应的线性代数异常. 实现求解 ``K_ii^{-1} K_ib`` 而不显式构造逆矩阵,
-            并复用该结果同时给出 ``N`` 与 ``K_s``.
-
-            利用 ``K_local`` 的对称性, ``K_bi`` 由 ``K_ib`` 转置得到而不单独提取.
-            这省去一次形状 ``(..., n_b, n_i)`` 的高级索引拷贝, 并消除 ``K_bi`` 与
-            ``K_ib`` 之间的不一致来源: 装配得到的 ``K_local`` 若带有舍入级非对称,
-            该误差不再传入 ``K_s``, 使下游特征值检查与 Cholesky 分解面对的非对称
-            仅来自 ``solve`` 与矩阵乘法本身. 注意这不保证 ``K_s`` 逐位对称. 若传入
-            明显非对称的 ``K_local``, 结果等价于对其对称部分做缩聚.
-
-            实现不对 ``K_local`` 做 dtype 转换, 输出 dtype 与输入一致; PyTorch 后端
-            下也因此保留计算图, 可直接参与自动微分.
+        Returns
+        -------
+        K_s : TensorLike
+            缩聚刚度矩阵, 形状 ``(..., n_b, n_b)``.
+        N : TensorLike
+            内部位移恢复矩阵, 形状 ``(..., n_i, n_b)``.
         """
         self._check_local_stiffness(K_local)
 

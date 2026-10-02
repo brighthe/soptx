@@ -1,9 +1,14 @@
 """子结构静力缩聚: 网格管理, 精确缩聚, PIML 代理与全局接口装配."""
 
-from .mesh import SubstructureMesh, SubstructurePrototype, build_substructures
+from .mesh import (
+    SubstructureMesh,
+    SubstructurePrototype,
+    build_modulus_substructures,
+    build_substructures,
+)
 from .condensation import (
     StaticCondensationBase,
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     StreamingShapeFunctionCondensation,
 )
 from .piml_surrogate import (
@@ -12,6 +17,9 @@ from .piml_surrogate import (
     SurrogateContractError,
 )
 from .assembler import GlobalAssembler, InterfaceSystem
+from .layout import HasGlobalDofs, InterfaceDofsView, StructuredSubstructureLayout
+from .recovery import recover_full_displacement
+from .reduction_adapter import normalize_local_reduction
 from .reductions import (
     CondensationReductionAdapter,
     ExactSchurReduction,
@@ -29,6 +37,7 @@ from .streaming import (
     iter_exact_trace_stiffness_batches,
 )
 from .traces import FullTraceBasis, LinearCornerTraceBasis, TraceBasis
+from .independent_targets import IndependentPredictionDecoder
 from .operator import InterfaceOperator
 from .problem_adapter import (
     InterfaceConditions,
@@ -53,7 +62,7 @@ __all__ = [
     "SubstructureMesh",
     "SubstructurePrototype",
     "StaticCondensationBase",
-    "FEAStaticCondensation",
+    "ExactSchurCondensation",
     "StreamingShapeFunctionCondensation",
     "ReducedStiffnessCondensation",
     "ShapeFunctionCondensation",
@@ -70,11 +79,17 @@ __all__ = [
     "TraceStiffnessBatch",
     "iter_exact_element_energy_batches",
     "iter_exact_trace_stiffness_batches",
+    "StructuredSubstructureLayout",
     "GlobalAssembler",
+    "IndependentPredictionDecoder",
     "TraceBasis",
     "FullTraceBasis",
     "LinearCornerTraceBasis",
     "InterfaceSystem",
+    "InterfaceDofsView",
+    "HasGlobalDofs",
+    "normalize_local_reduction",
+    "recover_full_displacement",
     "InterfaceOperator",
     "InterfaceConditions",
     "project_problem_conditions_to_full_system",
@@ -86,6 +101,7 @@ __all__ = [
     "solve_interface_system",
     "set_random_seed",
     "build_substructures",
+    "build_modulus_substructures",
     "make_density_fields",
     "sample_random_density",
     "train_reduced_stiffness_surrogate",

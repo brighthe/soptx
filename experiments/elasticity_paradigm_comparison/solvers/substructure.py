@@ -10,7 +10,7 @@ from .base import ExperimentContext, ParadigmSolver, SolveResult
 class SubstructureSolver(ParadigmSolver):
     """精确 Schur 补静力缩聚路径.
 
-    实现时调用 ``soptx.fem.substructure`` 的 ``FEAStaticCondensation`` 求局部
+    实现时调用 ``soptx.fem.substructure`` 的 ``ExactSchurCondensation`` 求局部
     ``K_s`` 与恢复矩阵 ``N``, 经 ``GlobalAssembler`` 装配全局接口系统, 由
     ``solve_interface_system`` 求解接口位移后回代恢复内部位移.
 
@@ -24,7 +24,7 @@ class SubstructureSolver(ParadigmSolver):
     NATURE = "exact"
     READY = False
     BLOCKER = (
-        "待接线, 无能力缺口: FEAStaticCondensation, GlobalAssembler 与 "
+        "待接线, 无能力缺口: ExactSchurCondensation, GlobalAssembler 与 "
         "solve_interface_system 均已在 soptx.fem.substructure 中"
     )
 

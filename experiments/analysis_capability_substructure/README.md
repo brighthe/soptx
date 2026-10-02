@@ -2,7 +2,7 @@
 
 本目录验证 `full_trace` 与 `linear_corner` 的正确性、收敛性和计算成本。实验参数统一登记在 `cases.toml`，通过 `run.py` 执行；结果与结论写入 [`results_analysis.md`](results_analysis.md)。
 
-两种迹空间统一通过 `GlobalAssembler.assemble_trace_system` 装配，由 case 构造 `FullTraceBasis` 或 `LinearCornerTraceBasis` 进行选择。旧的完整接口和宏观装配方法保留为底层兼容接口。
+精确子结构分析的主线流程（子结构与接口空间构建、局部刚度装配、静力缩聚、接口装配、边界处理与求解、完整位移恢复）见 [`results_analysis.md`](results_analysis.md) 第 2—3 节；本文件只登记工况与用法。
 
 ## 目录结构
 
@@ -11,6 +11,7 @@ analysis_capability_substructure/
 ├── cases.toml               工况注册表和唯一参数入口
 ├── config.py                工况读取与校验
 ├── run.py                   统一执行入口
+├── walkthrough.py           教学走查：当前只执行到 local_stiffness，后续步骤保留为注释
 ├── _corner_convergence.py   linear_corner 制造解一致性与收敛验证
 ├── _density_update.py       密度连续切换、重建对照与独立进程监控
 ├── _cost_measurement.py     FA、full_trace、linear_corner 独立进程成本测量
@@ -42,9 +43,16 @@ analysis_capability_substructure/
 | `linear_corner_density_update_2d` | `CantileverCorner2d` | `linear_corner` |
 | `linear_corner_density_update_3d` | `FullMBBBeam3d` | `linear_corner` |
 
-二维计算成本分别使用 fa_cost_2d、full_trace_cost_2d 和 linear_corner_cost_2d。三条路径采用相同的 CantileverCorner2d、n_sub=640x320、n_fine=5x5、density=pattern_a 和 MUMPS；各执行 1 次试运行和 3 次正式测量。full_trace_reference_2d 仅补存与既有计时结果相同的全场位移证据。
+二维计算成本包含以下 case，task 均为 `route_cost`。四个 case 采用相同的 `CantileverCorner2d`、`n_sub=640x320`、`n_fine=5x5`、`density=pattern_a` 和 MUMPS：
 
-二维、三维 case 均已接入验证。验证在同一 Worker 内连续使用均匀场、非均匀场 A、非均匀场 B，再恢复均匀场。更新路径复用网格、子结构编号、迹映射及同一个 `FEAStaticCondensation` 实例，每步重新计算；更新分析结束后清空 `K_s` 和 `N`，随后，重建路径按当前密度重新构造上述对象。两条路径比较局部刚度、缩聚刚度、恢复矩阵、接口刚度、完整位移和应变能。更新结果先写入临时矩阵文件，释放后再构建参照，以免两套全量状态同时驻留内存；局部缩聚和接口装配本身仍采用全量实现。由于每步主动清空数值状态，本实验验证重复计算与重建一致性，不验证自动缓存失效。
+| case-id | 路径 | 试运行 / 正式测量 |
+|---|---|---|
+| `fa_cost_2d` | FA | 1 / 3 |
+| `full_trace_cost_2d` | `full_trace` | 1 / 3 |
+| `linear_corner_cost_2d` | `linear_corner` | 1 / 3 |
+| `full_trace_reference_2d` | `full_trace` | 0 / 1，仅补存与既有计时结果相同的全场位移证据 |
+
+密度更新协议、成本测量口径与各工况的保存文件见 [`results_analysis.md`](results_analysis.md) 第 4—6 节。三维计算成本尚未接入：成本 Worker 当前仅支持二维。
 
 ## 使用方式
 
@@ -59,6 +67,8 @@ python run.py --case linear_corner_cost_2d --monitor
 ```
 
 无参数调用只显示帮助，不启动实验。`--case all` 会先检查全部工况，再依次执行；`--output-dir` 可修改输出根目录。`--monitor` 适用于密度更新和性能工况，显示独立 Worker 的 CPU、当前 RSS、`VmHWM` 和系统可用内存；结果中的 `memory_peak_rss_bytes` 仍以 Worker 最终 `VmHWM` 为准。
+
+`walkthrough.py` 独立于 `run.py`，不写输出文件，只打印各步骤的关键形状、全程峰值 RSS 与同网格 FA 对照误差。走查先用 `StructuredSubstructureLayout` 建立整体有限元布局并创建参考子结构，再由 `GlobalAssembler` 组合同一布局完成后续接口与 trace 系统装配；旧的 `GlobalAssembler(domain_size, n_sub, n_fine, ...)` 构造方式仍保留。在仓库根目录运行 `python experiments/analysis_capability_substructure/walkthrough.py`；`--trace-kind`、`--n-sub`、`--n-fine` 修改配置，`--mem-limit-gb` 限制进程地址空间（默认 35 GiB），超限时由 `MemoryError` 的 traceback 指出所在步骤。
 
 当前实验统一采用 Q1，收敛工况的配置固定为 `degree = 1`，不提供次数覆盖参数。
 

@@ -2,7 +2,7 @@
 
 接口基线: 基于完整周边接口 full_trace (单块 5x5 Q1 单元周边 20 个边界节点, 共 40 个接口自由度全保留, 无角点降阶投影).
 本脚本在同一物理问题, 同一密度场与同一接口系统上比较两条缩聚路径:
-精确 FEAStaticCondensation 批量 Schur 补, 与 ReducedStiffnessCondensation 逐子结构代理预测.
+精确 ExactSchurCondensation 批量 Schur 补, 与 ReducedStiffnessCondensation 逐子结构代理预测.
 1. 算子层: K_s 的相对 Frobenius 误差;
 2. 解层: 接口位移, 全场位移与结构柔度的相对误差;
 3. 误差归因诊断: 参数化上限校验、训练同分布留出集评估与零空间模态伪刚度污染分析.
@@ -38,7 +38,7 @@ from fealpy.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
     ReducedStiffnessCondensation,
     SubstructureMesh,
@@ -146,7 +146,7 @@ def verify_parameterization_parity(
     n_reduced = int(basis.shape[1])
     rho = sample_random_density(prototype, 1, DENSITY_RANGE)
     K_local = prototype.assemble_local_stiffness_batch(rho)
-    condensor_exact = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor_exact = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     condensor_exact.condense(K_local)
     K_s = condensor_exact.K_s[0]
 
@@ -180,7 +180,7 @@ def evaluate_holdout(
     rho_val = sample_random_density(prototype, n_val, DENSITY_RANGE)
     K_val_batch = prototype.assemble_local_stiffness_batch(rho_val)
 
-    ref_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    ref_condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     ref_condensor.condense(K_val_batch)
     K_s_ref = ref_condensor.K_s
 
@@ -605,7 +605,7 @@ def run_comparison(
         print("[路径 A] 精确 Schur 补批量缩聚...")
     K_local_batch = prototype.assemble_local_stiffness_batch(density)
     t0 = time.time()
-    exact_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    exact_condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     exact_condensor.condense(K_local_batch)
     K_s_exact = exact_condensor.K_s
     t_exact = time.time() - t0

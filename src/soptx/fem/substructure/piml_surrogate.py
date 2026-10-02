@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 from fealpy.backend import backend_manager as bm
 
-from .condensation import StaticCondensationBase, FEAStaticCondensation
+from .condensation import StaticCondensationBase, ExactSchurCondensation
 
 
 class SurrogateContractError(RuntimeError):
@@ -93,7 +93,7 @@ class ReducedStiffnessCondensation(StaticCondensationBase):
         self.rcond_min = float(rcond_min)
 
         # 精确缩聚器是模型缺失, 预测失败或门禁失败时的回退路径.
-        self.fallback_solver = FEAStaticCondensation(i_dofs, b_dofs)
+        self.fallback_solver = ExactSchurCondensation(i_dofs, b_dofs)
         self.used_fallback = False
 
         # 掩码按行优先枚举独立条目, 与训练侧 ``L[tril_mask]`` 的取值顺序一致.
@@ -337,7 +337,7 @@ class ShapeFunctionCondensation(StaticCondensationBase):
         self.rcond_min = float(rcond_min)
 
         # 精确缩聚器是模型缺失, 预测失败或门禁失败时的回退路径.
-        self.fallback_solver = FEAStaticCondensation(i_dofs, b_dofs)
+        self.fallback_solver = ExactSchurCondensation(i_dofs, b_dofs)
         self.used_fallback = False
         self.gate_report: dict = {}
 

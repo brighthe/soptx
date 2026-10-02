@@ -78,9 +78,9 @@ PIML 局部—全局契约见
 
 ```
 src/soptx/fem/substructure/              ← 核心库 (成熟)
-├── __init__.py                           ← 导出 SubstructureMesh, FEAStaticCondensation, GlobalAssembler
+├── __init__.py                           ← 导出 SubstructureMesh, ExactSchurCondensation, GlobalAssembler
 ├── mesh.py                               ← SubstructureMesh: 2D/3D 子结构网格管理
-├── condensation.py                       ← StaticCondensationBase, FEAStaticCondensation
+├── condensation.py                       ← StaticCondensationBase, ExactSchurCondensation
 ├── piml_surrogate.py                     ← 路线 A: ShapeFunctionSurrogateNet, ShapeFunctionCondensation
 │                                            路线 B: ReducedStiffnessSurrogateNet, ReducedStiffnessCondensation
 │                                            共用: SurrogateContractError
@@ -116,7 +116,7 @@ SubstructureMesh                          (soptx.fem.substructure.mesh)
   ├── rigid_basis / deformation_basis        (接口自由度上的刚体模态基与其正交补)
   └── assemble_local_stiffness(density_field) → K_local
 
-FEAStaticCondensation                    (soptx.fem.substructure.condensation, bm 后端)
+ExactSchurCondensation                    (soptx.fem.substructure.condensation, bm 后端)
   ├── condense(K_local) → (K_s, N)         (bm.linalg.solve, 不显式求逆)
   └── recover(u_b) → u_i                   (u_i = N @ u_b)
 
@@ -128,7 +128,7 @@ GlobalAssembler                           (soptx.fem.substructure.assembler)
 
 StaticCondensationBase                   (soptx.fem.substructure.condensation, 抽象基类)
   └── condense(K_local, rho_local=None) → (K_s, N)   (统一接口)
-      ├── FEAStaticCondensation             → 精确 Schur 补消元
+      ├── ExactSchurCondensation            → 精确 Schur 补消元
       └── ReducedStiffnessCondensation           → 网络推理 + 结构检查 + 失败回退
 ```
 
@@ -183,13 +183,13 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 #### 步骤 4：内部与接口自由度分块切片
 * **数学与物理**：根据坐标边界判别生成的 `i_dofs`（内部）和 `b_dofs`（接口）索引，将局部刚度矩阵切片为三个子块：
   $$\mathbf{K}_{\text{local}} = \begin{bmatrix} \mathbf{K}_{ii} & \mathbf{K}_{ib} \\ \mathbf{K}_{bi} & \mathbf{K}_{bb} \end{bmatrix}$$
-* **对应代码**：[`FEAStaticCondensation.condense()`](../../src/soptx/fem/substructure/condensation.py)
+* **对应代码**：[`ExactSchurCondensation.condense()`](../../src/soptx/fem/substructure/condensation.py)
 * **张量形状**：$K_{ii}$ `(b, n_i, n_i)` $\to$ `(4, 2, 2)`；$K_{ib}$ `(b, n_i, n_b)` $\to$ `(4, 2, 16)`；$K_{bb}$ `(b, n_b, n_b)` $\to$ `(4, 16, 16)`。
 
 #### 步骤 5：批量求解 Schur 补缩聚刚度 $K_s$ 与位移恢复矩阵 $N$
 * **数学与物理**：利用内部平衡方程消去内部自由度：
   $$N = - K_{ii}^{-1} K_{ib}, \quad K_s = K_{bb} - K_{ib}^{\mathsf{T}} K_{ii}^{-1} K_{ib} = K_{bb} + K_{ib}^{\mathsf{T}} N$$
-* **对应代码**：[`FEAStaticCondensation.condense()`](../../src/soptx/fem/substructure/condensation.py) 中的 `bm.linalg.solve`
+* **对应代码**：[`ExactSchurCondensation.condense()`](../../src/soptx/fem/substructure/condensation.py) 中的 `bm.linalg.solve`
 * **张量形状**：$K_s$ `(b, n_b, n_b)` $\to$ `(4, 16, 16)`；$N$ `(b, n_i, n_b)` $\to$ `(4, 2, 16)`。
 
 #### 步骤 6：全局接口系统装配（生成 FEALPy 原生 `CSRTensor`）
@@ -238,7 +238,7 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 │                     │                                                  │
 │                     ▼                                                  │
 │  [步骤 5: 核心分支点 ── 可即插即用替换]                                 │
-│    ├── 经典有限元路径 (FEAStaticCondensation):                         │
+│    ├── 经典有限元路径 (ExactSchurCondensation):                        │
 │    │     数值消元求逆: invK_ii_K_ib = solve(K_ii, K_ib)                │
 │    │     产出精确真值: (K_s,exact, N_exact)  ──> 作为 PIML 训练标签    │
 │    │                                                                   │
@@ -250,7 +250,7 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 │    └── PIML 路线 B (直接预测缩聚刚度):                                 │
 │          网络极速推理: ρ ──> 神经网络 ──> 变形空间 Cholesky 条目 L     │
 │          物理结构保障: K_s = R_perp @ (L @ L^T) @ R_perp^T (保零空间)   │
-│          安全门禁机制: 特征值退化时自动回退到 FEAStaticCondensation    │
+│          安全门禁机制: 特征值退化时自动回退到 ExactSchurCondensation   │
 │                     │                                                  │
 │                     ▼                                                  │
 │  [步骤 6～8]  全局接口装配 (K_B) ──> 接口求解 (u_B) ──> 细尺度位移恢复  │
@@ -260,7 +260,7 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 1. **唯一替换点：步骤 5**  
    PIML 代理模型（无论是预测形函数的路线 A，还是直接预测缩聚刚度的路线 B）**只替换步骤 5 中的数值消元**。步骤 1～4 的网格构建与局部刚度提取、步骤 6～8 的全局接口装配、稀疏求解与细尺度位移恢复 **100% 完全复用**。
 2. **多态基类统一契约**  
-   抽象基类 [`StaticCondensationBase`](../../src/soptx/fem/substructure/condensation.py) 统一了 `condense(K_local, rho_local)` 与 `recover(u_b)` 接口。`FEAStaticCondensation` 负责精确求解并产出训练标签，`ReducedStiffnessCondensation` 负责极速推理并在异常时无缝回退精确基线。
+   抽象基类 [`StaticCondensationBase`](../../src/soptx/fem/substructure/condensation.py) 统一了 `condense(K_local, rho_local)` 与 `recover(u_b)` 接口。`ExactSchurCondensation` 负责精确求解并产出训练标签，`ReducedStiffnessCondensation` 负责极速推理并在异常时无缝回退精确基线。
 
 ---
 
@@ -371,7 +371,7 @@ $8.1\times10^{-3}$，裕度 $2.5$ 倍。故障注入确认门禁切在声明位�
 代理按 $\widehat{\mathbf{K}}_s = \mathbf{R}_\perp\mathbf{L}\mathbf{L}^{\mathsf T}\mathbf{R}_\perp^{\mathsf T}$ 重构，$\mathbf{R}_\perp$ 即 `deformation_basis`。由此秩亏成为构造性质：$\widehat{\mathbf{K}}_s$ 在刚体子空间上恒为零，在变形子空间上正定；训练目标 $\operatorname{cholesky}(\mathbf{R}_\perp^{\mathsf T}\mathbf{K}_s\mathbf{R}_\perp)$ 无需正则。
 
 **门禁机制与精确回退**：
-`ReducedStiffnessCondensation` 判定 $\mathbf{L}$ 的对角线相对尺度（$\min\lvert\operatorname{diag}\rvert / \max\lvert\operatorname{diag}\rvert > 10^{-8}$）。预测异常或退化时自动回退到 `FEAStaticCondensation`，保证求解闭环绝对安全。
+`ReducedStiffnessCondensation` 判定 $\mathbf{L}$ 的对角线相对尺度（$\min\lvert\operatorname{diag}\rvert / \max\lvert\operatorname{diag}\rvert > 10^{-8}$）。预测异常或退化时自动回退到 `ExactSchurCondensation`，保证求解闭环绝对安全。
 
 ---
 

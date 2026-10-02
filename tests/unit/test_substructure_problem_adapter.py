@@ -11,7 +11,7 @@ import pytest
 from fealpy.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
     build_substructures,
     project_problem_conditions_to_full_system,
@@ -283,7 +283,7 @@ def test_uniform_2d_macro_system_with_problem_contract_is_solvable() -> None:
         assembler.split_global_cell_field(density)
     )
     stiffness = prototype.assemble_local_stiffness_batch(density_cell)
-    condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     stiffness_s, _ = condensor.condense(stiffness)
     interpolation = prototype.linear_boundary_matrix
     stiffness_macro = (

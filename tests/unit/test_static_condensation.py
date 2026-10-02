@@ -4,7 +4,7 @@ import numpy as np
 
 from fealpy.backend import backend_manager as bm
 
-from soptx.fem.substructure import FEAStaticCondensation
+from soptx.fem.substructure import ExactSchurCondensation
 
 
 def _make_spd_batch(shape_prefix: tuple[int, ...], n_dof: int, seed: int) -> np.ndarray:
@@ -40,8 +40,8 @@ class TestStaticCondensation(unittest.TestCase):
         cls.n_dof = 6
         cls.K_local_batch = _make_spd_batch((4,), cls.n_dof, seed=20260814)
 
-    def _condensor(self) -> FEAStaticCondensation:
-        return FEAStaticCondensation(self.i_dofs, self.b_dofs)
+    def _condensor(self) -> ExactSchurCondensation:
+        return ExactSchurCondensation(self.i_dofs, self.b_dofs)
 
     def test_batch_matches_scalar(self) -> None:
         """批量缩聚与逐个标量缩聚在机器精度内一致."""
@@ -171,13 +171,13 @@ class TestStaticCondensation(unittest.TestCase):
     def test_rejects_invalid_dof_partition_at_construction(self) -> None:
         """自由度划分的校验在构造时完成, 不进入缩聚热路径."""
         with self.assertRaises(ValueError):
-            FEAStaticCondensation([-1, 2, 4], [1, 3, 5])
+            ExactSchurCondensation([-1, 2, 4], [1, 3, 5])
         with self.assertRaises(ValueError):
-            FEAStaticCondensation([0, 2, 4], [1, 2, 5])
+            ExactSchurCondensation([0, 2, 4], [1, 2, 5])
         with self.assertRaises(ValueError):
-            FEAStaticCondensation([0, 2], [1, 3, 5])
+            ExactSchurCondensation([0, 2], [1, 3, 5])
         with self.assertRaises(ValueError):
-            FEAStaticCondensation([0, 0, 4], [1, 3, 5])
+            ExactSchurCondensation([0, 0, 4], [1, 3, 5])
 
 
 if __name__ == "__main__":

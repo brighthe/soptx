@@ -1,9 +1,4 @@
-"""精确子结构分析实验统一入口.
-
-用法:
-    python run.py --list
-    python run.py --case full_trace_convergence_2d
-"""
+"""精确子结构分析实验统一入口."""
 
 from __future__ import annotations
 

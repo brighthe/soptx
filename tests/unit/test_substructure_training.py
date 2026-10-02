@@ -14,7 +14,7 @@ def test_train_surrogate_restores_best_validation_state_and_preserves_rng() -> N
     config = TrainingConfig(
         epochs=20,
         batch_size=5,
-        learning_rate=0.02,
+        optimizer_params={"lr": 0.02},
         seed=9,
         patience=5,
     )
@@ -57,7 +57,7 @@ def test_train_surrogate_selects_physics_snapshot_at_fixed_intervals() -> None:
         TrainingConfig(
             epochs=4,
             batch_size=4,
-            learning_rate=0.01,
+            optimizer_params={"lr": 0.01},
             seed=5,
             physics_eval_interval=2,
         ),
@@ -86,7 +86,7 @@ def test_fixed_epoch_refit_restores_final_epoch_without_early_stopping() -> None
         TrainingConfig(
             epochs=3,
             batch_size=4,
-            learning_rate=0.01,
+            optimizer_params={"lr": 0.01},
             seed=7,
             select_final_state=True,
         ),

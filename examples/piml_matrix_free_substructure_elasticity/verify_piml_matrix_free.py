@@ -44,7 +44,7 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.problems.elasticity import FullMBBBeam2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
     InterfaceOperator,
     ReducedStiffnessCondensation,
@@ -181,7 +181,7 @@ def run_verification(
         piml_condensors.append(condensor)
     n_fallback = sum(1 for c in piml_condensors if c.used_fallback)
 
-    exact_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    exact_condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     exact_condensor.condense(K_local_batch)
 
     # ------------------------------------------------------------------

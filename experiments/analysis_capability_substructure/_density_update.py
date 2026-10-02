@@ -21,7 +21,6 @@ import shutil
 import subprocess
 import sys
 import time
-from types import SimpleNamespace
 from typing import Any, Sequence, cast
 
 import numpy as np
@@ -29,9 +28,10 @@ from scipy.sparse import csr_matrix
 from fealpy.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     FullTraceBasis,
     GlobalAssembler,
+    InterfaceDofsView,
     LinearCornerTraceBasis,
     build_substructures,
     solve_constrained_system,
@@ -225,7 +225,7 @@ def _build_context(
         domain, tuple(n_sub), tuple(n_fine), E_base=pde.E, nu=pde.nu
     )
     prototype, sub_meshes, _ = build_substructures(assembler)
-    condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     context: dict[str, Any] = {
         "pde": pde,
         "assembler": assembler,
@@ -242,7 +242,7 @@ def _build_context(
         context["trace"] = trace
     if route == "linear_corner":
         interface_dofs = assembler.build_interface_dofs(sub_meshes)
-        interface_view = SimpleNamespace(global_dofs=interface_dofs)
+        interface_view = InterfaceDofsView(global_dofs=interface_dofs)
         context.update(
             interface_view=interface_view,
             projection=build_corner_projection(
@@ -278,7 +278,7 @@ def _validate_retained_conditions(
     assembler = context["assembler"]
     interface_dofs = np.asarray(
         bm.to_numpy(
-            context.get("interface_view", SimpleNamespace(
+            context.get("interface_view", InterfaceDofsView(
                 global_dofs=assembler.build_interface_dofs(
                     context["sub_meshes"]
                 )
@@ -499,7 +499,7 @@ def _worker(request_path: Path, record_path: Path, scratch: Path) -> int:
         "strain_energy_formula": "0.5 * dot(full_force, displacement), homogeneous Dirichlet equilibrium",
         "reused_objects": [
             "GlobalAssembler", "SubstructurePrototype", "SubstructureMesh mappings",
-            "trace/projection", "FEAStaticCondensation instance",
+            "trace/projection", "ExactSchurCondensation instance",
         ],
         "numeric_state_policy": "每步重新计算数值矩阵; 更新分析结束后清空 K_s/N, 再创建独立重建对照. 不验证旧数值缓存的自动失效.",
         "steps": [], "phase": "build_context",

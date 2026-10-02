@@ -21,7 +21,6 @@ import sys
 import time
 import unicodedata
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Sequence, Tuple, cast
 
 import numpy as np
@@ -33,8 +32,9 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.problems.elasticity import HalfMBBBeamRight2d, FullMBBBeam3d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
+    InterfaceDofsView,
     LinearCornerTraceBasis,
     SubstructureMesh,
     SubstructurePrototype,
@@ -117,7 +117,7 @@ def build_corner_projection(
     trace_basis: Any,
 ) -> Any:
     """复用核心角点投影, 并保留既有实验导入入口."""
-    interface_view = SimpleNamespace(global_dofs=interface_dofs)
+    interface_view = InterfaceDofsView(global_dofs=interface_dofs)
     return assembler.build_linear_corner_projection(
         sub_meshes, interface_view, trace_basis
     )
@@ -156,7 +156,7 @@ def analyze_linear_corner(
     local_stiffness = prototype.assemble_local_stiffness_batch(density)
     phases["assembly"] = time.perf_counter() - tick
     tick = time.perf_counter()
-    condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     condensor.condense(local_stiffness)
     phases["condensation"] = time.perf_counter() - tick
     tick = time.perf_counter()
@@ -165,7 +165,7 @@ def analyze_linear_corner(
     )
     interface_dofs = assembler.build_interface_dofs(sub_meshes)
     # 仅恢复时使用完整接口编号, 不装配另一个完整接口刚度.
-    interface_view = SimpleNamespace(global_dofs=interface_dofs)
+    interface_view = InterfaceDofsView(global_dofs=interface_dofs)
     projection = build_corner_projection(
         assembler, sub_meshes, interface_dofs, trace_basis
     )

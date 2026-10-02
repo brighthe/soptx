@@ -65,7 +65,7 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.problems.elasticity import FullMBBBeam2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
     InterfaceOperator,
     build_substructures,
@@ -195,7 +195,7 @@ def run_verification(
 
     # 精确 Schur 补缩聚作为算子的输入; 算子对 K_s 的来源无感.
     K_local_batch = prototype.assemble_local_stiffness_batch(density)
-    exact_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    exact_condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     K_s_exact, _ = exact_condensor.condense(K_local_batch)
 
     system = assembler.assemble_interface_system(sub_meshes, exact_condensor)

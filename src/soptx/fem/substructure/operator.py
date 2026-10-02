@@ -26,6 +26,7 @@ from typing import Any, Optional, Sequence
 from fealpy.backend import backend_manager as bm
 
 from .assembler import GlobalAssembler
+from .reduction_adapter import normalize_local_reduction
 
 
 class InterfaceOperator:
@@ -72,7 +73,7 @@ class InterfaceOperator:
 
         n_b = int(sub_meshes[0].n_b)
         self.indices = assembler.interface_indices(sub_meshes, self.global_dofs)
-        self.K_s_batch, _ = assembler.normalize_condensors(
+        self.K_s_batch, _ = normalize_local_reduction(
             condensors, len(sub_meshes), n_b
         )
         self._flat_indices = bm.reshape(self.indices, (-1,))

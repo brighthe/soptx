@@ -9,6 +9,8 @@ from .artifacts import (
     save_checkpoint,
 )
 from .nets import (
+    IndependentOutputNet,
+    SplitOutputNet,
     ReducedStiffnessSurrogateNet,
     ShapeFunctionSurrogateNet,
     SubstructureSurrogateNet,
@@ -29,6 +31,8 @@ __all__ = [
     "DensitySamples",
     "DensitySamplingConfig",
     "ModelSignature",
+    "IndependentOutputNet",
+    "SplitOutputNet",
     "ReducedStiffnessSurrogateNet",
     "SamplingFractions",
     "ShapeFunctionSurrogateNet",

@@ -29,7 +29,6 @@ import argparse
 import json
 import unicodedata
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
@@ -40,8 +39,9 @@ from fealpy.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
+    InterfaceDofsView,
     LinearCornerTraceBasis,
     LocalReductionBatchResult,
     ReductionDiagnostics,
@@ -135,7 +135,7 @@ class Eq17Evaluator:
             SUB_SIZE, N_FINE, E_base=E_BASE, nu=NU,
             penal=SHAPE_SIMP_PENALTY, rho_min=SHAPE_RHO_MIN,
         )
-        self.condensor = FEAStaticCondensation(
+        self.condensor = ExactSchurCondensation(
             self.prototype.i_dofs, self.prototype.b_dofs
         )
         self.i_dofs = bm.to_numpy(self.prototype.i_dofs)
@@ -358,7 +358,7 @@ def step4_solution_layer(
     K_local_batch = prototype.assemble_local_stiffness_batch(density)
 
     # 1. 精确缩聚基线
-    exact_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    exact_condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     exact_condensor.condense(K_local_batch)
     K_s_exact_full = exact_condensor.K_s
 
@@ -419,7 +419,7 @@ def step4_solution_layer(
         # linear_corner 系统求解
         trace_basis = LinearCornerTraceBasis.from_prototype(prototype)
         interface_dofs = assembler.build_interface_dofs(sub_meshes)
-        interface_view = SimpleNamespace(global_dofs=interface_dofs)
+        interface_view = InterfaceDofsView(global_dofs=interface_dofs)
         projection = assembler.build_linear_corner_projection(
             sub_meshes, interface_view, trace_basis
         )

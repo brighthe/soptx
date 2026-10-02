@@ -11,7 +11,7 @@
 | 路径 | 学习/求解对象 | 核心库接口 | 产出 |
 |---|---|---|---|
 | `lagrange` | 全局位移 $\mathbf U$，解 $\mathbf{KU}=\mathbf F$ | `soptx.fem.analyzers.LagrangeFEMAnalyzer` | 参考真解 $\mathbf U_\text{full}$、全局刚度 $\mathbf K$ |
-| `substructure` | 局部 $\mathbf K_s^j=\mathbf K_{bb}^j-\mathbf K_{bi}^j(\mathbf K_{ii}^j)^{-1}\mathbf K_{ib}^j$ | `soptx.fem.substructure.FEAStaticCondensation` | $\mathbf U_\text{full}$、批量 $\mathbf K_s$ |
+| `substructure` | 局部 $\mathbf K_s^j=\mathbf K_{bb}^j-\mathbf K_{bi}^j(\mathbf K_{ii}^j)^{-1}\mathbf K_{ib}^j$ | `soptx.fem.substructure.ExactSchurCondensation` | $\mathbf U_\text{full}$、批量 $\mathbf K_s$ |
 | `pinn` | 连续解场 $\hat u_\theta(x)$ | 待下沉至 `soptx.ml` | 细网格节点采样位移 |
 | `piml` | 代理映射 $\rho^j\mapsto\widehat{\mathbf K}_s^j$ 或 $\widehat{\mathbf N}^j$ | `soptx.fem.substructure.ReducedStiffnessCondensation` | $\mathbf U_\text{full}$、批量 $\widehat{\mathbf K}_s$、回退统计 |
 

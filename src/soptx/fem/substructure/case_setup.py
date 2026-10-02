@@ -19,8 +19,7 @@ from soptx.ml.substructure import (
 )
 
 from .mesh import SubstructureMesh, SubstructurePrototype, build_substructures
-from .condensation import FEAStaticCondensation
-from .assembler import GlobalAssembler
+from .condensation import ExactSchurCondensation
 
 #: 降阶刚度代理网络的各隐藏层宽度. 当前不随工况配置.
 _REDUCED_STIFFNESS_HIDDEN_DIMS = (128, 128)
@@ -42,66 +41,6 @@ def set_random_seed(seed: int) -> None:
     if bm.backend_name == "numpy":
         bm.random.seed(seed)
     torch.manual_seed(seed)
-
-
-def build_substructures(
-    assembler: GlobalAssembler,
-) -> Tuple[SubstructurePrototype, List[SubstructureMesh], List[Tuple[int, ...]]]:
-    """按装配器的布局铺开全部子结构, 共享同一个参考子结构.
-
-    参数:
-        assembler: 已构造的全局装配器, 提供求解域尺寸与子结构划分.
-
-    返回:
-        (prototype, sub_meshes, positions): 共享的参考子结构, 按 x 优先字典序排列的
-            子结构列表, 以及各子结构在子结构网格中的整数位置 ``(sx, sy)``. 位置与
-            ``sub_meshes`` 同序, 供 ``get_substructure_global_dofs`` 把局部自由度映射
-            到全局编号. 全部子结构同构, 因此离散结构, 自由度划分与单位密度单元刚度
-            只构造一次.
-    """
-    sub_size = tuple(
-        assembler.domain_size[d] / assembler.n_sub[d] for d in range(assembler.dim)
-    )
-    prototype = SubstructurePrototype(
-        sub_size, assembler.n_fine, assembler.E_base, assembler.nu
-    )
-
-    sub_meshes: List[SubstructureMesh] = []
-    positions: List[Tuple[int, ...]] = []
-    sub_id = 0
-    if assembler.dim == 2:
-        for sx in range(assembler.n_sub[0]):
-            for sy in range(assembler.n_sub[1]):
-                spans = (
-                    (sx * sub_size[0], (sx + 1) * sub_size[0]),
-                    (sy * sub_size[1], (sy + 1) * sub_size[1]),
-                )
-                sub_meshes.append(
-                    SubstructureMesh(
-                        sub_id, *spans, *assembler.n_fine,
-                        E_base=assembler.E_base, nu=assembler.nu, prototype=prototype,
-                    )
-                )
-                positions.append((sx, sy))
-                sub_id += 1
-    elif assembler.dim == 3:
-        for sx in range(assembler.n_sub[0]):
-            for sy in range(assembler.n_sub[1]):
-                for sz in range(assembler.n_sub[2]):
-                    spans = (
-                        (sx * sub_size[0], (sx + 1) * sub_size[0]),
-                        (sy * sub_size[1], (sy + 1) * sub_size[1]),
-                        (sz * sub_size[2], (sz + 1) * sub_size[2]),
-                    )
-                    sub_meshes.append(
-                        SubstructureMesh(
-                            sub_id, *spans, *assembler.n_fine,
-                            E_base=assembler.E_base, nu=assembler.nu, prototype=prototype,
-                        )
-                    )
-                    positions.append((sx, sy, sz))
-                    sub_id += 1
-    return prototype, sub_meshes, positions
 
 
 def make_density_fields(
@@ -246,7 +185,7 @@ def train_reduced_stiffness_surrogate(
     rand_rho = sample_random_density(prototype, n_train, density_range)
 
     K_train_batch = prototype.assemble_local_stiffness_batch(rand_rho)
-    train_condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    train_condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     K_s_train, _ = train_condensor.condense(K_train_batch)
 
     # 限制到变形子空间后算子严格正定, Cholesky 分解无需任何正则.
@@ -270,7 +209,7 @@ def train_reduced_stiffness_surrogate(
     config = TrainingConfig(
         epochs=n_epochs,
         batch_size=n_train,
-        learning_rate=learning_rate,
+        optimizer_params={"lr": learning_rate},
         select_final_state=True,
     )
     result = _train_surrogate(net, X_train, Y_train, X_train, Y_train, config)

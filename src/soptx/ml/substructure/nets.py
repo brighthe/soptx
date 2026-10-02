@@ -156,15 +156,15 @@ class SplitShapeFunctionNet(SplitOutputNet):
     """保留形函数分组网络的原有接口, 实现复用通用分组网络."""
 
 
-class DirectStiffnessNet(SubstructureSurrogateNet):
-    """直接预测缩聚刚度的独立条目.
+class IndependentOutputNet(SubstructureSurrogateNet):
+    """使用单个网络预测所选路线的全部独立输出分量.
 
     Parameters
     ----------
     input_dim : int
         每个样本的输入特征数.
     output_dim : int
-        独立刚度条目数, 三维角点接口配置取 171.
+        独立输出分量数, 由形函数或刚度路线的标签维度决定.
     hidden_dims : tuple[int, ...]
         各隐藏层宽度, 由调用端指定.
     activation : ActivationSpec, optional
@@ -174,7 +174,11 @@ class DirectStiffnessNet(SubstructureSurrogateNet):
     Notes
     -----
     复用 SubstructureSurrogateNet 的构造和前向计算.
-    输出是独立刚度条目, 不是 Cholesky 因子. 对称性与刚体零空间
+    输出是形函数独立分量或刚度独立条目, 不是 Cholesky 因子. 刚体再现或刚体零空间
     约束由后续补全器施加, 不能使用 ReducedStiffnessCondensation
     的 Cholesky 重构逻辑解码.
     """
+
+
+class DirectStiffnessNet(IndependentOutputNet):
+    """保留旧单网络刚度类名, 新代码使用 IndependentOutputNet."""

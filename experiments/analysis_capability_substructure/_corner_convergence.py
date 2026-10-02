@@ -15,7 +15,7 @@ from fealpy.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     GlobalAssembler,
     InterfaceSystem,
     LinearCornerTraceBasis,
@@ -89,7 +89,7 @@ def _free_residual(
 def _build_full_extension(
     assembler: GlobalAssembler,
     sub_meshes: Sequence[Any],
-    condensor: FEAStaticCondensation,
+    condensor: ExactSchurCondensation,
     trace_basis: LinearCornerTraceBasis,
 ) -> csr_matrix:
     """构造宏观角点到全细网格的延拓, 并检查共享行一致性."""
@@ -181,7 +181,7 @@ def _solve_one_level(
         (len(sub_meshes),) + tuple(assembler.n_fine), dtype=bm.float64
     )
     local_stiffness = prototype.assemble_local_stiffness_batch(density)
-    condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     condensor.condense(local_stiffness)
     trace_basis = LinearCornerTraceBasis.from_prototype(prototype)
 

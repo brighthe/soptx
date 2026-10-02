@@ -45,7 +45,7 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.integrators import SourceIntegrator
 from soptx.protocols import BodyForce
 from soptx.fem.substructure import (
-    FEAStaticCondensation,
+    ExactSchurCondensation,
     build_substructures,
     GlobalAssembler,
     InterfaceSystem,
@@ -176,7 +176,7 @@ def solve_one_level(
         raise ValueError("本制造解验证仅支持零外载, 非零内部载荷需要额外缩聚右端项.")
 
     K_local_batch = prototype.assemble_local_stiffness_batch(density)
-    condensor = FEAStaticCondensation(prototype.i_dofs, prototype.b_dofs)
+    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
     condensor.condense(K_local_batch)
     system = assembler.assemble_interface_system(sub_meshes, condensor)
 

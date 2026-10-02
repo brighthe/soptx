@@ -429,7 +429,7 @@ def main() -> None:
     training_config = TrainingConfig(
         epochs=args.epochs,
         batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
+        optimizer_params={"lr": args.learning_rate},
         seed=args.seed,
         patience=args.patience,
         physics_eval_interval=args.physics_eval_interval,
@@ -479,7 +479,7 @@ def main() -> None:
         refit_config = TrainingConfig(
             epochs=result.best_epoch,
             batch_size=args.batch_size,
-            learning_rate=args.learning_rate,
+            optimizer_params={"lr": args.learning_rate},
             seed=args.seed,
             patience=0,
             select_final_state=True,

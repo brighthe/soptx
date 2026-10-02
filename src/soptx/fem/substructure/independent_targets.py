@@ -1,12 +1,13 @@
 """子结构独立条目标签与刚体约束补全.
 
-本模块实现 ``linear_corner`` 迹空间下的两类监督标签。它直接保留矩阵条目,
+本模块实现 ``linear_corner`` 与 ``full_trace`` 迹空间下的两类监督标签. 它直接保留矩阵条目,
 再由刚体约束消去一组 pivot 自由度; 因此既不是刚体正交补投影, 也不是
 Cholesky 参数化.
 """
 
 from __future__ import annotations
 
+from numbers import Integral, Real
 from typing import Any, Optional, Sequence
 
 import numpy as np
@@ -248,58 +249,35 @@ class StiffnessIndependentCodec:
         return np.swapaxes(selector, -1, -2) @ reduced @ selector
 
 
-class IndependentTargetProvider:
-    """生成二维或三维子结构在所选接口空间下的精确独立条目标签.
+class IndependentPredictionDecoder:
+    """基于已有参考子结构构造接口空间及网络输出编解码器.
 
-    输入是归一化杨氏模量 ``E / E_base``, 而非再经过 SIMP 插值的设计密度.
-    默认原型令 ``penal=1``、``rho_min=0``, 因此局部单元刚度对输入线性缩放.
-    二维原型沿用 ``SubstructurePrototype`` 的平面应力假设, 三维原型使用三维
-    各向同性线弹性假设.
+    Parameters
+    ----------
+    prototype : SubstructurePrototype
+        已由整体子结构流程创建的参考子结构.
+    trace_kind : str
+        linear_corner 或 full_trace, 默认保留角点接口.
     """
 
     def __init__(
         self,
+        prototype: SubstructurePrototype,
         *,
-        cell_size: Sequence[float] = (1.0, 1.0, 1.0),
-        n_fine: Sequence[int] = (5, 5, 5),
-        nu: float = 0.3,
-        chunk_size: Optional[int] = None,
         trace_kind: str = "linear_corner",
     ) -> None:
-        """初始化子结构及独立条目补全器.
-
-        Parameters
-        ----------
-        cell_size : sequence of float
-            子结构各方向尺寸.
-        n_fine : sequence of int
-            各方向细单元数量.
-        nu : float
-            固定泊松比.
-        chunk_size : int or None
-            局部刚度装配批量大小.
-        trace_kind : str
-            linear_corner 或 full_trace, 默认保留角点接口.
-        """
+        """从已有参考子结构初始化接口空间与独立条目补全器."""
         trace_types = {
             "linear_corner": LinearCornerTraceBasis,
             "full_trace": FullTraceBasis,
         }
         if trace_kind not in trace_types:
             raise ValueError("trace_kind 必须为 linear_corner 或 full_trace")
+
+        self.prototype = prototype
         self.trace_kind = trace_kind
-        self.prototype = SubstructurePrototype(
-            cell_size=cell_size,
-            n_fine=n_fine,
-            E_base=1.0,
-            nu=nu,
-            penal=1.0,
-            rho_min=0.0,
-        )
-        self.trace = trace_types[trace_kind].from_prototype(self.prototype)
-        rigid, _, rigid_interior = self.prototype.trace_interface_bases(
-            self.trace
-        )
+        self.trace = trace_types[trace_kind].from_prototype(prototype)
+        rigid, _, rigid_interior = prototype.trace_interface_bases(self.trace)
         rigid_numpy = np.asarray(bm.to_numpy(rigid), dtype=np.float64)
         interior_numpy = np.asarray(
             bm.to_numpy(rigid_interior), dtype=np.float64
@@ -315,6 +293,127 @@ class IndependentTargetProvider:
             "shape": self.shape_codec,
             "stiffness": self.stiffness_codec,
         }
+        self.nu = float(prototype.nu)
+
+    def metadata(self) -> dict[str, Any]:
+        """返回可写入 JSON 的独立条目配置与编号契约."""
+        geometry = (
+            "axis_aligned_quadrilateral"
+            if self.prototype.dim == 2
+            else "axis_aligned_hexahedron"
+        )
+
+        return {
+            "trace": self.trace_kind,
+            "spatial_dimension": int(self.prototype.dim),
+            "geometry": geometry,
+            "cell_size": list(self.prototype.cell_size),
+            "n_fine": list(self.prototype.n_fine),
+            "finite_element_degree": int(self.prototype.degree),
+            "dof_ordering": "node_major_component_minor",
+            "n_cells": int(self.prototype.n_cells),
+            "poisson_ratio": self.nu,
+            **(
+                {"material_hypothesis": self.prototype.hypothesis}
+                if self.prototype.dim == 2
+                else {}
+            ),
+            "input_quantity": "normalized_young_modulus",
+            "input_range": "(0, 1]",
+            "material_scaling": {
+                "reference_young_modulus": float(self.prototype.E_base),
+                "penal": float(self.prototype.penal),
+                "rho_min": float(self.prototype.rho_min),
+                "stiffness_quantity": "K_physical / E_reference",
+                "recovery_quantity": "dimensionless",
+            },
+            "n_i": self.shape_codec.n_internal,
+            "n_trace": self.shape_codec.n_trace,
+            "n_rigid": self.shape_codec.n_rigid,
+            "n_shape_targets": self.shape_codec.n_output,
+            "n_stiffness_targets": self.stiffness_codec.n_output,
+            "rigid_basis": self.shape_codec.rigid_basis.tolist(),
+            "rigid_interior": self.shape_codec.rigid_interior.tolist(),
+            "roundtrip_tolerance": {"rtol": 1e-8, "atol": 1e-10},
+            "pivot_indices": self.shape_codec.pivot_indices.tolist(),
+            "free_indices": self.shape_codec.free_indices.tolist(),
+            "shape_encoding": (
+                "free_matrix_entries_with_rigid_pivot_completion"
+            ),
+            "stiffness_encoding": (
+                "symmetric_free_block_with_rigid_pivot_completion"
+            ),
+        }
+
+
+class IndependentTargetProvider(IndependentPredictionDecoder):
+    """生成二维或三维子结构在所选接口空间下的精确独立条目标签.
+
+    输入是归一化杨氏模量 ``E / E_base``, 而非再经过 SIMP 插值的设计密度.
+    默认原型令 ``penal=1``、``rho_min=0``, 因此局部单元刚度对输入线性缩放.
+    二维原型可选平面应力或平面应变, 默认平面应力; 三维原型使用三维
+    各向同性线弹性假设.
+    """
+
+    def __init__(
+        self,
+        *,
+        cell_size: Sequence[float] = (1.0, 1.0, 1.0),
+        n_fine: Sequence[int] = (5, 5, 5),
+        nu: float = 0.3,
+        chunk_size: Optional[int] = None,
+        trace_kind: str = "linear_corner",
+        hypothesis: Optional[str] = None,
+    ) -> None:
+        """初始化子结构及独立条目补全器.
+
+        Parameters
+        ----------
+        cell_size : sequence of float
+            子结构各方向尺寸, 每个分量须为有限的正实数.
+        n_fine : sequence of int
+            各方向细单元数量, 每个分量须为至少 2 的整数.
+        nu : float
+            固定泊松比.
+        chunk_size : int or None
+            局部刚度装配批量大小, 为正整数或 None. 不限制整体标签求解内存.
+        trace_kind : str
+            linear_corner 或 full_trace, 默认保留角点接口.
+        hypothesis : str or None
+            二维允许 plane_stress 或 plane_strain, 默认前者; 三维使用 3D 或 None.
+        """
+        cell_size = tuple(cell_size)
+        n_fine = tuple(n_fine)
+        if len(cell_size) not in (2, 3) or len(cell_size) != len(n_fine):
+            raise ValueError("cell_size 与 n_fine 必须为等长的二维或三维序列")
+        if any(
+            isinstance(s, (bool, np.bool_)) or not isinstance(s, Real)
+            or not np.isfinite(s) or s <= 0
+            for s in cell_size
+        ):
+            raise ValueError("cell_size 的各分量必须为有限的正实数")
+        if any(
+            isinstance(n, (bool, np.bool_)) or not isinstance(n, Integral) or n < 2
+            for n in n_fine
+        ):
+            raise ValueError("n_fine 的各分量必须为至少 2 的整数")
+        if chunk_size is not None and (
+            isinstance(chunk_size, (bool, np.bool_))
+            or not isinstance(chunk_size, Integral) or chunk_size <= 0
+        ):
+            raise ValueError("chunk_size 必须为正整数或 None")
+        if trace_kind not in ("linear_corner", "full_trace"):
+            raise ValueError("trace_kind 必须为 linear_corner 或 full_trace")
+        prototype = SubstructurePrototype(
+            cell_size=cell_size,
+            n_fine=n_fine,
+            E_base=1.0,
+            nu=nu,
+            penal=1.0,
+            rho_min=0.0,
+            hypothesis=hypothesis,
+        )
+        super().__init__(prototype, trace_kind=trace_kind)
         self._trace_matrix = np.asarray(
             bm.to_numpy(self.trace.matrix), dtype=np.float64
         )
@@ -325,10 +424,21 @@ class IndependentTargetProvider:
             bm.to_numpy(self.prototype.b_dofs), dtype=np.int64
         )
         self.chunk_size = chunk_size
-        self.nu = float(nu)
 
-    def __call__(self, normalized_modulus: Any) -> dict[str, np.ndarray]:
-        """返回形函数与刚度的独立条目标签."""
+    def exact_matrices(self, normalized_modulus: Any) -> dict[str, np.ndarray]:
+        """计算局部精确矩阵, 供标签生成与局部预测验证复用.
+
+        Parameters
+        ----------
+        normalized_modulus : array_like
+            形状为 (batch, n_cells) 的归一化杨氏模量.
+
+        Returns
+        -------
+        dict[str, numpy.ndarray]
+            local_stiffness 为原型原自由度顺序的细网格刚度,
+            shape 为内部形函数, stiffness 为所选接口空间的缩聚刚度.
+        """
         modulus = np.asarray(normalized_modulus, dtype=np.float64)
         expected = self.prototype.n_cells
         if modulus.ndim != 2 or modulus.shape[1] != expected:
@@ -361,6 +471,13 @@ class IndependentTargetProvider:
             K_bb_trace
             + np.swapaxes(K_ib_trace, -1, -2) @ recovery
         )
+        return {"local_stiffness": local, "shape": recovery, "stiffness": stiffness}
+
+    def __call__(self, normalized_modulus: Any) -> dict[str, np.ndarray]:
+        """返回形函数与刚度的独立条目标签."""
+        matrices = self.exact_matrices(normalized_modulus)
+        recovery = matrices["shape"]
+        stiffness = matrices["stiffness"]
         targets = {
             "shape": np.asarray(self.shape_codec.encode(recovery)),
             "stiffness": np.asarray(self.stiffness_codec.encode(stiffness)),
@@ -376,46 +493,3 @@ class IndependentTargetProvider:
             ):
                 raise ValueError(f"{name} 独立条目补全与精确标签不一致")
         return targets
-
-    def metadata(self) -> dict[str, Any]:
-        """返回可直接写入 JSON 的标签构造契约."""
-        geometry = (
-            "axis_aligned_quadrilateral"
-            if self.prototype.dim == 2
-            else "axis_aligned_hexahedron"
-        )
-
-        return {
-            "trace": self.trace_kind,
-            "spatial_dimension": int(self.prototype.dim),
-            "geometry": geometry,
-            "cell_size": list(self.prototype.cell_size),
-            "n_fine": list(self.prototype.n_fine),
-            "finite_element_degree": int(self.prototype.degree),
-            "dof_ordering": "node_major_component_minor",
-            "n_cells": int(self.prototype.n_cells),
-            "poisson_ratio": self.nu,
-            **(
-                {"material_hypothesis": "plane_stress"}
-                if self.prototype.dim == 2
-                else {}
-            ),
-            "input_quantity": "normalized_young_modulus",
-            "input_range": "(0, 1]",
-            "n_i": self.shape_codec.n_internal,
-            "n_trace": self.shape_codec.n_trace,
-            "n_rigid": self.shape_codec.n_rigid,
-            "n_shape_targets": self.shape_codec.n_output,
-            "n_stiffness_targets": self.stiffness_codec.n_output,
-            "rigid_basis": self.shape_codec.rigid_basis.tolist(),
-            "rigid_interior": self.shape_codec.rigid_interior.tolist(),
-            "roundtrip_tolerance": {"rtol": 1e-8, "atol": 1e-10},
-            "pivot_indices": self.shape_codec.pivot_indices.tolist(),
-            "free_indices": self.shape_codec.free_indices.tolist(),
-            "shape_encoding": (
-                "free_matrix_entries_with_rigid_pivot_completion"
-            ),
-            "stiffness_encoding": (
-                "symmetric_free_block_with_rigid_pivot_completion"
-            ),
-        }
