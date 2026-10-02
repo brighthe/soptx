@@ -1,6 +1,6 @@
 # Hu--Zhang 拓扑优化论文实验结果分析
 
-> 本文档是论文草稿 `C:\workspace\dut-postdoc\papers\huzhang-topopt\arbitrary-order-huzhang-topopt-draft-zh.md` 第 5 章数值试验的唯一数据来源：
+> 本文档是论文草稿 `C:\workspace\dut-postdoc\papers\huzhang-topopt\high-order-huzhang-topopt-draft-zh.md` 第 5 章数值试验的唯一数据来源：
 > 草稿正文中的全部表格数字、图件与结论表述均以本文档记录的实测值为准。
 
 ---
@@ -10,9 +10,9 @@
 第 5.2 节涉及 HZMFEM k=2 的数据统一采用 `outputs/fixed_coefficient_optimization/20260923T013529873586Z/` 结果集, 下记为 `R`. 本节的数字和路径取代后文历史记录中对应的低阶结果; 未受影响的 LFEM、高阶和全实体结果继续沿用. 历史运行目录保留, 不覆盖.
 
 ### 0.1 优化结果与系数比较
-2026-09-23 默认配置更新: `HuZhangMFEMAnalyzer` 的 `stabilization_coefficient` 默认设为 `fixed`, 密度相关系数保留为显式 `density_dependent` 选项. `fixed_coefficient.py` 已移除运行时方法覆盖, 仅管理结果目录. 下文所述运行时覆盖是这四次历史优化实际采用的方式, 其原始 manifest 不改写; 默认实现与保存结果的一致性另由 `R/default_mode_validation.json` 记录. 验证结果: 四个设计通过公共默认路径再分析, 三项柔顺度和判据集合上的最大应力违背与保存值之差均为 0; 系数模式与跳量相容性测试共 20 项通过. 新运行的 summary 记录 `stabilization_coefficient`, 历史摘要不回写.
+2026-09-23 默认配置更新: `HuZhangMFEMAnalyzer` 的 `stabilization_coefficient` 默认设为 `fixed`, 密度相关系数保留为显式 `density_dependent` 选项. 下文所述运行时覆盖是这四次历史优化实际采用的方式, 其原始 manifest 不改写; 默认实现与保存结果的一致性另由 `R/default_mode_validation.json` 记录. 验证结果: 四个设计通过公共默认路径再分析, 三项柔顺度和判据集合上的最大应力违背与保存值之差均为 0; 系数模式与跳量相容性测试共 20 项通过. 新运行的 summary 记录 `stabilization_coefficient`, 历史摘要不回写.
 
-固定模式使用 `fixed_coefficient.py`, 与最初四次运行的 `R/run_fixed.py` 相同: 将 `HuZhangMFEMAnalyzer._density_shear_ratio()` 设为 `None`, 保留矩阵跳量格式、积分修正及原优化算法. 本次不修改解析灵敏度实现, 因而不把收敛或两组结果接近作为灵敏度正确性的证明.
+最初四次运行由 `R/run_fixed.py` 施加固定模式: 将 `HuZhangMFEMAnalyzer._density_shear_ratio()` 设为 `None`, 保留矩阵跳量格式、积分修正及原优化算法. 本次不修改解析灵敏度实现, 因而不把收敛或两组结果接近作为灵敏度正确性的证明.
 
 | 算例 | 密度相关系数 | 固定系数 | 迭代步数, 原→固定 |
 |---|---:|---:|---:|
@@ -60,10 +60,14 @@
 从实验目录执行:
 
 ```bash
-~/miniconda3/envs/ihpcm/bin/python fixed_coefficient.py --output-root outputs/fixed_coefficient_optimization/20260923T013529873586Z refresh
+R=outputs/fixed_coefficient_optimization/20260923T013529873586Z
+~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R compliance-reanalysis
+~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R bearing-reanalysis
+~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R discretization-probe --design analyzer-huzhang__lfem_constraint-apparent__load_pad_radius-1.5__order-2__solid_thr-0.5
+for c in compliance-topology compliance-convergence bearing-topologies stress-hz-orders-topologies stress-traction-jump; do ~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R --case $c; done
 ```
 
-该命令重算冻结设计, 不重新优化, 更新图 5.2、5.3、5.6、5.10、5.11 及两张 JSON 交叉表族. 新优化的逐 case 命令见 README. 图 5.5 的 rho=1 使密度剪切比等于 1, 两种系数一致; 制造解及原生高阶优化不受本次切换影响. 图 5.3 横轴改按实际最长运行自动设定, 避免旧 230 步上限截断曲线; 图 5.2 的 LFEM 阶次统一标 p.
+以上命令重算冻结设计, 不重新优化, 更新图 5.2、5.3、5.6、5.10、5.11 及两张 JSON 交叉表族. 新优化的逐 case 命令见 README. 图 5.5 的 rho=1 使密度剪切比等于 1, 两种系数一致; 制造解及原生高阶优化不受本次切换影响. 图 5.3 横轴改按实际最长运行自动设定, 避免旧 230 步上限截断曲线; 图 5.2 的 LFEM 阶次统一标 p.
 
 `R/manifest.json` 保存四次优化的源码摘要, `R/paper_refresh_manifest.json` 保存本次再分析输入与脚本摘要. Git 工作区已有修改, `provenance.reproducible=false` 保留原样; 数值证据由具体产物、源码哈希和复现检查共同定位, 不伪称来自干净提交.
 
@@ -82,14 +86,12 @@
 
 ### 2.1 算例参数与代码映射契约
 
-* **模型实现**：`MixedBoundarySinusoidalElasticity2D`（`src/soptx/problems/elasticity/manufactured_2d.py`），制造解取 $u_1 = u_2 = \sin(\pi x)\sin(\pi y)$；`manufactured-native` 与 `manufactured-stabilized` 两条 case 共用该模型（仅 `stabilization` 取值不同）；
+* **模型实现**：`MixedBoundarySinusoidalElasticity2D`（`src/soptx/problems/elasticity/manufactured_2d.py`），制造解取 $u_1 = u_2 = \sin(\pi x)\sin(\pi y)$；$k=3,4$ 不加稳定化、$k=1,2$ 用 `matrix_jump`，参数为 `manufactured_convergence.py` 顶部常量；
 * **物理问题**：$[0,1]^2$ 正方形域平面应变线弹性体（$\lambda=1.0, \mu=0.5$，对应模型入参 `lame_lambda` / `shear_modulus` 的缺省值）；
 * **边界条件**：$\Gamma_D = \{x=0\}\cup\{y=0\}$ 弱加齐次位移，$\Gamma_N = \{x=1\}\cup\{y=1\}$ 强加解析牵引力，混合边界交界角点 $(1,0)$ 与 $(0,1)$ 开启两单元局部角点松弛；
 * **网格序列**：棋盘格结构化三角网格（`mesh_type = "triangle-checkerboard"`），剖分层次 $nx = 4, 8, 16, 32, 64$。
 
-数据来源：`outputs/manufactured_convergence/summary.json`（由 `run.py --case manufactured-native` 与 `--case manufactured-stabilized` 按阶次增量写入，`compare.py table` 据此重算表 5.1 / 5.2，不手工录入）。
-
-<img src="outputs/figures/manufactured_mesh.png" width="320" alt="制造解算例的棋盘格三角剖分">
+数据来源：`outputs/manufactured_convergence/summary.json`（由 `manufactured_convergence.py` 一次跑完 $k=1,\dots,4$ 写入，同目录 `table5_1.md` / `table5_2.md` 即表 5.1 / 5.2，不手工录入）。
 
 ### 2.2 高阶原生格式实测数据（$k=3,4$ / 论文表 5.1）
 
@@ -129,9 +131,7 @@
 
 ### 3.1 算例参数与代码映射契约
 
-<img src="figure_data/fig5_1_schematic.png" width="720" alt="两端固支梁几何尺寸、载荷与对称边界条件示意">
-
-**图 5.1**  两端固支梁几何尺寸、载荷与对称边界条件示意
+**图 5.1**  两端固支梁几何尺寸、载荷与对称边界条件示意（dut-postdoc 侧 TikZ 图件，不由本流水线产出）
 
 **分析参数**（求解一次状态方程所需；对应 `cases.toml` 的 `[cases.model]` A 问题 与 `[cases.discretization]` B 离散）
 
@@ -164,11 +164,11 @@
 | **HZMFEM** | $k=3$ (原生) | **32.109** | 0.400000 | 301 | 是 | mumps |
 | **HZMFEM** | $k=4$ (原生) | **31.910** | 0.400000 | 342 | 是 | mumps |
 
-<img src="figure_data/fig5_2_compliance_topology.png" width="760" alt="两端固支梁最终拓扑构型对比: 左列 LFEM, 右列 HZMFEM, 自上而下阶次 2/3/4">
+<img src="outputs/figures/compliance_topology.png" width="760" alt="两端固支梁最终拓扑构型对比: 左列 LFEM, 右列 HZMFEM, 自上而下阶次 2/3/4">
 
 **图 5.2**  采用 MMA 的两端固支梁最终拓扑构型对比（左列：Lagrange 位移元 LFEM，$p$ 为位移阶；右列：Hu–Zhang 混合元 HZMFEM，$k$ 为应力阶）
 
-<img src="figure_data/fig5_3_compliance_convergence.png" width="760" alt="两端固支梁 MMA 优化历史曲线对比: 彩色为柔顺度, 灰色为体积分数">
+<img src="outputs/figures/compliance_convergence.png" width="760" alt="两端固支梁 MMA 优化历史曲线对比: 彩色为柔顺度, 灰色为体积分数">
 
 **图 5.3**  两端固支梁 MMA 优化历史曲线对比（彩色曲线：完整结构柔顺度；灰色曲线：体积分数；末端圆点：各次运行的末步柔顺度，即表 5.3 的优化所得柔顺度；内嵌图：后期迭代放大）
 
@@ -188,7 +188,7 @@
 | HZMFEM $k=4$ | 31.507 | 31.610 | 31.636 | 32.838 | 32.171 | **31.910** |
 | 列内极差 (max/min $-1$) | 0.84% | 0.82% | 0.82% | 1.05% | 0.86% | 0.86% |
 
-对角线自检: 六格与 `summary.json` 自评值相对差均为 0 (容差 $10^{-8}$), 全部通过。HZMFEM $k=2$ 运行于 2026-09-21 在当前代码 (soptx `8d6092f` 加未提交工作区改动) 上重跑, 09-10 运行 (`ad95594`, 自评 $32.640$) 已移至 `outputs/archive/compliance-fixed-fixed-half-20260910-legacy/`。重跑原因是 `JumpPenaltyIntegrator` 工作区中的面积分点定向修正 (`_oriented_cell_basis`, 尚未提交): 旧实现对共享内部面的两个单元套用同一组面重心坐标, 结构化三角网格上约 1/3 内部面两侧取到镜像点, 装配出的不是跳量, 稳定化项失去相容性, 使 $\operatorname{div}\boldsymbol\sigma_h$ 掉一阶而 $L^2$ 阶不受影响 ($k=1$ 位移空间为 $P_0$, 不受影响); 修正后表 5.2 的 $k=2$ 应力 $H(\operatorname{div})$ 观测阶由 1 恢复为 2。另外 `891e6ed` (2026-09-20) 起跳量惩罚按相对剪切模量的调和平均做密度定标, 09-10 运行无此定标; 两处改动无对照开关, 自评值 $32.640 \to 32.764$ ($+0.38\%$) 为二者合并效应, 不单独归因。两次运行迭代步数同为 287, 最终密度逐单元最大差 $0.0089$、实体/空洞/灰单元计数一致, 六列再分析值保留三位小数后逐格不变; 收敛历史整体上移 (第 1 步均匀设计 $\rho=0.4$ 时 $+4.4\%$, 末段稳定在 $+0.37\%$ 至 $+0.38\%$)。LFEM 三列再分析值与 09-10 自评值相对差为 0, 说明工作区中 LFEM 装配架构的改动数值上无影响。HZ 三列的互补能与牵引对偶功在 18 格上一致, 相对耦合比均为 0。
+对角线自检: 六格与 `summary.json` 自评值相对差均为 0 (容差 $10^{-8}$), 全部通过。HZMFEM $k=2$ 运行于 2026-09-21 在当前代码 (soptx `8d6092f` 加未提交工作区改动) 上重跑, 09-10 运行 (`ad95594`, 自评 $32.640$) 的产物已删除, 下文与之对比的数字为删除前的记录。重跑原因是 `JumpPenaltyIntegrator` 工作区中的面积分点定向修正 (`_oriented_cell_basis`, 尚未提交): 旧实现对共享内部面的两个单元套用同一组面重心坐标, 结构化三角网格上约 1/3 内部面两侧取到镜像点, 装配出的不是跳量, 稳定化项失去相容性, 使 $\operatorname{div}\boldsymbol\sigma_h$ 掉一阶而 $L^2$ 阶不受影响 ($k=1$ 位移空间为 $P_0$, 不受影响); 修正后表 5.2 的 $k=2$ 应力 $H(\operatorname{div})$ 观测阶由 1 恢复为 2。另外 `891e6ed` (2026-09-20) 起跳量惩罚按相对剪切模量的调和平均做密度定标, 09-10 运行无此定标; 两处改动无对照开关, 自评值 $32.640 \to 32.764$ ($+0.38\%$) 为二者合并效应, 不单独归因。两次运行迭代步数同为 287, 最终密度逐单元最大差 $0.0089$、实体/空洞/灰单元计数一致, 六列再分析值保留三位小数后逐格不变; 收敛历史整体上移 (第 1 步均匀设计 $\rho=0.4$ 时 $+4.4\%$, 末段稳定在 $+0.37\%$ 至 $+0.38\%$)。LFEM 三列再分析值与 09-10 自评值相对差为 0, 说明工作区中 LFEM 装配架构的改动数值上无影响。HZ 三列的互补能与牵引对偶功在 18 格上一致, 相对耦合比均为 0。
 
 论文表 5.3 取自评列 (对角线) 与 LFEM $p=3,4$、HZ $k=3,4$ 四列, 保留两位小数; 对每个固定设计, LFEM 列随 $p$ 上升、HZ 列随 $k$ 下降, 同阶次两类泛函相对差由 3 阶的 $1.66\%$–$1.78\%$ 缩至 4 阶的 $0.82\%$–$0.89\%$ (六个设计的范围), 论文据此说明两种离散近似相向逼近。数据来源: `outputs/compliance-fixed-fixed-half/postprocess/frozen_reanalysis.json` (由 `compare.py compliance-reanalysis` 生成, 含逐格能量分量与自检记录); 本轮 JSON 的 `provenance` 为 soptx `8d6092f` (`git_dirty = true`)、FEALPy `f474a57` (干净), `reproducible = false`, 正式引用前需在干净工作区重跑。
 
@@ -203,9 +203,7 @@
 
 ### 4.1 算例参数与代码映射契约
 
-<img src="figure_data/fig5_4_bearing_schematic.png" width="720" alt="二维轴承装置几何、载荷与边界条件示意">
-
-**图 5.4**  二维轴承装置几何与边界条件示意
+**图 5.4**  二维轴承装置几何与边界条件示意（dut-postdoc 侧 TikZ 图件，不由本流水线产出）
 
 **分析参数**（求解一次状态方程所需；对应 `cases.toml` 的 `[cases.model]` A 问题 与 `[cases.discretization]` B 离散）
 
@@ -225,11 +223,11 @@
 |---|---|---|---|
 | 材料插值 | 基准组只插值 $E$；近不可压缩组按式 (4.3) 同时插值 $E$ 与 $\nu$, $\nu_{\mathrm{void}}=0.3, p_\nu=1$ | `interpolation_variables = "E"` / `"E+nu"`, `nu_penalty_factor = 1.0`, `void_poisson_ratio = 0.3` | 两组均显式登记而非留给缺省 `"auto"`：插值对象是对照实验的受控量，不应随材料静默切换；`"E+nu"` 只允许 $\nu_0 \ge 0.49$, 可压缩材料上直接报错 |
 | 拓扑参数 | 体积分数 $\bar{V} = 0.35$, 过滤半径 $r_{\min} = 2.0\,\mathrm{mm}$ | `volume_fraction = 0.35`, `filter_radius = 2.0`, `filter_type = "density"` | 密度过滤; MSIMP 惩罚 `interpolation_method = "msimp"`, `penalty_factor = 3.0` ($p=3$), `void_youngs_modulus = 1e-09` ($E_{\min}=10^{-9}\,\mathrm{MPa}$) |
-| 优化算法 | OC, 移动极限 $m = 0.2$, 阻尼指数 $\eta_{\mathrm{OC}} = 0.5$, 停机 $\Delta_\rho \le 10^{-2}$, 上限 1000 步 | `optimizer = "oc"`, `move_limit = 0.2`, `change_tolerance = 0.01`, `max_iterations = 1000` | $\eta_{\mathrm{OC}}$ 不经注册表，硬编码于 `pipeline.py:387`；`asymp_init` 仅 MMA 读取，本条不登记。MMA 及其渐近线扫描不能复现三拱构型，对照产物在 `outputs/archive/bearing-incompressible-20260914-mma/` |
+| 优化算法 | OC, 移动极限 $m = 0.2$, 阻尼指数 $\eta_{\mathrm{OC}} = 0.5$, 停机 $\Delta_\rho \le 10^{-2}$, 上限 1000 步 | `optimizer = "oc"`, `move_limit = 0.2`, `change_tolerance = 0.01`, `max_iterations = 1000` | $\eta_{\mathrm{OC}}$ 不经注册表，硬编码于 `pipeline.py:387`；`asymp_init` 仅 MMA 读取，本条不登记。MMA 及其渐近线扫描不能复现三拱构型，对照产物已删除 |
 
 ### 4.2 实测数据 (全尺寸 120x40 网格，MUMPS 求解器 / 论文图 5.5、表 5.4)
 
-六组优化运行 (LFEM 四组为 2026-09-14 批次; HZ 两组于 2026-09-21 在外法向符号修复 `d8456cc`、`JumpPenaltyIntegrator` 的 `_oriented_cell_basis` 定向修复与密度缩放罚项 `891e6ed` 之后重跑, 旧产物移至 `outputs/archive/bearing-*-20260921-legacy/`):
+六组优化运行 (LFEM 四组为 2026-09-14 批次; HZ 两组于 2026-09-21 在外法向符号修复 `d8456cc`、`JumpPenaltyIntegrator` 的 `_oriented_cell_basis` 定向修复与密度缩放罚项 `891e6ed` 之后重跑, 旧产物已删除):
 
 | 算例工况 | 离散方法 | 阶次 | 实测柔顺度 $C$ | 最终体积分数 | 迭代步数 | 收敛状态 | 构型 |
 |---|---|---|---|---|---|---|---|
@@ -242,53 +240,31 @@
 
 HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代步数 796 → 470 / 702 → 278, 构型不变 (三拱, 仅边缘单元有差异)。
 
-<img src="figure_data/fig5_6_bearing_topology.png" width="760" alt="二维轴承装置最终拓扑构型对比: 左列泊松比 0.30, 右列 0.4999, 自上而下 LFEM p=1、LFEM p=2、HZMFEM k=2">
+<img src="outputs/figures/bearing_topologies.png" width="760" alt="二维轴承装置最终拓扑构型对比: 左列泊松比 0.30, 右列 0.4999, 自上而下 LFEM p=1、LFEM p=2、HZMFEM k=2">
 
 **图 5.6**  二维轴承装置最终拓扑构型对比（左列：$\nu_0 = 0.30$；右列：$\nu_0 = 0.4999$；自上而下：LFEM $p=1$、LFEM $p=2$、HZMFEM $k=2$）
 
 数据来源：`outputs/<case>/analyzer-<lfem|huzhang>__order-<k>/summary.json`（OC 运行）；图 5.6 由 `compare.py --case bearing-topologies` 从各运行目录的 `density_final.vtu` 绘出 (PNG/PDF/EPS, 同步到论文 `figures/`)。
 
-上表柔顺度只在各自离散下可比: 位移元在近不可压缩材料上因体积闭锁低估柔顺度, 不同离散优化出的设计不能直接横比。下面四张表由 `compare.py bearing-reanalysis` 产生 (论文表号: 全实体域扫描为图 5.5, 交叉再分析合并为表 5.4, 冻结设计 $\nu$ 扫描与 LFEM $p=4$ 列仅存档、论文未列) (`outputs/<case>/postprocess/frozen_reanalysis.json`): 冻结每个最终设计 `density_final.vtu`, 用五种离散重新求解一次柔顺度, 只做前向求解不做优化。五种离散 = 三种参赛离散 (`DESIGNS`: lfem-1 / lfem-2 / huzhang-2) + 两列参考离散 (`REFERENCES`: lfem-4 / huzhang-4, 后者为不加稳定化的原生 Hu–Zhang 元)。每个设计用自身离散再分析与 `summary.json` 的 `compliance` 相对差为 0 (自检容差 $10^{-8}$)。偏差列一律相对 HZMFEM $k=4$ 再分析值 (`REFERENCE_LABEL`)。
+上表柔顺度只在各自离散下可比: 位移元在近不可压缩材料上因体积闭锁低估柔顺度, 不同离散优化出的设计不能直接横比。下面两张表由 `compare.py bearing-reanalysis` 产生 (合并为论文表 5.4) (`outputs/<case>/postprocess/frozen_reanalysis.json`): 冻结每个最终设计 `density_final.vtu`, 用四种离散重新求解一次柔顺度, 只做前向求解不做优化。四种离散 = 三种参赛离散 (`DESIGNS`: lfem-1 / lfem-2 / huzhang-2) + 一列参考离散 (`REFERENCES`: huzhang-4, 不加稳定化的原生 Hu–Zhang 元)。每个设计用自身离散再分析与 `summary.json` 的 `compliance` 相对差为 0 (自检容差 $10^{-8}$)。偏差列一律相对 HZMFEM $k=4$ 再分析值 (`REFERENCE_LABEL`)。
 
 表 5.4(a) 交叉再分析, 可压缩基准组 $\nu_0 = 0.3$ (只插值 $E$; 行为优化设计, 列为再分析离散):
 
-| 设计 \ 分析 | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | LFEM $p=4$ | HZMFEM $k=4$ | $p=1$ 偏差 | $p=2$ 偏差 | $k=2$ 偏差 | $p=4$ 偏差 |
-|---|---|---|---|---|---|---|---|---|---|
-| LFEM $p=1$ (281 步) | 119.33 | 123.46 | 132.04 | 124.17 | 125.83 | $-5.16\%$ | $-1.88\%$ | $+4.94\%$ | $-1.31\%$ |
-| LFEM $p=2$ (351 步) | 119.60 | 122.73 | 129.63 | 123.19 | 124.64 | $-4.04\%$ | $-1.53\%$ | $+4.01\%$ | $-1.16\%$ |
-| HZMFEM $k=2$ (470 步) | 120.00 | 122.80 | 127.69 | 123.13 | 124.29 | $-3.45\%$ | $-1.20\%$ | $+2.74\%$ | $-0.94\%$ |
+| 设计 \ 分析 | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | HZMFEM $k=4$ | $p=1$ 偏差 | $p=2$ 偏差 | $k=2$ 偏差 |
+|---|---|---|---|---|---|---|---|
+| LFEM $p=1$ (281 步) | 119.33 | 123.46 | 132.04 | 125.83 | $-5.16\%$ | $-1.88\%$ | $+4.94\%$ |
+| LFEM $p=2$ (351 步) | 119.60 | 122.73 | 129.63 | 124.64 | $-4.04\%$ | $-1.53\%$ | $+4.01\%$ |
+| HZMFEM $k=2$ (470 步) | 120.00 | 122.80 | 127.69 | 124.29 | $-3.45\%$ | $-1.20\%$ | $+2.74\%$ |
 
 表 5.4(b) 交叉再分析, 近不可压缩组 $\nu_0 = 0.4999$ ($E$ 与 $\nu$ 双参数插值):
 
-| 设计 \ 分析 | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | LFEM $p=4$ | HZMFEM $k=4$ | $p=1$ 偏差 | $p=2$ 偏差 | $k=2$ 偏差 | $p=4$ 偏差 |
-|---|---|---|---|---|---|---|---|---|---|
-| LFEM $p=1$ (372 步) | 76.43 | 120.28 | 129.60 | 121.36 | 123.49 | $-38.10\%$ | $-2.60\%$ | $+4.95\%$ | $-1.72\%$ |
-| LFEM $p=2$ (245 步) | 82.24 | 98.06 | 104.07 | 98.71 | 100.01 | $-17.76\%$ | $-1.94\%$ | $+4.07\%$ | $-1.29\%$ |
-| HZMFEM $k=2$ (278 步) | 83.00 | 98.36 | 102.67 | 98.86 | 99.89 | $-16.91\%$ | $-1.54\%$ | $+2.79\%$ | $-1.03\%$ |
+| 设计 \ 分析 | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | HZMFEM $k=4$ | $p=1$ 偏差 | $p=2$ 偏差 | $k=2$ 偏差 |
+|---|---|---|---|---|---|---|---|
+| LFEM $p=1$ (372 步) | 76.43 | 120.28 | 129.60 | 123.49 | $-38.10\%$ | $-2.60\%$ | $+4.95\%$ |
+| LFEM $p=2$ (245 步) | 82.24 | 98.06 | 104.07 | 100.01 | $-17.76\%$ | $-1.94\%$ | $+4.07\%$ |
+| HZMFEM $k=2$ (278 步) | 83.00 | 98.36 | 102.67 | 99.89 | $-16.91\%$ | $-1.54\%$ | $+2.79\%$ |
 
 论文表 5.4 合并 (a)(b) 为六行表, 只列 huzhang-4 参考值一列绝对值, lfem-1 / lfem-2 / huzhang-2 三列改为相对 huzhang-4 的偏差 (%), 不列 LFEM $p=4$ 列; 优化所得柔顺度 (对角线绝对值) 写在论文图 5.6 段正文。
-
-冻结设计泊松比扫描 (论文未列, 仅存档): 冻结近不可压缩组 HZMFEM $k=2$ 最终设计, 材料泊松比取 6 档, 五种离散各求解一次。扫描用 `interpolation_variables = "auto"`: $\nu_0 < 0.49$ 时材料不判为近不可压缩, 落成只插值 $E$; 其余档落成 $E$ 与 $\nu$ 双参数插值, 与注册值一致。
-
-| $\nu_0$ | 插值对象 | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | LFEM $p=4$ | HZMFEM $k=4$ | $p=1$ 偏差 | $p=2$ 偏差 | $k=2$ 偏差 | $p=4$ 偏差 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 0.3 | $E$ | 122.67 | 125.38 | 130.15 | 125.69 | 126.85 | $-3.30\%$ | $-1.16\%$ | $+2.60\%$ | $-0.92\%$ |
-| 0.45 | $E$ | 101.70 | 105.10 | 109.54 | 105.51 | 106.59 | $-4.59\%$ | $-1.40\%$ | $+2.77\%$ | $-1.01\%$ |
-| 0.49 | $E+\nu$ | 94.51 | 100.07 | 104.36 | 100.51 | 101.55 | $-6.93\%$ | $-1.45\%$ | $+2.77\%$ | $-1.02\%$ |
-| 0.499 | $E+\nu$ | 87.04 | 98.52 | 102.83 | 99.01 | 100.04 | $-12.99\%$ | $-1.52\%$ | $+2.79\%$ | $-1.03\%$ |
-| 0.4999 | $E+\nu$ | 83.00 | 98.36 | 102.67 | 98.86 | 99.89 | $-16.91\%$ | $-1.54\%$ | $+2.79\%$ | $-1.03\%$ |
-| 0.49999 | $E+\nu$ | 82.22 | 98.34 | 102.66 | 98.84 | 99.87 | $-17.68\%$ | $-1.54\%$ | $+2.79\%$ | $-1.03\%$ |
-
-全实体域 $\nu$ 扫描 (`solid_sweep`, 仅存档, 已不入论文): $\rho_e \equiv 1$, 插值不起作用, 同样 6 档 $\nu_0$ 与五种离散。该扫描把 $\nu_0 = 0.49$ 处的插值切换与中间密度单元从闭锁判断中剔除。旧图由 `compare.py --case bearing-solid-locking` 读本 json 的 `solid_sweep` 块绘出, 三条曲线为 lfem-1 / lfem-2 / huzhang-2 相对 120x40 上 huzhang-4 的偏差。该图作废的原因: 120x40 上 $k=4$ 自身仍偏高 $0.3\%$ 至 $0.4\%$ (见下文 h 收敛表), 与 $p=2$、$k=2$ 的偏差同量级, "$\pm0.6\%$" 主要量的是参考值误差; 且固定网格扫 $\nu$ 无法区分 "$p=2$ 不闭锁" 与 "$p=2$ 的闭锁被细网格掩盖"。
-
-| $\nu_0$ | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | LFEM $p=4$ | HZMFEM $k=4$ | $p=1$ 偏差 | $p=2$ 偏差 | $k=2$ 偏差 | $p=4$ 偏差 |
-|---|---|---|---|---|---|---|---|---|---|
-| 0.3 | 26.00 | 26.01 | 26.19 | 26.01 | 26.09 | $-0.34\%$ | $-0.31\%$ | $+0.37\%$ | $-0.31\%$ |
-| 0.45 | 18.85 | 18.89 | 19.05 | 18.89 | 18.97 | $-0.62\%$ | $-0.42\%$ | $+0.46\%$ | $-0.39\%$ |
-| 0.49 | 16.08 | 16.21 | 16.37 | 16.22 | 16.29 | $-1.28\%$ | $-0.50\%$ | $+0.51\%$ | $-0.44\%$ |
-| 0.499 | 14.95 | 15.54 | 15.71 | 15.56 | 15.63 | $-4.33\%$ | $-0.54\%$ | $+0.53\%$ | $-0.45\%$ |
-| 0.4999 | 12.89 | 15.48 | 15.64 | 15.49 | 15.56 | $-17.17\%$ | $-0.55\%$ | $+0.53\%$ | $-0.45\%$ |
-| 0.49999 | 9.20 | 15.47 | 15.64 | 15.48 | 15.55 | $-40.84\%$ | $-0.55\%$ | $+0.53\%$ | $-0.45\%$ |
 
 论文图 5.5 全实体域 h 收敛 (`bearing_h_locking_probe.py` → `postprocess/solid_h_sweep.json`, 成图 `compare.py --case bearing-solid-h-convergence`): 两档 $\nu_0$ x 四级网格 x 四种离散, $\rho_e \equiv 1$。参考值为 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken $\Delta^2$, $C_\infty = c_3 - (c_2-c_3)\,r/(1-r)$, $r=(c_2-c_3)/(c_1-c_2)$, 实测差比 0.484 / 0.483, 不假定收敛阶): $\nu_0=0.3$ 为 26.014807, $\nu_0=0.4999$ 为 15.496407; $k=4$ 在 240x80 上单次求解超过 20 min, 未跑。
 
@@ -366,38 +342,13 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 2. 六次运行均按算法 2 的停止准则终止，$g_{\max}$ 均低于 $\delta_g=0.005$；主应力散点沿单轴拉、压方向成支（图 5.9），与桁架状构型相符。两类离散的体积分数与迭代步数接近。
 3. 在实体带（$\overline\rho_e>0.9$ 且 $e\notin\Omega_{\mathrm{pad}}$）上，HZMFEM 三个阶次的逐单元牵引跳量 $A_e$ 均在舍入量级（最大 $2.2\times10^{-16}$）；LFEM $p=2,3,4$ 的中位数依次为 $2.4\times10^{-2}$、$1.6\times10^{-2}$、$1.1\times10^{-2}$，第 95 百分位数依次为 $0.13$、$0.086$、$0.072$，随阶次降低但明显非零，集中于杆件边缘（图 5.11）。这是两类离散在跨单元界面平衡上的差别：Hu–Zhang 应力场保持法向牵引连续，位移梯度逐单元恢复的应力不满足该连续性。
 
-## 6. 算例 4：优化构型的独立高阶重分析与安全性复核（论文 5.3 节）
-
-### 6.1 验证协议与问题定义
-
-为消除各方法采用自身应力场进行自洽评估的潜在偏差（Self-consistency bias），确立如下独立验证协议：
-1. **构型固定**：冻结 5.2.3 节位移法（LFEM $k=2$）与混合法（HZMFEM $k=2$）所得的最终密度分布 $\rho_{\mathrm{LF}}^*$ 与 $\rho_{\mathrm{HZ}}^*$；
-2. **网格与阶次独立提升**：在加倍细化的网格（$160 \times 80$，**待确认**：交叉三角剖分下应为 25 600 个三角形单元，原文记 12 800）上，采用高阶胡张混合元（$k=4$，$P_4$ 应力 / $P_3$ 位移，高斯积分阶 $q=10$）进行单次高精度前向弹性状态求解；
-3. **应力真实安全性复核**：以 $k=4$ 高阶混合元解作为高保真准精确解（Ground Truth），重新计算两类构型在全域材料实体区的真实最大 Von Mises 应力与超标幅度。
-
-### 6.2 独立高阶重分析实测对比表
-
-| 优化所得构型来源 | 优化时名义最大应力 $\max(\tilde{\sigma}_{\mathrm{vm}})_{\mathrm{opt}}$ | 独立高阶 ($k=4$) 重分析真实最大应力 $\max(\tilde{\sigma}_{\mathrm{vm}})_{\mathrm{re}}$ | 真实应力约束状态 | 结构安全性与机理判定 |
-|---|:---:|:---:|:---:|---|
-| **LFEM $k=2$ 构型** | $1.0014$ (名义达标) | **$1.0423$** | **严重超标 $+4.23\%$** | **过优化 (Under-designed)**：位移法优化时低估了应力集中峰值，导致材料被过度削减，在真实高精度应力场下发生失效 |
-| **HZMFEM $k=2$ 构型** | $1.0018$ (名义达标) | **$0.9982$** | **严格满足 $\le 1.0$** | **真实安全 (Robust & Safe)**：混合元原生应力连续性准确捕捉应力集中，优化出的结构在独立高阶模型下依然完全满足承载安全要求 |
-
-### 6.3 关键结论
-
-独立高阶重分析从数值实验上无可辩驳地证明了：**Hu–Zhang 混合元驱动的局部应力约束拓扑优化消除了传统位移法因求导降阶低估应力集中而诱发的“虚假达标、实际超标”的过优化缺陷**，在工程结构真实承载安全性上展现出关键的优越性。
-
----
-
-## 7. 端到端一键复现流水线总结 (End-to-End Reproduction)
+## 6. 端到端一键复现流水线总结 (End-to-End Reproduction)
 
 以下命令均在仓库根目录 `soptx/` 下执行, 顺序即论文第 5 章的呈现顺序:
 
 ```bash
-# 5.1 网格剖分示意 (纯几何, 不依赖运行产物) + 前向制造解收敛阶 + 表 5.1 / 5.2
-python experiments/paper_topopt_huzhang/compare.py --case manufactured-mesh
-python experiments/paper_topopt_huzhang/run.py --case manufactured-native --full
-python experiments/paper_topopt_huzhang/run.py --case manufactured-stabilized --full
-python experiments/paper_topopt_huzhang/compare.py table
+# 5.1 前向制造解收敛阶 + 表 5.1 / 5.2
+python experiments/paper_topopt_huzhang/manufactured_convergence.py
 
 # 5.2.1 两端固支梁柔顺度 (--full 展开 comparison_orders = 2/3/4), 再冻结设计 6x6 交叉再分析 (表 5.3)
 python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --full
@@ -412,13 +363,12 @@ done
 python experiments/paper_topopt_huzhang/compare.py bearing-reanalysis
 python experiments/paper_topopt_huzhang/compare.py bearing-h-locking
 
-# 5.2.3 悬臂梁局部应力约束 (独立高阶重分析见本文 §6, 当前正文未收录)
-# 图 5.8~5.11 的数据由离散敏感性探针从冻结构型导出 (不是 export); k=2 优化与探针由固定系数入口
-# fixed_coefficient.py run/refresh 在独立结果集上产出, 见 README 首节
+# 5.2.3 悬臂梁局部应力约束 (--full 展开 comparison_orders = 2/3/4)
+# 图 5.8~5.11 的数据由 discretization-probe 冻结构型重分析导出 (不是 export); k=2 优化与探针在独立结果集 R 上
+# 产出 (run.py --output R / compare.py --output-root R), 见 README 首节
 python experiments/paper_topopt_huzhang/run.py --case cantilever-middle-2d-stress --full
 python experiments/paper_topopt_huzhang/compare.py export
 python experiments/paper_topopt_huzhang/compare.py discretization-probe
-python experiments/paper_topopt_huzhang/compare.py metrics
 
 # 全部插图
 python experiments/paper_topopt_huzhang/compare.py --case compliance-topology

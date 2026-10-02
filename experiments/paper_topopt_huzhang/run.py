@@ -6,35 +6,35 @@
 
 - 配置          ``config.py`` (路径/TOML 加载/参数拍平) ``provenance.py`` (溯源戳记);
 - 组装          ``pipeline.py``: 共享组装原语 + 三族算例的装配器 + 模型名注册表;
-- 驱动          ``driver.py`` (优化/状态对比/能量诊断) 与 ``convergence.py`` (制造解收敛阶);
-- 产出层        ``report.py`` (论文表 5.1 / 5.2) ``metrics.py`` (梯度校验/冻结指标/
-                插图数据导出);
+- 驱动          ``driver.py`` (优化/能量诊断);
+- 产出层        ``metrics.py`` (插图数据导出);
 - ``plots/``    唯一子目录: 每张图一个模块, 文件名是 ``<算例族>_<产物>`` 语义名
                 (论文图号只写在各模块 docstring 首行的括注里); ``_base.py`` 是
-                九个成图模块的共用底座 (字体/vtu 读取/产物定位/落盘口径)
+                八个成图模块的共用底座 (字体/vtu 读取/产物定位/落盘口径)
                 (成图落在 ``outputs/figures/``, 与之同名会混淆, 故不叫 figures).
 
-算例一律由 ``--case`` 驱动, 参数默认取自 ``cases.toml``; case 归属哪个驱动由其 ``role``
-决定, 调用方拿到 id 即可运行, 不必先知道用哪个动词::
+优化算例一律由 ``--case`` 驱动, 参数默认取自 ``cases.toml``::
 
     python run.py --list                             # 列出全部算例
-    python run.py --case manufactured-native         # 照注册表跑
+    python run.py --case compliance-fixed-fixed-half # 照注册表跑
     python run.py --case <id> <id> ...               # 跑若干 case
     python run.py --all                              # 跑全部 ready 算例
     python run.py --all --dry-run                    # 只打印派发计划
 
-``--case`` 之后可直接追加该驱动认识的覆盖参数, 由驱动自身的 argparse 校验::
+``--case`` 之后可直接追加 ``driver.py`` 认识的覆盖参数, 由其 argparse 校验::
 
-    python run.py --case manufactured-stabilized --stabilization none
     python run.py --case compliance-fixed-fixed-half --analyzer all --order 2
 
 具名开关之外的配置字段走通用覆盖通道 ``--override KEY=VALUE`` (可重复给出)::
 
     python run.py --case compliance-fixed-fixed-half --override optimizer=oc
 
-作用在已有产物上的后处理 (插图 / 论文表 / 冻结指标) 一律归 ``compare.py``::
+作用在已有产物上的后处理 (插图 / 冻结指标) 一律归 ``compare.py``::
 
     python compare.py --list
+
+论文 5.1 节的制造解收敛阶 (表 5.1 / 5.2) 不是优化算例, 由自包含脚本
+``manufactured_convergence.py`` 直接运行, 不进本入口.
 """
 
 from __future__ import annotations
@@ -62,20 +62,7 @@ bootstrap_source_path()
 
 # 已迁往 compare.py 的动词: 老命令会落进本层的 parse_known_args, 报「需要给出
 # --case」这种看不懂的错, 因此显式接住并指路.
-MOVED_COMMANDS = ("figure", "table", "export", "gradients", "metrics")
-
-# 算例派发规则: role 决定 case 由哪个驱动执行, 覆盖参数也随之透传给该驱动
-CONVERGENCE_ROLE = "convergence-verification"
-RUNNERS: dict[str, str] = {
-    "convergence": "convergence",
-    "optimize": "driver",
-}
-
-
-def runner_for(case: dict) -> str:
-    """按 role 判定该 case 归哪个驱动; 收敛验证走制造解套件, 其余走优化驱动."""
-    return "convergence" if case.get("role") == CONVERGENCE_ROLE else "optimize"
-
+MOVED_COMMANDS = ("figure", "export", "gradients", "metrics")
 
 def display_width(text: str) -> int:
     """终端里占的列数: 东亚宽字符 (W) 与全角字符 (F) 占两格, 其余按一格算."""
@@ -120,10 +107,6 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
     位移阶, 见 ORDER_SYMBOLS), 因此列里带记号而不是裸数字: 同一个 2 在两条链上不是
     同一个量。分析链与阶次都是单值, 与 resolve_runs 的缺省口径一致: 裸跑一条 case
     就是一次运行。注册表里的完整对比组 (methods x comparison_orders) 要 --full 才展开.
-
-    收敛验证由 base_nx/base_ny + levels 逐级加密, nx/ny 只是兼容字段, 因此按加密
-    区间显示; 这两条 case 不注册过滤器, optimizer = "none" 也只是满足 schema 的占位,
-    两列一并显示成 "-".
     字段一律 get: 骨架状态的 planned case 允许缺项, --list 不该因此崩掉.
     """
     discretization = case.get("discretization", {})
@@ -136,16 +119,6 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
     )
     mesh_type = str(discretization.get("mesh_type", ""))
     kind = MESH_CLASS_NAMES.get(mesh_type, mesh_type) or "-"
-    if runner_for(case) == "convergence":
-        base_nx = discretization.get("base_nx")
-        base_ny = discretization.get("base_ny")
-        levels = discretization.get("levels")
-        if base_nx and base_ny and levels:
-            factor = 2 ** (int(levels) - 1)
-            size = f"{base_nx}x{base_ny}->{int(base_nx) * factor}x{int(base_ny) * factor}"
-        else:
-            size = "-"
-        return kind, size, analyzer, order_text, "-", "-"
     nx = discretization.get("nx")
     ny = discretization.get("ny")
     size = f"{nx}x{ny}" if nx and ny else "-"
@@ -196,18 +169,18 @@ def select_case_ids(identifiers: list[str], run_all: bool) -> list[dict]:
 
 
 def run_cases(selected: list[dict], extra: list[str], dry_run: bool) -> int:
-    """按 role 派发算例; extra 是原样转交给该驱动的覆盖参数, 由驱动自己校验."""
-    plan = [(runner_for(case), case["id"]) for case in selected]
+    """逐条交给 driver.py; extra 是原样转交的覆盖参数, 由 driver 自己校验."""
+    case_ids = [case["id"] for case in selected]
     if dry_run:
-        for runner, case_id in plan:
-            print(" ".join([RUNNERS[runner], "<-", case_id, *extra]))
+        for case_id in case_ids:
+            print(" ".join(["driver", "<-", case_id, *extra]))
         return 0
 
-    for runner, case_id in plan:
+    for case_id in case_ids:
         print()
         suffix = " " + " ".join(extra) if extra else ""
-        print(f"[case] {case_id} -> {runner}{suffix}")
-        status = import_module(RUNNERS[runner]).main(["--case", case_id, *extra]) or 0
+        print(f"[case] {case_id} -> driver{suffix}")
+        status = import_module("driver").main(["--case", case_id, *extra]) or 0
         if status != 0:
             print(f"[fail] {case_id} 以状态 {status} 退出, 中止后续算例", file=sys.stderr)
             return status
@@ -252,8 +225,8 @@ def run_case_mode(argv: list[str]) -> int:
         print("没有可运行的算例", file=sys.stderr)
         return 1
 
-    # 覆盖参数的合法性由目标驱动的 argparse 判定, 而两个驱动认的参数并不重叠;
-    # 选中多条 case 时无法确定这些参数该按哪个驱动解释, 直接拒绝而不是猜.
+    # 覆盖参数针对单条 case 的注册值; 选中多条时同一组覆盖会落到不同算例上,
+    # 语义不明确, 直接拒绝而不是猜.
     if extra and len(selected) != 1:
         print(
             f"覆盖参数 {' '.join(extra)} 只能配合单个 --case 使用 "

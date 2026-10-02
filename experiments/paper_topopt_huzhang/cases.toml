@@ -6,9 +6,8 @@
 # 本文件只选择模型并给出离散与优化参数; 「数值 -> soptx 对象」的构造在
 # pipeline.py, TOML 不承担构造逻辑。
 #
-# 注册表分两段: 前 4 条 case (共 3 个工况) 是真实载荷工况 (有边界条件与载荷,
-# 走 driver.py 的优化/状态对比链路), 后 2 条是前向制造解验证算例 (无载荷、无优化, 走
-# convergence.py)。后者不是工况, 故不参与工况编号, 单列一段。
+# 注册表只含真实载荷工况 (有边界条件与载荷, 走 driver.py 的优化链路);
+# 论文 5.1 节的前向制造解验证不是工况, 由自包含脚本 manufactured_convergence.py 运行。
 #
 # 命名口径: case id 只标研究对象, 不标参数取值。凡是纯离散层的扫描 (网格加密、
 # 阶次) 一律用命令行覆盖跑, 不另立 id; 只有换模型类或换连续问题 (A 问题层, 如
@@ -23,7 +22,7 @@
 #       全域 160x20 版本只作对称降维核对的参照, 不再注册
 #
 #   2A. bearing-compressible          轴承装置        120x40  k=2        nu=0.3
-#   2B. bearing-incompressible        轴承装置        120x40  k=2,3,4    nu=0.4999
+#   2B. bearing-incompressible        轴承装置        120x40  k=2        nu=0.4999
 #       另立 id 的理由 = nu 属 A 问题层, 改它等于换题目 (可压缩基准组 vs
 #       近不可压实验组, 用于查 LFEM 体积锁定)
 #       两条 case 注册网格均为 triangle-single-diagonal-symmetric (对称单向对角,
@@ -34,12 +33,6 @@
 #       网格加密不另立 id, 用覆盖参数跑:
 #         run.py --case cantilever-middle-2d-stress --nx 160 --ny 80 --order 2 3
 #       注意 run.py --all 只按注册默认网格 80x40 跑, 细网格需单独执行上面这条。
-#
-# 验证算例一览 (2 个, role = convergence-verification):
-#
-#   V1. manufactured-native           论文 5.1.1 节 / 表 5.1  k=3,4  原生鞍点格式
-#   V2. manufactured-stabilized       论文 5.1.2 节 / 表 5.2  k=1,2  矩阵跳量稳定化
-#       变体轴 = 空间次数与稳定化 (k>=GD+1 原生稳定 vs k<=GD 必须加跳量项)
 #
 # 参数分类轴 = "改了它, 变的是题目还是解题路径":
 #   台账         id/title/role/status/methods/metrics/paper_table, 不进求解;
@@ -59,19 +52,14 @@ stage = "soptx/huzhang-topopt-paper/v1"
 
 [meta]
 title = "Hu--Zhang 混合有限元拓扑优化投稿论文复现实验"
-topic = "Hu--Zhang 应力混合元与 LFEM 位移元在柔顺度/近不可压/应力约束拓扑优化下的对照, 及混合元收敛阶验证"
+topic = "Hu--Zhang 应力混合元与 LFEM 位移元在柔顺度/近不可压/应力约束拓扑优化下的对照"
 date_created = "2026-08-01"
 date_updated = "2026-09-01"
-
-# =====================================================================
-# 第一段: 真实载荷工况 (role != convergence-verification, 由 driver.py 驱动)
-# =====================================================================
 
 # ---------------------------------------------------------------------
 # 工况 1/3: 中点受载两端固支梁, 取左半计算域并施加对称边界 (80x20)。
 # 论文 5.2.1 节即在此半域上求解; 全域 160x20 版本只作对称降维核对的参照,
 # 不再注册 (参数见 README「全域固定梁模型」一节)。
-# k=1 单列在 supplementary_orders 里 (供补充失效专题 supp-k1), 不进缺省也不进 --full。
 # ---------------------------------------------------------------------
 [[cases]]
 # -- 台账 (不进求解) --
@@ -109,8 +97,6 @@ nx = 80
 ny = 20
 # 正文对比组 (--full 展开的就是它); 论文 5.2.1 节排除 k=1: P_0 位移丧失刚体转动 RM 完备性.
 comparison_orders = [2, 3, 4]
-# 补充专题阶次: 只进 --order 白名单, 不进缺省也不进 --full, 供 supp-k1 失效专题取数.
-supplementary_orders = [1]
 use_relaxation = true
 solve_method = "mumps"
 
@@ -186,8 +172,8 @@ penalty_factor = 3.0
 void_youngs_modulus = 1.0e-9
 # 插值对象只有 Young 模量, Poisson 比固定为 0.3 (论文 5.2.2 节: 可压缩基准组不插值 nu)
 interpolation_variables = "E"
-# 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 产物见
-# outputs/archive/bearing-incompressible-20260914-mma/); MMA 对照用 --optimizer mma, 取值进目录名。
+# 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 对照产物已删除);
+# MMA 对照用 --optimizer mma, 取值进目录名。
 optimizer = "oc"
 # 与 OCOptions 现行缺省同值, 显式登记是为了钉住上游缺省变动 (论文 5.2.2 节: m = 0.2)。
 # 阻尼指数 eta_OC = 0.5 不经注册表, 硬编码于 pipeline.py; asymp_init 仅 MMA 读取, 不登记。
@@ -225,14 +211,15 @@ plane_type = "plane_strain"
 
 # -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
 [cases.discretization]
-# 注册网格为对称单向对角 (同 2A): lfem p=1 / lfem p=2 / huzhang k=2,3 在同一网格上并排跑。
+# 注册网格为对称单向对角 (同 2A): lfem p=1 / lfem p=2 / huzhang k=2 在同一网格上并排跑。
+# 表 5.4 的 4 阶参考列与图 5.5 的 h 收敛只做再分析, 由各模块覆盖 comparison_orders, 无需登记。
 # 棋盘格对照用 --mesh-type triangle-checkerboard 覆盖, 取值进产物目录名。
-# 注册值切换前 (棋盘格 + OC) 的全部产物已移至 outputs/archive/bearing-*-20260914-legacy/,
-# 两条 case 的 outputs/ 目录自 2026-09-14 起只含新注册值下的结果。
+# 注册值切换前 (棋盘格 + OC) 的产物已删除, 两条 case 的 outputs/ 目录自 2026-09-14 起
+# 只含新注册值下的结果。
 mesh_type = "triangle-single-diagonal-symmetric"
 nx = 120
 ny = 40
-comparison_orders = [2, 3, 4]
+comparison_orders = [2]
 supplementary_orders = [1]
 use_relaxation = true
 solve_method = "mumps"
@@ -250,8 +237,8 @@ void_youngs_modulus = 1.0e-9
 interpolation_variables = "E+nu"
 nu_penalty_factor = 1.0
 void_poisson_ratio = 0.3
-# 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 产物见
-# outputs/archive/bearing-incompressible-20260914-mma/); MMA 对照用 --optimizer mma, 取值进目录名。
+# 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 对照产物已删除);
+# MMA 对照用 --optimizer mma, 取值进目录名。
 optimizer = "oc"
 # 与 OCOptions 现行缺省同值, 显式登记是为了钉住上游缺省变动 (论文 5.2.2 节: m = 0.2)。
 # 阻尼指数 eta_OC = 0.5 不经注册表, 硬编码于 pipeline.py; asymp_init 仅 MMA 读取, 不登记。
@@ -359,7 +346,7 @@ support_pad_radius = 0.0
 mesh_type = "triangle-checkerboard"
 nx = 80
 ny = 40
-comparison_orders = [1, 2, 3, 4]
+comparison_orders = [2, 3, 4]
 use_relaxation = true
 solve_method = "mumps"
 
@@ -378,8 +365,8 @@ interpolation_method = "msimp"
 penalty_factor = 3.5
 void_youngs_modulus = 1.0e-9
 # 两条分析链统一采用 g=sigma_app/stress_limit-[m_E+epsilon(1-m_E)].
-# LFEM 原多项式消失约束保留为 --override stress_constraint_formulation=vanishing;
-# 该字段恒进应力算例的产物目录名, 因而不会覆盖旧的无标签结果.
+# 只取 apparent (原 LFEM 多项式消失约束已移除); 该字段恒进应力算例的产物目录名
+# (lfem_constraint-apparent), 因而不会覆盖旧的无标签结果.
 stress_constraint_formulation = "apparent"
 initial_density = 0.5
 optimizer = "al_mma"
@@ -418,30 +405,15 @@ move_limit = 0.15
 # LFEM k=1 1000 步不收敛)。相消已由稳定候选点公式解决, 2026-09-15 起退回 1e-4
 # 只防下溢; 旧值对照用 --override asymptote_min_distance=0.01。
 asymptote_min_distance = 1.0e-4
-# 以下三组开关的消融与修复验证一律走 --override, 使输出目录被 _run_label 分开
-# 而不覆盖基线; 确证有效后再提升为此处的默认值。
-# 1) 末期移动限制衰减: decay = 1.0 关闭。启用时仅在连续化终止 (C0) 之后,
-#    且窗口 W 内的运动被判为非相干 (相干行程份额 < ratio) 才收缩移动限制,
-#    仍在单调重组的轨迹不收缩, 以免冻在非驻点上误报收敛。
-# 2026-09-11 曾默认启用 (0.8) 以压住灰度带单元的两值翻转; 2026-09-15 查明该翻转
-# 源于渐近线下限 0.01 关掉了 MMA 自带的振荡收缩, 下限退回 1e-4 后 LFEM k=1 有无
-# 衰减都收敛 (437 步 V=0.3637 / 416 步 V=0.3626, 拓扑只差 15 个单元), 衰减既不改
-# 结果也不加速, 故关闭, 与 PolyStress (无衰减) 及论文 Algorithm 2 对齐。
-# 后四项仅在 decay < 1.0 时生效; 对照用 --override move_limit_decay=0.8。
-move_limit_decay = 1.0
-move_limit_min = 5.0e-3
-move_limit_progress_window = 10
-move_limit_progress_ratio = 0.3
-move_limit_progress_cell = 0.7
-# 2) 停止准则 C1 的度量对象: "mean" 为外层步首末设计变量的平均绝对变化
+# 以下各项的消融与修复验证一律走 --override, 使输出目录被 _run_label 分开
+# 而不覆盖基线; 确证有效后再提升为此处的默认值。末期移动限制衰减 (move_limit_decay)、
+# 条件式罚因子放大 (mu_update_rule) 与 KKT 终态诊断论文未用, 已从注册表移除,
+# 取 soptx ALMMMAOptions 默认 (不衰减 / unconditional / 不诊断)。
+# 1) 停止准则 C1 的度量对象: "mean" 为外层步首末设计变量的平均绝对变化
 #    (PolyStress 口径, 2026-09-11 起默认); "design" / "physical" 为逐 MMA 步的
 #    设计变量 / 物理密度最大绝对变化 (09-09 至 09-10 用 "design", 被移动限制钉死)。
 change_measure = "mean"
-# 3) 罚因子放大规则: "unconditional" 为每外层步无条件放大;
-#    "conditional" 时仅当 max_e r_e > tau * 上一步值 (不可行度下降不足) 才放大。
-mu_update_rule = "unconditional"
-mu_violation_ratio = 0.5
-# 4) 乘子安全阈 (safeguarded AL, Andreani-Birgin-Martinez 2007): 外层更新改为
+# 2) 乘子安全阈 (safeguarded AL, Andreani-Birgin-Martinez 2007): 外层更新改为
 #    lambda <- P_[0, lambda_max](lambda + mu h)。2026-09-18 依据: 统一协议下带垫片的
 #    五个已收敛臂 (LFEM k=1/2/3, HZ k=2/3) 终止 max lambda 为 372-1344, 无垫片六臂为
 #    828-4119 (HZ k=4 为 4119, 只落在 2 个 rho~0.21 的滤波尾部单元上); 带垫片 HZ k=4
@@ -450,7 +422,7 @@ mu_violation_ratio = 0.5
 #    截断的只有无垫片 k=4 那两个灰度单元, 它们在 C2 实体子集之外 (见下一项)。
 #    对照 (无阈, 复现 09-17 之前行为): --override lambda_max=1e20。
 lambda_max = 3000.0
-# 5) 停止准则 C2 的验收子集: 只在 rho_phys >= 阈值的 (未豁免) 单元上取最大相对
+# 3) 停止准则 C2 的验收子集: 只在 rho_phys >= 阈值的 (未豁免) 单元上取最大相对
 #    违反度; 全域值仍作诊断记录 (history 的 max_relative_violation、summary 的
 #    max_relative_violation)。2026-09-18 依据: k4 被钉住的是滤波尾部 rho 0.13-0.30
 #    的不承载灰度单元 (g 停在 0.005 附近略偏正, 设计无法改动); 老程序 (soptx-thesis)
@@ -460,128 +432,3 @@ lambda_max = 3000.0
 #    (acceptance_solid_threshold-0.5), 09-17 之前的全域口径产物保留在旧目录作对照;
 #    命令行给 none 可复原全域口径 (--override acceptance_solid_threshold=none)。
 acceptance_solid_threshold = 0.5
-# 原问题 KKT 默认仅作终态诊断: 终态增加一次伴随求解, 不改变停止准则.
-# 可显式关闭: --override kkt_diagnostics_enabled=false
-# 参与 C4 验收还须同时开启 kkt_acceptance_enabled 并显式给出三个正容差;
-# 容差没有预设论文值, 不按现有结果反向调节.
-kkt_diagnostics_enabled = true
-kkt_acceptance_enabled = false
-kkt_stationarity_tolerance = 0.0
-kkt_complementarity_tolerance = 0.0
-kkt_dual_tolerance = 0.0
-
-# =====================================================================
-# 第二段: 前向制造解验证算例 (role = convergence-verification, 由
-# convergence.py 驱动)。无载荷、无优化, 不是工况, 故不占工况编号;
-# [cases.optimization] 只写 optimizer = "none", 以满足 config.load_cases
-# 对三张表齐全的校验。
-# =====================================================================
-
-# ---------------------------------------------------------------------
-# 验证算例 V1/2: 正弦位移制造解, k=3,4 原生鞍点格式 (论文表 5.1)。
-# ---------------------------------------------------------------------
-[[cases]]
-# -- 台账 (不进求解) --
-id = "manufactured-native"
-title = "正弦位移制造解收敛阶验证 · 原生高阶格式（论文 5.1.1 节 / 表 5.1）"
-role = "convergence-verification"
-status = "ready"
-methods = ["huzhang"]
-paper_table = "5.1"
-metrics = [
-  "u_l2_error",
-  "u_l2_order",
-  "sigma_l2_error",
-  "sigma_l2_order",
-  "sigma_hdiv_error",
-  "sigma_hdiv_order",
-  "relative_equilibrium_residual",
-]
-
-# -- A 问题 (连续问题本身; 制造解由模型类给出, 无载荷参数) --
-[cases.model]
-name = "MixedBoundarySinusoidalElasticity2D"
-
-[cases.model.parameters]
-youngs_modulus = 1.0
-poisson_ratio = 0.3333333333333333
-lame_lambda = 1.0
-lame_mu = 0.5
-plane_type = "plane_strain"
-
-# -- B 离散 (收敛阶靠 base_nx/base_ny + levels 逐级加密; nx/ny 仅为兼容字段) --
-[cases.discretization]
-mesh_type = "triangle-checkerboard"
-nx = 64
-ny = 64
-base_nx = 4
-base_ny = 4
-levels = 5
-comparison_orders = [3, 4]
-use_relaxation = true
-solve_method = "mumps"
-# k >= GD+1 (二维即 k >= 3) 时原生鞍点格式本身稳定, HuZhangMFEMAnalyzer 忽略本字段.
-# 因此这里只能写 none; 写成 matrix_jump/vector_jump 会被 tools/convergence.py 拒绝,
-# 免得跑出一组名义上加了稳定化、实际没加的数.
-stabilization = "none"
-
-# -- C 拓扑建模 + D 算法 (本算例不做优化, 仅占位以通过配置校验) --
-[cases.optimization]
-optimizer = "none"
-
-# ---------------------------------------------------------------------
-# 验证算例 V2/2: 同 V1 的制造解与网格协议, k=1,2 加矩阵跳量稳定化
-# (论文表 5.2)。变体轴 = 空间次数与稳定化。
-# ---------------------------------------------------------------------
-[[cases]]
-# -- 台账 (不进求解) --
-id = "manufactured-stabilized"
-title = "正弦位移制造解收敛阶验证 · 低阶跳量稳定化格式（论文 5.1.2 节 / 表 5.2）"
-role = "convergence-verification"
-status = "ready"
-methods = ["huzhang"]
-paper_table = "5.2"
-metrics = [
-  "u_l2_error",
-  "u_l2_order",
-  "sigma_l2_error",
-  "sigma_l2_order",
-  "sigma_hdiv_error",
-  "sigma_hdiv_order",
-  "relative_equilibrium_residual",
-]
-
-# -- A 问题 (连续问题本身; 与 V1 逐项字面一致) --
-[cases.model]
-name = "MixedBoundarySinusoidalElasticity2D"
-
-[cases.model.parameters]
-youngs_modulus = 1.0
-poisson_ratio = 0.3333333333333333
-lame_lambda = 1.0
-lame_mu = 0.5
-plane_type = "plane_strain"
-
-# -- B 离散 (与 V1 仅差 comparison_orders 与 stabilization) --
-[cases.discretization]
-mesh_type = "triangle-checkerboard"
-nx = 64
-ny = 64
-base_nx = 4
-base_ny = 4
-levels = 5
-comparison_orders = [1, 2]
-use_relaxation = true
-solve_method = "mumps"
-# k <= GD (二维即 k <= 2) 时本字段直接驱动 HuZhangMFEMAnalyzer 的 stabilization 入参,
-# 取值 matrix_jump / vector_jump 对应 JumpPenaltyIntegrator 的两种跳量形式 (只作用在
-# 内部面与位移边界面上), none 表示不加稳定化项.
-# 论文表 5.2 用 matrix_jump; 消融请用 run.py --case manufactured-stabilized --stabilization none, 不要改本字段.
-stabilization = "matrix_jump"
-# 论文口径 gamma_0 = 1.0. 当前实现为 alpha = mu / L0**2 (jump_penalty_integrator.py),
-# 式中并无显式 gamma_0 系数, 等价于恒等于 1.0; 此字段只记录论文取值, 暂不可调.
-gamma_0 = 1.0
-
-# -- C 拓扑建模 + D 算法 (本算例不做优化, 仅占位以通过配置校验) --
-[cases.optimization]
-optimizer = "none"

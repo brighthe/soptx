@@ -8,28 +8,24 @@
 - 给定阶次 ``k``, LFEM 采用位移阶 ``p=k``; Hu--Zhang 采用应力阶 ``k`` (对应位移阶 ``k-1``);
 - 统一高斯积分阶 ``q=2k+2``;
 - 载荷统一通过 ``project_patch_traction_to_p1_trace`` 投影至底边连续 P1 迹空间, 消除强施加与弱积分的几何不对齐误差;
-- 正文比较阶次为 ``k=2, 3, 4``; ``k=1`` 因 P0 常数位移空间缺失刚体旋转模态、在拓扑演化中
-  引发人工刚度硬化而不进正文, 仅由 compliance_k1_comparison 作为反例呈现 (故仍在部分算例的
-  ``comparison_orders`` 中声明), 见 docs/fem/huzhang-mixed-fem-implementation.md.
+- 正文比较阶次为 ``k=2, 3, 4``; Hu--Zhang ``k=1`` 因 P0 常数位移空间缺失刚体旋转模态、在拓扑
+  演化中引发人工刚度硬化而不进任何优化算例; 轴承算例经 ``supplementary_orders`` 放开的
+  ``1`` 只服务 LFEM p=1 的体积闭锁对照, 见 docs/fem/huzhang-mixed-fem-implementation.md.
 
-运行模式:
-- ``--mode optimization`` (默认): 执行完整 OC 拓扑优化迭代, 产物写入
+运行: 执行完整拓扑优化迭代, 产物写入
   ``outputs/<case-id>/analyzer-<链>__order-<k>[__<字段>-<取值>...]/``,
   包含最终密度场 ``density_final.vtu``、收敛历史 ``history.json`` 与运行摘要 ``summary.json``;
   应力约束算例的每帧 VTU 另带单元场 ``von_mises_normalized`` (归一化表观应力比),
-  取自优化器在同一密度上求解得到的场 (2026-09-11 加);
-- ``--mode state-compare``: 在固定初始密度 (rho=0.4) 下执行单次状态前向分析, 输出相对柔顺度差异与能量恒等式诊断.
+  取自优化器在同一密度上求解得到的场 (2026-09-11 加).
 
-本模块同时承载能量恒等式诊断、真相对残差与结果落盘 (原 ``diagnostics.py``).
+本模块同时承载能量恒等式诊断 (供 ``compliance_reanalysis``)、真相对残差与结果落盘
+(原 ``diagnostics.py``).
 
 使用方法:
-    # 1. 运行固定梁单次状态对比 (k=2,3)
-    python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --analyzer all --order 2 --order 3 --mode state-compare --solver scipy
-
-    # 2. 运行胡张元 (k=2) 拓扑优化 (冒烟测试 3 步)
+    # 1. 运行胡张元 (k=2) 拓扑优化 (冒烟测试 3 步)
     python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --analyzer huzhang --order 2 --max-iterations 3 --solver scipy
 
-    # 3. 运行全量论文矩阵对比 (LFEM 与 Hu--Zhang, k=2,3,4)
+    # 2. 运行全量论文矩阵对比 (LFEM 与 Hu--Zhang, k=2,3,4)
     python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --analyzer all --solver scipy
 """
 
@@ -37,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import fields, replace
-from importlib import import_module
 import json
 from pathlib import Path
 import re
@@ -155,8 +150,8 @@ _VTU_CELL_FIELDS: dict[str, str] = {
     "von_mises_stress": "von_mises_normalized",
 }
 
-# 每次运行落盘的文件名: ``[output]`` 回执行与 write_optimization_result /
-# _write_stress_optimizer_state 共用同一份清单, 改名只改这里, 回执不会说谎.
+# 每次运行落盘的文件名: write_optimization_result 与 _write_stress_optimizer_state
+# 共用同一份清单, 改名只改这里.
 # VTU 名不含扩展名 (write_vtu 自行追加 .vtu); 演化序列按帧编号写入 vtu/ 子目录.
 OUTPUT_FILES: dict[str, str] = {
     "summary": "summary.json",
@@ -323,85 +318,6 @@ def write_optimization_result(
     )
 
 
-def print_state_comparison(payload: dict[str, Any]) -> None:
-    """在终端格式化打印单次状态分析的关键比较指标与能量诊断.
-
-    参数:
-        payload: 状态对比数据字典.
-    """
-    print()
-    print("固定初始密度状态对比")
-    extra_info = []
-    if "plane_type" in payload:
-        extra_info.append(f"plane_type={payload['plane_type']}")
-    if "poisson_ratio" in payload and payload["poisson_ratio"] is not None:
-        extra_info.append(f"nu={payload['poisson_ratio']}")
-    extra_str = f", {', '.join(extra_info)}" if extra_info else ""
-    initial_density = payload.get("initial_density")
-    density_note = (
-        f"rho0={initial_density:.3f}" if initial_density is not None else "rho0=?"
-    )
-    print(
-        f"  case={payload['case_id']}, model={payload['model']}{extra_str}, "
-        f"{density_note}"
-    )
-    print("  协议: 给定阶次 k, LFEM 采用位移阶 p=k; Hu--Zhang 采用应力阶 k (对应位移阶 k-1); 统一高斯积分阶 q=2k+2.")
-    print()
-    print("  method   k   q       compliance          volfrac       residual")
-    print("  ------- --- --- ------------------ ------------- ----------------")
-    for row in payload["rows"]:
-        # 体积最小化列式没有柔顺度目标, 此列留空而不填 0 冒充数值。
-        compliance_cell = (
-            f"{row['compliance']:>18.8e}" if row["compliance"] is not None
-            else f"{'-':>18}"
-        )
-        print(
-            f"  {row['method']:<7} {row['order']:>3} {row['integration_order']:>3} "
-            f"{compliance_cell} {row['volume_fraction']:>13.6f} "
-            f"{row['relative_equilibrium_residual']:>16.3e}"
-        )
-        if row.get("max_apparent_stress_ratio") is not None:
-            solid_region = row.get("max_solid_stress_ratio_solid_region")
-            solid_region_text = "-" if solid_region is None else f"{solid_region:.6f}"
-            print(
-                f"           应力: 表观最大={row['max_apparent_stress_ratio']:.6f}, "
-                f"实体比最大={row['max_solid_stress_ratio']:.6f}, "
-                f"实体区={solid_region_text}"
-            )
-        energy = row["energy_diagnostics"]
-        if row["method"] == "lfem":
-            print(
-                f"           能量: fTu={energy['external_work']:.8e}, "
-                f"uKu={energy['internal_energy']:.8e}, "
-                f"相对缺陷={energy['relative_defect']:.3e}"
-            )
-        else:
-            print(
-                f"           能量: sigmaAsigma={energy['complementary_energy']:.8e}, "
-                f"sigmaBu={energy['coupling_work']:.8e}, "
-                f"牵引对偶功={energy['traction_dual_work']:.8e}"
-            )
-
-    rows_by_order: dict[int, dict[str, dict[str, Any]]] = {}
-    for row in payload["rows"]:
-        rows_by_order.setdefault(row["order"], {})[row["method"]] = row
-    print()
-    for order, rows in sorted(rows_by_order.items()):
-        lfem = rows.get("lfem")
-        huzhang = rows.get("huzhang")
-        if lfem is None or huzhang is None:
-            continue
-        if lfem["compliance"] is None or huzhang["compliance"] is None:
-            continue
-        diff = abs(huzhang["compliance"] - lfem["compliance"]) / max(
-            abs(lfem["compliance"]), 1.0e-30
-        )
-        print(f"  k={order}: |C_HZ - C_LFEM| / |C_LFEM| = {diff:.2%}")
-    print(
-        "  注: 残差小说明各自线性系统已解收敛. 结构合力守恒由 "
-        "examples/huzhang_elasticity/concentrated_load_demo.py 承担核查."
-    )
-
 # ------------------------------------------------------------------ 驱动
 
 
@@ -451,13 +367,8 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--filter-type", choices=("density", "sensitivity", "projection"),
-        help="临时覆盖过滤器类型 (density/sensitivity/projection), 默认取 cases.toml.",
-    )
-    parser.add_argument(
-        "--load-discretization",
-        choices=("p1_trace_l2_projection", "point_force"),
-        help="固支梁载荷方式: 边界牵引投影或节点集中力 (仅 LFEM).",
+        "--filter-type", choices=("density", "projection"),
+        help="临时覆盖过滤器类型 (density/projection), 默认取 cases.toml.",
     )
     parser.add_argument(
         "--mesh-type",
@@ -489,12 +400,6 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--check-only", action="store_true", help="仅校验配置和运行组合.")
-    parser.add_argument(
-        "--mode",
-        choices=("optimization", "state-compare"),
-        default="optimization",
-        help="运行 OC 拓扑优化, 或仅执行相同初始密度下的单次状态对比.",
-    )
     parser.add_argument(
         "--output", type=Path, default=OUTPUT_DIR, help="运行产物输出根目录."
     )
@@ -695,7 +600,6 @@ _OVERRIDE_FIELDS = (
     ("optimizer", "optimizer"),
     ("filter_type", "filter_type"),
     ("interpolation_variables", "interpolation"),
-    ("load_discretization", "load_discretization"),
 )
 
 
@@ -774,168 +678,12 @@ def _solid_region_threshold(config: Any) -> float:
     return _SOLID_REGION_THRESHOLD if threshold is None else float(threshold)
 
 
-def _discretization_note(pipeline: Any, order: int) -> str:
-    """有限元格式; 含低阶稳定化的实际取值."""
-    if pipeline.method == "lfem":
-        assembly = getattr(pipeline.analyzer, "assembly_method", "standard")
-        return f"analyzer=lfem, 位移空间次数 p={order} (assembly_method={assembly})"
-
-    # Hu--Zhang: 应力阶 k, 位移为间断 P(k-1); k >= GD + 1 时原生稳定, 否则加跳量稳定化
-    geo_dimension = int(pipeline.mesh.geo_dimension())
-    if order >= geo_dimension + 1:
-        stability = f"原生稳定 (k >= GD+1 = {geo_dimension + 1})"
-    else:
-        scheme = getattr(pipeline.analyzer, "stabilization", "matrix_jump")
-        stability = (
-            f"stabilization=none (消融, k <= GD = {geo_dimension})"
-            if scheme == "none"
-            else f"stabilization={scheme} (k <= GD = {geo_dimension})"
-        )
-    return (
-        f"analyzer=huzhang, 应力空间次数 k={order} + 间断位移次数 p={order - 1}, "
-        f"{stability}"
-    )
-
-
-def _domain_note(problem: Any) -> str:
-    """几何区域; 取自物理问题本身, 保证与实际剖分的 box 一致 (半域算例即半域)."""
-    domain = getattr(problem, "domain", None)
-    if domain is None or len(domain) != 4:
-        return ""
-    x0, x1, y0, y1 = (float(v) for v in domain)
-    return f"domain=[{x0:g}, {x1:g}] x [{y0:g}, {y1:g}], "
-
-
-def _load_note(config: Any, model_name: str = "") -> str:
-    """载荷大小及施加形式; 点力区分全域与半域, 分布牵引显示宽度."""
-    load = getattr(config, "load", None)
-    if load is None:
-        traction = getattr(config, "traction", None)
-        return "" if traction is None else f", traction={traction}"
-    if getattr(config, "load_discretization", None) == "point_force":
-        if model_name in _HALF_DOMAIN_MODELS:
-            return f", load={load:g} (half-domain point force={load / 2:g})"
-        return f", load={load:g} (point force={load:g})"
-    # 分布牵引需要显示载荷宽度, 点力分支不使用该参数.
-    width = getattr(config, "load_width", None)
-    suffix = "" if width is None else f" (load_width={width:g})"
-    return f", load={load:g}{suffix}"
-
-
-def _load_scheme_note(config: Any) -> str:
-    """载荷离散方式; 取值是方案名 (p1_trace_l2_projection / patch), 不是分段数."""
-    scheme = getattr(config, "load_discretization", None)
-    return "" if scheme is None else f", load_discretization={scheme}"
-
-
-def _formulation_note(pipeline: Any, config: Any) -> str:
-    """优化列式; 应力算例与柔顺度算例的目标与约束正好对调, 必须分别表述."""
-    if hasattr(pipeline, "volume_objective"):
-        actual = pipeline.stress_constraint.formulation.name
-        constraint_note = (
-            f"表观应力 ε-松弛（epsilon={config.epsilon:g}）"
-            if actual == "apparent"
-            else ("多项式消失约束" if actual == "vanishing" else actual)
-        )
-        load_radius = getattr(config, "load_pad_radius", 0.0)
-        support_radius = getattr(config, "support_pad_radius", 0.0)
-        pads = []
-        if load_radius > 0.0:
-            pads.append(f"载荷贴片端点邻域 R={load_radius:g}")
-        if support_radius > 0.0:
-            pads.append(f"固支角点邻域 R={support_radius:g}")
-        pad_note = "无" if not pads else "，".join(pads) + "（实体保留 + 应力豁免）"
-        return (
-            f"min 体积, 许用应力：{config.stress_limit:g}, "
-            f"应力约束：{constraint_note}, "
-            f"几何奇点垫片：{pad_note}"
-        )
-    return f"min 柔顺度 s.t. volume_fraction <= {config.volume_fraction:g}"
-
-
-def _algorithm_note(config: Any) -> str:
-    """优化算法, 罚参数演化与终止准则; AL-MMA 的迭代预算是两层的, 与 OC 的单层写法不同.
-
-    ALM 的 mu_0 / alpha / mu_max 决定罚项的起点与爬升速度, 同一算例换一个 mu_0
-    就是另一条优化轨迹, 因此与迭代预算同列在回执里; OC 无此组字段, 自动略过。
-
-    数值一律按配置字段名打印 (不写 max_iter 这类简称): 回执上看到的名字就是
-    ``--override`` 能用的名字。应力算例的 max_iterations 是只读属性, 真正能改的
-    是 max_al_iterations, 打字段名同时也把这件事说清楚了。
-    """
-    outer = getattr(config, "max_al_iterations", None)
-    budget = (
-        f"max_iterations={config.max_iterations}"
-        if outer is None
-        else f"max_al_iterations={outer} x mma_iters_per_al={config.mma_iters_per_al}"
-    )
-    parts = [config.optimizer.upper()]
-    if config.optimizer in ("oc", "mma"):
-        # 柔顺度链路的步长参数; 与迭代预算同列, 换一个取值就是另一条优化轨迹
-        step = f"移动限制 move_limit={config.move_limit:g}"
-        if config.optimizer == "mma":
-            step += f", 初始渐近线 asymp_init={config.asymp_init:g}"
-        parts.append(step)
-    mu_0 = getattr(config, "mu_0", None)
-    if mu_0 is not None:
-        parts.append(
-            f"罚参数 mu_0={mu_0:g} 起, 每外层 x alpha={config.alpha:g} 放大至 "
-            f"mu_max={config.mu_max:g}, 乘子初值 lambda_0_init_val="
-            f"{config.lambda_0_init_val:g}"
-        )
-        lambda_max = getattr(config, "lambda_max", None)
-        parts.append(
-            "乘子更新无上限" if lambda_max is None
-            else f"乘子安全阈 lambda_max={lambda_max:g} (lambda <- P_[0, lambda_max](lambda + mu h))"
-        )
-    if outer is not None:
-        # AL_MMA 链路: C1 的度量对象由 change_measure 决定, 与 al_mma.py 一致
-        measure = getattr(config, "change_measure", "design")
-        c1 = {
-            "mean": "mean(abs(delta_design)) 按外层步首末 <",
-            "physical": "max(abs(delta_rho_phys)) <",
-        }.get(measure, "max(abs(delta_design)) <")
-        parts.append(f"迭代上限 {budget}; 密度变化判据 {c1} {config.change_tolerance:g}")
-        # 步长族参数: 移动限制及其末期衰减, 渐近线下限决定振荡单元的 MMA 步幅能否
-        # 继续收缩 (asymptote_min_distance 高于 move_limit_min 时振荡阻尼失效)
-        step = f"移动限制 move_limit={config.move_limit:g}"
-        decay = getattr(config, "move_limit_decay", None)
-        if decay is not None and decay < 1.0:
-            step += (
-                f" (末期 x{decay:g} 衰减至 move_limit_min="
-                f"{config.move_limit_min:g})"
-            )
-        floor = getattr(config, "asymptote_min_distance", None)
-        if floor is not None:
-            step += f", 渐近线下限 asymptote_min_distance={floor:g}"
-        parts.append(step)
-        rule = getattr(config, "mu_update_rule", None)
-        if rule is not None:
-            parts.append(f"罚因子放大规则 mu_update_rule={rule}")
-    else:
-        parts.append(
-            f"迭代上限 {budget}; 密度变化判据 change <= {config.change_tolerance:g}"
-        )
-    stress_tolerance = getattr(config, "stress_tolerance", None)
-    if stress_tolerance is not None:
-        parts.append(f"应力容差 stress_tolerance={stress_tolerance:g}")
-        solid_threshold = getattr(config, "acceptance_solid_threshold", None)
-        parts.append(
-            "C2 验收子集: 全域未豁免单元" if solid_threshold is None
-            else f"C2 验收子集: rho_phys >= acceptance_solid_threshold={solid_threshold:g} 的未豁免单元"
-        )
-    hold_steps = getattr(config, "hold_steps", None)
-    if hold_steps is not None:
-        parts.append(f"持续步数 hold_steps={hold_steps}")
-    return ", ".join(parts)
-
-
 def _effective_interpolation(pipeline: Any) -> dict[str, Any] | None:
     """实际生效的材料插值对象, 而非配置里写的值.
 
     ``MaterialInterpolationScheme`` 只在材料近不可压缩 (``is_incompressible``)
-    时插值 Poisson 比; 这里按分析器手里的插值格式与材料重算一遍, [topopt] 横幅
-    与 summary.json 都用它, 避免读日志的人误以为可压缩组也插值了 nu.
+    时插值 Poisson 比; 这里按分析器手里的插值格式与材料重算一遍, summary.json
+    用它, 避免读日志的人误以为可压缩组也插值了 nu.
     """
     scheme = getattr(pipeline.analyzer, "interpolation_scheme", None)
     material = getattr(pipeline.analyzer, "material", None)
@@ -953,20 +701,6 @@ def _effective_interpolation(pipeline: Any) -> dict[str, Any] | None:
     }
 
 
-def _interpolation_target_note(pipeline: Any) -> str:
-    """[topopt] 横幅的插值对象一段."""
-    effective = _effective_interpolation(pipeline)
-    if effective is None:
-        return "插值对象 未知"
-    if effective["variables"] == "E":
-        return "插值对象 E (nu 固定)"
-    return (
-        "插值对象 E+nu "
-        f"(nu_penalty_factor={effective['nu_penalty_factor']:g}, "
-        f"void_poisson_ratio={effective['void_poisson_ratio']:g})"
-    )
-
-
 def _display_path(path: Path) -> str:
     """路径能相对当前工作目录就打相对形式, 否则打绝对路径; 回执里的路径可直接复制."""
     try:
@@ -975,151 +709,20 @@ def _display_path(path: Path) -> str:
         return str(path.resolve())
 
 
-def _output_note(output: Path, volume_minimizing: bool) -> str:
-    """``[output]`` 行: 产物目录与文件清单, 应力算例多两份终态诊断文件."""
-    files = [
-        OUTPUT_FILES["summary"],
-        OUTPUT_FILES["history"],
-        f'{OUTPUT_FILES["density_final"]}.vtu',
-        f'{OUTPUT_FILES["vtu_dir"]}/{OUTPUT_FILES["vtu_frame"].replace("{index:03d}", "NNN")}.vtu',
-    ]
-    if volume_minimizing:
-        files.extend(STRESS_OUTPUT_FILES.values())
-    return (
-        f"{_display_path(output)}/ -> {', '.join(files)} "
-        f"(优化中途异常时改写入 {output.name}{_TAG_SEPARATOR}crashed/)"
-    )
-
-
 def print_run_banner(
     case: dict[str, Any],
     method: str,
     order: int,
-    pipeline: Any,
-    config: Any,
-    position: tuple[int, int] = (1, 1),
-    output: Path | None = None,
+    position: tuple[int, int],
+    output: Path,
 ) -> None:
-    """在迭代日志之前打印本次运行的物理问题、离散、规模与优化列式.
+    """在迭代日志之前打印进度 (第几组 / 共几组) 与产物目录.
 
-    分行与 cases.toml 同一分类轴: A 问题 / B 离散 / C 拓扑建模 / D 算法, 标签词汇
-    与 topopt_simp_fa 对齐, 两个实验的同名行是同一件事、改起来也是同一处。
-    B 层再拆成网格 / 空间 / 求解三行: 受控比较里网格固定、方法 x 阶次才是变量,
-    分开写便于批量运行时扫读; 状态求解单列 ``[solve]``, 因为鞍点系统对称不定、
-    只能用直接法, 这是离散格式的后果而非规模的后果。
-    载荷大小与宽度是连续问题, 归 ``[problem]``; 载荷怎么离散到网格上是 B 层决策,
-    归 ``[space]``。设计变量数与初始密度归 ``[topopt]``: 它们是拓扑建模层的产物,
-    不是算法参数, 且单元数 ``[mesh]`` 已经给过。
-    方法与阶次只在 ``[space]`` 出现一次 (``analyzer=lfem, 位移空间次数 p=2`` /
-    ``analyzer=huzhang, 应力空间次数 k=2``
-    已完整编码二者); case id 由 run.py 的 ``[case]`` 行给出, ``[run]`` 不重复打,
-    只作进度行 (第几组 / 共几组), 便于 --full 连跑时定位当前是哪一组。
-    自由度按各空间实取而非按节点数推算。
-    B/C/D 三层的可调数值一律按配置字段名打印 (penalty_factor 而非 p, filter_radius
-    而非 rmin), 回执上看到的名字就是 ``--override`` 能用的名字; 只有 E / nu 例外,
-    保留连续问题的论文符号。
+    完整配置随 summary.json 落盘, 不在回显里重复.
     """
-    mesh = pipeline.mesh
-    n_cells = int(mesh.number_of_cells())
-
     index, total = position
-    print(f"[run] {index}/{total} | {case.get('title', '-')}")
-    print(
-        f"[problem] model={case['model']['name']}, "
-        f"{_domain_note(pipeline.problem)}"
-        f"E={config.youngs_modulus:g}, nu={config.poisson_ratio:g}, "
-        f"{config.plane_type}{_load_note(config, case['model']['name'])}"
-    )
-    print(
-        f"[mesh] {type(mesh).__name__} mesh_type={getattr(config, 'mesh_type', '-')}, "
-        f"nx={config.nx}, ny={config.ny}, {n_cells} 单元, "
-        f"{int(mesh.number_of_nodes())} 节点"
-    )
-
-    n_disp = int(pipeline.analyzer.tensor_space.number_of_global_dofs())
-    stress_space = getattr(pipeline.analyzer, "huzhang_space", None)
-    if stress_space is None:
-        dof_text = f"位移自由度 u_dof={n_disp}"
-    else:
-        n_stress = int(stress_space.number_of_global_dofs())
-        dof_text = (
-            f"应力自由度 sigma_dof={n_stress} + 位移自由度 u_dof={n_disp} "
-            f"= {n_stress + n_disp}"
-        )
-    relaxation = getattr(config, "use_relaxation", None)
-    relaxation_text = (
-        "" if relaxation is None or method != "huzhang"
-        else f", use_relaxation={'true' if relaxation else 'false'}"
-    )
-    print(
-        f"[space] {_discretization_note(pipeline, order)}{relaxation_text}, "
-        f"{dof_text}, 积分阶 q={2 * order + 2}{_load_scheme_note(config)}"
-    )
-
-    if config.optimizer == "oc":
-        rho_min = pipeline.optimizer.options.design_variable_min
-        rho_max = 1.0  # OC 更新公式中的固定上界.
-    elif config.optimizer == "mma":
-        # MMA 在 optimize 中才初始化边界; 用独立副本读取相同设置.
-        from copy import deepcopy
-
-        options = deepcopy(pipeline.optimizer.options)
-        options.initialize_problem_params(m=1, n=n_cells)
-        rho_min = float(bm.min(options.xmin))
-        rho_max = float(bm.max(options.xmax))
-    else:
-        # ALM-MMA 更新公式的 zMin/zMax 固定为 0/1.
-        rho_min, rho_max = 0.0, 1.0
-    bounds_text = f", rho ∈ [{rho_min:g}, {rho_max:g}]"
-
-    initial_density = getattr(config, "initial_density", None)
-    if initial_density is None:
-        # 柔顺度链路无 initial_density 字段, pipeline 以 volume_fraction 作均匀初值
-        initial_density = getattr(config, "volume_fraction", None)
-    initial_text = (
-        ""
-        if initial_density is None
-        else f", 初值均匀 rho_0={initial_density:g}"
-    )
-    print(
-        f"[topopt] {_formulation_note(pipeline, config)}, "
-        f"interpolation_method={config.interpolation_method} "
-        f"(penalty_factor={config.penalty_factor:g}, "
-        f"void_youngs_modulus={config.void_youngs_modulus:g}), "
-        f"{_interpolation_target_note(pipeline)}, "
-        f"filter_type={config.filter_type} (filter_radius={config.filter_radius:g}), "
-        f"设计变量 {n_cells} 个 (单元密度){bounds_text}{initial_text}"
-    )
-    print(f"[solve] solve_method={config.solve_method} (直接法)")
-    print(f"[optim] {_algorithm_note(config)}")
-    if output is not None:
-        # 与 run_one 同一判据: 有 volume_objective 的是应力约束体积最小化链路.
-        volume_minimizing = hasattr(pipeline, "volume_objective")
-        print(f"[output] {_output_note(output, volume_minimizing)}")
-
-
-def _dump_crashed_run(output: Path, pipeline: Any, exc: BaseException) -> None:
-    """优化中途异常时保存部分历史, 供事后诊断; 自身不再抛错."""
-    history = getattr(pipeline.optimizer, "history", None)
-    if history is None or not getattr(history, "iter_indices", None):
-        print(f"[crash] 无可落盘的迭代历史: {exc!r}")
-        return
-    densities = getattr(history, "physical_densities", None) or []
-    if not densities:
-        print(f"[crash] 历史中无物理密度: {exc!r}")
-        return
-    summary = {
-        "status": "crashed",
-        "converged": False,
-        "termination_reason": f"exception: {exc!r}",
-        "optimization_iterations": len(history.iter_indices),
-        "provenance": provenance.run_stamp(),
-    }
-    try:
-        write_optimization_result(output, pipeline, densities[-1], history, summary)
-        print(f"[crash] 已保存 {len(history.iter_indices)} 步部分历史到 {output}")
-    except Exception as dump_exc:  # noqa: BLE001 - 诊断落盘失败不掩盖原异常
-        print(f"[crash] 部分历史落盘失败: {dump_exc!r}")
+    print(f"[run] {index}/{total} | {case.get('title', '-')} | analyzer={method}, order={order}")
+    print(f"[output] {_display_path(output)}/")
 
 
 def run_one(
@@ -1136,18 +739,12 @@ def run_one(
         raise RuntimeError("优化模式要求已创建优化器.")
     label = _run_label(method, order, config, changes)
     output = arguments.output / case["id"] / label
-    print_run_banner(case, method, order, pipeline, config, position, output=output)
+    print_run_banner(case, method, order, position, output)
 
-    try:
-        density, history = pipeline.optimizer.optimize(
-            design_variable=pipeline.design_variable,
-            density_distribution=pipeline.density_distribution,
-        )
-    except Exception as exc:
-        # 优化器抛错时把已走过的历史与末态密度落盘到 <label>__crashed/, 再原样抛出;
-        # 不与完整运行同目录, 也不写判据字段冒充结果。
-        _dump_crashed_run(output.with_name(f"{label}{_TAG_SEPARATOR}crashed"), pipeline, exc)
-        raise
+    density, history = pipeline.optimizer.optimize(
+        design_variable=pipeline.design_variable,
+        density_distribution=pipeline.density_distribution,
+    )
     state = pipeline.analyzer.solve_state(rho_val=density)
 
     # 两类列式的目标函数不同: 应力算例 min 体积, 柔顺度算例 min 柔顺度.
@@ -1200,8 +797,7 @@ def run_one(
         summary["stress_constraint_formulation"] = resolve_stress_constraint_formulation(
             config, method
         )
-        # 表观应力比用于展示, 约束对象定义的超限量用于验收.
-        # apparent 返回 g; vanishing 保留原表观应力比减一的历史判据.
+        # 表观应力比用于展示, 约束对象定义的超限量 g 用于验收.
         # 最终密度重新评价, 不从历史末项复制可能过期的应力.
         constraint_values = pipeline.stress_constraint.fun(density, state)
         stress_measure = pipeline.stress_constraint.compute_stress_measure(density, state)
@@ -1334,8 +930,6 @@ def run_one(
             value = getattr(pipeline.optimizer, key, None)
             summary[key.replace("last_", "")] = (
                 None if value is None or not np.isfinite(value) else float(value))
-        summary["mu_update_rule"] = str(
-            getattr(optimizer_options, "mu_update_rule", "unconditional"))
         lambda_max = getattr(optimizer_options, "lambda_max", None)
         summary["lambda_max"] = None if lambda_max is None else float(lambda_max)
         summary["multiplier_capped_count"] = int(
@@ -1344,39 +938,12 @@ def run_one(
         move_limit_base = getattr(optimizer_options, "move_limit", None)
         summary["move_limit_base"] = (
             None if move_limit_base is None else float(move_limit_base))
-        move_limit_final = getattr(pipeline.optimizer, "effective_move_limit", None)
-        summary["move_limit_final"] = (
-            None if move_limit_final is None else float(move_limit_final))
-        summary["move_limit_decays"] = int(
-            getattr(pipeline.optimizer, "move_limit_decays", 0))
         floor = getattr(optimizer_options, "asymptote_min_distance", None)
         summary["asymptote_min_distance"] = (
             None if floor is None else float(floor))
         # 优化器的判据基于迭代末态; 这里在终态密度重新求解后再核一次 C2,
         # 两者都成立才记为收敛。
         summary["converged"] = bool(converged and summary["stress_feasible"])
-        summary["kkt_diagnostics_enabled"] = bool(config.kkt_diagnostics_enabled)
-        summary["kkt_acceptance_enabled"] = bool(config.kkt_acceptance_enabled)
-        summary["kkt_diagnostics"] = None
-        if config.kkt_diagnostics_enabled:
-            kkt = pipeline.optimizer.kkt_diagnostics(
-                design_variable=pipeline.optimizer.final_design_variable,
-                density_distribution=density,
-                state=state,
-                passive_mask=pipeline.optimizer.passive_mask,
-            )
-            summary["kkt_diagnostics"] = kkt
-            if config.kkt_acceptance_enabled:
-                final_kkt_ok = bool(kkt["accepted"])
-                summary["converged"] = bool(summary["converged"] and final_kkt_ok)
-                if not final_kkt_ok:
-                    summary["termination_reason"] = (
-                        "final-kkt-audit-failed: "
-                        f"stationarity={kkt['stationarity']:.3e}, "
-                        f"complementarity={kkt['complementarity_normalized']:.3e}, "
-                        f"dual={kkt['dual_feasibility_normalized']:.3e}; "
-                        f"optimizer={termination_reason}"
-                    )
     else:
         final_cell_fields = None
         # 原始产物统一保存计算域柔顺度, 完整结构换算只在展示层进行.
@@ -1396,101 +963,6 @@ def run_one(
     return summary
 
 
-def run_state_comparison(
-    case: dict[str, Any],
-    arguments: argparse.Namespace,
-) -> dict[str, Any]:
-    """在固定初始密度场下求解单次状态方程并收集对比指标."""
-    model_name = case["model"]["name"]
-    rows: list[dict[str, Any]] = []
-    config: Any = None
-    for method, order in resolve_runs(case, arguments):
-        pipeline, config, _ = build_model_pipeline(
-            case, method, order, arguments, analysis_only=True
-        )
-        density = pipeline.density_distribution
-        state = pipeline.analyzer.solve_state(rho_val=density)
-        # 两类列式的目标函数不同 (同 run_one): 应力算例 min 体积, 柔顺度算例 min
-        # 柔顺度。不属于本列式的那一半没有意义, 按列式取舍而不拿 0.0 占位。
-        volume_minimizing = hasattr(pipeline, "volume_objective")
-        if volume_minimizing:
-            compliance = None
-            volume_fraction = float(pipeline.volume_objective.fun(density))
-        else:
-            compliance = float(
-                pipeline.objective.fun(density=density, state=state)
-            )
-            volume_fraction = config.volume_fraction + float(
-                pipeline.constraint.fun(density)
-            )
-        row = {
-            "method": method,
-            "order": order,
-            "integration_order": 2 * order + 2,
-            "compliance": compliance,
-            "stabilization_coefficient": getattr(pipeline.analyzer, "stabilization_coefficient", None),
-            "volume_fraction": volume_fraction,
-            "relative_equilibrium_residual": relative_residual(pipeline, state),
-            "energy_diagnostics": energy_identity_diagnostics(pipeline, state),
-            "cells": int(pipeline.mesh.number_of_cells()),
-        }
-        if volume_minimizing:
-            # 冻结设计下各阶次的应力读数: 这正是"同一个设计, 不同离散"要比的量,
-            # 与 run_one 的 summary 字段同名同口径, 便于两边直接对照。
-            # 次序同 run_one: fun 会把 von_mises 与 stiffness_ratio 写入 state,
-            # 后面几个 compute_* 都读该缓存, 先调用 fun 是硬性前提。
-            constraint_values = pipeline.stress_constraint.fun(density, state)
-            relative_violation = pipeline.stress_constraint.compute_relative_violation(
-                density, state
-            )
-            row["max_constraint"] = float(constraint_values.max())
-            row["max_relative_violation"] = float(relative_violation.max())
-            stress_measure = pipeline.stress_constraint.compute_stress_measure(
-                density, state
-            )
-            solid_stress_ratio = np.asarray(bm.to_numpy(
-                pipeline.stress_constraint.compute_solid_stress_ratio(density, state)))
-            solid_region = (np.asarray(bm.to_numpy(density[:])).reshape(-1)
-                            >= _solid_region_threshold(config))
-            row["max_apparent_stress_ratio"] = float(stress_measure.max())
-            row["max_solid_stress_ratio"] = float(solid_stress_ratio.max())
-            row["max_solid_stress_ratio_solid_region"] = (
-                float(solid_stress_ratio[solid_region].max())
-                if bool(solid_region.any()) else None
-            )
-        rows.append(row)
-
-    if config is None:
-        raise ConfigurationError(f"{case['id']}: state-compare 模式没有可执行的方法与阶次组合.")
-
-    payload = {
-        "case_id": case["id"],
-        "model": model_name,
-        "mode": "state-compare",
-        "compliance_domain": "half" if model_name in _HALF_DOMAIN_MODELS else "full",
-        "full_structure_factor": 2.0 if model_name in _HALF_DOMAIN_MODELS else 1.0,
-        "plane_type": getattr(config, "plane_type", "unknown"),
-        "poisson_ratio": getattr(config, "poisson_ratio", None),
-        # 体积最小化列式的 config 没有 volume_fraction (那是柔顺度列式的体积上限),
-        # 均匀初值记在 initial_density 上。
-        "initial_density": (
-            getattr(config, "volume_fraction", None)
-            or getattr(config, "initial_density", None)
-        ),
-        "comparison_protocol": "LFEM p=k versus Hu--Zhang stress order k, q=2k+2",
-        "provenance": provenance.run_stamp(),
-        "rows": rows,
-    }
-    output = arguments.output / case["id"] / f"state-comparison-{config.nx}x{config.ny}"
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "state_comparison.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    print_state_comparison(payload)
-    print(f"\n{case['id']}/state-compare: 已完成 {len(rows)} 组单次状态分析.")
-    return payload
-
-
 def main(argv: list[str] | None = None) -> int:
     """列出、校验或执行论文拓扑优化算例."""
     arguments = parse_arguments(argv)
@@ -1505,14 +977,6 @@ def main(argv: list[str] | None = None) -> int:
         prepared = []
         for case in selected:
             runs = resolve_runs(case, arguments)
-            load_kind = (arguments.load_discretization
-                         or arguments.overrides.get("load_discretization")
-                         or flatten_parameters(case).get("load_discretization"))
-            if load_kind == "point_force":
-                if any(method != "lfem" for method, _ in runs):
-                    raise ConfigurationError("point_force 仅支持 LFEM, 请指定 --analyzer lfem.")
-                if arguments.mode == "state-compare":
-                    raise ConfigurationError("state-compare 比较两种方法, 不支持 point_force.")
             if arguments.check_only:
                 pipeline, config, _ = build_model_pipeline(
                     case, "lfem", int(case["discretization"]["comparison_orders"][0]),
@@ -1521,8 +985,6 @@ def main(argv: list[str] | None = None) -> int:
                 prepared.append(
                     configuration_summary(case, config, runs, pipeline.problem.domain)
                 )
-            elif arguments.mode == "state-compare":
-                prepared.append(run_state_comparison(case, arguments))
             else:
                 prepared.extend(
                     run_one(case, method, order, arguments, (index, len(runs)))

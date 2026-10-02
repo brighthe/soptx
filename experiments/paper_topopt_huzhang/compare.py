@@ -5,13 +5,12 @@
 
     python compare.py --list                      # 列出产物 case
     python compare.py --case compliance-topology  # 整理出一件产物
-    python compare.py table
     python compare.py export [--check]
-    python compare.py gradients
-    python compare.py metrics
     python compare.py compliance-reanalysis
     python compare.py bearing-reanalysis
-    python compare.py stress-cross-eval
+    python compare.py bearing-h-locking
+    python compare.py discretization-probe
+    python compare.py --output-root <结果集> <其余参数>   # 改读另一个结果集
 
 一件产物 = 一条 ``--case``, 与 ``run.py --case`` 同一个词: 那边一条 case 是一道要解的
 题, 这边一条 case 是一件要整理出来的产物。产物 case 不另立注册表, 由 ``plots/`` 下声明
@@ -19,9 +18,13 @@
 是绘图代码的事实, 存第二份必然漂移。case id 取模块文件名, 论文图号只留在各模块
 docstring 首行的括注里, 排版改号不波及命令行。
 
-其中 export/gradients/metrics 会按冻结设计重新组装并求解 (见 ``metrics.py``), 因此
+其中 export 与各 ``*-reanalysis`` / ``*-probe`` 动词会按冻结设计重新组装并求解, 因此
 不是纯读产物; 但它们的产出是论文校验数字而非运行产物, 不写 ``outputs/<case>/<run>/``,
-故归在本入口而不是 ``run.py``. ``--help`` 用 ``[重分析]`` 标出这三个动词。
+故归在本入口而不是 ``run.py``. ``--help`` 用 ``[重分析]`` 标出这些动词。
+
+``--output-root`` 只能写在最前面: 它在任何后处理模块导入之前改写
+``config.OUTPUT_DIR`` / ``config.FIGURE_DIR``, 各模块导入时取到的就是该结果集;
+对应的优化运行走 ``run.py --case <id> --output <结果集>``.
 """
 
 from __future__ import annotations
@@ -38,49 +41,39 @@ EXPERIMENT_DIR = Path(__file__).resolve().parent
 if str(EXPERIMENT_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_DIR))
 
-from config import OUTPUT_DIR, bootstrap_source_path
+import config
+from config import bootstrap_source_path
 
 bootstrap_source_path()
 
 PLOTS_DIR = EXPERIMENT_DIR / "plots"
 
 
-# 子命令 -> "模块:入口函数". metrics.py 一个模块承载三个动词, 故入口名显式给出.
+# 子命令 -> "模块:入口函数". 入口名不统一, 故显式给出.
 COMMAND_MODULES: dict[str, str] = {
-    "table": "report:main",
     "export": "metrics:run_export",
-    "gradients": "metrics:run_gradient_check",
-    "metrics": "metrics:run_frozen_metrics",
-    "audit-final-stress": "metrics:run_audit_final_stress",
     "compliance-reanalysis": "compliance_reanalysis:run_compliance_reanalysis",
     "bearing-reanalysis": "bearing_reanalysis:run_bearing_reanalysis",
     "bearing-h-locking": "bearing_h_locking_probe:run",
-    "stress-cross-eval": "stress_cross_evaluation:run_stress_cross_evaluation",
     "discretization-probe": "discretization_probe:run_discretization_probe",
 }
 
 # 需要把子命令之后的参数透传下去的模块 (其余不接受参数)
-FORWARDS_ARGV = {"export", "stress-cross-eval", "discretization-probe"}
+FORWARDS_ARGV = {"export", "discretization-probe"}
 
 # 会按冻结设计重新组装并求解的动词: 比纯读产物慢, --help 里标出来免得误当作秒回
 REANALYSIS = {
-    "export", "gradients", "metrics", "audit-final-stress",
-    "compliance-reanalysis", "bearing-reanalysis", "bearing-h-locking", "stress-cross-eval",
+    "export", "compliance-reanalysis", "bearing-reanalysis", "bearing-h-locking",
     "discretization-probe",
 }
 
 # 动词的说明; 产物 case 的说明取自各 plots 模块自己的 docstring, 不在此重复
 DESCRIPTIONS: dict[str, str] = {
-    "table": "由 summary.json 重算论文表 5.1 / 5.2",
     "export": "冻结重分析导出插图场数据 (npz)",
-    "gradients": "伴随灵敏度的有限差分校验",
-    "metrics": "冻结设计的论文口径指标复算",
-    "audit-final-stress": "核查两组 k=2 最终密度的实际约束, 不覆盖结果",
     "compliance-reanalysis": "固支梁算例六个冻结设计 x 六种离散的柔顺度交叉再分析 (论文 5.2.1 节)",
-    "bearing-reanalysis": "轴承算例冻结设计交叉再分析、nu 扫描与全实体域扫描 (论文表 5.4)",
+    "bearing-reanalysis": "轴承算例冻结设计 x 四种离散的柔顺度交叉再分析 (论文表 5.4)",
     "bearing-h-locking": "轴承算例全实体域 h 收敛闭锁考察: 两档 nu x 四级网格 x 四种离散 (论文图 5.5)",
-    "stress-cross-eval": "应力算例: 一份构型 x 七条离散的应力比与可行性余量交叉表",
-    "discretization-probe": "应力算例: 冻结构型的离散敏感性探针 (散布/采样/牵引跳量)",
+    "discretization-probe": "应力算例: 冻结构型在自身离散下重分析, 导出应力比与牵引跳量 (图 5.8 / 5.10 / 5.11)",
 }
 
 
@@ -103,19 +96,19 @@ class ProductCase:
 
         首段是本产物的某条 source case 时按 ``<case>/<产物>`` 读全 —— 跨 case 的产物
         只能这么写; 否则整项都是 case 内的相对路径, 拼到唯一的 source case 上, 已迁
-        的单 case 模块因此一个字都不用改。不按有没有 ``/`` 判断: 应力三图依赖的是
-        ``postprocess/fig_data_*.npz``, 带 ``/`` 却仍是 case 内路径。
+        的单 case 模块因此一个字都不用改。不按有没有 ``/`` 判断: 应力图依赖的是
+        ``postprocess/...npz``, 带 ``/`` 却仍是 case 内路径。
         """
         head, _, rest = run.partition("/")
         if rest and head in self.source_cases:
-            return OUTPUT_DIR / head / rest
-        return OUTPUT_DIR / self.source_cases[0] / run
+            return config.OUTPUT_DIR / head / rest
+        return config.OUTPUT_DIR / self.source_cases[0] / run
 
     def missing_runs(self) -> tuple[str, ...]:
         """依赖里还没落盘的产物; 空元组表示可以直接整理.
 
-        用 exists 而不是 is_dir: 依赖不都是运行目录, 三张应力图吃的是 postprocess/
-        下的 npz 文件 (由 compare.py export 冻结重分析导出)。
+        用 exists 而不是 is_dir: 依赖不都是运行目录, 应力图吃的是 postprocess/
+        下的 npz 文件 (由 compare.py export / discretization-probe 冻结重分析导出)。
         """
         return tuple(
             run for run in self.required_runs if not self.resolve(run).exists()
@@ -135,7 +128,7 @@ class ProductCase:
         missing = self.missing_runs()
         commands = []
         for case in self.source_cases:
-            root = OUTPUT_DIR / case
+            root = config.OUTPUT_DIR / case
             if not any(self.resolve(run).is_relative_to(root) for run in missing):
                 continue
             total = sum(
@@ -268,6 +261,10 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument(
+        "--output-root", metavar="<结果集>", type=Path,
+        help="改读另一个结果集 (缺省 outputs/); 须写在最前面",
+    )
     parser.add_argument("--list", action="store_true", help="列出产物 case")
     parser.add_argument(
         "--case", metavar="<case-id>", help="整理出一件产物, 如 compliance-topology"
@@ -304,7 +301,6 @@ def run_case(identifier: str) -> int:
         return 1
     # 吃 postprocess/ npz 的 case 只准备自己那几组, 不触发其它阶次的批量导出.
     EXPORTS_BY_CASE = {
-        "stress-topologies": ["lfem-k2", "huzhang-k2"],
         "stress-cubic-convergence": ["lfem-k3", "huzhang-k3"],
     }
     if identifier in EXPORTS_BY_CASE:
@@ -318,7 +314,7 @@ def run_case(identifier: str) -> int:
     if missing:
         print(f"{identifier} 缺 {len(missing)} 个产物:", file=sys.stderr)
         for run in missing:
-            print(f"  {case.resolve(run).relative_to(OUTPUT_DIR.parent)}", file=sys.stderr)
+            print(f"  {case.resolve(run).relative_to(config.OUTPUT_DIR.parent)}", file=sys.stderr)
         print("请先运行:", file=sys.stderr)
         for command in case.run_commands():
             print(f"  {command}", file=sys.stderr)
@@ -328,9 +324,34 @@ def run_case(identifier: str) -> int:
     return 0
 
 
+def apply_output_root(argv: list[str]) -> list[str]:
+    """剥出打头的 ``--output-root <结果集>``, 把产物与成图目录切到该结果集.
+
+    Parameters
+    ----------
+    argv : list[str]
+        命令行参数 (不含程序名).
+
+    Returns
+    -------
+    list[str]
+        剥掉 ``--output-root`` 之后的其余参数.
+    """
+    if argv[:1] != ["--output-root"]:
+        return argv
+    if len(argv) < 2:
+        raise SystemExit("--output-root 需要一个目录参数.")
+    root = Path(argv[1]).resolve()
+    if not root.is_dir():
+        raise SystemExit(f"结果集目录不存在: {root}")
+    config.OUTPUT_DIR = root
+    config.FIGURE_DIR = root / "figures"
+    return argv[2:]
+
+
 def main() -> int:
     parser = build_parser()
-    argv = sys.argv[1:]
+    argv = apply_output_root(sys.argv[1:])
     if not argv:
         parser.print_help()
         return 1

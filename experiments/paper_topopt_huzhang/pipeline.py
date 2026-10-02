@@ -41,7 +41,6 @@ from soptx.topology.constraints import (
     LagrangeStressConstraint,
     build_exemption_mask,
     EpsilonRelaxedStressFormulation,
-    PolynomialVanishingStressFormulation,
     VolumeConstraint,
 )
 from soptx.topology.filters import Filter
@@ -62,8 +61,8 @@ from soptx.topology.optimizers import (
 # ============================================================ 零、共享组装原语
 MethodName = Literal["lfem", "huzhang"]
 OptimizerName = Literal["oc", "mma"]
-InterpolationMethod = Literal["simp", "msimp", "ramp"]
-FilterType = Literal["density", "sensitivity", "projection"]
+InterpolationMethod = Literal["msimp"]
+FilterType = Literal["density", "projection"]
 SolveMethod = Literal["mumps", "scipy"]
 InterpolationVariables = Literal["auto", "E", "E+nu"]
 MeshType = Literal[
@@ -71,8 +70,9 @@ MeshType = Literal[
     "triangle-single-diagonal-symmetric",
 ]
 
-INTERPOLATION_METHODS = ("simp", "msimp", "ramp")
-FILTER_TYPES = ("density", "sensitivity", "projection")
+# 只登记论文算例用到的取值; 新增取值须先在 cases.toml 注册.
+INTERPOLATION_METHODS = ("msimp",)
+FILTER_TYPES = ("density", "projection")
 SOLVE_METHODS = ("mumps", "scipy")
 COMPLIANCE_OPTIMIZERS = ("oc", "mma")
 # 材料插值对象: auto = 近不可压缩材料 (nu >= 0.49) 取 E+nu, 否则取 E; 显式给出时按给定值
@@ -553,7 +553,6 @@ def _instantiate_fixed_fixed(
         load_width=float(parameters["load_width"]),
         plane_type=str(parameters["plane_type"]),
         traction=traction,
-        point_force=parameters.get("load_discretization") == "point_force",
     )
 
 
@@ -577,7 +576,7 @@ def build_fixed_fixed_problem(
     位于对称面底端, 投影合力自动为完整域的一半 ``P/2``.
     """
     problem = _instantiate_fixed_fixed(parameters, model_name)
-    if n_cells is None or parameters.get("load_discretization") == "point_force":
+    if n_cells is None:
         return problem
 
     discretization = str(parameters["load_discretization"])
@@ -603,7 +602,7 @@ def build_fixed_fixed_config(parameters: dict[str, Any]) -> FixedFixedBeamExperi
         load_width=float(parameters["load_width"]),
         load_discretization=str(parameters["load_discretization"]),
     )
-    if config.load_discretization not in (P1_TRACE_L2_PROJECTION, "point_force"):
+    if config.load_discretization != P1_TRACE_L2_PROJECTION:
         raise ValueError(f"不支持的载荷离散方式: {config.load_discretization}.")
     validate_compliance_config(config, (1, 2, 3, 4))
     if config.load_width <= 0.0:
@@ -619,8 +618,6 @@ def build_fixed_fixed_analysis_pipeline(
     model_name: str = "FixedFixedBeamCenterLoad2d",
 ) -> OptimizationPipeline:
     """按受控比较协议组装一条 LFEM 或 Hu--Zhang 分析链."""
-    if config.load_discretization == "point_force" and method != "lfem":
-        raise ValueError("point_force 仅支持 LFEM, 请指定 --analyzer lfem.")
     # 覆盖后的物理参数必须传入问题工厂, 不能继续使用注册表原值.
     parameters = {**parameters, **vars(config)}
     # 底边单元数即 nx, 交叉网格的底边界正好有 nx 条边
@@ -742,8 +739,9 @@ def build_bearing_pipeline(
 
 
 StressOptimizerName = Literal["al_mma"]
-StressConstraintFormulation = Literal["apparent", "vanishing"]
-STRESS_CONSTRAINT_FORMULATIONS = ("apparent", "vanishing")
+StressConstraintFormulation = Literal["apparent"]
+# 只剩 apparent; 字段仍保留, 因为它恒进运行目录名 (lfem_constraint-apparent).
+STRESS_CONSTRAINT_FORMULATIONS = ("apparent",)
 
 
 @dataclass(frozen=True)
@@ -776,7 +774,7 @@ class CantileverStressExperimentConfig:
     # 豁免 + 实体保留是仅有的两步处置. 半径必须单独标定, 不能沿用 load_pad_radius
     # —— 幂律奇点的污染区比载荷侧的对数型宽, 半径取小了只会把热点搬到掩码边界.
     support_pad_radius: float
-    # 历史字段: 指定整组对照中的 LFEM 模型, Hu--Zhang 当前固定采用 apparent.
+    # 历史字段: 只取 apparent, 保留它是为了运行目录名中的 lfem_constraint 标签.
     stress_constraint_formulation: StressConstraintFormulation
     comparison_orders: tuple[int, ...]
     interpolation_method: InterpolationMethod
@@ -801,22 +799,10 @@ class CantileverStressExperimentConfig:
     lambda_0_init_val: float
     move_limit: float
     asymptote_min_distance: float
-    move_limit_decay: float
-    move_limit_min: float
-    move_limit_progress_window: int
-    move_limit_progress_ratio: float
-    move_limit_progress_cell: float
     change_measure: str
-    mu_update_rule: str
-    mu_violation_ratio: float
     # 2026-09-18: 乘子安全阈与 C2 实体验收子集, None 均复现旧行为 (无阈 / 全域).
     lambda_max: Optional[float]
     acceptance_solid_threshold: Optional[float]
-    kkt_diagnostics_enabled: bool
-    kkt_acceptance_enabled: bool
-    kkt_stationarity_tolerance: float
-    kkt_complementarity_tolerance: float
-    kkt_dual_tolerance: float
 
     @property
     def max_iterations(self) -> int:
@@ -921,10 +907,15 @@ def build_stress_config(parameters: dict[str, Any]) -> CantileverStressExperimen
         support_pad_radius=float(parameters.get("support_pad_radius", 0.0)),
         stress_constraint_formulation=stress_constraint_formulation,
         comparison_orders=tuple(int(v) for v in parameters.get("comparison_orders", [2])),
-        interpolation_method=str(parameters.get("interpolation_method", "simp")),
+        interpolation_method=validate_choice(
+            str(parameters.get("interpolation_method", "msimp")),
+            INTERPOLATION_METHODS, "不支持的材料插值方法",
+        ),
         penalty_factor=float(parameters.get("penalty_factor", 3.0)),
         void_youngs_modulus=float(parameters.get("void_youngs_modulus", 1.0e-9)),
-        filter_type=str(parameters.get("filter_type", "density")),
+        filter_type=validate_choice(
+            str(parameters.get("filter_type", "density")), FILTER_TYPES, "不支持的过滤器类型"
+        ),
         max_al_iterations=int(parameters.get("max_al_iterations", 100)),
         mma_iters_per_al=int(parameters.get("mma_iters_per_al", 5)),
         change_tolerance=float(parameters.get("change_tolerance", 2.0e-3)),
@@ -943,33 +934,19 @@ def build_stress_config(parameters: dict[str, Any]) -> CantileverStressExperimen
         lambda_0_init_val=float(parameters.get("lambda_0_init_val", 0.0)),
         move_limit=float(parameters.get("move_limit", 0.15)),
         asymptote_min_distance=float(parameters.get("asymptote_min_distance", 1.0e-4)),
-        move_limit_decay=float(parameters.get("move_limit_decay", 1.0)),
-        move_limit_min=float(parameters.get("move_limit_min", 5.0e-3)),
-        move_limit_progress_window=int(parameters.get("move_limit_progress_window", 10)),
-        move_limit_progress_ratio=float(parameters.get("move_limit_progress_ratio", 0.3)),
-        move_limit_progress_cell=float(parameters.get("move_limit_progress_cell", 0.7)),
         change_measure=str(parameters.get("change_measure", "design")),
-        mu_update_rule=str(parameters.get("mu_update_rule", "unconditional")),
-        mu_violation_ratio=float(parameters.get("mu_violation_ratio", 0.5)),
         lambda_max=_optional_float(parameters.get("lambda_max", None)),
         acceptance_solid_threshold=_optional_float(
             parameters.get("acceptance_solid_threshold", None)
         ),
-        kkt_diagnostics_enabled=bool(parameters.get("kkt_diagnostics_enabled", False)),
-        kkt_acceptance_enabled=bool(parameters.get("kkt_acceptance_enabled", False)),
-        kkt_stationarity_tolerance=float(parameters.get("kkt_stationarity_tolerance", 0.0)),
-        kkt_complementarity_tolerance=float(
-            parameters.get("kkt_complementarity_tolerance", 0.0)
-        ),
-        kkt_dual_tolerance=float(parameters.get("kkt_dual_tolerance", 0.0)),
     )
     validate_mesh_size(config.nx, config.ny, config.mesh_type)
     if not math.isfinite(config.load_pad_radius) or config.load_pad_radius < 0.0:
         raise ValueError("load_pad_radius 必须为有限非负数")
     if not math.isfinite(config.support_pad_radius) or config.support_pad_radius < 0.0:
         raise ValueError("support_pad_radius 必须为有限非负数")
-    # check-only 只构造分析管线，也必须验证 KKT 验收开关及容差；复用优化器
-    # 选项的唯一校验实现，避免执行模式与配置检查模式给出不同结论.
+    # check-only 只构造分析管线, 也必须走一遍优化器选项的唯一校验实现, 避免执行
+    # 模式与配置检查模式给出不同结论.
     _build_al_options(config)
     return config
 
@@ -1000,21 +977,9 @@ def _build_al_options(config: CantileverStressExperimentConfig) -> ALMMMAOptions
         lambda_0_init_val=config.lambda_0_init_val,
         move_limit=config.move_limit,
         asymptote_min_distance=config.asymptote_min_distance,
-        move_limit_decay=config.move_limit_decay,
-        move_limit_min=config.move_limit_min,
-        move_limit_progress_window=config.move_limit_progress_window,
-        move_limit_progress_ratio=config.move_limit_progress_ratio,
-        move_limit_progress_cell=config.move_limit_progress_cell,
         change_measure=config.change_measure,
-        mu_update_rule=config.mu_update_rule,
-        mu_violation_ratio=config.mu_violation_ratio,
         lambda_max=config.lambda_max,
         acceptance_solid_threshold=config.acceptance_solid_threshold,
-        kkt_diagnostics_enabled=config.kkt_diagnostics_enabled,
-        kkt_acceptance_enabled=config.kkt_acceptance_enabled,
-        kkt_stationarity_tolerance=config.kkt_stationarity_tolerance,
-        kkt_complementarity_tolerance=config.kkt_complementarity_tolerance,
-        kkt_dual_tolerance=config.kkt_dual_tolerance,
     )
 
 
@@ -1027,7 +992,7 @@ def resolve_stress_constraint_formulation(
     Parameters
     ----------
     config : CantileverStressExperimentConfig
-        实验配置. ``stress_constraint_formulation`` 保留为 LFEM 对照协议.
+        实验配置.
     method : MethodName
         有限元分析方法.
 
@@ -1038,8 +1003,7 @@ def resolve_stress_constraint_formulation(
 
     Notes
     -----
-    Hu--Zhang 当前只登记 apparent 模型. 新增模型时须显式扩展本解析器,
-    不根据非 LFEM 分支隐式回退.
+    两条分析链当前只登记 apparent 模型. 新增模型时须显式扩展本解析器.
     """
     formulation = validate_choice(
         config.stress_constraint_formulation,
@@ -1062,11 +1026,10 @@ def build_stress_analysis_pipeline(
 ) -> StressOptimizationPipeline:
     """组装悬臂梁应力约束分析求解链.
 
-    默认让两条路径使用同一表观应力松弛约束. Hu--Zhang 直接评价独立应力;
-    LFEM 从位移场恢复实体应力后乘相对刚度. 原多项式消失约束由
-    ``stress_constraint_formulation=vanishing`` 保留为 LFEM 对照选项.
+    两条路径使用同一表观应力松弛约束. Hu--Zhang 直接评价独立应力;
+    LFEM 从位移场恢复实体应力后乘相对刚度.
     """
-    formulation = resolve_stress_constraint_formulation(config, method)
+    resolve_stress_constraint_formulation(config, method)
     problem = build_stress_problem(parameters, model_name, n_cells=config.ny)
     mesh = create_mesh(problem, config.nx, config.ny, config.mesh_type)
     material = build_material(problem)
@@ -1086,11 +1049,7 @@ def build_stress_analysis_pipeline(
         use_relaxation=config.use_relaxation,
         interpolation=interpolation,
     )
-    relaxation = (
-        EpsilonRelaxedStressFormulation(epsilon=config.epsilon)
-        if formulation == "apparent"
-        else PolynomialVanishingStressFormulation()
-    )
+    relaxation = EpsilonRelaxedStressFormulation(epsilon=config.epsilon)
     constraint_type = (
         LagrangeStressConstraint if method == "lfem" else HuZhangStressConstraint
     )

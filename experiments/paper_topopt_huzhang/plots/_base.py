@@ -1,18 +1,17 @@
 """``plots/`` 下各成图模块的共用底座.
 
-中英文字体口径、vtu 读取、产物目录定位与统一落盘口径 (dpi、输出格式、论文插图同步
-目录) 只有一处定义, 十五个成图模块都从这里取; 改一次插图口径不必逐个模块翻找.
+论文字体口径、vtu 读取、产物目录定位与统一落盘口径 (dpi、输出格式、论文插图同步
+目录) 只有一处定义, 八个成图模块都从这里取; 改一次插图口径不必逐个模块翻找.
 
 下划线开头有两重作用: 标明它不是一件可整理的产物, 且 ``compare.py:discover_cases()``
 按 ``_`` 前缀跳过本模块, 扫描逻辑无须为它开特例.
 
-原为 ``report.py`` 的前半段, 2026-09-03 下沉进 plots 包内, 使 ``report.py`` 回到与
-``experiments/matrix_free_capability/report.py`` 一致的「论文表报」语义.
+原为 ``report.py`` 的前半段, 2026-09-03 下沉进 plots 包内; ``report.py`` 余下的
+论文表 5.1 / 5.2 已并入自包含脚本 ``manufactured_convergence.py``.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -20,43 +19,6 @@ import vtk
 from matplotlib import font_manager
 
 import config
-
-
-# 中文字体候选: WSL 下优先借用 Windows 微软雅黑, 其次发行版自带的 Droid Fallback
-_CHINESE_FONT_CANDIDATES = (
-    "/mnt/c/Windows/Fonts/msyh.ttc",
-    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-)
-
-
-def chinese_font() -> font_manager.FontProperties:
-    """返回可渲染中文的字体属性; 候选字体都不存在时回退到默认无衬线族."""
-    for candidate in _CHINESE_FONT_CANDIDATES:
-        path = Path(candidate)
-        if path.is_file():
-            font_manager.fontManager.addfont(str(path))
-            return font_manager.FontProperties(fname=str(path))
-    return font_manager.FontProperties(family="sans-serif")
-
-
-def academic_rcparams() -> None:
-    """学术英文排版口径: sans-serif 字族 + stix 数学字体 + 正常负号.
-
-    四个成图模块原先各自逐字重复这四行, 收在这里只留一处; 2026-09-17 起
-    ``stress_convergence`` 也调用它 —— 该图改用 ``compliance_convergence`` 的排版与
-    配色口径, 中文仍靠 ``fontproperties`` 逐处指定, 与本函数的字族设置不冲突.
-    余下的 ``stress_topologies`` 不调用它, 外观维持原样; ``bearing_highorder_topologies`` 只设
-    ``axes.unicode_minus``, 同样不并进来 —— 并了会改动它已定稿的插图外观.
-
-    pyplot 放在函数体内 import: 各模块都先 ``matplotlib.use("Agg")`` 再导入 pyplot,
-    _base 在模块级导入 pyplot 会抢在那之前把后端定死.
-    """
-    import matplotlib.pyplot as plt
-
-    plt.rcParams["font.family"] = "sans-serif"
-    plt.rcParams["font.sans-serif"] = ["DejaVu Sans", "Helvetica", "Arial"]
-    plt.rcParams["mathtext.fontset"] = "stix"
-    plt.rcParams["axes.unicode_minus"] = False
 
 
 # 论文正文字体候选: CICP 类以 mathpazo 选项排版, 正文为 Palatino。WSL 下优先借用
@@ -80,11 +42,10 @@ _PAPER_FONT_CANDIDATES = (
 def paper_rcparams(base_size: float = 9.0) -> str:
     """论文插图排版口径: 与 CICP 正文同族的 Palatino 衬线字体 + 同字体的 mathtext.
 
-    与 :func:`academic_rcparams` 并存: 后者是 DejaVu Sans 口径, 仍供已定稿的图使用;
-    本函数只被 2026-09-28 起改按版心尺寸出图的 ``compliance_topology``、
-    ``compliance_convergence``、``bearing_solid_h_convergence``、``bearing_topologies``
-    与四个 ``stress_*`` 绘图模块调用。这两张图按 ``\\textwidth`` (150 mm, 5.9 in)
-    原尺寸嵌入, 字号不再经缩放, 故 ``base_size`` 就是纸面字号 (正文 10 pt, 题注 9 pt)。
+    2026-09-28 起全部八个成图模块改按版心尺寸出图, 都只调用本函数; 原 DejaVu Sans
+    口径的 ``academic_rcparams`` 与中文字体 ``chinese_font`` 随旧图删除。插图按
+    ``\\textwidth`` (150 mm, 5.9 in) 原尺寸嵌入, 字号不再经缩放, 故 ``base_size``
+    就是纸面字号 (正文 10 pt, 题注 9 pt)。
     返回实际选中的字族名; 候选字体都不存在时回退到 DejaVu Serif。
     """
     import matplotlib.pyplot as plt
@@ -174,22 +135,6 @@ def load_density(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     density_array = grid.GetCellData().GetArray("density")
     density = np.array([density_array.GetValue(i) for i in range(grid.GetNumberOfCells())])
     return points, connectivity, density
-
-
-def load_compliance(run_dir: Path) -> float | None:
-    """从运行摘要读取柔顺度; 摘要缺失或字段缺失时返回 None, 不猜测数值."""
-    summary_file = run_dir / "summary.json"
-    if not summary_file.is_file():
-        return None
-    data = json.loads(summary_file.read_text(encoding="utf-8"))
-    value = data.get("compliance", data.get("objective"))
-    return None if value is None else float(value)
-
-
-def compliance_label(run_dir: Path) -> str:
-    """构造插图标题里的柔顺度片段; 无数据时返回空串."""
-    value = load_compliance(run_dir)
-    return "" if value is None else f", $C = {value:.2f}$"
 
 
 def mirror_half_beam(
