@@ -1,21 +1,16 @@
-"""Deprecated function-space namespace retained for SOPTX 1.1.x."""
+# 移植自 brighthe/fealpy ``fealpy/functionspace/__init__.py`` @ f474a5775, 仅保留 Lagrange 与张量空间.
+# FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-from warnings import warn
-
-from soptx.fem.spaces import (
-    HuZhangFESpace,
-    HuZhangFESpace2d,
-    HuZhangFESpace3d,
-)
-
-warn(
-    "soptx.functionspace is deprecated; import spaces from soptx.fem.spaces",
-    DeprecationWarning,
-    stacklevel=2,
-)
+from .space import FunctionSpace
+from .function import Function
+from .dofs import LinearMeshCFEDof
+from .lagrange_fe_space import LagrangeFESpace
+from .tensor_space import TensorFunctionSpace
 
 __all__ = [
-    "HuZhangFESpace",
-    "HuZhangFESpace2d",
-    "HuZhangFESpace3d",
+    'FunctionSpace',
+    'Function',
+    'LinearMeshCFEDof',
+    'LagrangeFESpace',
+    'TensorFunctionSpace',
 ]

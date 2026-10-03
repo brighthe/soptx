@@ -19,16 +19,6 @@ assert legacy is current
 """,
     ),
     (
-        "functionspace",
-        """
-from soptx.functionspace.huzhang_fe_space_2d import (
-    HuZhangFESpace2d as legacy,
-)
-from soptx.fem.spaces import HuZhangFESpace2d as current
-assert legacy is current
-""",
-    ),
-    (
         "interpolation",
         """
 from soptx.interpolation.linear_elastic_material import (

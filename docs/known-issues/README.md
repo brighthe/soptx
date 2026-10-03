@@ -194,6 +194,17 @@ git -C ~/workspace/fealpy worktree add ~/workspace/upstream-check suanhai/develo
 
 ---
 
+## 移植后遗留
+
+SOPTX 正在把依赖的 FEALPy 代码自 fork `f474a5775` 移植入库（来源见各文件头）。移植
+一律原样复制，过程中发现的缺陷先记在这里，不在移植中顺手修。
+
+| 问题 | 位置 | 来源 | 根因与影响 | 修法 | 状态 |
+|---|---|---|---|---|---|
+| PyTorch 后端下 $p \ge 2$ 的 `interpolation_points` 抛 `RuntimeError: expected scalar type Float but found Double` | `src/soptx/mesh/ipoints.py:389`（fork 同一行为 `fealpy/mesh/ipoints.py:387`） | 上游 `d97a78f12`，非 fork 补丁引入；fork 与移植副本行为一致 | `weights = mi / bm.sum(mi, ...)` 由整数张量相除得到，torch 给出默认精度 float32，与 float64 的节点坐标在 `einsum` 处类型不符；numpy 下整数相除即为 float64，不受影响。pytorch 后端下所有 $p \ge 2$ 的插值点不可用；gpu 系列 examples 默认 $p = 1$，至今未暴露 | 把 `weights` 转为 `points.dtype` 后再收缩 | 未修，移植完成后处理 |
+
+---
+
 ## 记账约定
 
 **两份文档，各有各的不变量——不要再增加第三份。**
