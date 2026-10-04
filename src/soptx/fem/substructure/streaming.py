@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from .reductions import ExactSchurReduction
 from .traces import TraceBasis

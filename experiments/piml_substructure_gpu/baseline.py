@@ -22,7 +22,7 @@ def _example():
 def prepare(case, np, torch):
     """复用示例标签并保存两端共用的初始参数。"""
     from training import _hash_arrays, _state_hash
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     from soptx.ml.substructure import ShapeFunctionSurrogateNet
     shared = _example()
     t0 = time.perf_counter()

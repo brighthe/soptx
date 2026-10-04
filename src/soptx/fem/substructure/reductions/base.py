@@ -13,7 +13,7 @@ from typing import (
     runtime_checkable,
 )
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 
 @dataclass(frozen=True)

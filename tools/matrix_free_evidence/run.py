@@ -17,9 +17,9 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 # 导入本包会把示例目录与 src/ 放上 sys.path
 from tools.matrix_free_evidence import layout, report, schema
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import (
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import (
     Mesh,
     TetrahedronMesh,
     TriangleMesh,

@@ -1,10 +1,10 @@
 from typing import Optional, Dict, Any, Literal, List, Union
 
-from fealpy.backend import backend_manager as bm
-from fealpy.decorator import variantmethod
-from fealpy.typing import TensorLike, Tuple
-from fealpy.functionspace import Function, LagrangeFESpace
-from fealpy.mesh import HomogeneousMesh
+from soptx.backend import backend_manager as bm
+from soptx.decorator import variantmethod
+from soptx.typing import TensorLike, Tuple
+from soptx.functionspace import Function, LagrangeFESpace
+from soptx.mesh import HomogeneousMesh
 
 from soptx.core import BaseLogged
 from soptx.materials import LinearElasticMaterial

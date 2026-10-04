@@ -15,8 +15,8 @@ K_e 是冗余的, 分析器改用常驻 {K_e^0} 与 {s_e} 的 ``SharedReferenceE
 
 from typing import Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 from soptx.fem.kernels import ElementRestriction
 

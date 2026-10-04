@@ -7,13 +7,13 @@
 from typing import Tuple
 from numpy.linalg import solve
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 from typing import Union, Optional, Literal
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.functionspace import Function
-from fealpy.mesh import HomogeneousMesh, SimplexMesh, TensorMesh
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.functionspace import Function
+from soptx.mesh import HomogeneousMesh, SimplexMesh, TensorMesh
 
 """Method of Moving Asymptotes (MMA) 子问题求解器
 

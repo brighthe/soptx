@@ -23,7 +23,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.fem.substructure import SubstructurePrototype
 from soptx.ml import MLP
 

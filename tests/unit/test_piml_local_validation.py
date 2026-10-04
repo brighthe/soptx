@@ -7,7 +7,7 @@ import sys
 import numpy as np
 import pytest
 import torch
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.fem.substructure.independent_targets import IndependentTargetProvider
 from soptx.ml.substructure.validation import LocalPredictionEvaluator, load_local_model
 from soptx.ml.substructure.independent_contract import (

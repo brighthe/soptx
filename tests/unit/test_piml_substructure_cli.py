@@ -232,7 +232,7 @@ def test_analysis_dispatches_to_same_module(entrypoint, monkeypatch, tmp_path, r
     module("soptx.ml.substructure.independent_data", prepare_training_data=forbidden)
     module("soptx.ml.substructure.independent_training", train_network=forbidden)
     module("soptx.ml.substructure.training", TrainingConfig=forbidden)
-    module("fealpy.backend", backend_manager=SimpleNamespace(set_backend=backend_calls.append))
+    module("soptx.backend", backend_manager=SimpleNamespace(set_backend=backend_calls.append))
     module("soptx.ml.substructure.independent_checkpoints", load_analysis_provider=lambda path: provider,
            load_analysis_networks=lambda path, data, **kwargs: (networks, sources))
 

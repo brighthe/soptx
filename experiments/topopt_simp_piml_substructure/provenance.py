@@ -74,7 +74,6 @@ def capture() -> dict[str, Any]:
         dirty = bool(status.strip())
 
     packages = {
-        "fealpy": _package_version("fealpy"),
         "torch": _package_version("torch"),
         "numpy": _package_version("numpy"),
         "scipy": _package_version("scipy"),

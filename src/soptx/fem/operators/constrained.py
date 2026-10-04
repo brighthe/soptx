@@ -20,8 +20,8 @@
 
 from typing import Any, Callable, Optional, Tuple, Union
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 CoefLike = Union[float, int, TensorLike, Callable[..., TensorLike]]
 

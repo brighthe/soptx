@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.topology.objectives import AugmentedLagrangianObjective
 from soptx.topology.optimizers.al_mma import ALMMMAOptimizer, ALMMMAOptions

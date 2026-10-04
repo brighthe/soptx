@@ -11,9 +11,9 @@
 """
 
 import pytest
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
 
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.materials import IsotropicLinearElasticMaterial

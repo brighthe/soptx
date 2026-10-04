@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.fem.substructure.independent_targets import IndependentTargetProvider
 from soptx.ml.substructure.independent_data import (
     find_training_data, prepare_training_data,

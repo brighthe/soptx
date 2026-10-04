@@ -13,7 +13,7 @@ CG 才可用. 与那边一样只用合成数组, 不经网格与空间; 覆盖 2
 
 import unittest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.kernels import strain_map, weighted_stress
 

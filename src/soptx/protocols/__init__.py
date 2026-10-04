@@ -32,7 +32,7 @@ from typing import (
 
 # ``TensorLike`` 仅用于类型注解.
 if TYPE_CHECKING:
-    from fealpy.typing import TensorLike
+    from soptx.typing import TensorLike
 
 from .loads import (
     BodyForce,

@@ -12,7 +12,7 @@ import numpy as np
 from scipy.linalg import qr
 from scipy.sparse import bmat, csr_matrix
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.solvers import create
 
 from .assembler import InterfaceSystem

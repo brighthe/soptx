@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem import create_huzhang_checkerboard_mesh
 from soptx.fem.spaces import HuZhangFESpace

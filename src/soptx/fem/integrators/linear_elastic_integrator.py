@@ -1,13 +1,13 @@
 
 from typing import NamedTuple, Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike, Index, _S
-from fealpy.mesh import HomogeneousMesh, SimplexMesh, StructuredMesh, TensorMesh
-from fealpy.functionspace.space import FunctionSpace, Function
-from fealpy.functionspace.tensor_space import TensorFunctionSpace
-from fealpy.decorator.variantmethod import variantmethod
-from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike, Index, _S
+from soptx.mesh import HomogeneousMesh, SimplexMesh, StructuredMesh, TensorMesh
+from soptx.functionspace.space import FunctionSpace, Function
+from soptx.functionspace.tensor_space import TensorFunctionSpace
+from soptx.decorator.variantmethod import variantmethod
+from soptx.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 
 from ...materials import LinearElasticMaterial
 from soptx.fem.integrators.utils import LinearSymbolicIntegration

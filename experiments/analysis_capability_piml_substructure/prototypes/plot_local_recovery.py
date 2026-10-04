@@ -30,7 +30,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.fem.substructure.mesh import SubstructurePrototype
 from soptx.fem.substructure.condensation import ExactSchurCondensation
 

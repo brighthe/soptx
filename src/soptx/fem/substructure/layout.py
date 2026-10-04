@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, List, Optional, Protocol, Sequence, Tuple, Union
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import HexahedronMesh, QuadrangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import HexahedronMesh, QuadrangleMesh
 
 from soptx.materials import IsotropicLinearElasticMaterial
 

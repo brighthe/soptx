@@ -23,7 +23,7 @@
 
 from typing import Any, Optional, Sequence
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from .assembler import GlobalAssembler
 from .reduction_adapter import normalize_local_reduction

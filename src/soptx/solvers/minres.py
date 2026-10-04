@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fealpy.backend import TensorLike
+from soptx.backend import TensorLike
 
 from .base import LinearSolver, SolveInfo
 

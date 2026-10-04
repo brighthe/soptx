@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 # 将 soptx 源码目录加入路径
 CURRENT_DIR = Path(__file__).resolve().parent

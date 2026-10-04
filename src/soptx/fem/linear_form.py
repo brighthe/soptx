@@ -26,10 +26,10 @@ from __future__ import annotations
 
 from typing import Literal, Union, overload
 
-from fealpy.backend import backend_manager as bm
-from fealpy.fem.linear_form import LinearForm as FEALPyLinearForm
-from fealpy.sparse import COOTensor
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.fem._linear_form_base import LinearForm as FEALPyLinearForm
+from soptx.sparse import COOTensor
+from soptx.typing import TensorLike
 
 
 class LinearForm(FEALPyLinearForm):

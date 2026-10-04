@@ -19,7 +19,7 @@
 from typing import Tuple, Any, Optional
 import torch
 import torch.nn as nn
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from .condensation import StaticCondensationBase, ExactSchurCondensation
 

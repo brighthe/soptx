@@ -11,7 +11,7 @@ import numpy as np
 from scipy.sparse import coo_matrix, csr_matrix
 from scipy.sparse.linalg import norm as sparse_norm
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import (

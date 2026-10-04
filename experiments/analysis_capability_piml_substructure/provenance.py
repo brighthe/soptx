@@ -83,7 +83,6 @@ def collect() -> dict[str, Any]:
         "torch": _package_version("torch"),
         "jax": _package_version("jax"),
         "numpy": _package_version("numpy"),
-        "fealpy": _package_version("fealpy"),
         "cuda_device": _cuda_device_name(),
     }
 

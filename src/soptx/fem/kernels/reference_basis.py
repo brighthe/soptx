@@ -46,8 +46,8 @@ from collections import OrderedDict
 from threading import Lock
 from typing import Any, Tuple
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 
 # build 阶段的进程级缓存: 键 -> ReferenceBasis. 见模块 docstring 的 "build 阶段" 一节.

@@ -12,7 +12,7 @@ __all__ = [
 import time
 from typing import Any
 
-from fealpy.typing import TensorLike
+from soptx.typing import TensorLike
 
 from .entity_mpi import EntityMPI
 

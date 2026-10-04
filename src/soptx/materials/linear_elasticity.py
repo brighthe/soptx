@@ -2,9 +2,9 @@ from abc import abstractmethod
 from math import isclose, isfinite
 from typing import Optional, Sequence
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace.utils import flatten_indices
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.functionspace.utils import flatten_indices
+from soptx.typing import TensorLike
 
 from ..core import BaseLogged
 

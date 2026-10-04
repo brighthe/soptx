@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from fealpy.typing import TensorLike
+from soptx.typing import TensorLike
 
 from soptx.fem.distributed import EntityMPI, OverlapOperator
 from soptx.fem.levels import AssemblyLevelExtension

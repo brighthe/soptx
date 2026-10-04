@@ -32,9 +32,9 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPOSITORY_ROOT / "examples" / "matrix_free_elasticity"))
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functional import linear_integral
-from fealpy.utils import process_coef_func
+from soptx.backend import backend_manager as bm
+from soptx.fem.functional import linear_integral
+from soptx.fem.coef import process_coef_func
 
 import benchmark_cpu_ea as bench
 

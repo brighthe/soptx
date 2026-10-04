@@ -21,8 +21,8 @@
 from typing import Dict, Optional, Union
 from dataclasses import dataclass, field
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 import numpy as np
 

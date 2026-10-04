@@ -25,7 +25,7 @@ from typing import Any, Sequence, cast
 
 import numpy as np
 from scipy.sparse import csr_matrix
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
     ExactSchurCondensation,

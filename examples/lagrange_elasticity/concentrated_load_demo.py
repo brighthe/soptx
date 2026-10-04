@@ -51,8 +51,8 @@ from typing import Any, Callable, Literal
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import HexahedronMesh, QuadrangleMesh, TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.mesh import HexahedronMesh, QuadrangleMesh, TriangleMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
@@ -448,11 +448,6 @@ def run_concentrated_load_benchmark(
         {"rtol": rtol, "atol": atol, "maxiter": maxiter} if iterative else {}
     )
 
-    fealpy_file = import_module("fealpy").__file__
-    if fealpy_file is None:
-        raise RuntimeError("无法确定当前导入的 FEALPy 模块文件路径.")
-    fealpy_path = str(Path(fealpy_file).resolve().parents[1])
-    print(f"FEALPy: {fealpy_path}")
     print(
         f"问题={entry.label}, 网格={mesh_type}, "
         f"空间次数={degree}, 求解器={solver}"
@@ -564,7 +559,6 @@ def run_concentrated_load_benchmark(
 
     summary: dict[str, Any] = {
         "script": Path(__file__).name,
-        "fealpy_path": fealpy_path,
         "case": entry.name,
         "case_label": entry.label,
         "problem": type(problem).__name__,

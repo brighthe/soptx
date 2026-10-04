@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.load_projection import project_nodal_loads
 from soptx.problems.loads import LineTractionLoad, PointForceLoad

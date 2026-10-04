@@ -1,12 +1,12 @@
 from typing import Optional
 
-from fealpy.typing import TensorLike, Index, _S, CoefLike
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import HomogeneousMesh
-from fealpy.functionspace.space import FunctionSpace as _FS
-from fealpy.utils import process_coef_func
-from fealpy.functional import linear_integral
-from fealpy.fem.integrator import LinearInt, SrcInt, CellInt, enable_cache
+from soptx.typing import TensorLike, Index, _S, CoefLike
+from soptx.backend import backend_manager as bm
+from soptx.mesh import HomogeneousMesh
+from soptx.functionspace.space import FunctionSpace as _FS
+from soptx.fem.coef import process_coef_func
+from soptx.fem.functional import linear_integral
+from soptx.fem.integrator import LinearInt, SrcInt, CellInt, enable_cache
 
 class SourceIntegrator(LinearInt, SrcInt, CellInt):
     def __init__(self, source: Optional[CoefLike]=None, q: Optional[int]=None, *,

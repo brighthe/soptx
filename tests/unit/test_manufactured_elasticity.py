@@ -5,7 +5,7 @@ from importlib import import_module
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.problems.elasticity import (
     DivergenceFreePolynomialElasticity3D,

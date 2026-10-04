@@ -28,7 +28,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.patches import Rectangle
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
-from fealpy.mesh import (
+from soptx.mesh import (
     HexahedronMesh,
     QuadrangleMesh,
     TetrahedronMesh,

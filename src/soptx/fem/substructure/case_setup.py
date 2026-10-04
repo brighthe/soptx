@@ -10,7 +10,7 @@ from typing import Any, Callable, List, Sequence, Tuple, cast
 
 import torch
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.ml.substructure import (
     ReducedStiffnessSurrogateNet,

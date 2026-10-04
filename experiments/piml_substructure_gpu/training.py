@@ -59,7 +59,7 @@ def _prepare(case, np, torch):
     if case.baseline == "example_full_trace":
         from baseline import prepare
         return prepare(case, np, torch)
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     from soptx.fem.substructure import (
         SubstructurePrototype, ExactSchurReduction, LinearCornerTraceBasis,
     )

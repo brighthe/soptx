@@ -64,7 +64,7 @@ def capture(inputs: tuple[Path, ...]) -> dict[str, Any]:
         },
         "packages": {
             name: _package_version(name)
-            for name in ("numpy", "scipy", "fealpy")
+            for name in ("numpy", "scipy")
         },
         "inputs": [file_digest(path) for path in inputs],
     }

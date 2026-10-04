@@ -18,10 +18,10 @@ from __future__ import annotations
 import sys
 from typing import Dict, List, Optional, Tuple
 
-from fealpy.backend import TensorLike, backend_manager as bm
-from fealpy.fem import BilinearForm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import (
+from soptx.backend import TensorLike, backend_manager as bm
+from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import (
     HexahedronMesh,
     QuadrangleMesh,
     TetrahedronMesh,

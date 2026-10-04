@@ -38,7 +38,7 @@ import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import spsolve
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.solvers import CGSolver, DiagonalPreconditioner
 from soptx.topology.filters import apply_structured_sensitivity_filter
 

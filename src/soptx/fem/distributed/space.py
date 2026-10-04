@@ -20,10 +20,10 @@ from typing import Any, Generic, NamedTuple, TypeVar
 from mpi4py.MPI import Comm, COMM_WORLD
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import FunctionSpace, LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import MeshView
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import FunctionSpace, LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import MeshView
+from soptx.typing import TensorLike
 
 from . import entity_mpi as _de
 from . import mesh as _dm

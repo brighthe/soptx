@@ -20,8 +20,8 @@ import time
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial

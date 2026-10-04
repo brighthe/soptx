@@ -79,7 +79,6 @@ def capture(inputs: Iterable[Path] = ()) -> dict[str, Any]:
             "processor": platform.processor(),
         },
         "packages": {
-            "fealpy": _package_version("fealpy"),
             "numpy": _package_version("numpy"),
             "scipy": _package_version("scipy"),
         },

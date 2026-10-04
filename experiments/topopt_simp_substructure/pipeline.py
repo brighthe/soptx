@@ -28,7 +28,7 @@ from typing import Any, Optional, Tuple
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 CURRENT_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = CURRENT_DIR.parents[1]

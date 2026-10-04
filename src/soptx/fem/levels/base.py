@@ -23,7 +23,7 @@
 
 from typing import Tuple
 
-from fealpy.typing import TensorLike
+from soptx.typing import TensorLike
 
 
 class AssemblyLevelExtension:

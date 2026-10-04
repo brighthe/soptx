@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 
 def relative_l2(u: Any, u_ref: Any) -> float:

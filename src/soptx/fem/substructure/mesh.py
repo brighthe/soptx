@@ -10,9 +10,9 @@
 
 from typing import Tuple, Any, Optional, Sequence, List, Dict, Iterator
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import QuadrangleMesh, HexahedronMesh
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.backend import backend_manager as bm
+from soptx.mesh import QuadrangleMesh, HexahedronMesh
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.fem.integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.materials import IsotropicLinearElasticMaterial
 

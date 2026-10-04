@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Sequence, Tuple, cast
 import numpy as np
 from scipy.sparse.linalg import norm as sparse_norm
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.problems.elasticity import HalfMBBBeamRight2d, FullMBBBeam3d

@@ -18,7 +18,7 @@ from typing import Any, Sequence
 import numpy as np
 from scipy.linalg import qr
 from scipy.sparse import bmat
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
     GlobalAssembler,

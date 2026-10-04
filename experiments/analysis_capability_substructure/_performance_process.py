@@ -305,7 +305,7 @@ def performance_environment() -> dict[str, Any]:
             'VECLIB_MAXIMUM_THREADS', 'NUMEXPR_NUM_THREADS',
         )},
     }
-    for package in ('scipy', 'fealpy', 'soptx'):
+    for package in ('scipy', 'soptx'):
         try:
             environment[package] = version(package)
         except PackageNotFoundError:

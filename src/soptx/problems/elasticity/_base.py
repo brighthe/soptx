@@ -5,8 +5,8 @@ from __future__ import annotations
 from math import isfinite
 from typing import Callable, Protocol, Sequence
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 from soptx.problems.loads import BodyForceLoad
 

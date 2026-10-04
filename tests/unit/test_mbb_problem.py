@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.protocols import DirichletElasticityProblem, ElasticityProblem
 from soptx.problems import HalfMBBBeamRight2d

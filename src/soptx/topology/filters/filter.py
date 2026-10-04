@@ -1,9 +1,9 @@
 from typing import Literal, Dict, Type, Tuple, Optional, Union
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import HomogeneousMesh
-from fealpy.functionspace import Function
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.mesh import HomogeneousMesh
+from soptx.functionspace import Function
+from soptx.typing import TensorLike
 
 from soptx.core import BaseLogged
 from soptx.topology.constraints.exemption import (

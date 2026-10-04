@@ -1,9 +1,9 @@
 from typing import Optional, Literal, Union, Dict
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.mesh import SimplexMesh, TensorMesh
-from fealpy.functionspace import Function
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.mesh import SimplexMesh, TensorMesh
+from soptx.functionspace import Function
 
 from soptx.core import BaseLogged
 from soptx.fem.analyzers import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer

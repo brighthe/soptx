@@ -33,7 +33,7 @@ from typing import Any
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.postprocess.vtk_export import read_vtu_cell_data, write_vtu
 from soptx.topology.constraints import build_exemption_mask

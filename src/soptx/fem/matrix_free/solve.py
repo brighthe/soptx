@@ -16,9 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import TensorFunctionSpace
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import TensorFunctionSpace
+from soptx.typing import TensorLike
 
 from soptx.core.numerics import (
     DEFAULT_ATOL,

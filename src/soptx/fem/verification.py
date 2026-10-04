@@ -18,9 +18,9 @@ from typing import Any
 import numpy as np
 from scipy.sparse.linalg import spsolve as scipy_spsolve
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import TensorFunctionSpace
-from fealpy.mesh import MeshView
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import TensorFunctionSpace
+from soptx.mesh import MeshView
 
 from soptx.core.numerics import NORM_FLOOR
 from soptx.fem.operators import ConstrainedOperator

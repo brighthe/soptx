@@ -278,7 +278,7 @@ def _render_panel_b(snapshot: dict[str, Any]) -> str:
             f"{ea['stored_operator_bytes'][index] / GIB:.4f} |"
         )
     lines.append(
-        f"\n基线（解释器 + FEALPy 导入）`{baseline / GIB:.3f} GiB`，"
+        f"\n基线（解释器 + 依赖导入）`{baseline / GIB:.3f} GiB`，"
         f"八次运行抖动 `{panel['baseline_spread_bytes'] / MIB:.3f} MiB`。"
         f"最粗档的峰值比 `{fa['peak_rss_bytes'][0] / ea['peak_rss_bytes'][0]:.2f}` 是基线稀释所致，"
         "不是层级差异；扣基线后从第二档起稳定。\n"
@@ -686,8 +686,7 @@ def _render_provenance(snapshot: dict[str, Any]) -> str:
     lines.append("|---|---|")
     lines.append(f"| 采集时间 | `{record['generated_at_utc']}` |")
     lines.append(f"| 平台 | `{record['platform']}` |")
-    lines.append(f"| Python / NumPy / FEALPy | `{record['python']}` / "
-                 f"`{record['numpy']}` / `{record['fealpy']}` |")
+    lines.append(f"| Python / NumPy | `{record['python']}` / `{record['numpy']}` |")
     if record.get("memory_total_bytes"):
         lines.append(f"| 本机物理内存 | `{record['memory_total_bytes'] / GIB:.1f} GiB` |")
     lines.append(f"| 源文件 | {len(snapshot['sources'])} 个，逐个记 `sha256` |")

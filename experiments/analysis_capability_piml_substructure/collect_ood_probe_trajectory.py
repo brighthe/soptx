@@ -53,7 +53,7 @@ from typing import Any, Dict, Tuple
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import GlobalAssembler

@@ -1,8 +1,8 @@
 import math
 from typing import Optional, Literal, Union, Dict, TYPE_CHECKING
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.functionspace import Function
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.functionspace import Function
 
 from soptx.core import BaseLogged, timer
 from soptx.topology.constraints.stress_formulation import StressConstraintProtocol

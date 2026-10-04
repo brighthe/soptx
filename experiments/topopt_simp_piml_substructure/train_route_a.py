@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 CURRENT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CURRENT_DIR.parents[1]

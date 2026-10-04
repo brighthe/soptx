@@ -188,10 +188,10 @@ def cell_path(n: int) -> Path:
 
 def build_mesh(n: int) -> Tuple[np.ndarray, int]:
     """构建 3D 结构化四面体网格并返回单元拓扑 (NC, 4) 与节点总数."""
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     bm.set_backend("numpy")
-    from fealpy.mesh import TetrahedronMesh
+    from soptx.mesh import TetrahedronMesh
 
     mesh = TetrahedronMesh.from_box(box=[0, 1, 0, 1, 0, 1], nx=n, ny=n, nz=n)
     cell = np.ascontiguousarray(np.asarray(mesh.entity("cell")), dtype=np.int64)
@@ -282,7 +282,7 @@ def _is_cuda(device_str: str) -> bool:
 def _setup_cuda(device_str: str) -> Tuple[Any, str]:
     """切换 FEALPy 后端到 PyTorch 并绑定 CUDA 设备; 返回 (torch.device, 规范化设备名)."""
     import torch
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     device_str = "cuda:0" if device_str in ("gpu", "cuda") else device_str
     bm.set_backend("pytorch")
@@ -294,8 +294,8 @@ def _setup_cuda(device_str: str) -> Tuple[Any, str]:
 
 def _build_problem_space(n: int, device: Any = None) -> Tuple[Any, Any, Any, Any]:
     """构建制造解问题、tet4 网格、向量 P1 空间与材料 (需先设置后端)."""
-    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-    from fealpy.mesh import TetrahedronMesh
+    from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+    from soptx.mesh import TetrahedronMesh
     from soptx.materials import IsotropicLinearElasticMaterial
     from soptx.problems.elasticity import DivergenceFreePolynomialElasticity3D
 
@@ -304,7 +304,7 @@ def _build_problem_space(n: int, device: Any = None) -> Tuple[Any, Any, Any, Any
     scalar = LagrangeFESpace(mesh, p=1, ctype="C")
     vs = TensorFunctionSpace(scalar, shape=(-1, 3))
     if device is None:
-        from fealpy.backend import backend_manager as bm
+        from soptx.backend import backend_manager as bm
 
         device = bm.get_device(mesh)
     material = IsotropicLinearElasticMaterial(
@@ -318,12 +318,12 @@ def _build_problem_space(n: int, device: Any = None) -> Tuple[Any, Any, Any, Any
 
 def _import_fe_stack_cpu() -> None:
     """在测量开始前把 FEALPy / SOPTX 相关模块全部导入, 避免 import 开销混入阶段测量."""
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     bm.set_backend("numpy")
-    import fealpy.functionspace  # noqa: F401
-    import fealpy.mesh  # noqa: F401
-    import fealpy.sparse  # noqa: F401
+    import soptx.functionspace  # noqa: F401
+    import soptx.mesh  # noqa: F401
+    import soptx.sparse  # noqa: F401
     import soptx.fem.integrators  # noqa: F401
     import soptx.fem.matrix.csr_pattern  # noqa: F401
     import soptx.materials  # noqa: F401
@@ -516,7 +516,7 @@ def _run_stage1_probe(integrator: Any, vs: Any, material: Any, snapshot_at: Tupl
 
         return wrapper
 
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     scalar_space = getattr(vs, "scalar_space", vs)
     restores = [
@@ -657,9 +657,9 @@ def measure_mesh(n: int, device_str: str = "cpu") -> dict:
         raise SystemExit("mesh 用例只测 CPU RSS 口径, 不支持 --device cuda")
 
     _import_fe_stack_cpu()
-    from fealpy.backend import backend_manager as bm
-    from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-    from fealpy.mesh import TetrahedronMesh
+    from soptx.backend import backend_manager as bm
+    from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+    from soptx.mesh import TetrahedronMesh
     from soptx.materials import IsotropicLinearElasticMaterial
     from soptx.problems.elasticity import DivergenceFreePolynomialElasticity3D
 
@@ -756,7 +756,7 @@ def measure_stage2(
             peak_bytes = torch.cuda.max_memory_allocated(device)
             nnz = int(K.nnz)
         elif route == "coalesce":
-            from fealpy.sparse import COOTensor
+            from soptx.sparse import COOTensor
 
             c2d = vs.cell_to_dof()
             I = torch.broadcast_to(c2d[:, :, None], (NC, 12, 12)).reshape(-1)
@@ -807,10 +807,10 @@ def measure_stage2(
     extra: Dict[str, Any] = {}
 
     if route == "coalesce":
-        from fealpy.backend import backend_manager as bm
+        from soptx.backend import backend_manager as bm
 
         bm.set_backend("numpy")
-        from fealpy.sparse import COOTensor
+        from soptx.sparse import COOTensor
 
         with meter.stage("inputs"):
             I, J, V = full_triplets(cell)
@@ -830,7 +830,7 @@ def measure_stage2(
         nnz = int(K.nnz)
 
     else:  # pattern
-        from fealpy.backend import backend_manager as bm
+        from soptx.backend import backend_manager as bm
 
         bm.set_backend("numpy")
         from soptx.fem.matrix.csr_pattern import assemble_csr, build_csr_pattern
@@ -957,7 +957,7 @@ def measure_full(
         }
 
     _import_fe_stack_cpu()
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     meter = StageMeter()
     with meter.stage("mesh"):
@@ -998,7 +998,7 @@ def measure_full(
 
         if route == "coalesce":
             # 逐行复刻 FEALPy BilinearForm._scalar_assembly + assembly(format="csr")
-            from fealpy.sparse import COOTensor
+            from soptx.sparse import COOTensor
 
             with meter.stage("stage2"):
                 sparse_shape = (Ndof, Ndof)

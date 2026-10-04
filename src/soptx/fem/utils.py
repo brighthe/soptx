@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any, Optional
 import math
 
-from fealpy.backend import backend_manager as bm
-from fealpy.decorator import  cartesian
-from fealpy.typing import TensorLike, Tuple
-from fealpy.functionspace import TensorFunctionSpace, Function, FunctionSpace
-from fealpy.mesh import TriangleMesh, QuadrangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.decorator import  cartesian
+from soptx.typing import TensorLike, Tuple
+from soptx.functionspace import TensorFunctionSpace, Function, FunctionSpace
+from soptx.mesh import TriangleMesh, QuadrangleMesh
 
 def _scalar_disp_to_tensor_disp(dof_priority: bool,
                             uh: Function, 

@@ -3,9 +3,9 @@ from time import time
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, Union, List, Any, Dict
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.functionspace import Function
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.functionspace import Function
 
 from soptx.core import BaseLogged, timer
 from soptx.topology.constraints import VolumeConstraint

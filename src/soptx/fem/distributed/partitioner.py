@@ -12,9 +12,9 @@ __all__ = [
     "partition_strategy_label",
 ]
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import MeshView
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.mesh import MeshView
+from soptx.typing import TensorLike
 
 AXIS_NAMES = ("x", "y", "z")
 

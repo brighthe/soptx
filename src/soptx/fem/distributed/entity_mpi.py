@@ -19,8 +19,8 @@ from typing import NamedTuple, TypeVar
 from mpi4py import MPI
 from mpi4py.MPI import Comm, COMM_WORLD
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 _T = TypeVar("_T")
 

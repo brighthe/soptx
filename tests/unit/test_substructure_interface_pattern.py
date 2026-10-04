@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from scipy.sparse import coo_matrix
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.fem.substructure import GlobalAssembler, build_substructures
 
 

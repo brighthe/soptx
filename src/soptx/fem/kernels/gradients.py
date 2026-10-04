@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """物理梯度: 基函数算子 B 及其转置 B^T 的张量收缩."""
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 
 def physical_gradient(u_E: TensorLike,

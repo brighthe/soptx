@@ -1,14 +1,14 @@
 
 from typing import Optional, Union, Callable
-from fealpy.typing import TensorLike, Index, _S, Threshold
+from soptx.typing import TensorLike, Index, _S, Threshold
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh.mesh_base import Mesh
-from fealpy.sparse import COOTensor
-from fealpy.sparse.ops import spdiags
-from fealpy.functionspace import FunctionSpace
-from fealpy.functionspace.functional import symmetry_span_array, symmetry_index
-from fealpy.decorator import barycentric
+from soptx.backend import backend_manager as bm
+from soptx.mesh.mesh_base import Mesh
+from soptx.sparse import COOTensor
+from soptx.sparse.ops import spdiags
+from soptx.functionspace import FunctionSpace
+from soptx.functionspace.functional import symmetry_span_array, symmetry_index
+from soptx.decorator import barycentric
 
 import numpy as np
 

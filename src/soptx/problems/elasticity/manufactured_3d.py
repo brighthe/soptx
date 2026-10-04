@@ -5,9 +5,9 @@ from __future__ import annotations
 from math import isfinite
 from typing import Callable, Sequence
 
-from fealpy.backend import backend_manager as bm
-from fealpy.decorator import cartesian
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.decorator import cartesian
+from soptx.typing import TensorLike
 
 from ._base import AllDisplacementBoundaryMixin, validated_domain
 

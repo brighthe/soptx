@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from time import time
 from typing import Dict, List, Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import Function
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import Function
+from soptx.typing import TensorLike
 
 
 @dataclass

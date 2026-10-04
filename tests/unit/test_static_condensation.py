@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.substructure import ExactSchurCondensation
 

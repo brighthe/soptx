@@ -16,11 +16,10 @@ import logging
 import numpy as np
 import pytest
 
-from fealpy import logger
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.solvers import ConvergedReason, DiagonalPreconditioner, cg
-from soptx.solvers.cg import NORM_TYPES
+from soptx.solvers.cg import NORM_TYPES, logger
 
 # TensorLike 的 isinstance 判定依赖已注册的 backend
 bm.set_backend("numpy")

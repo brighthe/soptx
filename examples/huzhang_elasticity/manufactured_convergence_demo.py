@@ -22,8 +22,8 @@ from pathlib import Path
 import sys
 from typing import Any, Callable, Literal, Protocol, cast
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 from soptx.fem import (
     HuZhangMFEMAnalyzer,

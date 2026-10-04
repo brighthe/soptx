@@ -14,9 +14,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import LagrangeFESpace
-from fealpy.mesh import TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import LagrangeFESpace
+from soptx.mesh import TriangleMesh
 
 from soptx.topology.constraints import apply_passive_solid
 from soptx.topology.constraints.exemption import PASSIVE_SOLID_DENSITY

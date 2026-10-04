@@ -23,8 +23,8 @@
 
 from typing import Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 from soptx.fem.kernels import ElementRestriction
 

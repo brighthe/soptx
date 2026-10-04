@@ -16,8 +16,8 @@ Notes
 
 from typing import Any, Optional, Union
 
-from fealpy.sparse import COOTensor, CSRTensor
-from fealpy.typing import TensorLike
+from soptx.sparse import COOTensor, CSRTensor
+from soptx.typing import TensorLike
 
 from soptx.fem.bilinear_form import BilinearForm
 from soptx.solvers.base import operator_diagonal

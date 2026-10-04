@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem import project_patch_traction_to_p1_trace
 from soptx.problems import FixedFixedBeamCenterLoad2d

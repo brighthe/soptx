@@ -22,7 +22,7 @@ from math import log2
 from pathlib import Path
 from typing import Any
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem import HuZhangMFEMAnalyzer, create_huzhang_checkerboard_mesh
 from soptx.materials import IsotropicLinearElasticMaterial
@@ -143,21 +143,15 @@ def _git_state(path: Path) -> dict[str, Any]:
 
 
 def provenance() -> dict[str, Any]:
-    """本次运行的溯源戳记: soptx 与 fealpy 副本的 revision/dirty.
+    """本次运行的溯源戳记: soptx 的 revision/dirty.
 
-    ``import fealpy`` 解析到本地 editable 的 vendor fork, 其未提交改动同样影响数值,
-    因此两者都干净才记 ``reproducible = True``.
+    数值代码 (含自 FEALPy 移植的部分) 全部位于本仓库, 工作区干净才记 ``reproducible = True``.
     """
-    import fealpy
-
     soptx = _git_state(REPOSITORY_ROOT)
-    fealpy_state = _git_state(Path(fealpy.__file__).resolve().parent)
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         **soptx,
-        "fealpy_git_revision": fealpy_state["git_revision"],
-        "fealpy_git_dirty": fealpy_state["git_dirty"],
-        "reproducible": soptx["git_dirty"] is False and fealpy_state["git_dirty"] is False,
+        "reproducible": soptx["git_dirty"] is False,
     }
 
 

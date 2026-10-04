@@ -1,11 +1,11 @@
 from typing import Optional, Union
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
-from fealpy.typing import TensorLike
-from fealpy.functionspace import FunctionSpace
-from fealpy.decorator.variantmethod import variantmethod
-from fealpy.functionspace.functional import symmetry_index
-from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
+from soptx.typing import TensorLike
+from soptx.functionspace import FunctionSpace
+from soptx.decorator.variantmethod import variantmethod
+from soptx.functionspace.functional import symmetry_index
+from soptx.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 
 from soptx.core import timer
 

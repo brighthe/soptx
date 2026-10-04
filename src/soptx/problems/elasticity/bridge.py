@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Callable, Sequence
 
-from fealpy.backend import backend_manager as bm
-from fealpy.decorator import cartesian
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.decorator import cartesian
+from soptx.typing import TensorLike
 
 from soptx.problems.loads import BoundaryTractionLoad
 

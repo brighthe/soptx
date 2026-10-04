@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, List
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from .layout import HasGlobalDofs, StructuredSubstructureLayout
 from .reduction_adapter import normalize_local_reduction

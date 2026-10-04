@@ -23,7 +23,9 @@ from typing import Any
 #: ``matvec_reference`` 去掉 ``symmetry_relative_error``, ``local_gates`` 的
 #: ``operator_symmetry`` 换成只查正定性的 ``positive_definite`` —— 对称性由
 #: ``dirichlet_matvec`` 蕴含 (FA 严格对称), 且它从来只在 FA 存在时才评估.
-SCHEMA_VERSION = 4
+#: 升到 5: ``environment`` 去掉 ``fealpy`` 字段 —— FEALPy 依赖代码已移植进 SOPTX,
+#: 由 ``git_revision`` / ``git_dirty`` 一并钉住.
+SCHEMA_VERSION = 5
 
 #: A gate that ran and succeeded.
 GATE_PASSED = "passed"

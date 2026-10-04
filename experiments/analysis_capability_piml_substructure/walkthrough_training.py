@@ -203,7 +203,7 @@ def main(argv=None):
     """按所选模式生成或恢复样本, 训练所选路线并打印结果目录."""
     args = parse_args(argv)
 
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     from soptx.fem.substructure.independent_targets import IndependentTargetProvider
     from soptx.ml.substructure.independent_contract import (
         SCHEMA, build_network, provider_metadata_matches,

@@ -60,9 +60,9 @@ setup 段换成 (NC, ldof, GD) 的分量布局, 参考基只认标量基函数.
 
 from typing import Optional, Tuple
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import SimplexMesh
-from fealpy.typing import TensorLike, _S
+from soptx.backend import backend_manager as bm
+from soptx.mesh import SimplexMesh
+from soptx.typing import TensorLike, _S
 
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.fem.kernels import (

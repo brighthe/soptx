@@ -76,8 +76,8 @@ from typing import Any, Literal
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import (
+from soptx.backend import backend_manager as bm
+from soptx.mesh import (
     HexahedronMesh,
     QuadrangleMesh,
     TetrahedronMesh,
@@ -659,15 +659,6 @@ def run_manufactured_convergence_benchmark(
     else:
         solver_options = {}
 
-    # 结论依赖于哪一份 FEALPy: 官方检出与打了缺陷修复的检出版本号都是 4.0.0,
-    # 只有解析路径能区分。见 docs/known-issues/fealpy-patches.md 第一节。不印在控制台,
-    # 而是记进产物的 fealpy_path 字段 —— 复核时看产物, 跑的时候不必每次刷这一行。
-    # 这里用 import_module 而不是模块级 ``import fealpy``: 后者只在这一行用到,
-    # 会被 "移除未使用导入" 的工具删掉, 而删掉的后果是整个算例起不来
-    fealpy_file = import_module("fealpy").__file__
-    if fealpy_file is None:
-        raise RuntimeError("无法确定当前导入的 FEALPy 模块文件路径.")
-    fealpy_path = str(Path(fealpy_file).resolve().parents[1])
     # 这一行印的是命令行开关原样, 不是中文标签: 照抄就能复跑同一条链, 不必回头
     # 查"quadrangle 对应 --mesh-type 填什么"。维数不单列 —— 网格类型已经定死了它
     # (quad/tri 必是 2D, hex/tet 必是 3D); mumps 的 sym 同理, 随 --solver mumps
@@ -749,7 +740,6 @@ def run_manufactured_convergence_benchmark(
 
     summary: dict[str, Any] = {
         "script": Path(__file__).name,
-        "fealpy_path": fealpy_path,
         "dimension": f"{dim}D",
         "problem": type(problem).__name__,
         "model": model,

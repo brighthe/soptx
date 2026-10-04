@@ -22,7 +22,7 @@ from typing import Any
 from xml.etree import ElementTree as ET
 
 import numpy as np
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.postprocess.vtk_export import write_vtu
 
 import provenance

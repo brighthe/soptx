@@ -1,9 +1,9 @@
 from typing import List, Callable, Optional, Tuple
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.decorator import cartesian, variantmethod
-from fealpy.mesh import QuadrangleMesh, TriangleMesh, HomogeneousMesh
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.decorator import cartesian, variantmethod
+from soptx.mesh import QuadrangleMesh, TriangleMesh, HomogeneousMesh
 
 from soptx.problems import HalfMBBBeamRight2d as _MaintainedHalfMBBBeamRight2d
 from soptx.model.pde_base import PDEBase  

@@ -1,14 +1,20 @@
+"""SOPTX 线弹性积分子与 FEALPy 参照的等价性.
+
+FEALPy 一侧的单元矩阵与全局矩阵已冻结在 ``data/fealpy_linear_elastic_reference.npz``:
+由 FEALPy fork ``f474a5775`` 的 ``LinearElasticityIntegrator`` (q=4, 传入本文件同一份
+SOPTX 材料) 在单位立方体 ``1x1x1`` 四面体网格上算得, 生成于 soptx ``aa58af5``;
+生成脚本见 ``~/codespace/soptx-baseline/aa58af5/generate_fealpy_linear_elastic_reference.py``.
+"""
+
+from pathlib import Path
 import unittest
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
-from fealpy.fem import (
-    BilinearForm,
-    LinearElasticityIntegrator as FealpyLinearElasticityIntegrator,
-)
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import TetrahedronMesh
+from soptx.backend import backend_manager as bm
+from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import TetrahedronMesh
 
 from soptx.fem.integrators import (
     LinearElasticIntegrator as SoptxLinearElasticIntegrator,
@@ -16,6 +22,10 @@ from soptx.fem.integrators import (
 from soptx.materials import (
     IsotropicLinearElasticMaterial,
 )
+
+
+REFERENCE = np.load(Path(__file__).parent / "data" / "fealpy_linear_elastic_reference.npz")
+SHAPE_KEYS = {(-1, 3): "dof_last", (3, -1): "dof_first"}
 
 
 class TestLinearElasticIntegratorEquivalence(unittest.TestCase):
@@ -48,17 +58,13 @@ class TestLinearElasticIntegratorEquivalence(unittest.TestCase):
         scalar_space = LagrangeFESpace(self.mesh, p=1)
         return TensorFunctionSpace(scalar_space, shape=shape)
 
-    def _make_fealpy_integrator(
-        self,
+    @staticmethod
+    def _fealpy_reference(
+        shape: tuple[int, int],
         method: str,
-    ) -> FealpyLinearElasticityIntegrator:
-        integrator = FealpyLinearElasticityIntegrator(
-            material=self.material,
-            q=4,
-        )
-        if method != "standard":
-            integrator.assembly.set(method)
-        return integrator
+    ) -> tuple[np.ndarray, np.ndarray]:
+        key = f"integrator_{SHAPE_KEYS[shape]}_{method}"
+        return REFERENCE[f"{key}_cell"], REFERENCE[f"{key}_global"]
 
     def _make_soptx_integrator(
         self,
@@ -185,18 +191,12 @@ class TestLinearElasticIntegratorEquivalence(unittest.TestCase):
         for shape in ((-1, 3), (3, -1)):
             with self.subTest(shape=shape):
                 space = self._make_tensor_space(shape)
-                fealpy_standard = self._assemble_cell_and_global(
-                    self._make_fealpy_integrator("standard"),
-                    space,
-                )
+                fealpy_standard = self._fealpy_reference(shape, "standard")
                 soptx_standard = self._assemble_cell_and_global(
                     self._make_soptx_integrator("standard"),
                     space,
                 )
-                fealpy_voigt = self._assemble_cell_and_global(
-                    self._make_fealpy_integrator("voigt"),
-                    space,
-                )
+                fealpy_voigt = self._fealpy_reference(shape, "voigt")
                 soptx_voigt = self._assemble_cell_and_global(
                     self._make_soptx_integrator("voigt"),
                     space,

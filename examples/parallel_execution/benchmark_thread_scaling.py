@@ -145,8 +145,8 @@ def build_workload(args: argparse.Namespace) -> Workload:
     Workload
         供各段复用的工况对象.
     """
-    from fealpy.backend import backend_manager as bm
-    from fealpy.mesh import QuadrangleMesh, TriangleMesh
+    from soptx.backend import backend_manager as bm
+    from soptx.mesh import QuadrangleMesh, TriangleMesh
 
     from soptx.fem.analyzers import LagrangeFEMAnalyzer
     from soptx.materials import IsotropicLinearElasticMaterial
@@ -203,7 +203,7 @@ def build_workload(args: argparse.Namespace) -> Workload:
 
 def _seg_assemble(ctx: Workload) -> dict[str, Any]:
     """装配单元刚度矩阵. 计算受限."""
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     t0 = time.perf_counter()
     K = ctx.analyzer.assemble_stiff_matrix()
@@ -219,7 +219,7 @@ def _seg_assemble(ctx: Workload) -> dict[str, Any]:
 
 def _seg_cg_solve(ctx: Workload) -> dict[str, Any]:
     """CG 求解. 计算受限, 是算子作用乘以迭代数的总账."""
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     # 装配与边界条件不计入本段计时, 但结果要缓存, 免得每次 repeat 重装.
     if "system" not in ctx.cache:
@@ -248,7 +248,7 @@ def _seg_filter_spmv(ctx: Workload) -> dict[str, Any]:
     走 ``filter_objective_sensitivities`` 而非 ``filter_design_variable``:
     前者收发都是裸张量, 后者要求传入 ``Function``, 对本段没有必要.
     """
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     if "filter_input" not in ctx.cache:
         rho = bm.ones((ctx.n_cells,), dtype=bm.float64) * 0.5

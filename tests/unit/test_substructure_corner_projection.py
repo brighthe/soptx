@@ -1,7 +1,7 @@
 """全局角点投影的仿射位移再现测试."""
 
 import numpy as np
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.fem.substructure import (
     GlobalAssembler, InterfaceDofsView, LinearCornerTraceBasis, build_substructures,
 )

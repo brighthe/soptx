@@ -2,9 +2,9 @@
 
 import argparse
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import QuadrangleMesh, TriangleMesh
 
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.fem.kernels import (

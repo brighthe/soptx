@@ -13,7 +13,7 @@
 
 import unittest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.kernels import physical_gradient, physical_gradient_transpose
 

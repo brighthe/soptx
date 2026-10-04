@@ -7,8 +7,8 @@ solve path rather than attribute presence.
 
 from __future__ import annotations
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.mesh import TriangleMesh
 
 from soptx.fem import (
     HuZhangMFEMAnalyzer,

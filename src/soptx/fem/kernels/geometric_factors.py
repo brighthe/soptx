@@ -21,7 +21,7 @@
 ``LinearElasticQFunction`` 持有, 随设计变量更新时重算的也正是那一份.
 """
 
-from fealpy.typing import TensorLike
+from soptx.typing import TensorLike
 
 
 class GeometricFactors:

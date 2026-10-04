@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.problems import (
     BearingDevice2d,

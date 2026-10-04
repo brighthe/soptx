@@ -377,9 +377,6 @@ def export_fingerprint(name: str) -> str:
     paths = [run_dir / "density_final.vtu", run_dir / "summary.json", CASES_FILE]
     paths.extend(sorted(Path(__file__).parent.glob("*.py")))
     paths.extend(sorted((root / "src" / "soptx").rglob("*.py")))
-    # FEALPy 为 editable 依赖, 同时覆盖其实际加载目录中的 Python 实现.
-    import fealpy
-    paths.extend(sorted(Path(fealpy.__file__).resolve().parent.rglob("*.py")))
     digest = hashlib.sha256()
     for path in paths:
         digest.update(str(path).encode())

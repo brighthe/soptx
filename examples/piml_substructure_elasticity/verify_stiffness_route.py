@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Literal, Sequence, Tuple, cast
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import (

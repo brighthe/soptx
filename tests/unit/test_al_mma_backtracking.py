@@ -1,7 +1,7 @@
 """AL-MMA 渐近线下限与稳定候选点公式的针对性测试, 不执行有限元求解."""
 import numpy as np
 import pytest
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.topology.optimizers.al_mma import (
     ALMMMAOptimizer,
     ALMMMAOptions,

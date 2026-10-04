@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from scipy.sparse import csr_matrix
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.solvers import spsolve
 

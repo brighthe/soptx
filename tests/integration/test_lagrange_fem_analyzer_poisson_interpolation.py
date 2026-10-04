@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem import LagrangeFEMAnalyzer, create_huzhang_checkerboard_mesh
 from soptx.materials import IsotropicLinearElasticMaterial

@@ -1,9 +1,9 @@
 from typing import Any, Dict, List, Optional
 from math import ceil
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import HomogeneousMesh
-from fealpy.sparse import COOTensor
+from soptx.backend import backend_manager as bm
+from soptx.mesh import HomogeneousMesh
+from soptx.sparse import COOTensor
 from soptx.core import BaseLogged, timer
 
 class FilterMatrixBuilder(BaseLogged):

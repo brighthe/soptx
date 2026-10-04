@@ -1,12 +1,12 @@
 from typing import Optional, Union, Literal, Dict
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.mesh import SimplexMesh, HomogeneousMesh
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from fealpy.fem import LinearForm
-from fealpy.decorator import variantmethod
-from fealpy.sparse import CSRTensor, COOTensor
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.mesh import SimplexMesh, HomogeneousMesh
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
+from soptx.fem._linear_form_base import LinearForm
+from soptx.decorator import variantmethod
+from soptx.sparse import CSRTensor, COOTensor
 
 from soptx.core import BaseLogged, timer
 from soptx.protocols import (

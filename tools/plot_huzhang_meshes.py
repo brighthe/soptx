@@ -30,7 +30,7 @@ from matplotlib.collections import PolyCollection
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from fealpy.backend import backend_manager as bm  # noqa: E402
+from soptx.backend import backend_manager as bm  # noqa: E402
 
 from soptx.mesh import (  # noqa: E402
     create_huzhang_checkerboard_mesh,

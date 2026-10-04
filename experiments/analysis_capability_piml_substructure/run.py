@@ -60,7 +60,7 @@ def _relative_error(
 def _conditions(assembler: GlobalAssembler) -> tuple[np.ndarray, np.ndarray]:
     """构造左端固支、右上角单位向下集中力."""
     import numpy as np
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     nodes = np.asarray(bm.to_numpy(assembler.full_mesh.node), dtype=np.float64)
     tolerance = 100.0 * np.finfo(np.float64).eps * max(
         1.0, max(assembler.domain_size)
@@ -105,7 +105,7 @@ class _StiffnessView:
     """让完整接口装配器消费已在 full_trace 上的刚度."""
 
     def __init__(self, stiffness: np.ndarray) -> None:
-        from fealpy.backend import backend_manager as bm
+        from soptx.backend import backend_manager as bm
 
         self.K_s = bm.asarray(stiffness, dtype=bm.float64)
 
@@ -137,7 +137,7 @@ def _solve(
 ) -> dict[str, Any]:
     """在所选迹空间施加同一全局载荷和约束."""
     import numpy as np
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     from soptx.fem.substructure import (
         InterfaceDofsView, solve_constrained_system, solve_interface_system,
     )
@@ -227,7 +227,7 @@ def _recover(
 ) -> tuple[np.ndarray, np.ndarray]:
     """恢复各块内部位移并散射为完整全局位移."""
     import numpy as np
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     q_local = np.asarray(solution["trace"], dtype=np.float64)[
         np.asarray(solution["local_indices"], dtype=np.int64)
     ]
@@ -324,7 +324,7 @@ def run_analysis(
     相对 exact 基线的刚度、位移和柔度误差分别给出.
     """
     import numpy as np
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     from soptx.fem.substructure import (
         ExactSchurReduction, GlobalAssembler, ShapeFunctionCondensation,
         build_substructures,
@@ -762,7 +762,7 @@ def main():
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
     if args.stage in ("analyze", "local"):
-        from fealpy.backend import backend_manager as bm
+        from soptx.backend import backend_manager as bm
         bm.set_backend("numpy")
 
     if args.stage in ("train", "local"):

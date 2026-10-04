@@ -26,9 +26,9 @@ MFEM 的 ``ElementRestriction`` 一致: 那里不论空间按 byNODES 还是 byV
 本地操作, 不含任何通信.
 """
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace.utils import flatten_indices
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.functionspace.utils import flatten_indices
+from soptx.typing import TensorLike
 
 
 class ElementRestriction:

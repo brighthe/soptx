@@ -3,11 +3,10 @@ import sympy as sp
 
 from typing import Optional, List
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.functionspace import FunctionSpace, LagrangeFESpace
-from fealpy.fem import ScalarMassIntegrator, ScalarDiffusionIntegrator
-from fealpy.mesh import SimplexMesh, TensorMesh, UniformMesh2d, UniformMesh3d
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.functionspace import FunctionSpace, LagrangeFESpace
+from soptx.mesh import SimplexMesh, TensorMesh, UniformMesh2d, UniformMesh3d
 
 class LinearSymbolicIntegration:
     def __init__(self, space1: FunctionSpace, space2 : Optional[FunctionSpace]=None):

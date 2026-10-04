@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from typing import Union, Tuple, Optional
 from time import time
 import math
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
-from fealpy.functionspace import Function
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
+from soptx.functionspace import Function
 
 from soptx.core import timer
 from soptx.topology.filters import Filter

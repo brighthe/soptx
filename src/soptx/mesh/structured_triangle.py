@@ -14,9 +14,9 @@ Notes
 from numbers import Integral
 from typing import Sequence
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.mesh import QuadrangleMesh, TriangleMesh
+from soptx.typing import TensorLike
 
 
 def create_huzhang_checkerboard_mesh(

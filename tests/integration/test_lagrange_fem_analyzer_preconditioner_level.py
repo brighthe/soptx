@@ -16,8 +16,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.mesh import TriangleMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial

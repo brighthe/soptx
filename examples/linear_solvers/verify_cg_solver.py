@@ -80,7 +80,7 @@ _REPOSITORY_ROOT = _SCRIPT_DIR.parents[1]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.verification import relative_difference, solution_error
 from soptx.solvers import (

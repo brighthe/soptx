@@ -62,7 +62,7 @@ from pipeline import (
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 
 # ------------------------------------------------------------------ 能量诊断
@@ -169,7 +169,7 @@ STRESS_OUTPUT_FILES: dict[str, str] = {
 
 def _per_cell_max(value: Any) -> np.ndarray:
     """把 (NC, NQ...) 的积分点场压成 (NC,) 的单元最大值; 已是 (NC,) 的原样返回."""
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     array = np.asarray(bm.to_numpy(value), dtype=np.float64)
     if array.ndim == 1:
@@ -205,7 +205,7 @@ def _write_stress_optimizer_state(output: Path, pipeline: Any, density: Any) -> 
     dict or None
         状态文件及内层控制元数据; 非 AL 管线返回 None.
     """
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     optimizer = getattr(pipeline, "optimizer", None)
     objective = getattr(pipeline, "al_objective", None)
@@ -263,7 +263,7 @@ def write_optimization_result(
     """
     output.mkdir(parents=True, exist_ok=True)
     from soptx.postprocess.vtk_export import write_vtu
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
 
     n_frames = len(getattr(history, "physical_densities", None) or [])
 

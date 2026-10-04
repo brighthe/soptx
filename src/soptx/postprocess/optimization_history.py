@@ -1,12 +1,12 @@
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 import json
 from typing import Optional, List, Dict
 from pathlib import Path
 
-from fealpy.typing import TensorLike
-from fealpy.mesh import StructuredMesh, HomogeneousMesh, SimplexMesh, TensorMesh
-from fealpy.functionspace import Function
+from soptx.typing import TensorLike
+from soptx.mesh import StructuredMesh, HomogeneousMesh, SimplexMesh, TensorMesh
+from soptx.functionspace import Function
 
 from soptx.topology.optimizers.history import OptimizationHistory
 

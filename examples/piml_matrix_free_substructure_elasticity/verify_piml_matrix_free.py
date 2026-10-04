@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Literal, Optional, cast
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 from soptx.solvers import CGSolver
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer

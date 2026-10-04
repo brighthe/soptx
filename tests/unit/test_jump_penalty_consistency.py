@@ -11,10 +11,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
-from fealpy.fem import BilinearForm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import TriangleMesh
 
 from soptx.fem.integrators import JumpPenaltyIntegrator
 from soptx.materials import IsotropicLinearElasticMaterial

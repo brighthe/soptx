@@ -3,11 +3,11 @@ import warnings
 from itertools import permutations
 from typing import Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike, Threshold
-from fealpy.functionspace import FunctionSpace as _FS
-from fealpy.decorator import variantmethod
-from fealpy.fem.integrator import LinearInt, OpInt, FaceInt, enable_cache
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike, Threshold
+from soptx.functionspace import FunctionSpace as _FS
+from soptx.decorator import variantmethod
+from soptx.fem.integrator import LinearInt, OpInt, FaceInt, enable_cache
 
 from soptx.materials import LinearElasticMaterial
 

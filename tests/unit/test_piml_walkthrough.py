@@ -202,7 +202,7 @@ def install_training_modules(
         find_training_data 替身报告的跳过目录.
     """
     backend = SimpleNamespace(set_backend=lambda name: calls.append(("backend", name)))
-    install(monkeypatch, "fealpy.backend", backend_manager=backend)
+    install(monkeypatch, "soptx.backend", backend_manager=backend)
     install(
         monkeypatch, "soptx.fem.substructure.independent_targets",
         IndependentTargetProvider=provider_factory,
@@ -505,7 +505,7 @@ def install_analysis_modules(
         to_numpy=np.asarray,
         float64=np.float64,
     )
-    install(monkeypatch, "fealpy.backend", backend_manager=backend)
+    install(monkeypatch, "soptx.backend", backend_manager=backend)
 
     def load_network(path, current, *, route):
         calls.append(("load_network", route, path))

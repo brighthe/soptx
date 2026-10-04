@@ -18,9 +18,9 @@ from typing import Any, NamedTuple
 
 from mpi4py.MPI import Comm, COMM_WORLD
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import EntitySector, MeshBlock, MeshView, Relation
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.mesh import EntitySector, MeshBlock, MeshView, Relation
+from soptx.typing import TensorLike
 
 from . import entity_mpi as _de
 

@@ -1,16 +1,26 @@
+"""SOPTX 线弹性材料协议.
+
+以 FEALPy 为参照的三个用例 (本构矩阵、标准应变矩阵、B-bar 应变矩阵) 读取冻结的
+``data/fealpy_linear_elastic_reference.npz``: 由 FEALPy fork ``f474a5775`` 的
+``LinearElasticMaterial`` 按各用例中的同一输入算得, 生成于 soptx ``aa58af5``;
+生成脚本见 ``~/codespace/soptx-baseline/aa58af5/generate_fealpy_linear_elastic_reference.py``.
+"""
+
+from pathlib import Path
 import unittest
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
-from fealpy.fem import LinearElasticityIntegrator
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.material import LinearElasticMaterial as FealpyMaterial
-from fealpy.mesh import TetrahedronMesh
+from soptx.backend import backend_manager as bm
+from soptx.fem.integrators import LinearElasticIntegrator
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import TetrahedronMesh
 
 from soptx.materials import (
     IsotropicLinearElasticMaterial,
 )
+
+REFERENCE = np.load(Path(__file__).parent / "data" / "fealpy_linear_elastic_reference.npz")
 
 
 class TestLinearElasticMaterialProtocol(unittest.TestCase):
@@ -43,15 +53,9 @@ class TestLinearElasticMaterialProtocol(unittest.TestCase):
                     poisson_ratio=0.3,
                     hypothesis=hypothesis,
                 )
-                reference = FealpyMaterial(
-                    name="reference",
-                    elastic_modulus=210.0,
-                    poisson_ratio=0.3,
-                    hypo=hypothesis,
-                )
                 self.assertTensorAllClose(
                     material.elastic_matrix(),
-                    reference.elastic_matrix(),
+                    REFERENCE[f"elastic_matrix_{hypothesis}"],
                 )
 
     def test_lame_constants_are_intrinsic_for_plane_stress(self) -> None:
@@ -154,12 +158,6 @@ class TestLinearElasticMaterialProtocol(unittest.TestCase):
             youngs_modulus=210.0,
             poisson_ratio=0.3,
         )
-        reference = FealpyMaterial(
-            name="reference",
-            elastic_modulus=210.0,
-            poisson_ratio=0.3,
-            hypo="3D",
-        )
 
         for dof_priority in (False, True):
             with self.subTest(dof_priority=dof_priority):
@@ -168,10 +166,7 @@ class TestLinearElasticMaterialProtocol(unittest.TestCase):
                         dof_priority=dof_priority,
                         gphi=gphi,
                     ),
-                    reference.strain_matrix(
-                        dof_priority=dof_priority,
-                        gphi=gphi,
-                    ),
+                    REFERENCE[f"strain_matrix_dof_priority_{dof_priority}"],
                 )
 
     def test_bbar_strain_matrix_matches_fealpy(self) -> None:
@@ -193,12 +188,6 @@ class TestLinearElasticMaterialProtocol(unittest.TestCase):
             youngs_modulus=210.0,
             poisson_ratio=0.3,
         )
-        reference = FealpyMaterial(
-            name="reference",
-            elastic_modulus=210.0,
-            poisson_ratio=0.3,
-            hypo="3D",
-        )
 
         self.assertTensorAllClose(
             material.strain_matrix(
@@ -209,14 +198,7 @@ class TestLinearElasticMaterialProtocol(unittest.TestCase):
                 ws=ws,
                 detJ=detJ,
             ),
-            reference.strain_matrix(
-                dof_priority=False,
-                gphi=gphi,
-                correction="BBar",
-                cm=cm,
-                ws=ws,
-                detJ=detJ,
-            ),
+            REFERENCE["bbar_strain_matrix"],
         )
 
         with self.assertRaises(ValueError):
@@ -229,7 +211,7 @@ class TestLinearElasticMaterialProtocol(unittest.TestCase):
                 detJ=detJ,
             )
 
-    def test_material_assembles_with_fealpy_integrator(self) -> None:
+    def test_material_assembles_with_soptx_integrator(self) -> None:
         mesh = TetrahedronMesh.from_box(
             [0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
             nx=1,
@@ -245,7 +227,7 @@ class TestLinearElasticMaterialProtocol(unittest.TestCase):
             lame_lambda=1.0,
             shear_modulus=1.0,
         )
-        integrator = LinearElasticityIntegrator(
+        integrator = LinearElasticIntegrator(
             material=material,
             q=4,
         )

@@ -13,9 +13,9 @@ from math import log
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import TriangleMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial

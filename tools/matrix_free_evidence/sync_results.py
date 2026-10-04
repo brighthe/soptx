@@ -25,7 +25,6 @@ FORMAL_ENVIRONMENT_KEYS = (
     "numpy",
     "scipy",
     "sympy",
-    "fealpy",
     "soptx",
     "mpi4py",
     "mpi_library",

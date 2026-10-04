@@ -24,9 +24,9 @@ from dataclasses import dataclass
 from numbers import Integral
 from typing import Any, NamedTuple, Optional, Sequence, Tuple
 
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
+from soptx.typing import TensorLike
 
 
 # 各网格的剖分模板: 每种剖分列出其顶点相对格子最小角点的偏移 (以格子数计),

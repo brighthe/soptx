@@ -7,8 +7,8 @@
 import math
 from typing import Any, Dict, Literal, Optional, Protocol, runtime_checkable
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 
 StressRepresentation = Literal["solid", "apparent"]

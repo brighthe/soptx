@@ -1,10 +1,10 @@
 from typing import Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike, SourceLike, Threshold
-from fealpy.mesh import HomogeneousMesh
-from fealpy.functionspace.space import FunctionSpace as _FS
-from fealpy.fem.integrator import LinearInt, SrcInt, FaceInt, enable_cache
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike, SourceLike, Threshold
+from soptx.mesh import HomogeneousMesh
+from soptx.functionspace.space import FunctionSpace as _FS
+from soptx.fem.integrator import LinearInt, SrcInt, FaceInt, enable_cache
 
 
 class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):

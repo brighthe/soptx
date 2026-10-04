@@ -1,8 +1,8 @@
 from typing import List, Callable, Optional, Tuple
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import QuadrangleMesh, TriangleMesh
-from fealpy.decorator import cartesian, variantmethod
-from fealpy.typing import TensorLike, Callable
+from soptx.backend import backend_manager as bm
+from soptx.mesh import QuadrangleMesh, TriangleMesh
+from soptx.decorator import cartesian, variantmethod
+from soptx.typing import TensorLike, Callable
 
 from soptx.model.pde_base import PDEBase
 

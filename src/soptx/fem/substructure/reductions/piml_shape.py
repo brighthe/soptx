@@ -3,7 +3,7 @@
 from typing import Any, Optional
 
 import torch
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from ..piml_surrogate import ShapeFunctionCondensation, SurrogateContractError
 from .base import (

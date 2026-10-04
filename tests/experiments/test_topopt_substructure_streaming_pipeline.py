@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]

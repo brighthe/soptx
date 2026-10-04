@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
     CondensationReductionAdapter,

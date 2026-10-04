@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.solvers import (
     CGSolver,
@@ -252,9 +252,9 @@ def test_fealpy_function_accepted_as_rhs() -> None:
     它的 MRO 是 ``(Function, Generic, object)``, 不是 ``TensorLike`` 的注册
     子类; 不在 solve 入口归一化, 整条 matrix-free 路径就进不来.
     """
-    from fealpy.backend import TensorLike
-    from fealpy.functionspace import LagrangeFESpace
-    from fealpy.mesh import TriangleMesh
+    from soptx.backend import TensorLike
+    from soptx.functionspace import LagrangeFESpace
+    from soptx.mesh import TriangleMesh
 
     space = LagrangeFESpace(TriangleMesh.from_box([0, 1, 0, 1], nx=4, ny=4),
                             p=1, ctype="C")
@@ -280,8 +280,8 @@ def test_plain_list_accepted_as_rhs() -> None:
 
 
 def test_function_accepted_as_initial_guess() -> None:
-    from fealpy.functionspace import LagrangeFESpace
-    from fealpy.mesh import TriangleMesh
+    from soptx.functionspace import LagrangeFESpace
+    from soptx.mesh import TriangleMesh
 
     space = LagrangeFESpace(TriangleMesh.from_box([0, 1, 0, 1], nx=3, ny=3),
                             p=1, ctype="C")

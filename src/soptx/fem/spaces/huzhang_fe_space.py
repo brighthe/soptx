@@ -1,4 +1,4 @@
-from fealpy.mesh import MeshView
+from soptx.mesh import MeshView
 
 class HuZhangFESpace:
     """Factory class for creating HuZhang finite element spaces."""

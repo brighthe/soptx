@@ -31,8 +31,8 @@ import sys
 import torch
 import torch.nn as nn
 
-from fealpy.backend import bm
-from fealpy.mesh import TetrahedronMesh, TriangleMesh
+from soptx.backend import bm
+from soptx.mesh import TetrahedronMesh, TriangleMesh
 from fealpy.ml.grad import gradient
 from fealpy.ml.modules import Solution
 from fealpy.ml.sampler import BoxBoundarySampler, ISampler

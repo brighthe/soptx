@@ -116,7 +116,6 @@ def collect() -> dict[str, Any]:
         "platform": platform.platform(),
         "python": platform.python_version(),
         "numpy": _package_version("numpy"),
-        "fealpy": _package_version("fealpy"),
         "memory_total_bytes": _memory_total_bytes(),
     }
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fealpy.functionspace import TensorFunctionSpace
+from soptx.functionspace import TensorFunctionSpace
 
 from soptx.fem.analyzers.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 

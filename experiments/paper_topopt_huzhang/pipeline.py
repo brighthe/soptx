@@ -19,8 +19,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 from soptx.fem import (
     HuZhangMFEMAnalyzer,

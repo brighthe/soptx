@@ -31,9 +31,9 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import TetrahedronMesh, TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import TetrahedronMesh, TriangleMesh
 
 from soptx.fem.matrix_free import solve_ea_system
 from soptx.fem.verification import relative_difference, serial_references

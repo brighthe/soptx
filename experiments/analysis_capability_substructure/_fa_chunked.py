@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 import numpy as np
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.fem.matrix.csr_pattern import (
     assemble_csr_chunks,

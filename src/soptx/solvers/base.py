@@ -26,8 +26,8 @@ from abc import ABC, abstractmethod
 from enum import IntEnum
 from typing import Any, Dict, Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.backend import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.backend import TensorLike
 
 # 重导出: 本模块内不使用, 供 cg / direct / preconditioners 从 .base 取用.
 from soptx.protocols import SupportsMatmul as SupportsMatmul

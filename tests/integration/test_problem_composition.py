@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fealpy.mesh import TetrahedronMesh, TriangleMesh
+from soptx.mesh import TetrahedronMesh, TriangleMesh
 
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems.elasticity import (

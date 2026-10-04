@@ -12,11 +12,11 @@
 # 借的是语义不是代码, 本文件不依赖 PETSc/MFEM.
 
 from itertools import count
+import logging
 from typing import Optional, Callable
 
-from fealpy.backend import backend_manager as bm
-from fealpy.backend import TensorLike
-from fealpy import logger
+from soptx.backend import backend_manager as bm
+from soptx.backend import TensorLike
 
 # SupportsMatmul 原定义在本文件, 已提到 soptx.protocols (层间边界) 并由
 # .base 重导出; 此处再导出一次, 使
@@ -24,6 +24,8 @@ from fealpy import logger
 from .base import ConvergedReason, LinearSolver, SolveInfo, SupportsMatmul
 from .base import reason_text
 from .registry import register
+
+logger = logging.getLogger(__name__)
 
 #: ``norm_type`` 的合法取值, 命名对齐 PETSc ``KSPNormType``.
 NORM_TYPES = ("natural", "unpreconditioned", "preconditioned")

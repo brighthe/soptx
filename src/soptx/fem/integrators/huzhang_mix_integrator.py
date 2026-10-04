@@ -1,8 +1,8 @@
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
-from fealpy.typing import TensorLike
-from fealpy.functionspace import FunctionSpace
-from fealpy.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
+from soptx.typing import TensorLike
+from soptx.functionspace import FunctionSpace
+from soptx.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 
 from soptx.core import timer
 

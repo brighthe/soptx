@@ -17,9 +17,9 @@ from typing import (
 import numpy as np
 from scipy.sparse import coo_matrix
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
-from fealpy.sparse import COOTensor, CSRTensor
+from soptx.sparse import COOTensor, CSRTensor
 from soptx.fem.matrix.csr_pattern import (
     CSRPattern,
     assemble_csr_chunks,

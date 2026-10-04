@@ -2,11 +2,11 @@ import math
 from abc import ABC, abstractmethod
 from typing import Tuple, Union, Literal, Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.functionspace import Function
-from fealpy.mesh import HomogeneousMesh
-from fealpy.typing import TensorLike
-from fealpy.sparse import CSRTensor
+from soptx.backend import backend_manager as bm
+from soptx.functionspace import Function
+from soptx.mesh import HomogeneousMesh
+from soptx.typing import TensorLike
+from soptx.sparse import CSRTensor
 
 from soptx.core import BaseLogged, timer
 from soptx.fem.utils import reshape_multiresolution_data

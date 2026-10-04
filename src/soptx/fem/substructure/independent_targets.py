@@ -12,7 +12,7 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 import torch
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from .mesh import SubstructurePrototype
 from .traces import FullTraceBasis, LinearCornerTraceBasis

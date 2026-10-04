@@ -1,7 +1,7 @@
 import math
 from typing import Optional, Dict
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 from soptx.core import BaseLogged
 from soptx.fem.analyzers import LagrangeFEMAnalyzer

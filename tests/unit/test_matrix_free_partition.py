@@ -8,7 +8,7 @@ import pytest
 # soptx.fem.distributed 经由 fealpy.distributed 引入 mpi4py, 属可选 extra
 pytest.importorskip("mpi4py")
 
-from fealpy.mesh import TetrahedronMesh, TriangleMesh
+from soptx.mesh import TetrahedronMesh, TriangleMesh
 
 from tools.matrix_free_evidence import contract
 from soptx.fem.distributed import partition_cells, partition_strategy_label

@@ -38,9 +38,9 @@ from typing import Any, Iterable, Iterator, Optional, Tuple
 
 import numpy as np
 import scipy.sparse as sp
-from fealpy.backend import backend_manager as bm
-from fealpy.sparse import CSRTensor
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.sparse import CSRTensor
+from soptx.typing import TensorLike
 
 #: 符号阶段查询键分块长度, 用于限制 ``searchsorted`` 的瞬时内存 (查询键与其输出各 8 B/元素).
 _QUERY_CHUNK = 1 << 20

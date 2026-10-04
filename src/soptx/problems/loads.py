@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Sequence
 
-from fealpy.decorator import cartesian
+from soptx.decorator import cartesian
 
 
 @dataclass(frozen=True)

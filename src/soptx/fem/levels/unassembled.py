@@ -43,7 +43,7 @@ PA 的那一份代码, 两个层级唯一的差别是内核常驻还是现造. �
 
 from typing import Optional
 
-from fealpy.typing import TensorLike
+from soptx.typing import TensorLike
 
 from soptx.fem.kernels import ElementRestriction, ReferenceBasis
 

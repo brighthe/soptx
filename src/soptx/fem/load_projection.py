@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from soptx.protocols import LineTraction, Load, PointForce
 

@@ -107,7 +107,7 @@ def main(argv=None):
         if not checkpoint.is_file():
             raise FileNotFoundError(f"--{name}-dir 缺少必要权重: {checkpoint}")
 
-    from fealpy.backend import backend_manager as bm
+    from soptx.backend import backend_manager as bm
     from soptx.ml.substructure.independent_checkpoints import (
         decoder_metadata_matches,
         load_independent_network, load_independent_provider_metadata,

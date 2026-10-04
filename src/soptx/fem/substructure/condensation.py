@@ -7,7 +7,7 @@
 from abc import ABC, abstractmethod
 from typing import Tuple, Any, Optional, Dict
 import numpy as np
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 from .traces import LinearCornerTraceBasis, TraceBasis
 

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fealpy.functionspace import TensorFunctionSpace
-from fealpy.typing import TensorLike
+from soptx.functionspace import TensorFunctionSpace
+from soptx.typing import TensorLike
 
 from soptx.fem.analyzers.builders import (
     build_distributed_analyzer,

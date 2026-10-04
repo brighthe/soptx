@@ -11,8 +11,8 @@ from typing import Optional
 
 import numpy as np
 
-from fealpy.backend import backend_manager as bm
-from fealpy.backend import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.backend import TensorLike
 
 from .base import CAP_MATRIX, LinearSolver, SolveInfo
 from .registry import register

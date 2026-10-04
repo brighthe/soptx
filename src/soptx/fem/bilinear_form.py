@@ -15,9 +15,9 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional, Sequence, Union, overload
 
-from fealpy.fem.bilinear_form import BilinearForm as FEALPyBilinearForm
-from fealpy.sparse import COOTensor, CSRTensor
-from fealpy.typing import TensorLike
+from soptx.fem._bilinear_form_base import BilinearForm as FEALPyBilinearForm
+from soptx.sparse import COOTensor, CSRTensor
+from soptx.typing import TensorLike
 
 from soptx.fem.matrix.csr_pattern import CSRPattern, assemble_csr, build_csr_pattern
 

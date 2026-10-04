@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fealpy.backend import backend_manager as bm
-from fealpy.backend import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.backend import TensorLike
 
 from .base import CAP_DIAGONAL, LinearSolver, SolveInfo, operator_diagonal
 

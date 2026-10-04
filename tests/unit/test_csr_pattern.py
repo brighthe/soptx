@@ -11,11 +11,11 @@
 import numpy as np
 import pytest
 import torch
-from fealpy.backend import backend_manager as bm
-from fealpy.fem import BilinearForm
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
-from fealpy.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
-from fealpy.sparse import CSRTensor
+from soptx.backend import backend_manager as bm
+from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
+from soptx.sparse import CSRTensor
 
 from soptx.fem.integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.fem.matrix.csr_pattern import CSRPattern, assemble_csr, build_csr_pattern

@@ -39,8 +39,8 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-from fealpy.backend import backend_manager as bm
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 __all__ = [
     "EXEMPT_CONSTRAINT_VALUE",

@@ -1,8 +1,8 @@
 """稳定化系数默认值及密度依赖的装配回归测试."""
 import numpy as np
 import pytest
-from fealpy.backend import backend_manager as bm
-from fealpy.mesh import TriangleMesh
+from soptx.backend import backend_manager as bm
+from soptx.mesh import TriangleMesh
 from soptx.fem import HuZhangMFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import MixedBoundarySinusoidalElasticity2D

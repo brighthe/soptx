@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fealpy.backend import backend_manager as bm
-from fealpy.decorator import cartesian
-from fealpy.typing import TensorLike
+from soptx.backend import backend_manager as bm
+from soptx.decorator import cartesian
+from soptx.typing import TensorLike
 
 
 @dataclass(frozen=True)

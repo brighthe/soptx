@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Tuple
 
-from fealpy.backend import backend_manager as bm
+from soptx.backend import backend_manager as bm
 
 def normalize_local_reduction(
     condensors: Any,
