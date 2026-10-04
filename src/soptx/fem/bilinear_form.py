@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """SOPTX 高性能双线性型 (BilinearForm) 模块.
 
 本模块提供自主可控的有限元双线性型门面 ``BilinearForm``:

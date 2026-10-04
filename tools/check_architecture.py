@@ -1,4 +1,8 @@
-"""Fail when the stable SOPTX layers contain a reverse dependency."""
+"""Fail when the stable SOPTX layers contain a reverse dependency.
+
+Also fail when any maintained Python file imports ``fealpy``: the FEALPy code
+SOPTX depends on has been ported into ``soptx`` (see THIRD_PARTY_NOTICES.md).
+"""
 
 from __future__ import annotations
 
@@ -10,11 +14,20 @@ import sys
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPOSITORY_ROOT / "src" / "soptx"
 
+# backend / typing / decorator / sparse / quadrature / mesh / functionspace 移植自
+# FEALPy (见 THIRD_PARTY_NOTICES.md); 同层互相导入允许, 只禁止导入更高层.
 LAYER = {
+    "backend": 0,
     "core": 0,
+    "decorator": 0,
     "ml": 0,
     "protocols": 0,
+    "quadrature": 0,
+    "sparse": 0,
+    "typing": 0,
+    "functionspace": 1,
     "materials": 1,
+    "mesh": 1,
     "problems": 1,
     "fem": 2,
     "topology": 3,
@@ -23,7 +36,6 @@ LAYER = {
 LEGACY_ROOTS = {
     "analysis",
     "demo",
-    "functionspace",
     "interpolation",
     "model",
     "old",
@@ -39,7 +51,6 @@ TOPIC_SKIP_PARTS = {"__pycache__", "legacy", "old"}
 # 已声明的外部依赖根, 不参与同名模块的越界判定.
 THIRD_PARTY_ROOTS = {
     "soptx",
-    "fealpy",
     "numpy",
     "scipy",
     "sympy",
@@ -48,7 +59,12 @@ THIRD_PARTY_ROOTS = {
     "mpi4py",
     "torch",
     "pytest",
+    "vtk",
 }
+
+# 禁止导入 fealpy 的扫描范围.
+FEALPY_SCAN_ROOTS = ("src", "tests", "examples", "experiments", "tools")
+FEALPY_SKIP_PARTS = {"__pycache__"}
 
 
 def imported_soptx_roots(
@@ -158,12 +174,68 @@ def topic_isolation_errors() -> list[str]:
     return errors
 
 
+def _is_fealpy(name: str) -> bool:
+    return name == "fealpy" or name.startswith("fealpy.")
+
+
+def fealpy_import_errors() -> list[str]:
+    """检查维护范围内的 Python 文件不再导入 fealpy.
+
+    覆盖 ``import fealpy``、``from fealpy ... import`` 以及以字面量模块名调用的
+    ``import_module("fealpy...")`` / ``__import__("fealpy...")``.
+
+    Returns
+    -------
+    list of str
+        违规位置与说明, 无违规时为空列表.
+    """
+    errors: list[str] = []
+    for root in FEALPY_SCAN_ROOTS:
+        base = REPOSITORY_ROOT / root
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            if not FEALPY_SKIP_PARTS.isdisjoint(path.parts):
+                continue
+            relative = path.relative_to(REPOSITORY_ROOT).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+            for node in ast.walk(tree):
+                names: list[str] = []
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    names = [node.module]
+                elif isinstance(node, ast.Call):
+                    func = node.func
+                    called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+                    if (called in {"import_module", "__import__"} and node.args
+                            and isinstance(node.args[0], ast.Constant)
+                            and isinstance(node.args[0].value, str)):
+                        names = [node.args[0].value]
+                for name in names:
+                    if _is_fealpy(name):
+                        errors.append(
+                            f"{relative}:{node.lineno}: imports '{name}'; "
+                            "fealpy code is ported into soptx"
+                        )
+    return errors
+
+
+def _layer_files(source_root: str) -> list[Path]:
+    """返回某个分层根 (子包目录或单文件模块) 下的全部 Python 文件."""
+    directory = PACKAGE_ROOT / source_root
+    if directory.is_dir():
+        return sorted(directory.rglob("*.py"))
+    module = PACKAGE_ROOT / f"{source_root}.py"
+    return [module] if module.is_file() else []
+
+
 def main() -> int:
     errors: list[str] = []
     errors.extend(topic_isolation_errors())
+    errors.extend(fealpy_import_errors())
     for source_root, source_rank in LAYER.items():
-        directory = PACKAGE_ROOT / source_root
-        for path in sorted(directory.rglob("*.py")):
+        for path in _layer_files(source_root):
             relative_to_package = path.relative_to(PACKAGE_ROOT)
             current_package = (
                 "soptx",

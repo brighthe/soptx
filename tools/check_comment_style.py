@@ -23,6 +23,37 @@ FULLWIDTH_PUNCTUATION = "，。；：！？（）【】“”‘’"
 FULLWIDTH_BASELINE = 645
 MISSING_DOCSTRING_BASELINE = 314
 
+# 自 FEALPy 移植的代码 (见 THIRD_PARTY_NOTICES.md) 原样保留英文 docstring, 暂不计入
+# 棘轮; 欠账登记在 docs/known-issues/README.md "移植后遗留", 按子包分批补齐后移出本表.
+PORTED_ROOTS = (
+    "src/soptx/backend/",
+    "src/soptx/decorator/",
+    "src/soptx/functionspace/",
+    "src/soptx/mesh/",
+    "src/soptx/quadrature/",
+    "src/soptx/sparse/",
+    "src/soptx/typing.py",
+    "src/soptx/fem/_bilinear_form_base.py",
+    "src/soptx/fem/_linear_form_base.py",
+    "src/soptx/fem/coef.py",
+    "src/soptx/fem/form.py",
+    "src/soptx/fem/functional.py",
+    "src/soptx/fem/integrator.py",
+    "examples/pinn_elasticity/_pinn_support.py",
+)
+# PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
+PORTED_EXCEPTIONS = {
+    "src/soptx/mesh/structured_box.py",
+    "src/soptx/mesh/structured_triangle.py",
+}
+
+
+def is_ported(relative: str) -> bool:
+    """判断仓库相对路径是否属于豁免的移植代码."""
+    if relative in PORTED_EXCEPTIONS:
+        return False
+    return relative.startswith(PORTED_ROOTS)
+
 
 def iter_python_files() -> list[Path]:
     files: list[Path] = []
@@ -60,6 +91,8 @@ def collect_violations() -> tuple[list[str], list[str]]:
     missing: list[str] = []
     for path in iter_python_files():
         relative = path.relative_to(REPOSITORY_ROOT).as_posix()
+        if is_ported(relative):
+            continue
         text = path.read_text(encoding="utf-8")
         try:
             for token in tokenize.generate_tokens(io.StringIO(text).readline):

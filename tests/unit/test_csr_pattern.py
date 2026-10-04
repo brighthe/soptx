@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """模式先行 (Pattern-First) CSR 稀疏矩阵装配单元测试.
 
 测试覆盖范围:
