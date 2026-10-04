@@ -59,8 +59,8 @@ MATERIAL_HYPOTHESES = {2: "plane_strain", 3: "3D"}
 本目录有四个可执行入口与两份文档。制造解已下沉到
 [`soptx.problems.elasticity`](../../src/soptx/problems/elasticity.py)（见上节）。证据流水线（`run`、`validate`、`sync_results`
 及其 `contract`/`layout`/`schema`/`report`）住在
-[`tools/matrix_free_evidence/`](../../tools/matrix_free_evidence/)，因为它同时是
-fealpy fork 的 merge 前门禁，不只服务于这一个示例。依赖方向是单向的：那个包不导入
+[`tools/matrix_free_evidence/`](../../tools/matrix_free_evidence/)，因为它是仓库级的正式
+证据门禁，不只服务于这一个示例。依赖方向是单向的：那个包不导入
 本目录的任何模块，反过来是正确性入口导入它的 `contract`，好让印出的 PASS/FAIL
 与正式门禁用同一批阈值。`stage1_evidence.py` 也以同一方式导入 `contract`，但它
 不经过那条验证管线，直接产出图 2 用的汇总 JSON。它们的测试在

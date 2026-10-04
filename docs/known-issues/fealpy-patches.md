@@ -1,22 +1,23 @@
 # FEALPy fork 补丁详述
 
-本页是 vendor fork（`~/workspace/fealpy`，分支 `main`）相对上游
-`suanhaitech/fealpy:develop` 全部**存活补丁**的技术正文，按 fealpy 子系统分四节。
+本页是原 vendor fork（`brighthe/fealpy` `main`）相对上游 `suanhaitech/fealpy:develop` 全部
+**存活补丁**的技术正文，按 fealpy 子系统分四节。
 
-> **可变状态不在本页。** 分叉量、`main`/`origin` 的当前 SHA、丢弃判据的核对现状统一由
-> [README](README.md) 的补丁总表维护；本页只写不变量——缺陷机理、修改点、回归验证、
-> 丢弃判据本身，以及补丁所在的提交 SHA（SHA 不随分支前进而过期）。
+> **历史记录，只读保留。** 2026-10 起这些补丁已随代码移植进 SOPTX（移植源 `f474a5775`），
+> fork 退役。各补丁在 SOPTX 中的落点、回归保护现状与移植后遗留问题以
+> [README](README.md) 为准。下文的文件路径如 `mesh/view/entity_view.py` 在 SOPTX 中对应
+> `src/soptx/mesh/view/entity_view.py`（solver 与 distributed 见下表）；凡涉及「丢弃判据」、
+> 与上游比对、`~/workspace/fealpy` 下运行 fork 测试的段落，描述的都是 fork 时代的维护流程，
+> 已不再执行，fork 自带的测试也未移植。缺陷机理与修改点仍然有效。
 >
-> **效果已丢弃的补丁不在本页**，只在 README 总表留一行。它们的代码对比针对的是上游
-> v0.4 之前的旧架构，移植时不可照搬；确需查看时 `git -C ~/workspace/fealpy show <SHA>`
-> 直接看原始 diff。本页保留原有的「缺陷 N」编号不重排，编号不连续是正常的。
+> 本页保留原有的「缺陷 N」编号不重排，编号不连续是正常的。
 
 | 节 | 子系统 | 补丁 |
 |---|---|---|
-| [一](#一mesh--functionspace-层) | `fealpy/mesh/`、`fealpy/functionspace/` | `0758339`、`fbfe39e`、`ce8aa8ae9`、`13e8ebb75`、`bc2ea8ecb` |
-| [二](#二backend--sparse-层) | `fealpy/backend/`、`fealpy/sparse/` | `09783f643`、`ceb0c61`、`88cf4fa`、`c33db98ae` |
-| [三](#三solver--distributed-层) | `fealpy/solver/`、`fealpy/distributed/` | `875496d`、`40016dc56`、`4c5887d`、`30ca15599` |
-| [四](#四functional-层) | `fealpy/functional.py` | `a1ec1086d` |
+| [一](#一mesh--functionspace-层) | `fealpy/mesh/`、`fealpy/functionspace/` → `src/soptx/mesh/`、`src/soptx/functionspace/` | `0758339`、`fbfe39e`、`ce8aa8ae9`、`13e8ebb75`、`bc2ea8ecb` |
+| [二](#二backend--sparse-层) | `fealpy/backend/`、`fealpy/sparse/` → `src/soptx/backend/`、`src/soptx/sparse/` | `09783f643`、`ceb0c61`、`88cf4fa`、`c33db98ae` |
+| [三](#三solver--distributed-层) | `fealpy/solver/`、`fealpy/distributed/` → `src/soptx/solvers/`、`src/soptx/fem/distributed/` | `875496d`、`40016dc56`、`4c5887d`、`30ca15599` |
+| [四](#四functional-层) | `fealpy/functional.py` → `src/soptx/fem/functional.py` | `a1ec1086d` |
 
 ---
 

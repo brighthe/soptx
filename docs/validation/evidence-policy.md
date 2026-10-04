@@ -21,7 +21,7 @@ criteria，不能仅凭命令结束判断成功。
 
 - clean Git revision；
 - dirty flag；
-- Python、FEALPy、NumPy、SciPy、SymPy 及可选运行时版本；
+- Python、NumPy、SciPy、SymPy 及可选运行时版本（FEALPy 代码已移植入库，由 Git revision 钉住）；
 - 完整参数和随机种子；
 - 源产物 SHA-256。
 

@@ -86,7 +86,7 @@ python experiments/matrix_free_capability/run.py --collect
 |---|---|
 | `schema_version` | 结构版本, 消费方据此判断兼容性 |
 | `figure` | 图号、标题、四问、消费方路径 |
-| `provenance` | revision / branch / dirty / 采集时间 / 主机 / 平台 / Python / NumPy / FEALPy / 物理内存总量 |
+| `provenance` | revision / branch / dirty / 采集时间 / 主机 / 平台 / Python / NumPy / 物理内存总量 |
 | `reproducible` | 有 revision 且 `dirty = false` 时为 `true` |
 | `panels.a` / `.b` / `.c` / `.d` | 四组数据, 均为 `status = "measured"`; 某组没有注册 case 时退回 `status = "placeholder"` 与原因 |
 | `sources` | 22 条: case id、role、仓库根相对路径、`sha256`、字节数 |

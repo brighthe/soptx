@@ -15,5 +15,5 @@
 
 ## 仓库特有约定
 
-- SOPTX 基于 FEALPy 开发；`import fealpy` 解析到本地 editable 安装的 vendor fork `~/workspace/fealpy`，而非 PyPI 发行版。修改该 fork 必须记入 `docs/known-issues/`，记账细则见该目录 `README.md`。
-- 实现前先检索 fealpy 与 soptx 中已有的能力，优先复用或扩展现有接口，不重复造轮子。
+- SOPTX 不依赖 FEALPy：原先所用的 FEALPy 代码已移植为 `soptx` 子包（backend、sparse、quadrature、mesh、functionspace、fem 基类等），按普通 SOPTX 代码维护，来源与许可证见 `THIRD_PARTY_NOTICES.md`；不得再 `import fealpy`（`tools/check_architecture.py` 门禁）。修改移植代码无需另行记账，但影响已内联补丁或移植后遗留问题时同步 `docs/known-issues/README.md`；若再从 FEALPy 取代码，须在 `THIRD_PARTY_NOTICES.md` 登记来源提交并在文件头注明。
+- 实现前先检索 soptx 中已有的能力，优先复用或扩展现有接口，不重复造轮子。

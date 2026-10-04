@@ -54,12 +54,11 @@
 
 ## 已知问题
 
-- [`known-issues/README.md`](known-issues/README.md) — **FEALPy fork 补丁总账**：
-  本地 vendor fork 相对上游的全部补丁、测试覆盖现状与丢弃判据，也是该目录**唯一的
-  可变状态源**（分叉量、当前 SHA、判据结论只写在那里）。
-  **2026-08-26 上游 mesh 层的 v0.4 架构重写已全量合入，其中四条补丁的落点消失、
-  两条的症状换落点重现**——移植经验与待反馈的上游问题一并记在该页。该目录只有两份
-  文档，另一份 `fealpy-patches.md`（存活补丁的技术正文）由总账页索引，此处不重复枚举。
+- [`known-issues/README.md`](known-issues/README.md) — **FEALPy 来源与已内联补丁清单**：
+  2026-10 起 SOPTX 所用的 FEALPy 代码已移植入库、fork 退役；该页记录移植状态、fork 补丁
+  在 SOPTX 中的落点与回归保护现状，以及移植后遗留问题，是该目录**唯一的可变状态源**。
+  该目录只有两份文档，另一份 `fealpy-patches.md`（补丁技术正文，历史记录）由该页索引，
+  此处不重复枚举。来源与许可证见根目录 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。
 
 ## 可执行示例
 

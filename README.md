@@ -1,7 +1,8 @@
 # SOPTX
 
-SOPTX（Structural Optimization Topology Simulation Software）是基于
-[FEALPy](https://github.com/suanhaitech/fealpy) 的个人结构拓扑优化科研软件仓库。
+SOPTX（Structural Optimization Topology Simulation Software）是最初基于
+[FEALPy](https://github.com/suanhaitech/fealpy) 开发的个人结构拓扑优化科研软件仓库；
+所依赖的 FEALPy 代码已移植入库，来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 本仓库负责把可执行算法、数值验证和可复现实验组织为可维护的软件资产。
 
 ## 快速开始
@@ -23,30 +24,33 @@ PINN 示例入口见
 
 ## 安装与环境
 
-SOPTX 当前迁移版本为 `1.1.0.dev0`，Python 最低版本为 3.10：
+SOPTX 当前迁移版本为 `1.1.0.dev0`，Python 最低版本为 3.12（移入的网格与积分代码使用
+PEP 695 泛型与 `type` 语句）：
 
 ```bash
 python -m pip install -e .
 ```
 
-硬依赖是 `fealpy>=4,<5`，不随本仓库分发，需单独安装。其余基础依赖为 `numpy`、
-`scipy`、`sympy`。
+基础依赖为 `numpy`、`scipy`、`sympy`。
 
-实际使用的是一份**长期维护的 vendor fork**，位于 `~/workspace/fealpy`（`origin` =
-`brighthe/fealpy`（私有），上游 `suanhai` = `suanhaitech/fealpy`，工作分支 `main`），
-以 editable 方式安装，`import fealpy` 解析到的就是它。上游 `4.0.0-alpha` 存在多处
-回归缺陷，修复直接落在该 fork 上而非通过 PR 回流，因此 fork 与上游长期分叉。
+SOPTX **不依赖 FEALPy**。原先所用的 FEALPy 代码（backend、sparse、quadrature、
+mesh、functionspace 与 fem 基类等）已自 vendor fork `brighthe/fealpy` `f474a5775`
+移植为 `soptx` 子包，来源与许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)；
+fork 上的缺陷修复随代码一并内联，在 SOPTX 中的落点见
+[`docs/known-issues/README.md`](docs/known-issues/README.md)。
+`tools/check_architecture.py` 禁止仓库内再导入 `fealpy`。
 
-> **上游已知回归**：FEALPy `4.0.0-alpha` 的 mesh 重构引入四处回归，其中一处影响所有
-> 网格类型，会使 SOPTX 全部算例在计算误差时抛异常；另三处使四边形、六面体静默给出
-> 错误结果。这些缺陷已在 fork 中修复。缺陷细节、复现脚本与上游进展见
+> **张量积网格的静默错误**：FEALPy v0.4 网格重写曾使四边形、六面体单元静默给出
+> 错误结果（缺陷 8、9），修复已随代码移入 `soptx.mesh`。这两处没有 pytest 级回归
+> 保护，修改 `soptx.mesh` 的 `view/entity_view.py`、`ipoints.py`、`schema/` 后须手工
+> 复核张量积网格收敛阶，细节见
 > [`docs/known-issues/fealpy-patches.md`](docs/known-issues/fealpy-patches.md) 第一节。
 
 可选 extra 按用途划分：
 
 | Extra | 内容 | 用途 |
 | --- | --- | --- |
-| `viz` | matplotlib、pillow | 可视化输出；基础导入不要求该 extra |
+| `viz` | matplotlib、pillow、vtk | 可视化与 VTU 输出；基础导入不要求该 extra |
 | `mpi` | mpi4py | Matrix-Free 分布式算子与多 rank 运行 |
 | `pinn` | torch | PINN 示例训练 |
 | `test` | pytest、build | 测试与 wheel 构建 |
@@ -83,10 +87,8 @@ python experiments/huzhang_topopt_paper/dry_run.py --json
 的记录要求（clean revision、dirty flag、依赖版本、参数与随机种子、产物 SHA-256）见
 [`docs/validation/evidence-policy.md`](docs/validation/evidence-policy.md)。
 
-evidence 的 `environment.fealpy` 记录的不是静态版本号，而是运行时 `fealpy.__file__`
-所在检出的 `path`、`git_revision`、`git_dirty` 和 `git_remote`，因此可以直接判定该次
-运行用的是上游还是本地 fork、工作区是否干净。缺陷背景见
-[`docs/known-issues/fealpy-patches.md`](docs/known-issues/fealpy-patches.md) 第一节。
+evidence 的 `environment` 自 schema 5 起不再记录 `fealpy`：全部数值代码位于本仓库，
+由 `git_revision` 与 `git_dirty` 一并钉住。
 
 ## 目录入口
 
@@ -144,14 +146,16 @@ CI 另有一个 Matrix-Free fast job，装上 `mpi4py` 后重跑 `tests -q -k ma
 `repository:repo-relative-path#heading` 指针，不复制其他仓库的事实正文。完整的八仓库
 职责与内容路由规范见 `workstation:workspace/responsibilities.md#单一职责`。
 
-FEALPy 是 SOPTX 的上游数值计算依赖，其接口与实现由
-`suanhaitech/fealpy` 独立维护。SOPTX 可以调用 FEALPy 的公开接口，但不复制、
-vendor 或重新托管算海仓库中的代码、数据、运行日志、客户算例、凭据或内部文档。
-涉及 `fealpy`、`mfleo`、`xihe` 的技术事实时，以对应算海仓库为工程事实源；本仓库
-只保存属于 SOPTX 软件职责的个人实现、非敏感验证结果和事实源指针。
+FEALPy 是 SOPTX 的代码来源之一：SOPTX 依赖的 FEALPy 代码已于 2026-10 自 vendor fork
+`f474a5775` 按 `GPL-3.0-or-later` 移植入库（见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)），
+此后以本仓库为准演化，不再依赖、也不再跟随 `suanhaitech/fealpy`。除此之外，本仓库不复制
+或重新托管算海仓库中的数据、运行日志、客户算例、凭据或内部文档；涉及 `mfleo`、`xihe`
+的技术事实时，以对应算海仓库为工程事实源。本仓库只保存属于 SOPTX 软件职责的个人实现、
+非敏感验证结果和事实源指针。
 
 ## 许可证与第三方代码
 
-SOPTX 自有代码采用 `GPL-3.0-only`。`reference_code/` 不自动适用 SOPTX
+SOPTX 自有代码采用 `GPL-3.0-only`；源自 FEALPy 的代码按 `GPL-3.0-or-later` 使用，
+来源与范围见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。`reference_code/` 不自动适用 SOPTX
 许可证；其来源和许可证确认前不可再发布，也不会进入 wheel。治理说明与 SHA-256
 清单见 [`docs/references/README.md`](docs/references/README.md)。
