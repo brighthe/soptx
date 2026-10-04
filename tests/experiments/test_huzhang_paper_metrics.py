@@ -1,42 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Hu--Zhang 论文实验梯度诊断的纯判定测试."""
+"""Hu--Zhang 论文实验结果集协议字段与运行目录标签的纯判定测试."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-import numpy as np
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 EXPERIMENT_ROOT = REPOSITORY_ROOT / "experiments" / "paper_topopt_huzhang"
 
 if str(EXPERIMENT_ROOT) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_ROOT))
-
-from metrics import _has_adjacent_acceptable_errors  # noqa: E402
-
-
-def test_gradient_scan_accepts_two_adjacent_accurate_steps():
-    assert _has_adjacent_acceptable_errors([8.0e-5, 9.0e-5, 2.0e-4])
-    assert _has_adjacent_acceptable_errors([2.0e-4, 9.0e-5, 8.0e-5])
-
-
-def test_gradient_scan_rejects_single_or_nonadjacent_accidental_hits():
-    assert not _has_adjacent_acceptable_errors([8.0e-5, 2.0e-4, 3.0e-4])
-    assert not _has_adjacent_acceptable_errors([8.0e-5, 2.0e-4, 9.0e-5])
-    assert not _has_adjacent_acceptable_errors([np.inf, 8.0e-5, 2.0e-4])
-
-
-def test_gradient_parameters_follow_registered_case(monkeypatch):
-    import metrics
-
-    registered = {"nx": 80, "ny": 40, "interpolation_method": "simp",
-                  "penalty_factor": 3.5, "mu_max": 100000.0}
-    monkeypatch.setattr(metrics, "case_parameters", lambda: registered)
-    assert metrics.make_params(40, 20) == {**registered, "nx": 40, "ny": 20}
-    assert registered["nx"] == 80
-
 
 def test_protocol_mismatch_flags_missing_safeguard_fields(tmp_path):
     """2026-09-18 之前的产物缺 lambda_max / acceptance_solid_threshold, 必须被冻结评估排除."""

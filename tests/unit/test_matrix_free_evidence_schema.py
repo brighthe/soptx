@@ -13,11 +13,14 @@ from pathlib import Path
 
 import pytest
 
-from soptx.problems.elasticity import SinusoidalPlaneStrainElasticity2D
+# tools.matrix_free_evidence.report 在模块顶层导入 mpi4py.
+pytest.importorskip("mpi4py")
 
-from tools.matrix_free_evidence import contract, report, schema
-from tools.matrix_free_evidence.contract import RunConfig
-from tools.matrix_free_evidence.schema import RunResult
+from soptx.problems.elasticity import SinusoidalPlaneStrainElasticity2D  # noqa: E402
+
+from tools.matrix_free_evidence import contract, report, schema  # noqa: E402
+from tools.matrix_free_evidence.contract import RunConfig  # noqa: E402
+from tools.matrix_free_evidence.schema import RunResult  # noqa: E402
 
 
 def make_config(*, benchmark: bool = False) -> RunConfig:

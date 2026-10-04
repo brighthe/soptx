@@ -87,6 +87,8 @@ def train_network(
         最佳轮数 best_epoch、最佳验证损失 best_validation_loss、
         checkpoint 路径及实际训练轮数 epochs_run.
     """
+    if route not in ("shape", "stiffness"):
+        raise ValueError("route 必须为 shape 或 stiffness")
     codec = provider.codecs[route]
     provider_metadata = provider.metadata()
     config = config or TrainingConfig(

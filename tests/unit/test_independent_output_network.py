@@ -69,7 +69,7 @@ def test_legacy_single_network_predictions_preserved(tmp_path, shape_class):
                                        activation=ACTIVATIONS).double()
     _save_checkpoint(tmp_path, "shape", old_shape)
     _save_checkpoint(tmp_path, "stiffness", old_stiffness)
-    models, _ = _loader()(tmp_path, META)
+    models, _ = _loader()(tmp_path, META, route="stiffness")
     x = torch.ones(2, 4, dtype=torch.float64)
     for route, old in (("shape", old_shape), ("stiffness", old_stiffness)):
         assert type(models[route]) is IndependentOutputNet

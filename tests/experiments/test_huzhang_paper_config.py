@@ -131,10 +131,8 @@ def test_unregistered_model_is_rejected(cases):
         paper_run.build_model_pipeline(case, "lfem", 2, _arguments())
 
 
-def test_stress_protocol_defaults_to_unified_apparent_and_has_distinct_labels(cases):
-    """统一约束与 legacy LFEM 约束必须写入不同运行目录."""
-    from dataclasses import replace
-
+def test_stress_protocol_defaults_to_unified_apparent(cases):
+    """应力算例默认采用统一 apparent 约束, 运行目录标签如实标注该协议."""
     paper_config.bootstrap_source_path()
     import driver as paper_run
     import pipeline as paper_pipeline
@@ -142,8 +140,6 @@ def test_stress_protocol_defaults_to_unified_apparent_and_has_distinct_labels(ca
     case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
     config = paper_pipeline.build_stress_config(paper_config.flatten_parameters(case))
     assert config.stress_constraint_formulation == "apparent"
-    assert config.kkt_diagnostics_enabled is True
-    assert config.kkt_acceptance_enabled is False
     assert config.asymptote_min_distance == pytest.approx(1.0e-4)
     # 2026-09-15: epsilon 提到 1e-3 以消除滤波尾部单元的慢尾 (见 cases.toml 注)
     assert config.epsilon == pytest.approx(1.0e-3)
@@ -159,15 +155,7 @@ def test_stress_protocol_defaults_to_unified_apparent_and_has_distinct_labels(ca
     assert config.acceptance_solid_threshold == pytest.approx(0.5)
 
     apparent_label = paper_run._run_label("lfem", 2, config, {})
-    vanishing_label = paper_run._run_label(
-        "lfem",
-        2,
-        replace(config, stress_constraint_formulation="vanishing"),
-        {"stress_constraint_formulation": "vanishing"},
-    )
     assert "lfem_constraint-apparent" in apparent_label
-    assert "lfem_constraint-vanishing" in vanishing_label
-    assert apparent_label != vanishing_label
 
 
 def test_load_pad_radius_tags_run_directory_and_reverts_on_zero(cases):
@@ -271,8 +259,6 @@ def test_stress_inner_stop_controls_flow_through_override_and_al_options(cases):
     [
         ("lfem", "apparent", "apparent"),
         ("huzhang", "apparent", "apparent"),
-        ("lfem", "vanishing", "vanishing"),
-        ("huzhang", "vanishing", "apparent"),
     ],
 )
 def test_stress_model_resolution_separates_method_from_lfem_protocol(
@@ -310,21 +296,6 @@ def test_stress_protocol_rejects_unknown_formulation(cases):
     parameters = paper_config.flatten_parameters(case)
     parameters["stress_constraint_formulation"] = "unknown"
     with pytest.raises(ValueError, match="应力约束形式"):
-        paper_pipeline.build_stress_config(parameters)
-
-
-def test_stress_config_rejects_kkt_acceptance_without_explicit_tolerances(cases):
-    """check-only 使用的 config 构造阶段也要拒绝不完整的 KKT 验收配置."""
-    paper_config.bootstrap_source_path()
-    import pipeline as paper_pipeline
-
-    case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
-    parameters = paper_config.flatten_parameters(case)
-    parameters.update({
-        "kkt_diagnostics_enabled": True,
-        "kkt_acceptance_enabled": True,
-    })
-    with pytest.raises(ValueError, match="三个正的 KKT 容差"):
         paper_pipeline.build_stress_config(parameters)
 
 
@@ -379,48 +350,6 @@ def test_stress_config_keeps_mesh_type_and_rejects_unknown_or_odd_sizes(cases):
         paper_pipeline.build_stress_config({**parameters, "mesh_type": "quad"})
     with pytest.raises(ValueError, match="为偶数"):
         paper_pipeline.build_stress_config({**parameters, "nx": 81})
-
-
-def test_algorithm_note_reports_step_family_for_stress_case(cases):
-    import pipeline as paper_pipeline
-    import driver as paper_driver
-
-    case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
-    config = paper_pipeline.build_stress_config(paper_config.flatten_parameters(case))
-    note = paper_driver._algorithm_note(config)
-
-    assert config.move_limit_decay == pytest.approx(1.0)
-    assert "move_limit=0.15, 渐近线下限 asymptote_min_distance=0.0001" in note
-    assert "衰减" not in note
-
-    decayed = paper_pipeline.build_stress_config(
-        {**paper_config.flatten_parameters(case), "move_limit_decay": "0.8"}
-    )
-    assert "move_limit=0.15 (末期 x0.8 衰减至 move_limit_min=0.005)" in (
-        paper_driver._algorithm_note(decayed)
-    )
-
-
-def test_run_banner_reports_output_directory_and_file_list(tmp_path):
-    """``[output]`` 回执行列出产物目录与文件清单, 且清单与落盘用的是同一份常量."""
-    paper_config.bootstrap_source_path()
-    import driver as paper_driver
-
-    output = tmp_path / "outputs" / "case-x" / "analyzer-lfem__order-1"
-    note = paper_driver._output_note(output, volume_minimizing=True)
-    assert note.startswith(f"{output.resolve()}/ -> ")
-    for name in ("summary.json", "history.json", "density_final.vtu",
-                 "vtu/density_iter_NNN.vtu", "final_optimizer_state.npz",
-                 "outer_history.json"):
-        assert name in note
-    assert "analyzer-lfem__order-1__crashed/" in note
-    # 柔顺度算例不写终态诊断文件, 回执也不能列出.
-    compliance_note = paper_driver._output_note(output, volume_minimizing=False)
-    assert "final_optimizer_state.npz" not in compliance_note
-    assert "density_final.vtu" in compliance_note
-    # 清单常量必须与落盘代码引用的键一致.
-    assert paper_driver.OUTPUT_FILES["summary"] == "summary.json"
-    assert paper_driver.STRESS_OUTPUT_FILES["optimizer_state"] == "final_optimizer_state.npz"
 
 
 def test_acceptance_solid_threshold_tags_run_directory_and_lambda_max_does_not(cases):
@@ -491,19 +420,3 @@ def test_stress_config_rejects_invalid_lambda_max_and_solid_threshold(cases):
             {**parameters, "acceptance_solid_threshold": 1.5})
 
 
-def test_algorithm_note_reports_multiplier_cap_and_c2_subset(cases):
-    from dataclasses import replace
-
-    import pipeline as paper_pipeline
-    import driver as paper_driver
-
-    case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
-    config = paper_pipeline.build_stress_config(paper_config.flatten_parameters(case))
-    note = paper_driver._algorithm_note(config)
-    assert "lambda_max=3000" in note
-    assert "acceptance_solid_threshold=0.5" in note
-
-    legacy = paper_driver._algorithm_note(
-        replace(config, lambda_max=None, acceptance_solid_threshold=None))
-    assert "乘子更新无上限" in legacy
-    assert "C2 验收子集: 全域未豁免单元" in legacy

@@ -178,6 +178,8 @@ def test_mixed_boundary_sinusoidal_problem_rejects_invalid_material() -> None:
 
 
 def test_new_problem_values_match_pre_v2_problem_values() -> None:
+    # 对照的旧实现位于被 .gitignore 排除的 old/ 目录, 本地不存在时跳过.
+    pytest.importorskip("old.old_version2.model.linear_elasticity_2d")
     from old.old_version2.model.linear_elasticity_2d import (
         BoxTriLagrange2dData,
         TriSolHomoDirHuZhang2d,
