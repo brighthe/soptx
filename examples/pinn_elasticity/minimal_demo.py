@@ -33,9 +33,7 @@ import torch.nn as nn
 
 from soptx.backend import bm
 from soptx.mesh import TetrahedronMesh, TriangleMesh
-from fealpy.ml.grad import gradient
-from fealpy.ml.modules import Solution
-from fealpy.ml.sampler import BoxBoundarySampler, ISampler
+from _pinn_support import BoxBoundarySampler, ISampler, Solution, gradient
 
 from soptx.problems.elasticity import (
     DivergenceFreePolynomialElasticity3D,
