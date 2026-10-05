@@ -20,7 +20,8 @@
 - **做法**：先分层「影子搬入」，此时 SOPTX 现有代码仍用 FEALPy；全部到位后在一个提交里
   一次性切换引用。不能逐层切换：中间状态会同时存在两个 `backend_manager` 单例与两套同名
   网格类，混用时静默出错。
-- **分支**：`claude/soptx-fealpy-migration-18ef30`，基于 `main` 的 `041e424`，可快进合并。
+- **分支**：`claude/soptx-fealpy-migration-18ef30`，基于 `main` 的 `041e424`；期间并入 `main` 上的
+  `e583825` 并完成其 FEALPy 依赖切换，2026-10-05 已快进合并到 `main`（`4d9bd76`）。
 
 ### 1.2 提交清单
 
@@ -33,6 +34,8 @@
 | `6712050` | 第 6 步之一：移除 `fealpy` 依赖，CI 门禁禁止导入 `fealpy` |
 | `1ce45f4` | 第 6 步之二：来源声明与规范文档 |
 | `b888a20` | `viz` extra 声明 `pyevtk`（此前由 FEALPy 的 requirements 间接带入） |
+| `5c0c10f` | 本汇总文档 |
+| `4d9bd76` | 并入 `main` 的 `e583825`（子结构接口空间与流式精确缩聚等），解决 5 处导入区冲突，其余 12 处 FEALPy 导入切换到 `soptx`；随后 `main` 快进到此提交 |
 
 ### 1.3 搬入内容
 
@@ -96,6 +99,7 @@
 | fork 补丁回归用例（改为导入 `soptx`） | 35/35 通过，含缺陷 8、9 的 delta 判据（四类网格 × $p=1..4$） |
 | 收敛阶基准 | 四边形 $p=3$：4.001 / 4.000；六面体 $p=2$：2.997 / 3.007；三角形 $p=2$：3.015 / 3.005；四边形 $p=1$：1.993 / 1.998 |
 | 只装核心依赖 | 除 `soptx.ml`（需 torch）外，主要子包只需 numpy、scipy、sympy 即可导入 |
+| 并入 `e583825` 后 | 拦截 FEALPy 导入下全量 pytest 1009 passed、1 skipped；`ihpcm` 已装 mpi4py 与 PyMUMPS，分布式与 MUMPS 用例实际运行并通过；`main` 检出处直接运行结果相同 |
 | wheel | 元数据无 `fealpy`，`Requires-Python >=3.12`，含 `manager.pyi` 与全部移入子包 |
 | `known-issues/fealpy-patches.md` 逐项核对 | 12 项修复全部在位，调用契约均成立；仅「运行期警告治理」在当前 torch 2.11 下不生效（文档记录环境为 2.13），只影响提示信息 |
 
@@ -108,14 +112,15 @@
 
 按建议的执行顺序排列。
 
-### 2.0 先决定的两项
+### 2.0 先决定的事项
 
 | 事项 | 说明 |
 |---|---|
-| 合回 `main` | `git merge --ff-only claude/soptx-fealpy-migration-18ef30`，可快进、无冲突。合并后主仓库与 `ihpcm` 环境才用上不依赖 FEALPy 的代码；拖得越久越容易与 `main` 上的新提交冲突 |
 | 缺陷 8、9 的自动化防线（可选） | 把 fork 的 `tests/mesh/unit/test_interpolation_delta.py` 放进 `tests/`，只需把导入从 `fealpy` 改为 `soptx`，22 个用例约 0.8 秒。它是唯一能抓住这两个静默错误的测试 |
 
-### 2.1 结构整理（建议合并后另开分支，分两个提交）
+合回 `main` 已于 2026-10-05 完成（`4d9bd76`）。
+
+### 2.1 结构整理（另开分支，分两个提交）
 
 **HuZhang 空间移入 `soptx/functionspace/`**（风险低）
 
