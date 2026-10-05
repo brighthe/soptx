@@ -26,13 +26,19 @@ MISSING_DOCSTRING_BASELINE = 314
 # 自 FEALPy 移植的代码 (见 THIRD_PARTY_NOTICES.md) 原样保留英文 docstring, 暂不计入
 # 棘轮; 欠账登记在 docs/known-issues/README.md "移植后遗留", 按子包分批补齐后移出本表.
 PORTED_ROOTS = (
-    "src/soptx/mesh/",
+    "src/soptx/mesh/schema/",
+    "src/soptx/mesh/topology/",
+    "src/soptx/mesh/view/",
+    "src/soptx/mesh/__init__.py",
+    "src/soptx/mesh/aggregate.py",
+    "src/soptx/mesh/ipoints.py",
+    "src/soptx/mesh/mapping.py",
+    "src/soptx/mesh/mesh_base.py",
+    "src/soptx/mesh/reference_basis.py",
+    "src/soptx/mesh/vtk_writter.py",
 )
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
-PORTED_EXCEPTIONS = {
-    "src/soptx/mesh/structured_box.py",
-    "src/soptx/mesh/structured_triangle.py",
-}
+PORTED_EXCEPTIONS: set[str] = set()
 
 
 def is_ported(relative: str) -> bool:

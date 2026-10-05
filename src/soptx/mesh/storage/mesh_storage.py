@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/storage/mesh_storage.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""网格存储: 实体分区、实体子集、网格块与 Schema 计算上下文."""
+
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
@@ -15,22 +17,24 @@ __all__ = ["EntityContext", "EntitySector", "EntitySet", "MeshBlock"]
 
 @dataclass(slots=True)
 class EntitySector:
-    """A homogeneous entity batch with independent semantic identity.
+    """一批同类实体, 具有独立的语义身份 (实体分区).
 
-    ``id`` is unique within its ``MeshBlock``, while ``schema`` is the concrete
-    immutable :class:`EntitySchema` value shared by every entity in the sector.
-    Several sectors may therefore use the same Schema while remaining distinct
-    semantic domains, such as a shell and a derived solid face.
+    ``id`` 在所属 ``MeshBlock`` 内唯一; ``schema`` 是分区内所有实体共享的具体、
+    不可变的 :class:`EntitySchema` 值. 因此多个分区可以使用同一个 Schema 而仍是
+    不同的语义域, 例如壳体与实体的派生面.
 
-    For fixed-cardinality sectors (``indptr is None``), ``indices`` is a rank-2
-    tensor whose last dimension equals ``schema.number_of_nodes()`` and whose
-    values are block-global node ids.  ``source_cell_sector_id`` records the
-    root-cell provenance of derived sectors and is ``None`` for direct sectors.
+    定长分区 (``indptr is None``) 的 ``indices`` 为二维张量, 末轴长度等于
+    ``schema.number_of_nodes()``, 元素为网格块全局的节点编号. 变长分区以
+    ``(indices, indptr)`` 压缩存储. ``source_cell_sector_id`` 记录派生分区来自
+    哪个根单元分区, 直接给出的分区为 None.
 
-    Raises:
-        TypeError: If ``id`` or ``schema`` has an invalid type.
-        ValueError: If fixed-cardinality connectivity width does not match the
-            Schema's complete local-node count.
+    Raises
+    ------
+    TypeError
+        ``id`` 或 ``schema`` 类型不对, 或变长分区的索引不是整数类型.
+    ValueError
+        定长分区的连接宽度与 Schema 的局部节点数不符, 或变长分区的
+        ``indptr`` 不合法.
     """
 
     id: str
@@ -89,14 +93,15 @@ class EntitySector:
 
 @dataclass(slots=True)
 class EntitySet:
-    """A named subset of one existing ``EntitySector``.
+    """某个已有 ``EntitySector`` 的具名子集.
 
-    ``sector_id`` must reference a sector in the owning ``MeshBlock``, and
-    ``indices`` contains one-dimensional entity indices within that sector's
-    numbering.  An ``EntitySet`` never creates a new entity numbering space.
+    ``sector_id`` 须指向所属 ``MeshBlock`` 中的分区, ``indices`` 为该分区编号下的
+    一维实体编号. ``EntitySet`` 从不建立新的实体编号空间.
 
-    Raises:
-        TypeError: If ``id`` or ``sector_id`` is not a non-empty string.
+    Raises
+    ------
+    TypeError
+        ``id`` 或 ``sector_id`` 不是非空字符串.
     """
 
     id: str
@@ -111,15 +116,21 @@ class EntitySet:
 
 @dataclass(slots=True)
 class MeshBlock:
-    """Shared node/position numbering domain with one canonical node sector.
+    """共享节点 (坐标) 编号域的网格块, 含一个规范节点分区.
 
-    Every constructed ``MeshBlock`` owns a canonical sector ``"node"`` whose
-    indices enumerate ``positions`` as ``(NN, 1)``.  Ordinary
-    :meth:`add_sector` calls must not replace or rewrite that sector.
+    每个构造好的 ``MeshBlock`` 都拥有规范分区 ``"node"``, 其索引以 ``(NN, 1)``
+    依次枚举 ``positions``. 普通的 :meth:`add_sector` 调用不得替换或改写该分区.
 
-    ``id`` is stable within its owning aggregate and defaults to ``"block"`` for
-    single-block callers.  ``root_cell_sector_ids`` lists sector ids that can be
-    used as view anchors; the canonical node sector is not a root cell sector.
+    ``id`` 在所属聚合中保持不变, 单块调用方默认为 ``"block"``.
+    ``root_cell_sector_ids`` 列出可作为视图锚点的分区 id; 规范节点分区不是根单元
+    分区.
+
+    Raises
+    ------
+    TypeError
+        ``id`` 不是非空字符串.
+    ValueError
+        给出的节点分区与规范节点域不符.
     """
 
     positions: Tensor
@@ -170,14 +181,15 @@ class MeshBlock:
             self._validate_entity_set(entity_set)
 
     def add_sector(self, sec: EntitySector, *, root: bool = False) -> None:
-        """Add a homogeneous sector to this block.
+        """向网格块加入一个同类实体分区.
 
-        The sector's node ids must lie in the block node domain.  ``root=True``
-        additionally records ``sec.id`` as a root cell sector id.
+        分区引用的节点编号须落在本块的节点域内. ``root=True`` 时还把 ``sec.id``
+        记为根单元分区.
 
-        Raises:
-            ValueError: If ``sec.id`` already exists or its node ids are out of
-                range.
+        Raises
+        ------
+        ValueError
+            ``sec.id`` 已存在, 或节点编号越界.
         """
         if sec.id in self.sectors:
             raise ValueError(
@@ -196,25 +208,25 @@ class MeshBlock:
 
     @property
     def topology_revision(self) -> int:
-        """Return the controlled root-connectivity revision.
+        """受控的根连接版本号.
 
-        The revision changes when a root sector is added or its connectivity
-        is replaced.  Coordinate-only replacement preserves the revision.
-        Direct mutation of sector connectivity is outside the controlled
-        mutation contract and cannot be detected by this counter.
+        加入根分区或替换其连接关系时版本号改变, 只替换坐标时不变. 直接修改分区的
+        连接数组不在受控修改的约定之内, 本计数器无法察觉.
         """
         return self._topology_revision
 
     def get_sector(self, sector_id: str, /) -> EntitySector:
-        """Return the sector with ``sector_id``.
+        """返回 id 为 ``sector_id`` 的分区.
 
-        Raises:
-            KeyError: If no such sector exists.
+        Raises
+        ------
+        KeyError
+            不存在该分区.
         """
         return self.sectors[sector_id]
 
     def has_sector(self, sector_id: str, /) -> bool:
-        """Return whether a sector with ``sector_id`` exists."""
+        """是否存在 id 为 ``sector_id`` 的分区."""
         return sector_id in self.sectors
 
     def _validate_entity_set(self, entity_set: EntitySet) -> None:
@@ -242,13 +254,16 @@ class MeshBlock:
             )
 
     def add_entity_set(self, entity_set: EntitySet) -> None:
-        """Add one validated ``EntitySet`` to this block.
+        """校验后向网格块加入一个 ``EntitySet``.
 
-        Raises:
-            ValueError: If ``entity_set.id`` already exists.
-            KeyError: If ``entity_set.sector_id`` is unknown.
-            ValueError: If ``entity_set.indices`` is not a valid one-dimensional
-                entity-index tensor for its referenced sector.
+        Raises
+        ------
+        ValueError
+            ``entity_set.id`` 已存在, 或其索引不是所引用分区的合法一维实体编号.
+        KeyError
+            ``entity_set.sector_id`` 未知.
+        TypeError
+            索引不是整数类型.
         """
         if entity_set.id in self.entity_sets:
             raise ValueError(
@@ -258,15 +273,17 @@ class MeshBlock:
         self.entity_sets[entity_set.id] = entity_set
 
     def add_relation(self, relation: Relation) -> None:
-        """Add one canonical directed relation between existing sectors.
+        """在已有分区之间加入一条规范的有向关系.
 
-        The ordered pair ``(src_sector_id, tgt_sector_id)`` is the relation's
-        identity.  Materialization differences must not create a second entry
-        for the same pair.
+        有序对 ``(src_sector_id, tgt_sector_id)`` 即关系的身份; 实体化方式的不同
+        不得为同一对产生第二条记录.
 
-        Raises:
-            KeyError: If either referenced sector does not exist.
-            ValueError: If the ordered pair already has a canonical relation.
+        Raises
+        ------
+        KeyError
+            所引用的分区不存在.
+        ValueError
+            该有序对已有规范关系.
         """
         if relation.src_sector_id not in self.sectors:
             raise KeyError(
@@ -282,18 +299,19 @@ class MeshBlock:
         self.relations[key] = relation
 
     def replace_positions(self, positions: Tensor) -> None:
-        """Atomically replace coordinates without changing the node count.
+        """在节点数不变的前提下原子地替换坐标.
 
-        This is the minimal controlled position-update path: it keeps the
-        canonical node sector's numbering intact, preserves all sectors,
-        entity sets, and relations, and invalidates derived caches.
+        这是最小的受控坐标更新路径: 保持规范节点分区的编号, 保留所有分区、实体子集
+        与关系, 并使派生缓存失效.
 
-        Raises:
-            TypeError: If ``positions`` is not a tensor.
-            ValueError: If ``positions`` is not rank-2.
-            NotImplementedError: If the node count would change.  Size-changing
-                node-domain mutation requires an approved protocol and is not
-                silently supported.
+        Raises
+        ------
+        TypeError
+            ``positions`` 不是张量.
+        ValueError
+            ``positions`` 不是二维.
+        NotImplementedError
+            节点数会改变. 改变节点域大小需要经批准的协议, 不会被静默支持.
         """
         if not isinstance(positions, Tensor):
             raise TypeError("positions must be a Tensor")
@@ -324,20 +342,20 @@ class MeshBlock:
         root_sector_id: str,
         root_indices: Tensor,
     ) -> None:
-        """Atomically replace single-root topology and coordinates.
+        """原子地替换单根拓扑与坐标.
 
-        The new root sector is constructed on a temporary block before any
-        state on this block is changed.  On success the temporary block's
-        canonical node domain, sectors and relations replace this block's
-        topology.  Entity sets whose sector no longer exists are dropped.
-        Node and cell attributes are not automatically remapped to the new
-        numbering; callers are responsible for an explicit attribute mapping.
+        先在临时网格块上构造新的根分区, 期间不改动本块的任何状态; 成功后用临时块的
+        规范节点域、分区与关系替换本块的拓扑. 所引用分区已不存在的实体子集被丢弃.
+        节点与单元属性不会自动映射到新编号, 由调用方显式处理.
 
-        Raises:
-            TypeError: If ``positions`` or ``root_indices`` is invalid.
-            KeyError: If ``root_sector_id`` is unknown.
-            ValueError: If ``root_sector_id`` is not a root, connectivity width
-                is wrong, or node ids fall outside the new node domain.
+        Raises
+        ------
+        TypeError
+            ``positions`` 或 ``root_indices`` 不合法.
+        KeyError
+            ``root_sector_id`` 未知.
+        ValueError
+            ``root_sector_id`` 不是根分区, 连接宽度不对, 或节点编号越出新的节点域.
         """
         if not isinstance(positions, Tensor) or len(positions.shape) != 2:
             raise TypeError("positions must be a rank-2 Tensor")
@@ -396,14 +414,21 @@ class MeshBlock:
         root_sector_id: str,
         root_indices: Tensor,
     ) -> None:
-        """Atomically replace one root sector while preserving other roots.
+        """原子地替换一个根分区, 其他根分区保持不变.
 
-        This is the multi-root refinement path.  It validates and builds the
-        new root on a temporary block first, then replaces only the target root
-        and its derived sectors/relations.  Sectors belonging to other roots
-        remain unchanged.  Node attributes and target-root EntitySets are not
-        automatically remapped and are dropped; node EntitySets keep their old
-        indices because old nodes remain the prefix of the new node domain.
+        这是多根网格的加密路径: 先在临时网格块上校验并构造新的根, 再只替换目标根及
+        其派生分区与关系, 属于其他根的分区不变. 节点属性与目标根的 EntitySet 不会
+        自动映射, 而是被丢弃; 节点的 EntitySet 保留原编号, 因为旧节点仍是新节点域的
+        前缀.
+
+        Raises
+        ------
+        TypeError
+            ``positions`` 或 ``root_indices`` 不合法.
+        KeyError
+            ``root_sector_id`` 未知.
+        ValueError
+            ``root_sector_id`` 不是根分区, 连接宽度不对, 或节点编号越界.
         """
         if not isinstance(positions, Tensor) or len(positions.shape) != 2:
             raise TypeError("positions must be a rank-2 Tensor")
@@ -480,14 +505,14 @@ class MeshBlock:
         }
 
     def add_nodes(self, positions: Tensor) -> None:
-        """Reject size-changing node insertion until a protocol is approved."""
+        """拒绝改变节点数的插入, 在批准相应协议之前一律抛 ``NotImplementedError``."""
         raise NotImplementedError(
             "node insertion is not supported until an approved canonical-node "
             "mutation protocol exists"
         )
 
     def remove_nodes(self, indices: Tensor) -> None:
-        """Reject size-changing node removal until a protocol is approved."""
+        """拒绝改变节点数的删除, 在批准相应协议之前一律抛 ``NotImplementedError``."""
         raise NotImplementedError(
             "node removal is not supported until an approved canonical-node "
             "mutation protocol exists"
@@ -496,7 +521,7 @@ class MeshBlock:
 
 @dataclass(slots=True, frozen=True)
 class EntityContext:
-    """Lightweight block/sector context passed to Schema computation methods."""
+    """传给 Schema 计算方法的轻量上下文: 网格块与实体分区."""
 
     block: MeshBlock
     sector: EntitySector

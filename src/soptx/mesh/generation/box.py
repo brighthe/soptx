@@ -1,6 +1,12 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/generation/box.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""一、二、三维长方体区域的结构网格生成器.
+
+各生成器先生成节点与按张量积顺序编号的内部单元 (``initialize``), 再按所需单元类型
+重排或细分, 构造只含一个根分区的网格块.
+"""
+
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
@@ -19,12 +25,24 @@ from ..view.mesh_view import MeshView
 
 
 class BoxCache(NamedTuple):
+    """生成器缓存的节点与内部单元."""
     node: Tensor
     cell: Tensor
 
 
 @dataclass(slots=True)
 class Box1d:
+    """区间上的结构网格生成器.
+
+    Parameters
+    ----------
+    box : list of float, optional
+        区间 ``[x0, x1]``, 默认 ``[0, 1]``.
+    nx : int, optional
+        剖分数, 默认 10.
+    device : optional
+        设备.
+    """
     box: list[float] = field(default_factory=list)
     nx: int = 10
     device: Any | None = None
@@ -35,6 +53,7 @@ class Box1d:
             self.box = [0, 1]
 
     def initialize(self):
+        """返回节点与区间单元, 结果会缓存."""
         if self._cache is not None:
             return self._cache.node, self._cache.cell
 
@@ -50,17 +69,18 @@ class Box1d:
         return node, cell
 
     def clear(self) -> None:
+        """清除缓存."""
         self._cache = None
 
     def nodalize(self) -> MeshView:
-        """Create a mesh of the box with positions only."""
+        """生成只含节点坐标、没有单元的网格."""
         node, _ = self.initialize()
 
         block = MeshBlock(positions=node)
         return MeshView(block).construct()
 
     def segmentize(self) -> MeshView:
-        """Create a segmented mesh of the box."""
+        """生成区间剖分网格."""
         node, cell = self.initialize()
 
         block = MeshBlock(positions=node)
@@ -77,6 +97,17 @@ class Box1d:
 
 @dataclass(slots=True)
 class Box2d:
+    """矩形上的结构网格生成器.
+
+    Parameters
+    ----------
+    box : list of float, optional
+        区域 ``[x0, x1, y0, y1]``, 默认单位正方形.
+    nx, ny : int, optional
+        各方向的剖分数, 默认 10.
+    device : optional
+        设备.
+    """
     box: list[float] = field(default_factory=list)
     nx: int = 10
     ny: int = 10
@@ -88,7 +119,7 @@ class Box2d:
             self.box = [0, 1, 0, 1]
 
     def initialize(self):
-        """Return nodes and the generator's internal tensor-product cells."""
+        """返回节点与按张量积顺序编号的内部单元 (x 方向变化最快), 结果会缓存."""
         if self._cache is not None:
             return self._cache.node, self._cache.cell
 
@@ -127,17 +158,18 @@ class Box2d:
         return node, cell
 
     def clear(self) -> None:
+        """清除缓存."""
         self._cache = None
 
     def nodalize(self) -> MeshView:
-        """Create a mesh of the box with positions only."""
+        """生成只含节点坐标、没有单元的网格."""
         node, _ = self.initialize()
 
         block = MeshBlock(positions=node)
         return MeshView(block).construct()
 
     def triangulate(self) -> MeshView:
-        """Create a triangulated mesh of the box."""
+        """生成三角形网格: 每个矩形沿 (0, 0)--(1, 1) 对角线分成两个三角形."""
         node, cell = self.initialize()
         local_cell = bm.asarray([
             [0, 1, 3],
@@ -157,7 +189,7 @@ class Box2d:
         return MeshView(block).construct()
 
     def quadrangulate(self) -> MeshView:
-        """Create a quadrilateral mesh of the box."""
+        """生成四边形网格, 单元顶点按逆时针循环顺序排列."""
         node, cell = self.initialize()
         tensor_to_cyclic = bm.asarray(
             [0, 1, 3, 2],
@@ -180,6 +212,17 @@ class Box2d:
 
 @dataclass(slots=True)
 class Box3d:
+    """长方体上的结构网格生成器.
+
+    Parameters
+    ----------
+    box : list of float, optional
+        区域 ``[x0, x1, y0, y1, z0, z1]``, 默认单位立方体.
+    nx, ny, nz : int, optional
+        各方向的剖分数, 默认 10.
+    device : optional
+        设备.
+    """
     box: list[float] = field(default_factory=list)
     nx: int = 10
     ny: int = 10
@@ -192,7 +235,7 @@ class Box3d:
             self.box = [0, 1, 0, 1, 0, 1]
 
     def initialize(self):
-        """Return nodes and the generator's internal tensor-product cells."""
+        """返回节点与按张量积顺序编号的内部单元 (x 方向变化最快), 结果会缓存."""
         if self._cache is not None:
             return self._cache.node, self._cache.cell
 
@@ -243,17 +286,18 @@ class Box3d:
         return node, cell
 
     def clear(self) -> None:
+        """清除缓存."""
         self._cache = None
 
     def nodalize(self) -> MeshView:
-        """Create a mesh of the box with positions only."""
+        """生成只含节点坐标、没有单元的网格."""
         node, _ = self.initialize()
 
         block = MeshBlock(positions=node)
         return MeshView(block).construct()
 
     def tetrahedralize(self) -> MeshView:
-        """Create a tetrahedral mesh of the box."""
+        """生成四面体网格: 每个小长方体分成 6 个四面体."""
         node, cell = self.initialize()
         local_cell = bm.asarray([
             [0, 1, 2, 6],
@@ -277,7 +321,7 @@ class Box3d:
         return MeshView(block).construct()
 
     def prismatize(self) -> MeshView:
-        """Create a prismatic mesh of the box."""
+        """生成三棱柱网格: 每个小长方体分成 2 个三棱柱."""
         node, cell = self.initialize()
         local_cell = bm.asarray([
             [0, 1, 2, 4, 5, 6],
@@ -297,7 +341,7 @@ class Box3d:
         return MeshView(block).construct()
 
     def pyramidalize(self) -> MeshView:
-        """Create a pyramidal mesh of the box."""
+        """生成四棱锥网格: 每个小长方体分成 3 个四棱锥."""
         node, cell = self.initialize()
         local_cell = bm.asarray([
             [0, 1, 2, 3, 6],
@@ -318,7 +362,7 @@ class Box3d:
         return MeshView(block).construct()
 
     def hexahedralize(self) -> MeshView:
-        """Create a hexahedral mesh of the box."""
+        """生成六面体网格, 单元顶点按经典六面体的循环顺序排列."""
         node, cell = self.initialize()
         tensor_to_cyclic = bm.asarray(
             [0, 1, 3, 2, 4, 5, 7, 6],

@@ -1,7 +1,7 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/transform/uniform.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Uniform refinement algorithms for supported mesh schemas."""
+"""各类网格 Schema 的一致加密算法."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def _root_names(block: MeshBlock) -> set[str]:
 
 
 def _child_sector_id(block: MeshBlock, root_id: str, child_schema_name: str) -> str:
-    """Resolve a derived sector id from its root and child Schema family."""
+    """由根分区与子实体的 Schema 名找出派生分区的 id."""
     matches: list[str] = []
     for sector in block.sectors.values():
         if (
@@ -70,7 +70,7 @@ def _ensure_child_sector(
     root_id: str,
     child_schema_name: str,
 ) -> str:
-    """Return a derived child id, rebuilding topology when it is absent."""
+    """返回派生子分区的 id, 不存在时先重建拓扑."""
     try:
         child_id = _child_sector_id(block, root_id, child_schema_name)
     except KeyError:
@@ -108,7 +108,7 @@ def _replace_topology(
     root_indices: Tensor,
     positions: Tensor,
 ) -> None:
-    """Commit one root refinement through controlled atomic replacement."""
+    """以受控的原子替换提交一次根分区加密."""
     block.replace_root_topology(positions, root_name, root_indices)
 
 
@@ -157,7 +157,27 @@ def uniform_refine_edge(
     root_id: str = "edge",
     **kwargs,
 ) -> list | None:
-    """Uniformly refine edge entities in a MeshBlock in place."""
+    """一致加密区间网格, 原地修改网格块.
+
+    每次加密把每个区间分成 2 个子区间 (取中点).
+
+    Parameters
+    ----------
+    block : MeshBlock
+        网格块.
+    n : int, optional
+        加密次数, 默认 1.
+    returnim : bool, optional
+        是否返回各次加密的延拓矩阵. 默认 False.
+    root_id : str, optional
+        被加密的根分区 id, 默认 ``edge``.
+
+    Returns
+    -------
+    list of scipy.sparse.csr_matrix or None
+        ``returnim`` 为 True 时返回延拓矩阵列表 (从最细一层到最粗一层),
+        否则返回 None.
+    """
     im = [] if returnim else None
     for _ in range(n):
         if returnim:
@@ -205,7 +225,29 @@ def uniform_refine_triangle(
     root_id: str = "tri",
     **kwargs,
 ) -> list | None:
-    """Uniformly refine triangular entities in a MeshBlock in place."""
+    """一致加密三角形网格, 原地修改网格块.
+
+    每次加密把每个三角形分成 4 个子三角形 (连接各边中点).
+
+    Parameters
+    ----------
+    block : MeshBlock
+        网格块.
+    n : int, optional
+        加密次数, 默认 1.
+    surface, interface : optional
+        未使用.
+    returnim : bool, optional
+        是否返回各次加密的延拓矩阵. 默认 False.
+    root_id : str, optional
+        被加密的根分区 id, 默认 ``tri``.
+
+    Returns
+    -------
+    list of scipy.sparse.csr_matrix or None
+        ``returnim`` 为 True 时返回延拓矩阵列表 (从最细一层到最粗一层),
+        否则返回 None.
+    """
     im = [] if returnim else None
     for _ in range(n):
         edge_id = _ensure_child_sector(block, root_id, "edge")
@@ -260,7 +302,29 @@ def uniform_refine_quadrilateral(
     root_id: str = "quad",
     **kwargs,
 ) -> list | None:
-    """Uniformly refine quadrilateral entities in a MeshBlock in place."""
+    """一致加密四边形网格, 原地修改网格块.
+
+    每次加密把每个四边形分成 4 个子四边形 (取各边中点与单元中心).
+
+    Parameters
+    ----------
+    block : MeshBlock
+        网格块.
+    n : int, optional
+        加密次数, 默认 1.
+    surface, interface : optional
+        未使用.
+    returnim : bool, optional
+        是否返回各次加密的延拓矩阵. 默认 False.
+    root_id : str, optional
+        被加密的根分区 id, 默认 ``quad``.
+
+    Returns
+    -------
+    list of scipy.sparse.csr_matrix or None
+        ``returnim`` 为 True 时返回延拓矩阵列表 (从最细一层到最粗一层),
+        否则返回 None.
+    """
     im = [] if returnim else None
     for _ in range(n):
         edge_id = _ensure_child_sector(block, root_id, "edge")
@@ -352,7 +416,27 @@ def uniform_refine_tetrahedron(
     root_id: str = "tet",
     **kwargs,
 ) -> list | None:
-    """Uniformly refine tetrahedral entities in a MeshBlock in place."""
+    """一致加密四面体网格, 原地修改网格块.
+
+    每次加密把每个四面体分成 8 个子四面体 (取各边中点).
+
+    Parameters
+    ----------
+    block : MeshBlock
+        网格块.
+    n : int, optional
+        加密次数, 默认 1.
+    returnim : bool, optional
+        是否返回各次加密的延拓矩阵. 默认 False.
+    root_id : str, optional
+        被加密的根分区 id, 默认 ``tet``.
+
+    Returns
+    -------
+    list of scipy.sparse.csr_matrix or None
+        ``returnim`` 为 True 时返回延拓矩阵列表 (从最细一层到最粗一层),
+        否则返回 None.
+    """
     im = [] if returnim else None
     for _ in range(n):
         edge_id = _ensure_child_sector(block, root_id, "edge")
@@ -409,7 +493,31 @@ def uniform_refine_prism(
     root_id: str = "prism",
     **kwargs,
 ) -> list | None:
-    """Uniformly refine prism entities in a MeshBlock in place."""
+    """一致加密三棱柱网格, 原地修改网格块.
+
+    每次加密把每个三棱柱分成 8 个子三棱柱 (取各边中点与四边形面中心).
+
+    Parameters
+    ----------
+    block : MeshBlock
+        网格块.
+    n : int, optional
+        加密次数, 默认 1.
+    returnim : bool, optional
+        是否返回各次加密的延拓矩阵. 默认 False.
+    root_id : str, optional
+        被加密的根分区 id, 默认 ``prism``.
+
+    Returns
+    -------
+    list of scipy.sparse.csr_matrix or None
+        ``returnim`` 为 True 时返回延拓矩阵列表 (从最细一层到最粗一层),
+        否则返回 None.
+
+    Notes
+    -----
+    三棱柱尚未生成延拓矩阵, ``returnim`` 为 True 时返回空列表.
+    """
     im = [] if returnim else None
     for _ in range(n):
         _refine_prism_once(block, root_id)
@@ -471,7 +579,29 @@ def uniform_refine_hexahedron(
     root_id: str = "hex",
     **kwargs,
 ) -> list | None:
-    """Uniformly refine hexahedral entities in a MeshBlock in place."""
+    """一致加密六面体网格, 原地修改网格块.
+
+    每次加密把每个六面体分成 8 个子六面体 (取各边中点、各面中心与单元中心).
+
+    Parameters
+    ----------
+    block : MeshBlock
+        网格块.
+    n : int, optional
+        加密次数, 默认 1.
+    surface, interface : optional
+        未使用.
+    returnim : bool, optional
+        是否返回各次加密的延拓矩阵. 默认 False.
+    root_id : str, optional
+        被加密的根分区 id, 默认 ``hex``.
+
+    Returns
+    -------
+    list of scipy.sparse.csr_matrix or None
+        ``returnim`` 为 True 时返回延拓矩阵列表 (从最细一层到最粗一层),
+        否则返回 None.
+    """
     im = [] if returnim else None
     for _ in range(n):
         edge_id = _ensure_child_sector(block, root_id, "edge")
@@ -522,11 +652,32 @@ def uniform_refine(
     root_id: str | None = None,
     **kwargs,
 ) -> list | None:
-    """Uniformly refine a MeshBlock in place.
+    """一致加密网格块, 原地修改; 按根分区的具体 Schema 分派到对应的加密函数.
 
-    This function dispatches by the concrete Schema of a root sector id.
-    ``schema_name`` is retained as a transitional alias for classic single-root
-    callers; new callers should prefer ``root_id``.
+    Parameters
+    ----------
+    block : MeshBlock
+        网格块.
+    n : int, optional
+        加密次数, 默认 1.
+    schema_name : str, optional
+        ``root_id`` 的过渡别名, 为经典单根调用方保留; 新代码应使用 ``root_id``.
+    root_id : str, optional
+        被加密的根分区 id, 默认取第一个根单元分区.
+    **kwargs
+        传给具体的加密函数, 如 ``returnim``.
+
+    Returns
+    -------
+    list or None
+        具体加密函数的返回值.
+
+    Raises
+    ------
+    ValueError
+        网格块没有根实体, 或 ``root_id`` 不是根单元分区.
+    NotImplementedError
+        该 Schema 没有一致加密实现.
     """
     if root_id is None:
         root_id = schema_name
