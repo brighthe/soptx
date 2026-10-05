@@ -1,13 +1,25 @@
 # 移植自 brighthe/fealpy ``fealpy/quadrature/gauss_legendre.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""一维 Gauss--Legendre 积分公式."""
 
 from ..backend import backend_manager as bm
 from .quadrature import Quadrature
 
-# http://keisan.casio.com/exec/system/1280624821
+# 节点与权重取自 http://keisan.casio.com/exec/system/1280624821
 
 class GaussLegendreQuadrature(Quadrature):
+    """区间上的 ``n`` 点 Gauss--Legendre 公式, ``n = index`` 取 1 到 20.
+
+    对次数不超过 ``2n - 1`` 的多项式精确. 积分点以区间的重心坐标 ``(NQ, 2)`` 给出.
+    """
     def make(self, index: int):
+        """生成 ``index`` 点公式的积分点与权重.
+
+        Raises
+        ------
+        NotImplementedError
+            ``index`` 大于 20.
+        """
         kwargs = {'dtype': bm.float64, 'device': self.device}
         if index == 1:
             A = bm.tensor([[0.0, 2.0]], **kwargs)
@@ -267,7 +279,7 @@ class GaussLegendreQuadrature(Quadrature):
         else:
             raise NotImplementedError('quadrature index higher than 20 is not supported now.')
 
-        # Removed out=A
+        # 已去掉 out=A 参数
         A = bm.divide(A, 2.0)
         return bm.stack([(0.5 + A[:, 0]),
                          (0.5 - A[:, 0])], axis=-1), A[:, -1]

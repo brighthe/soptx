@@ -1,12 +1,25 @@
 # 移植自 brighthe/fealpy ``fealpy/quadrature/gauss_lobatto.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""一维 Gauss--Lobatto 积分公式."""
 
 from ..backend import backend_manager as bm
 from .quadrature import Quadrature
 
 
 class GaussLobattoQuadrature(Quadrature):
+    """区间上的 ``n`` 点 Gauss--Lobatto 公式, ``n = index`` 取 2 到 12.
+
+    积分点含两个端点, 对次数不超过 ``2n - 3`` 的多项式精确. 积分点以区间的重心
+    坐标 ``(NQ, 2)`` 给出.
+    """
     def make(self, index:int):
+        """生成 ``index`` 点公式的积分点与权重.
+
+        Raises
+        ------
+        NotImplementedError
+            ``index`` 不在 2 到 12 之间.
+        """
         kwargs = {'dtype': bm.float64, 'device': self.device}
         if index == 2:
             A = bm.tensor([[-1, 1], [1, 1]], **kwargs)

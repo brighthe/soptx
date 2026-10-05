@@ -29,7 +29,6 @@ PORTED_ROOTS = (
     "src/soptx/backend/",
     "src/soptx/functionspace/",
     "src/soptx/mesh/",
-    "src/soptx/quadrature/",
     "src/soptx/sparse/",
 )
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
