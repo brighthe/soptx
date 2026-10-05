@@ -5,7 +5,8 @@
 1. 2D (三角形、四边形) 与 3D (四面体、六面体) 有限元网格;
 2. 标量拉格朗日空间与向量张量空间;
 3. 动态密度系数调制 (SIMP 拓扑优化多轮迭代复用测试);
-4. NumPy 后端与 PyTorch (CPU / CUDA) 双后端数值与拓扑代数严格等价性 (< 1e-14).
+4. NumPy 后端与 PyTorch (CPU / CUDA) 双后端数值与拓扑代数严格等价性 (< 1e-14);
+5. ``BilinearForm`` 的 pattern 路线在前提不成立时报错, 并且 coalesce 路线可以接手.
 """
 
 import numpy as np
@@ -13,10 +14,11 @@ import pytest
 import torch
 from soptx.backend import backend_manager as bm
 from soptx.fem.bilinear_form import BilinearForm
-from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.functionspace import HuZhangFESpace, LagrangeFESpace, TensorFunctionSpace
 from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
 from soptx.sparse import CSRTensor
 
+from soptx.fem.integrators import HuZhangMixIntegrator, JumpPenaltyIntegrator
 from soptx.fem.integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.fem.matrix.csr_pattern import (
     CSRChunkAccumulator,
@@ -274,3 +276,91 @@ def test_chunk_accumulator_rejects_invalid_sequences():
 
     with pytest.raises(ValueError, match="局部矩阵尾部形状"):
         CSRChunkAccumulator(pattern).add(0, values[:, :2, :2])
+
+
+def _pattern_guard_case():
+    """4x4 三角形网格上的 P1 向量空间、线弹性材料与单刚积分子."""
+    mesh = TriangleMesh.from_box([0, 1, 0, 1], nx=4, ny=4)
+    mat = IsotropicLinearElasticMaterial(
+        lame_lambda=1.0, shear_modulus=0.5, hypothesis="plane_strain", enable_logging=False
+    )
+    tspace = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=1), shape=(-1, 2))
+    return mesh, mat, tspace
+
+
+def test_pattern_rejects_two_spaces():
+    """双空间 (矩形) 矩阵走 pattern 报错, coalesce 给出 (test_gdof, trial_gdof)."""
+    mesh, _, tspace = _pattern_guard_case()
+    hzspace = HuZhangFESpace(mesh, p=3)
+    bform = BilinearForm((tspace, hzspace))
+    bform.add_integrator(HuZhangMixIntegrator())
+
+    with pytest.raises(ValueError, match="pattern 路线只支持单空间"):
+        bform.assembly()
+
+    B = bform.assembly(method="coalesce")
+    assert B.shape == (hzspace.number_of_global_dofs(), tspace.number_of_global_dofs())
+
+
+def test_pattern_rejects_batch():
+    """批量装配走 pattern 报错; 修复前这里静默返回不带批量维的矩阵."""
+    _, mat, tspace = _pattern_guard_case()
+    bform = BilinearForm(tspace, batch_size=2)
+    bform.add_integrator(LinearElasticIntegrator(material=mat, method="fast"))
+
+    with pytest.raises(ValueError, match="pattern 路线不支持批量装配"):
+        bform.assembly()
+
+
+def test_pattern_rejects_face_integrator():
+    """面积分子的局部张量按面给出, 与按单元的 CSR 骨架形状不符."""
+    mesh, mat, _ = _pattern_guard_case()
+    dspace = TensorFunctionSpace(
+        scalar_space=LagrangeFESpace(mesh, p=1, ctype="D"), shape=(-1, 2)
+    )
+    face2cell = mesh.face_to_cell()
+    internal = bm.nonzero(face2cell[:, 0] != face2cell[:, 1])[0]
+    bform = BilinearForm(dspace)
+    bform.add_integrator(
+        JumpPenaltyIntegrator(
+            q=4,
+            threshold=internal,
+            method="matrix_jump",
+            material=mat,
+            penalty_scaling="physical_h",
+        )
+    )
+
+    with pytest.raises(ValueError, match="与 CSR 骨架要求的"):
+        bform.assembly()
+
+    J = bform.assembly(method="coalesce")
+    assert J.shape == (dspace.number_of_global_dofs(), ) * 2
+
+
+def test_pattern_rejects_partial_cell_integrator():
+    """只在部分单元上积分的积分子, 局部张量单元数与骨架不符."""
+    _, mat, tspace = _pattern_guard_case()
+    integrator = LinearElasticIntegrator(material=mat, method="standard", index=bm.arange(5))
+    bform = BilinearForm(tspace)
+    bform.add_integrator(integrator)
+
+    with pytest.raises(ValueError, match=r"局部张量形状 \(5, 6, 6\)"):
+        bform.assembly()
+
+    K = bform.assembly(method="coalesce")
+    assert K.shape == (tspace.number_of_global_dofs(), ) * 2
+
+
+def test_bilinear_form_rejects_invalid_arguments():
+    """非法装配路线与产出格式报错, 未加积分子时 pattern 路线报错."""
+    _, mat, tspace = _pattern_guard_case()
+    bform = BilinearForm(tspace)
+    bform.add_integrator(LinearElasticIntegrator(material=mat, method="fast"))
+
+    with pytest.raises(ValueError, match="不支持的装配路线"):
+        bform.assembly(method="foo")
+    with pytest.raises(ValueError, match="不支持的产出格式"):
+        bform.assembly(format="dense")
+    with pytest.raises(RuntimeError, match="未添加任何有效的积分子"):
+        BilinearForm(tspace).assembly()
