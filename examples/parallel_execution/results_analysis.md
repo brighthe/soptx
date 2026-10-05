@@ -26,7 +26,7 @@
 | 材料 | `IsotropicLinearElasticMaterial`，$E = 1$，$\nu = 0.3$，`plane_strain` |
 | 网格 | `QuadrangleMesh` / `TriangleMesh`（`--mesh-type`）的 `from_box`，$n \times n$ |
 | 分析器 | `LagrangeFEMAnalyzer`，`space_degree = order`，`integration_order = order + 3`，`solve_method = "cg"`，`topopt_algorithm = None` |
-| 滤波器 | `Filter`，`filter_type = "density"`，`density_location = "element"`，`rmin = --rmin` |
+| 滤波器 | `Filter`，`filter_type = "density"`，`density_location = "element"`，`rmin = --rmin-cells` $\times h$，$h$ 为单元尺寸 |
 
 `--dim` 只接受 2，3D 在 `build_workload` 中抛 `NotImplementedError`。
 
@@ -36,7 +36,7 @@
 
 | 段 | `kind` | 计时范围 | 不计时的准备 | 指纹 `signature` |
 |---|---|---|---|---|
-| `assemble` | `compute` | `analyzer.assemble_stiff_matrix()` | — | `K_norm` $= \lVert \mathrm{vals}(K) \rVert_{2}$ |
+| `assemble` | `compute` | `analyzer.assemble_stiff_matrix()` | — | `K_norm`：`'fa'` 取稀疏矩阵非零值 `K.values` 的 2-范数，`'ea'` 取常驻单元矩阵 `K.element_matrices` 的范数 |
 | `cg_solve` | `compute` | `analyzer.solve_system(K, F, uh, rtol=1e-12, atol=1e-12, maxiter=5000)` | 装配、体力、`apply_bc`，首次调用后缓存于 `ctx.cache["system"]` | `u_norm` $= \lVert u_{h} \rVert_{2}$，`niter` |
 | `filter_spmv` | `bandwidth` | `filter_obj.filter_objective_sensitivities(rho, grad)` | 输入 $\rho \equiv 0.5$、`grad = linspace(0, 1, NC)`，缓存于 `ctx.cache["filter_input"]` | `out_norm` $= \lVert \mathrm{out} \rVert_{2}$ |
 | `simp_update` | `bandwidth` | 未实现（`fn=None`） | — | — |
@@ -101,9 +101,8 @@
 
 ## 4. 已知口径偏差
 
-以下两点是当前代码的行为，判读结果前须知晓：
+以下一点是当前代码的行为，判读结果前须知晓：
 
 | 项 | 现象 | 影响 |
 |---|---|---|
-| `--rmin` 的长度单位 | `Filter` 按物理长度解释 `rmin`；工况域为单位正方形，默认 `2.4` 大于对角线 $\sqrt{2}$。`from_box` 网格不带 `meshdata`，滤波矩阵走 `_compute_weighted_matrix_general` | 每个单元的邻域覆盖全部单元，`H` 在稀疏格式下实际稠密（$NC^{2}$ 个非零元），工况构造开销与内存随 $n^{4}$ 增长，`filter_spmv` 测到的不是典型的窄带 spmv |
 | `'ea'` 下的 `cg_solve` 初值 | `_seg_cg_solve` 不传 `x0`，而 `solve_system` 要求 `'ea'` 的初值由调用方给出满足 Dirichlet 值的 prescribed solution | 跨线程指纹仍可比，但 `'ea'` 的 `niter` 与解不与 `'fa'` 同口径 |

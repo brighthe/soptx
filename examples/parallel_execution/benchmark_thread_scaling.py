@@ -162,7 +162,7 @@ def build_workload(args: argparse.Namespace) -> Workload:
 
     problem = SinusoidalPlaneStrainElasticity2D()
     material = IsotropicLinearElasticMaterial(
-        youngs_modulus=1.0, poisson_ratio=0.3, plane_type="plane_strain",
+        youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="plane_strain",
     )
     constructor = {"tri": TriangleMesh, "quad": QuadrangleMesh}[args.mesh_type]
     mesh = constructor.from_box(list(problem.domain), nx=args.n, ny=args.n)
@@ -180,10 +180,13 @@ def build_workload(args: argparse.Namespace) -> Workload:
     )
 
     # 滤波器只在选到带宽受限段时才需要, 但构造很便宜, 一并建好.
+    # Filter 把 rmin 当物理长度; 命令行按单元尺寸的倍数给出, 使滤波邻域不随 --n 变化.
+    domain = problem.domain
+    cell_size = min((domain[1] - domain[0]) / args.n, (domain[3] - domain[2]) / args.n)
     filter_obj = Filter(
         design_mesh=mesh,
         filter_type="density",
-        rmin=args.rmin,
+        rmin=args.rmin_cells * cell_size,
         density_location="element",
         enable_logging=False,
     )
@@ -210,7 +213,8 @@ def _seg_assemble(ctx: Workload) -> dict[str, Any]:
     seconds = time.perf_counter() - t0
 
     # 指纹取矩阵值的范数: 线程数不同只应改变归约顺序, 不应改变这个数.
-    values = K.values() if hasattr(K, "values") else K.data
+    # 'ea' 返回常驻单元矩阵的 ElementAssembly, 'fa' 返回 COO/CSR 稀疏张量.
+    values = K.element_matrices if hasattr(K, "element_matrices") else K.values
     return {
         "seconds": seconds,
         "signature": {"K_norm": float(bm.linalg.norm(bm.asarray(values)))},
@@ -497,7 +501,7 @@ def run_child(threads: int, args: argparse.Namespace) -> dict[str, Any]:
         "--mesh-type", args.mesh_type,
         "--order", str(args.order),
         "--operator-level", args.operator_level,
-        "--rmin", str(args.rmin),
+        "--rmin-cells", str(args.rmin_cells),
         "--segments", args.segments,
         "--repeat", str(args.repeat),
         "--warmup", str(args.warmup),
@@ -655,7 +659,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--order", type=int, default=1, help="位移空间次数")
     parser.add_argument("--operator-level", default="fa", choices=["fa", "ea"],
                         help="fa 全装配; ea 单元级 matrix-free")
-    parser.add_argument("--rmin", type=float, default=2.4, help="滤波半径")
+    parser.add_argument("--rmin-cells", type=float, default=2.4,
+                        help="滤波半径, 以单元尺寸为单位 (传给 Filter 的物理长度为 rmin_cells * h)")
     parser.add_argument("--repeat", type=int, default=3, help="计时次数, 取中位数")
     parser.add_argument("--warmup", type=int, default=1, help="预热次数, 不计时")
     parser.add_argument("--tol", type=float, default=1e-10,

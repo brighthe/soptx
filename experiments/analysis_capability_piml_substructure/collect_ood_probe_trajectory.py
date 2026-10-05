@@ -34,13 +34,13 @@
 
     # 默认配置: 密度滤波, rmin = 0.5 (本配置 hx = hy = 0.2, 合 2.5 个细单元).
     # --solve-method 默认为 mumps, 环境未装 pymumps 时须显式改用 scipy.
-    python experiments/piml_capability/collect_ood_probe_trajectory.py \
+    python experiments/analysis_capability_piml_substructure/collect_ood_probe_trajectory.py \
         --solve-method scipy
 
     # 加大滤波半径, 考察空间相关长度对分布错配的影响.
     # 注意 rmin 是物理长度而非单元个数: 梁厚只有 10 个细单元, rmin 取到 1.5 就相当于
     # 7.5 个单元, 整场被抹成灰度 (密度均值恰为 0.5, 两端各 0%), 那样的轨迹测不出 OOD.
-    python experiments/piml_capability/collect_ood_probe_trajectory.py \
+    python experiments/analysis_capability_piml_substructure/collect_ood_probe_trajectory.py \
         --rmin 1.0 --solve-method scipy --tag density_r10
 """
 
@@ -65,9 +65,8 @@ from soptx.topology.objectives import ComplianceObjective
 from soptx.topology.optimizers import OCOptimizer
 
 
-# 问题配置的单一来源; 与 verify_stiffness_route.py / verify_shape_function_route.py
-# 共用同一份投产参数 (12x2 子结构, 单个子结构 5x5 细单元, 合计 24 个子结构与 60x10
-# 全局网格), 任何一方都不得在本地复制字面量.
+# 问题配置直接取自 verify_stiffness_route.py 的投产参数 (12x2 子结构, 单个子结构 5x5
+# 细单元, 合计 24 个子结构与 60x10 全局网格), 不在本地复制字面量.
 # TRAINING_DENSITY_RANGE 只用于在配置中留痕, 本脚本不据此裁剪轨迹.
 import sys
 
@@ -75,15 +74,20 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
-from examples.piml_substructure_elasticity._common import (  # noqa: E402
-    CELL_SIZE,
+from examples.piml_substructure_elasticity.verify_stiffness_route import (  # noqa: E402
+    DENSITY_RANGE as TRAINING_DENSITY_RANGE,
     DOMAIN,
     E_BASE,
     N_FINE,
     N_SUB,
     NU,
     P_LOAD,
-    TRAINING_DENSITY_RANGE,
+)
+
+# 全局细单元尺寸 (hx, hy); 滤波半径 rmin 与它同单位.
+CELL_SIZE = (
+    (DOMAIN[1] - DOMAIN[0]) / (N_SUB[0] * N_FINE[0]),
+    (DOMAIN[3] - DOMAIN[2]) / (N_SUB[1] * N_FINE[1]),
 )
 
 
