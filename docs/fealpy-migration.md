@@ -156,8 +156,9 @@
 明细与修法见 [`known-issues/README.md`](known-issues/README.md)「移植后遗留」一节，这里只列
 条目：
 
-- PyTorch 后端下 $p \ge 2$ 的 `interpolation_points` 因 float32 / float64 混用报错
-  （`mesh/ipoints.py:389`，一行修复）。
+- ~~PyTorch 后端下 $p \ge 2$ 的 `interpolation_points` 因 float32 / float64 混用报错~~（已修复：
+  `mesh/ipoints.py` 先把 `multi_index` 转成坐标浮点类型；回归测试
+  `tests/unit/test_interpolation_points_backend.py`）。
 - 移植代码的英文 docstring 欠账（`PORTED_ROOTS`，约 596 处缺失），按子包补齐后移出豁免表。
 - ~~Form 过渡基类~~（已随 2.1 完成）。
 - 调用网格上不存在的方法：`huzhang_fe_space_2d.py:1080`、`lagrange_fe_space.py:192-216, 299`、

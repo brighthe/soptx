@@ -385,6 +385,9 @@ def ipoints(mesh: "MeshView", order: int | tuple[int, ...], names: Iterable[str]
         columns = _vertex_column_permutation(subentity.schema)
         if columns is not None:
             mi = mi[:, columns]
+        # multi_index 是整数张量; torch 下整数相除得到默认精度 float32, 与 float64
+        # 的坐标在 einsum 处类型不符, 故先转成坐标的浮点类型
+        mi = bm.astype(mi, points.dtype)
         weights = mi / bm.sum(mi, axis=-1, keepdims=True)
         points = bm.einsum("qv, evd -> eqd", weights, points)
         collected.append(bm.reshape(points, (-1, mesh.geo_dimension())))
