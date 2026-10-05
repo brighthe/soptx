@@ -194,16 +194,19 @@ def _assemble_integrated_load(
     if isinstance(load, BodyForce):
         @cartesian
         def source(points: Any) -> Any:
+            """在平移到 Problem 物理坐标后的点上计算体力."""
             return load.body_force(points + offset)
 
         integrator = SourceIntegrator(source=source, q=integration_order)
     elif isinstance(load, BoundaryTraction):
         @cartesian
         def source(points: Any) -> Any:
+            """在平移到 Problem 物理坐标后的点上计算边界牵引."""
             return load.traction(points + offset)
 
         @cartesian
         def threshold(points: Any) -> Any:
+            """在平移到 Problem 物理坐标后的点上判定是否属于受载边界."""
             return load.is_load_boundary(points + offset)
 
         integrator = LagrangeBoundarySourceIntegrator(

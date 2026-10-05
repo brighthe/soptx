@@ -1,3 +1,10 @@
+"""Hu--Zhang 应力-位移混合有限元分析器.
+
+应力取 ``HuZhangFESpace``, 位移取间断 Lagrange 张量空间, 状态方程为对称不定的
+鞍点系统, 只用直接法求解. 位移边界按自然边界条件弱施加, 牵引边界按应力法向迹
+强施加.
+"""
+
 from typing import Optional, Union, Literal, Tuple, Dict
 from time import time
 
@@ -32,6 +39,14 @@ from soptx.functionspace import HuZhangFESpace, boundary_outward_sign
 from soptx.materials import LinearElasticMaterial
 
 class HuZhangMFEMAnalyzer(BaseLogged):
+    """Hu--Zhang 混合有限元的线弹性分析器.
+
+    消费满足 ``MixedBoundaryElasticityProblem`` 的 Problem, 提供刚度组装,
+    状态与伴随求解以及积分点应力计算, 满足 ``AnalysisStage`` 协议. 应力空间
+    为 ``p`` 阶 ``HuZhangFESpace``, 位移空间为 ``p - 1`` 阶间断 Lagrange 张量空间.
+    低阶 (``p <= GD``) 时可加跳量稳定化项.
+    """
+
     def __init__(self,
                 disp_mesh: HomogeneousMesh,
                 pde: MixedBoundaryElasticityProblem,
@@ -781,6 +796,28 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                     enable_timing: bool = False, 
                     **kwargs
                 ) -> Dict[str, Function]:
+        """组装并直接求解鞍点系统, 得到应力与位移.
+
+        按边重心调用 ``pde.is_traction_boundary`` 与 ``pde.is_displacement_boundary``
+        标记边界边; 若 Problem 提供 ``is_symmetry_boundary``, 同时标记对称面.
+        施加牵引边界条件后的系统矩阵, 右端项与解向量会被缓存, 供 ``solve_adjoint``,
+        ``relative_state_residual`` 与 ``state_matrix_symmetry_error`` 复用.
+
+        Parameters
+        ----------
+        rho_val : TensorLike or Function, optional
+            密度场, 传给 ``assemble_stiff_matrix``.
+        enable_timing : bool, optional
+            是否打印各阶段耗时.
+        **kwargs
+            传给直接求解器的选项, 如 ``solver`` (``'mumps'`` 或 ``'scipy'``) 与
+            MUMPS 的 ``sym``.
+
+        Returns
+        -------
+        dict
+            ``'stress'`` 为应力有限元函数, ``'displacement'`` 为位移有限元函数.
+        """
         t = None
         if enable_timing:
             t = timer(f"分析阶段时间")

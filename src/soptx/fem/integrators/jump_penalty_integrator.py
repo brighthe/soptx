@@ -1,3 +1,5 @@
+"""Hu-Zhang 混合元低阶稳定化用的位移跳量惩罚项积分子."""
+
 import warnings
 
 from itertools import permutations
@@ -12,6 +14,33 @@ from soptx.fem.integrator import LinearInt, OpInt, FaceInt, enable_cache
 from soptx.materials import LinearElasticMaterial
 
 class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
+    """位移跳量惩罚项的面积分子.
+
+    在选定的面上装配 ``sum_F c_F int_F [[u]] : [[v]] ds``, 用于 Hu-Zhang 混合元在
+    ``p <= GD`` 时的稳定化. 局部矩阵按面组织, 每个面的局部自由度由两侧单元的自由度
+    拼接而成, 见 ``to_global_dof``. 目前只支持二维网格, 三维在 ``_cell_to_face_sign``
+    处抛 ``NotImplementedError``.
+
+    Parameters
+    ----------
+    q : int, optional
+        面积分阶, 默认 ``space.p + 3``.
+    threshold : TensorLike, optional
+        参与积分的面编号; 为 None 时取全部面.
+    method : str, optional
+        装配变体: ``'matrix_jump'`` (默认, 对称化的矩阵跳量) 或 ``'vector_jump'``
+        (向量跳量); 未注册的键回落到默认变体.
+    material : LinearElasticMaterial, optional
+        基材. ``'matrix_jump'`` 变体用其杨氏模量与剪切模量定惩罚系数, 此时必须给出.
+    penalty_scaling : str, optional
+        ``'matrix_jump'`` 的惩罚缩放律: ``'gamma_hinv'`` 为旧缩放, 其余取值 (默认
+        ``'physical_h'``) 均按物理量纲缩放.
+    density_shear_ratio : TensorLike, optional
+        逐单元相对剪切模量, 形状 ``(NC, )``; None 时不做密度定标.
+    density_coupling : str, optional
+        两侧单元相对剪切模量合成为面标度的规则: ``'harmonic'`` (默认), ``'min'``
+        或 ``'mean'``, 见 ``_face_penalty_scale``.
+    """
 
     def __init__(self,
                 q: Optional[int]=None,
@@ -204,6 +233,25 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         return phi
 
     def make_index(self, space: _FS):
+        """给出参与积分的面编号及其是否为内部面.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        index : TensorLike
+            面编号; ``threshold`` 为 None 时为全部面 ``arange(NF)``.
+        is_internal_flag : TensorLike
+            与 ``index`` 对应的布尔标记, ``face_to_cell`` 两列不等即为内部面.
+
+        Raises
+        ------
+        ValueError
+            ``threshold`` 既不是 None 也不是张量.
+        """
         mesh = space.mesh
         NF = mesh.number_of_faces()
         
@@ -356,6 +404,34 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
     @variantmethod('matrix_jump')
     def assembly(self, space: _FS) -> TensorLike:
+        """``'matrix_jump'`` 变体: 对称化矩阵跳量的惩罚项局部矩阵.
+
+        内部面上矩阵跳量取 ``sym(v^+ n^T) - sym(v^- n^T)``, 边界面上取
+        ``sym(v n^T)``, 其中 ``sym(A) = (A + A^T) / 2``, ``n`` 为面的单位法向.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NF_sel, 2*ldof, 2*ldof)`` 的局部矩阵.
+
+        Warns
+        -----
+        UserWarning
+            材料杨氏模量不等于 1 (未做归一化).
+
+        Notes
+        -----
+        面系数 ``c_F``: ``penalty_scaling='gamma_hinv'`` 时为 ``gamma / hF``, ``gamma``
+        在位移空间为 ``P_0`` 时取 ``0.01 E``, 否则取 ``0.01 mu``; 其余情形为
+        ``mu / L0**2 * hF``, ``L0`` 为网格包围盒的最大边长. ``hF`` 在二维为面测度,
+        三维为面测度的平方根. 给出 ``density_shear_ratio`` 时再乘以
+        ``_face_penalty_scale`` 的逐面标度.
+        """
         ws, matrix_jump, hF, fm = self.fetch_matrix_jump(space)
         integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
         
@@ -485,6 +561,23 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
     @assembly.register('vector_jump')
     def assembly(self, space: _FS) -> TensorLike:
+        """``'vector_jump'`` 变体: 向量跳量 ``[[v]] = v^+ - v^-`` 的惩罚项局部矩阵.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NF_sel, 2*ldof, 2*ldof)`` 的局部矩阵, 面系数为 ``1 / hF``.
+
+        Notes
+        -----
+        本变体不读 ``material``, ``penalty_scaling`` 与 ``density_shear_ratio``.
+        边界面上跳量取迹本身.
+        """
         ws, vector_jump, hF, fm = self.fetch_vector_jump(space)
         # hF: (NF, )
         # ws: (NQ, )

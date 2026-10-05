@@ -172,6 +172,7 @@ class CSRPattern:
             target_device = torch.device(device) if isinstance(device, str) else device
 
             def move(t):
+                """把张量迁到目标设备, ``None`` 原样返回."""
                 return None if t is None else t.to(device=target_device)
 
             return CSRPattern(
@@ -332,6 +333,7 @@ def _finalize(
             device = torch.device(device)
 
         def load(a):
+            """把 NumPy 数组转为目标设备上的 int64 张量, ``None`` 原样返回."""
             if a is None:
                 return None
             return torch.from_numpy(np.ascontiguousarray(a)).to(

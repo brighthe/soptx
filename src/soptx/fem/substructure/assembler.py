@@ -428,6 +428,7 @@ class GlobalAssembler:
         )
 
         def chunks() -> Iterable[Tuple[int, Any]]:
+            """逐批校验刚度形状并产出 ``(start, stiffness)``."""
             for batch in stiffness_batches:
                 start = int(batch.start)
                 end = int(batch.end)

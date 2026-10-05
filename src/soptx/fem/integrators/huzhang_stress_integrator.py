@@ -1,3 +1,5 @@
+"""Hu-Zhang 混合有限元的应力 (柔度) 项积分子."""
+
 from typing import Optional, Union
 from soptx.backend import backend_manager as bm
 
@@ -10,6 +12,23 @@ from soptx.fem.integrator import (LinearInt, OpInt, CellInt, enable_cache)
 from soptx.core import timer
 
 class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
+    """Hu-Zhang 应力空间上的柔度项 ``(A sigma, tau)_K`` 积分子.
+
+    柔度算子取 ``A sigma = lambda0 sigma - lambda1 tr(sigma) I``. 基函数按对称张量的
+    独立分量存储, 分量内积按 ``symmetry_index`` 给出的重数加权.
+
+    Parameters
+    ----------
+    lambda0, lambda1 : float or TensorLike, optional
+        柔度系数, 默认均为 1.0. ``'fast'`` 变体允许形状 ``(NC, )`` 的逐单元系数.
+    coef : TensorLike, optional
+        只由 ``'standard'`` 变体读取的密度系数, 形状 ``(NC, )`` 或 ``(NC, NQ)``.
+    q : int, optional
+        积分阶, 为 None (或 0) 时取 ``space.p + 3``.
+    method : str, optional
+        装配变体: ``'standard'`` (默认) 或 ``'fast'``; 未注册的键回落到默认变体.
+    """
+
     def __init__(self, 
                 lambda0: Union[float, TensorLike] = 1.0, 
                 lambda1: Union[float, TensorLike] = 1.0,
@@ -28,11 +47,30 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
+        """单元到全局自由度的映射 ``space.cell_to_dof()``."""
         c2d0  = space.cell_to_dof()
         return c2d0
 
     @enable_cache
     def fetch(self, space: FunctionSpace):
+        """取 ``'standard'`` 变体所需的求积数据与基函数, 结果按空间缓存.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            Hu-Zhang 应力空间.
+
+        Returns
+        -------
+        cm : TensorLike
+            单元测度, 形状 ``(NC, )``.
+        phi : TensorLike
+            基函数值, 形状 ``(NC, NQ, ldof, NS)``, ``NS`` 为对称张量的独立分量数.
+        trphi : TensorLike
+            基函数的迹, 形状 ``(NC, NQ, ldof)``.
+        ws : TensorLike
+            积分权重, 形状 ``(NQ, )``.
+        """
         p = space.p
         q = self.q if self.q else p+3
 
@@ -54,6 +92,30 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
 
     @variantmethod('standard')
     def assembly(self, space: FunctionSpace, enable_timing: bool = False) -> TensorLike:
+        """``'standard'`` 变体: 逐次求积计算柔度项局部矩阵.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            Hu-Zhang 应力空间.
+        enable_timing : bool, optional
+            是否打印分段计时. 默认 False.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, ldof, ldof)`` 的局部矩阵.
+
+        Raises
+        ------
+        NotImplementedError
+            ``coef`` 不是 None, 形状也不是 ``(NC, )`` 或 ``(NC, NQ)``.
+
+        Notes
+        -----
+        ``coef`` 为 ``(NC, )`` 或 ``(NC, NQ)`` 时被积函数再乘以 ``coef``. 本变体中
+        ``lambda0`` 与 ``lambda1`` 按标量使用.
+        """
         t = None
         if enable_timing:
             t = timer(f"应力项组装")
@@ -150,6 +212,20 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
     
     @enable_cache
     def fetch_fast(self, space: FunctionSpace) -> TensorLike:
+        """``'fast'`` 变体的缓存部分: 与材料系数无关的两块几何矩阵.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            Hu-Zhang 应力空间.
+
+        Returns
+        -------
+        M0 : TensorLike
+            按分量重数加权的 ``(phi, phi)``, 形状 ``(NC, ldof, ldof)``.
+        M1 : TensorLike
+            ``(tr phi, tr phi)``, 形状 ``(NC, ldof, ldof)``.
+        """
         p = space.p
         q = self.q if self.q else p+3
 
@@ -192,6 +268,24 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
                 space: FunctionSpace, 
                 enable_timing: bool = False
             ) -> TensorLike:
+        """``'fast'`` 变体: 由缓存的几何矩阵组合出 ``lambda0 M0 - lambda1 M1``.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            Hu-Zhang 应力空间.
+        enable_timing : bool, optional
+            是否打印分段计时. 默认 False.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, ldof, ldof)`` 的局部矩阵.
+
+        Notes
+        -----
+        ``lambda0`` 与 ``lambda1`` 为一维 ``(NC, )`` 张量时按单元广播. 本变体不读 ``coef``.
+        """
         t = None
         if enable_timing:
             t = timer(f"应力项组装 (Fast Cached)")

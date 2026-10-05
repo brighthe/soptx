@@ -166,6 +166,7 @@ def assemble_interface_stiffness(
         pattern = build_interface_pattern(local, n_global, dof_numel=dof_numel)
 
     def chunks() -> Iterator[Tuple[int, Any]]:
+        """逐批校验刚度形状并产出 ``(start, stiffness)``."""
         for batch in stiffness_batches:
             start = int(batch.start)
             end = int(batch.end)

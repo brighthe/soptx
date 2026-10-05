@@ -57,9 +57,25 @@ class ElasticityProblem(Protocol):
     dimension: int
 
     @property
-    def domain(self) -> Sequence[float]: ...
+    def domain(self) -> Sequence[float]:
+        """轴对齐盒形计算区域的边界值.
 
-    def loads(self) -> Sequence[Load]: ...
+        长度为 ``2 * dimension``, 按 ``(x_min, x_max, y_min, y_max[, z_min, z_max])``
+        排列; 消费方以 ``domain[0::2]`` 作为物理域原点.
+        """
+        ...
+
+    def loads(self) -> Sequence[Load]:
+        """返回全部物理外载荷.
+
+        Returns
+        -------
+        Sequence[Load]
+            满足 ``Load`` 契约的载荷对象, 其 ``dimension`` 必须与 Problem 的
+            ``dimension`` 一致. 分析器按 ``BodyForce``, ``BoundaryTraction``,
+            ``PointForce``, ``LineTraction`` 分派装配.
+        """
+        ...
 
 
 @runtime_checkable
@@ -74,11 +90,42 @@ class DirichletElasticityProblem(ElasticityProblem, Protocol):
     """
 
     @property
-    def boundary_type(self) -> str: ...
+    def boundary_type(self) -> str:
+        """边界类型, 取 ``'mixed'`` 或 ``'dirichlet'``.
 
-    def dirichlet_bc(self, points: TensorLike) -> TensorLike: ...
+        ``'mixed'`` 时 ``LagrangeFEMAnalyzer`` 装配 ``loads()`` 中的非体力载荷;
+        ``'dirichlet'`` 表示全边界为本质边界, 此时 ``loads()`` 只能给出
+        ``BodyForce``, 否则分析器报错. 其他取值同样报错.
+        """
+        ...
 
-    def is_dirichlet_boundary(self) -> tuple[Callable[..., TensorLike], ...]: ...
+    def dirichlet_bc(self, points: TensorLike) -> TensorLike:
+        """在给定点上计算 Dirichlet 位移值.
+
+        Parameters
+        ----------
+        points : TensorLike
+            形状 ``(..., GD)`` 的物理坐标.
+
+        Returns
+        -------
+        TensorLike
+            与 ``points`` 同形状的位移值; 由 ``boundary_interpolate`` 只在
+            ``is_dirichlet_boundary()`` 标记的分量上取用.
+        """
+        ...
+
+    def is_dirichlet_boundary(self) -> tuple[Callable[..., TensorLike], ...]:
+        """返回按位移分量划分的 Dirichlet 边界判定函数.
+
+        Returns
+        -------
+        tuple of Callable
+            长度为 ``dimension``, 第 ``i`` 项判定第 ``i`` 个位移分量是否受约束:
+            输入形状 ``(N, GD)`` 的坐标, 返回形状 ``(N,)`` 的布尔掩码. 子结构
+            投影路径允许某项为 ``None``, 表示该分量不受约束.
+        """
+        ...
 
 
 @runtime_checkable
@@ -91,11 +138,51 @@ class MixedBoundaryElasticityProblem(ElasticityProblem, Protocol):
     为 Hu--Zhang 角点松弛提供几何角点.
     """
 
-    def mark_corners(self, node: TensorLike) -> TensorLike: ...
+    def mark_corners(self, node: TensorLike) -> TensorLike:
+        """从网格节点中挑出区域的几何角点.
 
-    def is_displacement_boundary(self, points: TensorLike) -> TensorLike: ...
+        Parameters
+        ----------
+        node : TensorLike
+            形状 ``(NN, GD)`` 的网格节点坐标.
 
-    def is_traction_boundary(self, points: TensorLike) -> TensorLike: ...
+        Returns
+        -------
+        TensorLike
+            形状 ``(N_corner, GD)`` 的角点坐标, 作为 ``HuZhangFESpace`` 的
+            ``corners`` 参数用于角点松弛.
+        """
+        ...
+
+    def is_displacement_boundary(self, points: TensorLike) -> TensorLike:
+        """判定点是否位于位移边界 (弱施加 ``u = u_D``).
+
+        Parameters
+        ----------
+        points : TensorLike
+            形状 ``(..., GD)`` 的坐标; 分析器传入边的重心.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``points.shape[:-1]`` 的布尔掩码.
+        """
+        ...
+
+    def is_traction_boundary(self, points: TensorLike) -> TensorLike:
+        """判定点是否位于牵引边界 (强施加 ``sigma n = t``).
+
+        Parameters
+        ----------
+        points : TensorLike
+            形状 ``(..., GD)`` 的坐标; 分析器传入边的重心.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``points.shape[:-1]`` 的布尔掩码.
+        """
+        ...
 
 
 @runtime_checkable
@@ -108,16 +195,33 @@ class MaterialInterpolation(Protocol):
     """
 
     @property
-    def density_location(self) -> str: ...
+    def density_location(self) -> str:
+        """密度场的离散位置.
+
+        取 ``'element'``, ``'node'``, ``'element_multiresolution'`` 或
+        ``'node_multiresolution'``.
+        """
+        ...
 
     @property
-    def n_sub(self) -> int: ...
+    def n_sub(self) -> int:
+        """每个位移单元内的子密度单元数, 仅多分辨率时有效."""
+        ...
 
     @property
-    def interpolate_material(self) -> Any: ...
+    def interpolate_material(self) -> Any:
+        """绑定后的材料插值入口.
+
+        调用形式为 ``interpolate_material(material=..., rho_val=...,
+        integration_order=..., displacement_mesh=...)``, 返回插值后的杨氏模量
+        ``E_rho``; 同时插值泊松比时返回二元组 ``(E_rho, nu_rho)``.
+        """
+        ...
 
     @property
-    def interpolate_material_derivative(self) -> Any: ...
+    def interpolate_material_derivative(self) -> Any:
+        """绑定后的材料插值导数入口, 返回插值材料参数对密度的导数."""
+        ...
 
 
 @runtime_checkable
@@ -136,19 +240,76 @@ class AnalysisStage(Protocol):
     """
 
     @property
-    def disp_mesh(self) -> Any: ...
+    def disp_mesh(self) -> Any:
+        """位移有限元网格."""
+        ...
 
     @property
-    def material(self) -> Any: ...
+    def material(self) -> Any:
+        """实体线弹性材料, 提供 ``youngs_modulus`` 与 ``calculate_von_mises_stress`` 等."""
+        ...
 
     @property
-    def interpolation_scheme(self) -> MaterialInterpolation: ...
+    def interpolation_scheme(self) -> MaterialInterpolation:
+        """材料插值方案."""
+        ...
 
-    def solve_state(self, rho_val: Any = None, **kwargs) -> dict: ...
+    def solve_state(self, rho_val: Any = None, **kwargs) -> dict:
+        """在密度场 ``rho_val`` 下求解状态方程.
 
-    def solve_adjoint(self, rhs: Any, rho_val: Any = None, **kwargs) -> Any: ...
+        Parameters
+        ----------
+        rho_val : TensorLike or Function, optional
+            密度场; 拓扑优化模式下必须提供.
+        **kwargs
+            分析器特有的选项, 例如 ``enable_timing``, 以及 ``LagrangeFEMAnalyzer``
+            的 ``adjoint``.
 
-    def compute_stress_state(self, state: dict, **kwargs) -> dict: ...
+        Returns
+        -------
+        dict
+            至少含 ``'displacement'``; ``HuZhangMFEMAnalyzer`` 另含 ``'stress'``.
+        """
+        ...
+
+    def solve_adjoint(self, rhs: Any, rho_val: Any = None, **kwargs) -> Any:
+        """以伴随载荷 ``rhs`` 求解齐次边界条件下的伴随方程.
+
+        Parameters
+        ----------
+        rhs : TensorLike
+            伴随载荷向量. ``HuZhangMFEMAnalyzer`` 只接受应力自由度部分.
+        rho_val : TensorLike or Function, optional
+            密度场, 用于组装伴随方程的左端算子.
+        **kwargs
+            传给线性求解器的选项.
+
+        Returns
+        -------
+        TensorLike
+            伴随变量向量. ``HuZhangMFEMAnalyzer`` 返回应力与位移自由度的完整向量.
+        """
+        ...
+
+    def compute_stress_state(self, state: dict, **kwargs) -> dict:
+        """由状态字典计算积分点应力.
+
+        Parameters
+        ----------
+        state : dict
+            ``solve_state`` 返回的状态字典.
+        **kwargs
+            方法相关的关键字参数, 例如 ``integration_order``;
+            ``HuZhangMFEMAnalyzer`` 另接受 ``rho_val``.
+
+        Returns
+        -------
+        dict
+            应力字典, 键随方法而异: ``LagrangeFEMAnalyzer`` 给出
+            ``'stress_solid'``, ``HuZhangMFEMAnalyzer`` 给出 ``'stress_apparent'``,
+            形状均为 ``(NC, NQ, NS)``.
+        """
+        ...
 
 
 __all__ = [

@@ -59,9 +59,11 @@ class DistributedElasticityAnalyzer(LagrangeFEMAnalyzer):
         super().__init__(*args, dof_comm=dof_comm, **kwargs)
 
     def reduce_load(self, F: TensorLike) -> TensorLike:
+        """把各 rank 在共享自由度副本上的右端项贡献求和."""
         return self.dof_comm.sync_add(F)
 
     def wrap_operator(self, form: AssemblyLevelExtension) -> OverlapOperator:
+        """把局部单元级算子包装为在重叠自由度上归约 matvec 结果的 ``OverlapOperator``."""
         return OverlapOperator(form, self.dof_comm)
 
     def solve_system(

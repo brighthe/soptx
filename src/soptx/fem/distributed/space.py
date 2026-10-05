@@ -57,12 +57,15 @@ def _mk_distributed_space_type(kind: type[_ST_co]) -> type[_ST_co]:
         return f"<Distributed{kind.__name__} object at {hex(id(self))}>"
 
     def cell_to_dof(self: Any, index: Any = _S) -> Any:
+        """返回本 rank 局部编号下的单元到自由度映射."""
         return self.cell2dof[index]
 
     def face_to_dof(self: Any, index: Any = _S) -> Any:
+        """返回本 rank 局部编号下的面到自由度映射."""
         return self.face2dof[index]
 
     def edge_to_dof(self: Any, index: Any = _S) -> Any:
+        """返回本 rank 局部编号下的边到自由度映射."""
         return self.edge2dof[index]
 
     class_namespace = {

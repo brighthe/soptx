@@ -1,4 +1,22 @@
 
+"""线弹性双线性型 ``(D epsilon(u), epsilon(v))`` 的单元积分子.
+
+``LinearElasticIntegrator.assembly`` 是变体方法, 由构造参数 ``method`` 选定:
+
+standard (默认)
+    逐次求积, 按位移分量分块拼装, 只读 ``D`` 的各向同性元.
+standard_multiresolution
+    位移单元内含 ``n_sub`` 个子密度单元的多分辨率版本, 拼装方式同 standard.
+voigt
+    用应变矩阵 ``B`` 直接计算 ``B^T D B``.
+voigt_multiresolution
+    多分辨率的 voigt 版本.
+fast
+    预计算与单元无关的参考单元积分张量, 再按单元的仿射映射收缩.
+symbolic
+    用 ``LinearSymbolicIntegration`` 符号积分得到参考单元积分张量, 再按单元收缩.
+"""
+
 from typing import NamedTuple, Optional
 
 from soptx.backend import backend_manager as bm
@@ -98,6 +116,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def to_global_dof(self, space: FunctionSpace) -> TensorLike:
+        """``index`` 单元到全局自由度的映射, 形状 ``(NC, GD*ldof)``."""
         return space.cell_to_dof()[self._index]
     
     ########################################################################################
@@ -169,6 +188,26 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def fetch_assembly(self, space: TensorFunctionSpace):
+        """``'standard'`` 变体的缓存部分, 结果按空间缓存.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        cm : TensorLike
+            ``index`` 单元的测度, 形状 ``(NC, )``.
+        bcs : TensorLike
+            积分点的重心坐标.
+        ws : TensorLike
+            积分权重, 形状 ``(NQ, )``.
+        gphi : TensorLike
+            标量基函数对物理坐标的梯度, 形状 ``(NC, NQ, ldof, GD)``.
+        detJ : TensorLike or None
+            积分点上的 ``|det J|``, 形状 ``(NC, NQ)``; 单纯形网格为 None.
+        """
         ctx = self.fetch_context(space)
         scalar_space, mesh, index = ctx.scalar_space, ctx.mesh, ctx.index
         bcs, ws, cm = ctx.bcs, ctx.ws, ctx.cell_measure
@@ -183,6 +222,32 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 space: TensorFunctionSpace, 
                 enable_timing: bool = False
             ) -> TensorLike:
+        """``'standard'`` 变体: 逐次求积并按位移分量分块拼装单元刚度矩阵.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+        enable_timing : bool, optional
+            是否打印分段计时. 默认 False.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, GD*ldof, GD*ldof)`` 的单元刚度矩阵, 自由度排序随
+            ``space.dof_priority``.
+            ``NC`` 为 ``index`` 截取后的单元数.
+
+        Raises
+        ------
+        ValueError
+            ``coef`` 不是 None, 形状也不是 ``(NC, )``, ``(NC, NS, NS)`` 或 ``(NC, NQ)``.
+
+        Notes
+        -----
+        拼装只读 ``D`` 的 ``(0, 0)``, ``(0, 1)`` 与剪切对角元 (二维为 ``(2, 2)``, 三维
+        为 ``(5, 5)``), 即假定各向同性结构.
+        """
         t = None
         if enable_timing:
             t = timer(f"矩阵组装")
@@ -368,6 +433,27 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
     
     @assembly.register('standard_multiresolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+        """``'standard_multiresolution'`` 变体: 位移单元内含 ``n_sub`` 个子密度单元.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, GD*ldof, GD*ldof)`` 的单元刚度矩阵, 自由度排序随
+            ``space.dof_priority``.
+
+        Notes
+        -----
+        ``coef`` 必须给出, 为单元密度 ``(NC, n_sub)`` 或节点密度 ``(NC, n_sub, NQ)``.
+        积分阶按 ``n_sub`` 取定: ``4 <= n_sub <= 9`` 取 4, ``n_sub >= 16`` 取 3, 其余取
+        构造时的 ``q`` 或 ``p + 3``. 积分点经 ``map_bcs_to_sub_elements`` 映到各子单元,
+        该函数只接受张量积积分点, 故本变体只适用于二维张量积网格. 各子单元贡献乘以
+        ``1 / n_sub``, 拼装方式同 ``'standard'``.
+        """
         index = self._index
         mesh_u = getattr(space, 'mesh', None)
         s_space_u = space.scalar_space
@@ -570,6 +656,26 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def fetch_voigt_assembly(self, space: TensorFunctionSpace):
+        """``'voigt'`` 变体的缓存部分, 结果按空间缓存.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        cm : TensorLike
+            ``index`` 单元的测度, 形状 ``(NC, )``.
+        ws : TensorLike
+            积分权重, 形状 ``(NQ, )``.
+        bcs : TensorLike
+            积分点的重心坐标.
+        gphi : TensorLike
+            标量基函数对物理坐标的梯度, 形状 ``(NC, NQ, ldof, GD)``.
+        detJ : TensorLike or None
+            积分点上的 ``|det J|``, 形状 ``(NC, NQ)``; 单纯形网格为 None.
+        """
         ctx = self.fetch_context(space)
         scalar_space, mesh, index = ctx.scalar_space, ctx.mesh, ctx.index
         bcs, ws, cm = ctx.bcs, ctx.ws, ctx.cell_measure
@@ -581,6 +687,28 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @assembly.register('voigt')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+        """``'voigt'`` 变体: 用应变矩阵 ``B`` 计算 ``int_K B^T D B dx``.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, GD*ldof, GD*ldof)`` 的单元刚度矩阵, 自由度排序随
+            ``space.dof_priority``.
+
+        Raises
+        ------
+        NotImplementedError
+            ``coef`` 不是 None, 形状也不是 ``(NC, )`` 或 ``(NC, NQ)``.
+
+        Notes
+        -----
+        ``B`` 由 ``material.strain_matrix`` 给出, 不对 ``D`` 的结构做假定.
+        """
         mesh = getattr(space, 'mesh', None)
         cm, ws, bcs, gphi, detJ = self.fetch_voigt_assembly(space)
 
@@ -627,6 +755,27 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @assembly.register('voigt_multiresolution')
     def assembly(self, space: TensorFunctionSpace) -> TensorLike:
+        """``'voigt_multiresolution'`` 变体: 多分辨率下用应变矩阵计算 ``B^T D B``.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, GD*ldof, GD*ldof)`` 的单元刚度矩阵, 自由度排序随
+            ``space.dof_priority``.
+
+        Notes
+        -----
+        ``coef`` 必须给出, 为单元密度 ``(NC, n_sub)`` 或节点密度 ``(NC, n_sub, NQ)``;
+        其他形状时返回 None. 积分阶按 ``n_sub`` 取定: ``4 <= n_sub <= 9`` 取 3,
+        ``n_sub >= 16`` 取 2, 其余取构造时的 ``q`` 或 ``p + 3``. 与
+        ``'standard_multiresolution'`` 一样只适用于二维张量积网格, 各子单元贡献乘以
+        ``1 / n_sub``.
+        """
         index = self._index
         mesh_u = getattr(space, 'mesh', None)
         s_space_u = space.scalar_space
@@ -729,6 +878,30 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def fetch_fast_assembly(self, space: TensorFunctionSpace):
+        """``'fast'`` 变体的缓存部分, 结果按空间缓存.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        cm : TensorLike
+            ``index`` 单元的测度, 形状 ``(NC, )``.
+        G : TensorLike
+            单纯形网格为重心坐标的梯度 ``grad_lambda``, 形状 ``(NC, TD+1, GD)``;
+            其余网格为常值 Jacobi 矩阵的逆转置, 形状 ``(NC, GD, GD)``.
+        S : TensorLike
+            参考单元上的梯度积分张量. 单纯形网格对重心坐标求导, 形状
+            ``(ldof, ldof, TD+1, TD+1)``; 其余网格对参考坐标求导, 形状
+            ``(ldof, ldof, GD, GD)``.
+
+        Raises
+        ------
+        ValueError
+            非单纯形网格的 Jacobi 矩阵在积分点上不恒定.
+        """
         ctx = self.fetch_context(space)
         scalar_space, mesh, index = ctx.scalar_space, ctx.mesh, ctx.index
         bcs, ws, cm = ctx.bcs, ctx.ws, ctx.cell_measure
@@ -763,6 +936,30 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 space: TensorFunctionSpace,
                 enable_timing: bool = False
                 ) -> TensorLike:
+        """``'fast'`` 变体: 用缓存的参考单元积分张量收缩出单元刚度矩阵.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+        enable_timing : bool, optional
+            是否打印分段计时. 默认 False.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, GD*ldof, GD*ldof)`` 的单元刚度矩阵, 自由度排序随
+            ``space.dof_priority``.
+
+        Raises
+        ------
+        NotImplementedError
+            ``coef`` 不是 None, 形状也不是 ``(NC, )``.
+
+        Notes
+        -----
+        只适用于单元映射为仿射的网格. 拼装方式同 ``'standard'``, 只读 ``D`` 的各向同性元.
+        """
         t = None
         if enable_timing:
             t = timer(f"矩阵快速组装")
@@ -910,6 +1107,33 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                             space: TensorFunctionSpace,
                             enable_timing: bool = False
                         ) -> TensorLike:
+        """``'symbolic'`` 变体的缓存部分, 结果按空间缓存.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+        enable_timing : bool, optional
+            是否打印分段计时. 默认 False.
+
+        Returns
+        -------
+        cm : TensorLike
+            单元测度, 形状 ``(NC, )``.
+        bcs : TensorLike
+            积分点的重心坐标.
+        G : TensorLike
+            单纯形网格为全体单元的 ``grad_lambda``, 形状 ``(NC, TD+1, GD)``;
+            ``TensorMesh`` 为 ``LinearSymbolicIntegration.compute_mapping`` 给出的
+            ``(NC, GD, GD)`` 映射矩阵.
+        S : TensorLike
+            ``LinearSymbolicIntegration.gphi_gphi_matrix`` 的数值结果, 形状
+            ``(ldof, ldof, dim, dim)``.
+
+        Notes
+        -----
+        网格既不是单纯形也不是 ``TensorMesh`` 时返回 None.
+        """
         t = None
         if enable_timing:
             t = timer(f"参考单元解析预计算组装(缓存)")
@@ -952,6 +1176,31 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
                 space: TensorFunctionSpace,
                 enable_timing: bool = False
             ) -> TensorLike:
+        """``'symbolic'`` 变体: 用符号积分得到的参考单元积分张量收缩出单元刚度矩阵.
+
+        Parameters
+        ----------
+        space : TensorFunctionSpace
+            位移空间.
+        enable_timing : bool, optional
+            是否打印分段计时. 默认 False.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, GD*ldof, GD*ldof)`` 的单元刚度矩阵, ``NC`` 为网格全部单元数,
+            自由度排序随 ``space.dof_priority``.
+
+        Raises
+        ------
+        NotImplementedError
+            ``coef`` 不是 None, 形状也不是 ``(NC, )``; 或网格既不是单纯形也不是
+            ``TensorMesh``.
+
+        Notes
+        -----
+        拼装方式同 ``'standard'``, 只读 ``D`` 的各向同性元.
+        """
         t = None
         if enable_timing:
             t = timer(f"参考单元解析预计算组装")

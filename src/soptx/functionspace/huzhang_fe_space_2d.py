@@ -1,3 +1,11 @@
+r"""二维三角形网格上的胡张 (Hu-Zhang) 对称应力有限元空间, 含角点松弛.
+
+应力空间 :math:`\Sigma_h` 由 :math:`P_k` 对称矩阵值函数组成, 满足 :math:`H(\mathrm{div})`
+协调. 每个基函数写成 "标量 Lagrange 基 x 对称张量标架" 的乘积, 自由度按子单纯形
+(顶点, 边, 单元) 分层; 边上取标架 :math:`(n_f, t_f)`, 其中 :math:`\sigma_{nn}`,
+:math:`\sigma_{nt}` 跨边连续, :math:`\sigma_{tt}` 记在单元账上. 对称张量分量按
+``[xx, xy, yy]`` 排列. 实现说明见 ``docs/fem/huzhang-mixed-fem-implementation.md``.
+"""
 
 from typing import Optional, Union, Callable
 from soptx.typing import TensorLike, Index, _S, Threshold
@@ -46,6 +54,20 @@ def boundary_outward_sign(mesh: Mesh, index: Index = _S) -> TensorLike:
 
 
 def number_of_multiindex(p, d):
+    """``d`` 维单纯形上 ``p`` 次多重指标的个数, 即 :math:`P_p` 的维数.
+
+    Parameters
+    ----------
+    p : int
+        多项式次数.
+    d : int
+        单纯形维数, 仅支持 1, 2, 3; 其余取值返回 None.
+
+    Returns
+    -------
+    int
+        ``p+1``, ``(p+1)(p+2)/2`` 或 ``(p+1)(p+2)(p+3)/6``.
+    """
     if d == 1:
         return p+1
     elif d == 2:
@@ -54,6 +76,18 @@ def number_of_multiindex(p, d):
         return (p+1)*(p+2)*(p+3)//6
 
 def multiindex_to_number(a):
+    """把重心多重指标映射为它在 ``bm.multi_index_matrix(p, d)`` 中的行号.
+
+    Parameters
+    ----------
+    a : TensorLike
+        形状 ``(N, d+1)`` 的多重指标, 各行分量和相同, ``d`` 仅支持 1, 2, 3.
+
+    Returns
+    -------
+    TensorLike
+        形状 ``(N,)`` 的行号, 可直接索引 ``mesh.shape_function`` 的最后一维.
+    """
     d = a.shape[1] - 1
     if d==1:
         return a[:, 1]
@@ -68,6 +102,27 @@ def multiindex_to_number(a):
         return a1*(1+a1)*(2+a1)//6 + a2*(1+a2)//2 + a3
 
 class TensorDofsOnSubsimplex():
+    """单元内某个子单纯形上的一组张量自由度.
+
+    每个自由度是二元组 ``(alpha, I)``: ``alpha`` 为标量 Lagrange 基的重心多重指标,
+    ``I`` 为对称张量标架的分量编号. 对应的基函数为 "标量基 x 标架第 ``I`` 个对称张量".
+
+    Parameters
+    ----------
+    dofs : list of tuple
+        自由度列表 ``[(alpha, I), ...]``.
+    subsimplex : TensorLike
+        该子单纯形的局部顶点编号, 形状 ``(i+1,)``, ``i`` 为子单纯形维数.
+
+    Attributes
+    ----------
+    dof_scalar : TensorLike
+        形状 ``(n, TD+1)`` 的多重指标.
+    dof_tensor : TensorLike
+        形状 ``(n,)`` 的标架分量编号.
+    dof2num : TensorLike
+        由 ``multiindex_to_number(alpha) + I*ldof`` 到组内序号的反查表.
+    """
     def __init__(self, dofs : list, subsimplex : list):
         """
         dofs: list of tuple (alpha, I), alpha is the multi-index, I is the
@@ -97,6 +152,22 @@ class TensorDofsOnSubsimplex():
         return nummap
 
     def permute_to_order(self, perm):
+        """子单纯形顶点按 ``perm`` 重排后, 各自由度对应到组内的序号.
+
+        把每个自由度多重指标在 ``subsimplex`` 上的分量按 ``perm`` 重排, 张量分量
+        编号保持不变, 再经 ``dof2num`` 反查. ``cell_to_dof`` 用它处理局部边方向与
+        全局边方向相反的单元.
+
+        Parameters
+        ----------
+        perm : list of int
+            子单纯形顶点的排列, 2D 边上为 ``[1, 0]``.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(n,)`` 的组内序号.
+        """
         alpha = self.dof_scalar.copy()
         alpha[:, self.subsimplex] = alpha[:, self.subsimplex][:, perm]
 
@@ -106,6 +177,22 @@ class TensorDofsOnSubsimplex():
         return self.dof2num[idx]
 
 class HuZhangFECellDof2d():
+    """三角形单元上胡张元局部自由度按子单纯形的分类.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        二维单纯形网格, 局部边顺序取自 ``mesh.localEdge``.
+    p : int
+        应力空间的多项式次数.
+
+    Attributes
+    ----------
+    boundary_dofs : list of list of TensorDofsOnSubsimplex
+        ``boundary_dofs[i]`` 为各 ``i`` 维子单纯形上跨单元连续的自由度组.
+    internal_dofs : list of list of TensorDofsOnSubsimplex
+        ``internal_dofs[i]`` 为各 ``i`` 维子单纯形上单元私有的自由度组.
+    """
     def __init__(self, mesh : Mesh, p: int):
         self.p = p
         self.mesh = mesh
@@ -126,6 +213,20 @@ class HuZhangFECellDof2d():
         self.dual_subsimplex = [[dual(f) for f in ssixi] for ssixi in self.subsimplex]
 
     def dof_classfication(self):
+        r"""按子单纯形把单元局部自由度分为连续与断开两类.
+
+        多重指标 ``alpha`` 归属于子单纯形 ``f`` 当且仅当 ``alpha`` 在 ``f`` 的顶点上
+        全非零, 在其余顶点上全为零. 对 ``i`` 维子单纯形, ``NS`` 个对称张量标架分量中
+        前 ``NS - i(i+1)/2`` 个跨单元连续, 其余断开; 2D 下顶点 3 个全连续, 边上
+        :math:`\sigma_{nn}, \sigma_{nt}` 连续而 :math:`\sigma_{tt}` 断开, 单元内部全断开.
+
+        Returns
+        -------
+        boundary_dofs : list of list of TensorDofsOnSubsimplex
+            按维数 ``0..TD`` 组织的连续自由度组, 空组不收录.
+        internal_dofs : list of list of TensorDofsOnSubsimplex
+            按维数 ``0..TD`` 组织的断开自由度组, 空组不收录.
+        """
         p = self.p
         mesh = self.mesh
         TD = mesh.top_dimension()
@@ -224,6 +325,18 @@ class HuZhangFEDof2d():
         return NC*cldof + NE*eldof + NN*nldof + self.NCP
     
     def node_to_internal_dof(self) -> TensorLike:
+        """顶点上的全局自由度编号, 松弛模式下另给出角点的 4 个自由度.
+
+        顶点段编号为 ``0..NN*NS-1``; 松弛角点的追加自由度紧接其后.
+
+        Returns
+        -------
+        node2dof : TensorLike
+            形状 ``(NN, NS)``.
+        corner2dof : TensorLike or None
+            ``use_relaxation`` 为真且存在角点时形状为 ``(NCP, 4)``, 即
+            ``[d0, d1, d2, d3]``, 前 3 个取自该顶点, ``d3`` 为追加编号; 否则为 None.
+        """
         mesh = self.mesh
         NN = mesh.number_of_nodes()
         nldof = self.number_of_internal_local_dofs('node')
@@ -259,6 +372,17 @@ class HuZhangFEDof2d():
         return edge2dof.reshape(NE, eldof)
 
     def edge_to_dof(self) -> TensorLike:
+        """每条边上 ``[端点 0, 边内部, 端点 1]`` 的全局自由度编号, 按全局边方向排列.
+
+        每行为 ``[e0dof, edge2idof, e1dof]``: 两端顶点各取前 2 个顶点自由度, 中间为
+        边内部的 ``2(p-1)`` 个自由度. 松弛模式下, 角点所在两条边界边的端点自由度
+        分别改为 ``corner2dof`` 的前 2 个与后 2 个.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NE, 2(p+1))``.
+        """
         mesh = self.mesh
         edge = mesh.entity('edge')
         edge2idof = self.edge_to_internal_dof()
@@ -372,6 +496,37 @@ class HuZhangFEDof2d():
         return c2d[index]
 
 class HuZhangFESpace2d(FunctionSpace):
+    r"""二维三角形网格上的胡张 (Hu-Zhang) 应力空间 :math:`\Sigma_h`.
+
+    基函数取值为 Voigt 形式 ``[xx, xy, yy]`` 的对称张量; 全局自由度按 "顶点段 ->
+    (松弛角点追加) -> 边段 -> 单元段" 编号. 启用角点松弛时, 构造期生成基底变换
+    矩阵 ``TM``, ``value`` 与 ``div_value`` 先以 ``TM @ uh`` 变换系数.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        三角形网格, 单元须为 3 顶点, 否则抛出 ValueError.
+    p : int, optional
+        应力多项式次数 ``k``, 默认 1.
+    ctype : str, optional
+        保留参数, 当前未使用.
+    use_relaxation : bool, optional
+        是否启用角点松弛, 默认 False.
+    corners : TensorLike, optional
+        形状 ``(N, GD)`` 的几何角点坐标, ``use_relaxation=True`` 时必需; 每个角点须
+        恰好连接 2 个三角形并共享一条从角点出发的内部边.
+
+    Attributes
+    ----------
+    dof : HuZhangFEDof2d
+        自由度管理对象.
+    NCP : int
+        松弛角点个数, 未松弛时为 0.
+    nsframe, esframe, csframe : TensorLike
+        顶点, 边, 单元上的对称张量标架, 见 ``dof_frame_of_S``.
+    TM : CSRTensor
+        形状 ``(gdof, gdof)`` 的基底变换矩阵, 未松弛时为单位阵.
+    """
     def __init__(self, mesh, p: int=1, ctype='C', use_relaxation: bool=False,
                  corners=None):
         self.mesh = mesh
@@ -625,30 +780,43 @@ class HuZhangFESpace2d(FunctionSpace):
 
     ## 自由度接口
     def number_of_local_dofs(self) -> int:
+        """单元上的局部自由度个数 ``3(p+1)(p+2)/2``."""
         return self.dof.number_of_local_dofs()
 
     def number_of_global_dofs(self) -> int:
+        """全局自由度个数, 含松弛角点的追加自由度."""
         return self.dof.number_of_global_dofs()
 
     def interpolation_points(self) -> TensorLike:
+        """自由度对应的插值点坐标; ``HuZhangFEDof2d`` 尚未实现该方法, 调用会抛出 AttributeError."""
         return self.dof.interpolation_points()
 
     def cell_to_dof(self, index: Index=_S) -> TensorLike:
+        """单元到全局自由度的映射, 形状 ``(NC, ldof)``, 顺序为顶点 -> 边 -> 单元."""
         return self.dof.cell_to_dof(index=index)
 
     def face_to_dof(self, index: Index=_S) -> TensorLike:
+        """面到全局自由度的映射; ``HuZhangFEDof2d`` 尚未实现该方法, 调用会抛出 AttributeError."""
         return self.dof.face_to_dof(index=index)
 
     def edge_to_dof(self, index=_S):
+        """边到全局自由度的映射.
+
+        ``HuZhangFEDof2d.edge_to_dof`` 不接受 ``index``, 本方法目前会抛出 TypeError;
+        需要边自由度时直接调用 ``self.dof.edge_to_dof()``.
+        """
         return self.dof.edge_to_dof(index=index)
 
     def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
+        """标记边界自由度; ``HuZhangFEDof2d`` 尚未实现该方法, 调用会抛出 AttributeError."""
         return self.dof.is_boundary_dof(threshold, method=method)
 
     def geo_dimension(self):
+        """几何维数."""
         return self.GD
 
     def top_dimension(self):
+        """拓扑维数."""
         return self.TD
     
     def boundary_interpolate(self,
@@ -656,6 +824,36 @@ class HuZhangFESpace2d(FunctionSpace):
                             uh: Optional[TensorLike] = None,
                             *, threshold: Optional[Threshold]=None, method=None,
                         ) -> TensorLike:
+        r"""在牵引边界上强施加法向迹 :math:`\sigma_{nn}, \sigma_{nt}` (混合法的本质边界).
+
+        在每条选中边界边的 ``p+1`` 个等距点 ``bm.multi_index_matrix(p, 1)/p`` 上取
+        ``gd`` 的值, 投影到边标架 :math:`(n_f, t_f)` 后得到 ``[sigma_nn, 2*sigma_nt]``
+        (切向乘 Voigt 因子 2), 按 ``edge_to_dof`` 的列顺序
+        ``[q0 法向, q0 切向, q1 法向, q1 切向, ...]`` 写入. 被相邻边界边重复写入的
+        顶点自由度取平均, 见 ``_average_boundary_writes``.
+
+        Parameters
+        ----------
+        gd : Callable or TensorLike
+            边界数据. 可调用时以形状 ``(NEb, p+1, 2)`` 的点坐标调用, 返回最后一维为
+            3 的 Voigt 应力 ``[xx, xy, yy]``, 或最后一维为 2 的外法向牵引
+            :math:`t = \sigma \cdot n_{out}`; 后者两个分量都乘
+            ``boundary_outward_sign``. 非可调用时须带 ``shape`` 属性, 广播到
+            ``(NEb, p+1, gd.shape[-1])``.
+        uh : TensorLike, optional
+            形状 ``(gdof,)`` 的自由度向量, 缺省为零向量.
+        threshold : Threshold, optional
+            边界边的选取 (布尔标记或下标), 缺省取 ``mesh.boundary_edge_flag()``.
+        method : optional
+            保留参数, 当前未使用.
+
+        Returns
+        -------
+        uh : Function
+            写入边界值后的有限元函数.
+        isDDof : TensorLike
+            形状 ``(gdof,)`` 的布尔数组, 标记被写入的自由度.
+        """
         if uh is None:
             uh = bm.zeros((self.number_of_global_dofs(),), dtype=self.ftype, device=self.device)
 
@@ -848,6 +1046,22 @@ class HuZhangFESpace2d(FunctionSpace):
         return self.function(uh), isDDof
 
     def dof_frame(self) -> TensorLike:
+        """顶点, 边, 单元上的向量标架.
+
+        边标架为 ``[face_unit_normal, edge_unit_tangent]``, 即 :math:`(n_f, t_f)`;
+        单元标架为笛卡尔基. 顶点标架先置为笛卡尔基, 再依次被所在边的标架覆盖
+        (同一顶点多次写入时以最后一次为准), 然后边界顶点改取边界边的标架,
+        松弛角点改取 ``corner['to_midedge']`` 所指内部边的标架.
+
+        Returns
+        -------
+        nframe : TensorLike
+            形状 ``(NN, 2, 2)``.
+        eframe : TensorLike
+            形状 ``(NE, 2, 2)``.
+        cframe : TensorLike
+            形状 ``(NC, 2, 2)``.
+        """
         mesh = self.mesh
 
         NN = mesh.number_of_nodes()
@@ -887,6 +1101,22 @@ class HuZhangFESpace2d(FunctionSpace):
         return nframe, eframe, cframe
 
     def dof_frame_of_S(self):
+        r"""由 ``dof_frame`` 张成的对称张量标架, 以 Voigt 分量 ``[xx, xy, yy]`` 表示.
+
+        对向量标架 :math:`(v_0, v_1)`, 第 ``i`` 个对称张量依次为
+        :math:`v_0 \otimes v_0`, :math:`\mathrm{sym}(v_0 \otimes v_1)`,
+        :math:`v_1 \otimes v_1`; 边上即 :math:`\sigma_{nn}, \sigma_{nt}, \sigma_{tt}`
+        对应的方向. 2D 下 ``basis_frame_of_S`` 是本方法的别名.
+
+        Returns
+        -------
+        nsframe : TensorLike
+            形状 ``(NN, 3, 3)``, 第二维为张量编号, 第三维为 Voigt 分量.
+        esframe : TensorLike
+            形状 ``(NE, 3, 3)``.
+        csframe : TensorLike
+            形状 ``(NC, 3, 3)``.
+        """
         mesh = self.mesh
 
         NN = mesh.number_of_nodes()
@@ -915,6 +1145,24 @@ class HuZhangFESpace2d(FunctionSpace):
     basis_frame_of_S = dof_frame_of_S
 
     def basis(self, bc: TensorLike, index: Index=_S):
+        r"""单元积分点处的基函数值, 取值为 Voigt 对称张量 ``[xx, xy, yy]``.
+
+        每个基函数为标量 Lagrange 基与 ``basis_frame_of_S`` 中对称张量的乘积. 局部
+        基函数顺序与 ``cell_to_dof`` 一致: 顶点 -> 边上连续分量 -> 边上
+        :math:`\sigma_{tt}` 分量 -> 单元泡函数 (仅 ``p >= 3``).
+
+        Parameters
+        ----------
+        bc : TensorLike or tuple
+            形状 ``(NQ, 3)`` 的重心坐标, 也接受积分器传入的单元素 tuple.
+        index : Index, optional
+            单元选取, 缺省为全部单元.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, NQ, ldof, 3)``, ``NC`` 为所选单元数.
+        """
         # FEALPy 4.0.0 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
         if isinstance(bc, tuple):
             bc = bc[0] if len(bc) == 1 else bm.stack(list(bc), axis=-1)
@@ -998,6 +1246,23 @@ class HuZhangFESpace2d(FunctionSpace):
         return phi
 
     def div_basis(self, bc: TensorLike):
+        r"""单元积分点处基函数的散度, 在全部单元上计算.
+
+        对 Voigt 张量 ``[xx, xy, yy]``, 散度为
+        :math:`(\partial_x \sigma_{xx} + \partial_y \sigma_{xy},
+        \partial_x \sigma_{xy} + \partial_y \sigma_{yy})`, 梯度取
+        ``grad_shape_function(..., variables='x')`` 的物理导数. 局部基函数顺序同 ``basis``.
+
+        Parameters
+        ----------
+        bc : TensorLike or tuple
+            形状 ``(NQ, 3)`` 的重心坐标, 也接受积分器传入的单元素 tuple.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NC, NQ, ldof, 2)``.
+        """
         # FEALPy 4.0.0 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
         if isinstance(bc, tuple):
             bc = bc[0] if len(bc) == 1 else bm.stack(list(bc), axis=-1)

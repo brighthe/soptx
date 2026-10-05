@@ -1,3 +1,10 @@
+"""Lagrange 位移有限元分析器.
+
+在 Lagrange 张量空间上组装线弹性刚度算子与外载荷, 施加 Dirichlet 边界条件并
+求解状态与伴随方程. 算子层级 ``'fa'``, ``'ea'``, ``'pa'``, ``'ua'`` 共用同一套
+离散; ``reduce_load`` 与 ``wrap_operator`` 是串行下为恒等操作的分布式扩展点.
+"""
+
 from typing import Optional, Union, Literal, Dict
 
 from soptx.backend import backend_manager as bm
@@ -34,6 +41,13 @@ from soptx.fem.operators import ConstrainedOperator
 from soptx.materials import LinearElasticMaterial
 
 class LagrangeFEMAnalyzer(BaseLogged):
+    """Lagrange 位移有限元的线弹性分析器.
+
+    消费满足 ``DirichletElasticityProblem`` 的 Problem, 提供刚度组装, 边界条件
+    施加, 状态与伴随求解, 应力计算及刚度对密度的导数, 满足 ``AnalysisStage``
+    协议. 设置 ``topopt_algorithm`` 时按 ``interpolation_scheme`` 插值材料参数.
+    """
+
     def __init__(self,
                 disp_mesh: HomogeneousMesh,
                 pde: DirichletElasticityProblem,
@@ -791,6 +805,28 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     enable_timing: bool = False, 
                     **kwargs
                 ) -> Dict[str, Function]:
+        """组装刚度与载荷, 施加边界条件后求解位移.
+
+        Parameters
+        ----------
+        rho_val : TensorLike or Function, optional
+            密度场. 拓扑优化模式下必须提供; 标准有限元分析下被忽略并告警.
+        adjoint : bool, optional
+            为 ``True`` 时在刚度中叠加弹簧刚度, 右端项取物理载荷与伴随载荷两列,
+            一次求解两个右端. 仅 ``operator_level='fa'`` 支持.
+        enable_timing : bool, optional
+            是否打印各阶段耗时.
+        **kwargs
+            传给 ``solve_system`` 的选项. 非 ``'fa'`` 层级下若未给出 ``x0``,
+            以 ``apply_bc`` 得到的 Dirichlet 基准向量为初值.
+
+        Returns
+        -------
+        dict
+            ``'displacement'`` 为位移解: ``adjoint=False`` 时是有限元函数,
+            ``adjoint=True`` 时是形状 ``(gdof, 2)`` 的张量, 第 0 列为物理解.
+            ``'solver'`` 为 ``solve_system`` 返回的求解诊断.
+        """
         t = None
         if enable_timing:
             t = timer(f"分析求解位移阶段")

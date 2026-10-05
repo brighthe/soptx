@@ -25,7 +25,9 @@ class HasGlobalDofs(Protocol):
     """
 
     @property
-    def global_dofs(self) -> Any: ...
+    def global_dofs(self) -> Any:
+        """升序排列的接口全局自由度编号, 形状 ``(n_interface,)``."""
+        ...
 
 
 @dataclass(frozen=True)

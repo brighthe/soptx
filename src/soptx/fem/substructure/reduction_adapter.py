@@ -74,6 +74,7 @@ def normalize_local_reduction(
             if hasattr(condensor, "get_chunk_stiffness"):
                 # 流式容器模式: 不在内存中持有全局全量张量, 按需由 get_chunk_stiffness 提供
                 def recover(u_b_batch: Any) -> Any:
+                    """委托流式缩聚容器的 recover 批量恢复内部位移."""
                     return condensor.recover(u_b_batch)
                 return None, recover
             raise RuntimeError("condensor 必须在全局装配前完成 condense().")

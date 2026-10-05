@@ -1,3 +1,5 @@
+"""胡张 (Hu-Zhang) 对称应力有限元空间的工厂, 按 ``mesh.top_dimension()`` 分派到 2D/3D 实现."""
+
 from soptx.mesh import MeshView
 
 class HuZhangFESpace:

@@ -1,3 +1,4 @@
+"""积分子的辅助工具: 参考单元上的符号积分与应变矩阵的分块构造."""
 
 import sympy as sp
 
@@ -9,6 +10,19 @@ from soptx.functionspace import FunctionSpace, LagrangeFESpace
 from soptx.mesh import SimplexMesh, TensorMesh, UniformMesh2d, UniformMesh3d
 
 class LinearSymbolicIntegration:
+    """用 sympy 在参考单元上对 Lagrange 基函数做符号积分.
+
+    单纯形网格以重心坐标为变量, 积分值相对单元测度归一化; ``UniformMesh2d`` 在
+    ``[0, 1]^2`` 上积分; 其余网格一律按三维结构网格在 ``[0, 1]^3`` 上积分.
+
+    Parameters
+    ----------
+    space1 : FunctionSpace
+        第一个有限元空间.
+    space2 : FunctionSpace, optional
+        第二个有限元空间, 默认与 ``space1`` 相同.
+    """
+
     def __init__(self, space1: FunctionSpace, space2 : Optional[FunctionSpace]=None):
         """
         初始化符号积分类
@@ -364,6 +378,18 @@ class LinearSymbolicIntegration:
         return grad_phi
     
     def multi_index(self, monomial: sp.Expr) -> TensorLike:
+        """取重心坐标单项式中各 ``l_i`` 的幂次.
+
+        Parameters
+        ----------
+        monomial : sympy.Expr
+            关于重心坐标符号 ``l0, l1, ...`` 的单项式.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(GD+1, )`` 的整数幂指标, 不出现的变量记为 0.
+        """
         l = self.l
         GD = self.GD
 
@@ -428,6 +454,14 @@ class LinearSymbolicIntegration:
             raise ValueError(error_msg)  # 抛出更具体的错误
     
     def phi_phi_matrix(self) -> sp.tensor.array.MutableDenseNDimArray:
+        """计算两组基函数乘积在参考单元上的积分.
+
+        Returns
+        -------
+        sympy.MutableDenseNDimArray
+            形状 ``(1, ldof1, ldof2)``, ``M[0, i, j]`` 为 ``phi1_i * phi2_j`` 经
+            ``integrate`` 得到的积分值.
+        """
         if isinstance(self.mesh, SimplexMesh):
             phi1 = self.basis(self.p1, self.mi1)
             phi2 = self.basis(self.p2, self.mi2)
@@ -499,6 +533,8 @@ class LinearSymbolicIntegration:
         return S
 
 class NonlinearSymbolicIntegration:
+    """非线性符号积分的占位类, 尚无实现."""
+
     pass
 
 def normal_strain(gphi: TensorLike, indices: TensorLike, *, out:

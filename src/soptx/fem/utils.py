@@ -1,3 +1,10 @@
+"""多分辨率拓扑优化的有限元辅助函数.
+
+包括把位移单元积分点映射到子密度单元, 计算子密度单元积分点处的形函数梯度,
+以及位移单元布局 ``(NC, n_sub, ...)`` 与密度单元布局 ``(NC * n_sub, ...)`` 之间
+的数据重排.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

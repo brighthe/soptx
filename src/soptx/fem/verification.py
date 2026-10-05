@@ -55,6 +55,7 @@ def solution_error(
     )
 
     def zero_field(points):
+        """与精确位移同形状的零场, 用于以 ``mesh.error`` 计算精确解范数."""
         return bm.zeros_like(pde.disp_solution(points))
 
     exact_norm = float(
