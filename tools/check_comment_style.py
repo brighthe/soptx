@@ -1,7 +1,7 @@
 """注释与 docstring 风格棘轮门禁.
 
 看住两条约定: 注释与 docstring 使用英文半角标点; ``src/`` 下公开 API 必须有
-docstring. 存量违规以棘轮基线常数记录, 数量超过基线即失败; 清理存量后应同步
+docstring (``@overload`` 存根除外). 存量违规以棘轮基线常数记录, 数量超过基线即失败; 清理存量后应同步
 下调基线常数, 使其只降不升.
 """
 
@@ -37,7 +37,6 @@ PORTED_ROOTS = (
     "src/soptx/fem/form.py",
     "src/soptx/fem/functional.py",
     "src/soptx/fem/integrator.py",
-    "examples/pinn_elasticity/_pinn_support.py",
 )
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
 PORTED_EXCEPTIONS = {
@@ -54,6 +53,15 @@ def is_ported(relative: str) -> bool:
     if relative in PORTED_EXCEPTIONS:
         return False
     return relative.startswith(PORTED_ROOTS)
+
+
+def is_overload(node: ast.AST) -> bool:
+    """判断函数是否为 ``@overload`` 存根; numpydoc 惯例只为实现写文档, 存根不要求 docstring."""
+    for decorator in getattr(node, "decorator_list", []):
+        name = getattr(decorator, "id", None) or getattr(decorator, "attr", None)
+        if name == "overload":
+            return True
+    return False
 
 
 def iter_python_files() -> list[Path]:
@@ -122,7 +130,11 @@ def collect_violations() -> tuple[list[str], list[str]]:
             if isinstance(
                 node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
             ):
-                if not node.name.startswith("_") and id(node) not in documented:
+                if (
+                    not node.name.startswith("_")
+                    and id(node) not in documented
+                    and not is_overload(node)
+                ):
                     missing.append(f"{relative}:{node.lineno} {node.name}")
     return fullwidth, missing
 
