@@ -122,14 +122,18 @@
 
 ### 2.1 结构整理（另开分支，分两个提交）
 
-**HuZhang 空间移入 `soptx/functionspace/`**（风险低）
+**HuZhang 空间移入 `soptx/functionspace/`**（已完成）
 
 - 移动 `fem/spaces/huzhang_fe_space.py`、`huzhang_fe_space_2d.py`、`huzhang_fe_space_3d.py`，
   约 1.9k 行。
-- 依据：HuZhang 空间不依赖 fem 层的任何能力，现在分两处只是「FEALPy 来源 vs SOPTX 自有」的
-  历史遗留。反过来把空间整体放进 fem 也不行，第 1 层的 materials 与 solvers 依赖它们。
-- `fem/spaces/__init__.py` 先保留为转发（fem 导入 functionspace 是合法方向），现有导入不用改。
-- 验证：全量测试，加 HuZhang 示例的数值基线比对。
+- 依据：HuZhang 空间只依赖 backend、mesh、sparse 与 functionspace 基类，不依赖 fem 层的任何
+  能力，现在分两处只是「FEALPy 来源 vs SOPTX 自有」的历史遗留。反过来把 functionspace 整体
+  放进 fem 也不行：第 1 层的 materials（`flatten_indices`）依赖它。
+- `fem/spaces/__init__.py` 保留为转发（fem 导入 functionspace 是合法方向），仓库内导入已改到
+  `soptx.functionspace`；旧子模块路径（如 `soptx.fem.spaces.huzhang_fe_space_2d`）不再存在。
+- 3 个文件是 SOPTX 自有代码，已加入 `tools/check_comment_style.py` 的 `PORTED_EXCEPTIONS`，
+  搬进 `functionspace/` 后照常计入注释风格棘轮。
+- 验证：全量测试；HuZhang 与 Lagrange 装配矩阵与 `88018e7` 逐位一致，示例输出逐行一致。
 
 **`BilinearForm` / `LinearForm` 的基类与子类合并**（会改变行为，需单独验证）
 

@@ -5,9 +5,9 @@ from soptx.typing import TensorLike, Index, _S, Threshold
 from soptx.backend import TensorLike
 from soptx.backend import backend_manager as bm
 from soptx.mesh.mesh_base import Mesh
-from soptx.functionspace import FunctionSpace
-from soptx.functionspace.function import Function
-from soptx.functionspace.functional import symmetry_span_array, symmetry_index
+from .space import FunctionSpace
+from .function import Function
+from .functional import symmetry_span_array, symmetry_index
 from soptx.decorator import barycentric, cartesian
 
 from scipy.special import factorial, comb

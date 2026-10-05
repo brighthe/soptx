@@ -12,7 +12,7 @@ from soptx.fem import (
     create_huzhang_checkerboard_mesh,
     create_huzhang_symmetric_single_diagonal_mesh,
 )
-from soptx.fem.spaces import HuZhangFESpace
+from soptx.functionspace import HuZhangFESpace
 
 
 def _box_mesh() -> TriangleMesh:

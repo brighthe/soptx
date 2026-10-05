@@ -39,7 +39,7 @@ from .levels import (
 from .linear_form import LinearForm
 from .matrix import CSRPattern, assemble_csr, build_csr_pattern
 from .operators import ConstrainedOperator
-from .spaces import HuZhangFESpace
+from ..functionspace import HuZhangFESpace
 
 # 向后兼容别名: 结构网格生成器已迁至 soptx.mesh.structured_triangle,
 # 此处保留旧导入路径, 新代码请直接从 soptx.mesh 导入。

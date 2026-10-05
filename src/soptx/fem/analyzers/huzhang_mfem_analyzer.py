@@ -28,7 +28,7 @@ from soptx.fem.integrators import (
     JumpPenaltyIntegrator,
     SourceIntegrator,
 )
-from soptx.fem.spaces import HuZhangFESpace, boundary_outward_sign
+from soptx.functionspace import HuZhangFESpace, boundary_outward_sign
 from soptx.materials import LinearElasticMaterial
 
 class HuZhangMFEMAnalyzer(BaseLogged):

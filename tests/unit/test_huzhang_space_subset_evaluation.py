@@ -16,7 +16,7 @@ import pytest
 from soptx.backend import backend_manager as bm
 
 from soptx.fem import create_huzhang_checkerboard_mesh
-from soptx.fem.spaces import HuZhangFESpace
+from soptx.functionspace import HuZhangFESpace
 
 
 def _relaxed_space(degree: int) -> Any:

@@ -13,7 +13,7 @@ import numpy as np
 from soptx.backend import backend_manager as bm
 from soptx.mesh import TriangleMesh
 
-from soptx.fem.spaces import HuZhangFESpace
+from soptx.functionspace import HuZhangFESpace
 
 
 _TRACTION = -2.0

@@ -6,8 +6,8 @@ from soptx.backend import backend_manager as bm
 from soptx.mesh.mesh_base import Mesh
 from soptx.sparse import COOTensor
 from soptx.sparse.ops import spdiags
-from soptx.functionspace import FunctionSpace
-from soptx.functionspace.functional import symmetry_span_array, symmetry_index
+from .space import FunctionSpace
+from .functional import symmetry_span_array, symmetry_index
 from soptx.decorator import barycentric
 
 import numpy as np

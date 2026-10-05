@@ -43,6 +43,9 @@ PORTED_ROOTS = (
 )
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
 PORTED_EXCEPTIONS = {
+    "src/soptx/functionspace/huzhang_fe_space.py",
+    "src/soptx/functionspace/huzhang_fe_space_2d.py",
+    "src/soptx/functionspace/huzhang_fe_space_3d.py",
     "src/soptx/mesh/structured_box.py",
     "src/soptx/mesh/structured_triangle.py",
 }

@@ -9,11 +9,12 @@ SOPTX 的实现直接操作应力空间基底，不为位移元引入额外的 B
 ### 文件布局
 
 ```
+src/soptx/functionspace/
+├── huzhang_fe_space.py              ← 工厂，按 mesh.top_dimension() 分派
+├── huzhang_fe_space_2d.py           ← 2D 应力空间（含角点松弛）
+└── huzhang_fe_space_3d.py           ← 3D 应力空间（无松弛）
+
 src/soptx/fem/
-├── spaces/
-│   ├── huzhang_fe_space.py          ← 工厂，按 mesh.top_dimension() 分派
-│   ├── huzhang_fe_space_2d.py       ← 2D 应力空间（含角点松弛）
-│   └── huzhang_fe_space_3d.py       ← 3D 应力空间（无松弛）
 ├── integrators/
 │   ├── huzhang_stress_integrator.py ← A 块：∫ C⁻¹ σ : τ（柔度双线性型）
 │   ├── huzhang_mix_integrator.py    ← B 块：∫ div σ · u（应力-位移耦合）
@@ -25,7 +26,7 @@ src/soptx/mesh/
 └── structured_triangle.py           ← 与角点松弛兼容的结构网格生成器
 ```
 
-两个空间类都实现 DOF 枚举、`basis` 与 `div_basis`；`huzhang_fe_space_2d.py` 另外提供角点松弛变换矩阵 `TM` 的构造。结构网格生成器只构造 `TriangleMesh`、不依赖任何应力空间对象，因此独立放在 `soptx.mesh` 下；`soptx.fem` 与 `soptx.fem.spaces` 保留了向后兼容的导入别名。
+两个空间类都实现 DOF 枚举、`basis` 与 `div_basis`；`huzhang_fe_space_2d.py` 另外提供角点松弛变换矩阵 `TM` 的构造。应力空间只依赖网格与 `soptx.functionspace` 的基类，与 Lagrange 空间同放在 `soptx.functionspace` 下；结构网格生成器只构造 `TriangleMesh`、不依赖任何应力空间对象，因此独立放在 `soptx.mesh` 下。`soptx.fem` 与 `soptx.fem.spaces` 保留了向后兼容的导入别名。
 
 ### 核心类关系
 
