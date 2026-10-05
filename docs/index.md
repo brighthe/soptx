@@ -5,12 +5,8 @@
 
 ## 架构
 
-- [`architecture/overview.md`](architecture/overview.md) — 分层、目录职责和公共 API；
-- [`architecture/adr-0001-layered-src-layout.md`](architecture/adr-0001-layered-src-layout.md) —
-  `src/soptx` 架构决策；
-- [`architecture/migration-map.md`](architecture/migration-map.md) — `1.1.x` 旧→新路径；
-- [`architecture/file-classification.md`](architecture/file-classification.md) —
-  maintained、incubating、experiment、compatibility 与 archive 分类。
+分层与目录职责见根目录 [`README.md`](../README.md)「目录入口」一节；分层由
+`tools/check_architecture.py` 强制。
 
 ## 求解器
 

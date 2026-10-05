@@ -101,14 +101,21 @@ evidence 的 `environment` 自 schema 5 起不再记录 `fealpy`：全部数值�
 | `docs/` | 架构、数学模型、验证和引用文档 |
 | `reference_code/` | 待归档且许可证未核实的第三方参考代码 |
 
-各路径的 maintained、incubating、experiment、compatibility 与 archive 分类及其迁移
-政策见
-[`docs/architecture/file-classification.md`](docs/architecture/file-classification.md)。
+`src/soptx` 的分层由 `tools/check_architecture.py` 的 `LAYER` 表强制，只允许导入同层或
+更低层：
 
-目标依赖方向是
-`core/protocols/ml → materials/problems → fem → topology → postprocess`。Problem 只表达
-区域、载荷、边界与精确解；Material 独立；网格由 FEM workflow 或 example case
-显式创建。详细设计见 [`docs/architecture/overview.md`](docs/architecture/overview.md)。
+| 层 | 子包 |
+| --- | --- |
+| 0 | `backend`、`core`、`decorator`、`protocols`、`quadrature`、`sparse`、`typing` |
+| 1 | `functionspace`、`materials`、`mesh`、`problems` |
+| 2 | `fem`、`ml` |
+| 3 | `topology` |
+| 4 | `postprocess` |
+
+`solvers` 尚未登记到该表，不受分层检查。
+
+Problem 只表达区域、载荷、边界与精确解；Material 独立；网格由 FEM workflow 或
+example case 显式创建。
 
 ## 开发门禁
 
@@ -132,8 +139,7 @@ CI 另有一个 Matrix-Free fast job，装上 `mpi4py` 后重跑 `tests -q -k ma
 - 结构拓扑优化、材料插值、正则化、目标函数、约束和优化器的实现；
 - 有限元分析与拓扑优化相关的软件接口和可执行模型；
 - 单元测试、等价性验证、示例程序和可复现实验；
-- 软件使用文档。版本变更以 Git 历史和
-  [`docs/architecture/migration-map.md`](docs/architecture/migration-map.md) 为准。
+- 软件使用文档。版本变更以 Git 历史为准。
 
 以下内容由其他仓库维护：
 
