@@ -85,7 +85,7 @@ HuZhangMFEMAnalyzer
 线弹性问题的边界条件与外载荷在位移元与混合元中呈现严格的变分对偶性：位移法强施加位移、弱施加载荷，混合法强施加载荷、弱施加位移。混合边界条件通过 `MixedBoundaryElasticityProblem` 协议定义：
 
 - **位移边界 $\Gamma_D$**：弱施加（自然边界），通过 $\int_{\Gamma_D} (\tau \cdot n) \cdot u_D \; ds$ 进入右端项。支持非齐次位移。
-- **牵引边界 $\Gamma_N$**：强施加（本质边界），直接修改刚度矩阵对应行。使用 `face_to_cell` / `face_unit_normal` 适配 FEALPy 4.0 API。
+- **牵引边界 $\Gamma_N$**：强施加（本质边界），直接修改刚度矩阵对应行。使用网格（`soptx.mesh`）的 `face_to_cell` / `face_unit_normal` 接口。
 
 纯 Dirichlet 问题是混合边界的退化形式（`AllDisplacementBoundaryMixin`）。
 

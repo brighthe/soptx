@@ -24,7 +24,7 @@ def boundary_outward_sign(mesh: Mesh, index: Index = _S) -> TensorLike:
     r"""返回边界边上 ``face_unit_normal()`` 相对于外法向的符号.
 
     ``mesh.face_unit_normal()`` 由全局边定向决定, 在边界上并不保证朝外: 单位
-    正方形的结构化三角网格里恰有一半的边界边法向朝内 (fealpy 自带的
+    正方形的结构化三角网格里恰有一半的边界边法向朝内 (soptx.mesh 的
     ``TriangleMesh.from_box`` 同样如此). 凡是把"外法向牵引" :math:`t = \sigma
     \cdot n_{out}` 与该法向配对的计算, 都必须先取回这个符号, 否则朝内的那一半
     边会整体反号.
@@ -874,7 +874,7 @@ class HuZhangFESpace2d(FunctionSpace):
         mesh = self.mesh
         p = self.p
 
-        # FEALPy 4.0.0 的 Mesh 不再挂载 edgedata, 边界标记改由调用方经
+        # soptx.mesh 的网格不挂载 edgedata, 边界标记由调用方经
         # threshold 显式传入; 缺省时回退到全部边界边
         if threshold is not None:
             ebdflag = threshold
@@ -911,7 +911,7 @@ class HuZhangFESpace2d(FunctionSpace):
         elif dim_gd == 2:
             #* Case B: 输入是外法向牵引向量 t = sigma . n_out
             # 获取边界标架的法向 n_f 和切向 t_f
-            # 二维下 face 即 edge, FEALPy 4.0.0 只保留 face_unit_normal
+            # 二维下 face 即 edge, 网格只提供 face_unit_normal
             en = mesh.face_unit_normal()[ebdflag]   # (NEb, 2)
             et = mesh.edge_unit_tangent()[ebdflag]  # (NEb, 2)
 
@@ -1095,7 +1095,7 @@ class HuZhangFESpace2d(FunctionSpace):
         cframe[:, 0] = bm.array([[1, 0]], dtype=mesh.ftype)
         cframe[:, 1] = bm.array([[0, 1]], dtype=mesh.ftype)
 
-        # 二维下 face 即 edge, FEALPy 4.0.0 只保留 face_unit_normal
+        # 二维下 face 即 edge, 网格只提供 face_unit_normal
         eframe[:, 0] = mesh.face_unit_normal()
         eframe[:, 1] = mesh.edge_unit_tangent()
         nframe[edge] = eframe[:, None]
@@ -1177,7 +1177,7 @@ class HuZhangFESpace2d(FunctionSpace):
         TensorLike
             形状 ``(NC, NQ, ldof, 3)``, ``NC`` 为所选单元数.
         """
-        # FEALPy 4.0.0 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
+        # 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
         if isinstance(bc, tuple):
             bc = bc[0] if len(bc) == 1 else bm.stack(list(bc), axis=-1)
         p = self.p
@@ -1280,7 +1280,7 @@ class HuZhangFESpace2d(FunctionSpace):
         TensorLike
             形状 ``(NC, NQ, ldof, 2)``.
         """
-        # FEALPy 4.0.0 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
+        # 积分器把重心坐标包成单元素 tuple 传入, 解包后即 (NQ, TD+1) 数组
         if isinstance(bc, tuple):
             bc = bc[0] if len(bc) == 1 else bm.stack(list(bc), axis=-1)
         p = self.p
@@ -1305,7 +1305,7 @@ class HuZhangFESpace2d(FunctionSpace):
 
         nsframe, esframe, csframe = self.basis_frame_of_S()
 
-        # FEALPy 4.0.0 的 grad_shape_function 默认返回参考单元
+        # 网格的 grad_shape_function 默认返回参考单元
         # 坐标导数 (2D 为物理导数的一半), 必须带 variables='x' 才返回笛卡尔
         # 物理梯度; 与 3D 空间的 div_basis 调用方式保持一致.
         gphi_s = self.mesh.grad_shape_function(bc, self.p, variables='x')  # (NC, NQ, LDOF, GD)

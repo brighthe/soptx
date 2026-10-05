@@ -28,7 +28,7 @@ _MUMPS_ICNTL14_SCHEDULE = (None, 100, 400, 1600)
 
 
 def _as_scipy(A):
-    """FEALPy 稀疏张量转 scipy; 已是 scipy 稀疏矩阵时原样返回."""
+    """soptx.sparse 稀疏张量转 scipy; 已是 scipy 稀疏矩阵时原样返回."""
     return A.to_scipy() if hasattr(A, "to_scipy") else A
 
 
@@ -88,7 +88,7 @@ def _scipy_solve(A, b):
     Notes
     -----
     SuperLU 会对输入矩阵做原地的列置换与缩放, 而 ``to_scipy()`` 返回的是与
-    FEALPy 张量共享内存的视图; 对已经是 CSR 的 scipy 矩阵, ``tocsr()`` 默认
+    soptx.sparse 张量共享内存的视图; 对已经是 CSR 的 scipy 矩阵, ``tocsr()`` 默认
     也不复制. 两者叠加会让调用方持有的 K 在求解后被破坏 -- 拓扑优化里同一个
     K 还要用于伴随求解. 因此转 CSR 与保护性复制统一在本函数内完成, 调用方不
     必再自行 ``to_scipy().tocsr()`` 或预先缓存副本.

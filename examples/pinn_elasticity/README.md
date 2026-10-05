@@ -1,6 +1,6 @@
 # 线弹性 PINN 2D/3D 求解算例 (Linear Elasticity PINN)
 
-本目录提供基于 PyTorch 与 FEALPy 的二维平面应变与三维各向同性线弹性强形式 Physics-Informed Neural Networks (PINN) 求解器。
+本目录提供基于 PyTorch 与 SOPTX 的二维平面应变与三维各向同性线弹性强形式 Physics-Informed Neural Networks (PINN) 求解器。
 
 算例采用自包含的单文件代码设计，方便快速阅读与二次扩展。
 

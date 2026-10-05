@@ -3,7 +3,7 @@
 
 """线性网格 (``MeshView``) 上 Lagrange 空间的标量自由度管理器.
 
-管理器沿用 FEALPy 的 ``MeshView`` 接口: 调用 ``cell_to_ipoint``、
+管理器使用 soptx.mesh 的 ``MeshView`` 接口: 调用 ``cell_to_ipoint``、
 ``face_to_ipoint``、``edge_to_ipoint``、``interpolation_points`` 及相应计数方法,
 而不直接访问更底层的 ``EntityView``.
 """

@@ -125,7 +125,7 @@ assert load.vector == (0.0, -1.0)
 #### 使用示例
 
 ```python
-from fealpy.mesh import TriangleMesh
+from soptx.mesh import TriangleMesh
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import HalfMBBBeamRight2d
@@ -258,7 +258,7 @@ assert load.vector == (0.0, -1.0, 0.0)
 #### 使用示例
 
 ```python
-from fealpy.mesh import HexahedronMesh
+from soptx.mesh import HexahedronMesh
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import FullMBBBeam3d

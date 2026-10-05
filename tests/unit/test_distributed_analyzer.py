@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-# distributed_analyzer 经由 fealpy.distributed 引入 mpi4py, 属可选 extra
+# distributed_analyzer 经由 soptx.fem.distributed 引入 mpi4py, 属可选 extra
 pytest.importorskip("mpi4py")
 
 from soptx.fem.analyzers import builders
@@ -39,7 +39,7 @@ def test_cg_is_the_registered_solver() -> None:
 
 
 def test_an_unweighted_solver_is_refused_with_an_explanation() -> None:
-    """转发到 fealpy 的 gmres 会重复计数共享自由度, 必须拒绝而不是照跑."""
+    """未加权内积的求解器 (如 gmres) 会重复计数共享自由度, 必须拒绝而不是照跑."""
 
     instance = Bare()
 

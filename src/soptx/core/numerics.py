@@ -3,10 +3,10 @@
 These constants are needed on both sides of a validation pipeline: by the
 solvers themselves, and by the evidence tooling that has to reproduce a run's
 convergence criteria without ever constructing one.  That tooling must be able
-to run on machines without FEALPy or an MPI runtime, which is why this module
-sits in :mod:`soptx.core` -- layer 0, deliberately free of runtime FEALPy and
-mpi4py imports -- rather than under ``soptx.fem``, where importing anything
-pulls in FEALPy through the package ``__init__``.
+to run on machines without an MPI runtime, which is why this module sits in
+:mod:`soptx.core` -- layer 0, deliberately free of finite-element and mpi4py
+imports -- rather than under ``soptx.fem``, where importing anything pulls in
+the whole finite-element stack through the package ``__init__``.
 
 It is intentionally not re-exported from ``soptx.core.__init__``: consumers
 import it by its full path, so the dependency shows up at every call site.

@@ -1,6 +1,6 @@
 """三种稀疏直接法后端的正确性验证入口.
 
-被验证的对象是 ``soptx/solvers/direct.py``: 它把 FEALPy 稀疏算子交给 SuperLU /
+被验证的对象是 ``soptx/solvers/direct.py``: 它把 soptx.sparse 稀疏算子交给 SuperLU /
 MUMPS / MKL PARDISO 求解, 本文件检查这条交接是否正确、是否守规矩. 有限元装配
 只是为了造出一个真实的弹性刚度阵, 不是被验证的对象.
 
@@ -20,8 +20,8 @@ solution   制造解的 L2 观测收敛阶不低于门禁. 残差只说明"这�
            说明不了"装配与边界条件对了"; 收敛阶补的正是后一半. 这一项复用
            ``examples/lagrange_elasticity/manufactured_convergence_demo.py``
            的加密序列与判定, 不另写一份.
-ownership  求解后调用方持有的矩阵数值与索引均未被改写. 分两档输入: FEALPy 稀疏
-           算子 (主路径) 与原生 scipy CSR (substructure 接口的路径, 也正是
+ownership  求解后调用方持有的矩阵数值与索引均未被改写. 分两档输入: soptx.sparse
+           稀疏算子 (主路径) 与原生 scipy CSR (substructure 接口的路径, 也正是
            ``_scipy_solve`` 里那句 ``tocsr(copy=True)`` 唯一起作用的地方).
 guard      非法 solver 名与非法 sym 值都抛 ValueError.
 
@@ -255,7 +255,7 @@ def build_system(
     """装配一个带 Dirichlet 边界的线弹性系统.
 
     返回施加过本质边界条件的全局算子 (对称正定) 与右端项. ``"fa"`` 下算子是
-    稀疏矩阵, ``"ea"`` 下是 ``DirichletBCOperator``; 后者的右端项在 Dirichlet 自由
+    稀疏矩阵, ``"ea"`` 下是 ``ConstrainedOperator``; 后者的右端项在 Dirichlet 自由
     度上取边界值, 迭代法的初值必须携带同样的分量.
 
     Returns
@@ -629,10 +629,10 @@ def print_error_table(rows: list[dict[str, Any]], orders: list[float | None]) ->
 # --------------------------------------------------------------------------
 # ownership: 调用方矩阵的所有权
 # --------------------------------------------------------------------------
-# 两档输入: FEALPy 稀疏算子是主路径, 原生 scipy CSR 是 substructure 接口传进来
+# 两档输入: soptx.sparse 稀疏算子是主路径, 原生 scipy CSR 是 substructure 接口传进来
 # 的路径, 也正是 _scipy_solve 里那句 tocsr(copy=True) 唯一起作用的地方.
 INPUT_ARMS = ("tensor", "csr")
-INPUT_ARM_LABELS = {"tensor": "FEALPy 算子", "csr": "scipy CSR"}
+INPUT_ARM_LABELS = {"tensor": "soptx.sparse 算子", "csr": "scipy CSR"}
 
 
 def ownership_evidence(

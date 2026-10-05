@@ -66,7 +66,7 @@ class P1TraceLoad:
 
         return bm.where(bm.expand_dims(on_line, axis=-1), traction, bm.zeros_like(traction))
 
-    # 兼容按名字调用的场景 (fealpy 的部分接口按 ``obj.traction(points)`` 取值)
+    # 兼容按名字调用的场景 (soptx 的部分接口按 ``obj.traction(points)`` 取值)
     @cartesian
     def traction(self, points: TensorLike) -> TensorLike:
         """``__call__`` 的具名别名."""

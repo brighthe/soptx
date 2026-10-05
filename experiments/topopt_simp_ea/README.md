@@ -2,7 +2,7 @@
 
 本模块验证 EA/EbE（Element Assembly / Element-by-Element）精确 Matrix-Free 变密度拓扑优化闭环，并与 `experiments/topopt_simp_fa/` 在统一条件下对照。实验目录只负责工况注册、公共组件组装、结果验收、对照与证据汇总；有限元分析、材料插值、目标函数、体积约束、Filter 和 Optimizer 均调用 `src/soptx` 的公开接口。
 
-与 FA 的唯一算子差异：`operator_level="ea"`，每次迭代不显式生成全局稀疏刚度矩阵，通过单元 gather、局部作用和 scatter-add 完成算子作用；求解器固定为 fealpy `cg`。
+与 FA 的唯一算子差异：`operator_level="ea"`，每次迭代不显式生成全局稀疏刚度矩阵，通过单元 gather、局部作用和 scatter-add 完成算子作用；求解器固定为 `soptx.solvers` 的 `cg`。
 
 首轮范围限定为规则矩形／长方体区域。Triangle 由规则盒状网格系统剖分得到，不代表一般非结构化网格能力。
 
@@ -30,7 +30,7 @@
 
 ## 对照分层
 
-- **Tier 1（强对照）**：5 个工况的基准运行均填写 `fa_reference`，两侧同用 fealpy `cg`（`rtol=atol=1e-12`），只差算子层级。`compare.py` 执行参数一致性门禁、逐迭代轨迹对照、锁步对照（同一密度下的 u、dc、真残差）和阈值化拓扑对照。带 override 的运行用相同的 `--case ID --override ...` 指定，脚本在 FA 侧重放同一组 override 定位配对运行。
+- **Tier 1（强对照）**：5 个工况的基准运行均填写 `fa_reference`，两侧同用 `soptx.solvers` 的 `cg`（`rtol=atol=1e-12`），只差算子层级。`compare.py` 执行参数一致性门禁、逐迭代轨迹对照、锁步对照（同一密度下的 u、dc、真残差）和阈值化拓扑对照。带 override 的运行用相同的 `--case ID --override ...` 指定，脚本在 FA 侧重放同一组 override 定位配对运行。
 - **Tier 2（闭环能力）**：override 运行（density / projection / none 过滤、MMA 等）按 `collect.py` 验收条件独立判定 EA 闭环能力，不要求与 FA 配对。
 
 ## 目录结构

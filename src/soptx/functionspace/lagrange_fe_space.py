@@ -21,7 +21,7 @@ class LagrangeFESpace(FunctionSpace, Generic[_MT]):
     """单个 ``MeshView`` 上的标量 Lagrange 有限元空间.
 
     ``mesh`` 须为 ``MeshView``; ``TriangleMesh``、``TetrahedronMesh`` 等经典网格
-    经其 ``MeshView`` 基类得到支持. 本类以 FEALPy 的网格接口作为对网格的约定.
+    经其 ``MeshView`` 基类得到支持. 本类以 soptx.mesh 的网格接口作为对网格的约定.
 
     Parameters
     ----------

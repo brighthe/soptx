@@ -52,7 +52,7 @@ class FilterMatrixBuilder(BaseLogged):
         均匀笛卡尔网格上) 时, 才走结构化快路径; 其余一律走 KD-tree 通用路径,
         后者对任意非结构网格 (gmsh 三角/四面体网格等) 同样成立.
 
-        ``meshdata`` 不是 fealpy 网格的固有属性, 而是各 experiment 的 pipeline
+        ``meshdata`` 不是 soptx.mesh 网格的固有属性, 而是各 experiment 的 pipeline
         手工挂上去的元数据字典, 因此这里一律用 ``get`` 探测: 缺键时安静退回通
         用路径, 不再直接 KeyError.
         """

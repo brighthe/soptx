@@ -12,7 +12,7 @@ E 向量的布局由 ``cell2dof`` 的形状决定, 两种各有其用户, 都由
 按 ``layout`` 参数构造:
 
 - (NC, ldof): 扁平布局 (``layout='flat'``), 单元内自由度按张量空间的 ``dof_priority``
-  排列, 与 FEALPy 积分子给出的单元矩阵同序. EA 用这一种, 以便直接乘常驻的 K_e.
+  排列, 与积分子给出的单元矩阵同序. EA 用这一种, 以便直接乘常驻的 K_e.
 - (NC, ldof, GD): 分量布局 (``layout='component'``, 默认), ``[c, i, d]`` 为标量基函数
   i 的第 d 个分量, 与空间的自由度排序无关. PA 与 UA 用这一种, 基函数算子 B 只认它.
 
@@ -46,7 +46,7 @@ class ElementRestriction:
     -----
     多列右端项按自由度维在前的 (gdof, NB) 布局处理, 与 ``soptx.solvers`` 里迭代解法
     的规范布局一致 (``CG`` 在 ``batch_first=True`` 时先转成该布局再进迭代), 也与
-    ``ConstrainedOperator`` 用布尔掩码取边界行的写法一致. FEALPy
+    ``ConstrainedOperator`` 用布尔掩码取边界行的写法一致. soptx.fem 的
     ``BilinearForm.__matmul__`` 在这里按 (NB, gdof) 布局写, 散加却用了
     ``bm.index_add`` 的默认 ``axis=0``, 两处不自洽, 多列下必然越界; 本类不照抄.
     """
@@ -88,7 +88,7 @@ class ElementRestriction:
         写一遍而日后只改了其中一处. 两种布局取的是同一份 cell2dof, 只差最后是否做
         单元内置换.
 
-        扁平布局原样使用积分子给出的 cell2dof. 分量布局的重排用 FEALPy 的
+        扁平布局原样使用积分子给出的 cell2dof. 分量布局的重排用 soptx.functionspace.utils 的
         ``flatten_indices``, 与 ``TensorFunctionSpace`` 生成张量自由度编号走的是同一
         套约定: ``perm[i, d]`` 是标量自由度 i 的第 d 个分量在扁平单元向量里的槽位, 于
         是 ``cell2dof[:, perm]`` 一步得到 (NC, ldof, GD).

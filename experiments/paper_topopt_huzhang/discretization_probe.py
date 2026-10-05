@@ -211,7 +211,7 @@ def evaluate(
 # 跳量一律测表观应力 sigma^app, 不测实体应力: 连续介质中即便模量随空间变化, 真实
 # 牵引 sigma . n 也跨面连续 (跳的是应变), 而 sigma^sol = sigma^app / m_E 因 m_E 逐单元
 # 常值必然跳变. 两族的表观应力分别为 LFEM 的 m_E(rho) * D B u 与 Hu--Zhang 原始应力
-# 自由度的取值. soptx 与 fealpy 中没有可复用的两侧求值设施 (JumpPenaltyIntegrator
+# 自由度的取值. soptx 中没有可复用的两侧求值设施 (JumpPenaltyIntegrator
 # 跳的是位移基函数而非给定场), 故此处自建.
 #
 # 配序是唯一的正确性陷阱: 同一条边从两侧单元提升到重心坐标后, 求积点在物理空间的
@@ -219,7 +219,7 @@ def evaluate(
 # bcs 等价于沿求积点轴反转求值结果, 因此只需一次求值.
 
 
-# 三角形局部边的顶点编号, 与 fealpy TriangleMesh.localFace 一致; 仅用于断言.
+# 三角形局部边的顶点编号, 与 soptx.mesh.TriangleMesh.localFace 一致; 仅用于断言.
 _TRIANGLE_LOCAL_FACE = ((1, 2), (2, 0), (0, 1))
 
 

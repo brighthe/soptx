@@ -36,7 +36,7 @@
 被测对象是仓库核心代码 ``soptx.fem.matrix_free.ElasticityEAOperator`` (门面) 及其底层:
 ``LagrangeFEMAnalyzer.assemble_stiff_matrix('ea')`` 用 ``LinearElasticIntegrator.const`` 缓存 K_e 与
 cell2dof 并装进未 assembly 的 ``soptx.fem.BilinearForm``; ``@`` 走 ``BilinearForm.__matmul__``
-(gather -> einsum -> index_add) 外包 ``DirichletBCOperator`` (Pi_I K Pi_I + Pi_D); Jacobi-PCG 用
+(gather -> einsum -> index_add) 外包 ``ConstrainedOperator`` (Pi_I K Pi_I + Pi_D); Jacobi-PCG 用
 ``soptx.solvers.cg`` 与 ``DiagonalPreconditioner``, 对角由 ``assemble_operator_diagonal`` 给出.
 本脚本不含任何算子或求解器的自有实现.
 
@@ -254,7 +254,7 @@ def _num_classes() -> int:
 def _build_reference(method: str, n: int) -> tuple[Dict[str, Any], StageMeter]:
     """构建网格 / 空间 / 材料 (mesh 阶段), 供逐单元参考 EA 与共享参考 EA 显式构造; 不建分析器与门面.
 
-    网格与标准 EA 同由 ``build_problem_space`` 的 FEALPy ``from_box`` 生成, 未重编号, 满足共享参考
+    网格与标准 EA 同由 ``build_problem_space`` 的 ``from_box`` 生成, 未重编号, 满足共享参考
     EA 的类归属约定 k(e) = e mod N_k; 逐单元参考 EA 取 N_k = NC, 不依赖这一约定.
 
     Parameters
@@ -358,7 +358,7 @@ def _assemble_system(ctx: Dict[str, Any], meter: StageMeter) -> None:
     Ke, cell2dof = _element_data(facade)
     ctx.update(
         {
-            "operator": operator,  # DirichletBCOperator, 即 facade.system_operator
+            "operator": operator,  # ConstrainedOperator, 即 facade.system_operator
             "load": np.asarray(load),
             "Ke": Ke,
             "cell2dof": cell2dof,
@@ -610,7 +610,7 @@ def measure_matvec(method: str, n: int, repeats: int = 20, seed: int = 0) -> dic
         {
             "repeats": repeats,
             "seed": seed,
-            "matvec_impl": "soptx.fem.BilinearForm.__matmul__ (inherited from fealpy): gather -> einsum -> index_add",
+            "matvec_impl": "soptx.fem.BilinearForm.__matmul__: gather -> einsum -> index_add",
             "matvec_seconds_median": round(t_med, 6),
             "matvec_seconds_min": round(min(times), 6),
             "matvec_seconds_all": [round(t, 6) for t in times],

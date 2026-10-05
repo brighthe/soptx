@@ -2,7 +2,7 @@
 
 Everything here is domain-free: logging, timing, a small result record, the
 MUMPS-side MPI activation hook and the numeric defaults that the evidence
-tooling has to reproduce without FEALPy or an MPI runtime.
+tooling has to reproduce without an MPI runtime.
 
 The structural protocols an analyzer requires of its ``pde`` and
 ``interpolation_scheme`` are *not* infrastructure -- they name elasticity

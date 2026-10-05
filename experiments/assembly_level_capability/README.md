@@ -22,7 +22,7 @@
 
 所有单元级方案共享 `cell2dof` (24 个 int64/单元), 用同一条 gather → 局部作用 → `np.add.at` scatter 路径: `ea` / `pa` 经 `ElementRestriction.scatter_add` → `bm.index_add` 落到 `np.add.at`, 与 `stored-b` / `shared-ke` 手写的那条是同一个 numpy 调用。
 
-`fa` 的每单元数按实测折算, `(values.nbytes + col.nbytes) / 8 / NC`。生产栈的 CSR 索引是 int64 (`build_csr_pattern` 产出 int64 的 `crow` / `col`, fealpy `CSRTensor` 原样保留), 每个非零元的索引开销与数值本身一样是 8 字节。早期原型把这三个数组交给 `scipy.sparse.csr_matrix` 构造, scipy 会把索引降到 int32, 同一个矩阵的常驻字节因此少约 25% (n = 16 下 4165 → 3116 字节/单元)。表里记的是生产口径。
+`fa` 的每单元数按实测折算, `(values.nbytes + col.nbytes) / 8 / NC`。生产栈的 CSR 索引是 int64 (`build_csr_pattern` 产出 int64 的 `crow` / `col`, `soptx.sparse` 的 `CSRTensor` 原样保留), 每个非零元的索引开销与数值本身一样是 8 字节。早期原型把这三个数组交给 `scipy.sparse.csr_matrix` 构造, scipy 会把索引降到 int32, 同一个矩阵的常驻字节因此少约 25% (n = 16 下 4165 → 3116 字节/单元)。表里记的是生产口径。
 
 `pa` 的每单元 double 数 80 只数与单元数成正比的项 (`J^{-1}_q` 72 + `w_q detJ_q` 8)。生产 `LinearElasticQFunction` 另存两个与网格规模无关的小数组 —— `strain_map` (6, 3, 3) 与 `quadratic_form` (3, 3, 3), 合计 648 字节 —— 它们计入实测 `persistent_bytes`, 不进每单元理论数。
 

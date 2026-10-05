@@ -189,7 +189,7 @@ def test_entrypoint_import_does_not_load_compute_dependencies(monkeypatch):
     original_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
-        if name.split(".")[0] in {"numpy", "torch", "fealpy", "soptx", "analysis"}:
+        if name.split(".")[0] in {"numpy", "torch", "soptx", "analysis"}:
             raise AssertionError(f"入口导入不应加载 {name}")
         return original_import(name, *args, **kwargs)
 

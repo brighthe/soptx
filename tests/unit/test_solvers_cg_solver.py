@@ -3,7 +3,7 @@
 Covers the branch complementary to ``DirectSolver``: an empty ``requires``,
 so a matrix-free operator must be accepted. Also pins the info contract, the
 ``M=`` slot, preconditioner setup cascading, the vector-layer type
-normalisation that lets a fealpy ``Function`` in, and the pass-through of the
+normalisation that lets a ``soptx.functionspace.Function`` in, and the pass-through of the
 PETSc/MFEM-flavoured knobs (``norm_type``, ``divtol``, ``monitor``,
 ``print_level``) down to :func:`~soptx.solvers.cg.cg`.
 """

@@ -8,7 +8,7 @@
 * ``print_grid_summary``: 打印网格规模与场信息;
 * ``render_and_save``: 平行投影离屏渲染并保存 PNG, 相机由调用方配置.
 
-依赖 ``vtk`` (随 fealpy 安装). 本模块只在被显式导入时加载, 不会拖慢
+依赖 ``vtk`` (随 ``soptx[viz]`` 可选依赖安装). 本模块只在被显式导入时加载, 不会拖慢
 ``import soptx``.
 """
 

@@ -53,7 +53,7 @@ def write_vtu(
     """把节点场和/或单元场数据写成 VTU 非结构化网格文件.
 
     参数:
-        mesh: FEALPy 网格, 需提供 ``entity('node')`` / ``entity('cell')``.
+        mesh: soptx.mesh 网格, 需提供 ``entity('node')`` / ``entity('cell')``.
         point_data: 节点场字典, 值为 ``(n_nodes,)`` 或 ``(n_nodes, gd)`` 数组.
         filepath: 输出路径 (不含扩展名时 pyevtk 自动补 ``.vtu``).
         cell_data: 单元场字典, 值为 ``(n_cells,)`` 或 ``(n_cells, ...)`` 数组.

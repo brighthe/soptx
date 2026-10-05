@@ -43,7 +43,7 @@ class SparseData1D(NamedTuple):
 
 
 class EntityMPI:
-    """FEALPy/SOPTX 实体级 MPI 通信器.
+    """SOPTX 实体级 MPI 通信器.
 
     管理特定维度几何实体或自由度在各 rank 间的共享关系、引用重数及同步操作.
     """

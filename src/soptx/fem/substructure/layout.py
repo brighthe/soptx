@@ -305,7 +305,7 @@ class StructuredSubstructureLayout:
         """返回结构化高阶网格下标到全局节点编号的映射, 形状 ``(total_full_nodes,)``.
 
         说明:
-            FEALPy 标准结构化网格节点按 C 序字典序排布 (x 优先, y 次之, z 内层),
+            soptx.mesh 标准结构化网格节点按 C 序字典序排布 (x 优先, y 次之, z 内层),
             节点下标与线性编号自然恒等, 直接由 ``bm.arange`` 给出, 彻底避免构造全尺度
             网格与插值坐标所造成的数十 GB 内存开销.
         """

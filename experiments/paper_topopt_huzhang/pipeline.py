@@ -138,8 +138,8 @@ def create_mesh(
 ) -> Any:
     """构造两种离散共享的 Hu--Zhang 兼容三角形网格 (剖分方式见 MESH_TYPES).
 
-    ``meshdata`` 是 soptx 附加在 fealpy 网格对象上的元数据字典 (过滤器矩阵等
-    依赖它), fealpy 的网格类并未声明该属性, 因此这里显式放宽为 ``Any``.
+    ``meshdata`` 是 soptx 附加在网格对象上的元数据字典 (过滤器矩阵等
+    依赖它), ``soptx.mesh`` 的网格类并未声明该属性, 因此这里显式放宽为 ``Any``.
     """
     mesh_type = validate_choice(mesh_type, MESH_TYPES, "不支持的网格类型")
     mesh: Any = _MESH_BUILDERS[mesh_type](box=problem.domain, nx=nx, ny=ny)

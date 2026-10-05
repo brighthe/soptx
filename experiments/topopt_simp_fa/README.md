@@ -2,7 +2,7 @@
 
 本模块验证 Fully Assembled（FA）变密度拓扑优化闭环，并作为 `experiments/topopt_simp_ea/` 统一条件对照的参照侧。实验目录只负责工况注册、公共组件组装、结果验收与证据汇总；有限元分析、材料插值、目标函数、体积约束、Filter 和 Optimizer 均调用 `src/soptx` 的公开接口。
 
-与 EA 的唯一算子差异：`operator_level="fa"`，每次迭代显式组装并存储全局稀疏刚度矩阵。基准求解器与 EA 同为 fealpy `cg`（`rtol=atol=1e-12`），直接法 `mumps` / `scipy` 走 `--override solve_method=...`，只作 FA 自身的求解器对照。
+与 EA 的唯一算子差异：`operator_level="fa"`，每次迭代显式组装并存储全局稀疏刚度矩阵。基准求解器与 EA 同为 `soptx.solvers` 的 `cg`（`rtol=atol=1e-12`），直接法 `mumps` / `scipy` 走 `--override solve_method=...`，只作 FA 自身的求解器对照。
 
 首轮范围限定为规则矩形／长方体区域。Triangle 由规则盒状网格系统剖分得到，不代表一般非结构化网格能力。
 

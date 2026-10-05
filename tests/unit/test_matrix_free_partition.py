@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-# soptx.fem.distributed 经由 fealpy.distributed 引入 mpi4py, 属可选 extra
+# soptx.fem.distributed 引入 mpi4py, 属可选 extra
 pytest.importorskip("mpi4py")
 
 from soptx.mesh import TetrahedronMesh, TriangleMesh

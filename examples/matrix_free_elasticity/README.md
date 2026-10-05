@@ -7,7 +7,7 @@
 
 ## 推进阶段
 
-装配层级固定在 **EA**（FEALPy 当前提供的 matrix-free 就是 EA），沿执行后端推进：
+装配层级固定在 **EA**，沿执行后端推进：
 
 | 阶段 | 范围 | 状态 |
 |---|---|---|
@@ -244,7 +244,7 @@ main
           → analyzer.apply_bc(assemble_stiff_matrix(), assemble_body_force_vector())
           → analyzer.solve_system → DISTRIBUTED_SOLVERS["cg"]
               → krylov.weighted_cg
-                  → fealpy cg(dot_product=dof_comm.dot)
+                  → CGSolver(dot_product=dof_comm.dot)
           → solver_diagnostics
       → dof_comm.gather_add(local_solution / references)
       → finalize

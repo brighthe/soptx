@@ -233,7 +233,7 @@ class MeshView:
         return EntityView(self.block, names[0])
 
     def entity(self, name_or_topdim: str | int, /) -> Tensor:
-        """以经典 FEALPy 布局返回实体数据.
+        """以经典布局返回实体数据.
 
         节点角色返回坐标张量, 其余角色返回整数连接数组.
 

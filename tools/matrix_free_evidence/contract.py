@@ -16,10 +16,10 @@ Three modules could plausibly own these numbers; two of them must not:
   ``SCHEMA_VERSION``.  Values live here, layout lives there.
 
 That leaves this package, which is where the gate is enforced.  The numbers sit
-next to ``validate.py`` rather than in the example, because the example is two
-demo scripts and this pipeline is also the fealpy fork's pre-merge gate.
+next to ``validate.py`` rather than in the example, because the example is only
+two demo scripts.
 
-This module must stay free of FEALPy and mpi4py imports: the evidence tooling
+This module must stay free of mpi4py imports: the evidence tooling
 has to run on machines without an MPI runtime.  :mod:`soptx.core.numerics` is safe
 precisely because it carries no such imports either.
 """
@@ -112,7 +112,7 @@ def matvec_reference_gates(matvec: dict) -> dict[str, bool]:
 
     判据本身也只写一次, 不只是阈值: ``compare_lagrange.py`` 与 ``report.py`` 调
     同一个函数, 就不会出现"两边阈值相同但一边漏了正定性探针"这种漂移. 入参是
-    纯 dict, 所以本模块仍然不碰 FEALPy.
+    纯 dict, 所以本模块无需导入网格、空间等数值模块.
 
     前两条是这个脚本的正题 —— EA 与 FA 在裸算子和施加边界条件后是否给出同一个
     结果, 两条走的是不同代码路径, 不能并成一条. 第三条是唯一一条不以 "FA 是对的"

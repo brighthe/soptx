@@ -1,6 +1,6 @@
 # 胡张混合有限元 2D 求解算例 (Hu--Zhang Mixed FEM)
 
-本目录提供基于 FEALPy 的二维线弹性 Hu--Zhang 混合有限元求解器：应力
+本目录提供二维线弹性 Hu--Zhang 混合有限元求解器：应力
 $\boldsymbol{\sigma}\in\Sigma_h\subset H(\mathrm{div})$ 与位移
 $\boldsymbol{u}\in V_h\subset[L_2]^d$ 联合求解，离散成应力--位移鞍点系统。
 

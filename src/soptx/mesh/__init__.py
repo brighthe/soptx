@@ -7,7 +7,7 @@ SOPTX 用到的四类经典网格, 未移植绘图、半边结构与局部加密
 导入本包只依赖 numpy 与 scipy; vtk 仅在调用 ``write_mesh_to_vtu`` 时加载.
 """
 
-# 以下导入顺序与 FEALPy 一致: 顶层 ``Mesh`` 须最后由 ``aggregate`` 覆盖
+# 以下导入顺序不可调换: 顶层 ``Mesh`` 须最后由 ``aggregate`` 覆盖
 # ``mesh_base`` 中的同名别名.
 from .schema import *
 from .storage import *

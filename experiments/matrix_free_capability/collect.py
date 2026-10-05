@@ -500,7 +500,7 @@ def _collect_peak_rss(cases: tuple[config.Case, ...],
     def series(level: str, field: str) -> list[Any]:
         return [by_level[level][n][field] for n in resolutions]
 
-    # 基线是解释器与 FEALPy 导入的常量开销, 八次运行应当几乎相同;
+    # 基线是解释器与 SOPTX 导入的常量开销, 八次运行应当几乎相同;
     # 抖动大意味着测量环境不干净, 峰值比也就不可信.
     baselines = (series("fa", "peak_rss_baseline_bytes")
                  + series("ea", "peak_rss_baseline_bytes"))

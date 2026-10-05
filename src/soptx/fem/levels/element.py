@@ -39,12 +39,12 @@ class ElementAssembly(AssemblyLevelExtension):
 
     Notes
     -----
-    单列右端项下 ``__matmul__`` 的 einsum 下标与 FEALPy ``BilinearForm.__matmul__``
-    在单积分子情形下完全相同, 因此结果逐位一致. 这条等价性依赖 "只有一个积分子":
-    多积分子时 FEALPy 逐组散加, 浮点求和次序与本实现不同.
+    单列右端项下 ``__matmul__`` 的 einsum 下标与 ``soptx.fem.BilinearForm.__matmul__``
+    (移植自 FEALPy) 在单积分子情形下完全相同, 因此结果逐位一致. 这条等价性依赖 "只有一个
+    积分子": 多积分子时 ``BilinearForm`` 逐组散加, 浮点求和次序与本实现不同.
 
-    多列右端项下两者不再对应: 本实现按 (gdof, NB) 布局, FEALPy 按 (NB, gdof), 理由见
-    ``ElementRestriction``.
+    多列右端项下两者不再对应: 本实现按 (gdof, NB) 布局, ``BilinearForm`` 按 (NB, gdof),
+    理由见 ``ElementRestriction``.
     """
 
     level = 'ea'

@@ -286,7 +286,7 @@ def run_case(
         "overrides": dict(case.overrides) or None,
         "method": "EA-SIMP",
         "assembly_level": "element",
-        "backend": "fealpy-numpy",
+        "backend": "numpy",
         # 以下为求解过程算出来的量, 不是注册表里的参数.
         "plane_type": analyzer.pde.plane_type,
         "mesh_layout": MESH_LAYOUT,

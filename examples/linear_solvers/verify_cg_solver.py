@@ -18,7 +18,7 @@ case 轴是预条件子 (``--case``), 与 verify_direct_solvers 的"一个 case 
 同一个离散算子以两种形态进入 CG:
 
     fa   apply_bc 对称消元后的全局稀疏矩阵, 按 COO 作用 (与 analyzer 同路)
-    ea   DirichletBCOperator 包住的 matrix-free 算子, 只支持 @
+    ea   ConstrainedOperator 包住的 matrix-free 算子, 只支持 @
 
 算子形态轴 (``--operator-level`` / ``-L``):
 
@@ -252,7 +252,7 @@ def build_level(
     -------
     dict
         ``operator`` 是交给 CG 的算子 ('fa' 下照 ``LagrangeFEMAnalyzer.
-        _as_iterative_operator`` 转成 COO 作用, 'ea' 下就是 DirichletBCOperator);
+        _as_iterative_operator`` 转成 COO 作用, 'ea' 下就是 ConstrainedOperator);
         ``matrix`` 只在 'fa' 下有值, 给直接法用; ``prescribed`` 是 Dirichlet
         基准向量; ``diag`` 是 ``assemble_operator_diagonal`` 取出的算子对角;
         ``mesh`` 与 ``problem`` 供 solution 一项算制造解误差.

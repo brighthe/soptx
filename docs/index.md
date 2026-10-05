@@ -26,7 +26,7 @@
   同一 $\mathbf K_e$ 的三条计算路径、数学等价性、中间张量与容量差异，以及与装配层级（operator_level）的正交关系。
 - [`fem/huzhang-mixed-fem-implementation.md`](fem/huzhang-mixed-fem-implementation.md) —
   胡张混合有限元实现：空间构造、次数与稳定化分支、角点松弛、2D/3D 差异、
-  FEALPy 4.0 兼容要点及开放问题。
+  FEALPy 3.4 → 4.0 迁移要点（历史记录）及开放问题。
 - [`fem/substructure-condensation-implementation.md`](fem/substructure-condensation-implementation.md) —
   子结构静力缩聚实现：Schur 补消元、全局接口 Scatter-Add 装配、2D/3D 统一、
   PIML 路线 A/B 接口、精确回退，以及与 MFEM 和 Huang 2023 的关系。

@@ -117,7 +117,7 @@ def run_case(
         analyzer.assemble_body_force_vector(),
     )
     solution = bm.zeros_like(load)
-    # fealpy 的 cg 要求初值为后端张量; prescribed_solution 在 apply_bc 后非空.
+    # soptx.solvers 的 cg 要求初值为后端张量; prescribed_solution 在 apply_bc 后非空.
     x0 = bm.asarray(analyzer.prescribed_solution, dtype=bm.float64)
     _, cg_info = analyzer.solve_system(
         operator,

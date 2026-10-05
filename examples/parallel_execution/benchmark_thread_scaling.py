@@ -26,7 +26,7 @@ OpenBLAS 与 MKL 在 ``import numpy`` / ``import torch`` 的那一刻就建好�
 
 from __future__ import annotations
 
-# 本模块顶层严禁 import numpy / torch / fealpy: 父进程也会加载本文件, 而
+# 本模块顶层严禁 import numpy / torch / soptx: 父进程也会加载本文件, 而
 # 线程池必须在子进程的 env 生效之后才建立. 重型 import 一律放到函数内部.
 import argparse
 import json
@@ -52,7 +52,7 @@ THREAD_ENV_VARS = (
     "NUMEXPR_NUM_THREADS",
 )
 
-#: 子进程用于分隔 JSON 的标记. FEALPy 与后端库会往 stdout 打日志, 直接
+#: 子进程用于分隔 JSON 的标记. SOPTX 与后端库会往 stdout 打日志, 直接
 #: json.loads 整个 stdout 会失败.
 JSON_BEGIN = "__THREAD_SCALING_JSON_BEGIN__"
 JSON_END = "__THREAD_SCALING_JSON_END__"
@@ -652,7 +652,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--segments", default="assemble,cg_solve,filter_spmv",
                         help="被测段, 逗号分隔")
     parser.add_argument("--backend", default="numpy", choices=["numpy", "pytorch"],
-                        help="FEALPy 后端: numpy 走 OpenBLAS, pytorch 走 ATen")
+                        help="计算后端 (soptx.backend): numpy 走 OpenBLAS, pytorch 走 ATen")
     parser.add_argument("--dim", type=int, default=2, choices=[2])
     parser.add_argument("--n", type=int, default=128, help="每方向网格数")
     parser.add_argument("--mesh-type", default="quad", choices=["quad", "tri"])

@@ -13,7 +13,7 @@
 ``used_fallback``. 数学背景, 门禁判据的推导与实测证据见
 ``docs/fem/substructure-condensation-implementation.md``.
 
-所有数组与代数运算基于 FEALPy 后端管理器 (bm).
+所有数组与代数运算基于 soptx.backend 的后端管理器 (bm).
 """
 
 from typing import Tuple, Any, Optional

@@ -1,7 +1,7 @@
 """长方形/长方体区域上的结构化网格生成器, 附带平移类约定.
 
-本模块由 soptx 自行实现, 只经 FEALPy 的公开构造器 ``TriangleMesh(node, cell)`` 等
-生成网格. 输出的节点坐标与单元顶点编号与 FEALPy ``*.from_box`` 逐位一致 (由单元测试
+本模块由 soptx 自行实现, 只经 ``soptx.mesh`` 的公开构造器 ``TriangleMesh(node, cell)`` 等
+生成网格. 输出的节点坐标与单元顶点编号与 ``*.from_box`` (移植自 FEALPy) 逐位一致 (由单元测试
 保证), 因此可以直接替换 ``from_box``, 已有结果仍可逐位比较.
 
 与 ``from_box`` 不同的是, 单元编号约定在这里是 soptx 的公开契约, 而不是生成器的内部
@@ -120,7 +120,7 @@ def create_box_mesh(
     Returns
     -------
     BoxMesh
-        ``mesh`` 与对应 FEALPy ``*.from_box(box, nx, ny[, nz])`` 的节点、单元逐位一致;
+        ``mesh`` 与对应 ``*.from_box(box, nx, ny[, nz])`` 的节点、单元逐位一致;
         ``classes`` 为按单元编号约定给出的平移类.
 
     Raises

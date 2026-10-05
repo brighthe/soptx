@@ -40,7 +40,7 @@ UA 层级把构造与作用整个委托给本层级: 它每次作用现调一次
 里只有 PA 与 UA 走 B, FA 与 EA 走显式装配的那条路, 因此这份 B 的共享面是 PA 与 UA
 两级. libCEED
 的 ``CeedBasis`` 与 MFEM 的 ``FiniteElementCollection`` 靠构造时不吃网格把 build 在类型
-上独立出来, FEALPy 的 ``LagrangeFESpace`` 绑网格, 拿不到那个保证.
+上独立出来, soptx.functionspace 的 ``LagrangeFESpace`` 绑网格, 拿不到那个保证.
 
 soptx 把两段分在两处: build 段是 ``ReferenceBasis.build``, 它只吃 (标量空间, q), 按
 (单元形状, p, q) 缓存在进程级; setup 段是本类 ``build`` 方法的后半段. 之所以还叫一个

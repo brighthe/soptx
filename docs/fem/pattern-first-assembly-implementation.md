@@ -16,15 +16,15 @@ $$
 \mathbf K = \sum_{e=1}^{N_C} \mathbf L_e^T \mathbf K_e \mathbf L_e
 $$
 
-### 1. 传统 FEALPy 装配的瓶颈机理
-传统有限元框架（如 FEALPy `BilinearForm.assembly()`）在执行上述合并时，采用**全长坐标格式（COO）三元组后处理**机制：
+### 1. 传统 COO 装配的瓶颈机理
+传统有限元框架（如源自 FEALPy、现为 `BilinearForm.assembly(method='coalesce')` 的路线）在执行上述合并时，采用**全长坐标格式（COO）三元组后处理**机制：
 1. **全长三元组物化**：在内存中先分配并物化所有单元的三元组数组 $(I, J, V)$。在三维一阶四面体网格（3D tet4, $p=1$）下，每个自由度平均产生 288 个三元组贡献，仅基础索引与浮点开销即达 $24\text{ B/triplet}$；
 2. **全局排序与归并去重（`coalesce`）**：调用 PyTorch/CUB 或 NumPy 进行全局大张量基数排序与分桶去重，产生庞大的排序临时缓冲；
 3. **最终转为 CSR**：去重完成后再构造 CSR 矩阵。
 
 ```
 【传统 COO 装配路径（慢速、耗内存）】：
-单刚 K_e ──► 物化全长 (I, J, V) ──► 全局排序去重 (coalesce) ──► FEALPy CSRTensor
+单刚 K_e ──► 物化全长 (I, J, V) ──► 全局排序去重 (coalesce) ──► CSRTensor
            (占用 52~77 B/triplet)    (排序缓冲膨胀 15~20 倍)       (仅需 2.6 B/triplet)
 ```
 
@@ -55,7 +55,7 @@ build_csr_pattern(space)                               assemble_csr(K_e, pattern
  • 展开为 DOF 级 CSR 骨架 (crow, col)                    • 槽位预映射原地原子累加:
  • 矢量化提取槽位映射 slot_map (NC * ldof^2,)              - NumPy: np.add.at / bincount
  • 一次性搬运并常驻计算设备 (CPU / CUDA GPU)                - PyTorch: scatter_add_ (CUDA atomicAdd)
-                                                        • O(1) 零拷贝直接产出标准 FEALPy CSRTensor
+                                                        • O(1) 零拷贝直接产出标准 CSRTensor (soptx.sparse)
 ```
 
 ### 1. 阶段 0：符号阶段 (`build_csr_pattern`)
@@ -73,7 +73,7 @@ build_csr_pattern(space)                               assemble_csr(K_e, pattern
 2. **原地置零与原子累加**：
    * **NumPy (CPU)**：`buffer.fill(0.0); np.add.at(buffer, pattern.slot_map, K_e.ravel())`；
    * **PyTorch (CUDA GPU)**：`buffer.zero_(); buffer.scatter_add_(0, pattern.slot_map, K_e.view(-1))`；
-3. **$O(1)$ 零拷贝包装**：直接构造并返回 `fealpy.sparse.CSRTensor(crow, col, buffer, shape)`，整个过程耗时仅数毫秒，零动态内存申请。
+3. **$O(1)$ 零拷贝包装**：直接构造并返回 `soptx.sparse.CSRTensor(crow, col, buffer, shape)`，整个过程耗时仅数毫秒，零动态内存申请。
 
 ---
 
@@ -126,8 +126,8 @@ build_csr_pattern(space)                               assemble_csr(K_e, pattern
 
 ### 1. 标准有限元分析与拓扑优化中的典型用法
 ```python
-from fealpy.mesh import TetrahedronMesh
-from fealpy.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.mesh import TetrahedronMesh
+from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.fem import BilinearForm
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.materials.linear_elasticity import IsotropicLinearElasticMaterial
@@ -145,7 +145,7 @@ integrator = LinearElasticIntegrator(material=material, method="fast")
 bform = BilinearForm(tspace)
 bform.add_integrator(integrator)
 
-# 高性能模式先行装配 (产出标准 FEALPy CSRTensor)
+# 高性能模式先行装配 (产出 soptx.sparse 的 CSRTensor)
 K = bform.assembly(format="csr")
 print(f"装配完成: 形状 {K.shape}, 非零元总数 {K.nnz:,}")
 ```
@@ -167,6 +167,6 @@ K_global_gpu = assemble_csr(K_e_gpu, pattern)
 ## 七、验证与质量门禁
 
 SOPTX 模式先行装配体系已通过完备的自动化回归测试门禁：
-1. **数学代数严格等价性**：[`tests/unit/test_csr_pattern.py`](../../tests/unit/test_csr_pattern.py) 验证在 2D/3D 网格下与 FEALPy 传统基准的稠密残差严格为 **$0.0$**；
+1. **数学代数严格等价性**：[`tests/unit/test_csr_pattern.py`](../../tests/unit/test_csr_pattern.py) 验证在 2D/3D 网格下与 coalesce 路线（传统 COO 基准）的稠密残差严格为 **$0.0$**；
 2. **多后端与 GPU 显存驻留**：覆盖 NumPy、PyTorch CPU 与 PyTorch CUDA GPU 显存内装配；
 3. **全流程物理收敛性**：制造解线弹性测试（`test_lagrange_fem_analyzer_standard.py`）严格验证位移场二阶收敛（$L_2$ 收敛阶 $1.982$），全套 344 项测试 100% 绿灯通过。

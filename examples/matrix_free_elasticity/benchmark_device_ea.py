@@ -1,7 +1,7 @@
 """同一 EA matrix-free 算子在 CPU 与单块 GPU 上的单次求解耗时对照.
 
 本脚本固定制造解、材料、边界条件、P1 空间、``operator_level = "ea"`` 和 CG 停机
-准则, **唯一的变量是设备**: 两侧都走 fealpy 的 ``pytorch`` 后端, 只切
+准则, **唯一的变量是设备**: 两侧都走 soptx.backend 的 ``pytorch`` 后端, 只切
 ``bm.set_default_device("cpu" / "cuda")``. 换后端(numpy 对 pytorch-cuda)会把后端
 差异混进加速比里, 那样测出来的不是"这个算子能不能上加速器".
 

@@ -38,7 +38,7 @@ def block_compute_imports(monkeypatch):
     original = builtins.__import__
 
     def guarded(name, *args, **kwargs):
-        if name.split(".")[0] in {"numpy", "torch", "fealpy", "soptx", "experiments"}:
+        if name.split(".")[0] in {"numpy", "torch", "soptx", "experiments"}:
             raise AssertionError(f"不应加载计算依赖: {name}")
         return original(name, *args, **kwargs)
 

@@ -184,7 +184,7 @@ filters 只发信号，重置由优化器完成：`MMAOptimizer` / `ALMMAOptimiz
 
 ### 5.1 `meshdata`
 
-`meshdata` 是各 pipeline 手工挂在 FEALPy 网格上的字典，唯一消费者是 `FilterMatrixBuilder.build()`，
+`meshdata` 是各 pipeline 手工挂在网格（`soptx.mesh`）上的字典，唯一消费者是 `FilterMatrixBuilder.build()`，
 一律用 `get` 探测，缺键退回通用路径：
 
 | 键 | 用途 | 缺失后果 |
@@ -205,7 +205,7 @@ filters 只发信号，重置由优化器完成：`MMAOptimizer` / `ALMMAOptimiz
 
 多分辨率下 $x$ 与 $\bar\rho$ 形状不同，策略层用 `soptx.fem.utils` 的
 `reshape_multiresolution_data` / `reshape_multiresolution_data_inverse` 互转；$\mathbf H$ 建在子单元
-网格上。`density` / `physical_density` 可以是裸 `TensorLike` 或 FEALPy `Function`，各方法通过
+网格上。`density` / `physical_density` 可以是裸 `TensorLike` 或 `soptx.functionspace.Function`，各方法通过
 `rho_phys[:]` 就地写入，对两种容器一致。
 
 ## 6. 独立旁路 `structured.py`
@@ -234,4 +234,4 @@ filters 只发信号，重置由优化器完成：`MMAOptimizer` / `ALMMAOptimiz
    `device_put` 且要求 COO 格式（CSR 在 GPU 下出错）。
 4. `_compute_weighted_matrix_2d/3d` 逐单元构建邻域索引列表，大网格上成瓶颈；通用路径是全向量化的。
 5. `strategies.py` 末尾的 `continuation_step_backup` 是死代码。
-6. 结构化路径写死 $i \cdot n_y + j$ 的字典序编号，与 FEALPy `from_box` 当前行为绑定，无运行期断言。
+6. 结构化路径写死 $i \cdot n_y + j$ 的字典序编号，与 `soptx.mesh` 中 `from_box` 当前行为绑定，无运行期断言。

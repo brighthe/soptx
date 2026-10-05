@@ -45,7 +45,7 @@ SYMMETRY_TOLERANCE = 1.0e-12
 # 各维度最粗一档的每方向单元数, 之后逐层加倍; 胡张元角点松弛要求偶数
 BASE_SUBDIVISIONS = {2: 2}
 
-# 直接解法经 fealpy.solver.spsolve 分派到对应后端; 胡张元不支持迭代解法
+# 直接解法经 soptx.solvers.spsolve 分派到对应后端; 胡张元不支持迭代解法
 DIRECT_SOLVERS = ("scipy", "mumps")
 SolverName = Literal["scipy", "mumps"]
 
@@ -196,7 +196,7 @@ def create_mesh(domain: tuple[float, ...], subdivisions: int) -> Any:
         subdivisions: 各坐标轴方向的单元剖分数 (必须为正偶数).
 
     返回:
-        构建完成的 FEALPy 棋盘格三角形网格对象.
+        构建完成的棋盘格三角形网格对象 (``soptx.mesh.TriangleMesh``).
     """
     return create_huzhang_checkerboard_mesh(
         box=domain,
@@ -347,7 +347,7 @@ def report(rows: list[dict[str, Any]]) -> None:
 def solver_unavailable_reason(solver: SolverName) -> str | None:
     """探测求解器后端是否可用, 不可用时返回提示原因.
 
-    只有 ``mumps`` 需要探测: 它依赖外部 ``mumps`` 包 (PyMUMPS), 不是 fealpy
+    只有 ``mumps`` 需要探测: 它依赖外部 ``mumps`` 包 (PyMUMPS), 不是 soptx
     自带. 在入口提前检查, 避免装配完成后才在求解步骤异常退出.
 
     参数:

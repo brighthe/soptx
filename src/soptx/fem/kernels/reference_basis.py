@@ -37,7 +37,7 @@ PA / UA 两个层级, 以及 UA 每次作用时现造的那个 PA 算子, 命中
 变的 (数组构造后不再写), 共享实例没有别名风险.
 
 libCEED 的 ``CeedBasis`` 与 MFEM 的 ``FiniteElementCollection`` 靠 "构造时不吃网格"
-在类型上保证这件事. FEALPy 的 ``LagrangeFESpace`` 绑网格, 本类拿不到那个保证, 只能
+在类型上保证这件事. soptx.functionspace 的 ``LagrangeFESpace`` 绑网格, 本类拿不到那个保证, 只能
 靠上面这把键把它在运行期还原; 键漏一维就是静默取到错的基函数, 故键里宁可多带
 backend / device / dtype 三项冗余.
 """

@@ -7,7 +7,7 @@
 - **载体**：子结构（批量缩聚刚度 `K_s`，来自精确 Schur 补），不是单元。单元载体的 EA/EbE 基线见 `../matrix_free_elasticity/`。
 - **不含 PIML**：`K_s` 一律取精确 Schur 补；算子对 `K_s` 来源无感这一性质由扰动批量判据覆盖，但网络训练、预测与代理精度评估全部属于 `../piml_substructure_elasticity/`。
 - **不含缩聚正确性验证**：精确缩聚本身（Schur 补 vs 全阶直接解）的基线在 `../substructure_elasticity/`；本目录以缩聚结果为既定输入。
-- **求解器**：`fealpy.solver.cg` 直接吃 `InterfaceOperator`（duck typing，只要求 `__matmul__`）；当前为无预条件裸 CG，Jacobi 预条件（`diagonal()`）为下一步。
+- **求解器**：`soptx.solvers.CGSolver` 直接吃 `InterfaceOperator`（duck typing，只要求 `__matmul__`）；当前为无预条件裸 CG，Jacobi 预条件（`diagonal()`）为下一步。
 
 ## 文件职责
 

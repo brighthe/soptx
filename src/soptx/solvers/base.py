@@ -111,14 +111,14 @@ def as_tensor(value: Any) -> Any:
     :meth:`LinearSolver.solve` 入口, 各求解器内部仍可假定拿到的是
     ``TensorLike``.
 
-    显式处理 :class:`fealpy.functionspace.function.Function`: 它的 MRO 是
+    显式处理 :class:`soptx.functionspace.function.Function`: 它的 MRO 是
     ``(Function, Generic, object)``, **不是** ``TensorLike`` 的注册子类,
     但持有 ``.array``. 'ea' 层级的 ``ElasticityEAOperator.assemble()`` 正
     是返回它, 不接就整条 matrix-free 路径进不来.
     """
     if value is None or isinstance(value, TensorLike):
         return value
-    # fealpy Function: 'array' 走 object.__getattribute__, 不会被
+    # soptx Function: 'array' 走 object.__getattribute__, 不会被
     # Function.__getattr__ 转发, 拿到的是真正的底层张量.
     array = getattr(value, "array", None)
     if isinstance(array, TensorLike):
@@ -133,7 +133,7 @@ class OperatorCapabilityError(TypeError):
 def operator_capabilities(op: Any) -> frozenset:
     """探测算子能提供哪些能力.
 
-    按方法是否存在判断而不是按类型判断: 'fa' 侧是 fealpy 的 CSRTensor/
+    按方法是否存在判断而不是按类型判断: 'fa' 侧是 soptx.sparse 的 CSRTensor/
     COOTensor, substructure 侧直接传 scipy 稀疏矩阵, 'ea' 侧是 SOPTX 自有
     的算子包装, 三者没有共同基类.
 
@@ -148,14 +148,14 @@ def operator_capabilities(op: Any) -> frozenset:
         该算子提供的能力标签集合.
     """
     caps = set()
-    # to_scipy: fealpy 稀疏张量; tocsr: 已经是 scipy 稀疏矩阵
+    # to_scipy: soptx.sparse 稀疏张量; tocsr: 已经是 scipy 稀疏矩阵
     if hasattr(op, "to_scipy") or hasattr(op, "tocsr"):
         caps.add(CAP_MATRIX)
     # diagonal: 算子自报对角, 一维向量 (SOPTX 的算子包装, scipy 稀疏, numpy
-    # 稠密都是这个口径); tocoo: fealpy 稀疏张量自己给不出一维对角, 但能扫 COO
+    # 稠密都是这个口径); tocoo: soptx.sparse 稀疏张量自己给不出一维对角, 但能扫 COO
     # 取出来.
     #
-    # 刻意不认 fealpy 的 ``diags()``: 它返回的是只保留对角的稀疏矩阵而不是一
+    # 刻意不认 soptx.sparse 的 ``diags()``: 它返回的是只保留对角的稀疏矩阵而不是一
     # 维向量, 认了会让 CAP_DIAGONAL 通过, 而下游拿到一个形状不对的东西.
     if hasattr(op, "diagonal") or hasattr(op, "tocoo"):
         caps.add(CAP_DIAGONAL)
@@ -318,7 +318,7 @@ class LinearSolver(ABC):
         不给 ``returninfo`` 开关: "可能没收敛"是迭代法的固有状态, 让调用方
         每次都接住 info, 比让它可选安全.
 
-        入参先经 :func:`as_tensor` 归一化, 因此 fealpy ``Function`` 与
+        入参先经 :func:`as_tensor` 归一化, 因此 soptx ``Function`` 与
         list 之类都能直接传入; 返回的 ``x`` 一律是后端张量.
         """
         x, info = self._solve(as_tensor(b), as_tensor(x0))

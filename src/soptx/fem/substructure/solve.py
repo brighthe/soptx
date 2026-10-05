@@ -44,7 +44,7 @@ def solve_interface_system(
     """在接口系统上施加位移约束并用 soptx.solvers 的 DirectSolver 求解.
 
     参数:
-        system: 已装配的接口系统 (持有 FEALPy ``CSRTensor``).
+        system: 已装配的接口系统 (持有 soptx.sparse 的 ``CSRTensor``).
         load: 接口自由度上的右端项, 形状 ``(n_interface,)``. 可由
             ``GlobalAssembler.project_global_vector`` 从全局载荷投影得到.
         fixed_dofs: 受约束的接口自由度编号. 可由

@@ -22,7 +22,7 @@ bm.set_backend("numpy")
 
 
 class SerialDofComm:
-    """Single-rank stand-in for FEALPy's overlapping-DOF communicator."""
+    """Single-rank stand-in for the overlapping-DOF communicator ``EntityMPI``."""
 
     mpi_rank = 0
 

@@ -52,7 +52,7 @@ def _problem(dim: int) -> Any:
 
 
 def _as_scipy(matrix: Any) -> csr_matrix:
-    """将 FEALPy 或 SciPy 稀疏矩阵规整为 CSR."""
+    """将 soptx.sparse 或 SciPy 稀疏矩阵规整为 CSR."""
     return (
         matrix.to_scipy().tocsr()
         if hasattr(matrix, "to_scipy")

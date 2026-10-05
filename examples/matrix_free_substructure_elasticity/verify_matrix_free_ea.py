@@ -76,7 +76,7 @@ from soptx.fem.substructure import (
 # PyTorch 首次构造 CSR 张量时, 从 C++ 侧 (SparseCsrTensorImpl.cpp) 发一条
 # TORCH_WARN_ONCE 声明该特性处于 beta. 它没有任何 Python API 可以关闭, 是版本状态
 # 通知而非缺陷指示, 且本脚本的判据已覆盖所依赖的全部 CSR 行为, 故按消息原文精确屏蔽.
-# 过滤器装在脚本里而不是 fealpy 里: 库不该替调用方决定警告策略. 屏蔽只针对这一条
+# 过滤器装在脚本里而不是 soptx 库里: 库不该替调用方决定警告策略. 屏蔽只针对这一条
 # 消息, 其余 UserWarning 照常显示.
 warnings.filterwarnings(
     "ignore",

@@ -393,7 +393,7 @@ class SubstructurePrototype:
                 "无法建立密度场到单元编号的映射."
             )
         # ``linear_index[cell_id] = grid_id``. 两个方向都显式保存, 避免调用方
-        # 猜测 FEALPy 单元编号与结构化 C 序是否一致.
+        # 猜测网格单元编号与结构化 C 序是否一致.
         self._cell_grid_index: Any = linear_index
         inverse: Any = bm.zeros((self.n_cells,), dtype=bm.int64)
         inverse = bm.set_at(
@@ -620,7 +620,7 @@ class SubstructurePrototype:
                 任意前导批量维 ``...``.
 
         返回:
-            cell_field: 形状 ``(..., NC)`` 的场, 最后一维按 FEALPy prototype
+            cell_field: 形状 ``(..., NC)`` 的场, 最后一维按 prototype
                 单元编号排列.
 
         异常:
@@ -641,7 +641,7 @@ class SubstructurePrototype:
         """把 prototype FE cell 顺序的场重排为局部结构化网格场.
 
         参数:
-            cell_field: 按 FEALPy prototype 单元编号排列的场, 形状
+            cell_field: 按 prototype 单元编号排列的场, 形状
                 ``(..., NC)``.
 
         返回:

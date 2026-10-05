@@ -181,7 +181,7 @@ def test_analyzers_only_use_declared_problem_members(
 # Analyse-stage protocol: both analyzers serve the topology "analysis stage"
 # (state solve + stress + adjoint).  Checked at class level (member presence)
 # rather than by constructing an instance, because HuZhang's 3D constructor
-# currently trips an unrelated FEALPy-space bug.
+# currently trips an unrelated function-space bug.
 ANALYSIS_STAGE_CLASSES = (LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer)
 
 

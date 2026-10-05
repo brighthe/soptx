@@ -79,7 +79,7 @@ def display_width(text: str) -> int:
 
 
 def _as_scipy(matrix: Any) -> Any:
-    """将 FEALPy 或 SciPy 稀疏矩阵规整为 CSR."""
+    """将 soptx.sparse 或 SciPy 稀疏矩阵规整为 CSR."""
     return (
         matrix.to_scipy().tocsr()
         if hasattr(matrix, "to_scipy")

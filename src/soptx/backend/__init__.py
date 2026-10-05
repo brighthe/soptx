@@ -12,7 +12,7 @@ import logging
 from .base import *
 from .manager import BackendManager
 
-# 与 FEALPy 的 ``logs.py`` 一致: 应用未配置日志时, 后端日志不输出.
+# 应用未配置日志时, 后端日志不输出.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 backend_manager = BackendManager(default_backend='numpy')

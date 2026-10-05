@@ -2,7 +2,7 @@
 
 SOPTX（Structural Optimization Topology Simulation Software）是最初基于
 [FEALPy](https://github.com/suanhaitech/fealpy) 开发的个人结构拓扑优化科研软件仓库；
-所依赖的 FEALPy 代码已移植入库，来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+原先所依赖的 FEALPy 代码已移植入库，来源见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 本仓库负责把可执行算法、数值验证和可复现实验组织为可维护的软件资产。
 
 ## 快速开始
@@ -152,7 +152,7 @@ CI 另有一个 Matrix-Free fast job，装上 `mpi4py` 后重跑 `tests -q -k ma
 `repository:repo-relative-path#heading` 指针，不复制其他仓库的事实正文。完整的八仓库
 职责与内容路由规范见 `workstation:workspace/responsibilities.md#单一职责`。
 
-FEALPy 是 SOPTX 的代码来源之一：SOPTX 依赖的 FEALPy 代码已于 2026-10 自 vendor fork
+FEALPy 是 SOPTX 的代码来源之一：SOPTX 原先依赖的 FEALPy 代码已于 2026-10 自 vendor fork
 `f474a5775` 按 `GPL-3.0-or-later` 移植入库（见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)），
 此后以本仓库为准演化，不再依赖、也不再跟随 `suanhaitech/fealpy`。除此之外，本仓库不复制
 或重新托管算海仓库中的数据、运行日志、客户算例、凭据或内部文档；涉及 `mfleo`、`xihe`

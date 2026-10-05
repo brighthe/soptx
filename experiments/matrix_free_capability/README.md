@@ -146,7 +146,7 @@ python experiments/matrix_free_capability/run.py --collect
    | 缺口 | 现状 | 影响 |
    |---|---|---|
    | 设备对照的 `torch_threads` | 脚本已写该字段(`benchmark_device_ea.py:161`), 但当前快照 `panels.c.cpu.torch_threads` 四档全为 `null` —— 快照早于该行。重跑 `c-dev-*` 即可补上 | 事后无从从产物本身判定分母是单核还是满核 |
-   | (a) EA 环的 `backend` | `stage1_evidence.py` 不调 `set_backend`, 走 fealpy 硬编码默认 `numpy`, 但产物不记该字段 | 当前可由代码反推, 一旦上游改默认值, 历史产物就无法区分 |
+   | (a) EA 环的 `backend` | `stage1_evidence.py` 不调 `set_backend`, 走后端管理器 (`soptx.backend`) 硬编码默认 `numpy`, 但产物不记该字段 | 当前可由代码反推, 一旦改默认值, 历史产物就无法区分 |
    | (a) FA 链的 BLAS 线程数 | 运行时既不设也不记, 而实测该段默认会拉起最多 32 条 OpenBLAS 线程 | 同一条链在不同机器/不同 `OMP_NUM_THREADS` 下耗时可差 `1.2` 倍以上, 跨机引用会静默失真 |
 
 7. **跨格对照表由人工维护。** [`results_analysis.md`](results_analysis.md) §4.4 那四行取自两个不同的 role(`mpi-strong` 与 `device-speedup`), `collect.py` 没有跨格提取器, 是全库唯一一处手抄数字的表。要闭环应加一个跨格核对函数, 按「同 `n`、同装配、同迭代数」把两个 role 的记录对起来并断言残差同量级。

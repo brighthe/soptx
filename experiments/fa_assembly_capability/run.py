@@ -280,7 +280,7 @@ def _is_cuda(device_str: str) -> bool:
 
 
 def _setup_cuda(device_str: str) -> Tuple[Any, str]:
-    """切换 FEALPy 后端到 PyTorch 并绑定 CUDA 设备; 返回 (torch.device, 规范化设备名)."""
+    """切换后端 (soptx.backend) 到 PyTorch 并绑定 CUDA 设备; 返回 (torch.device, 规范化设备名)."""
     import torch
     from soptx.backend import backend_manager as bm
 
@@ -317,7 +317,7 @@ def _build_problem_space(n: int, device: Any = None) -> Tuple[Any, Any, Any, Any
 
 
 def _import_fe_stack_cpu() -> None:
-    """在测量开始前把 FEALPy / SOPTX 相关模块全部导入, 避免 import 开销混入阶段测量."""
+    """在测量开始前把 SOPTX 相关模块全部导入, 避免 import 开销混入阶段测量."""
     from soptx.backend import backend_manager as bm
 
     bm.set_backend("numpy")
@@ -895,7 +895,7 @@ def measure_full(
         单刚组装方式 (standard/voigt/fast).
     route : str
         总刚合并路线 (pattern/coalesce/scipy); pattern 与 coalesce 逐行复刻
-        ``soptx.fem.BilinearForm.assembly`` 与 FEALPy ``BilinearForm._scalar_assembly`` 的两步.
+        ``soptx.fem.BilinearForm.assembly`` 与 ``BilinearForm._scalar_assembly`` 的两步.
     n : int
         网格每方向段数.
     device_str : str
@@ -997,7 +997,7 @@ def measure_full(
                 K_e = integrator.assembly(vs)
 
         if route == "coalesce":
-            # 逐行复刻 FEALPy BilinearForm._scalar_assembly + assembly(format="csr")
+            # 逐行复刻 soptx.fem.BilinearForm._scalar_assembly + assembly(method="coalesce", format="csr")
             from soptx.sparse import COOTensor
 
             with meter.stage("stage2"):
@@ -1014,7 +1014,7 @@ def measure_full(
                 indices = bm.stack([I.ravel(), J.ravel()], axis=0)
                 values = bm.reshape(K_e, (-1,))
                 M = M.add(COOTensor(indices, values, sparse_shape))
-                # FEALPy 中 K_e / I / J 是 _scalar_assembly 的局部变量, 返回后即释放, coalesce 时已不在.
+                # soptx.fem.BilinearForm 中 K_e / I / J 是 _scalar_assembly 的局部变量, 返回后即释放, coalesce 时已不在.
                 del I, J, indices, values, K_e
                 K = M.coalesce().tocsr()
             nnz = int(K.nnz)

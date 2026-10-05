@@ -110,7 +110,7 @@ def test_raw_matvec_agrees_between_operator_levels() -> None:
 
 
 def test_dirichlet_matvec_agrees_between_operator_levels() -> None:
-    """Symmetric elimination and DirichletBCOperator define one system."""
+    """Symmetric elimination and ConstrainedOperator define one system."""
 
     fa = make_analyzer(6, "fa", "scipy")
     ea = make_analyzer(6, "ea", "cg")
@@ -253,7 +253,7 @@ def test_distributed_seams_are_used_by_the_ea_path() -> None:
 
     assert analyzer.reduced_loads == 1
     assert analyzer.wrapped is not None
-    # 包装必须真的参与 matvec, 而不是被 DirichletBCOperator 绕过
+    # 包装必须真的参与 matvec, 而不是被 ConstrainedOperator 绕过
     assert analyzer.wrapped.matvec_calls > 0
     # 恒等包装不得改变结果
     assert relative_difference(solution[:], baseline[:]) < 1.0e-12

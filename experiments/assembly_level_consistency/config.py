@@ -2,7 +2,7 @@
 """cases.toml 的加载、校验与模型转换.
 
 本模块只负责 cases.toml 的数据结构反序列化与静态门禁检查,
-不依赖 fealpy, 不执行任何数值计算.
+不依赖 soptx 数值代码, 不执行任何数值计算.
 """
 
 from __future__ import annotations

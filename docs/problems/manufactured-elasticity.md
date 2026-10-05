@@ -326,7 +326,7 @@ $$
 数学问题与材料参数必须显式一致，但对象彼此独立：
 
 ```python
-from fealpy.mesh import TriangleMesh
+from soptx.mesh import TriangleMesh
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import SinusoidalPlaneStrainElasticity2D
 

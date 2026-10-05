@@ -331,7 +331,7 @@ def run_analysis(
     )
     from soptx.ml.substructure.inference import predict_independent_outputs
     if bm.backend_name != "numpy":
-        raise RuntimeError("结构求解验证要求 FEALPy numpy 后端.")
+        raise RuntimeError("结构求解验证要求 numpy 后端.")
     metadata = provider.metadata()
     dim = int(metadata["spatial_dimension"])
     n_sub = tuple(int(value) for value in n_sub)

@@ -134,7 +134,7 @@ NORM_FLOOR = 1.0e-30
 # 与 LagrangeFEMAnalyzer 的 solve_method 形参取值域保持一致, 避免传入未支持的求解器名
 SolverName = Literal["scipy", "mumps", "cg"]
 
-# 直接解法经 fealpy.solver.spsolve 分派到对应后端; cg 是迭代解法
+# 直接解法经 soptx.solvers.spsolve 分派到对应后端; cg 是迭代解法
 DIRECT_SOLVERS: tuple[SolverName, ...] = ("scipy", "mumps")
 ITERATIVE_SOLVERS: tuple[SolverName, ...] = ("cg",)
 
@@ -428,7 +428,7 @@ def report(rows: list[dict], solver: str) -> list[float]:
 def solver_unavailable_reason(solver: str) -> str | None:
     """求解器后端不可用时返回原因, 可用则返回 None.
 
-    只有 ``mumps`` 需要探测: 它依赖外部 ``mumps`` 包 (PyMUMPS), 不是 fealpy
+    只有 ``mumps`` 需要探测: 它依赖外部 ``mumps`` 包 (PyMUMPS), 不是 soptx
     自带. 放在入口检查, 免得装配跑完了才在求解那一步炸.
     """
 

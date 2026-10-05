@@ -75,7 +75,7 @@ def pad(text: str, width: int) -> str:
 
 
 # 网格配置对应的完整类名; 未登记的取值原样显示.
-# --list 的 mesh 列: fealpy 网格类 + 剖分方式 (两种都是 TriangleMesh, 只差对角线规则)
+# --list 的 mesh 列: soptx.mesh 网格类 + 剖分方式 (两种都是 TriangleMesh, 只差对角线规则)
 MESH_CLASS_NAMES = {
     "triangle-checkerboard": "TriangleMesh/checkerboard",
     "triangle-single-diagonal-symmetric": "TriangleMesh/single-diagonal-sym",

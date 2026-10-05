@@ -149,7 +149,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._cached_K = None  # 缓存施加边界条件后的刚度矩阵, 供伴随求解复用
         self._cached_rhs = None
         self._cached_state_vector = None
-        self._essential_bc = None  # 牵引边界边标记 (NE,), FEALPy 4.0.0 无 mesh.edgedata
+        self._essential_bc = None  # 牵引边界边标记 (NE,), 网格没有 mesh.edgedata
         self._natural_bc = None    # 位移边界边标记 (NE,), u = u_D 弱施加
         self._symmetry_bc = None   # 对称面边标记 (NE,), 仅强加切向牵引分量 sigma_nt
         self._cached_Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space) # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
@@ -605,7 +605,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         mesh = self._mesh
         gdof = space_sigma.number_of_global_dofs()
 
-        # FEALPy 4.0.0 无 mesh.edgedata, 边界标记由分析器持有
+        # 网格没有 mesh.edgedata, 边界标记由分析器持有
         if self._natural_bc is not None:
             disp_edge_flag = self._natural_bc
         else:
@@ -827,7 +827,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         pde = self._pde
         bc = mesh.entity_barycenter('edge')
 
-        # FEALPy 4.0.0 的 Mesh 不再挂载 edgedata 用户数据字典, 边界标记改由分析器持有
+        # 网格不挂载 edgedata 用户数据字典, 边界标记由分析器持有
         self._essential_bc = pde.is_traction_boundary(bc)      # σ·n = t (强施加)
         self._natural_bc = pde.is_displacement_boundary(bc)    # u = u_D (弱施加)
 
@@ -1225,7 +1225,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         bd_edge_flag = mesh.boundary_edge_flag()
 
         # 1. 获取自然边界标记 (Natural BC)
-        # FEALPy 4.0.0 不再挂载 edgedata, 优先取分析器持有的标记, 否则按 PDE 谓词重算
+        # 网格不挂载 edgedata, 优先取分析器持有的标记, 否则按 PDE 谓词重算
         if self._natural_bc is not None:
             disp_edge_flag = self._natural_bc
         else:
@@ -1252,7 +1252,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             return bm.zeros(gdof, dtype=bm.float64, device=space.device)
 
         # 3. 准备积分数据
-        # 二维下 face 即 edge, FEALPy 4.0.0 只保留 face_to_cell / face_unit_normal
+        # 二维下 face 即 edge, 网格只提供 face_to_cell / face_unit_normal
         e2c = mesh.face_to_cell()[bdedge]
         en  = mesh.face_unit_normal()[bdedge]
         edge_measure  = mesh.entity_measure('edge')[bdedge]

@@ -80,7 +80,7 @@ def _validated_point_force(load: PointForce, dimension: int) -> tuple[Any, Any]:
 def _lagrange_basis_at(degree: int, xi: float) -> tuple[float, ...]:
     """返回参考区间 ``[-1, 1]`` 上等距节点的 Lagrange 基函数值.
 
-    节点取 ``xi_i = -1 + 2 i / degree``, 与 fealpy Lagrange 空间在单元边上的
+    节点取 ``xi_i = -1 + 2 i / degree``, 与 soptx.functionspace 的 Lagrange 空间在单元边上的
     插值点排布一致. 基函数在纯 Python 浮点上求值: 阶次低、与后端无关, 且避免
     在积分循环里反复构造后端张量.
     """
@@ -222,8 +222,8 @@ def project_line_traction(
     ``degree`` 必须与提供 ``node_coordinates`` 的位移空间阶次一致: 把高阶空间
     的插值点当作 P1 节点串处理会保持合力、却给出错误的节点力分布.
 
-    命中节点必须构成一条直线, 且每个单元内的插值点等距 —— 这正是 fealpy
-    Lagrange 空间在直边上的插值点排布. 不满足时显式报错, 不做几何近似.
+    命中节点必须构成一条直线, 且每个单元内的插值点等距 —— 这正是 soptx.functionspace
+    的 Lagrange 空间在直边上的插值点排布. 不满足时显式报错, 不做几何近似.
     """
     if int(load.dimension) != dimension:
         raise ValueError("LineTraction.dimension 与节点坐标维数不一致.")

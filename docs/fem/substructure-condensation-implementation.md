@@ -156,10 +156,10 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
  [阶段二: 局部静力缩聚]  步骤 5: Schur 补消元，产出 K_s (4, 16, 16) 与恢复矩阵 N (4, 2, 16)
                              │
                              ▼
- [阶段三: 宏观接口求解]  步骤 6: FEALPy COOTensor 散加装配为全局接口 CSRTensor K_B
+ [阶段三: 宏观接口求解]  步骤 6: 按缓存的 CSR pattern 散加装配为全局接口 CSRTensor K_B
                              │
                              ▼
-                         步骤 7: 接口边界投影 + fealpy.solver.spsolve 求解接口位移 u_B
+                         步骤 7: 接口边界投影 + soptx.solvers 直接法求解接口位移 u_B
                              │
                              ▼
  [阶段四: 细尺度位移恢复]步骤 8: 矩阵乘法回代 u_i = N @ u_b，拼合输出全场位移 U
@@ -192,13 +192,13 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 * **对应代码**：[`ExactSchurCondensation.condense()`](../../src/soptx/fem/substructure/condensation.py) 中的 `bm.linalg.solve`
 * **张量形状**：$K_s$ `(b, n_b, n_b)` $\to$ `(4, 16, 16)`；$N$ `(b, n_i, n_b)` $\to$ `(4, 2, 16)`。
 
-#### 步骤 6：全局接口系统装配（生成 FEALPy 原生 `CSRTensor`）
+#### 步骤 6：全局接口系统装配（生成 `soptx.sparse` 的 `CSRTensor`）
 * **数学与物理**：将各子结构的缩聚刚度 $K_s^j$ 按接口拓扑映射矩阵 $L_j$ 散加为整个大结构的全局接口刚度矩阵：
   $$K_{\mathcal{B}} = \sum_{j=1}^M L_j^{\mathsf{T}} K_s^j L_j$$
 * **对应代码**：[`GlobalAssembler.assemble_interface_system()`](../../src/soptx/fem/substructure/assembler.py)
-* **张量形状**：`system.stiffness` $\to$ `(n_interface, n_interface)`（FEALPy `CSRTensor`）。
+* **张量形状**：`system.stiffness` $\to$ `(n_interface, n_interface)`（`soptx.sparse` 的 `CSRTensor`）。
 
-#### 步骤 7：施加宏观边界条件并用 `fealpy.solver.spsolve` 求解接口位移
+#### 步骤 7：施加宏观边界条件并用 `soptx.solvers` 的 `DirectSolver` 求解接口位移
 * **数学与物理**：外载和 Dirichlet 约束投影到接口，对自由自由度子系统进行稀疏求解：
   $$K_{\text{free}} u_{\text{free}} = F_{\text{free}} - K_{\text{fixed}} u_{\text{fixed}}$$
 * **对应代码**：[`solve_interface_system()`](../../src/soptx/fem/substructure/solve.py)
@@ -220,7 +220,7 @@ StaticCondensationBase                   (soptx.fem.substructure.condensation, �
 | **步骤 3** | `K_local` | `(4, 18, 18)` | 4 个子结构的局部全自由度刚度矩阵 |
 | **步骤 4** | `K_ii` / `K_ib` / `K_bb` | `(4, 2, 2)` / `(4, 2, 16)` / `(4, 16, 16)` | 内部刚度块 / 耦合刚度块 / 接口刚度块 |
 | **步骤 5** | `K_s` / `N` | `(4, 16, 16)` / `(4, 2, 16)` | 子结构 Schur 补缩聚刚度矩阵 / 内部位移恢复矩阵 |
-| **步骤 6** | `system.stiffness` | `(n_interface, n_interface)` | 宏观全局接口刚度矩阵 (FEALPy `CSRTensor`) |
+| **步骤 6** | `system.stiffness` | `(n_interface, n_interface)` | 宏观全局接口刚度矩阵 (`soptx.sparse` 的 `CSRTensor`) |
 | **步骤 7** | `u` ($u_{\mathcal{B}}$) | `(n_interface,)` | 宏观全局接口位移向量 |
 | **步骤 8** | `U_full` | `(total_full_dofs,)` | 包含所有细节点自由度的全场位移向量 |
 
@@ -399,4 +399,4 @@ $m \times m \times m$）子域、节点位置分类、逐子结构整块缩聚�
 ## 开放问题与后续工作
 
 1. **路线 A 的端到端大规模训练泛化**：路线 A 已由 `ShapeFunctionCondensation` 落库并配三道门禁，在 5×5 子结构、完整 MBB 梁上完成与路线 B 的同预算消融（`verify_shape_function_route.py`）。尚未做的是：换子结构尺寸与算例后重新标定 `excess_rtol`（当前值锚定在本算例的路线交叉点上，可移植性未验证），以及在复杂拓扑优化迭代分布下的 OOD 泛化评估——留出集密度为独立均匀采样，与优化过程中出现的密度场分布不同。
-2. **全局 Matrix-Free 融合**：当前 `GlobalAssembler` 使用 FEALPy 原生 `CSRTensor` 组装稀疏矩阵；向无矩阵算子作用接口（Matrix-Free Operator-Action）的进一步加速融合属于后续工作。
+2. **全局 Matrix-Free 融合**：当前 `GlobalAssembler` 使用 `soptx.sparse` 的 `CSRTensor` 组装稀疏矩阵；向无矩阵算子作用接口（Matrix-Free Operator-Action）的进一步加速融合属于后续工作。

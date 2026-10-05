@@ -109,7 +109,7 @@ class PIMLShapeReduction(CondensationReductionAdapter):
     ) -> LocalReductionBatchResult:
         """批量执行路线 A, 并对未通过门禁的子结构集中 Exact 回退.
 
-        网络只调用一次; 变分式在 FEALPy 后端上向量化计算. 门禁仍按子结构
+        网络只调用一次; 变分式在 soptx.backend 后端上向量化计算. 门禁仍按子结构
         独立判断, 使 diagnostics 和回退范围保持局部性. 返回的刚度与延拓落在
         构造时给定的迹空间上, ``trace=None`` 时即完整接口.
         """

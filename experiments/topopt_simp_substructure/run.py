@@ -353,7 +353,7 @@ def run_case(
         "method": "substructure-condensation-SIMP",
         "trace": case.trace,
         "reduction": case.reduction,
-        "backend": "fealpy-numpy",
+        "backend": "numpy",
         "dimension": case.dim,
         "problem": case.problem,
         "domain": list(case.domain),

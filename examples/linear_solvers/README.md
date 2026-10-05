@@ -63,7 +63,7 @@ PARDISO 提供对称性利用与分阶段能力。pypardiso 接入 `soptx.solver
 | `CGSolver` / 函数式 `cg` | `src/soptx/solvers/cg.py` | PCG 递推、停机判据、`norm_type`、`residual_refresh`、批量右端项、`info` |
 | `DiagonalPreconditioner` | `src/soptx/solvers/preconditioners.py` | 作为 `M=` 接入后解不变、两层级迭代数都严格下降 |
 | `assemble_operator_diagonal` | `src/soptx/fem/analyzers/lagrange_fem_analyzer.py` | `'fa'` 与 `'ea'` 取出的对角一致（Jacobi 的输入） |
-| `DirichletBCOperator` 作为 CG 的算子 | `fealpy.fem.dirichlet_bc_operator`（vendor fork） | 只用 `@` 就能被 `CGSolver.setup` 接受并解对 |
+| `ConstrainedOperator` 作为 CG 的算子 | `src/soptx/fem/operators/constrained.py` | 只用 `@` 就能被 `CGSolver.setup` 接受并解对 |
 
 `DirectSolver` 在迭代法检查里只充当参考解。
 
@@ -84,7 +84,7 @@ PARDISO 提供对称性利用与分阶段能力。pypardiso 接入 `soptx.solver
 |---|---|---|---|---|---|
 | `residual` | 对**完整矩阵**算相对残差 $\lVert b - Ax\rVert/\lVert b\rVert$ 落在阈值内 | ✓ | ✓ | ✓ | 正确性基准 |
 | `solution` | 制造解的 $L_{2}$ 观测收敛阶不低于门禁，复用 `lagrange_elasticity/manufactured_convergence_demo.py` 的加密序列与判定 | ✓ | ✓ | — | 正确性基准 |
-| `ownership` | 求解后调用方持有的矩阵数值与索引均未被改写，分 FEALPy 稀疏算子与原生 scipy CSR 两档输入 | ✓ | ✓ | ✓ | 正确性基准 |
+| `ownership` | 求解后调用方持有的矩阵数值与索引均未被改写，分 `soptx.sparse` 稀疏算子与原生 scipy CSR 两档输入 | ✓ | ✓ | ✓ | 正确性基准 |
 | `guard` | 非法 solver 名与非法 `sym` 值均抛 `ValueError` | ✓ | ✓ | — | 正确性基准 |
 
 `residual` 必须对完整矩阵算：`sym=1/2` 时后端只读一侧三角，把非对称矩阵按对称
