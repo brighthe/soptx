@@ -121,26 +121,6 @@ class _FaceSourceIntegrator(LinearInt, SrcInt, FaceInt):
 
         return F
 
-class InterFaceSourceIntegrator(_FaceSourceIntegrator):
-    """以 ``threshold`` 直接作为面编号的面源项积分子."""
-
-    def make_index(self, space: _FS):
-        """返回参与积分的面编号.
-
-        Parameters
-        ----------
-        space : FunctionSpace
-            检验函数空间 (未使用).
-
-        Returns
-        -------
-        TensorLike
-            ``threshold`` 原样返回, 应为面编号.
-        """
-        index = self.threshold
-
-        return index
-
 class LagrangeBoundarySourceIntegrator(_FaceSourceIntegrator):
     """边界面上的自然边界载荷积分器.
 

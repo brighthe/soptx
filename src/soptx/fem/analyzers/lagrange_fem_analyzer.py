@@ -1357,7 +1357,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         NC       = mesh_u.number_of_cells()
         LDOF     = s_space.number_of_local_dofs()
 
-        # --- 复用 voigt_multiresolution 前半段: 积分点、gphi、detJ ---
+        # --- 多分辨率的积分点、gphi、detJ ---
         if 4 <= n_sub <= 9:
             q = 3
         elif n_sub >= 16:
@@ -1382,7 +1382,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             J_sub = mesh_u.entity_view('cell').jacobi_matrix(sub_bcs)           # (NC, NQ, GD, GD)
             detJ_eg[:, s_idx] = bm.abs(bm.linalg.det(J_sub))              # (NC, NQ)
 
-        # --- 计算 B 矩阵, 与 voigt_multiresolution 完全一致 ---
+        # --- 计算 B 矩阵 ---
         from soptx.fem.utils import (reshape_multiresolution_data,
                                         reshape_multiresolution_data_inverse)
         B_eg = reshape_multiresolution_data_inverse(

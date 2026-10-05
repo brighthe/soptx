@@ -71,7 +71,7 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 | 稀疏张量的其他小缺陷 | `sparse/coo_tensor.py`、`csr_tensor.py` | 移植原样保留 | 模式张量 (`values` 为 None) 与稠密张量相加时 `dense_ndim + (nnz,)` 为 int 加 tuple，抛 `TypeError`；`CSRTensor.sum(axis=0)` 返回各行之和，与 numpy 约定相反 (已在 docstring 注明) | 逐项修正 | 未修 |
 | numpy 后端 `bc_to_points` 不接受张量积重心坐标 | `backend/numpy_backend.py` | 移植原样保留 | 对张量积重心坐标调用 `tensorprod(bcs)` 未解包，抛 `AttributeError`；pytorch 正常。仓库内未经 `bm` 调用 | 改为 `tensorprod(*bcs)` | 未修 |
 | 后端中的失效代码 | `backend/pytorch_backend.py`、`backend/numpy_backend.py` | 移植原样保留 | 两个后端的 `quadrangle_grad_lambda_2d` 函数体为空；`NumpyRandom` 把 `rng` 的 setter 定义成了名为 `setter` 的属性而无法实例化；`NumpyRandom`、`PyTorchRandom` 均未被使用 | 删除未使用的类与空函数 | 未修 |
-| 网格工厂与加密中的小问题 | `mesh/uniform_mesh/`、`mesh/factory/`、`mesh/transform/uniform.py` | 移植原样保留 | `UniformMesh*` 是无实现的占位类，`fem/integrators/utils.py` 中对其的 `isinstance` 分支恒不成立；四类网格 `from_box` 的 `threshold` 参数未使用；三棱柱一致加密在 `returnim=True` 时返回空列表 (未生成延拓矩阵) | 删除占位类与对应分支；删除或实现 `threshold` | 未修 |
+| 网格工厂与加密中的小问题 | `mesh/uniform_mesh/`、`mesh/factory/`、`mesh/transform/uniform.py` | 移植原样保留 | `UniformMesh*` 是无实现的占位类（原先唯一引用它的 `fem/integrators/utils.py` 已随符号积分删除）；四类网格 `from_box` 的 `threshold` 参数未使用；三棱柱一致加密在 `returnim=True` 时返回空列表 (未生成延拓矩阵) | 删除占位类；删除或实现 `threshold` | 未修 |
 
 ## 记账约定
 

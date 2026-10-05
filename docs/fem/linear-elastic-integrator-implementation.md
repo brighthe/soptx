@@ -47,7 +47,7 @@ $$
 $$
 \int_{\tau} \lambda_0^{I_0}\lambda_1^{I_1}\cdots\lambda_d^{I_d}\,\mathrm{d}\boldsymbol{x} = \frac{d!\,\boldsymbol{I}!}{(|\boldsymbol{I}|+d)!}\,|\tau|, \qquad \boldsymbol{I}! := \prod_{r=0}^d I_r!,\quad |\boldsymbol{I}| := \sum_{r=0}^d I_r
 $$
-SOPTX 通过 `LinearSymbolicIntegration` 在初始化阶段将被积多项式解析展开并精确求积，直接输出闭式精确的 $\hat{S}_{ij}^{kl}$，**彻底消除了高阶数值求积的阶数选取开销与数值截断误差**。
+SOPTX 曾以 `LinearSymbolicIntegration`（`symbolic` 变体）实现这一路线，因无调用方且忽略 `index`，已于 2026-10 删除。被积函数是多项式，`fast` 变体所用的高斯求积在积分阶足够时同样精确。
 
 ---
 
@@ -124,9 +124,8 @@ flowchart TD
 | 数学/架构对象 | 源码映射（`soptx/fem/integrators/linear_elastic_integrator.py`）|
 | :--- | :--- |
 | **积分器主类** | `class LinearElasticIntegrator(LinearInt, OpInt, CellInt)` |
-| **装配变体注册** | `@assembly.register('standard' | 'voigt' | 'fast' | 'standard_multiresolution' | 'voigt_multiresolution')` |
+| **装配变体注册** | `@variantmethod('standard')`，`@assembly.register('voigt' | 'fast')` |
 | **快速缓存获取** | `@enable_cache def fetch_fast_assembly(self, space)` |
-| **符号解析积分** | `from soptx.fem.integrators.utils import LinearSymbolicIntegration` |
 | **材料本构求值** | `material.elastic_matrix()` 与 `material.strain_matrix(...)` |
 
 ## 相关文档
