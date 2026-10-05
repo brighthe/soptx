@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/ipoints.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""插值点: 多重指标、实体到插值点的编号映射与插值点坐标."""
+
 from collections.abc import Iterable
 from itertools import combinations_with_replacement
 from typing import TYPE_CHECKING
@@ -25,21 +27,24 @@ __all__ = [
 
 
 class MultiIndex:
+    """单纯形上插值点多重指标的生成工具."""
     @classmethod
     def multi_index_matrix(cls, p: int, n: int, *, dtype: dtype | None = None) -> Tensor:
-        """Generate the multi-index matrix for interpolation points of
-        degree p with n vertices. The multi-index matrix is of shape
-        (C(p+n-1, n-1), n) and each row corresponds to the multi-index of
-        an interpolation point.
+        """生成 ``n`` 个顶点的单纯形上 ``p`` 次插值点的多重指标矩阵, 每行对应一个插值点.
 
-        Parameters:
-            p (int): Degree of interpolation.
-            n (int): Number of vertices in the Simplex.
-            dtype (dtype, optional): Data type of the output tensor. If None, it will
-                default to int32.
+        Parameters
+        ----------
+        p : int
+            插值次数.
+        n : int
+            单纯形的顶点数.
+        dtype : dtype, optional
+            结果的整数类型, 默认 int32.
 
-        Returns:
-            Tensor: A tensor of shape (C(p+n-1, n-1), n) containing the multi-indices.
+        Returns
+        -------
+        Tensor
+            形状 ``(C(p+n-1, n-1), n)`` 的多重指标.
         """
         if dtype is None:
             dtype = bm.int32
@@ -55,10 +60,12 @@ class MultiIndex:
 
     @classmethod
     def multi_index_inner(cls, p: int, n: int, *, dtype: dtype | None = None) -> Tensor:
-        """Generate the multi-index corresponding to the inner interpolation
-        points of degree p with n vertices.
+        """生成 ``n`` 个顶点的单纯形上 ``p`` 次内部插值点的多重指标.
 
-        See also: `multi_index_matrix`."""
+        See Also
+        --------
+        multi_index_matrix
+        """
         if p < n:
             if dtype is None:
                 dtype = bm.int32
@@ -67,7 +74,7 @@ class MultiIndex:
 
 
 def multi_index_sort(multi_index: Tensor, /) -> Tensor:
-    """Return the indices to sort multi-indices according to the predefined orientation."""
+    """返回按预定义定向对多重指标排序的下标."""
     NV = multi_index.shape[-1]
     count = bm.sum(multi_index != 0, axis=1)
     nonzero_row, nonzero_col = bm.nonzero(multi_index)
@@ -80,7 +87,7 @@ def multi_index_sort(multi_index: Tensor, /) -> Tensor:
 def _local_face_groups(
     schema: "EntitySchema",
 ) -> list[tuple[int, list[tuple[int, ...]]]]:
-    """Return ``(top_dim, vertex rows)`` for every local subentity group."""
+    """对每个局部子实体组返回 ``(拓扑维数, 顶点行)``."""
     groups: list[tuple[int, list[tuple[int, ...]]]] = []
     for top_dim in range(1, schema.top_dim):
         for group in schema.local_entity_groups(top_dim):
@@ -131,10 +138,10 @@ def multi_index_tensorprod(
     broadcast_multi_index: Tensor,
     split_indices: tuple[int, ...] | None = None
 ) -> Tensor:
-    """Compute the tensor product between split multi-indices.
+    """对拆分后的多重指标做张量积.
 
-    Do nothing if split_indices is None, as no other operand is provided to
-    perform the tensor product with."""
+    ``split_indices`` 为 None 时没有其他操作数可做张量积, 原样返回.
+    """
     from functools import reduce
 
     if split_indices is not None:
@@ -143,6 +150,7 @@ def multi_index_tensorprod(
         return broadcast_multi_index
 
     def kron_last_dim(a: Tensor, b: Tensor) -> Tensor:
+        """沿最后一维做 Kronecker 积; ``a`` 为空时原样返回."""
         if bm.size(a) == 0:
             return a
         return (a[..., :, None] * b[..., None, :]).reshape(*a.shape[:-1], -1) # type: ignore[return-value]
@@ -151,10 +159,9 @@ def multi_index_tensorprod(
 
 
 def _vertex_column_permutation(schema: "EntitySchema") -> list[int] | None:
-    """Column indices reordering ``multi_index`` into local vertex numbering.
+    """把 ``multi_index`` 的列重排为局部顶点编号的列下标.
 
-    Return ``None`` when ``multi_index`` already numbers its columns by local
-    vertex, which is the case for every simplex-based Schema.
+    ``multi_index`` 的列已按局部顶点编号时返回 None, 所有单纯形类 Schema 都属此情形.
     """
     columns = schema.multi_index_vertex_columns()
     if columns is None:
@@ -169,12 +176,11 @@ def _vertex_orientation_to_ipoint_permutation(
     schema: "EntitySchema",
     order: tuple[int, ...],
 ) -> dict[tuple[int, ...], Tensor]:
-    """Build vertex-orientation -> local ipoint permutation.
+    """构造 "顶点定向 -> 局部插值点置换" 的映射.
 
-    Keys are the vertex automorphisms reported by ``vertex_permutations()``,
-    matching what ``EntityView.global_permutations`` produces.  Values are the
-    column permutation carrying the sub-entity's own internal-point order into
-    the order the parent expects under that relative orientation.
+    键为 ``vertex_permutations()`` 给出的顶点自同构, 与
+    ``EntityView.global_permutations`` 的结果一致; 值为列置换, 把子实体自身的内部点
+    顺序变为父实体在该相对定向下所期望的顺序.
     """
     # 用重心键直接查表, 不走 multi_index_sort.
     #
@@ -205,21 +211,23 @@ def to_ipoint(
     entity: "EntityView | str",
     order: int,
 ) -> Tensor:
-    """Get the interpolation point indices for the given entity and order,
-    in unstructured meshes.
-    The interpolation point indices are ordered from lower-dimensional
-    sub-entities to higher-dimensional entities, and the interpolation points
-    of each sub-entity are ordered according to the vertex orientation.
+    """返回非结构网格中给定实体上 ``order`` 次插值点的全局编号.
 
-    Parameters:
-        mesh (Mesh): The mesh object.
-        entity (EntityView | str): The target entity view or an unambiguous
-            sector id / role accepted by ``mesh.entity_view``.
-        order (int): The degree of interpolation.
+    插值点编号按子实体维数从低到高排列, 每个子实体内的插值点按顶点定向排列.
 
-    Returns:
-        Tensor: A tensor of shape (num_entities, num_ip) containing the
-            interpolation point indices.
+    Parameters
+    ----------
+    mesh : Mesh
+        网格.
+    entity : EntityView or str
+        目标实体视图, 或 ``mesh.entity_view`` 能无歧义识别的分区 id / 角色名.
+    order : int
+        插值次数.
+
+    Returns
+    -------
+    Tensor
+        形状 ``(实体数, 每个实体的插值点数)``.
     """
     from .view.entity_view import EntityView
 
@@ -310,13 +318,10 @@ def to_ipoint(
 
 
 def to_ipoint_permutation(schema: type["EntitySchema"], order: tuple[int, ...]) -> Tensor | None:
-    """Column permutation from topological ipoint order to basis order.
+    """从拓扑插值点顺序到基函数顺序的列置换.
 
-    ``to_ipoint`` builds interpolation-point indices in topological order
-    (lower-dimensional sub-entities first). Schemas whose basis functions
-    use a different local ordering may override this hook to return the
-    column permutation that aligns the mapping with ``multi_index`` and
-    shape-function order.
+    ``to_ipoint`` 按拓扑顺序 (低维子实体在前) 构造插值点编号. 基函数采用其他局部
+    顺序的 Schema 可借此钩子返回列置换, 使映射与 ``multi_index`` 及形函数顺序对齐.
     """
     from .schema.classic.base import _TensorProductOrderSchema
 
@@ -339,16 +344,21 @@ def to_ipoint_permutation(schema: type["EntitySchema"], order: tuple[int, ...]) 
 
 
 def ipoints(mesh: "MeshView", order: int | tuple[int, ...], names: Iterable[str]) -> Tensor:
-    """Get the interpolation points for the given entity and order.
+    """返回给定实体上 ``order`` 次插值点的坐标.
 
-    Parameters:
-        mesh (MeshView): The mesh object.
-        order (int | tuple[int, ...]): The degree of interpolation.
-        names (Iterable[str]): The names of the entities for which to compute
-            interpolation points. For example, ["tet", "hex"].
+    Parameters
+    ----------
+    mesh : MeshView
+        网格.
+    order : int or tuple of int
+        插值次数.
+    names : iterable of str
+        要计算插值点的实体名, 如 ``["tet", "hex"]``.
 
-    Returns:
-        Tensor: A tensor of shape (num_ip, GD) containing the interpolation points.
+    Returns
+    -------
+    Tensor
+        形状 ``(插值点数, GD)``.
     """
     if isinstance(order, int):
         order = (order,)

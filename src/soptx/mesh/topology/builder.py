@@ -1,24 +1,23 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/topology/builder.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Construct per-root derived sectors and canonical incidence relations.
+"""按根分区构造派生子分区与规范关联关系.
 
-This module implements the topology half of the FEALPy mesh four-layer model.
-Topology construction is rooted in one :class:`EntitySector`; it never merges
-distinct root semantic sectors and never creates, trims, merges, or renumbers
-the canonical ``"node"`` sector owned by :class:`MeshBlock`.
+本模块实现网格四层模型 (源自 FEALPy) 中的拓扑部分. 拓扑构造以一个
+:class:`EntitySector` 为根; 从不合并不同的根语义分区, 也从不创建、裁剪、合并或
+重编号 :class:`MeshBlock` 所拥有的规范 ``"node"`` 分区.
 
-For conforming Lagrange meshes, each local subentity uses two identity levels:
+对协调的 Lagrange 网格, 每个局部子实体用两级身份:
 
-``(child Schema Python type, canonical vertex tuple)``
-    identifies a topological entity;
+``(子 Schema 的 Python 类型, 规范顶点元组)``
+    标识一个拓扑实体;
 
-``(concrete Schema id, canonical full-node tuple)``
-    validates conforming consistency for that topological identity.
+``(具体 Schema 的 id, 规范完整节点元组)``
+    校验该拓扑身份下的协调一致性.
 
-The implementation extracts occurrences with :func:`extract_local_entity_occurrences`,
-canonicalizes orientations with :func:`canonicalize_local_entity_occurrences`,
-and stores both forward and reverse canonical :class:`EntityRelation` pairs.
+实现上用 :func:`extract_local_entity_occurrences` 提取出现, 用
+:func:`canonicalize_local_entity_occurrences` 规范化定向, 并同时存储正反两个方向的
+规范 :class:`EntityRelation`.
 """
 
 
@@ -67,9 +66,9 @@ _LEGACY_SCHEMA_TYPES = {
 
 
 def _unique_unordered_rows_across(*arrays: Tensor) -> tuple[Tensor, tuple[Tensor, ...]]:
-    """Unique rows across 2D tensors after row-wise canonicalization.
+    """对多个二维张量的行逐行规范化后统一去重.
 
-    Rows are treated as unordered sets by sorting each row first.
+    先对每行排序, 即把行视为无序集合.
     """
     if not arrays:
         raise ValueError("at least one array is required")
@@ -78,19 +77,19 @@ def _unique_unordered_rows_across(*arrays: Tensor) -> tuple[Tensor, tuple[Tensor
         if len(arr.shape) != 2:
             raise ValueError("only 2D tensors are supported")
 
-    total = bm.concat(arrays, axis=0)  # (total_rows, ncols)
+    total = bm.concat(arrays, axis=0)  # 形状 (total_rows, ncols)
     canonical_total = bm.sort(total, axis=1)
 
-    indices = bm.lexsort(tuple(reversed(canonical_total.T)), axis=0)  # sorted <-> original
+    indices = bm.lexsort(tuple(reversed(canonical_total.T)), axis=0)  # 排序后 <-> 原始顺序
     sorted_canonical = canonical_total[indices]
 
     diff_flag = bm.any(sorted_canonical[1:] != sorted_canonical[:-1], axis=1)
     true = bm.ones((1,), dtype=bm.bool, device=diff_flag.device)
     diff_flag = bm.concat([true, diff_flag])
 
-    # choose representative rows in their original ordering
+    # 取各组代表行, 保持其原始顺序
     unique = total[indices[diff_flag]]
-    sorted_to_unique = bm.cumulative_sum(diff_flag, axis=0) - 1  # sorted -> unique
+    sorted_to_unique = bm.cumulative_sum(diff_flag, axis=0) - 1  # 排序后 -> 去重后
 
     original_to_sorted = bm.empty_like(indices)
     original_to_sorted[indices] = bm.arange(
@@ -98,7 +97,7 @@ def _unique_unordered_rows_across(*arrays: Tensor) -> tuple[Tensor, tuple[Tensor
         dtype=original_to_sorted.dtype,
         device=original_to_sorted.device,
     )
-    total_to_unique = sorted_to_unique[original_to_sorted]  # original -> unique
+    total_to_unique = sorted_to_unique[original_to_sorted]  # 原始顺序 -> 去重后
 
     array_indptr = [0]
     for arr in arrays:
@@ -113,7 +112,7 @@ def _unique_unordered_rows_across(*arrays: Tensor) -> tuple[Tensor, tuple[Tensor
 
 
 def _unique_ordered_rows(rows: Tensor) -> tuple[Tensor, Tensor]:
-    """Unique exact 2D rows in lexicographic order and map inputs to uniques."""
+    """按字典序对二维张量的行精确去重, 并给出输入行到去重结果的映射."""
     if len(rows.shape) != 2:
         raise ValueError("only 2D tensors are supported")
     if rows.shape[0] == 0:
@@ -143,6 +142,7 @@ def _unique_ordered_rows(rows: Tensor) -> tuple[Tensor, Tensor]:
 
 
 def get_total_face(cell: Tensor, local_face: list[list[int]]) -> Tensor:
+    """按局部面编号收集所有单元的局部面, 形状 ``(NC * NFC_local, NVF)``, 未去重."""
     total_face = cell[:, local_face]
     NFC = len(local_face[0])
     return bm.reshape(total_face, (-1, NFC))
@@ -152,7 +152,7 @@ def _lower_entities(
     schema: type["EntitySchema"],
     excluded: set[str] | None = None,
 ) -> dict[str, list[list[int]]]:
-    """Return the OFace entries that point to lower-dimensional schemas."""
+    """返回指向低维 Schema 的局部面 (OFace) 条目."""
     excluded = set() if excluded is None else excluded
     return {
         name: local_indices
@@ -167,12 +167,11 @@ def _derived_sector_id(
     *,
     use_legacy_name: bool,
 ) -> str:
-    """Return a root-scoped derived sector id.
+    """返回限定于根的派生分区 id.
 
-    A single classic root whose sector id equals its Schema name keeps the
-    child Schema's short name, preserving the historical single-type layout.
-    Other roots use ``f"{root.id}_{child_schema.name}"`` so distinct semantic
-    sectors cannot share a derived id.
+    分区 id 等于其 Schema 名的单一经典根沿用子 Schema 的短名, 以保持历史上的单类型
+    布局; 其他根使用 ``f"{root.id}_{child_schema.name}"``, 使不同的语义分区不会共用
+    派生 id.
     """
     if use_legacy_name:
         return child_schema.name
@@ -185,7 +184,7 @@ def _derived_sector_id_for_root_id(
     *,
     use_legacy_name: bool,
 ) -> str:
-    """Return the derived id associated with a root's child Schema."""
+    """返回某个根的子 Schema 所对应的派生分区 id."""
     if use_legacy_name:
         return child_schema.name
     return f"{root_id}_{child_schema.name}"
@@ -196,12 +195,11 @@ def _ordered_rows_to_existing(
     new: Tensor,
     target_id: str,
 ) -> Tensor:
-    """Map exact canonical rows in ``new`` to an existing canonical sector.
+    """把 ``new`` 中的规范行精确映射到已存在的规范分区.
 
-    ``existing`` must already be the canonical, unique, lexicographically
-    ordered row set of its target sector.  The function builds a combined
-    ordered-unique index, verifies that the first ``len(existing)`` rows still
-    map to themselves, and returns target ids for the ``new`` rows.
+    ``existing`` 须已是目标分区规范、去重、按字典序排列的行集. 本函数建立合并后的
+    有序去重索引, 校验前 ``len(existing)`` 行仍映射到自身, 并返回 ``new`` 各行的
+    目标编号.
     """
     existing_count = int(existing.shape[0])
     new_count = int(new.shape[0])
@@ -228,12 +226,11 @@ def _ordered_rows_to_existing(
 def _validate_conforming_occurrences(
     canonical_by_schema: dict["EntitySchema", CanonicalLocalEntityOccurrence],
 ) -> None:
-    """Validate the double-key conforming rule within one root sector.
+    """在一个根分区内校验双键协调规则.
 
-    The topological key is ``(type(child Schema), canonical vertex tuple)``.
-    On the first occurrence the concrete Schema id and canonical full-node
-    tuple are recorded.  Later occurrences must have the same concrete Schema
-    id and the same canonical full nodes; otherwise the mesh is nonconforming.
+    拓扑键为 ``(type(子 Schema), 规范顶点元组)``. 首次出现时记录具体 Schema 的 id
+    与规范完整节点元组; 之后的出现须有相同的具体 Schema id 与相同的规范完整节点,
+    否则网格不协调.
     """
     seen: dict[
         tuple[type["EntitySchema"], tuple[int, ...]],
@@ -267,27 +264,26 @@ def _validate_conforming_occurrences(
 
 
 class ConstructResult(NamedTuple):
+    """一层低维实体的构造结果: 实体类型名、去重后的实体及各输入单元到它的映射."""
     face_type: str
     face: Tensor
     cell_to_face: tuple[Tensor, ...]
 
 
 class TopologyBuilder:
-    """Build per-root derived sectors and canonical incidence relations.
+    """按根分区构造派生子分区与规范关联关系.
 
-    ``construct`` is the stable entry point.  It handles one or more root cell
-    sectors independently:
+    ``construct`` 是稳定的入口, 对一个或多个根单元分区分别处理:
 
-    - extract complete child occurrences;
-    - canonicalize allowed orientations;
-    - validate the double-key conforming rules;
-    - deduplicate exact canonical full-node rows;
-    - bind derived sectors with ``source_cell_sector_id``;
-    - build root/derived/node relations and materialize reverse pairs.
+    - 提取完整的子实体出现;
+    - 规范化允许的定向;
+    - 校验双键协调规则;
+    - 按规范完整节点行精确去重;
+    - 绑定带 ``source_cell_sector_id`` 的派生分区;
+    - 建立根/派生/节点之间的关系, 并实体化反向关系.
 
-    The class does not parse sector ids into cell/face/edge roles.  Role
-    interpretation belongs to :class:`MeshView`, based on its root anchor and
-    the stored provenance and relations.
+    本类不从分区 id 解析出单元/面/边的角色; 角色的解释属于 :class:`MeshView`,
+    依据其根锚点以及存储的来源与关系.
     """
 
     @classmethod
@@ -296,23 +292,21 @@ class TopologyBuilder:
         cells: Iterable[Tensor],
         local_face_dicts: Iterable[dict[str, list[list[int]]]],
     ) -> Iterator[ConstructResult]:
-        """
-        Construct lower-dimensional elements.
+        """构造低一维的实体.
 
-        Parameters:
-            cells (Iterable[Tensor]):
-                A sequence of cells, containing tensors in the shape of (NC, NVF).
-            local_face_dicts (Iterable[dict[str, list[list[int]]]]):
-                A sequence of local face dictionaries. Keys are used to tag the
-                faces, and values are local face indices.
+        Parameters
+        ----------
+        cells : iterable of Tensor
+            单元序列, 每个形状为 ``(NC, NVF)``.
+        local_face_dicts : iterable of dict
+            局部面字典序列: 键用于标记面的类型, 值为局部面的顶点编号.
 
-        Returns:
-            Iterator[ConstructResult]:
-                An iterator of ConstructResult, which contains the face type name,
-                the unique face array, and the cell-to-face mapping for each input
-                cell.
+        Yields
+        ------
+        ConstructResult
+            面的类型名、去重后的面数组, 以及各输入单元到面的映射.
         """
-        # NOTE: {face_kind: ([total_face,], [NFC,])}
+        # NOTE: 结构为 {face_kind: ([total_face,], [NFC,])}
         face_table: dict[str, tuple[list[Tensor], list[int]]] = {}
 
         for cell, local_face_dict in zip(cells, local_face_dicts):
@@ -339,7 +333,7 @@ class TopologyBuilder:
         blocks: list[EntitySector],
         excluded: set[str],
     ) -> list[EntitySector]:
-        """Construct one OFace layer from ``blocks`` and return touched sectors."""
+        """由 ``blocks`` 构造一层局部面 (OFace) 实体, 返回涉及的分区."""
         constructed: list[EntitySector] = []
 
         for const_result in cls.construct_lower_dims(
@@ -397,29 +391,28 @@ class TopologyBuilder:
         src_name: str | None = None,
         exclude: list[str] | None = None,
     ):
-        """Construct lower-dimensional sectors per root cell sector.
+        """按根单元分区构造低维分区, 原地修改 ``storage``.
 
-        The operation is in-place on ``storage``.  Each root sector is handled
-        independently: occurrences are extracted from its parameterized local
-        entity groups, canonically oriented, deduplicated, and bound to a
-        derived sector with ``source_cell_sector_id`` set to the root id.
-        Nested canonical relations are built for derived sectors, and reverse
-        pairs are materialized.  Distinct root semantic sectors are never
-        merged.
+        各根分区分别处理: 从其参数化的局部实体组提取出现, 规范化定向, 去重, 并绑定到
+        ``source_cell_sector_id`` 为该根 id 的派生分区; 为派生分区建立嵌套的规范关系,
+        并实体化反向关系. 不同的根语义分区从不合并.
 
-        This method is not idempotent.  It assumes the requested derived
-        sectors and relations do not already exist; rebuild paths must clear
-        stale sectors/relations before invoking it.
+        本方法不是幂等的: 它假定所需的派生分区与关系尚不存在, 重建路径须先清除过时的
+        分区与关系.
 
-        Parameters:
-            storage (MeshBlock): The mesh storage object to modify.
-            src_name (str, optional): The name of the source block to start from.
-                If None, all root blocks are used. Default is None.
-            exclude (list[str], optional): A list of lower-dimensional shape names
-                to exclude from construction. Default is None.
+        Parameters
+        ----------
+        storage : MeshBlock
+            要修改的网格存储对象.
+        src_name : str, optional
+            起始的源分区名; 为 None (默认) 时处理所有根分区.
+        exclude : list of str, optional
+            不构造的低维形状名.
 
-        Returns:
-            list[EntitySector]: Newly constructed lower-dimensional sectors.
+        Returns
+        -------
+        list of EntitySector
+            新构造的低维分区.
         """
         excluded = set() if exclude is None else set(exclude)
         if src_name is None:
@@ -481,7 +474,7 @@ class TopologyBuilder:
         *,
         use_legacy_name: bool,
     ) -> list[EntitySector]:
-        """Construct cyclic edges and ragged incidence for one polygon root."""
+        """为一个多边形根分区构造循环的边与不等长的关联关系."""
         indptr = root.indptr
         if indptr is None:
             raise ValueError("PolygonSchema root sectors require indptr")
@@ -640,13 +633,11 @@ class TopologyBuilder:
         *,
         use_legacy_name: bool,
     ) -> list[EntitySector]:
-        """Build all lower-dimensional sectors for one root sector.
+        """为一个根分区构造全部低维分区.
 
-        Occurrences are grouped by concrete child Schema, canonically
-        oriented, validated for conforming consistency, and deduplicated by
-        exact canonical full-node rows.  Each resulting sector records its
-        ``source_cell_sector_id`` and receives direct root→derived and
-        root→node relations.
+        出现按具体子 Schema 分组, 规范化定向, 校验协调一致性, 并按规范完整节点行精确
+        去重. 得到的每个分区记录其 ``source_cell_sector_id``, 并直接获得根→派生与
+        根→节点的关系.
         """
         occurrences_by_schema: dict["EntitySchema", list[LocalEntityOccurrence]] = {}
         for top_dim in range(1, root.schema.top_dim):
@@ -731,13 +722,10 @@ class TopologyBuilder:
         *,
         use_legacy_name: bool,
     ) -> None:
-        """Build nested relations among sectors derived from one root.
+        """在同一根派生出的分区之间建立嵌套关系.
 
-        Derived sectors are processed from highest to lowest dimension.  For
-        each source sector, its child occurrences are extracted and matched to
-        the already-built root-scoped target sectors.  This produces
-        face→edge, edge→node, and analogous lower-dimensional chains without
-        merging sectors across different roots.
+        派生分区按维数从高到低处理: 对每个源分区提取其子实体出现, 匹配到已建好的、
+        限定于该根的目标分区. 由此得到面→边、边→节点等低维关系链, 不跨根合并分区.
         """
         derived = [
             sector
@@ -813,11 +801,10 @@ class TopologyBuilder:
 
     @classmethod
     def _materialize_reverse_relations(cls, storage: MeshBlock) -> None:
-        """Materialize the canonical reverse for every stored relation.
+        """为每条已存储的关系实体化其规范反向关系.
 
-        The inverse is added only when the reverse ordered pair is absent.
-        Since :class:`MeshBlock` enforces one relation per ordered pair, the
-        result is deterministic and preserves transpose/incidence consistency.
+        只在反向有序对不存在时加入逆关系. 由于 :class:`MeshBlock` 规定每个有序对只有
+        一条关系, 结果是确定的, 并保持转置与关联的一致性.
         """
         for (src_id, tgt_id), relation in list(storage.relations.items()):
             reverse_id = (tgt_id, src_id)
@@ -832,7 +819,7 @@ class TopologyBuilder:
         src_name: str | None = None,
         exclude: list[str] | None = None,
     ) -> None:
-        """Optionally construct relations among already-created lower entities."""
+        """按需在已建好的低维实体之间建立关系."""
         excluded = set() if exclude is None else set(exclude)
         if src_name is None:
             current_blocks = [
@@ -849,6 +836,7 @@ class TopologyBuilder:
 
 
 class TopRelationConnector:
+    """把源分区连接到已存在的目标分区, 建立 ``src -> tgt`` 关系."""
     @classmethod
     def _new_to_existing(
         cls,
@@ -876,20 +864,29 @@ class TopRelationConnector:
         src_name: str,
         tgt_name: str,
     ) -> Relation:
-        """Connect src -> tgt mapping for existing tgt sector.
-        This is an in-place operation that modifies the ``storage`` object.
+        """为已存在的目标分区建立 ``src -> tgt`` 映射, 原地修改 ``storage``.
 
-        A temporary tgt layer is built from src only. The temporary tgt entities
-        are matched back to the existing tgt sector, then the temporary relation
-        is remapped into the storage numbering.
+        只由源分区构造一层临时目标实体, 把临时目标实体匹配回已存在的目标分区, 再把
+        临时关系重映射到存储中的编号.
 
-        Parameters:
-            storage (MeshBlock): The mesh storage object to modify.
-            src_name (str): The name of the source block.
-            tgt_name (str): The name of the target block.
+        Parameters
+        ----------
+        storage : MeshBlock
+            要修改的网格存储对象.
+        src_name : str
+            源分区名.
+        tgt_name : str
+            目标分区名.
 
-        Returns:
-            Relation: The constructed relation from src to tgt.
+        Returns
+        -------
+        Relation
+            构造出的 ``src -> tgt`` 关系.
+
+        Raises
+        ------
+        ValueError
+            所需的目标实体不在已存在的目标分区中.
         """
         if tgt_name not in storage.sectors:
             raise ValueError(f"target sector {tgt_name!r} does not exist")
@@ -920,6 +917,7 @@ class TopRelationConnector:
 
 
 class TopRelationInferer:
+    """经中间维数的关系复合, 推断高维分区到低维分区的关系."""
     _pattern_select_cache: dict[tuple[str, str, int], Tensor] = {}
 
     @staticmethod
@@ -1013,13 +1011,13 @@ class TopRelationInferer:
         if src_dim - 1 < dst_dim:
             raise ValueError(f"no adjacent lower-dimensional relation found for {src_name!r}")
 
-        for mid_dim in range(src_dim - 1, dst_dim, -1): # in [src_dim-1, dst_dim+1]
-            # 1) Get all `src -> parent` relations
+        for mid_dim in range(src_dim - 1, dst_dim, -1): # 取值于 [src_dim-1, dst_dim+1]
+            # 1) 取得所有 `src -> parent` 关系
             src_to_mids: list[tuple[str, Relation]] = []
 
-            if mid_dim == src_dim - 1: # get the highest-dimensional's children by its schema name
+            if mid_dim == src_dim - 1: # 最高一层按 schema 取直接子实体
                 src_to_mids = list(cls._iter_adjacent_children(storage, src_name))
-            else: # get the rest by their dimension
+            else: # 其余按维数选取
                 for (rel_src, rel_tgt), relation in storage.relations.items():
                     if rel_src != src_name:
                         continue
@@ -1030,8 +1028,8 @@ class TopRelationInferer:
             if not src_to_mids:
                 raise ValueError(f"cannot infer relation from {src_name!r} to {dst_name!r}")
 
-            # 2) Get all `mid -> dst` relations and compose them with
-            #   `src -> mid` to get `src -> dst` candidates.
+            # 2) 取得所有 `mid -> dst` 关系, 与 `src -> mid` 复合,
+            #   得到 `src -> dst` 的候选.
             candidates_of_dst: dict[str, list[Tensor]] = {}
             for mid_name, src_to_mid in src_to_mids:
                 for dst_name, mid_to_dst in cls._iter_adjacent_children(storage, mid_name):
@@ -1054,6 +1052,18 @@ class TopRelationInferer:
 
     @classmethod
     def infer(cls, storage: MeshBlock, src_name: str, dst_name: str) -> None:
+        """推断并登记 ``src_name -> dst_name`` 的关系.
+
+        Raises
+        ------
+        ValueError
+            源分区维数不高于目标分区, 或无法推断.
+
+        Notes
+        -----
+        ``_infer_from`` 的内层循环变量与参数 ``dst_name`` 同名, 循环后对目标关系是否
+        建成的检查实际针对最后遍历到的子分区.
+        """
         src_dim = cls._dim(storage, src_name)
         dst_dim = cls._dim(storage, dst_name)
 

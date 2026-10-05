@@ -1,11 +1,10 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/aggregate.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Top-level multi-:class:`MeshBlock` aggregate object.
+"""顶层的多 :class:`MeshBlock` 聚合对象.
 
-The aggregate ``Mesh`` owns several ``MeshBlock`` values and exposes anchored
-``MeshView`` access, but it does not define block-global ``cell``/``face``/
-``edge``/``node`` roles.
+聚合 ``Mesh`` 拥有若干 ``MeshBlock``, 提供带锚点的 ``MeshView`` 访问, 但不定义
+跨块的 ``cell``/``face``/``edge``/``node`` 角色.
 """
 
 from __future__ import annotations
@@ -21,16 +20,16 @@ __all__ = ["Mesh"]
 
 @dataclass(slots=True)
 class Mesh:
-    """Aggregate one or more :class:`MeshBlock` values.
+    """聚合一个或多个 :class:`MeshBlock`.
 
-    Block keys are :attr:`MeshBlock.id`.  Use :meth:`view` to obtain a
-    root-cell-anchored :class:`MeshView`.
+    以 :attr:`MeshBlock.id` 为键. 用 :meth:`view` 取得锚定在根单元上的
+    :class:`MeshView`.
     """
 
     blocks: dict[str, MeshBlock] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Validate the block collection and its keys."""
+        """校验网格块集合及其键."""
         if not isinstance(self.blocks, dict):
             raise TypeError("Mesh.blocks must be a dict")
         for key, block in self.blocks.items():
@@ -46,10 +45,12 @@ class Mesh:
 
     @classmethod
     def from_blocks(cls, blocks: Iterable[MeshBlock]) -> "Mesh":
-        """Build an aggregate from an iterable of mesh blocks.
+        """由网格块的可迭代对象构造聚合.
 
-        Raises:
-            ValueError: If two blocks share the same ``id``.
+        Raises
+        ------
+        ValueError
+            两个网格块的 ``id`` 相同.
         """
         mapping: dict[str, MeshBlock] = {}
         for block in blocks:
@@ -59,24 +60,26 @@ class Mesh:
         return cls(blocks=mapping)
 
     def __len__(self) -> int:
-        """Return the number of mesh blocks."""
+        """网格块的个数."""
         return len(self.blocks)
 
     @property
     def block_ids(self) -> tuple[str, ...]:
-        """Return the stable block ids in insertion order."""
+        """按插入顺序返回各网格块的 id."""
         return tuple(self.blocks)
 
     def block(self, block_id: str, /) -> MeshBlock:
-        """Return the mesh block with ``block_id``.
+        """返回 id 为 ``block_id`` 的网格块.
 
-        Raises:
-            KeyError: If no such block exists.
+        Raises
+        ------
+        KeyError
+            不存在该网格块.
         """
         if block_id not in self.blocks:
             raise KeyError(f"MeshBlock {block_id!r} not found")
         return self.blocks[block_id]
 
     def view(self, block_id: str, cell_sector_id: str, /) -> MeshView:
-        """Return an anchored view on one block's root cell sector."""
+        """返回锚定在某个网格块根单元分区上的视图."""
         return MeshView(self.block(block_id), cell_sector_id)

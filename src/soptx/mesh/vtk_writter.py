@@ -1,6 +1,11 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/vtk_writter.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""把网格 (选定的实体分区) 写为 VTU 文件.
+
+vtk 只在调用 ``write_mesh_to_vtu`` 时才导入.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -19,7 +24,7 @@ __all__ = [
 ]
 
 
-# Keep the mapping by constant name to avoid importing vtk at module import time.
+# 映射表按常量名保存, 免得导入本模块时就导入 vtk.
 SCHEMA_TO_VTK_CELL_TYPE_NAME: dict[str, str] = {
 	"node": "VTK_VERTEX",
 	"edge": "VTK_LINE",
@@ -114,7 +119,7 @@ def _normalize_attributes_array(value: Any, count: int, field_name: str) -> np.n
 			f"expected {count}, got {arr.shape[0]}."
 		)
 
-	# VTK vectors are typically represented as (N, 3); pad 2D vectors.
+	# VTK 的向量通常为 (N, 3), 二维向量补零.
 	if arr.ndim == 2 and arr.shape[1] == 2:
 		out = np.zeros((count, 3), dtype=arr.dtype)
 		out[:, :2] = arr
@@ -153,16 +158,24 @@ def write_mesh_to_vtu(
 	entity_names: Iterable[str] | None = None,
 	binary: bool = True,
 ) -> None:
-	"""Write a mesh (selected entities) to a VTU file.
+	"""把网格 (选定的实体分区) 写为 VTU 文件.
 
-    Parameters:
-        filename (str): Output `.vtu` file path.
-        mesh (Mesh | MeshBlock): Input mesh block or its view.
-        entity_names (Iterable[str] | None, optional): Optional iterable of
-            schema names to export, e.g. `["tri", "edge"]`.
-            If omitted, all entity blocks in `mesh.block` are exported.
-        binary (bool, optional): If `True`, write binary VTU;
-            otherwise write ASCII VTU.
+	Parameters
+	----------
+	filename : str
+	    输出的 ``.vtu`` 文件路径.
+	mesh : Mesh or MeshBlock
+	    网格块或其视图.
+	entity_names : iterable of str, optional
+	    要导出的 schema 名, 如 ``["tri", "edge"]``; 省略时导出 ``mesh.block`` 的
+	    全部实体分区.
+	binary : bool, optional
+	    为 True (默认) 时写二进制 VTU, 否则写 ASCII VTU.
+
+	Raises
+	------
+	ValueError
+	    ``mesh`` 既不是 ``Mesh`` 也不是 ``MeshBlock``.
 	"""
 	vtk, vnp = _load_vtk()
 	if isinstance(mesh, Mesh):

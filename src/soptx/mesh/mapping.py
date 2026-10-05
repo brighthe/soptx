@@ -1,12 +1,10 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/mapping.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Transform values induced by reference-to-physical entity mappings.
+"""参考实体到物理实体的映射所诱导的数值变换.
 
-This module contains Jacobian-dependent transformations of integration
-weights and vector values.  These operations belong to the geometric mapping
-between reference and physical entities; they are distinct from mesh-state
-transformations such as refinement, coarsening, movement, and remeshing.
+本模块收录依赖 Jacobi 矩阵的积分权与向量值变换. 这些操作属于参考实体与物理实体
+之间的几何映射, 不同于加密、粗化、移动、重新剖分等改变网格状态的变换.
 """
 
 from ..backend import Tensor, bm
@@ -19,13 +17,13 @@ __all__ = [
 
 
 def check_jacobi_matrix(J: Tensor) -> None:
-    """Check the validity of the Jacobian matrix."""
+    """检查 Jacobi 矩阵是否至少二维, 否则抛 ``ValueError``."""
     if J.ndim < 2:
         raise ValueError("The Jacobian matrix must have at least 2 dimensions.")
 
 
 def is_square_jacobi_matrix(J: Tensor) -> bool:
-    """Check if the Jacobian matrix is square."""
+    """Jacobi 矩阵最后两维是否为方阵."""
     return J.shape[-2] == J.shape[-1]
 
 
@@ -33,15 +31,21 @@ def integral_transform(
     value: Tensor,
     J: Tensor,
 ) -> Tensor:
-    """Integral transformation.
+    """积分变换: 把值除以测度因子 ``W``.
 
-    Parameters:
-        value (Tensor): Value of tensor-valued function to be transformed,
-            with shape (...[, any_dim]).
-        J (Tensor): Jacobian matrix, with shape (..., phy_dim, ref_dim).
+    方阵时 ``W = det(J)``, 否则 ``W = sqrt(det(J^T J))``.
 
-    Returns:
-        Tensor: Transformed value, with shape (...[, any_dim]).
+    Parameters
+    ----------
+    value : Tensor
+        待变换的张量值函数的值, 形状 ``(...[, any_dim])``.
+    J : Tensor
+        Jacobi 矩阵, 形状 ``(..., phy_dim, ref_dim)``.
+
+    Returns
+    -------
+    Tensor
+        变换后的值, 形状 ``(...[, any_dim])``.
     """
     check_jacobi_matrix(J)
 
@@ -57,15 +61,21 @@ def piola_transform_covariant(
     value: Tensor,
     J: Tensor,
 ) -> Tensor:
-    """Piola transformation for covariant vectors.
+    """协变向量的 Piola 变换.
 
-    Parameters:
-        value (Tensor): Value of tensor-valued function to be transformed,
-            with shape (..., ref_dim).
-        J (Tensor): Jacobian matrix, with shape (..., phy_dim, ref_dim).
+    方阵时为 ``J^{-T} v``, 否则为 ``J (J^T J)^{-1} v``.
 
-    Returns:
-        Tensor: Transformed value, with shape (..., phy_dim).
+    Parameters
+    ----------
+    value : Tensor
+        待变换的向量值, 形状 ``(..., ref_dim)``.
+    J : Tensor
+        Jacobi 矩阵, 形状 ``(..., phy_dim, ref_dim)``.
+
+    Returns
+    -------
+    Tensor
+        变换后的值, 形状 ``(..., phy_dim)``.
     """
     check_jacobi_matrix(J)
 
@@ -82,15 +92,19 @@ def piola_transform_contravariant(
     value: Tensor,
     J: Tensor,
 ) -> Tensor:
-    """Piola transformation for contravariant vectors.
+    """逆变向量的 Piola 变换: ``J v / W``, ``W`` 同 ``integral_transform``.
 
-    Parameters:
-        value (Tensor): Value of tensor-valued function to be transformed,
-            with shape (..., ref_dim).
-        J (Tensor): Jacobian matrix, with shape (..., phy_dim, ref_dim).
+    Parameters
+    ----------
+    value : Tensor
+        待变换的向量值, 形状 ``(..., ref_dim)``.
+    J : Tensor
+        Jacobi 矩阵, 形状 ``(..., phy_dim, ref_dim)``.
 
-    Returns:
-        Tensor: Transformed value, with shape (..., phy_dim).
+    Returns
+    -------
+    Tensor
+        变换后的值, 形状 ``(..., phy_dim)``.
     """
     check_jacobi_matrix(J)
 

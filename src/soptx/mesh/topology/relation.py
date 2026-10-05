@@ -1,11 +1,10 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/topology/relation.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Resolve canonical directed relations by explicit sector identity.
+"""按显式的分区身份解析规范有向关系.
 
-Relation resolution never consults a Schema name or parses an ontology string;
-it uses :class:`EntitySector` ids from the owning :class:`MeshBlock`.  The
-canonical relation identity is the ordered pair ``(src_sector_id,
+解析关系从不查看 Schema 名, 也不解析本体字符串, 只用所属 :class:`MeshBlock` 中
+:class:`EntitySector` 的 id. 规范关系的身份是有序对 ``(src_sector_id,
 tgt_sector_id)``.
 """
 
@@ -21,16 +20,17 @@ def resolve_relation(
     src_sector_id: str,
     tgt_sector_id: str,
 ) -> Relation:
-    """Resolve the canonical relation from ``src_sector_id`` to ``tgt_sector_id``.
+    """解析从 ``src_sector_id`` 到 ``tgt_sector_id`` 的规范关系.
 
-    If the forward pair is absent, a materialized reverse relation is used to
-    create its canonical inverse.  Otherwise, when the source sector has higher
-    topological dimension than the target, the topology inference service is
-    used as a fallback.
+    正向关系不存在时, 若已实体化反向关系, 则由其构造规范逆关系并登记; 否则在源
+    分区拓扑维数高于目标时, 退而调用拓扑推断补建.
 
-    Raises:
-        KeyError: If either sector id is unknown.
-        ValueError: If no relation can be resolved or inferred.
+    Raises
+    ------
+    KeyError
+        任一分区 id 未知.
+    ValueError
+        无法解析或推断出该关系.
     """
     src_sector = block.get_sector(src_sector_id)
     tgt_sector = block.get_sector(tgt_sector_id)

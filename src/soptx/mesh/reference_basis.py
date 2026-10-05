@@ -1,13 +1,11 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/reference_basis.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Shared Lagrange basis kernels on reference entities.
+"""参考实体上共享的 Lagrange 基函数内核.
 
-The functions in this module evaluate scalar Lagrange bases without owning
-geometry, finite-element DoF, or physical-coordinate semantics.  A Schema
-descriptor is required only to isolate reusable backend tensors in the
-external cache; callers remain responsible for selecting the reference
-entity convention and local basis ordering.
+本模块的函数只计算标量 Lagrange 基, 不涉及几何、有限元自由度或物理坐标语义.
+需要 Schema 描述符只是为了在外部缓存中隔离可复用的后端张量; 参考实体的约定与局部
+基函数的顺序由调用方负责选定.
 """
 
 from __future__ import annotations
@@ -277,6 +275,7 @@ def _reference_gradient_transform(
     )
 
     def factory() -> Tensor:
+        """构造重心坐标导数到参考坐标导数的变换矩阵 ``(V, V-1)``: 首行全为 -1, 其下为单位阵."""
         device = bm.get_device(bcs)
         first_row = -bm.ones(
             (1, reference_dimension),
@@ -300,22 +299,24 @@ def simplex_lagrange_basis(
     descriptor: SchemaDescriptor,
     permutation: tuple[int, ...] | None = None,
 ) -> Tensor:
-    """Evaluate a scalar Lagrange basis on one simplex reference entity.
+    """计算单纯形参考实体上的标量 Lagrange 基函数.
 
-    Parameters:
-        bcs: Barycentric coordinates with shape ``(Q, V)``, where ``V`` is
-            the number of simplex vertices.
-        p: Non-negative polynomial order.  Order zero returns one constant
-            basis function.
-        descriptor: Concrete Schema identity used to isolate cached backend
-            tensors.  It does not change the polynomial definition.
-        permutation: Optional mapping from requested output positions to the
-            backend multi-index order.  It must be a bijection of all basis
-            columns.
+    Parameters
+    ----------
+    bcs : Tensor
+        重心坐标, 形状 ``(Q, V)``, ``V`` 为单纯形顶点数.
+    p : int
+        非负的多项式次数; 0 次返回一个常数基函数.
+    descriptor : SchemaDescriptor
+        具体 Schema 的身份, 用于隔离缓存的后端张量, 不影响多项式的定义.
+    permutation : optional
+        输出位置到后端多重指标顺序的映射, 须为全部基函数列上的双射.
 
-    Returns:
-        Basis values with shape ``(Q, L)``, where ``L`` is the number of
-        simplex Lagrange nodes.  The result keeps the input dtype and device.
+    Returns
+    -------
+    Tensor
+        基函数值, 形状 ``(Q, L)``, ``L`` 为单纯形 Lagrange 节点数; 保持输入的
+        dtype 与 device.
     """
     _require_simplex_bcs(bcs, "simplex_lagrange_basis")
     p = _normalize_simplex_order(p)
@@ -337,13 +338,11 @@ def simplex_lagrange_grad_barycentric(
     descriptor: SchemaDescriptor,
     permutation: tuple[int, ...] | None = None,
 ) -> Tensor:
-    """Differentiate a simplex Lagrange basis by barycentric coordinates.
+    """单纯形 Lagrange 基函数对重心坐标的导数, 形状 ``(Q, L, V)``.
 
-    The result has shape ``(Q, L, V)``.  Its basis axis follows
-    ``permutation`` and its last axis follows the input barycentric order.
-    The barycentric variables are differentiated as independent variables;
-    use :func:`simplex_lagrange_grad_reference` for derivatives restricted
-    by ``sum(lambda_i) = 1``.
+    基函数轴按 ``permutation`` 排列, 末轴按输入重心坐标的顺序. 各重心坐标视为独立
+    变量求导; 受 ``sum(lambda_i) = 1`` 约束的导数用
+    :func:`simplex_lagrange_grad_reference`.
     """
     _require_simplex_bcs(bcs, "simplex_lagrange_grad_barycentric")
     p = _normalize_simplex_order(p)
@@ -370,11 +369,9 @@ def simplex_lagrange_grad_reference(
     descriptor: SchemaDescriptor,
     permutation: tuple[int, ...] | None = None,
 ) -> Tensor:
-    """Differentiate a simplex Lagrange basis by reference coordinates.
+    """单纯形 Lagrange 基函数对参考坐标的导数, 形状 ``(Q, L, V - 1)``.
 
-    Reference coordinates are ``(lambda_1, ..., lambda_{V-1})`` with
-    ``lambda_0 = 1 - sum(reference_coordinates)``.  The result has shape
-    ``(Q, L, V - 1)``.
+    参考坐标为 ``(lambda_1, ..., lambda_{V-1})``, ``lambda_0 = 1 - sum(参考坐标)``.
     """
     _require_simplex_bcs(bcs, "simplex_lagrange_grad_reference")
     p = _normalize_simplex_order(p)
@@ -474,13 +471,12 @@ def tensor_product_lagrange_basis(
     descriptor: SchemaDescriptor,
     permutation: tuple[int, ...] | None = None,
 ) -> Tensor:
-    """Evaluate a tensor product of simplex-factor Lagrange bases.
+    """计算各单纯形因子上 Lagrange 基函数的张量积.
 
-    Each factor coordinate tensor has shape ``(Q_f, V_f)``.  The output has
-    shape ``(product(Q_f), product(L_f))``.  Factor order is explicit: the
-    first supplied factor is the slowest-varying point and basis index.
-    Interval products provide quadrilateral and hexahedron kernels, while a
-    triangle-by-interval product provides the prism kernel.
+    每个因子的坐标张量形状为 ``(Q_f, V_f)``, 输出形状为
+    ``(product(Q_f), product(L_f))``. 因子顺序是显式的: 第一个因子对应变化最慢的
+    积分点与基函数下标. 区间之积给出四边形与六面体的内核, 三角形乘区间给出三棱柱的
+    内核.
     """
     bcs = _require_tensor_product_bcs(bcs, "tensor_product_lagrange_basis")
     p = _normalize_tensor_product_order(p, len(bcs))
@@ -507,12 +503,10 @@ def tensor_product_lagrange_grad_barycentric(
     descriptor: SchemaDescriptor,
     permutation: tuple[int, ...] | None = None,
 ) -> Tensor:
-    """Differentiate a tensor-product basis by all factor barycentrics.
+    """张量积基函数对全部因子重心坐标的导数, 形状 ``(product(Q_f), product(L_f), sum(V_f))``.
 
-    The result has shape ``(product(Q_f), product(L_f), sum(V_f))``.  The
-    last axis concatenates independent factor barycentric derivatives in
-    input order.  Reference gradients apply each factor's barycentric sum
-    constraint.
+    末轴按输入顺序拼接各因子独立的重心坐标导数; 参考坐标梯度则施加各因子重心坐标
+    之和为 1 的约束.
     """
     bcs = _require_tensor_product_bcs(
         bcs,
@@ -549,11 +543,9 @@ def tensor_product_lagrange_grad_reference(
     descriptor: SchemaDescriptor,
     permutation: tuple[int, ...] | None = None,
 ) -> Tensor:
-    """Differentiate a tensor-product basis by factor reference coordinates.
+    """张量积基函数对各因子参考坐标的导数, 形状 ``(product(Q_f), product(L_f), sum(V_f - 1))``.
 
-    The result has shape ``(product(Q_f), product(L_f), sum(V_f - 1))``.
-    Each factor uses ``(lambda_1, ..., lambda_{V_f-1})`` as its independent
-    reference coordinates.
+    每个因子以 ``(lambda_1, ..., lambda_{V_f-1})`` 为独立的参考坐标.
     """
     bcs = _require_tensor_product_bcs(
         bcs,
@@ -584,12 +576,12 @@ def tensor_product_lagrange_grad_reference(
 
 
 def _clear_reference_basis_cache() -> None:
-    """Clear cached backend tensors for deterministic tests and diagnostics."""
+    """清空缓存的后端张量, 供确定性测试与诊断使用."""
     with _REFERENCE_BASIS_CACHE_LOCK:
         _REFERENCE_BASIS_CACHE.clear()
 
 
 def _reference_basis_cache_keys() -> tuple[_ReferenceBasisCacheKey, ...]:
-    """Return an immutable cache-key snapshot for tests and diagnostics."""
+    """返回缓存键的不可变快照, 供测试与诊断使用."""
     with _REFERENCE_BASIS_CACHE_LOCK:
         return tuple(_REFERENCE_BASIS_CACHE)

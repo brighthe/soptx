@@ -1,16 +1,14 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/topology/local_entity.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Extract and canonically orient complete local subentity occurrences.
+"""提取局部子实体的完整出现并确定其规范定向.
 
-``extract_local_entity_occurrences`` converts a homogeneous source sector and
-its parameterized :class:`LocalEntityGroup` layout into block-global child
-connectivity rows.  ``canonicalize_local_entity_occurrences`` then selects the
-allowed orientation whose vertex tuple is lexicographically smallest and
-returns the corresponding complete child-node permutation.
+``extract_local_entity_occurrences`` 按同类源分区及其参数化的
+:class:`LocalEntityGroup` 布局, 生成以网格块全局节点编号表示的子实体连接行;
+``canonicalize_local_entity_occurrences`` 再从允许的定向中选出顶点元组字典序最小
+者, 并返回相应的完整子节点置换.
 
-Both steps are deliberately storage/relation-free: they do not assign sector
-ids, deduplicate global entities, or create incidence relations.
+这两步刻意不涉及存储与关系: 不分配分区 id, 不对全局实体去重, 也不建立关联关系.
 """
 
 from __future__ import annotations
@@ -32,13 +30,11 @@ __all__ = [
 
 
 class LocalEntityOccurrence(NamedTuple):
-    """Complete local occurrences bound to one concrete child Schema.
+    """绑定到一个具体子 Schema 的局部子实体完整出现.
 
-    ``schema`` is the immutable child :class:`EntitySchema` shared by all
-    rows, and ``indices`` contains block-global node ids with shape
-    ``(number_of_occurrences, schema.number_of_nodes())``.  Rows follow the
-    child's complete canonical local-node order; higher-order interpolation
-    nodes are not omitted.
+    ``schema`` 是各行共享的不可变子 :class:`EntitySchema`; ``indices`` 为网格块
+    全局节点编号, 形状 ``(出现次数, schema.number_of_nodes())``. 各行按子实体完整
+    的规范局部节点顺序排列, 不省略高阶插值节点.
     """
 
     schema: EntitySchema
@@ -46,14 +42,12 @@ class LocalEntityOccurrence(NamedTuple):
 
 
 class CanonicalLocalEntityOccurrence(NamedTuple):
-    """Canonically oriented rows of one homogeneous local occurrence group.
+    """一组同类局部出现经规范定向后的各行.
 
-    ``indices`` has the same shape as the input occurrence and contains
-    block-global node ids in the child's canonical full-node order.
-    ``canonical_vertices`` contains the corresponding vertex sub-rows used for
-    topological identity.  ``vertex_permutation`` and ``node_permutation``
-    record, row by row, the supported orientation chosen to reach the
-    canonical form.
+    ``indices`` 与输入同形状, 为按子实体规范完整节点顺序排列的网格块全局节点编号;
+    ``canonical_vertices`` 为相应的顶点子行, 用于判定拓扑身份;
+    ``vertex_permutation`` 与 ``node_permutation`` 逐行记录为达到规范形式所选用的
+    定向.
     """
 
     schema: EntitySchema
@@ -67,39 +61,37 @@ def extract_local_entity_occurrences(
     sector: EntitySector,
     top_dim: int,
 ) -> tuple[LocalEntityOccurrence, ...]:
-    """Extract all local subentity occurrences for one topological dimension.
+    """提取某一拓扑维数的全部局部子实体出现.
 
-    This is the topology-construction bridge between a source
-    :class:`EntitySector` and the parameterized
-    :class:`~fealpy.mesh.schema.LocalEntityGroup` protocol.  It does not
-    deduplicate global entities, assign derived sector ids, or construct
-    relations; those responsibilities belong to later topology stages.
+    这是源 :class:`EntitySector` 与参数化的
+    :class:`~soptx.mesh.schema.LocalEntityGroup` 协议之间的拓扑构造桥梁; 不对全局
+    实体去重, 不分配派生分区 id, 也不建立关系, 这些由后续拓扑阶段负责.
 
-    For each group returned by
-    :meth:`EntitySchema.local_entity_groups`, the source connectivity is
-    gathered with the group's parent-local node columns and reshaped into one
-    occurrence row per parent entity and local occurrence.  Consequently the
-    returned rows contain the child Schema's complete local-node layout,
-    including higher-order nodes.
+    对 :meth:`EntitySchema.local_entity_groups` 返回的每一组, 用该组在父实体中的
+    局部节点列收集源连接, 再整形为 "每个父实体每次局部出现一行". 因此返回的各行
+    包含子 Schema 完整的局部节点布局, 含高阶节点.
 
-    Parameters:
-        sector: A homogeneous source sector whose ``indices`` width equals its
-            Schema's complete local-node count.
-        top_dim: Target topological dimension in the closed interval
-            ``[0, sector.schema.top_dim]``.
+    Parameters
+    ----------
+    sector : EntitySector
+        同类源分区, ``indices`` 宽度等于其 Schema 的完整局部节点数.
+    top_dim : int
+        目标拓扑维数, 取值于闭区间 ``[0, sector.schema.top_dim]``.
 
-    Returns:
-        One result per :class:`LocalEntityGroup` returned by the parent
-        Schema.  Multiple results may therefore share the same child Schema
-        when the parent exposes multiple local groups at one dimension.
+    Returns
+    -------
+    tuple of LocalEntityOccurrence
+        父 Schema 返回的每个 :class:`LocalEntityGroup` 对应一项; 父实体在同一维数
+        上有多个局部组时, 多项可能共用同一个子 Schema.
 
-    Raises:
-        TypeError: If ``sector`` is not an :class:`EntitySector` or
-            ``top_dim`` is not a plain integer.
-        ValueError: If ``top_dim`` is outside the parent Schema's supported
-            interval.
-        NotImplementedError: If the sector is variable-cardinality
-            (``indptr is not None``) and cannot use a fixed local-node layout.
+    Raises
+    ------
+    TypeError
+        ``sector`` 不是 :class:`EntitySector`, 或 ``top_dim`` 不是普通整数.
+    ValueError
+        ``top_dim`` 超出父 Schema 支持的区间.
+    NotImplementedError
+        分区为变长 (``indptr is not None``), 无法使用固定的局部节点布局.
     """
     if not isinstance(sector, EntitySector):
         raise TypeError("sector must be an EntitySector instance")
@@ -135,31 +127,30 @@ def extract_local_entity_occurrences(
 def canonicalize_local_entity_occurrences(
     occurrence: LocalEntityOccurrence,
 ) -> CanonicalLocalEntityOccurrence:
-    """Choose a canonical orientation for every local occurrence row.
+    """为每一行局部出现选定规范定向.
 
-    For each child Schema, the allowed vertex automorphisms are enumerated
-    through :meth:`EntitySchema.vertex_permutations`.  A candidate canonical
-    row is obtained by applying the corresponding full
-    :meth:`EntitySchema.node_permutation` to the original child-local node
-    order.  The row-wise candidate with the lexicographically smallest
-    canonical vertex tuple is selected.  Equal canonical vertex tuples keep
-    the first candidate, making the result deterministic.
+    对每个子 Schema, 用 :meth:`EntitySchema.vertex_permutations` 枚举允许的顶点
+    自同构; 对原始子局部节点顺序施加相应的完整 :meth:`EntitySchema.node_permutation`
+    得到候选行, 逐行选取规范顶点元组字典序最小的候选. 顶点元组相同时保留第一个
+    候选, 使结果确定.
 
-    Parameters:
-        occurrence: A homogeneous local occurrence group produced by
-            :func:`extract_local_entity_occurrences`.
+    Parameters
+    ----------
+    occurrence : LocalEntityOccurrence
+        由 :func:`extract_local_entity_occurrences` 生成的一组同类局部出现.
 
-    Returns:
-        A canonical occurrence whose ``indices`` shape equals the input shape.
-        Its per-row ``vertex_permutation`` and ``node_permutation`` can be
-        used later to map source local occurrences to derived canonical
-        entities.
+    Returns
+    -------
+    CanonicalLocalEntityOccurrence
+        ``indices`` 与输入同形状; 逐行的 ``vertex_permutation`` 与
+        ``node_permutation`` 可在之后用于把源局部出现映射到派生的规范实体.
 
-    Raises:
-        TypeError: If ``occurrence`` is not a
-            :class:`LocalEntityOccurrence`.
-        ValueError: If ``occurrence.indices`` is not rank-2 or its width does
-            not match the child Schema's complete local-node count.
+    Raises
+    ------
+    TypeError
+        ``occurrence`` 不是 :class:`LocalEntityOccurrence`.
+    ValueError
+        ``occurrence.indices`` 不是二维, 或宽度与子 Schema 的完整局部节点数不符.
     """
     if not isinstance(occurrence, LocalEntityOccurrence):
         raise TypeError("occurrence must be a LocalEntityOccurrence")

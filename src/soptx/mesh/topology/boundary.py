@@ -1,13 +1,11 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/topology/boundary.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Infer boundary masks from canonical sector-pair relations.
+"""由规范的分区对关系推断边界掩码.
 
-Boundary queries use ``EntitySector.id`` rather than Schema names or parsed
-ontology strings.  For a single root, boundary is defined by incidence counts
-against codimension-one derived sectors.  For multiple roots of different
-topological dimension, block-wide boundary remains rooted in the highest root
-dimension until anchored :class:`MeshView` context is introduced in P4.
+边界查询使用 ``EntitySector.id``, 而不是 Schema 名或解析出的本体字符串. 单根
+网格的边界由与余维 1 派生分区的关联计数确定; 多个拓扑维数不同的根并存时, 在引入
+带锚点的 :class:`MeshView` 上下文 (P4 阶段) 之前, 全块边界仍以最高根维数为准.
 """
 
 from dataclasses import dataclass
@@ -22,19 +20,20 @@ __all__ = ["BoundaryInfo", "BoundaryInferencer"]
 
 @dataclass(frozen=True)
 class BoundaryInfo:
+    """某个实体分区的边界掩码."""
     mask: Tensor
 
     @cached_property
     def index(self) -> Tensor:
+        """边界实体的编号."""
         return bm.nonzero(self.mask)[0]
 
 
 class BoundaryInferencer:
-    """Infer block-wide boundary masks from canonical relations.
+    """由规范关系推断全块的边界掩码.
 
-    Codimension-one entities are boundary entities when they are adjacent to
-    exactly one top-dimensional source sector.  Higher/lower-dimensional
-    boundary masks are then propagated through existing forward relations.
+    余维 1 实体恰与一个最高维实体相邻时为边界实体; 更高或更低维实体的边界掩码再经
+    已有的正向关系传递得到.
     """
 
     @staticmethod
@@ -64,11 +63,14 @@ class BoundaryInferencer:
         codim1_names: list[str],
         binfo: dict[str, BoundaryInfo],
     ) -> dict[str, BoundaryInfo]:
-        """Infer boundary info for all codimension-1 entity blocks.
+        """推断所有余维 1 实体分区的边界信息.
 
-        Boundary rule:
-            Count adjacent top-dimensional entities. A codim-1 entity is on
-            boundary iff adjacency count equals 1.
+        判定规则: 统计相邻的最高维实体个数, 余维 1 实体当且仅当该数为 1 时位于边界.
+
+        Raises
+        ------
+        ValueError
+            给出的分区不是余维 1.
         """
         top_dim = cls._top_dimension(storage)
         if top_dim < 0:
@@ -109,11 +111,9 @@ class BoundaryInferencer:
         top_names: list[str],
         binfo: dict[str, BoundaryInfo]
     ) -> dict[str, BoundaryInfo]:
-        """Infer boundary info for top-dimensional entity blocks.
+        """推断最高维实体分区的边界信息.
 
-        Boundary rule:
-            A top-dimensional entity is on boundary iff it references at least
-            one boundary codim-1 entity.
+        判定规则: 最高维实体当且仅当至少引用一个边界上的余维 1 实体时位于边界.
         """
         top_dim = cls._top_dimension(storage)
         if top_dim < 0:
@@ -158,7 +158,13 @@ class BoundaryInferencer:
         names: list[str],
         binfo: dict[str, BoundaryInfo]
     ) -> dict[str, BoundaryInfo]:
-        """Infer boundary info for all entity blocks."""
+        """推断低维实体分区的边界信息: 被边界上的余维 1 实体引用者位于边界.
+
+        Raises
+        ------
+        ValueError
+            给出的分区是余维 1, 应改用 ``infer_codim1``.
+        """
         top_dim = cls._top_dimension(storage)
         codim1 = top_dim - 1
         if top_dim < 0:
@@ -200,12 +206,15 @@ class BoundaryInferencer:
         entity_name: str,
         binfo: dict[str, BoundaryInfo] | None = None
     ) -> BoundaryInfo:
-        """Infer boundary info for one entity sector by ``entity_name``.
+        """推断 id 为 ``entity_name`` 的实体分区的边界信息.
 
-        ``entity_name`` is a sector id, not a Schema family name.  The method
-        first identifies related codimension-one sectors from existing
-        relation keys, infers their boundary masks, and then propagates the
-        mask to the requested sector.
+        ``entity_name`` 是分区 id, 不是 Schema 族名. 先从已有关系的键中找出相关的
+        余维 1 分区并推断其边界掩码, 再把掩码传递到所求分区.
+
+        Raises
+        ------
+        ValueError
+            分区不存在.
         """
         if binfo is None:
             binfo = {}
@@ -220,10 +229,10 @@ class BoundaryInferencer:
             cls.infer_codim1(storage, [entity_name], binfo)
             return binfo[entity_name]
 
-        # STEP 1: Find all face schemas that are related to the entity
+        # 第 1 步: 找出与该实体相关的所有面分区
         faces: list[str] = []
 
-        if top_dim < highest_top_dim - 1:  # lower-dimensional entity
+        if top_dim < highest_top_dim - 1:  # 低维实体
             for src_id, tgt_id in storage.relations:
                 src_sector = storage.get_sector(src_id)
                 if (
@@ -231,7 +240,7 @@ class BoundaryInferencer:
                     and tgt_id == entity_name
                 ):
                     faces.append(src_id)
-        else:  # top-dimensional entity
+        else:  # 最高维实体
             for src_id, tgt_id in storage.relations:
                 if src_id != entity_name:
                     continue
@@ -239,17 +248,16 @@ class BoundaryInferencer:
                 if tgt_sector.schema.top_dim == highest_top_dim - 1:
                     faces.append(tgt_id)
 
-        # NOTE: Relations from cells to faces are already established,
-        # so we can directly infer boundary info for these faces.
+        # NOTE: 单元到面的关系已经建立, 可以直接推断这些面的边界信息.
         cls.infer_codim1(storage, faces, binfo)
 
-        # STEP 2: Ensure relations from faces to the entity are present
+        # 第 2 步: 确保面到该实体的关系存在
         for face_name in faces:
             from .relation import resolve_relation
 
             resolve_relation(storage, face_name, entity_name)
 
-        # STEP 3: Infer boundary info for the entity
+        # 第 3 步: 推断该实体的边界信息
         cls.infer_all(storage, [entity_name], binfo)
 
         return binfo[entity_name]

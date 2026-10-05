@@ -27,15 +27,7 @@ MISSING_DOCSTRING_BASELINE = 314
 # 棘轮; 欠账登记在 docs/known-issues/README.md "移植后遗留", 按子包分批补齐后移出本表.
 PORTED_ROOTS = (
     "src/soptx/mesh/schema/",
-    "src/soptx/mesh/topology/",
     "src/soptx/mesh/view/",
-    "src/soptx/mesh/__init__.py",
-    "src/soptx/mesh/aggregate.py",
-    "src/soptx/mesh/ipoints.py",
-    "src/soptx/mesh/mapping.py",
-    "src/soptx/mesh/mesh_base.py",
-    "src/soptx/mesh/reference_basis.py",
-    "src/soptx/mesh/vtk_writter.py",
 )
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
 PORTED_EXCEPTIONS: set[str] = set()
