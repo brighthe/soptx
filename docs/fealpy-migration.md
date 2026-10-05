@@ -187,19 +187,31 @@
 - **坏链接**：CI 不检查链接。全仓原有 67 个，恢复 `docs/references/` 修好 2 个，余下的 `docs/architecture/` 相关 8 个随 2.4 兼容层清理一并决定（迁移表本为兼容层而写），约 45 个指向不入库的 `outputs/`，约 12 个为改名后未跟进，另做一轮文档整理。
 - **torch 版本**：CI 安装最新 torch，只是本地 `ihpcm` 环境旧于 known-issues 记录的验证环境。
 
-修复过程中读代码发现、尚未处理的问题（均未运行复现，除注明「实测」外）：
+修复过程中读代码发现的问题，已在分支 `claude/s23-fixes` 处理（每项有回归测试或运行验证）：
 
-- `experiments/analysis_capability_piml_substructure/collect_ood_probe_trajectory.py` 导入从未存在过的
-  `examples.piml_substructure_elasticity._common`，一导入即失败；所需常量原在 `71a03d6` 删除的
-  `deployment_config.py` 中。
-- `HuZhangFESpace` 工厂把 `use_relaxation` 传给不接受该参数的 `HuZhangFESpace3d.__init__`，任何三维网格均抛
-  `TypeError`（实测）；`HuZhangFESpace2d` 的 `interpolation_points`、`face_to_dof`、`is_boundary_dof`、
-  `edge_to_dof()` 调用即报错（实测），三维对应方法为空桩。
-- `examples/parallel_execution/benchmark_thread_scaling.py` 默认 `--rmin 2.4` 在单位正方形上使滤波矩阵稠密。
-- `fem/integrators`：`voigt_multiresolution` 节点密度加单纯形分支引用未定义的 `cm_eg`；`MassIntegrator.to_global_dof`
-  不按 `index` 截取；`symbolic` 变体忽略 `index`；`fetch_vector_jump` 边界面上对基函数逐项取绝对值，$p \ge 2$ 时有误。
-- `LagrangeFEMAnalyzer.solve_adjoint` 只适用于 `'fa'`；`compute_stress_state` 两种分析器返回键不一致；
-  `MaterialInterpolation.n_sub` 协议标注应为 `Optional[int]`。
+- ~~`collect_ood_probe_trajectory.py` 导入从未存在过的 `_common`~~：改从 `verify_stiffness_route` 取投产参数，
+  `CELL_SIZE` 本地派生，与原 `deployment_config.py` 一致。
+- ~~`HuZhangFESpace` 三维工厂必抛 `TypeError`，二维访问器调用即报错，三维访问器为空桩~~：工厂修正；二维
+  `edge_to_dof` / `face_to_dof` 按 `index` 选边；未实现的访问器明确抛 `NotImplementedError`；二维 `basis` 接受
+  布尔掩码；三维 `basis` / `value` / `div_value` 传单元子集时报错。
+- ~~`benchmark_thread_scaling.py` 默认 `--rmin 2.4` 使滤波矩阵稠密~~：改为 `--rmin-cells`。同时修复该脚本一启动即
+  `TypeError`（材料参数 `plane_type`）与 `assemble` 段在两种层级下取指纹报错，全部段在 `fa` / `ea` 下实测通过。
+- ~~`fetch_vector_jump` 边界面逐项取绝对值；`MassIntegrator.to_global_dof` 不按 `index` 截取~~：已修。
+- ~~`voigt_multiresolution`、`standard_multiresolution`、`symbolic` 变体坏掉且无调用方~~：连同
+  `fem/integrators/utils.py` 与 `InterFaceSourceIntegrator` 删除。
+- ~~`LagrangeFEMAnalyzer.solve_adjoint` 只适用于 `'fa'`；`n_sub` 标注~~：非 `'fa'` 明确报错；标注改为 `Optional[int]`。
+- `compute_stress_state` 两种分析器返回键不同（`stress_solid` / `stress_apparent`）：语义本就不同，各消费方按分析器
+  分开取用，不是缺陷。
+
+尚未处理、只留档的问题：
+
+- 三维 Hu–Zhang 标架未归一化，二维 / 三维 `basis_frame_of_S` 系数不一致；是否为缺陷需从数学上判定，且无三维算例。
+- 二维 Hu–Zhang `boundary_interpolate` 的报错路径写错（实际抛 `AttributeError`），`gd` 不接受标量。
+- `HuZhangMFEMAnalyzer.__init__` 重复赋值 `_interpolation_scheme`；Hu–Zhang 积分子以 `q if q else p+3` 判断，
+  `q=0` 被当作未给出。
+- MMA 在 Hu–Zhang 分析器下打开 `is_store_stress` 时取 `stress_solid` 报 `KeyError`。
+- 删除符号积分后 `src/` 不再使用 `sympy`，`pyproject.toml` 的运行依赖可随兼容层清理一并评估。
+- 函数名拼写 `reshape_multiresolution_data_bcakup`、残留的 FEALPy 字样：并入 2.4。
 
 ### 2.4 统一清理（最后做）
 
