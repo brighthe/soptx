@@ -27,15 +27,11 @@ MISSING_DOCSTRING_BASELINE = 314
 # 棘轮; 欠账登记在 docs/known-issues/README.md "移植后遗留", 按子包分批补齐后移出本表.
 PORTED_ROOTS = (
     "src/soptx/backend/",
-    "src/soptx/functionspace/",
     "src/soptx/mesh/",
     "src/soptx/sparse/",
 )
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
 PORTED_EXCEPTIONS = {
-    "src/soptx/functionspace/huzhang_fe_space.py",
-    "src/soptx/functionspace/huzhang_fe_space_2d.py",
-    "src/soptx/functionspace/huzhang_fe_space_3d.py",
     "src/soptx/mesh/structured_box.py",
     "src/soptx/mesh/structured_triangle.py",
 }

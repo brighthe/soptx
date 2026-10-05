@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/functionspace/tensor_space.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""由标量空间构造的张量值函数空间."""
 
 from typing import Tuple, Union, Callable,Optional
 from math import prod
@@ -13,15 +14,30 @@ from ..decorator import barycentric, cartesian
 
 
 class TensorFunctionSpace(FunctionSpace):
-    def __init__(self, scalar_space: FunctionSpace, shape: Tuple[int, ...]) -> None:
-        """_summary_
+    """由标量空间构造的张量值函数空间, 每个标量自由度携带一个张量分量.
 
-        Parameters:
-            scalar_space (FunctionSpace): The scalar space to build tensor space from.\n
-            shape (int, ...): Shape of each dof.
-                Requires a `-1` be the first or last element to mark the priority
-                of the DoF in arrangement.
-        """
+    Parameters
+    ----------
+    scalar_space : FunctionSpace
+        标量空间.
+    shape : tuple of int
+        自由度形状, 首或末元素须为 ``-1`` 以标明自由度的排列优先级: 末元素为
+        ``-1`` (如 ``(2, -1)``) 时自由度优先, 即同一分量的全部自由度相邻; 首元素
+        为 ``-1`` (如 ``(-1, 2)``) 时分量优先.
+
+    Attributes
+    ----------
+    dof_shape : tuple of int
+        去掉 ``-1`` 后的分量形状.
+    dof_priority : bool
+        是否自由度优先.
+
+    Raises
+    ------
+    ValueError
+        ``shape`` 少于两个元素, 或首末都不是 ``-1``.
+    """
+    def __init__(self, scalar_space: FunctionSpace, shape: Tuple[int, ...]) -> None:
         self.scalar_space = scalar_space
         self.shape = shape
 
@@ -41,49 +57,59 @@ class TensorFunctionSpace(FunctionSpace):
 
     @property
     def mesh(self):
+        """标量空间的网格."""
         return self.scalar_space.mesh
 
     @property
-    def device(self): return self.scalar_space.device
+    def device(self):
+        """标量空间的设备."""
+        return self.scalar_space.device
     @property
-    def ftype(self): return self.scalar_space.ftype
+    def ftype(self):
+        """标量空间的浮点类型."""
+        return self.scalar_space.ftype
     @property
-    def itype(self): return self.scalar_space.itype
+    def itype(self):
+        """标量空间的整数类型."""
+        return self.scalar_space.itype
 
     @property
     def dof_numel(self) -> int:
+        """每个标量自由度的分量数."""
         return prod(self.dof_shape)
 
     @property
     def dof_ndim(self) -> int:
+        """分量形状的维数."""
         return len(self.dof_shape)
 
     def number_of_global_dofs(self) -> int:
+        """全局自由度个数, 即分量数乘以标量自由度数."""
         return self.dof_numel * self.scalar_space.number_of_global_dofs()
 
     def number_of_local_dofs(self, doftype='cell') -> int:
+        """``doftype`` 类实体上的局部自由度个数."""
         return self.dof_numel * self.scalar_space.number_of_local_dofs(doftype)
 
     def basis(self, p: TensorLike, index: Index=_S, **kwargs) -> TensorLike:
+        """单元积分点处的张量基函数, 形状 ``(1, NQ, ldof*numel, *dof_shape)``."""
         phi = self.scalar_space.basis(p, index, **kwargs) # (NC, NQ, ldof)
         return generate_tensor_basis(phi, self.dof_shape, self.dof_priority)
     
     def face_basis(self, p: TensorLike, index: Index=_S, **kwargs) -> TensorLike:
+        """面积分点处的张量面基函数."""
         phi = self.scalar_space.face_basis(p, index, **kwargs)
         return generate_tensor_basis(phi, self.dof_shape, self.dof_priority)
 
 
     def grad_basis(self, p: TensorLike, index: Index=_S, **kwargs) -> TensorLike:
+        """单元积分点处的张量基函数梯度, 形状 ``(NC, NQ, ldof*numel, *dof_shape, GD)``."""
         gphi = self.scalar_space.grad_basis(p, index, **kwargs)
         return generate_tensor_grad_basis(gphi, self.dof_shape, self.dof_priority)
     
      
     def cell_to_dof(self, index: Index=_S) -> TensorLike:
-        """Get the cell to dof mapping.
-
-        Returns:
-            Tensor: Cell to dof mapping, shaped (NC, ldof*dof_numel).
-        """
+        """单元到张量自由度的映射, 形状 ``(NC, ldof*dof_numel)``."""
         return to_tensor_dof(
             self.scalar_space.cell_to_dof(),
             self.dof_numel,
@@ -92,11 +118,7 @@ class TensorFunctionSpace(FunctionSpace):
         )[index]
 
     def face_to_dof(self, index: Index=_S) -> TensorLike:
-        """Get the face to dof mapping.
-
-        Returns:
-            Tensor: Face to dof mapping, shaped (NF, ldof*dof_numel).
-        """
+        """面到张量自由度的映射, 形状 ``(NF, ldof*dof_numel)``."""
         return to_tensor_dof(
             self.scalar_space.face_to_dof(),
             self.dof_numel,
@@ -105,11 +127,7 @@ class TensorFunctionSpace(FunctionSpace):
         )[index]
     
     def edge_to_dof(self, index: Index=_S) -> TensorLike:
-        """Get the edge to dof mapping.
-
-        Returns:
-            Tensor: Edge to dof mapping, shaped (NE, ldof*dof_numel).
-        """
+        """边到张量自由度的映射, 形状 ``(NE, ldof*dof_numel)``."""
         return to_tensor_dof(
             self.scalar_space.edge_to_dof(),
             self.dof_numel,
@@ -118,6 +136,7 @@ class TensorFunctionSpace(FunctionSpace):
         )[index]
     
     def entity_to_dof(self, etype: int, index: Index=_S):
+        """按拓扑维数取单元、面或边到张量自由度的映射."""
         TD = self.mesh.top_dimension()
         if etype == TD:
             return self.cell_to_dof(index=index)
@@ -129,10 +148,12 @@ class TensorFunctionSpace(FunctionSpace):
             raise ValueError(f"Unknown entity type: {etype}")
 
     def interpolation_points(self) -> TensorLike:
+        """标量空间的插值点坐标."""
 
         return self.scalar_space.interpolation_points()
     
     def interpolate(self, u: Union[Callable[..., TensorLike], TensorLike], ) -> TensorLike:
+        """把张量值函数插值到空间中, 按 ``dof_priority`` 排列后展平."""
 
         if self.dof_priority:
             uI = self.scalar_space.interpolate(u)
@@ -144,6 +165,27 @@ class TensorFunctionSpace(FunctionSpace):
         return self.function(uI.reshape(-1))
     
     def is_boundary_dof(self, threshold=None, method='interp') -> TensorLike:
+        """标记边界上的张量自由度.
+
+        Parameters
+        ----------
+        threshold : TensorLike, callable, tuple or None, optional
+            长度为全局自由度数的布尔张量时原样返回; None 或函数时由标量空间判定
+            后扩展到全部分量; 元组时按分量分别给出标量空间的筛选条件 (仅支持
+            向量值空间).
+        method : str, optional
+            传给标量空间的判定方式, 默认 'interp'.
+
+        Returns
+        -------
+        TensorLike
+            长度为全局自由度数的布尔张量.
+
+        Raises
+        ------
+        ValueError
+            ``threshold`` 类型未知, 或张量长度不等于全局自由度数.
+        """
         scalar_space = self.scalar_space
 
         scalar_gdof = scalar_space.number_of_global_dofs()
@@ -163,7 +205,7 @@ class TensorFunctionSpace(FunctionSpace):
                 is_bd_dof = bm.reshape(scalar_is_bd_dof, (scalar_gdof,) + (-1,) * self.dof_ndim)
                 is_bd_dof = bm.broadcast_to(is_bd_dof, (scalar_gdof,) + self.dof_shape)
         elif isinstance(threshold, tuple):
-            ### 只处理了向量型的tensorspace空间
+            ### 只处理了向量型的 tensorspace 空间
             assert self.dof_numel == len(threshold)
             scalar_is_bd_dof = [scalar_space.is_boundary_dof(i, method=method) for i in threshold] 
             if self.dof_priority:
@@ -179,6 +221,35 @@ class TensorFunctionSpace(FunctionSpace):
         uh: Optional[TensorLike]=None,
         *,
         threshold: Union[Callable, TensorLike, None]=None, method=None) -> TensorLike:
+        """在边界张量自由度上设置第一类 (Dirichlet) 边界值.
+
+        Parameters
+        ----------
+        gd : int, float, TensorLike, Function or callable
+            边界值: 常数、长度为全局自由度数的张量或函数, 或在插值点处求值、
+            末轴为分量的函数.
+        uh : TensorLike, optional
+            写入边界值的有限元函数, 默认新建.
+        threshold : TensorLike, callable, tuple or None, optional
+            边界自由度的筛选条件, 见 ``is_boundary_dof``.
+        method : str, optional
+            传给 ``is_boundary_dof`` 的判定方式.
+
+        Returns
+        -------
+        tuple
+            ``(uh, isTensorBDof)``: 写入边界值后的函数与边界自由度的布尔掩码.
+
+        Raises
+        ------
+        ValueError
+            ``gd`` 或 ``threshold`` 类型未知.
+
+        Notes
+        -----
+        常数 ``gd`` 的分支以 ``uh[threshold] = gd`` 赋值, ``threshold`` 不是布尔
+        张量时不会只写边界自由度. 函数末尾 if 链之后的赋值语句不可达.
+        """
         ipoints = self.interpolation_points()
         scalar_space = self.scalar_space
         if uh is None:
@@ -188,7 +259,7 @@ class TensorFunctionSpace(FunctionSpace):
             if bm.is_tensor(threshold):
                 assert len(threshold) == self.number_of_global_dofs()
                 isTensorBDof = threshold
-            else : #threshold callable None
+            else : # threshold 为函数或 None
                 isTensorBDof = self.is_boundary_dof(threshold=threshold, method=method)
             uh[threshold] = gd
             return uh, isTensorBDof
@@ -198,7 +269,7 @@ class TensorFunctionSpace(FunctionSpace):
             if bm.is_tensor(threshold):
                 assert len(threshold) == self.number_of_global_dofs()
                 isTensorBDof = threshold
-            else : #threshold callable None
+            else : # threshold 为函数或 None
                 isTensorBDof = self.is_boundary_dof(threshold=threshold, method=method)
             uh[isTensorBDof] = gd[isTensorBDof]
             return uh, isTensorBDof
@@ -268,6 +339,7 @@ class TensorFunctionSpace(FunctionSpace):
     
     @barycentric
     def value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike:
+        """有限元函数在积分点处的值, 形状 ``(NC, NQ, *dof_shape)``."""
         if isinstance(bc, tuple):
             TD = sum(item.shape[-1] - 1 for item in bc)
         else :
@@ -279,6 +351,7 @@ class TensorFunctionSpace(FunctionSpace):
     
     @barycentric
     def grad_value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike:
+        """有限元函数在积分点处的梯度, 形状 ``(NC, NQ, *dof_shape, GD)``."""
         if isinstance(bc, tuple):
             TD = sum(item.shape[-1] - 1 for item in bc)
         else :

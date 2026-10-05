@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/functionspace/utils.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""函数空间的自由度与张量基工具."""
 
 from typing import Optional, Tuple, Union
 from math import prod
@@ -9,6 +10,7 @@ from ..typing import TensorLike, Size
 
 
 def zero_dofs(gdofs: int, dims: Union[Size, int, None]=None, *, dtype=None):
+    """创建全零的自由度数组, 形状 ``(gdofs, *dims)``; ``dims`` 为 None 或 0 时为 ``(gdofs, )``."""
     kwargs = {'dtype': dtype}
 
     if dims is None:
@@ -22,20 +24,25 @@ def zero_dofs(gdofs: int, dims: Union[Size, int, None]=None, *, dtype=None):
 
 
 def flatten_indices(shape: Size, permute: Size) -> TensorLike:
-    """Construct indices of elements in the flattened tensor.
+    """按轴置换后展平的顺序, 给出原张量各元素的展平序号.
 
-    Parameters:
-        shape (Tuple[int, ...]): Shape of the source tensor.
-        permute (Tuple[int, ...]): _description_
+    Parameters
+    ----------
+    shape : tuple of int
+        原张量形状.
+    permute : tuple of int
+        轴置换, 含义同 ``permute_dims``.
 
-    Returns:
-        Tensor: Indices of elements in the flattened tensor.
+    Returns
+    -------
+    TensorLike
+        形状为 ``shape`` 的整数张量, 元素为该位置在置换后展平序列中的序号.
     """
     permuted_shape = [shape[d] for d in permute]
     numel = prod(permuted_shape)
-    # indices after permutation
+    # 置换后的序号
     permuted_indices = bm.arange(numel, dtype=bm.int64).reshape(permuted_shape)
-    # indices before permutation
+    # 置换前的序号
     inv_permute = [None, ] * len(permute)
     for d in range(len(permute)):
         inv_permute[permute[d]] = d
@@ -44,17 +51,31 @@ def flatten_indices(shape: Size, permute: Size) -> TensorLike:
 
 
 def to_tensor_dof(to_dof: TensorLike, dof_numel: int, gdof: int, dof_priority: bool=True) -> TensorLike:
-    """Expand the relationship between entity and scalar dof to the tensor dof.
+    """把实体到标量自由度的映射扩展为实体到张量自由度的映射.
 
-    Parameters:
-        to_dof (Tensor): Entity to the scalar dofs.\n
-        dof_numel (int): Number of dof elements.\n
-        gdof (int): total number of scalar dofs.\n
-        dof_priority (bool, optional): If True, the degrees of freedom are arranged\
-        prior to their components. Defaults to True.
+    Parameters
+    ----------
+    to_dof : TensorLike or tuple of TensorLike
+        实体到标量自由度的映射 ``(NE, ldof)``; 变阶空间为 ``(cell2dof,
+        cell2dofLocation)`` 压缩格式.
+    dof_numel : int
+        每个标量自由度的分量数.
+    gdof : int
+        标量自由度总数.
+    dof_priority : bool, optional
+        为 True 时自由度优先排列 (同一分量的全部自由度相邻), 否则分量优先.
+        默认 True.
 
-    Returns:
-        Tensor: Global indices of tensor dofs in each entity.
+    Returns
+    -------
+    TensorLike or tuple of TensorLike
+        实体上张量自由度的全局编号 ``(NE, ldof * dof_numel)``; 压缩格式输入时
+        返回同格式的元组.
+
+    Notes
+    -----
+    压缩格式分支固定按 2 个分量、自由度优先展开, 不使用 ``dof_numel`` 与
+    ``dof_priority``.
     """
     if isinstance(to_dof, tuple):
         scell2dof, scell2dofLocation = to_dof[0], to_dof[1]
@@ -98,28 +119,45 @@ def to_tensor_dof(to_dof: TensorLike, dof_numel: int, gdof: int, dof_priority: b
 
 
 def tensor_basis(shape: Size, *, dtype=None, device=None) -> TensorLike:
-    """Generate tensor basis with 0-1 elements.
+    """生成由 0 与 1 组成的张量基.
 
-    Parameters:
-        shape (Tuple[int, ...]): Shape of each tensor basis.
+    Parameters
+    ----------
+    shape : tuple of int
+        每个张量基的形状.
+    dtype, device : optional
+        数据类型与设备.
 
-    Returns:
-        Tensor: Tensor basis shaped (numel, *shape).
+    Returns
+    -------
+    TensorLike
+        形状 ``(numel, *shape)``, 第 ``k`` 个基只在展平后的第 ``k`` 个位置为 1.
     """
     numel = prod(shape)
     return bm.eye(numel, dtype=dtype, device=device).reshape((numel,) + shape)
 
 
 def normal_strain(gphi: TensorLike, indices: TensorLike, *, out: Optional[TensorLike]=None) -> TensorLike:
-    """Assembly normal strain tensor.
+    """组装正应变部分的应变--位移矩阵.
 
-    Parameters:
-        gphi (Tensor): Gradient of the scalar basis functions shaped (..., ldof, GD).\n
-        indices (bool, optional): Indices of DoF components in the flattened DoF, shaped (ldof, GD).\n
-        out (Tensor | None, optional): Output tensor. Defaults to None.
+    Parameters
+    ----------
+    gphi : TensorLike
+        标量基函数梯度, 形状 ``(..., ldof, GD)``.
+    indices : TensorLike
+        各分量在展平自由度中的位置, 形状 ``(ldof, GD)``.
+    out : TensorLike, optional
+        输出张量, 默认新建.
 
-    Returns:
-        Tensor: Normal strain shaped (..., GD, GD*ldof).
+    Returns
+    -------
+    TensorLike
+        形状 ``(..., GD, GD*ldof)``.
+
+    Raises
+    ------
+    ValueError
+        ``out`` 的形状不符.
     """
     kwargs = {'dtype': gphi.dtype}
     if hasattr(gphi, 'device'):
@@ -141,15 +179,27 @@ def normal_strain(gphi: TensorLike, indices: TensorLike, *, out: Optional[Tensor
 
 
 def shear_strain(gphi: TensorLike, indices: TensorLike, *, out: Optional[TensorLike]=None) -> TensorLike:
-    """Assembly shear strain tensor.
+    """组装剪应变部分的应变--位移矩阵.
 
-    Parameters:
-        gphi (Tensor): Gradient of the scalar basis functions shaped (..., ldof, GD).\n
-        indices (bool, optional): Indices of DoF components in the flattened DoF, shaped (ldof, GD).\n
-        out (Tensor | None, optional): Output tensor. Defaults to None.
+    Parameters
+    ----------
+    gphi : TensorLike
+        标量基函数梯度, 形状 ``(..., ldof, GD)``.
+    indices : TensorLike
+        各分量在展平自由度中的位置, 形状 ``(ldof, GD)``.
+    out : TensorLike, optional
+        输出张量, 默认新建.
 
-    Returns:
-        Tensor: Sheared strain shaped (..., NNZ, GD*ldof) where NNZ = (GD + (GD+1))//2.
+    Returns
+    -------
+    TensorLike
+        形状 ``(..., NNZ, GD*ldof)``, 其中 ``NNZ = GD*(GD-1)//2``, 按 ``(i, j)``,
+        ``i < j`` 的字典序排列.
+
+    Raises
+    ------
+    ValueError
+        ``GD < 2`` 或 ``out`` 的形状不符.
     """
     kwargs = {'dtype': gphi.dtype}
     if hasattr(gphi, 'device'):

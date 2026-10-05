@@ -60,13 +60,17 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 
 | 问题 | 位置 | 来源 | 根因与影响 | 修法 | 状态 |
 |---|---|---|---|---|---|
-| 移植代码的 docstring 为英文且大量缺失 | `tools/check_comment_style.py` 的 `PORTED_ROOTS` 所列路径 | 移植原样保留 | 2026-10-05 实测：缺 docstring 576 处（其中 `@overload` 存根 39 处现已豁免）、英文 docstring 469 条、英文说明性注释 430 行、全角标点 16 处；豁免使其暂不计入棘轮，基线数字不放松 | 按子包补中文 numpydoc 并翻译英文 docstring 与注释，`tools/check_docstring_only.py` 核对只改了 docstring 与注释，补齐后从 `PORTED_ROOTS` 移出。已完成：`typing`、`decorator`、fem 基类（`coef`、`functional`、`form`、`integrator`）、`quadrature` | 进行中 |
+| 移植代码的 docstring 为英文且大量缺失 | `tools/check_comment_style.py` 的 `PORTED_ROOTS` 所列路径 | 移植原样保留 | 2026-10-05 实测：缺 docstring 576 处（其中 `@overload` 存根 39 处现已豁免）、英文 docstring 469 条、英文说明性注释 430 行、全角标点 16 处；豁免使其暂不计入棘轮，基线数字不放松 | 按子包补中文 numpydoc 并翻译英文 docstring 与注释，`tools/check_docstring_only.py` 核对只改了 docstring 与注释，补齐后从 `PORTED_ROOTS` 移出。已完成：`typing`、`decorator`、fem 基类（`coef`、`functional`、`form`、`integrator`）、`quadrature`、`functionspace` | 进行中 |
 | 三维跳量稳定化未实现 | `fem/integrators/jump_penalty_integrator.py` 的 `_cell_to_face_sign` | 原调用 v0.4 网格已不存在的 `mesh.cell_to_face_sign` | 三维低阶（$p \le 3$）Hu--Zhang 默认的跳量稳定化不可用，现明确抛 `NotImplementedError`；$p \ge 4$ 或 `stabilization='none'` 不受影响。二维的 `cell_to_edge_sign` 与「全局面法向指向本单元外侧」逐项相同，可按此判据推广，但尚无三维制造解验证收敛阶 | 有三维 Hu--Zhang 算例后按几何判据实现并验证收敛阶 | 未修 |
 | `Form` 的 `splitter` 分块装配不可用 | `fem/form.py` 的 `UniformSplitter` 与 `_assembly_kernel` | FEALPy 的分块接口，SOPTX 积分子未实现 | `add_integrator(splitter=...)` 会以 `indices=` 调用积分子的 `assembly`，SOPTX 的积分子均不接受该参数，报 `TypeError`；仓库内无人使用。`Integrator.size` 中的 `mesh.count` 已改为 `mesh.entity(etype)` | 需要分块装配时为积分子补 `indices` 参数，或删除该接口 | 未修 |
 | `process_coef_func` 的网格检查疑似写反 | `fem/coef.py` 的 `process_coef_func` | 移植原样保留 | 网格检查放在 `coordtype == 'barycentric'` 分支，报错信息却称直角坐标函数需要网格；直角坐标分支不检查，`mesh=None` 时在 `mesh.bc_to_point` 处报 `AttributeError` | 把网格检查移到直角坐标分支 | 未修 |
 | `get_semilinear_coef` 在 `coef=None` 时报错 | `fem/functional.py` 的 `get_semilinear_coef` | 移植原样保留 | `coef is None` 分支计算 `None * value`，抛 `TypeError`；仓库内无调用方 | `coef` 为 None 时返回 `value` | 未修 |
 | 积分子的 `Mesh` 协议仍声明 `count` | `fem/integrator.py` 的 `Mesh` | 移植原样保留 | 仅用于类型标注，v0.4 网格没有 `count`，`Integrator.size` 已改用 `mesh.entity` | 协议改为声明 `entity` | 未修 |
 | `ConstIntegrator` 以旧签名调用基类构造 | `fem/integrator.py` 的 `ConstIntegrator.__init__` | 移植原样保留 | `super().__init__('assembly', False, False)` 使 `keep_data='assembly'`（真值），缓存被意外开启；`ConstIntegrator` 自身不用 `enable_cache`，目前无实际影响 | 改为 `super().__init__()` | 未修 |
+| `multi_index2d_to_index` / `multi_index3d_to_index` 引用未定义变量 | `functionspace/functional.py` | 移植原样保留 | 函数体用 `a` 而参数名为 `midx`，调用即 `NameError`；仓库内无调用方 | 删除，或把 `a` 改为 `midx` | 未修 |
+| `TensorFunctionSpace.boundary_interpolate` 常数边界值分支 | `functionspace/tensor_space.py` | 移植原样保留 | `gd` 为常数时以 `uh[threshold] = gd` 赋值：`threshold` 为 None 时写满全部自由度，为函数时报错，只有布尔张量时正确；仓库内调用方都传函数，未触发。函数末尾 if 链之后的赋值不可达 | 改用 `uh[isTensorBDof] = gd`，删除不可达代码 | 未修 |
+| `to_tensor_dof` 压缩格式分支固定按 2 分量展开 | `functionspace/utils.py` | 移植原样保留 | 标量映射为 `(cell2dof, cell2dofLocation)` 元组 (变阶空间) 时，忽略 `dof_numel` 与 `dof_priority`，按 2 分量、自由度优先展开 | 按 `dof_numel` 与 `dof_priority` 展开，或明确只支持二维向量 | 未修 |
+| `LagrangeFESpace.interpolate` 的重心坐标分支结果不对 | `functionspace/lagrange_fe_space.py` | 移植原样保留 | 原代码注释即标注 "这个结果是不对的"：同一自由度在各相邻单元上的值被累加而非取一次 | 删除该分支或改为按自由度去重 | 未修 |
 
 ## 记账约定
 

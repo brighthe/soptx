@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/functionspace/function.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""有限元函数: 空间与自由度值的组合."""
 
 from typing import Generic, Union, TypeVar, Optional
 from functools import partial
@@ -12,6 +13,22 @@ _FS = TypeVar('_FS')
 
 
 class Function(Generic[_FS]):
+    """有限元函数, 由所属空间与自由度值数组组成.
+
+    以重心坐标调用即求值 (``uh(bcs)`` 等价于 ``space.value(uh.array, bcs)``);
+    下标读写作用于自由度数组; 名字以 ``value`` 结尾的空间方法 (如
+    ``grad_value``) 可直接作为属性调用, 已绑定自由度数组; 其余未定义的属性转发给
+    自由度数组. 与数或张量的四则运算作用于自由度数组, 返回同一空间中的新函数.
+
+    Parameters
+    ----------
+    space : FunctionSpace
+        所属空间.
+    array : TensorLike
+        自由度值, 形状 ``(..., GDOF)``.
+    coordtype : str, optional
+        函数接受的坐标类型.
+    """
     def __init__(self, space: _FS, array: TensorLike, coordtype: Optional[str]=None) -> None:
         self.space = space
         self.array = array

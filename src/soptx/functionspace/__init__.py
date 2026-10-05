@@ -1,6 +1,7 @@
 # 移植自 brighthe/fealpy ``fealpy/functionspace/__init__.py`` @ f474a5775, 仅保留 Lagrange 与张量空间;
 # Hu--Zhang 应力空间为 SOPTX 自有代码.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""有限元函数空间: Lagrange 空间、张量空间与 Hu--Zhang 应力空间."""
 
 from .space import FunctionSpace
 from .function import Function

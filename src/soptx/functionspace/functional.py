@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/functionspace/functional.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""张量基函数生成与对称张量工具."""
 
 import string
 import numpy as np
@@ -13,17 +14,21 @@ from .utils import tensor_basis
 
 
 def generate_tensor_basis(basis: TensorLike, shape: Tuple[int, ...], dof_priority=True) -> TensorLike:
-    """Generate tensor basis from scalar basis.
+    """由标量空间的基函数生成张量空间的基函数.
 
-    Parameters:
-        basis (Tensor): Basis of a scalar space, shaped (..., ldof).\n
-        shape (Tuple[int, ...]): Shape of the dof.\n
-        dof_priority (bool, optional): If True, the degrees of freedom are arranged\
-        prior to their components. Defaults to True.
+    Parameters
+    ----------
+    basis : TensorLike
+        标量空间的基函数, 形状 ``(..., ldof)``.
+    shape : tuple of int
+        每个自由度的分量形状.
+    dof_priority : bool, optional
+        为 True 时自由度优先排列, 否则分量优先. 默认 True.
 
-    Returns:
-        Tensor: Basis of the tensor space, shaped (..., ldof*numel, *shape),\
-        where numel is the number of elements in the shape.
+    Returns
+    -------
+    TensorLike
+        形状 ``(..., ldof*numel, *shape)``, ``numel`` 为 ``shape`` 的元素数.
     """
     kwargs = bm.context(basis)
     factor = tensor_basis(shape, **kwargs) # (numel, numel)
@@ -34,7 +39,7 @@ def generate_tensor_basis(basis: TensorLike, shape: Tuple[int, ...], dof_priorit
 
     if dof_priority:
         ndim = len(shape)
-        # 如果 dof_priority 为 True，交换 ldof 和 numel 这两个维度的位置
+        # 如果 dof_priority 为 True, 交换 ldof 和 numel 这两个维度的位置
         tb = bm.swapaxes(tb, -ndim-1, -ndim-2) # (1, ldof, numel, ldof, numel)
 
     tb = tb.reshape(basis.shape[:-1] + (numel*ldof,) + shape) # (1, ldof, ldof*numel, numel)
@@ -43,17 +48,21 @@ def generate_tensor_basis(basis: TensorLike, shape: Tuple[int, ...], dof_priorit
 
 
 def generate_tensor_grad_basis(grad_basis: TensorLike, shape: Tuple[int, ...], dof_priority=True) -> TensorLike:
-    """Generate tensor grad basis from grad basis in scalar space.
+    """由标量空间的基函数梯度生成张量空间的基函数梯度.
 
-    Parameters:
-        grad_basis (Tensor): Gradient of basis of a scalar space, shaped (..., ldof, GD).\n
-        shape (Tuple[int, ...]): Shape of the dof.\n
-        dof_priority (bool, optional): If True, the degrees of freedom are arranged\
-        prior to their components. Defaults to True.
+    Parameters
+    ----------
+    grad_basis : TensorLike
+        标量空间的基函数梯度, 形状 ``(..., ldof, GD)``.
+    shape : tuple of int
+        每个自由度的分量形状.
+    dof_priority : bool, optional
+        为 True 时自由度优先排列, 否则分量优先. 默认 True.
 
-    Returns:
-        Tensor: Basis of the tensor space, shaped (..., ldof*numel, *shape, GD),\
-        where numel is the number of elements in the shape.
+    Returns
+    -------
+    TensorLike
+        形状 ``(..., ldof*numel, *shape, GD)``, ``numel`` 为 ``shape`` 的元素数.
     """
     factor = tensor_basis(shape, dtype=grad_basis.dtype)
     s0 = "abcde"[:len(shape)]
@@ -68,31 +77,44 @@ def generate_tensor_grad_basis(grad_basis: TensorLike, shape: Tuple[int, ...], d
     return tb.reshape(grad_basis.shape[:-2] + (numel*ldof,) + shape + (GD,))
 
 def custom_next_permutation(arr, compare_function):
-    """
-    @brief 生成下一个排列
+    """按 ``compare_function`` 给出的序把 ``arr`` 原地变为字典序的下一个排列.
+
+    Returns
+    -------
+    bool
+        存在下一个排列时为 True; 已是最大排列时为 False, ``arr`` 不变.
     """
     n = len(arr)
     i = n - 2
     while i >= 0 and compare_function(arr[i], arr[i + 1]) >= 0:
         i -= 1
     if i == -1:
-        # 如果没有找到降序的元素，说明当前排列已经是最大的排列
+        # 如果没有找到降序的元素, 说明当前排列已经是最大的排列
         return False
-    # 从右向左查找第一个大于arr[i]的元素
+    # 从右向左查找第一个大于 arr[i] 的元素
     j = n - 1
     while compare_function(arr[j], arr[i]) <= 0:
         j -= 1
-    # 交换arr[i]和arr[j]
+    # 交换 arr[i] 和 arr[j]
     arr[i], arr[j] = arr[j], arr[i]
-    # 反转arr[i+1:]，使其成为升序
+    # 反转 arr[i+1:], 使其成为升序
     arr[i + 1:] = arr[i + 1:][::-1]
     return True
 
 def span_array(arr, alpha):
-    """
-    @brief 计算 arr^alpha
-    @param arr : (NC, l, d)
-    alpha : (l, )
+    """计算张量积 ``arr^alpha``: 第 ``i`` 个向量自乘 ``alpha[i]`` 次后依次外积.
+
+    Parameters
+    ----------
+    arr : TensorLike
+        形状 ``(NC, l, d)``.
+    alpha : TensorLike
+        各向量的次数, 形状 ``(l, )``.
+
+    Returns
+    -------
+    TensorLike
+        形状 ``(NC,) + (d,) * sum(alpha)``.
     """
     N = bm.sum(alpha)
     s = string.ascii_lowercase[:N]
@@ -106,10 +128,19 @@ def span_array(arr, alpha):
     return bm.einsum(*tup)
 
 def symmetry_span_array(arr, alpha):
-    """
-    @brief 计算 arr^alpha 的对称部分
-    @param arr : (NC, l, d)
-    alpha : (l, )
+    """计算 ``arr^alpha`` 的对称部分: 对各因子位置的全部不同排列取平均.
+
+    Parameters
+    ----------
+    arr : TensorLike
+        形状 ``(NC, l, d)``.
+    alpha : TensorLike
+        各向量的次数, 形状 ``(l, )``.
+
+    Returns
+    -------
+    TensorLike
+        与 ``span_array(arr, alpha)`` 同形状.
     """
     M = span_array(arr, alpha)
 
@@ -132,10 +163,27 @@ def symmetry_span_array(arr, alpha):
     return ret
 
 def symmetry_index(d, r, dtype=None, device=None):
+    """``d`` 维 ``r`` 阶张量展平后, 其对称部分各独立分量的位置与重数.
+
+    Parameters
+    ----------
+    d : int
+        维数.
+    r : int
+        阶数.
+    dtype : dtype, optional
+        索引的整数类型, 默认 ``bm.int32``.
+    device : device, optional
+        设备.
+
+    Returns
+    -------
+    symidx : TensorLike
+        各独立分量 (指标非降的组合) 在展平张量中的位置.
+    num : TensorLike
+        各独立分量在完整张量中出现的次数.
+    """
     dtype = dtype if dtype is not None else bm.int32
-    """
-    @brief 将 d 维 r 阶张量拉长以后，其对称部分对应的索引和出现的次数
-    """
     symidx0 = bm.tensor(list(combinations_with_replacement(range(d), r)),
                         dtype=dtype, device=device)
     coe = bm.flip(d**bm.arange(r, dtype=dtype, device=device))
@@ -156,19 +204,41 @@ def symmetry_index(d, r, dtype=None, device=None):
     return symidx, num
 
 def multi_index2d_to_index(midx):
-    """
-    @brief 计算二维多重指标的索引
-    @param midx : (l, 3)
-    @return idx : (l, )
+    """计算二维多重指标的线性序号.
+
+    Parameters
+    ----------
+    midx : TensorLike
+        形状 ``(l, 3)``.
+
+    Returns
+    -------
+    TensorLike
+        形状 ``(l, )``.
+
+    Notes
+    -----
+    函数体引用未定义的 ``a`` 而非参数 ``midx``, 调用即抛 ``NameError``.
     """
     idx = (a[..., 1]+a[..., 2])*(1+a[..., 1]+a[..., 2])//2 + a[..., 2]
     return idx
 
 def multi_index3d_to_index(midx):
-    """
-    @brief 计算三维多重指标的索引
-    @param midx : (l, 4)
-    @return idx : (l, )
+    """计算三维多重指标的线性序号.
+
+    Parameters
+    ----------
+    midx : TensorLike
+        形状 ``(l, 4)``.
+
+    Returns
+    -------
+    TensorLike
+        形状 ``(l, )``.
+
+    Notes
+    -----
+    函数体引用未定义的 ``a`` 而非参数 ``midx``, 调用即抛 ``NameError``.
     """
     s1 = a[..., 1]+a[..., 2]+a[..., 3]
     s2 = a[..., 2]+a[..., 3]

@@ -1,8 +1,10 @@
 """核对 Python 改动只涉及 docstring 与注释.
 
-把基准版本与工作区中同一文件各自解析为 AST, 去掉模块、类与函数的 docstring 后
-比较 ``ast.dump``. 注释不进入 AST, 因此只改 docstring 与注释的文件两侧必然相同;
-任何代码改动 (包括字符串常量、默认参数、装饰器) 都会使两侧不同.
+把基准版本与工作区中同一文件各自解析为 AST, 去掉所有裸字符串语句 (docstring
+以及不在首行、不起作用的字符串表达式) 后比较 ``ast.dump``. 注释不进入 AST, 因此
+只改 docstring 与注释的文件两侧必然相同; 任何代码改动 (包括参与运算的字符串常量、
+默认参数、装饰器) 都会使两侧不同. 把误放在第二条语句的说明字符串挪成 docstring
+也视为只改 docstring.
 
 用法::
 
@@ -20,11 +22,20 @@ import subprocess
 import sys
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+STATEMENT_LISTS = ("body", "orelse", "finalbody")
+
+
+def is_bare_string(statement: ast.stmt) -> bool:
+    """判断语句是否为不起作用的裸字符串表达式 (含 docstring)."""
+    return (
+        isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Constant)
+        and isinstance(statement.value.value, str)
+    )
 
 
 def strip_docstrings(tree: ast.Module) -> ast.Module:
-    """原地删除模块、类与函数体首条字符串表达式, 返回同一棵树.
+    """原地删除所有语句块中的裸字符串表达式, 返回同一棵树.
 
     Parameters
     ----------
@@ -34,18 +45,13 @@ def strip_docstrings(tree: ast.Module) -> ast.Module:
     Returns
     -------
     ast.Module
-        删除 docstring 后的语法树.
+        删除 docstring 与其余裸字符串语句后的语法树.
     """
     for node in ast.walk(tree):
-        if isinstance(node, DOCUMENTED):
-            body = node.body
-            if (
-                body
-                and isinstance(body[0], ast.Expr)
-                and isinstance(body[0].value, ast.Constant)
-                and isinstance(body[0].value.value, str)
-            ):
-                del body[0]
+        for field in STATEMENT_LISTS:
+            statements = getattr(node, field, None)
+            if isinstance(statements, list):
+                statements[:] = [s for s in statements if not is_bare_string(s)]
     return tree
 
 
