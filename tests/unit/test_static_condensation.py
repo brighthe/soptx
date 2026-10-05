@@ -4,7 +4,7 @@ import numpy as np
 
 from fealpy.backend import backend_manager as bm
 
-from soptx.fem.substructure import ExactSchurCondensation
+from soptx.fem.substructure import ExactSchurCondensation, schur_complement
 
 
 def _make_spd_batch(shape_prefix: tuple[int, ...], n_dof: int, seed: int) -> np.ndarray:
@@ -157,6 +157,49 @@ class TestStaticCondensation(unittest.TestCase):
 
         asymmetry = np.max(np.abs(K_s_np - np.swapaxes(K_s_np, -1, -2)))
         self.assertLess(asymmetry, 1.0e-12 * np.max(np.abs(K_s_np)))
+
+    def test_pure_function_matches_condensor(self) -> None:
+        """纯函数 ``schur_complement`` 应与 ``ExactSchurCondensation.condense`` 逐位一致."""
+        for prefix in ((), (4,), (2, 3)):
+            K = bm.asarray(_make_spd_batch(prefix, self.n_dof, seed=7))
+            expected_K_s, expected_N = self._condensor().condense(K)
+            K_s, T_full = schur_complement(K, self.i_dofs, self.b_dofs)
+            np.testing.assert_array_equal(
+                bm.to_numpy(K_s), bm.to_numpy(expected_K_s)
+            )
+            np.testing.assert_array_equal(
+                bm.to_numpy(T_full), bm.to_numpy(expected_N)
+            )
+
+    def test_pure_function_matches_explicit_inverse(self) -> None:
+        """纯函数结果应满足式 (2.1) 与 (2.2) 的显式求逆定义."""
+        K = _make_spd_batch((), self.n_dof, seed=11)
+        i = bm.to_numpy(self.i_dofs)
+        b = bm.to_numpy(self.b_dofs)
+        K_ii, K_ib = K[np.ix_(i, i)], K[np.ix_(i, b)]
+        K_bi, K_bb = K[np.ix_(b, i)], K[np.ix_(b, b)]
+        inverse = np.linalg.inv(K_ii)
+
+        K_s, T_full = schur_complement(bm.asarray(K), self.i_dofs, self.b_dofs)
+
+        np.testing.assert_allclose(
+            bm.to_numpy(T_full), -inverse @ K_ib, rtol=1.0e-12, atol=1.0e-12
+        )
+        np.testing.assert_allclose(
+            bm.to_numpy(K_s), K_bb - K_bi @ inverse @ K_ib,
+            rtol=1.0e-12, atol=1.0e-12,
+        )
+
+    def test_pure_function_accepts_plain_index_sequences(self) -> None:
+        """自由度划分可用普通序列给出, 且不改变输入的数据类型."""
+        K = bm.asarray(
+            _make_spd_batch((3,), self.n_dof, seed=13).astype(np.float32)
+        )
+        K_s, T_full = schur_complement(K, [0, 2, 4], [1, 3, 5])
+        self.assertEqual(tuple(K_s.shape), (3, 3, 3))
+        self.assertEqual(tuple(T_full.shape), (3, 3, 3))
+        self.assertEqual(K_s.dtype, np.float32)
+        self.assertEqual(T_full.dtype, np.float32)
 
     def test_rejects_shape_mismatch(self) -> None:
         """局部刚度矩阵形状与自由度划分不一致时立即失败."""

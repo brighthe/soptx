@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
 from fealpy.backend import backend_manager as bm
 
@@ -49,25 +50,28 @@ finally:
         sys.modules["config"] = previous_config
 
 
-def _full_batch_linear_corner_forward(ctx: Any, rho: Any) -> tuple[float, Any]:
-    """按第 4 步接入前的完整批量路径计算小工况基准."""
+def _full_batch_forward(ctx: Any, rho: Any) -> tuple[float, Any]:
+    """按流式接入前的完整批量路径计算小工况基准, 两种接口空间各走旧整批入口."""
     rho_sub_grid = ctx.assembler.split_global_cell_field(rho)
     rho_sub_cell = ctx.prototype.grid_to_cell_field(rho_sub_grid)
     local_stiffness = ctx.prototype.assemble_local_stiffness_batch(rho_sub_cell)
     result = ctx.reduction.reduce_many(local_stiffness, rho_sub_grid)
-    trace_stiffness = ctx.trace_basis.project_stiffness(result.stiffness)
-    system = ctx.assembler.assemble_macro_system(
-        ctx.sub_meshes,
-        trace_stiffness,
-    )
+    if ctx.interface_space.name == "linear_corner":
+        trace_stiffness = ctx.interface_space.trace_basis.project_stiffness(result.stiffness)
+        system = ctx.assembler.assemble_macro_system(
+            ctx.sub_meshes,
+            trace_stiffness,
+        )
+    else:
+        system = ctx.assembler.assemble_interface_system(ctx.sub_meshes, result)
     displacement = experiment_pipeline.solve_interface_system(
         system,
         ctx.load,
         ctx.fixed_dofs,
     )
 
-    trace_displacement = displacement[ctx.trace_indices]
-    boundary_displacement = ctx.trace_basis.expand_displacement(
+    trace_displacement = displacement[ctx.interface_space.local_dofs]
+    boundary_displacement = ctx.interface_space.trace_basis.expand_displacement(
         trace_displacement
     )
     internal_displacement = result.recover(boundary_displacement)
@@ -112,14 +116,17 @@ def test_registered_cases_have_positive_chunk_size() -> None:
     assert case_3d.filter_type == "sensitivity"
 
 
-def test_linear_corner_pipeline_matches_full_batch_without_calling_batch_api(
+@pytest.mark.parametrize("trace", ["linear_corner", "full_trace"])
+def test_pipeline_matches_full_batch_without_calling_batch_api(
     monkeypatch: Any,
+    trace: str,
 ) -> None:
-    """实验流式路径应匹配旧批量结果且不调用完整局部刚度 API."""
+    """两种接口空间的流式路径都应匹配旧批量结果且不调用完整局部刚度 API."""
     bm.set_backend("numpy")
     registered = experiment_config.get_case("cantilever_2d_lc")
     case = replace(
         registered,
+        trace=trace,
         domain=(0.0, 2.0, 0.0, 1.0),
         n_sub=(2, 1),
         n_fine=(2, 2),
@@ -132,13 +139,10 @@ def test_linear_corner_pipeline_matches_full_batch_without_calling_batch_api(
         dtype=bm.float64,
     )
 
-    expected_compliance, expected_energy = _full_batch_linear_corner_forward(
-        ctx,
-        rho,
-    )
+    expected_compliance, expected_energy = _full_batch_forward(ctx, rho)
 
     def reject_full_batch(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("linear_corner 不应调用完整批量局部刚度装配接口")
+        raise AssertionError(f"{trace} 不应调用完整批量局部刚度装配接口")
 
     monkeypatch.setattr(
         ctx.prototype,

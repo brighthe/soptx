@@ -7,6 +7,7 @@ Cholesky 参数化.
 
 from __future__ import annotations
 
+from copy import copy
 from numbers import Integral, Real
 from typing import Any, Optional, Sequence
 
@@ -364,6 +365,9 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
         chunk_size: Optional[int] = None,
         trace_kind: str = "linear_corner",
         hypothesis: Optional[str] = None,
+        integration_order: Optional[int] = None,
+        backend: str = "numpy",
+        device: str = "cpu",
     ) -> None:
         """初始化子结构及独立条目补全器.
 
@@ -381,6 +385,12 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
             linear_corner 或 full_trace, 默认保留角点接口.
         hypothesis : str or None
             二维允许 plane_stress 或 plane_strain, 默认前者; 三维使用 3D 或 None.
+        integration_order : int or None
+            单元数值积分阶数, None 沿用积分器默认设置.
+        backend : str
+            批量精确计算后端, numpy 或 pytorch. 不改变参考子结构编码.
+        device : str
+            CPU 或 CUDA 设备, numpy 仅支持 cpu.
         """
         cell_size = tuple(cell_size)
         n_fine = tuple(n_fine)
@@ -412,6 +422,7 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
             penal=1.0,
             rho_min=0.0,
             hypothesis=hypothesis,
+            integration_order=integration_order,
         )
         super().__init__(prototype, trace_kind=trace_kind)
         self._trace_matrix = np.asarray(
@@ -424,20 +435,66 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
             bm.to_numpy(self.prototype.b_dofs), dtype=np.int64
         )
         self.chunk_size = chunk_size
+        self._configure_execution(backend, device)
 
-    def exact_matrices(self, normalized_modulus: Any) -> dict[str, np.ndarray]:
-        """计算局部精确矩阵, 供标签生成与局部预测验证复用.
+    def _configure_execution(self, backend: str, device: str) -> None:
+        """缓存所选设备上的装配与接口数据.
+
+        Parameters
+        ----------
+        backend : str
+            numpy 或 pytorch.
+        device : str
+            cpu, cuda 或 cuda:N.
+        """
+        if backend not in ("numpy", "pytorch"):
+            raise ValueError("backend 必须为 numpy 或 pytorch")
+        if backend == "numpy" and device != "cpu":
+            raise ValueError("numpy 后端仅支持 cpu")
+        self.backend = backend
+        self.device = "cpu"
+        self._torch_execution = backend == "pytorch"
+        if not self._torch_execution:
+            return
+        target = torch.device(device)
+        if target.type not in ("cpu", "cuda"):
+            raise ValueError("pytorch 仅支持 CPU 或 CUDA 设备")
+        if target.type == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("当前环境 CUDA 不可用")
+            index = torch.cuda.current_device() if target.index is None else target.index
+            if index >= torch.cuda.device_count():
+                raise ValueError("CUDA 设备编号越界")
+            target = torch.device("cuda", index)
+        from fealpy.backend.manager import BackendManager
+
+        self._tensor_backend = BackendManager(default_backend="pytorch").get_current_backend()
+        self._tensor_device = target
+        self.device = str(target)
+        # 参考原型保持原后端, 设备副本仅复用装配核需要的两个缓存.
+        self._tensor_prototype = copy(self.prototype)
+        self._tensor_prototype.KE_unit = torch.as_tensor(
+            bm.to_numpy(self.prototype.KE_unit), dtype=torch.float64, device=target,
+        )
+        self._tensor_prototype._scatter_index = torch.as_tensor(
+            bm.to_numpy(self.prototype._scatter_index), dtype=torch.int64, device=target,
+        )
+        self._tensor_trace = torch.as_tensor(self._trace_matrix, dtype=torch.float64, device=target)
+        self._tensor_i = torch.as_tensor(self._i_dofs, dtype=torch.int64, device=target)
+        self._tensor_b = torch.as_tensor(self._b_dofs, dtype=torch.int64, device=target)
+
+    def _exact_matrices_native(self, normalized_modulus: Any) -> dict[str, Any]:
+        """在所选设备完成装配与消元, 保留原生数组用于标签编码.
 
         Parameters
         ----------
         normalized_modulus : array_like
-            形状为 (batch, n_cells) 的归一化杨氏模量.
+            形状为 (batch, n_cells) 的 CPU 归一化杨氏模量.
 
         Returns
         -------
-        dict[str, numpy.ndarray]
-            local_stiffness 为原型原自由度顺序的细网格刚度,
-            shape 为内部形函数, stiffness 为所选接口空间的缩聚刚度.
+        dict[str, array_like]
+            局部刚度, 内部形函数与接口刚度, PyTorch 路线保留设备张量.
         """
         modulus = np.asarray(normalized_modulus, dtype=np.float64)
         expected = self.prototype.n_cells
@@ -450,46 +507,96 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
             raise ValueError("normalized_modulus 必须全部有限且严格为正.")
         if np.any(modulus > 1.0):
             raise ValueError("normalized_modulus 不得大于 1.")
-
-        local_backend = self.prototype.assemble_local_stiffness_batch(
-            bm.asarray(modulus, dtype=bm.float64),
-            chunk_size=self.chunk_size,
-        )
-        local = np.asarray(bm.to_numpy(local_backend), dtype=np.float64)
-        i_dofs = self._i_dofs
-        b_dofs = self._b_dofs
-        trace = self._trace_matrix
-
-        K_ii = local[..., i_dofs[:, None], i_dofs]
-        K_ib = local[..., i_dofs[:, None], b_dofs]
-        K_bb = local[..., b_dofs[:, None], b_dofs]
-        K_ib_trace = K_ib @ trace
-        K_bb_trace = np.swapaxes(trace, -1, -2) @ K_bb @ trace
-
-        recovery = -np.linalg.solve(K_ii, K_ib_trace)
-        stiffness = (
-            K_bb_trace
-            + np.swapaxes(K_ib_trace, -1, -2) @ recovery
-        )
+        if self._torch_execution:
+            with torch.no_grad():
+                values = torch.as_tensor(modulus, dtype=torch.float64, device=self._tensor_device)
+                step = self.chunk_size or max(len(values), 1)
+                blocks = [
+                    self._tensor_prototype._assemble_chunk(
+                        values[start:start + step], backend=self._tensor_backend,
+                    )
+                    for start in range(0, len(values), step)
+                ]
+                if not blocks:
+                    n = self.prototype.n_total_dofs
+                    local = values.new_empty((0, n, n))
+                else:
+                    local = blocks[0] if len(blocks) == 1 else torch.cat(blocks)
+                i, b, trace = self._tensor_i, self._tensor_b, self._tensor_trace
+                K_ii = local.index_select(-2, i).index_select(-1, i)
+                K_ib = local.index_select(-2, i).index_select(-1, b)
+                K_bb = local.index_select(-2, b).index_select(-1, b)
+                K_ib_trace = K_ib @ trace
+                recovery = -torch.linalg.solve(K_ii, K_ib_trace)
+                stiffness = trace.T @ K_bb @ trace + K_ib_trace.transpose(-1, -2) @ recovery
+        else:
+            local_backend = self.prototype.assemble_local_stiffness_batch(
+                bm.asarray(modulus, dtype=bm.float64), chunk_size=self.chunk_size,
+            )
+            local = np.asarray(bm.to_numpy(local_backend), dtype=np.float64)
+            i, b, trace = self._i_dofs, self._b_dofs, self._trace_matrix
+            K_ii = local[..., i[:, None], i]
+            K_ib = local[..., i[:, None], b]
+            K_bb = local[..., b[:, None], b]
+            K_ib_trace = K_ib @ trace
+            recovery = -np.linalg.solve(K_ii, K_ib_trace)
+            stiffness = np.swapaxes(trace, -1, -2) @ K_bb @ trace + np.swapaxes(K_ib_trace, -1, -2) @ recovery
         return {"local_stiffness": local, "shape": recovery, "stiffness": stiffness}
 
-    def __call__(self, normalized_modulus: Any) -> dict[str, np.ndarray]:
-        """返回形函数与刚度的独立条目标签."""
-        matrices = self.exact_matrices(normalized_modulus)
-        recovery = matrices["shape"]
-        stiffness = matrices["stiffness"]
-        targets = {
-            "shape": np.asarray(self.shape_codec.encode(recovery)),
-            "stiffness": np.asarray(self.stiffness_codec.encode(stiffness)),
+    def exact_matrices(self, normalized_modulus: Any) -> dict[str, np.ndarray]:
+        """计算局部精确矩阵, 保留供现有验证调用者使用的 NumPy 返回契约.
+
+        Parameters
+        ----------
+        normalized_modulus : array_like
+            形状为 (batch, n_cells) 的归一化杨氏模量.
+
+        Returns
+        -------
+        dict[str, numpy.ndarray]
+            local_stiffness 为细网格刚度, shape 为内部形函数,
+            stiffness 为所选接口空间的缩聚刚度.
+        """
+        matrices = self._exact_matrices_native(normalized_modulus)
+        return {
+            name: value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else value
+            for name, value in matrices.items()
         }
-        for name, exact in (("shape", recovery), ("stiffness", stiffness)):
+
+    def __call__(self, normalized_modulus: Any) -> dict[str, np.ndarray]:
+        """生成独立条目标签, 编码及补全检查完成后转为 CPU 数组.
+
+        Parameters
+        ----------
+        normalized_modulus : array_like
+            形状为 (batch, n_cells) 的归一化杨氏模量.
+
+        Returns
+        -------
+        dict[str, numpy.ndarray]
+            float64 的 shape 与 stiffness 独立条目, 可直接写入磁盘.
+        """
+        matrices = self._exact_matrices_native(normalized_modulus)
+        targets = {
+            name: self.codecs[name].encode(matrices[name])
+            for name in ("shape", "stiffness")
+        }
+        for name in ("shape", "stiffness"):
+            exact = matrices[name]
             restored = self.codecs[name].decode(targets[name])
-            error = np.linalg.norm(restored - exact, axis=(-2, -1))
-            scale = np.linalg.norm(exact, axis=(-2, -1))
-            if (
-                not np.isfinite(error).all()
-                or not np.isfinite(scale).all()
-                or np.any(error > 1e-8 * scale + 1e-10)
-            ):
+            if isinstance(exact, torch.Tensor):
+                error = torch.linalg.matrix_norm(restored - exact)
+                scale = torch.linalg.matrix_norm(exact)
+                invalid = (~torch.isfinite(error) | ~torch.isfinite(scale)
+                           | (error > 1e-8 * scale + 1e-10)).any().item()
+            else:
+                error = np.linalg.norm(restored - exact, axis=(-2, -1))
+                scale = np.linalg.norm(exact, axis=(-2, -1))
+                invalid = (not np.isfinite(error).all() or not np.isfinite(scale).all()
+                           or np.any(error > 1e-8 * scale + 1e-10))
+            if invalid:
                 raise ValueError(f"{name} 独立条目补全与精确标签不一致")
-        return targets
+        return {
+            name: value.detach().cpu().numpy() if isinstance(value, torch.Tensor) else np.asarray(value)
+            for name, value in targets.items()
+        }

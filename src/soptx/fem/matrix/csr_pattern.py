@@ -647,3 +647,117 @@ def assemble_csr_chunks(
         crow=pattern.crow, col=pattern.col, values=buffer,
         spshape=pattern.sparse_shape,
     )
+
+
+class CSRChunkAccumulator:
+    """按连续批次把局部矩阵推入同一个 CSR 数值缓冲区.
+
+    ``assemble_csr_chunks`` 的推模型对应物: 循环留在调用方, 每得到一批局部矩阵
+    就调用一次 ``add``, 全部推完后由 ``to_csr`` 校验覆盖并产出矩阵.
+
+    Parameters
+    ----------
+    pattern : CSRPattern
+        符号阶段预建的 CSR 模式.
+    buffer : TensorLike, optional
+        长度为 ``pattern.nnz`` 的数值缓冲区. 省略时依次取 ``pattern.buffer``,
+        再取按首批数据类型新分配的零数组.
+
+    Notes
+    -----
+    批次必须从 0 开始, 首尾相接, 最终恰好覆盖 ``pattern.n_cells`` 个局部实体;
+    校验规则与报错信息同 ``assemble_csr_chunks``. 缓冲区在首次 ``add`` 时置零,
+    因此同一模式可由多个累加器先后复用; 若各累加器不共享缓冲区, 产出的矩阵
+    数值互不影响.
+    """
+
+    def __init__(
+        self,
+        pattern: CSRPattern,
+        buffer: Optional[TensorLike] = None,
+    ) -> None:
+        self._pattern = pattern
+        self._buffer = buffer
+        self._expected = 0
+        self._started = False
+        self._finished = False
+
+    @property
+    def n_added(self) -> int:
+        """已累加的局部实体数."""
+        return self._expected
+
+    def add(self, start: int, values: TensorLike) -> None:
+        """累加一批局部矩阵.
+
+        Parameters
+        ----------
+        start : int
+            该批次首个局部实体的编号, 必须等于此前已累加的实体数.
+        values : TensorLike
+            局部矩阵批次, 形状 ``(b, ldof, ldof)``.
+
+        Raises
+        ------
+        RuntimeError
+            ``to_csr`` 已调用.
+        ValueError
+            缓冲区长度与模式不符, 批次不从 0 开始或不连续, 批次越界, 或局部
+            矩阵尾部形状与模式不符.
+        """
+        if self._finished:
+            raise RuntimeError("累加器已产出结果, 不能继续累加.")
+        pattern = self._pattern
+        start = int(start)
+
+        if not self._started:
+            buffer = self._buffer
+            if buffer is None:
+                buffer = pattern.buffer
+                if buffer is None:
+                    buffer = bm.zeros(
+                        (pattern.nnz,), dtype=values.dtype, device=pattern.device
+                    )
+            if int(buffer.shape[0]) != pattern.nnz:
+                raise ValueError(
+                    f"buffer 长度必须为 {pattern.nnz}; 当前为 {int(buffer.shape[0])}."
+                )
+            bm.set_at(buffer, slice(None), 0.0)
+            self._buffer = buffer
+            if start != 0:
+                raise ValueError(f"chunks 必须从 0 开始; 当前为 {start}.")
+            self._started = True
+        elif start != self._expected:
+            raise ValueError(
+                f"chunks 必须连续覆盖; 期望 {self._expected}, 当前为 {start}."
+            )
+
+        _add_csr_chunk(values, pattern, self._buffer, start)
+        self._expected += int(values.shape[0])
+
+    def to_csr(self) -> CSRTensor:
+        """校验覆盖完整并产出 CSR 矩阵.
+
+        Returns
+        -------
+        CSRTensor
+            以模式的行指针与列索引, 以及累加后的数值缓冲区构成的稀疏矩阵.
+
+        Raises
+        ------
+        ValueError
+            尚未累加任何批次, 或已累加的批次未完整覆盖全部局部实体.
+        """
+        pattern = self._pattern
+        if not self._started:
+            raise ValueError("chunks 不能为空.")
+        if self._expected != pattern.n_cells:
+            raise ValueError(
+                f"chunks 只覆盖 {self._expected} 个局部实体; "
+                f"需要 {pattern.n_cells} 个."
+            )
+        self._finished = True
+        return CSRTensor(
+            crow=pattern.crow, col=pattern.col, values=self._buffer,
+            spshape=pattern.sparse_shape,
+        )

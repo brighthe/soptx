@@ -7,10 +7,10 @@ from math import isclose, isfinite, prod
 from pathlib import Path
 
 CURRENT_DIR = Path(__file__).resolve().parent
-# 两路合训的正式训练目录, 同时含 shape_best.pt 与 stiffness_best.pt; 来源见 data_provenance.json.
-TRAINING_DIR = Path(
-    "/home/brighthe/workspace/data/soptx/piml_substructure/"
-    "independent_15_layer/training/20260922T065924289373Z"
+# 两路合训的正式训练目录, 同时含 shape_best.pt 与 stiffness_best.pt; 文件清单与 sha256 见 piml_substructure/ 下 SHA256SUMS.
+TRAINING_DIR = (
+    Path.home() / "codespace" / "data" / "soptx" / "piml_substructure"
+    / "independent_15_layer" / "training" / "20260922T065924289373Z"
 )
 
 

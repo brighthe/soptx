@@ -11,7 +11,7 @@ analysis_capability_substructure/
 ├── cases.toml               工况注册表和唯一参数入口
 ├── config.py                工况读取与校验
 ├── run.py                   统一执行入口
-├── walkthrough.py           教学走查：当前只执行到 local_stiffness，后续步骤保留为注释
+├── walkthrough.py           教学走查：接口装配求解、逐批位移恢复与全场拼接；同网格 FA 自检保留为注释
 ├── _corner_convergence.py   linear_corner 制造解一致性与收敛验证
 ├── _density_update.py       密度连续切换、重建对照与独立进程监控
 ├── _cost_measurement.py     FA、full_trace、linear_corner 独立进程成本测量
@@ -68,7 +68,13 @@ python run.py --case linear_corner_cost_2d --monitor
 
 无参数调用只显示帮助，不启动实验。`--case all` 会先检查全部工况，再依次执行；`--output-dir` 可修改输出根目录。`--monitor` 适用于密度更新和性能工况，显示独立 Worker 的 CPU、当前 RSS、`VmHWM` 和系统可用内存；结果中的 `memory_peak_rss_bytes` 仍以 Worker 最终 `VmHWM` 为准。
 
-`walkthrough.py` 独立于 `run.py`，不写输出文件，只打印各步骤的关键形状、全程峰值 RSS 与同网格 FA 对照误差。走查先用 `StructuredSubstructureLayout` 建立整体有限元布局并创建参考子结构，再由 `GlobalAssembler` 组合同一布局完成后续接口与 trace 系统装配；旧的 `GlobalAssembler(domain_size, n_sub, n_fine, ...)` 构造方式仍保留。在仓库根目录运行 `python experiments/analysis_capability_substructure/walkthrough.py`；`--trace-kind`、`--n-sub`、`--n-fine` 修改配置，`--mem-limit-gb` 限制进程地址空间（默认 35 GiB），超限时由 `MemoryError` 的 traceback 指出所在步骤。
+`walkthrough.py` 独立于 `run.py`，不写输出文件，当前打印各步骤的关键形状、接口求解残差与柔顺度；接口求解后逐批恢复并拼接全场位移，打印恢复进度与耗时；同网格 FA 对照及峰值 RSS 输出尚未启用。走查先用 `StructuredSubstructureLayout` 建立整体有限元布局并创建参考子结构，再由 `GlobalAssembler` 组合同一布局完成后续接口与 trace 系统装配；旧的 `GlobalAssembler(domain_size, n_sub, n_fine, ...)` 构造方式仍保留。在仓库根目录运行 `python experiments/analysis_capability_substructure/walkthrough.py`；`--trace-kind`、`--n-sub`、`--n-fine`、`--chunk-size` 修改配置，`--mem-limit-gb` 限制进程地址空间（默认 35 GiB），超限时由 `MemoryError` 的 traceback 指出所在步骤。
+
+走查中的接口刚度装配显式展示分块循环：局部装配后提取内部与边界刚度块，令 `B = K_ib Psi`，求解 `K_ii T_q = -B`，再利用线弹性刚度的对称性计算 `K_r = Psi^T K_bb Psi + B^T T_q`，最后通过已有 `CSRChunkAccumulator` 散加到全局接口系统。`linear_corner` 不构造完整 Schur 矩阵和完整恢复矩阵；`full_trace` 利用 `Psi = I` 跳过单位阵乘法。首个批次打印中间量形状，`T_q` 仅在当前批次存在。此流程要求子结构内部无载荷，与当前问题适配器的约束一致。
+
+位移恢复显式采用单右端路径：从接口解提取 `q = A_q Q` 并展开 `u_b = Psi q`，按相同密度重装配局部刚度，直接求解 `K_ii u_i = -K_ib u_b`。此阶段不重新构造恢复矩阵或 Schur 补，恢复在主流程中显式逐批执行，复用 `layout.get_substructure_global_dofs` 获取编号并将边界与内部位移分别写回全场向量；共享接口位移按编号写回而不求和。恢复同样要求子结构内部无载荷。
+
+恢复结果核对包括逐子结构内部平衡残差、全场形状与有限性、全部写回后的边界拼接误差、原始细网格支承位移，以及全场外力功、接口外力功、接口刚度二次型与局部刚度二次型之和的一致性。内部残差以两项分量力的范数之和归一化；边界误差以期望边界位移的最大绝对值归一化，支承误差以全场最大绝对位移归一化；功与能量差以比较双方绝对值的较大者归一化，零分母使用 float64 最小正规正数保护。二次型均为两倍应变能。诊断打印实际误差，不自动宣称精度通过；非有限结果明确报错。这些检查不替代独立参考解对照，原有执行进度输出保持保留。
 
 当前实验统一采用 Q1，收敛工况的配置固定为 `degree = 1`，不提供次数覆盖参数。
 

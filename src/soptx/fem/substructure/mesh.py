@@ -711,9 +711,8 @@ class SubstructurePrototype:
             ValueError: 当 ``chunk_size`` 非正时抛出.
 
         说明:
-            单元刚度由 ``coef(rho) * KE_unit`` 得到, 再一次性散加到局部矩阵.
-            散加使用 ``bm.bincount`` 而非 ``bm.add_at``: 后者在 NumPy 后端走的是
-            无缓冲的 ``np.add.at``, 在 PyTorch 后端则被上游标注为非确定性.
+            本方法是 ``iter_local_stiffness_batches`` 的整批包装: 逐批产出后
+            ``concat`` 成完整批量. 流式路线应直接消费迭代器, 不经本方法.
 
             单元刚度阵由积分子以 ``float64`` 产出, 因此装配结果恒为 ``float64``.
         """
@@ -722,20 +721,21 @@ class SubstructurePrototype:
 
         rho_cells = self.to_cell_density(density)
         leading = tuple(rho_cells.shape[:-1])
-        rho_flat = bm.reshape(rho_cells, (-1, self.n_cells))
-        n_batch = rho_flat.shape[0]
+        n_batch = int(bm.reshape(rho_cells, (-1, self.n_cells)).shape[0])
 
-        step = n_batch if chunk_size is None else min(chunk_size, n_batch)
-        if step == 0:
-            blocks = [bm.zeros((0, self.n_total_dofs, self.n_total_dofs),
-                               dtype=bm.float64)]
+        if n_batch == 0:
+            stacked = bm.zeros(
+                (0, self.n_total_dofs, self.n_total_dofs), dtype=bm.float64
+            )
         else:
+            step = n_batch if chunk_size is None else min(chunk_size, n_batch)
             blocks = [
-                self._assemble_chunk(rho_flat[start:start + step])
-                for start in range(0, n_batch, step)
+                chunk for _, _, chunk in self.iter_local_stiffness_batches(
+                    rho_cells, chunk_size=step,
+                )
             ]
+            stacked = blocks[0] if len(blocks) == 1 else bm.concat(blocks, axis=0)
 
-        stacked = blocks[0] if len(blocks) == 1 else bm.concat(blocks, axis=0)
         return bm.reshape(
             stacked, leading + (self.n_total_dofs, self.n_total_dofs)
         )
@@ -762,9 +762,14 @@ class SubstructurePrototype:
             ValueError: 当 ``chunk_size`` 非正时抛出.
 
         说明:
-            与 ``assemble_local_stiffness_batch`` 不同, 本方法不保存已生成批次,
-            也不在末尾执行 ``bm.concat``. 调用方消费一个批次后即可释放局部刚度
-            矩阵, 从而把峰值内存限制在 ``chunk_size`` 对应的规模.
+            本方法是局部刚度装配的唯一实现; ``assemble_local_stiffness_batch``
+            只是它的整批包装. 本方法不保存已生成批次, 也不在末尾执行
+            ``bm.concat``. 调用方消费一个批次后即可释放局部刚度矩阵, 从而把
+            峰值内存限制在 ``chunk_size`` 对应的规模.
+
+            单元刚度由 ``coef(rho) * KE_unit`` 得到, 再一次性散加到局部矩阵.
+            散加使用 ``bm.bincount`` 而非 ``bm.add_at``: 后者在 NumPy 后端走的是
+            无缓冲的 ``np.add.at``, 在 PyTorch 后端则被上游标注为非确定性.
         """
         if chunk_size <= 0:
             raise ValueError(f"chunk_size 必须为正整数; 当前为 {chunk_size}.")
@@ -777,15 +782,22 @@ class SubstructurePrototype:
             end = min(start + chunk_size, n_batch)
             yield start, end, self._assemble_chunk(rho_flat[start:end])
 
-    def _assemble_chunk(self, rho_chunk: Any) -> Any:
+    def _assemble_chunk(self, rho_chunk: Any, *, backend: Any = None) -> Any:
         """装配一批局部刚度矩阵.
 
-        参数:
-            rho_chunk: 按单元编号排列的密度, 形状 ``(b, NC)``.
+        Parameters
+        ----------
+        rho_chunk : array_like
+            按单元编号排列的密度, 形状为 (b, NC).
+        backend : backend proxy or None
+            与输入及原型装配缓存相容的后端代理, None 使用当前后端.
 
-        返回:
-            K_local: 形状 ``(b, n_dof, n_dof)`` 的局部刚度矩阵.
+        Returns
+        -------
+        array_like
+            形状为 (b, n_dof, n_dof) 的局部刚度矩阵.
         """
+        backend = bm.get_current_backend() if backend is None else backend
         n_chunk = rho_chunk.shape[0]
         n_dof = self.n_total_dofs
 
@@ -794,17 +806,17 @@ class SubstructurePrototype:
         if self.rho_min != 0.0:
             coef = self.rho_min + (1.0 - self.rho_min) * coef
 
-        KE = bm.einsum('be, eij -> beij', coef, self.KE_unit)
+        KE = backend.einsum('be, eij -> beij', coef, self.KE_unit)
 
         # 把 batch 编号并入平坦索引, 一次 bincount 完成全批散加.
-        offsets = bm.arange(n_chunk, dtype=bm.int64) * (n_dof * n_dof)
-        indices = bm.reshape(offsets[:, None] + self._scatter_index[None, :], (-1,))
-        accumulated = bm.bincount(
+        offsets = backend.arange(n_chunk, dtype=backend.int64, device=backend.get_device(rho_chunk)) * (n_dof * n_dof)
+        indices = backend.reshape(offsets[:, None] + self._scatter_index[None, :], (-1,))
+        accumulated = backend.bincount(
             indices,
-            weights=bm.reshape(KE, (-1,)),
+            weights=backend.reshape(KE, (-1,)),
             minlength=n_chunk * n_dof * n_dof,
         )
-        K_local = bm.reshape(accumulated, (n_chunk, n_dof, n_dof))
+        K_local = backend.reshape(accumulated, (n_chunk, n_dof, n_dof))
 
         return K_local
 

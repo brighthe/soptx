@@ -430,9 +430,9 @@ def test_training_rejects_invalid_reused_manifest(
     assert not any(call[0] in {"generate", "train"} for call in calls)
 
 
-FORMAL_TRAINING_DIR = Path(
-    "/home/brighthe/workspace/data/soptx/piml_substructure/"
-    "independent_15_layer/training/20260922T065924289373Z"
+FORMAL_TRAINING_DIR = (
+    Path.home() / "codespace" / "data" / "soptx" / "piml_substructure"
+    / "independent_15_layer" / "training" / "20260922T065924289373Z"
 )
 
 
