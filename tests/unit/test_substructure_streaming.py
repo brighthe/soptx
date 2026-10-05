@@ -9,12 +9,19 @@ from soptx.backend import backend_manager as bm
 
 from soptx.fem.substructure import (
     ExactSchurReduction,
+    FullTraceBasis,
     GlobalAssembler,
+    InterfaceDofsView,
     LinearCornerTraceBasis,
     SubstructurePrototype,
+    assemble_exact_interface_system,
+    build_interface_space,
     build_substructures,
+    iter_exact_condensation_batches,
     iter_exact_element_energy_batches,
+    iter_exact_internal_displacement_batches,
     iter_exact_trace_stiffness_batches,
+    recover_full_displacement_batches,
 )
 
 
@@ -108,6 +115,63 @@ def test_streamed_batches_reject_nonpositive_chunk_size(
 
 
 @pytest.mark.parametrize("chunk_size", [1, 2, 4])
+def test_exact_condensation_batches_match_full_reduction(
+    chunk_size: int,
+) -> None:
+    """流式 Exact Schur 缩聚应与完整批量路径逐位一致, 且保留最后的短批次."""
+    bm.set_backend("numpy")
+    assembler = GlobalAssembler(
+        domain_size=(3.0, 1.0),
+        n_sub=(3, 1),
+        n_fine=(2, 2),
+        E_base=1.0,
+        nu=0.3,
+    )
+    prototype, _, _ = build_substructures(assembler)
+    prototype.penal = 3.0
+    prototype.rho_min = 1.0e-3
+    density = np.linspace(0.35, 0.9, 12).reshape(3, 2, 2)
+
+    local_full = prototype.assemble_local_stiffness_batch(density)
+    expected = ExactSchurReduction(
+        prototype.i_dofs,
+        prototype.b_dofs,
+    ).reduce_many(local_full)
+
+    batches = list(
+        iter_exact_condensation_batches(
+            prototype,
+            density,
+            chunk_size=chunk_size,
+        )
+    )
+
+    assert [(batch.start, batch.end) for batch in batches] == [
+        (start, min(start + chunk_size, 3))
+        for start in range(0, 3, chunk_size)
+    ]
+    assert all(
+        tuple(batch.stiffness.shape)
+        == (batch.end - batch.start, prototype.n_b, prototype.n_b)
+        and tuple(batch.recovery.shape)
+        == (batch.end - batch.start, prototype.n_i, prototype.n_b)
+        for batch in batches
+    )
+    np.testing.assert_allclose(
+        bm.to_numpy(bm.concat([batch.stiffness for batch in batches], axis=0)),
+        bm.to_numpy(expected.stiffness),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        bm.to_numpy(bm.concat([batch.recovery for batch in batches], axis=0)),
+        bm.to_numpy(expected.recovery),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 4])
 def test_exact_trace_batches_match_full_reduction(
     chunk_size: int,
 ) -> None:
@@ -187,6 +251,50 @@ def test_streamed_macro_assembly_matches_full_batch(
         chunk_size=chunk_size,
     )
     actual = assembler.assemble_macro_system_batches(sub_meshes, batches)
+
+    np.testing.assert_array_equal(
+        bm.to_numpy(actual.global_dofs),
+        bm.to_numpy(expected.global_dofs),
+    )
+    np.testing.assert_allclose(
+        bm.to_numpy(actual.stiffness.to_dense()),
+        bm.to_numpy(expected.stiffness.to_dense()),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 4])
+def test_streamed_interface_assembly_matches_full_batch(
+    chunk_size: int,
+) -> None:
+    """流式完整接口散加应与整批 ``assemble_interface_system`` 一致."""
+    bm.set_backend("numpy")
+    assembler = GlobalAssembler(
+        domain_size=(3.0, 1.0),
+        n_sub=(3, 1),
+        n_fine=(2, 2),
+        E_base=1.0,
+        nu=0.3,
+    )
+    prototype, sub_meshes, _ = build_substructures(assembler)
+    density = np.linspace(0.3, 0.95, 12).reshape(3, 2, 2)
+    trace_basis = FullTraceBasis.from_prototype(prototype)
+
+    local_full = prototype.assemble_local_stiffness_batch(density)
+    reduced_full = ExactSchurReduction(
+        prototype.i_dofs,
+        prototype.b_dofs,
+    ).reduce_many(local_full)
+    expected = assembler.assemble_interface_system(sub_meshes, reduced_full)
+
+    batches = iter_exact_trace_stiffness_batches(
+        prototype,
+        density,
+        trace_basis,
+        chunk_size=chunk_size,
+    )
+    actual = assembler.assemble_interface_system_batches(sub_meshes, batches)
 
     np.testing.assert_array_equal(
         bm.to_numpy(actual.global_dofs),
@@ -297,3 +405,196 @@ def test_streamed_element_energy_rejects_displacement_shape() -> None:
                 chunk_size=1,
             )
         )
+
+
+@pytest.mark.parametrize("kind", ["full_trace", "linear_corner"])
+@pytest.mark.parametrize("chunk_size", [1, 2, 4])
+def test_streamed_internal_displacement_matches_full_recovery(
+    kind: str,
+    chunk_size: int,
+) -> None:
+    """流式内部位移应与整批 ``reduce_many`` 加 ``recover`` 逐位一致."""
+    bm.set_backend("numpy")
+    assembler = GlobalAssembler(
+        domain_size=(3.0, 1.0),
+        n_sub=(3, 1),
+        n_fine=(2, 2),
+        E_base=1.0,
+        nu=0.3,
+    )
+    prototype, sub_meshes, _ = build_substructures(assembler)
+    prototype.penal = 3.0
+    prototype.rho_min = 1.0e-3
+    density = np.linspace(0.3, 0.95, 12).reshape(3, 2, 2)
+    space = build_interface_space(kind, assembler, sub_meshes, prototype)
+    Q = bm.asarray(np.linspace(-1.0, 1.0, space.n_global), dtype=bm.float64)
+
+    local_full = prototype.assemble_local_stiffness_batch(density)
+    reduced_full = ExactSchurReduction(
+        prototype.i_dofs,
+        prototype.b_dofs,
+    ).reduce_many(local_full)
+    expected_boundary = space.boundary_displacement(Q)
+    expected_internal = reduced_full.recover(expected_boundary)
+
+    batches = list(
+        iter_exact_internal_displacement_batches(
+            prototype,
+            density,
+            space.trace_displacement(Q),
+            space.trace_basis,
+            chunk_size=chunk_size,
+        )
+    )
+
+    assert [(batch.start, batch.end) for batch in batches] == [
+        (start, min(start + chunk_size, 3))
+        for start in range(0, 3, chunk_size)
+    ]
+    np.testing.assert_allclose(
+        bm.to_numpy(bm.concat([batch.boundary for batch in batches], axis=0)),
+        bm.to_numpy(expected_boundary),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        bm.to_numpy(bm.concat([batch.internal for batch in batches], axis=0)),
+        bm.to_numpy(expected_internal),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+
+@pytest.mark.parametrize("kind", ["full_trace", "linear_corner"])
+@pytest.mark.parametrize("chunk_size", [1, 2, 4])
+def test_streamed_full_displacement_matches_batch_recovery(
+    kind: str,
+    chunk_size: int,
+) -> None:
+    """流式全尺度位移恢复应与整批 ``recover_full_displacement`` 一致."""
+    bm.set_backend("numpy")
+    assembler = GlobalAssembler(
+        domain_size=(3.0, 1.0),
+        n_sub=(3, 1),
+        n_fine=(2, 2),
+        E_base=1.0,
+        nu=0.3,
+    )
+    prototype, sub_meshes, _ = build_substructures(assembler)
+    prototype.penal = 3.0
+    prototype.rho_min = 1.0e-3
+    density = np.linspace(0.3, 0.95, 12).reshape(3, 2, 2)
+    space = build_interface_space(kind, assembler, sub_meshes, prototype)
+    full_space = build_interface_space(
+        "full_trace", assembler, sub_meshes, prototype
+    )
+    Q = bm.asarray(np.linspace(-1.0, 1.0, space.n_global), dtype=bm.float64)
+
+    # 整批参考: 完整接口位移 U_Gamma = P_q Q, 再由批量恢复矩阵回填内部.
+    local_full = prototype.assemble_local_stiffness_batch(density)
+    reduced_full = ExactSchurReduction(
+        prototype.i_dofs,
+        prototype.b_dofs,
+    ).reduce_many(local_full)
+    u_interface = bm.asarray(
+        space.global_trace_map() @ bm.to_numpy(Q), dtype=bm.float64
+    )
+    expected = assembler.recover_full_displacement(
+        sub_meshes,
+        reduced_full,
+        InterfaceDofsView(global_dofs=full_space.global_dofs),
+        u_interface,
+    )
+
+    actual = recover_full_displacement_batches(
+        assembler.layout,
+        sub_meshes,
+        iter_exact_internal_displacement_batches(
+            prototype,
+            density,
+            space.trace_displacement(Q),
+            space.trace_basis,
+            chunk_size=chunk_size,
+        ),
+    )
+
+    assert tuple(actual.shape) == (assembler.total_full_dofs,)
+    np.testing.assert_allclose(
+        bm.to_numpy(actual),
+        bm.to_numpy(expected),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+
+def test_streamed_full_displacement_rejects_gapped_batches() -> None:
+    """批次区间不连续或未覆盖全部子结构时应明确报错."""
+    bm.set_backend("numpy")
+    assembler = GlobalAssembler(
+        domain_size=(3.0, 1.0),
+        n_sub=(3, 1),
+        n_fine=(2, 2),
+        E_base=1.0,
+        nu=0.3,
+    )
+    prototype, sub_meshes, _ = build_substructures(assembler)
+    n_b, n_i = int(prototype.n_b), int(prototype.n_i)
+
+    def batch(start: int, end: int):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            start=start,
+            end=end,
+            boundary=bm.zeros((end - start, n_b), dtype=bm.float64),
+            internal=bm.zeros((end - start, n_i), dtype=bm.float64),
+        )
+
+    with pytest.raises(ValueError, match="连续半开区间"):
+        recover_full_displacement_batches(
+            assembler.layout, sub_meshes, [batch(0, 1), batch(2, 3)]
+        )
+    with pytest.raises(ValueError, match="未完整覆盖"):
+        recover_full_displacement_batches(
+            assembler.layout, sub_meshes, [batch(0, 2)]
+        )
+
+
+@pytest.mark.parametrize("kind", ["full_trace", "linear_corner"])
+@pytest.mark.parametrize("chunk_size", [1, 2, 4])
+def test_eager_interface_assembly_matches_two_step_route(
+    kind: str,
+    chunk_size: int,
+) -> None:
+    """立即执行的正向装配应与"迭代器加 ``assemble``"两步写法给出同一系统."""
+    bm.set_backend("numpy")
+    assembler = GlobalAssembler(
+        domain_size=(3.0, 1.0),
+        n_sub=(3, 1),
+        n_fine=(2, 2),
+        E_base=1.0,
+        nu=0.3,
+    )
+    prototype, sub_meshes, _ = build_substructures(assembler)
+    prototype.penal = 3.0
+    prototype.rho_min = 1.0e-3
+    density = np.linspace(0.3, 0.95, 12).reshape(3, 2, 2)
+    space = build_interface_space(kind, assembler, sub_meshes, prototype)
+
+    expected = space.assemble(
+        iter_exact_trace_stiffness_batches(
+            prototype, density, space.trace_basis, chunk_size=chunk_size,
+        )
+    )
+    actual = assemble_exact_interface_system(
+        prototype, density, space, chunk_size=chunk_size,
+    )
+
+    np.testing.assert_array_equal(
+        bm.to_numpy(actual.global_dofs), bm.to_numpy(expected.global_dofs)
+    )
+    np.testing.assert_allclose(
+        bm.to_numpy(actual.stiffness.to_dense()),
+        bm.to_numpy(expected.stiffness.to_dense()),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )

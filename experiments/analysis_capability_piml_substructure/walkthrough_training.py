@@ -17,8 +17,8 @@ from math import isfinite
 from pathlib import Path
 
 CURRENT_DIR = Path(__file__).resolve().parent
-# 正式样本与权重的存放根目录; 来源见 data_provenance.json.
-DATA_ROOT = Path.home() / "workspace" / "data" / "soptx" / "piml_substructure"
+# 正式样本与权重的存放根目录; 文件清单与 sha256 见该目录下 SHA256SUMS.
+DATA_ROOT = Path.home() / "codespace" / "data" / "soptx" / "piml_substructure"
 LAYOUT = "independent_15_layer"
 
 

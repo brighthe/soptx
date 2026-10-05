@@ -365,7 +365,7 @@ class FilterMatrixBuilder(BaseLogged):
 
         Returns
         -------
-        H : 过滤矩阵.
+        H : 过滤矩阵, 权重 max(0, rmin - d), 条目按行号、行内列号递增排列.
 
         Notes
         -----
@@ -373,127 +373,72 @@ class FilterMatrixBuilder(BaseLogged):
 
         设计变量的取法随分辨率策略而异: SRTO 取单元密度中心点; MRTO 取密度子单元中心
         点, 因此要求设计变量网格与密度子单元网格一致.
+
+        单元 (i, j, k) 的线性编号为 (i ny + j) nz + k. 每个单元的搜索窗口是各方向偏移
+        -(s - 1) .. s - 1, s = ceil(rmin / h). 实现按行分块, 块内对全部 (行, 偏移) 对
+        向量化求权重, 不逐单元循环. 偏移按字典序排列, 故每行的列号递增; 距离按
+        "各自乘步长再相减" 计算, 与逐单元写法逐位一致.
         """
         t = None
         if enable_timing:
             t = timer(f"Filter_3d_{self._density_location}")
             next(t)
-        
-        search_radius_x = ceil(rmin/hx)
-        search_radius_y = ceil(rmin/hy)
-        search_radius_z = ceil(rmin/hz)
-        
-        # 批处理单元, 避免一次处理所有单元耗尽内存
-        batch_size = min(10000, nx * ny * nz)  
-        n_batches = (nx * ny * nz + batch_size - 1) // batch_size
-        
-        # 创建一个映射函数，从线性索引转换为 3D 坐标
-        def linear_to_3d(linear_idx):
-            i = linear_idx // (ny * nz)
-            j = (linear_idx % (ny * nz)) // nz
-            k = linear_idx % nz
-            return i, j, k
-        
-        # 预计算每个格子的物理坐标 
-        all_coords = bm.zeros((nx * ny * nz, 3), dtype=bm.float64, device='cpu')
-        
-        for idx in range(nx * ny * nz):
-            i, j, k = linear_to_3d(idx)
-            all_coords[idx, 0] = i * hx
-            all_coords[idx, 1] = j * hy
-            all_coords[idx, 2] = k * hz
-                
+
+        sx, sy, sz = ceil(rmin / hx), ceil(rmin / hy), ceil(rmin / hz)
+        offsets = [(a, b, c)
+                   for a in range(-(sx - 1), sx)
+                   for b in range(-(sy - 1), sy)
+                   for c in range(-(sz - 1), sz)]
+        oi, oj, ok = (bm.tensor([offset[axis] for offset in offsets], dtype=bm.int64, device='cpu')
+                      for axis in range(3))
+
+        N = nx * ny * nz
+        # 每块约 2^22 个 (行, 偏移) 对, 临时数组约数十 MB
+        chunk = max(1, (1 << 22) // len(offsets))
+
         if enable_timing:
             t.send('预处理')
 
-        # 初始化存储结果的列表
-        all_rows = []
-        all_cols = []
-        all_vals = []
-        
-        # 分批处理所有单元
-        for batch_idx in range(n_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min((batch_idx + 1) * batch_size, nx * ny * nz)
-            
-            batch_rows = []
-            batch_cols = []
-            batch_vals = []
-            
-            # 获取当前批次单元的坐标
-            batch_coords = all_coords[start_idx:end_idx]
-            
-            # 处理当前批次中的每个单元
-            for local_idx, global_idx in enumerate(range(start_idx, end_idx)):
-                i, j, k = linear_to_3d(global_idx)
-                row = global_idx
-                
-                # 计算搜索范围 - 与原始函数完全相同
-                ii1 = max(0, i - (search_radius_x - 1))
-                ii2 = min(nx, i + search_radius_x)
-                jj1 = max(0, j - (search_radius_y - 1))
-                jj2 = min(ny, j + search_radius_y)
-                kk1 = max(0, k - (search_radius_z - 1))
-                kk2 = min(nz, k + search_radius_z)
-                
-                # 创建搜索范围内所有单元的线性索引
-                search_indices = []
-                for ii in range(ii1, ii2):
-                    for jj in range(jj1, jj2):
-                        for kk in range(kk1, kk2):
-                            col = kk + jj * nz + ii * ny * nz
-                            search_indices.append(col)
-                
-                if not search_indices:
-                    continue
-                    
-                # 获取搜索单元的物理坐标
-                search_coords = all_coords[search_indices]
-                
-                # 计算与当前单元的距离
-                current_coords = batch_coords[local_idx].reshape(1, 3) 
-                diffs = search_coords - current_coords  
-                squared_dists = bm.sum(diffs * diffs, axis=1) 
-                distances = bm.sqrt(squared_dists) 
-                
-                # 计算滤波因子
-                factors = rmin - distances 
-                valid_mask = factors > 0  
-                
-                if bm.any(valid_mask):
-                    valid_cols = bm.array(search_indices, device='cpu')[valid_mask]
-                    valid_factors = factors[valid_mask]
-                    
-                    # 收集结果
-                    batch_rows.extend([row] * len(valid_cols))
-                    batch_cols.extend(valid_cols.tolist())
-                    batch_vals.extend(valid_factors.tolist())
-            
-            # 添加批次结果到总结果
-            all_rows.extend(batch_rows)
-            all_cols.extend(batch_cols)
-            all_vals.extend(batch_vals)
-                
+        rows, cols, vals = [], [], []
+        for start in range(0, N, chunk):
+            row = bm.arange(start, min(start + chunk, N), dtype=bm.int64, device='cpu')
+            i = row // (ny * nz)
+            j = (row % (ny * nz)) // nz
+            k = row % nz
+
+            ii = i[:, None] + oi[None, :]
+            jj = j[:, None] + oj[None, :]
+            kk = k[:, None] + ok[None, :]
+            inside = ((ii >= 0) & (ii < nx) & (jj >= 0) & (jj < ny) & (kk >= 0) & (kk < nz))
+
+            # 坐标先各自乘步长再相减, 与逐单元写法 coords[col] - coords[row] 相同. 整数下标须先
+            # 显式转为 float64: torch 中 int64 张量乘 Python 浮点数会提升为默认的 float32
+            f64 = lambda index: bm.astype(index, bm.float64)
+            dx = f64(ii) * hx - (f64(i) * hx)[:, None]
+            dy = f64(jj) * hy - (f64(j) * hy)[:, None]
+            dz = f64(kk) * hz - (f64(k) * hz)[:, None]
+            factors = rmin - bm.sqrt(dx * dx + dy * dy + dz * dz)
+            valid = inside & (factors > 0)
+
+            rows.append(bm.broadcast_to(row[:, None], valid.shape)[valid])
+            cols.append(((ii * ny + jj) * nz + kk)[valid])
+            vals.append(factors[valid])
+
         if enable_timing:
             t.send('计算距离和过滤因子')
 
-        if all_rows:
-            iH = bm.tensor(all_rows, dtype=bm.int32, device='cpu')
-            jH = bm.tensor(all_cols, dtype=bm.int32, device='cpu')
-            sH = bm.tensor(all_vals, dtype=bm.float64, device='cpu')
-        else:
-            iH = bm.tensor([], dtype=bm.int32, device='cpu')
-            jH = bm.tensor([], dtype=bm.int32, device='cpu')
-            sH = bm.tensor([], dtype=bm.float64, device='cpu')
-        
+        iH = bm.astype(bm.concat(rows, axis=0), bm.int32)
+        jH = bm.astype(bm.concat(cols, axis=0), bm.int32)
+        sH = bm.astype(bm.concat(vals, axis=0), bm.float64)
+
         H = COOTensor(
                     indices=bm.stack((iH, jH), axis=0),
                     values=sH,
-                    spshape=(nx * ny * nz, nx * ny * nz)
+                    spshape=(N, N)
                 )
 
         if enable_timing:
             t.send('矩阵构建')
             t.send(None)
-        
+
         return H

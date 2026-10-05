@@ -18,10 +18,21 @@ from .condensation import (
     StaticCondensationBase,
     ExactSchurCondensation,
     StreamingShapeFunctionCondensation,
+    schur_complement,
 )
 from .assembler import GlobalAssembler, InterfaceSystem
+from .interface_space import (
+    INTERFACE_SPACE_KINDS,
+    InterfaceSpace,
+    assemble_interface_stiffness,
+    build_interface_pattern,
+    build_interface_space,
+)
 from .layout import HasGlobalDofs, InterfaceDofsView, StructuredSubstructureLayout
-from .recovery import recover_full_displacement
+from .recovery import (
+    recover_full_displacement,
+    recover_full_displacement_batches,
+)
 from .reduction_adapter import normalize_local_reduction
 from .reductions import (
     CondensationReductionAdapter,
@@ -33,8 +44,13 @@ from .reductions import (
 )
 from .streaming import (
     ElementStrainEnergyBatch,
+    InternalDisplacementBatch,
+    LocalCondensationBatch,
     TraceStiffnessBatch,
+    assemble_exact_interface_system,
+    iter_exact_condensation_batches,
     iter_exact_element_energy_batches,
+    iter_exact_internal_displacement_batches,
     iter_exact_trace_stiffness_batches,
 )
 from .traces import FullTraceBasis, LinearCornerTraceBasis, TraceBasis
@@ -95,6 +111,7 @@ __all__ = [
     "StaticCondensationBase",
     "ExactSchurCondensation",
     "StreamingShapeFunctionCondensation",
+    "schur_complement",
     "ReducedStiffnessCondensation",
     "ShapeFunctionCondensation",
     "SurrogateContractError",
@@ -107,11 +124,21 @@ __all__ = [
     "PIMLShapeReduction",
     "PIMLStiffnessReduction",
     "ElementStrainEnergyBatch",
+    "InternalDisplacementBatch",
+    "LocalCondensationBatch",
     "TraceStiffnessBatch",
+    "assemble_exact_interface_system",
+    "iter_exact_condensation_batches",
     "iter_exact_element_energy_batches",
+    "iter_exact_internal_displacement_batches",
     "iter_exact_trace_stiffness_batches",
     "StructuredSubstructureLayout",
     "GlobalAssembler",
+    "INTERFACE_SPACE_KINDS",
+    "InterfaceSpace",
+    "assemble_interface_stiffness",
+    "build_interface_pattern",
+    "build_interface_space",
     "IndependentPredictionDecoder",
     "TraceBasis",
     "FullTraceBasis",
@@ -121,6 +148,7 @@ __all__ = [
     "HasGlobalDofs",
     "normalize_local_reduction",
     "recover_full_displacement",
+    "recover_full_displacement_batches",
     "InterfaceOperator",
     "InterfaceConditions",
     "project_problem_conditions_to_full_system",

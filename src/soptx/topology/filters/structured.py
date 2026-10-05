@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
+import sys
 
 import numpy as np
 from scipy.ndimage import convolve, uniform_filter
@@ -135,12 +136,46 @@ def _validate_density_input(
     return rho, normalized
 
 
+def _torch_density_filter(field: Any, rmin: float, spacing: Spacing3d, *, adjoint: bool) -> Any:
+    """在输入 Tensor 的设备上执行锥形过滤或其伴随运算.
+
+    Notes
+    -----
+    复用物理距离权重核. 零填充对应域外权重为零; 正向先卷积再归一化,
+    伴随先归一化再卷积, 与 NumPy 路径的边界截断一致.
+    """
+    import torch
+    from torch.nn.functional import conv3d
+
+    if field.ndim != 3:
+        raise ValueError(f"输入必须为三维 Tensor; 当前为 {field.shape}.")
+    normalized = tuple(float(value) for value in spacing)
+    kernel_np = build_structured_cone_kernel(rmin, normalized)
+    kernel = torch.tensor(kernel_np, dtype=torch.float64, device=field.device)[None, None]
+    padding = tuple(size // 2 for size in kernel_np.shape)
+    values = field.to(dtype=torch.float64)[None, None]
+    weight_sum = conv3d(torch.ones_like(values), kernel, padding=padding)
+    if adjoint:
+        result = conv3d(values / weight_sum, kernel, padding=padding)
+    else:
+        result = conv3d(values, kernel, padding=padding) / weight_sum
+    return result[0, 0]
+
+
+def _is_torch_tensor(value: Any) -> bool:
+    """识别已加载的 PyTorch Tensor, 不为 NumPy 路径引入可选依赖."""
+    torch = sys.modules.get("torch")
+    return torch is not None and isinstance(value, torch.Tensor)
+
+
 def apply_structured_density_filter(
-    density: np.ndarray,
+    density: Any,
     rmin: float,
     spacing: Spacing3d,
-) -> np.ndarray:
-    """计算归一化锥形密度过滤 ``rho_phys = D^{-1} H rho``."""
+) -> Any:
+    """计算归一化锥形密度过滤, 保留 NumPy 或 PyTorch 输入的后端与设备."""
+    if _is_torch_tensor(density):
+        return _torch_density_filter(density, rmin, spacing, adjoint=False)
     rho, normalized = _validate_density_input(density, rmin, spacing)
     kernel = build_structured_cone_kernel(rmin, normalized)
     numerator = convolve(rho, kernel, mode="constant", cval=0.0)
@@ -148,11 +183,13 @@ def apply_structured_density_filter(
 
 
 def apply_structured_density_filter_adjoint(
-    gradient: np.ndarray,
+    gradient: Any,
     rmin: float,
     spacing: Spacing3d,
-) -> np.ndarray:
-    """应用密度过滤 Jacobian 的转置 ``H^T D^{-1}`` 回传梯度."""
+) -> Any:
+    """应用密度过滤 Jacobian 的转置 ``H^T D^{-1}``, 保留输入后端与设备."""
+    if _is_torch_tensor(gradient):
+        return _torch_density_filter(gradient, rmin, spacing, adjoint=True)
     grad, normalized = _validate_density_input(gradient, rmin, spacing)
     scaled = grad / _structured_weight_sum(grad.shape, rmin, normalized)
     kernel = build_structured_cone_kernel(rmin, normalized)

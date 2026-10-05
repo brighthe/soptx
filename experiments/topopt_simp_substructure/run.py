@@ -163,7 +163,7 @@ def print_run_banner(case: TopOptCase, ctx: CaseContext, output_dir: Path) -> No
         f"[substructure] {sub_str}={ctx.n_sub_total} 子结构 (单块 {fine_str}={ctx.prototype.n_cells} 单元), "
         f"trace={case.trace}, reduction={case.reduction}, "
         f"内部自由度 u_int={ctx.prototype.n_i}, 接口自由度 u_bnd={ctx.prototype.n_b}, "
-        f"全局迹自由度 u_trace={ctx.n_global_trace_dofs}"
+        f"全局迹自由度 u_trace={ctx.interface_space.n_global}"
     )
     print(
         f"[topopt] SIMP (penalty={case.simp_penalty:g}, emin={case.emin:g}), "
@@ -364,9 +364,9 @@ def run_case(
         "n_substructures": ctx.n_sub_total,
         "grid": list(ctx.n_elem_grid),
         "n_cells": int(rho_final_np.size),
-        "n_global_trace_dofs": ctx.n_global_trace_dofs,
-        "n_boundary_dofs_per_sub": int(ctx.trace_basis.n_boundary_dofs),
-        "n_trace_dofs_per_sub": int(ctx.trace_basis.n_trace_dofs),
+        "n_global_trace_dofs": ctx.interface_space.n_global,
+        "n_boundary_dofs_per_sub": int(ctx.interface_space.n_boundary_dofs),
+        "n_trace_dofs_per_sub": int(ctx.interface_space.n_trace_dofs),
         "volfrac": case.volfrac,
         "penal": case.simp_penalty,
         "emin": case.emin,

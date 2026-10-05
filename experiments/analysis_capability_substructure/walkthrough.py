@@ -1,7 +1,8 @@
-"""精确子结构流程: 局部装配, Schur 补缩聚, 接口空间投影, 接口装配求解与内部位移恢复."""
+"""精确子结构流程: 局部装配, Schur 补缩聚, 接口迹降阶, 接口装配求解与内部位移恢复."""
 
 import argparse
-from math import isfinite
+from math import isfinite, prod
+from time import perf_counter
 
 
 def parse_args(argv=None):
@@ -28,7 +29,8 @@ def parse_args(argv=None):
         help="接口系统与同网格 FA 对照共用的直接求解器",
     )
     parser.add_argument(
-        "--seed", type=int, default=0, help="整体密度场随机种子",
+        "--chunk-size", type=int, default=256,
+        help="单次装配并缩聚的子结构数; 局部刚度 K^j 只在分块内存在",
     )
     parser.add_argument(
         "--mem-limit-gb", type=float, default=35.0,
@@ -49,15 +51,15 @@ def parse_args(argv=None):
         parser.error("--n-sub 须为正整数, 个数等于空间维数")
     if args.n_fine < 2:
         parser.error("--n-fine 至少为 2")
-    if args.seed < 0:
-        parser.error("--seed 不能为负数")
+    if args.chunk_size <= 0:
+        parser.error("--chunk-size 须为正整数")
     if not isfinite(args.mem_limit_gb) or args.mem_limit_gb < 1 / 2**30:
         parser.error("--mem-limit-gb 须为有限正数且至少为 1 字节")
     return args
 
 
 def main(argv=None):
-    """依次创建子结构、生成材料场并装配局部刚度."""
+    """依次创建子结构, 生成密度场, 逐块完成局部静力缩聚与接口迹降阶, 组装求解接口方程并恢复全场位移."""
     args = parse_args(argv)
 
     import resource
@@ -66,13 +68,15 @@ def main(argv=None):
     limit = int(args.mem_limit_gb * GIB)
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
-    import numpy as np
     from soptx.backend import backend_manager as bm
+    from soptx.fem.matrix import CSRChunkAccumulator
     from soptx.fem.substructure import (
-        ExactSchurCondensation,
         GlobalAssembler,
+        InterfaceSystem,
         StructuredSubstructureLayout,
+        build_interface_space,
         build_substructures,
+        solve_constrained_system,
     )
     from soptx.problems.elasticity import CantileverCorner2d, FullMBBBeam3d
 
@@ -106,108 +110,252 @@ def main(argv=None):
     n_fine = (args.n_fine,) * dim
     trace_kind = args.trace_kind
 
-    # 数值求解: 接口系统与同网格 FA 对照共用的直接求解器.
+    # 数值求解: 接口系统与同网格 FA 对照共用的直接求解器; 局部缩聚每次处理 chunk_size 个子结构.
     solver = args.solver
+    chunk_size = args.chunk_size
 
     # ------------------------------------------------------------------
-    # 子结构划分: 整体布局, 参考子结构, 子结构排列
+    # 子结构划分: 整体布局, 局部密度, 全局装配器, 参考子结构与子结构实例
     # ------------------------------------------------------------------
-    # 求解域划分为 prod(n_sub) 个互不重叠的同构子结构.
+    # 构造整体布局: 将求解域划分为互不重叠的同构子结构.
     domain_size = domain[1::2]
     layout = StructuredSubstructureLayout(
-        domain_size, n_sub, n_fine, E_base=E_base, nu=nu,
+        domain_size=domain_size,
+        n_sub=n_sub,
+        n_fine=n_fine,
+        E_base=E_base,
+        nu=nu,
         hypothesis=hypothesis,
     )
+    # 构造子结构单元密度
+    density = bm.linspace(0.5, 0.9, prod(layout.total_fine))
+    local_density = layout.split_global_cell_field(density)
+    print(f"[输入] 求解域 {domain}, 密度 (0.5, 0.9)")
+    # 构造全局装配器: 提供全局接口刚度的逐块散加入口, 供接口空间调用.
     assembler = GlobalAssembler(layout)
-    # 结构化划分下全部子结构同构, 与 j 无关的几何量 (边界/内部自由度划分,
-    # 单位密度单元刚度, 角点插值矩阵) 由参考子结构只构造一次.
-    prototype, sub_meshes, positions = build_substructures(
-        layout, penal=penalty, rho_min=0.0,
+    # 构造参考子结构与子结构实例: 与 j 无关的量只在 prototype 上构造一次, SIMP 参数存入 prototype.
+    prototype, sub_meshes, sub_positions = build_substructures(
+        assembler=assembler,
+        penal=penalty,
+        rho_min=0.0,
     )
 
     # ------------------------------------------------------------------
-    # 局部刚度装配: 密度场, 局部刚度 K^j (原型内 SIMP 插值)
+    # 构造接口空间
     # ------------------------------------------------------------------
-    M = len(sub_meshes)
-    n_dof = prototype.n_total_dofs
+    interface_space = build_interface_space(
+        kind=trace_kind,
+        assembler=assembler,
+        sub_meshes=sub_meshes,
+        prototype=prototype,
+    )
+    trace = interface_space.trace_basis
+    n_q = interface_space.n_trace_dofs
+
     print(
-        f"子结构 {M:,} 个, 细单元 {M * prototype.n_cells:,} 个"
+        f"[局部缩聚] 子结构 {len(sub_meshes):,} 个, 单子结构 "
+        f"K^j {(prototype.n_total_dofs,) * 2}, "
+        f"T_q^j {(prototype.n_i, n_q)}; chunk_size {chunk_size}, "
+        f"单分块 K^j 至多 {chunk_size * prototype.n_total_dofs**2 * 8 / GIB:.2f} GiB"
     )
     print(
-        f"[局部装配] 稠密刚度数组预计 "
-        f"{M * n_dof**2 * 8 / GIB:.2f} GiB",
+        f"[迹降阶] {trace.name}: Psi {tuple(trace.matrix.shape)}, "
+        f"单子结构 K_r^j {(n_q, n_q)}",
         flush=True,
     )
 
-    # 密度场: 各细单元独立服从 U(density_range), 由 seed 复现.
-    density_range = (0.5, 0.9)
-    seed = args.seed
-    density = bm.asarray(
-        np.random.default_rng(seed).uniform(
-            *density_range, size=layout.total_fine,
+    # ------------------------------------------------------------------
+    # 构造全局接口刚度
+    # ------------------------------------------------------------------
+    print("[接口编号] 开始建立 CSR 模式", flush=True)
+    pattern = interface_space.pattern
+    accumulator = CSRChunkAccumulator(pattern)
+    print(
+        f"[接口编号] local_dofs {tuple(interface_space.local_dofs.shape)}, "
+        f"CSR 模式 {pattern.shape}, 非零位置 {pattern.nnz:,}",
+        flush=True,
+    )
+    i_dofs, b_dofs = prototype.i_dofs, prototype.b_dofs
+    Psi = trace.matrix
+
+    n_substructures = len(sub_meshes)
+    n_batches = (n_substructures + chunk_size - 1) // chunk_size
+    stiffness_batches = prototype.iter_local_stiffness_batches(
+        local_density, chunk_size=chunk_size,
+    )
+    for batch_index in range(n_batches):
+        batch_number = batch_index + 1
+        expected_start = batch_index * chunk_size
+        expected_end = min(expected_start + chunk_size, n_substructures)
+        print(
+            f"[批次 {batch_number}/{n_batches}] 开始, "
+            f"子结构 [{expected_start}, {expected_end})",
+            flush=True,
         )
+        batch_started = perf_counter()
+        step_started = perf_counter()
+        start, end, K_local = next(stiffness_batches)
+        print(f"  局部刚度装配完成, 耗时 {perf_counter() - step_started:.3f} s", flush=True)
+        step_started = perf_counter()
+        K_ii = K_local[..., i_dofs[:, None], i_dofs]
+        K_ib = K_local[..., i_dofs[:, None], b_dofs]
+        K_bb = K_local[..., b_dofs[:, None], b_dofs]
+
+        B = K_ib if trace_kind == "full_trace" else K_ib @ Psi
+        K_qq = trace.project_stiffness(K_bb)
+        print(f"  刚度分块与迹投影完成, 耗时 {perf_counter() - step_started:.3f} s", flush=True)
+
+        step_started = perf_counter()
+        T_q = bm.linalg.solve(K_ii, -B)
+        print(f"  内部消元完成, 耗时 {perf_counter() - step_started:.3f} s", flush=True)
+
+        step_started = perf_counter()
+        K_r = K_qq + bm.matrix_transpose(B) @ T_q
+        print(f"  局部迹刚度计算完成, 耗时 {perf_counter() - step_started:.3f} s", flush=True)
+        if start == 0:
+            print(
+                f"[首批局部装配] 子结构 [{start}, {end}), K {tuple(K_local.shape)}; "
+                f"K_ii {tuple(K_ii.shape)}, K_ib {tuple(K_ib.shape)}, "
+                f"K_bb {tuple(K_bb.shape)}",
+                flush=True,
+            )
+            print(
+                f"[首批迹空间消元] B {tuple(B.shape)}, T_q {tuple(T_q.shape)}, "
+                f"K_qq {tuple(K_qq.shape)}, K_r {tuple(K_r.shape)}",
+                flush=True,
+            )
+
+        step_started = perf_counter()
+        accumulator.add(start, K_r)
+        print(f"  全局散加完成, 耗时 {perf_counter() - step_started:.3f} s", flush=True)
+        # 本阶段仅组装刚度, 恢复算子不跨批保存; 后续恢复需逐块重算.
+        del K_local, K_ii, K_ib, K_bb, B, K_qq, T_q, K_r
+        # 百分比表示装配覆盖的子结构比例, 不代表总运行时间比例.
+        print(
+            f"[批次 {batch_number}/{n_batches}] 完成, "
+            f"累计 {end}/{n_substructures} ({end / n_substructures:.2%}), "
+            f"本批 {perf_counter() - batch_started:.3f} s",
+            flush=True,
+        )
+
+    system = InterfaceSystem(
+        stiffness=accumulator.to_csr(),
+        global_dofs=interface_space.global_dofs,
     )
     print(
-        f"[输入] 求解域 {domain}, 随机密度 U{density_range}, seed {seed}"
+        f"[接口装配] {trace.name}: N_q = {len(system.global_dofs):,}, "
+        f"K_Q {tuple(system.stiffness.shape)}, 非零元 {system.stiffness.nnz:,}",
+        flush=True,
     )
 
-    # 形状: density 为 total_fine; local_density 为 (M, *n_fine), M 为子结构总数,
-    # 第 0 维按 x 优先字典序与 sub_meshes 同序; local_stiffness 为 (M, n_b + n_i, n_b + n_i).
-    local_density = layout.split_global_cell_field(density)
-    local_stiffness = prototype.assemble_local_stiffness_batch(local_density)
+    # 组装全局接口载荷与约束
+    print("[接口载荷] 开始构造载荷与约束", flush=True)
+    step_started = perf_counter()
+    load, constraints = interface_space.constrained_conditions(pde)
     print(
-        f"[局部装配] local_density {tuple(local_density.shape)}, "
-        f"local_stiffness {tuple(local_stiffness.shape)}"
+        f"[接口载荷] F_Q {tuple(load.shape)}, 约束 C_D {constraints.shape}, "
+        f"耗时 {perf_counter() - step_started:.3f} s",
+        flush=True,
     )
-    # ---------------------------------------------------------------------------
-    # 基于静力缩聚构造局部缩聚刚度
-    # ---------------------------------------------------------------------------
-    condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
-    condensed, recovery = condensor.condense(local_stiffness)
-    # 走查额外释放: K^j 在缩聚后不再使用, 文档代码未写这一步.
-    del local_stiffness
-    print(f'[局部缩聚] K_s {tuple(condensed.shape)}, N_int {tuple(recovery.shape)}')
 
-    # # ---------------------------------------------------------------------------
-    # # §3.3 接口装配
-    # # ---------------------------------------------------------------------------
-    # system = assembler.assemble_trace_system(
-    #     sub_meshes, condensor, trace_basis=trace,
-    # )
-    # # 走查额外检查: P = I 要求 full_trace 接口系统沿用 build_interface_dofs 的编号.
-    # # linear_corner 下 P 的列数由 solve_constrained_system 校验.
-    # if trace_kind == 'full_trace':
-    #     assert np.array_equal(bm.to_numpy(system.global_dofs), bm.to_numpy(interface_dofs))
-    # print(f'[§3.3] 接口系统 {tuple(system.stiffness.shape)}')
+    # ------------------------------------------------------------------
+    # 支承约束与接口求解
+    # ------------------------------------------------------------------
+    # 求解接口方程.
+    print(f"[接口求解] 开始, solver={solver}", flush=True)
+    step_started = perf_counter()
+    solved = solve_constrained_system(
+        system=system,
+        load=load,
+        constraints=constraints,
+        solver=solver,
+    )
+    Q = solved.displacement
+    print(
+        f"[接口求解] {solved.mode}, 约束秩 {solved.constraint_rank}, "
+        f"平衡相对残差 {solved.equilibrium_relative_residual:.3e}, "
+        f"约束相对残差 {solved.constraint_relative_residual:.3e}, "
+        f"柔顺度 F_Q^T Q = {float(bm.dot(load, Q)):.10e}, "
+        f"耗时 {perf_counter() - step_started:.3f} s",
+        flush=True,
+    )
 
-    # # ---------------------------------------------------------------------------
-    # # §3.4 边界处理与求解
-    # # ---------------------------------------------------------------------------
-    # # 静力缩聚不缩聚载荷, 载荷与支承必须落在接口自由度上, 否则抛出 ValueError.
-    # conditions = project_problem_conditions_to_interface_system(
-    #     pde, assembler, interface_view,
-    # )
-    # macro_force = projection.T @ conditions.interface_force
-    # constraints = projection[conditions.interface_fixed_dofs]
-    # solved = solve_constrained_system(
-    #     system, macro_force, constraints, solver=args.solver,
-    # )
-    # macro_u = solved.displacement
-    # print(f'[§3.4] {solved.mode}, 约束秩 {solved.constraint_rank}, '
-    #       f'平衡相对残差 {solved.equilibrium_relative_residual:.3e}, '
-    #       f'约束相对残差 {solved.constraint_relative_residual:.3e}')
+    # ------------------------------------------------------------------
+    # 子结构位移恢复与全场拼接
+    # ------------------------------------------------------------------
+    print("[位移恢复] 开始逐批恢复并拼接全场位移", flush=True)
+    recovery_started = perf_counter()
+    displacement = bm.zeros((layout.total_full_dofs,), dtype=bm.float64)
+    n_substructures = len(sub_meshes)
+    n_batches = (n_substructures + chunk_size - 1) // chunk_size
+    stiffness_batches = prototype.iter_local_stiffness_batches(
+        local_density, chunk_size=chunk_size,
+    )
+    for batch_index in range(n_batches):
+        batch_number = batch_index + 1
+        print(f"[恢复批次 {batch_number}/{n_batches}] 开始", flush=True)
+        batch_started = perf_counter()
+        step_started = perf_counter()
+        start, end, K_local = next(stiffness_batches)
+        print(
+            f"  子结构 [{start}, {end}), 局部刚度重装配完成, "
+            f"耗时 {perf_counter() - step_started:.3f} s",
+            flush=True,
+        )
 
-    # # ---------------------------------------------------------------------------
-    # # §3.5 完整位移恢复
-    # # ---------------------------------------------------------------------------
-    # interface_u = bm.asarray(
-    #     projection @ bm.to_numpy(macro_u), dtype=bm.float64,
-    # )
-    # displacement = assembler.recover_full_displacement(
-    #     sub_meshes, condensor, interface_view, interface_u,
-    # )
-    # compliance = float(bm.dot(conditions.full_force, displacement))
-    # print(f'[§3.5] displacement {tuple(displacement.shape)}, 柔顺度 {compliance:.10e}')
+        q = Q[interface_space.local_dofs[start:end]]
+        u_b = trace.expand_displacement(q)
+
+        K_ii = K_local[..., i_dofs[:, None], i_dofs]
+        K_ib = K_local[..., i_dofs[:, None], b_dofs]
+        rhs = -(K_ib @ u_b[..., None])
+        step_started = perf_counter()
+        u_i = bm.linalg.solve(K_ii, rhs)[..., 0]
+        print(
+            f"  内部位移单右端求解完成, "
+            f"耗时 {perf_counter() - step_started:.3f} s",
+            flush=True,
+        )
+        if start == 0:
+            print(
+                f"[首批位移恢复] q {tuple(q.shape)}, u_b {tuple(u_b.shape)}, "
+                f"右端 {tuple(rhs.shape)}, u_i {tuple(u_i.shape)}",
+                flush=True,
+            )
+        del K_local, K_ii, K_ib, rhs, q
+
+        global_dofs = bm.stack(
+            [
+                layout.get_substructure_global_dofs(pos, sub_mesh)
+                for pos, sub_mesh in zip(
+                    sub_positions[start:end], sub_meshes[start:end]
+                )
+            ],
+            axis=0,
+        )
+        displacement = bm.set_at(
+            displacement,
+            bm.reshape(global_dofs[:, b_dofs], (-1,)),
+            bm.reshape(u_b, (-1,)),
+        )
+        displacement = bm.set_at(
+            displacement,
+            bm.reshape(global_dofs[:, i_dofs], (-1,)),
+            bm.reshape(u_i, (-1,)),
+        )
+        del global_dofs, u_b, u_i
+        print(
+            f"[恢复批次 {batch_number}/{n_batches}] 全场写回完成, "
+            f"累计 {end}/{n_substructures} ({end / n_substructures:.2%}), "
+            f"本批 {perf_counter() - batch_started:.3f} s",
+            flush=True,
+        )
+
+    print(
+        f"[位移恢复] 全场 displacement {tuple(displacement.shape)}, "
+        f"耗时 {perf_counter() - recovery_started:.3f} s",
+        flush=True,
+    )
 
     # # ---------------------------------------------------------------------------
     # # 自检: 同网格 FA. full_trace 应达机器精度; linear_corner 的差来自接口迹降阶.

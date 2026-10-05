@@ -8,18 +8,16 @@
 约定. 缩聚结果既可以按子结构逐个给出, 也可以按批量前导维 ``B`` 一次给出.
 """
 
-from dataclasses import dataclass
 import hashlib
 from typing import (
     Any, Callable, Iterable, List, Optional, Sequence, Tuple, Union,
 )
 
 import numpy as np
-from scipy.sparse import coo_matrix
 
 from soptx.backend import backend_manager as bm
 
-from soptx.sparse import COOTensor, CSRTensor
+from soptx.sparse import CSRTensor
 from soptx.fem.matrix.csr_pattern import (
     CSRPattern,
     assemble_csr_chunks,
@@ -33,26 +31,14 @@ from .layout import (
 )
 from .recovery import recover_full_displacement
 from .reduction_adapter import normalize_local_reduction
+from .interface_space import (
+    InterfaceSpace,
+    InterfaceSystem,
+    assemble_interface_stiffness,
+    linear_corner_global_map,
+)
 from .streaming import TraceStiffnessBatch
-from .traces import FullTraceBasis, LinearCornerTraceBasis, TraceBasis
-
-
-@dataclass(frozen=True)
-class InterfaceSystem:
-    """缩聚后的接口刚度矩阵及其全局自由度映射.
-
-    该对象只表达装配结果, 不携带载荷, 边界条件或求解策略.
-
-    属性:
-        stiffness: 接口刚度矩阵, 形状 ``(n_interface, n_interface)``. 采用
-            FEALPy ``CSRTensor`` 格式, 供 ``soptx.solvers.spsolve`` 直接求解.
-        global_dofs: 接口自由度对应的全局自由度编号, 升序排列, 形状
-            ``(n_interface,)``. 升序是契约的一部分, 全局到接口的反查依赖
-            二分定位而非字典.
-    """
-
-    stiffness: CSRTensor
-    global_dofs: Any
+from .traces import TraceBasis
 
 
 class GlobalAssembler:
@@ -184,25 +170,17 @@ class GlobalAssembler:
 
         返回:
             system: 宏观刚度矩阵与全局宏观自由度映射.
+
+        说明:
+            本方法是 ``assemble_macro_system_batches`` 的整批包装, 把整个批量
+            作为单个批次交给流式散加.
         """
-        c_macro = self.macro_corner_indices(sub_meshes)
-        n_batch, l_dim = c_macro.shape
-        shape = (n_batch, l_dim, l_dim)
-
-        rows = bm.reshape(bm.broadcast_to(c_macro[:, :, None], shape), (-1,))
-        cols = bm.reshape(bm.broadcast_to(c_macro[:, None, :], shape), (-1,))
-        vals = bm.reshape(Ks_macro_batch, (-1,))
-
-        indices = bm.stack([rows, cols], axis=0)
-        coo = COOTensor(
-            indices=indices,
-            values=vals,
-            spshape=(self.total_macro_dofs, self.total_macro_dofs),
+        if not sub_meshes:
+            raise ValueError("sub_meshes 不能为空.")
+        single_batch = TraceStiffnessBatch(
+            start=0, end=len(sub_meshes), stiffness=Ks_macro_batch,
         )
-        K_macro = coo.coalesce().tocsr()
-        macro_global_dofs = bm.arange(self.total_macro_dofs, dtype=bm.int64)
-
-        return InterfaceSystem(stiffness=K_macro, global_dofs=macro_global_dofs)
+        return self.assemble_macro_system_batches(sub_meshes, [single_batch])
 
     def build_linear_corner_projection(
         self,
@@ -226,44 +204,9 @@ class GlobalAssembler:
             ValueError: 当局部维度不匹配, 投影未覆盖完整接口, 或相邻子结构
                 在共享接口上给出不一致的插值时抛出.
         """
-        if not sub_meshes:
-            raise ValueError("sub_meshes 不能为空.")
-
-        interface_dofs = bm.asarray(interface_system.global_dofs, dtype=bm.int64)
-        boundary = np.asarray(
-            bm.to_numpy(self.interface_indices(sub_meshes, interface_dofs)),
-            dtype=np.int64,
+        return linear_corner_global_map(
+            self, sub_meshes, interface_system.global_dofs, trace_basis
         )
-        corners = np.asarray(
-            bm.to_numpy(self.macro_corner_indices(sub_meshes)), dtype=np.int64
-        )
-        local = np.asarray(bm.to_numpy(trace_basis.matrix), dtype=np.float64)
-        if local.shape != (boundary.shape[1], corners.shape[1]):
-            raise ValueError(
-                "trace_basis.matrix 的形状必须为 "
-                f"({boundary.shape[1]}, {corners.shape[1]}); 当前为 {local.shape}."
-            )
-
-        row, col = np.nonzero(local)
-        n_batch, n_boundary = boundary.shape
-        candidates = coo_matrix(
-            (
-                np.tile(local[row, col], n_batch),
-                (
-                    (np.arange(n_batch)[:, None] * n_boundary + row).ravel(),
-                    corners[:, col].ravel(),
-                ),
-            ),
-            shape=(n_batch * n_boundary, self.total_macro_dofs),
-        ).tocsr()
-        global_rows, first = np.unique(boundary.ravel(), return_index=True)
-        if not np.array_equal(global_rows, np.arange(len(interface_dofs))):
-            raise ValueError("角点线性迹投影未覆盖完整接口.")
-        projection = candidates[first].tocsr()
-        difference = candidates - projection[boundary.ravel()]
-        if difference.nnz and np.max(np.abs(difference.data)) > 1.0e-12:
-            raise ValueError("相邻子结构在共享接口上给出了不一致的角点插值.")
-        return projection
 
     def assemble_macro_system_batches(
         self,
@@ -286,64 +229,20 @@ class GlobalAssembler:
                 批次刚度形状与宏观角点自由度不一致时抛出.
 
         说明:
-            每批先独立生成规范 CSR 矩阵, 再与当前全局 CSR 做稀疏加法. 因此
-            峰值内存由当前全局稀疏矩阵和单个批次决定, 不保存完整的
-            ``K_trace_batch`` 或全量未合并 COO 三元组.
+            以 ``macro_corner_indices`` 为 ``cell2dof``, 交给
+            ``assemble_interface_stiffness`` 做普通有限元式的 dofmap 组装; 峰值
+            内存由 CSR 数值缓冲区和单个批次决定.
         """
         if not sub_meshes:
             raise ValueError("sub_meshes 不能为空.")
 
         c_macro = self.macro_corner_indices(sub_meshes)
-        n_sub_total, n_trace = c_macro.shape
-        next_start = 0
-        K_macro: Optional[CSRTensor] = None
-
-        for batch in stiffness_batches:
-            start = int(batch.start)
-            end = int(batch.end)
-            stiffness = bm.asarray(batch.stiffness)
-
-            if start != next_start or end <= start or end > n_sub_total:
-                raise ValueError(
-                    "stiffness_batches 必须以连续半开区间完整覆盖子结构; "
-                    f"期望 start={next_start}, 当前区间为 [{start}, {end})."
-                )
-
-            expected_shape = (end - start, n_trace, n_trace)
-            if tuple(stiffness.shape) != expected_shape:
-                raise ValueError(
-                    f"批次刚度形状必须为 {expected_shape}; "
-                    f"当前为 {tuple(stiffness.shape)}."
-                )
-
-            indices_chunk = c_macro[start:end]
-            shape = expected_shape
-            rows = bm.reshape(
-                bm.broadcast_to(indices_chunk[:, :, None], shape),
-                (-1,),
-            )
-            cols = bm.reshape(
-                bm.broadcast_to(indices_chunk[:, None, :], shape),
-                (-1,),
-            )
-            values = bm.reshape(stiffness, (-1,))
-            coo = COOTensor(
-                indices=bm.stack([rows, cols], axis=0),
-                values=values,
-                spshape=(self.total_macro_dofs, self.total_macro_dofs),
-            )
-            K_chunk = coo.coalesce().tocsr()
-            K_macro = K_chunk if K_macro is None else K_macro.add(K_chunk)
-            next_start = end
-
-        if next_start != n_sub_total or K_macro is None:
-            raise ValueError(
-                "stiffness_batches 未完整覆盖全部子结构; "
-                f"已覆盖 {next_start}, 总数为 {n_sub_total}."
-            )
-
+        stiffness = assemble_interface_stiffness(
+            c_macro, self.total_macro_dofs, stiffness_batches,
+            dof_numel=int(self.dim),
+        )
         return InterfaceSystem(
-            stiffness=K_macro,
+            stiffness=stiffness,
             global_dofs=bm.arange(self.total_macro_dofs, dtype=bm.int64),
         )
 
@@ -383,50 +282,28 @@ class GlobalAssembler:
 
         Notes
         -----
-        full_trace 直接复用完整接口装配, 不对缩聚刚度执行恒等投影;
-        linear_corner 先计算 T^T K_s T, 再装配宏观角点系统.
+        由 ``InterfaceSpace.from_trace_basis`` 选定全局编号与装配入口, 再逐批
+        投影并散加. full_trace 的迹基投影为恒等短路, 不做与单位阵的乘法.
         """
         if not sub_meshes:
             raise ValueError("sub_meshes 不能为空.")
         if chunk_size is not None and chunk_size <= 0:
             raise ValueError(f"chunk_size 必须为正整数; 当前为 {chunk_size}.")
-        if not isinstance(
-            trace_basis, (FullTraceBasis, LinearCornerTraceBasis)
-        ):
-            raise TypeError(
-                "trace_basis 当前仅支持 FullTraceBasis 或 "
-                "LinearCornerTraceBasis; "
-                f"当前为 {type(trace_basis).__name__}."
-            )
+        # 迹基类型决定全局编号与装配入口, 分派集中在 InterfaceSpace 内.
+        space = InterfaceSpace.from_trace_basis(trace_basis, self, sub_meshes)
 
         n_sub_total = len(sub_meshes)
         n_b = int(sub_meshes[0].n_b)
-        if trace_basis.n_boundary_dofs != n_b:
-            raise ValueError(
-                "trace_basis 的完整接口自由度数必须与子结构 n_b 一致; "
-                f"当前为 {trace_basis.n_boundary_dofs} 与 {n_b}."
-            )
-
-        if isinstance(trace_basis, FullTraceBasis):
-            return self.assemble_interface_system(
-                list(sub_meshes), condensors, chunk_size=chunk_size
-            )
-
         K_s_batch, _ = normalize_local_reduction(
             condensors, n_sub_total, n_b
         )
         if K_s_batch is not None and chunk_size is None:
-            return self.assemble_macro_system(
-                list(sub_meshes), trace_basis.project_stiffness(K_s_batch)
-            )
-
-        step = min(
-            64 if chunk_size is None else chunk_size,
-            n_sub_total,
-        )
+            step = n_sub_total
+        else:
+            step = min(64 if chunk_size is None else chunk_size, n_sub_total)
 
         def projected_batches() -> Iterable[TraceStiffnessBatch]:
-            """逐批读取完整 Schur 刚度并投影到角点迹空间."""
+            """逐批读取完整 Schur 刚度并投影到迹空间."""
             for start in range(0, n_sub_total, step):
                 stop = min(start + step, n_sub_total)
                 stiffness = (
@@ -437,12 +314,10 @@ class GlobalAssembler:
                 yield TraceStiffnessBatch(
                     start=start,
                     end=stop,
-                    stiffness=trace_basis.project_stiffness(stiffness),
+                    stiffness=space.project_stiffness(stiffness),
                 )
 
-        return self.assemble_macro_system_batches(
-            sub_meshes, projected_batches()
-        )
+        return space.assemble(projected_batches())
 
     @staticmethod
     def normalize_condensors(
@@ -503,26 +378,74 @@ class GlobalAssembler:
         self._interface_pattern_cache = (key, pattern)
         return pattern
 
-    @staticmethod
-    def _assemble_interface_values(
-        pattern: CSRPattern,
-        K_s_batch: Any,
-        condensors: Any,
-        n_batch: int,
-        step: int,
-    ) -> CSRTensor:
-        """把完整或流式缩聚刚度按批次累加到独立数值缓冲区."""
-        def chunks() -> Iterable[Tuple[int, Any]]:
-            for start in range(0, n_batch, step):
-                stop = min(start + step, n_batch)
-                if K_s_batch is None:
-                    values = condensors.get_chunk_stiffness(start, stop)
-                else:
-                    values = K_s_batch[start:stop]
-                yield start, values
-                del values
+    def assemble_interface_system_batches(
+        self,
+        sub_meshes: Sequence[Any],
+        stiffness_batches: Iterable[Any],
+        *,
+        dtype: Any = None,
+    ) -> InterfaceSystem:
+        """由连续的完整接口缩聚刚度批次流式装配全局接口系统.
 
-        return assemble_csr_chunks(chunks(), pattern)
+        Parameters
+        ----------
+        sub_meshes : sequence
+            按批次编号排列的全部子结构.
+        stiffness_batches : iterable
+            连续覆盖全部子结构的批次迭代器. 每项提供 ``start``, ``end`` 和
+            ``stiffness`` 属性, 其中刚度形状为 ``(end - start, n_b, n_b)``, 即
+            完整接口上的 ``K_s``.
+        dtype : dtype, optional
+            接口 CSR 数值缓冲区的数据类型, 缺省 ``bm.float64``.
+
+        Returns
+        -------
+        InterfaceSystem
+            接口 CSR 矩阵与升序接口全局自由度.
+
+        Raises
+        ------
+        ValueError
+            子结构为空, 批次刚度形状与 ``n_b`` 不一致, 批次区间不连续或未完整
+            覆盖子结构.
+
+        Notes
+        -----
+        与 ``assemble_macro_system_batches`` 对称, 对应 ``full_trace`` 的式
+        ``K_Q = sum_j A_b^T K_s^j A_b``. 接口 CSR 符号模式由
+        ``_prepare_interface_pattern`` 构建并缓存, 各批次只向其数值缓冲区累加,
+        因此峰值内存由该缓冲区和单个批次决定, 不保存完整的 ``K_s`` 批量.
+        """
+        if not sub_meshes:
+            raise ValueError("sub_meshes 不能为空.")
+
+        interface_global_dofs = self.build_interface_dofs(sub_meshes)
+        n_interface = int(len(interface_global_dofs))
+        n_b = int(sub_meshes[0].n_b)
+        b_interface = self.interface_indices(sub_meshes, interface_global_dofs)
+        pattern = self._prepare_interface_pattern(
+            b_interface, n_interface, bm.float64 if dtype is None else dtype
+        )
+
+        def chunks() -> Iterable[Tuple[int, Any]]:
+            for batch in stiffness_batches:
+                start = int(batch.start)
+                end = int(batch.end)
+                stiffness = bm.asarray(batch.stiffness)
+                expected_shape = (end - start, n_b, n_b)
+                if tuple(stiffness.shape) != expected_shape:
+                    raise ValueError(
+                        f"批次刚度形状必须为 {expected_shape}; "
+                        f"当前为 {tuple(stiffness.shape)}."
+                    )
+                yield start, stiffness
+                del stiffness
+
+        K_global = assemble_csr_chunks(chunks(), pattern)
+        return InterfaceSystem(
+            stiffness=K_global,
+            global_dofs=interface_global_dofs,
+        )
 
     def assemble_interface_system(
         self,
@@ -546,35 +469,40 @@ class GlobalAssembler:
         -------
         InterfaceSystem
             接口 CSR 矩阵与自由度映射. 数值缓冲独立, 符号结构可复用.
+
+        Notes
+        -----
+        本方法是 ``assemble_interface_system_batches`` 的整批包装: 把整批
+        ``K_s`` 或流式容器按 ``chunk_size`` 切成批次后交给流式散加.
         """
         if not sub_meshes:
             raise ValueError("sub_meshes 不能为空.")
         if chunk_size is not None and chunk_size <= 0:
             raise ValueError(f"chunk_size 必须为正整数; 当前为 {chunk_size}.")
 
-        interface_global_dofs = self.build_interface_dofs(sub_meshes)
-        n_interface = int(len(interface_global_dofs))
+        n_batch = len(sub_meshes)
         n_b = int(sub_meshes[0].n_b)
-        b_interface = self.interface_indices(sub_meshes, interface_global_dofs)
-        K_s_batch, _ = normalize_local_reduction(
-            condensors, len(sub_meshes), n_b
-        )
+        K_s_batch, _ = normalize_local_reduction(condensors, n_batch, n_b)
         dtype = (
             getattr(K_s_batch, "dtype", None)
             if K_s_batch is not None
             else bm.float64
         )
-        pattern = self._prepare_interface_pattern(
-            b_interface, n_interface, dtype
-        )
-        n_batch = len(sub_meshes)
         step = n_batch if chunk_size is None else min(chunk_size, n_batch)
-        K_global = self._assemble_interface_values(
-            pattern, K_s_batch, condensors, n_batch, step
-        )
-        return InterfaceSystem(
-            stiffness=K_global,
-            global_dofs=interface_global_dofs,
+
+        def batches() -> Iterable[TraceStiffnessBatch]:
+            """按 chunk_size 从整批结果或流式容器切出完整接口刚度批次."""
+            for start in range(0, n_batch, step):
+                stop = min(start + step, n_batch)
+                values = (
+                    condensors.get_chunk_stiffness(start, stop)
+                    if K_s_batch is None
+                    else K_s_batch[start:stop]
+                )
+                yield TraceStiffnessBatch(start=start, end=stop, stiffness=values)
+
+        return self.assemble_interface_system_batches(
+            sub_meshes, batches(), dtype=dtype
         )
 
     def recover_full_displacement(

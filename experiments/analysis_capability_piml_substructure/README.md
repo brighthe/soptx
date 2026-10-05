@@ -68,7 +68,7 @@
 
 ```bash
 # 在 experiments/analysis_capability_piml_substructure 目录运行.
-TRAINING_DIR="$HOME/workspace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z"
+TRAINING_DIR="$HOME/codespace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z"
 # 预测路线与子结构配置从权重元数据自动恢复，重新生成独立测试样本。
 python run.py --validate-local \
   --checkpoint "$TRAINING_DIR/shape_best.pt" \
@@ -84,9 +84,9 @@ python run.py --validate-local \
 
 ## 离线训练与在线分析走查
 
-`walkthrough_training.py` 展示离线阶段. 指定 `--generate-samples` 时, 由 `--dim`、局部问题配置和样本参数生成样本后训练; 默认三维、每方向 5 个细单元、400,000 个训练样本、40,000 个验证样本及 500 轮训练. 默认复用 `/home/brighthe/workspace/data/soptx/piml_substructure/independent_15_layer/samples/20260922T065924289373Z`, 可通过 `--samples-dir` 更换目录; 从 `manifest.json` 恢复空间维数、尺寸、细划分、泊松比、材料假设、接口空间和独立分量编号, 并拒绝重复指定这些局部问题及样本生成参数. `--route shape` 只训练形函数网络; `--route stiffness` 同时训练刚度网络与内部位移恢复所需的形函数网络.
+`walkthrough_training.py` 展示离线阶段. 指定 `--generate-samples` 时, 由 `--dim`、局部问题配置和样本参数生成样本后训练; 默认三维、每方向 5 个细单元、400,000 个训练样本、40,000 个验证样本及 500 轮训练. 默认复用 `~/codespace/data/soptx/piml_substructure/independent_15_layer/samples/20260922T065924289373Z`, 可通过 `--samples-dir` 更换目录; 从 `manifest.json` 恢复空间维数、尺寸、细划分、泊松比、材料假设、接口空间和独立分量编号, 并拒绝重复指定这些局部问题及样本生成参数. `--route shape` 只训练形函数网络; `--route stiffness` 同时训练刚度网络与内部位移恢复所需的形函数网络.
 
-`walkthrough_analysis.py` 展示在线阶段. `--shape-dir` 指定 `shape_best.pt` 所在目录; `--route stiffness` 还需用 `--stiffness-dir` 指定 `stiffness_best.pt` 所在目录. 两个选项默认指向 `/home/brighthe/workspace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z`. 脚本从权重恢复局部问题配置和网络, 通过 `StructuredSubstructureLayout` 创建整体有限元布局, 由 `build_modulus_substructures` 创建按归一化模量线性装配的公共参考子结构, 再基于同一 `prototype` 构造 `IndependentPredictionDecoder`; decoder 的离散配置、独立分量编号和数值基须与权重元数据相容.
+`walkthrough_analysis.py` 展示在线阶段. `--shape-dir` 指定 `shape_best.pt` 所在目录; `--route stiffness` 还需用 `--stiffness-dir` 指定 `stiffness_best.pt` 所在目录. 两个选项默认指向 `~/codespace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z`. 脚本从权重恢复局部问题配置和网络, 通过 `StructuredSubstructureLayout` 创建整体有限元布局, 由 `build_modulus_substructures` 创建按归一化模量线性装配的公共参考子结构, 再基于同一 `prototype` 构造 `IndependentPredictionDecoder`; decoder 的离散配置、独立分量编号和数值基须与权重元数据相容.
 
 在线流程按“密度场 -> $E$ 的 SIMP 插值 -> FE cell 顺序的归一化模量 -> 网络预测 -> $K_s^j$”组织. `--E-simp-penalty` 设置 $E$ 的 SIMP 指数, 默认 3; 空材料杨氏模量显式取 0, 与精确走查的 `rho_min=0` 对齐. `--local-batch-size` 默认 32, 同时限制网络推理批量及 shape 路线的局部刚度装配批量. shape 路线每批先预测并补全内部延拓, 再装配当前批的 $K^j$ 并立即计算 $(N^j)^T K^j N^j$, 不保存全量细网格刚度或内部延拓. stiffness 路线直接补全预测的 $K_s^j$, 不装配细网格 $K^j$; `shape_best.pt` 仍为后续内部位移恢复所需, 但当前阶段不执行 shape 推理. 当前可执行代码止于 `local_condensed_stiffness`; 全局接口装配、求解和内部位移恢复仍保留为未启用草稿, 不作为已执行或已通过数值验证的流程.
 
@@ -95,7 +95,7 @@ python run.py --validate-local \
 以下命令在仓库根目录运行, 当前 Python 环境须已安装此工作区的 `soptx`:
 
 ```bash
-DATA_DIR="$HOME/workspace/data/soptx/piml_substructure/independent_15_layer"
+DATA_DIR="$HOME/codespace/data/soptx/piml_substructure/independent_15_layer"
 
 # 从头生成三维样本并训练形函数路线:
 python -m experiments.analysis_capability_piml_substructure.walkthrough_training \
@@ -112,7 +112,7 @@ python -m experiments.analysis_capability_piml_substructure.walkthrough_analysis
   --domain 0 2 0 1 0 1 --n-sub 2 1 1 --route shape --seed 0
 ```
 
-新产物写入 `<outputs-root>/independent_15_layer/{samples,training}/<UTC 时间戳>/`, `--outputs-root` 默认为仓库外的 `~/workspace/data/soptx/piml_substructure/`. 相对路径均以对应脚本目录为基准. 正式默认样本规模约占 13 GB; 演示规模须显式设置 `--n-train`、`--n-validation`、`--epochs` 并将 `--outputs-root` 指向临时目录. 文件清单、sha256 与重新生成命令见 [data_provenance.json](data_provenance.json).
+新产物写入 `<outputs-root>/independent_15_layer/{samples,training}/<UTC 时间戳>/`, `--outputs-root` 默认为仓库外的 `~/codespace/data/soptx/piml_substructure/`. 相对路径均以对应脚本目录为基准. 正式默认样本规模约占 13 GB; 演示规模须显式设置 `--n-train`、`--n-validation`、`--epochs` 并将 `--outputs-root` 指向临时目录. 文件清单与 sha256 见数据根目录下的 `SHA256SUMS`, 在该目录运行 `sha256sum -c SHA256SUMS` 校验; 重新生成命令见上方代码块.
 
 `walkthrough_analysis.py` 的 `--mem-limit-gb` 限制进程虚拟地址空间, 默认 35 GiB; `--local-batch-size` 只限制当前网络输入批次以及 shape 路线当前批次的细网格 $K^j$ 和内部延拓. 脚本仍保留全部 $K_s^j$ 供后续全局装配使用, `full_trace` 或大量子结构下该数组仍可能成为主要内存开销. 此限制不会自动选择可行的批量或缩减 $K_s^j$.
 

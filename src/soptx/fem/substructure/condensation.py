@@ -12,6 +12,44 @@ from soptx.backend import backend_manager as bm
 from .traces import LinearCornerTraceBasis, TraceBasis
 
 
+def schur_complement(K_local: Any, i_dofs: Any, b_dofs: Any) -> Tuple[Any, Any]:
+    """计算内部块的 Schur 补与内部位移恢复矩阵, 对应式 (2.1) 与 (2.2).
+
+    Parameters
+    ----------
+    K_local : TensorLike
+        局部刚度矩阵, 形状 ``(..., n_dof, n_dof)``; 前导维为空表示单个子结构,
+        前导维 ``B`` 表示同构子结构批次.
+    i_dofs : TensorLike
+        被消去的内部自由度的局部编号, 形状 ``(n_i,)``.
+    b_dofs : TensorLike
+        保留的边界自由度的局部编号, 形状 ``(n_b,)``.
+
+    Returns
+    -------
+    K_s : TensorLike
+        缩聚刚度 ``K_bb - K_bi K_ii^{-1} K_ib``, 形状 ``(..., n_b, n_b)``.
+    T_full : TensorLike
+        内部位移恢复矩阵 ``-K_ii^{-1} K_ib``, 形状 ``(..., n_i, n_b)``.
+
+    Notes
+    -----
+    纯函数: 不保存状态, 不转换 ``K_local`` 的数据类型, 也不校验 ``i_dofs`` 与
+    ``b_dofs`` 是否构成完整划分, 划分的正确性由调用方保证. ``K_bi`` 取
+    ``K_ib`` 的转置, 依赖局部刚度矩阵对称. 批量求解沿前导维广播.
+    """
+    i = bm.asarray(i_dofs, dtype=bm.int64)
+    b = bm.asarray(b_dofs, dtype=bm.int64)
+
+    K_ii = K_local[..., i[:, None], i]
+    K_ib = K_local[..., i[:, None], b]
+    K_bb = K_local[..., b[:, None], b]
+
+    invK_ii_K_ib = bm.linalg.solve(K_ii, K_ib)
+    K_s = K_bb - bm.matrix_transpose(K_ib) @ invK_ii_K_ib
+    return K_s, -invK_ii_K_ib
+
+
 class StaticCondensationBase(ABC):
     """
     子结构静力缩聚抽象基类.
@@ -169,12 +207,12 @@ class ExactSchurCondensation(StaticCondensationBase):
         """
         self._check_local_stiffness(K_local)
 
-        # 按内部和接口自由度索引提取刚度分块; ``...`` 保留全部前导批量维.
+        # 按内部和接口自由度索引提取刚度分块.
         K_ii = K_local[..., self.i_dofs[:, None], self.i_dofs]
         K_ib = K_local[..., self.i_dofs[:, None], self.b_dofs]
         K_bb = K_local[..., self.b_dofs[:, None], self.b_dofs]
 
-        # bm.linalg.solve 沿前导维广播, 对每个子结构独立求解 K_ii^{-1} K_ib.
+        # 对每个子结构独立求解 K_ii^{-1} K_ib.
         invK_ii_K_ib = bm.linalg.solve(K_ii, K_ib)
 
         # 保存缩聚结果, 供全局接口装配和内部位移恢复复用.

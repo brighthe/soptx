@@ -415,7 +415,7 @@ $$
 ```bash
 # 加载该权重，对新材料样本进行预测，并与精确计算结果比较。
 # 使用第 4 节已登记的模型权重；重新训练后替换为实际训练结果目录。
-TRAINING_DIR="$HOME/workspace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z"
+TRAINING_DIR="$HOME/codespace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z"
 # 预测路线与子结构配置从权重元数据自动恢复，重新生成独立测试样本。
 python run.py --validate-local \
   --checkpoint "$TRAINING_DIR/shape_best.pt" \
@@ -461,10 +461,10 @@ python run.py --validate-local \
 
 形函数路线通过预测的内部延拓变分重构局部刚度; 直接刚度路线由预测独立条目补全局部刚度. 装配并求解整体接口系统后, 两条路线均使用形函数网络恢复内部位移. 因此, 直接刚度路线的离线训练和在线分析都需要形函数网络.
 
-离线阶段由 [walkthrough_training.py](walkthrough_training.py) 展示. 指定 `--generate-samples` 时, 脚本按命令行局部问题配置生成样本后训练; 默认复用 `/home/brighthe/workspace/data/soptx/piml_substructure/independent_15_layer/samples/20260922T065924289373Z`, 可通过 `--samples-dir` 更换目录; 从 `manifest.json` 恢复维数、尺寸、细划分、材料假设、泊松比、接口空间及独立分量编号, 跳过样本生成. 复用样本时不接受重复指定局部问题或样本生成参数.
+离线阶段由 [walkthrough_training.py](walkthrough_training.py) 展示. 指定 `--generate-samples` 时, 脚本按命令行局部问题配置生成样本后训练; 默认复用 `~/codespace/data/soptx/piml_substructure/independent_15_layer/samples/20260922T065924289373Z`, 可通过 `--samples-dir` 更换目录; 从 `manifest.json` 恢复维数、尺寸、细划分、材料假设、泊松比、接口空间及独立分量编号, 跳过样本生成. 复用样本时不接受重复指定局部问题或样本生成参数.
 
 ```bash
-DATA_DIR="$HOME/workspace/data/soptx/piml_substructure/independent_15_layer"
+DATA_DIR="$HOME/codespace/data/soptx/piml_substructure/independent_15_layer"
 
 # 从头生成三维样本并训练形函数路线:
 python -m experiments.analysis_capability_piml_substructure.walkthrough_training \
@@ -484,7 +484,7 @@ python -m experiments.analysis_capability_piml_substructure.walkthrough_analysis
   --n-sub 2 1 1 --route shape --seed 0
 ```
 
-新离线产物写入 `<outputs-root>/independent_15_layer/{samples,training}/<UTC 时间戳>/`; `--outputs-root` 默认为仓库外的 `~/workspace/data/soptx/piml_substructure/`. 正式默认规模为 400,000 个训练样本、40,000 个验证样本和最多 500 轮训练. 演示规模必须显式缩小样本数和训练轮数, 并把输出根目录指向临时位置.
+新离线产物写入 `<outputs-root>/independent_15_layer/{samples,training}/<UTC 时间戳>/`; `--outputs-root` 默认为仓库外的 `~/codespace/data/soptx/piml_substructure/`. 正式默认规模为 400,000 个训练样本、40,000 个验证样本和最多 500 轮训练. 演示规模必须显式缩小样本数和训练轮数, 并把输出根目录指向临时位置.
 
 在线入口的 `--mem-limit-gb` 默认 35 GiB. 当前默认规模仅局部稠密刚度数组约需 41.2 GiB, 因此该默认限制无法容纳数组; 内存限制不减少计算所需内存. 两个入口均可在 `main()` 中按阶段设置断点, 且不创建正式分析结果目录; 正式结果记录仍使用下面的 `run.py --analyze`.
 
@@ -1138,7 +1138,7 @@ internal, full = _recover(
 以下命令在本实验目录下执行, 加载主工作区中已有的 `linear_corner` 权重, 不重新生成样本或训练网络:
 
 ```bash
-CHECKPOINT_DIR="$HOME/workspace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z"
+CHECKPOINT_DIR="$HOME/codespace/data/soptx/piml_substructure/independent_15_layer/training/20260922T065924289373Z"
 python run.py --analyze --checkpoint-dir "$CHECKPOINT_DIR" \
   --n-sub 2 1 1 --route both --seed 2026 --device cpu
 ```

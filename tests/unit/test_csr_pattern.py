@@ -18,7 +18,14 @@ from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, Triangle
 from soptx.sparse import CSRTensor
 
 from soptx.fem.integrators.linear_elastic_integrator import LinearElasticIntegrator
-from soptx.fem.matrix.csr_pattern import CSRPattern, assemble_csr, build_csr_pattern
+from soptx.fem.matrix.csr_pattern import (
+    CSRChunkAccumulator,
+    CSRPattern,
+    assemble_csr,
+    assemble_csr_chunks,
+    build_csr_pattern,
+    build_csr_pattern_from_dofmap,
+)
 from soptx.materials.linear_elasticity import IsotropicLinearElasticMaterial
 
 
@@ -178,3 +185,92 @@ def test_csr_pattern_topopt_density_multi_iteration():
 
         diff = np.max(np.abs(bm.to_numpy(K_fealpy.to_dense()) - bm.to_numpy(K_pattern.to_dense())))
         assert diff < 1e-14, f"迭代 {it} 误差超标: {diff}"
+
+
+def _ring_dofmap_case():
+    """5 个自由度首尾相接的 4 个三节点局部实体, 及其随机局部矩阵."""
+    local_to_global = np.array(
+        [[0, 1, 2], [1, 2, 3], [2, 3, 4], [3, 4, 0]], dtype=np.int64
+    )
+    values = np.random.default_rng(20261003).standard_normal((4, 3, 3))
+    pattern = build_csr_pattern_from_dofmap(
+        local_to_global, 5, allocate_buffer=False
+    )
+    dense = np.zeros((5, 5))
+    for cell, dofs in enumerate(local_to_global):
+        dense[np.ix_(dofs, dofs)] += values[cell]
+    return pattern, values, dense
+
+
+@pytest.mark.parametrize("splits", [[4], [1, 3], [1, 2, 1], [1, 1, 1, 1]])
+def test_chunk_accumulator_matches_pull_assembly_and_dense_scatter(splits):
+    """推模型累加器应与 ``assemble_csr_chunks`` 及稠密散加参考逐位一致."""
+    pattern, values, dense = _ring_dofmap_case()
+    bounds = np.concatenate([[0], np.cumsum(splits)])
+
+    accumulator = CSRChunkAccumulator(pattern)
+    for start, stop in zip(bounds[:-1], bounds[1:]):
+        accumulator.add(int(start), values[start:stop])
+    assert accumulator.n_added == 4
+    pushed = accumulator.to_csr()
+
+    pulled = assemble_csr_chunks(
+        ((int(a), values[a:b]) for a, b in zip(bounds[:-1], bounds[1:])), pattern
+    )
+
+    assert isinstance(pushed, CSRTensor)
+    np.testing.assert_allclose(bm.to_numpy(pushed.to_dense()), dense, atol=1e-14)
+    np.testing.assert_array_equal(
+        bm.to_numpy(pushed.values), bm.to_numpy(pulled.values)
+    )
+
+
+def test_chunk_accumulators_on_one_pattern_do_not_share_values():
+    """同一模式上先后建立的累加器在不共享缓冲区时互不污染."""
+    pattern, values, dense = _ring_dofmap_case()
+
+    first = CSRChunkAccumulator(pattern)
+    first.add(0, values)
+    K_first = first.to_csr()
+
+    second = CSRChunkAccumulator(pattern)
+    second.add(0, 2.0 * values)
+    K_second = second.to_csr()
+
+    np.testing.assert_allclose(bm.to_numpy(K_first.to_dense()), dense, atol=1e-14)
+    np.testing.assert_allclose(
+        bm.to_numpy(K_second.to_dense()), 2.0 * dense, atol=1e-14
+    )
+
+
+def test_chunk_accumulator_rejects_invalid_sequences():
+    """起点非 0, 批次不连续, 覆盖不全, 空累加, 产出后续加和缓冲区长度不符都应报错."""
+    pattern, values, _ = _ring_dofmap_case()
+
+    with pytest.raises(ValueError, match="chunks 必须从 0 开始"):
+        CSRChunkAccumulator(pattern).add(1, values[1:])
+
+    gapped = CSRChunkAccumulator(pattern)
+    gapped.add(0, values[:1])
+    with pytest.raises(ValueError, match="chunks 必须连续覆盖"):
+        gapped.add(2, values[2:])
+
+    partial = CSRChunkAccumulator(pattern)
+    partial.add(0, values[:3])
+    with pytest.raises(ValueError, match="chunks 只覆盖 3 个局部实体"):
+        partial.to_csr()
+
+    with pytest.raises(ValueError, match="chunks 不能为空"):
+        CSRChunkAccumulator(pattern).to_csr()
+
+    finished = CSRChunkAccumulator(pattern)
+    finished.add(0, values)
+    finished.to_csr()
+    with pytest.raises(RuntimeError, match="不能继续累加"):
+        finished.add(4, values[:1])
+
+    with pytest.raises(ValueError, match="buffer 长度必须为"):
+        CSRChunkAccumulator(pattern, buffer=np.zeros(pattern.nnz + 1)).add(0, values)
+
+    with pytest.raises(ValueError, match="局部矩阵尾部形状"):
+        CSRChunkAccumulator(pattern).add(0, values[:, :2, :2])
