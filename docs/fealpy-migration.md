@@ -166,8 +166,8 @@
   `HuZhangBoundarySourceIntegrator`）已删除；节点密度链路的 `cell_to_node`、`jacobi_matrix`
   已改用 `mesh.cell` 与 `entity_view('cell').jacobi_matrix`，连带修复插值格式 SIMP 节点分支的
   两处缺陷，有限差分测试 `tests/unit/test_node_density.py` 覆盖；`mesh.count` 已改用
-  `mesh.entity`。三维跳量稳定化、`splitter` 分块装配、`save_optimization_history` 三项转记
-  known-issues。
+  `mesh.entity`；同样悬空且无调用方的 `save_optimization_history`（`mesh.celldata`、
+  `mesh.to_vtk`）已删除。三维跳量稳定化与 `splitter` 分块装配两项转记 known-issues。
 - ~~`fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` 源自 FEALPy 但文件头未注明来源~~（已补注）。
 
 ### 2.3 移植前已存在的 CI 问题（与移植无关）

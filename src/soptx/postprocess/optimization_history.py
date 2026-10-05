@@ -1,69 +1,13 @@
 from soptx.backend import backend_manager as bm
 
 import json
-from typing import Optional, List, Dict
+from typing import List, Dict
 from pathlib import Path
 
 from soptx.typing import TensorLike
-from soptx.mesh import StructuredMesh, HomogeneousMesh, SimplexMesh, TensorMesh
 from soptx.functionspace import Function
 
 from soptx.topology.optimizers.history import OptimizationHistory
-
-def save_optimization_history(design_mesh: HomogeneousMesh, 
-                            history: OptimizationHistory, 
-                            density_location: str,
-                            disp_mesh: Optional[HomogeneousMesh]=None, 
-                            save_path: Optional[str]=None
-                        ) -> None:
-    """保存优化过程的所有迭代结果"""
-    if save_path is None:
-        return
-    
-    von_mises_stresses = history.field_histories.get('von_mises_stress', None)
-    
-    if von_mises_stresses is not None:
-        iterator = zip(history.physical_densities, von_mises_stresses)
-    else:
-        iterator = zip(history.physical_densities, [None]*len(history.physical_densities))
-
-    for i, (physical_density, von_mises_stress) in enumerate(iterator):
-        if density_location in ['element']:
-            # 单分辨率单元密度情况：形状为 (NC, )
-            design_mesh.celldata['density'] = physical_density
-            
-            if von_mises_stress is not None:
-                design_mesh.celldata['von_mises'] = von_mises_stress
-
-        elif density_location in ['node']:
-            # 单分辨率节点密度情况：形状为 (NN, )
-            design_mesh.nodedata['density'] = physical_density
-
-        elif density_location in ['element_multiresolution']:
-            from soptx.fem.utils import reshape_multiresolution_data
-            # 密度: (NC, n_sub)
-            rho_phys = reshape_multiresolution_data(
-                            mesh=disp_mesh, 
-                            data=physical_density
-                        )  # (NC*n_sub, )
-            
-            # von Mises 应力: (NC, n_sub, NQ)
-            if von_mises_stress is not None:
-                vm = reshape_multiresolution_data(
-                                        mesh=disp_mesh, 
-                                        data=von_mises_stress
-                                    )  # (NC*n_sub, NQ)
-                design_mesh.celldata['von_mises'] = vm
-
-            design_mesh.celldata['density'] = rho_phys
-
-        else:
-            raise ValueError(f"不支持的密度数据维度：{physical_density.ndim}")
-        
-        if isinstance(design_mesh, StructuredMesh):
-            design_mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vts")
-        else:  
-            design_mesh.to_vtk(f"{save_path}/density_iter_{i:03d}.vtu")
 
 #####################################################
 #                    绘图和数据保存工具函数

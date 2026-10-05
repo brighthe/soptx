@@ -11,9 +11,8 @@ Concrete helpers live in the submodules:
   (:func:`soptx.postprocess.vtk_render.load_vtu`,
   :func:`soptx.postprocess.vtk_render.create_warped_actor` and
   :func:`soptx.postprocess.vtk_render.render_and_save`);
-* :mod:`soptx.postprocess.optimization_history` -- dump a density history to
-  per-iteration VTU, persist and reload it as JSON, and plot the convergence
-  curves;
+* :mod:`soptx.postprocess.optimization_history` -- persist and reload an
+  optimization history as JSON, and plot the convergence curves;
 * :mod:`soptx.postprocess.stress_report` -- post-optimization stress-constraint
   checking, solid-element statistics and von Mises yield-surface plots.
 
