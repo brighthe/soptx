@@ -7,6 +7,10 @@ path always runs; the MUMPS path is skipped when PyMUMPS is not installed.
 
 from __future__ import annotations
 
+import sys
+import types
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from scipy.sparse import csr_matrix
@@ -201,3 +205,87 @@ def test_mumps_close_releases_context() -> None:
     assert solver.is_setup is False
     with pytest.raises(RuntimeError, match="尚未 setup"):
         solver.solve(b)
+
+
+# --------------------------------------------------------------------------
+# MUMPS 工作空间不足时放大 ICNTL(14) 重试 (替身上下文, 不依赖 PyMUMPS)
+# --------------------------------------------------------------------------
+
+class _FakeMumpsContext:
+    """DMumpsContext 替身: 记录 ICNTL(14), 按 ``failures`` 依次给出分解的 INFOG(1)."""
+
+    created: list["_FakeMumpsContext"] = []
+    failures: list[int] = []
+
+    def __init__(self, sym: int = 0) -> None:
+        self.icntl14 = None
+        self.destroyed = False
+        self.id = SimpleNamespace(infog=[0] * 40)
+        type(self).created.append(self)
+
+    def set_silent(self) -> None:
+        pass
+
+    def set_icntl(self, key: int, value: int) -> None:
+        if key == 14:
+            self.icntl14 = value
+
+    def set_centralized_sparse(self, A) -> None:
+        pass
+
+    def run(self, job: int) -> None:
+        code = type(self).failures.pop(0) if type(self).failures else 0
+        if code:
+            self.id.infog[0] = code
+            raise RuntimeError(f"MUMPS error: {code}")
+
+    def destroy(self) -> None:
+        self.destroyed = True
+
+
+@pytest.fixture
+def fake_mumps(monkeypatch):
+    """把 ``mumps`` 模块与 MPI 初始化换成替身, 返回替身上下文类."""
+    import soptx.core.mpi_runtime as mpi_runtime
+
+    module = types.ModuleType("mumps")
+    module.DMumpsContext = _FakeMumpsContext
+    monkeypatch.setitem(sys.modules, "mumps", module)
+    monkeypatch.setattr(mpi_runtime, "ensure_mpi_initialized", lambda: True)
+    _FakeMumpsContext.created = []
+    _FakeMumpsContext.failures = []
+    return _FakeMumpsContext
+
+
+@pytest.mark.parametrize("code", [-8, -9])
+def test_mumps_workspace_error_retried_with_larger_icntl14(fake_mumps, code) -> None:
+    A, _, _ = spd_system(10)
+    fake_mumps.failures = [code, code]
+    solver = DirectSolver("mumps").setup(A)
+    assert [ctx.icntl14 for ctx in fake_mumps.created] == [None, 100, 400]
+    assert [ctx.destroyed for ctx in fake_mumps.created] == [True, True, False]
+    assert solver._ctx is fake_mumps.created[-1]
+
+
+def test_mumps_success_keeps_default_icntl14(fake_mumps) -> None:
+    A, _, _ = spd_system(10)
+    DirectSolver("mumps").setup(A)
+    assert [ctx.icntl14 for ctx in fake_mumps.created] == [None]
+
+
+def test_mumps_other_error_not_retried(fake_mumps) -> None:
+    A, _, _ = spd_system(10)
+    fake_mumps.failures = [-10]
+    with pytest.raises(RuntimeError, match="-10"):
+        DirectSolver("mumps").setup(A)
+    assert len(fake_mumps.created) == 1
+    assert fake_mumps.created[0].destroyed is True
+
+
+def test_mumps_workspace_error_raises_after_last_retry(fake_mumps) -> None:
+    A, _, _ = spd_system(10)
+    fake_mumps.failures = [-9] * 4
+    with pytest.raises(RuntimeError, match="-9"):
+        DirectSolver("mumps").setup(A)
+    assert [ctx.icntl14 for ctx in fake_mumps.created] == [None, 100, 400, 1600]
+    assert all(ctx.destroyed for ctx in fake_mumps.created)

@@ -3,7 +3,9 @@
 # 上游 suanhaitech/fealpy 没有. 此后以 SOPTX 本文件为准演化.
 # 相对 fealpy 版的行为差异: (1) A 已是 scipy 稀疏矩阵时直接使用, 不再强求
 # ``to_scipy()`` (substructure 接口系统传入的就是 scipy csr); (2) scipy 路径
-# 内部统一转 CSR 并复制, 使 SuperLU 的原地改写不会破坏调用方持有的矩阵.
+# 内部统一转 CSR 并复制, 使 SuperLU 的原地改写不会破坏调用方持有的矩阵;
+# (3) DirectSolver 的 MUMPS 分解在工作空间不足 (INFOG(1) = -8/-9) 时放大
+# ICNTL(14) 重试.
 
 from __future__ import annotations
 
@@ -16,6 +18,13 @@ from soptx.backend import TensorLike
 
 from .base import CAP_MATRIX, LinearSolver, SolveInfo
 from .registry import register
+
+# MUMPS 以 INFOG(1) = -8 / -9 报整型 / 实型工作数组不足, 两者都由 ICNTL(14)
+# (工作空间相对分析期估计的放大百分比, MUMPS 默认 20) 控制.
+_MUMPS_WORKSPACE_ERRORS = (-8, -9)
+# 依次尝试的 ICNTL(14); 首次用 MUMPS 默认值 (None), 只在工作空间不足时才放大,
+# 使原本能分解的系统保持原有主元顺序与数值.
+_MUMPS_ICNTL14_SCHEDULE = (None, 100, 400, 1600)
 
 
 def _as_scipy(A):
@@ -158,6 +167,10 @@ class DirectSolver(LinearSolver):
 
     本类持有 MUMPS 上下文这一非 Python 资源. 重复 :meth:`setup`、:meth:`close`
     与析构都会释放它; 也可用 ``with`` 语句管理生命周期.
+
+    MUMPS 分解报工作空间不足 (INFOG(1) = -8/-9) 时, 按 ICNTL(14) = 100, 400,
+    1600 依次放大重试, 用尽仍失败才抛出. 零对角块的鞍点系统 (如 Hu--Zhang
+    原生格式) 分解时主元大量延迟, 分析期的工作空间估计在粗网格上可能偏小.
     """
 
     requires = frozenset({CAP_MATRIX})
@@ -207,8 +220,6 @@ class DirectSolver(LinearSolver):
             # 改写调用方持有的矩阵 (to_scipy() 返回的是共享内存的视图).
             self._lu = splu(A.tocsc(copy=True))
         else:
-            from mumps import DMumpsContext
-
             from soptx.core.mpi_runtime import ensure_mpi_initialized
 
             ensure_mpi_initialized()
@@ -221,19 +232,49 @@ class DirectSolver(LinearSolver):
             else:
                 A_in = A
 
+            self._ctx = self._mumps_factorize(A_in)
+
+        return self
+
+    def _mumps_factorize(self, A_in):
+        """建 MUMPS 上下文并做分析与数值分解, 工作空间不足时放大 ICNTL(14) 重试.
+
+        Parameters
+        ----------
+        A_in : scipy sparse matrix
+            传给 MUMPS 的矩阵; ``sym != 0`` 时已是下三角部分.
+
+        Returns
+        -------
+        mumps.DMumpsContext
+            已完成分解的上下文.
+
+        Raises
+        ------
+        RuntimeError
+            MUMPS 报非工作空间类错误, 或按 ``_MUMPS_ICNTL14_SCHEDULE`` 放大到最后
+            一档仍工作空间不足.
+        """
+        from mumps import DMumpsContext
+
+        last = len(_MUMPS_ICNTL14_SCHEDULE) - 1
+        for attempt, icntl14 in enumerate(_MUMPS_ICNTL14_SCHEDULE):
             ctx = DMumpsContext(sym=self._sym)
             try:
                 ctx.set_silent()
+                if icntl14 is not None:
+                    ctx.set_icntl(14, icntl14)
                 ctx.set_centralized_sparse(A_in)
                 ctx.run(job=4)  # 分析 + 数值分解, 不解
-            except BaseException:
+            except BaseException as error:
                 # 分解失败也必须释放上下文, 否则 PyMUMPS 析构时告警,
                 # 且 MUMPS 侧内存不回收.
+                code = int(ctx.id.infog[0]) if isinstance(error, RuntimeError) else 0
                 ctx.destroy()
+                if code in _MUMPS_WORKSPACE_ERRORS and attempt < last:
+                    continue
                 raise
-            self._ctx = ctx
-
-        return self
+            return ctx
 
     def _solve(
         self, b: TensorLike, x0: Optional[TensorLike] = None
