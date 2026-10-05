@@ -253,12 +253,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def insert(x, obj, values, /, *, axis=None):
-        """仿 ``np.insert``: 在 ``axis`` 轴的 ``obj`` 位置之前插入 ``values``; ``axis`` 为 None 时先展平.
-
-        Notes
-        -----
-        单个插入位置的分支残留一条调试用 ``print``.
-        """
+        """仿 ``np.insert``: 在 ``axis`` 轴的 ``obj`` 位置之前插入 ``values``; ``axis`` 为 None 时先展平."""
         kwargs = {'dtype': x.dtype, 'device': x.device}
         ndim = x.ndim
         if axis is None:
@@ -309,7 +304,6 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
             slobj[axis] = slice(None, index)
             new[tuple(slobj)] = x[tuple(slobj)]
             slobj[axis] = slice(index, index+numnew)
-            print(values.shape, new.shape, slobj)
             new[tuple(slobj)] = values
             slobj[axis] = slice(index+numnew, None)
             slobj2 = [slice(None)] * ndim
@@ -625,30 +619,6 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
         return x
 
     ### 函数式编程 ###
-
-    @staticmethod
-    def apply_along_axis(func1d, axis, x, *args, **kwargs):
-        """沿给定轴对一维切片调用 ``func1d`` (经 ``vmap``).
-
-        Parameters
-        ----------
-        func1d : callable
-            接受一维数组的函数, ``(M,) -> (Nj...)``.
-        axis : int
-            切片所沿的轴.
-        x : Tensor
-            输入张量 ``(Ni..., M, Nk...)``.
-        *args, **kwargs
-            未使用 (原意为传给 ``func1d`` 的附加参数).
-
-        Notes
-        -----
-        ``axis == 0`` 分支调用 ``torch.transpose(x)`` 缺少维度参数, 会抛 ``TypeError``;
-        其余取值直接对首轴 ``vmap``, 并不按 ``axis`` 切片.
-        """
-        if axis==0:
-            x = torch.transpose(x)
-        return vmap(func1d)(x)
 
     @staticmethod
     def vmap(func, /, in_axes=0, out_axes=0, **kwargs):

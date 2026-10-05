@@ -127,13 +127,8 @@ class NumPyBackend(BackendProxy, backend_name='numpy'):
     # Python array API 标准 v2023.12
     @staticmethod
     def unstack(x, /, *, axis: int=0):
-        """沿 ``axis`` 拆成长度为 1 的切片列表.
-
-        Notes
-        -----
-        与 array API 及 pytorch 后端的 ``unstack`` 不同, 拆出的切片保留 ``axis`` 轴.
-        """
-        return np.split(x, x.shape[axis], axis=axis)
+        """沿 ``axis`` 拆成切片元组, 切片去掉该轴, 与 array API 及 pytorch 后端一致."""
+        return tuple(np.moveaxis(x, axis, 0))
 
     ### 查找函数 ###
 
