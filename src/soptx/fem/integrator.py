@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/fem/integrator.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""积分子基类、类型标记类与组合工具."""
 
 from typing import (
     Union, Optional, Any, TypeVar, Tuple, List, Dict, Callable,
@@ -29,7 +30,10 @@ __all__ = [
 ]
 
 class Mesh(Protocol):
-    def count(self, etype: Union[int, str]) -> int: ...
+    """积分子对网格的最小接口要求, 仅用于类型标注."""
+    def count(self, etype: Union[int, str]) -> int:
+        """返回某类实体的个数. 注意 v0.4 网格没有此方法, ``Integrator.size`` 已改用 ``mesh.entity``."""
+        ...
 
 Self = TypeVar('Self')
 Space = TypeVar("Space")
@@ -40,15 +44,16 @@ _Region = Union[Callable[[Mesh], TensorLike], TensorLike, None]
 
 
 def enable_cache(func: Self) -> Self:
-    """A decorator indicating that the method should be cached by its `space` arg.
+    """按 ``space`` 参数缓存方法结果的装饰器.
 
-    This is useful for assembly methods supporting coefficient and source to
-    fetch the data like the basis of space and the measurement of mesh entities.
-    Redundant computation can be avoided after coef or source are changed.
+    适用于取空间基函数、实体测度等积分素材的方法: 系数或源项改变后重新装配时,
+    这些素材无需重算. 缓存键为 ``(方法名, id(space))``, 只在 ``indices`` 为 None
+    且积分子开启了 ``keep_data`` 时生效.
 
-    Use `Integrator.keep_data(True)` to enable the cache.
+    用 ``Integrator.keep_data(True)`` 开启缓存.
     """
     def wrapper(integrator_obj, space, /, indices=None) -> TensorLike:
+        """有缓存时直接返回, 否则计算; 给出 ``indices`` 时不使用缓存."""
         if (indices is None) and (integrator_obj._keep_data):
             assert hasattr(integrator_obj, '_cache')
             _cache = integrator_obj._cache
@@ -70,45 +75,33 @@ def enable_cache(func: Self) -> Self:
 
 
 class Integrator(metaclass=VariantMeta):
-    """The base class for integrators.
+    """积分子基类.
 
-    ## Introduction
+    积分子在给定空间上对被积函数做积分, 输出实体上的张量: 第 0 轴为实体, 第 1 轴
+    为各局部自由度, 其后可以有附加维.
 
-    Integrators are designed to integral given functions in input spaces.
-    Output of integrators are tensors on entities (0-axis), containing data
-    of each local DoFs (1-axis). There may be extra dimensions.
+    积分子有 "区域" (``region``) 的概念, 以网格实体编号指定积分范围, 输出的第 0 轴
+    长度即区域内的实体数.
 
-    Integrators have a concept called `region` to specify the region of integration,
-    given as indices of mesh entities.
-    Integrators are expected to output tensor fields on these mesh entities
-    (i.e. tensors sized the number of entity in the 0-dimension).
+    子类须实现两个方法::
 
-    All integrators should implement methods named `assembly` and `to_global_dof`.
-    See examples below:
-    ```
-    def to_global_dof(space, /, indices=None):
-        pass
+        def to_global_dof(space, /, indices=None): ...
+        def assembly(space, /, indices=None): ...
 
-    def assembly(space, /, indices=None):
-        pass
-    ```
-    These two methods indicate two functions of an integrator: calculation of the integral,
-    and getting relationship between local DoFs and global DoFs, repectively.
-    The `indices` argument is designed to select a subset of integrator's working region,
-    and the final indices of entities can be fetched by
-    ```
-    # inside the methods of integrators
-    index = self.entity_selection(indices)
-    ```
-    Users can customize an integrator by implementing them in a subclass.
+    前者给出局部自由度到全局自由度的映射, 后者计算积分. ``indices`` 用于在积分区域
+    内再选一个子集, 最终参与积分的实体编号在方法内用
+    ``index = self.entity_selection(indices)`` 取得. 注意 SOPTX 的具体积分子均未
+    实现 ``indices`` 参数.
 
-    ## Features
+    Parameters
+    ----------
+    keep_data : bool, optional
+        是否开启 ``enable_cache`` 缓存. 默认 False.
 
-    ### Using Cache
-
-    The `enable_cache` decorator is a simple tool provided to cache some integral materials.
-    This may be useful for unchanged integrators in an iteration algorithm.
-    See `integrator.enable_cache` for details.
+    Notes
+    -----
+    ``enable_cache`` 装饰器可缓存部分积分素材, 适合在迭代算法中反复装配而空间
+    不变的积分子, 见 ``integrator.enable_cache``.
     """
     _region: _Region = None
     etype: str
@@ -117,34 +110,52 @@ class Integrator(metaclass=VariantMeta):
         self._cache: Dict[Tuple[str, int], Any] = {}
         self.keep_data(keep_data)
 
-    ### START: Cache System ###
+    ### START: 缓存 ###
     def keep_data(self, status_on=True, /):
-        """Set whether to keep the integral material decorated by @enable_cache."""
+        """设置是否保留 ``@enable_cache`` 修饰的方法所缓存的积分素材; 关闭时清空缓存."""
         self._keep_data = status_on
         if not status_on:
             self._cache.clear()
         return self
 
     def clear(self) -> None:
-        """Clear the cache of integrator."""
+        """清空积分子的缓存."""
         self._cache.clear()
-    ### END: Cache System ###
+    ### END: 缓存 ###
 
-    ### START: Region of Integration ###
+    ### START: 积分区域 ###
     def set_region(self, region: _Region, /):
-        """Set the region of integration, given as indices of mesh entity,
-        or a callable that receives a mesh and returns the indices."""
+        """设置积分区域: 网格实体编号, 或接收网格并返回编号的函数; 同时清空缓存."""
         self._region = region
         self.clear()
         return self
 
     def get_region(self):
-        """Get the region of integration, returned as indices of mesh entity,
-        or a callable that receives a mesh and returns the indices."""
+        """返回积分区域: 网格实体编号, 或接收网格并返回编号的函数."""
         return self._region
 
     def entity_selection(self, indices: _OpIndex = None, *, mesh: Optional[Mesh] = None) -> Index:
-        """Make the selection of integral entities."""
+        """确定参与积分的实体.
+
+        Parameters
+        ----------
+        indices : Index, optional
+            在积分区域内再选的子集; 区域为布尔掩码时按其真值位置的序号选取.
+        mesh : Mesh, optional
+            网格; 积分区域为函数时必须给出.
+
+        Returns
+        -------
+        Index
+            参与积分的实体编号, 区域与 ``indices`` 都未给出时为全切片.
+
+        Raises
+        ------
+        RuntimeError
+            积分区域为函数而未给出网格.
+        TypeError
+            积分区域不是张量而又给出了 ``indices``.
+        """
         if self._region is None:
             if indices is None:
                 return slice(None, None, None)
@@ -170,6 +181,15 @@ class Integrator(metaclass=VariantMeta):
                                     "is not supported when indices is given.")
 
     def size(self, mesh: Mesh, /) -> int:
+        """积分区域内的实体数; 未设区域时为网格上 ``etype`` 类实体的总数.
+
+        Raises
+        ------
+        RuntimeError
+            未设区域且积分子没有 ``etype``.
+        TypeError
+            积分区域不是张量.
+        """
         if self._region is None:
             if not hasattr(self, 'etype'):
                 raise RuntimeError("etype of Integrator should be specified to detect "
@@ -189,9 +209,10 @@ class Integrator(metaclass=VariantMeta):
             else:
                 raise TypeError(f"region of type '{full_region.__class__.__name__}' "
                                 "is not supported when indices is given.")
-    ### END: Region of Integration ###
+    ### END: 积分区域 ###
 
     def const(self, space: _SpaceGroup, /):
+        """在 ``space`` 上算出积分与自由度映射, 冻结为 ``ConstIntegrator``."""
         value = self.assembly(space)
         to_gdof = self.to_global_dof(space)
         return ConstIntegrator(value, to_gdof)
@@ -203,15 +224,14 @@ class Integrator(metaclass=VariantMeta):
         return self.assembly(*args, **kwargs)
 
     def to_global_dof(self, space: _SpaceGroup, /, indices: _OpIndex = None) -> Union[TensorLike, Tuple[TensorLike, ...]]:
-        """Return the relationship between the integral entities
-        and the global dofs."""
+        """返回积分实体的局部自由度到全局自由度的映射, 由子类实现."""
         raise NotImplementedError
 
     def assembly(self, space: _SpaceGroup, /, indices: _OpIndex = None) -> TensorLike:
-        """The default method of integration on entities."""
+        """在实体上计算积分的默认方法, 由子类实现."""
         raise NotImplementedError
 
-    ### Operations
+    ### 运算
 
     def __add__(self, other: 'Integrator'):
         if isinstance(other, Integrator):
@@ -222,55 +242,52 @@ class Integrator(metaclass=VariantMeta):
     __iadd__ = __add__
 
 
-# These Integrator classes are for type checking
+# 以下积分子类只作类型标记
 
 class NonlinearInt(Integrator):
-    """### Nonlinear Integrator
-    Base class for integrators without linearity requirement."""
+    """非线性积分子: 不要求线性的积分子基类."""
     pass
 
 class LinearInt(Integrator):
-    """### Linear Integrator
-    Base class for integrators generating integration linear to both `u` and `v`."""
+    """线性积分子: 积分关于 ``u`` 与 ``v`` 都是线性的积分子基类."""
     pass
 
 class OpInt(Integrator):
-    """### Operator Integrator
-    Base class for integrators involving both the trail function `u` and test function `v`."""
+    """算子积分子: 同时涉及试探函数 ``u`` 与检验函数 ``v`` 的积分子基类."""
     pass
 
 class SrcInt(Integrator):
-    """### Source Integrator
-    Base class for integrators involving the test function `v` only."""
+    """源项积分子: 只涉及检验函数 ``v`` 的积分子基类."""
     pass
 
 class CellInt(Integrator):
-    """### Cell Integrator
-    Base class for integrators that integrate over mesh cells."""
+    """单元积分子: 在网格单元上积分的积分子基类."""
     etype = 'cell'
 
 class FaceInt(Integrator):
-    """### Face Integrator
-    Base class for integrators that integrate over mesh faces."""
+    """面积分子: 在网格面上积分的积分子基类."""
     etype = 'face'
 
 class EdgeInt(Integrator):
-    """### Edge Integrator
-    Base class for integrators that integrate over mesh edges."""
+    """边积分子: 在网格边上积分的积分子基类."""
     etype = 'edge'
 
 
 ##################################################
-### Integral Utils
+### 积分工具
 ##################################################
 
 _GT = TypeVar('_GT')
 
 class ConstIntegrator(Integrator, Generic[_GT]):
-    """An integral item with given values.
+    """取给定值的积分项: 把一个张量包装成积分子.
 
-    ConstIntegrator wrap a given TensorLike object as an Integrator type.
-    The `to_gdof` is optional but must be provided if `to_global_dof` is needed.
+    Parameters
+    ----------
+    value : TensorLike
+        积分值, 第 0 轴为实体.
+    to_gdof : TensorLike or tuple of TensorLike, optional
+        自由度映射; 需要调用 ``to_global_dof`` 时必须给出.
     """
     def __init__(self, value: TensorLike, to_gdof: Optional[_GT] = None):
         super().__init__('assembly', False, False)
@@ -279,10 +296,18 @@ class ConstIntegrator(Integrator, Generic[_GT]):
         self._region = slice(None)
 
     def set_region(self, region, /):
+        """记录区域但不起作用 (会给出警告), 积分值已固定."""
         logger.warning("`set_region` has no effect for ConstIntegrator.")
         return super().set_region(region)
 
     def to_global_dof(self, space, /, indices: _OpIndex = None) -> _GT:
+        """返回给定的自由度映射, 给出 ``indices`` 时取其子集.
+
+        Raises
+        ------
+        RuntimeError
+            构造时未给出 ``to_gdof``.
+        """
         if self.to_gdof is None:
             raise RuntimeError("to_gdof not defined for ConstIntegrator.")
         if indices is None:
@@ -292,27 +317,36 @@ class ConstIntegrator(Integrator, Generic[_GT]):
         return self.to_gdof[indices]
 
     def assembly(self, space, /, indices: _OpIndex = None):
+        """返回给定的积分值, 给出 ``indices`` 时取其子集."""
         if indices is None:
             return self.value
         return self.value[indices]
 
 
 class GroupIntegrator(Integrator):
-    """Combine multiple integral items as one.
+    """把多个积分项合为一个.
 
-    GroupIntegrator requires all sub-integrators have the same to_global_dof output.
-    That is to say, all integral items must have the same domains and local-global relationship for DoFs.
+    要求所有子积分子的 ``to_global_dof`` 输出相同, 即积分区域与局部-全局自由度
+    关系一致. 组合后子积分子只提供积分值, 自由度映射取第一个子积分子的
+    ``to_global_dof``.
 
-    Managed by the GroupIntegrator, as a result, sub-integrators ignored their
-    own to_global_dof, outputing integrals only.
-    The grouped integrator takes the first integrator's `to_global_dof` as its implementation.
+    Parameters
+    ----------
+    *ints : Integrator
+        子积分子; 其中的 ``GroupIntegrator`` 会被展开.
+    region : TensorLike, optional
+        给出时替换所有子积分子的积分区域; 为 None 时不替换.
 
-    Note: All sub-integrators' region will be replaced by the `region` parameter.
-    Skip this operation if `None`.
+    Raises
+    ------
+    ValueError
+        没有给出子积分子.
+    TypeError
+        子积分子不是 ``Integrator``.
     """
     def __init__(self, *ints: Integrator, region: Optional[TensorLike] = None):
         super().__init__('assembly')
-        self.ints: List[Integrator] = [] # Integrator except GroupIntegrator.
+        self.ints: List[Integrator] = [] # 不含 GroupIntegrator 的子积分子.
         if len(ints) == 0:
             raise ValueError("No integrators provided.")
         for integrator in ints:
@@ -338,7 +372,7 @@ class GroupIntegrator(Integrator):
     def __getitem__(self, index: int):
         return self.ints[index]
 
-    def __iadd__(self, other: Integrator): # Don't create new for the grouped
+    def __iadd__(self, other: Integrator): # 原地并入, 不新建组
         if isinstance(other, GroupIntegrator):
             self.ints.extend(other)
         elif isinstance(other, Integrator):
@@ -349,14 +383,17 @@ class GroupIntegrator(Integrator):
 
     @property
     def etype(self) -> str:
+        """第一个子积分子的实体类型."""
         return self.ints[0].etype
 
     def set_region(self, region: TensorLike, /) -> None:
+        """把积分区域同时设到所有子积分子与组本身."""
         for integrator in self.ints:
             integrator.set_region(region)
         return super().set_region(region)
 
     def to_global_dof(self, space: _SpaceGroup, /, indices: _OpIndex = None):
+        """取第一个子积分子的自由度映射."""
         if indices is None:
             return self.ints[0].to_global_dof(space)
         return self.ints[0].to_global_dof(space, indices=indices)
@@ -364,6 +401,13 @@ class GroupIntegrator(Integrator):
     @overload
     def assembly(self, space: _SpaceGroup, /, indices: _OpIndex = None) -> TensorLike: ...
     def assembly(self, space: _SpaceGroup, /, *args, **kwargs):
+        """各子积分子的积分值相加; 维数不同时在较少维者前补一个批量轴后相加.
+
+        Raises
+        ------
+        RuntimeError
+            子积分子输出的共同前导维形状不一致.
+        """
         ct = self.ints[0].assembly(space, *args, **kwargs)
 
         for int_ in self.ints[1:]:
