@@ -247,8 +247,8 @@ class TensorFunctionSpace(FunctionSpace):
 
         Notes
         -----
-        常数 ``gd`` 的分支以 ``uh[threshold] = gd`` 赋值, ``threshold`` 不是布尔
-        张量时不会只写边界自由度. 函数末尾 if 链之后的赋值语句不可达.
+        ``gd`` 为函数且 ``threshold`` 为 None 或函数时, 分支只算出边界值, 由函数末尾
+        if 链之后的赋值写入 ``uh``; 这是各分析器走的主路径.
         """
         ipoints = self.interpolation_points()
         scalar_space = self.scalar_space
@@ -261,7 +261,7 @@ class TensorFunctionSpace(FunctionSpace):
                 isTensorBDof = threshold
             else : # threshold 为函数或 None
                 isTensorBDof = self.is_boundary_dof(threshold=threshold, method=method)
-            uh[threshold] = gd
+            uh[isTensorBDof] = gd
             return uh, isTensorBDof
 
         elif (bm.is_tensor(gd)) or (isinstance(gd, Function)):

@@ -72,12 +72,17 @@ def to_tensor_dof(to_dof: TensorLike, dof_numel: int, gdof: int, dof_priority: b
         实体上张量自由度的全局编号 ``(NE, ldof * dof_numel)``; 压缩格式输入时
         返回同格式的元组.
 
-    Notes
-    -----
-    压缩格式分支固定按 2 个分量、自由度优先展开, 不使用 ``dof_numel`` 与
-    ``dof_priority``.
+    Raises
+    ------
+    NotImplementedError
+        压缩格式输入且不是 2 分量、自由度优先.
     """
     if isinstance(to_dof, tuple):
+        if dof_numel != 2 or not dof_priority:
+            raise NotImplementedError(
+                "压缩格式的自由度映射只支持 2 分量、自由度优先的展开, "
+                f"收到 dof_numel={dof_numel}, dof_priority={dof_priority}"
+            )
         scell2dof, scell2dofLocation = to_dof[0], to_dof[1]
         sgdof = bm.max(scell2dof) + 1
         context = bm.context(scell2dof)

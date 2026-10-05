@@ -160,23 +160,22 @@ class LagrangeFESpace(FunctionSpace, Generic[_MT]):
         Function
             插值函数.
 
-        Notes
-        -----
-        ``coordtype == 'barycentric'`` 的分支按原注释标注结果不对, 不应使用.
+        Raises
+        ------
+        NotImplementedError
+            ``u`` 为重心坐标函数. 按单元插值点逐单元求值再散加, 会把相邻单元在共享
+            自由度上的值重复累加, 且多重指标顺序与 ``cell_to_dof`` 不一致; 请改用直角
+            坐标函数.
         """
         assert callable(u)
 
         if not hasattr(u, 'coordtype') or u.coordtype == 'cartesian':
             ips = self.interpolation_points()
             uI = u(ips)
-        elif u.coordtype == 'barycentric': # TODO: 这个结果是不对的 
-            TD = self.TD
-            p = self.p
-            bcs = self.mesh.multi_index_matrix(p, TD)/p
-            val = u(bcs)
-            cell2dof = self.cell_to_dof()
-            uI = bm.zeros(self.number_of_global_dofs(), dtype=self.ftype)
-            uI = bm.index_add(uI, cell2dof, val) 
+        elif u.coordtype == 'barycentric':
+            raise NotImplementedError(
+                "LagrangeFESpace.interpolate 不支持重心坐标函数, 请改用直角坐标函数"
+            )
         return self.function(uI)
 
     def boundary_interpolate(self,
