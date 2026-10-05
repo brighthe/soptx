@@ -21,7 +21,7 @@ FULLWIDTH_PUNCTUATION = "，。；：！？（）【】“”‘’"
 
 # 棘轮基线: 2026-10-05 清理后的存量违规数. 只允许下调, 不允许上调.
 FULLWIDTH_BASELINE = 3
-MISSING_DOCSTRING_BASELINE = 271
+MISSING_DOCSTRING_BASELINE = 168
 
 # 自 FEALPy 移植而尚未补齐中文 docstring 的路径, 暂不计入棘轮. 2026-10 移植的代码已全部
 # 补齐, 本表为空; 再从 FEALPy 取代码且来不及补齐时, 在此登记并记入

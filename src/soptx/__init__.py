@@ -11,6 +11,6 @@ MUMPS 求解前的 MPI 上下文激活由
 MUMPS 的求解点上显式调用.
 """
 
-__version__ = "1.1.0.dev0"
+__version__ = "1.2.0.dev0"
 
 __all__ = ["__version__"]

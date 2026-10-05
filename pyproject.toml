@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "soptx"
-version = "1.1.0.dev0"
+version = "1.2.0.dev0"
 description = "Finite-element analysis and structural topology optimization research platform"
 readme = "README.md"
 requires-python = ">=3.12"

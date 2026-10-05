@@ -24,7 +24,7 @@ PINN 示例入口见
 
 ## 安装与环境
 
-SOPTX 当前迁移版本为 `1.1.0.dev0`，Python 最低版本为 3.12（移入的网格与积分代码使用
+SOPTX 当前版本为 `1.2.0.dev0`，Python 最低版本为 3.12（移入的网格与积分代码使用
 PEP 695 泛型与 `type` 语句）：
 
 ```bash
@@ -68,8 +68,8 @@ from soptx.problems import SinusoidalPlaneStrainElasticity2D
 from soptx.fem.integrators import LinearElasticIntegrator
 ```
 
-迁移表中声明的旧公共路径在 `1.1.x` 发出一次 `DeprecationWarning`，迁移表见
-[`docs/architecture/migration-map.md`](docs/architecture/migration-map.md)。
+`1.1.x` 的兼容路径（`soptx.analysis`、`interpolation`、`model`、`optimization`、
+`regularization`、`utils`）在 `1.2` 起已删除，改从上面的职责子包导入。
 已经不存在的 `soptx.pde/material/solver/filter/opt` 不会重新建立。
 
 ## 复现与验证

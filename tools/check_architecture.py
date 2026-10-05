@@ -34,6 +34,7 @@ LAYER = {
     "topology": 3,
     "postprocess": 4,
 }
+# 已删除的 1.1.x 兼容层与不入库的旧目录: 稳定层不得导入, 也借此防止重建这些旧路径.
 LEGACY_ROOTS = {
     "analysis",
     "demo",
