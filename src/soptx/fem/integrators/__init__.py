@@ -3,9 +3,6 @@
 from .face_source_integrator_lfem import (
     LagrangeBoundarySourceIntegrator,
 )
-from .face_source_integrator_mfem import (
-    HuZhangBoundarySourceIntegrator,
-)
 from .huzhang_mix_integrator import HuZhangMixIntegrator
 from .huzhang_stress_integrator import HuZhangStressIntegrator
 from .jump_penalty_integrator import JumpPenaltyIntegrator
@@ -17,7 +14,6 @@ from .mass_integrator import MassIntegrator
 from .source_integrator import SourceIntegrator
 
 __all__ = [
-    "HuZhangBoundarySourceIntegrator",
     "HuZhangMixIntegrator",
     "HuZhangStressIntegrator",
     "IntegrationContext",

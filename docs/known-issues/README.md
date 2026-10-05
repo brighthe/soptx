@@ -61,7 +61,7 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 | 问题 | 位置 | 来源 | 根因与影响 | 修法 | 状态 |
 |---|---|---|---|---|---|
 | 移植代码的 docstring 为英文且大量缺失 | `tools/check_comment_style.py` 的 `PORTED_ROOTS` 所列路径 | 移植原样保留 | 豁免前约 596 处缺 docstring、16 处全角标点；豁免使其暂不计入棘轮，基线数字不放松 | 按子包补中文 numpydoc，补齐后从 `PORTED_ROOTS` 移出 | 未修 |
-| 调用网格上不存在的方法 | `functionspace/huzhang_fe_space_2d.py:1080`（`mesh.hess_shape_function`）；`functionspace/lagrange_fe_space.py:192-216, 299`（`mesh.number_of_faces_of_cells`、`mesh.update_bcs`、`mesh.prolongation_matrix`）；`fem/utils.py:40-54`（`mesh.bisect_options` 与 `isMarkedCell=` 关键字） | v0.4 网格重写后上游即已悬空，移植未使其变差 | 走到这些分支即 `AttributeError` / `TypeError`；`fem/utils.py` 中的 `project_solution_to_finer_mesh` 无任何调用方 | 删除无调用方的函数；其余按需补实现或删除分支 | 未修 |
+| 调用网格上不存在的方法 | `topology/objectives/compliance.py:170`、`mechanism.py:109`、`topology/constraints/volume.py:107, 112`、`topology/optimizers/utils.py:379`（`mesh.cell_to_node`、`mesh.jacobi_matrix`）；`fem/integrators/jump_penalty_integrator.py:116`（`mesh.cell_to_face_sign`）；`fem/integrator.py:178`（`mesh.count`） | v0.4 网格重写后上游即已悬空，移植未使其变差 | 前两项使 `density_location='node'` 不可用；第三项使 3D 低阶 Hu--Zhang 跳量稳定化不可用；第四项只在 `add_integrator(splitter=<int>)` 时触发。无调用方的悬空代码（`hess_basis`、`cell_basis_on_face`、`prolongation_matrix`、`project_solution_to_finer_mesh`、`HuZhangBoundarySourceIntegrator`）已删除 | 节点密度改用 `mesh.cell` 与 `entity_view('cell').jacobi_matrix`；3D 跳量稳定化明确报错；`mesh.count` 改用 `mesh.entity(etype)` | 未修 |
 | `fem/distributed/` 中源自 FEALPy 的文件未注明来源 | `fem/distributed/mesh.py`、`entity_mpi.py`、`space.py` | 早于本次移植（`abd0945`） | 与 fork `fealpy/distributed/` 逐行比对高度相似，`THIRD_PARTY_NOTICES.md` 已登记 | 文件头补来源说明 | 未修 |
 
 ## 记账约定

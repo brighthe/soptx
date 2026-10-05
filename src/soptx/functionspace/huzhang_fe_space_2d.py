@@ -1074,11 +1074,6 @@ class HuZhangFESpace2d(FunctionSpace):
 
         return dphi
 
-    def hess_basis(self, bc: TensorLike, index: Index=_S, variable='x'):
-        if isinstance(bc, tuple):
-            bc = bm.stack(list(bc), axis=-1)
-        return self.mesh.hess_shape_function(bc, self.p, index=index, variables=variable)
-    
     @barycentric
     def value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike: 
         """

@@ -184,65 +184,6 @@ class LagrangeFESpace(FunctionSpace, Generic[_MT]):
             variables=variable,
         )
 
-    def hess_basis(self, bc: TensorLike, index: Index=_S, variable='x'):
-        return self.mesh.hess_shape_function(bc, self.p, index=index, variables=variable)
-
-    @barycentric
-    def cell_basis_on_face(self, bc: TensorLike, eindex: TensorLike) -> TensorLike:
-        NLF = self.mesh.number_of_faces_of_cells()
-        NF = len(eindex)
-        NQ = bc.shape[0]
-        ldof = self.number_of_local_dofs('cell')
-        result = bm.zeros((NF,NQ,ldof),dtype=self.ftype) 
-        face2cell = self.mesh.face_to_cell(eindex) 
-        cbcs = self.mesh.update_bcs(bc, 'cell')
-
-        for i in range(NLF): 
-            phi = self.basis(cbcs[i])
-            tag = bm.where(face2cell[:,2]==i)
-            result[tag] = phi
-        return result
-        
-    @barycentric
-    def cell_grad_basis_on_face(self, bc: TensorLike, eindex: TensorLike, 
-                                isleft = True) -> TensorLike:
-        TD = self.mesh.TD  ## 一定是单元的
-        NLF = self.mesh.number_of_faces_of_cells()
-        NF = len(eindex)
-        NQ = bc.shape[0]
-        ldof = self.number_of_local_dofs('cell')
-        result = bm.zeros((NF,NQ,ldof,TD),dtype=self.ftype) 
-        
-        cbcs = self.mesh.update_bcs(bc, 'cell')   
-        face2cell = self.mesh.face_to_cell(eindex)      
-        if isleft:
-            c_index  = face2cell[:,0]
-            e_local_index = face2cell[:,2]
-        else :
-            c_index  = face2cell[:,1]
-            e_local_index = face2cell[:,3]
-        
-        Xf = self.mesh.bc_to_point(bc[[0, -1]], index=eindex)   # (NF, 2, GD)
-
-        for i in range(NLF):
-            gphi = self.grad_basis(cbcs[i], c_index)        # (NF, NQ, ldof, TD)
-            tag = bm.where(e_local_index == i)
-            if tag[0].size == 0:
-                continue
-            gi = gphi[tag]                                  # (nF, NQ, ldof, TD)
-            
-            Xc = self.mesh.bc_to_point(cbcs[i][[0, -1]], index=c_index[tag])  # (nF, 2, GD)
-            Xf_tag = Xf[tag]                                                  # (nF, 2, GD)
-            # 选择与面参数顺序更接近的方向
-            d0 = bm.linalg.norm(Xc - Xf_tag, axis=-1).sum(axis=1)          # (nF,)
-            d1 = bm.linalg.norm(Xc[:, ::-1, :] - Xf_tag, axis=-1).sum(axis=1)
-            flip = d1 < d0
-            if bm.any(flip):
-                gi = bm.where(flip[:, None, None, None], gi[:, ::-1, ...], gi)
-            result[tag] = gi
-        
-        return result
-    
     @barycentric
     def value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike:
         if isinstance(bc, tuple):
@@ -276,28 +217,3 @@ class LagrangeFESpace(FunctionSpace, Generic[_MT]):
         e2dof = self.dof.entity_to_dof(TD, index=index)
         val = bm.einsum('cilm, cl -> cim', gphi, uh[e2dof])
         return val
-    
-    def prolongation_matrix(self, cdegree=[1]):
-        """
-        Generate a list of interpolation matrices from lower-order spaces to higher-order spaces,
-        from the highest to the lowest.
-        
-        Parameters:
-            cdegree[list]: list of the degree of the needed space,from low space to high space
-        
-        Returns:
-            IM[list]: list of the prolongation matrix,from high space to low space
-        """
-        assert isinstance(cdegree, list), "cdegree must be a list"
-        assert all(isinstance(c, int) for c in cdegree), "All in elements cdegree must be integers"
-        assert all(c < self.p for c in cdegree), "All elements in cdegree must be less than self.p"
-        assert cdegree == sorted(cdegree), "cdegree must be in ascending order"
-        assert self.ctype == 'C'
-        p = self.p
-        Ps = []
-        for c in cdegree[-1::-1]:
-            Ps.append(self.mesh.prolongation_matrix(c, p))
-            p = c
-        return Ps
-
-    
