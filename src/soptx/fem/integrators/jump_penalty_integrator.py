@@ -295,14 +295,14 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             fidx = cell2face[:, i]
             pos  = cell2facesign[:, i]
             
-            L = bm.nonzero(pos)[0]   # 左侧：pos=True，这是 w^+
-            R = bm.nonzero(~pos)[0]  # 右侧：pos=False，这是 w^-
+            L = bm.nonzero(pos)[0]   # 左侧: pos=True, 这是 w^+
+            R = bm.nonzero(~pos)[0]  # 右侧: pos=False, 这是 w^-
             
             # 按各单元自身的局部面定向映射积分点, 使面两侧取到同一物理点,
             # 否则装配出的不是跳量, 见 _oriented_cell_basis 的 Notes
             phi = self._oriented_cell_basis(space, bcs, i)
             
-            # 存储原始基函数值（不带符号）
+            # 存储原始基函数值 (不带符号)
             if L.size > 0:
                 w_plus[fidx[L]]  = phi[L]   # w^+
             if R.size > 0:
@@ -360,7 +360,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
         
         # 构建缩放系数
-        # k=1 用 E，k>=2 用 mu，反映不同次数对稳定化强度的不同需求
+        # k=1 用 E, k>=2 用 mu, 反映不同次数对稳定化强度的不同需求
         # 应力空间的次数
         p = space.p + 1
         mesh = space.mesh
@@ -468,7 +468,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             # 该映射按各单元自身的局部面定向进行, 见 _oriented_cell_basis 的 Notes
             phi = self._oriented_cell_basis(space, bcs, i)     # (NC, NQ, LDOF, GD)
 
-            # [w] = w^+ - w^-，构建算子 [ -φ_R, +φ_L ]
+            # [w] = w^+ - w^-, 构建算子 [ -φ_R, +φ_L ]
             if R.size > 0:
                 val_all[fidx[R], :, 0:ldof, :]   =  - phi[R, :, :, :]
             if L.size > 0:

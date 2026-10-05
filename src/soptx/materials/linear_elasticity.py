@@ -57,15 +57,15 @@ class LinearElasticMaterial(BaseLogged):
         Parameters
         ----------
         dof_priority
-            张量空间展平后的排序中, 向量分量是否排在标量自由度之前。
+            张量空间展平后的排序中, 向量分量是否排在标量自由度之前.
         gphi
-            标量基函数的物理梯度, 形状为 ``(NC, NQ, LDOF, GD)``。
+            标量基函数的物理梯度, 形状为 ``(NC, NQ, LDOF, GD)``.
         shear_order
-            三维工程剪应变分量的排列顺序。
+            三维工程剪应变分量的排列顺序.
         correction
-            ``None`` 表示标准矩阵, ``"BBar"`` 表示三维 B-bar 修正。
+            ``None`` 表示标准矩阵, ``"BBar"`` 表示三维 B-bar 修正.
         cm, ws, detJ
-            B-bar 修正所需的单元测度、积分权重和 Jacobi 行列式。
+            B-bar 修正所需的单元测度、积分权重和 Jacobi 行列式.
         """
         if gphi.ndim != 4:
             raise ValueError(
@@ -282,8 +282,8 @@ class LinearElasticMaterial(BaseLogged):
 class IsotropicLinearElasticMaterial(LinearElasticMaterial):
     """均匀各向同性线弹性材料.
 
-    ``lame_lambda`` 和 ``shear_modulus`` 始终表示三维本征 Lamé 常数。所选的
-    hypothesis 只改变构造本构矩阵时使用的降维方式, 不改变这两个常数的含义。
+    ``lame_lambda`` 和 ``shear_modulus`` 始终表示三维本征 Lamé 常数. 所选的
+    hypothesis 只改变构造本构矩阵时使用的降维方式, 不改变这两个常数的含义.
     """
 
     _VALID_HYPOTHESES = {
@@ -337,7 +337,7 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         """本构矩阵, 构造时算好后不再变化.
 
         property 只防止整体重新绑定; 返回的张量本身仍可被原地修改, 调用方
-        不应这样做。
+        不应这样做.
         """
         return self._D
 
@@ -607,11 +607,11 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         """返回均匀材料的本构矩阵.
 
         返回形状为 ``(1, 1, NS, NS)``: 前两维是单元与积分点的占位维, 由调用
-        方按 ``(NC, NQ, NS, NS)`` 广播。均匀材料在所有单元和积分点上的本构
-        相同, 所以这里不实际展开, 避免无谓的内存占用。
+        方按 ``(NC, NQ, NS, NS)`` 广播. 均匀材料在所有单元和积分点上的本构
+        相同, 所以这里不实际展开, 避免无谓的内存占用.
 
         接收 ``bcs`` 是为了兼容 FEALPy 的材料协议; 对均匀材料而言本构矩阵
-        与位置无关, 因此这个参数被有意忽略。
+        与位置无关, 因此这个参数被有意忽略.
         """
         del bcs
         return self._D[None, None, ...]

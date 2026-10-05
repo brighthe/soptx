@@ -134,12 +134,12 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
 
         # --- 预计算测度权重 ---
         if self._density_location in ['element', 'element_multiresolution']:
-            # 单元密度表征：权重即为设计变量网格单元体积/面积
+            # 单元密度表征: 权重即为设计变量网格单元体积/面积
             # shape: (NC, )
             self._measure_weight = self._design_mesh.entity_measure('cell')
             
         elif self._density_location == 'node':
-            # 节点密度表征：权重为节点控制体积
+            # 节点密度表征: 权重为节点控制体积
             # shape: (NN, )
             cm = self._design_mesh.entity_measure('cell')
             NN = self._design_mesh.number_of_nodes()
@@ -187,7 +187,7 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
             sub_physical_density = reshape_multiresolution_data_inverse(
                                                     nx=nx_displacement,
                                                     ny=ny_displacement,
-                                                    data_flat=design_variable, # 注意这里直接使用 dv，不做卷积
+                                                    data_flat=design_variable, # 注意这里直接使用 dv, 不做卷积
                                                     n_sub=n_sub
                                                 ) 
             physical_density[:] = bm.set_at(physical_density, slice(None), sub_physical_density)
@@ -204,7 +204,7 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
                                 ) -> TensorLike:
         
         if self._density_location == 'element_multiresolution':
-            # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
+            # 多分辨率: obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
             n_sub = obj_grad_rho.shape[-1]
             n_sub_x, n_sub_y = int(math.sqrt(n_sub)), int(math.sqrt(n_sub))
             nx_displacement, ny_displacement = int(self._design_mesh.meshdata['nx'] / n_sub_x), int(self._design_mesh.meshdata['ny'] / n_sub_y)
@@ -229,7 +229,7 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
                                     con_grad_rho: TensorLike
                                 ) -> TensorLike:
         
-        #* 对于简单的 OC 算法，体积约束不需要过滤
+        #* 对于简单的 OC 算法, 体积约束不需要过滤
         if self._density_location == 'element_multiresolution':
             n_sub = con_grad_rho.shape[-1]
             n_sub_x = int(math.sqrt(n_sub))
@@ -264,12 +264,12 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
 
         # --- 预计算测度权重 ---
         if self._density_location in ['element', 'element_multiresolution']:
-            # 单元密度表征：权重即为设计变量网格单元体积/面积
+            # 单元密度表征: 权重即为设计变量网格单元体积/面积
             # shape: (NC, )
             self._measure_weight = self._design_mesh.entity_measure('cell')
             
         elif self._density_location == 'node':
-            # 节点密度表征：权重为节点控制体积
+            # 节点密度表征: 权重为节点控制体积
             # shape: (NN, )
             cm = self._design_mesh.entity_measure('cell')
             NN = self._design_mesh.number_of_nodes()
@@ -341,7 +341,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                                     obj_grad_rho: TensorLike,
                                 ) -> TensorLike:
         if self._density_location == 'element_multiresolution':
-            # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
+            # 多分辨率: obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
             obj_grad_rho = reshape_multiresolution_data(
                                     mesh=self._disp_mesh, 
                                     data=obj_grad_rho
@@ -363,7 +363,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                             con_grad_rho: TensorLike
                         ) -> TensorLike:
         if self._density_location == 'element_multiresolution':
-            # 多分辨率：obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
+            # 多分辨率: obj_grad_rho (NC, n_sub) ->  (NC * n_sub, )
             con_grad_rho = reshape_multiresolution_data(
                                     mesh=self._disp_mesh, 
                                     data=con_grad_rho
@@ -419,13 +419,13 @@ class ProjectionStrategy(DensityStrategy):
                 f"Expected 'additive' or 'multiplicative'."
             )
         self.continuation_strategy = continuation_strategy
-        self.beta_increment  = beta_increment   # 加法策略专用：每次增量
-        self.beta_multiplier = beta_multiplier  # 乘法策略专用：每次倍数
+        self.beta_increment  = beta_increment   # 加法策略专用: 每次增量
+        self.beta_multiplier = beta_multiplier  # 乘法策略专用: 每次倍数
 
         # 初始化计数器
         self._beta_iter = 0 
         
-        # 用于存储线性过滤后的中间密度 (rho_tilde)，用于灵敏度分析的链式法则
+        # 用于存储线性过滤后的中间密度 (rho_tilde), 用于灵敏度分析的链式法则
         self._rho_tilde_cache: Optional[TensorLike] = None
 
     def _apply_projection(self, rho_tilde: TensorLike) -> TensorLike:
@@ -539,25 +539,25 @@ class ProjectionStrategy(DensityStrategy):
         """执行一步 beta continuation (更新 beta 值)
 
         加法策略 ('additive'):
-            仅按固定频率触发，与 PolyStress MATLAB 完全一致:
+            仅按固定频率触发, 与 PolyStress MATLAB 完全一致:
                 [BFreq=continuation_iter, B0=beta, Binc=beta_increment, Bmax=beta_max]
-            触发条件：达到迭代间隔
+            触发条件: 达到迭代间隔
 
         乘法策略 ('multiplicative'):
-            按固定频率或设计收敛时触发，适合快速推进二值化:
-            触发条件：达到迭代间隔 或 变化量 <= 0.01
+            按固定频率或设计收敛时触发, 适合快速推进二值化:
+            触发条件: 达到迭代间隔 或 变化量 <= 0.01
         """
         self._beta_iter += 1
 
         # ── 判断是否触发更新 ──────────────────────────────────────────
         if self.continuation_strategy == 'additive':
-            # 加法策略：仅按固定频率触发
+            # 加法策略: 仅按固定频率触发
             should_update = (
                 self.beta < self.beta_max and
                 self._beta_iter >= self.continuation_iter
             )
         else:
-            # 乘法策略：固定频率 或 收敛时触发
+            # 乘法策略: 固定频率 或 收敛时触发
             should_update = (
                 self.beta < self.beta_max and
                 (self._beta_iter >= self.continuation_iter or change <= 0.01)
@@ -582,7 +582,7 @@ class ProjectionStrategy(DensityStrategy):
             if self._enable_logging:
                 print(f"[{trigger}] beta: {old_beta:.4f} -> {self.beta:.4f}")
 
-            # 强制返回 change=1.0，防止外层优化循环因收敛判断提前退出
+            # 强制返回 change=1.0, 防止外层优化循环因收敛判断提前退出
             return 1.0, True
 
         return change, False
@@ -591,7 +591,7 @@ class ProjectionStrategy(DensityStrategy):
         """执行一步 beta continuation (更新 beta 值)"""
         self._beta_iter += 1
         
-        # 判断条件：beta 未达上限 且 (达到迭代间隔 或 收敛)
+        # 判断条件: beta 未达上限 且 (达到迭代间隔 或 收敛)
         if (self.beta < self.beta_max and 
                 (self._beta_iter >= self.continuation_iter or change <= 0.01)):
             
@@ -608,8 +608,8 @@ class ProjectionStrategy(DensityStrategy):
                 trigger = "Interval" if self._beta_iter >= self.continuation_iter else "Convergence"
                 print(f"[{trigger}] Projection beta updated: {old_beta} -> {self.beta}")
             
-            # 3. 关键：强制返回 1.0，防止外层循环提前退出
+            # 3. 关键: 强制返回 1.0, 防止外层循环提前退出
             return 1.0, True
         
-        # 如果没有更新，保持原有的 change 值
+        # 如果没有更新, 保持原有的 change 值
         return change, False

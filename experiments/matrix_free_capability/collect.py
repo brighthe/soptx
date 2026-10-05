@@ -4,7 +4,7 @@
 分工: ``cases.toml`` 描述"跑什么", 本模块描述"读什么、怎么判".
 两者分开的原因是提取逻辑带门禁判断和跨源一致性核对, 写不进 TOML.
 
-本模块只读产物、不触发计算; 缺产物时报缺失, 不会隐式重跑。
+本模块只读产物、不触发计算; 缺产物时报缺失, 不会隐式重跑.
 """
 
 from __future__ import annotations
@@ -26,27 +26,27 @@ EA_FA_SOLUTION_RELATIVE_TOL = 1.0e-9
 EXPECTED_REFINEMENT_LEVELS = 5
 EXPECTED_BASE_SUBDIVISIONS = 4
 
-# 两条误差链在重合档上的一致性门禁。只在 collect 阶段生效 —— 它核对的是
+# 两条误差链在重合档上的一致性门禁. 只在 collect 阶段生效 —— 它核对的是
 # examples/lagrange_elasticity 的 FA 链与本管线 EA 三档这两个不同来源, 不属于
-# contract.py 覆盖的 stage-1 单跑/跨跑门禁, 故不进 _check_contract_drift。
+# contract.py 覆盖的 stage-1 单跑/跨跑门禁, 故不进 _check_contract_drift.
 # 数值上与旧判据 "最少吻合 8 位有效数字" 完全等价 (8 位 <=> 相对差 < 1e-8),
-# 换成相对差只是把单位统一到全文其余门禁上, 不改变松紧。
+# 换成相对差只是把单位统一到全文其余门禁上, 不改变松紧.
 EA_FA_ERROR_CHAIN_RELATIVE_TOL = 1.0e-8
 
 # 峰值 RSS 的分阶段采样点顺序, 必须与 benchmark_cpu_ea.py 里 ``stages`` 的追加
-# 顺序逐字一致。``load`` 是后加的采样点: 早于该次插桩的产物只有一个合并的 ``bc``
-# 阶段, 无法把体力组装与 Dirichlet 处理分开, 因此按缺阶段直接判失败而不是静默补零。
+# 顺序逐字一致. ``load`` 是后加的采样点: 早于该次插桩的产物只有一个合并的 ``bc``
+# 阶段, 无法把体力组装与 Dirichlet 处理分开, 因此按缺阶段直接判失败而不是静默补零.
 STAGE_ORDER = ["baseline", "mesh", "operator", "load", "bc", "solve"]
 
-# (c) 的验收门禁: CPU 与单卡 GPU 两侧解的相对差上限。取值与 (a) 的 EA/FA 判据
-# 相同 —— 两处问的是同一件事 "换了实现路径后还是不是同一个解", 没有理由用两把尺子。
+# (c) 的验收门禁: CPU 与单卡 GPU 两侧解的相对差上限. 取值与 (a) 的 EA/FA 判据
+# 相同 —— 两处问的是同一件事 "换了实现路径后还是不是同一个解", 没有理由用两把尺子.
 DEVICE_SOLUTION_RELATIVE_TOL = 1.0e-9
 
-# (c) 在尚未注册 case 时的占位原因, 写进快照供 run.py 打印、消费方按需引用。
+# (c) 在尚未注册 case 时的占位原因, 写进快照供 run.py 打印、消费方按需引用.
 #
 # 已于 2026-08-22 注册 c-dev-n{8,16,32,64} 四个 case, 正常路径下 panel c 走
 # _collect_device_speedup 出实测值; 本常量只在 cases.toml 里 panel c 被清空时
-# 才会再次生效, 保留它是为了让"退回占位"仍有可读的解释, 而不是抛 KeyError。
+# 才会再次生效, 保留它是为了让"退回占位"仍有可读的解释, 而不是抛 KeyError.
 PANEL_C_REASON = (
     "(c) 问的是同一个 matrix-free 算子换到单块 GPU 上能快多少, 横轴与 (b) 同为自由度; "
     "验收门禁是 GPU 与 CPU 解的相对差不大于 1e-9。占位不是因为缺算子路径 —— 现有 EA "
@@ -56,12 +56,12 @@ PANEL_C_REASON = (
 )
 
 
-# (d) 的验收门禁。进程级强扩展换的是分区数, 不是算法, 因此代数结果必须不随
+# (d) 的验收门禁. 进程级强扩展换的是分区数, 不是算法, 因此代数结果必须不随
 # 进程数变化 —— 迭代数逐档相同是硬门禁 (不同即 Krylov 轨迹已分叉), 残差只要求
-# 同量级: 归约次序随分区变, 末位浮点差异是正常的, 不是错误。
+# 同量级: 归约次序随分区变, 末位浮点差异是正常的, 不是错误.
 MPI_RESIDUAL_RELATIVE_TOL = 1.0e-3
 
-# (d) 在尚未注册 case 时的占位原因, 与 (c) 同理。
+# (d) 在尚未注册 case 时的占位原因, 与 (c) 同理.
 PANEL_D_REASON = (
     "(d) 问的是同一个 matrix-free 算子在进程级 (MPI) 上的强扩展: 规模固定在 "
     "n=64, 只加进程数; 验收门禁是迭代数逐档不变。占位说明 cases.toml 里 "
@@ -109,9 +109,9 @@ def _check_contract_drift(failures: list[str]) -> None:
 def _relative_difference(a: float, b: float) -> float | None:
     """两个正数的相对差, 以较大者为分母.
 
-    这是核对 FA 与 EA 两条独立误差链吻合程度的主指标。全文其余门禁 (解相对差、
+    这是核对 FA 与 EA 两条独立误差链吻合程度的主指标. 全文其余门禁 (解相对差、
     残差、黄金参考) 都以相对差计, 此处沿用同一单位, 读者不必在 "位数" 与
-    "相对差" 之间换算。
+    "相对差" 之间换算.
 
     参数:
         a: 第一个数, 需为有限正数.
@@ -132,12 +132,12 @@ def _matching_significant_digits(relative: float | None) -> int:
 
     只为快照留档 —— 报告表格已改用相对差 (见 ``_relative_difference``), 但外部
     引用 (china-postdoc 申请书正文) 仍以 "吻合到 N 位有效数字" 陈述该结论, 故
-    该派生量继续写进 ``fig2_data.json``。
+    该派生量继续写进 ``fig2_data.json``.
 
     注意口径: ``floor(-log10(relative))`` 不等价于 "打印出来的前 N 位数字逐位
     相同" —— 跨十进制档口时两者会分叉, 例如 ``0.9999999999995`` 与
-    ``1.0000000000005`` 相对差 ``1e-12`` 记 12 位, 首位却不同。它衡量的是相对
-    差的量级, 引用时按此陈述。
+    ``1.0000000000005`` 相对差 ``1e-12`` 记 12 位, 首位却不同. 它衡量的是相对
+    差的量级, 引用时按此陈述.
 
     参数:
         relative: ``_relative_difference`` 的返回值.
@@ -191,20 +191,20 @@ def _collect_fa_chain(case: config.Case, failures: list[str]) -> dict[str, Any]:
         "mesh_type": payload["mesh_type"],
         "mesh_label": payload.get("mesh_label"),
         "model": payload["model"],
-        # 制造解类名。表 a-1 的表头要指名道姓写出"误差是相对哪个精确解量的",
-        # 只写 model 别名 (sinusoidal / divfree-poly) 读者查不到定义。
+        # 制造解类名. 表 a-1 的表头要指名道姓写出"误差是相对哪个精确解量的",
+        # 只写 model 别名 (sinusoidal / divfree-poly) 读者查不到定义.
         "problem": payload.get("problem"),
         "material_hypothesis": payload.get("material_hypothesis"),
         "degree": payload["space_degree"],
         "solver": payload["solver"],
         "solver_options": payload.get("solver_options", {}),
         "assembly_method": payload.get("assembly_method"),
-        # 档位参数入快照后, 表头就不必再把 "五档" 与 "--base 4 --levels 5" 写死。
+        # 档位参数入快照后, 表头就不必再把 "五档" 与 "--base 4 --levels 5" 写死.
         "base_subdivisions": payload.get("base_subdivisions"),
         "refinement_levels": payload.get("refinement_levels"),
         "theoretical_order": payload.get("theoretical_order"),
-        # 代数误差的量级。表 a-1 要说明"直接解使代数误差可忽略, 测的是纯离散误差",
-        # 这个断言需要一个可核验的数, 而不是一句形容。
+        # 代数误差的量级. 表 a-1 要说明"直接解使代数误差可忽略, 测的是纯离散误差",
+        # 这个断言需要一个可核验的数, 而不是一句形容.
         "max_residual": payload.get("max_residual"),
         "residual_tolerance": payload.get("residual_tolerance"),
         "subdivisions": [lv["subdivisions"] for lv in levels],
@@ -232,7 +232,7 @@ def _collect_ea_rings(case: config.Case, failures: list[str]) -> dict[str, Any]:
     if payload.get("passed") is not True:
         failures.append(f"{case.id}: stage-1 汇总 passed != true")
 
-    # 显式参考核对的验收阈值来自 contract, 产物只存核对结果、不存阈值。
+    # 显式参考核对的验收阈值来自 contract, 产物只存核对结果、不存阈值.
     try:
         import sys
         sys.path.insert(0, str(config.REPOSITORY_ROOT))
@@ -248,7 +248,7 @@ def _collect_ea_rings(case: config.Case, failures: list[str]) -> dict[str, Any]:
             failures.append(f"{case.id}: {dimension}D 分块 passed != true")
 
         # EA/FA 逐档解相对差: coarse 单值字段向后兼容 (旧消费方), 逐档列表
-        # 按 EA 档位顺序供表 a-2' 渲染; 门禁逐档判, 任一档超阈值即失败。
+        # 按 EA 档位顺序供表 a-2' 渲染; 门禁逐档判, 任一档超阈值即失败.
         differences = comparison.get("ea_fa_solution_relative_differences") or {}
         gap = comparison["coarse_solution_ea_fa_relative_difference"]
         gaps = [
@@ -263,14 +263,14 @@ def _collect_ea_rings(case: config.Case, failures: list[str]) -> dict[str, Any]:
                 )
 
         errors = comparison["relative_l2_errors"]
-        # 键形如 ea-coarse-1rank, 顺序即 coarse/medium/fine, 不重排。
-        # CG 的相对残差容差。表 a-1 要说明"收敛阶的举证为什么不交给 matrix-free",
+        # 键形如 ea-coarse-1rank, 顺序即 coarse/medium/fine, 不重排.
+        # CG 的相对残差容差. 表 a-1 要说明"收敛阶的举证为什么不交给 matrix-free",
         # 依据是这个容差会给误差垫地板 —— 那句话必须引 EA 侧的 rtol, 不能拿 FA
-        # 产物里同为 1e-10 的 residual_tolerance(那是直接解残差的门禁阈值)顶替。
+        # 产物里同为 1e-10 的 residual_tolerance(那是直接解残差的门禁阈值)顶替.
         first_case = next(iter(block["cases"].values()), {})
         # 档位 (每轴剖分数) 按 EA 三档的顺序取; 显式参考核对取全部单 rank 算例
-        # (EA 三档 + FA coarse) 的最大相对差, 证明 CG 解已站在 spsolve 直接解上。
-        # 并行算例 (mpi_size != 1) 不构造显式参考, 不参与核对。
+        # (EA 三档 + FA coarse) 的最大相对差, 证明 CG 解已站在 spsolve 直接解上.
+        # 并行算例 (mpi_size != 1) 不构造显式参考, 不参与核对.
         refinements: list[int] = []
         explicit_errors: list[float] = []
         for name in errors:
@@ -285,7 +285,7 @@ def _collect_ea_rings(case: config.Case, failures: list[str]) -> dict[str, Any]:
                 explicit_errors.append(float(reference["relative_error"]))
         explicit_max = max(explicit_errors) if explicit_errors else None
         # 门禁: CG 解与 spsolve 直接解的偏差必须落在 EXPLICIT_SOLUTION_RELATIVE_TOL
-        # 内 —— 表 a-2 "CG 解已站在直接解上"的论断靠它兜底, 阈值来自 contract。
+        # 内 —— 表 a-2 "CG 解已站在直接解上"的论断靠它兜底, 阈值来自 contract.
         if not explicit_errors:
             failures.append(
                 f"{case.id}: {dimension}D 未找到单 rank 算例的 "
@@ -317,11 +317,11 @@ def _cross_check_chains(fa: dict[str, Any], rings: dict[str, Any],
     """核对 FA 与 EA 两条独立误差链在重合档上的相对差.
 
     两处出自不同脚本、不同求解器 (直接解 vs CG rtol=1e-10), 画的却是同一个
-    离散; 若某一档相对差骤增, 说明两条链已经不是同一个离散, 必须查。
+    离散; 若某一档相对差骤增, 说明两条链已经不是同一个离散, 必须查.
 
     比的是误差标量 (两条链在同一档的相对 L2 误差值), 与 ``_collect_ea_rings``
     记录的解向量相对差是两个对象, 不可互换引用: 前者说 "落在同一条收敛曲线
-    上", 后者说 "解本身一样"。
+    上", 后者说 "解本身一样".
 
     参数:
         fa: ``{"2d": chain, "3d": chain}`` 形式的显式组装误差链.
@@ -340,7 +340,7 @@ def _cross_check_chains(fa: dict[str, Any], rings: dict[str, Any],
             continue
         by_subdivision = dict(zip(chain["subdivisions"], chain["l2_relative"]))
         relatives: list[float | None] = []
-        # stage-1 的三档固定为 n = 8/16/32 (contract.REFINEMENTS)。
+        # stage-1 的三档固定为 n = 8/16/32 (contract.REFINEMENTS).
         for subdivision, ea_error in zip((8, 16, 32), ring["l2_relative"]):
             fa_error = by_subdivision.get(subdivision)
             if fa_error is None:
@@ -355,7 +355,7 @@ def _cross_check_chains(fa: dict[str, Any], rings: dict[str, Any],
             "subdivisions": [8, 16, 32],
             "error_relative_differences": relatives,
             "maximum": worst,
-            # 派生量, 供外部按 "吻合 N 位有效数字" 引用; 报告表格不再使用。
+            # 派生量, 供外部按 "吻合 N 位有效数字" 引用; 报告表格不再使用.
             "matching_significant_digits": [
                 _matching_significant_digits(value) for value in relatives
             ],
@@ -404,14 +404,14 @@ def _decompose_peaks(level_panel: dict[str, Any],
 
     峰值本身回答不了"这些内存是非占不可, 还是组装路上的临时开销" —— 而 (b)
     格的因果论断 (matrix-free 省的不是存得少, 是从不物化全局 COO/CSR) 恰恰要
-    靠这个拆分才立得住, 故在采集侧算出来, 消费方不必各自复算。
+    靠这个拆分才立得住, 故在采集侧算出来, 消费方不必各自复算.
 
     下界取 ``baseline + mesh + stored_operator``: 解释器与导入的常量开销、网格
     与函数空间、以及该层级必须长期持有的算子数据 (FA 是全局 CSR, EA 是逐单元
-    ``K_e`` 缓存)。峰值减去下界即瞬态。
+    ``K_e`` 缓存). 峰值减去下界即瞬态.
 
     ⚠️ 下界是**该实现路径**的下界, 不是问题本身的下界: 换算子层级 (如只存积分
-    点因子的 PA) 会改变 ``stored_operator`` 这一项。
+    点因子的 PA) 会改变 ``stored_operator`` 这一项.
 
     参数:
         level_panel: 单个算子层级的数据, 需含 ``peak_rss_bytes``、
@@ -431,7 +431,7 @@ def _decompose_peaks(level_panel: dict[str, Any],
                                     level_panel["stored_operator_bytes"],
                                     level_panel["stage_bytes"]):
         # 逐档取该次运行自己的 baseline 高水位, 而非八次运行的最小值, 这样四段
-        # 之和严格等于该档峰值, 拆分不会因基线抖动而对不平。
+        # 之和严格等于该档峰值, 拆分不会因基线抖动而对不平.
         baseline = stages[baseline_index]
         mesh = stages[mesh_index] - baseline
         floor = baseline + mesh + stored
@@ -469,7 +469,7 @@ def _collect_peak_rss(cases: tuple[config.Case, ...],
         level = case.extra["level"]
         resolution = case.extra["resolution"]
 
-        # 逐项核对产物确实是这个 case 声明的那次运行, 防止旧产物被当成新的读进来。
+        # 逐项核对产物确实是这个 case 声明的那次运行, 防止旧产物被当成新的读进来.
         expectations = (
             ("operator_level", level),
             ("resolution", resolution),
@@ -501,7 +501,7 @@ def _collect_peak_rss(cases: tuple[config.Case, ...],
         return [by_level[level][n][field] for n in resolutions]
 
     # 基线是解释器与 FEALPy 导入的常量开销, 八次运行应当几乎相同;
-    # 抖动大意味着测量环境不干净, 峰值比也就不可信。
+    # 抖动大意味着测量环境不干净, 峰值比也就不可信.
     baselines = (series("fa", "peak_rss_baseline_bytes")
                  + series("ea", "peak_rss_baseline_bytes"))
     baseline_spread = max(baselines) - min(baselines)
@@ -531,15 +531,15 @@ def _collect_peak_rss(cases: tuple[config.Case, ...],
         }
         panel[level].update(_decompose_peaks(panel[level], panel["stage_order"]))
 
-    # 两个层级各自的"必需存储"下界之比。它与峰值比是相反方向的量: 峰值比 EA 占
+    # 两个层级各自的"必需存储"下界之比. 它与峰值比是相反方向的量: 峰值比 EA 占
     # 优 (躲开组装瞬态), 下界比却是 FA 占优 (CSR 比逐单元 K_e 缓存小), 引用时
-    # 不可只取一侧。
+    # 不可只取一侧.
     panel["floor_ratio_ea_over_fa"] = [
         ea / fa if fa else None
         for ea, fa in zip(panel["ea"]["floor_bytes"], panel["fa"]["floor_bytes"])
     ]
 
-    # 逐档迭代数必须一致: 两个层级是同一个离散, 迭代数不同就说明算子不同。
+    # 逐档迭代数必须一致: 两个层级是同一个离散, 迭代数不同就说明算子不同.
     if panel["fa"]["cg_iterations"] != panel["ea"]["cg_iterations"]:
         failures.append(
             f"FA 与 EA 的 CG 迭代数逐档不一致: "
@@ -553,8 +553,8 @@ def _collect_device_speedup(cases: tuple[config.Case, ...],
     """提取四档 CPU / 单卡 GPU 耗时对照, 并核对两侧算的是同一个问题.
 
     加速比只有在"两边解同一个离散问题"成立时才有意义, 所以本函数的门禁不看耗时,
-    只看等价性: 解的相对差、CG 迭代数是否逐档相同、两侧是否都真的收敛。耗时快慢
-    不设门禁 —— 慢也是结论 (n=8 那档 GPU 就更慢), 不该被判失败。
+    只看等价性: 解的相对差、CG 迭代数是否逐档相同、两侧是否都真的收敛. 耗时快慢
+    不设门禁 —— 慢也是结论 (n=8 那档 GPU 就更慢), 不该被判失败.
 
     参数:
         cases: ``role`` 为 ``device-speedup`` 的全部 case.
@@ -568,7 +568,7 @@ def _collect_device_speedup(cases: tuple[config.Case, ...],
         payload = _load(case.artifact_path)
         resolution = case.extra["resolution"]
 
-        # 与 (b) 同样逐项核对产物身份, 防止旧产物或改了参数的产物被当成本 case 的。
+        # 与 (b) 同样逐项核对产物身份, 防止旧产物或改了参数的产物被当成本 case 的.
         expectations = (
             ("mode", "device-speedup-ea"),
             ("resolution", resolution),
@@ -597,8 +597,8 @@ def _collect_device_speedup(cases: tuple[config.Case, ...],
             record = payload.get("devices", {}).get(device, {})
             if record.get("cg_converged") is not True:
                 failures.append(f"{case.id}: {device} 侧 CG 未收敛")
-        # 产物自带一次门禁判定。它与本模块复述的阈值应当同向; 不同向说明脚本的
-        # --gap-gate 被调松过, 这时以本模块为准并显式报出来。
+        # 产物自带一次门禁判定. 它与本模块复述的阈值应当同向; 不同向说明脚本的
+        # --gap-gate 被调松过, 这时以本模块为准并显式报出来.
         if payload.get("gate_passed") is not True:
             failures.append(f"{case.id}: 产物自判 gate_passed != true")
 
@@ -612,7 +612,7 @@ def _collect_device_speedup(cases: tuple[config.Case, ...],
     def device_series(device: str, field: str) -> list[Any]:
         return [by_resolution[n]["devices"][device].get(field) for n in resolutions]
 
-    # 计时口径必须四档一致, 否则中位数之间不可比。
+    # 计时口径必须四档一致, 否则中位数之间不可比.
     repeats = {by_resolution[n].get("repeats") for n in resolutions}
     warmups = {by_resolution[n].get("warmup") for n in resolutions}
     if len(repeats) != 1 or len(warmups) != 1:
@@ -645,8 +645,8 @@ def _collect_device_speedup(cases: tuple[config.Case, ...],
             "true_relative_residual": device_series(device, "true_relative_residual"),
         }
     # 显存高水位与卡容量只有 CUDA 侧有, 但它是 (c) 的能力边界证据 —— 不带进快照,
-    # 文档就只能手抄, 手抄的数迟早与产物脱节。CPU 线程数决定"加速比是对几个核说
-    # 的", 不记下来这个对照就没法复核; 早于该字段的产物取到 None, 报告端跳过。
+    # 文档就只能手抄, 手抄的数迟早与产物脱节. CPU 线程数决定"加速比是对几个核说
+    # 的", 不记下来这个对照就没法复核; 早于该字段的产物取到 None, 报告端跳过.
     panel["cuda"]["gpu_peak_allocated_bytes"] = device_series(
         "cuda", "gpu_peak_allocated_bytes"
     )
@@ -663,7 +663,7 @@ def _collect_mpi_strong(cases: tuple[config.Case, ...],
 
     与 (c) 的差别不只是横轴换成进程数: (c) 比的是两条实现路径 (CPU vs GPU) 解同一
     个问题, (d) 比的是同一条路径切成不同份数, 因此正确性判据也不同 —— (c) 判两侧
-    解的相对差, (d) 判迭代数是否逐档不变。
+    解的相对差, (d) 判迭代数是否逐档不变.
 
     参数:
         cases: role 为 ``mpi-strong`` 的全部 case.
@@ -710,12 +710,12 @@ def _collect_mpi_strong(cases: tuple[config.Case, ...],
         return [by_ranks[p].get("ea_overlap_matvec_profile_seconds_max_rank", {})
                 .get(field) for p in ordered]
 
-    # 强扩展固定总规模, 自由度必须逐档相同 —— 不同就不是强扩展而是弱扩展。
+    # 强扩展固定总规模, 自由度必须逐档相同 —— 不同就不是强扩展而是弱扩展.
     dof_set = set(series("global_vector_dofs"))
     if len(dof_set) != 1:
         failures.append(f"(d) 各档自由度不同, 不构成强扩展: {sorted(dof_set)}")
 
-    # 迭代数逐档不变是本格的正确性门禁: 分区只改数据分布, 不改代数。
+    # 迭代数逐档不变是本格的正确性门禁: 分区只改数据分布, 不改代数.
     iterations = solver_series("iterations")
     if len(set(iterations)) != 1:
         failures.append(
@@ -733,8 +733,8 @@ def _collect_mpi_strong(cases: tuple[config.Case, ...],
                 f"{MPI_RESIDUAL_RELATIVE_TOL:.0e}"
             )
 
-    # 计时口径与 (c) 同理必须逐档一致, 否则各档时间不可比。早于该字段的产物取到
-    # None; 全为 None 时集合仍是单元素, 不判失败, 由报告端标注口径未知。
+    # 计时口径与 (c) 同理必须逐档一致, 否则各档时间不可比. 早于该字段的产物取到
+    # None; 全为 None 时集合仍是单元素, 不判失败, 由报告端标注口径未知.
     warmups = {by_ranks[p].get("warmup") for p in ordered}
     repeats = {by_ranks[p].get("repeats") for p in ordered}
     if len(warmups) != 1 or len(repeats) != 1:
@@ -783,7 +783,7 @@ def build(cases: tuple[config.Case, ...], figure: dict[str, Any]) -> dict[str, A
     _check_contract_drift(failures)
 
     # by_role 只容得下每个 role 一个 case, 因此多档的 role 必须先摘出去,
-    # 否则同 role 的后一个会静默覆盖前一个。
+    # 否则同 role 的后一个会静默覆盖前一个.
     multi_case_roles = {"peak-rss", "device-speedup", "mpi-strong"}
     by_role = {c.role: c for c in cases if c.role not in multi_case_roles}
     peak_cases = tuple(c for c in cases if c.role == "peak-rss")
@@ -798,16 +798,16 @@ def build(cases: tuple[config.Case, ...], figure: dict[str, Any]) -> dict[str, A
     cross = _cross_check_chains(fa, rings, notes)
     panel_b = _collect_peak_rss(peak_cases, failures)
 
-    # 没有注册 case 时退回占位: 这一格的存在性由 cases.toml 决定, 不靠人工改常量。
+    # 没有注册 case 时退回占位: 这一格的存在性由 cases.toml 决定, 不靠人工改常量.
     if device_cases:
         panel_c_body = _collect_device_speedup(device_cases, failures)
         # (b) 与设备对照(渲染进图面的 (d))共用一条自由度横轴, 两格才能连起来读成
-        # "能算多大 / 算得多快"。⚠️ 这里的 panel_c 是**数据组**键名, 它进的是图面
-        # 的 (d); 图面的 (c) 是 panels.d 的 MPI 强扩展, 横轴是进程数, 不在这条轴上。
-        # 但 (c) 允许比 (b) 短: 单卡显存未必跟得上 (b) 在主机内存里能到的最细档。
+        # "能算多大 / 算得多快". ⚠️ 这里的 panel_c 是**数据组**键名, 它进的是图面
+        # 的 (d); 图面的 (c) 是 panels.d 的 MPI 强扩展, 横轴是进程数, 不在这条轴上.
+        # 但 (c) 允许比 (b) 短: 单卡显存未必跟得上 (b) 在主机内存里能到的最细档.
         # 判据因此是"(c) 的档位构成 (b) 的前缀"—— 同起点、同档位、只是早一步停,
-        # 两格仍在同一条轴上; 若两者错位或交错, 那才是真的不同轴, 必须报出来。
-        # 放宽到"随便短一截都行"会漏掉真正的错位, 所以用前缀而不是子集。
+        # 两格仍在同一条轴上; 若两者错位或交错, 那才是真的不同轴, 必须报出来.
+        # 放宽到"随便短一截都行"会漏掉真正的错位, 所以用前缀而不是子集.
         prefix = panel_b["dofs"][: len(panel_c_body["dofs"])]
         if panel_c_body["dofs"] != prefix:
             failures.append(
@@ -833,7 +833,7 @@ def build(cases: tuple[config.Case, ...], figure: dict[str, Any]) -> dict[str, A
             "reason": PANEL_C_REASON,
         }
 
-    # (d) 与 (c) 同样由 cases.toml 决定存在性, 没注册就退回占位。
+    # (d) 与 (c) 同样由 cases.toml 决定存在性, 没注册就退回占位.
     if mpi_cases:
         panel_d = {
             "status": "measured",
@@ -878,7 +878,7 @@ def build(cases: tuple[config.Case, ...], figure: dict[str, Any]) -> dict[str, A
             "d": panel_d,
         },
         # script 是产物的事实源 (run.py 以子进程调用它生成产物): 与产物路径、
-        # 指纹一并入快照, 使表 a-1 的来源说明由 report.py 按此渲染, 不硬编码路径。
+        # 指纹一并入快照, 使表 a-1 的来源说明由 report.py 按此渲染, 不硬编码路径.
         "sources": [
             {"case_id": c.id, "role": c.role, "script": c.script,
              **provenance.file_digest(c.artifact_path)}

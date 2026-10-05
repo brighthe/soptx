@@ -1,6 +1,6 @@
 """二维制造解线弹性问题.
 
-完整方程与推导见 ``docs/models/manufactured-elasticity.md``。
+完整方程与推导见 ``docs/models/manufactured-elasticity.md``.
 """
 
 from __future__ import annotations
@@ -198,9 +198,9 @@ class MixedBoundaryExponentialSineElasticity2D(
 ):
     """指数/正弦制造解问题的混合边界视角.
 
-    精确位移在单位正方形边界上为零。三条边按位移边界处理, 右边按非零
+    精确位移在单位正方形边界上为零. 三条边按位移边界处理, 右边按非零
     traction 边界处理, 于是同一组精确场就能检验强 traction 数据, 而不必
-    引入第二套公式来源。
+    引入第二套公式来源.
     """
 
     boundary_type = "mixed"
@@ -218,12 +218,12 @@ class MixedBoundaryExponentialSineElasticity2D(
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         """位移元强施加的边界只有 :math:`\\Gamma_D`.
 
-        基类按全 Dirichlet 判定四条边。混合边界必须收窄到 :math:`\\Gamma_D`,
+        基类按全 Dirichlet 判定四条边. 混合边界必须收窄到 :math:`\\Gamma_D`,
         否则 ``apply_bc`` 会把 :math:`\\Gamma_N` 的自由度也强加位移, 于是上一
         步刚加进右端项的 traction 载荷被整个覆盖 —— 而且因为强加的位移取自
-        精确解, 结果依然正确、收敛阶依然是 2, 属于不报错的静默失效。
+        精确解, 结果依然正确、收敛阶依然是 2, 属于不报错的静默失效.
 
-        ``is_dirichlet_boundary_dof_y`` 由基类转调本方法, 不必重复覆盖。
+        ``is_dirichlet_boundary_dof_y`` 由基类转调本方法, 不必重复覆盖.
         """
 
         return self.is_displacement_boundary(points)
@@ -234,10 +234,10 @@ class MixedBoundaryExponentialSineElasticity2D(
     def _boundary_traction(self, points: TensorLike) -> TensorLike:
         """位移元视角的自然边界数据: 法向迹 :math:`t=\\sigma\\cdot n`.
 
-        与 ``traction_bc`` 是同一份精确应力的两种形式。混合形式要完整应力,
+        与 ``traction_bc`` 是同一份精确应力的两种形式. 混合形式要完整应力,
         由 Hu--Zhang 应力空间自行投影; 位移元的边界积分要的是已经点乘过法向
-        的牵引向量。区域轴对齐, :math:`\\Gamma_N` 只有右边一条, 外法向恒为
-        :math:`(1,0)`, 于是 :math:`t=(\\sigma_{xx},\\sigma_{xy})`。
+        的牵引向量. 区域轴对齐, :math:`\\Gamma_N` 只有右边一条, 外法向恒为
+        :math:`(1,0)`, 于是 :math:`t=(\\sigma_{xx},\\sigma_{xy})`.
         """
 
         stress = self.stress_solution(points)
@@ -271,8 +271,8 @@ class MixedBoundarySinusoidalElasticity2D(
        \Gamma_D=\{x=0\}\cup\{y=0\},\quad
        \Gamma_N=\{x=1\}\cup\{y=1\}.
 
-    区域固定为单位正方形. ``traction_bc`` 返回精确应力的 Voigt 向量，
-    由 Hu--Zhang 应力空间在牵引边界上投影为法向迹。
+    区域固定为单位正方形. ``traction_bc`` 返回精确应力的 Voigt 向量,
+    由 Hu--Zhang 应力空间在牵引边界上投影为法向迹.
     """
 
     dimension = 2
@@ -364,12 +364,12 @@ class MixedBoundarySinusoidalElasticity2D(
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
         """位移元强施加的边界只有 :math:`\\Gamma_D`.
 
-        基类按全 Dirichlet 判定四条边。混合边界必须收窄到 :math:`\\Gamma_D`,
+        基类按全 Dirichlet 判定四条边. 混合边界必须收窄到 :math:`\\Gamma_D`,
         否则 ``apply_bc`` 会把 :math:`\\Gamma_N` 的自由度也强加位移, 于是上一
         步刚加进右端项的 traction 载荷被整个覆盖 —— 而且因为强加的位移取自
-        精确解, 结果依然正确、收敛阶依然是 2, 属于不报错的静默失效。
+        精确解, 结果依然正确、收敛阶依然是 2, 属于不报错的静默失效.
 
-        ``is_dirichlet_boundary_dof_y`` 由基类转调本方法, 不必重复覆盖。
+        ``is_dirichlet_boundary_dof_y`` 由基类转调本方法, 不必重复覆盖.
         """
 
         return self.is_displacement_boundary(points)
@@ -385,17 +385,17 @@ class MixedBoundarySinusoidalElasticity2D(
     def _boundary_traction(self, points: TensorLike) -> TensorLike:
         """位移元视角的自然边界数据: 法向迹 :math:`t=\\sigma\\cdot n`.
 
-        与 ``traction_bc`` 是同一份精确应力的两种形式。混合形式要完整应力,
+        与 ``traction_bc`` 是同一份精确应力的两种形式. 混合形式要完整应力,
         由 Hu--Zhang 应力空间自行投影; 位移元的边界积分要的是已经点乘过法向
-        的牵引向量。区域轴对齐, :math:`\\Gamma_N` 的两条边上外法向分别是
+        的牵引向量. 区域轴对齐, :math:`\\Gamma_N` 的两条边上外法向分别是
         :math:`(1,0)` 与 :math:`(0,1)`, 于是
 
         .. math::
            t|_{x=1}=(\\sigma_{xx},\\sigma_{xy}),\\qquad
            t|_{y=1}=(\\sigma_{xy},\\sigma_{yy}).
 
-        角点 :math:`(1,1)` 同时落在两条边上, 这里由后写的上边覆盖。面积分点
-        取在面内部, 落不到角点上, 因此这个选择不影响装配结果。
+        角点 :math:`(1,1)` 同时落在两条边上, 这里由后写的上边覆盖. 面积分点
+        取在面内部, 落不到角点上, 因此这个选择不影响装配结果.
         """
 
         stress = self.stress_solution(points)

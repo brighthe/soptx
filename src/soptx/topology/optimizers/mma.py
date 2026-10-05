@@ -121,7 +121,7 @@ class MMAOptimizer(BaseLogged):
         if isinstance(options, MMAOptions):
             self.options = options
         elif isinstance(options, dict):
-            # 如果传入字典，先创建默认实例，再更新
+            # 如果传入字典, 先创建默认实例, 再更新
             self.options = MMAOptions()
             # 获取 dataclass 的有效字段集合
             valid_configs = {f for f in self.options.__dict__ if not f.startswith('_')}
@@ -159,7 +159,7 @@ class MMAOptimizer(BaseLogged):
         penalty_update = iter_idx // 30
         current_penalty = min(1.0 + penalty_update * 0.5, 3.0)
         
-        # 方式 2: 每步增加 0.04，第 50 步达到 3
+        # 方式 2: 每步增加 0.04, 第 50 步达到 3
         # current_penalty = min(1.0 + iter_idx * 0.04, 3.0)
         
         # 更新插值方案中的惩罚因子

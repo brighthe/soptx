@@ -3,7 +3,7 @@
 
 ``operator_level`` 参数化: 默认组装 EA (matrix-free) 链;
 ``compare.py`` 用同一函数以 ``operator_level="fa"`` 在进程内构建
-FA-cg 参照侧, 保证锁步对照两侧只差算子层级。
+FA-cg 参照侧, 保证锁步对照两侧只差算子层级.
 """
 
 from __future__ import annotations
@@ -33,14 +33,14 @@ from config import MESH_LAYOUT, TopOptCase
 
 
 # 本模块默认走 EA (matrix-free) 算子层级; compare.py 会显式传 "fa" 在
-# 进程内构建 FA 参照。算子层级由目录名声明, 不进 --list;
-# ANALYZER_KIND 只是 analyzer 列的离散方法前缀, 后半段取逐工况 solve_method。
+# 进程内构建 FA 参照. 算子层级由目录名声明, 不进 --list;
+# ANALYZER_KIND 只是 analyzer 列的离散方法前缀, 后半段取逐工况 solve_method.
 OPERATOR_LEVEL = "ea"
 ANALYZER_KIND = "lfem"
 
 # 本模块所有工况都是同一个提法: 体积分数约束下的柔顺度最小化
 # (build_pipeline 里 ComplianceObjective + VolumeConstraint 写死, 无分支);
-# 逐工况只变约束上限 volfrac, 故提法进代码不进 cases.toml 的 summary。
+# 逐工况只变约束上限 volfrac, 故提法进代码不进 cases.toml 的 summary.
 FORMULATION = "体积分数约束下的柔顺度最小化"
 
 
@@ -92,7 +92,7 @@ def _create_problem(case: TopOptCase) -> Any:
         )
     if case.problem == "bearing_device":
         lx, ly = case.domain
-        # load 字段映射为顶边均布牵引强度 t (N/mm), 而非合力。
+        # load 字段映射为顶边均布牵引强度 t (N/mm), 而非合力.
         return BearingDevice2d(
             domain=(0.0, lx, 0.0, ly),
             t=case.load,
@@ -101,7 +101,7 @@ def _create_problem(case: TopOptCase) -> Any:
         )
     if case.problem == "half_mbb_beam_right":
         lx, ly = case.domain
-        # domain 是对称右半域 (整梁跨度为 2 * lx); 左边界为对称面。
+        # domain 是对称右半域 (整梁跨度为 2 * lx); 左边界为对称面.
         return HalfMBBBeamRight2d(
             domain=(0.0, lx, 0.0, ly),
             P=case.load,
@@ -110,8 +110,8 @@ def _create_problem(case: TopOptCase) -> Any:
         )
     if case.problem == "simply_supported_bridge":
         lx, ly = case.domain
-        # load 字段映射为顶边均布牵引强度 t (N/mm), 而非合力。桥面实体非设计域
-        # 厚度取 H/10 (博士论文算例 3.2: L/30, H = L/3), 随 domain 走, 不进注册表。
+        # load 字段映射为顶边均布牵引强度 t (N/mm), 而非合力. 桥面实体非设计域
+        # 厚度取 H/10 (博士论文算例 3.2: L/30, H = L/3), 随 domain 走, 不进注册表.
         return SimplySupportedBridge2d(
             domain=(0.0, lx, 0.0, ly),
             t=case.load,
@@ -191,7 +191,7 @@ def build_components(
             "atol": case.cg_atol,
             "rtol": case.cg_rtol,
             # None 表示不加预条件; 取 "jacobi" 时分析器会建 DiagonalPreconditioner,
-            # 并把真残差刷新间隔一并绑上 (Jacobi 的 M-范数递推残差会失真)。
+            # 并把真残差刷新间隔一并绑上 (Jacobi 的 M-范数递推残差会失真).
             "precond": None if case.cg_precond == "none" else case.cg_precond,
         },
         topopt_algorithm="density_based",
@@ -218,9 +218,9 @@ def build_components(
     projection_params = None
     if case.filter_type == "projection":
         projection_params = {
-            # 与 topopt_simp_fa 一致: 显式钉住投影类型。旧版 Filter 的门面默认
+            # 与 topopt_simp_fa 一致: 显式钉住投影类型. 旧版 Filter 的门面默认
             # 值 (已删除) 会把未指定的 projection_type 静默设成 exponential,
-            # 不写死会落到签名默认的 tanh, 改变本实验既有的数值行为。
+            # 不写死会落到签名默认的 tanh, 改变本实验既有的数值行为.
             "projection_type": "exponential",
             "beta": case.projection_beta,
             "eta": case.projection_eta,
@@ -232,9 +232,9 @@ def build_components(
         filter_type=case.filter_type,
         rmin=case.filter_radius,
         density_location="element",
-        # 非结构网格走 KD-tree 通用路径, 权重为 (1 - d/rmin)^q。q 曾在
+        # 非结构网格走 KD-tree 通用路径, 权重为 (1 - d/rmin)^q. q 曾在
         # FilterMatrixBuilder 内部写死为 3, 现已参数化 (默认 1 = 线性锥形);
-        # 这里显式钉住 3, 保持既有结果不变。
+        # 这里显式钉住 3, 保持既有结果不变.
         filter_q=3,
         projection_params=projection_params,
         enable_logging=False,

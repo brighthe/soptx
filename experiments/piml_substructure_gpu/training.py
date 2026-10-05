@@ -1,6 +1,6 @@
-"""复用 SOPTX 训练循环的 CPU/CUDA 固定预算实验。
+"""复用 SOPTX 训练循环的 CPU/CUDA 固定预算实验.
 
-模块顶层只导入标准库，数值依赖在实际运行时加载。
+模块顶层只导入标准库, 数值依赖在实际运行时加载.
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from pathlib import Path
 
 
 class ExperimentError(RuntimeError):
-    """实验条件或结果不满足比较契约。"""
+    """实验条件或结果不满足比较契约."""
 
 
 def _dependencies(case):
-    """在加载数值库前固定线程配置。"""
+    """在加载数值库前固定线程配置."""
     for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ[name] = str(case.cpu_threads)
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -38,7 +38,7 @@ def _dependencies(case):
 
 
 def _hash_arrays(*arrays):
-    """摘要同时覆盖形状、dtype 与数值。"""
+    """摘要同时覆盖形状、dtype 与数值."""
     digest = hashlib.sha256()
     for array in arrays:
         digest.update(str((array.shape, str(array.dtype))).encode())
@@ -55,7 +55,7 @@ def _state_hash(state):
 
 
 def _prepare(case, np, torch):
-    """生成角点迹变形分量标签；两端共享同一准备结果。"""
+    """生成角点迹变形分量标签; 两端共享同一准备结果."""
     if case.baseline == "example_full_trace":
         from baseline import prepare
         return prepare(case, np, torch)
@@ -127,7 +127,7 @@ def _sync(torch, device):
 
 
 def _metrics(np, prediction, data):
-    """恢复形函数并评价无回退的变分刚度。"""
+    """恢复形函数并评价无回退的变分刚度."""
     M = prediction.astype(np.float64).reshape(-1, data["n_i"], data["D"].shape[1])
     B = data["Phi"] @ data["R"].T + M @ data["D"].T
     T = data["T"]
@@ -149,7 +149,7 @@ def _metrics(np, prediction, data):
 
 
 def _train(case, data, np, torch):
-    """训练计时包括原有循环的验证和参数快照管理。"""
+    """训练计时包括原有循环的验证和参数快照管理."""
     if case.baseline == "example_full_trace":
         from baseline import train
         return train(case, data, np, torch)
@@ -256,10 +256,10 @@ def _execute(cases, output_dir):
 
 
 def run_case(case, output_dir):
-    """运行一个已注册训练工况。"""
+    """运行一个已注册训练工况."""
     return _execute((case,), output_dir)
 
 
 def run_pair(cpu, cuda, output_dir):
-    """共享数据与初始权重，依次运行 CPU 与 CUDA。"""
+    """共享数据与初始权重, 依次运行 CPU 与 CUDA."""
     return _execute((cpu, cuda), output_dir)

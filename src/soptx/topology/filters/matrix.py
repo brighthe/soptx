@@ -15,11 +15,11 @@ class FilterMatrixBuilder(BaseLogged):
       ``max(0, rmin - d)``, 只对均匀笛卡尔网格成立 (单元按 ``i*ny + j`` 的
       字典序编号);
     - 通用路径 (``_compute_weighted_matrix_general``): KD-tree 近邻查询 +
-      ``(1 - d/rmin)**q`` 权重, 对任意网格成立。
+      ``(1 - d/rmin)**q`` 权重, 对任意网格成立.
 
     两条路径在 ``q = 1`` 时权重函数一致 (相差常数因子 rmin, 被行归一化
     ``H / Hs`` 约掉); ``q > 1`` 是 PolyFilter (Giraldo-Londono & Paulino,
-    2020) 的非线性权重, 与结构化路径不可比, 故 q 必须由调用方显式给定。
+    2020) 的非线性权重, 与结构化路径不可比, 故 q 必须由调用方显式给定.
     """
     def __init__(self,
                 mesh: HomogeneousMesh,
@@ -50,11 +50,11 @@ class FilterMatrixBuilder(BaseLogged):
         只有当密度定义在单元上、``meshdata`` 同时给出 ``nx/ny(/nz)`` 与
         ``hx/hy(/hz)``、且单元数恰好等于 ``nx*ny(*nz)`` (设计变量确实排在一张
         均匀笛卡尔网格上) 时, 才走结构化快路径; 其余一律走 KD-tree 通用路径,
-        后者对任意非结构网格 (gmsh 三角/四面体网格等) 同样成立。
+        后者对任意非结构网格 (gmsh 三角/四面体网格等) 同样成立.
 
         ``meshdata`` 不是 fealpy 网格的固有属性, 而是各 experiment 的 pipeline
         手工挂上去的元数据字典, 因此这里一律用 ``get`` 探测: 缺键时安静退回通
-        用路径, 不再直接 KeyError。
+        用路径, 不再直接 KeyError.
         """
         meshdata: Dict[str, Any] = dict(getattr(self._mesh, 'meshdata', None) or {})
         NC = self._mesh.number_of_cells()
@@ -79,9 +79,9 @@ class FilterMatrixBuilder(BaseLogged):
     def _bounding_box(self, meshdata: Dict[str, Any]) -> List[float]:
         """计算域包围盒 ``[xmin, xmax, ymin, ymax, ...]``
 
-        ``meshdata['domain']`` 缺失时 (非结构网格的常态) 由节点坐标现算。该值
+        ``meshdata['domain']`` 缺失时 (非结构网格的常态) 由节点坐标现算. 该值
         只在 ``bm.query_point`` 打开周期性时才会被用到, 而通用路径固定
-        ``periodic=[False, False, False]``, 因此它当前对结果没有影响。
+        ``periodic=[False, False, False]``, 因此它当前对结果没有影响.
         """
         domain = meshdata.get('domain')
         if domain is not None:
@@ -236,7 +236,7 @@ class FilterMatrixBuilder(BaseLogged):
         batch_size = min(10000, N_total) 
         n_batches = (N_total + batch_size - 1) // batch_size 
         
-        # 创建一个映射函数，从线性索引转换为 2D 坐标
+        # 创建一个映射函数, 从线性索引转换为 2D 坐标
         def linear_to_2d(linear_idx):
             i = linear_idx // ny
             j = linear_idx % ny

@@ -52,14 +52,14 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         Parameters
         ----------
-        solve_method : 求解方式。状态方程是鞍点系统, 只能用直接法:
+        solve_method : 求解方式. 状态方程是鞍点系统, 只能用直接法:
                        'scipy' 与 'mumps', 都经 soptx.solvers.registry 分派;
                        'mumps' 需要环境装有 PyMUMPS 包 (pip install pymumps)
-                       与系统 MUMPS 库。
-        stabilization : 低阶 (p <= GD) 稳定化项的选取。'matrix_jump' (默认) 与
+                       与系统 MUMPS 库.
+        stabilization : 低阶 (p <= GD) 稳定化项的选取.'matrix_jump' (默认) 与
                         'vector_jump' 对应 JumpPenaltyIntegrator 的两种跳量形式;
-                        'none' 则不加稳定化项, 用于消融验证低阶失稳。
-                        p >= GD + 1 时原生格式本身稳定, 本参数被忽略。
+                        'none' 则不加稳定化项, 用于消融验证低阶失稳.
+                        p >= GD + 1 时原生格式本身稳定, 本参数被忽略.
         stabilization_coefficient : {'fixed', 'density_dependent'}, optional
             低阶稳定化系数模式. 默认 'fixed' 使用基材常数, 不随密度更新;
             'density_dependent' 额外乘逐单元相对剪切模量的面调和平均.
@@ -75,7 +75,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
         
-        # 私有属性（建议通过属性访问器访问，不要直接修改）
+        # 私有属性 (建议通过属性访问器访问, 不要直接修改)
         self._mesh = disp_mesh
         self._pde = pde
         self._material = material
@@ -131,12 +131,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._lambda0_rho = None
         self._lambda1_rho = None
 
-        self._cached_K = None  # 缓存施加边界条件后的刚度矩阵，供伴随求解复用
+        self._cached_K = None  # 缓存施加边界条件后的刚度矩阵, 供伴随求解复用
         self._cached_rhs = None
         self._cached_state_vector = None
-        self._essential_bc = None  # 牵引边界边标记 (NE,)，FEALPy 4.0.0 无 mesh.edgedata
-        self._natural_bc = None    # 位移边界边标记 (NE,)，u = u_D 弱施加
-        self._symmetry_bc = None   # 对称面边标记 (NE,)，仅强加切向牵引分量 sigma_nt
+        self._essential_bc = None  # 牵引边界边标记 (NE,), FEALPy 4.0.0 无 mesh.edgedata
+        self._natural_bc = None    # 位移边界边标记 (NE,), u = u_D 弱施加
+        self._symmetry_bc = None   # 对称面边标记 (NE,), 仅强加切向牵引分量 sigma_nt
         self._cached_Ae0 = self._hzs_integrator.assembly(space=self._huzhang_space) # 缓存实体材料单元局部柔度矩阵 A_σσ^(0)
 
 
@@ -374,7 +374,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             bc_face = mesh.entity_barycenter('face')
             is_dirichlet = self._pde.is_displacement_boundary(bc_face)
             
-            # 3. 合并：只在内部面和位移边界上施加惩罚
+            # 3. 合并: 只在内部面和位移边界上施加惩罚
             valid_faces_bool = is_internal | is_dirichlet
             valid_faces_idx = bm.nonzero(valid_faces_bool)[0]
 
@@ -427,17 +427,17 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             # print(f"Neumann边界面:    {NF_neumann}")
             # print(f"内部+Dirichlet:   {NF_internal + NF_dirichlet}")
 
-            # # 检查是否有面被重复计算（内部面不应出现在边界中）
+            # # 检查是否有面被重复计算 (内部面不应出现在边界中)
             # overlap = is_internal & is_dirichlet
             # print(f"\n内部面与Dirichlet面是否有重叠: {int(overlap.sum())}")  # 应为 0
 
-            # # 检查 Dirichlet 面的坐标，确认只在正确边界上
+            # # 检查 Dirichlet 面的坐标, 确认只在正确边界上
             # dirichlet_bc = bc_face[is_dirichlet]
             # print(f"\nDirichlet 面重心坐标范围:")
             # print(f"  x: [{float(dirichlet_bc[:,0].min()):.4f}, {float(dirichlet_bc[:,0].max()):.4f}]")
             # print(f"  y: [{float(dirichlet_bc[:,1].min()):.4f}, {float(dirichlet_bc[:,1].max()):.4f}]")
 
-            # # 检查 Neumann 面的坐标，确认只在右边界
+            # # 检查 Neumann 面的坐标, 确认只在右边界
             # neumann_mask = ~is_internal & ~is_dirichlet
             # neumann_bc = bc_face[neumann_mask]
             # print(f"\nNeumann 面重心坐标范围:")
@@ -465,7 +465,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         return K
     
     def _validated_loads(self) -> tuple[Load, ...]:
-        """返回当前物理载荷，并拒绝 Hu--Zhang 位移空间无法配对的载荷."""
+        """返回当前物理载荷, 并拒绝 Hu--Zhang 位移空间无法配对的载荷."""
         loads = tuple(self._pde.loads())
         for load in loads:
             if not isinstance(load, Load):
@@ -689,7 +689,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # 强加边界值: 在右端项直接填入已知值
         F = bm.set_at(F, is_fixed_dof, U_fixed[is_fixed_dof])
 
-        # 修改矩阵：行列清零，对角置1
+        # 修改矩阵: 行列清零, 对角置1
         fixed_idx = bm.zeros(gdof_total, dtype=bm.int32)
         fixed_idx = bm.set_at(fixed_idx, is_fixed_dof, 1)
         
@@ -720,12 +720,12 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # load_width = self._pde._load_width
 
         # if load_width <= hx + 1e-12:
-        #     # 逼近点载荷：选唯一最近边
+        #     # 逼近点载荷: 选唯一最近边
         #     nearest = bm.argmin(dist_val)
         #     in_load = bm.zeros(dist_val.shape, dtype=bm.bool)
         #     in_load = bm.set_at(in_load, nearest, True)
         # else:
-        #     # 显式分布载荷：区间选取
+        #     # 显式分布载荷: 区间选取
         #     search_hw = load_width / 2 + 1e-12
         #     in_load = on_right & (dist_val <= search_hw)
 
@@ -741,13 +741,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         """用直接法求解鞍点系统, 状态方程与伴随方程共用
 
         名字到求解器类的分派交给 soptx.solvers.registry, 这里只负责拒绝 CG 并
-        补上 MUMPS 的 sym 选项。
+        补上 MUMPS 的 sym 选项.
 
         CG 在状态解与伴随解两处一律拒绝: K 为 [[A, B], [B^T, 0]] 或
         [[A, B], [B^T, -J]], 对称不定; CG 只对对称正定矩阵成立, 用在这里会给出
-        不收敛或静默错误的解。等 MINRESSolver 落地后再放开对称不定的迭代路径。
+        不收敛或静默错误的解. 等 MINRESSolver 落地后再放开对称不定的迭代路径.
 
-        分解不跨调用复用: 求解完即释放, MUMPS 上下文逐次建销。
+        分解不跨调用复用: 求解完即释放, MUMPS 上下文逐次建销.
         """
         from soptx.solvers import available, create
 
@@ -897,34 +897,34 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                     **kwargs
                 ) -> TensorLike:
         """
-        求解伴随方程，复用正向求解的矩阵分解.
+        求解伴随方程, 复用正向求解的矩阵分解.
         
         伴随方程结构:
             [A  B^T] [λ_σ]   [dP/dΣ]
             [B  0  ] [λ_u] = [  0  ]
         
-        左端矩阵与正向问题完全相同，直接复用 solve_state 中缓存的 K.
+        左端矩阵与正向问题完全相同, 直接复用 solve_state 中缓存的 K.
 
         Parameters
         ----------
         rhs : (gdofs_stress,)
-            仅包含应力自由度部分的伴随载荷向量，
+            仅包含应力自由度部分的伴随载荷向量,
             由 HuZhangStressConstraint.compute_adjoint_load 计算得到.
-        rho_val : 密度场（仅在缓存失效时重新组装矩阵时使用）
+        rho_val : 密度场 (仅在缓存失效时重新组装矩阵时使用)
         
         Returns
         -------
         adjoint_lambda : (gdofs_total,)
-            完整伴随变量向量，前 gdofs_stress 个分量为 λ_σ.
+            完整伴随变量向量, 前 gdofs_stress 个分量为 λ_σ.
         """
         space_sigma = self._huzhang_space
         gdof_sigma = space_sigma.number_of_global_dofs()
 
-        # --- 构造全局 RHS: 应力部分来自伴随载荷，位移部分严格为零 ---
+        # --- 构造全局 RHS: 应力部分来自伴随载荷, 位移部分严格为零 ---
         if self._cached_K is not None:
             gdof_total = self._cached_K.shape[0]
         else:
-            # 缓存失效时重新组装（正常流程不应走到这里）
+            # 缓存失效时重新组装 (正常流程不应走到这里)
             self._log_warning("solve_adjoint: 未找到缓存的刚度矩阵，重新组装.")
             K0 = self.assemble_stiff_matrix(rho_val=rho_val)
             gdof_total = K0.shape[0]
@@ -932,7 +932,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         rhs_full = bm.zeros(gdof_total, dtype=bm.float64)
         rhs_full = bm.set_at(rhs_full, slice(0, gdof_sigma), rhs)
 
-        # --- 施加齐次边界条件：边界应力自由度上的伴随载荷置零 ---
+        # --- 施加齐次边界条件: 边界应力自由度上的伴随载荷置零 ---
         essential_bc = self._essential_bc
         if essential_bc is None:
             bc = self._mesh.entity_barycenter('edge')
@@ -970,8 +970,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         Parameters
         ----------
-        state : 状态字典，包含位移场等信息
-        rho_val : 密度场（用于应力惩罚，拓扑优化时需要）
+        state : 状态字典, 包含位移场等信息
+        rho_val : 密度场 (用于应力惩罚, 拓扑优化时需要)
         integration_order : 积分阶次
             默认为 1, 单纯形上即单元形心单点. 局部应力约束不传该参数, 故此
             默认值就是约束的评价位置, 属问题定义而非数值参数; 与
@@ -979,7 +979,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         
         Returns
         -------
-        dict : 包含以下键值：
+        dict : 包含以下键值:
             - 'stress_apparent': 积分点处的表观应力张量 (NC, NQ, NS)
         """
         if integration_order is None:
@@ -1010,7 +1010,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     ###############################################################################################
 
     def compute_local_stress_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
-        """计算局部应力矩阵 A 关于物理密度的导数（灵敏度）"""
+        """计算局部应力矩阵 A 关于物理密度的导数 (灵敏度)"""
         if self._lambda0_rho is None or self._lambda1_rho is None:
             material_vals = self._interpolation_scheme.interpolate_material(
                                             material=self._material, 
@@ -1080,7 +1080,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         stress_dof : TensorLike, shape (gdof,)
             全局应力自由度向量
         integration_order : int, optional
-            积分阶数，默认使用分析器的积分阶数
+            积分阶数, 默认使用分析器的积分阶数
             
         Returns
         -------
@@ -1157,7 +1157,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
         non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
 
-        # 修复：只选取适当数量的值对应设置
+        # 修复: 只选取适当数量的值对应设置
         # 找出所有边界DOF对应的行索引
         bd_rows = bm.where(loc_flag)[0]
         new_col = bm.empty((NNZ,), **indices_context)
@@ -1195,14 +1195,14 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             bc_edge = mesh.entity_barycenter('edge')
             disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
 
-        # 简化逻辑：不再检查 ndim==2，默认全模型下的标记是 1D 布尔数组
+        # 简化逻辑: 不再检查 ndim==2, 默认全模型下的标记是 1D 布尔数组
         bdedge = bd_edge_flag & disp_edge_flag
 
         # 2. 排除本质边界 (Essential BC) 的干扰
-        # 虽然 PDE 定义中通常互斥，但保留此检查更健壮
+        # 虽然 PDE 定义中通常互斥, 但保留此检查更健壮
         if 'essential_bc' in mesh.edgedata:
             essential_bc = mesh.edgedata['essential_bc']
-            # 如果 essential_bc 意外是 2D 的 (旧代码遗留)，将其压缩为 1D
+            # 如果 essential_bc 意外是 2D 的 (旧代码遗留), 将其压缩为 1D
             if essential_bc.ndim == 2:
                 essential_bc_1d = bm.any(essential_bc, axis=1)
             else:
@@ -1235,8 +1235,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # 获取位移边界函数
         gd = getattr(self._pde, "displacement_bc", None)
         if gd is None or (not callable(gd)):
-            # 如果没有定义 displacement_bc，默认位移为 0 (齐次)，直接返回零向量
-            # (通常底部固支 u=0，此时该积分为0，可以直接返回，节省计算)
+            # 如果没有定义 displacement_bc, 默认位移为 0 (齐次), 直接返回零向量
+            # (通常底部固支 u=0, 此时该积分为0, 可以直接返回, 节省计算)
             return bm.zeros(gdof, dtype=bm.float64, device=space.device)
         
         # 4. 循环计算
@@ -1252,10 +1252,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
             # 计算 tau · n (测试函数应力 在法向上的投影)
             # phi 的形状通常是 (..., 3) 对应 Voigt [xx, yy, xy] 或 [xx, xy, yy]
-            # 这里假设 space.basis 返回的是标准 Voigt 顺序，需根据具体空间确认 symidx 映射
+            # 这里假设 space.basis 返回的是标准 Voigt 顺序, 需根据具体空间确认 symidx 映射
             en_curr = en[flag, None, None, :]
             
-            # 投影逻辑：假设 phi 输出为 [tau_xx, tau_xy, tau_yy]
+            # 投影逻辑: 假设 phi 输出为 [tau_xx, tau_xy, tau_yy]
             # (tau . n)_x = tau_xx * n_x + tau_xy * n_y
             # (tau . n)_y = tau_xy * n_x + tau_yy * n_y
             phi_n[flag, ..., 0] = bm.sum(phi[..., symidx[0]] * en_curr, axis=-1)
@@ -1266,7 +1266,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             gd_val[flag] = gd(points)
         
         # 5. 积分组装 (简化版)
-        # 直接计算点积 <phi_n, u_D>，无需 mask
+        # 直接计算点积 <phi_n, u_D>, 无需 mask
         val = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phi_n, gd_val)
         
         cell2dof = space.cell_to_dof()[e2c[:, 0]]

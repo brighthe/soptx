@@ -3,11 +3,11 @@
 
 本脚本不实现任何物理或数值算法, 只按 ``cases.toml`` 以**子进程**调用
 ``examples/`` 与 ``tools/`` 下已有的脚本, 再由 ``collect.py`` 把产物收成
-一份带溯源的入库快照。
+一份带溯源的入库快照.
 
 用子进程而非导入函数, 有一个硬性理由: (b) 的峰值内存取 ``ru_maxrss``,
 它是进程级高水位、无法按对象归因, 所以每个数据点必须独占一个进程 ——
-同一进程里先建 FA 再建 EA, 测出来的 EA 峰值是被 FA 抬高过的。
+同一进程里先建 FA 再建 EA, 测出来的 EA 峰值是被 FA 抬高过的.
 
 命令:
     # 列出全部数据点
@@ -51,7 +51,7 @@ def command_list(cases: tuple[config.Case, ...], figure: dict) -> int:
         present = "有" if case.artifact_path.is_file() else "缺"
         print(f"{case.id:14} {case.panel:3} {case.role:14} {present:6} {case.summary}")
     # 哪一格是占位由注册情况决定, 不写死在这里 —— 写死过一次, 结果数据组 (c) 的
-    # case 注册上以后这行还在说"尚无数据点"。
+    # case 注册上以后这行还在说"尚无数据点".
     empty = [panel for panel in config.PANELS
              if not any(case.panel == panel for case in cases)]
     if empty:
@@ -93,8 +93,8 @@ def command_run(cases: tuple[config.Case, ...], *, check_only: bool,
         print(f"\n{prefix}: {case.summary}")
         print(f"  $ {printable}", flush=True)
         started = time.perf_counter()
-        # 不捕获输出: 这些 case 单档可达数分钟, 需要让进度直接可见。
-        # artifact 允许带子目录 (如 mpi/...), 子进程不负责建目录。
+        # 不捕获输出: 这些 case 单档可达数分钟, 需要让进度直接可见.
+        # artifact 允许带子目录 (如 mpi/...), 子进程不负责建目录.
         if case.output_mode == "file":
             case.artifact_path.parent.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(
@@ -126,7 +126,7 @@ def command_collect(cases: tuple[config.Case, ...], figure: dict) -> int:
     try:
         snapshot = collect.build(cases, figure)
     except collect.CollectError as error:
-        # 产物缺失是常态入口错误 (还没跑), 不是异常, 不该抛 traceback。
+        # 产物缺失是常态入口错误 (还没跑), 不是异常, 不该抛 traceback.
         print(f"采集失败: {error}", file=sys.stderr)
         return 1
     path = collect.write(snapshot)
@@ -161,7 +161,7 @@ def command_collect(cases: tuple[config.Case, ...], figure: dict) -> int:
         print("\n注意: 工作区 dirty 或无 git 溯源, 这批数字属开发证据, "
               "不可复现。正式投递前须在 clean revision 上重跑。")
 
-    # 文档里的证据表与快照同源: collect 一次就刷一次, 不留手工同步的缝。
+    # 文档里的证据表与快照同源: collect 一次就刷一次, 不留手工同步的缝.
     try:
         document = report.update(snapshot_path=path)
         print(f"证据表已刷新: {document}")

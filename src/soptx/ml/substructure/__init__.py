@@ -1,4 +1,4 @@
-"""子结构机器学习的数据、训练与 artifact 契约。"""
+"""子结构机器学习的数据、训练与 artifact 契约."""
 
 from .artifacts import (
     ArchitectureSignature,

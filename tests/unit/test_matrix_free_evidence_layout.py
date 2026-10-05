@@ -21,7 +21,7 @@ def validation_summaries(dimension: int) -> set:
 
 
 def test_serial_case_names_are_stable():
-    """阶段 1a 的默认范围只有单 rank 算例, EA 与 FA 同档各三档。"""
+    """阶段 1a 的默认范围只有单 rank 算例, EA 与 FA 同档各三档."""
 
     assert {
         layout.case_name(role, operator_level, ranks)
@@ -37,7 +37,7 @@ def test_serial_case_names_are_stable():
 
 
 def test_parallel_case_names_are_stable():
-    """阶段 1b 在 1a 之上恰好追加一个 2-rank 算例。"""
+    """阶段 1b 在 1a 之上恰好追加一个 2-rank 算例."""
 
     assert {
         layout.case_name(role, operator_level, ranks)

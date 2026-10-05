@@ -8,7 +8,7 @@
     python driver.py --case half_mbb_2d_concentrated --override simp_penalty=4.0
 
 ``--case`` 只认注册工况 id; 带 override 的运行不在注册表里, 由 id + override 推导
-出 run_id (= 产物目录 outputs/<工况 id>/<参数标签>/), 一条命令一次运行。
+出 run_id (= 产物目录 outputs/<工况 id>/<参数标签>/), 一条命令一次运行.
 """
 
 from __future__ import annotations
@@ -78,9 +78,9 @@ def _publish(staging: Path, target: Path) -> None:
 
     两次 rename 各自原子, 所以 target 在任一时刻要么是上一次的完整结果,
     要么是这一次的, 不会出现 "新 VTU 配旧 summary.json" 这种混合目录 ——
-    collect 判完成只看 summary.json 在不在, 混合目录会被它当成有效结果。
+    collect 判完成只看 summary.json 在不在, 混合目录会被它当成有效结果.
     崩在两次 rename 之间只会留下 .partial/ 与 .previous/, 都不是注册的
-    产物目录, collect 视而不见, 下次运行开头清掉。
+    产物目录, collect 视而不见, 下次运行开头清掉.
     """
     previous = target.with_name(target.name + ".previous")
     if previous.exists():
@@ -96,9 +96,9 @@ def _write_density_vtu_history(
     raw_history: Any,
     output_dir: Path,
 ) -> dict[str, Any]:
-    """把全部迭代密度写为 VTU，并生成 ParaView PVD 时间序列.
+    """把全部迭代密度写为 VTU, 并生成 ParaView PVD 时间序列.
 
-    output_dir 是 _stage_dir 给的空暂存目录, 不必清理旧帧。
+    output_dir 是 _stage_dir 给的空暂存目录, 不必清理旧帧.
     """
     vtu_dir = output_dir / "vtu"
     vtu_dir.mkdir(parents=True, exist_ok=True)
@@ -156,26 +156,26 @@ def run_case(
     if case.overrides:
         pairs = ", ".join(f"{name}={text}" for name, text in case.overrides)
         note = f" (override: {pairs})"
-    # 头行报 run_id, 它就是 outputs/ 下的产物目录路径; 收尾的 [out] 报同一个名字。
+    # 头行报 run_id, 它就是 outputs/ 下的产物目录路径; 收尾的 [out] 报同一个名字.
     print(f"[run] {case.run_id}{note}: {FORMULATION}, {case.summary}")
     optimizer, design_variable, density_distribution, mesh, analyzer = (
         build_pipeline(case)
     )
     n_cells = int(mesh.number_of_cells())
     n_nodes = int(mesh.number_of_nodes())
-    # 位移自由度按张量空间实取: P>1 时不等于 节点数 x 维数。
+    # 位移自由度按张量空间实取: P>1 时不等于 节点数 x 维数.
     n_dofs = int(analyzer.tensor_space.number_of_global_dofs())
     scalar_space = analyzer.scalar_space
     # 优化侧参数一律读活对象: cases.toml 未声明的 OC 高级项取库默认值,
-    # 只有打出来才不会隐身。
+    # 只有打出来才不会隐身.
     opts = optimizer.options
     rho0 = float(
         np.mean(np.asarray(bm.to_numpy(density_distribution[:]), dtype=np.float64))
     )
-    # 以下分行与 cases.toml 同一分类轴: A 问题 / B 离散 / C 拓扑建模 / D 算法。
+    # 以下分行与 cases.toml 同一分类轴: A 问题 / B 离散 / C 拓扑建模 / D 算法.
     # 各行里能用 --override 改的数值一律打 cases.toml 的字段名 (simp_penalty 而
-    # 非 p): 回执上看到的名字就是命令行能用的名字。cases.toml 未声明、取库默认值的
-    # OC 高级项打库属性全名; A 层只有 E / nu 例外, 保留连续问题的论文符号。
+    # 非 p): 回执上看到的名字就是命令行能用的名字. cases.toml 未声明、取库默认值的
+    # OC 高级项打库属性全名; A 层只有 E / nu 例外, 保留连续问题的论文符号.
     print(
         f"[problem] {case.problem} ({analyzer.pde.plane_type}), "
         f"domain={_join(case.domain)}, "
@@ -235,7 +235,7 @@ def run_case(
         f"终止准则 max_iter={opts.max_iterations} 或 "
         f"tol_change<={opts.change_tolerance:g}"
     )
-    # 组件默认静默 (供 compare/测试等程序化调用)；CLI 交互运行打开逐迭代日志.
+    # 组件默认静默 (供 compare/测试等程序化调用); CLI 交互运行打开逐迭代日志.
     if not quiet:
         optimizer.enable_logging(True)
     density, raw_history = optimizer.optimize(
@@ -247,12 +247,12 @@ def run_case(
     history = _history_records(raw_history)
     if not history:
         raise RuntimeError(f"运行 {case.run_id} 未生成优化历史.")
-    # 全部产物先写进暂存目录, 最后一步整目录换上去 (见 _publish)。
+    # 全部产物先写进暂存目录, 最后一步整目录换上去 (见 _publish).
     staging = _stage_dir(case.output_dir)
     # 密度只存 VTU: pyevtk 写的是 appended raw float64, read_vtu_cell_data
-    # 读回逐位相同, 所以 collect/compare 直接以 VTU 为数据源, 不再另存 .npy。
+    # 读回逐位相同, 所以 collect/compare 直接以 VTU 为数据源, 不再另存 .npy.
     # density_final.vtu 与 vtu/ 下末次迭代内容相同, 单独写一份是为了在
-    # ParaView 里一眼可见最终构型 (口径同 huzhang_topopt_paper)。
+    # ParaView 里一眼可见最终构型 (口径同 huzhang_topopt_paper).
     write_vtu(
         mesh=mesh,
         filepath=str(staging / "density_final"),
@@ -280,15 +280,15 @@ def run_case(
         "case_id": case.id,
         "run_id": case.run_id,
         # 影响结果的参数一次性按字段名原样落盘, 与 cases.toml 出自同一份声明:
-        # 这里不重新起名、不挑字段, 少一个就是门禁少查一个。
+        # 这里不重新起名、不挑字段, 少一个就是门禁少查一个.
         "config": config_values(case),
         # override 原文按字段名排序落盘; collect 据此在注册表基准上重放出同一次
-        # 运行, ea/compare 据此在 FA 侧重放出配对运行。参数取值已在 config 块里。
+        # 运行, ea/compare 据此在 FA 侧重放出配对运行. 参数取值已在 config 块里.
         "overrides": dict(case.overrides) or None,
         "method": "FA-SIMP",
         "assembly_level": "full",
         "backend": "fealpy-numpy",
-        # 以下为求解过程算出来的量, 不是注册表里的参数。
+        # 以下为求解过程算出来的量, 不是注册表里的参数.
         "plane_type": analyzer.pde.plane_type,
         "mesh_layout": MESH_LAYOUT,
         "n_cells": int(density_array.size),
@@ -322,7 +322,7 @@ def run_case(
 
 def build_parser() -> argparse.ArgumentParser:
     # allow_abbrev=False: run.py 把它不认识的参数原样透传到这里, 前缀匹配会把
-    # 写错的选项静默认成另一个, 报错比猜好。
+    # 写错的选项静默认成另一个, 报错比猜好.
     parser = argparse.ArgumentParser(
         prog="driver.py",
         description="FA 变密度拓扑优化的单次运行驱动",
@@ -423,7 +423,7 @@ def main(argv: list[str] | None = None) -> int:
 
     bm.set_backend("numpy")
     _, cases = load()
-    # id 全表唯一由 config.load 保证, 这里最多命中一条。
+    # id 全表唯一由 config.load 保证, 这里最多命中一条.
     selected = tuple(case for case in cases if case.id == arguments.case)
     if not selected:
         parser.error(f"没有匹配的工况: {arguments.case}")

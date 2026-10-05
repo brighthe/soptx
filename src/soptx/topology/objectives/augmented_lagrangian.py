@@ -8,7 +8,7 @@ from soptx.core import BaseLogged, timer
 from soptx.topology.constraints.stress_formulation import StressConstraintProtocol
 from soptx.topology.objectives.volume import VolumeObjective
 
-# 使用 TYPE_CHECKING 避免循环导入，仅用于类型提示
+# 使用 TYPE_CHECKING 避免循环导入, 仅用于类型提示
 if TYPE_CHECKING:
     from soptx.topology.optimizers.al_mma import ALMMMAOptions
 
@@ -64,7 +64,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 最大罚因子 μ_max
         self.mu_max = float(options.mu_max)
         # 乘子安全阈 λ_max (None 表示不设上限, 复现无阈更新); 用 getattr 读取,
-        # 使单测可用 SimpleNamespace 注入不含该字段的选项对象。
+        # 使单测可用 SimpleNamespace 注入不含该字段的选项对象.
         lambda_max = getattr(options, 'lambda_max', None)
         self.lambda_max = None if lambda_max is None else float(lambda_max)
         if self.lambda_max is not None and not (
@@ -109,7 +109,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         # 2. 计算应力约束 g
         g = self._stress_constraint.fun(density, state) # 单分辨率: (NC, NQ) | 多分辨率: (NC, n_sub, NQ)
 
-        # 设计约定断言：每单元恰好1个应力评估点
+        # 设计约定断言: 每单元恰好1个应力评估点
         assert g.shape[-1] == 1, (
                         f"要求 NQ=1，但实际 NQ={g.shape[-1]}，请检查积分阶数设置。"
                     )
@@ -166,16 +166,16 @@ class AugmentedLagrangianObjective(BaseLogged):
         self.fun(density=density, state=state)
 
         # ------------------------------------------------------------------ #
-        # 第一步：准备公共中间量
+        # 第一步: 准备公共中间量
         # ------------------------------------------------------------------ #
         g    = self._cache_g   # (NC, NQ) 或 (NC, n_sub, NQ)
         h    = self._cache_h   # (NC, NQ) 或 (NC, n_sub, NQ)
 
-        # 激活集：当 g > -λ/μ 时约束激活，h = g；否则 h = -λ/μ，梯度为零
+        # 激活集: 当 g > -λ/μ 时约束激活, h = g; 否则 h = -λ/μ, 梯度为零
         mask = g > (-self.lamb / self.mu)  # 与 g、h 同形
 
         # ------------------------------------------------------------------ #
-        # 第二步：计算 dP/d(σ^vM)，用于构造伴随载荷. 具体约束模型
+        # 第二步: 计算 dP/d(σ^vM), 用于构造伴随载荷. 具体约束模型
         # 的 ∂g/∂σ^vM 由约束对象给出, 避免按有限元类型猜测约束形式.
         # ------------------------------------------------------------------ #
         dhdVM_val = self._stress_constraint.compute_gradient_wrt_von_mises(state)
@@ -193,7 +193,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         dPenaldm_E_explicit = bm.where(mask, (self.lamb + self.mu * h) * dgdm_E, 0.0)  # (NC, NQ) 或 (NC, n_sub, NQ)
 
         # ------------------------------------------------------------------ #
-        # 第四步：伴随法求解隐式偏导数 ∂P/∂m_E|_implicit
+        # 第四步: 伴随法求解隐式偏导数 ∂P/∂m_E|_implicit
         #
         #   组装伴随载荷: F_adj = ∂P/∂(状态变量)
         #     位移元作用在位移自由度: F_adj = (∂σ^v/∂U)^T · dP/dσ^v
@@ -220,9 +220,9 @@ class AugmentedLagrangianObjective(BaseLogged):
         dPenaldm_E_implicit = self._stress_constraint.compute_implicit_sensitivity_term(adjoint_vector, state)  # (NC,) 或 (NC, n_sub)
         
         # ------------------------------------------------------------------ #
-        # 第五步：链式法则组装 dP/dρ
+        # 第五步: 链式法则组装 dP/dρ
         # ------------------------------------------------------------------ #
-        # 显式项对 NQ 维度求和，还原为单元级标量
+        # 显式项对 NQ 维度求和, 还原为单元级标量
         dPenaldm_E_explicit_reduced = bm.sum(dPenaldm_E_explicit, axis=-1)  # (NC,) 或 (NC, n_sub)
 
         # 计算 dm_E/dρ = (dE/dρ) / E₀
@@ -234,7 +234,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         dP_drho = (dPenaldm_E_explicit_reduced + dPenaldm_E_implicit) * dm_E_drho
 
         # ------------------------------------------------------------------ #
-        # 第六步：归一化并组装总梯度
+        # 第六步: 归一化并组装总梯度
         #   dJ/dρ = ∂f/∂ρ + (1/N) · dP/dρ
         # ------------------------------------------------------------------ #
         dVol_drho     = self._volume_objective.jac(density=density, state=state)
@@ -265,7 +265,7 @@ class AugmentedLagrangianObjective(BaseLogged):
         ``L = f_V + (1 / N_c) * sum(lambda_j * g_j)``
 
         中的当前 AL 乘子 ``lambda``. 该梯度不含增广罚项 ``mu`` 和截断函数
-        ``h``，用于原问题的一阶最优性诊断，不能以 AL 子问题梯度替代.
+        ``h``, 用于原问题的一阶最优性诊断, 不能以 AL 子问题梯度替代.
 
         Parameters
         ----------
@@ -316,7 +316,7 @@ class AugmentedLagrangianObjective(BaseLogged):
                                           dP_drho_norm: TensorLike, 
                                           step_k: int = 0) -> None:
         """
-        验证体积梯度与惩罚项梯度是否在同一数量级，辅助校准 mu_0
+        验证体积梯度与惩罚项梯度是否在同一数量级, 辅助校准 mu_0
         """
         # 计算最大绝对值 (无穷大范数)
         max_vol_grad = bm.max(bm.abs(dVol_drho))

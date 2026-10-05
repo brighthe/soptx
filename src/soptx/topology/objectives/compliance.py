@@ -92,7 +92,7 @@ class ComplianceObjective(BaseLogged):
                 B_u_sigma = B_sigma_u.T
                 A = self._analyzer.get_stress_matrix(rho_val=density)
                 # 应力矩阵 A 只在这里解一次, 分解不跨调用复用; MUMPS 上下文
-                # 与 MPI 初始化都由 DirectSolver 自己管, 调用方不必再准备。
+                # 与 MPI 初始化都由 DirectSolver 自己管, 调用方不必再准备.
                 solver = create('mumps')
                 try:
                     x, _ = solver.setup(A).solve(B_sigma_u @ uh[:])

@@ -118,7 +118,7 @@ def _replay_case(
     重放成功、run_id 与目录路径一致、且 summary 里的 config 快照与重放结果逐字段
     相同才算认领; 否则返回原因文本 (注册表已删掉该工况、override 在当前注册表上
     非法、目录路径与参数推导不符、或注册表基准参数改过而产物还是旧参数跑的),
-    由 collect 记为 unclaimed, 不当成有效结果, 也不静默跳过。
+    由 collect 记为 unclaimed, 不当成有效结果, 也不静默跳过.
     """
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     base = registered.get(summary.get("case_id"))
@@ -145,17 +145,17 @@ def collect() -> dict[str, Any]:
     """汇总 outputs/ 下全部运行 (基准 + override), 并列出未运行的注册工况.
 
     运行清单从 outputs/ 枚举而不是从注册表推导: override 运行不在注册表里,
-    只有落盘的 summary.json 知道它们存在。每个目录都在当前注册表上重放一遍
-    再验收, 保证汇总里的参数快照与产物一致。
+    只有落盘的 summary.json 知道它们存在. 每个目录都在当前注册表上重放一遍
+    再验收, 保证汇总里的参数快照与产物一致.
     """
     meta, cases = load()
     registered = {case.id: case for case in cases}
     runs: dict[str, dict[str, Any]] = {}
     unclaimed: dict[str, str] = {}
-    # 产物目录两层 outputs/<工况 id>/<参数标签>/, run_id 就是这两段的相对路径。
+    # 产物目录两层 outputs/<工况 id>/<参数标签>/, run_id 就是这两段的相对路径.
     for summary_path in sorted(OUTPUT_DIR.glob("*/*/summary.json")):
         run_dir = summary_path.parent
-        # .partial / .previous 是 driver.py 原子发布的中间态, 不是产物目录。
+        # .partial / .previous 是 driver.py 原子发布的中间态, 不是产物目录.
         if run_dir.suffix in {".partial", ".previous"}:
             continue
         case = _replay_case(registered, run_dir)
@@ -171,7 +171,7 @@ def collect() -> dict[str, Any]:
         "meta": meta,
         "runs": runs,
         "completed_run_ids": sorted(runs),
-        # 注册工况的基准运行尚未落盘的; override 运行没有 "待运行" 概念。
+        # 注册工况的基准运行尚未落盘的; override 运行没有 "待运行" 概念.
         "pending_case_ids": [case.id for case in cases if case.id not in runs],
         "unclaimed_run_dirs": unclaimed,
     }

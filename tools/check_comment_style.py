@@ -19,8 +19,8 @@ SCAN_ROOTS = ("src", "tools", "tests", "examples", "experiments")
 SKIP_PARTS = {"__pycache__", "legacy", "old"}
 FULLWIDTH_PUNCTUATION = "，。；：！？（）【】“”‘’"
 
-# 棘轮基线: 2026-08-28 的存量违规数. 只允许下调, 不允许上调.
-FULLWIDTH_BASELINE = 645
+# 棘轮基线: 存量违规数 (全角标点 2026-10-05 清理, 缺 docstring 2026-08-28). 只允许下调, 不允许上调.
+FULLWIDTH_BASELINE = 3
 MISSING_DOCSTRING_BASELINE = 314
 
 # 自 FEALPy 移植而尚未补齐中文 docstring 的路径, 暂不计入棘轮. 2026-10 移植的代码已全部

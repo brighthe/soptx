@@ -1,46 +1,46 @@
 """拉格朗日位移元求解线弹性问题的制造解收敛阶算例 (CPU 串行).
 
 目的是用尽量少的代码走通一条完整的求解链: 装配 -> 施加边界条件 -> 求解 ->
-与制造解比较, 并观察 L2 误差的收敛阶。二维和三维共用同一段流程, 只有网格类型、
-问题类和材料假设按维数选择。
+与制造解比较, 并观察 L2 误差的收敛阶. 二维和三维共用同一段流程, 只有网格类型、
+问题类和材料假设按维数选择.
 
 ``--operator-level`` 决定这条链上的离散算子怎么存、怎么作用 (``fa`` 全局 CSR、
-``ea`` 逐单元 K_e、``pa`` 逐积分点几何量), 缺省 ``fa``。三者描述同一个离散算子,
+``ea`` 逐单元 K_e、``pa`` 逐积分点几何量), 缺省 ``fa``. 三者描述同一个离散算子,
 收敛阶必须一致, 因此各跑一条误差链就是各自的正确性证据 —— 这比"与 FA 的作用
-结果相同"更强: 后者在 K_e 本身算错时会一致通过。``ea``/``pa`` 没有显式矩阵,
-只能配 ``--solver cg``。
+结果相同"更强: 后者在 K_e 本身算错时会一致通过. ``ea``/``pa`` 没有显式矩阵,
+只能配 ``--solver cg``.
 
 与 ``examples/matrix_free_elasticity`` 的关系: 那里同时承担 MPI 重叠副本、
-FA/EA 双路对照和可重放 evidence 三件事, 因此有十余个模块。本算例只保留 CPU
-串行这一条主路径, 不导入那个目录的任何模块, 也不生成 evidence。想看并行,
-去读那个目录; 想看"有限元怎么把方程解出来", 读这一个文件就够。
+FA/EA 双路对照和可重放 evidence 三件事, 因此有十余个模块. 本算例只保留 CPU
+串行这一条主路径, 不导入那个目录的任何模块, 也不生成 evidence. 想看并行,
+去读那个目录; 想看"有限元怎么把方程解出来", 读这一个文件就够.
 
 问题类和材料类直接取自 ``soptx``, 没有本地适配层 —— 这本身就是算例的一部分:
-它验证维护中的 Problem 满足 ``DirichletElasticityProblem`` 契约。
+它验证维护中的 Problem 满足 ``DirichletElasticityProblem`` 契约.
 
 判据两项, 都无歧义:
 
 * 真相对残差 ``||K u - F|| / ||F||`` —— 线性系统是否真的解开了;
-* 最细一档的 L2 观测收敛阶 —— 离散是否正确。P1 与 Q1 元的 L2 误差理论阶都是
-  2, 阈值取 1.5, 与 ``tools/matrix_free_evidence/contract.py`` 的门禁一致。
+* 最细一档的 L2 观测收敛阶 —— 离散是否正确. P1 与 Q1 元的 L2 误差理论阶都是
+  2, 阈值取 1.5, 与 ``tools/matrix_free_evidence/contract.py`` 的门禁一致.
 
 用 ``cg`` 时额外要求每一层都收敛: 迭代解法的真残差达标只说明这一次侥幸解对了,
-没收敛却残差合格不能算通过。
+没收敛却残差合格不能算通过.
 
 网格类型与制造解都按维数配对: 网格 2D 是 ``tri``/``quad``、3D 是
 ``tet``/``hex``; 模型 2D 是 ``sinusoidal``/``exp-sine`` (全 Dirichlet) 与
-``mixed-sinusoidal``/``mixed-exp-sine`` (混合边界), 3D 只有 ``divfree-poly``。
-交叉组合在入口报错。各制造解的完整数学定义见
-`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__。
+``mixed-sinusoidal``/``mixed-exp-sine`` (混合边界), 3D 只有 ``divfree-poly``.
+交叉组合在入口报错. 各制造解的完整数学定义见
+`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__.
 
 两个 ``mixed-`` 模型的右端项多一段 traction 边界积分, 走的是全 Dirichlet 模型
-碰不到的面积分装配路径; 它们的强 Dirichlet 只施加在 Gamma_D 上。``quad`` 与 ``hex`` 是张量积网格, FEALPy 4.0.0 在这两条路上都出过基
+碰不到的面积分装配路径; 它们的强 Dirichlet 只施加在 Gamma_D 上. ``quad`` 与 ``hex`` 是张量积网格, FEALPy 4.0.0 在这两条路上都出过基
 函数缺陷, 见 ``docs/known-issues/fealpy-patches.md`` 第一节; 那里的判据落
-在基函数层, 这里的收敛阶落在求解层, 两者不能互相替代。
+在基函数层, 这里的收敛阶落在求解层, 两者不能互相替代.
 
 前置: SOPTX 需以 editable 方式安装 (``pip install -e .``, 见仓库 README),
 这样 ``import soptx`` 直接解析到工作树的 ``src/soptx``, 脚本里不必再改
-``sys.path``。
+``sys.path``.
 
 运行::
 
@@ -56,11 +56,11 @@ FA/EA 双路对照和可重放 evidence 三件事, 因此有十余个模块。�
     python examples/lagrange_elasticity/manufactured_convergence_demo.py --operator-level ea --solver cg
 
 全部门禁在 ``run_manufactured_convergence_benchmark`` 内以运行时断言实现: 任一项不达标
-即抛 ``AssertionError`` 且不写任何文件, 全部通过才落盘 JSON 证据。契约与实测证据见同目录
-``results_analysis.md``。
+即抛 ``AssertionError`` 且不写任何文件, 全部通过才落盘 JSON 证据. 契约与实测证据见同目录
+``results_analysis.md``.
 
 ``--output-dir`` 缺省为本脚本同级的 ``outputs/``, 按脚本位置解析, 与从哪个目录发起命令
-无关; 传相对路径时按当前工作目录解析, 可能落到 ``.gitignore`` 覆盖范围之外。
+无关; 传相对路径时按当前工作目录解析, 可能落到 ``.gitignore`` 覆盖范围之外.
 """
 
 from __future__ import annotations
@@ -100,19 +100,19 @@ from soptx.problems import (
 RESIDUAL_TOLERANCE = 1.0e-10
 MINIMUM_L2_ORDER = 1.5
 
-# 各维度最粗一档的每方向单元数缺省值, 之后逐层加倍; 可用 ``--base`` 覆盖。
+# 各维度最粗一档的每方向单元数缺省值, 之后逐层加倍; 可用 ``--base`` 覆盖.
 #
 # 缺省值按各维度的单档成本定: 2D 从 8 起, 三档就落在误差已进入渐近区的网格上;
-# 3D 从 4 起, 因为同样的每方向剖分数在 3D 是三次方的自由度。
+# 3D 从 4 起, 因为同样的每方向剖分数在 3D 是三次方的自由度.
 #
 # 要把两个维度放在同一段 h 区间上并排比较 (例如图表里 2D/3D 两条链画在一起),
 # 用 ``--base`` 显式对齐, 不要改这里的缺省值 —— 缺省值一动, 已归档的整套证据
-# 就都不再能用缺省命令复现。
+# 就都不再能用缺省命令复现.
 #
 # 基数与层数一起决定加密序列, 因此它们随每次运行记进 JSON 的
 # ``base_subdivisions`` 与 ``refinement_levels``: 文件名只区分配置
 # (维数/网格/模型/次数/求解器), 不区分加密序列, 同一配置换一组序列重跑会覆盖
-# 旧文件, 靠 JSON 内部这两项自述当前口径。
+# 旧文件, 靠 JSON 内部这两项自述当前口径.
 BASE_SUBDIVISIONS = {2: 8, 3: 4}
 
 # 各维度可用的网格类型; 交叉组合 (2D 的 hex、3D 的 quad) 在入口报错
@@ -138,42 +138,42 @@ SolverName = Literal["scipy", "mumps", "cg"]
 DIRECT_SOLVERS: tuple[SolverName, ...] = ("scipy", "mumps")
 ITERATIVE_SOLVERS: tuple[SolverName, ...] = ("cg",)
 
-# 与 LagrangeFEMAnalyzer 的 assembly_method 形参取值域保持一致。三条路径描述的是
-# 同一个双线性型, 只是收缩次序不同, 差别在装配期的临时数组规模。
+# 与 LagrangeFEMAnalyzer 的 assembly_method 形参取值域保持一致. 三条路径描述的是
+# 同一个双线性型, 只是收缩次序不同, 差别在装配期的临时数组规模.
 #
 # 注意是"同一个数学量", 不是"逐位相同的浮点数": 收缩次序变了舍入就变, 再经刚度阵
-# (2D 上 κ ~ h^-2) 放大。实测 standard 与 fast 在 quad / tri 两条链上的 L2 误差
+# (2D 上 κ ~ h^-2) 放大. 实测 standard 与 fast 在 quad / tri 两条链上的 L2 误差
 # 逐档相对偏差约 1e-11 ~ 1e-15 量级, 最细一档最大 (quad 1.6e-11, tri 6.6e-11),
-# 观测收敛阶到小数点后四位完全相同。所以判等要用相对误差阈值, 不能用 ==。
+# 观测收敛阶到小数点后四位完全相同. 所以判等要用相对误差阈值, 不能用 ==.
 AssemblyMethodName = Literal["standard", "voigt", "fast"]
 ASSEMBLY_METHODS: tuple[AssemblyMethodName, ...] = ("standard", "voigt", "fast")
 
-# 与 LagrangeFEMAnalyzer 的 operator_level 形参取值域保持一致。四个层级描述的是同一个
+# 与 LagrangeFEMAnalyzer 的 operator_level 形参取值域保持一致. 四个层级描述的是同一个
 # 离散算子, 只是存储与作用方式不同 (fa 持有全局 CSR, ea 逐单元 K_e, pa 逐积分点几何量,
 # ua 零常驻、每次作用现算几何量), 因此收敛阶必须一致 —— 这正是拿它们各跑一条误差链要验
-# 的东西。ua 与 pa 更强: ua 每次作用现调一次 PartialAssembly.build 再把算子丢掉, 内核
+# 的东西. ua 与 pa 更强: ua 每次作用现调一次 PartialAssembly.build 再把算子丢掉, 内核
 # 构造与数据流走的都是 pa 那一份代码, 作用结果逐位相同, 因此误差链与 niter 列也应逐位
-# 相同, 不只是吻合。
+# 相同, 不只是吻合.
 OperatorLevelName = Literal["fa", "ea", "pa", "ua"]
 OPERATOR_LEVELS: tuple[OperatorLevelName, ...] = ("fa", "ea", "pa", "ua")
 
 # 与 LagrangeFEMAnalyzer.solve_system 的 precond 取值域保持一致, 另加一个显式的
 # "none" —— 缺省不带预条件子这件事必须落在纸面上: 无预条件 cg 的迭代数按 O(h^-1)
 # 翻倍 (κ ~ h^-2), 一条收敛链的 niter 列是 5/24/54/110/220 还是常数, 结论完全不同,
-# 产物里不记就无从判读。'jacobi' 取对角逆; 'scipy'/'mumps' 是把直接法当预条件子
-# (精确逆, cg 应一步收敛), 只用于验证两个层级确实是同一个离散算子。
+# 产物里不记就无从判读.'jacobi' 取对角逆; 'scipy'/'mumps' 是把直接法当预条件子
+# (精确逆, cg 应一步收敛), 只用于验证两个层级确实是同一个离散算子.
 PreconditionerName = Literal["none", "jacobi", "scipy", "mumps"]
 PRECONDITIONERS: tuple[PreconditionerName, ...] = ("none", "jacobi", "scipy", "mumps")
 
 # ea / pa / ua 都不组装全局矩阵 (ea 只持有逐单元的 K_e, pa 与 ua 连单元矩阵也不存),
-# 直接解法无从分解, 只能配迭代解法。
+# 直接解法无从分解, 只能配迭代解法.
 MATRIX_FREE_LEVELS: tuple[OperatorLevelName, ...] = ("ea", "pa", "ua")
 
 
 def _sinusoidal_2d() -> tuple:
     """u=(sin(pi x) sin(pi y), 0), 全 Dirichlet.
 
-    第二个位移分量恒为零, 因此两个分量之间的耦合项基本不被激活。
+    第二个位移分量恒为零, 因此两个分量之间的耦合项基本不被激活.
     """
 
     domain = (0.0, 1.0, 0.0, 1.0)
@@ -190,7 +190,7 @@ def _sinusoidal_2d() -> tuple:
 def _exponential_sine_2d() -> tuple:
     """u=(e^{x-y} x(1-x) y(1-y), sin(pi x) sin(pi y)), 全 Dirichlet.
 
-    两个位移分量都非平凡, 能激活 sinusoidal 覆盖不到的耦合项。
+    两个位移分量都非平凡, 能激活 sinusoidal 覆盖不到的耦合项.
     """
 
     domain = (0.0, 1.0, 0.0, 1.0)
@@ -222,7 +222,7 @@ def _mixed_sinusoidal_2d() -> tuple:
     """u1=u2=sin(pi x) sin(pi y); Gamma_D={x=0}∪{y=0}, Gamma_N={x=1}∪{y=1}.
 
     右端项因此多一段 traction 边界积分, 走的是全 Dirichlet 模型完全碰不到的
-    面积分装配路径。
+    面积分装配路径.
     """
 
     problem = MixedBoundarySinusoidalElasticity2D()
@@ -248,8 +248,8 @@ def _mixed_exponential_sine_2d() -> tuple:
     return problem, material, problem.domain
 
 
-# 各维度可用的制造解。材料参数一律从 problem 的属性读取而不是各写一遍字面量
-# —— 两者不一致时不会报错, 只会让收敛阶悄悄塌掉, 是这个算例最难查的错法。
+# 各维度可用的制造解. 材料参数一律从 problem 的属性读取而不是各写一遍字面量
+# —— 两者不一致时不会报错, 只会让收敛阶悄悄塌掉, 是这个算例最难查的错法.
 PROBLEM_FACTORIES = {
     2: {
         "sinusoidal": _sinusoidal_2d,
@@ -279,7 +279,7 @@ def create_mesh(
 
     ``quad`` 与 ``hex`` 是张量积网格, 走的基函数实现与单纯形网格完全不同 ——
     FEALPy 4.0.0 在这两条路上都出过基函数缺陷, 见
-    ``docs/known-issues/fealpy-patches.md`` 第一节。
+    ``docs/known-issues/fealpy-patches.md`` 第一节.
     """
 
     constructor = MESH_CONSTRUCTORS[dimension][mesh_type]
@@ -315,7 +315,7 @@ def solve_one_level(
     """在一层网格上求解, 返回误差与诊断量.
 
     这里不调用 ``analyzer.solve_state()``, 而是把它内部的三步展开写出来 ——
-    整个算例想说明的就是这三步。
+    整个算例想说明的就是这三步.
     """
 
     mesh = create_mesh(dimension, domain, subdivisions, mesh_type)
@@ -343,10 +343,10 @@ def solve_one_level(
     F0 = analyzer.assemble_body_force_vector()
 
     # 2. 边界条件: 'fa' 走对称消元, 直接改写已装配好的矩阵; 'ea'/'pa' 没有显式矩阵,
-    #    走 matrix_free 变体。混合边界模型还会先把 Gamma_N 的 traction 等效载荷加进右端项
+    #    走 matrix_free 变体. 混合边界模型还会先把 Gamma_N 的 traction 等效载荷加进右端项
     K, F = analyzer.apply_bc(K0, F0)
 
-    # 3. 求解: 直接解法或 cg。'fa' 的 K 已经过对称消元, 迭代解法从零初值起步即可;
+    # 3. 求解: 直接解法或 cg.'fa' 的 K 已经过对称消元, 迭代解法从零初值起步即可;
     #    非 'fa' 需要把 apply_bc 留下的 prescribed_solution 传成 x0, 这一步由
     #    LagrangeFEMAnalyzer.solve_system 自己补, 这里不必显式传
     uh = analyzer.tensor_space.function()
@@ -359,9 +359,9 @@ def solve_one_level(
     residual_norm = float(np.linalg.norm(np.asarray(K @ displacement - F)))
     load_norm = float(np.linalg.norm(np.asarray(F)))
     # 绝对与相对两个口径都记: 观测阶只看比值, 两者给出同一个数; 但跨维度、跨
-    # 算例比较误差大小时, 只有除掉精确解范数的相对误差可比。定义取自
+    # 算例比较误差大小时, 只有除掉精确解范数的相对误差可比. 定义取自
     # ``soptx.fem.verification``, 与 matrix-free 那条路径共用同一个函数, 两边的
-    # 数字因此可以直接对照。
+    # 数字因此可以直接对照.
     l2_error, l2_relative = solution_error(mesh, uh, problem, degree)
 
     return {
@@ -429,7 +429,7 @@ def solver_unavailable_reason(solver: str) -> str | None:
     """求解器后端不可用时返回原因, 可用则返回 None.
 
     只有 ``mumps`` 需要探测: 它依赖外部 ``mumps`` 包 (PyMUMPS), 不是 fealpy
-    自带。放在入口检查, 免得装配跑完了才在求解那一步炸。
+    自带. 放在入口检查, 免得装配跑完了才在求解那一步炸.
     """
 
     if solver != "mumps":
@@ -643,7 +643,7 @@ def run_manufactured_convergence_benchmark(
     if iterative:
         # precond 显式落成 None 而不是干脆不传: 不传时 solve_system 也回落到 None,
         # 但那样产物的 solver_options 里就看不出"到底加没加预条件子", 只能靠读源码
-        # 反推缺省。这一项是判读 niter 列的前提, 必须自述。
+        # 反推缺省. 这一项是判读 niter 列的前提, 必须自述.
         solver_options: dict[str, Any] = {
             "rtol": rtol, "atol": atol, "maxiter": maxiter,
             "precond": None if preconditioner == "none" else preconditioner,
@@ -660,9 +660,9 @@ def run_manufactured_convergence_benchmark(
         solver_options = {}
 
     # 这一行印的是命令行开关原样, 不是中文标签: 照抄就能复跑同一条链, 不必回头
-    # 查"quadrangle 对应 --mesh-type 填什么"。维数不单列 —— 网格类型已经定死了它
+    # 查"quadrangle 对应 --mesh-type 填什么". 维数不单列 —— 网格类型已经定死了它
     # (quad/tri 必是 2D, hex/tet 必是 3D); mumps 的 sym 同理, 随 --solver mumps
-    # 一并记进产物。
+    # 一并记进产物.
     print(
         f"--mesh-type {mesh_type} --model {model} --operator-level {operator_level} "
         f"--degree {degree} --solver {solver} --assembly-method {assembly_method}"
@@ -710,12 +710,12 @@ def run_manufactured_convergence_benchmark(
         for coarse, fine in zip(rows[:-1], rows[1:])
     )
 
-    # 三项门禁只判不印: 逐项"-> 通过"与表格是同一批数字的复述, 通过时是噪音。
+    # 三项门禁只判不印: 逐项"-> 通过"与表格是同一批数字的复述, 通过时是噪音.
     # 未通过才有信息量, 由下面的 AssertionError 连同超标值一起报出来 (退出码非零);
-    # 要看阈值与逐项判定就读产物或走 experiments/*/compare.py。
+    # 要看阈值与逐项判定就读产物或走 experiments/*/compare.py.
     #
     # 迭代解法多一项: 真残差达标不能代替收敛判定, 没收敛而残差碰巧合格
-    # 只说明这一次侥幸, 不能作为求解链可用的证据。逐层的 conv 列已在表里。
+    # 只说明这一次侥幸, 不能作为求解链可用的证据. 逐层的 conv 列已在表里.
     converged = True
     if iterative:
         converged = all(bool(row["converged"]) for row in rows)
@@ -777,7 +777,7 @@ def run_manufactured_convergence_benchmark(
         # 否则同一份 JSON 会把不同口径的历史数值混成一组证据
         # 后缀规则钉在 "standard" 这个名字上, 不跟着缺省值走: 缺省值改过一次
         # (standard -> fast), 若规则写成"缺省的不进文件名", 每改一次缺省就要把
-        # 已冻结的证据文件全部重命名一遍。判读时以 JSON 内的 ``assembly_method``
+        # 已冻结的证据文件全部重命名一遍. 判读时以 JSON 内的 ``assembly_method``
         # 字段为准, 文件名只是去重手段
         method_tag = "" if assembly_method == "standard" else f"_{assembly_method}"
         # 缺省算子层级同样不进文件名, 理由与装配路径一致: 已冻结的 FA 证据文件保持原名,

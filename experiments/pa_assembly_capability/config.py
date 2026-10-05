@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# 本目录与仓库根。experiments/<name>/config.py 上溯两级即仓库根。
+# 本目录与仓库根. experiments/<name>/config.py 上溯两级即仓库根.
 EXPERIMENT_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = EXPERIMENT_DIR.parents[1]
 CASES_FILE = EXPERIMENT_DIR / "cases.toml"

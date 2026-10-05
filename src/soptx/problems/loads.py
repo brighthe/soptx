@@ -18,7 +18,7 @@ class BodyForceLoad:
 
     @property
     def support_dimension(self) -> int:
-        """返回体力作用实体（单元）的维数."""
+        """返回体力作用实体 (单元) 的维数."""
         return self.dimension
 
     @cartesian
@@ -52,7 +52,7 @@ class PointForceLoad:
 
     @property
     def support_dimension(self) -> int:
-        """返回集中力作用实体（点）的维数零."""
+        """返回集中力作用实体 (点) 的维数零."""
         return 0
 
     def force(self, *, time: float | None = None) -> tuple[float, ...]:
@@ -72,7 +72,7 @@ class LineTractionLoad:
 
     @property
     def support_dimension(self) -> int:
-        """返回线载荷作用实体（线）的维数一."""
+        """返回线载荷作用实体 (线) 的维数一."""
         return 1
 
     @cartesian

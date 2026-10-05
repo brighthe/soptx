@@ -155,9 +155,9 @@ def measure_device(device: str, arguments: argparse.Namespace):
     if device == "cpu":
         import torch
 
-        # 加速比是"一块卡对几个 CPU 核"的比值。脚本不限制线程数, 走 torch 默认值,
+        # 加速比是"一块卡对几个 CPU 核"的比值. 脚本不限制线程数, 走 torch 默认值,
         # 但那个默认值必须落到产物里 —— 否则事后无从判断分母是单核还是满核, 而
-        # 这两种读法会把同一个 16 倍解释成完全不同的结论。
+        # 这两种读法会把同一个 16 倍解释成完全不同的结论.
         record["torch_threads"] = int(torch.get_num_threads())
         record["torch_interop_threads"] = int(torch.get_num_interop_threads())
     if device == "cuda":

@@ -542,7 +542,7 @@ def _run_stage1_probe(integrator: Any, vs: Any, material: Any, snapshot_at: Tupl
     del Ke
     gc.collect()
     # 每次被测调用前都做过 reset_peak, 故 get_traced_memory 的峰值只覆盖最后一段;
-    # 阶段峰值取全部调用内峰值与该尾段峰值的最大者。
+    # 阶段峰值取全部调用内峰值与该尾段峰值的最大者.
     stage_peak = max([traced_peak] + [c["peak_in_MiB"] * 2**20 for c in calls])
     return {
         "calls": calls,
@@ -582,8 +582,8 @@ def measure_stage1_probe(method: str, n: int) -> dict:
 
     对 ``bm.einsum`` / ``bm.zeros`` / ``bm.set_at`` / ``bm.concat`` / ``bm.tensordot`` /
     ``material.strain_matrix`` / ``space.grad_basis`` 打桩, 逐调用记录:
-    调用前已存活的分配量 (co-resident)、调用内峰值、调用内临时量 (peak 减两端存活量的较大者)。
-    跑两遍: 第一遍定位峰值所在调用, 第二遍在该调用前拍快照以分解此刻的存活构成。
+    调用前已存活的分配量 (co-resident)、调用内峰值、调用内临时量 (peak 减两端存活量的较大者).
+    跑两遍: 第一遍定位峰值所在调用, 第二遍在该调用前拍快照以分解此刻的存活构成.
 
     Parameters
     ----------

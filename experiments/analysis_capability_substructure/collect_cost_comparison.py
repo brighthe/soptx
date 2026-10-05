@@ -16,7 +16,7 @@ import numpy as np
 
 
 def load_sample(path: Path) -> tuple[dict, np.ndarray]:
-    """读取已通过验收的样本，并分块核对位移指纹."""
+    """读取已通过验收的样本, 并分块核对位移指纹."""
     record = json.loads(path.read_text(encoding="utf-8"))
     if record["status"] != "PASS":
         raise ValueError(f"样本未通过: {path}")

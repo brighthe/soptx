@@ -76,7 +76,7 @@ def write_solution(
 ) -> None:
     """把重心处的位移与误差写成 VTU
 
-    只有本脚本的证据产物需要它, 所以留在这里而不是上浮到 ``soptx``。
+    只有本脚本的证据产物需要它, 所以留在这里而不是上浮到 ``soptx``.
     """
 
     weight = 1.0 / (problem.dimension + 1)

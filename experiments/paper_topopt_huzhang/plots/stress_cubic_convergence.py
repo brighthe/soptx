@@ -2,30 +2,30 @@
 """三次离散下悬臂梁应力约束优化的收敛历史与主应力分布 (论文图 5.9).
 
 产物 case ``stress-cubic-convergence``: 与图 5.8 同构, 2x2 四宫格 ——
-- (a)(c) 收敛历史: 只读两次优化运行目录下的 history.json 与 summary.json, 不重解方程。
+- (a)(c) 收敛历史: 只读两次优化运行目录下的 history.json 与 summary.json, 不重解方程.
   运行目录按 driver 的 _run_label 命名, 取 pad 1.5 mm 且按判据集合验收 (solid_thr-0.5)
   的两组; 本模块启动时核对 summary 记录了 ``acceptance_solid_threshold``, 缺失即报错,
-  免得静默画出旧口径的历史。
+  免得静默画出旧口径的历史.
 - (b)(d) 主应力空间内的单元应力分布: 取 postprocess/ 下的 npz
   (sig1/sig2/vm/solid_mask/pad_mask), 由 ``compare.py export --run lfem-k3 --run
   huzhang-k3`` 从 density_final.vtu 冻结重分析导出; export 认的运行目录与本模块的
-  REQUIRED_RUNS 前两项是同一批 (metrics.resolve_run_dir 按注册口径解析)。散点只画
+  REQUIRED_RUNS 前两项是同一批 (metrics.resolve_run_dir 按注册口径解析). 散点只画
   判据集合 E_acc: solid_mask (rho > 0.5) 剔除 pad_mask (被动实体区, rho 固定 1 但不
-  施加约束)。
+  施加约束).
 
 右轴画 ``max_relative_violation_solid``, 即判据集合上的 g_max, 停止准则判的就是它
 <= delta_g; 全域 (含灰度单元) 的 ``max_relative_violation`` 不画, 正文亦不引.
-参考线取 summary 记录的 ``relative_stress_tolerance``, 不另写常数。
+参考线取 summary 记录的 ``relative_stress_tolerance``, 不另写常数.
 
-输出 PDF 矢量与 600 dpi PNG 至 papers/huzhang-topopt/figures 与本地 outputs/figures, 不再出 EPS。
+输出 PDF 矢量与 600 dpi PNG 至 papers/huzhang-topopt/figures 与本地 outputs/figures, 不再出 EPS.
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
 原尺寸嵌入, 面板标题字号即纸面字号; 字体走 ``paper_rcparams`` 的 Palatino 口径, 标题与轴名
-改英文 (投稿稿用)。面板标题只写编号、方法与阶次, 体积分数等数值由正文给出。图例放在各面板内:
+改英文 (投稿稿用). 面板标题只写编号、方法与阶次, 体积分数等数值由正文给出. 图例放在各面板内:
 收敛历史三项单列放右上角 (框底在左轴 0.57 之上、框左缘在第 160 步之后, 该段 f_V 已低于 0.38,
 g_max 低于 0.15, 不压数据; 图例挂在 twin 上, 免得被后画的 g_max 曲线盖住), 只写符号, 全名在
 同色轴名上; 主应力面两项放左上角, 纵轴上限由 1.5 抬到 1.9 留出图例带 (屈服椭圆顶 1.155 在框底
-1.20 之下, 满应力点全在 sigma_1 >= sigma_2 半平面), 色标改挂 inset_axes 以与非正方形面板等高。
+1.20 之下, 满应力点全在 sigma_1 >= sigma_2 半平面), 色标改挂 inset_axes 以与非正方形面板等高.
 """
 import json
 

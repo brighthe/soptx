@@ -2,7 +2,7 @@
 """cases.toml 的加载、校验与模型转换.
 
 本模块只负责 cases.toml 的数据结构反序列化与静态门禁检查,
-不依赖 fealpy, 不执行任何数值计算。
+不依赖 fealpy, 不执行任何数值计算.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ PANELS: Tuple[str, ...] = ("bandwidth", "matvec", "solve")
 SCHEMES: Tuple[str, ...] = ("stored-b", "ea", "fa", "pa", "shared-ke")
 PSEUDO_SCHEMES: Tuple[str, ...] = ("all", "memcpy")
 
-# 全部工况统一的单线程口径: 子进程与直接启动的 worker 都注入这组环境变量。
+# 全部工况统一的单线程口径: 子进程与直接启动的 worker 都注入这组环境变量.
 THREAD_ENV: Dict[str, str] = {
     "OMP_NUM_THREADS": "1",
     "OPENBLAS_NUM_THREADS": "1",

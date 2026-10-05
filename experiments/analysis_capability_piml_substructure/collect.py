@@ -199,7 +199,7 @@ def build(cases: tuple[config.AnalysisCase, ...], figure: dict[str, Any]) -> dic
 
     # 注册表可以登记尚未跑出产物的工况 (例如按正确配置声明、等待重跑的工况),
     # 摘要表对这类工况记 None, 不阻断快照生成; 进图工况的产物缺失已在上面各
-    # panel 的取数处报错。
+    # panel 的取数处报错.
     artifacts_digest: dict[str, Any] = {}
     for c in cases:
         try:

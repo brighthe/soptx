@@ -1,16 +1,16 @@
 """GPU 后端求解线弹性方程的最小验证算例.
 
 统一使用 pytorch 后端, 分别运行在 CPU 和 CUDA 设备上, 然后逐位比对二者的解
-向量。两个因素 (数值库、设备) 中只有设备不同, 任何差异都直接归因于 GPU 计算。
+向量. 两个因素 (数值库、设备) 中只有设备不同, 任何差异都直接归因于 GPU 计算.
 
 判据:
 
 * 真相对残差 ``||K u - F|| / ||F||`` —— 两侧都解开;
 * GPU vs CPU 逐位一致性 —— ``||u_gpu - u_cpu||_∞`` 在机器精度内;
-* GPU vs CPU 逐位相对误差 —— 排除位移幅值导致的误判。
+* GPU vs CPU 逐位相对误差 —— 排除位移幅值导致的误判.
 
 制造解定义见
-`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__。
+`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__.
 
 运行::
 

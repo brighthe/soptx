@@ -32,8 +32,8 @@ class ALMMMAOptions(MMAOptions):
     mma_iters_per_al: int = 5              # 每个 ALM 步中 MMA 内层迭代次数
     stress_tolerance: float = 0.003        # 应力约束容差 (TolS)
     # C2 验收子集: 非 None 时只在 rho_phys >= 阈值的 (未豁免) 单元上取最大相对违
-    # 反度; None 复现全域口径。2026-09-18 起用于排除滤波尾部不承载的灰度单元
-    # (g 长期停在容差附近略偏正, 设计无法改动), 全域值仍作诊断记录。
+    # 反度; None 复现全域口径. 2026-09-18 起用于排除滤波尾部不承载的灰度单元
+    # (g 长期停在容差附近略偏正, 设计无法改动), 全域值仍作诊断记录.
     acceptance_solid_threshold: Optional[float] = None
     hold_steps: int = 3                    # 停止准则 C3: 需连续满足 C1/C2 的 ALM 外层步数
     inner_stop_rule: str = 'legacy'        # 'legacy' | 'projected_gradient'
@@ -51,7 +51,7 @@ class ALMMMAOptions(MMAOptions):
     mu_0: float = 10.0                     # 初始罚因子 μ^(0)
     mu_max: float = 10000.0                # 最大罚因子 μ_max
     # 乘子安全阈 lambda_max (safeguarded AL): lambda <- P_[0, lambda_max](lambda + mu h);
-    # None = 无上限 (今日行为)。见 AugmentedLagrangianObjective.update_multipliers。
+    # None = 无上限 (今日行为). 见 AugmentedLagrangianObjective.update_multipliers.
     lambda_max: Optional[float] = None
     alpha: float = 1.1                     # 罚因子更新参数 α > 1
     lambda_0_init_val: float = 0.0         # 初始拉格朗日乘子标量值 λ^(0)
@@ -73,7 +73,7 @@ class ALMMMAOptions(MMAOptions):
 
     # --- 收敛判据 C1 的度量对象 ---
     # 'mean': 外层步首末设计变量的平均绝对变化 (PolyStress 口径, 2026-09-11 起默认由
-    #         cases.toml 指定); 'design' | 'physical': 逐 MMA 步的最大绝对变化 (对照)。
+    #         cases.toml 指定); 'design' | 'physical': 逐 MMA 步的最大绝对变化 (对照).
     change_measure: str = 'design'           # 'mean' | 'design' | 'physical'
 
     # --- 罚参数 mu 的放大规则 ---
@@ -256,7 +256,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                 "options 必须是 ALMMMAOptions 实例."
             )
             
-        # 调用父类初始化，传入空约束列表 []，使得 MMA 子问题退化为无约束问题 (m=0)
+        # 调用父类初始化, 传入空约束列表 [], 使得 MMA 子问题退化为无约束问题 (m=0)
         super().__init__(objective=al_objective, 
                         constraint=[], 
                         filter=filter, 
@@ -278,13 +278,13 @@ class ALMMMAOptimizer(MMAOptimizer):
         return float(base) if current is None else float(current)
 
     def _update_penalty(self, iter_idx: int) -> None:
-        """重写父类的连续化技术：自动捕获插值方案中的目标惩罚因子作为上限"""
+        """重写父类的连续化技术: 自动捕获插值方案中的目标惩罚因子作为上限"""
         if not self.options.use_penalty_continuation:
             return
         
         interpolation_scheme = self._al_objective._analyzer.interpolation_scheme
         
-        # 第一次调用时，把用户初始设置的 penalty_factor 保存为目标上限
+        # 第一次调用时, 把用户初始设置的 penalty_factor 保存为目标上限
         if not hasattr(self, '_target_penalty'):
             self._target_penalty = interpolation_scheme.penalty_factor
             self._log_info(f"开启惩罚延续策略: 目标最大惩罚因子捕获为 {self._target_penalty}")
@@ -346,17 +346,17 @@ class ALMMMAOptimizer(MMAOptimizer):
 
         # 停止准则状态: hold_count 记录连续满足 C0-C2 的 ALM 外层步数 (C3);
         # converged/termination_reason 是终止判据的唯一出处, 供 driver 汇总,
-        # 避免消费端各自用单条件重新拼一个收敛标志。
+        # 避免消费端各自用单条件重新拼一个收敛标志.
         hold_count = 0
         self.converged = False
         self.termination_reason = 'not-started'
         change = 2 * opts.change_tolerance
         max_relative_violation = float('inf')
         max_relative_violation_solid = float('inf')
-        # 6.4 节诊断量: 乘子相对变化, 只报告不进判据。
+        # 6.4 节诊断量: 乘子相对变化, 只报告不进判据.
         self.last_multiplier_change = float('nan')
         # 末期移动限制衰减的路径相关状态 (存在 optimizer 实例上, 不回写 options:
-        # _build_al_options 被调用两次产出两个对象, 改一个会静默失步)。
+        # _build_al_options 被调用两次产出两个对象, 改一个会静默失步).
         self._move_limit_now = float(getattr(opts, 'move_limit', ALMMMAOptions.move_limit))
         self._move_limit_decays = 0
         self._c0_first_iter = None
@@ -371,8 +371,8 @@ class ALMMMAOptimizer(MMAOptimizer):
         inner_iteration_failed = False
         rho_window = []
         # 状态复用 (算法 2 步骤 2/4): 内层步末已对新设计求解, 下一步头部直接沿用;
-        # 只有刚度 (罚指数连续化) 或物理密度 (beta 更新后重过滤) 变化时才重解。
-        # AL 参数 (lambda, mu) 只影响 Phi 不影响状态, 乘子更新后只需重算目标缓存。
+        # 只有刚度 (罚指数连续化) 或物理密度 (beta 更新后重过滤) 变化时才重解.
+        # AL 参数 (lambda, mu) 只影响 Phi 不影响状态, 乘子更新后只需重算目标缓存.
         state = None
         state_penalty = None
         objective_valid = False
@@ -397,13 +397,13 @@ class ALMMMAOptimizer(MMAOptimizer):
             outer_beta = None if beta_value is None else float(beta_value)
 
             change = 2 * opts.change_tolerance
-            # 外层步起点设计 rho^{k,0}: C1 的 'mean' 度量按外层步首末设计计。
+            # 外层步起点设计 rho^{k,0}: C1 的 'mean' 度量按外层步首末设计计.
             dv_outer_start = bm.copy(dv[:])
 
-            # 初始化为一个远大于 1.0+TolS 的“魔法数字”（防守型编程）
-            # 作用：作为逻辑屏障，人为伪造一个“结构严重超载”的初始假象。
-            # 这能强制逼迫内层 MMA 循环去调用有限元求解器计算真实应力，
-            # 绝对防止在获取真实应力数据前意外触发底部的全局收敛条件（避免过早假收敛）。
+            # 初始化为一个远大于 1.0+TolS 的"魔法数字" (防守型编程)
+            # 作用: 作为逻辑屏障, 人为伪造一个"结构严重超载"的初始假象.
+            # 这能强制逼迫内层 MMA 循环去调用有限元求解器计算真实应力,
+            # 绝对防止在获取真实应力数据前意外触发底部的全局收敛条件 (避免过早假收敛).
             max_stress_measure = 2.0 
             
             # =====================================================================
@@ -426,7 +426,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                 
                 # --- 计算增广拉格朗日目标函数及灵敏度 ---
                 # a. 状态求解 (FEA): 沿用上一内层步末对当前设计的分析, 刚度或物理
-                #    密度变化后重解。
+                #    密度变化后重解.
                 if state is None or state_penalty != current_penalty:
                     state = analyzer.solve_state(rho_val=rho_phys)
                     state_penalty = current_penalty
@@ -435,7 +435,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                     t.send('求解')
                 
                 # b. 评估增广拉格朗日目标函数及其物理敏度: AL 参数变化后重算缓存
-                #    (_cache_g/_cache_h 与体积缓存), 供 jac 使用。
+                #    (_cache_g/_cache_h 与体积缓存), 供 jac 使用.
                 if not objective_valid:
                     self._al_objective.fun(density=rho_phys, state=state)
                     objective_valid = True
@@ -471,8 +471,8 @@ class ALMMMAOptimizer(MMAOptimizer):
                             * inner_initial_residual,
                         )
                     elif current_residual <= inner_target:
-                        # global_iter/history 只统计已经接受的 MMA 更新；本次只评估
-                        # 了接受态残差，没有生成新的候选设计。
+                        # global_iter/history 只统计已经接受的 MMA 更新; 本次只评估
+                        # 了接受态残差, 没有生成新的候选设计.
                         global_iter -= 1
                         inner_final_residual = current_residual
                         inner_accepted = True
@@ -482,9 +482,9 @@ class ALMMMAOptimizer(MMAOptimizer):
 
                 # --- 求解无约束 MMA 子问题 ---
                 if use_projected_gradient:
-                    # PolyStress 的 legacy 路径按 AL 外层步更新 _epoch。新的
-                    # fixed-AL 内层模式按已接受的 MMA 更新计数，使第三次更新起
-                    # 能使用历史渐近线；这是一项内层算法选择，不改变 legacy。
+                    # PolyStress 的 legacy 路径按 AL 外层步更新 _epoch. 新的
+                    # fixed-AL 内层模式按已接受的 MMA 更新计数, 使第三次更新起
+                    # 能使用历史渐近线; 这是一项内层算法选择, 不改变 legacy.
                     self._epoch = global_iter
                 if passive_mask is not None:
                     dv_new = bm.copy(dv)
@@ -504,7 +504,7 @@ class ALMMMAOptimizer(MMAOptimizer):
 
                 # --- 密度过滤与设计更新 (算法 2 步骤 3) ---
                 # rho_phys 才是进 FEA / 体积 / 应力约束与全部出图的场, 物理变化量
-                # 必须在下一行重绑之前算。
+                # 必须在下一行重绑之前算.
                 rho_prev = bm.copy(rho_phys[:])
                 rho_phys = self._filter.filter_design_variable(
                     design_variable=dv_new, physical_density=rho_phys)
@@ -512,14 +512,14 @@ class ALMMMAOptimizer(MMAOptimizer):
                     t.send('密度过滤')
                 change = float(bm.max(bm.abs(dv_new - dv)))
                 change_phys = float(bm.max(bm.abs(rho_phys[:] - rho_prev)))
-                # 相邻两次 MMA 更新间设计变量的平均绝对变化, 只用于内层提前退出。
+                # 相邻两次 MMA 更新间设计变量的平均绝对变化, 只用于内层提前退出.
                 change_mean = float(bm.mean(bm.abs(dv_new - dv)))
                 xold2, xold1 = xold1, bm.copy(dv)
                 dv = dv_new
 
                 # --- 对新设计重新分析 (算法 2 步骤 4) ---
                 # 内层退出判据、历史记录、外层 C2 与乘子更新全部使用新设计的约束值;
-                # 该状态同时供下一内层步头部复用, 每次 MMA 更新仍只求解一次。
+                # 该状态同时供下一内层步头部复用, 每次 MMA 更新仍只求解一次.
                 state = analyzer.solve_state(rho_val=rho_phys)
                 state_penalty = current_penalty
                 J_val = float(self._al_objective.fun(density=rho_phys, state=state))
@@ -535,14 +535,14 @@ class ALMMMAOptimizer(MMAOptimizer):
                     rho=rho_phys, state=state)
                 max_relative_violation = float(bm.max(relative_violation))
                 # C2 实际比较的量: 实体子集 (rho_phys >= acceptance_solid_threshold)
-                # 上的最大相对违反度; 阈值为 None 时等于全域值。豁免单元已由约束
-                # 返回 -1, 无需再处理。
+                # 上的最大相对违反度; 阈值为 None 时等于全域值. 豁免单元已由约束
+                # 返回 -1, 无需再处理.
                 max_relative_violation_solid = self._solid_max_relative_violation(
                     relative_violation, rho_phys, max_relative_violation)
                 max_multiplier = float(bm.max(self._al_objective.lamb))
-                # 未加权实体应力比: 只作诊断打印, 不参与 C2。加权验收量会被空洞
+                # 未加权实体应力比: 只作诊断打印, 不参与 C2. 加权验收量会被空洞
                 # 单元的 m_E ~ 1e-9 压到阈值之下, 未加权量才反映实体材料真实应
-                # 力水平。见方法说明 (dut-postdoc) 第 6.4 节。
+                # 力水平. 见方法说明 (dut-postdoc) 第 6.4 节.
                 solid_ratio_fn = getattr(
                     self._al_objective._stress_constraint,
                     'compute_solid_stress_ratio', None)
@@ -573,7 +573,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                     )
                 
                 # 调用确切的 log_iteration 接口保存历史数据: 密度帧、标量与应力场
-                # 同属 MMA 更新后并已重新分析的设计。
+                # 同属 MMA 更新后并已重新分析的设计.
                 self.history.log_iteration(
                         iter_idx=global_iter,
                         change=change,                              # 设计变量最大绝对变化量
@@ -600,7 +600,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                 inner_steps += 1
 
                 # 内层收敛判定: 最大设计变化及相对约束超限均达标
-                # change_measure 决定 C1 度量的对象, 默认 'design' 复现今日行为。
+                # change_measure 决定 C1 度量的对象, 默认 'design' 复现今日行为.
                 measure = getattr(opts, 'change_measure', 'design')
                 change_c1 = (change_mean if measure == 'mean'
                              else change_phys if measure == 'physical'
@@ -608,12 +608,12 @@ class ALMMMAOptimizer(MMAOptimizer):
                 if (not use_projected_gradient
                         and change_c1 < opts.change_tolerance
                         and max_relative_violation_solid <= opts.stress_tolerance):
-                        break # 跳出内层循环，进入 ALM 更新      
+                        break # 跳出内层循环, 进入 ALM 更新      
 
             if use_projected_gradient:
                 if not inner_accepted:
                     # 硬预算耗尽后, 在内层末设计 (步骤 4 已分析并评估目标) 上补一次
-                    # 伴随评估, 避免用候选步起点的梯度验收内层子问题。
+                    # 伴随评估, 避免用候选步起点的梯度验收内层子问题.
                     dJ_drho = self._al_objective.jac(density=rho_phys, state=state)
                     dJ_dv = self._filter.filter_objective_sensitivities(
                         design_variable=dv,
@@ -628,8 +628,8 @@ class ALMMMAOptimizer(MMAOptimizer):
                     )
                     inner_accepted = inner_final_residual <= inner_target
 
-                # PG 失败会在本外层更新之前退出；先固定本外层首末变化，避免
-                # summary 沿用上一外层值或在首外层报告 NaN。
+                # PG 失败会在本外层更新之前退出; 先固定本外层首末变化, 避免
+                # summary 沿用上一外层值或在首外层报告 NaN.
                 change_outer_mean = float(
                     bm.mean(bm.abs(dv[:] - dv_outer_start)))
                 self.last_change_outer_mean = change_outer_mean
@@ -656,7 +656,7 @@ class ALMMMAOptimizer(MMAOptimizer):
 
                 if not inner_accepted:
                     inner_iteration_failed = True
-                    # 本外层未执行乘子更新，因此乘子变化精确为零。
+                    # 本外层未执行乘子更新, 因此乘子变化精确为零.
                     self.last_multiplier_change = 0.0
                     self.termination_reason = (
                         'inner-iteration-limit: '
@@ -676,17 +676,17 @@ class ALMMMAOptimizer(MMAOptimizer):
             # ALM 乘子与惩罚参数更新 (外层更新)
             # =====================================================================
             # 罚因子条件放大所需的违反度: 与 C2 同量 (实体子集上的 max_e r_e), 由
-            # 优化器推入。update_multipliers() 的零参签名保持不变, 覆写者不受影响。
+            # 优化器推入. update_multipliers() 的零参签名保持不变, 覆写者不受影响.
             _set_violation = getattr(self._al_objective, 'set_current_violation', None)
             if _set_violation is not None:
                 _set_violation(max_relative_violation_solid)
 
             lamb_prev = bm.copy(self._al_objective.lamb)
             self._al_objective.update_multipliers()
-            # lambda/mu 改变了 Phi 及其缓存, 状态不受影响。
+            # lambda/mu 改变了 Phi 及其缓存, 状态不受影响.
             objective_valid = False
             # 乘子相对变化 max|lambda^(n+1) - lambda^(n)| / max(1, max lambda^(n)):
-            # 6.4 节的必报诊断量, 反映外层是否已停止推乘子; 不进 C0-C3。
+            # 6.4 节的必报诊断量, 反映外层是否已停止推乘子; 不进 C0-C3.
             self.last_multiplier_change = float(
                 bm.max(bm.abs(self._al_objective.lamb - lamb_prev))
                 / max(1.0, float(bm.max(lamb_prev))))
@@ -707,13 +707,13 @@ class ALMMMAOptimizer(MMAOptimizer):
                 # 重置相关的缩放因子 (如果有)
                 if hasattr(self, '_obj_scale_factor'):
                     self._obj_scale_factor = None 
-                # 重置 MMA 渐近线和历史步，防止非线性跳跃导致的震荡
+                # 重置 MMA 渐近线和历史步, 防止非线性跳跃导致的震荡
                 self._low, self._upp = None, None  
                 xold1, xold2 = dv[:], dv[:]        
                 
-                # 基于新的 beta 重新过滤一次物理密度，确保物理场与当前 beta 严格一致
+                # 基于新的 beta 重新过滤一次物理密度, 确保物理场与当前 beta 严格一致
                 rho_phys = self._filter.filter_design_variable(design_variable=dv, physical_density=rho_phys)
-                # 物理密度已变, 下一内层步头部重解状态 (每次 beta 更新多一次求解)。
+                # 物理密度已变, 下一内层步头部重解状态 (每次 beta 更新多一次求解).
                 state = None
                 objective_valid = False
                 
@@ -722,21 +722,21 @@ class ALMMMAOptimizer(MMAOptimizer):
             # =====================================================================
             # 全局收敛判定: C0 连续化终止 & C1 设计稳定 & C2 松弛可行 & C3 持续
             # 依据 dut-postdoc/papers/huzhang-topopt/
-            #     stress-constrained-topopt-models-and-algorithms.md 第 6 节。
+            #     stress-constrained-topopt-models-and-algorithms.md 第 6 节.
             # =====================================================================
             # 将内层计算出的最新最大应力赋值给外层判定变量
             max_stress_measure = max_vm_stress
 
-            # C0: 全部连续化参数已到达终值且本步未发生更新。
+            # C0: 全部连续化参数已到达终值且本步未发生更新.
             # beta 只判 not beta_updated 是不够的: 那只说明本步没更新, 不说明
-            # 已经到顶, 会把连续化中途的停滞记为收敛。
+            # 已经到顶, 会把连续化中途的停滞记为收敛.
             beta_now = getattr(self._filter, 'beta', None)
             beta_ceiling = getattr(self._filter, 'beta_max', None)
             if beta_now is None or beta_ceiling is None:
-                # 读不到投影状态: 退到"本步未发生连续化更新"这一必要条件。
+                # 读不到投影状态: 退到"本步未发生连续化更新"这一必要条件.
                 # 无连续化的过滤器上 beta_updated 恒为 False, 该分量恒成立;
                 # 有连续化但不暴露 beta 的过滤器上, 至少不会把刚更新过投影的
-                # 那一步记成 C0 达标 (那一步的状态还没在新参数下重解过)。
+                # 那一步记成 C0 达标 (那一步的状态还没在新参数下重解过).
                 beta_done = not beta_updated
             else:
                 beta_done = (not beta_updated) and (float(beta_now) >= float(beta_ceiling))
@@ -745,9 +745,9 @@ class ALMMMAOptimizer(MMAOptimizer):
             c0 = beta_done and penalty_done
 
             # beta 更新步上 continuation_step 强制返回 change = 1.0 (哨兵值),
-            # 物理度量必须在该分支同样失格, 否则 history 会把那一步画成"已收敛"。
+            # 物理度量必须在该分支同样失格, 否则 history 会把那一步画成"已收敛".
             # 'mean': 外层步首末设计 rho^{k+1,0} 与 rho^{k,0} 的平均绝对变化
-            # (正文算法 2 第 5 步的 Delta_{rho,out}); 最大变化只报告不判据。
+            # (正文算法 2 第 5 步的 Delta_{rho,out}); 最大变化只报告不判据.
             change_outer_mean = float(bm.mean(bm.abs(dv[:] - dv_outer_start)))
             self.last_change_outer_mean = change_outer_mean
             self.last_change_outer_max = float(bm.max(bm.abs(dv[:] - dv_outer_start)))
@@ -762,7 +762,7 @@ class ALMMMAOptimizer(MMAOptimizer):
             c2 = max_relative_violation_solid <= opts.stress_tolerance
             c4 = True
             if bool(getattr(opts, 'kkt_acceptance_enabled', False)) and c0 and c1 and c2:
-                # C0 成立意味着本步未更新 beta, state 即当前 rho_phys 的状态。
+                # C0 成立意味着本步未更新 beta, state 即当前 rho_phys 的状态.
                 self.last_kkt_diagnostics = self.kkt_diagnostics(
                     design_variable=dv,
                     density_distribution=rho_phys,
@@ -773,8 +773,8 @@ class ALMMMAOptimizer(MMAOptimizer):
 
             # -----------------------------------------------------------------
             # 末期移动限制衰减: 仅在连续化终止 (C0) 之后、且窗口内的运动被判为
-            # 非相干 (极限环) 时才收缩。仍在单调重组的轨迹不收缩, 以免把它冻在
-            # 一个不是驻点的点上而误报 criterion-met。
+            # 非相干 (极限环) 时才收缩. 仍在单调重组的轨迹不收缩, 以免把它冻在
+            # 一个不是驻点的点上而误报 criterion-met.
             # -----------------------------------------------------------------
             move_limit_decay = float(getattr(opts, 'move_limit_decay', 1.0))
             if move_limit_decay < 1.0:
@@ -810,7 +810,7 @@ class ALMMMAOptimizer(MMAOptimizer):
                 hold_count = 0
 
             # C3: 连续 hold_steps 个 ALM 外层步同时满足 C0-C2 才终止, 用于排除
-            # 乘子更新与渐近线调整造成的振幅穿越阈值的偶然命中。
+            # 乘子更新与渐近线调整造成的振幅穿越阈值的偶然命中.
             if hold_count >= opts.hold_steps:
                 self.converged = True
                 criteria = (
@@ -882,7 +882,7 @@ class ALMMMAOptimizer(MMAOptimizer):
         if thr is None:
             return float(global_max)
         rho = bm.reshape(rho_phys[:], (-1,))
-        # 逐单元先取最大 (HuZhang 链路返回 (NC, NQ) 的逐积分点量), 再按密度筛选。
+        # 逐单元先取最大 (HuZhang 链路返回 (NC, NQ) 的逐积分点量), 再按密度筛选.
         rv_cell = bm.max(bm.reshape(relative_violation, (rho.shape[0], -1)), axis=1)
         mask = rho >= float(thr)
         if int(bm.sum(mask)) == 0:
@@ -903,11 +903,11 @@ class ALMMMAOptimizer(MMAOptimizer):
         ``||z - clip(z - grad L, 0, 1)||_inf``.
 
         其中 ``grad L`` 由原 Lagrangian 的物理密度梯度经过当前过滤/投影链回传.
-        该定义不含 MMA 移动限制，也不使用 AL 罚权 ``lambda + mu*h``，因此移动
+        该定义不含 MMA 移动限制, 也不使用 AL 罚权 ``lambda + mu*h``, 因此移动
         限制缩小不会把非驻点伪装成一阶最优点.
 
-        每次调用需要一次伴随求解. 当前应力算例每个单元仅在形心施加一个约束，
-        因而 ``N_c=N_e``；实现仍按约束数组的实际元素数归一化并显式报告两者.
+        每次调用需要一次伴随求解. 当前应力算例每个单元仅在形心施加一个约束,
+        因而 ``N_c=N_e``; 实现仍按约束数组的实际元素数归一化并显式报告两者.
         """
         if state is None:
             state = self._al_objective._analyzer.solve_state(rho_val=density_distribution)
@@ -1040,13 +1040,13 @@ class ALMMMAOptimizer(MMAOptimizer):
             L = z - s * (zold1 - low_prev)
             U = z + s * (upp_prev - zold1)
 
-        # 渐近线距离界 [asymptote_min_distance, 10] x (zMax - zMin)。
+        # 渐近线距离界 [asymptote_min_distance, 10] x (zMax - zMin).
         # PolyStress 的 MMA_unconst 没有下限: 两值振荡的变量按 AsymDecr 逐步收缩
         # U - L, 步幅几何衰减直至停在折点上, 这是 MMA 对 AL 罚项折点 (曲率跳 mu)
-        # 的唯一逐变量阻尼。2026-09-11 曾因 Hu-Zhang k=2 第 152 外层步 U - L 收缩到
+        # 的唯一逐变量阻尼. 2026-09-11 曾因 Hu-Zhang k=2 第 152 外层步 U - L 收缩到
         # 原式分母 p - q 相消归零而设下限 0.01, 但 0.01 高于末期移动限 (0.005),
-        # 使该阻尼失效, 灰度带单元被钉在移动限幅度上翻转 (2026-09-15 LFEM k=1 极限环)。
-        # 相消问题已由 _stable_mma_candidate 解决, 下限退回 1e-4 只防 U - L 下溢。
+        # 使该阻尼失效, 灰度带单元被钉在移动限幅度上翻转 (2026-09-15 LFEM k=1 极限环).
+        # 相消问题已由 _stable_mma_candidate 解决, 下限退回 1e-4 只防 U - L 下溢.
         span = zMax - zMin
         L, U = _bound_mma_asymptotes(
             z,

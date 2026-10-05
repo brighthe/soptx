@@ -17,8 +17,8 @@ from soptx.solvers import create
 
 from .assembler import InterfaceSystem
 
-#: 本函数支持的直接法后端。CG 一类迭代法不在此列: 接口系统规模小且要求一次
-#: 给准, 迭代法在这里没有收益; 旧实现对未知名字会静默回落到 scipy, 现在报错。
+#: 本函数支持的直接法后端. CG 一类迭代法不在此列: 接口系统规模小且要求一次
+#: 给准, 迭代法在这里没有收益; 旧实现对未知名字会静默回落到 scipy, 现在报错.
 DIRECT_BACKENDS = ("scipy", "mumps")
 
 
@@ -113,7 +113,7 @@ def solve_interface_system(
             f"未知的直接法后端: {solver!r}; 可选 {DIRECT_BACKENDS}."
         )
     # 接口系统在本函数内只解一次, 分解不跨调用复用; MUMPS 上下文用完即释放,
-    # MPI 初始化由 DirectSolver 自己负责, 调用方不必再准备。
+    # MPI 初始化由 DirectSolver 自己负责, 调用方不必再准备.
     linear_solver = create(solver)
     try:
         u_free, _ = linear_solver.setup(K_free_scipy).solve(f_np[free_np])

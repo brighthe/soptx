@@ -2,9 +2,9 @@
 """从快照重新生成 ``results_analysis.md`` 里的三格证据表.
 
 本目录的 ``results_analysis.md`` 按**图面分格**组织, 与两个 example 目录按
-技术栈组织的那两份是同一批数字的不同切法。同一个数字写在两处就会漂移 ——
+技术栈组织的那两份是同一批数字的不同切法. 同一个数字写在两处就会漂移 ——
 本会话里已经发生过两次 —— 所以三格的表格不手写, 由本模块从
-``figure_data/fig2_data.json`` 渲染, 写进文档里的标记区间。
+``figure_data/fig2_data.json`` 渲染, 写进文档里的标记区间.
 
 标记形如::
 
@@ -12,7 +12,7 @@
     ...此区间内的内容会被整体替换...
     <!-- END generated: panel-a -->
 
-标记之外的叙述、读法与边界说明是手写的, 不受影响。
+标记之外的叙述、读法与边界说明是手写的, 不受影响.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import config
 GIB = 2 ** 30
 MIB = 2 ** 20
 
-# 文档里受本模块管理的区间名, 顺序即渲染顺序。
+# 文档里受本模块管理的区间名, 顺序即渲染顺序.
 GENERATED_BLOCKS = ("panel-a", "panel-b", "panel-c", "panel-d", "provenance")
 
 
@@ -66,7 +66,7 @@ def _render_panel_a(snapshot: dict[str, Any]) -> str:
         detail = "，".join(f"`{key}={value}`" for key, value in sorted(options.items()))
         solver = f"`{chain['solver']}`" + (f"（{detail}）" if detail else "")
         # material_hypothesis 在 3D 上就是 "3D", 与维数列重复, 只有 2D 的
-        # plane_strain / plane_stress 才带信息。
+        # plane_strain / plane_stress 才带信息.
         hypothesis = chain.get("material_hypothesis")
         mesh = f"`{chain['mesh_label'] or chain['mesh_type']}`"
         if hypothesis and hypothesis != chain["dimension"]:
@@ -86,8 +86,8 @@ def _render_panel_a(snapshot: dict[str, Any]) -> str:
         f"3D `{fa3['l2_relative'][-1]:.2e}`）小十个量级，本表测的基本是纯离散误差，"
         "故可充当参考路径。\n")
 
-    # 来源说明: 两条 FA 链由 examples/lagrange_elasticity 的 demo 脚本生成。
-    # 脚本路径从快照 sources 取, 与 cases.toml 同源, 不在渲染侧硬编码。
+    # 来源说明: 两条 FA 链由 examples/lagrange_elasticity 的 demo 脚本生成.
+    # 脚本路径从快照 sources 取, 与 cases.toml 同源, 不在渲染侧硬编码.
     fa_scripts = {
         source["role"]: source.get("script")
         for source in snapshot.get("sources", [])
@@ -149,7 +149,7 @@ def _render_panel_a(snapshot: dict[str, Any]) -> str:
 
     tol = panel["gate"]["ea_fa_solution_relative_tol"]
     chain_tol = panel["gate"].get("ea_fa_error_chain_relative_tol")
-    # 逐档相对差按维度取出, 缺档处为 None (FA 链缺该档)。
+    # 逐档相对差按维度取出, 缺档处为 None (FA 链缺该档).
     chain_by_dimension = {
         str(cross["dimension"]): cross["error_relative_differences"]
         for cross in panel.get("chain_cross_check", [])
@@ -178,7 +178,7 @@ def _render_panel_a(snapshot: dict[str, Any]) -> str:
         f"CG 解之差（验收阈值 `{tol:g}`），说的是解本身一样；右列是两条误差链"
         f"在该档的相对 L2 误差值之差（验收阈值 {chain_tol_text}），说的是落在同一条"
         f"收敛曲线上。两列均由 `collect.py` 逐档算出，非估计。")
-    # 余量取三档中最接近阈值的那档 (最大的相对差对应最小的余量), 两列分别报。
+    # 余量取三档中最接近阈值的那档 (最大的相对差对应最小的余量), 两列分别报.
     solution_parts, chain_parts = [], []
     for dimension, block in sorted(blocks.items()):
         gaps = block.get("solution_relative_differences_vs_fa") or [
@@ -208,7 +208,7 @@ def _render_panel_a(snapshot: dict[str, Any]) -> str:
     else:
         lines.append("")
 
-    # 来源说明: 生成脚本与产物均在 examples/ 或本目录内, 不经过 tools 管线。
+    # 来源说明: 生成脚本与产物均在 examples/ 或本目录内, 不经过 tools 管线.
     ring_source = next(
         (s for s in snapshot.get("sources", []) if s.get("role") == "ea-rings"), {}
     )
@@ -229,11 +229,11 @@ def _render_panel_a(snapshot: dict[str, Any]) -> str:
 
 _CJK_DIGITS = "〇一二三四五六七八九十"
 
-# EA 每单元缓存一个 ldof x ldof 的 float64 单元刚度阵。3D 四面体 P1 位移场的
-# ldof = 4 节点 x 3 分量 = 12, 故每单元 12*12*8 = 1152 B。设备对照(图面 (d))的
+# EA 每单元缓存一个 ldof x ldof 的 float64 单元刚度阵. 3D 四面体 P1 位移场的
+# ldof = 4 节点 x 3 分量 = 12, 故每单元 12*12*8 = 1152 B. 设备对照(图面 (d))的
 # 门禁已锁死
 # dimension=3 / degree=1 / mesh_type=tet, 这个常数才敢写死在这里 —— 换单元类型
-# 或阶数必须同步改, 否则带宽会算错而且错得看不出来。
+# 或阶数必须同步改, 否则带宽会算错而且错得看不出来.
 _EA_BYTES_PER_CELL = 12 * 12 * 8
 
 
@@ -241,7 +241,7 @@ def _level_word(count: int) -> str:
     """把档数写成中文数词, 供表题与正文使用.
 
     表题里曾写死"四档", 补入 n=80 后当场过期 —— 生成区里的任何计数都必须由数据
-    现算, 手抄的数字迟早与数据脱节。
+    现算, 手抄的数字迟早与数据脱节.
     """
     if count <= 10:
         return _CJK_DIGITS[count]
@@ -323,7 +323,7 @@ def _render_panel_b(snapshot: dict[str, Any]) -> str:
     )
 
     # 线性性是"可算规模 ≈ 内存比"这句话的依据: 只有内存对自由度线性,
-    # 该表述才是内插而非外推。指数从第二档到最细档算, 跳过基线稀释的最粗档。
+    # 该表述才是内插而非外推. 指数从第二档到最细档算, 跳过基线稀释的最粗档.
     dof_growth = panel["dofs"][last] / panel["dofs"][1]
     parts = []
     for name, block in (("FA", fa), ("EA", ea)):
@@ -331,8 +331,8 @@ def _render_panel_b(snapshot: dict[str, Any]) -> str:
                   / block["peak_rss_above_baseline_bytes"][1])
         exponent = math.log(growth) / math.log(dof_growth)
         parts.append(f"{name} 扣基线峰值增 `{growth:.1f}` 倍（指数 `{exponent:.3f}`）")
-    # 可算规模比就是最细档的扣基线内存比: 内存对自由度线性时两者相等。
-    # 这个数会随实现改动漂移, 不能写死在文案里。
+    # 可算规模比就是最细档的扣基线内存比: 内存对自由度线性时两者相等.
+    # 这个数会随实现改动漂移, 不能写死在文案里.
     scale_ratio = (fa["peak_rss_above_baseline_bytes"][last]
                    / ea["peak_rss_above_baseline_bytes"][last])
     lines.append(
@@ -386,13 +386,13 @@ def _render_panel_b(snapshot: dict[str, Any]) -> str:
 def _render_panel_c(snapshot: dict[str, Any]) -> str:
     """渲染设备对照(CPU / 单卡 GPU 耗时与等价性证据), 即**图面的 (d)**.
 
-    ⚠️ 函数名里的 c 是**数据组**键名(snapshot["panels"]["c"]), 不是图面位置。
-    2026-08-24 换版式后两者正好错开: panels.c -> 图面 (d), panels.d -> 图面 (c)。
+    ⚠️ 函数名里的 c 是**数据组**键名(snapshot["panels"]["c"]), 不是图面位置.
+    2026-08-24 换版式后两者正好错开: panels.c -> 图面 (d), panels.d -> 图面 (c).
     键名按采集顺序固定, 改名会作废历史快照, 所以让它们错开是有意的选择, 不是待
-    修的中间态。凡是要写给人看的位置字样, 一律按图面写。
+    修的中间态. 凡是要写给人看的位置字样, 一律按图面写.
 
     没有注册 case 时快照里这一组是 placeholder, 此时渲染占位说明而不是空表 ——
-    文档要能如实反映"这一格还没有数据", 而不是留一段看不出状态的空白。
+    文档要能如实反映"这一格还没有数据", 而不是留一段看不出状态的空白.
     """
     panel = snapshot["panels"]["c"]
     if panel.get("status") != "measured":
@@ -434,9 +434,9 @@ def _render_panel_c(snapshot: dict[str, Any]) -> str:
         f"即整条 Krylov 轨迹一致，而不只是碰巧收敛到附近。两侧唯一的差别是 "
         f"`bm.set_default_device`，后端同为 `pytorch`。\n")
 
-    # 加速比"为什么是这个形状"要用带宽回答。每次 CG 迭代把整份 K_e 流一遍, 用
+    # 加速比"为什么是这个形状"要用带宽回答. 每次 CG 迭代把整份 K_e 流一遍, 用
     # 单次迭代耗时反算有效带宽, 就能看出 CPU 端各档基本恒定、GPU 端随规模爬升 ——
-    # 这条曲线的形状是 GPU 的饱和过程, 不是玄学。
+    # 这条曲线的形状是 GPU 的饱和过程, 不是玄学.
     lines.append(
         f"**表 c-2　逐档有效访存带宽**"
         f"（由 `cells × {_EA_BYTES_PER_CELL} B ÷ 单次 CG 迭代耗时` 反算；"
@@ -481,7 +481,7 @@ def _render_panel_c(snapshot: dict[str, Any]) -> str:
     lines.append("")
 
     # 本批只能把交叉点夹在相邻两档之间, 说不出具体值 —— 写成 "约 X 附近" 就是
-    # 把首个加速档当成了交叉点, 那是没量过的数。
+    # 把首个加速档当成了交叉点, 那是没量过的数.
     first_faster = next(
         (i for i, s in enumerate(panel["speedup_solve"]) if s > 1.0), None)
     if first_faster is None:
@@ -492,8 +492,8 @@ def _render_panel_c(snapshot: dict[str, Any]) -> str:
     else:
         crossing = (f"`{panel['dofs'][first_faster - 1]:,}` 与 "
                     f"`{panel['dofs'][first_faster]:,}` 自由度之间")
-    # warmup 1 / repeats 3 撑不起小数点后两位。把样本能给出的最宽区间写出来,
-    # 比端出一个 "16.08" 更经得起追问 —— 那两位小数是中位数的舍入, 不是精度。
+    # warmup 1 / repeats 3 撑不起小数点后两位. 把样本能给出的最宽区间写出来,
+    # 比端出一个 "16.08" 更经得起追问 —— 那两位小数是中位数的舍入, 不是精度.
     low = min(cpu["solve_samples"][last]) / max(gpu["solve_samples"][last])
     high = max(cpu["solve_samples"][last]) / min(gpu["solve_samples"][last])
     lines.append(
@@ -538,12 +538,12 @@ def _render_panel_d(snapshot: dict[str, Any]) -> str:
     """渲染进程级 (MPI) 强扩展, 即**图面的 (c)**.
 
     ⚠️ 函数名里的 d 是数据组键名(snapshot["panels"]["d"]), 不是图面位置, 见
-    _render_panel_c 的说明。
+    _render_panel_c 的说明.
 
     这一格与设备对照(图面 (d))问的不是同一个问题, 加速比也不能相加或互相外推:
     (d) 切的是设备内 (SIMT), 本格切的是进程 (MPI), 两个并行层级各有各的墙, 分母
-    也不同 —— 本格对单进程, (d) 对同后端 CPU 的 16 条线程。本函数因此不渲染任何
-    跨层比较, 跨层的话只写在手写段落里, 并写明口径。
+    也不同 —— 本格对单进程, (d) 对同后端 CPU 的 16 条线程. 本函数因此不渲染任何
+    跨层比较, 跨层的话只写在手写段落里, 并写明口径.
     """
     panel = snapshot["panels"]["d"]
     if panel.get("status") != "measured":
@@ -573,8 +573,8 @@ def _render_panel_d(snapshot: dict[str, Any]) -> str:
             f"`{panel['true_relative_residual'][index]:.3e}` |")
     lines.append("")
 
-    # 强扩展表最容易被质疑的一点是"换了分区是不是换了问题"。迭代数逐档相同比
-    # 残差接近更强: 它说明整条 Krylov 轨迹没变, 而不只是终点碰巧落在附近。
+    # 强扩展表最容易被质疑的一点是"换了分区是不是换了问题". 迭代数逐档相同比
+    # 残差接近更强: 它说明整条 Krylov 轨迹没变, 而不只是终点碰巧落在附近.
     residuals = panel["true_relative_residual"]
     spread = (max(residuals) - min(residuals)) / min(residuals)
     lines.append(
@@ -583,8 +583,8 @@ def _render_panel_d(snapshot: dict[str, Any]) -> str:
         f"真实相对残差跨档相对离散仅 `{spread:.1e}`，这点差异来自归约次序随分区"
         f"改变，是浮点求和的正常表现，不是误差；加速来自真的省了时间，不是少算。\n")
 
-    # 效率掉下去以后, 唯一有用的追问是"掉在通信还是掉在本地算"。把一次 MatVec
-    # 拆成本地核 + 两处同步就能直接回答, 不必猜。
+    # 效率掉下去以后, 唯一有用的追问是"掉在通信还是掉在本地算". 把一次 MatVec
+    # 拆成本地核 + 两处同步就能直接回答, 不必猜.
     lines.append(
         "**表 d-2　单次算子作用 (MatVec) 的分解**"
         "（`local_kernel` 是本地单元作用，两处 `sync` 是界面自由度的输入/输出"
@@ -610,8 +610,8 @@ def _render_panel_d(snapshot: dict[str, Any]) -> str:
     lines.append("")
 
     # 三个分项各自对 rank 取 max(benchmark_cpu_ea.py 的 measure_profiled_parallel_
-    # matvec), 不同项的 max 可能来自不同进程, 故分项之和会超过 MatVec 总计。不写
-    # 明这一点, 读者会拿"同步占比"和"本地核占比"相加发现大于 100% 而不知所措。
+    # matvec), 不同项的 max 可能来自不同进程, 故分项之和会超过 MatVec 总计. 不写
+    # 明这一点, 读者会拿"同步占比"和"本地核占比"相加发现大于 100% 而不知所措.
     parts_last = (panel["local_kernel_seconds"][last]
                   + panel["input_sync_seconds"][last]
                   + panel["output_sync_seconds"][last])
@@ -727,7 +727,7 @@ def render(snapshot: dict[str, Any], document: str) -> str:
     for name in GENERATED_BLOCKS:
         begin = f"<!-- BEGIN generated: {name} -->"
         end = f"<!-- END generated: {name} -->"
-        # 区间内容可为空 (首次生成), 故不在正则里强求换行, 由替换串补齐。
+        # 区间内容可为空 (首次生成), 故不在正则里强求换行, 由替换串补齐.
         pattern = re.compile(
             rf"{re.escape(begin)}.*?{re.escape(end)}", re.DOTALL
         )

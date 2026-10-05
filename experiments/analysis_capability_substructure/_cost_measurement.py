@@ -79,7 +79,7 @@ def cost_measurement_config(route: str | None = None) -> dict[str, Any]:
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
-    """原子更新 JSON 记录，保留失败前最后一个完整阶段."""
+    """原子更新 JSON 记录, 保留失败前最后一个完整阶段."""
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
@@ -89,7 +89,7 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def _phase_start(record: dict[str, Any], record_path: Path, phase: str) -> float:
-    """在阶段开始前持久化标识，并返回计时起点."""
+    """在阶段开始前持久化标识, 并返回计时起点."""
     record["phase"] = phase
     _write_json(record_path, record)
     return time.perf_counter()
@@ -140,7 +140,7 @@ def _physical_data(
 
 
 def _worker(request_path: Path, record_path: Path) -> int:
-    """执行一次全新进程测量，并在异常时保留阶段与回溯."""
+    """执行一次全新进程测量, 并在异常时保留阶段与回溯."""
     request = json.loads(request_path.read_text(encoding="utf-8"))
     route = str(request["route"])
     record: dict[str, Any] = {
@@ -535,7 +535,7 @@ def _worker_run(
     monitor_interval: float,
     label: str,
 ) -> dict[str, Any]:
-    """启动一个全新 Worker，并保留其请求、结果和标准输出."""
+    """启动一个全新 Worker, 并保留其请求、结果和标准输出."""
     directory.mkdir(parents=True, exist_ok=False)
     request_path = directory / "request.json"
     record_path = directory / "record.json"

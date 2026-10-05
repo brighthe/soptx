@@ -178,7 +178,7 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
             phi_comp = phi[..., i]
             weight = num[i] # 纯几何权重 (1 or 2)
             
-            # 纯几何积分，不乘 lambda
+            # 纯几何积分, 不乘 lambda
             part = bm.einsum('q, c, cql, cqm -> clm', ws, cm, phi_comp, phi_comp)
             M0 += weight * part
 

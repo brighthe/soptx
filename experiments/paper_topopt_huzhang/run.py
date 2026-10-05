@@ -82,7 +82,7 @@ MESH_CLASS_NAMES = {
 }
 
 # 阶次记号随方法走: Hu--Zhang 的 k 是应力空间次数 (位移阶为 k-1), LFEM 的 p 是位移
-# 阶。两者数值同源但含义不同, 统一写成 p 会把应力阶读成位移阶; 未登记的方法退回 p.
+# 阶. 两者数值同源但含义不同, 统一写成 p 会把应力阶读成位移阶; 未登记的方法退回 p.
 ORDER_SYMBOLS = {"huzhang": "k", "lfem": "p"}
 
 
@@ -90,7 +90,7 @@ def with_radius(kind: str, radius) -> str:
     """拼成 ``density r=2.4``; 半径缺项时只显示类型, 类型也没登记就显示 "-".
 
     半径按 %g 打而不是照抄 TOML 原文: 2.0 与 2 在这里是同一个半径, 写法跟着
-    topopt_simp_* 走, 三个实验的同一列才好横着对。
+    topopt_simp_* 走, 三个实验的同一列才好横着对.
     """
     if not kind:
         return "-"
@@ -105,8 +105,8 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
 
     阶次单列, 记号按各方法的惯用写法 (``huzhang`` 的 k 是应力阶, ``lfem`` 的 p 是
     位移阶, 见 ORDER_SYMBOLS), 因此列里带记号而不是裸数字: 同一个 2 在两条链上不是
-    同一个量。分析链与阶次都是单值, 与 resolve_runs 的缺省口径一致: 裸跑一条 case
-    就是一次运行。注册表里的完整对比组 (methods x comparison_orders) 要 --full 才展开.
+    同一个量. 分析链与阶次都是单值, 与 resolve_runs 的缺省口径一致: 裸跑一条 case
+    就是一次运行. 注册表里的完整对比组 (methods x comparison_orders) 要 --full 才展开.
     字段一律 get: 骨架状态的 planned case 允许缺项, --list 不该因此崩掉.
     """
     discretization = case.get("discretization", {})

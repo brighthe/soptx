@@ -1,4 +1,4 @@
-"""线弹性问题。"""
+"""线弹性问题."""
 
 from .mbb import HalfMBBBeamRight2d, HalfMBBBeamRight3d, FullMBBBeam2d, FullMBBBeam3d
 from .fixed_fixed import FixedFixedBeamCenterLoad2d, FixedFixedBeamHalfDomain2d

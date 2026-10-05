@@ -25,11 +25,11 @@ OUTPUT_DIR = EXAMPLE_DIR / "outputs"
 EVIDENCE_DIR = EXAMPLE_DIR / "evidence"
 RUN_SCRIPT = TOOL_DIR / "run.py"
 
-# (role, operator_level, ranks) per dimension, split by推进阶段。
+# (role, operator_level, ranks) per dimension, split by推进阶段.
 #
-# 1a（CPU 串行 EA/FA）是当前的默认验证范围: EA 与 FA 各三档单 rank,
-# 不涉及任何 MPI 分区与重叠副本归约。FA 与 EA 同档, 使 EA/FA 解相对差
-# 能在每一档上直接比对, 而不是只在最粗档取一个参照。
+# 1a (CPU 串行 EA/FA) 是当前的默认验证范围: EA 与 FA 各三档单 rank,
+# 不涉及任何 MPI 分区与重叠副本归约. FA 与 EA 同档, 使 EA/FA 解相对差
+# 能在每一档上直接比对, 而不是只在最粗档取一个参照.
 SERIAL_VALIDATION_CASES = (
     ("coarse", "ea", 1),
     ("medium", "ea", 1),
@@ -39,8 +39,8 @@ SERIAL_VALIDATION_CASES = (
     ("fine", "fa", 1),
 )
 
-# 1b（CPU 并行 EA）在 1a 之上追加的算例; 由 validate.py 的
-# ``--include-parallel`` 打开, 对应 1/2-rank 一致性门禁。
+# 1b (CPU 并行 EA) 在 1a 之上追加的算例; 由 validate.py 的
+# ``--include-parallel`` 打开, 对应 1/2-rank 一致性门禁.
 PARALLEL_VALIDATION_CASES = (
     ("fine", "ea", 2),
 )
@@ -50,11 +50,11 @@ def validation_cases(
     *,
     include_parallel: bool = False,
 ) -> tuple[tuple[str, str, int], ...]:
-    """当前验证范围内的算例表。
+    """当前验证范围内的算例表.
 
-    默认只返回 1a 的串行算例; ``include_parallel`` 追加 1b 的多 rank 算例。
+    默认只返回 1a 的串行算例; ``include_parallel`` 追加 1b 的多 rank 算例.
     两个阶段共享同一份算例定义与同一份阈值, 因此 1b 的跨 rank 门禁始终与 1a
-    的串行结果可比。
+    的串行结果可比.
     """
 
     if include_parallel:
@@ -64,11 +64,11 @@ def validation_cases(
 # EA roles whose summaries feed the committed evidence, in refinement order.
 #
 # 这个元组是加密档数的唯一定义: 它的长度必须与 ``contract.REFINEMENTS`` 每个
-# 维度的元组长度一致, 顺序即由粗到细。要增减档数只改这两处, 下游的收敛阶计算
-# 与产物命名都由它派生。
+# 维度的元组长度一致, 顺序即由粗到细. 要增减档数只改这两处, 下游的收敛阶计算
+# 与产物命名都由它派生.
 #
 # FA 与 EA 同档 (见 ``SERIAL_VALIDATION_CASES``), 逐档比对 EA/FA 解相对差;
-# 向后兼容的单一 FA 参照取最粗档, 见 ``fa_evidence_source``。
+# 向后兼容的单一 FA 参照取最粗档, 见 ``fa_evidence_source``.
 EA_EVIDENCE_ROLES = ("coarse", "medium", "fine")
 
 EVIDENCE_SCOPE = "cpu-single-rank-fa-ea"
@@ -147,7 +147,7 @@ def ea_evidence_sources(dimension: int) -> tuple[tuple[str, Path], ...]:
 def fa_evidence_source(dimension: int) -> Path:
     """Single-rank FA summary consumed by the evidence builder.
 
-    FA 与 EA 同档全跑; 向后兼容的单一参照取最粗档 (``EA_EVIDENCE_ROLES[0]``)。
+    FA 与 EA 同档全跑; 向后兼容的单一参照取最粗档 (``EA_EVIDENCE_ROLES[0]``).
     """
 
     return validation_artifact_paths(

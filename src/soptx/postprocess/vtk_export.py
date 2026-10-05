@@ -133,7 +133,7 @@ def read_vtu_cell_data(filepath: Path | str, name: str = "density") -> np.ndarra
     n_cells = int(re.search(r'NumberOfCells="(\d+)"', header).group(1))
     base = raw.index(b"_", raw.index(b'encoding="raw">')) + 1
     offset = base + int(match.group(1))
-    # appended 段每个数组前有 8 字节长度头; 对不上说明取到的不是单元场。
+    # appended 段每个数组前有 8 字节长度头; 对不上说明取到的不是单元场.
     n_bytes = int(np.frombuffer(raw, dtype=np.uint64, count=1, offset=offset)[0])
     if n_bytes != n_cells * 8:
         raise ValueError(

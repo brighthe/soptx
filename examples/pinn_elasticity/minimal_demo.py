@@ -2,19 +2,19 @@
 
 目的是用尽量少的代码走通 PINN 求解线弹性方程的全流程:
 构造坐标到位移的神经网络 -> 采样域内与边界配点 -> 自动微分 (autograd) 计算应变、应力与平衡残差
--> Adam 优化器极小化强形式 Loss -> 评估位移 L2 误差。
+-> Adam 优化器极小化强形式 Loss -> 评估位移 L2 误差.
 
 与本地多模块架构的关系:
 本目录下的 contract.py / cases.py / operators.py / solve.py 等模块承担自动门禁与 evidence 导出;
-而本 minimal_demo.py 属于完全自包含的单文件脚本, 不依赖本目录的任何本地模块。
-想看工程级自动化校验, 去读那些模块; 想看 PINN 是怎么把弹性力学方程解出来的, 读这一个文件就够。
+而本 minimal_demo.py 属于完全自包含的单文件脚本, 不依赖本目录的任何本地模块.
+想看工程级自动化校验, 去读那些模块; 想看 PINN 是怎么把弹性力学方程解出来的, 读这一个文件就够.
 
 问题类和材料类直接取自 soptx.problems.elasticity:
 - 2D: ExponentialSineManufacturedElasticity2D (平面应变, lambda=1.0, mu=0.5)
 - 3D: DivergenceFreePolynomialElasticity3D (3D各向同性, lambda=1.0, mu=1.0)
 
 各制造解的完整数学定义见
-`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__。
+`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__.
 
 运行::
 
@@ -287,7 +287,7 @@ def run_minimal_demo(
     except Exception as err:
         print(f"绘图跳过: {err}")
 
-    # 7. 可选：导出 ParaView 格式的 .vtu 可视化文件 (使用 pyevtk 库机制)
+    # 7. 可选: 导出 ParaView 格式的 .vtu 可视化文件 (使用 pyevtk 库机制)
     if save_vtu:
         try:
             import numpy as np
@@ -326,7 +326,7 @@ def run_minimal_demo(
         except Exception as err:
             print(f"VTU 导出跳过: {err}")
 
-    # 8. 可选：保存训练好的神经网络模型
+    # 8. 可选: 保存训练好的神经网络模型
     if save_model:
         checkpoint_dir = Path(__file__).resolve().parent / "outputs" / "checkpoints"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)

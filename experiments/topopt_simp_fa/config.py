@@ -4,14 +4,14 @@
 字段的单一事实来源是 ``TopOptCase`` 的声明: 每个字段用 ``_spec`` 同时给出
 分类轴、解析函数与通用校验规则, 解析 (``_build_case``)、通用校验
 (``_validate``) 与结果影响判据 (``GATE_FIELDS``) 全部由这份声明推导,
-不再各写一份字段清单。新增参数只改 ``TopOptCase``; 忘记标注分类轴会在
-import 时直接失败。
+不再各写一份字段清单. 新增参数只改 ``TopOptCase``; 忘记标注分类轴会在
+import 时直接失败.
 
 一条 ``[[cases]]`` 只登记一种模型 (问题 + 几何 + 载荷 + 单元核) 及其基准参数;
-参数变化不进注册表, 一律走命令行 ``--override``。产物目录分两层: 第一层是工况
+参数变化不进注册表, 一律走命令行 ``--override``. 产物目录分两层: 第一层是工况
 id, 第二层由规范化的 override 标签推导 (见 ``TopOptCase.run_id``), 与
 experiments/topopt_simp_ea/ 用相同 override 跑就落在相同路径下, EA 侧 compare
-据此配对。
+据此配对.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ CASES_FILE = EXPERIMENT_DIR / "cases.toml"
 OUTPUT_DIR = EXPERIMENT_DIR / "outputs"
 FIGURE_DATA_DIR = EXPERIMENT_DIR / "figure_data"
 
-# 非工况参数: collect.py 的事后验收阈值, 不进入求解, 因此不进 cases.toml。
-# 所有影响求解的参数一律逐工况显式写在注册表里。
+# 非工况参数: collect.py 的事后验收阈值, 不进入求解, 因此不进 cases.toml.
+# 所有影响求解的参数一律逐工况显式写在注册表里.
 VOLUME_TOLERANCE = 5.0e-3
 NONTRIVIAL_STD = 1.0e-3
 
@@ -50,20 +50,20 @@ VALID_OPTIMIZERS = {"oc", "mma"}
 VALID_INTERPOLATIONS = {"simp", "msimp", "ramp"}
 VALID_ASSEMBLY_METHODS = {"standard", "voigt", "fast"}
 VALID_SOLVERS = {"scipy", "mumps", "cg"}
-# CG 的预条件子。"none" 即不加预条件; "jacobi" 走 DiagonalPreconditioner,
-# 此时 LagrangeFEMAnalyzer 会自动把真残差刷新间隔绑成 50, 无需在此另开旋钮。
+# CG 的预条件子."none" 即不加预条件; "jacobi" 走 DiagonalPreconditioner,
+# 此时 LagrangeFEMAnalyzer 会自动把真残差刷新间隔绑成 50, 无需在此另开旋钮.
 VALID_PRECONDS = {"none", "jacobi"}
 
 # 分类轴 = "改了它, 变的是题目还是解题路径" (口径同 cases.toml 头部):
 #   A 问题 / B 离散 / C 拓扑建模 / D 算法 —— 四者都影响结果, 进门禁与产物命名;
-#   ledger 台账 —— 只做溯源, 不进求解, 不进门禁。
+#   ledger 台账 —— 只做溯源, 不进求解, 不进门禁.
 RESULT_AXES = ("A", "B", "C", "D")
 LEDGER_AXIS = "ledger"
 
-# id 与 override 标签直接拼成目录路径, 不做转义, 所以限定安全字符。
+# id 与 override 标签直接拼成目录路径, 不做转义, 所以限定安全字符.
 _NAME_RE = re.compile(r"[0-9A-Za-z_.\-]+")
 _TAG_SEPARATOR = "__"
-# 没有 override 的基准运行, 第二层目录名; 与参数标签同级, 不留空目录名。
+# 没有 override 的基准运行, 第二层目录名; 与参数标签同级, 不留空目录名.
 _BASE_TAG = "base"
 
 
@@ -101,7 +101,7 @@ def _spec(axis: str, parse: Any, **rules: Any):
     axis    分类轴, RESULT_AXES 之一或 LEDGER_AXIS;
     parse   toml 原值 -> 字段值的转换;
     missing 键缺失时的取值, 不给则该字段必填;
-    choices 取值集合; positive 要求 > 0。跨字段与依赖维度的约束写在 _validate。
+    choices 取值集合; positive 要求 > 0. 跨字段与依赖维度的约束写在 _validate.
     """
     metadata = {"axis": axis, "parse": parse, **rules}
     if "missing" in rules:
@@ -114,7 +114,7 @@ class TopOptCase:
     """一次运行的全部参数; 分组与顺序同 cases.toml."""
 
     # -- 台账 (不进求解) --
-    # id 是模型身份, 也是产物目录的第一层; FA/EA 配对靠它。
+    # id 是模型身份, 也是产物目录的第一层; FA/EA 配对靠它.
     id: str = _spec(LEDGER_AXIS, _as_str)
     # -- A 问题 (连续问题本身; 改了就是换一道题) --
     problem: str = _spec("A", _as_str)
@@ -147,7 +147,7 @@ class TopOptCase:
     tol_change: float = _spec("D", _as_float, positive=True)
     assembly_method: str = _spec("D", _as_str, choices=VALID_ASSEMBLY_METHODS)
     solve_method: str = _spec("D", _as_str, choices=VALID_SOLVERS)
-    # cg 参数只在 solve_method = "cg" 时生效并校验; 直接法工况可不写。
+    # cg 参数只在 solve_method = "cg" 时生效并校验; 直接法工况可不写.
     cg_rtol: float = _spec("D", _as_float, missing=0.0)
     cg_atol: float = _spec("D", _as_float, missing=0.0)
     cg_maxiter: int = _spec("D", _as_int, missing=0)
@@ -155,10 +155,10 @@ class TopOptCase:
     # -- 台账 (可选; 必须排在必填字段之后) --
     summary: str = _spec(LEDGER_AXIS, _as_str, missing="")
     # 这条工况在实验里承担的角色 (覆盖矩阵的哪一格 / 哪个对照组), 只进 --list 表,
-    # 不进求解; 口径同 experiments/huzhang_topopt_paper 的 role 字段。
+    # 不进求解; 口径同 experiments/huzhang_topopt_paper 的 role 字段.
     role: str = _spec(LEDGER_AXIS, _as_str, missing="")
-    # 命令行 override 的原文 (字段名, 文本), 按字段名排序; 空表示注册表基准运行。
-    # 只做溯源与 collect 重放, 参数本身已经写进对应字段。
+    # 命令行 override 的原文 (字段名, 文本), 按字段名排序; 空表示注册表基准运行.
+    # 只做溯源与 collect 重放, 参数本身已经写进对应字段.
     overrides: tuple[tuple[str, str], ...] = _spec(
         LEDGER_AXIS, _as_override_pairs, missing=()
     )
@@ -168,12 +168,12 @@ class TopOptCase:
         """一次运行的唯一标识 = 产物目录相对 outputs/ 的路径 ``<id>/<参数标签>``.
 
         第一层是工况 id, 第二层是相对注册表基准的偏离: 按字段名顺序拼
-        ``<字段>-<取值>`` 再用 ``__`` 连接, 基准运行没有偏离, 记 ``base``。
+        ``<字段>-<取值>`` 再用 ``__`` 连接, 基准运行没有偏离, 记 ``base``.
         取值取解析后的规范形式 (而非命令行原文), 所以 ``filter_radius=2.4``
-        与 ``filter_radius=2.40`` 落在同一目录。
-        标识与落盘位置同一个来源, 不会出现 "叫这个名字却写到别处"。
+        与 ``filter_radius=2.40`` 落在同一目录.
+        标识与落盘位置同一个来源, 不会出现 "叫这个名字却写到别处".
         两层的分法与 experiments/huzhang_topopt_paper 一致 (第一层认工况,
-        第二层认参数), 三个实验的 outputs/ 用同一套读法。
+        第二层认参数), 三个实验的 outputs/ 用同一套读法.
         """
         tags = [
             f"{name}-{_tag_text(getattr(self, name))}" for name, _ in self.overrides
@@ -198,7 +198,7 @@ def _tag_text(value: Any) -> str:
 
 
 # 未标注分类轴的字段既不会进门禁也不会进产物命名 —— 那意味着改了它会静默覆盖
-# 旧结果, 比漏写校验更危险, 所以在 import 期直接失败。
+# 旧结果, 比漏写校验更危险, 所以在 import 期直接失败.
 _UNCLASSIFIED = tuple(
     entry.name
     for entry in fields(TopOptCase)
@@ -210,19 +210,19 @@ if _UNCLASSIFIED:
         + ", ".join(_UNCLASSIFIED)
     )
 
-# 影响结果的全部字段, 供产物落盘与 FA-EA 门禁共用。
+# 影响结果的全部字段, 供产物落盘与 FA-EA 门禁共用.
 GATE_FIELDS = tuple(
     entry.name
     for entry in fields(TopOptCase)
     if entry.metadata.get("axis") in RESULT_AXES
 )
-# override 只允许改影响结果的参数; 台账字段是工况身份, 不可覆盖。
+# override 只允许改影响结果的参数; 台账字段是工况身份, 不可覆盖.
 NON_OVERRIDABLE_FIELDS = frozenset(
     entry.name
     for entry in fields(TopOptCase)
     if entry.metadata.get("axis") == LEDGER_AXIS
 )
-# 注册表里允许出现的键 = 全部字段减去只能由命令行产生的 overrides。
+# 注册表里允许出现的键 = 全部字段减去只能由命令行产生的 overrides.
 _REGISTRY_FIELDS = frozenset(
     entry.name for entry in fields(TopOptCase) if entry.name != "overrides"
 )
@@ -237,7 +237,7 @@ def _jsonable(value: Any) -> Any:
 def config_values(case: TopOptCase) -> dict[str, Any]:
     """影响结果的全部参数: 字段名 -> 可 JSON 序列化的取值.
 
-    产物落盘与 FA-EA 门禁共用这一份, 谁都不重新起名或挑字段。
+    产物落盘与 FA-EA 门禁共用这一份, 谁都不重新起名或挑字段.
     """
     return {name: _jsonable(getattr(case, name)) for name in GATE_FIELDS}
 
@@ -273,7 +273,7 @@ def _validate(case: TopOptCase) -> None:
     if not case.id:
         raise ConfigError("工况缺少 id.")
     if not _NAME_RE.fullmatch(case.id):
-        # id 直接当目录名用, 分隔符和空格会把结果写到意料之外的位置。
+        # id 直接当目录名用, 分隔符和空格会把结果写到意料之外的位置.
         raise ConfigError(
             f"工况 {case.id!r} 的 id 只能是字母/数字/下划线/点/连字符."
         )
@@ -338,8 +338,8 @@ def _validate(case: TopOptCase) -> None:
 def parse_override_args(groups: list[list[str]]) -> dict[str, str]:
     """把 argparse (action=append, nargs=+) 收到的 KEY=VALUE 摊平成字典.
 
-    同名键后写覆盖先写。与 EA 侧 run.py / compare.py 同一套解析, 保证同一串
-    命令行在两侧解析出同一组 override。
+    同名键后写覆盖先写. 与 EA 侧 run.py / compare.py 同一套解析, 保证同一串
+    命令行在两侧解析出同一组 override.
     """
     overrides: dict[str, str] = {}
     for text in (item for group in groups for item in group):
@@ -356,8 +356,8 @@ def build_overridden_case(
     """在注册表基准运行上应用命令行 override, 得到一次新的运行.
 
     override 是正式的参数维度, 不是探索区: 产物落在 outputs/<run_id>/,
-    与基准运行同属一个工况目录, 通过验收即为证据。FA/EA 两侧用同一组 override 得到
-    同一个 run_id, compare 据此配对, 参数是否真的一致仍由门禁逐项断言。
+    与基准运行同属一个工况目录, 通过验收即为证据. FA/EA 两侧用同一组 override 得到
+    同一个 run_id, compare 据此配对, 参数是否真的一致仍由门禁逐项断言.
     """
     if not overrides:
         raise ConfigError("override 为空.")
@@ -371,7 +371,7 @@ def build_overridden_case(
         raise ConfigError(f"不可覆盖的字段: {', '.join(sorted(invalid))}.")
     parsed: dict[str, Any] = {}
     for name, text in overrides.items():
-        # 逗号分隔的值展开成列表, 类型转换仍走字段自己声明的 parse。
+        # 逗号分隔的值展开成列表, 类型转换仍走字段自己声明的 parse.
         raw: Any = text.split(",") if "," in text else text
         try:
             parsed[name] = specs[name].metadata["parse"](raw)

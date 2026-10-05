@@ -1,4 +1,4 @@
-"""与 FEM 解耦的代理模型训练循环测试。"""
+"""与 FEM 解耦的代理模型训练循环测试."""
 
 import numpy as np
 import torch

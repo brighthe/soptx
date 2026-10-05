@@ -1,4 +1,4 @@
-"""子结构模型 artifact 签名测试。"""
+"""子结构模型 artifact 签名测试."""
 
 from dataclasses import replace
 
@@ -66,7 +66,7 @@ def test_legacy_state_dict_requires_explicit_loader(tmp_path) -> None:
 
 
 def test_architecture_is_recorded_and_checked(tmp_path) -> None:
-    """架构随 checkpoint 登记, 层数或激活不符一律报错。"""
+    """架构随 checkpoint 登记, 层数或激活不符一律报错."""
     path = tmp_path / "shape_function.pt"
     signature = _signature()
     save_checkpoint(path, _model(), signature, {})
@@ -91,7 +91,7 @@ def test_architecture_is_recorded_and_checked(tmp_path) -> None:
 
 
 def test_checkpoint_without_architecture_degrades_to_warning(tmp_path) -> None:
-    """早于架构登记的 checkpoint 只警告, 不阻断加载。"""
+    """早于架构登记的 checkpoint 只警告, 不阻断加载."""
     path = tmp_path / "shape_function.pt"
     legacy_path = tmp_path / "legacy_schema.pt"
     signature = _signature()
@@ -106,6 +106,6 @@ def test_checkpoint_without_architecture_degrades_to_warning(tmp_path) -> None:
 
 
 def test_architecture_signature_requires_registered_model() -> None:
-    """未登记架构属性的模型不能写入 checkpoint。"""
+    """未登记架构属性的模型不能写入 checkpoint."""
     with pytest.raises(TypeError, match="未登记 hidden_dims/activation_name"):
         ArchitectureSignature.from_model(nn.Linear(2, 2))

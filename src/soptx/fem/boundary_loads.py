@@ -190,8 +190,8 @@ def boundary_load_resultant(
     ----
     force : 形状 ``(dimension * n_nodes,)`` 的全局载荷向量
     dimension : 位移分量个数
-    dof_priority : 与 ``TensorFunctionSpace.dof_priority`` 同义。``True`` 表示
-        分量优先 (先排完第 0 分量的全部节点), ``False`` 表示节点优先。
+    dof_priority : 与 ``TensorFunctionSpace.dof_priority`` 同义. ``True`` 表示
+        分量优先 (先排完第 0 分量的全部节点), ``False`` 表示节点优先.
     """
     vector = bm.asarray(force, dtype=bm.float64)
     if len(vector.shape) != 1 or int(vector.shape[0]) % int(dimension) != 0:
@@ -219,11 +219,11 @@ def check_boundary_load_resultant(
 
     边界积分器按面重心整面选取载荷区 (见
     ``LagrangeBoundarySourceIntegrator``), 载荷区端点与网格不对齐时会静默地
-    多算或少算整个面的贡献。本函数把这种静默偏差变成一个可断言的量: 装配完
-    载荷后调用它, 与解析合力比对即可。
+    多算或少算整个面的贡献. 本函数把这种静默偏差变成一个可断言的量: 装配完
+    载荷后调用它, 与解析合力比对即可.
 
     合力守恒是必要条件而非充分条件: 通过本检查只说明总量对得上, 载荷沿边界的
-    分布仍可能与解析牵引不同。
+    分布仍可能与解析牵引不同.
     """
     resultant = boundary_load_resultant(
         force,

@@ -1,6 +1,6 @@
 """拓扑优化工具函数模块
 
-该模块包含了拓扑优化中使用的通用工具函数，包括：
+该模块包含了拓扑优化中使用的通用工具函数, 包括:
 - MMA 子问题求解器
 """
 
@@ -87,7 +87,7 @@ def solve_mma_subproblem(m: int, n: int,
     z = bm.array([[1.0]])
     lam = bm.copy(eem)
     
-    #! A-2：用安全分母初始化 xsi / eta，避免 (x-alfa) 或 (beta-x) 为 0 ----
+    #! A-2: 用安全分母初始化 xsi / eta, 避免 (x-alfa) 或 (beta-x) 为 0 ----
     xalfa = bm.maximum(x - alfa, bm.tensor(eps_x, dtype=bm.float64))
     betax = bm.maximum(beta - x, bm.tensor(eps_x, dtype=bm.float64))
 
@@ -170,7 +170,7 @@ def solve_mma_subproblem(m: int, n: int,
             
             # 2. 计算 Newton 方向的一阶残差 delta_x, delta_y, delta_z, delta_lambda
             dpsidx = plam / ux2 - qlam / xl2                            # (n, 1)
-            #! A-3：Newton 迭代内安全分母（每次内循环都要更新，因为 x 在变）----
+            #! A-3: Newton 迭代内安全分母 (每次内循环都要更新, 因为 x 在变) ----
             xalfa = bm.maximum(x - alfa, bm.tensor(eps_x, dtype=bm.float64))
             betax = bm.maximum(beta - x, bm.tensor(eps_x, dtype=bm.float64))
             delx = dpsidx - epsvecn / xalfa + epsvecn / betax           # (n, 1)

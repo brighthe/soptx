@@ -15,7 +15,7 @@ class LinearSymbolicIntegration:
         
         Parameters
         - space1 : 第一个有限元空间
-        - space2 : 第二个有限元空间，默认与第一个相同
+        - space2 : 第二个有限元空间, 默认与第一个相同
         """
         self.space1 = space1
         self.mesh = space1.mesh
@@ -23,7 +23,7 @@ class LinearSymbolicIntegration:
         self.GD = self.mesh.geo_dimension()  # 几何维度
         self.ldof1 = space1.number_of_local_dofs()  # 第一个空间的局部自由度数量
 
-        # 如果没有提供第二个空间，则假设两个空间相同
+        # 如果没有提供第二个空间, 则假设两个空间相同
         if space2 is None:
             self.space2 = space1
             self.p2 = self.p1
@@ -212,7 +212,7 @@ class LinearSymbolicIntegration:
         """计算 p 次拉格朗日基函数
         
         使用递推方法构造基函数, 可以得到正确的系数和形式
-        例如, 对于 p = 3 时：
+        例如, 对于 p = 3 时:
         - 顶点基函数: λᵢ(3λᵢ - 2)(3λᵢ - 1)/4
         - 边内部点基函数: 9λᵢλⱼ(3λᵢ - 1)/2
         - 内部点基函数: 27λ₀λ₁λ₂
@@ -342,15 +342,15 @@ class LinearSymbolicIntegration:
         """
         if isinstance(self.mesh, SimplexMesh):
             phi = self.basis(p, mi)
-            # 对单纯形，导数是相对于重心坐标
+            # 对单纯形, 导数是相对于重心坐标
             vars_list = self.l[:self.GD + 1]
         elif isinstance(self.mesh, UniformMesh2d):
             phi = self.basis(p)
-            # 对四边形，导数是相对于参考坐标
+            # 对四边形, 导数是相对于参考坐标
             vars_list = [self.eta, self.xi]
         else:
             phi = self.basis(p)
-            # 对六面体，导数是相对于参考坐标
+            # 对六面体, 导数是相对于参考坐标
             vars_list = [self.zeta, self.eta, self.xi]
         
         ldof = len(phi)
@@ -390,7 +390,7 @@ class LinearSymbolicIntegration:
         f = f.expand()
         r = 0    # 积分值
         
-        # 处理非常数项，完全按照原始实现
+        # 处理非常数项, 完全按照原始实现
         for m in f.as_coeff_add()[1]:
             c = m.as_coeff_mul()[0]   # 返回系数
             a = self.multi_index(m)   # 返回单项式的幂指标

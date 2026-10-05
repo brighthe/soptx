@@ -1,6 +1,6 @@
-"""为 examples 的 full_trace 精度基线添加设备计时与溯源。
+"""为 examples 的 full_trace 精度基线添加设备计时与溯源.
 
-不另写采样、训练循环或力学评价公式。
+不另写采样、训练循环或力学评价公式.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def _example():
-    """按唯一目录定位已有精度验证模块，仅实际运行时导入。"""
+    """按唯一目录定位已有精度验证模块, 仅实际运行时导入."""
     directory = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(directory))
     from examples.piml_substructure_elasticity import verify_shape_function_route as shared
@@ -20,7 +20,7 @@ def _example():
 
 
 def prepare(case, np, torch):
-    """复用示例标签并保存两端共用的初始参数。"""
+    """复用示例标签并保存两端共用的初始参数."""
     from training import _hash_arrays, _state_hash
     from soptx.backend import backend_manager as bm
     from soptx.ml.substructure import ShapeFunctionSurrogateNet
@@ -55,7 +55,7 @@ def prepare(case, np, torch):
 
 
 def train(case, data, np, torch):
-    """只对共享全批量训练循环计时，解层复核在计时区间之外。"""
+    """只对共享全批量训练循环计时, 解层复核在计时区间之外."""
     from training import _sync, _state_hash, ExperimentError
     from soptx.ml.substructure import ShapeFunctionSurrogateNet
     shared = _example()
@@ -86,7 +86,7 @@ def train(case, data, np, torch):
     if not np.isfinite(losses).all():
         raise ExperimentError("训练损失存在非有限值。")
     t0 = time.perf_counter()
-    # 在同一 CPU 评价器上复核两端的最终模型，避免把评价设备差异混入精度比较。
+    # 在同一 CPU 评价器上复核两端的最终模型, 避免把评价设备差异混入精度比较.
     net.cpu()
     local = shared.step3_trained_network(data["ev"], net, case.n_eval)
     from examples.piml_substructure_elasticity.verify_shape_function_route import step4_solution_layer

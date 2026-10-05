@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """线弹性矩阵组装层级横向对比 (stored-B / EA / FA / PA / shared-Ke) 统一驱动.
 
-本模块只测性能与容量, 不验正确性。
+本模块只测性能与容量, 不验正确性.
 
 正确性证据的分布要看方案类别: fa / ea / pa 是装配层级分类法里的层级, 它们的求解链收敛阶
 与彼此一致性由 ``experiments/assembly_level_consistency/`` 给出; stored-b / shared-ke 不是
 层级, 只是本目录的对照实现, 其正确性前提由本目录自负, 眼下尚无取证 —— 引用本目录的性能
-数字时要知道这一点。两边共用 ``experiments/_common/assembly_levels.py`` 的同一套问题与
-算子实现。
+数字时要知道这一点. 两边共用 ``experiments/_common/assembly_levels.py`` 的同一套问题与
+算子实现.
 
 本模块实现:
 1. Worker 测量层:
@@ -18,11 +18,11 @@
 3. 终端看板: Style B (Modern Tree Card) 树状卡片输出
 
 五种方案共用同一网格 (单位立方体 n^3 六面体 Q1)、同一材料 (E = 1, nu = 0.3)、
-同一积分 (q = 2, 8 点)、同一交错自由度布局 (dof = 3 * node + comp)。
+同一积分 (q = 2, 8 点)、同一交错自由度布局 (dof = 3 * node + comp).
 
 其中 ea / fa / pa 由 ``soptx.fem.levels.create_level`` 构造, 量的就是生产栈本身;
 stored-b (臧昕禹推断方案) 与 shared-ke (均匀网格共享一份 K_e) 没有生产对应物, 是本
-模块自带的对照实现。
+模块自带的对照实现.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import os
 import sys
 
 # 直接以 --worker 启动 (不经调度器) 时也要在 import numpy 之前锁定单线程,
-# 否则 OpenBLAS 会按核数开线程, 五方案的线程口径不一致。
+# 否则 OpenBLAS 会按核数开线程, 五方案的线程口径不一致.
 if "--worker" in sys.argv:
     for _k, _v in (
         ("OMP_NUM_THREADS", "1"),
@@ -110,7 +110,7 @@ def measure_matvec(scheme: str, n: int, repeats: int = 20, seed: int = 0) -> dic
 
     t1 = time.perf_counter()
     # 只有 shared-ke 还要外部的参考 K_e; ea / fa 的单元矩阵由生产层级的 build 内部算,
-    # 仍落在 t1 计时区间内, build_seconds 的口径不变。
+    # 仍落在 t1 计时区间内, build_seconds 的口径不变.
     K_e = reference_K_e(ctx) if scheme == "shared-ke" else None
     op = build_operator(scheme, ctx, K_e)
     del K_e

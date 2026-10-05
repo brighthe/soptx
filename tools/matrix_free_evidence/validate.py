@@ -15,17 +15,17 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
-# 本进程只派发子进程, 自身不做任何 MPI 计算, 因此必须保持在 MPI 之外。
+# 本进程只派发子进程, 自身不做任何 MPI 计算, 因此必须保持在 MPI 之外.
 #
 # 历史成因是 ``soptx`` 包根曾为 MUMPS 主动 ``from mpi4py import MPI``, 使得只
 # 导入 ``contract`` 也会连带 ``MPI_Init``; 该副作用已收进
-# ``soptx.core.mpi_runtime.ensure_mpi_initialized``, 本进程不再有这条路径。
+# ``soptx.core.mpi_runtime.ensure_mpi_initialized``, 本进程不再有这条路径.
 # 保留本设置作兜底: 一旦本进程成为 MPI singleton, 从它内部再启动 ``mpiexec``
 # 就是 "MPI 作业里套 MPI 作业", OpenMPI 的 ``orterun`` 会立刻以 1 退出且不打印
 # 任何诊断, 表现为每个算例都 "process returned 1 / summary was not created",
-# 极难定位。
+# 极难定位.
 #
-# 关掉自动初始化即可 —— 子进程是各自独立的解释器, 照常初始化, 不受影响。
+# 关掉自动初始化即可 —— 子进程是各自独立的解释器, 照常初始化, 不受影响.
 try:
     import mpi4py
 
@@ -392,8 +392,8 @@ def compare_cases(
     fine_serial = results[fine_serial_name]
 
     # EA/FA 逐档比对: FA 与 EA 同档, 每个档位都取同一网格的两个算例,
-    # 否则比的是两个不同的离散。``coarse_solution_...`` 字段保留向后兼容,
-    # 值取自最粗档, 新消费方应读逐档字段。
+    # 否则比的是两个不同的离散. ``coarse_solution_...`` 字段保留向后兼容,
+    # 值取自最粗档, 新消费方应读逐档字段.
     fa_differences = {
         role: relative_solution_difference(
             results[layout.case_name(role, "ea", 1)],
@@ -418,7 +418,7 @@ def compare_cases(
                 f"{contract.EA_FA_SOLUTION_RELATIVE_TOL:g}"
             )
 
-    # 1b（CPU 并行 EA）的跨 rank 门禁; 1a 下这两条不参与判定, 也不记入
+    # 1b (CPU 并行 EA) 的跨 rank 门禁; 1a 下这两条不参与判定, 也不记入
     # comparison, 以免串行证据里出现空占位而被误读为"已检验".
     parallel_difference: float | None = None
     parallel_l2_difference: float | None = None
@@ -460,7 +460,7 @@ def compare_cases(
     relative_l2_errors = dict(zip(ea_names, errors))
     comparison = {
         "stage": "1b" if include_parallel else "1a",
-        # 向后兼容: 旧消费方读单值, 新消费方读逐档字段。
+        # 向后兼容: 旧消费方读单值, 新消费方读逐档字段.
         "coarse_solution_ea_fa_relative_difference": (
             fa_differences[layout.EA_EVIDENCE_ROLES[0]]
         ),
@@ -539,11 +539,11 @@ def validate_dimension(
 def verify_launcher(mpiexec: str) -> str | None:
     """探测启动器与 ``mpi4py`` 是否同厂.
 
-    以 ``-n 2`` 起一个只打印 ``COMM_WORLD`` 大小的探针。启动器与 ``mpi4py``
+    以 ``-n 2`` 起一个只打印 ``COMM_WORLD`` 大小的探针. 启动器与 ``mpi4py``
     链接的 MPI 不是同一实现时, 两个进程不会组成通信域, 而是各自成为
     ``size=1`` 的独立进程 —— 这不会报错, 只会让后续所有多 rank 断言得到无意义
     的结果(例如"多 rank 应触发的守卫"因为 ``size`` 恒为 1 而永不触发, 却被报成
-    "expected error message not found", 指向完全错误的方向)。
+    "expected error message not found", 指向完全错误的方向).
 
     参数:
         mpiexec: 待探测的启动器路径.
@@ -586,12 +586,12 @@ def verify_launcher(mpiexec: str) -> str | None:
 
 def main() -> int:
     arguments = parse_arguments()
-    # 优先解释器同目录的 mpiexec, 前提是它与 mpi4py 链接的那份 MPI 是同一实现。
+    # 优先解释器同目录的 mpiexec, 前提是它与 mpi4py 链接的那份 MPI 是同一实现.
     # 这个前提会被破坏: 环境里可能同时装着别的 MPI 运行时(例如 pypi 的
     # ``impi-rt`` 会把 Intel MPI 的 mpiexec 放进 ``bin/``), 而 mpi4py 链的是系统
     # OpenMPI. 用错启动器时 mpi4py 读不到启动器写入的进程信息, ``mpi_size`` 直接
     # 是 ``None``, 报错点会落在很远的下游, 因此留一个显式出口:
-    # ``SOPTX_MPIEXEC=/usr/bin/mpiexec`` 指定与 mpi4py 匹配的那一份。
+    # ``SOPTX_MPIEXEC=/usr/bin/mpiexec`` 指定与 mpi4py 匹配的那一份.
     override = os.environ.get("SOPTX_MPIEXEC")
     env_mpiexec = Path(sys.executable).parent / "mpiexec"
     if override:
@@ -608,7 +608,7 @@ def main() -> int:
         )
         return 2
 
-    # 先探测启动器再跑证据: 用错启动器时下游报的错会指向错误的方向, 这里挡住。
+    # 先探测启动器再跑证据: 用错启动器时下游报的错会指向错误的方向, 这里挡住.
     launcher_problem = verify_launcher(mpiexec)
     if launcher_problem is not None:
         print(f"[mpiexec] {mpiexec}", file=sys.stderr)

@@ -4,11 +4,11 @@
 本脚本只跑 stage-1 的 1a 串行范围: 2D/3D 各六个单 rank 算例
 (EA/FA × coarse/medium/fine, 档位 ``n = 8/16/32``), 产出逐档相对 L2 误差、
 同档 EA/FA 解相对差与观测阶, 写成汇总 JSON, 供
-``experiments/matrix_free_capability`` 的表 a-2 使用。
+``experiments/matrix_free_capability`` 的表 a-2 使用.
 
 图 2 的证据链因此不再经过 ``tools/`` 的验证管线; 阈值仍从
 ``tools/matrix_free_evidence/contract.py`` 读取, 与 ``verify_ea_correctness.py``
-同一方式, 保持阈值单一来源。
+同一方式, 保持阈值单一来源.
 
 用法:
     python examples/matrix_free_elasticity/stage1_evidence.py --dim all \\
@@ -103,7 +103,7 @@ def run_case(
         operator_level,
     )
 
-    # 黄金参考: EA/FA matvec 核对 + FA 显式组装 spsolve 直接解。
+    # 黄金参考: EA/FA matvec 核对 + FA 显式组装 spsolve 直接解.
     matvec_reference, direct_solution = serial_references(
         vector_space,
         problem,
@@ -117,7 +117,7 @@ def run_case(
         analyzer.assemble_body_force_vector(),
     )
     solution = bm.zeros_like(load)
-    # fealpy 的 cg 要求初值为后端张量; prescribed_solution 在 apply_bc 后非空。
+    # fealpy 的 cg 要求初值为后端张量; prescribed_solution 在 apply_bc 后非空.
     x0 = bm.asarray(analyzer.prescribed_solution, dtype=bm.float64)
     _, cg_info = analyzer.solve_system(
         operator,

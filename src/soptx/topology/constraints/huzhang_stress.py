@@ -175,7 +175,7 @@ class HuZhangStressConstraint(BaseLogged):
         """
         计算伴随载荷 (右端项).
 
-        对于混合元，伴随载荷直接作用在应力自由度 Σ 上:
+        对于混合元, 伴随载荷直接作用在应力自由度 Σ 上:
             F_adj = -(∂σ^v/∂Σ)^T * dPenaldVM
         """
         material = self._analyzer.material
@@ -226,8 +226,8 @@ class HuZhangStressConstraint(BaseLogged):
 
     def compute_implicit_sensitivity_term(self, adjoint_vector: TensorLike, state: Dict) -> TensorLike:
         """
-        计算隐式灵敏度项（预除 m_E²）: (1/m_E²) * λ_σ,e^T * A⁰_e * Σ_e
-        通过物理掩码（Mask）防范孔洞区域除零溢出。
+        计算隐式灵敏度项 (预除 m_E²): (1/m_E²) * λ_σ,e^T * A⁰_e * Σ_e
+        通过物理掩码 (Mask) 防范孔洞区域除零溢出.
         """
         # --- 1. 提取基础数据 ---
         A0 = self._analyzer._cached_Ae0
@@ -247,15 +247,15 @@ class HuZhangStressConstraint(BaseLogged):
         lambda_sigma_e = lambda_coeff[cell2dof]
 
         # --- 3. 全局计算双线性型 W_e = λ_σ,e^T * A⁰_e * Σ_e ---
-        # 这里只有纯乘法，即使在孔洞区遇到 1e-10 的数值噪声，乘完依然是极小数，绝对安全
+        # 这里只有纯乘法, 即使在孔洞区遇到 1e-10 的数值噪声, 乘完依然是极小数, 绝对安全
         W_e = bm.einsum('ci, cij, cj -> c', lambda_sigma_e, A0, sigma_e)
 
-        # --- 4. 物理掩码截断（核心防爆震逻辑） ---
+        # --- 4. 物理掩码截断 (核心防爆震逻辑) ---
         term = bm.zeros_like(m_E)    # 默认全域敏度为 0
-        active = m_E > 1e-4          # 划定红线：只认有实质刚度的单元
+        active = m_E > 1e-4          # 划定红线: 只认有实质刚度的单元
 
         # --- 5. 安全除法 ---
-        # 只有在非孔洞区域，才执行除以 m_E^2 的操作
+        # 只有在非孔洞区域, 才执行除以 m_E^2 的操作
         if bm.any(active):
             term[active] = W_e[active] / (m_E[active] ** 2)
 
@@ -273,18 +273,18 @@ class HuZhangStressConstraint(BaseLogged):
         """未加权的实体材料应力比 sigma^solid_vm / sigma_lim.
 
         本路径求解的是表观应力 sigma^app = m_E sigma^solid, 故实体应力比由表观
-        量除以 m_E 还原, 使两条路径报告同一个物理量。只作诊断报告, 不参与任何
-        停机判据; 验收量见 compute_relative_violation。
+        量除以 m_E 还原, 使两条路径报告同一个物理量. 只作诊断报告, 不参与任何
+        停机判据; 验收量见 compute_relative_violation.
         依据: papers/huzhang-topopt/stress-constrained-topopt-models-and-algorithms.md
-        (dut-postdoc) 第 6.4 节。
+        (dut-postdoc) 第 6.4 节.
 
-        还原次序: 先对应力张量除以 m_E 再取 von Mises, 不能反过来。von Mises 本身
+        还原次序: 先对应力张量除以 m_E 再取 von Mises, 不能反过来. von Mises 本身
         是一次正齐次的, 两种次序在精确算术下等价; 但 calculate_von_mises_stress 对
-        平方量施加了 1e-12 下限 (即 vm >= 1e-6), 该下限破坏齐次性。空洞单元的表观
+        平方量施加了 1e-12 下限 (即 vm >= 1e-6), 该下限破坏齐次性. 空洞单元的表观
         应力恒低于此下限, 先取 vm 会读回常数 1e-6, 再除以 m_E = 1e-9 便放大成
         1e-6 / (1e-9 * sigma_lim) 的定值 (sigma_lim = 180 时恒为 5.5556), 与应力、
-        阶次、设计全都无关。先做除法则下限落在实体应力上, 相对量级 1e-6 / sigma_lim,
-        与 LFEM 路径 (直接对 stress_solid 取 vm) 口径一致。
+        阶次、设计全都无关. 先做除法则下限落在实体应力上, 相对量级 1e-6 / sigma_lim,
+        与 LFEM 路径 (直接对 stress_solid 取 vm) 口径一致.
 
         Parameters
         ----------

@@ -20,7 +20,7 @@ import numpy as np
 # ==========================================
 # 1. SOPTX 论文全局配色配置 (模块级常量)
 # ==========================================
-# 这段配置应该放在脚本的最顶端，所有函数都能访问
+# 这段配置应该放在脚本的最顶端, 所有函数都能访问
 SOPTX_COLORS = {
     # 物理量 (用于收敛曲线)
     'compliance': '#d62728',  # 红色 (Tab:red)
@@ -37,12 +37,12 @@ SOPTX_COLORS = {
 # ==========================================
 # 2. 字体配置 (基于您提供的绝对路径)
 # ==========================================
-# 建议也作为全局变量加载一次，避免每次绘图都重新加载
+# 建议也作为全局变量加载一次, 避免每次绘图都重新加载
 PATH_ZH = '/usr/share/fonts/suanhai_fonts/Sim/simhei.ttf'
 PATH_EN = '/usr/share/fonts/suanhai_fonts/Times/times.ttf'
 try:
     # 标签与图例字体 (中文黑体)
-    # 建议将 size 也设为变量，方便统一调整
+    # 建议将 size 也设为变量, 方便统一调整
     FONT_ZH = font_manager.FontProperties(fname=PATH_ZH, size=14)
     
     # 刻度数值字体 (西文 Times New Roman)
@@ -62,7 +62,7 @@ def save_history_data(
                     density_iter: int = -1,
                 ) -> None:
     """
-    保存 history 中用于绘图的关键数据（轻量级 JSON 格式）
+    保存 history 中用于绘图的关键数据 (轻量级 JSON 格式)
     
     Parameters
     ----------
@@ -71,11 +71,11 @@ def save_history_data(
     save_path : str
         保存目录路径
     label : str
-        标签名，如 'k1', 'k2', 'k3' 等
+        标签名, 如 'k1', 'k2', 'k3' 等
     save_density : bool, optional
-        是否保存物理密度场，默认 False
+        是否保存物理密度场, 默认 False
     density_iter : int, optional
-        保存第几次迭代的密度，支持负索引，默认 -1 (最后一次)
+        保存第几次迭代的密度, 支持负索引, 默认 -1 (最后一次)
     
     Examples
     --------
@@ -143,8 +143,8 @@ def load_history_data(
     Returns
     -------
     dict | Dict[str, dict]
-        - 如果 labels 是字符串：返回单个 history 的字典
-        - 如果 labels 是列表：返回 {label: history_data} 的字典
+        - 如果 labels 是字符串: 返回单个 history 的字典
+        - 如果 labels 是列表: 返回 {label: history_data} 的字典
     
     Examples
     --------
@@ -175,8 +175,8 @@ def plot_optimization_history(history,
     Parameters
     ----------
     problem_type : str
-        'compliance' : 柔顺度最小化 + 体积约束，绘制柔顺度和体积分数
-        'stress'     : 体积最小化 + 应力约束，绘制体积分数和最大归一化应力
+        'compliance' : 柔顺度最小化 + 体积约束, 绘制柔顺度和体积分数
+        'stress'     : 体积最小化 + 应力约束, 绘制体积分数和最大归一化应力
     history : dict 或带属性的对象均可
     """
     def _get(obj, key):
@@ -252,7 +252,7 @@ def plot_optimization_history(history,
         for label in ax2.get_yticklabels():
             label.set_fontproperties(FONT_EN)
 
-    # 应力问题时在右轴添加 sigma=1 的参考线，表示约束边界
+    # 应力问题时在右轴添加 sigma=1 的参考线, 表示约束边界
     if problem_type == 'stress':
         ax2.axhline(y=1.0, color=right_color, linestyle=':', 
                     linewidth=1.5, alpha=0.7, label='约束边界 $\\sigma=1$')
@@ -296,8 +296,8 @@ def plot_optimization_history_backup(history,
     Parameters
     ----------
     problem_type : str
-        'compliance' : 柔顺度最小化 + 体积约束，绘制柔顺度和体积分数
-        'stress'     : 体积最小化 + 应力约束，绘制体积分数和最大归一化应力
+        'compliance' : 柔顺度最小化 + 体积约束, 绘制柔顺度和体积分数
+        'stress'     : 体积最小化 + 应力约束, 绘制体积分数和最大归一化应力
     """
     iterations = np.array(history.iter_indices) + 1
 
@@ -365,7 +365,7 @@ def plot_optimization_history_backup(history,
         for label in ax2.get_yticklabels():
             label.set_fontproperties(FONT_EN)
 
-    # 应力问题时在右轴添加 sigma=1 的参考线，表示约束边界
+    # 应力问题时在右轴添加 sigma=1 的参考线, 表示约束边界
     if problem_type == 'stress':
         ax2.axhline(y=1.0, color=right_color, linestyle=':', 
                     linewidth=1.5, alpha=0.7, label='约束边界 $\\sigma=1$')
@@ -432,12 +432,12 @@ def plot_optimization_history_backup(history,
     # fig, ax1 = plt.subplots(figsize=figsize, dpi=600)
     
     # # ------------------------------------------
-    # # 绘制左轴：柔顺度 (Compliance)
+    # # 绘制左轴: 柔顺度 (Compliance)
     # # ------------------------------------------
     # # 直接使用全局配色字典
     # color_c = SOPTX_COLORS['compliance'] 
     
-    # # 设置标签 (混合排版：中文使用 SimHei)
+    # # 设置标签 (混合排版: 中文使用 SimHei)
     # ax1.set_xlabel('迭代步数', fontproperties=FONT_ZH)
     # ax1.set_ylabel('柔顺度 $c$', color=color_c, fontproperties=FONT_ZH)
     
@@ -457,7 +457,7 @@ def plot_optimization_history_backup(history,
     #         label.set_fontproperties(FONT_EN)
 
     # # ------------------------------------------
-    # # 绘制右轴：体积分数 (Volume Fraction)
+    # # 绘制右轴: 体积分数 (Volume Fraction)
     # # ------------------------------------------
     # ax2 = ax1.twinx()
     # # 直接使用全局配色字典
@@ -530,9 +530,9 @@ def plot_optimization_history_comparison(
     # ------------------------------------------
     # 1. 绘图参数设置
     # ------------------------------------------
-    # 默认配色方案：使用 SOPTX 全局色 + 补充对比色
+    # 默认配色方案: 使用 SOPTX 全局色 + 补充对比色
     if colors is None:
-        # 顺序：红、蓝、绿、黑、橙 (用于区分不同的 Method)
+        # 顺序: 红、蓝、绿、黑、橙 (用于区分不同的 Method)
         colors = [
             SOPTX_COLORS['compliance'], # 红色
             SOPTX_COLORS['volume'],     # 蓝色
@@ -547,9 +547,9 @@ def plot_optimization_history_comparison(
     # 智能设置画布大小
     if figsize is None:
         if plot_type == 'both':
-            figsize = (12, 5) # 双图并排，长宽比约 2.4:1
+            figsize = (12, 5) # 双图并排, 长宽比约 2.4:1
         else:
-            figsize = (8, 5)  # 单图，长宽比 1.6:1 (接近黄金比例)
+            figsize = (8, 5)  # 单图, 长宽比 1.6:1 (接近黄金比例)
 
     # ------------------------------------------
     # 2. 辅助函数 (数据兼容性)
@@ -618,12 +618,12 @@ def plot_optimization_history_comparison(
         # 设置网格 (半透明虚线)
         ax.grid(True, linestyle='--', alpha=0.5)
         
-        # 设置图例 (右上角，中文支持)
+        # 设置图例 (右上角, 中文支持)
         # framealpha=0.9 防止遮挡背景网格
-        # prop=FONT_ZH 确保图例中的中文(如果有)能显示，英文(CPU/GPU)也会使用该字体显示
+        # prop=FONT_ZH 确保图例中的中文(如果有)能显示, 英文(CPU/GPU)也会使用该字体显示
         ax.legend(loc='upper right', prop=FONT_ZH, framealpha=0.9, fancybox=False)
         
-        # --- 关键：强制设置刻度字体为 Times New Roman ---
+        # --- 关键: 强制设置刻度字体为 Times New Roman ---
         if FONT_EN:
             for label in ax.get_xticklabels():
                 label.set_fontproperties(FONT_EN)
@@ -634,7 +634,7 @@ def plot_optimization_history_comparison(
     # 6. 标题与保存
     # ------------------------------------------
     if title:
-        # 如果有总标题，使用中文
+        # 如果有总标题, 使用中文
         fig.suptitle(title, fontproperties=FONT_ZH, y=0.98)
 
     plt.tight_layout()

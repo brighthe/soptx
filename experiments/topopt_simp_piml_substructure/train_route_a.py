@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""离线训练 PIML Route A 形函数代理并保存带签名 checkpoint。"""
+"""离线训练 PIML Route A 形函数代理并保存带签名 checkpoint."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ from config import OUTPUT_DIR, ROUTE_A_HIDDEN_DIMS, TopOptCase, load
 def build_context(
     case: TopOptCase,
 ) -> tuple[SubstructurePrototype, GlobalAssembler]:
-    """按拓扑工况构造唯一子结构原型及其全局装配器。"""
+    """按拓扑工况构造唯一子结构原型及其全局装配器."""
     domain_size = tuple(
         case.domain[2 * axis + 1] - case.domain[2 * axis]
         for axis in range(case.dim)
@@ -82,7 +82,7 @@ def exact_shape_function_targets(
     prototype: SubstructurePrototype,
     density: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, Any, Any]:
-    r"""用 Exact Schur 生成 $M=N R_{\perp}$ 标签及精确降阶刚度。"""
+    r"""用 Exact Schur 生成 $M=N R_{\perp}$ 标签及精确降阶刚度."""
     density_bm = bm.asarray(density, dtype=bm.float64)
     density_cell = prototype.grid_to_cell_field(density_bm)
     local_stiffness = prototype.assemble_local_stiffness_batch(density_cell)
@@ -106,7 +106,7 @@ def load_exact_trajectory(
     path: Path,
     case: TopOptCase,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """读取一条完整 Exact 轨迹；不在轨迹内部切分 train/validation。"""
+    """读取一条完整 Exact 轨迹; 不在轨迹内部切分 train/validation."""
     resolved = path.expanduser().resolve()
     digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
     required = {
@@ -160,7 +160,7 @@ def _raw_route_a_stiffness(
     density: np.ndarray,
     local_stiffness: Any,
 ) -> Any:
-    r"""由 raw 网络输出按式 (17) 构造 $\widehat K$，不执行 Exact fallback。"""
+    r"""由 raw 网络输出按式 (17) 构造 $\widehat K$, 不执行 Exact fallback."""
     model.eval()
     with torch.no_grad():
         prediction = model(
@@ -201,7 +201,7 @@ def make_physics_evaluator(
     solid_stiffness_norm: float,
     gate_weight: float,
 ):
-    """构造分来源 gate 与 raw 式 (17) 刚度误差评价器。"""
+    """构造分来源 gate 与 raw 式 (17) 刚度误差评价器."""
     density_bm = bm.asarray(validation_density, dtype=bm.float64)
     source_array = np.asarray(validation_sources)
 

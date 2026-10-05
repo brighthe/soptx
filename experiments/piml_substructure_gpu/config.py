@@ -1,4 +1,4 @@
-"""子结构 PIML GPU 实验的静态工况注册。"""
+"""子结构 PIML GPU 实验的静态工况注册."""
 
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ OUTPUT_DIR = EXPERIMENT_DIR / "outputs"
 
 
 class ConfigError(RuntimeError):
-    """工况注册表不满足实验契约。"""
+    """工况注册表不满足实验契约."""
 
 
 @dataclass(frozen=True)
 class TrainingCase:
-    """一个 CPU 或 CUDA 训练工况。"""
+    """一个 CPU 或 CUDA 训练工况."""
 
     id: str
     pair_id: str
@@ -44,7 +44,7 @@ class TrainingCase:
     n_eval: int = 200
 
     def comparison_contract(self) -> dict[str, Any]:
-        """返回配对两端必须一致的计算契约。"""
+        """返回配对两端必须一致的计算契约."""
         data = dict(vars(self))
         for name in ("id", "device", "summary"):
             data.pop(name)
@@ -57,7 +57,7 @@ class TrainingCase:
         epochs: int | None,
         batch_size: int | None,
     ) -> "TrainingCase":
-        """应用同一组命令行工作量覆盖。"""
+        """应用同一组命令行工作量覆盖."""
         result = replace(
             self,
             samples=self.samples if samples is None else samples,
@@ -106,7 +106,7 @@ def _validate(case: TrainingCase) -> None:
 
 
 def load() -> tuple[dict[str, Any], tuple[TrainingCase, ...]]:
-    """读取配置；不导入数值库。"""
+    """读取配置; 不导入数值库."""
     try:
         raw = tomllib.loads(CASES_FILE.read_text(encoding="utf-8"))
     except Exception as error:
@@ -155,7 +155,7 @@ def load() -> tuple[dict[str, Any], tuple[TrainingCase, ...]]:
 
 
 def pair(cases: tuple[TrainingCase, ...], pair_id: str) -> tuple[TrainingCase, TrainingCase]:
-    """取得一个配置完全一致的 CPU/CUDA pair。"""
+    """取得一个配置完全一致的 CPU/CUDA pair."""
     matches = [case for case in cases if case.pair_id == pair_id]
     selected = {case.device: case for case in matches}
     if len(matches) != 2 or set(selected) != {"cpu", "cuda"}:

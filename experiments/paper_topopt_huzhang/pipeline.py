@@ -275,9 +275,9 @@ def build_density_filter(
         filter_type=filter_type,
         rmin=filter_radius,
         density_location="element",
-        # 非结构网格走 KD-tree 通用路径, 权重为 (1 - d/rmin)^q。q 曾在
+        # 非结构网格走 KD-tree 通用路径, 权重为 (1 - d/rmin)^q. q 曾在
         # FilterMatrixBuilder 内部写死为 3, 现已参数化 (默认 1 = 线性锥形);
-        # 这里显式钉住 3, 保持既有结果不变。
+        # 这里显式钉住 3, 保持既有结果不变.
         filter_q=3,
         projection_params=projection_params,
         passive_mask=passive_mask,
@@ -751,7 +751,7 @@ class CantileverStressExperimentConfig:
     nx: int
     ny: int
     # 三角剖分方式 (见 MESH_TYPES); 此前该字段被静默丢弃, create_mesh 的默认值
-    # 恰为棋盘格, 补齐后行为不变, 但 [mesh] 头部与 summary 能如实报告。
+    # 恰为棋盘格, 补齐后行为不变, 但 [mesh] 头部与 summary 能如实报告.
     mesh_type: MeshType
     filter_radius: float
     load_width: float

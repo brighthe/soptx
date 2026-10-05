@@ -424,7 +424,7 @@ def _analyze(
     displacement_sha256 = _sha256(displacement)
     timings["total"] = time.perf_counter() - started
 
-    # 每步重新计算全部数值状态；结束后清空 K_s/N，仅复用几何对象和缩聚器实例。
+    # 每步重新计算全部数值状态; 结束后清空 K_s/N, 仅复用几何对象和缩聚器实例.
     condensor.K_s = None
     condensor.N = None
     return {
@@ -665,7 +665,7 @@ def run_density_update_consistency(
     monitor: bool = False,
     monitor_interval: float = 0.5,
 ) -> dict[str, Any]:
-    """在独立 Worker 中执行密度更新验证，并保留失败证据."""
+    """在独立 Worker 中执行密度更新验证, 并保留失败证据."""
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     target = output / _result_name(route, dim, n_sub, n_fine)

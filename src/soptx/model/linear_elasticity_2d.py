@@ -571,7 +571,7 @@ class PolyQ2MixHomoDirNhomoNeu2d(PDEBase):
     r"""
     二维线弹性 (平面应变) —— 二次多项式函数解析解 + 混合边界条件 (上/下 非齐次 Dirichlet, 左/右 非齐次 Neumann)
     
-    材料参数：
+    材料参数:
         λ = 1.0, μ = 0.5 
 
     体力密度:
@@ -1237,7 +1237,7 @@ class TriMixHomoDirNhomoNeu2d(PDEBase):
     胡张混合有限元
         二维线弹性 (平面应变) —— 解析解 + 混合边界条件 (上/下 齐次 Dirichlet, 左/右 非齐次 Neumann)
 
-    材料参数：
+    材料参数:
         λ = 1.0, μ = 0.5 
 
     解析位移 (三角函数):
@@ -2128,21 +2128,21 @@ class BoxTriMixedLagrange2dData(PDEBase):
     """
     混合边界条件的线弹性问题
     
-    控制方程：
+    控制方程:
         -∇·σ = f    in Ω
     
-    边界条件：
+    边界条件:
         u = 0       on Γ_D = {x=0} ∪ {y=0} (Dirichlet)
         σ·n = g     on Γ_N = {x=1} ∪ {y=1} (Neumann)
     
-    其中：
+    其中:
         - σ is the stress tensor
         - ε = (∇u + ∇u^T)/2 is the strain tensor
     
-    材料参数：
+    材料参数:
         E = 1, nu = 0.3 (平面应变)
     
-    精确解：
+    精确解:
         u(x, y) = [sin(πx)sin(πy), 0]^T
     """
     def __init__(self, 
@@ -2313,7 +2313,7 @@ class BoxTriMixedLagrange2dData(PDEBase):
         return grad_u
 
     #######################################################################################################################
-    # Dirichlet 边界条件（左边和底边）
+    # Dirichlet 边界条件 (左边和底边)
     #######################################################################################################################
 
     @cartesian
@@ -2324,7 +2324,7 @@ class BoxTriMixedLagrange2dData(PDEBase):
     
     @cartesian
     def is_dirichlet_boundary_dof_x(self, points: TensorLike) -> TensorLike:
-        """判断 x 方向位移是否在 Dirichlet 边界上（左边和底边）"""
+        """判断 x 方向位移是否在 Dirichlet 边界上 (左边和底边)"""
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -2337,7 +2337,7 @@ class BoxTriMixedLagrange2dData(PDEBase):
 
     @cartesian  
     def is_dirichlet_boundary_dof_y(self, points: TensorLike) -> TensorLike:
-        """判断 y 方向位移是否在 Dirichlet 边界上（左边和底边）"""
+        """判断 y 方向位移是否在 Dirichlet 边界上 (左边和底边)"""
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 
@@ -2354,7 +2354,7 @@ class BoxTriMixedLagrange2dData(PDEBase):
                 self.is_dirichlet_boundary_dof_y)
 
     #######################################################################################################################
-    # Neumann 边界条件（右边和顶边）
+    # Neumann 边界条件 (右边和顶边)
     #######################################################################################################################
 
     @cartesian
@@ -2391,7 +2391,7 @@ class BoxTriMixedLagrange2dData(PDEBase):
 
     @cartesian
     def is_neumann_boundary_dof(self, points: TensorLike) -> TensorLike:
-        """判断是否在 Neumann 边界上（右边和顶边）"""
+        """判断是否在 Neumann 边界上 (右边和顶边)"""
         domain = self.domain
         x, y = points[..., 0], points[..., 1]
 

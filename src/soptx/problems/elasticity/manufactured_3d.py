@@ -15,8 +15,8 @@ from ._base import AllDisplacementBoundaryMixin, validated_domain
 class DivergenceFreePolynomialElasticity3D(AllDisplacementBoundaryMixin):
     r"""多项式全 Dirichlet 制造解弹性问题.
 
-    精确位移是无散的 (divergence-free), 因此体力只依赖剪切模量。
-    见 ``docs/models/manufactured-elasticity.md``。
+    精确位移是无散的 (divergence-free), 因此体力只依赖剪切模量.
+    见 ``docs/models/manufactured-elasticity.md``.
     """
 
     dimension = 3

@@ -312,7 +312,7 @@ def test_a_direct_solve_does_not_fabricate_iteration_counts() -> None:
     """LinearSolver 契约要求每条路径都给 niter/relres/converged.
 
     一步解法记 niter == 1, 使消费方无条件读得到这三个键; 但迭代法专属的诊断
-    (maxit, 递推残差) 不得凭空造出来 -- 直接法没有这两个量。
+    (maxit, 递推残差) 不得凭空造出来 -- 直接法没有这两个量.
     """
     analyzer = make_analyzer(8, "fa", "scipy")
     info = analyzer.solve_state()["solver"]

@@ -151,7 +151,7 @@ def _tag_matches_registered(field: str, value: str, parameters: dict[str, Any]) 
     """判断目录里的附加标签是否只是把注册默认值显式写了一遍.
 
     ``--override stress_tolerance=0.005`` 与注册默认 ``5.0e-3`` 数值相同, driver
-    仍会写进目录名; 这类运行与不带标签的注册运行同口径, 应当被冻结评估认走。
+    仍会写进目录名; 这类运行与不带标签的注册运行同口径, 应当被冻结评估认走.
     取值不同的覆盖跑 (``epsilon=1e-4``、``mu_max=1e5`` 等) 则必须排除.
     """
     if field not in parameters:

@@ -72,18 +72,18 @@ def _edge_key(points) -> tuple:
 
     ``QuadrangleMesh.from_box`` 的结点坐标由 ``linspace`` 生成, 与测试侧按
     ``i / n`` 直接算出的期望坐标走的是不同浮点路径; 当步长不可精确表示
-    (``n`` 取 3、6 等) 时两者相差 1 ULP, 直接做元组相等比较会漏判。两侧统一
-    量化到 12 位小数后再比较, 结果与 ``nx``、``ny`` 的取值无关。
+    (``n`` 取 3、6 等) 时两者相差 1 ULP, 直接做元组相等比较会漏判. 两侧统一
+    量化到 12 位小数后再比较, 结果与 ``nx``、``ny`` 的取值无关.
 
     Parameters
     ----------
     points : iterable of (float, float)
-        边的两个端点坐标。
+        边的两个端点坐标.
 
     Returns
     -------
     tuple
-        排序后的量化端点对。
+        排序后的量化端点对.
     """
     return tuple(sorted(
         (round(float(x), _COORD_DECIMALS), round(float(y), _COORD_DECIMALS))

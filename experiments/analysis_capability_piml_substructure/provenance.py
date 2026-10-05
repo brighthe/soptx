@@ -2,7 +2,7 @@
 """运行溯源的采集 (PIML 能力验证).
 
 记录 Git revision、dirty 状态、运行时间戳、主机环境、Python/PyTorch/JAX/FEALPy 版本
-以及 GPU 设备型号 (如存在)。
+以及 GPU 设备型号 (如存在).
 """
 
 from __future__ import annotations

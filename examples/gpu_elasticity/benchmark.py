@@ -1,8 +1,8 @@
 """GPU vs CPU 线弹性求解性能 benchmark.
 
-固定求解器和制造解, 在不同网格规模下测量各阶段 wall time, 计算 speedup。
+固定求解器和制造解, 在不同网格规模下测量各阶段 wall time, 计算 speedup.
 制造解定义见
-`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__。
+`制造解文档 <../../docs/problems/manufactured-elasticity.md>`__.
 
 运行::
 

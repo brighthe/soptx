@@ -89,7 +89,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
 
-        # 私有属性（建议通过属性访问器访问，不要直接修改）
+        # 私有属性 (建议通过属性访问器访问, 不要直接修改)
         self._mesh = disp_mesh
         self._pde = pde
         self._material = material
@@ -243,7 +243,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """最近一次装配中泊松比是否随密度插值
 
         为 True 时 K_e 不再是实体单元刚度的标量倍, 依赖 K_e = E(ρ)/E0 · K_e^0
-        的外部路径 (自动微分、应力约束的隐式项) 不再成立。
+        的外部路径 (自动微分、应力约束的隐式项) 不再成立.
         """
         return self._cached_nu_rho is not None
     
@@ -257,7 +257,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """最近一次 assemble_stiff_matrix 构造出的装配层级对象
 
         'fa' 下它持有全局稀疏矩阵与 CSR 骨架, 'ea' 下它就是刚度算子本身 (与
-        stiffness_matrix 同一个对象)。assemble_stiff_matrix 之前为 None。
+        stiffness_matrix 同一个对象). assemble_stiff_matrix 之前为 None.
         """
         return self._level
 
@@ -275,8 +275,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def prescribed_solution(self) -> Optional[TensorLike]:
         """最近一次 apply_bc 得到的 Dirichlet 基准向量
 
-        边界自由度取给定值, 内部自由度为零。可用作迭代解法的初值, 以及边界误差
-        的比较基准。apply_bc 之前为 None。
+        边界自由度取给定值, 内部自由度为零. 可用作迭代解法的初值, 以及边界误差
+        的比较基准. apply_bc 之前为 None.
         """
         return self._prescribed_solution
 
@@ -551,13 +551,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """按 pde.boundary_type 决定是否装配自然边界载荷
 
         assemble_external_load 与两个 apply_bc 变体都经过本方法, 保证「只消费外载
-        的调用方」(子结构缩聚等) 与「求解全尺度系统的调用方」看到的是同一个载荷。
+        的调用方」(子结构缩聚等) 与「求解全尺度系统的调用方」看到的是同一个载荷.
 
         - 'mixed'     : 装配点力、线载荷与边界牵引 (以及伴随载荷列);
-        - 'dirichlet' : 全边界都是本质边界, 自然边界项不进入右端。此时 pde 若仍
+        - 'dirichlet' : 全边界都是本质边界, 自然边界项不进入右端. 此时 pde 若仍
                         给出非体力载荷, 说明边界类型与载荷契约矛盾, 显式报错而不是
                         静默丢弃;
-        - 其他        : 尚未定义装配语义, 报错。
+        - 其他        : 尚未定义装配语义, 报错.
         """
         boundary_type = self._pde.boundary_type
 
@@ -580,7 +580,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._log_error(f"Unsupported boundary type: {boundary_type}")
 
     def _assemble_non_body_loads(self, adjoint: bool = False) -> TensorLike:
-        """组装点力、线载荷和边界牵引，并保留现有伴随载荷入口."""
+        """组装点力、线载荷和边界牵引, 并保留现有伴随载荷入口."""
         space_uh = self._tensor_space
         F_physical = space_uh.function()
         nodal_loads = []
@@ -666,9 +666,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Note
         ----
         本分支不经过 reduce_load / wrap_operator: 对称消元直接改写一个已经装配好
-        的全局矩阵, 没有可供插入重叠归约的位置。因此 'fa' 只能在单 rank 上用——
-        多 rank 若放行, 各 rank 会在自己的局部矩阵上求解, 不报错但结果是错的。
-        单 rank 下重叠归约本身是恒等操作, 带 dof_comm 也是安全的。
+        的全局矩阵, 没有可供插入重叠归约的位置. 因此 'fa' 只能在单 rank 上用——
+        多 rank 若放行, 各 rank 会在自己的局部矩阵上求解, 不报错但结果是错的.
+        单 rank 下重叠归约本身是恒等操作, 带 dof_comm 也是安全的.
         """
         if self._dof_comm is not None and self._dof_comm.mpi_size > 1:
             self._log_error(
@@ -718,10 +718,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """在矩阵自由算子上施加边界条件
 
         不改写任何矩阵, 而是把算子包进 ConstrainedOperator: matvec 时先把
-        Dirichlet 自由度置零, 作用后再还原, 等价于 'fa' 的对称消元系统。
+        Dirichlet 自由度置零, 作用后再还原, 等价于 'fa' 的对称消元系统.
 
         本变体只用到 AssemblyLevelExtension 的接口, 不碰常驻形式, 因此 'ea' 与
-        'pa' 共用它。
+        'pa' 共用它.
         """
         if adjoint:
             self._log_error(
@@ -762,22 +762,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def wrap_operator(self, form: AssemblyLevelExtension):
         """在施加边界条件之前对单元级算子做一层包装
 
-        串行下原样返回。分布式实现覆盖本方法, 返回一个把 matvec 结果在重叠自由度
+        串行下原样返回. 分布式实现覆盖本方法, 返回一个把 matvec 结果在重叠自由度
         上求和的包装 (示例中的 `distributed.OverlapOperator`), 之后的边界条件处理
-        和求解都不需要知道它的存在。
+        和求解都不需要知道它的存在.
 
         Note
         ----
         包装必须发生在 ConstrainedOperator 之前: 先跨 rank 组装出完整的算子作用,
-        再在其上消去 Dirichlet 自由度。顺序反过来会把边界行的置换也带进通信。
+        再在其上消去 Dirichlet 自由度. 顺序反过来会把边界行的置换也带进通信.
         """
         return form
 
     def reduce_load(self, F: TensorLike) -> TensorLike:
         """把按自由度分布的右端项在重叠自由度上归约
 
-        串行下原样返回。分布式实现覆盖本方法, 通常是 `dof_comm.sync_add(F)`。
-        必须在施加 Dirichlet 边界条件之前调用, 否则边界行会被重复累加。
+        串行下原样返回. 分布式实现覆盖本方法, 通常是 `dof_comm.sync_add(F)`.
+        必须在施加 Dirichlet 边界条件之前调用, 否则边界行会被重复累加.
         """
         return F
 
@@ -884,7 +884,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """把刚度算子转成迭代解法可以直接作用的形式
 
         矩阵自由层级下 K 本身就支持 @ 运算; 'fa' 下 PyTorch 后端需要绕开 FEALPy
-        的 CSRTensor, 其余后端直接用 COO。
+        的 CSRTensor, 其余后端直接用 COO.
         """
         if self._operator_level != 'fa':
             return K
@@ -911,11 +911,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         取对角已下沉到求解层的 ``soptx.solvers.operator_diagonal``, 按算子实际
         能提供什么分派: 'ea' 下 ConstrainedOperator 自报 (Dirichlet 自由度上恒
         为 1, 其余转发内层算子, 跨 rank 归约由 OverlapOperator 完成), 'fa' 下扫
-        对称消元后稀疏矩阵的 COO 取主对角。
+        对称消元后稀疏矩阵的 COO 取主对角.
 
         analyzer 内部已不再调用本方法: ``_build_solver`` 把算子直接交给
-        ``DiagonalPreconditioner``, 由它在 setup 时取。本方法保留为一层转发,
-        供 examples 与 experiments 里的既有脚本沿用。
+        ``DiagonalPreconditioner``, 由它在 setup 时取. 本方法保留为一层转发,
+        供 examples 与 experiments 里的既有脚本沿用.
 
         Parameters
         ----------
@@ -935,12 +935,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         主算子在 solve_system 拿到时已经施加过边界条件 (solve_state 里
         ``K, F = self.apply_bc(K0, F0)``), 预条件层级不走一遍同样的处理就是在给
-        奇异矩阵做分解, 因此本方法负责补上矩阵侧的边界条件。
+        奇异矩阵做分解, 因此本方法负责补上矩阵侧的边界条件.
 
         不复用 ``apply_bc``: 它是按 ``operator_level`` 定死变体的 variantmethod,
         预条件层级可能属于另一个变体; 它还同时做载荷侧的事 (累加非体力载荷, 跨
         rank 归约, 写 ``_F`` 与 ``_prescribed_solution``), 二次调用会重复加载荷并
-        覆盖状态。这里只取两个变体的矩阵侧, 各自都已经是现成的单句。
+        覆盖状态. 这里只取两个变体的矩阵侧, 各自都已经是现成的单句.
 
         Returns
         -------
@@ -950,10 +950,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
         -----
         必须在 ``assemble_stiff_matrix`` 之后调用: 层级从 ``self._integrator``
         构造, 而密度系数是 ``_update_density_coefficient`` 在装配时写进积分子的,
-        提前调用会读到上一步的密度。``_build_solver`` 的调用点天然满足这一点。
+        提前调用会读到上一步的密度. ``_build_solver`` 的调用点天然满足这一点.
 
-        结果刻意不缓存: 拓扑优化每步都改密度, 缓存必然读到陈旧的刚度。代价是每次
-        求解多一次装配 —— 这是第一版的取舍, 把失效管理与本轴解耦。
+        结果刻意不缓存: 拓扑优化每步都改密度, 缓存必然读到陈旧的刚度. 代价是每次
+        求解多一次装配 —— 这是第一版的取舍, 把失效管理与本轴解耦.
         """
         space_uh = self._tensor_space
         threshold_uh = self._pde.is_dirichlet_boundary()
@@ -976,7 +976,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """按名字造出求解器, 并选定它要绑定的算子
 
         名字到类的分派由 soptx.solvers.registry 完成, 本方法只剩两件本地的事:
-        各后端读哪些选项, 以及 'fa'/'ea' 下算子形态的差异。
+        各后端读哪些选项, 以及 'fa'/'ea' 下算子形态的差异.
 
         Returns
         -------
@@ -1014,7 +1014,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 )
 
                 # 预条件子的算子源: 默认就是主算子本身, 给了 preconditioner_level
-                # 就另建一个。两者都是已施加边界条件的算子, 对预条件子而言等价。
+                # 就另建一个. 两者都是已施加边界条件的算子, 对预条件子而言等价.
                 #
                 # 先在 fem 侧的算子上 setup 再交给 CG (CG 只对未 setup 的预条件子
                 # 做级联): 一是 _as_iterative_operator 的产物在 pytorch 后端是原生
@@ -1030,7 +1030,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     M = DiagonalPreconditioner()
                 elif precond in ('scipy', 'mumps'):
                     # 直接法当预条件子: LinearSolver.__matmul__ 本就是"零初值解一
-                    # 次"的预条件子模式, 不需要适配层。它是精确逆, CG 应一步收敛,
+                    # 次"的预条件子模式, 不需要适配层. 它是精确逆, CG 应一步收敛,
                     # 因此主要用途是验证两个层级确实是同一个离散算子
                     M = create(precond)
                 else:
@@ -1051,11 +1051,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
                 # 判据范数与下游口径对齐: cg 默认在 natural 范数
                 # sqrt(r^T M^-1 r) 下停机, 而本方法返回的 relres 是 2-范数,
-                # Jacobi 的 diag^-1 可达 1e6 量级, 两个口径能差几个数量级。
+                # Jacobi 的 diag^-1 可达 1e6 量级, 两个口径能差几个数量级.
                 # 显式选 unpreconditioned 让停机判据也用 ||r||_2, 不多做 matvec
                 norm_type = 'unpreconditioned'
                 # 与范数选择正交: 递推残差在长迭代下会漂移, 周期性用 b - A x
-                # 校正。撤掉它需要单独的数值证据, 故与 M 绑定保持开启
+                # 校正. 撤掉它需要单独的数值证据, 故与 M 绑定保持开启
                 if residual_refresh <= 0:
                     residual_refresh = 50
 
@@ -1071,7 +1071,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if solver_type == 'mumps':
             # sym=0 按一般非对称矩阵分解; 位移元刚度阵经对称消元后仍是对称正定,
             # 传 1 (正定) 或 2 (一般对称) 只让 MUMPS 读下三角, 因子存储与运算量
-            # 大致减半。默认保持 0, 由调用方显式开启
+            # 大致减半. 默认保持 0, 由调用方显式开启
             mumps_sym = int(kwargs.get('sym', 0))
 
             return create('mumps', sym=mumps_sym), K, {'sym': mumps_sym}, None
@@ -1096,20 +1096,20 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         Note
         ----
-        本方法不读取任何由 apply_bc 留下的状态。迭代解法的初值必须由调用方通过
+        本方法不读取任何由 apply_bc 留下的状态. 迭代解法的初值必须由调用方通过
         kwargs['x0'] 显式给出——对 'ea' 而言通常就是 apply_bc 产生的
-        prescribed_solution, 它已满足 Dirichlet 值。
+        prescribed_solution, 它已满足 Dirichlet 值.
 
         直接法在 'ea' 下不可用一事不在此处硬编码判断: DirectSolver 声明自己需要
         显式矩阵, matrix-free 算子给不出, setup 时即抛 OperatorCapabilityError,
-        本方法只负责把它转成与其他使用错误一致的 RuntimeError。
+        本方法只负责把它转成与其他使用错误一致的 RuntimeError.
 
         分解不跨调用复用: 求解完即释放, MUMPS 上下文的生命周期与改造前逐次
-        建销一致。状态解与伴随解共用一个分解要改 analyzer 的状态管理, 单独一步做。
+        建销一致. 状态解与伴随解共用一个分解要改 analyzer 的状态管理, 单独一步做.
 
         这是分布式求解唯一的注入点: 并行只需在此处把 fealpy 的 cg 换成带
-        overlap 加权内积的版本, 上层的组装与边界条件处理不受影响。覆盖本方法的
-        实现负责自行处理 dof_comm。
+        overlap 加权内积的版本, 上层的组装与边界条件处理不受影响. 覆盖本方法的
+        实现负责自行处理 dof_comm.
         """
         if self._dof_comm is not None:
             raise NotImplementedError(
@@ -1135,7 +1135,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             out[:], raw = solver.solve(F[:], kwargs.get('x0', None))
         finally:
-            # 直接法持有 SuperLU 分解或 MUMPS 上下文, 用完即释放。预条件子位上的
+            # 直接法持有 SuperLU 分解或 MUMPS 上下文, 用完即释放. 预条件子位上的
             # 直接法 (preconditioner_level 配 precond='scipy'/'mumps') 持有的是
             # 另一份, 一并释放, 否则 MUMPS 侧的内存不回收
             for owner in (solver, getattr(solver, 'M', None)):
@@ -1149,9 +1149,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 'converged': bool(raw['converged'])}
 
         if tol is not None:
-            # 收敛与否以求解器自己的退出原因为准, 不在这里重判。原来那段用
+            # 收敛与否以求解器自己的退出原因为准, 不在这里重判. 原来那段用
             # max(atol, rtol * ||F||_2) 重算是错的: solve_system 支持传 x0,
-            # 热启动时 rtol 的参照量是 ||r0|| 而非 ||F||。判据口径的对齐已在
+            # 热启动时 rtol 的参照量是 ||r0|| 而非 ||F||. 判据口径的对齐已在
             # 求解器内部完成 (见上面 _build_solver 的 norm_type)
             reason = raw.get('reason', None)
             if reason is not None:
@@ -1189,7 +1189,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     #   平面应力      : λ* = λ̄ = E ν / (1-ν²) = 2λμ / (λ+2μ)
     #   μ = E / (2(1+ν))
     # 于是 K_e = λ*_e K_e^λ + μ_e K_e^μ, 两个基矩阵与设计无关; 对 ρ 求导只需
-    # 对 λ*、μ 做链式法则, 不必重新积分。
+    # 对 λ*、μ 做链式法则, 不必重新积分.
     # ------------------------------------------------------------------
 
     def _lame_basis_matrices(self) -> tuple:
@@ -1216,7 +1216,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def _lame_parameters(self, E: TensorLike, nu: TensorLike) -> tuple:
         """由逐单元 (E, ν) 计算 (λ*, μ, ∂λ*/∂E, ∂λ*/∂ν, ∂μ/∂E, ∂μ/∂ν)
 
-        λ* 按材料的 hypothesis 取 λ (平面应变、3D) 或 λ̄ (平面应力)。
+        λ* 按材料的 hypothesis 取 λ (平面应变、3D) 或 λ̄ (平面应力).
         """
         one_plus = 1.0 + nu
         mu = E / (2.0 * one_plus)
@@ -1520,7 +1520,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         Parameters
         ----------
-        integration_order : 积分阶次，默认使用分析器的积分阶次
+        integration_order : 积分阶次, 默认使用分析器的积分阶次
         
         Returns
         -------
@@ -1531,7 +1531,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Note
         ----
         B 只取决于位移离散和积分点位置, 与密度自由度住在哪里无关; 唯一的区别是
-        多分辨率要在子密度单元的积分点上求值, 因此这里只按是否多分辨率分支。
+        多分辨率要在子密度单元的积分点上求值, 因此这里只按是否多分辨率分支.
         """
         if integration_order is None:
             integration_order = self._integration_order

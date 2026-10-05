@@ -90,7 +90,7 @@ def run_case(updates, violation=-0.1, continuation=False, outer=2, inner=2):
         change_tolerance=0.002, stress_tolerance=0.003,
         # 本文件的用例查的是状态一致性与相对超限量, 不查 C3 持续性;
         # 取 hold_steps=1 保持"一步达标即退出"的原有语义, 否则每个用例都要
-        # 多喂 2 个外层步才退出, 断言的观察点会被推后。
+        # 多喂 2 个外层步才退出, 断言的观察点会被推后.
         hold_steps=1,
         use_penalty_continuation=False,
         initialize_problem_params=lambda m, n: None,
@@ -136,7 +136,7 @@ def test_relative_violation_prevents_early_exit_despite_small_raw_constraint():
     assert calls == 4
     assert history.scalar_histories["max_constraint"][-1] == pytest.approx(0.0001)
     assert history.scalar_histories["max_relative_violation"][-1] == pytest.approx(0.01)
-    # 状态跨步复用: 初始设计 1 次 + 每次 MMA 更新后 1 次, 内层步头部不重解。
+    # 状态跨步复用: 初始设计 1 次 + 每次 MMA 更新后 1 次, 内层步头部不重解.
     assert len(objective.solved) == 1 + calls
 
 
@@ -146,5 +146,5 @@ def test_projection_change_requires_new_state_before_exit():
     np.testing.assert_allclose(rho, 0.6)
     np.testing.assert_array_equal(objective.solved[-1], rho)
     assert history.scalar_histories["max_von_mises"][-1] == pytest.approx(0.6)
-    # beta 更新重过滤了物理密度, 下一外层步头部必须重解: 1 + 2 次更新 + 1 次补解。
+    # beta 更新重过滤了物理密度, 下一外层步头部必须重解: 1 + 2 次更新 + 1 次补解.
     assert len(objective.solved) == 4

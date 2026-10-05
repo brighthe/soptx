@@ -104,7 +104,7 @@ class OverlapOperator:
         的情况下拿到只含本 rank 贡献的对角.
 
         返回:
-            TensorLike: (gdof, ) 的全局算子对角。
+            TensorLike: (gdof, ) 的全局算子对角.
         """
         return self.dof_comm.sync_add(self.local_operator.diagonal())
 

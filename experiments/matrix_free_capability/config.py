@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# 本目录与仓库根。experiments/<name>/config.py 上溯两级即仓库根。
+# 本目录与仓库根. experiments/<name>/config.py 上溯两级即仓库根.
 EXPERIMENT_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = EXPERIMENT_DIR.parents[1]
 CASES_FILE = EXPERIMENT_DIR / "cases.toml"
@@ -26,8 +26,8 @@ OUTPUT_MODES = ("dir", "file", "fixed")
 #
 # ⚠️ 这四个键是数据组标识, 不是图面位置, 两者自 2026-08-24 版式改造起错开:
 # 数据组 c(device-speedup)画在图面的 (d), 数据组 d(进程级 MPI 强扩展)画在图面
-# 的 (c)。键名按采集顺序固定 —— 改名会让全部历史快照的 panels.* 对不上, 而图面
-# 位置按阅读顺序排, 两套编号没有理由必须一致。图面侧的映射在 make_figs.py。
+# 的 (c). 键名按采集顺序固定 —— 改名会让全部历史快照的 panels.* 对不上, 而图面
+# 位置按阅读顺序排, 两套编号没有理由必须一致. 图面侧的映射在 make_figs.py.
 PANELS = ("a", "b", "c", "d")
 
 

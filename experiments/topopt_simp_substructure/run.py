@@ -5,10 +5,10 @@
 experiments/topopt_simp_piml_substructure/run.py 的 FEA 基线逐参数一致
 (move=0.2, damping=0.5, initial_lambda=1e9, bisection_tol=1e-4,
 design_variable_min=1e-3, 收敛判据为连续 5 步 |dC|/C < tol_change 且 it >= 10),
-因此同工况的柔度历史可以直接与该目录及 experiments/topopt_simp_fa 对照。
+因此同工况的柔度历史可以直接与该目录及 experiments/topopt_simp_fa 对照.
 
 正问题 (装配 / 缩聚 / 求解 / 恢复 / 单元应变能) 全部在 pipeline.py 中,
-本文件只负责优化状态、落盘与命令行。
+本文件只负责优化状态、落盘与命令行.
 
 用法:
     python run.py --list

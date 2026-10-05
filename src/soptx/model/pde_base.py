@@ -7,7 +7,7 @@ from soptx.typing import TensorLike
 from soptx.core import BaseLogged
 
 class PDEBase(BaseLogged, ABC):
-    """PDE 基类，提供网格管理功能"""
+    """PDE 基类, 提供网格管理功能"""
     
     def __init__(self,
                 domain: List[float] = [0, 1, 0, 1],

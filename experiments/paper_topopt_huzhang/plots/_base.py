@@ -21,9 +21,9 @@ from matplotlib import font_manager
 import config
 
 
-# 论文正文字体候选: CICP 类以 mathpazo 选项排版, 正文为 Palatino。WSL 下优先借用
+# 论文正文字体候选: CICP 类以 mathpazo 选项排版, 正文为 Palatino. WSL 下优先借用
 # Windows 的 Palatino Linotype (TrueType, PDF 后端可按 Type 42 嵌入), 其次 TeX Live
-# 自带的 TeX Gyre Pagella (OpenType CFF, PNG 可用, PDF 嵌入不保证)。
+# 自带的 TeX Gyre Pagella (OpenType CFF, PNG 可用, PDF 嵌入不保证).
 _PAPER_FONT_CANDIDATES = (
     (
         "Palatino Linotype",
@@ -43,10 +43,10 @@ def paper_rcparams(base_size: float = 9.0) -> str:
     """论文插图排版口径: 与 CICP 正文同族的 Palatino 衬线字体 + 同字体的 mathtext.
 
     2026-09-28 起全部八个成图模块改按版心尺寸出图, 都只调用本函数; 原 DejaVu Sans
-    口径的 ``academic_rcparams`` 与中文字体 ``chinese_font`` 随旧图删除。插图按
+    口径的 ``academic_rcparams`` 与中文字体 ``chinese_font`` 随旧图删除. 插图按
     ``\\textwidth`` (150 mm, 5.9 in) 原尺寸嵌入, 字号不再经缩放, 故 ``base_size``
-    就是纸面字号 (正文 10 pt, 题注 9 pt)。
-    返回实际选中的字族名; 候选字体都不存在时回退到 DejaVu Serif。
+    就是纸面字号 (正文 10 pt, 题注 9 pt).
+    返回实际选中的字族名; 候选字体都不存在时回退到 DejaVu Serif.
     """
     import matplotlib.pyplot as plt
 
@@ -99,8 +99,8 @@ def resolve_run_dir(case_dir: Path, folder: str) -> Path | None:
 
     ``folder`` 是产物目录第二层的参数标签, 按 driver 的命名
     ``analyzer-<链>__order-<k>[__<字段>-<取值>...]`` 书写 (见 driver.py 的
-    _run_label)。标签自描述且与参数一一对应, 故不做名字回落: 目录不在就返回
-    None, 由调用方决定报错还是画占位面板。
+    _run_label). 标签自描述且与参数一一对应, 故不做名字回落: 目录不在就返回
+    None, 由调用方决定报错还是画占位面板.
     """
     candidate = case_dir / folder
     return candidate if candidate.is_dir() else None

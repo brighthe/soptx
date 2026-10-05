@@ -166,7 +166,7 @@ def resolve_runs(
 
     ``--method`` 与 ``--order`` 省略时只跑一个默认组合 (见 ``default_method`` 与
     ``comparison_orders`` 的最小值); ``--full`` 才展开成 ``cases.toml`` 声明的完整
-    对比组。注册表里的 ``methods`` / ``comparison_orders`` 同时是这两个选项的白名单,
+    对比组. 注册表里的 ``methods`` / ``comparison_orders`` 同时是这两个选项的白名单,
     ``supplementary_orders`` 额外放宽 ``--order`` 的白名单但不参与任何自动展开.
 
     参数:

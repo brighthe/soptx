@@ -739,7 +739,7 @@ class LinearElasticIntegrator(LinearInt, OpInt, CellInt):
             glambda_x = mesh.grad_lambda(index=index)   # (NC, LDOF, GD)
             # 快速装配用的恒等式是 ``grad(phi_i) = sum_k (d phi_i / d lambda_k) grad(lambda_k)``,
             # 因此 ``S`` 的后两轴必须是重心坐标轴 (长度 ``BC = GD + 1``), 与 ``glambda_x``
-            # 的重心坐标轴对齐。上面按 ``variable='u'`` 取到的是对物理坐标的导数
+            # 的重心坐标轴对齐. 上面按 ``variable='u'`` 取到的是对物理坐标的导数
             # (末轴长度 ``GD``), 轴长对不上, 收缩会直接报错
             gphi_lambda_b = scalar_space.grad_basis(bcs, index=index, variable='b')  # (NQ, LDOF, BC)
             S = bm.einsum('q, qik, qjl -> ijkl', ws, gphi_lambda_b, gphi_lambda_b)  # (LDOF, LDOF, BC, BC)

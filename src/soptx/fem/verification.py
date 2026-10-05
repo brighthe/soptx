@@ -1,14 +1,14 @@
 """交叉校核用的参考解构造与误差度量
 
-EA 路径没有可以打印出来的全局矩阵, 正确性只能靠与 FA 及直接解的比对来钉住。
+EA 路径没有可以打印出来的全局矩阵, 正确性只能靠与 FA 及直接解的比对来钉住.
 本模块提供这套比对所需的三样东西: 相对差、L2 位移误差, 以及一次性构造好全部
-参照量的 :func:`serial_references`。
+参照量的 :func:`serial_references`.
 
 原先住在 ``examples/matrix_free_elasticity/utils/references.py`` 与
-``utils/postprocess.py``, demo 脚本和证据工具都要用, 因此上浮到 ``soptx``。
+``utils/postprocess.py``, demo 脚本和证据工具都要用, 因此上浮到 ``soptx``.
 
 判定阈值不在这里: 按 :mod:`soptx.core.numerics` 的约定, 验收门禁的数字属于定义该门禁
-的示例或研究, 本模块只产出被判定的量。随机种子同理, 由调用方显式传入。
+的示例或研究, 本模块只产出被判定的量. 随机种子同理, 由调用方显式传入.
 """
 
 from __future__ import annotations
@@ -77,8 +77,8 @@ def serial_references(
 ):
     """构造只用于正确性判定的 EA/FA 与直接解参照
 
-    仅限单 rank, 所以用普通串行分析器。两个算子层级出自同一个类, 因此下面任何
-    差异都是两种装配策略之间的真实差异, 而不是两份独立实现之间的差异。
+    仅限单 rank, 所以用普通串行分析器. 两个算子层级出自同一个类, 因此下面任何
+    差异都是两种装配策略之间的真实差异, 而不是两份独立实现之间的差异.
     """
 
     ea = build_serial_analyzer(space, pde, material, degree, "ea")

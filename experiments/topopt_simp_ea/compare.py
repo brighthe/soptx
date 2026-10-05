@@ -9,13 +9,13 @@
    迭代数与 change 历史;
 3. 锁步对照: 取 FA 侧密度快照 (iter 1 / 中期 / 收敛), 进程内用
    ``build_components`` 分别构建 FA 与 EA 分析链, 同一密度下比较位移、
-   灵敏度与两侧真残差。
+   灵敏度与两侧真残差.
 
 默认对照全部注册工况的基准运行; 带 override 的运行用与 run.py 相同的
 ``--case ID --override KEY=VALUE`` 指定, 脚本在 FA 侧重放同一组 override
-找到配对运行。结论写入 ``outputs/compare/<run_id>.json``
-(= ``outputs/compare/<工况 id>/<参数标签>.json``)。阈值超限先视为待调查,
-不在脚本里放宽。
+找到配对运行. 结论写入 ``outputs/compare/<run_id>.json``
+(= ``outputs/compare/<工况 id>/<参数标签>.json``). 阈值超限先视为待调查,
+不在脚本里放宽.
 """
 
 from __future__ import annotations
@@ -52,8 +52,8 @@ DENSITY_THRESHOLD = 0.5         # 最终拓扑阈值化水平
 MAX_THRESHOLD_MISMATCH = 0      # 阈值化失配单元数
 
 # 门禁清单 = config.GATE_FIELDS (标了 A/B/C/D 轴的全部字段), 不在这里另抄
-# 一份: 抄一份就意味着 cases.toml 新增参数时门禁会静默漏掉它。两侧的清单由
-# _fa_module() 加载后逐项核对, 不一致直接报错。
+# 一份: 抄一份就意味着 cases.toml 新增参数时门禁会静默漏掉它. 两侧的清单由
+# _fa_module() 加载后逐项核对, 不一致直接报错.
 
 
 class CompareError(RuntimeError):
@@ -79,7 +79,7 @@ def _fa_module():
 
     FA 与 EA 是两个平行实验目录, 各有一个顶层 config.py, 不能同时 import;
     这里显式按文件加载, 从而复用 FA 自己的解析与校验, 不再在本文件里重写
-    一遍 FA 的默认值规则 (那份复制品曾经就与 FA 的实际默认值脱节)。
+    一遍 FA 的默认值规则 (那份复制品曾经就与 FA 的实际默认值脱节).
     """
     path = FA_EXPERIMENT_DIR / "config.py"
     if not path.is_file():
@@ -88,7 +88,7 @@ def _fa_module():
         return sys.modules["fa_config"]
     spec = importlib.util.spec_from_file_location("fa_config", path)
     module = importlib.util.module_from_spec(spec)
-    # dataclass 处理注解时要能从 sys.modules 找回自己所在模块。
+    # dataclass 处理注解时要能从 sys.modules 找回自己所在模块.
     sys.modules["fa_config"] = module
     spec.loader.exec_module(module)
     if tuple(module.GATE_FIELDS) != tuple(GATE_FIELDS):
@@ -103,9 +103,9 @@ def _fa_module():
 def find_fa_run(case: TopOptCase) -> Any:
     """按 fa_reference 找到 FA 侧工况, 再重放同一组 override 得到配对运行.
 
-    两侧同一组 override 推导出同一个 run_id, 不必逐次登记引用。名字只用来
+    两侧同一组 override 推导出同一个 run_id, 不必逐次登记引用. 名字只用来
     配对, 参数是否真的逐项一致由 check_parameter_gate 对全部 GATE_FIELDS
-    断言 —— 基准参数在两侧注册表里写歪了, 门禁会点名是哪个字段。
+    断言 —— 基准参数在两侧注册表里写歪了, 门禁会点名是哪个字段.
     """
     module = _fa_module()
     _, fa_cases = module.load()
@@ -137,7 +137,7 @@ def check_parameter_gate(case: TopOptCase, fa_case: Any) -> dict[str, Any]:
     """逐项断言 EA 运行与 FA 对照运行的影响结果参数字面一致.
 
     run_id 相同只说明 id 与 override 标签相同, 其余字段是否一致必须在这里
-    逐项断言; 真出事时报 "哪个字段不一样" 也比报 "名字对不上" 有用得多。
+    逐项断言; 真出事时报 "哪个字段不一样" 也比报 "名字对不上" 有用得多.
     """
     fa_values = config_values(fa_case)
     ea_values = config_values(case)
@@ -177,7 +177,7 @@ def _load_artifacts(
             raise CompareError(
                 f"{summary_path} 的 {key}={summary.get(key)!r} 与预期 {value!r} 不符."
             )
-    # 产物必须是当前注册表这组参数跑出来的, 而不是改参数前留下的旧结果。
+    # 产物必须是当前注册表这组参数跑出来的, 而不是改参数前留下的旧结果.
     recorded = summary.get("config", {})
     stale = {
         field: {"注册表": value, "产物": recorded.get(field, "<缺失>")}
@@ -193,7 +193,7 @@ def _load_artifacts(
         "summary": summary,
         "history": json.loads(history_path.read_text(encoding="utf-8")),
         "density_final": read_vtu_cell_data(density_path),
-        # 逐迭代密度全在 vtu/ 下, 锁步取样点由 compare_lockstep 自己挑。
+        # 逐迭代密度全在 vtu/ 下, 锁步取样点由 compare_lockstep 自己挑.
         "vtu_dir": output_dir / "vtu",
     }
 
@@ -261,10 +261,10 @@ def _solve_at_density(case: TopOptCase, operator_level: str, snapshot: np.ndarra
 
 
 def _lockstep_iterations(n_iterations: int) -> list[int]:
-    """锁步取样点: 首次 / 中期 / 收敛。
+    """锁步取样点: 首次 / 中期 / 收敛.
 
     逐迭代密度都在 vtu/ 下, 取三点而非全部是为了控制重解成本: 算子层级的
-    系统性偏差在这三点上就会暴露, 全程重解只是把同一结论重复几百遍。
+    系统性偏差在这三点上就会暴露, 全程重解只是把同一结论重复几百遍.
     """
     return sorted({1, (n_iterations + 1) // 2, n_iterations})
 
@@ -329,7 +329,7 @@ def compare_case(case: TopOptCase) -> dict[str, Any]:
     fa_case = find_fa_run(case)
     gate = check_parameter_gate(case, fa_case)
     # 两侧产物目录都由各自的参数推导, 不需要在这里拼路径; run_id 一并核对,
-    # 确保读到的确实是这一次 (基准或这组 override 的) 运行。
+    # 确保读到的确实是这一次 (基准或这组 override 的) 运行.
     fa = _load_artifacts(
         fa_case.output_dir,
         {"method": "FA-SIMP", "assembly_level": "full", "run_id": fa_case.run_id},
@@ -415,7 +415,7 @@ def main() -> int:
     for case in selected:
         print(f"[compare] {case.run_id} vs FA/{case.fa_reference}")
         result = compare_case(case)
-        # 一次运行一个结论文件, 相对路径就是 run_id, 与产物目录一一对应。
+        # 一次运行一个结论文件, 相对路径就是 run_id, 与产物目录一一对应.
         target = compare_dir / f"{case.run_id}.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(

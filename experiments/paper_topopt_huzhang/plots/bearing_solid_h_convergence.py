@@ -2,27 +2,27 @@
 
 产物 case ``bearing-solid-h-convergence``: 左右两幅并排, (a) $\\nu_0 = 0.3$, (b) $\\nu_0 = 0.4999$;
 横轴单元尺寸 $h$ (30x10 … 240x80 四级, 对数刻度), 纵轴各离散在全域实体 ($\\rho_e \\equiv 1$,
-无材料插值) 上的柔顺度相对误差绝对值 (%, 对数刻度)。四条曲线 LFEM $p=1$ / LFEM $p=2$ /
-HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑)。位移元从下方逼近 (误差为负),
-混合元从上方逼近 (误差为正), 图上只画绝对值, 符号写在图注。
+无材料插值) 上的柔顺度相对误差绝对值 (%, 对数刻度). 四条曲线 LFEM $p=1$ / LFEM $p=2$ /
+HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑). 位移元从下方逼近 (误差为负),
+混合元从上方逼近 (误差为正), 图上只画绝对值, 符号写在图注.
 
 参考值不是任一离散在某网格上的值: 120x40 上 $k=4$ 自身仍高出真值 0.3% 至 0.4%, 与被评估
-离散的误差同量级。这里取 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken delta^2, 按实测差比,
+离散的误差同量级. 这里取 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken delta^2, 按实测差比,
 不假定收敛阶), 与 ``bearing_h_locking_probe.py`` 终端表同一公式; 改用其余序列外推, 参考值变化
 不超过 0.06% (实测 0.01% 至 0.05%), 即其不确定度, 因此 $p=2$ 在 $\\nu_0 = 0.3$ 最细两级的点
-(0.016%, 0.013%) 不可信。
+(0.016%, 0.013%) 不可信.
 
 数据不重解方程, 只读 ``bearing_h_locking_probe.py`` 落盘的
-``outputs/bearing-incompressible/postprocess/solid_h_sweep.json``; 缺文件即报错。
+``outputs/bearing-incompressible/postprocess/solid_h_sweep.json``; 缺文件即报错.
 
 输出: outputs/figures/bearing_solid_h_convergence.{pdf,png}, 自动同步至
-papers/huzhang-topopt/figures/。
+papers/huzhang-topopt/figures/.
 
 2026-09-28 起按版心尺寸出图: 宽 6.3 in, 论文里以 ``width=\\textwidth`` (5.9 in) 嵌入,
 字号按 9 pt 底稿定; 字体走 ``paper_rcparams`` 的 Palatino 口径, 轴名改英文 (投稿稿用),
-输出 PDF 矢量与 PNG, 不再出 EPS。
+输出 PDF 矢量与 PNG, 不再出 EPS.
 
-论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
+论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响.
 """
 
 from __future__ import annotations

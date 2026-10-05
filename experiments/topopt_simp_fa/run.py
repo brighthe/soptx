@@ -18,7 +18,7 @@
     python run.py --all                                   # 跑全部基准运行
     python run.py --all --dry-run                         # 只打印派发计划
 
-``--case`` 只认注册工况 id (一条 [[cases]] = 一次基准运行)。参数变化不进注册表,
+``--case`` 只认注册工况 id (一条 [[cases]] = 一次基准运行). 参数变化不进注册表,
 在 ``--case`` 之后追加驱动认识的参数, 由 ``driver.py`` 自身的 argparse 校验;
 ``--override`` 在基准上改字段, 产物落在 outputs/<id>/<字段>-<值>[__...]/::
 
@@ -49,12 +49,12 @@ from config import ConfigError, TopOptCase, load
 from pipeline import ANALYZER_KIND
 
 # 本实验只有一条执行路径, 因此没有 huzhang_topopt_paper 那样的 role -> 驱动
-# 映射表; 派发目标写成常量, 是为了与那边同一个读法。
+# 映射表; 派发目标写成常量, 是为了与那边同一个读法.
 RUNNER = "driver"
 
 # 只能作用于唯一一次运行的透传参数: 参数覆盖只在一个基准工况上改字段
-# (口径同 topopt_simp_ea/run.py, 覆盖参数必须与单个 --case 配对)。--timing /
-# --quiet 是各次运行自己的日志开关, 批量长跑照样能用, 不在此列。
+# (口径同 topopt_simp_ea/run.py, 覆盖参数必须与单个 --case 配对). --timing /
+# --quiet 是各次运行自己的日志开关, 批量长跑照样能用, 不在此列.
 SINGLE_RUN_FLAGS = frozenset(
     {
         "--override",
@@ -88,12 +88,12 @@ def list_cases(cases: tuple[TopOptCase, ...]) -> int:
     """一行一个注册工况 (= 一次基准运行), 列取 id 未编码的自由度.
 
     首列是 case.id, 也是 --case 认的写法与产物目录的第一层; 带 override 的运行
-    不在注册表里, 不在这里列 (它们的参数标签见 outputs/ 或 collect 快照)。
+    不在注册表里, 不在这里列 (它们的参数标签见 outputs/ 或 collect 快照).
     不打印 cases.toml 的 summary: 那是手写文本, 与字段无同步保证, 改了 grid
-    忘改 summary 就会在这里撒谎; 表格直接由 TopOptCase 字段渲染。
+    忘改 summary 就会在这里撒谎; 表格直接由 TopOptCase 字段渲染.
     一格只装一个量: analyzer / order / solver 三者与 filter / optimizer 两者都
-    逐工况可变, 挤在一格里就没法按列扫读, 也对不上 huzhang_topopt_paper 的表。
-    integration_order 不进表; 算子层级 (fa/ea) 由模块目录名声明, 也不进表。
+    逐工况可变, 挤在一格里就没法按列扫读, 也对不上 huzhang_topopt_paper 的表.
+    integration_order 不进表; 算子层级 (fa/ea) 由模块目录名声明, 也不进表.
     """
     header = (
         "case-id", "mesh", "analyzer", "order", "filter", "solver", "optimizer", "role"
@@ -125,7 +125,7 @@ def select_runs(
 ) -> list[TopOptCase]:
     """把命令行给的工况 id 解析成若干次基准运行; --all 取全部, 顺序照 cases.toml.
 
-    同一个 id 给了两次只跑一次, 顺序仍按 cases.toml。
+    同一个 id 给了两次只跑一次, 顺序仍按 cases.toml.
     """
     if run_all:
         return list(cases)
@@ -201,7 +201,7 @@ def run_case_mode(argv: list[str]) -> int:
         return 1
 
     # override 要落到唯一的基准工况上 (见 SINGLE_RUN_FLAGS); 其余透传参数逐次
-    # 运行各自成立, 不受这条限制。
+    # 运行各自成立, 不受这条限制.
     single_only = [
         token for token in extra if token.split("=", 1)[0] in SINGLE_RUN_FLAGS
     ]

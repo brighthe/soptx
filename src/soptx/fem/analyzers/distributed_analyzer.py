@@ -26,11 +26,11 @@ from soptx.solvers import SupportsMatmul, weighted_cg
 #: 求解器返回 (解, 诊断信息)
 SolverResult = tuple[TensorLike, dict]
 
-#: 登记表里求解器的统一签名。关键字随求解器而异, 所以参数列表用 ``...``。
+#: 登记表里求解器的统一签名. 关键字随求解器而异, 所以参数列表用 ``...``.
 SolverRoutine = Callable[..., SolverResult]
 
 
-#: 重叠副本布局下可用的求解器。
+#: 重叠副本布局下可用的求解器.
 DISTRIBUTED_SOLVERS: dict[str, SolverRoutine] = {
     "cg": weighted_cg,
 }
@@ -39,16 +39,16 @@ DISTRIBUTED_SOLVERS: dict[str, SolverRoutine] = {
 class DistributedElasticityAnalyzer(LagrangeFEMAnalyzer):
     """补上重叠 MPI 部分的 LagrangeFEMAnalyzer
 
-    离散由分析器负责, 并行的东西全部留在这里。覆盖三个扩展点:
+    离散由分析器负责, 并行的东西全部留在这里. 覆盖三个扩展点:
 
     * ``reduce_load``   -- 把各 rank 在共享自由度副本上的贡献求和
     * ``wrap_operator`` -- 让单个局部 matvec 表现为全局算子
     * ``solve_system``  -- 派发到 ``DISTRIBUTED_SOLVERS`` 里的加权内积求解器
 
     前两个只能从 EA 路径到达: ``apply_bc('fa')`` 改写的是已经装配好的全局矩阵,
-    没有插入重叠归约的位置, 这也是基类直接拒绝多 rank FA 的原因。
+    没有插入重叠归约的位置, 这也是基类直接拒绝多 rank FA 的原因.
     ``solve_system`` 则两个算子层级都用, 包括单 rank 的 FA 参照——那里所有重叠
-    归约本身就是恒等操作。
+    归约本身就是恒等操作.
     """
 
     def __init__(self, *args: Any, dof_comm: EntityMPI, **kwargs: Any) -> None:
@@ -80,8 +80,8 @@ class DistributedElasticityAnalyzer(LagrangeFEMAnalyzer):
         """派发到重叠加权内积的迭代解法
 
         关键字沿用基类的词汇表 (``x0``、``solver``、``maxiter``、``rtol``、
-        ``atol``), 这样经由 ``solve_state`` 传进来的参数不会被悄悄丢弃。多余的
-        ``options`` 原样转交给具体求解器, 供其自有选项使用。
+        ``atol``), 这样经由 ``solve_state`` 传进来的参数不会被悄悄丢弃. 多余的
+        ``options`` 原样转交给具体求解器, 供其自有选项使用.
         """
 
         routine = DISTRIBUTED_SOLVERS.get(solver)

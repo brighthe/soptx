@@ -1,4 +1,4 @@
-"""PIML Route A 局部恢复与灵敏度审计的纯函数测试。"""
+"""PIML Route A 局部恢复与灵敏度审计的纯函数测试."""
 
 from __future__ import annotations
 

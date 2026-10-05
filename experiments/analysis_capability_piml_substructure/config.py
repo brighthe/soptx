@@ -137,7 +137,7 @@ class AnalysisCase:
         return f"{self.id}.json"
 
     def find_latest_artifact(self, output_root: Path = OUTPUT_DIR) -> Path | None:
-        """在 output_root/<case.id>/<timestamp>/ 下寻找最新产物，不存在则回退至根输出目录."""
+        """在 output_root/<case.id>/<timestamp>/ 下寻找最新产物, 不存在则回退至根输出目录."""
         case_dir = output_root / self.id
         if case_dir.is_dir():
             subdirs = sorted([d for d in case_dir.iterdir() if d.is_dir()], reverse=True)

@@ -14,11 +14,11 @@ from .base import (
 
 
 class PIMLShapeReduction(CondensationReductionAdapter):
-    """路线 A 的规范适配器：预测内部延拓并按变分式构造降阶刚度.
+    """路线 A 的规范适配器: 预测内部延拓并按变分式构造降阶刚度.
 
     ``trace`` 为 ``None`` 时结果落在完整接口上, 与其余 ``LocalReduction`` 实现
-    一致; 给出 ``trace`` 时结果直接落在该迹空间上。这不是事后投影: 网络的输出
-    维数定义在迹空间中, 详见 ``ShapeFunctionCondensation`` 的类文档。
+    一致; 给出 ``trace`` 时结果直接落在该迹空间上. 这不是事后投影: 网络的输出
+    维数定义在迹空间中, 详见 ``ShapeFunctionCondensation`` 的类文档.
     """
 
     def __init__(
@@ -107,11 +107,11 @@ class PIMLShapeReduction(CondensationReductionAdapter):
         local_stiffness_batch: Any,
         density_batch: Optional[Any] = None,
     ) -> LocalReductionBatchResult:
-        """批量执行路线 A，并对未通过门禁的子结构集中 Exact 回退.
+        """批量执行路线 A, 并对未通过门禁的子结构集中 Exact 回退.
 
-        网络只调用一次；变分式在 FEALPy 后端上向量化计算。门禁仍按子结构
-        独立判断，使 diagnostics 和回退范围保持局部性。返回的刚度与延拓落在
-        构造时给定的迹空间上，``trace=None`` 时即完整接口。
+        网络只调用一次; 变分式在 FEALPy 后端上向量化计算. 门禁仍按子结构
+        独立判断, 使 diagnostics 和回退范围保持局部性. 返回的刚度与延拓落在
+        构造时给定的迹空间上, ``trace=None`` 时即完整接口.
         """
         if getattr(local_stiffness_batch, "ndim", 0) != 3:
             raise ValueError(

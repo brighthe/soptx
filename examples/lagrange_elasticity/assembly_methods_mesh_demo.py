@@ -1,15 +1,15 @@
-"""线弹性积分器（LinearElasticIntegrator）组装变体与网格类型支持验证 Demo
+"""线弹性积分器 (LinearElasticIntegrator) 组装变体与网格类型支持验证 Demo
 
 本脚本验证 docs/fem/linear-elastic-integrator-implementation.md §3.2 中给出的
-“网格支持矩阵与几何前置条件”：
-1. 仿射单纯形网格（2D TriangleMesh / 3D TetrahedronMesh）：
-   - 验证 standard / voigt / fast 三种变体的单元刚度矩阵与全局矩阵数值等价（机器精度级别）；
-   - 验证刚度矩阵对称性与变密度场缩放一致性；
-2. 规则张量积网格（2D QuadrangleMesh / 3D HexahedronMesh）：
-   - 验证 standard 与 voigt 的数值等价性；
-   - 探测 fast 变体在当前网格下的边界与异常防御行为。
+"网格支持矩阵与几何前置条件":
+1. 仿射单纯形网格 (2D TriangleMesh / 3D TetrahedronMesh):
+   - 验证 standard / voigt / fast 三种变体的单元刚度矩阵与全局矩阵数值等价 (机器精度级别);
+   - 验证刚度矩阵对称性与变密度场缩放一致性;
+2. 规则张量积网格 (2D QuadrangleMesh / 3D HexahedronMesh):
+   - 验证 standard 与 voigt 的数值等价性;
+   - 探测 fast 变体在当前网格下的边界与异常防御行为.
 
-用法：
+用法:
     python examples/lagrange_elasticity/assembly_methods_mesh_demo.py
 """
 
@@ -33,18 +33,18 @@ from soptx.materials import IsotropicLinearElasticMaterial
 
 
 def rel_frobenius_err(actual: TensorLike, expected: TensorLike) -> float:
-    """计算两数组间的相对 Frobenius 误差。"""
+    """计算两数组间的相对 Frobenius 误差."""
     denom = max(float(bm.linalg.norm(expected)), float(bm.finfo(bm.float64).eps))
     return float(bm.linalg.norm(actual - expected) / denom)
 
 
 def max_abs_err(actual: TensorLike, expected: TensorLike) -> float:
-    """计算最大绝对误差。"""
+    """计算最大绝对误差."""
     return float(bm.max(bm.abs(actual - expected)))
 
 
 def check_symmetry(matrix: TensorLike) -> float:
-    """计算刚度矩阵的对称性相对误差。"""
+    """计算刚度矩阵的对称性相对误差."""
     transpose = bm.swapaxes(matrix, -1, -2)
     return rel_frobenius_err(matrix, transpose)
 

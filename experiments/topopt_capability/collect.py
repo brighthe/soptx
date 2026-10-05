@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """产物收集与数据快照组装 (TopOpt 平台能力验证).
 
-从真实运行产物 ``outputs/<figure.base>/`` 组装申请书图 10 的数据快照 ``fig4_data.json``：
+从真实运行产物 ``outputs/<figure.base>/`` 组装申请书图 10 的数据快照 ``fig4_data.json``:
   - ``summary.json``           GPU 191.5 万自由度全收敛运行摘要
-  - ``gpu_single_step.json``   均匀密度单步计时（GPU 张量化）
-  - ``cpu_sparse_single_step.json``  scipy 稀疏单步计时（CPU 基线）
+  - ``gpu_single_step.json``   均匀密度单步计时 (GPU 张量化)
+  - ``cpu_sparse_single_step.json``  scipy 稀疏单步计时 (CPU 基线)
   - ``cpu_vs_gpu_compare.json`` 同一设计密度下 CPU/GPU 解对比
   - ``history.json`` / ``density_final.npy``  完整优化历程与最终构型
 
-本模块**不含任何性能数字硬编码**；快照里所有耗时、加速比、迭代数与解误差均来自上述
-真实产物。若产物缺失则直接报错，不静默回退。
+本模块**不含任何性能数字硬编码**; 快照里所有耗时、加速比、迭代数与解误差均来自上述
+真实产物. 若产物缺失则直接报错, 不静默回退.
 """
 
 from __future__ import annotations

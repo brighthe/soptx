@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""子结构 PIML GPU 实验的惰性 CLI。"""
+"""子结构 PIML GPU 实验的惰性 CLI."""
 
 from __future__ import annotations
 

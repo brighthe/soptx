@@ -30,7 +30,7 @@ class DiagonalPreconditioner(LinearSolver):
       算子给不出就在 setup 处拒绝, 而不是等到 CG 里以 breakdown 暴露.
 
     后者是 analyzer 走的路: 它把算子交过来, 由本类按算子实际能提供什么取对角,
-    不必再自己按 ``operator_level`` 分支。
+    不必再自己按 ``operator_level`` 分支.
 
     Parameters
     ----------

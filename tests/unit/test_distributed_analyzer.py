@@ -1,4 +1,4 @@
-"""求解器派发与构造契约, 不需要 MPI runtime。"""
+"""求解器派发与构造契约, 不需要 MPI runtime."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from soptx.fem.analyzers.distributed_analyzer import (
 
 
 class RecordingRoutine:
-    """记录收到的关键字, 代替真实求解器。"""
+    """记录收到的关键字, 代替真实求解器."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -26,7 +26,7 @@ class RecordingRoutine:
 
 
 class Bare:
-    """跳过 __init__ 的分析器实例, 只测 solve_system 的派发。"""
+    """跳过 __init__ 的分析器实例, 只测 solve_system 的派发."""
 
     def __new__(cls):
         instance = object.__new__(DistributedElasticityAnalyzer)
@@ -39,7 +39,7 @@ def test_cg_is_the_registered_solver() -> None:
 
 
 def test_an_unweighted_solver_is_refused_with_an_explanation() -> None:
-    """转发到 fealpy 的 gmres 会重复计数共享自由度, 必须拒绝而不是照跑。"""
+    """转发到 fealpy 的 gmres 会重复计数共享自由度, 必须拒绝而不是照跑."""
 
     instance = Bare()
 
@@ -48,7 +48,7 @@ def test_an_unweighted_solver_is_refused_with_an_explanation() -> None:
 
 
 def test_registered_solvers_receive_the_forwarded_options() -> None:
-    """自有选项要能透传, 否则新增求解器无法配置。"""
+    """自有选项要能透传, 否则新增求解器无法配置."""
 
     routine = RecordingRoutine()
     instance = Bare()

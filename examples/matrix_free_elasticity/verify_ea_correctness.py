@@ -121,8 +121,8 @@ def build_mesh(
 def launcher_mpi_size() -> int | None:
     """读取 MPI 启动器声明的进程数, 用于发现 MPI 运行时不匹配.
 
-    Open MPI、MPICH 与 Intel MPI 使用不同的环境变量。本函数只比较启动器
-    声明的进程数和 ``mpi4py`` 实际通信域, 不绑定任一种 MPI 实现。
+    Open MPI、MPICH 与 Intel MPI 使用不同的环境变量. 本函数只比较启动器
+    声明的进程数和 ``mpi4py`` 实际通信域, 不绑定任一种 MPI 实现.
     """
     sizes = {
         int(value)
@@ -145,7 +145,7 @@ def run_serial_ea_correctness(
     """验证一档网格上 EA Matrix-Free 求解的正确性.
 
     验证包括 EA/FA 的原始与 Dirichlet 后 MatVec 一致性、正定性探针、EA-CG
-    解与 FA/Scipy 直接解一致性，以及制造解相对 L2 误差。
+    解与 FA/Scipy 直接解一致性, 以及制造解相对 L2 误差.
 
     参数:
         dimension: 空间维度, 取值为 ``2`` 或 ``3``.

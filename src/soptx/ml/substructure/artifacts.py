@@ -1,4 +1,4 @@
-"""子结构代理模型 checkpoint 的显式签名与兼容性校验。"""
+"""子结构代理模型 checkpoint 的显式签名与兼容性校验."""
 
 from __future__ import annotations
 
@@ -17,12 +17,12 @@ TARGET_VERSION_SHAPE_FUNCTION = "shape-function-NRperp-v1"
 
 
 class ArtifactCompatibilityError(RuntimeError):
-    """checkpoint 结构或模型签名与当前算例不兼容。"""
+    """checkpoint 结构或模型签名与当前算例不兼容."""
 
 
 @dataclass(frozen=True)
 class ModelSignature:
-    """决定模型输入、输出和物理语义的不可省略签名。"""
+    """决定模型输入、输出和物理语义的不可省略签名."""
 
     n_fine: tuple[int, ...]
     input_dim: int
@@ -51,11 +51,11 @@ class ModelSignature:
 
 @dataclass(frozen=True)
 class ArchitectureSignature:
-    """网络结构的登记形式。
+    """网络结构的登记形式.
 
     与 ModelSignature 的分工: 后者是调用方给出的物理签名 (输入输出维数、
     采样与标签版本), 前者是网络自身的结构, 由模型实例读出, 调用方不书写,
-    以免登记值与实际构造的网络产生漂移。
+    以免登记值与实际构造的网络产生漂移.
     """
 
     hidden_dims: tuple[int, ...]
@@ -63,17 +63,17 @@ class ArchitectureSignature:
 
     @classmethod
     def from_model(cls, model: nn.Module) -> "ArchitectureSignature":
-        """从模型实例读取结构。
+        """从模型实例读取结构.
 
         参数:
             model: 已构造的网络, 须带 hidden_dims 与 activation_name
-                属性 (MLP 及其子类在 __init__ 中登记)。
+                属性 (MLP 及其子类在 __init__ 中登记).
 
         返回:
-            该模型的架构签名。
+            该模型的架构签名.
 
         异常:
-            TypeError: 模型未登记架构属性时抛出。
+            TypeError: 模型未登记架构属性时抛出.
         """
         try:
             hidden_dims = tuple(int(value) for value in model.hidden_dims)
@@ -91,19 +91,19 @@ def _check_architecture(
     model: nn.Module,
     source: Path,
 ) -> None:
-    """比对 checkpoint 登记的架构与当前构造的网络。
+    """比对 checkpoint 登记的架构与当前构造的网络.
 
     参数:
-        recorded: checkpoint 中的架构字典; None 表示该文件早于架构登记。
-        model: 由 model_factory 构造的网络。
-        source: checkpoint 路径, 仅用于消息。
+        recorded: checkpoint 中的架构字典; None 表示该文件早于架构登记.
+        model: 由 model_factory 构造的网络.
+        source: checkpoint 路径, 仅用于消息.
 
     异常:
-        ArtifactCompatibilityError: 登记的架构与当前网络不一致时抛出。
+        ArtifactCompatibilityError: 登记的架构与当前网络不一致时抛出.
 
     说明:
         缺少架构登记时只发警告: 旧 checkpoint 的层数与激活无从校验, 但权重
-        形状仍由 load_state_dict 把关, 因此不阻断加载。
+        形状仍由 load_state_dict 把关, 因此不阻断加载.
     """
     if recorded is None:
         warnings.warn(
@@ -148,7 +148,7 @@ def save_checkpoint(
     signature: ModelSignature,
     training_summary: Mapping[str, Any],
 ) -> None:
-    """以带 schema 和物理签名的格式原子保存模型。"""
+    """以带 schema 和物理签名的格式原子保存模型."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
@@ -168,7 +168,7 @@ def load_checkpoint(
     model_factory: Callable[[], ModelT],
     expected_signature: ModelSignature,
 ) -> tuple[ModelT, Mapping[str, Any]]:
-    """校验 checkpoint 后加载模型；任何签名差异均直接报错。"""
+    """校验 checkpoint 后加载模型; 任何签名差异均直接报错."""
     source = Path(path)
     if not source.is_file():
         raise FileNotFoundError(f"模型 checkpoint 不存在: {source}")
@@ -209,7 +209,7 @@ def load_legacy_state_dict(
     path: str | Path,
     model: ModelT,
 ) -> ModelT:
-    """显式加载旧裸 state_dict；调用者自行承担缺少物理签名的风险。"""
+    """显式加载旧裸 state_dict; 调用者自行承担缺少物理签名的风险."""
     state_dict = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(state_dict, dict) or "schema_version" in state_dict:
         raise ArtifactCompatibilityError("给定文件不是旧裸 state_dict。")

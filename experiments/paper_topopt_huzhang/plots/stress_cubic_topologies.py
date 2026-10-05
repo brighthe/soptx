@@ -4,7 +4,7 @@
 产物 case ``stress-cubic-topologies``: 依赖 postprocess/discretization_probe/ 下的
 两份 fields.npz, 由 ``compare.py discretization-probe`` 产出 (不是 ``compare.py
 export``, 故 REQUIRED_RUNS 缺失时 run_case 打印的 run.py 命令不适用, 正确的补数据
-命令见本文件末尾注释)。
+命令见本文件末尾注释).
 
 与图 5.7 的区别: 图 5.7 是 k=2, 本图是 k=3, 对应 §5.2.3 的主对比; 两者同为 pad 1.5 mm,
 本图的运行另按判据集合 (rho >= 0.5, 区外) 验收. 密度与表观 von Mises 应力比都取各自
@@ -12,11 +12,11 @@ export``, 故 REQUIRED_RUNS 缺失时 run_case 打印的 run.py 命令不适用,
 所用的读数同口径; 被动实体区照常着色 (其密度为 1, 应力比为自读值), 体积分数含该区.
 
 仅输出 PNG 至 papers/huzhang-topopt/figures 与本地 outputs/figures: 密度与应力比都是
-分片常数场, 矢量输出会显出三角形接缝, 故只出 600 dpi 的 PNG。
+分片常数场, 矢量输出会显出三角形接缝, 故只出 600 dpi 的 PNG.
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
 原尺寸嵌入, 面板标题字号即纸面字号; 字体走 ``paper_rcparams`` 的 Palatino 口径, 标题与轴名
-改英文 (投稿稿用)。面板标题只写编号、方法、阶次与物理量, 体积分数等数值由正文给出。
+改英文 (投稿稿用). 面板标题只写编号、方法、阶次与物理量, 体积分数等数值由正文给出.
 """
 import numpy as np
 import matplotlib
@@ -32,7 +32,7 @@ from ._base import load_density, paper_rcparams, save_figure
 
 paper_rcparams()
 
-# 版心宽 150 mm; 高度 = 2 行 80x40 面板 (每行约 1.3 in) + 2 行 9 pt 标题 + 行距。
+# 版心宽 150 mm; 高度 = 2 行 80x40 面板 (每行约 1.3 in) + 2 行 9 pt 标题 + 行距.
 FIG_SIZE_IN = (5.9, 3.15)
 TITLE_PT = 9.0
 DPI = 600

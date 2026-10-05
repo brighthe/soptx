@@ -224,7 +224,7 @@ def test_stress_asymptote_min_distance_flows_through_override_and_al_options(cas
 
 
 def test_stress_inner_stop_controls_flow_through_override_and_al_options(cases):
-    """新内层协议可经 generic --override 进入 AL-MMA，默认配置仍是 legacy。"""
+    """新内层协议可经 generic --override 进入 AL-MMA, 默认配置仍是 legacy."""
     from dataclasses import replace
 
     paper_config.bootstrap_source_path()

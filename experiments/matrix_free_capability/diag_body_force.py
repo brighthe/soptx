@@ -1,14 +1,14 @@
 """体力向量组装的分步峰值内存诊断.
 
 用途: 确认 ``experiments/matrix_free_capability`` 表 b-2 里 ``operator`` 之后那段
-``3.25 GiB`` 瞬态究竟由哪一步产生, 并量化"按单元分块"能把它压到多少。
+``3.25 GiB`` 瞬态究竟由哪一步产生, 并量化"按单元分块"能把它压到多少.
 
 它**不装配刚度算子**, 因此进程里没有更高的历史高水位来遮盖后面的步骤 ——
-这正是主 benchmark 里 FA 的 ``bc`` 阶段显示 ``+0.000`` 的原因。
+这正是主 benchmark 里 FA 的 ``bc`` 阶段显示 ``+0.000`` 的原因.
 
 口径与 ``benchmark_cpu_ea.py --mode serial-peak-rss`` 一致: 逐步读
 ``resource.getrusage(RUSAGE_SELF).ru_maxrss``, 得到的是**累积**高水位, 相邻两步
-之差才是"这一步额外抬高了多少"。
+之差才是"这一步额外抬高了多少".
 
 两种模式必须各自独占一个进程 (高水位不可回落):
 
@@ -75,7 +75,7 @@ def build(resolution: int):
     _, problem, vector_space, _, mesh = bench.build_context(
         "polynomial", "tet", resolution
     )
-    # 与 LagrangeFEMAnalyzer 的默认一致: integration_order = degree + 3。
+    # 与 LagrangeFEMAnalyzer 的默认一致: integration_order = degree + 3.
     order = bench.DEGREE + 3
     quadrature = mesh.quadrature_formula(order, "cell")
     bcs, ws = quadrature.get_quadrature_points_and_weights()
@@ -114,7 +114,7 @@ def run_stepwise(resolution: int) -> None:
     phi = vector_space.basis(bcs, index=index)
     trace.stamp(f"phi {tuple(phi.shape)} + cm")
 
-    # process_coef_func 内部先算 ps 再调 coef(ps), 两者同时存活 —— 这里拆开打点。
+    # process_coef_func 内部先算 ps 再调 coef(ps), 两者同时存活 —— 这里拆开打点.
     points = mesh.bc_to_point(bcs, index=index)
     trace.stamp("bc_to_point(ps)")
 
@@ -129,7 +129,7 @@ def run_stepwise(resolution: int) -> None:
     trace.stamp(f"linear_integral -> {tuple(local.shape)}")
 
     # local 是逐单元的 (NC, tldof), 与 chunked 模式的全局向量不是同一个对象;
-    # 必须散射到全局自由度后才能比对范数。
+    # 必须散射到全局自由度后才能比对范数.
     F = bm.zeros((vector_space.number_of_global_dofs(),), dtype=bm.float64)
     bm.index_add(F, vector_space.cell_to_dof().reshape(-1), local.reshape(-1))
     trace.stamp(f"index_add -> {tuple(F.shape)}")
@@ -165,7 +165,7 @@ def run_chunked(resolution: int, chunk: int, verify: bool) -> None:
     for start in range(0, n_cells, chunk):
         block = bm.arange(start, min(start + chunk, n_cells))
         cell_measure = mesh.entity_measure("cell", index=block)
-        # phi 与单元无关, 形状 (1, NQ, tldof, 3), 每块重取的代价可忽略。
+        # phi 与单元无关, 形状 (1, NQ, tldof, 3), 每块重取的代价可忽略.
         phi = vector_space.basis(bcs, index=block)
         val = process_coef_func(
             body_force, bcs=bcs, mesh=mesh, etype="cell", index=block
@@ -181,7 +181,7 @@ def run_chunked(resolution: int, chunk: int, verify: bool) -> None:
     print(f"全局 F 的 L2 范数 = {float(bm.linalg.norm(F)):.15e}  (与 stepwise 逐位可比)")
 
     if verify:
-        # 分块只改变求和顺序, 不改变数值; 相对差应在浮点累加误差量级 (1e-16~1e-14)。
+        # 分块只改变求和顺序, 不改变数值; 相对差应在浮点累加误差量级 (1e-16~1e-14).
         reference = _reference_load(problem, vector_space, mesh, bcs, ws)
         difference = float(bm.linalg.norm(F - reference))
         scale = max(float(bm.linalg.norm(reference)), 1.0e-30)

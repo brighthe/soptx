@@ -8,11 +8,11 @@
 表观 von Mises 应力比取各自离散的自读数, 被动实体区照常着色, 体积分数含该区.
 
 与 stress_cubic_topologies 同理只出 600 dpi 的 PNG (至 papers/huzhang-topopt/figures 与本地
-outputs/figures), 尺寸、字号与字体常量也从该模块取, 两图版式保持一致。
+outputs/figures), 尺寸、字号与字体常量也从该模块取, 两图版式保持一致.
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
 原尺寸嵌入, 面板标题字号即纸面字号; 字体走 ``paper_rcparams`` 的 Palatino 口径, 标题与轴名
-改英文 (投稿稿用)。面板标题只写编号、方法、阶次与物理量, 体积分数等数值由正文给出。
+改英文 (投稿稿用). 面板标题只写编号、方法、阶次与物理量, 体积分数等数值由正文给出.
 """
 import matplotlib
 matplotlib.use("Agg")

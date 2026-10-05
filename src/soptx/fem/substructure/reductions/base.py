@@ -28,7 +28,7 @@ class ReductionDiagnostics:
     metrics: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """冻结门禁指标快照，避免后续旧对象状态污染既有结果."""
+        """冻结门禁指标快照, 避免后续旧对象状态污染既有结果."""
         object.__setattr__(self, "metrics", MappingProxyType(dict(self.metrics)))
 
 
@@ -37,7 +37,7 @@ class LocalReductionResult:
     """一个子结构在完整接口上的局部缩聚结果.
 
     ``stiffness`` 和 ``recovery`` 尚未施加 ``TraceBasis``. 接口迹投影属于
-    后续分析阶段，不属于 ``LocalReduction`` 的职责。
+    后续分析阶段, 不属于 ``LocalReduction`` 的职责.
     """
 
     stiffness: Any
@@ -46,11 +46,11 @@ class LocalReductionResult:
 
     @property
     def used_fallback(self) -> bool:
-        """兼容常用判断，权威信息仍位于 ``diagnostics``."""
+        """兼容常用判断, 权威信息仍位于 ``diagnostics``."""
         return self.diagnostics.used_fallback
 
     def recover(self, boundary_displacement: Any) -> Any:
-        """仅使用本结果快照恢复内部位移，不读取 reduction 的可变状态."""
+        """仅使用本结果快照恢复内部位移, 不读取 reduction 的可变状态."""
         if self.recovery is None:
             raise RuntimeError("当前局部缩聚结果不包含内部位移恢复矩阵.")
         return bm.einsum(
@@ -64,8 +64,8 @@ class LocalReductionResult:
 class LocalReductionBatchResult:
     """批量局部缩聚的堆叠数值结果及逐子结构诊断.
 
-    数值张量保留 batch 维，避免先拆分再 ``stack`` 破坏 Exact Schur 的向量化
-    路径；索引或迭代时才构造轻量的单子结构结果视图。
+    数值张量保留 batch 维, 避免先拆分再 ``stack`` 破坏 Exact Schur 的向量化
+    路径; 索引或迭代时才构造轻量的单子结构结果视图.
     """
 
     stiffness: Any
@@ -114,7 +114,7 @@ class LocalReduction(Protocol):
         local_stiffness: Any,
         density: Optional[Any] = None,
     ) -> LocalReductionResult:
-        """缩聚一个局部子结构；不接受批量前导维."""
+        """缩聚一个局部子结构; 不接受批量前导维."""
         ...
 
     def reduce_many(
@@ -129,9 +129,9 @@ class LocalReduction(Protocol):
 class CondensationReductionAdapter:
     """把旧 ``condense`` 对象适配为无状态结果契约.
 
-    适配方向固定为 ``reduce -> legacy.condense``。旧类在迁移期间保持不变，
-    从而避免 ``reduce`` 与 ``condense`` 互相调用产生递归，也不改变依赖
-    ``K_s``、``N`` 和旧 ``recover`` 的现有装配代码。
+    适配方向固定为 ``reduce -> legacy.condense``. 旧类在迁移期间保持不变,
+    从而避免 ``reduce`` 与 ``condense`` 互相调用产生递归, 也不改变依赖
+    ``K_s``、``N`` 和旧 ``recover`` 的现有装配代码.
     """
 
     def __init__(
@@ -194,7 +194,7 @@ class CondensationReductionAdapter:
         local_stiffness: Any,
         density: Optional[Any] = None,
     ) -> LocalReductionResult:
-        """调用旧缩聚器恰好一次，并立即保存独立的结果与诊断引用."""
+        """调用旧缩聚器恰好一次, 并立即保存独立的结果与诊断引用."""
         self._check_single(local_stiffness)
         stiffness, recovery = self.legacy.condense(local_stiffness, density)
         return LocalReductionResult(
@@ -208,7 +208,7 @@ class CondensationReductionAdapter:
         local_stiffness_batch: Any,
         density_batch: Optional[Any] = None,
     ) -> LocalReductionBatchResult:
-        """缺省沿第一维逐项缩聚，再形成统一堆叠结果."""
+        """缺省沿第一维逐项缩聚, 再形成统一堆叠结果."""
         if getattr(local_stiffness_batch, "ndim", 0) != 3:
             raise ValueError(
                 "LocalReduction.reduce_many() 要求形状为 "

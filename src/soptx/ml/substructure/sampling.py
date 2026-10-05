@@ -1,4 +1,4 @@
-"""子结构代理模型的可复现密度场采样。"""
+"""子结构代理模型的可复现密度场采样."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ SAMPLER_VERSION = "mixed-topology-v2"
 
 @dataclass(frozen=True)
 class SamplingFractions:
-    """混合采样各组成部分的比例。"""
+    """混合采样各组成部分的比例."""
 
     continuous: float = 0.25
     low_density: float = 0.25
@@ -41,7 +41,7 @@ class SamplingFractions:
 
 @dataclass(frozen=True)
 class DensitySamplingConfig:
-    """局部密度场混合采样配置。"""
+    """局部密度场混合采样配置."""
 
     shape: tuple[int, ...]
     design_min: float
@@ -67,7 +67,7 @@ class DensitySamplingConfig:
 
 @dataclass(frozen=True)
 class DensitySamples:
-    """采样得到的密度张量及逐样本来源。"""
+    """采样得到的密度张量及逐样本来源."""
 
     values: np.ndarray
     sources: tuple[str, ...]
@@ -203,7 +203,7 @@ def sample_density_fields(
     *,
     trajectory: Optional[np.ndarray] = None,
 ) -> DensitySamples:
-    """按配置生成覆盖拓扑优化状态的混合局部密度场。"""
+    """按配置生成覆盖拓扑优化状态的混合局部密度场."""
     if n_samples <= 0:
         raise ValueError("n_samples 必须为正整数。")
     rng = np.random.default_rng(config.seed)

@@ -529,7 +529,7 @@ def benchmark_mpi_ea(arguments: argparse.Namespace) -> int:
             "assembly_method": arguments.assembly_method,
             # 计时口径必须随产物一起落盘: 强扩展是跨多次独立运行拼出来的一条
             # 曲线, 各档 warmup/repeats 不同则中位数之间不可比, 而口径只存在
-            # 于当时的命令行里, 不记下来事后无从复核。
+            # 于当时的命令行里, 不记下来事后无从复核.
             "warmup": arguments.warmup,
             "repeats": arguments.repeats,
             "ea_construction_seconds_max_rank": construction_seconds,

@@ -1,11 +1,11 @@
 """生成 ``docs/fem/assets/`` 下的胡张元结构网格示意图.
 
 图形直接由 :mod:`soptx.mesh.structured_triangle` 的生成器构造出的网格绘制,
-而不是手工摆放线段, 因此剖分规则一旦改动, 重跑本脚本即可让插图跟上代码。
+而不是手工摆放线段, 因此剖分规则一旦改动, 重跑本脚本即可让插图跟上代码.
 
 两种剖分共用同一套视觉约定: 灰色三角形边、四个几何角点标绿点并注 "2 tri"
 (角点松弛要求的两单元拓扑), 镜像剖分额外画红色虚线中缝并把两个翻转的四边形
-底色标蓝。
+底色标蓝.
 
 Examples
 --------
@@ -56,12 +56,12 @@ def _corner_label_offsets(box):
     Parameters
     ----------
     box : tuple of float
-        ``(xmin, xmax, ymin, ymax)``。
+        ``(xmin, xmax, ymin, ymax)``.
 
     Returns
     -------
     list of tuple
-        每项为 ``(x, y, dx, dy, ha, va)``, 后四者用于把 "2 tri" 推到角点外侧。
+        每项为 ``(x, y, dx, dy, ha, va)``, 后四者用于把 "2 tri" 推到角点外侧.
     """
     xmin, xmax, ymin, ymax = box
     span = min(xmax - xmin, ymax - ymin)
@@ -80,16 +80,16 @@ def _highlighted_cells(node, cell, quads):
     Parameters
     ----------
     node : ndarray
-        结点坐标, 形状 ``(NN, 2)``。
+        结点坐标, 形状 ``(NN, 2)``.
     cell : ndarray
-        单元结点编号, 形状 ``(NC, 3)``。
+        单元结点编号, 形状 ``(NC, 3)``.
     quads : iterable of tuple
-        四边形的 ``(ix, iy)`` 下标。
+        四边形的 ``(ix, iy)`` 下标.
 
     Returns
     -------
     ndarray
-        命中的单元下标。
+        命中的单元下标.
     """
     centroid = node[cell].mean(axis=1)
     hx, hy = (BOX[1] - BOX[0]) / NX, (BOX[3] - BOX[2]) / NY
@@ -107,18 +107,18 @@ def _highlighted_cells(node, cell, quads):
 def _draw_on(ax, mesh, *, highlight_quads=(), mirror_line=False):
     """按共用视觉约定把一张网格示意图画到指定 axes 上.
 
-    图内不写标题, 剖分规则由文档正文的表格承担。
+    图内不写标题, 剖分规则由文档正文的表格承担.
 
     Parameters
     ----------
     ax : Axes
-        目标坐标轴。
+        目标坐标轴.
     mesh : TriangleMesh
-        待绘制的三角网格。
+        待绘制的三角网格.
     highlight_quads : iterable of tuple, optional
-        需要标蓝底色的四边形 ``(ix, iy)`` 下标。
+        需要标蓝底色的四边形 ``(ix, iy)`` 下标.
     mirror_line : bool, optional
-        是否画竖直镜像中缝。
+        是否画竖直镜像中缝.
     """
     node = bm.to_numpy(mesh.entity("node"))
     cell = bm.to_numpy(mesh.entity("cell"))
@@ -160,7 +160,7 @@ def _draw(mesh, **kwargs):
     Returns
     -------
     Figure
-        绘制完成的 matplotlib 图对象。
+        绘制完成的 matplotlib 图对象.
     """
     fig, ax = plt.subplots(figsize=(7.7, 5.4), dpi=100)
     _draw_on(ax, mesh, **kwargs)

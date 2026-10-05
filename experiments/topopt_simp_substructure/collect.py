@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """汇总 outputs/ 下各工况的运行结果, 生成一张紧凑的验收表.
 
-只读已落盘的 summary.json / history.json, 不触发任何计算。
+只读已落盘的 summary.json / history.json, 不触发任何计算.
 
 用法:
     python collect.py

@@ -32,17 +32,17 @@ FILTER_STRATEGY_REGISTRY: Dict[str, Type[_FilterStrategy]] = \
 class Filter(BaseLogged):
     """统一的过滤方法接口类
 
-    该类使用策略模式来动态选择和应用不同的过滤算法。filter_type 的四个取值
+    该类使用策略模式来动态选择和应用不同的过滤算法. filter_type 的四个取值
     不是四种并列的过滤器, 而是一条两级的正则化链:
 
     - 'none'        : 不做正则化 (恒等映射);
     - 'sensitivity' : 灵敏度过滤, 作用在梯度空间, 密度场本身不被平滑;
     - 'density'     : 线性密度过滤, 对密度场做加权平均 (卷积矩阵 H);
     - 'projection'  : 密度过滤 **加** Heaviside 投影 (含 beta 延拓), 即在
-                      'density' 之上再叠一层非线性映射, 而不是它的替代品。
+                      'density' 之上再叠一层非线性映射, 而不是它的替代品.
 
     这一层次关系在实现上由 ``ProjectionStrategy(DensityStrategy)`` 的继承
-    表达; 扁平枚举只是配置层的门面, 读配置时不要把后两者理解成互斥选项。
+    表达; 扁平枚举只是配置层的门面, 读配置时不要把后两者理解成互斥选项.
     """
     def __init__(self,
                 design_mesh: HomogeneousMesh,
@@ -63,8 +63,8 @@ class Filter(BaseLogged):
         self._filter_type = filter_type
 
         # 实体保留 (passive solid) 掩码: 该批单元的物理密度在过滤/投影之后被
-        # 覆写为 1, 相应的密度灵敏度置零。施加点必须在过滤之后 —— 只钉设计
-        # 变量时, 宽过滤下保留单元的物理密度仍由邻域决定, 达不到实体保留。
+        # 覆写为 1, 相应的密度灵敏度置零. 施加点必须在过滤之后 —— 只钉设计
+        # 变量时, 宽过滤下保留单元的物理密度仍由邻域决定, 达不到实体保留.
         self._passive_mask = validate_exemption_mask(
             passive_mask, design_mesh.number_of_cells()
         )
@@ -84,7 +84,7 @@ class Filter(BaseLogged):
         if self._filter_type != 'none' and self._rmin is not None and self._rmin > 0:
             # filter_q 只作用于非结构网格所走的 KD-tree 通用路径 (权重
             # (1 - d/rmin)^q); 均匀笛卡尔网格走结构化快路径, 权重恒为线性
-            # 锥形, 该参数在那条路径上不起作用。
+            # 锥形, 该参数在那条路径上不起作用.
             builder = FilterMatrixBuilder(
                                     mesh=self._design_mesh, 
                                     rmin=self._rmin, 
@@ -120,10 +120,10 @@ class Filter(BaseLogged):
                         }
         
         if self._filter_type == 'projection' and projection_params:
-            # 投影参数的默认值只在 ProjectionStrategy 的签名里维护一份。
+            # 投影参数的默认值只在 ProjectionStrategy 的签名里维护一份.
             # 曾经这里另有一份门面默认值, 且无条件覆盖签名默认 (例如把
             # projection_type 从 'tanh' 静默换成 'exponential'), 调用方读签名
-            # 会读到与实际不符的行为, 故这里只透传调用方显式给定的键。
+            # 会读到与实际不符的行为, 故这里只透传调用方显式给定的键.
             strategy_params.update(projection_params)
         
         # 实例化策略
@@ -131,27 +131,27 @@ class Filter(BaseLogged):
 
     @property
     def design_mesh(self) -> HomogeneousMesh:
-        """设计变量所在网格。
+        """设计变量所在网格.
 
         优化器 (如 OC) 据此向问题类索取被动单元掩码
         (``pde.get_passive_element_mask(mesh=design_mesh)``); 问题类不定义
-        该方法时优化器不设掩码, 现有无被动区的工况不受影响。
+        该方法时优化器不设掩码, 现有无被动区的工况不受影响.
         """
         return self._design_mesh
 
     @property
     def passive_mask(self) -> Optional[TensorLike]:
-        """实体保留单元的布尔掩码; 无保留区时为 None。
+        """实体保留单元的布尔掩码; 无保留区时为 None.
 
         消费端 (驱动层的产物汇总、冻结评价) 需要知道哪些单元的密度不是设计
-        结果而是硬约束, 否则会把垫片的体积算成优化得到的体积。
+        结果而是硬约束, 否则会把垫片的体积算成优化得到的体积.
         """
         return self._passive_mask
 
     def _enforce_passive_solid(self,
                         physical_density: Union[TensorLike, Function],
                     ) -> Union[TensorLike, Function]:
-        """把实体保留单元的物理密度覆写为满密度。"""
+        """把实体保留单元的物理密度覆写为满密度."""
         if self._passive_mask is None:
             return physical_density
 
@@ -165,25 +165,25 @@ class Filter(BaseLogged):
 
     @property
     def has_projection(self) -> bool:
-        """本过滤链是否含非线性投影。
+        """本过滤链是否含非线性投影.
 
         算法层 (如 MMA 的目标函数缩放) 需要知道这件事, 但不该去比 filter_type
-        字符串: 那是配置层的门面。这里按策略对象的实际类型回答。
+        字符串: 那是配置层的门面. 这里按策略对象的实际类型回答.
         """
         return isinstance(self._strategy, ProjectionStrategy)
 
     @property
     def beta(self) -> Optional[float]:
-        """动态获取当前策略的 beta 值（如果存在）"""
+        """动态获取当前策略的 beta 值 (如果存在)"""
         # 探测底层策略对象是否具有 beta 属性
         return getattr(self._strategy, 'beta', None)
 
     @property
     def beta_max(self) -> Optional[float]:
-        """当前策略的 beta 上限; 无投影连续化时为 None。
+        """当前策略的 beta 上限; 无投影连续化时为 None.
 
         停止准则要求先判定连续化已终止再判定收敛 (否则把连续化中途的停滞
-        记为收敛), 该判定需要上限而不只是当前值, 故与 beta 成对暴露。
+        记为收敛), 该判定需要上限而不只是当前值, 故与 beta 成对暴露.
         """
         return getattr(self._strategy, 'beta_max', None)
 
@@ -213,7 +213,7 @@ class Filter(BaseLogged):
                                 ) -> TensorLike:
 
         # 保留单元的 rho_phys 是常数, d rho_phys / d z = 0, 故先把这些行清零
-        # 再走链式法则; 否则梯度里会留下一份并不存在的下降方向。
+        # 再走链式法则; 否则梯度里会留下一份并不存在的下降方向.
         obj_grad_rho = apply_exemption(obj_grad_rho, self._passive_mask, 0.0)
 
         return self._strategy.filter_objective_sensitivities(design_variable=design_variable, obj_grad_rho=obj_grad_rho)

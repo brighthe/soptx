@@ -5,22 +5,22 @@
 * ``manufactured_convergence_demo.py`` 走制造解: 有精确解, 判据是 L2 观测收敛阶
   + 真相对残差, 回答"离散是否正确";
 * 本文件走工程基准: 没有解析解, 判据是真相对残差 + 载荷等效性, 回答
-  "集中力载荷路径是否被正确装配"。
+  "集中力载荷路径是否被正确装配".
 
 为什么没有 L2 收敛阶判据: 二维点载荷在作用点处应力奇异, 位移解光滑性低于
-制造解, 理论收敛阶也随之降低, 沿用制造解的 1.5 门槛会误报。集中力路径的
+制造解, 理论收敛阶也随之降低, 沿用制造解的 1.5 门槛会误报. 集中力路径的
 正确性由两条无歧义判据守住:
 
 * 真相对残差 ``||K u - F|| / ||F||`` —— 线性系统确实解开了;
-* 载荷等效性 ``|sum(F_sigmah) - P|`` —— 等效节点力装配没有丢力/多分力。
+* 载荷等效性 ``|sum(F_sigmah) - P|`` —— 等效节点力装配没有丢力/多分力.
   这一步必须测量 ``apply_bc`` 覆盖 Dirichlet 自由度之前的 traction 向量:
   若载荷落在被强加的自由度上, 残差依然为 0, 而载荷会被静默吞掉, 只有
-  载荷和校验能抓到这种失效。
+  载荷和校验能抓到这种失效.
 
 全部门禁在 ``run_concentrated_load_benchmark`` 内以运行时断言实现: 任一项不达标
-即抛 ``AssertionError`` 且不写任何文件, 全部通过才落盘 JSON 证据。证据缺省写入
-本文件同目录的 ``outputs/``, 由 ``--output-dir`` 改写。契约与实测证据见同目录
-``results_analysis.md``。
+即抛 ``AssertionError`` 且不写任何文件, 全部通过才落盘 JSON 证据. 证据缺省写入
+本文件同目录的 ``outputs/``, 由 ``--output-dir`` 改写. 契约与实测证据见同目录
+``results_analysis.md``.
 
 运行::
 
@@ -67,7 +67,7 @@ from soptx.postprocess.vtk_export import export_vtu
 
 @dataclass(frozen=True)
 class ConcentratedLoadProblemEntry:
-    """集中力工程基准算例的元数据。"""
+    """集中力工程基准算例的元数据."""
 
     name: str
     label: str
@@ -148,7 +148,7 @@ def create_problem_and_material(
     entry: ConcentratedLoadProblemEntry,
     domain_override: tuple[float, ...] | None = None,
 ) -> tuple[Any, IsotropicLinearElasticMaterial]:
-    """根据注册表条目创建问题实例和对应的材料对象。"""
+    """根据注册表条目创建问题实例和对应的材料对象."""
 
     domain = domain_override if domain_override is not None else entry.default_domain
     problem = entry.factory(domain=domain)
@@ -163,7 +163,7 @@ def create_problem_and_material(
 
 
 def create_mesh(problem, mesh_type: str, nx: int, ny: int, nz: int | None = None):
-    """显式创建问题离散网格，保持 Problem 与 Mesh 分离。"""
+    """显式创建问题离散网格, 保持 Problem 与 Mesh 分离."""
 
     if problem.dimension == 2:
         constructor = {"quad": QuadrangleMesh, "tri": TriangleMesh}[mesh_type]
@@ -188,7 +188,7 @@ def solve_one_level(
     solver_options: dict[str, Any],
     nz: int | None = None,
 ) -> dict:
-    """在一层网格上求解，返回残差、载荷和与柔顺度等诊断量。"""
+    """在一层网格上求解, 返回残差、载荷和与柔顺度等诊断量."""
 
     mesh = create_mesh(problem, mesh_type, nx, ny, nz)
     integration_order = degree + 3

@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """矩阵组装层级正确性证据的汇总报表.
 
-读制造解求解链的 JSON, 打印逐档 L2 误差与实测阶, 判末档阶是否够门禁。每个算子层级
-(fa / ea / pa / ua) 各占一条工况, 一条工况下每种网格各一条链; 迭代解法的链另打印逐档迭代数。
+读制造解求解链的 JSON, 打印逐档 L2 误差与实测阶, 判末档阶是否够门禁. 每个算子层级
+(fa / ea / pa / ua) 各占一条工况, 一条工况下每种网格各一条链; 迭代解法的链另打印逐档迭代数.
 
 判读顺序是先横向后纵向: 同一档上 ea 与 pa 的迭代数应逐项相等 —— 二者是同一离散算子的
 两种存法, 对同一初值与同一右端张成同一个 Krylov 子空间, 迭代序列因而逐步相同, 只差舍入,
-与用哪种 Krylov 方法无关。这比 L2 阶门禁灵敏得多; 确认迭代数对齐之后, 再看各条链
-自己的末档阶。ua 对 pa 的判据更硬: ua 每次作用现调一次 PartialAssembly.build 再把
-算子丢掉, 走的是 pa 那一份代码, L2 误差列应当逐位相同。各条链逐档的 L2
+与用哪种 Krylov 方法无关. 这比 L2 阶门禁灵敏得多; 确认迭代数对齐之后, 再看各条链
+自己的末档阶. ua 对 pa 的判据更硬: ua 每次作用现调一次 PartialAssembly.build 再把
+算子丢掉, 走的是 pa 那一份代码, L2 误差列应当逐位相同. 各条链逐档的 L2
 误差也应彼此吻合到求解容差量级, 那就是跨层级一致性 ——
-它原先由一个独立的 correctness 面板承担, 已随该面板删除, 理由见 cases.toml 头部注意 0。
+它原先由一个独立的 correctness 面板承担, 已随该面板删除, 理由见 cases.toml 头部注意 0.
 
-内存与 MatVec 耗时的对比报表在 ``experiments/assembly_level_capability/compare.py``。
+内存与 MatVec 耗时的对比报表在 ``experiments/assembly_level_capability/compare.py``.
 """
 
 from __future__ import annotations
@@ -51,17 +51,17 @@ def show_convergence_table(output_dir: Optional[Path] = None) -> bool:
 
     工况与产物名从 ``cases.toml`` 读, 不在本文件写死: 收敛链的文件名由上游脚本按
     (dim, mesh_type, model, degree, solver, assembly_method) 拼成, 在两处各抄一份
-    迟早对不上。
+    迟早对不上.
 
     Parameters
     ----------
     output_dir : Path, optional
-        自定义产物目录, 默认本目录 ``outputs/``。
+        自定义产物目录, 默认本目录 ``outputs/``.
 
     Returns
     -------
     bool
-        全部 convergence 工况都有产物且末档 L2 阶达门禁时为 True。
+        全部 convergence 工况都有产物且末档 L2 阶达门禁时为 True.
     """
     print("\n" + "=" * 100)
     print("【convergence: 各算子层级求解链的制造解收敛阶】")
@@ -89,7 +89,7 @@ def show_convergence_table(output_dir: Optional[Path] = None) -> bool:
             all_passed = False
             continue
 
-        # 迭代解法才有 niter; 直接解法那几档是 None, 整列省掉免得排一列空。
+        # 迭代解法才有 niter; 直接解法那几档是 None, 整列省掉免得排一列空.
         has_niter = any(level.get("niter") is not None for level in data["levels"])
         head = f"    {'剖分':>6} {'单元数':>10} {'自由度':>10} {'L2 误差':>12} {'实测阶':>8} {'用时/s':>9}"
         if has_niter:
@@ -119,9 +119,9 @@ def show_convergence_table(output_dir: Optional[Path] = None) -> bool:
             f"    算子层级 = {data.get('operator_level', 'fa')}, 求解器 = {data.get('solver')}, "
             f"装配路径 = {data.get('assembly_method')}"
         )
-        # 迭代链才有预条件子可言。这里不能用 has_niter 判: 直接解法的产物也把 niter
-        # 记成 1。旧产物没有 preconditioner 字段, 缺了就明说"未记录", 不默认成 none
-        # —— niter 列的判读全靠它, 猜一个反而比空着更危险。
+        # 迭代链才有预条件子可言. 这里不能用 has_niter 判: 直接解法的产物也把 niter
+        # 记成 1. 旧产物没有 preconditioner 字段, 缺了就明说"未记录", 不默认成 none
+        # —— niter 列的判读全靠它, 猜一个反而比空着更危险.
         if data.get("solver") in ITERATIVE_SOLVERS:
             if "preconditioner" in data:
                 pc = data["preconditioner"] or "none"

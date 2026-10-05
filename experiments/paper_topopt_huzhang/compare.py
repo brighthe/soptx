@@ -13,14 +13,14 @@
     python compare.py --output-root <结果集> <其余参数>   # 改读另一个结果集
 
 一件产物 = 一条 ``--case``, 与 ``run.py --case`` 同一个词: 那边一条 case 是一道要解的
-题, 这边一条 case 是一件要整理出来的产物。产物 case 不另立注册表, 由 ``plots/`` 下声明
+题, 这边一条 case 是一件要整理出来的产物. 产物 case 不另立注册表, 由 ``plots/`` 下声明
 了 ``SOURCE_CASE`` 的模块自描述 (见 discover_cases) —— 图读哪个算例的哪几次运行, 本就
-是绘图代码的事实, 存第二份必然漂移。case id 取模块文件名, 论文图号只留在各模块
-docstring 首行的括注里, 排版改号不波及命令行。
+是绘图代码的事实, 存第二份必然漂移. case id 取模块文件名, 论文图号只留在各模块
+docstring 首行的括注里, 排版改号不波及命令行.
 
 其中 export 与各 ``*-reanalysis`` / ``*-probe`` 动词会按冻结设计重新组装并求解, 因此
 不是纯读产物; 但它们的产出是论文校验数字而非运行产物, 不写 ``outputs/<case>/<run>/``,
-故归在本入口而不是 ``run.py``. ``--help`` 用 ``[重分析]`` 标出这些动词。
+故归在本入口而不是 ``run.py``. ``--help`` 用 ``[重分析]`` 标出这些动词.
 
 ``--output-root`` 只能写在最前面: 它在任何后处理模块导入之前改写
 ``config.OUTPUT_DIR`` / ``config.FIGURE_DIR``, 各模块导入时取到的就是该结果集;
@@ -82,7 +82,7 @@ class ProductCase:
     """一件可整理出来的产物: id, 来源算例, 依赖的产物, 一句话说明.
 
     ``source_cases`` 是元组而非单值: 图 5.5 要把可压缩基准组与近不可压实验组并排,
-    两者按 cases.toml 的口径是两条 case (nu 属 A 问题层), 故一件产物可以跨 case。
+    两者按 cases.toml 的口径是两条 case (nu 属 A 问题层), 故一件产物可以跨 case.
     """
 
     id: str
@@ -96,8 +96,8 @@ class ProductCase:
 
         首段是本产物的某条 source case 时按 ``<case>/<产物>`` 读全 —— 跨 case 的产物
         只能这么写; 否则整项都是 case 内的相对路径, 拼到唯一的 source case 上, 已迁
-        的单 case 模块因此一个字都不用改。不按有没有 ``/`` 判断: 应力图依赖的是
-        ``postprocess/...npz``, 带 ``/`` 却仍是 case 内路径。
+        的单 case 模块因此一个字都不用改. 不按有没有 ``/`` 判断: 应力图依赖的是
+        ``postprocess/...npz``, 带 ``/`` 却仍是 case 内路径.
         """
         head, _, rest = run.partition("/")
         if rest and head in self.source_cases:
@@ -108,7 +108,7 @@ class ProductCase:
         """依赖里还没落盘的产物; 空元组表示可以直接整理.
 
         用 exists 而不是 is_dir: 依赖不都是运行目录, 应力图吃的是 postprocess/
-        下的 npz 文件 (由 compare.py export / discretization-probe 冻结重分析导出)。
+        下的 npz 文件 (由 compare.py export / discretization-probe 冻结重分析导出).
         """
         return tuple(
             run for run in self.required_runs if not self.resolve(run).exists()
@@ -119,11 +119,11 @@ class ProductCase:
 
         --full 的判据仍看该 case 在 REQUIRED_RUNS 里的**全部**依赖数而不是缺失数:
         裸跑一条 case 只出注册表的缺省单条组合 (见 run.py 的 registered_defaults),
-        缺的那条未必就是缺省的那条, 只剩一个缺口时照样要靠这个旗标补上。
+        缺的那条未必就是缺省的那条, 只剩一个缺口时照样要靠这个旗标补上.
 
         缺失里带扩展名的那些 (postprocess/*.npz) 不是 run.py 的落盘产物, 而是
         ``compare.py export`` 从 density_final.vtu 冻结重分析导出的, 故补一条 export;
-        它同样要先有运行目录, 所以排在 run.py 之后。
+        它同样要先有运行目录, 所以排在 run.py 之后.
         """
         missing = self.missing_runs()
         commands = []
@@ -162,8 +162,8 @@ def discover_cases() -> dict[str, ProductCase]:
     """扫 plots/ 下声明了 SOURCE_CASE 的模块, 每个即一条产物 case.
 
     元数据长在模块自己身上 (docstring 首行 + SOURCE_CASE / REQUIRED_RUNS 两个字面量
-    常量), 于是没有第二份注册表可漂移。同样用 ast 静态解析而不 import: --list 只是
-    列清单, 不该为此加载 matplotlib。没声明 SOURCE_CASE 的模块不算产物, 直接跳过。
+    常量), 于是没有第二份注册表可漂移. 同样用 ast 静态解析而不 import: --list 只是
+    列清单, 不该为此加载 matplotlib. 没声明 SOURCE_CASE 的模块不算产物, 直接跳过.
     """
     cases: dict[str, ProductCase] = {}
     for path in sorted(PLOTS_DIR.glob("*.py")):
@@ -215,9 +215,9 @@ def module_path(module_name: str) -> str:
 def figure_summary(module_name: str) -> str:
     """取 plots 模块 docstring 首行作为说明.
 
-    用 ast 静态解析而不 import: --list 只是列清单, 不该为此加载 matplotlib。
+    用 ast 静态解析而不 import: --list 只是列清单, 不该为此加载 matplotlib.
     迁移后的模块首行形如 ``<正文> (论文图 5.2)``, 未迁移的仍是 ``生成论文图 5.2:
-    <正文>``; 两种写法的图号都不该进 --list, 分别由下面的冒号切分与括注剥除去掉。
+    <正文>``; 两种写法的图号都不该进 --list, 分别由下面的冒号切分与括注剥除去掉.
     """
     path = EXPERIMENT_DIR / module_path(module_name)
     try:
@@ -239,8 +239,8 @@ def figure_summary(module_name: str) -> str:
 def list_targets() -> int:
     """列出全部产物 case.
 
-    只列 case, 与 ``run.py --list`` 同一个口径。动词与尚未迁移的图号由 argparse 的
-    ``--help`` 逐条列出, 在这里重印一遍只是同一份信息的第二个出口。
+    只列 case, 与 ``run.py --list`` 同一个口径. 动词与尚未迁移的图号由 argparse 的
+    ``--help`` 逐条列出, 在这里重印一遍只是同一份信息的第二个出口.
     """
     cases = discover_cases()
     header = ("case-id", "source-case", "说明")

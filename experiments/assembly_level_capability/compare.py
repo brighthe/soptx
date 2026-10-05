@@ -7,8 +7,8 @@
 3. solve:       Jacobi-PCG 迭代数随 n 的增长
 
 装配层级 (fa / ea / pa) 的正确性报表在 ``experiments/assembly_level_consistency/compare.py``,
-那边看的是各层级求解链的制造解收敛阶与逐档一致性。stored-b / shared-ke 两个对照实现不在
-那边取证, 其正确性前提由本目录自负。
+那边看的是各层级求解链的制造解收敛阶与逐档一致性. stored-b / shared-ke 两个对照实现不在
+那边取证, 其正确性前提由本目录自负.
 """
 
 from __future__ import annotations

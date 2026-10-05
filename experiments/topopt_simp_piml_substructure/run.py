@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """PIML 子结构拓扑优化完整迭代执行脚本 (支持 2D 与 3D 算例, 严格对齐 Huang 2023).
 
-本脚本实现基于 PIML 路线 A (形函数预测 + 式 17) 及精确 FEA 基线的 2D/3D MBB 梁完整拓扑优化闭环。
-支持 ParaView 逐代演化动画 VTU 文件序列导出、收敛历程记录及性能评估。
-特性：
-1. 包含 Huang 2023 式 (330) 同质子结构复用与分块流式缩聚机制，杜绝超大规模下的 OOM 内存溢出；
-2. 只加载并校验离线训练产生的带签名 checkpoint；
-3. 集成 soptx.topology.filters 官方原生 3D 卷积滤波。
+本脚本实现基于 PIML 路线 A (形函数预测 + 式 17) 及精确 FEA 基线的 2D/3D MBB 梁完整拓扑优化闭环.
+支持 ParaView 逐代演化动画 VTU 文件序列导出、收敛历程记录及性能评估.
+特性:
+1. 包含 Huang 2023 式 (330) 同质子结构复用与分块流式缩聚机制, 杜绝超大规模下的 OOM 内存溢出;
+2. 只加载并校验离线训练产生的带签名 checkpoint;
+3. 集成 soptx.topology.filters 官方原生 3D 卷积滤波.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ from sensitivity_audit import (
 def _shape_function_signature(
     prototype: SubstructurePrototype,
 ) -> ModelSignature:
-    """根据当前子结构原型构造 Route A checkpoint 的物理签名。"""
+    """根据当前子结构原型构造 Route A checkpoint 的物理签名."""
     n_interior = int(len(prototype.i_dofs))
     n_reduced = int(prototype.deformation_basis.shape[1])
     n_fine = tuple(int(value) for value in prototype.n_fine)
@@ -90,7 +90,7 @@ def load_route_a_model(
     *,
     allow_legacy_weight: bool = False,
 ) -> ShapeFunctionSurrogateNet:
-    """加载并校验 Route A 模型；旧裸权重只能显式启用。"""
+    """加载并校验 Route A 模型; 旧裸权重只能显式启用."""
     if not checkpoint_path.is_file():
         raise FileNotFoundError(
             f"Route A checkpoint 不存在: {checkpoint_path}. "
@@ -266,7 +266,7 @@ def run_topopt(
         audit_hybrid_dc_np: Optional[np.ndarray] = None
         rho_subs_grid = assembler.split_global_cell_field(rho)
         if save_density_trajectory:
-            # 保存本轮实际参与 FE 装配的 pre-OC 局部密度，而不是更新后的 rho_new。
+            # 保存本轮实际参与 FE 装配的 pre-OC 局部密度, 而不是更新后的 rho_new.
             density_trajectory.append(bm.to_numpy(rho_subs_grid).astype(np.float32, copy=True))
         rho_subs_cell = prototype.grid_to_cell_field(rho_subs_grid)
 

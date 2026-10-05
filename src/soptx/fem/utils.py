@@ -70,7 +70,7 @@ def map_bcs_to_sub_elements(bcs_e: Tuple[TensorLike, TensorLike], n_sub: int):
             mapped_xi = xi_start + p_1d * (xi_end - xi_start)
             mapped_eta = eta_start + p_1d * (eta_end - eta_start)
             
-            # 构造重心坐标：对于一维单纯形，位置t的重心坐标是[1-t, t]
+            # 构造重心坐标: 对于一维单纯形, 位置t的重心坐标是[1-t, t]
             bcs_g_xi[sub_element_idx, :, 0] = 1.0 - mapped_xi  # xi方向的重心坐标
             bcs_g_xi[sub_element_idx, :, 1] = mapped_xi
             
@@ -87,13 +87,13 @@ def calculate_multiresolution_gphi_eg(
                             n_sub: int,
                         ) -> TensorLike:
     """
-    在多分辨率框架下，计算父位移单元内部各子密度单元高斯点评估处的形函数梯度
+    在多分辨率框架下, 计算父位移单元内部各子密度单元高斯点评估处的形函数梯度
 
     Note
     ----
-    位移自由度仍来自父位移单元 (粗网格)，但应力/应变评估点取自子密度单元 (细网格),
-    - 首先在父参考单元上生成高斯点, 然后将这些高斯点映射到各子单元的参考区域中，
-    - 并把映射后的点仍用 “父参考单元坐标” 表达，从而可直接调用父位移空间的 grad_basis.
+    位移自由度仍来自父位移单元 (粗网格), 但应力/应变评估点取自子密度单元 (细网格),
+    - 首先在父参考单元上生成高斯点, 然后将这些高斯点映射到各子单元的参考区域中,
+    - 并把映射后的点仍用 "父参考单元坐标" 表达, 从而可直接调用父位移空间的 grad_basis.
     - 最终返回的 gphi_eg_reshaped 形状为 (NC*n_sub, NQ, LDOF, GD), 
     - 可直接传入 material.strain_matrix(...) 构造 B 矩阵.
 
@@ -109,7 +109,7 @@ def calculate_multiresolution_gphi_eg(
     Returns
     -------
     gphi_eg_reshaped: 
-        展平后的形函数梯度数组, 形状 (NC*n_sub, NQ, LDOF, GD), 用于后续构造 B 矩阵。
+        展平后的形函数梯度数组, 形状 (NC*n_sub, NQ, LDOF, GD), 用于后续构造 B 矩阵.
     """
     mesh_u = s_space_u.mesh
     
@@ -163,12 +163,12 @@ def reshape_multiresolution_data(mesh, data: TensorLike) -> TensorLike:
     is_full_rect = (NC == nx * ny)
 
     if is_full_rect:
-        # 完整矩形网格：直接按列优先编号生成 col/row，无需计算 cell_centers
+        # 完整矩形网格: 直接按列优先编号生成 col/row, 无需计算 cell_centers
         cols = bm.arange(NC) // ny
         rows = bm.arange(NC) % ny
         pos_to_local = None  # 完整矩形无需查找表
     else:
-        # 非完整区域（如 L 型）：需要从几何位置计算 cell_positions
+        # 非完整区域 (如 L 型): 需要从几何位置计算 cell_positions
         hx = mesh.meshdata['hx']
         hy = mesh.meshdata['hy']
         cell_centers = mesh.entity_barycenter('cell')  # (NC, 2)
@@ -297,12 +297,12 @@ def reshape_multiresolution_data_bcakup(nx: int, ny: int, data: TensorLike) -> T
     # 获取重排索引
     reorder_indices = []
 
-    # 按列优先遍历位移单元，对于每列的位移单元，按子单元行优先排列
+    # 按列优先遍历位移单元, 对于每列的位移单元, 按子单元行优先排列
     for pos_col in range(nx):  # 对于每一列的位移单元
         for sub_row in range(sub_dim):  # 对于子单元的每一行
             for pos_row in range(ny):  # 对于该列中的每个位移单元
                 for sub_col in range(sub_dim):  # 对于子单元的每一列
-                    # 计算位移单元索引（按列优先编号）
+                    # 计算位移单元索引 (按列优先编号)
                     c = pos_col * ny + pos_row
                     # 计算子单元索引
                     s = sub_row * sub_dim + sub_col
@@ -312,7 +312,7 @@ def reshape_multiresolution_data_bcakup(nx: int, ny: int, data: TensorLike) -> T
     
     reorder_indices = bm.array(reorder_indices)
 
-    # 重塑数据：(NC, n_sub, ...) -> (NC * n_sub, ...)
+    # 重塑数据: (NC, n_sub, ...) -> (NC * n_sub, ...)
     data_reshaped = data.reshape(NC * n_sub, *extra_dims)
     
     # 按照空间位置重排
@@ -351,7 +351,7 @@ def reshape_multiresolution_data_inverse_backup(nx: int, ny: int, data_flat: Ten
         for sub_row in range(sub_dim):  # 对于子单元的每一行
             for pos_row in range(ny):  # 对于该列中的每个位移单元
                 for sub_col in range(sub_dim):  # 对于子单元的每一列
-                    # 计算位移单元索引（按列优先编号）
+                    # 计算位移单元索引 (按列优先编号)
                     c = pos_col * ny + pos_row
                     # 计算子单元索引
                     s = sub_row * sub_dim + sub_col

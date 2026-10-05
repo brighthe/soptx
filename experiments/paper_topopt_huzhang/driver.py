@@ -385,10 +385,10 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-iterations", type=int, help="临时覆盖最大优化迭代次数.")
     parser.add_argument(
         # 具名开关只覆盖最常用的那几个字段; 其余字段走这个通用通道, 免得每加一个
-        # 参数就往 parser 里塞一个开关。字段名以 build_config 造出的配置对象为准,
+        # 参数就往 parser 里塞一个开关. 字段名以 build_config 造出的配置对象为准,
         # 也就是 cases.toml 的 discretization/optimization 键名; 运行组合维度
         # analyzer / order 也一并接住 (见 _apply_run_selection), 口径与 EA/FA
-        # 两个实验的 --override 一致。
+        # 两个实验的 --override 一致.
         "--override",
         nargs="+",
         action="append",
@@ -414,7 +414,7 @@ def _collect_overrides(
 ) -> dict[str, str]:
     """把 --override 的分组文本摊平成 {字段: 文本}; 语法错误当场由 parser 报错.
 
-    同一字段重复给出直接判错: 静默取最后一次会让命令行与实际跑的参数对不上。
+    同一字段重复给出直接判错: 静默取最后一次会让命令行与实际跑的参数对不上.
     """
     overrides: dict[str, str] = {}
     for item in (text for group in groups for text in group):
@@ -443,8 +443,8 @@ def _apply_run_selection(
     """把 --override 里的 analyzer / order 转写成具名开关取值, 并从覆盖字典摘除.
 
     多值用逗号分隔 (``order=2,3`` 等价于 ``--order 2 --order 3``), 与 EA/FA 侧
-    --override 的列表写法一致; ``analyzer`` 同时给出两条链等价于 ``all``。
-    与具名开关撞车时报错而不是定先后顺序, 口径同 ``_override_changes``。
+    --override 的列表写法一致; ``analyzer`` 同时给出两条链等价于 ``all``.
+    与具名开关撞车时报错而不是定先后顺序, 口径同 ``_override_changes``.
     """
     for name in _RUN_SELECTION_FIELDS:
         if name not in overrides:
@@ -478,14 +478,14 @@ def _apply_run_selection(
 # 产物目录第二层的标签分隔符; 与 experiments/topopt_simp_fa|ea 同一套写法.
 _TAG_SEPARATOR = "__"
 # 目录标签里的字段别名: 字段名过长会把 \\wsl.localhost 下的 Windows 路径推过
-# MAX_PATH (260), ParaView 等未声明 long-path aware 的程序就列不出目录。别名只用于
+# MAX_PATH (260), ParaView 等未声明 long-path aware 的程序就列不出目录. 别名只用于
 # 目录名, summary.json 与 cases.toml 仍用完整字段名; metrics._parse_run_label 负责映回.
 _TAG_ALIASES = {"acceptance_solid_threshold": "solid_thr"}
 
 _BOOLEAN_TEXTS = {"true": True, "false": False}
 # 允许用 none/null 覆盖成 None 的 Optional 字段 (注册值非 None 时现值类型是 float,
 # 光看现值猜不出它可空): lambda_max=none 复原无阈更新, acceptance_solid_threshold=none
-# 复原 C2 全域口径。
+# 复原 C2 全域口径.
 _OPTIONAL_OVERRIDE_FIELDS = frozenset({"lambda_max", "acceptance_solid_threshold"})
 _NONE_TEXTS = {"none", "null"}
 
@@ -494,7 +494,7 @@ def _coerce(name: str, text: str, current: Any) -> Any:
     """按配置对象里现有取值的类型转换覆盖文本; 类型不认识就原样当字符串.
 
     不读 dataclass 的类型注解: 模块开头有 from __future__ import annotations,
-    注解此时是字符串, 拿现值的类型更可靠。
+    注解此时是字符串, 拿现值的类型更可靠.
     """
     if isinstance(current, bool):
         if text.lower() not in _BOOLEAN_TEXTS:
@@ -512,7 +512,7 @@ def _coerce(name: str, text: str, current: Any) -> Any:
                 ) from error
     if current is None:
         # Optional 字段 (lambda_max、acceptance_solid_threshold) 的现值可能是 None,
-        # 按文本猜类型: 整数、浮点、none/null, 都不是才原样当字符串。
+        # 按文本猜类型: 整数、浮点、none/null, 都不是才原样当字符串.
         for caster in (int, float):
             try:
                 return caster(text)
@@ -533,13 +533,13 @@ def _override_changes(
     unknown = sorted(set(overrides) - field_names)
     if unknown:
         # analyzer / order 已在 _apply_run_selection 摘除, 但要进「可覆盖」清单,
-        # 否则报错信息会让人以为这两个维度不能用 --override 给。
+        # 否则报错信息会让人以为这两个维度不能用 --override 给.
         available = sorted(field_names | set(_RUN_SELECTION_FIELDS))
         raise ConfigurationError(
             f"未知的覆盖字段: {', '.join(unknown)}; 可覆盖: {', '.join(available)}."
         )
     # 与具名开关撞车时报错而不是定一个先后顺序: 两个写法给同一个字段不同取值,
-    # 无论哪边赢都有一半命令行是假的。
+    # 无论哪边赢都有一半命令行是假的.
     conflicts = sorted(set(overrides) & set(named))
     if conflicts:
         raise ConfigurationError(
@@ -555,9 +555,9 @@ def _run_label(method: str, order: int, config: Any, changes: dict[str, Any]) ->
     """产物目录第二层: 这一次运行相对注册表基准的参数标签.
 
     analyzer 与 order 是运行组合维度 —— 同一个 case 目录下并排躺着好几组, 故恒进
-    标签; 其余字段只在被覆盖时进标签, 探索性运行因此不会盖掉注册运行的产物。标签
+    标签; 其余字段只在被覆盖时进标签, 探索性运行因此不会盖掉注册运行的产物. 标签
     按字段名排序、用 ``__`` 连接, 与 experiments/topopt_simp_fa|ea 的第二层同一套
-    写法, 三个实验的 outputs/ 用同一种读法。过长的字段名按 ``_TAG_ALIASES`` 缩写.
+    写法, 三个实验的 outputs/ 用同一种读法. 过长的字段名按 ``_TAG_ALIASES`` 缩写.
     """
     tags: dict[str, Any] = {"analyzer": method, "order": order}
     tags.update({name: getattr(config, name) for name in changes})
@@ -577,8 +577,8 @@ def _run_label(method: str, order: int, config: Any, changes: dict[str, Any]) ->
         if float(pad_radius) > 0.0:
             tags[pad_field] = pad_radius
     # C2 的验收子集改变的是停止准则本身 (2026-09-18 起注册 0.5), 同上恒进目录名;
-    # 取 None (全域口径) 时标签复原成旧名, 与 09-17 之前的全域口径产物同名可比。
-    # lambda_max 与 mu_max 同类, 只在被覆盖时进标签。
+    # 取 None (全域口径) 时标签复原成旧名, 与 09-17 之前的全域口径产物同名可比.
+    # lambda_max 与 mu_max 同类, 只在被覆盖时进标签.
     solid_threshold = getattr(config, "acceptance_solid_threshold", None)
     tags.pop("acceptance_solid_threshold", None)
     if solid_threshold is not None:
@@ -613,7 +613,7 @@ def build_model_pipeline(
 ) -> tuple[Any, Any, dict[str, Any]]:
     """按模型名从 pipeline.ASSEMBLERS 取装配器, 组装分析链或优化链, 并施加命令行覆盖.
 
-    第三个返回值是本次实际生效的覆盖改动, 供 run 目录名判断要不要另起标签。
+    第三个返回值是本次实际生效的覆盖改动, 供 run 目录名判断要不要另起标签.
     """
     model_name = case["model"]["name"]
     try:
@@ -667,8 +667,8 @@ def build_model_pipeline(
 _HALF_DOMAIN_MODELS = {"FixedFixedBeamHalfDomain2d"}
 
 # 实体区口径: 报告未加权实体应力比时用的默认密度阈值 (config 未注册
-# acceptance_solid_threshold 时的回退值)。2026-09-18 起, 注册了该阈值的算例在同一
-# 子集上判定 C2 终态复核, 见 _solid_region_threshold。
+# acceptance_solid_threshold 时的回退值). 2026-09-18 起, 注册了该阈值的算例在同一
+# 子集上判定 C2 终态复核, 见 _solid_region_threshold.
 _SOLID_REGION_THRESHOLD = 0.5
 
 
@@ -758,8 +758,8 @@ def run_one(
         volume_fraction = config.volume_fraction + float(pipeline.constraint.fun(density))
 
     # 终止判据的唯一出处是优化器: ALMMMAOptimizer 按 C0 连续化终止 / C1 设计稳定 /
-    # C2 松弛可行 / C3 持续 hold_steps 步给出结论。不具备该属性的优化器 (柔顺度算例
-    # 的 OC/MMA) 退回原有的设计变化单条件, 不在消费端另拼一套判据。
+    # C2 松弛可行 / C3 持续 hold_steps 步给出结论. 不具备该属性的优化器 (柔顺度算例
+    # 的 OC/MMA) 退回原有的设计变化单条件, 不在消费端另拼一套判据.
     optimizer_verdict = getattr(pipeline.optimizer, "converged", None)
     termination_reason = getattr(pipeline.optimizer, "termination_reason", None)
     if optimizer_verdict is None:
@@ -810,7 +810,7 @@ def run_one(
         final_cell_fields = {"von_mises_normalized": stress_measure}
         summary["relative_stress_tolerance"] = config.stress_tolerance
         # C2 终态复核与优化器同一口径: 注册了 acceptance_solid_threshold 时只看
-        # rho_phys >= 阈值的单元 (2026-09-18 起), 否则全域; 全域值始终另存作诊断。
+        # rho_phys >= 阈值的单元 (2026-09-18 起), 否则全域; 全域值始终另存作诊断.
         density_array = np.asarray(bm.to_numpy(density[:])).reshape(-1)
         solid_threshold = _solid_region_threshold(config)
         solid_region = density_array >= solid_threshold
@@ -830,9 +830,9 @@ def run_one(
         summary["relative_stress_feasible"] = bool(c2_quantity <= config.stress_tolerance)
         # 保留旧字段供现有消费者读取, 含义与相对超限判据一致.
         summary["stress_feasible"] = summary["relative_stress_feasible"]
-        # 未加权实体应力比: 强制诊断量, 只报告不判据。验收量按刚度加权, 空洞
+        # 未加权实体应力比: 强制诊断量, 只报告不判据. 验收量按刚度加权, 空洞
         # 单元的 m_E ~ 1e-9 会把它压到阈值之下, 未加权量才反映实体材料真实的
-        # 应力水平; 其在实体区的取值直接反映真实承载安全性。
+        # 应力水平; 其在实体区的取值直接反映真实承载安全性.
         solid_stress_ratio = np.asarray(bm.to_numpy(
             pipeline.stress_constraint.compute_solid_stress_ratio(density, state)))
         summary["max_solid_stress_ratio"] = float(solid_stress_ratio.max())
@@ -841,13 +841,13 @@ def run_one(
             float(solid_stress_ratio[solid_region].max())
             if bool(solid_region.any()) else None)
         # 几何奇点垫片: 必须随产物落盘, 否则 summary 里的 max_constraint /
-        # max_relative_violation 无从知道是在哪个集合上取的最大值。垫片内的量
+        # max_relative_violation 无从知道是在哪个集合上取的最大值. 垫片内的量
         # 一律单列, 使"垫片掩盖了多大的应力"可被直接读出, 不靠重算 —— 读的时候
         # 要看 max_constraint_pad 而不是 max_solid_stress_ratio_pad: 后者会被
-        # rho~0 的空洞单元主导 (那里 g 恒等于 -epsilon, 无害)。
+        # rho~0 的空洞单元主导 (那里 g 恒等于 -epsilon, 无害).
         # 两侧垫片分列: 载荷侧的牵引间断端点与支撑侧的固支角点是两个独立的几何
         # 奇点, 半径各自标定, 因此诊断量也必须能分开读, 否则无从判断某一侧的半径
-        # 是否取够 (取小了热点会搬到掩码边界, 表现为约束区最大值不降反升)。
+        # 是否取够 (取小了热点会搬到掩码边界, 表现为约束区最大值不降反升).
         summary["load_pad_radius"] = config.load_pad_radius
         summary["support_pad_radius"] = getattr(config, "support_pad_radius", 0.0)
         problem = getattr(pipeline, "problem", None)
@@ -874,7 +874,7 @@ def run_one(
             pad = np.asarray(bm.to_numpy(pad_mask)).astype(bool)
 
             def _component_mask(name: str) -> np.ndarray:
-                """取单侧垫片掩码; 旧 pipeline 未分列时退化为全 False。"""
+                """取单侧垫片掩码; 旧 pipeline 未分列时退化为全 False."""
                 component = getattr(pipeline, name, None)
                 if component is None:
                     return np.zeros_like(pad)
@@ -883,7 +883,7 @@ def run_one(
             load_pad = _component_mask("load_pad_mask")
             support_pad = _component_mask("support_pad_mask")
             # 垫片内约束值要用未豁免的口径重算: pipeline 的 constraint_values
-            # 在这些单元上已被换成哨兵 -1.0, 直接取最大值只会读回哨兵。
+            # 在这些单元上已被换成哨兵 -1.0, 直接取最大值只会读回哨兵.
             pad_constraint = np.asarray(bm.to_numpy(
                 pipeline.stress_constraint.compute_unexempted_constraint(
                     density, state)))
@@ -905,9 +905,9 @@ def run_one(
             summary["max_constraint_support_pad"] = (
                 float(pad_constraint[support_pad].max())
                 if bool(support_pad.any()) else None)
-        # ALM 内部状态的必报诊断量, 同样不进判据。mu 在本实现里是全局标量,
-        # 逐外层步统一放大, 不是逐单元罚参数。乘子相对变化只有优化器能算
-        # (需要上一外层步的 lambda), 故读优化器属性而非在此重建。
+        # ALM 内部状态的必报诊断量, 同样不进判据. mu 在本实现里是全局标量,
+        # 逐外层步统一放大, 不是逐单元罚参数. 乘子相对变化只有优化器能算
+        # (需要上一外层步的 lambda), 故读优化器属性而非在此重建.
         al_objective = getattr(pipeline, "al_objective", None)
         if al_objective is not None:
             multiplier = np.asarray(bm.to_numpy(al_objective.lamb))
@@ -917,12 +917,12 @@ def run_one(
             summary["complementarity_residual"] = float(
                 np.abs(multiplier * constraint_np).max())
         multiplier_change = getattr(pipeline.optimizer, "last_multiplier_change", None)
-        # 外层一步未走完时该量为 nan, 落盘写 None 而不是非法 JSON 的 NaN。
+        # 外层一步未走完时该量为 nan, 落盘写 None 而不是非法 JSON 的 NaN.
         summary["multiplier_relative_change"] = (
             None if multiplier_change is None or not np.isfinite(multiplier_change)
             else float(multiplier_change))
         # 停止准则 C1 的度量对象与移动限制的生效值必须原样落盘: 悄悄换掉度量
-        # 比原问题更糟, 读者需要能自己核 change 与 change_physical 的比值。
+        # 比原问题更糟, 读者需要能自己核 change 与 change_physical 的比值.
         optimizer_options = getattr(pipeline.optimizer, "options", None)
         summary["change_measure"] = str(
             getattr(optimizer_options, "change_measure", "design"))
@@ -942,7 +942,7 @@ def run_one(
         summary["asymptote_min_distance"] = (
             None if floor is None else float(floor))
         # 优化器的判据基于迭代末态; 这里在终态密度重新求解后再核一次 C2,
-        # 两者都成立才记为收敛。
+        # 两者都成立才记为收敛.
         summary["converged"] = bool(converged and summary["stress_feasible"])
     else:
         final_cell_fields = None

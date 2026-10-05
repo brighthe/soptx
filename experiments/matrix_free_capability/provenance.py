@@ -2,11 +2,11 @@
 """运行溯源的采集.
 
 上游脚本自己不写溯源: ``validate.py`` 不产出 ``environment`` 块,
-``benchmark_cpu_ea.py`` 连时间戳都不写。因此"这批数字出自哪个 revision"
-无法从产物本身判定, 只能由本模块在采集侧补上。
+``benchmark_cpu_ea.py`` 连时间戳都不写. 因此"这批数字出自哪个 revision"
+无法从产物本身判定, 只能由本模块在采集侧补上.
 
 溯源写进 ``figure_data/fig2_data.json``, 与数字同一次落盘、同一次提交,
-使快照可被机器校验, 而不是只能靠重跑核对。
+使快照可被机器校验, 而不是只能靠重跑核对.
 """
 
 from __future__ import annotations

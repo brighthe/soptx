@@ -2,7 +2,7 @@
 
 test_al_mma_state_consistency.py 把 hold_steps 钉死为 1 并注明不覆盖 C3;
 本文件补上 C3, 以及与之交互的两处新增外层步状态 (_c0_first_iter、rho 窗口、
-_prev_violation)。所有用例复用该文件的 fakes, 不碰 FEA。
+_prev_violation). 所有用例复用该文件的 fakes, 不碰 FEA.
 """
 from types import SimpleNamespace
 
@@ -25,7 +25,7 @@ def run_case(updates, violation=-0.1, outer=8, inner=1, initial=None,
     """按外层步逐个投喂设计变量增量, inner=1 使每个外层步恰好消耗一个增量.
 
     initial 为 None 时 10 个单元全取 0.5; 传入数组可构造实体 / 灰度单元并存的密度场
-    (FakeFilter 不滤波, 物理密度等于设计变量)。
+    (FakeFilter 不滤波, 物理密度等于设计变量).
     """
     bm.set_backend("numpy")
     objective = FakeObjective(violation)
@@ -58,7 +58,7 @@ def run_case(updates, violation=-0.1, outer=8, inner=1, initial=None,
 
 
 def run_projected_gradient_case(gradients, inner=3):
-    """用可控梯度验证 fixed-AL 内层协议；不执行有限元求解。"""
+    """用可控梯度验证 fixed-AL 内层协议; 不执行有限元求解."""
     bm.set_backend("numpy")
     objective = FakeObjective(-0.1)
     jac_calls = []
@@ -190,7 +190,7 @@ def test_projected_gradient_uses_inner_mma_epoch_after_two_updates():
 def test_c3_requires_three_consecutive_clean_outer_steps():
     zero = np.zeros(10)
     optimizer, _, _, calls = run_case([zero], outer=8)
-    # 每个外层步一次子问题求解; 第 1 步就已达标, 但必须数满 3 步才收敛。
+    # 每个外层步一次子问题求解; 第 1 步就已达标, 但必须数满 3 步才收敛.
     assert calls == 3
     assert optimizer.converged is True
     assert optimizer.termination_reason.startswith("criterion-met")
@@ -201,7 +201,7 @@ def test_c3_hold_count_restarts_after_a_bad_step():
     zero = np.zeros(10)
     bad = np.full(10, 0.01)          # 超过 change_tolerance, C1 失格
     optimizer, _, _, calls = run_case([zero, bad, zero, zero, zero], outer=8)
-    # 达标(1) -> 坏步(归零) -> 达标(1,2,3): 共 5 个外层步。
+    # 达标(1) -> 坏步(归零) -> 达标(1,2,3): 共 5 个外层步.
     assert calls == 5
     assert optimizer.converged is True
 
@@ -282,7 +282,7 @@ def test_conditional_rule_freezes_once_feasible():
     for _ in range(3):
         objective.set_current_violation(-0.2)
         objective.update_multipliers()
-    # 真正可行后 v = 0, "0 > tau * 0" 恒假, mu 冻结。
+    # 真正可行后 v = 0, "0 > tau * 0" 恒假, mu 冻结.
     assert objective.mu == pytest.approx(grown)
 
 
@@ -306,7 +306,7 @@ def test_coherent_share_is_one_for_monotone_drift():
 
 def test_coherent_share_ignores_incoherent_majority():
     # 2 个单元单调重组、18 个单元 period-2 抖动: 全局 net/travel 会被抖动淹没,
-    # 而按单元判定的相干行程份额仍能把重组识别出来。
+    # 而按单元判定的相干行程份额仍能把重组识别出来.
     steps = 10
     window = []
     for j in range(steps + 1):

@@ -2,7 +2,7 @@
 """cases.toml 的加载、校验与模型转换.
 
 本模块只负责 cases.toml 的数据结构反序列化与静态门禁检查,
-不依赖 fealpy, 不执行任何数值计算。
+不依赖 fealpy, 不执行任何数值计算.
 """
 
 from __future__ import annotations
@@ -23,35 +23,35 @@ EXPERIMENT_DIR = Path(__file__).resolve().parent
 DEFAULT_CASES_PATH = EXPERIMENT_DIR / "cases.toml"
 OUTPUT_DIR = EXPERIMENT_DIR / "outputs"
 
-# 面板: 眼下只有 convergence 一个。曾另有一个 correctness 面板 (EA / PA 与 FA 对同一随机
+# 面板: 眼下只有 convergence 一个. 曾另有一个 correctness 面板 (EA / PA 与 FA 对同一随机
 # 向量的作用结果比相对误差), 在 convergence 只有 FA 一条链时是必要的; 三个层级各有四格
 # 之后, 逐档比 convergence_<层级> 与 convergence_fa 就是同一件事且覆盖更广, 故整体删除,
-# 理由详见 cases.toml 头部注意 0。元组保留而不写死成字符串: id 的命名规则是
-# <panel>_<scheme>, 将来再开面板时不必改 id 格式。
+# 理由详见 cases.toml 头部注意 0. 元组保留而不写死成字符串: id 的命名规则是
+# <panel>_<scheme>, 将来再开面板时不必改 id 格式.
 PANELS: Tuple[str, ...] = ("convergence",)
 
 # 本目录只收装配层级分类法里的层级 (FA/TA -> LA -> EA/EbE -> PA/QA -> UA/NONE), 一层级一
-# 组工况。soptx 现有三级: create_level 注册了 full / element / partial, LagrangeFEMAnalyzer
-# 的签名也是 Literal['fa','ea','pa']。LA 串行下退化为 FA, UA 尚无实现, 均见 cases.toml 末尾。
+# 组工况. soptx 现有三级: create_level 注册了 full / element / partial, LagrangeFEMAnalyzer
+# 的签名也是 Literal['fa','ea','pa']. LA 串行下退化为 FA, UA 尚无实现, 均见 cases.toml 末尾.
 #
 # _common 里另有 stored-b / shared-ke 两个对照实现, 但它们不是分类法里的层级, 故不在本目录
-# 取证; 用到它们的是 ../assembly_level_capability/, 由那边自行负责其前提与正确性。
+# 取证; 用到它们的是 ../assembly_level_capability/, 由那边自行负责其前提与正确性.
 LEVELS: Tuple[str, ...] = ("fa", "ea", "pa", "ua")
 
 # FA 是逐档比对时的参照层级: 它走直接解法, 没有迭代求解容差, 是三条链里唯一不含
-# Krylov 误差的一条。ea / pa 的判读都以它为基准。
+# Krylov 误差的一条. ea / pa 的判读都以它为基准.
 REFERENCE_LEVEL: str = "fa"
 
 # 本目录的 run.py 只是调度器, 不再自产任何数值产物 (correctness worker 已随面板一起删除),
-# 故没有一条工况可以把 script 指向它。这里留常量是为了在注册时把这种写法拦住并给出原因,
-# 而不是等子进程 argparse 报一个看不懂的错。
+# 故没有一条工况可以把 script 指向它. 这里留常量是为了在注册时把这种写法拦住并给出原因,
+# 而不是等子进程 argparse 报一个看不懂的错.
 OWN_SCRIPT: str = "experiments/assembly_level_consistency/run.py"
 
 # 产物重定向方式: 现存工况全是外部脚本, 调度器只用 --output-dir 给目录, 文件名由上游
-# 脚本按 (dim, mesh_type, model, degree, solver, assembly_method, operator_level) 自拼。
+# 脚本按 (dim, mesh_type, model, degree, solver, assembly_method, operator_level) 自拼.
 OUTPUT_MODES: Tuple[str, ...] = ("dir",)
 
-# 全部工况统一的单线程口径: 子进程与直接启动的 worker 都注入这组环境变量。
+# 全部工况统一的单线程口径: 子进程与直接启动的 worker 都注入这组环境变量.
 THREAD_ENV: Dict[str, str] = {
     "OMP_NUM_THREADS": "1",
     "OPENBLAS_NUM_THREADS": "1",
@@ -94,9 +94,9 @@ class Case:
     def to_command(self, repo_root: Path) -> List[str]:
         """将工况配置还原为可执行的子进程命令行列表.
 
-        不接受任何运行期覆盖: 档位、层级、求解器一律写死在 ``args`` 里。要换参数就改
+        不接受任何运行期覆盖: 档位、层级、求解器一律写死在 ``args`` 里. 要换参数就改
         cases.toml 或直接手工调上游脚本, 不从调度器这一层开口子 —— 开了口子, 产物名
-        与注册表就对不上了 (文件名由上游脚本按参数自拼)。
+        与注册表就对不上了 (文件名由上游脚本按参数自拼).
         """
         return [sys.executable, str(repo_root / self.script), *self.args]
 
@@ -143,8 +143,8 @@ def load_cases(path: Optional[Path] = None) -> Tuple[Dict[str, Any], Tuple[Case,
                 f"本目录只收装配层级, 不收 _common 的对照实现 (stored-b / shared-ke)"
             )
         # id 恰为 "<panel>_<scheme>" 两段, 不含网格: 网格是工况的另一个坐标 (见下面的
-        # [cases.mesh.*]), 由使用者在命令行上选, 不进 id。命名规则散在注释里管不住漂移,
-        # 这里拦一道。
+        # [cases.mesh.*]), 由使用者在命令行上选, 不进 id. 命名规则散在注释里管不住漂移,
+        # 这里拦一道.
         expected = f"{panel}_{scheme}"
         if case_id != expected:
             raise ConfigError(
@@ -164,7 +164,7 @@ def load_cases(path: Optional[Path] = None) -> Tuple[Dict[str, Any], Tuple[Case,
             if not isinstance(variant, dict):
                 raise ConfigError(f"工况 '{case_id}' 的 [cases.mesh.{mesh_tag}] 必须是子表")
             # 网格标签是 id 之外的单段坐标: 段内允许 "-" (hex-distorted), 但不许再含 "_",
-            # 否则产物名 <id>_<网格>.json 会读不出边界。
+            # 否则产物名 <id>_<网格>.json 会读不出边界.
             if "_" in mesh_tag:
                 raise ConfigError(
                     f"工况 '{case_id}' 的网格标签 '{mesh_tag}' 不得含 '_' "
@@ -195,7 +195,7 @@ def load_cases(path: Optional[Path] = None) -> Tuple[Dict[str, Any], Tuple[Case,
                 )
 
             # 文件名由上游脚本按自己的参数拼, 本目录只能给它一个落盘目录, 推导不出来,
-            # 故必须显式声明 artifact —— 否则调度器无从判断产物是否真的生成。
+            # 故必须显式声明 artifact —— 否则调度器无从判断产物是否真的生成.
             artifact_name = c.get("artifact", "")
             if not artifact_name:
                 raise ConfigError(
@@ -235,7 +235,7 @@ def select(
     """根据过滤条件筛选工况子集.
 
     ``case_ids`` 给的是 ``<panel>_<scheme>`` 两段 id, 命中该 id 注册的全部网格;
-    要落到单个数据点再加 ``meshes``。
+    要落到单个数据点再加 ``meshes``.
     """
     selected = list(cases)
     if panel:
@@ -248,7 +248,7 @@ def select(
         selected = [c for c in selected if c.id in target_set]
     if meshes:
         # 网格既可用注册表里的短标签 (quad / hex), 也可用 --list 打印的类名
-        # (QuadrangleMesh / HexahedronMesh), 免得看着表却猜不出该往 --mesh 填什么。
+        # (QuadrangleMesh / HexahedronMesh), 免得看着表却猜不出该往 --mesh 填什么.
         wanted = {m.lower() for m in meshes}
         matched = {
             c.mesh for c in selected

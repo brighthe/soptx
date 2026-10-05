@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """矩阵组装层级 (FA / EA / PA) 求解链正确性的统一驱动.
 
-本模块只做一件事: 按 cases.toml 把每个 (层级, 网格) 数据点以独立子进程跑出来。数值
+本模块只做一件事: 按 cases.toml 把每个 (层级, 网格) 数据点以独立子进程跑出来. 数值
 代码一行都不在这里 —— 全部工况都调 ``examples/lagrange_elasticity/manufactured_convergence_demo.py``,
-以制造解求解并统计 L2 误差随 h 的收敛阶。
+以制造解求解并统计 L2 误差随 h 的收敛阶.
 
 一条链同时证两件事: 该层级自己收敛到连续解 (末档 L2 阶 >= 门禁), 以及它与 fa 那条链
-逐档给出同一个离散解 (跨层级一致性)。后者原先由一个独立的 correctness 面板承担, 在
+逐档给出同一个离散解 (跨层级一致性). 后者原先由一个独立的 correctness 面板承担, 在
 convergence 只有 FA 一条链时是必要的; 三个层级各有四格之后它已被完全覆盖, 故删除,
-理由详见 cases.toml 头部注意 0。
+理由详见 cases.toml 头部注意 0.
 
-性能与容量的测量在 ``experiments/assembly_level_capability/``。
+性能与容量的测量在 ``experiments/assembly_level_capability/``.
 
 本模块实现:
 1. 调度与编排层: 读取 cases.toml, 以独立子进程 (单线程环境) 跑指定数据点
@@ -52,12 +52,12 @@ def command_list(cases: Tuple[config.Case, ...], figure: dict) -> int:
     """列出已注册的数据点.
 
     一行是一个 (case id, 网格) 组合, 即一个进程一个产物; 同一 case id 的多个网格并列
-    在它名下, id 只在首行印一次。不单列 panel 与 scheme: case id 就是
-    ``<panel>_<scheme>``, 再各占一列是同一信息排三遍。要筛选用 ``--panel`` 与 ``--mesh``。
+    在它名下, id 只在首行印一次. 不单列 panel 与 scheme: case id 就是
+    ``<panel>_<scheme>``, 再各占一列是同一信息排三遍. 要筛选用 ``--panel`` 与 ``--mesh``.
 
-    列出的是"这条工况在算什么": 网格类、剖分档次与连续问题。验收口径、产物名与落盘
+    列出的是"这条工况在算什么": 网格类、剖分档次与连续问题. 验收口径、产物名与落盘
     状态不在此列 —— 那是 ``compare.py`` 的事, 它读产物本身, 报的是实测值与判定,
-    比这里干印一个"有/缺"准确。
+    比这里干印一个"有/缺"准确.
     """
     headers = ["case-id", "Mesh", "grid", "problem"]
     rows = []
@@ -98,7 +98,7 @@ def command_run(
             continue
 
         # 外部脚本自己拼文件名, 本目录只能指定落盘目录; 产物是否真的生成
-        # 在子进程退出后按 artifact_path 核对。
+        # 在子进程退出后按 artifact_path 核对.
         cmd = case.to_command(repo_root) + ["--output-dir", str(_OUTPUT_DIR)]
 
         if check_only:

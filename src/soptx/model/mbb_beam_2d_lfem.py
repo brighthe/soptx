@@ -206,29 +206,29 @@ class _LegacyHalfMBBBeamRight2d(PDEBase):
             n_elements = 2 * nx * ny
             # 生成所有三角形的索引
             el_indices = bm.arange(n_elements)
-            # 核心修正：将三角形索引映射回它所在的“父方格”索引
-            # 例如：三角形 0,1 -> 方格 0；三角形 2,3 -> 方格 1
+            # 核心修正: 将三角形索引映射回它所在的"父方格"索引
+            # 例如: 三角形 0,1 -> 方格 0; 三角形 2,3 -> 方格 1
             grid_cell_indices = el_indices // 2
         elif isinstance(mesh, QuadrangleMesh):
             n_elements = nx * ny
             el_indices = bm.arange(n_elements)
-            # 四边形本身就是方格，索引不变
+            # 四边形本身就是方格, 索引不变
             grid_cell_indices = el_indices
 
         # 2. 基于父方格索引计算空间坐标 (ix, iy)
-        # 注意：这里依然使用 ny，因为网格在几何上仍然是 nx 列 ny 行
+        # 注意: 这里依然使用 ny, 因为网格在几何上仍然是 nx 列 ny 行
         ix = grid_cell_indices // ny  # 列号
         iy = grid_cell_indices % ny   # 行号
         
-        # 3. 区域判定 (逻辑与之前完全一致，因为是基于 ix, iy 判定的)
+        # 3. 区域判定 (逻辑与之前完全一致, 因为是基于 ix, iy 判定的)
         
-        # 载荷点区域（左上角）
+        # 载荷点区域 (左上角)
         load_w, load_h = load_region
         # 增加边界保护
         limit_load_w = min(load_w, nx)
         mask_load = (ix < limit_load_w) & (iy >= ny - load_h)
         
-        # 支座点区域（右下角）
+        # 支座点区域 (右下角)
         support_w, support_h = support_region
         # 增加边界保护
         limit_support_w = max(nx - support_w, 0)

@@ -1,4 +1,4 @@
-"""PIML Route A 拓扑优化的诊断性局部能量与灵敏度审计。"""
+"""PIML Route A 拓扑优化的诊断性局部能量与灵敏度审计."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _json_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def select_audit_positions(count: int, limit: int) -> np.ndarray:
-    """在保持确定性和空间顺序覆盖的前提下选择 audit 位置。"""
+    """在保持确定性和空间顺序覆盖的前提下选择 audit 位置."""
     if count < 0:
         raise ValueError("count 不能为负数。")
     if limit <= 0:
@@ -64,10 +64,10 @@ def audit_accepted_local_responses(
     rho_min: float,
     gate_metrics: Sequence[Mapping[str, Any]],
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    """比较 accepted PIML 恢复与同一边界迹下的 Exact Schur 恢复。
+    """比较 accepted PIML 恢复与同一边界迹下的 Exact Schur 恢复.
 
-    返回 Exact 单元能量以及逐子结构诊断记录。这里不重新求解全局接口系统，
-    因而隔离的是局部恢复关系对能量与 SIMP 灵敏度的影响。
+    返回 Exact 单元能量以及逐子结构诊断记录. 这里不重新求解全局接口系统,
+    因而隔离的是局部恢复关系对能量与 SIMP 灵敏度的影响.
     """
     ids = tuple(int(index) for index in substructure_ids)
     boundary = np.asarray(boundary_displacement, dtype=np.float64)
@@ -184,7 +184,7 @@ def filtered_sensitivity_metrics(
     approximate: np.ndarray,
     hybrid_exact_reference: np.ndarray,
 ) -> dict[str, float]:
-    """比较正式 PIML 过滤梯度与 accepted 局部 Exact 替换后的混合参考。"""
+    """比较正式 PIML 过滤梯度与 accepted 局部 Exact 替换后的混合参考."""
     approximate_array = np.asarray(approximate, dtype=np.float64).reshape(-1)
     reference_array = np.asarray(
         hybrid_exact_reference, dtype=np.float64
@@ -206,7 +206,7 @@ def filtered_sensitivity_metrics(
 def summarize_local_records(
     records: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """汇总逐子结构 audit 记录，同时保留原始记录供定位。"""
+    """汇总逐子结构 audit 记录, 同时保留原始记录供定位."""
     keys = (
         "interior_displacement_relative_l2",
         "cell_energy_relative_l2",
@@ -242,7 +242,7 @@ def summarize_local_records(
 def summarize_audit_iterations(
     iterations: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """汇总全部迭代的局部误差及混合参考过滤梯度误差。"""
+    """汇总全部迭代的局部误差及混合参考过滤梯度误差."""
     records = [
         record
         for iteration in iterations

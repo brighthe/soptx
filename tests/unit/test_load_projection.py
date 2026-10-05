@@ -26,7 +26,7 @@ def test_point_force_is_written_to_the_unique_interpolation_node() -> None:
 
 
 def test_constant_line_traction_forms_consistent_nodal_forces() -> None:
-    """常值线载荷按相邻线段积分，端点与内部节点权重正确."""
+    """常值线载荷按相邻线段积分, 端点与内部节点权重正确."""
     bm.set_backend("numpy")
     points = bm.asarray(((0.0, 0.0), (0.0, 2.0), (0.0, 4.0)))
     load = LineTractionLoad(

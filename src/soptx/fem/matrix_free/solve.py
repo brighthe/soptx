@@ -73,7 +73,7 @@ def solver_diagnostics(
         ``rhs_norm`` 与 ``reference_norm`` 是两个不同的量, 都要给: 前者是 ``||load||``,
         后者是 CG 里 rtol 真正的参照量 ``||r0||``. ``solve_matrix_free_system`` 传
         ``x0=system.prescribed`` 热启动, 此时 ``||r0|| < ||load||``, 按 ``rhs_norm``
-        设门限会比求解器实际达到的判据宽。这里先把 ``reference_norm`` 生产出来,
+        设门限会比求解器实际达到的判据宽. 这里先把 ``reference_norm`` 生产出来,
         门禁口径的切换 (``tools/matrix_free_evidence/contract.py``) 要连同 stage-1
         证据链重跑, 是独立的一步.
     """

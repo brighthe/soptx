@@ -10,10 +10,10 @@
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以
 ``width=\\textwidth`` 原尺寸嵌入, 面板标题字号即纸面字号; 高度按 3 行 160x20 面板加
-3 行标题算出, 不再留大片空白。面板标题只写编号、方法与阶次, 柔顺度数值由论文表给出。
-密度场是分片常数, 矢量输出在多数阅读器里会显出三角形接缝, 故只出 600 dpi 的 PNG。
+3 行标题算出, 不再留大片空白. 面板标题只写编号、方法与阶次, 柔顺度数值由论文表给出.
+密度场是分片常数, 矢量输出在多数阅读器里会显出三角形接缝, 故只出 600 dpi 的 PNG.
 
-论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响。
+论文图号只写在首行括注里: 排版改号时改这一处, case id 与命令行都不受影响.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ paper_rcparams()
 
 # ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
 # 这张图吃哪个算例的哪几次运行, 本就是绘图代码自己的事实, 故写在模块身上而
-# 不另立注册表; 两个常量都保持字面量, ast.literal_eval 才读得动。
+# 不另立注册表; 两个常量都保持字面量, ast.literal_eval 才读得动.
 SOURCE_CASE = "compliance-fixed-fixed-half"
 REQUIRED_RUNS = (
     "analyzer-lfem__order-2", "analyzer-huzhang__order-2",
@@ -49,7 +49,7 @@ REQUIRED_RUNS = (
 OUTPUTS = config.OUTPUT_DIR / SOURCE_CASE
 
 # 3 行 2 列: 行是阶次 k=2,3,4, 列是方法 (左 LFEM / 右 HZMFEM). run 目录只在
-# REQUIRED_RUNS 里写一遍, 面板按阅读顺序取, 同一个目录名不在本文件出现两处。
+# REQUIRED_RUNS 里写一遍, 面板按阅读顺序取, 同一个目录名不在本文件出现两处.
 PANELS = [
     [
         (
@@ -63,7 +63,7 @@ PANELS = [
     for row, order in enumerate((2, 3, 4))
 ]
 
-# 版心宽 150 mm; 高度 = 3 行面板 (每行约 0.36 in) + 3 行 9 pt 标题 + 行距。
+# 版心宽 150 mm; 高度 = 3 行面板 (每行约 0.36 in) + 3 行 9 pt 标题 + 行距.
 FIG_SIZE_IN = (5.9, 1.85)
 TITLE_PT = 9.0
 DPI = 600
@@ -102,7 +102,7 @@ def main():
             ax.set_xticks([])
             ax.set_yticks([])
 
-            # 阶次记号随方法走: LFEM 的 p 是位移阶, HZMFEM 的 k 是应力阶 (与题注一致)。
+            # 阶次记号随方法走: LFEM 的 p 是位移阶, HZMFEM 的 k 是应力阶 (与题注一致).
             symbol = "p" if method == "LFEM" else "k"
             ax.set_title(f"{tag} {method}, ${symbol} = {k}$", fontsize=TITLE_PT, pad=2.5)
 

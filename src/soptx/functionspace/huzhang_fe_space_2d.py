@@ -179,7 +179,7 @@ class HuZhangFEDof2d():
         self.use_relaxation = use_relaxation
         self.corner = corner
 
-        # TODO 只有开启松弛且有角点数据时，NCP 才有效，否则为0
+        # TODO 只有开启松弛且有角点数据时, NCP 才有效, 否则为0
         self.NCP = len(corner['coords']) if (use_relaxation and corner is not None) else 0
 
         self.cell_dofs = HuZhangFECellDof2d(mesh, p)
@@ -240,7 +240,7 @@ class HuZhangFEDof2d():
             corner2dof = bm.concatenate([node2dof[cornidx], extra_dofs], axis=1)
             return node2dof, corner2dof 
         else:
-            # 未松弛模式，不需要 corner2dof，返回 None 占位
+            # 未松弛模式, 不需要 corner2dof, 返回 None 占位
             return node2dof, None
 
     node_to_dof = node_to_internal_dof
@@ -615,7 +615,7 @@ class HuZhangFESpace2d(FunctionSpace):
     @property
     def shape(self):
         """
-        自由度的形状，表示排序方式
+        自由度的形状, 表示排序方式
         (-1, NS): gd_priority, 先排每个位置的所有应力分量
         
         对于 2D: (-1, 3) 表示 (σ0_xx, σ0_xy, σ0_yy, σ1_xx, σ1_xy, σ1_yy, ...)
@@ -877,7 +877,7 @@ class HuZhangFESpace2d(FunctionSpace):
         nframe[edge[isbdege]] = eframe[isbdege, None]
 
         # 修改角点的标架 (仅在松弛模式有效)
-        # 如果 self.NCP == 0 (未开启松弛)，循环自动跳过
+        # 如果 self.NCP == 0 (未开启松弛), 循环自动跳过
         for p in range(self.NCP):
             eid = self.corner['to_midedge'][p]
             nid = self.corner['idx'][p]
@@ -1077,10 +1077,10 @@ class HuZhangFESpace2d(FunctionSpace):
     @barycentric
     def value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike: 
         """
-        计算有限元函数的值。
+        计算有限元函数的值.
         自动处理松弛模式下的系数变换.
         """
-        #TODO 1. 系数变换 (仅在松弛模式且存在角点时执行，避免不必要的矩阵乘法)
+        #TODO 1. 系数变换 (仅在松弛模式且存在角点时执行, 避免不必要的矩阵乘法)
         if self.use_relaxation and self.NCP > 0:
             uh0 = self.TM @ uh
         else:
@@ -1115,7 +1115,7 @@ class HuZhangFESpace2d(FunctionSpace):
         # 2. 计算散度基函数值
         gphi = self.div_basis(bc) 
         
-        # 如果提供了 index，需要对 gphi 进行切片，因为 div_basis 通常计算所有单元
+        # 如果提供了 index, 需要对 gphi 进行切片, 因为 div_basis 通常计算所有单元
         if index is not _S:
             gphi = gphi[index]
 

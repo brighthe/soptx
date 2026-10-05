@@ -7,7 +7,7 @@ from .base import CondensationReductionAdapter
 
 
 class PIMLStiffnessReduction(CondensationReductionAdapter):
-    """路线 B 的规范适配器：预测刚度，恢复关系仍取 Exact Schur."""
+    """路线 B 的规范适配器: 预测刚度, 恢复关系仍取 Exact Schur."""
 
     def __init__(
         self,

@@ -2,7 +2,7 @@
 """运行溯源的采集 (子结构缩聚变密度拓扑优化实验).
 
 与 experiments/topopt_simp_piml_substructure/provenance.py 同构, 但本目录不依赖
-torch, 因此不采集 CUDA 信息。
+torch, 因此不采集 CUDA 信息.
 """
 
 from __future__ import annotations

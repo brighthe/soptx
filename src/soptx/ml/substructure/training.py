@@ -1,4 +1,4 @@
-"""与有限元实现解耦的子结构代理模型训练循环。"""
+"""与有限元实现解耦的子结构代理模型训练循环."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def build_optimizer(model: nn.Module, config: TrainingConfig) -> torch.optim.Opt
 
 @dataclass(frozen=True)
 class TrainingResult:
-    """训练完成后的可序列化摘要。"""
+    """训练完成后的可序列化摘要."""
 
     epochs_run: int
     best_epoch: int
@@ -135,12 +135,12 @@ def train_surrogate(
     *,
     evaluator: Optional[Callable[[nn.Module], Mapping[str, Any]]] = None,
 ) -> TrainingResult:
-    """训练给定代理网络，并恢复 MSE 或 physics 最优的参数快照。
+    """训练给定代理网络, 并恢复 MSE 或 physics 最优的参数快照.
 
-    本函数只处理已经构造好的 ``(X, Y)``，不导入 FEM，也不负责生成物理标签。
-    当 ``physics_eval_interval > 0`` 时，evaluator 必须返回有限的
-    selection_score；模型只在固定 physics 检查点参与选模，patience
-    也按连续未改善的 physics 检查次数计。否则保持按验证 MSE 选模的旧行为。
+    本函数只处理已经构造好的 ``(X, Y)``, 不导入 FEM, 也不负责生成物理标签.
+    当 ``physics_eval_interval > 0`` 时, evaluator 必须返回有限的
+    selection_score; 模型只在固定 physics 检查点参与选模, patience
+    也按连续未改善的 physics 检查次数计. 否则保持按验证 MSE 选模的旧行为.
     """
     x_train_tensor = _as_float_tensor(x_train, "x_train")
     y_train_tensor = _as_float_tensor(y_train, "y_train")

@@ -27,9 +27,9 @@ class SimplySupportedBridge2d:
         - 其余边界: 自由边界, traction 为 0
         - 顶部边界 (y = ymax): 竖直均布牵引载荷 ``t = (0, t_y)``
 
-    问题定义只包含区域、材料参数、载荷与边界条件; 网格由调用方显式创建。
+    问题定义只包含区域、材料参数、载荷与边界条件; 网格由调用方显式创建.
     被动区通过 :meth:`get_passive_element_mask` 按单元重心判定, 只支持
-    单元密度表征。
+    单元密度表征.
     """
 
     dimension = 2
@@ -166,7 +166,7 @@ class SimplySupportedBridge2d:
         """返回桥面被动单元掩码 (形状 ``(NC,)`` 的布尔张量).
 
         单元重心落在 ``y > ymax - deck_height`` 的条带内即视为桥面单元;
-        按几何判定, 不依赖单元编号顺序, 结构化 tri/quad 网格通用。
+        按几何判定, 不依赖单元编号顺序, 结构化 tri/quad 网格通用.
         """
         barycenter = mesh.entity_barycenter("cell")
         y = barycenter[..., 1]

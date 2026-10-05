@@ -67,29 +67,29 @@ PARALLEL_L2_DIFFERENCE_TOL = 1.0e-10
 MINIMUM_FINAL_L2_ORDER = 1.5
 
 # 三档加密, 依次对应 layout.EA_EVIDENCE_ROLES 的 coarse/medium/fine, 由
-# validate.py 驱动。
+# validate.py 驱动.
 #
-# 两个维度取同一组剖分数, 这样 EA 与 FA 的比对档位在 2D/3D 上是同一个网格尺寸。
+# 两个维度取同一组剖分数, 这样 EA 与 FA 的比对档位在 2D/3D 上是同一个网格尺寸.
 #
 # 这里不承担"收敛阶趋势"的举证: 那条链由
 # ``examples/lagrange_elasticity/manufactured_convergence_demo.py`` 的两条五档
-# 显式组装结果给出(见该目录 ``results_analysis.md``)。本工具回答"EA 与 FA
+# 显式组装结果给出(见该目录 ``results_analysis.md``). 本工具回答"EA 与 FA
 # 是不是同一个离散": FA 与 EA 同档 (见 ``layout.SERIAL_VALIDATION_CASES``),
-# 三档逐档比对 —— 收敛阶达标是门禁, 不是展示对象。
+# 三档逐档比对 —— 收敛阶达标是门禁, 不是展示对象.
 #
-# 上界停在 32 已不再是硬约束: 3D 的 n=64 (823,875 自由度) 现在跑得动。原先的
+# 上界停在 32 已不再是硬约束: 3D 的 n=64 (823,875 自由度) 现在跑得动. 原先的
 # OOM 有两个叠加原因, 均已解除 —— ``linear_elastic_integrator`` 的 ``standard``
 # 分支把被求和掉的积分点轴物化成九个 ``(NC, NQ, 4, 4)`` 临时张量(单块 3.75 GiB,
-# 九块同时存活), 以及本机 WSL2 内存上限只有缺省的 31.2 GiB。改走
+# 九块同时存活), 以及本机 WSL2 内存上限只有缺省的 31.2 GiB. 改走
 # ``assembly_method='fast'`` 并把上限抬到 48 GB 后, 该档实测峰值 RSS 17.38 GiB、
 # 单档 150.3 s(FA + MUMPS ``sym=1``), 对照见
-# ``examples/lagrange_elasticity/results_analysis.md`` §4.4。
+# ``examples/lagrange_elasticity/results_analysis.md`` §4.4.
 #
 # 之所以仍停在 32, 是因为把这里改成 (8, 16, 64) 之类要重跑并重新冻结整条 stage-1
-# 证据链, 且本工具的职责("EA 与 FA 是不是同一个离散")三档已经足够。EA 侧的峰值
+# 证据链, 且本工具的职责("EA 与 FA 是不是同一个离散")三档已经足够. EA 侧的峰值
 # 内存已另行测得, 走的是 ``examples/matrix_free_elasticity/benchmark_cpu_ea.py``
 # 的 ``--mode serial-peak-rss``(一个进程只建一个层级), 与本链无关, 因此这里不必
-# 因为要补那格数据而动 —— 对照见该目录 ``results_analysis.md`` §3.5。
+# 因为要补那格数据而动 —— 对照见该目录 ``results_analysis.md`` §3.5.
 REFINEMENTS = {
     2: (8, 16, 32),
     3: (8, 16, 32),

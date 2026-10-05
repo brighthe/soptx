@@ -1,13 +1,13 @@
 """绘制 PIML 子结构局部响应恢复精度对比云图 (路线 A: 多尺度形函数预测).
 
-⚠️ **本脚本的 (c)(d) 不是实测, 不得作为证据引用。** ``N_pred`` 由
+⚠️ **本脚本的 (c)(d) 不是实测, 不得作为证据引用. ** ``N_pred`` 由
 ``N_exact + gaussian_filter(白噪声)`` 构造 (见 ``compute_displacement_fields``),
 没有任何网络推理; 因此 ``outputs/fig3_evidence.json`` 里的最大 1.90% / 平均 0.45%
-与图上"界面附近误差偏大"的结构都是造出来的。该脚本只保留作云图版式的原型。
+与图上"界面附近误差偏大"的结构都是造出来的. 该脚本只保留作云图版式的原型.
 
 形函数路线的**实测**证据在 ``verify_shape_function_route.py`` 与
 ``examples/piml_substructure_elasticity/outputs/eq17_second_order.json``: 留出集上形函数误差 8.97%, 经式 (17) 后的缩聚
-刚度误差 0.435%, 解层全场位移 0.153%。契约与推导见 ``../legacy_examples_results.md`` §3。
+刚度误差 0.435%, 解层全场位移 0.153%. 契约与推导见 ``../legacy_examples_results.md`` §3.
 
 四图联轴内容与契约:
   (a) rho: 经典拓扑优化微结构密度场 (48x48 细网格, 黑色=实体骨架 rho=1.0, 白色=4个减重方孔 rho=0.0);

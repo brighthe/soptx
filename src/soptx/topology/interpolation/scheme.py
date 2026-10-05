@@ -64,7 +64,7 @@ class MaterialInterpolationScheme(BaseLogged):
     
     @property
     def n_sub(self) -> int:
-        """获取子密度单元数量（仅多分辨率时有效）"""
+        """获取子密度单元数量 (仅多分辨率时有效)"""
         return getattr(self, '_n_sub', None)
     
     @property

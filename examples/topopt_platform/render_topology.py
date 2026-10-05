@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""把 SIMP 最终密度场渲染为灰阶 3D 构型图（申请书画图用）.
+"""把 SIMP 最终密度场渲染为灰阶 3D 构型图 (申请书画图用).
 
-管线：密度场(阈值 0.5) -> VTK Marching Cubes 等值面 -> 三角面片 ->
-matplotlib ``Poly3DCollection`` 灰阶渲染。只借 VTK 做几何提取，不做 VTK 渲染，
-因此无头（无 X/GL）环境也能稳定出图；灰阶印刷风格与申请书其余图片一致。
+管线: 密度场(阈值 0.5) -> VTK Marching Cubes 等值面 -> 三角面片 ->
+matplotlib ``Poly3DCollection`` 灰阶渲染. 只借 VTK 做几何提取, 不做 VTK 渲染,
+因此无头 (无 X/GL) 环境也能稳定出图; 灰阶印刷风格与申请书其余图片一致.
 
 用法:
   python examples/topopt_platform/render_topology.py \
@@ -172,7 +172,7 @@ def density_to_triangles(density: np.ndarray, Lx: float, Ly: float, Lz: float,
     tri = np.empty((n_tri, 3), dtype=np.int64)
     off = 0
     for i in range(n_tri):
-        conn = cell_arr.GetValue(off)  # 单元顶点数（应为 3）
+        conn = cell_arr.GetValue(off)  # 单元顶点数 (应为 3)
         tri[i] = [cell_arr.GetValue(off + 1 + j) for j in range(3)]
         off += conn + 1
     return verts, tri
@@ -228,7 +228,7 @@ def _shade_faces(verts: np.ndarray, tri: np.ndarray, *,
 
 
 def _annotate(ax, Lx, Ly, Lz):
-    """载荷箭头与固支标注（论文算例 3.3：x=0 固支，右端面底边 -y 均布线载荷）。"""
+    """载荷箭头与固支标注 (论文算例 3.3: x=0 固支, 右端面底边 -y 均布线载荷)."""
     # 绘图坐标下载荷沿竖直轴向下, 起点取自由端底边的厚度中面.
     ax.quiver(Lx, Lz / 2, 0.0, 0, 0, -0.26 * Ly, color=INK,
               arrow_length_ratio=0.30, linewidth=2.2)
@@ -249,7 +249,7 @@ def _setup_axes(ax, Lx, Ly, Lz):
 
 def render_domain_box(Lx: float, Ly: float, Lz: float, out: str, *,
                       title: str = "", figsize=(6.0, 3.2), trim: bool = True) -> None:
-    """初始构型：设计域长方体（均匀材料分布的初始设计）. """
+    """初始构型: 设计域长方体 (均匀材料分布的初始设计). """
     verts = np.array([[0, 0, 0], [Lx, 0, 0], [Lx, Ly, 0], [0, Ly, 0],
                       [0, 0, Lz], [Lx, 0, Lz], [Lx, Ly, Lz], [0, Ly, Lz]])
     faces = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4],

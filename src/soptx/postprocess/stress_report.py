@@ -128,12 +128,12 @@ class StressPostProcessor:
         # --- 3. 计算 von Mises 应力 ---
         if 'von_mises' not in state:
             if is_mixed:
-                # 混合元：使用表观应力
+                # 混合元: 使用表观应力
                 if 'stress_apparent' not in state:
                     state.update(analyzer.compute_stress_state(state=state, rho_val=rho_phys))
                 state['von_mises'] = analyzer.material.calculate_von_mises_stress(state['stress_apparent'])
             else:
-                # 位移元：使用实体应力
+                # 位移元: 使用实体应力
                 if 'stress_solid' not in state:
                     state.update(analyzer.compute_stress_state(state))
                 state['von_mises'] = analyzer.material.calculate_von_mises_stress(state['stress_solid'])
@@ -147,7 +147,7 @@ class StressPostProcessor:
             vm_scalar = vm
 
         # --- 4. 归一化应力测度 SM ---
-        # 核心区别：混合元直接使用表观应力，位移元需乘惩罚系数
+        # 核心区别: 混合元直接使用表观应力, 位移元需乘惩罚系数
         if is_mixed:
             SM = vm_scalar / slim
         else:
@@ -240,7 +240,7 @@ class StressPostProcessor:
         if stress.ndim == 3:
             stress = stress[:, 0, :]  # (NC, NS)
 
-        # 核心区别：混合元无需惩罚，位移元需乘插值系数还原表观应力
+        # 核心区别: 混合元无需惩罚, 位移元需乘插值系数还原表观应力
         if is_mixed:
             cauchy = stress  
         else:
@@ -308,8 +308,8 @@ class StressPostProcessor:
             font_zh = font_manager.FontProperties(fname=path_zh, size=12)
             font_zh_title = font_manager.FontProperties(fname=path_zh, size=13)
             font_zh_legend = font_manager.FontProperties(fname=path_zh, size=11)
-            # 对于纯英文或数字，可以选用 font_en，但在纯 matplotlib 中混排时，
-            # 统一对包含中文的字符串使用 font_zh 通常能获得最稳定的效果。
+            # 对于纯英文或数字, 可以选用 font_en, 但在纯 matplotlib 中混排时,
+            # 统一对包含中文的字符串使用 font_zh 通常能获得最稳定的效果.
             print("字体加载成功！")
         except Exception as e:
             print(f"字体加载失败，将使用系统默认字体: {e}")
@@ -354,7 +354,7 @@ class StressPostProcessor:
         vm_actual = np.sqrt(s1**2 - s1 * s2 + s2**2)
         max_ratio = float(np.max(vm_actual)) if len(vm_actual) > 0 else 0.0
 
-        # 设置坐标轴 (LaTeX 数学公式不受 FontProperties 影响，保持优美的数学字体)
+        # 设置坐标轴 (LaTeX 数学公式不受 FontProperties 影响, 保持优美的数学字体)
         ax.set_xlabel(r'$\sigma_1 / \sigma_{\mathrm{lim}}$', fontsize=14)
         ax.set_ylabel(r'$\sigma_2 / \sigma_{\mathrm{lim}}$', fontsize=14)
         

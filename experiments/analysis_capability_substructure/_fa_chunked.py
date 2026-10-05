@@ -1,4 +1,4 @@
-"""二维规则 Q1 网格的 FA 分块 pattern 装配。"""
+"""二维规则 Q1 网格的 FA 分块 pattern 装配."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ DEFAULT_CHUNK_SIZE = 65_536
 
 
 def _as_numpy(value: Any) -> np.ndarray:
-    """把后端数组转为 NumPy 数组。"""
+    """把后端数组转为 NumPy 数组."""
     return np.asarray(bm.to_numpy(value))
 
 
@@ -43,7 +43,7 @@ def _validate_cell_and_dof_ordering(
     total_fine: Sequence[int],
     domain_size: Sequence[float],
 ) -> None:
-    """核对全网格单元顺序与单位单元局部自由度顺序。"""
+    """核对全网格单元顺序与单位单元局部自由度顺序."""
     nx, ny = (int(value) for value in total_fine)
     mesh = analyzer.disp_mesh
     cells = _as_numpy(mesh.entity("cell"))
@@ -93,7 +93,7 @@ def assemble_chunked_fa(
     total_fine: Sequence[int],
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> tuple[Any, dict[str, Any]]:
-    """用单位单元刚度和 CSR pattern 分块装配二维 FA 刚度矩阵。"""
+    """用单位单元刚度和 CSR pattern 分块装配二维 FA 刚度矩阵."""
     if chunk_size <= 0:
         raise ValueError("chunk_size 必须为正整数。")
     if len(total_fine) != 2 or len(domain_size) != 2:
@@ -154,7 +154,7 @@ def verify_small(
     n_fine: Sequence[int] = (5, 5),
     chunk_size: int = 127,
 ) -> dict[str, Any]:
-    """在小网格上与生产 FA 全批量装配、位移和能量逐项比较。"""
+    """在小网格上与生产 FA 全批量装配、位移和能量逐项比较."""
     bm.set_backend("numpy")
     pde = _problem(2)
     domain_size = tuple(
