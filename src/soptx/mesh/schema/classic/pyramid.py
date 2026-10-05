@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/pyramid.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""参考四棱锥的线性 Lagrange Schema (只支持五节点几何)."""
+
 from ....backend import bm
 from ....backend import Index, Tensor
 from ...ipoints import MultiIndex as _MI, multi_index_tensorprod
@@ -19,14 +21,11 @@ __all__ = ["LagrangePyramidSchema", "PyramidSchema"]
 
 
 class LagrangePyramidSchema(_ScalarOrderSchema):
-    """Immutable linear Lagrange pyramid schema.
+    """不可变的线性 Lagrange 四棱锥 Schema.
 
-    Only the five-node geometry order ``p=1`` is supported.  Reference input
-    is ``(bc_u, bc_v, bc_w)`` and geometry reference gradients are returned in
-    ``(u, v, w)`` order.  Arbitrary-order Lagrange basis evaluation, including
-    a request with ``p=1``, is deliberately unsupported and raises
-    ``NotImplementedError``; the approved geometry formula is not promoted to
-    a finite-element reference-basis contract.
+    只支持五节点的几何次数 ``p=1``. 参考输入为 ``(bc_u, bc_v, bc_w)``, 几何参考梯度按
+    ``(u, v, w)`` 顺序返回. 任意次 Lagrange 基函数 (包括 ``p=1`` 的请求) 有意不支持, 抛
+    ``NotImplementedError``; 已认可的几何公式不升格为有限元参考基函数约定.
     """
 
     __slots__ = ()
@@ -119,10 +118,11 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
 
     @classmethod
     def geometry_shape_function(cls, bcs: tuple[Tensor, Tensor, Tensor]) -> Tensor:
+        """五节点几何基函数在三个方向乘积点上的值."""
         lu0, lu1, lv0, lv1, lw0, lw1 = cls._split_bcs(bcs)
         phi0 = cls._product(lu0, lv0, lw0)
         phi1 = cls._product(lu1, lv0, lw0)
-        # The schema uses cyclic base order (u0v0, u1v0, u1v1, u0v1).
+        # 本 Schema 的底面使用循环顺序 (u0v0, u1v0, u1v1, u0v1).
         phi2 = cls._product(lu1, lv1, lw0)
         phi3 = cls._product(lu0, lv1, lw0)
         phi4 = cls._product(bm.ones_like(lu0), bm.ones_like(lv0), lw1)
@@ -130,6 +130,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
 
     @classmethod
     def geometry_grad_shape_function(cls, bcs: tuple[Tensor, Tensor, Tensor]) -> Tensor:
+        """五节点几何基函数对 ``(u, v, w)`` 的参考梯度."""
         lu0, lu1, lv0, lv1, lw0, _ = cls._split_bcs(bcs)
         z = cls._product(lu0, lv0, bm.zeros_like(lw0))
         o = cls._product(bm.ones_like(lu0), bm.ones_like(lv0), bm.ones_like(lw0))
@@ -160,6 +161,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
     @classmethod
     def bc_to_point(cls, ctx: EntityContext, bcs: tuple[Tensor, ...],
                     index: Index | None) -> Tensor:
+        """把 ``(bc_u, bc_v, bc_w)`` 重心坐标映射为物理点."""
         bcs = _require_bcs_tuple(bcs, "pyramid bc_to_point", 3)
         pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[pyramid]
@@ -167,10 +169,9 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         return bm.einsum("qi,cid->cqd", phi, points)
 
     def shape_function(self, bcs: tuple[Tensor, Tensor, Tensor]) -> Tensor:
-        """Evaluate the five-node geometry basis on product points.
+        """在乘积点上计算五节点几何基函数.
 
-        The result has shape ``(Qu * Qv * Qw, 5)`` and columns follow the
-        complete local-node order.
+        结果形状为 ``(Qu * Qv * Qw, 5)``, 列按完整的局部节点顺序.
         """
         if not isinstance(bcs, tuple):
             raise TypeError(
@@ -182,7 +183,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         self,
         bcs: tuple[Tensor, Tensor, Tensor],
     ) -> Tensor:
-        """Report the unsupported independent-barycentric gradient."""
+        """不支持独立重心坐标梯度, 调用即报错."""
         raise NotImplementedError(
             "pyramid geometry does not expose independent barycentric gradients"
         )
@@ -191,10 +192,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         self,
         bcs: tuple[Tensor, Tensor, Tensor],
     ) -> Tensor:
-        """Return geometry gradients with shape ``(Q, 5, 3)``.
-
-        The final axis follows public reference order ``(u, v, w)``.
-        """
+        """几何基函数的参考梯度, 形状 ``(Q, 5, 3)``, 末轴按公开的参考顺序 ``(u, v, w)``."""
         if not isinstance(bcs, tuple):
             raise TypeError(
                 "pyramid grad_shape_function_reference expects a tuple of tensors"
@@ -206,7 +204,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         bcs: tuple[Tensor, Tensor, Tensor],
         p: int,
     ) -> Tensor:
-        """Report that arbitrary-order pyramid Lagrange bases are unsupported."""
+        """不支持任意次四棱锥 Lagrange 基函数, 调用即报错."""
         raise NotImplementedError(
             "LagrangePyramidSchema does not yet support an arbitrary-order "
             "reference Lagrange basis"
@@ -217,7 +215,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         bcs: tuple[Tensor, Tensor, Tensor],
         p: int,
     ) -> Tensor:
-        """Report that pyramid barycentric basis gradients are unsupported."""
+        """不支持四棱锥基函数的重心坐标梯度, 调用即报错."""
         raise NotImplementedError(
             "LagrangePyramidSchema does not yet support arbitrary-order "
             "barycentric basis gradients"
@@ -228,7 +226,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         bcs: tuple[Tensor, Tensor, Tensor],
         p: int,
     ) -> Tensor:
-        """Report that pyramid reference basis gradients are unsupported."""
+        """不支持四棱锥基函数的参考梯度, 调用即报错."""
         raise NotImplementedError(
             "LagrangePyramidSchema does not yet support arbitrary-order "
             "reference basis gradients"
@@ -241,6 +239,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None
     ) -> Tensor:
+        """参考四棱锥到物理四棱锥映射的 Jacobi 矩阵, 形状 ``(NC, NQ, GD, 3)``."""
         pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[pyramid]
         gphi = cls().grad_shape_function_reference(bcs)
@@ -254,6 +253,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         ref_grad: Tensor,
         index: Index | None
     ) -> Tensor:
+        """把参考梯度变换为物理梯度: ``J (J^T J)^{-1}`` 作用于参考梯度."""
         J = cls.jacobi_matrix(ctx, bcs, index)
         metric = bm.einsum("cqdk,cqdl->cqkl", J, J)
         metric_inv = bm.linalg.inv(metric)
@@ -268,6 +268,7 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
         *,
         ref: bool = False,
     ) -> Tensor:
+        """参考坐标的物理梯度; 不给 ``bcs`` 时在参考中心求值."""
         pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(pyramid.shape) == 1:
             pyramid = bm.reshape(pyramid, (1, -1))
@@ -292,17 +293,30 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
 
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
+        """四棱锥上插值点的多重指标.
+
+        Notes
+        -----
+        非内部情形借用五顶点单纯形的多重指标, 原代码即注明不正确.
+        """
         p = _require_order_tuple(order, "pyramid multi_index", 1)[0]
         if internal:
             mi = _MI.multi_index_inner(p, 5)
         else:
-            mi = _MI.multi_index_matrix(p, 5) # TODO: not correct
+            mi = _MI.multi_index_matrix(p, 5) # TODO: 不正确
         if tensorprod:
             return multi_index_tensorprod(mi)
         return mi
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
+        """参考四棱锥上的张量积 Gauss--Legendre 公式, ``w`` 方向至少 2 阶.
+
+        Raises
+        ------
+        ValueError
+            ``qtype`` 不是 ``"legendre"`` 或 None.
+        """
         if qtype not in (None, "legendre"):
             raise ValueError(f"unsupported pyramid quadrature type: {qtype!r}")
         from ....quadrature import GaussLegendreQuadrature, TensorProductQuadrature
@@ -313,16 +327,25 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """四棱锥五个顶点坐标的平均."""
         pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[pyramid]
         return bm.mean(points, axis=1)
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """四棱锥体积, 按两个四面体 (0, 1, 3, 4) 与 (0, 3, 2, 4) 求和.
+
+        Notes
+        -----
+        底面顶点为循环顺序, 这一剖分只在底面为平行四边形或梯形时恰好正确; 一般四边形底面
+        实测偏差明显 (例如 0.45 对精确值 0.617).
+        """
         pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[pyramid]
 
         def tet_volume(i: int, j: int, k: int, m: int) -> Tensor:
+            """由四个局部顶点组成的四面体体积."""
             vectors = bm.stack([
                 points[:, j, :] - points[:, i, :],
                 points[:, k, :] - points[:, i, :],
@@ -335,6 +358,13 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """法方向: 几何维数等于拓扑维数时返回空张量.
+
+        Raises
+        ------
+        ValueError
+            几何维数小于拓扑维数.
+        """
         pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
         GD = cls.geo_dimension(ctx)
         normal_count = GD - cls.top_dim
@@ -356,9 +386,10 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """以顶点 0 出发到顶点 1、2、4 的代表性切向量, 形状 ``(NC, 3, GD)``."""
         pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[pyramid]
-        # Representative local frame; Jacobian-based tangents depend on reference points.
+        # 代表性的局部标架; 基于 Jacobi 矩阵的切向依赖参考点.
         return bm.stack([
             points[:, 1, :] - points[:, 0, :],
             points[:, 2, :] - points[:, 0, :],

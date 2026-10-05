@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/triangle.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""参考三角形的 Lagrange Schema."""
+
 from ....backend import bm
 from ....backend import Index, Tensor
 from ...ipoints import MultiIndex as _MI, multi_index_tensorprod
@@ -18,11 +20,10 @@ __all__ = ["LagrangeTriangleSchema", "TriangleSchema"]
 
 
 class LagrangeTriangleSchema(_ScalarOrderSchema):
-    """Represent an immutable Lagrange triangle of geometry order ``p``.
+    """几何次数为 ``p`` 的不可变 Lagrange 三角形.
 
-    ``p`` is a positive integer.  Reference input uses barycentric order
-    ``(lambda_0, lambda_1, lambda_2)``; reference derivatives use
-    ``(lambda_1, lambda_2)`` with ``lambda_0 = 1-lambda_1-lambda_2``.
+    ``p`` 为正整数. 参考输入按重心坐标顺序 ``(lambda_0, lambda_1, lambda_2)``; 参考导数取
+    ``(lambda_1, lambda_2)``, ``lambda_0 = 1 - lambda_1 - lambda_2``.
     """
 
     __slots__ = ()
@@ -78,6 +79,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
 
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
+        """三角形上插值点的多重指标, 每个顶点一列; ``internal`` 为 True 时只取内部点, ``tensorprod`` 为 True 时转为插值点工具所用的张量积兼容顺序."""
         p = _require_order_tuple(order, "triangle multi_index", 1)[0]
         if internal:
             mi = _MI.multi_index_inner(p, 3)
@@ -89,6 +91,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """选定三角形顶点坐标的平均, 形状 ``(NC, GD)``."""
         tri = cls._selected_triangles(ctx, index)
         points = ctx.block.positions[tri]
         return bm.mean(points, axis=1)
@@ -100,6 +103,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None,
     ) -> Tensor:
+        """参考三角形到物理三角形映射的 Jacobi 矩阵, 形状 ``(NC, NQ, GD, TD)``."""
         bcs = _require_bcs_tuple(bcs, "triangle jacobi_matrix", 1)
         tri = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(tri.shape) == 1:
@@ -110,6 +114,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
 
     @classmethod
     def bc_to_point(cls, ctx: EntityContext, bcs: tuple[Tensor, ...], index: Index | None) -> Tensor:
+        """把三角形上的重心坐标映射为物理点, 形状 ``(NC, NQ, GD)``."""
         bcs = _require_bcs_tuple(bcs, "triangle bc_to_point", 1)
         bc = bcs[0]
         tri = cls._selected_triangles(ctx, index)
@@ -125,6 +130,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
         *,
         ref: bool = False,
     ) -> Tensor:
+        """三个重心坐标的梯度: ``ref`` 为 True 时为单位阵 ``(NC, 3, 3)``, 否则为物理梯度 ``(NC, 3, GD)``; 给出 ``bcs`` 时沿积分点轴广播."""
         tri = cls._selected_triangles(ctx, index)
         node = ctx.block.positions
         if ref:
@@ -148,6 +154,13 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
+        """参考三角形上的积分公式: ``q <= 9`` 用对称三角形公式, 更高阶用 Stroud 锥积公式.
+
+        Raises
+        ------
+        ValueError
+            ``qtype`` 不是 ``"legendre"``.
+        """
         if qtype != "legendre":
             raise ValueError(f"unsupported quadrature type: {qtype}")
         if q > 9:
@@ -158,6 +171,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """三角形面积: 二维为有向测度, 三维为叉积模长的一半."""
         tri = cls._selected_triangles(ctx, index)
         node = ctx.block.positions
         gd = int(node.shape[1])
@@ -173,6 +187,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """二维时没有法方向, 返回 ``(NC, 0, 2)`` 的空张量; 三维时为两条边的叉积方向."""
         tri = cls._selected_triangles(ctx, index)
         points = ctx.block.positions[tri]
         gd = int(points.shape[2])
@@ -187,6 +202,7 @@ class LagrangeTriangleSchema(_ScalarOrderSchema):
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """以顶点 0 出发的两条边 ``(v1 - v0, v2 - v0)`` 作为切向量, 形状 ``(NC, 2, GD)``."""
         tri = cls._selected_triangles(ctx, index)
         points = ctx.block.positions[tri]
         t0 = points[:, 1, :] - points[:, 0, :]

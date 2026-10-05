@@ -1,12 +1,11 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/entity_schema.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Contracts for immutable mesh-entity Schema values.
+"""不可变网格实体 Schema 值的约定.
 
-An :class:`EntitySchema` value describes one concrete reference entity: its
-stable identity, complete local-node layout, admissible orientations, geometry
-interpolation, and optional reference-basis capabilities.  Schema values do
-not own mesh connectivity, physical coordinates, or finite-element DoFs.
+一个 :class:`EntitySchema` 值描述一个具体的参考实体: 稳定的身份、完整的局部节点布局、
+允许的定向、几何插值, 以及可选的参考基函数能力. Schema 值不拥有网格连接、物理坐标
+或有限元自由度.
 """
 
 from __future__ import annotations
@@ -29,18 +28,15 @@ P = ParamSpec("P")
 
 
 class EntitySchema:
-    """Define one immutable, parameterized reference-entity contract.
+    """一个不可变、参数化的参考实体约定.
 
-    A Schema Python class identifies a structural family, while each instance
-    identifies one normalized member of that family.  For example,
-    ``LagrangeTriangleSchema(p=1)`` and ``LagrangeTriangleSchema(p=2)`` have
-    the same Python type but different descriptors, IDs, local-node layouts,
-    and geometry bases.
+    Schema 的 Python 类标识一个结构族, 每个实例标识该族中一个规范化的成员. 例如
+    ``LagrangeTriangleSchema(p=1)`` 与 ``LagrangeTriangleSchema(p=2)`` 的 Python 类型相同,
+    但描述符、ID、局部节点布局与几何基函数都不同.
 
-    Concrete Schema values are immutable and compare by value.  Callers must
-    use equality, :attr:`descriptor`, or :attr:`id` for identity and must not
-    rely on Python object identity.  A Schema contains no ``MeshBlock`` state
-    and no backend, device, or dtype-specific tensor cache.
+    具体的 Schema 值不可变且按值比较. 调用方须以相等性、:attr:`descriptor` 或 :attr:`id`
+    判断身份, 不得依赖 Python 对象身份. Schema 不含任何 ``MeshBlock`` 状态, 也不含与后端、
+    设备或数据类型相关的张量缓存.
     """
 
     __slots__ = ()
@@ -58,11 +54,10 @@ class EntitySchema:
 
     @property
     def descriptor(self) -> SchemaDescriptor:
-        """Return the canonical descriptor derived from normalized fields.
+        """由规范化字段导出的规范描述符.
 
-        Parameter names and order follow ``descriptor_parameter_names`` on
-        the registered Schema type.  The returned value is immutable and is
-        sufficient to reconstruct an equal Schema through ``SCHEMA_RESOLVER``.
+        参数名与顺序遵循所登记 Schema 类型的 ``descriptor_parameter_names``. 返回值不可变,
+        足以经 ``SCHEMA_RESOLVER`` 重建出相等的 Schema.
         """
         parameters = tuple(
             (name, cast(CanonicalValue, getattr(self, name)))
@@ -76,77 +71,73 @@ class EntitySchema:
 
     @property
     def id(self) -> str:
-        """Return the deterministic, reversible ID of this concrete Schema.
+        """本具体 Schema 确定且可逆的 ID.
 
-        The ID encodes :attr:`descriptor`; it is independent of module paths,
-        process-local registry insertion order, and Python object identity.
+        ID 编码了 :attr:`descriptor`, 与模块路径、进程内登记顺序以及 Python 对象身份无关.
         """
         return self.descriptor.to_id()
 
     def number_of_vertices(self) -> int:
-        """Return the size of the topological vertex skeleton.
+        """拓扑顶点骨架的大小.
 
-        This count is independent of interpolation order and can be smaller
-        than :meth:`number_of_nodes` for a high-order geometry Schema.
+        该数与插值次数无关, 对高阶几何 Schema 可小于 :meth:`number_of_nodes`.
         """
         raise NotImplementedError()
 
     def number_of_nodes(self) -> int:
-        """Return the width of this Schema's complete local-node layout.
+        """本 Schema 完整局部节点布局的宽度.
 
-        The layout contains vertices and all higher-order interpolation nodes
-        used by the geometry basis.  It is the required connectivity width of
-        an entity sector bound to this concrete Schema.
+        布局包含顶点及几何基函数用到的全部高阶插值节点, 即绑定到本具体 Schema 的实体分区
+        所需的连接宽度.
         """
         raise NotImplementedError()
 
     def validate_connectivity_counts(self, counts: Tensor) -> None:
-        """Validate entity-wise connectivity counts for a ragged sector.
+        """校验变长分区中各实体的连接数.
 
-        Fixed-cardinality Schemas keep the transitional permissive behavior
-        for existing variable-sector callers. Variable-cardinality Schemas
-        override this hook with their structural cardinality contract.
+        定长 Schema 对现有的变长分区调用方保持过渡期的宽松行为; 变长 Schema 以其结构上的
+        基数约定重写本钩子.
         """
 
     def local_vertices(self) -> tuple[int, ...]:
-        """Return vertex-column positions in the complete local-node layout.
+        """顶点在完整局部节点布局中的列位置.
 
-        The result indexes local connectivity columns; it does not contain
-        block-global node IDs.
+        结果索引的是局部连接列, 不含网格块全局节点编号.
         """
         raise NotImplementedError()
 
     def local_entity_groups(self, top_dim: int) -> tuple[LocalEntityGroup, ...]:
-        """Describe local subentities of one topological dimension.
+        """描述某一拓扑维数的局部子实体.
 
-        Each returned group binds an immutable child Schema to rows of parent
-        local-node column indices.  Every row follows the child's complete
-        canonical node order.  Multiple groups may exist at the same
-        dimension, as for triangular and quadrilateral prism faces.
+        每个返回的组把一个不可变子 Schema 绑定到若干行父局部节点列下标上, 每行按子实体完整
+        的规范节点顺序. 同一维数可有多个组, 如三棱柱的三角形面与四边形面.
 
-        At dimension zero the groups cover every node in the complete parent
-        layout, not only the topological vertices.  Use :meth:`local_vertices`
-        when only the vertex skeleton is required.
+        零维时各组覆盖父实体完整布局中的每个节点, 而不只是拓扑顶点; 只需顶点骨架时用
+        :meth:`local_vertices`.
 
-        Parameters:
-            top_dim: Target dimension in the closed interval
-                ``[0, self.top_dim]``.
+        Parameters
+        ----------
+        top_dim : int
+            目标维数, 取值于闭区间 ``[0, self.top_dim]``.
 
-        Returns:
-            Immutable homogeneous local-subentity groups.
+        Returns
+        -------
+        tuple of LocalEntityGroup
+            不可变的同类局部子实体组.
 
-        Raises:
-            TypeError: If ``top_dim`` is not a plain integer.
-            ValueError: If ``top_dim`` is outside the supported interval.
+        Raises
+        ------
+        TypeError
+            ``top_dim`` 不是普通整数.
+        ValueError
+            ``top_dim`` 超出支持的区间.
         """
         raise NotImplementedError()
 
     def vertex_permutations(self) -> tuple[tuple[int, ...], ...]:
-        """Return vertex automorphisms supported by this concrete Schema.
+        """本具体 Schema 支持的顶点自同构.
 
-        These are reference-entity symmetries that preserve the parameterized
-        node set.  They are not an assertion that every vertex ordering is a
-        valid orientation.
+        这些是保持参数化节点集不变的参考实体对称, 并不表示任意顶点顺序都是合法的定向.
         """
         raise NotImplementedError()
 
@@ -154,20 +145,22 @@ class EntitySchema:
         self,
         vertex_permutation: tuple[int, ...],
     ) -> tuple[int, ...]:
-        """Lift one supported vertex automorphism to all local-node columns.
+        """把一个支持的顶点自同构提升到全部局部节点列.
 
-        ``result[i]`` is the column occupied by local node ``i`` after the
-        requested vertex permutation.  The result is a bijection of
-        ``range(number_of_nodes())`` and uses the same column convention as
-        the geometry and positive-order Lagrange basis APIs.
+        ``result[i]`` 为施加该顶点置换后局部节点 ``i`` 所在的列. 结果是
+        ``range(number_of_nodes())`` 上的双射, 列约定与几何基函数及正次数 Lagrange 基函数接口
+        相同.
 
-        Raises:
-            TypeError: If the permutation is not a tuple of plain integers.
-            ValueError: If it is not supported by this concrete Schema.
+        Raises
+        ------
+        TypeError
+            置换不是由普通整数组成的元组.
+        ValueError
+            本具体 Schema 不支持该置换.
         """
         raise NotImplementedError()
 
-    ### [Entity Topology] ###
+    ### [实体拓扑] ###
 
     @classmethod
     def local_entity(
@@ -176,53 +169,55 @@ class EntitySchema:
         /,
         indexing: Literal["o", "s"] = "o",
     ) -> tuple[tuple[int, ...], ...]:
-        """Local entity indices of the target entity.
+        """目标实体的局部编号.
 
-        Parameters:
-            tgt_name (str): The name of the target entity.
-            indexing (Literal["o", "s"], optional): The indexing method. Defaults to "o".
+        Parameters
+        ----------
+        tgt_name : str
+            目标实体名.
+        indexing : {'o', 's'}, optional
+            编号方式, 默认 ``'o'``.
 
-        Returns:
-            tuple[tuple[int, ...], ...]: The immutable local entity indices.
+        Returns
+        -------
+        tuple of tuple of int
+            不可变的局部实体编号.
         """
         raise NotImplementedError()
 
     @classmethod
     def size(cls, ctx: EntityContext) -> int:
-        """Number of entities in the sector."""
+        """分区中的实体个数."""
         raise NotImplementedError()
 
-    ### [Multi-Indices] ###
+    ### [多重指标] ###
 
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
-        """Multi-index of the entity, with one column per vertex."""
+        """实体的多重指标, 每个顶点一列."""
         raise NotImplementedError()
 
     @classmethod
     def multi_index_vertex_columns(cls) -> tuple[int, ...] | None:
-        """Map ``multi_index`` columns onto local vertex numbers.
+        """把 ``multi_index`` 的列映射到局部顶点编号.
 
-        ``multi_index(..., tensorprod=True)`` emits one column per vertex, but
-        a tensor-product Schema numbers those columns in factor-nesting order,
-        which need not agree with the vertex numbering used by
-        ``local_vertices()``, ``_node_keys()`` and the local entity tables.
-        Return the permutation ``columns`` such that column ``s`` of
-        ``multi_index`` is the barycentric weight of vertex ``columns[s]``, or
-        ``None`` when the two conventions coincide.
+        ``multi_index(..., tensorprod=True)`` 每个顶点输出一列, 但张量积 Schema 按因子嵌套顺序
+        编号这些列, 未必与 ``local_vertices()``、``_node_keys()`` 及局部实体表所用的顶点编号
+        一致. 返回置换 ``columns``, 使 ``multi_index`` 的第 ``s`` 列是顶点 ``columns[s]`` 的重心
+        权重; 两种约定一致时返回 None.
         """
         return None
 
     @classmethod
     def num_multi_index(cls, order: tuple[int, ...], *, internal: bool = False) -> int:
-        """Number of multi-indices."""
+        """多重指标的个数."""
         return int(cls.multi_index(order, internal=internal).shape[0])
 
-    ### [Geometric Computations] ###
+    ### [几何计算] ###
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute the barycenter of the entity."""
+        """计算实体的重心."""
         raise NotImplementedError()
 
     @classmethod
@@ -232,33 +227,32 @@ class EntitySchema:
         func: Callable[Concatenate[Tensor, P], R],
         index: Index | None
     ) -> Callable[Concatenate[Tensor | tuple[Tensor, ...], P], R]:
-        """Transform functions from cartesian to barycentric coordinates."""
+        """把函数从直角坐标变换到重心坐标."""
         raise NotImplementedError()
 
     @classmethod
     def bc_to_point(cls, ctx: EntityContext, bcs: tuple[Tensor, ...], index: Index | None) -> Tensor:
-        """Convert barycentric coordinates to physical points."""
+        """把重心坐标转换为物理点."""
         raise NotImplementedError()
 
     @classmethod
     def geo_dimension(cls, ctx: EntityContext) -> int:
-        """Geometric dimension of the cell."""
+        """实体的几何维数."""
         raise NotImplementedError()
 
     def grad_shape_function_barycentric(
         self,
         bcs: Tensor | tuple[Tensor, ...],
     ) -> Tensor:
-        """Differentiate the geometry basis by barycentric variables.
+        """几何基函数对重心坐标变量的导数, 形状 ``(Q, Lg, B)``.
 
-        The result has shape ``(Q, Lg, B)``.  ``Lg`` follows the complete
-        geometry local-node order and ``B`` concatenates barycentric
-        components in public reference-factor order.  The barycentric
-        variables of each factor are treated as independent.
+        ``Lg`` 按完整的几何局部节点顺序, ``B`` 按公开的参考因子顺序拼接各重心坐标分量;
+        每个因子的重心坐标视为独立变量.
 
-        Raises:
-            NotImplementedError: If the Schema has no independent-
-                barycentric gradient contract.
+        Raises
+        ------
+        NotImplementedError
+            本 Schema 没有独立重心坐标梯度的约定.
         """
         raise NotImplementedError()
 
@@ -269,15 +263,15 @@ class EntitySchema:
         *,
         index: Index | None = None
     ) -> Tensor:
-        """Differentiate the geometry basis in physical coordinates.
+        """几何基函数在物理坐标下的导数.
 
-        The geometry basis and all geometry nodes determine the reference-to-
-        physical map.  The result's local-basis axis follows the complete
-        local-node order.
+        参考实体到物理实体的映射由几何基函数与全部几何节点决定. 结果的局部基函数轴按完整
+        的局部节点顺序.
 
-        Raises:
-            NotImplementedError: If the Schema or current embedding does not
-                provide this physical-coordinate operation.
+        Raises
+        ------
+        NotImplementedError
+            本 Schema 或当前嵌入不提供该物理坐标运算.
         """
         raise NotImplementedError()
 
@@ -285,12 +279,10 @@ class EntitySchema:
         self,
         bcs: Tensor | tuple[Tensor, ...],
     ) -> Tensor:
-        """Differentiate the geometry basis in reference coordinates.
+        """几何基函数在参考坐标下的导数, 形状 ``(Q, Lg, R)``.
 
-        The result has shape ``(Q, Lg, R)`` where ``Lg`` is
-        :meth:`number_of_nodes` and ``R`` is the reference dimension.  For
-        tensor-product entities, reference components follow the public
-        factor order documented by the concrete Schema.
+        ``Lg`` 为 :meth:`number_of_nodes`, ``R`` 为参考维数. 张量积实体的参考分量按具体
+        Schema 所述的公开因子顺序.
         """
         raise NotImplementedError()
 
@@ -299,27 +291,24 @@ class EntitySchema:
         bcs: Tensor | tuple[Tensor, ...],
         p: int | tuple[int, ...],
     ) -> Tensor:
-        """Evaluate an independent Lagrange basis on this reference family.
+        """在本参考族上计算独立的 Lagrange 基函数.
 
-        This is a reference-entity capability for finite-element spaces; it
-        does not change the Schema's geometry order, descriptor, identity, or
-        local-node count.  Scalar simplex families require a non-negative
-        integer ``p``.  Tensor-product families accept either one
-        non-negative integer for every factor or a tuple in public factor
-        order.
+        这是供有限元空间使用的参考实体能力, 不改变 Schema 的几何次数、描述符、身份或局部
+        节点数. 标量单纯形族要求非负整数 ``p``; 张量积族接受对所有因子统一的非负整数, 或按
+        公开因子顺序给出的元组.
 
-        ``bcs`` is one ``(Q, V)`` barycentric tensor for a simplex, or a tuple
-        containing one tensor per tensor-product factor.  Tensor-product
-        points are evaluated as a Cartesian product.  The result has shape
-        ``(Q, Lp)``; for positive order its basis axis follows the complete
-        local-node order of the equal family member with geometry order
-        ``p``.  The output preserves the input floating dtype and device.
+        单纯形的 ``bcs`` 为一个 ``(Q, V)`` 重心坐标张量, 张量积为各因子一个张量的元组, 张量积
+        的点按笛卡尔积求值. 结果形状为 ``(Q, Lp)``; 正次数时基函数轴按几何次数为 ``p`` 的同族
+        成员的完整局部节点顺序. 输出保持输入的浮点类型与设备.
 
-        Raises:
-            TypeError: If the coordinate container or order type is invalid.
-            ValueError: If coordinate shapes or order values are invalid.
-            NotImplementedError: If this Schema family does not provide an
-                arbitrary-order Lagrange reference basis.
+        Raises
+        ------
+        TypeError
+            坐标容器或次数的类型不合法.
+        ValueError
+            坐标形状或次数取值不合法.
+        NotImplementedError
+            本 Schema 族不提供任意次 Lagrange 参考基函数.
         """
         raise NotImplementedError()
 
@@ -328,12 +317,10 @@ class EntitySchema:
         bcs: Tensor | tuple[Tensor, ...],
         p: int | tuple[int, ...],
     ) -> Tensor:
-        """Differentiate an order-``p`` basis by barycentric variables.
+        """``p`` 次基函数对重心坐标变量的导数, 形状 ``(Q, Lp, B)``.
 
-        The result has shape ``(Q, Lp, B)``.  The basis axis uses the same
-        ordering as :meth:`lagrange_basis_function`; barycentric components
-        are concatenated in public reference-factor order and are treated as
-        independent variables.
+        基函数轴的顺序同 :meth:`lagrange_basis_function`; 重心坐标分量按公开的参考因子顺序
+        拼接, 视为独立变量.
         """
         raise NotImplementedError()
 
@@ -342,11 +329,9 @@ class EntitySchema:
         bcs: Tensor | tuple[Tensor, ...],
         p: int | tuple[int, ...],
     ) -> Tensor:
-        """Differentiate an order-``p`` basis in reference coordinates.
+        """``p`` 次基函数在参考坐标下的导数, 形状 ``(Q, Lp, R)``.
 
-        The result has shape ``(Q, Lp, R)``.  The basis axis uses the same
-        ordering as :meth:`lagrange_basis_function`, and the reference-
-        coordinate axis follows public factor order.
+        基函数轴的顺序同 :meth:`lagrange_basis_function`, 参考坐标轴按公开的因子顺序.
         """
         raise NotImplementedError()
 
@@ -357,64 +342,64 @@ class EntitySchema:
         func: Callable[[Tensor], Tensor] | Callable[[tuple[Tensor, ...]], Tensor],
         q: int, index: Index | None
     ) -> Tensor:
-        """Integral of a barycentric function."""
+        """重心坐标函数的积分."""
         raise NotImplementedError()
 
     @classmethod
     def jacobi_matrix(cls, ctx: EntityContext, bcs: tuple[Tensor, ...], index: Index | None) -> Tensor:
-        """Jacobi matrix of the transformation from reference to physical element.
+        """参考实体到物理实体变换的 Jacobi 矩阵.
 
-        Parameters:
-            ctx (EntityContext): The entity context containing the mesh block and sector information.
-            bcs (tuple[Tensor, ...]): Barycentric coordinates of evaluation points, with shape (NQ, num_bc).
-            index (Index | None): The index of the entity in the sector, or None for all entities.
+        Parameters
+        ----------
+        ctx : EntityContext
+            含网格块与实体分区的上下文.
+        bcs : tuple of Tensor
+            求值点的重心坐标, 形状 ``(NQ, num_bc)``.
+        index : Index or None
+            分区中的实体编号, None 表示全部实体.
 
-        Returns:
-            Tensor: The Jacobi matrix with shape (NC, NQ, GD, ref_dim), where
-                NC is the number of cells, NQ is the number of points,
-                GD is the geometric dimension, and ref_dim is the number of
-                reference coordinates (typically equal to the topological
-                dimension of the entity).
+        Returns
+        -------
+        Tensor
+            Jacobi 矩阵, 形状 ``(NC, NQ, GD, ref_dim)``: ``NC`` 为实体数, ``NQ`` 为点数, ``GD`` 为
+            几何维数, ``ref_dim`` 为参考坐标数 (通常等于实体的拓扑维数).
         """
         raise NotImplementedError()
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute the measure of the entity."""
+        """计算实体的测度."""
         raise NotImplementedError()
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute the normal vector of the entity."""
+        """计算实体的法向量."""
         raise NotImplementedError()
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device = None) -> "Quadrature":
-        """Quadrature formula for the entity."""
+        """实体上的积分公式."""
         raise NotImplementedError()
 
     def shape_function(self, bcs: Tensor | tuple[Tensor, ...]) -> Tensor:
-        """Evaluate this concrete Schema's geometry interpolation basis.
+        """计算本具体 Schema 的几何插值基函数.
 
-        Unlike :meth:`lagrange_basis_function`, this method has no order
-        argument: the geometry order is fixed by the immutable Schema value.
-        The result has shape ``(Q, Lg)`` where ``Lg`` is
-        :meth:`number_of_nodes`; its final axis follows the complete local-node
-        layout used by sector connectivity.  The output preserves the input
-        floating dtype and device.
+        与 :meth:`lagrange_basis_function` 不同, 本方法没有次数参数, 几何次数由不可变的 Schema
+        值确定. 结果形状为 ``(Q, Lg)``, ``Lg`` 为 :meth:`number_of_nodes`, 末轴按实体分区连接
+        所用的完整局部节点布局. 输出保持输入的浮点类型与设备.
         """
         raise NotImplementedError()
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute the tangent vector of the entity."""
+        """计算实体的切向量."""
         raise NotImplementedError()
 
 
 def _freeze_local_entities(
     entities: Mapping[str, Iterable[Iterable[int]]],
 ) -> Mapping[str, tuple[tuple[int, ...], ...]]:
-    """Create a read-only, deeply immutable local-entity mapping."""
+    """构造只读、深度不可变的局部实体映射."""
     return MappingProxyType(
         {
             name: tuple(tuple(local) for local in local_entities)

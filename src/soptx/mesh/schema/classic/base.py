@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/base.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""经典 Schema 的公共基类: 固定参考形状的完整节点布局、单纯形族与张量积族的基函数实现."""
+
 from dataclasses import dataclass
 from fractions import Fraction
 from itertools import permutations, product
@@ -25,12 +27,10 @@ _EntityDefinition = tuple["ShapedEntitySchema", tuple[_VertexMap, ...]]
 
 
 class ShapedEntitySchema(EntitySchema):
-    """Share complete-node layout rules for a fixed reference shape.
+    """固定参考形状的完整节点布局规则的共享基类.
 
-    Concrete subclasses provide exact rational reference-node keys and child
-    entity definitions.  This base turns them into the topology-first public
-    layout used consistently by connectivity, local groups, orientations, and
-    positive-order basis columns.
+    具体子类给出精确的有理参考节点键与子实体定义; 本基类把它们转换为拓扑优先的公开
+    布局, 在连接、局部组、定向与正次数基函数列之间一致地使用.
     """
 
     __slots__ = ()
@@ -41,7 +41,7 @@ class ShapedEntitySchema(EntitySchema):
         raise NotImplementedError()
 
     def _lagrange_kernel_node_keys(self) -> tuple[_NodeKey, ...]:
-        """Return node keys in the shared kernel's unpermuted basis order."""
+        """按共享内核未置换的基函数顺序返回节点键."""
         return self._raw_node_keys()
 
     def _layout_entity_definitions(self) -> tuple[_EntityDefinition, ...]:
@@ -109,15 +109,15 @@ class ShapedEntitySchema(EntitySchema):
         return tuple(ordered)
 
     def number_of_vertices(self) -> int:
-        """Return the fixed size of this family's vertex skeleton."""
+        """本族顶点骨架的固定大小."""
         return self._vertex_count
 
     def number_of_nodes(self) -> int:
-        """Return the complete connectivity width for this geometry order."""
+        """本几何次数下的完整连接宽度."""
         return len(self._node_keys())
 
     def local_vertices(self) -> tuple[int, ...]:
-        """Return vertex columns in the complete local-node connectivity."""
+        """顶点在完整局部节点连接中的列."""
         one = Fraction(1)
         zero = Fraction(0)
         lookup = {key: index for index, key in enumerate(self._node_keys())}
@@ -132,7 +132,7 @@ class ShapedEntitySchema(EntitySchema):
         )
 
     def local_entity_groups(self, top_dim: int) -> tuple[LocalEntityGroup, ...]:
-        """Return complete child layouts grouped by equal concrete Schemas."""
+        """按相等的具体 Schema 分组返回子实体的完整布局."""
         if type(top_dim) is not int:
             raise TypeError("top_dim must be a plain integer")
         if top_dim < 0 or top_dim > self.top_dim:
@@ -187,7 +187,7 @@ class ShapedEntitySchema(EntitySchema):
         return tuple(groups)
 
     def vertex_permutations(self) -> tuple[_VertexMap, ...]:
-        """Return automorphisms that preserve this parameterized node set."""
+        """保持本参数化节点集不变的自同构."""
         node_key_set = set(self._node_keys())
         supported: list[_VertexMap] = []
         for candidate in self._candidate_vertex_permutations():
@@ -216,7 +216,7 @@ class ShapedEntitySchema(EntitySchema):
         self,
         vertex_permutation: tuple[int, ...],
     ) -> tuple[int, ...]:
-        """Lift a supported vertex permutation to complete local nodes."""
+        """把支持的顶点置换提升到完整的局部节点."""
         if type(vertex_permutation) is not tuple:
             raise TypeError("vertex_permutation must be a tuple")
         if any(type(index) is not int for index in vertex_permutation):
@@ -241,6 +241,15 @@ class ShapedEntitySchema(EntitySchema):
         /,
         indexing: Literal["o", "s"] = "o",
     ) -> tuple[tuple[int, ...], ...]:
+        """按名返回局部子实体表.
+
+        ``indexing='o'`` 取有向表 ``OFace``, ``'s'`` 取排序表 ``SFace``.
+
+        Raises
+        ------
+        ValueError
+            ``indexing`` 取值非法, 或本 Schema 没有定义该子实体.
+        """
         if indexing == "o":
             if tgt_name in cls.OFace:
                 return cls.OFace[tgt_name]
@@ -253,10 +262,10 @@ class ShapedEntitySchema(EntitySchema):
 
     @classmethod
     def size(cls, ctx: EntityContext) -> int:
-        """Number of entities in the sector."""
+        """分区中的实体个数."""
         return ctx.sector.indices.shape[0]
 
-    ### [Geometric Computations] ###
+    ### [几何计算] ###
 
     @classmethod
     def barycentric[**P, R](
@@ -265,12 +274,13 @@ class ShapedEntitySchema(EntitySchema):
         func: Callable[Concatenate[Tensor, P], R],
         index: Index | None
     ) -> Callable[Concatenate[Tensor | tuple[Tensor, ...], P], R]:
-        """Compute the barycentric coordinates of the entity."""
+        """把直角坐标函数包装为重心坐标函数: 求值时先把重心坐标映射为物理点."""
         from functools import wraps
         from ....decorator import barycentric
         @wraps(func)
         @barycentric
         def wrapper(bcs: Tensor | tuple[Tensor, ...], *args, **kwargs) -> R:
+            """把重心坐标映射为物理点后调用原函数."""
             if not isinstance(bcs, tuple):
                 bcs = (bcs,)
             points = cls.bc_to_point(ctx, bcs, index) # [NC, NQ, GD]
@@ -279,11 +289,12 @@ class ShapedEntitySchema(EntitySchema):
 
     @classmethod
     def geo_dimension(cls, ctx: EntityContext) -> int:
+        """网格块节点坐标的几何维数."""
         return int(ctx.block.positions.shape[1])
 
     @classmethod
     def integral(cls, ctx: EntityContext, func: Callable[[Tensor], Tensor], q: int, index: Index | None) -> Tensor:
-        """Integral of a barycentric function."""
+        """重心坐标函数的积分."""
         quadrature = cls.quadrature_formula(q)
         bcs, ws = quadrature.get_quadrature_points_and_weights()
         if not isinstance(bcs, tuple):
@@ -298,7 +309,7 @@ class ShapedEntitySchema(EntitySchema):
         if J.shape[-2] == J.shape[-1]:
             factor = bm.abs(det(J)) # [NC, NQ]
         else:
-            # For non-square Jacobians, compute the square root of the determinant of J^T * J
+            # 非方阵的 Jacobi 矩阵取 J^T * J 行列式的平方根
             JTJ = bm.einsum("...ji, ...jk -> ...ik", J, J) # [NC, NQ, ref_dim, ref_dim]
             factor = bm.sqrt(det(JTJ)) # [NC, NQ]
 
@@ -383,12 +394,10 @@ def _normalize_tensor_basis_order(
 
 @dataclass(frozen=True, slots=True)
 class _ScalarOrderSchema(ShapedEntitySchema):
-    """Implement a simplex-family Schema with scalar geometry order ``p``.
+    """几何次数为标量 ``p`` 的单纯形族 Schema 实现.
 
-    Geometry order is a positive plain integer.  Independent Lagrange basis
-    order is a non-negative plain integer and does not mutate ``p``.  Input is
-    a barycentric tensor of shape ``(Q, V)`` or a one-item tuple containing
-    that tensor.
+    几何次数为正的普通整数; 独立 Lagrange 基函数的次数为非负普通整数, 不改变 ``p``.
+    输入为形状 ``(Q, V)`` 的重心坐标张量, 或只含该张量的单元素元组.
     """
 
     p: int = 1
@@ -426,10 +435,9 @@ class _ScalarOrderSchema(ShapedEntitySchema):
         return bcs
 
     def shape_function(self, bcs: Tensor | tuple[Tensor, ...]) -> Tensor:
-        """Evaluate the order-``self.p`` geometry basis.
+        """计算 ``self.p`` 次几何基函数.
 
-        The result has shape ``(Q, number_of_nodes())`` and follows the
-        topology-first complete local-node order.
+        结果形状为 ``(Q, number_of_nodes())``, 按拓扑优先的完整局部节点顺序.
         """
         return self.lagrange_basis_function(bcs, self.p)
 
@@ -437,14 +445,14 @@ class _ScalarOrderSchema(ShapedEntitySchema):
         self,
         bcs: Tensor | tuple[Tensor, ...],
     ) -> Tensor:
-        """Return geometry gradients with shape ``(Q, Lg, V)``."""
+        """几何基函数的重心坐标梯度, 形状 ``(Q, Lg, V)``."""
         return self.grad_lagrange_basis_function_barycentric(bcs, self.p)
 
     def grad_shape_function_reference(
         self,
         bcs: Tensor | tuple[Tensor, ...],
     ) -> Tensor:
-        """Return geometry gradients with shape ``(Q, Lg, V - 1)``."""
+        """几何基函数的参考坐标梯度, 形状 ``(Q, Lg, V - 1)``."""
         return self.grad_lagrange_basis_function_reference(bcs, self.p)
 
     def lagrange_basis_function(
@@ -452,15 +460,16 @@ class _ScalarOrderSchema(ShapedEntitySchema):
         bcs: Tensor | tuple[Tensor, ...],
         p: int,
     ) -> Tensor:
-        """Evaluate an order-``p`` basis in topology-first column order.
+        """按拓扑优先的列顺序计算 ``p`` 次基函数.
 
-        The result has shape ``(Q, Lp)`` and preserves the coordinate tensor's
-        floating dtype and device.  ``p=0`` returns one constant basis column.
+        结果形状为 ``(Q, Lp)``, 保持坐标张量的浮点类型与设备; ``p=0`` 返回一列常数基函数.
 
-        Raises:
-            TypeError: If ``p`` is not a plain integer.
-            ValueError: If ``p`` is negative or the barycentric shape is
-                inconsistent with the reference simplex.
+        Raises
+        ------
+        TypeError
+            ``p`` 不是普通整数.
+        ValueError
+            ``p`` 为负, 或重心坐标的形状与参考单纯形不符.
         """
         p = _normalize_scalar_basis_order(p, type(self).__name__)
         bc = self._lagrange_bcs(bcs, "lagrange_basis_function")
@@ -476,7 +485,7 @@ class _ScalarOrderSchema(ShapedEntitySchema):
         bcs: Tensor | tuple[Tensor, ...],
         p: int,
     ) -> Tensor:
-        """Return order-``p`` basis gradients with shape ``(Q, Lp, V)``."""
+        """``p`` 次基函数的重心坐标梯度, 形状 ``(Q, Lp, V)``."""
         p = _normalize_scalar_basis_order(p, type(self).__name__)
         bc = self._lagrange_bcs(
             bcs,
@@ -494,7 +503,7 @@ class _ScalarOrderSchema(ShapedEntitySchema):
         bcs: Tensor | tuple[Tensor, ...],
         p: int,
     ) -> Tensor:
-        """Return order-``p`` basis gradients with shape ``(Q, Lp, V - 1)``."""
+        """``p`` 次基函数的参考坐标梯度, 形状 ``(Q, Lp, V - 1)``."""
         p = _normalize_scalar_basis_order(p, type(self).__name__)
         bc = self._lagrange_bcs(
             bcs,
@@ -510,13 +519,11 @@ class _ScalarOrderSchema(ShapedEntitySchema):
 
 @dataclass(frozen=True, slots=True)
 class _TensorProductOrderSchema(ShapedEntitySchema):
-    """Implement a Schema composed from ordered simplex reference factors.
+    """由有序的单纯形参考因子组成的 Schema 实现.
 
-    A scalar geometry order is repeated for every factor; otherwise ``p`` is
-    normalized to a positive tuple in the concrete Schema's public factor
-    order.  Independent basis orders may additionally contain zero.  Input
-    coordinates are always a tuple with one ``(Qf, Vf)`` barycentric tensor
-    per public factor, and evaluation uses their Cartesian product.
+    标量几何次数对每个因子重复使用, 否则把 ``p`` 规范化为按具体 Schema 公开因子顺序的
+    正整数元组; 独立基函数的次数还可以含 0. 输入坐标总是元组, 每个公开因子一个
+    ``(Qf, Vf)`` 重心坐标张量, 按其笛卡尔积求值.
     """
 
     factor_count: ClassVar[int]
@@ -537,11 +544,12 @@ class _TensorProductOrderSchema(ShapedEntitySchema):
         return hash((type(self), self.descriptor))
 
     def _lagrange_kernel_factor_order(self) -> tuple[int, ...]:
-        """Map shared-kernel factor positions to public reference factors."""
+        """把共享内核的因子位置映射到公开的参考因子."""
         return tuple(range(self.factor_count))
 
     @classmethod
     def multi_index_vertex_columns(cls) -> tuple[int, ...] | None:
+        """``multi_index`` 列到局部顶点编号的置换, 即具体 Schema 的 ``_tp_to_contract``; 未定义时 (如三棱柱) 返回 None."""
         # multi_index 按因子嵌套顺序给列编号, 与 bc_to_point 在张量收缩前对顶点
         # 做的重排是同一个置换, 因此直接复用具体 Schema 已有的 _tp_to_contract.
         # 三棱柱两套编号本就一致, 不定义该常量, 这里返回 None.
@@ -611,10 +619,9 @@ class _TensorProductOrderSchema(ShapedEntitySchema):
         return values[..., indices]
 
     def shape_function(self, bcs: tuple[Tensor, ...]) -> Tensor:
-        """Evaluate the geometry basis on the Cartesian-product points.
+        """在笛卡尔积点上计算几何基函数.
 
-        The result has shape ``(prod(Qf), number_of_nodes())`` and follows the
-        topology-first complete local-node order.
+        结果形状为 ``(prod(Qf), number_of_nodes())``, 按拓扑优先的完整局部节点顺序.
         """
         return self.lagrange_basis_function(bcs, self.p)
 
@@ -622,14 +629,14 @@ class _TensorProductOrderSchema(ShapedEntitySchema):
         self,
         bcs: tuple[Tensor, ...],
     ) -> Tensor:
-        """Return geometry gradients in public barycentric-factor order."""
+        """按公开的重心坐标因子顺序返回几何基函数的梯度."""
         return self.grad_lagrange_basis_function_barycentric(bcs, self.p)
 
     def grad_shape_function_reference(
         self,
         bcs: tuple[Tensor, ...],
     ) -> Tensor:
-        """Return geometry gradients in public reference-factor order."""
+        """按公开的参考因子顺序返回几何基函数的梯度."""
         return self.grad_lagrange_basis_function_reference(bcs, self.p)
 
     def lagrange_basis_function(
@@ -637,20 +644,19 @@ class _TensorProductOrderSchema(ShapedEntitySchema):
         bcs: tuple[Tensor, ...],
         p: int | tuple[int, ...],
     ) -> Tensor:
-        """Evaluate an independent tensor-product Lagrange basis.
+        """计算独立的张量积 Lagrange 基函数.
 
-        A scalar ``p`` is repeated for every factor.  A tuple supplies one
-        non-negative order per public factor.  The result has shape
-        ``(prod(Qf), Lp)`` and preserves the input floating dtype and device.
-        Positive-order columns follow the equal geometry Schema's complete
-        local-node layout; a zero-order factor uses the kernel's documented
-        canonical product ordering because no full vertex skeleton exists.
+        标量 ``p`` 对每个因子重复使用, 元组则为每个公开因子给出一个非负次数. 结果形状为
+        ``(prod(Qf), Lp)``, 保持输入的浮点类型与设备. 正次数时各列遵循相等几何 Schema 的
+        完整局部节点布局; 某因子次数为 0 时没有完整的顶点骨架, 采用内核文档所述的规范乘积
+        顺序.
 
-        Raises:
-            TypeError: If coordinates are not a tuple or ``p`` has an invalid
-                type.
-            ValueError: If factor counts, coordinate shapes, or order values
-                are invalid.
+        Raises
+        ------
+        TypeError
+            坐标不是元组, 或 ``p`` 的类型不合法.
+        ValueError
+            因子个数、坐标形状或次数取值不合法.
         """
         kernel_bcs, kernel_order = self._lagrange_inputs(
             bcs,
@@ -674,10 +680,7 @@ class _TensorProductOrderSchema(ShapedEntitySchema):
         bcs: tuple[Tensor, ...],
         p: int | tuple[int, ...],
     ) -> Tensor:
-        """Return basis gradients in public barycentric-factor order.
-
-        The shape is ``(prod(Qf), Lp, sum(Vf))``.
-        """
+        """按公开的重心坐标因子顺序返回基函数梯度, 形状 ``(prod(Qf), Lp, sum(Vf))``."""
         kernel_bcs, kernel_order = self._lagrange_inputs(
             bcs,
             p,
@@ -705,10 +708,7 @@ class _TensorProductOrderSchema(ShapedEntitySchema):
         bcs: tuple[Tensor, ...],
         p: int | tuple[int, ...],
     ) -> Tensor:
-        """Return basis gradients in public reference-factor order.
-
-        The shape is ``(prod(Qf), Lp, sum(Vf - 1))``.
-        """
+        """按公开的参考因子顺序返回基函数梯度, 形状 ``(prod(Qf), Lp, sum(Vf - 1))``."""
         kernel_bcs, kernel_order = self._lagrange_inputs(
             bcs,
             p,
@@ -915,19 +915,22 @@ def _require_order_tuple(p: Any, name: str, n: Literal[2]) -> tuple[int, int]: .
 @overload
 def _require_order_tuple(p: Any, name: str, n: Literal[3]) -> tuple[int, int, int]: ...
 def _require_order_tuple(p: Any, name: str, n: int | None = None) -> tuple[int, ...]:
-    """Ensure that the polynomial degree is a tuple of integers.
+    """确保多项式次数为整数元组.
 
-    Parameters:
-        p (tuple[int, ...]): The input polynomial degree(s).
-        name (str): The name of the function for error messages.
-        n (int | None): The expected number of polynomial degrees.
-            If None, no check is performed. If an integer, the length of the
-            tuple must be either 1 or n.
-            1-length means that the same degree is used for all dimensions,
-            returning a tuple of length n with the repeated degree.
+    Parameters
+    ----------
+    p : tuple of int
+        输入的多项式次数.
+    name : str
+        报错信息中使用的函数名.
+    n : int or None
+        期望的次数个数; None 时不检查. 为整数时元组长度须为 1 或 ``n``, 长度为 1 表示
+        所有方向使用同一次数, 返回重复 ``n`` 次的元组.
 
-    Returns:
-        tuple[int, ...]: A tuple of polynomial degrees with length n (if n is not None).
+    Returns
+    -------
+    tuple of int
+        次数元组, ``n`` 不为 None 时长度为 ``n``.
     """
     if not isinstance(p, tuple):
         raise TypeError(f"{name} expects polynomial degrees as a tuple of integers, got {type(p).__name__}")

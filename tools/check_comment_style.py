@@ -23,11 +23,10 @@ FULLWIDTH_PUNCTUATION = "，。；：！？（）【】“”‘’"
 FULLWIDTH_BASELINE = 645
 MISSING_DOCSTRING_BASELINE = 314
 
-# 自 FEALPy 移植的代码 (见 THIRD_PARTY_NOTICES.md) 原样保留英文 docstring, 暂不计入
-# 棘轮; 欠账登记在 docs/known-issues/README.md "移植后遗留", 按子包分批补齐后移出本表.
-PORTED_ROOTS = (
-    "src/soptx/mesh/schema/",
-)
+# 自 FEALPy 移植而尚未补齐中文 docstring 的路径, 暂不计入棘轮. 2026-10 移植的代码已全部
+# 补齐, 本表为空; 再从 FEALPy 取代码且来不及补齐时, 在此登记并记入
+# docs/known-issues/README.md "移植后遗留".
+PORTED_ROOTS: tuple[str, ...] = ()
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
 PORTED_EXCEPTIONS: set[str] = set()
 

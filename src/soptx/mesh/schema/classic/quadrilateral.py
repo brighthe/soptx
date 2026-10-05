@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/quadrilateral.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""参考四边形 (区间乘区间) 的 Lagrange Schema."""
+
 from ....backend import bm
 from ....backend import Index, Tensor
 from ...ipoints import MultiIndex as _MI, multi_index_tensorprod
@@ -19,16 +21,14 @@ __all__ = ["LagrangeQuadrilateralSchema", "QuadrilateralSchema"]
 
 
 class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
-    """Represent an immutable interval-by-interval Lagrange quadrilateral.
+    """不可变的区间乘区间 Lagrange 四边形.
 
-    A scalar ``p`` is normalized to ``(p, p)``; a tuple means ``(px, py)``.
-    Reference input is ``(bc_x, bc_y)``.  Internal kernel factor reversal used
-    for Cartesian-product point ordering is not visible in basis or gradient
-    axes, which always return in public ``(x, y)`` order.
+    标量 ``p`` 规范化为 ``(p, p)``, 元组表示 ``(px, py)``. 参考输入为 ``(bc_x, bc_y)``. 为笛卡尔
+    积点排序所做的内核因子翻转在基函数与梯度的轴上不可见, 它们总按公开的 ``(x, y)``
+    顺序返回.
 
-    Public connectivity uses the cyclic vertex order ``(bottom-left,
-    bottom-right, top-right, top-left)``.  Tensor-product order is confined to
-    reference kernels and converted before it reaches mesh connectivity.
+    公开的连接使用循环顶点顺序 (左下, 右下, 右上, 左上); 张量积顺序只用于参考内核, 在进入
+    网格连接之前即已转换.
     """
 
     __slots__ = ()
@@ -47,8 +47,8 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
         "edge": [[0, 1], [1, 2], [2, 3], [0, 3]],
         "node": [[0], [1], [2], [3]],
     })
-    # Legacy interpolation-point metadata permutes tensor-factor barycentric
-    # columns; public topology orientations come from vertex_permutations().
+    # 旧式插值点元数据置换的是张量因子的重心坐标列;
+    # 公开的拓扑定向来自 vertex_permutations().
     orientation = (
         (0, 1, 2, 3), (2, 0, 3, 1), (3, 2, 1, 0), (1, 3, 0, 2),
         (2, 3, 0, 1), (0, 2, 1, 3), (1, 0, 3, 2), (3, 1, 2, 0),
@@ -60,7 +60,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
         return _quadrilateral_node_keys(self.p)
 
     def _lagrange_kernel_factor_order(self) -> tuple[int, ...]:
-        # Preserve the established quadrature-point order: y is slow, x fast.
+        # 保持既定的积分点顺序: y 变化慢, x 变化快.
         return (1, 0)
 
     def _edge_definitions(self):
@@ -90,6 +90,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
 
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
+        """四边形上插值点的多重指标, 每个顶点一列; ``internal`` 为 True 时只取内部点, ``tensorprod`` 为 True 时转为插值点工具所用的张量积兼容顺序."""
         px, py = _require_order_tuple(order, "quadrilateral multi_index", 2)
 
         if internal:
@@ -109,12 +110,14 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """选定四边形顶点坐标的平均, 形状 ``(NC, GD)``."""
         quad = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[quad]
         return bm.mean(points, axis=1)
 
     @classmethod
     def bc_to_point(cls, ctx: EntityContext, bcs: tuple[Tensor, ...], index: Index | None) -> Tensor:
+        """把四边形上的重心坐标映射为物理点, 形状 ``(NC, NQ, GD)``."""
         bcs = _require_bcs_tuple(bcs, "quadrilateral bc_to_point", 2)
         quad = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[quad[:, [0, 1, 3, 2]]]
@@ -125,6 +128,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
+        """参考四边形上两个方向同阶的张量积 Gauss--Legendre 公式."""
         from ....quadrature import GaussLegendreQuadrature, TensorProductQuadrature
         qf = GaussLegendreQuadrature(q, device=device)
         return TensorProductQuadrature((qf, qf))
@@ -138,6 +142,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
         *,
         ref: bool = False,
     ) -> Tensor:
+        """两个方向局部坐标的梯度; 不给 ``bcs`` 时用以中点差分构造的平均 Jacobi 矩阵计算."""
         quad = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(quad.shape) == 1:
             quad = bm.reshape(quad, (1, -1))
@@ -198,6 +203,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None,
     ) -> Tensor:
+        """参考四边形到物理四边形映射的 Jacobi 矩阵, 形状 ``(NC, NQ, GD, TD)``."""
         bcs = _require_bcs_tuple(bcs, "quadrilateral jacobi_matrix", 2)
         node = ctx.block.positions
         cell = ctx.sector.indices if index is None else ctx.sector.indices[index]
@@ -209,6 +215,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """四边形面积: 沿对角线 (0, 2) 分成两个三角形求和."""
         quad = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[quad]
         v0 = points[:, 1, :] - points[:, 0, :]
@@ -226,6 +233,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """二维时没有法方向, 返回 ``(NC, 0, 2)`` 的空张量; 三维时由边向量的叉积构造."""
         quad = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[quad]
         gd = int(points.shape[2])
@@ -241,6 +249,7 @@ class LagrangeQuadrilateralSchema(_TensorProductOrderSchema):
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """两个方向的平均边向量 ``(vr, vs)`` 作为切向量, 形状 ``(NC, 2, GD)``."""
         quad = ctx.sector.indices if index is None else ctx.sector.indices[index]
         points = ctx.block.positions[quad]
         vr = 0.5 * ((points[:, 1, :] - points[:, 0, :]) + (points[:, 2, :] - points[:, 3, :]))

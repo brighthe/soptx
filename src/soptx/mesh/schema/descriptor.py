@@ -1,7 +1,7 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/descriptor.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Stable descriptors and codecs for parameterized entity schemas."""
+"""参数化实体 Schema 的稳定描述符及其编解码."""
 
 from __future__ import annotations
 
@@ -49,21 +49,26 @@ def _validate_canonical_value(value: object, path: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class SchemaDescriptor:
-    """Describe the stable identity of one parameterized entity schema.
+    """描述一个参数化实体 Schema 的稳定身份.
 
-    Parameters are ordered pairs because their order is part of the schema
-    type's versioned serialization contract. Values are restricted to
-    backend-independent immutable scalars and nested tuples.
+    参数以有序对给出, 因为其顺序是 Schema 类型带版本的序列化约定的一部分. 参数值限于与
+    后端无关的不可变标量及嵌套元组.
 
-    Parameters:
-        type_id: Stable registry and serialization key.
-        schema_version: Positive version of the descriptor interpretation.
-        parameters: Identity-bearing parameter names and normalized values in
-            the order declared by the registered schema type.
+    Parameters
+    ----------
+    type_id : str
+        稳定的登记与序列化键.
+    schema_version : int
+        描述符解释方式的版本号, 为正整数.
+    parameters : tuple of tuple
+        承载身份的参数名与规范化的值, 按登记的 Schema 类型所声明的顺序.
 
-    Raises:
-        TypeError: If a field has an unsupported Python type.
-        ValueError: If an identifier, version, or parameter layout is invalid.
+    Raises
+    ------
+    TypeError
+        某字段的 Python 类型不受支持.
+    ValueError
+        标识符、版本或参数布局不合法.
     """
 
     type_id: str
@@ -102,12 +107,12 @@ class SchemaDescriptor:
             _validate_canonical_value(value, f"parameter {name!r}")
 
     def to_id(self) -> str:
-        """Encode this descriptor as its deterministic schema identifier."""
+        """把本描述符编码为确定的 Schema 标识串."""
         return encode_schema_descriptor(self)
 
     @classmethod
     def from_id(cls, schema_id: str) -> "SchemaDescriptor":
-        """Decode an identifier using the process-wide type registry."""
+        """用进程级的类型登记表解码标识串."""
         return decode_schema_descriptor(schema_id)
 
 
@@ -126,23 +131,29 @@ def _encode_value(value: CanonicalValue) -> str:
 
 
 def encode_schema_descriptor(descriptor: SchemaDescriptor) -> str:
-    """Validate and encode a registered descriptor.
+    """校验并编码一个已登记的描述符.
 
-    The grammar is ``type_id@version(name=value,...)``. Tuple, boolean,
-    integer, and string values have one canonical representation; no Python
-    module path, object identity, or registry insertion order enters the ID.
+    语法为 ``type_id@version(name=value,...)``. 元组、布尔、整数与字符串值各有唯一的
+    规范表示; Python 模块路径、对象身份或登记顺序都不进入 ID.
 
-    Parameters:
-        descriptor: Descriptor for a type/version pair registered in the
-            process-wide schema type registry.
+    Parameters
+    ----------
+    descriptor : SchemaDescriptor
+        在进程级 Schema 类型登记表中登记过的类型/版本对的描述符.
 
-    Returns:
-        A deterministic and reversible schema identifier.
+    Returns
+    -------
+    str
+        确定且可逆的 Schema 标识串.
 
-    Raises:
-        TypeError: If ``descriptor`` is not a ``SchemaDescriptor``.
-        ValueError: If its parameter contract is invalid.
-        KeyError: If its type ID or descriptor version is unknown.
+    Raises
+    ------
+    TypeError
+        ``descriptor`` 不是 ``SchemaDescriptor``.
+    ValueError
+        参数约定不合法.
+    KeyError
+        类型 ID 或描述符版本未知.
     """
     from .registry import SCHEMA_TYPE_REGISTRY
 
@@ -171,6 +182,7 @@ class _DescriptorParser:
         self.position = 0
 
     def parse(self) -> SchemaDescriptor:
+        """解析整个标识串 ``type_id@version(name=value,...)``, 返回描述符."""
         type_id = self._parse_identifier("type_id")
         self._consume("@")
         schema_version = self._parse_integer("schema_version")
@@ -287,23 +299,29 @@ def _decode_schema_descriptor_unchecked(schema_id: str) -> SchemaDescriptor:
 
 
 def decode_schema_descriptor(schema_id: str) -> SchemaDescriptor:
-    """Decode and validate one registered canonical schema identifier.
+    """解码并校验一个已登记的规范 Schema 标识串.
 
-    Custom or plugin registries can use ``SchemaTypeRegistry.decode`` with
-    their own registrations. This convenience function uses the process-wide
-    schema type registry.
+    自定义或插件登记表可用 ``SchemaTypeRegistry.decode`` 配合各自的登记; 本便捷函数使用
+    进程级的 Schema 类型登记表.
 
-    Parameters:
-        schema_id: Identifier using the canonical descriptor grammar.
+    Parameters
+    ----------
+    schema_id : str
+        符合规范描述符语法的标识串.
 
-    Returns:
-        The decoded immutable descriptor.
+    Returns
+    -------
+    SchemaDescriptor
+        解码出的不可变描述符.
 
-    Raises:
-        TypeError: If ``schema_id`` is not a string.
-        ValueError: If the identifier is malformed, non-canonical, or has an
-            invalid parameter contract.
-        KeyError: If its type ID or descriptor version is unknown.
+    Raises
+    ------
+    TypeError
+        ``schema_id`` 不是字符串.
+    ValueError
+        标识串格式错误、不规范或参数约定不合法.
+    KeyError
+        类型 ID 或描述符版本未知.
     """
     from .registry import SCHEMA_TYPE_REGISTRY
 

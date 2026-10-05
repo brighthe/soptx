@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/registry.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""Schema 类型登记表与解析器, 以及实体类型名到拓扑维数的换算工具."""
+
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
@@ -31,10 +33,9 @@ __all__ = [
 
 
 class SchemaTypeRegistry:
-    """Map versioned schema type IDs to their Python schema classes.
+    """把带版本的 Schema 类型 ID 映射到其 Python Schema 类.
 
-    The registry validates descriptor parameter names and their canonical
-    values. Immutable instance construction is owned by ``SchemaResolver``.
+    登记表校验描述符的参数名及其规范值; 不可变实例的构造由 ``SchemaResolver`` 负责.
     """
 
     def __init__(self) -> None:
@@ -46,20 +47,24 @@ class SchemaTypeRegistry:
     def schema_types(
         self,
     ) -> Mapping[tuple[str, int], type[EntitySchema]]:
-        """Return a read-only view of registered type/version pairs."""
+        """已登记的类型/版本对的只读视图."""
         return MappingProxyType(self._schema_types)
 
     def register(self, schema_type: type[EntitySchema]) -> None:
-        """Register one schema Python type from its descriptor metadata.
+        """按描述符元数据登记一个 Schema Python 类型.
 
-        Parameters:
-            schema_type: ``EntitySchema`` subclass declaring ``type_id``,
-                ``schema_version``, and ``descriptor_parameter_names``.
+        Parameters
+        ----------
+        schema_type : type
+            声明了 ``type_id``、``schema_version`` 与 ``descriptor_parameter_names`` 的
+            ``EntitySchema`` 子类.
 
-        Raises:
-            TypeError: If the class or its metadata has an invalid type.
-            ValueError: If its metadata is invalid or conflicts with an
-                existing registration.
+        Raises
+        ------
+        TypeError
+            类或其元数据的类型不合法.
+        ValueError
+            元数据不合法, 或与已有登记冲突.
         """
         if not isinstance(schema_type, type) or not issubclass(
             schema_type,
@@ -108,10 +113,12 @@ class SchemaTypeRegistry:
         self._parameter_names[key] = parameter_names
 
     def get(self, type_id: str, schema_version: int) -> type[EntitySchema]:
-        """Return the class registered for an exact type/version pair.
+        """返回为某个类型/版本对精确登记的类.
 
-        Raises:
-            KeyError: If the type ID or its requested version is unknown.
+        Raises
+        ------
+        KeyError
+            类型 ID 或所求版本未知.
         """
         key = (type_id, schema_version)
         try:
@@ -130,11 +137,9 @@ class SchemaTypeRegistry:
             raise KeyError(f"unknown schema type_id {type_id!r}") from None
 
     def validate(self, descriptor: SchemaDescriptor) -> SchemaDescriptor:
-        """Validate a descriptor against its registered type contract.
+        """按登记的类型约定校验描述符.
 
-        The parameter set and order must exactly match the registration.
-        Parameter values must already be in the canonical form produced by
-        the immutable schema type.
+        参数集合与顺序须与登记完全一致, 参数值须已是不可变 Schema 类型所产生的规范形式.
         """
         if not isinstance(descriptor, SchemaDescriptor):
             raise TypeError(
@@ -179,16 +184,16 @@ class SchemaTypeRegistry:
         return descriptor
 
     def encode(self, descriptor: SchemaDescriptor) -> str:
-        """Validate and canonically encode one schema descriptor."""
+        """校验并规范地编码一个 Schema 描述符."""
         return _encode_schema_descriptor_unchecked(self.validate(descriptor))
 
     def decode(self, schema_id: str) -> SchemaDescriptor:
-        """Decode and validate one registered schema identifier."""
+        """解码并校验一个已登记的 Schema 标识串."""
         return self.validate(_decode_schema_descriptor_unchecked(schema_id))
 
 
 class SchemaResolver:
-    """Construct immutable Schema values through a Schema type registry."""
+    """经 Schema 类型登记表构造不可变的 Schema 值."""
 
     __slots__ = ("_type_registry",)
 
@@ -199,10 +204,9 @@ class SchemaResolver:
         self,
         descriptor_or_id: SchemaDescriptor | str,
     ) -> EntitySchema:
-        """Resolve a descriptor or ID to an equal immutable schema value.
+        """把描述符或 ID 解析为相等的不可变 Schema 值.
 
-        A new equal instance may be returned on each call. Callers must not
-        use Python object identity as schema identity.
+        每次调用可能返回一个新的相等实例; 调用方不得以 Python 对象身份作为 Schema 身份.
         """
         if isinstance(descriptor_or_id, str):
             descriptor = self._type_registry.decode(descriptor_or_id)
@@ -238,6 +242,13 @@ SCHEMA_RESOLVER = SchemaResolver(SCHEMA_TYPE_REGISTRY)
 
 
 def ensure_positive_topdim(top_dim: int, highest_dim: int) -> int:
+    """把负的拓扑维数 (从最高维倒数) 换算为非负值.
+
+    Raises
+    ------
+    ValueError
+        ``top_dim`` 超出 ``[-highest_dim-1, highest_dim]``.
+    """
     if top_dim < -highest_dim - 1 or top_dim > highest_dim:
         raise ValueError(f"top dimension {top_dim} is out of range "
                          f"[-{highest_dim + 1}, {highest_dim}]")
@@ -248,6 +259,7 @@ def ensure_positive_topdim(top_dim: int, highest_dim: int) -> int:
 
 
 def string_to_etype_and_idx(etype_string: str, highest_dim: int) -> tuple[int, int]:
+    """解析 ``"类型名"`` 或 ``"类型名:序号"`` 形式的实体选择串, 返回 ``(拓扑维数, 序号)``."""
     etype_idx = etype_string.split(":")
 
     if len(etype_idx) == 1:
@@ -262,6 +274,13 @@ def string_to_etype_and_idx(etype_string: str, highest_dim: int) -> tuple[int, i
 
 
 def etype_to_topdim(etype: str, highest_dim: int) -> int:
+    """把实体类型名 (cell、face、edge、node, 不区分大小写) 换算为拓扑维数.
+
+    Raises
+    ------
+    ValueError
+        类型名不受支持.
+    """
     etype = etype.upper()
 
     if etype == "CELL":

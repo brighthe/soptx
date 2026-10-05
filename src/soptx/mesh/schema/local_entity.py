@@ -1,7 +1,7 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/local_entity.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Immutable local-subentity descriptions for parameterized Schemas."""
+"""参数化 Schema 的不可变局部子实体描述."""
 
 from __future__ import annotations
 
@@ -14,27 +14,28 @@ __all__ = ["LocalEntityGroup"]
 
 @dataclass(frozen=True, slots=True)
 class LocalEntityGroup:
-    """Describe homogeneous local subentities in a parent Schema layout.
+    """描述父 Schema 布局中的一组同类局部子实体.
 
-    ``schema`` is the concrete immutable child Schema shared by every row.
-    Each row of ``local_node_indices`` contains parent local-node column
-    positions in the child's complete canonical node order.  The rows do not
-    contain block-global node IDs and do not omit higher-order child nodes.
+    ``schema`` 是各行共享的具体、不可变的子 Schema. ``local_node_indices`` 的每一行按子实体
+    完整的规范节点顺序, 给出父实体中的局部节点列位置; 各行不含网格块全局节点编号, 也不
+    省略子实体的高阶节点.
 
-    A parent may return several groups at one topological dimension when its
-    children have different Schema values or node layouts.  At dimension zero
-    a parent Schema uses point groups to cover all interpolation nodes; this is
-    distinct from its topological vertex skeleton.
+    子实体的 Schema 值或节点布局不同时, 父实体在同一拓扑维数上可返回多个组. 零维时父
+    Schema 用点组覆盖全部插值节点, 这与其拓扑顶点骨架不同.
 
-    Parameters:
-        schema: Concrete child Schema shared by the group.
-        local_node_indices: Immutable occurrence-by-child-node rows indexing
-            the parent Schema's complete local-node layout.
+    Parameters
+    ----------
+    schema : EntitySchema
+        组内共享的具体子 Schema.
+    local_node_indices : tuple of tuple of int
+        不可变的 "出现 x 子节点" 行, 索引父 Schema 的完整局部节点布局.
 
-    Raises:
-        TypeError: If the Schema or tuple structure has an invalid type.
-        ValueError: If a row has the wrong width, contains negative indices,
-            or repeats a parent local-node column.
+    Raises
+    ------
+    TypeError
+        Schema 或元组结构的类型不对.
+    ValueError
+        某行宽度不对、含负索引或重复的父局部节点列.
     """
 
     schema: EntitySchema

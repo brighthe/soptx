@@ -159,7 +159,7 @@
 - ~~PyTorch 后端下 $p \ge 2$ 的 `interpolation_points` 因 float32 / float64 混用报错~~（已修复：
   `mesh/ipoints.py` 先把 `multi_index` 转成坐标浮点类型；回归测试
   `tests/unit/test_interpolation_points_backend.py`）。
-- 移植代码的英文 docstring 欠账（`PORTED_ROOTS`，约 596 处缺失），按子包补齐后移出豁免表。
+- ~~移植代码的英文 docstring 欠账~~（已完成：按子包补齐中文 numpydoc 并翻译英文 docstring 与注释，共 12 个提交；`tools/check_docstring_only.py` 逐批核对只改了 docstring 与注释，`PORTED_ROOTS` 已清空）。
 - ~~Form 过渡基类~~（已随 2.1 完成）。
 - ~~调用网格上不存在的方法~~（已处理）。全仓扫描 `*mesh*.<方法>(` 后共 11 类：无调用方的
   （`hess_basis`、`cell_basis_on_face`、`prolongation_matrix`、`project_solution_to_finer_mesh`、

@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/edge.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""参考区间 (边) 的 Lagrange Schema."""
+
 from ....backend import bm
 from ....backend import Index, Tensor
 from ...ipoints import MultiIndex as _MI, multi_index_tensorprod
@@ -18,11 +20,10 @@ __all__ = ["LagrangeEdgeSchema", "EdgeSchema"]
 
 
 class LagrangeEdgeSchema(_ScalarOrderSchema):
-    """Represent an immutable Lagrange edge of geometry order ``p``.
+    """几何次数为 ``p`` 的不可变 Lagrange 边.
 
-    ``p`` is a positive integer.  Reference input uses the barycentric order
-    ``(lambda_0, lambda_1)`` and positive-order basis columns follow the
-    complete topology-first node layout.
+    ``p`` 为正整数. 参考输入按重心坐标顺序 ``(lambda_0, lambda_1)``, 正次数基函数的列遵循
+    拓扑优先的完整节点布局.
     """
 
     __slots__ = ()
@@ -49,14 +50,19 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def _entity(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Return the selected edge connectivity with an explicit entity axis.
+        """返回选定边的连接数组, 保留显式的实体轴.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: The edge connectivity tensor with shape ``(NC, 2)``.
+        Returns
+        -------
+        Tensor
+            边的连接张量, 形状 ``(NC, 2)``.
         """
         edge = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(edge.shape) == 1:
@@ -65,29 +71,39 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def _points(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Return the endpoint coordinates of the selected edges.
+        """选定边的端点坐标.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: Endpoint coordinates with shape ``(NC, 2, GD)``.
+        Returns
+        -------
+        Tensor
+            端点坐标, 形状 ``(NC, 2, GD)``.
         """
         return ctx.block.positions[cls._entity(ctx, index)]
 
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
-        """Return interpolation multi-indices on the reference edge.
+        """参考边上插值点的多重指标.
 
-        Parameters:
-            order (tuple[int, ...]): Polynomial degree on the edge.
-            internal (bool, optional): If ``True``, return only interior multi-indices.
-            tensorprod (bool, optional): If ``True``, convert the simplex ordering to the
-                tensor-product-compatible ordering used by interpolation-point utilities.
+        Parameters
+        ----------
+        order : tuple of int
+            参考边上的多项式次数.
+        internal : bool, optional
+            为 True 时只返回内部多重指标.
+        tensorprod : bool, optional
+            为 True 时把单纯形顺序转换为插值点工具所用的张量积兼容顺序.
 
-        Returns:
-            Tensor: The multi-index tensor with one column per edge endpoint.
+        Returns
+        -------
+        Tensor
+            多重指标张量, 每个端点一列.
         """
         p = _require_order_tuple(order, "edge multi_index", 1)[0]
         if internal:
@@ -100,14 +116,19 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def num_multi_index(cls, order: tuple[int, ...], *, internal: bool = False) -> int:
-        """Return the number of interpolation multi-indices on the edge.
+        """边上插值多重指标的个数.
 
-        Parameters:
-            order (tuple[int, ...]): Polynomial degree on the edge.
-            internal (bool, optional): If ``True``, count only interior multi-indices.
+        Parameters
+        ----------
+        order : tuple of int
+            边上的多项式次数.
+        internal : bool, optional
+            为 True 时只计内部多重指标.
 
-        Returns:
-            int: The number of local interpolation multi-indices.
+        Returns
+        -------
+        int
+            局部插值多重指标的个数.
         """
         p = _require_order_tuple(order, "edge num_multi_index", 1)[0]
         if internal:
@@ -116,30 +137,40 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute edge barycenters as the average of the two endpoints.
+        """边的重心, 即两端点的平均.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: Edge barycenters with shape ``(NC, GD)``.
+        Returns
+        -------
+        Tensor
+            边的重心, 形状 ``(NC, GD)``.
         """
         points = cls._points(ctx, index)
         return bm.mean(points, axis=1)
 
     @classmethod
     def bc_to_point(cls, ctx: EntityContext, bcs: tuple[Tensor, ...], index: Index | None) -> Tensor:
-        """Map edge barycentric coordinates to physical points.
+        """把边上的重心坐标映射为物理点.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            bcs (tuple[Tensor, ...]): Edge barycentric coordinates with one tensor of
-                shape ``(NQ, 2)``.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        bcs : tuple of Tensor
+            边的重心坐标, 一个形状为 ``(NQ, 2)`` 的张量.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: Physical points with shape ``(NC, NQ, GD)``.
+        Returns
+        -------
+        Tensor
+            物理点, 形状 ``(NC, NQ, GD)``.
         """
         bcs = _require_bcs_tuple(bcs, "edge bc_to_point", 1)
         if bcs[0].shape[-1] != 2:
@@ -157,22 +188,24 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
         *,
         ref: bool = False,
     ) -> Tensor:
-        """Return gradients of the edge barycentric coordinates.
+        """边上重心坐标的梯度.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
-            bcs (tuple[Tensor, ...] | None, optional): Evaluation points in barycentric
-                form. When provided, the result is broadcast to shape
-                ``(NC, NQ, 2, GD_or_2)``.
-            ref (bool, optional): If ``True``, return gradients with respect to the two
-                barycentric coordinates on the reference edge. If ``False``, return
-                physical gradients with respect to cartesian coordinates.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        index : Index or None
+            选定的边, None 表示全部边.
+        bcs : tuple of Tensor, optional
+            求值点的重心坐标; 给出时结果广播为 ``(NC, NQ, 2, GD_or_2)``.
+        ref : bool, optional
+            为 True 时返回参考边上对两个重心坐标的梯度, 否则返回对直角坐标的物理梯度.
 
-        Returns:
-            Tensor: Gradients of ``lambda_0`` and ``lambda_1``. Without ``bcs``, the
-            shape is ``(NC, 2, GD_or_2)``. With ``bcs``, the gradients are broadcast
-            along the quadrature axis.
+        Returns
+        -------
+        Tensor
+            ``lambda_0`` 与 ``lambda_1`` 的梯度; 不给 ``bcs`` 时形状为 ``(NC, 2, GD_or_2)``, 给出
+            时沿积分点轴广播.
         """
         points = cls._points(ctx, index)
         nc = int(points.shape[0])
@@ -195,16 +228,21 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
-        """Return a 1D Gauss-Legendre quadrature rule on the reference edge.
+        """参考边上的一维 Gauss--Legendre 积分公式.
 
-        Parameters:
-            q (int): Quadrature order.
-            qtype (str | None, optional): Quadrature family. Only ``"legendre"`` is
-                supported for edges.
-            device (optional): Backend device on which the quadrature data is created.
+        Parameters
+        ----------
+        q : int
+            积分阶.
+        qtype : str or None, optional
+            积分公式族, 边上只支持 ``"legendre"``.
+        device : optional
+            积分数据所在的后端设备.
 
-        Returns:
-            Quadrature: The quadrature object for the reference edge.
+        Returns
+        -------
+        Quadrature
+            参考边上的积分公式对象.
         """
         if qtype not in (None, "legendre"):
             raise ValueError(f"unsupported edge quadrature type: {qtype!r}")
@@ -213,14 +251,19 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Return the physical lengths of the selected edges.
+        """选定边的物理长度.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: Edge lengths with shape ``(NC,)``.
+        Returns
+        -------
+        Tensor
+            边长, 形状 ``(NC,)``.
         """
         points = cls._points(ctx, index)
         tangent = points[:, 1, :] - points[:, 0, :]
@@ -228,17 +271,21 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Return normal directions orthogonal to each edge tangent.
+        """与各边切向正交的法方向.
 
-        In 2D, one normal direction is returned for each edge. In 3D, two
-        mutually orthogonal normal directions are constructed.
+        二维时每条边返回一个法方向, 三维时构造两个相互正交的法方向.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: Normal directions with shape ``(NC, GD - 1, GD)`` for ``GD <= 3``.
+        Returns
+        -------
+        Tensor
+            法方向, ``GD <= 3`` 时形状为 ``(NC, GD - 1, GD)``.
         """
         points = cls._points(ctx, index)
         tangent = points[:, 1, :] - points[:, 0, :]
@@ -267,33 +314,45 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Return the non-unit physical tangent vectors of the selected edges.
+        """选定边的物理切向量 (非单位).
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: Tangent vectors with shape ``(NC, 1, GD)``.
+        Returns
+        -------
+        Tensor
+            切向量, 形状 ``(NC, 1, GD)``.
         """
         points = cls._points(ctx, index)
         return (points[:, 1, :] - points[:, 0, :])[:, None, :]
 
     @classmethod
     def transform(cls, ctx: EntityContext, func, kind: str = "value"):
-        """Wrap a cartesian function so it can be evaluated on edge barycentric points.
+        """把直角坐标函数包装为可在边的重心坐标点上求值的函数.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            func: A callable defined on physical points.
-            kind (str, optional): Transformation kind. Only ``"value"`` is supported.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        func : callable
+            定义在物理点上的函数.
+        kind : str, optional
+            变换类型, 只支持 ``"value"``.
 
-        Returns:
-            Callable: A wrapper that accepts edge barycentric coordinates.
+        Returns
+        -------
+        callable
+            接受边重心坐标的包装函数.
         """
         points = ctx.block.positions[ctx.sector.indices]
 
         def wrapper(bc: Tensor) -> Tensor:
+            """把重心坐标映射为物理点后求函数值."""
             x = bm.einsum("...j,cjd->c...d", bc, points)
             value = func(x)
             if kind == "value":
@@ -309,18 +368,21 @@ class LagrangeEdgeSchema(_ScalarOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None,
     ) -> Tensor:
-        """Compute the Jacobian of the reference-to-physical edge map.
+        """参考边到物理边映射的 Jacobi 矩阵.
 
-        Parameters:
-            ctx (EntityContext): The mesh block and edge sector.
-            bcs (tuple[Tensor, ...]): Barycentric evaluation points on the reference
-                edge.
-            index (Index | None): Selected edge entities, or ``None`` for all edges.
+        Parameters
+        ----------
+        ctx : EntityContext
+            网格块与边分区.
+        bcs : tuple of Tensor
+            参考边上求值点的重心坐标.
+        index : Index or None
+            选定的边, None 表示全部边.
 
-        Returns:
-            Tensor: The Jacobian tensor with shape ``(NC, NQ, GD, 1)``. Its last axis
-            stores the derivative of the physical map with respect to the reference
-            coordinate ``u``.
+        Returns
+        -------
+        Tensor
+            Jacobi 张量, 形状 ``(NC, NQ, GD, 1)``, 末轴为物理映射对参考坐标 ``u`` 的导数.
         """
         bcs = _require_bcs_tuple(bcs, "edge jacobi_matrix", 1)
         points = cls._points(ctx, index)

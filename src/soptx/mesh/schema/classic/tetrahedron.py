@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/tetrahedron.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""参考四面体的 Lagrange Schema."""
+
 from ....backend import bm
 from ....backend import Index, Tensor
 from ...ipoints import MultiIndex as _MI, multi_index_tensorprod
@@ -18,11 +20,10 @@ __all__ = ["LagrangeTetrahedronSchema", "TetrahedronSchema"]
 
 
 class LagrangeTetrahedronSchema(_ScalarOrderSchema):
-    """Represent an immutable Lagrange tetrahedron of geometry order ``p``.
+    """几何次数为 ``p`` 的不可变 Lagrange 四面体.
 
-    ``p`` is a positive integer.  Reference input uses barycentric order
-    ``(lambda_0, lambda_1, lambda_2, lambda_3)``; reference derivatives use
-    the last three coordinates with ``lambda_0`` dependent.
+    ``p`` 为正整数. 参考输入按重心坐标顺序 ``(lambda_0, lambda_1, lambda_2, lambda_3)``;
+    参考导数取后三个坐标, ``lambda_0`` 为因变量.
     """
 
     __slots__ = ()
@@ -75,6 +76,7 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """选定四面体顶点坐标的平均, 形状 ``(NC, GD)``."""
         tet = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(tet.shape) == 1:
             tet = bm.reshape(tet, (1, -1))
@@ -83,6 +85,7 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
 
     @classmethod
     def bc_to_point(cls, ctx: EntityContext, bcs: tuple[Tensor, ...], index: Index | None) -> Tensor:
+        """把四面体上的重心坐标映射为物理点, 形状 ``(NC, NQ, GD)``."""
         bcs = _require_bcs_tuple(bcs, "tetrahedron bc_to_point", 1)
         if bcs[0].shape[-1] != 4:
             raise ValueError(f"tetrahedron barycentric coordinates expect last dimension 4, got {bcs[0].shape[-1]}")
@@ -100,6 +103,7 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None,
     ) -> Tensor:
+        """参考四面体到物理四面体映射的 Jacobi 矩阵, 形状 ``(NC, NQ, GD, TD)``."""
         bcs = _require_bcs_tuple(bcs, "tetrahedron jacobi_matrix", 1)
         tet = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(tet.shape) == 1:
@@ -117,6 +121,7 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
         *,
         ref: bool = False,
     ) -> Tensor:
+        """四个重心坐标的梯度: ``ref`` 为 True 时为单位阵 ``(NC, 4, 4)``, 否则为物理梯度 ``(NC, 4, 3)``; 给出 ``bcs`` 时沿积分点轴广播."""
         tet = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(tet.shape) == 1:
             tet = bm.reshape(tet, (1, -1))
@@ -148,6 +153,13 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """四面体体积.
+
+        Raises
+        ------
+        ValueError
+            几何维数不是 3.
+        """
         gd = cls.geo_dimension(ctx)
         if gd != 3:
             raise ValueError(f"tetrahedron geometry requires GD == 3, got {gd}")
@@ -164,6 +176,7 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
 
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
+        """四面体上插值点的多重指标, 每个顶点一列; ``internal`` 为 True 时只取内部点, ``tensorprod`` 为 True 时转为插值点工具所用的张量积兼容顺序."""
         p = _require_order_tuple(order, "tetrahedron multi_index", 1)[0]
         if internal:
             mi = _MI.multi_index_inner(p, 4)
@@ -175,6 +188,13 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """三维体单元没有法方向, 返回 ``(NC, 0, 3)`` 的空张量.
+
+        Raises
+        ------
+        ValueError
+            几何维数不是 3.
+        """
         gd = cls.geo_dimension(ctx)
         if gd != 3:
             raise ValueError(f"tetrahedron geometry requires GD == 3, got {gd}")
@@ -186,6 +206,13 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
+        """参考四面体上的积分公式: ``q <= 7`` 用四面体公式, 更高阶用 Stroud 锥积公式.
+
+        Raises
+        ------
+        ValueError
+            ``qtype`` 不是 ``"legendre"`` 或 None.
+        """
         if qtype not in (None, "legendre"):
             raise ValueError(f"unsupported tetrahedron quadrature type: {qtype!r}")
         if q > 7:
@@ -196,6 +223,13 @@ class LagrangeTetrahedronSchema(_ScalarOrderSchema):
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """以顶点 0 出发的三条边作为切向量, 形状 ``(NC, 3, 3)``.
+
+        Raises
+        ------
+        ValueError
+            几何维数不是 3.
+        """
         gd = cls.geo_dimension(ctx)
         if gd != 3:
             raise ValueError(f"tetrahedron geometry requires GD == 3, got {gd}")

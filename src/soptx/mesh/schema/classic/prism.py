@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/prism.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""参考三棱柱 (三角形乘区间) 的 Lagrange Schema."""
+
 from fractions import Fraction
 
 from ....backend import bm
@@ -22,13 +24,11 @@ __all__ = ["LagrangePrismSchema", "PrismSchema"]
 
 
 class LagrangePrismSchema(_TensorProductOrderSchema):
-    """Represent an immutable triangle-by-interval Lagrange prism.
+    """不可变的三角形乘区间 Lagrange 三棱柱.
 
-    A scalar ``p`` is repeated; a tuple means
-    ``(triangle_order, interval_order)``.  Reference input is
-    ``(triangle_bcs, interval_bcs)`` and gradient components preserve that
-    public factor order.  Mixed triangular and quadrilateral faces are exposed
-    as separate :class:`~fealpy.mesh.schema.LocalEntityGroup` values.
+    标量 ``p`` 对两个因子重复使用, 元组表示 ``(三角形次数, 区间次数)``. 参考输入为
+    ``(triangle_bcs, interval_bcs)``, 梯度分量保持这一公开的因子顺序. 混合的三角形面与
+    四边形面以各自的 :class:`~soptx.mesh.schema.LocalEntityGroup` 给出.
     """
 
     __slots__ = ()
@@ -170,25 +170,21 @@ class LagrangePrismSchema(_TensorProductOrderSchema):
     @classmethod
     def _tp_points(cls, ctx: EntityContext, index: Index | None = None) -> Tensor:
         prism = cls._entity(ctx, index)
-        # ``shape_function`` orders the six nodes as triangle vertices on the
-        # bottom layer followed by the corresponding vertices on the top
-        # layer.  This is also the schema's contract order.
+        # ``shape_function`` 把六个节点排为底层的三角形顶点, 接着顶层对应的顶点;
+        # 这也是本 Schema 的约定顺序.
         return ctx.block.positions[prism]
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute barycenters of prism entities.
-
-        Return shape: (NC, GD).
-        """
+        """三棱柱的重心 (顶点平均), 形状 ``(NC, GD)``."""
         points = cls._points(ctx, index)
         return bm.mean(points, axis=1)
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute the volume of a prism.
+        """三棱柱的体积.
 
-        ∫_K dx = ∫_{\\hat K} sqrt(det(G)) dξ, where G = J^T J.
+        ``∫_K dx = ∫_{K̂} sqrt(det(G)) dξ``, 其中 ``G = J^T J``.
         """
         qf = cls.quadrature_formula(2)
         bcs, ws = qf.get_quadrature_points_and_weights()
@@ -198,23 +194,21 @@ class LagrangePrismSchema(_TensorProductOrderSchema):
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Prism volume entities have no normal directions in 3D."""
+        """三维中三棱柱体单元没有法方向, 返回空张量."""
         prism = cls._entity(ctx, index)
         GD = cls.geo_dimension(ctx)
         return bm.zeros((prism.shape[0], 0, GD), dtype=ctx.block.positions.dtype)
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Compute tangent directions of prism entities.
-
-        Return shape: (NC, 3, GD).
-        """
+        """三棱柱的切方向: 以顶点 0 出发到顶点 1、2、3 的向量, 形状 ``(NC, 3, GD)``."""
         points = cls._points(ctx, index)
         return points[:, [1, 2, 3], :] - points[:, [0], :]
 
-    # quadrature
+    # 积分
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
+        """参考三棱柱上三角形公式与 Gauss--Legendre 公式的张量积."""
         from ....quadrature import (
             GaussLegendreQuadrature,
             TensorProductQuadrature,
@@ -232,6 +226,7 @@ class LagrangePrismSchema(_TensorProductOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None
     ) -> Tensor:
+        """参考三棱柱到物理三棱柱映射的 Jacobi 矩阵, 形状 ``(NC, NQ, GD, 3)``."""
         bcs = _require_bcs_tuple(bcs, "prism jacobi_matrix", 2)
 
         points = cls._tp_points(ctx, index)
@@ -248,6 +243,7 @@ class LagrangePrismSchema(_TensorProductOrderSchema):
         *,
         ref: bool = False,
     ) -> Tensor:
+        """参考坐标的物理梯度; 不给 ``bcs`` 时在单元中心求值."""
         prism = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(prism.shape) == 1:
             prism = bm.reshape(prism, (1, -1))
@@ -271,13 +267,10 @@ class LagrangePrismSchema(_TensorProductOrderSchema):
         grad = bm.einsum("cqdk,cqkl,qil->cqid", J, Ginv, ref3)
         return grad[:, 0, :, :] if squeeze_q else grad
 
-    # ipoint
+    # 插值点
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
-        """Compute the multi-index matrix on reference prism.
-
-        Return tensor-product multi-index of triangle and interval.
-        """
+        """参考三棱柱上的多重指标: 三角形与区间多重指标的张量积."""
         p0, p1 = _require_order_tuple(order, "prism multi_index", 2)
 
         if internal:
@@ -303,10 +296,7 @@ class LagrangePrismSchema(_TensorProductOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None
     ) -> Tensor:
-        """Convert barycentric coordinates to Cartesian coordinates.
-
-        x = sum_i phi_i x_i on the physical prism.
-        """
+        """把重心坐标转换为直角坐标: 物理三棱柱上 ``x = sum_i phi_i x_i``."""
         phi = cls().shape_function(bcs)
         points = cls._tp_points(ctx, index)
         return bm.einsum("cim,qi->cqm", points, phi)
@@ -320,10 +310,7 @@ class LagrangePrismSchema(_TensorProductOrderSchema):
         return_jacobi: bool = False,
         return_grad: bool = False
     ):
-        """Compute the first fundamental form of the Lagrange prism.
-
-        G = J^T J, where J is the Jacobian matrix of the reference-to-physical map.
-        """
+        """Lagrange 三棱柱的第一基本形式 ``G = J^T J``, ``J`` 为参考到物理映射的 Jacobi 矩阵."""
         J = cls.jacobi_matrix(ctx, bcs, index=index)
         gphi = cls().grad_shape_function_reference(bcs)
         TD = J.shape[-1]

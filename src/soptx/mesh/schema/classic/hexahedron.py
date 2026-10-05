@@ -1,6 +1,8 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/classic/hexahedron.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""参考六面体 (三个区间之积) 的 Lagrange Schema."""
+
 from ....backend import bm
 from ....backend import Index, Tensor
 from ...ipoints import MultiIndex as _MI, multi_index_tensorprod
@@ -19,12 +21,10 @@ __all__ = ["HexahedronSchema", "LagrangeHexahedronSchema"]
 
 
 class LagrangeHexahedronSchema(_TensorProductOrderSchema):
-    """Represent an immutable three-interval Lagrange hexahedron.
+    """不可变的三区间之积 Lagrange 六面体.
 
-    A scalar ``p`` is normalized to ``(p, p, p)``; a tuple means
-    ``(px, py, pz)``.  Reference input and returned gradient components use
-    public ``(x, y, z)`` factor order even though the shared kernel reverses
-    factors to preserve established Cartesian-product point ordering.
+    标量 ``p`` 规范化为 ``(p, p, p)``, 元组表示 ``(px, py, pz)``. 参考输入与返回的梯度分量都按
+    公开的 ``(x, y, z)`` 因子顺序, 尽管共享内核为保持既定的笛卡尔积点顺序而翻转了因子.
     """
 
     __slots__ = ()
@@ -67,7 +67,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
         return _hexahedron_node_keys(self.p)
 
     def _lagrange_kernel_factor_order(self) -> tuple[int, ...]:
-        # Preserve the established quadrature-point order: z, y, then x.
+        # 保持既定的积分点顺序: 依次为 z, y, x.
         return (2, 1, 0)
 
     def _edge_definitions(self):
@@ -121,6 +121,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """选定六面体顶点坐标的平均, 形状 ``(NC, GD)``."""
         cell = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(cell.shape) == 1:
             cell = bm.reshape(cell, (1, -1))
@@ -128,6 +129,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
 
     @classmethod
     def bc_to_point(cls, ctx: EntityContext, bcs: tuple[Tensor, ...], index: Index | None) -> Tensor:
+        """把三个方向的重心坐标映射为物理点; 连接按上下两层的循环顺序, 收缩前先换成张量积顺序."""
         bcs = _require_bcs_tuple(bcs, "hexahedron bc_to_point", 3)
         for bc in bcs:
             if bc.shape[-1] != 2:
@@ -138,7 +140,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
         cell = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(cell.shape) == 1:
             cell = bm.reshape(cell, (1, -1))
-        # Contract order is bottom/top cyclic; tensor-product order is different.
+        # 连接按上下两层的循环顺序排列, 与张量积顺序不同.
         points = ctx.block.positions[cell[:, [0, 1, 3, 2, 4, 5, 7, 6]]]
         points = bm.reshape(points, (-1, 2, 2, 2, cls.geo_dimension(ctx)))
         u, v, w = bcs
@@ -152,6 +154,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
         bcs: tuple[Tensor, ...],
         index: Index | None,
     ) -> Tensor:
+        """参考六面体到物理六面体映射的 Jacobi 矩阵, 形状 ``(NC, NQ, GD, 3)``."""
         bcs = _require_bcs_tuple(bcs, "hexahedron jacobi_matrix", 3)
         node = ctx.block.positions
         cell = ctx.sector.indices if index is None else ctx.sector.indices[index]
@@ -162,6 +165,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
 
     @classmethod
     def multi_index(cls, order: tuple[int, ...], *, internal: bool = False, tensorprod: bool = True) -> Tensor:
+        """六面体上插值点的多重指标 (三个区间多重指标的张量积); ``internal`` 为 True 时只取内部点."""
         order = _require_order_tuple(order, "hexahedron multi_index", 3)
         px, py, pz = order
 
@@ -191,6 +195,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
         *,
         ref: bool = False,
     ) -> Tensor:
+        """三个方向局部坐标的梯度; 不给 ``bcs`` 时在单元中心求值."""
         cell = ctx.sector.indices if index is None else ctx.sector.indices[index]
         if len(cell.shape) == 1:
             cell = bm.reshape(cell, (1, -1))
@@ -211,6 +216,7 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
         z = bm.zeros_like(u0)
 
         def ref_row(ua, ub, va, vb, wa, wb):
+            """把六个分量拼成参考梯度的一行."""
             return bm.stack([ua, ub, va, vb, wa, wb], axis=-1)
 
         ref_grad = bm.stack([
@@ -249,6 +255,13 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """六面体体积, 用每方向 2 点的张量积 Gauss 公式对 Jacobi 行列式积分.
+
+        Raises
+        ------
+        ValueError
+            几何维数不是 3.
+        """
         gd = cls.geo_dimension(ctx)
         if gd != 3:
             raise ValueError(f"hexahedron geometry requires GD == 3, got {gd}")
@@ -275,6 +288,13 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """三维体单元没有法方向, 返回 ``(NC, 0, 3)`` 的空张量.
+
+        Raises
+        ------
+        ValueError
+            几何维数不是 3.
+        """
         gd = cls.geo_dimension(ctx)
         if gd != 3:
             raise ValueError(f"hexahedron geometry requires GD == 3, got {gd}")
@@ -285,6 +305,13 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
+        """参考六面体上三个方向同阶的张量积 Gauss--Legendre 公式.
+
+        Raises
+        ------
+        ValueError
+            ``qtype`` 不是 ``"legendre"`` 或 None.
+        """
         if qtype not in (None, "legendre"):
             raise ValueError(f"unsupported hexahedron quadrature type: {qtype!r}")
         from ....quadrature import GaussLegendreQuadrature, TensorProductQuadrature
@@ -294,6 +321,13 @@ class LagrangeHexahedronSchema(_TensorProductOrderSchema):
 
     @classmethod
     def tangent(cls, ctx: EntityContext, index: Index | None) -> Tensor:
+        """以顶点 0 出发的三条棱作为切向量, 形状 ``(NC, 3, 3)``.
+
+        Raises
+        ------
+        ValueError
+            几何维数不是 3.
+        """
         gd = cls.geo_dimension(ctx)
         if gd != 3:
             raise ValueError(f"hexahedron geometry requires GD == 3, got {gd}")

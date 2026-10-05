@@ -1,7 +1,7 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/schema/polygon.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Variable-cardinality polygon entity Schema."""
+"""顶点数可变的多边形实体 Schema."""
 
 from dataclasses import dataclass
 
@@ -14,13 +14,11 @@ __all__ = ["PolygonSchema"]
 
 @dataclass(frozen=True, slots=True)
 class PolygonSchema(EntitySchema):
-    """Describe a linear polygon with a variable-size cyclic vertex ring.
+    """顶点环大小可变的线性多边形.
 
-    A polygon has no single fixed reference cell or fixed local-node layout.
-    Its sector connectivity therefore uses a flat vertex-index tensor and an
-    ``indptr`` tensor. Reference basis and reference-map operations are
-    intentionally unsupported; topology and physical geometry use the
-    concrete ragged sector directly.
+    多边形没有单一固定的参考单元, 也没有固定的局部节点布局, 因此其分区连接使用展平的
+    顶点编号张量加 ``indptr`` 张量. 参考基函数与参考映射有意不支持; 拓扑与物理几何直接
+    使用具体的变长分区.
     """
 
     type_id = "polygon"
@@ -34,24 +32,24 @@ class PolygonSchema(EntitySchema):
         return hash((type(self), self.descriptor))
 
     def validate_connectivity_counts(self, counts: Tensor) -> None:
-        """Require at least three vertices in every polygon cell."""
+        """要求每个多边形单元至少有三个顶点."""
         if bool(bm.any(counts < 3)):
             raise ValueError("polygon cells must contain at least three vertices")
 
     def number_of_vertices(self) -> int:
-        """Reject a fixed vertex count for the polygon family."""
+        """多边形族没有固定的顶点数, 调用即报错."""
         raise NotImplementedError("PolygonSchema has variable vertex cardinality")
 
     def number_of_nodes(self) -> int:
-        """Reject a fixed connectivity width for the polygon family."""
+        """多边形族没有固定的连接宽度, 调用即报错."""
         raise NotImplementedError("PolygonSchema has variable node cardinality")
 
     def local_vertices(self) -> tuple[int, ...]:
-        """Reject a fixed local vertex layout for the polygon family."""
+        """多边形族没有固定的局部顶点布局, 调用即报错."""
         raise NotImplementedError("PolygonSchema has a dynamic local vertex layout")
 
     def local_entity_groups(self, top_dim: int):
-        """Reject fixed local-entity tables for variable polygons."""
+        """可变多边形没有固定的局部实体表, 调用即报错."""
         if type(top_dim) is not int:
             raise TypeError("top_dim must be a plain integer")
         if top_dim < 0 or top_dim > self.top_dim:
@@ -61,23 +59,23 @@ class PolygonSchema(EntitySchema):
         )
 
     def vertex_permutations(self) -> tuple[tuple[int, ...], ...]:
-        """Reject fixed-width polygon permutations."""
+        """多边形没有定宽的顶点置换, 调用即报错."""
         raise NotImplementedError("PolygonSchema permutations are entity-dependent")
 
     def node_permutation(self, vertex_permutation: tuple[int, ...]) -> tuple[int, ...]:
-        """Reject fixed-width polygon node permutations."""
+        """多边形没有定宽的节点置换, 调用即报错."""
         raise NotImplementedError("PolygonSchema permutations are entity-dependent")
 
     @classmethod
     def local_entity(cls, tgt_name: str, /, indexing="o"):
-        """Reject fixed local-entity tables for variable polygons."""
+        """可变多边形没有固定的局部实体表, 调用即报错."""
         raise NotImplementedError(
             "PolygonSchema local entities depend on sector connectivity"
         )
 
     @classmethod
     def size(cls, ctx: EntityContext) -> int:
-        """Return the number of polygon cells in the ragged sector."""
+        """变长分区中多边形单元的个数."""
         if ctx.sector.indptr is None:
             raise ValueError("PolygonSchema requires sector.indptr")
         return int(ctx.sector.indptr.shape[0]) - 1
@@ -100,7 +98,7 @@ class PolygonSchema(EntitySchema):
 
     @classmethod
     def barycenter(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Return the arithmetic mean of each polygon's vertices."""
+        """各多边形顶点的算术平均."""
         counts, cell_ids = cls._cell_ids(ctx)
         points = ctx.block.positions[ctx.sector.indices]
         result = bm.zeros(
@@ -114,7 +112,7 @@ class PolygonSchema(EntitySchema):
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """Return unsigned polygon areas by the shoelace formula."""
+        """按鞋带公式计算的多边形面积 (无符号)."""
         if int(ctx.block.positions.shape[1]) != 2:
             raise ValueError("PolygonSchema area currently requires geo_dimension == 2")
         indptr = ctx.sector.indptr
@@ -143,12 +141,12 @@ class PolygonSchema(EntitySchema):
 
     @classmethod
     def geo_dimension(cls, ctx: EntityContext) -> int:
-        """Return the physical embedding dimension."""
+        """物理嵌入空间的维数."""
         return int(ctx.block.positions.shape[1])
 
     @classmethod
     def quadrature_formula(cls, q: int, qtype: str | None = "legendre", device=None):
-        """Return the triangle rule used on polygon fan subtriangles."""
+        """多边形扇形剖分的子三角形上所用的三角形积分公式."""
         if qtype != "legendre":
             raise ValueError(f"unsupported quadrature type: {qtype}")
         from ...quadrature import TriangleQuadrature
@@ -157,38 +155,49 @@ class PolygonSchema(EntitySchema):
 
     @classmethod
     def barycentric(cls, ctx, func, index):
+        """不支持: 多边形没有规范的重心坐标, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical barycentric coordinates")
 
     @classmethod
     def bc_to_point(cls, ctx, bcs, index):
+        """不支持: 多边形没有规范的参考映射, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical reference map")
 
     @classmethod
     def integral(cls, ctx, func, q, index):
+        """不支持: 组合积分应使用多边形网格的 ``integral``, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("use PolygonMesh.integral for composite integration")
 
     @classmethod
     def normal(cls, ctx, index):
+        """不支持: 二维版本未定义多边形单元的法向, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygon cell normals are not defined in the 2D release")
 
     @classmethod
     def tangent(cls, ctx, index):
+        """不支持: 多边形没有固定的切标架, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no fixed tangent frame")
 
     def shape_function(self, bcs):
+        """不支持: 多边形没有规范的几何基函数, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical geometry basis")
 
     def grad_shape_function_barycentric(self, bcs):
+        """不支持: 多边形没有规范的几何基函数, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical geometry basis")
 
     def grad_shape_function_reference(self, bcs):
+        """不支持: 多边形没有规范的几何基函数, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical geometry basis")
 
     def lagrange_basis_function(self, bcs, p):
+        """不支持: 多边形没有规范的 Lagrange 基函数, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical Lagrange basis")
 
     def grad_lagrange_basis_function_barycentric(self, bcs, p):
+        """不支持: 多边形没有规范的 Lagrange 基函数, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical Lagrange basis")
 
     def grad_lagrange_basis_function_reference(self, bcs, p):
+        """不支持: 多边形没有规范的 Lagrange 基函数, 调用即抛 ``NotImplementedError``."""
         raise NotImplementedError("polygons have no canonical Lagrange basis")
