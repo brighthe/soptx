@@ -155,3 +155,40 @@ def test_both_sides_of_a_face_see_the_same_trace(nx: int) -> None:
         f"内部面两侧取到的迹不一致 (最大偏差 {deviation:.3e}), "
         "面积分点未对齐, 跳量装配会退化为非跳量形式"
     )
+
+
+def test_vector_jump_boundary_trace_with_sign_change() -> None:
+    """边界面上 vector_jump 罚项等于迹的平方积分 sum_F h_F^{-1} int_F |w|^2 ds.
+
+    位移取 P2 间断空间, 基函数在面上变号; 曾对边界面的基函数逐项取绝对值, 此时
+    罚项偏离. 场在边界上也取正负两种值, 使比较不依赖迹的符号.
+    """
+    bm.set_backend("numpy")
+    mesh = TriangleMesh.from_box([0.0, 1.0, 0.0, 1.0], nx=3, ny=3)
+    scalar_space = LagrangeFESpace(mesh, p=2, ctype="D")
+    space = TensorFunctionSpace(scalar_space=scalar_space, shape=(-1, 2))
+
+    def field(points):
+        x, y = points[..., 0], points[..., 1]
+        return bm.stack(((x - 0.5) ** 2 - 0.1, x * y - 0.2), axis=-1)
+
+    face2cell = mesh.face_to_cell()
+    boundary = bm.nonzero(face2cell[:, 0] == face2cell[:, 1])[0]
+    form = BilinearForm(space)
+    form.add_integrator(JumpPenaltyIntegrator(q=6, threshold=boundary, method="vector_jump"))
+    matrix = form.assembly(format="csr", method="coalesce").to_scipy()
+    uh = bm.to_numpy(space.interpolate(field)[:])
+
+    # 直接按 3 点 Gauss 公式积分 (|w|^2 为 4 次多项式, 积分精确)
+    node = bm.to_numpy(mesh.entity("node"))
+    edge = bm.to_numpy(mesh.entity("face"))[bm.to_numpy(boundary)]
+    t, w = np.polynomial.legendre.leggauss(3)
+    t, w = 0.5 * (t + 1.0), 0.5 * w
+    x0, x1 = node[edge[:, 0]], node[edge[:, 1]]
+    length = np.linalg.norm(x1 - x0, axis=-1)
+    points = x0[:, None, :] + t[None, :, None] * (x1 - x0)[:, None, :]
+    values = bm.to_numpy(field(bm.tensor(points)))
+    trace_squared = np.einsum("q, fqd, fqd -> f", w, values, values) * length  # int_F |w|^2 ds
+    expected = np.sum(trace_squared / length)  # 二维 h_F 即边长
+
+    assert uh @ (matrix @ uh) == pytest.approx(expected, rel=1e-12)

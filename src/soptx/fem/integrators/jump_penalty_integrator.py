@@ -332,7 +332,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         cell2face = mesh.cell_to_face()
         # 单元内局部面的局部取向是否与该全局面的全局取向一致
-        cell2facesign = self._cell_to_face_sign(mesh)      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
+        cell2facesign = self._cell_to_face_sign(mesh)      # (NC, TD+1)  True: 全局面法向指向本单元外侧, 即左侧 (w^+); False: 右侧 (w^-)
         ldof = space.number_of_local_dofs()
 
         # 内部面 F 上, 基函数 w^+ 来自 L 侧单元, w^- 来自 R 侧单元
@@ -526,7 +526,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         cell2face = mesh.cell_to_face()               # (NC, TD+1)
         # 单元内局部面的局部取向是否与该全局面的全局取向一致
-        cell2facesign = self._cell_to_face_sign(mesh)      # (NC, TD+1)  True: "右/正" 侧; False: "左/负" 侧
+        cell2facesign = self._cell_to_face_sign(mesh)      # (NC, TD+1)  True: 全局面法向指向本单元外侧, 即左侧 (w^+); False: 右侧 (w^-)
         ldof = space.number_of_local_dofs()
 
         val_all = bm.zeros((NF, NQ, 2*ldof, GD), dtype=bm.float64) 
@@ -552,10 +552,9 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         val = val_all[index] # (NF[index], NQ, 2*LDOF, GD)
 
-        boundary_indices_in_val = bm.nonzero(~is_internal_flag)[0]
-        # 对于边界面, 跳量是迹本身即 [w] = w, 边界面值为 [-φ, 0] 或 [0, +φ]
-        if len(boundary_indices_in_val) > 0:
-            val[boundary_indices_in_val] = bm.abs(val[boundary_indices_in_val])
+        # 边界面上跳量即迹本身 [w] = w, 而这里只填了 [-φ, 0] 或 [0, +φ] 中的一侧.
+        # 罚项对 val 是二次的, 整体符号不影响结果, 故无需翻转; 不能逐项取绝对值,
+        # 否则基函数在面上变号时 (p >= 2) 结果出错
 
         return ws, val, hF, fm
 

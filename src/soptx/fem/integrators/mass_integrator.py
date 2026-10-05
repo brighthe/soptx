@@ -37,13 +37,8 @@ class MassIntegrator(LinearInt, OpInt, CellInt):
 
     @enable_cache
     def to_global_dof(self, space: _FS) -> TensorLike:
-        """单元到全局自由度的映射 ``space.cell_to_dof()``.
-
-        Notes
-        -----
-        返回全体单元的映射, 不按 ``index`` 截取.
-        """
-        return space.cell_to_dof()
+        """``index`` 选中单元到全局自由度的映射, 形状 ``(NC, ldof)``."""
+        return space.cell_to_dof()[self.index]
 
     @enable_cache
     def fetch(self, space: _FS):
