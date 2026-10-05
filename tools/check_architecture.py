@@ -46,8 +46,10 @@ LEGACY_ROOTS = {
     "utils",
 }
 
-# 主题目录隔离: examples/ 与 experiments/ 的各主题目录不得互相 import.
+# 主题目录隔离: 同一父目录下的各主题目录不得互相 import; 跨父目录只允许
+# experiments/ 以包式 import 复用 examples/ 中已验证的流水线, 反向禁止.
 TOPIC_PARENTS = ("examples", "experiments")
+ALLOWED_CROSS_PARENT = {("experiments", "examples")}
 TOPIC_SKIP_PARTS = {"__pycache__", "legacy", "old"}
 # 已声明的外部依赖根, 不参与同名模块的越界判定.
 THIRD_PARTY_ROOTS = {
@@ -113,7 +115,11 @@ def absolute_imports(tree: ast.AST) -> set[str]:
 
 
 def topic_isolation_errors() -> list[str]:
-    """主题目录之间不得互相 import: 检查跨主题的模块名越界."""
+    """主题目录之间不得互相 import: 检查跨主题的模块名越界.
+
+    同一父目录下的主题互相禁止; ``experiments`` 可以包式 import ``examples``,
+    ``examples`` 不得 import ``experiments``.
+    """
     errors: list[str] = []
     for parent in TOPIC_PARENTS:
         base = REPOSITORY_ROOT / parent
@@ -153,10 +159,11 @@ def topic_isolation_errors() -> list[str]:
                 for name in sorted(absolute_imports(tree)):
                     parts = name.split(".")
                     if parts[0] in TOPIC_PARENTS:
-                        # 包式 import 允许指向本主题自身, 禁止指向其他主题.
+                        # 包式 import 允许指向本主题自身, 以及 ALLOWED_CROSS_PARENT
+                        # 所列方向的另一父目录主题, 禁止指向同级其他主题.
                         if len(parts) < 2 or (
                             parts[0] == parent and parts[1] == topic.name
-                        ):
+                        ) or (parent, parts[0]) in ALLOWED_CROSS_PARENT:
                             continue
                         errors.append(
                             f"{relative}: imports '{name}' from another "
