@@ -175,7 +175,7 @@ class Integrator(metaclass=VariantMeta):
                 raise RuntimeError("etype of Integrator should be specified to detect "
                 "the number of entities when region is `None`.")
             else:
-                return mesh.count(self.etype)
+                return mesh.entity(self.etype).shape[0]
         else:
             if callable(self._region):
                 full_region = self._region(mesh)

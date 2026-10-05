@@ -206,7 +206,8 @@ class MaterialInterpolationScheme(BaseLogged):
 
             elif self._density_location in ['node']:
                 # rho_val.shape = (NN, )
-                qf = self._mesh.quadrature_formula(q=integration_order)
+                density_mesh = rho_val.space.mesh
+                qf = density_mesh.quadrature_formula(q=integration_order)
                 bcs, ws = qf.get_quadrature_points_and_weights()
                 rho_q = rho_val(bcs) # (NC, NQ)
                 E_rho = rho_q[:] ** penalty_factor * E0
@@ -311,7 +312,11 @@ class MaterialInterpolationScheme(BaseLogged):
                 dE_rho = p * rho_element[:] ** (p - 1) * E0
 
             elif self._density_location in ['node']:
-                rho_q = rho_val[:] # (NC, NQ)
+                # rho_val.shape = (NN, ), 与 interpolate_material 一样先在积分点处求值
+                density_mesh = rho_val.space.mesh
+                qf = density_mesh.quadrature_formula(q=integration_order)
+                bcs, ws = qf.get_quadrature_points_and_weights()
+                rho_q = rho_val(bcs) # (NC, NQ)
                 dE_rho = p * rho_q[:] ** (p - 1) * E0
             
             elif self._density_location in ['element_multiresolution']:

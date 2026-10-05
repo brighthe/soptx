@@ -104,12 +104,12 @@ class VolumeConstraint(BaseLogged):
                 cell_measure = self._mesh.entity_measure('cell')
                 dg_e = bm.einsum('q, c, ql -> cl', ws, cell_measure, phi) / self._v0 # (NC, NCN)
             elif isinstance(self._mesh, TensorMesh):
-                J = self._mesh.jacobi_matrix(bcs)    # (NC, NQ, GD, GD)
+                J = self._mesh.entity_view('cell').jacobi_matrix(bcs)    # (NC, NQ, GD, GD)
                 detJ = bm.abs(bm.linalg.det(J))      # (NC, NQ)
                 dg_e = bm.einsum('q, cq, ql -> cl', ws, detJ, phi) / self._v0    # (NC, NCN)
 
             NN = self._mesh.number_of_nodes()
-            cell2node = self._mesh.cell_to_node() # (NC, NCN)
+            cell2node = self._mesh.cell # (NC, NCN)
 
             dg = bm.zeros((NN, ), dtype=bm.float64, device=self._mesh.device) # (NN, )
             dg = bm.add_at(dg, cell2node.reshape(-1), dg_e.reshape(-1)) # (NN, )

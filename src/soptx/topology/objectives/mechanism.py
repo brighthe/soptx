@@ -106,7 +106,7 @@ class CompliantMechanismObjective(BaseLogged):
                 dc_e = bm.einsum('ci, clij, cj -> cl', lambdahe, diff_KE, uhe) # (NC, NCN)
 
                 mesh = space_uh.mesh
-                cell2node = mesh.cell_to_node() # (NC, NCN)
+                cell2node = mesh.cell # (NC, NCN)
                 NN = mesh.number_of_nodes()
                 dc = bm.zeros((NN, ), dtype=uhe.dtype, device=uhe.device) # (NN, )
                 dc = bm.add_at(dc, cell2node.reshape(-1), dc_e.reshape(-1))

@@ -110,10 +110,23 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         return 2.0 * m_left * m_right / safe
 
     def _cell_to_face_sign(self, mesh):
-        """FEALPy 4.0.0 二维下 face 即 edge, 接口名为 cell_to_edge_sign."""
+        """单元局部面的取向是否与全局面一致, 形状 ``(NC, TD+1)``.
+
+        二维下 face 即 edge, 用网格的 ``cell_to_edge_sign``. 其值与 "全局面法向指向
+        本单元外侧" 逐项相同, 可按此几何判据推广到三维; 但目前没有三维 Hu--Zhang 制造解
+        可验证三维跳量稳定化的收敛阶, 故三维先明确拒绝, 不给出未经验证的结果.
+
+        Raises
+        ------
+        NotImplementedError
+            网格拓扑维数不是 2.
+        """
         if mesh.top_dimension() == 2:
             return mesh.cell_to_edge_sign()
-        return mesh.cell_to_face_sign()
+        raise NotImplementedError(
+            "三维跳量稳定化尚未实现: 网格缺少 cell_to_face_sign, 且尚无三维算例验证. "
+            "三维 Hu--Zhang 请取 p >= 4 (原生稳定) 或 stabilization='none'"
+        )
 
     def _oriented_cell_basis(self, space: _FS, bcs: TensorLike, i: int) -> TensorLike:
         """把面上的积分点按各单元自身的局部面定向映入单元, 再取基函数值.

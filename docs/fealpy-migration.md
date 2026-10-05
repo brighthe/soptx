@@ -161,8 +161,13 @@
   `tests/unit/test_interpolation_points_backend.py`）。
 - 移植代码的英文 docstring 欠账（`PORTED_ROOTS`，约 596 处缺失），按子包补齐后移出豁免表。
 - ~~Form 过渡基类~~（已随 2.1 完成）。
-- 调用网格上不存在的方法：`huzhang_fe_space_2d.py:1080`、`lagrange_fe_space.py:192-216, 299`、
-  `fem/utils.py:40-54`。
+- ~~调用网格上不存在的方法~~（已处理）。全仓扫描 `*mesh*.<方法>(` 后共 11 类：无调用方的
+  （`hess_basis`、`cell_basis_on_face`、`prolongation_matrix`、`project_solution_to_finer_mesh`、
+  `HuZhangBoundarySourceIntegrator`）已删除；节点密度链路的 `cell_to_node`、`jacobi_matrix`
+  已改用 `mesh.cell` 与 `entity_view('cell').jacobi_matrix`，连带修复插值格式 SIMP 节点分支的
+  两处缺陷，有限差分测试 `tests/unit/test_node_density.py` 覆盖；`mesh.count` 已改用
+  `mesh.entity`。三维跳量稳定化、`splitter` 分块装配、`save_optimization_history` 三项转记
+  known-issues。
 - `fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` 源自 FEALPy 但文件头未注明来源。
 
 ### 2.3 移植前已存在的 CI 问题（与移植无关）

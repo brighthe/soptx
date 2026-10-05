@@ -61,7 +61,9 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 | 问题 | 位置 | 来源 | 根因与影响 | 修法 | 状态 |
 |---|---|---|---|---|---|
 | 移植代码的 docstring 为英文且大量缺失 | `tools/check_comment_style.py` 的 `PORTED_ROOTS` 所列路径 | 移植原样保留 | 豁免前约 596 处缺 docstring、16 处全角标点；豁免使其暂不计入棘轮，基线数字不放松 | 按子包补中文 numpydoc，补齐后从 `PORTED_ROOTS` 移出 | 未修 |
-| 调用网格上不存在的方法 | `topology/objectives/compliance.py:170`、`mechanism.py:109`、`topology/constraints/volume.py:107, 112`、`topology/optimizers/utils.py:379`（`mesh.cell_to_node`、`mesh.jacobi_matrix`）；`fem/integrators/jump_penalty_integrator.py:116`（`mesh.cell_to_face_sign`）；`fem/integrator.py:178`（`mesh.count`） | v0.4 网格重写后上游即已悬空，移植未使其变差 | 前两项使 `density_location='node'` 不可用；第三项使 3D 低阶 Hu--Zhang 跳量稳定化不可用；第四项只在 `add_integrator(splitter=<int>)` 时触发。无调用方的悬空代码（`hess_basis`、`cell_basis_on_face`、`prolongation_matrix`、`project_solution_to_finer_mesh`、`HuZhangBoundarySourceIntegrator`）已删除 | 节点密度改用 `mesh.cell` 与 `entity_view('cell').jacobi_matrix`；3D 跳量稳定化明确报错；`mesh.count` 改用 `mesh.entity(etype)` | 未修 |
+| 三维跳量稳定化未实现 | `fem/integrators/jump_penalty_integrator.py` 的 `_cell_to_face_sign` | 原调用 v0.4 网格已不存在的 `mesh.cell_to_face_sign` | 三维低阶（$p \le 3$）Hu--Zhang 默认的跳量稳定化不可用，现明确抛 `NotImplementedError`；$p \ge 4$ 或 `stabilization='none'` 不受影响。二维的 `cell_to_edge_sign` 与「全局面法向指向本单元外侧」逐项相同，可按此判据推广，但尚无三维制造解验证收敛阶 | 有三维 Hu--Zhang 算例后按几何判据实现并验证收敛阶 | 未修 |
+| `Form` 的 `splitter` 分块装配不可用 | `fem/form.py` 的 `UniformSplitter` 与 `_assembly_kernel` | FEALPy 的分块接口，SOPTX 积分子未实现 | `add_integrator(splitter=...)` 会以 `indices=` 调用积分子的 `assembly`，SOPTX 的积分子均不接受该参数，报 `TypeError`；仓库内无人使用。`Integrator.size` 中的 `mesh.count` 已改为 `mesh.entity(etype)` | 需要分块装配时为积分子补 `indices` 参数，或删除该接口 | 未修 |
+| 优化历史 VTK 导出调用网格上不存在的接口 | `postprocess/optimization_history.py` 的 `save_optimization_history` | v0.4 网格重写后上游即已悬空 | 调用 `mesh.celldata` 与 `mesh.to_vtk`，走到即 `AttributeError`；仓库内无调用方 | 删除，或改用 `soptx.mesh.write_mesh_to_vtu` | 未修 |
 | `fem/distributed/` 中源自 FEALPy 的文件未注明来源 | `fem/distributed/mesh.py`、`entity_mpi.py`、`space.py` | 早于本次移植（`abd0945`） | 与 fork `fealpy/distributed/` 逐行比对高度相似，`THIRD_PARTY_NOTICES.md` 已登记 | 文件头补来源说明 | 未修 |
 
 ## 记账约定

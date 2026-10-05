@@ -143,7 +143,7 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
             # shape: (NN, )
             cm = self._design_mesh.entity_measure('cell')
             NN = self._design_mesh.number_of_nodes()
-            cell2node = self._design_mesh.cell_to_node()
+            cell2node = self._design_mesh.cell
             NNE = cell2node.shape[1]
 
             # 将单元测度均分给每个节点
@@ -273,7 +273,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
             # shape: (NN, )
             cm = self._design_mesh.entity_measure('cell')
             NN = self._design_mesh.number_of_nodes()
-            cell2node = self._design_mesh.cell_to_node()
+            cell2node = self._design_mesh.cell
             NNE = cell2node.shape[1]
 
             # 将单元测度均分给每个节点

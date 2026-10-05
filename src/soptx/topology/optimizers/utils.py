@@ -376,7 +376,7 @@ def compute_volume(
             current_volume = bm.einsum('q, cq, c -> ', ws, rho_q, cm)
         
         elif isinstance(mesh, TensorMesh):
-            J = mesh.jacobi_matrix(bcs)
+            J = mesh.entity_view('cell').jacobi_matrix(bcs)
             detJ = bm.abs(bm.linalg.det(J))
             current_volume = bm.einsum('q, cq, cq -> ', ws, rho_q, detJ)
 
