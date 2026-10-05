@@ -239,14 +239,16 @@ def hstack(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
 def bmat(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
     """由二维块列表组装分块稀疏矩阵, 用法仿 ``scipy.sparse.bmat``.
 
+    各块先转为 COO, 按块行、块列偏移索引后拼接, 再按需转为 CSR. 不改写调用方的块列表.
+
     Parameters
     ----------
     blocks : list of list of SparseTensor or None
-        二维块列表, None 表示零块.
+        二维块列表, None 表示零块; 每个块行与块列至少有一个非 None 的块.
     format : {'csr', 'coo'}, optional
-        结果格式, 默认 'csr'.
+        结果格式, 默认 'csr'; 其他取值返回 COO.
     dtype : dtype, optional
-        结果的数值类型.
+        结果的数值类型, 默认沿用各块的类型.
 
     Returns
     -------
@@ -256,15 +258,10 @@ def bmat(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
     Raises
     ------
     ValueError
-        ``blocks`` 为空、不是二维列表, 或同一块行/块列的维数不一致.
-
-    Notes
-    -----
-    含 None 块时按 COO 统一组装, 结果正确. 不含 None 时走另一条路径, 有误:
-    单块行 (``1 x N``) 返回的是列表; 单块列 (``M x 1``, ``M > 1``) 只返回第一个块,
-    且不报错. 仓库内的调用都含 None 块.
+        ``blocks`` 为空或不是二维列表, 全为 None, 某个块行或块列全为 None, 或同一块行
+        (块列) 中各块的行数 (列数) 不一致.
     """
-    if not isinstance(blocks, list) or not blocks: 
+    if not isinstance(blocks, list) or not blocks:
         raise ValueError('Blocks cannot be empty.')
 
     if not all(isinstance(item, list) for item in blocks):
@@ -275,71 +272,70 @@ def bmat(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
 
     M = len(blocks)
     N = len(blocks[0])
+    if any(len(row) != N for row in blocks):
+        raise ValueError('Blocks must be 2-D')
 
-    if all(None not in blocks[b] for b in range(M)):
-        if N > 1:
-            blocks = [[hstack(blocks[b], format=format, dtype=dtype) for b in range(M)]]
-        if M > 1:
-            A = vstack(blocks[0], format=format, dtype=dtype)
-        else:
-            A = blocks[0]
-        if dtype is not None:
-            A = A.astype(dtype)
-        return A
+    coo = [[None if block is None else block.tocoo() for block in row] for row in blocks]
 
-    ii = []
-    jj = []
-    nnz = 0
+    row_lengths: list[Optional[int]] = [None] * M
+    col_lengths: list[Optional[int]] = [None] * N
+    first = None
     for i in range(M):
         for j in range(N):
-            if blocks[i][j] is not None:
-                if nnz == 0:
-                    kwargs1 = bm.context(blocks[i][j].crow)
-                    kwargs2 = bm.context(blocks[i][j].values)
-                    brow_lengths = bm.zeros(M, **kwargs1)
-                    bcol_lengths = bm.zeros(N, **kwargs1)
-                nnz = nnz + blocks[i][j].nnz
+            A = coo[i][j]
+            if A is None:
+                continue
+            if first is None:
+                first = A
+            nrow, ncol = (int(n) for n in A.sparse_shape)
+            if row_lengths[i] is None:
+                row_lengths[i] = nrow
+            elif row_lengths[i] != nrow:
+                raise ValueError(f'blocks[{i},:] has incompatible row dimensions. '
+                                 f'Got blocks[{i},{j}].shape[0] == {nrow}, '
+                                 f'expected {row_lengths[i]}.')
+            if col_lengths[j] is None:
+                col_lengths[j] = ncol
+            elif col_lengths[j] != ncol:
+                raise ValueError(f'blocks[:,{j}] has incompatible column dimensions. '
+                                 f'Got blocks[{i},{j}].shape[1] == {ncol}, '
+                                 f'expected {col_lengths[j]}.')
 
-                A = blocks[i][j].tocoo()
-                blocks[i][j] = A
-                if brow_lengths[i] == 0:
-                    brow_lengths[i] = A._spshape[0]
-                elif brow_lengths[i] != A._spshape[0]:
-                    msg = (f'blocks[{i},:] has incompatible row dimensions. '
-                           f'Got blocks[{i},{j}].shape[0] == {A._spshape[0]}, '
-                           f'expected {brow_lengths[i]}.')
-                    raise ValueError(msg)
-                ii.append(i)
-                jj.append(j)
-                if bcol_lengths[j] == 0:
-                    bcol_lengths[j] = A._spshape[1]
-                elif bcol_lengths[j] != A._spshape[1]:
-                    msg = (f'blocks[:,{j}] has incompatible column '
-                           f'dimensions. '
-                           f'Got blocks[{i},{j}].shape[1] == {A._spshape[1]}, '
-                           f'expected {bcol_lengths[j]}.')
-                    raise ValueError(msg)
+    if first is None:
+        raise ValueError('blocks 全为 None, 至少需要一个非 None 的块')
+    for i, n in enumerate(row_lengths):
+        if n is None:
+            raise ValueError(f'blocks[{i},:] 全为 None, 无法确定该块行的行数')
+    for j, n in enumerate(col_lengths):
+        if n is None:
+            raise ValueError(f'blocks[:,{j}] 全为 None, 无法确定该块列的列数')
 
-    row_offsets = bm.concat((bm.tensor([0], **kwargs1), bm.cumsum(brow_lengths, axis=0)))
-    col_offsets = bm.concat((bm.tensor([0], **kwargs1), bm.cumsum(bcol_lengths, axis=0)))
+    row_offsets = [0]
+    for n in row_lengths:
+        row_offsets.append(row_offsets[-1] + n)
+    col_offsets = [0]
+    for n in col_lengths:
+        col_offsets.append(col_offsets[-1] + n)
 
-    shape = (row_offsets[-1], col_offsets[-1])
+    itype = first.itype
+    indices_list = []
+    values_list = []
+    for i in range(M):
+        for j in range(N):
+            A = coo[i][j]
+            if A is None:
+                continue
+            row = bm.astype(A.row, itype) + row_offsets[i]
+            col = bm.astype(A.col, itype) + col_offsets[j]
+            indices_list.append(bm.stack((row, col), axis=0))
+            values_list.append(A.values)
 
-    data = bm.empty(nnz, **kwargs2)
-    row = bm.empty(nnz, **kwargs1)
-    col = bm.empty(nnz, **kwargs1)
+    indices = bm.concat(indices_list, axis=1)
+    values = bm.concat(values_list, axis=-1)
+    if dtype is not None:
+        values = bm.astype(values, dtype)
 
-    nnz = 0
-    for i, j in zip(ii, jj):
-        B = blocks[i][j]
-        idx = slice(nnz, nnz + B.nnz)
-        data[idx] = B.data
-        row[idx] = bm.add(B.row, row_offsets[i])
-        col[idx] = bm.add(B.col, col_offsets[j])
-        nnz += B.nnz
-    indices = bm.stack((row, col), axis=0)
-    A = COOTensor(indices, data, spshape=shape)
-
+    A = COOTensor(indices, values, spshape=(row_offsets[-1], col_offsets[-1]))
     if format == 'csr':
         return A.tocsr()
     return A

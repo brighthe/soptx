@@ -277,8 +277,8 @@ class COOTensor(SparseTensor):
     @overload
     def reshape(self, *shape: int) -> 'COOTensor': ...
     def reshape(self, *shape) -> 'COOTensor':
-        """改变稀疏维形状. 尚未实现: 函数体为空, 返回 None."""
-        pass
+        """改变稀疏维形状. 尚未实现, 调用即抛 ``NotImplementedError``; 展平可用 ``ravel``."""
+        raise NotImplementedError("COOTensor.reshape 尚未实现, 展平可用 ravel()")
 
     def ravel(self):
         """把稀疏维展平为一维, 共享 ``values``."""

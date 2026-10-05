@@ -342,16 +342,16 @@ class CSRTensor(SparseTensor):
     @overload
     def reshape(self, *shape: int) -> 'CSRTensor': ...
     def reshape(self, *shape) -> 'CSRTensor':
-        """改变形状. 尚未实现: 函数体为空, 返回 None."""
-        pass
+        """改变形状. 尚未实现, 调用即抛 ``NotImplementedError``; 需要时先 ``tocoo``."""
+        raise NotImplementedError("CSRTensor.reshape 尚未实现")
 
     def ravel(self) -> 'CSRTensor':
-        """展平稀疏维. 尚未实现: 函数体为空, 返回 None."""
-        pass
+        """展平稀疏维. 尚未实现, 调用即抛 ``NotImplementedError``; 可用 ``tocoo().ravel()``."""
+        raise NotImplementedError("CSRTensor.ravel 尚未实现, 可用 tocoo().ravel()")
 
     def flatten(self) -> 'CSRTensor':
-        """展平稀疏维并复制. 尚未实现: 函数体为空, 返回 None."""
-        pass
+        """展平稀疏维并复制. 尚未实现, 调用即抛 ``NotImplementedError``; 可用 ``tocoo().flatten()``."""
+        raise NotImplementedError("CSRTensor.flatten 尚未实现, 可用 tocoo().flatten()")
 
     @property
     def T(self):
@@ -551,17 +551,15 @@ class CSRTensor(SparseTensor):
 
         Raises
         ------
+        NotImplementedError
+            ``other`` 为 CSR 矩阵 (尚未实现).
         ValueError
             模式矩阵乘以数.
         TypeError
             ``other`` 的类型不受支持.
-
-        Notes
-        -----
-        与 CSR 矩阵相乘的分支尚未实现, 函数体为空, 会静默返回 None.
         """
         if isinstance(other, CSRTensor):
-            pass
+            raise NotImplementedError("CSRTensor 之间的逐元素乘法尚未实现")
 
         elif isinstance(other, TensorLike):
             check_shape_match(self.shape, other.shape)
@@ -717,24 +715,6 @@ class CSRTensor(SparseTensor):
         """
         diags_loc = (self.row) == self.col
         return self.partial(diags_loc)
-
-    def col_min(self):
-        """各列非零元的最小值.
-
-        Returns
-        -------
-        TensorLike
-            形状 ``(ncol, )``.
-
-        Notes
-        -----
-        结果以 0 为初值, 全为正值的列返回 0; 依赖 numpy 的 ``minimum.at``,
-        其他后端不可用.
-        """
-        M = bm.zeros(self._spshape[1], dtype=self._values.dtype)
-        bm.minimum.at(M, self._col, self._values)
-        
-        return M
 
     def __getitem__(self, index):
         if isinstance(index, Tuple):
