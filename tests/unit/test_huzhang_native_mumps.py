@@ -10,7 +10,8 @@ from __future__ import annotations
 import pytest
 
 from soptx.backend import backend_manager as bm
-from soptx.fem import HuZhangMFEMAnalyzer, create_huzhang_checkerboard_mesh
+from soptx.fem import HuZhangMFEMAnalyzer
+from soptx.mesh import create_huzhang_checkerboard_mesh
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import MixedBoundarySinusoidalElasticity2D
 
