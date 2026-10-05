@@ -26,7 +26,7 @@ src/soptx/mesh/
 └── structured_triangle.py           ← 与角点松弛兼容的结构网格生成器
 ```
 
-两个空间类都实现 DOF 枚举、`basis` 与 `div_basis`；`huzhang_fe_space_2d.py` 另外提供角点松弛变换矩阵 `TM` 的构造。应力空间只依赖网格与 `soptx.functionspace` 的基类，与 Lagrange 空间同放在 `soptx.functionspace` 下；结构网格生成器只构造 `TriangleMesh`、不依赖任何应力空间对象，因此独立放在 `soptx.mesh` 下。`soptx.fem` 与 `soptx.fem.spaces` 保留了向后兼容的导入别名。
+两个空间类都实现 DOF 枚举、`basis` 与 `div_basis`；`huzhang_fe_space_2d.py` 另外提供角点松弛变换矩阵 `TM` 的构造。应力空间只依赖网格与 `soptx.functionspace` 的基类，与 Lagrange 空间同放在 `soptx.functionspace` 下；结构网格生成器只构造 `TriangleMesh`、不依赖任何应力空间对象，因此独立放在 `soptx.mesh` 下。原 `soptx.fem` 与 `soptx.fem.spaces` 中的转发别名已在 `1.2` 删除。
 
 ### 核心类关系
 

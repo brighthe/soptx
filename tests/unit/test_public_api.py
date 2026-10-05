@@ -27,9 +27,22 @@ def test_stable_subpackage_imports() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["analysis", "interpolation", "model", "optimization", "regularization", "utils"]
+    "name",
+    ["analysis", "interpolation", "model", "optimization", "regularization", "utils", "fem.spaces"],
 )
 def test_removed_compatibility_namespaces(name: str) -> None:
-    """1.1.x 的兼容路径在 1.2 起删除, 不得重新出现."""
+    """1.1.x 的兼容路径与 fem.spaces 转发在 1.2 起删除, 不得重新出现."""
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(f"soptx.{name}")
+
+
+def test_fem_no_longer_reexports_moved_objects() -> None:
+    """Hu-Zhang 空间与结构网格生成器只从定义处导出, soptx.fem 不再转发."""
+    import soptx.fem
+
+    for name in (
+        "HuZhangFESpace",
+        "create_huzhang_checkerboard_mesh",
+        "create_huzhang_symmetric_single_diagonal_mesh",
+    ):
+        assert not hasattr(soptx.fem, name)

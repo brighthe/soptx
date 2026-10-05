@@ -27,6 +27,8 @@ from soptx.typing import TensorLike
 
 from soptx.fem import (
     HuZhangMFEMAnalyzer,
+)
+from soptx.mesh import (
     create_huzhang_checkerboard_mesh,
 )
 from soptx.materials import IsotropicLinearElasticMaterial

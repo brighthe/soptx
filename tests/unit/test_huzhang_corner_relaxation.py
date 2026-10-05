@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 
 from soptx.backend import backend_manager as bm
-from soptx.mesh import TriangleMesh
-
-from soptx.fem import (
+from soptx.mesh import (
+    TriangleMesh,
     create_huzhang_checkerboard_mesh,
     create_huzhang_symmetric_single_diagonal_mesh,
 )
+
 from soptx.functionspace import HuZhangFESpace
 
 

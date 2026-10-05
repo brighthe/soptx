@@ -8,11 +8,10 @@ solve path rather than attribute presence.
 from __future__ import annotations
 
 from soptx.backend import backend_manager as bm
-from soptx.mesh import TriangleMesh
+from soptx.mesh import TriangleMesh, create_huzhang_checkerboard_mesh
 
 from soptx.fem import (
     HuZhangMFEMAnalyzer,
-    create_huzhang_checkerboard_mesh,
 )
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import (

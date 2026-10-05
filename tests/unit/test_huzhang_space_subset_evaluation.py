@@ -15,7 +15,7 @@ import pytest
 
 from soptx.backend import backend_manager as bm
 
-from soptx.fem import create_huzhang_checkerboard_mesh
+from soptx.mesh import create_huzhang_checkerboard_mesh
 from soptx.functionspace import HuZhangFESpace
 
 

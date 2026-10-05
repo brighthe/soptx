@@ -25,9 +25,11 @@ from soptx.typing import TensorLike
 from soptx.fem import (
     HuZhangMFEMAnalyzer,
     LagrangeFEMAnalyzer,
+    project_patch_traction_to_p1_trace,
+)
+from soptx.mesh import (
     create_huzhang_checkerboard_mesh,
     create_huzhang_symmetric_single_diagonal_mesh,
-    project_patch_traction_to_p1_trace,
 )
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import (

@@ -27,8 +27,10 @@ from soptx.fem import (
     HuZhangMFEMAnalyzer,
     LagrangeFEMAnalyzer,
     P1TraceLoad,
-    create_huzhang_checkerboard_mesh,
     project_patch_traction_to_p1_trace,
+)
+from soptx.mesh import (
+    create_huzhang_checkerboard_mesh,
 )
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import FixedFixedBeamCenterLoad2d
