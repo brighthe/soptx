@@ -129,8 +129,8 @@ class VolumeConstraint(BaseLogged):
                             **kwargs
                         ) -> TensorLike:
         """使用自动微分技术计算体积约束函数关于物理密度的梯度 (归一化)"""
-        if bm.backend_name not in ['pytorch', 'jax']:
-            self._log_error(f"自动微分仅在 pytorch 或者 jax 后端下有效")
+        if bm.backend_name != 'pytorch':
+            self._log_error(f"自动微分仅在 pytorch 后端下有效")
 
         if self._density_location == 'element':
             # density.shape = (NC, )

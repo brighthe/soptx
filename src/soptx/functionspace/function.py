@@ -44,10 +44,7 @@ class Function(Generic[_FS]):
         return self.array[index]
 
     def __setitem__(self, index: Index, value: TensorLike):
-        if bm.backend_name == 'jax':
-            self.array = self.array.at[index].set(value)
-        else:
-            self.array[index] = value
+        self.array[index] = value
 
     def __getattr__(self, item: str):
         if item in {'space', 'array', 'coordtype'}:
