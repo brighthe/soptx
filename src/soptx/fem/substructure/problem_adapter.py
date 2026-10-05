@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 
 from soptx.backend import backend_manager as bm
 from soptx.decorator import cartesian
-from soptx.fem._linear_form_base import LinearForm
+from soptx.fem.linear_form import LinearForm
 
 from soptx.fem.integrators import (
     LagrangeBoundarySourceIntegrator,

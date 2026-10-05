@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import torch
 from soptx.backend import backend_manager as bm
-from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.fem.bilinear_form import BilinearForm
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
 from soptx.sparse import CSRTensor
@@ -47,7 +47,7 @@ def reset_backend():
     ],
 )
 def test_csr_pattern_numpy_equivalence(mesh_factory, hypo, dim):
-    """测试 NumPy 后端下模式先行装配与 FEALPy coalesce 产物的严格等价性."""
+    """测试 NumPy 后端下模式先行装配与 coalesce 路线产物的严格等价性."""
     bm.set_backend("numpy")
     mesh = mesh_factory()
     space = LagrangeFESpace(mesh, p=1)
@@ -59,23 +59,23 @@ def test_csr_pattern_numpy_equivalence(mesh_factory, hypo, dim):
     integrator = LinearElasticIntegrator(material=mat, method="fast")
     K_e = integrator.assembly(tspace)
 
-    # 1. FEALPy 传统装配基准
+    # 1. coalesce 路线基准
     bform = BilinearForm(tspace)
     bform.add_integrator(integrator)
-    K_fealpy = bform.assembly()
+    K_coalesce = bform.assembly(method="coalesce")
 
     # 2. 模式先行装配
     pattern = build_csr_pattern(tspace)
     K_pattern = assemble_csr(K_e, pattern)
 
     assert isinstance(K_pattern, CSRTensor)
-    assert K_pattern.sparse_shape == K_fealpy.sparse_shape
+    assert K_pattern.sparse_shape == K_coalesce.sparse_shape
 
     # 3. 数值误差校验 (稠密与非零元)
-    K_dense_fealpy = bm.to_numpy(K_fealpy.to_dense())
+    K_dense_coalesce = bm.to_numpy(K_coalesce.to_dense())
     K_dense_pattern = bm.to_numpy(K_pattern.to_dense())
 
-    max_diff = np.max(np.abs(K_dense_fealpy - K_dense_pattern))
+    max_diff = np.max(np.abs(K_dense_coalesce - K_dense_pattern))
     assert max_diff < 1e-14, f"NumPy 后端装配误差过大: {max_diff}"
 
 
@@ -87,7 +87,7 @@ def test_csr_pattern_numpy_equivalence(mesh_factory, hypo, dim):
     ],
 )
 def test_csr_pattern_pytorch_cpu_equivalence(mesh_factory, hypo, dim):
-    """测试 PyTorch CPU 后端下模式先行装配与 FEALPy coalesce 产物的严格等价性."""
+    """测试 PyTorch CPU 后端下模式先行装配与 coalesce 路线产物的严格等价性."""
     bm.set_backend("pytorch")
     mesh = mesh_factory()
     space = LagrangeFESpace(mesh, p=1)
@@ -99,17 +99,17 @@ def test_csr_pattern_pytorch_cpu_equivalence(mesh_factory, hypo, dim):
     integrator = LinearElasticIntegrator(material=mat, method="fast")
     K_e = integrator.assembly(tspace)
 
-    # 1. FEALPy 传统基准
+    # 1. coalesce 路线基准
     bform = BilinearForm(tspace)
     bform.add_integrator(integrator)
-    K_fealpy = bform.assembly()
+    K_coalesce = bform.assembly(method="coalesce")
 
     # 2. 模式先行装配
     pattern = build_csr_pattern(tspace, device="cpu")
     K_pattern = assemble_csr(K_e, pattern)
 
     assert isinstance(K_pattern, CSRTensor)
-    diff = torch.max(torch.abs(K_fealpy.to_dense() - K_pattern.to_dense())).item()
+    diff = torch.max(torch.abs(K_coalesce.to_dense() - K_pattern.to_dense())).item()
     assert diff < 1e-14, f"PyTorch CPU 后端装配误差过大: {diff}"
 
 
@@ -178,12 +178,12 @@ def test_csr_pattern_topopt_density_multi_iteration():
         # 模式先行装配
         K_pattern = assemble_csr(K_e, pattern)
 
-        # FEALPy 传统装配
+        # coalesce 路线基准
         bform = BilinearForm(tspace)
         bform.add_integrator(integrator)
-        K_fealpy = bform.assembly()
+        K_coalesce = bform.assembly(method="coalesce")
 
-        diff = np.max(np.abs(bm.to_numpy(K_fealpy.to_dense()) - bm.to_numpy(K_pattern.to_dense())))
+        diff = np.max(np.abs(bm.to_numpy(K_coalesce.to_dense()) - bm.to_numpy(K_pattern.to_dense())))
         assert diff < 1e-14, f"迭代 {it} 误差超标: {diff}"
 
 

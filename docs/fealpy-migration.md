@@ -135,13 +135,21 @@
   搬进 `functionspace/` 后照常计入注释风格棘轮。
 - 验证：全量测试；HuZhang 与 Lagrange 装配矩阵与 `88018e7` 逐位一致，示例输出逐行一致。
 
-**`BilinearForm` / `LinearForm` 的基类与子类合并**（会改变行为，需单独验证）
+**`BilinearForm` / `LinearForm` 的基类与子类合并**（已完成）
 
-- 把 `_bilinear_form_base.py`、`_linear_form_base.py` 分别并入 SOPTX 子类成单个类，同时补中文
-  numpydoc。
-- 风险：Hu--Zhang 与拉格朗日分析器、子结构 `problem_adapter`、3 个测试与 2 个示例目前直接
-  使用基类，合并后会改走子类重写的装配（`CSRPattern` / scatter）。需逐个核对调用方，并与
-  examples 数值基线比对。
+- `_bilinear_form_base.py`、`_linear_form_base.py` 分别并入 `bilinear_form.py`、`linear_form.py`，
+  两个类直接继承 `Form`，原基类的装配成为 `method='coalesce'` 路线；全文改为中文 numpydoc，
+  删除从未实现的 `BilinearForm.mult()`，保留 `.T` 与 `@`（EA 实验计时用到 `@`）。
+- 原先直接用基类的 `BilinearForm` 调用方（Hu--Zhang 分析器的 $A$、$B$、$J$，3 个测试，
+  `assembly_methods_mesh_demo`）显式传 `method='coalesce'`，走与原来完全相同的代码；
+  `test_csr_pattern` 由此仍以 coalesce 为参照，不会变成 pattern 与自身比较。
+- 直接用基类的 `LinearForm` 调用方（两个分析器、`problem_adapter`、
+  `verify_full_trace_convergence`）改走默认 scatter 路线：均为单列、`format='dense'`，两个
+  分析器的右端项逐位一致，`problem_adapter` 由子结构测试覆盖。
+- pattern 路线新增前提检查：双空间、批量装配、局部张量形状与骨架不符（面积分子、部分单元
+  积分子）时抛 `ValueError`。原先前三种报含义不明的 `reshape` 错误，批量装配则静默返回不带
+  批量维的矩阵。只核对形状，形状相符但自由度编号不同的积分子仍无法识别。
+- 验证：同提交 1，装配矩阵与右端项与 `88018e7` 逐位一致。
 
 ### 2.2 移植遗留
 
@@ -151,7 +159,7 @@
 - PyTorch 后端下 $p \ge 2$ 的 `interpolation_points` 因 float32 / float64 混用报错
   （`mesh/ipoints.py:389`，一行修复）。
 - 移植代码的英文 docstring 欠账（`PORTED_ROOTS`，约 596 处缺失），按子包补齐后移出豁免表。
-- Form 过渡基类（与 2.1 一并处理）。
+- ~~Form 过渡基类~~（已随 2.1 完成）。
 - 调用网格上不存在的方法：`huzhang_fe_space_2d.py:1080`、`lagrange_fe_space.py:192-216, 299`、
   `fem/utils.py:40-54`。
 - `fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` 源自 FEALPy 但文件头未注明来源。

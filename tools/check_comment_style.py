@@ -33,8 +33,6 @@ PORTED_ROOTS = (
     "src/soptx/quadrature/",
     "src/soptx/sparse/",
     "src/soptx/typing.py",
-    "src/soptx/fem/_bilinear_form_base.py",
-    "src/soptx/fem/_linear_form_base.py",
     "src/soptx/fem/coef.py",
     "src/soptx/fem/form.py",
     "src/soptx/fem/functional.py",

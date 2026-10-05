@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Sequence, Tuple, cast
 
 import numpy as np
 from soptx.backend import backend_manager as bm
-from soptx.fem._linear_form_base import LinearForm
+from soptx.fem.linear_form import LinearForm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.integrators import SourceIntegrator

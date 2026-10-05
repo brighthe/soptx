@@ -5,8 +5,8 @@ from soptx.backend import backend_manager as bm
 from soptx.typing import TensorLike
 from soptx.mesh import HomogeneousMesh
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from soptx.fem._bilinear_form_base import BilinearForm
-from soptx.fem._linear_form_base import LinearForm
+from soptx.fem.bilinear_form import BilinearForm
+from soptx.fem.linear_form import LinearForm
 from soptx.decorator import cartesian
 from soptx.decorator.variantmethod import variantmethod
 from soptx.sparse import CSRTensor, COOTensor 
@@ -263,7 +263,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         bform1 = BilinearForm(space_sigma)
         bform1.add_integrator(self._hzs_integrator)
-        A = bform1.assembly(format='csr')
+        A = bform1.assembly(format='csr', method='coalesce') # Hu--Zhang 空间不走 CSRPattern 骨架
 
         #TODO 角点松弛
         if space_sigma.use_relaxation == True:
@@ -317,7 +317,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         hzm_integrator = HuZhangMixIntegrator()
         bform.add_integrator(hzm_integrator)
 
-        B = bform.assembly(format='csr') # (GDOF_sigma, GDOF_u)
+        B = bform.assembly(format='csr', method='coalesce') # (GDOF_sigma, GDOF_u), 双空间矩形矩阵
 
         #TODO 角点松弛
         if space_sigma.use_relaxation == True:
@@ -390,7 +390,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                     density_shear_ratio=self._density_shear_ratio(),
                                 )
             bform3.add_integrator(jpi_integrator)
-            J = bform3.assembly(format='csr')
+            J = bform3.assembly(format='csr', method='coalesce') # 面积分子
 
             # fealpy bmat 在 blocks 全部非 None 时走 hstack/vstack 分支,
             # 该分支对含 B.T 与 -J 的组合会丢失 J 块 (K 秩亏导致求解失败);

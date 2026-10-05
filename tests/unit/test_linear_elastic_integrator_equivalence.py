@@ -12,7 +12,7 @@ import unittest
 import numpy as np
 
 from soptx.backend import backend_manager as bm
-from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.fem.bilinear_form import BilinearForm
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.mesh import TetrahedronMesh
 
@@ -101,7 +101,7 @@ class TestLinearElasticIntegratorEquivalence(unittest.TestCase):
 
         form = BilinearForm(space)
         form.add_integrator(integrator)
-        global_matrix = form.assembly(format="csr").to_scipy().toarray()
+        global_matrix = form.assembly(format="csr", method="coalesce").to_scipy().toarray()
         global_matrix = np.asarray(global_matrix, dtype=np.float64)
         return cell_matrix, global_matrix
 

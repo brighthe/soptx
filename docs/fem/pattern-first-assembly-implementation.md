@@ -81,14 +81,16 @@ build_csr_pattern(space)                               assemble_csr(K_e, pattern
 
 为了保持有限元变分形式的经典数学美感与 API 友好性，SOPTX 在底层执行内核之上提供了统一的高层门面类 [`soptx.fem.BilinearForm`](../../src/soptx/fem/bilinear_form.py)。
 
-### 1. 继承与重写的面向对象设计
-`soptx.fem.BilinearForm` 继承自 `fealpy.fem.BilinearForm`，100% 兼容其数学定义与积分子容器接口：
-* **重写 `assembly()` 引擎**：
+### 1. 两条装配路线
+`soptx.fem.BilinearForm` 直接继承 `soptx.fem.form.Form`（积分子容器接口源自 FEALPy），`assembly()` 提供两条路线：
+* **`method='pattern'`（默认）**：
   ```python
   bform = BilinearForm(space)
   bform.add_integrator(integrator)
-  K = bform.assembly(format='csr')  # 默认自动调用 CSRPattern 高性能路径
+  K = bform.assembly(format='csr')  # 默认走 CSRPattern 高性能路径
   ```
+  只适用于单空间、单列、全部积分子按 `cell_to_dof` 给出 `(NC, ldof, ldof)` 局部张量的情形；前提不成立时抛 `ValueError` 并提示改用 coalesce。
+* **`method='coalesce'`**：传统 COO 路线，用于双空间（矩形）矩阵、面积分子、部分单元积分子与批量装配。Hu--Zhang 分析器的 $A$、$B$、$J$ 三块都走这条路线。
 * **支持多积分子（Multi-Integrator）矢量化叠加**：
   若物理问题同时包含弹性积分子与附加刚度积分子，`BilinearForm` 在单刚阶段将所有积分子求和为统一的 $\mathbf K_e$，仅执行一次 `assemble_csr`，避免多次稀疏矩阵加法开销。
 * **无缝支持 EA 算子（Matrix-Free）**：

@@ -27,7 +27,7 @@ SOPTX 不再依赖 FEALPy 发行版或 fork。下列代码移植后即为 SOPTX 
 | `src/soptx/sparse/`、`src/soptx/quadrature/` | `fealpy/sparse/`、`fealpy/quadrature/` | 原样 |
 | `src/soptx/mesh/`（`structured_box.py`、`structured_triangle.py` 除外） | `fealpy/mesh/`（v0.4 网格树） | 只保留三角形、四边形、四面体、六面体四类经典网格的依赖闭包；未移植绘图、半边结构、局部加密与粗化、多边形等网格工厂、读写与合并；`schema/classic` 中 3 处 `fealpy.quadrature` 绝对导入改为相对导入 |
 | `src/soptx/functionspace/` | `fealpy/functionspace/` 中 `space`、`function`、`dofs`、`lagrange_fe_space`、`tensor_space`、`functional`、`utils` | 2 处 `fealpy.decorator` 绝对导入改为相对导入；其余空间与 `functionspace()` 工厂未移植。同目录的 `huzhang_fe_space*.py` 是 SOPTX 自有代码，不在本行范围内 |
-| `src/soptx/fem/integrator.py`、`form.py`、`_bilinear_form_base.py`、`_linear_form_base.py` | `fealpy/fem/integrator.py`、`form.py`、`bilinear_form.py`、`linear_form.py` | 两个 Form 基类改名以避开 SOPTX 同名子类 |
+| `src/soptx/fem/integrator.py`、`form.py`；`bilinear_form.py`、`linear_form.py` 中的 coalesce 路线 | `fealpy/fem/integrator.py`、`form.py`、`bilinear_form.py`、`linear_form.py` | 两个 Form 类先以 `_bilinear_form_base.py`、`_linear_form_base.py` 移入，后与 SOPTX 同名子类合并为单个类（`bilinear_form.py`、`linear_form.py` 文件头注明部分移植） |
 | `src/soptx/fem/functional.py`、`src/soptx/fem/coef.py` | `fealpy/functional.py`、`fealpy/utils/utils.py` | `coef.py` 只保留 `process_coef_func`、`is_scalar`、`is_tensor`、`fill_axis` |
 | `src/soptx/solvers/cg.py`、`src/soptx/solvers/direct.py` | `fealpy/solver/cg.py` @ `40016dc56`、`fealpy/solver/direct.py` @ `30ca15599` | 早于本次移植，文件头已注明 |
 | `src/soptx/fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` | `fealpy/distributed/`（`distributed_mesh.py`、`entity_mpi.py`、`distributed_space.py`） | 早于本次移植（`abd0945`），文件头未注明；来源由与 fork 逐行比对推断，相同行分别约 192/256、166/292、80/286 |

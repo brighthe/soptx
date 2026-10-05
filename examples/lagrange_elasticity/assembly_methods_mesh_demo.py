@@ -19,7 +19,7 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 from soptx.backend import TensorLike, backend_manager as bm
-from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.fem.bilinear_form import BilinearForm
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.mesh import (
     HexahedronMesh,
@@ -139,11 +139,11 @@ class MeshSupportDemo:
             # 全局装配一致性校验
             form_std = BilinearForm(space)
             form_std.add_integrator(int_std)
-            g_std = bm.array(form_std.assembly(format="csr").to_scipy().toarray())
+            g_std = bm.array(form_std.assembly(format="csr", method="coalesce").to_scipy().toarray())
 
             form_fast = BilinearForm(space)
             form_fast.add_integrator(int_fast)
-            g_fast = bm.array(form_fast.assembly(format="csr").to_scipy().toarray())
+            g_fast = bm.array(form_fast.assembly(format="csr", method="coalesce").to_scipy().toarray())
 
             err_global = max_abs_err(g_fast, g_std)
 

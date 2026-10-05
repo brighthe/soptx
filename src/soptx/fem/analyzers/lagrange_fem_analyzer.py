@@ -4,7 +4,7 @@ from soptx.backend import backend_manager as bm
 from soptx.typing import TensorLike
 from soptx.mesh import SimplexMesh, HomogeneousMesh
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from soptx.fem._linear_form_base import LinearForm
+from soptx.fem.linear_form import LinearForm
 from soptx.decorator import variantmethod
 from soptx.sparse import CSRTensor, COOTensor
 

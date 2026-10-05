@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from soptx.backend import backend_manager as bm
-from soptx.fem._bilinear_form_base import BilinearForm
+from soptx.fem.bilinear_form import BilinearForm
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.mesh import TriangleMesh
 
@@ -69,7 +69,7 @@ def _internal_face_penalty(mesh, degree: int, method: str):
             penalty_scaling="physical_h",
         )
     )
-    matrix = form.assembly(format="csr").to_scipy()
+    matrix = form.assembly(format="csr", method="coalesce").to_scipy()
     vector = bm.to_numpy(space.interpolate(_continuous_field(degree - 1))[:])
 
     return matrix, vector
