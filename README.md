@@ -50,7 +50,7 @@ fork 上的缺陷修复随代码一并内联，在 SOPTX 中的落点见
 
 | Extra | 内容 | 用途 |
 | --- | --- | --- |
-| `viz` | matplotlib、pillow、vtk | 可视化与 VTU 输出；基础导入不要求该 extra |
+| `viz` | matplotlib、pillow、pyevtk、vtk | 可视化与 VTU 输出；基础导入不要求该 extra |
 | `mpi` | mpi4py | Matrix-Free 分布式算子与多 rank 运行 |
 | `pinn` | torch | PINN 示例训练 |
 | `test` | pytest、build | 测试与 wheel 构建 |
