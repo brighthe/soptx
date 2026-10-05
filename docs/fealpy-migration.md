@@ -213,19 +213,32 @@
 - 删除符号积分后 `src/` 不再使用 `sympy`，`pyproject.toml` 的运行依赖可随兼容层清理一并评估。
 - 函数名拼写 `reshape_multiresolution_data_bcakup`、残留的 FEALPy 字样：并入 2.4。
 
-### 2.4 统一清理（最后做）
+### 2.4 统一清理（已完成）
 
-- **5 个 1.1.x 兼容层**：`regularization`、`analysis`、`interpolation`、`optimization`、
-  `utils` 一起删除，同步清理 `tests/unit/test_compatibility_api.py` 与 `LEGACY_ROOTS`，README
-  的弃用政策改为「1.2 起移除」或直接升版本号；同时决定 `fem.spaces` 转发是否一并删除。
-- **残留的 FEALPy 文字**：约 94 个代码文件的注释与 docstring、`docs/fem/*.md` 中的 FEALPy
-  提及，改为描述当前状态；各主题目录的 `results_analysis.md` 是历史运行记录，保持不动。
-- **零散小项**：
-  - `examples/pinn_elasticity/results_analysis.md` 记录的边界残差应为 `5.311e-04`
-    （现写 `5.3118e-04`，与同表总损失不自洽）；
-  - `examples/linear_solvers/README.md` 仍提到早已被替换的 `DirichletBCOperator`；
-  - `topology` 中两处 `'jax'` 判断；
-  - 产物标签 `"fealpy-numpy"`。
+分支 `claude/compat-cleanup`，版本升至 `1.2.0.dev0`：
+
+- ~~5 个 1.1.x 兼容层与 `soptx.model`~~：删除，连同 `test_compatibility_api.py`；`test_public_api` 改为检查这些
+  路径不可导入。`LEGACY_ROOTS` 保留，防止重建旧路径。缺 docstring 基线 271 → 168。
+- ~~`fem.spaces` 转发~~：与 `soptx.fem` 中的 `HuZhangFESpace`、两个结构网格生成器别名一并删除，9 个文件改从定义处导入。
+- ~~指向 `docs/architecture` 的 8 个坏链接~~：删除链接；README 改列 `check_architecture.py` 强制的分层表。
+- ~~残留的 FEALPy 文字~~：87 个文件改为描述当前的 soptx 子包；来源声明、历史事实与参考值比对保留。
+  产物标签 `"fealpy-numpy"` 改为 `"numpy"`。
+- ~~零散小项~~：`'jax'` 判断（`function.py`、`volume.py`）、`DirichletBCOperator` 现行描述、无调用方的
+  `*_bcakup` / `*_inverse_backup`、运行依赖 `sympy`（证据 `environment` 仍记录该字段，未改 schema）、
+  PINN 边界残差（重跑复现其余 7 项，实为 `5.3110e-04`）。
+
+留待处理：
+
+- 用户有未提交改动的文件未动：`lagrange_fem_analyzer.py`、`mesh/topology/builder.py`、`mesh/view/entity_view.py`
+  中的 FEALPy 现行描述，`topology/objectives/compliance.py` 中的 `'jax'` 判断。
+- 无调用方的 `plot_optimization_history_backup`、`HuZhangMFEMAnalyzer.assemble_displacement_bc_vector_backup`、
+  `continuation_step_backup`。
+- `BilinearForm.__matmul__` 多列右端项按 `(B, gdof)` 布局，`index_add` 却沿默认 `axis=0`（读代码所得，未复现）。
+- `experiments/fa_assembly_capability/run.py` 匹配 `"/fealpy/"` 的帧过滤分支已不会命中；VTU 元数据数组名
+  `FEALPY_MESH_META` 属文件格式字段，保留。
+- `core/__init__.py`、`core/numerics.py` 的 docstring 仍为英文；`matrix_free_evidence` 的 `schema.py` / `layout.py`
+  称 `contract` 不导入 SOPTX，与代码不符；`examples/matrix_free_elasticity/README.md` 等仍引用已不存在的
+  `krylov.weighted_cg`（现为 `soptx.solvers.overlap`）。
 
 ### 2.5 仓库之外的事项
 
