@@ -5,11 +5,17 @@
 - 表 5.1: k = 3, 4, 原生格式 (k >= GD + 1, 不加稳定化);
 - 表 5.2: k = 1, 2, 矩阵跳量稳定化 (alpha = mu / L0^2, 即论文 gamma_0 = 1).
 
-一次运行跑完全部阶次, 整份 ``summary.json`` 出自同一份代码, 只盖一个溯源戳记;
-同时把表 5.1 / 5.2 的 Markdown 写到同一目录并回显. 用法::
+一次运行跑完全部阶次, 整份结果出自同一份代码, 只盖一个溯源戳记; 同时写出表 5.1 /
+5.2 的 Markdown 并回显. 落盘去向由溯源戳记决定:
+
+- 工作区干净 (``reproducible = True``): 写入入库的论文证据目录 ``results/``,
+  即 ``manufactured_convergence.json`` 与 ``table5_1.md`` / ``table5_2.md``;
+- 工作区不干净: 只写入不入库的 ``outputs/manufactured_convergence/``, 不触碰 ``results/``.
+
+用法::
 
     python manufactured_convergence.py                # 论文口径, 全部阶次
-    python manufactured_convergence.py --degree 2     # 调试单个阶次, 不覆盖 summary.json
+    python manufactured_convergence.py --degree 2     # 调试单个阶次, 只回显不落盘
 """
 
 from __future__ import annotations
@@ -28,7 +34,10 @@ from soptx.fem import HuZhangMFEMAnalyzer, create_huzhang_checkerboard_mesh
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import MixedBoundarySinusoidalElasticity2D
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / "manufactured_convergence"
+EXPERIMENT_DIR = Path(__file__).resolve().parent
+RESULTS_DIR = EXPERIMENT_DIR / "results"
+OUTPUT_DIR = EXPERIMENT_DIR / "outputs" / "manufactured_convergence"
+RESULT_FILE = "manufactured_convergence.json"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 # 论文 5.1 节的算例设置
@@ -183,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="制造解前向收敛阶验证 (论文表 5.1 / 5.2)")
     parser.add_argument(
         "--degree", type=int, action="append", dest="degrees", choices=sorted(STABILIZATION),
-        help="只跑指定阶次 (可重复); 结果只回显, 不覆盖 summary.json",
+        help="只跑指定阶次 (可重复); 结果只回显, 不落盘",
     )
     args = parser.parse_args(argv)
     degrees = args.degrees or sorted(STABILIZATION)
@@ -213,9 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.degrees:
         return 0
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = provenance()
+    target = RESULTS_DIR if stamp["reproducible"] else OUTPUT_DIR
+    target.mkdir(parents=True, exist_ok=True)
     summary = {
-        "provenance": provenance(),
+        "provenance": stamp,
         "settings": {
             "lame_lambda": LAME_LAMBDA,
             "shear_modulus": SHEAR_MODULUS,
@@ -227,10 +238,12 @@ def main(argv: list[str] | None = None) -> int:
         },
         "results": results,
     }
-    (OUTPUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (target / RESULT_FILE).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     for name, markdown in tables.items():
-        (OUTPUT_DIR / f"{name}.md").write_text(markdown + "\n", encoding="utf-8")
-    print(f"\n[OK] 结果与表格已写入: {OUTPUT_DIR}")
+        (target / f"{name}.md").write_text(markdown + "\n", encoding="utf-8")
+    print(f"\n[OK] 结果与表格已写入: {target}")
+    if not stamp["reproducible"]:
+        print("[WARN] 工作区不干净 (reproducible = False), 未写入 results/, 结果不可作论文证据")
     return 0
 
 

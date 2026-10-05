@@ -45,8 +45,13 @@ experiments/paper_topopt_huzhang/
 |   |-- stress_cubic_topologies.py stress_cubic_convergence.py   # 图 5.8 / 5.9: LFEM p=3 与 HZMFEM k=3 主对比
 |   `-- stress_hz_orders_topologies.py stress_traction_jump.py   # 图 5.10 / 5.11: HZMFEM k=2,4 构型; 六个构型实体带的牵引跳量
 |                               # 图 5.1 / 5.4 / 5.7 是论文侧 TikZ 示意图, 不在本目录; 图号以各模块 docstring 首行括注为准
-`-- outputs/                    # 运行产物, 不提交
+|-- results/                    # 论文证据, 入库: 第 5 章数值结果的定稿数据 (目前为 5.1 节)
+|   |-- manufactured_convergence.json  # 表 5.1 / 5.2 全部数据 + 算例参数 + 溯源戳记
+|   `-- table5_1.md table5_2.md        # 由上述 JSON 生成, 可直接贴入草稿
+`-- outputs/                    # 运行产物, 不提交 (仅本机原始运行, 可随时删除重跑)
 ```
+
+`results/` 与 `outputs/` 的分工: `outputs/` 是本机工作区, 不承担存证; 论文引用的数字只以 `results/` 为准, 且只在干净工作区 (`reproducible = true`) 上写入。
 
 ## 已注册算例
 
@@ -76,7 +81,7 @@ experiments/paper_topopt_huzhang/
 
 材料插值对象 `interpolation` 取三值: `E` 只插值 Young 模量 (Poisson 比固定为实体值), `E+nu` 同时按论文式 (4.3) 插值 Poisson 比 (只允许近不可压缩材料 `nu >= 0.49`, 可压缩材料上直接报错), `auto` 按材料自动决定。两条轴承 case 已显式登记 (`bearing-compressible` 为 `E`, `bearing-incompressible` 为 `E+nu`), 参数 `nu_penalty_factor` / `void_poisson_ratio` 走 `--override`。
 
-论文 5.1 节的制造解收敛阶 (表 5.1 / 5.2) 不是优化算例, 不进注册表: `manufactured_convergence.py` 把参数写成文件顶部常量, 一次跑完 $k=1,\dots,4$, 写出 `outputs/manufactured_convergence/summary.json` (顶层一个溯源戳记) 与 `table5_1.md` / `table5_2.md`。`--degree` 只回显, 不覆盖 `summary.json`。
+论文 5.1 节的制造解收敛阶 (表 5.1 / 5.2) 不是优化算例, 不进注册表: `manufactured_convergence.py` 把参数写成文件顶部常量, 一次跑完 $k=1,\dots,4$, 写出 `manufactured_convergence.json` (顶层一个溯源戳记) 与 `table5_1.md` / `table5_2.md`。工作区干净时写入 `results/`, 否则只写入 `outputs/manufactured_convergence/` 并提示, 不触碰 `results/`。`--degree` 只回显, 不落盘。
 
 ```bash
 python experiments/paper_topopt_huzhang/manufactured_convergence.py

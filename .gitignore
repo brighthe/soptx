@@ -85,6 +85,11 @@ dist/
 /experiments/*/outputs/
 /experiments/*/logs/
 
+# 例外: paper_topopt_huzhang 的论文证据目录 results/ 整体入库。它存放论文第 5 章
+# 全部数值结果 (表格数据、成图数据、冻结设计), 不止成图数据, 故不沿用 figure_data/
+# 之名; 用 ** 放行子目录。须排在上面 *.json 等规则之后, 否则被覆盖。
+!/experiments/paper_topopt_huzhang/results/**
+
 # 根目录兜底：figs/、logs/、outputs/、old/ 不是架构目录，正式产物一律放在
 # examples/<topic>/ 或 experiments/<topic>/ 内部；根目录出现的这些目录均为
 # 临时运行残留或历史遗留，整体忽略以免污染 git status
