@@ -54,6 +54,8 @@
 
 ## 已知问题
 
+- [`fealpy-migration.md`](fealpy-migration.md) — **FEALPy 依赖移植汇总**：做法、提交清单、
+  移植范围、验证结果与约定好的后续工作（结构整理、移植遗留、既有 CI 问题、统一清理）。
 - [`known-issues/README.md`](known-issues/README.md) — **FEALPy 来源与已内联补丁清单**：
   2026-10 起 SOPTX 所用的 FEALPy 代码已移植入库、fork 退役；该页记录移植状态、fork 补丁
   在 SOPTX 中的落点与回归保护现状，以及移植后遗留问题，是该目录**唯一的可变状态源**。
