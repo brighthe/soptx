@@ -14,9 +14,9 @@
    - 对 ``GD x GD`` 个分量对, 由基址与行度数闭式算出该块的全局槽位, 用后端无关的
      ``bm.add_at`` 原地原子累加 (numpy 端为 ``np.add.at``, pytorch 端为
      ``index_put_(accumulate=True)``);
-   - 零全长三元组物化, 零排序, 以 O(1) 零拷贝直接产出标准的 soptx.sparse ``CSRTensor``.
+   - 零全长三元组物化, 零排序, 以 O(1) 零拷贝直接产出标准的 FEALPy ``CSRTensor``.
 
-自由度编号约定与 soptx.functionspace 的 ``to_tensor_dof`` / ``generate_tensor_basis`` 严格一致.
+自由度编号约定与 FEALPy ``to_tensor_dof`` / ``generate_tensor_basis`` 严格一致.
 记标量全局自由度 ``s``, 分量 ``a``, 单元内标量局部自由度 ``i``, 标量全局自由度总数
 ``sgdof``, 单元内标量局部自由度数 ``ldof_s``:
 
@@ -576,7 +576,7 @@ def assemble_csr(
         buffer: 可选的原地缓冲数组/张量. 若为 ``None``, 则使用 ``pattern.buffer``.
 
     Returns:
-        matrix (CSRTensor): 装配完成的标准 soptx.sparse ``CSRTensor`` 稀疏矩阵.
+        matrix (CSRTensor): 装配完成的标准 FEALPy ``CSRTensor`` 稀疏矩阵.
     """
     GD = pattern.dof_numel
     NC = pattern.n_cells

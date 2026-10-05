@@ -229,8 +229,8 @@
 
 留待处理：
 
-- 用户有未提交改动的文件未动：`lagrange_fem_analyzer.py`、`mesh/topology/builder.py`、`mesh/view/entity_view.py`
-  中的 FEALPy 现行描述，`topology/objectives/compliance.py` 中的 `'jax'` 判断。
+- 用户有未提交改动的文件未动：`lagrange_fem_analyzer.py`、`mesh/topology/builder.py`、`mesh/view/entity_view.py`、
+  `fem/matrix/csr_pattern.py` 中的 FEALPy 现行描述，`topology/objectives/compliance.py` 中的 `'jax'` 判断。
 - 无调用方的 `plot_optimization_history_backup`、`HuZhangMFEMAnalyzer.assemble_displacement_bc_vector_backup`、
   `continuation_step_backup`。
 - `BilinearForm.__matmul__` 多列右端项按 `(B, gdof)` 布局，`index_add` 却沿默认 `axis=0`（读代码所得，未复现）。
