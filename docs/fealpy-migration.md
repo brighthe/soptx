@@ -170,16 +170,36 @@
   `mesh.to_vtk`）已删除。三维跳量稳定化与 `splitter` 分块装配两项转记 known-issues。
 - ~~`fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` 源自 FEALPy 但文件头未注明来源~~（已补注）。
 
-### 2.3 移植前已存在的 CI 问题（与移植无关）
+### 2.3 移植前已存在的 CI 问题（已修复）
 
-| 问题 | 规模 |
+分支 `claude/ci-fixes`，本地按 `.github/workflows/ci.yml` 的 `fast` 任务顺序逐步通过：
+
+| 问题 | 处理 |
 |---|---|
-| `ml`（第 0 层）导入 `fem`（第 2 层） | `ml/substructure/` 下 3 个文件；需决定调整分层还是挪动代码 |
-| `experiments` 直接导入 `examples` 模块，违反主题目录隔离 | 7 处 |
-| 注释风格存量超出棘轮基线 | 全角标点 1315 处（基线 645），缺 docstring 431 处（基线 314），其中 4 处是去掉 BOM 后才被统计到 |
-| `check_repo_layout` 缺文档 | `parallel_execution`、`piml_substructure_elasticity`、`substructure_elasticity` 缺 `results_analysis.md` |
-| `docs/references/`、`docs/architecture/` 不存在 | 导致 `generate_repository_inventory --check` 失败，以及 README 与 `docs/index.md` 中 11 个坏链接 |
-| torch 版本 | `ihpcm` 现为 2.11，旧于 known-issues 记录的验证环境 2.13，稀疏不变量提示无法消除 |
+| ~~`ml`（第 0 层）导入 `fem`（第 2 层）~~ | `ml` 调整为第 2 层，与 `fem` 同层；`ml.substructure` 与 `fem.substructure` 本就互相导入，第 0、1 层无模块导入 `ml` |
+| ~~`experiments` 直接导入 `examples`（7 处）~~ | 主题隔离改为单向：`experiments` 可包式 import `examples`，反向禁止，同一父目录下主题仍互相禁止 |
+| ~~注释风格超出棘轮基线~~ | 注释与 docstring 中 916 个记号的全角标点机械替换为半角，`FULLWIDTH_BASELINE` 645 → 3；补 `protocols`、`fem`、Hu–Zhang 空间 142 处 docstring，`MISSING_DOCSTRING_BASELINE` 314 → 271。两步均经 `check_docstring_only` 确认 AST 不变 |
+| ~~`check_repo_layout` 缺 `results_analysis.md`~~ | 三个目录按当前脚本补写映射与验收契约；证据指向 `experiments/analysis_capability_*` 或标「待跑」 |
+| ~~`docs/references/` 不存在~~ | 从 `ad95594^` 原样恢复，清单与重新生成的结果逐字节相同 |
+
+不属于 CI 失败、移出本节的两项：
+
+- **坏链接**：CI 不检查链接。全仓原有 67 个，恢复 `docs/references/` 修好 2 个，余下的 `docs/architecture/` 相关 8 个随 2.4 兼容层清理一并决定（迁移表本为兼容层而写），约 45 个指向不入库的 `outputs/`，约 12 个为改名后未跟进，另做一轮文档整理。
+- **torch 版本**：CI 安装最新 torch，只是本地 `ihpcm` 环境旧于 known-issues 记录的验证环境。
+
+修复过程中读代码发现、尚未处理的问题（均未运行复现，除注明「实测」外）：
+
+- `experiments/analysis_capability_piml_substructure/collect_ood_probe_trajectory.py` 导入从未存在过的
+  `examples.piml_substructure_elasticity._common`，一导入即失败；所需常量原在 `71a03d6` 删除的
+  `deployment_config.py` 中。
+- `HuZhangFESpace` 工厂把 `use_relaxation` 传给不接受该参数的 `HuZhangFESpace3d.__init__`，任何三维网格均抛
+  `TypeError`（实测）；`HuZhangFESpace2d` 的 `interpolation_points`、`face_to_dof`、`is_boundary_dof`、
+  `edge_to_dof()` 调用即报错（实测），三维对应方法为空桩。
+- `examples/parallel_execution/benchmark_thread_scaling.py` 默认 `--rmin 2.4` 在单位正方形上使滤波矩阵稠密。
+- `fem/integrators`：`voigt_multiresolution` 节点密度加单纯形分支引用未定义的 `cm_eg`；`MassIntegrator.to_global_dof`
+  不按 `index` 截取；`symbolic` 变体忽略 `index`；`fetch_vector_jump` 边界面上对基函数逐项取绝对值，$p \ge 2$ 时有误。
+- `LagrangeFEMAnalyzer.solve_adjoint` 只适用于 `'fa'`；`compute_stress_state` 两种分析器返回键不一致；
+  `MaterialInterpolation.n_sub` 协议标注应为 `Optional[int]`。
 
 ### 2.4 统一清理（最后做）
 
