@@ -16,11 +16,11 @@ PACKAGE_ROOT = REPOSITORY_ROOT / "src" / "soptx"
 
 # backend / typing / decorator / sparse / quadrature / mesh / functionspace 移植自
 # FEALPy (见 THIRD_PARTY_NOTICES.md); 同层互相导入允许, 只禁止导入更高层.
+# ml 与 fem 同层: ml.substructure 为 fem.substructure 提供网络与训练组件, 二者互相导入.
 LAYER = {
     "backend": 0,
     "core": 0,
     "decorator": 0,
-    "ml": 0,
     "protocols": 0,
     "quadrature": 0,
     "sparse": 0,
@@ -30,6 +30,7 @@ LAYER = {
     "mesh": 1,
     "problems": 1,
     "fem": 2,
+    "ml": 2,
     "topology": 3,
     "postprocess": 4,
 }
