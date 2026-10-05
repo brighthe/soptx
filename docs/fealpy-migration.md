@@ -168,7 +168,7 @@
   两处缺陷，有限差分测试 `tests/unit/test_node_density.py` 覆盖；`mesh.count` 已改用
   `mesh.entity`。三维跳量稳定化、`splitter` 分块装配、`save_optimization_history` 三项转记
   known-issues。
-- `fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` 源自 FEALPy 但文件头未注明来源。
+- ~~`fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` 源自 FEALPy 但文件头未注明来源~~（已补注）。
 
 ### 2.3 移植前已存在的 CI 问题（与移植无关）
 

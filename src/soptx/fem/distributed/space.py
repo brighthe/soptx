@@ -1,3 +1,6 @@
+# 源自 brighthe/fealpy ``fealpy/distributed/distributed_space.py``, 于 abd0945 之前移入, 源提交未记录;
+# 此后经 SOPTX 改写, 与 fork @ f474a5775 逐行比对相同行约 80/286.
+# FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 """分布式有限元空间分发 (Distributed Space) 模块.
 
 负责将全局标量 Lagrange 空间与多维交错向量空间 (TensorFunctionSpace) 分发并限制到各个 MPI 进程,

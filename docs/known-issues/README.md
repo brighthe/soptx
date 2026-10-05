@@ -64,7 +64,6 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 | 三维跳量稳定化未实现 | `fem/integrators/jump_penalty_integrator.py` 的 `_cell_to_face_sign` | 原调用 v0.4 网格已不存在的 `mesh.cell_to_face_sign` | 三维低阶（$p \le 3$）Hu--Zhang 默认的跳量稳定化不可用，现明确抛 `NotImplementedError`；$p \ge 4$ 或 `stabilization='none'` 不受影响。二维的 `cell_to_edge_sign` 与「全局面法向指向本单元外侧」逐项相同，可按此判据推广，但尚无三维制造解验证收敛阶 | 有三维 Hu--Zhang 算例后按几何判据实现并验证收敛阶 | 未修 |
 | `Form` 的 `splitter` 分块装配不可用 | `fem/form.py` 的 `UniformSplitter` 与 `_assembly_kernel` | FEALPy 的分块接口，SOPTX 积分子未实现 | `add_integrator(splitter=...)` 会以 `indices=` 调用积分子的 `assembly`，SOPTX 的积分子均不接受该参数，报 `TypeError`；仓库内无人使用。`Integrator.size` 中的 `mesh.count` 已改为 `mesh.entity(etype)` | 需要分块装配时为积分子补 `indices` 参数，或删除该接口 | 未修 |
 | 优化历史 VTK 导出调用网格上不存在的接口 | `postprocess/optimization_history.py` 的 `save_optimization_history` | v0.4 网格重写后上游即已悬空 | 调用 `mesh.celldata` 与 `mesh.to_vtk`，走到即 `AttributeError`；仓库内无调用方 | 删除，或改用 `soptx.mesh.write_mesh_to_vtu` | 未修 |
-| `fem/distributed/` 中源自 FEALPy 的文件未注明来源 | `fem/distributed/mesh.py`、`entity_mpi.py`、`space.py` | 早于本次移植（`abd0945`） | 与 fork `fealpy/distributed/` 逐行比对高度相似，`THIRD_PARTY_NOTICES.md` 已登记 | 文件头补来源说明 | 未修 |
 
 ## 记账约定
 

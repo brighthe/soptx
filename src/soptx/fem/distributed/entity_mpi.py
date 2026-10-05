@@ -1,3 +1,6 @@
+# 源自 brighthe/fealpy ``fealpy/distributed/entity_mpi.py``, 于 abd0945 之前移入, 源提交未记录;
+# 此后经 SOPTX 改写, 与 fork @ f474a5775 逐行比对相同行约 166/292.
+# FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 """实体级 MPI 消息传递接口 (EntityMPI) 模块.
 
 管理分布式网格/有限元空间中几何实体与自由度的跨进程通信拓扑、重叠引用计数与数据同步.

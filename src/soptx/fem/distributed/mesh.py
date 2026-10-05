@@ -1,3 +1,6 @@
+# 源自 brighthe/fealpy ``fealpy/distributed/distributed_mesh.py``, 于 abd0945 之前移入, 源提交未记录;
+# 此后经 SOPTX 改写, 与 fork @ f474a5775 逐行比对相同行约 192/256.
+# FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 """分布式网格分发 (Distributed Mesh) 模块.
 
 负责将全局网格及其几何实体 (Cell/Face/Edge/Node) 分割并分发给各 MPI 进程,
