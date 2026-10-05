@@ -72,8 +72,6 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 | numpy 后端 `bc_to_points` 不接受张量积重心坐标 | `backend/numpy_backend.py` | 移植原样保留 | 对张量积重心坐标调用 `tensorprod(bcs)` 未解包，抛 `AttributeError`；pytorch 正常。仓库内未经 `bm` 调用 | 改为 `tensorprod(*bcs)` | 未修 |
 | 后端中的失效代码 | `backend/pytorch_backend.py`、`backend/numpy_backend.py` | 移植原样保留 | 两个后端的 `quadrangle_grad_lambda_2d` 函数体为空；`NumpyRandom` 把 `rng` 的 setter 定义成了名为 `setter` 的属性而无法实例化；`NumpyRandom`、`PyTorchRandom` 均未被使用 | 删除未使用的类与空函数 | 未修 |
 | 网格工厂与加密中的小问题 | `mesh/uniform_mesh/`、`mesh/factory/`、`mesh/transform/uniform.py` | 移植原样保留 | `UniformMesh*` 是无实现的占位类，`fem/integrators/utils.py` 中对其的 `isinstance` 分支恒不成立；四类网格 `from_box` 的 `threshold` 参数未使用；三棱柱一致加密在 `returnim=True` 时返回空列表 (未生成延拓矩阵) | 删除占位类与对应分支；删除或实现 `threshold` | 未修 |
-| `TopRelationInferer._infer_from` 变量遮蔽 | `mesh/topology/builder.py` | 移植原样保留 | 内层循环变量与参数同名 (`dst_name`)，循环结束后 "目标关系是否建成" 的检查实际针对最后遍历到的子分区，可能误报或漏报；调用方 `resolve_relation` 捕获 `ValueError` 后会再按原目标查表，影响有限 | 内层循环变量改名 | 未修 |
-| 四棱锥体积在一般底面上错误 | `mesh/schema/classic/pyramid.py` 的 `LagrangePyramidSchema.measure` | 移植原样保留 | 按四面体 (0, 1, 3, 4) 与 (0, 3, 2, 4) 剖分求和, 而底面顶点为循环顺序, 只在底面为平行四边形或梯形时恰好正确; 一般四边形底面实测 0.45 对精确值 0.617。SOPTX 未使用四棱锥 | 改为沿对角线 (0, 2) 剖分, 或对 Jacobi 行列式数值积分 | 未修 |
 
 ## 记账约定
 

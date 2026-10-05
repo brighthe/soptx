@@ -334,27 +334,15 @@ class LagrangePyramidSchema(_ScalarOrderSchema):
 
     @classmethod
     def measure(cls, ctx: EntityContext, index: Index | None) -> Tensor:
-        """四棱锥体积, 按两个四面体 (0, 1, 3, 4) 与 (0, 3, 2, 4) 求和.
+        """四棱锥体积: 用每方向 2 点的张量积 Gauss 公式对 Jacobi 行列式积分.
 
-        Notes
-        -----
-        底面顶点为循环顺序, 这一剖分只在底面为平行四边形或梯形时恰好正确; 一般四边形底面
-        实测偏差明显 (例如 0.45 对精确值 0.617).
+        几何映射是顶面收缩为一点的三线性映射, Jacobi 行列式在每个参考方向上至多 2 次,
+        2 点 Gauss 公式即精确; 底面不必是平面或平行四边形.
         """
-        pyramid = ctx.sector.indices if index is None else ctx.sector.indices[index]
-        points = ctx.block.positions[pyramid]
-
-        def tet_volume(i: int, j: int, k: int, m: int) -> Tensor:
-            """由四个局部顶点组成的四面体体积."""
-            vectors = bm.stack([
-                points[:, j, :] - points[:, i, :],
-                points[:, k, :] - points[:, i, :],
-                points[:, m, :] - points[:, i, :],
-            ], axis=1)
-            gram = bm.einsum("cig,cjg->cij", vectors, vectors)
-            return bm.sqrt(bm.abs(bm.linalg.det(gram))) / 6.0
-
-        return tet_volume(0, 1, 3, 4) + tet_volume(0, 3, 2, 4)
+        qf = cls.quadrature_formula(2)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        J = cls.jacobi_matrix(ctx, bcs, index)
+        return bm.einsum("q,cq->c", ws, bm.abs(bm.linalg.det(J)))
 
     @classmethod
     def normal(cls, ctx: EntityContext, index: Index | None) -> Tensor:

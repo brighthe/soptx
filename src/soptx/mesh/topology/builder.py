@@ -1032,18 +1032,18 @@ class TopRelationInferer:
             #   得到 `src -> dst` 的候选.
             candidates_of_dst: dict[str, list[Tensor]] = {}
             for mid_name, src_to_mid in src_to_mids:
-                for dst_name, mid_to_dst in cls._iter_adjacent_children(storage, mid_name):
-                    if (src_name, dst_name) in storage.relations:
-                        composed = storage.relations[(src_name, dst_name)].tgt_indices
+                for child_name, mid_to_dst in cls._iter_adjacent_children(storage, mid_name):
+                    if (src_name, child_name) in storage.relations:
+                        composed = storage.relations[(src_name, child_name)].tgt_indices
                     else:
                         composed = cls._compose_homogeneous(src_to_mid, mid_to_dst)
-                    candidates_of_dst.setdefault(dst_name, []).append(composed)
+                    candidates_of_dst.setdefault(child_name, []).append(composed)
 
-            for dst_name, candidates in candidates_of_dst.items():
-                merged = cls._merge_candidates(candidates, src_name, dst_name, mid_dim)
+            for child_name, candidates in candidates_of_dst.items():
+                merged = cls._merge_candidates(candidates, src_name, child_name, mid_dim)
                 storage.add_relation(Relation(
                     src_sector_id=src_name,
-                    tgt_sector_id=dst_name,
+                    tgt_sector_id=child_name,
                     tgt_indices=merged,
                 ))
 
@@ -1058,11 +1058,6 @@ class TopRelationInferer:
         ------
         ValueError
             源分区维数不高于目标分区, 或无法推断.
-
-        Notes
-        -----
-        ``_infer_from`` 的内层循环变量与参数 ``dst_name`` 同名, 循环后对目标关系是否
-        建成的检查实际针对最后遍历到的子分区.
         """
         src_dim = cls._dim(storage, src_name)
         dst_dim = cls._dim(storage, dst_name)
