@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/sparse/ops.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""稀疏矩阵的构造与拼接: 对角矩阵、单位矩阵、横向/纵向拼接与分块矩阵."""
 
 from typing import overload, Optional, Union, Literal
 
@@ -20,18 +21,36 @@ def spdiags(data: TensorLike, diags: Union[TensorLike, int], M: int, N: int,
             format: Literal['coo'], *, index_dtype=None) -> COOTensor: ...
 def spdiags(data: TensorLike, diags: Union[TensorLike, int], M: int, N: int,
             format: Optional[str] = 'csr', *, index_dtype=None):
-    """Return a sparse matrix from diagonals.
+    """由对角线数据构造稀疏矩阵, 约定同 ``scipy.sparse.spdiags``.
 
-    Parameters:
-        data (Tensor): data on the matrix diagonals.
-        diags (Tensor | int): index of matrix diagonals.
-        for k in diags:
-            k = 0 the main diagonal
-            k > 0 the k-th upper diagonal
-            k < 0 the k-th lower diagonal.
+    ``data[k, j]`` 放在第 ``diags[k]`` 条对角线的第 ``j`` 列, 即位置
+    ``(j - diags[k], j)``; 落在矩阵外的项与零值被丢弃.
 
-        M, N (int): shape of the result.
-        format (str): format of the result, default to "csr".
+    Parameters
+    ----------
+    data : TensorLike
+        对角线数据, 形状 ``(num_diags, len_diags)``; 只有一条对角线时也可为一维.
+    diags : TensorLike or int
+        对角线编号: 0 为主对角线, ``k > 0`` 为第 ``k`` 条上对角线, ``k < 0`` 为
+        第 ``-k`` 条下对角线.
+    M, N : int
+        矩阵形状.
+    format : {'csr', 'coo'}, optional
+        结果格式, 默认 'csr'.
+    index_dtype : dtype, optional
+        索引的整数类型, 默认 ``bm.int64``.
+
+    Returns
+    -------
+    CSRTensor or COOTensor
+        稀疏矩阵.
+
+    Raises
+    ------
+    ValueError
+        ``data`` 超过二维、行数与对角线数不符, 或 ``diags`` 有重复.
+    TypeError
+        ``diags`` 既不是张量也不是整数.
     """
     is_scalar = False
     index_dtype = bm.int64 if index_dtype is None else index_dtype
@@ -99,6 +118,27 @@ def spdiags(data: TensorLike, diags: Union[TensorLike, int], M: int, N: int,
     )
 
 def vstack(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
+    """纵向拼接 CSR 矩阵.
+
+    Parameters
+    ----------
+    blocks : list of CSRTensor or None
+        一维的块列表, None 跳过; 各块须为 CSR 且列数相同 (不检查).
+    format : {'csr', 'coo'}, optional
+        结果格式, 默认 'csr'.
+    dtype : dtype, optional
+        结果的数值类型.
+
+    Returns
+    -------
+    CSRTensor or COOTensor
+        拼接后的矩阵.
+
+    Raises
+    ------
+    ValueError
+        ``blocks`` 为空或不是一维列表.
+    """
     if not isinstance(blocks, list) or not blocks: 
         raise ValueError('Blocks must be no empty.')
 
@@ -137,6 +177,27 @@ def vstack(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
     return A
 
 def hstack(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
+    """横向拼接稀疏矩阵.
+
+    Parameters
+    ----------
+    blocks : list of SparseTensor or None
+        一维的块列表, None 跳过; 各块行数须相同 (不检查).
+    format : {'csr', 'coo'}, optional
+        结果格式, 默认 'csr'.
+    dtype : dtype, optional
+        结果的数值类型.
+
+    Returns
+    -------
+    CSRTensor or COOTensor
+        拼接后的矩阵.
+
+    Raises
+    ------
+    ValueError
+        ``blocks`` 为空或不是一维列表.
+    """
     if not isinstance(blocks, list) or not blocks: 
         raise ValueError('Blocks must be no empty.')
 
@@ -176,6 +237,33 @@ def hstack(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
 
 
 def bmat(blocks: TensorLike, format: Optional[str] = 'csr', dtype=None):
+    """由二维块列表组装分块稀疏矩阵, 用法仿 ``scipy.sparse.bmat``.
+
+    Parameters
+    ----------
+    blocks : list of list of SparseTensor or None
+        二维块列表, None 表示零块.
+    format : {'csr', 'coo'}, optional
+        结果格式, 默认 'csr'.
+    dtype : dtype, optional
+        结果的数值类型.
+
+    Returns
+    -------
+    CSRTensor or COOTensor
+        分块矩阵.
+
+    Raises
+    ------
+    ValueError
+        ``blocks`` 为空、不是二维列表, 或同一块行/块列的维数不一致.
+
+    Notes
+    -----
+    含 None 块时按 COO 统一组装, 结果正确. 不含 None 时走另一条路径, 有误:
+    单块行 (``1 x N``) 返回的是列表; 单块列 (``M x 1``, ``M > 1``) 只返回第一个块,
+    且不报错. 仓库内的调用都含 None 块.
+    """
     if not isinstance(blocks, list) or not blocks: 
         raise ValueError('Blocks cannot be empty.')
 
@@ -267,20 +355,27 @@ def speye(M: int, N: Optional[int] = None, diags: Union[TensorLike, int] = 0, dt
           device = None, *, format: Literal['coo']) -> COOTensor: ... 
 def speye(M: int, N: Optional[int] = None, diags: Union[TensorLike, int] = 0, dtype=None,
           device = None, *, format: Optional[str] = 'csr'):
-    """Return a sparse matrix with ones on diagonal
+    """构造指定对角线上全为 1 的稀疏矩阵.
 
-    Parameters:  
-        M (int): The number of rows of the resulting sparse tensor.
-        N (int | None): The number of columns of the resulting sparse tensor.
-        diags (Tensor | int): The index or indices of the diagonals to place ones on.
-            k = 0: the main diagonal.
-            k > 0: the k-th upper diagonal.
-            k < 0: the k-th lower diagonal.
+    Parameters
+    ----------
+    M : int
+        行数.
+    N : int, optional
+        列数, 默认等于 ``M``.
+    diags : TensorLike or int, optional
+        放 1 的对角线编号, 含义同 ``spdiags``, 默认 0 (主对角线).
+    dtype : dtype, optional
+        元素类型, 默认为后端的默认浮点类型 (float64).
+    device : device, optional
+        设备.
+    format : {'csr', 'coo'}, optional
+        结果格式, 默认 'csr'.
 
-        dtype: The data type of the sparse tensor elements (the ones). Defaults to bm.int64.
-        device: The device where the sparse tensor will be created (e.g., 'cpu', 'cuda').
-
-        format (str | None): The format of the resulting sparse tensor.
+    Returns
+    -------
+    CSRTensor or COOTensor
+        稀疏矩阵.
     """
     if N is None:
         N = M

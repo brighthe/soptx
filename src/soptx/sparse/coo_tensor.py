@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/sparse/coo_tensor.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""COO (坐标) 格式稀疏张量."""
 
 from typing import Optional, Union, overload, Tuple, Sequence
 from math import prod
@@ -15,19 +16,31 @@ from ._spmm import spmm_coo
 
 
 class COOTensor(SparseTensor):
+    """COO (坐标) 格式稀疏张量.
+
+    Parameters
+    ----------
+    indices : TensorLike
+        非零元索引, 形状 ``(D, nnz)``, ``D`` 为稀疏维数.
+    values : TensorLike or None
+        非零元的值, 形状 ``(..., nnz)``, 前导轴为稠密维; None 表示值均为 1 的
+        模式张量.
+    spshape : tuple of int, optional
+        稀疏维形状, 默认取各维最大索引加 1.
+    is_coalesced : bool, optional
+        索引是否已合并 (无重复且有序); True 时 ``coalesce`` 直接返回自身.
+
+    Raises
+    ------
+    TypeError
+        ``indices`` 不是张量, 或 ``values`` 既不是张量也不是 None.
+    ValueError
+        ``indices`` 不是二维, ``values`` 末轴长度与 ``nnz`` 不符, 或 ``spshape``
+        长度与稀疏维数不符.
+    """
     def __init__(self, indices: TensorLike, values: Optional[TensorLike],
                  spshape: Optional[Size] = None, *,
                  is_coalesced: Optional[bool] = None):
-        """
-        Initialize COO format sparse tensor.
-
-        Parameters:
-            indices (Tensor): indices of non-zero elements, shaped (D, nnz).
-                Where D is the number of sparse dimension, and nnz is the number
-                of non-zeros.
-            values (Tensor | None): non-zero elements, shaped (..., nnz).
-            spshape (Size | None, optional): shape in the sparse dimensions.
-        """
         self._indices = indices
         self._values = values
         self.is_coalesced = is_coalesced
@@ -36,7 +49,7 @@ class COOTensor(SparseTensor):
         if spshape is None:
             self._spshape = tuple(bm.tolist(bm.max(indices, axis=1) + 1))
         else:
-            # total ndim should be equal to sparse_ndim + dense_dim
+            # 总维数应等于稀疏维数加稠密维数
             if len(spshape) != indices.shape[0]:
                 raise ValueError(
                     f"length of sparse shape ({len(spshape)}) "
@@ -54,7 +67,7 @@ class COOTensor(SparseTensor):
             if values.ndim < 1:
                 raise ValueError(f"values must be at least 1D, but got {values.ndim}D")
 
-            # The last dim of values must match the last dim of indices.
+            # values 的末轴须与 indices 的末轴 (非零元个数) 一致.
             if values.shape[-1] != indices.shape[1]:
                 raise ValueError(f"values must have the same size as indices ({indices.shape[1]}) "
                                  "in the last dimension (number of non-zero elements), "
@@ -67,44 +80,56 @@ class COOTensor(SparseTensor):
     def __repr__(self) -> str:
         return f"COOTensor(indices={self._indices}, values={self._values}, shape={self.shape})"
 
-    ### 1. Data Fetching ###
+    ### 1. 数据获取 ###
     @property
     def device(self):
-        """返回底层 tensor 所在的设备 (cpu / cuda:0 等)."""
+        """索引张量所在的设备 (cpu / cuda:0 等)."""
         return self._indices.device
 
     @property
-    def itype(self): return self._indices.dtype
+    def itype(self):
+        """索引的整数类型."""
+        return self._indices.dtype
 
     @property
-    def nnz(self): return self._indices.shape[1]
+    def nnz(self):
+        """非零元个数 (含重复索引)."""
+        return self._indices.shape[1]
 
     @property
     def indices(self) -> TensorLike:
-        """Return the indices of the non-zero elements."""
+        """非零元索引, 形状 ``(D, nnz)``."""
         return self._indices
 
     @property
     def values(self) -> Optional[TensorLike]:
-        """Return the non-zero elements."""
+        """非零元的值, 形状 ``(..., nnz)``; 模式张量为 None."""
         return self._values
 
     @property
-    def row(self): return self._indices[0] # scipy convention
+    def row(self):
+        """行索引, 沿用 scipy 的命名."""
+        return self._indices[0]
 
     @property
-    def col(self): return self._indices[1] # scipy convenstion
+    def col(self):
+        """列索引, 沿用 scipy 的命名."""
+        return self._indices[1]
 
     @property
-    def data(self): return self._values # scipy convention
+    def data(self):
+        """非零元的值, 沿用 scipy 的命名."""
+        return self._values
 
     @property
     def nonzero_slice(self) -> Tuple[Union[slice, TensorLike]]:
+        """在同形状稠密张量上取出各非零位置的下标元组, 稠密维取全切片."""
         slicing = [self._indices[i] for i in range(self.sparse_ndim)]
         return (slice(None),) * self.dense_ndim + tuple(slicing)
 
-    ### 2. Data Type & Device Management ###
+    ### 2. 数据类型与设备管理 ###
     def astype(self, dtype=None, /, *, copy=True):
+        """转换 ``values`` 的数据类型; 模式张量转换为值全为 1 的张量."""
         if self._values is None:
             values = bm.ones(self.nnz, dtype=dtype)
         else:
@@ -114,13 +139,15 @@ class COOTensor(SparseTensor):
                          is_coalesced=self.is_coalesced)
 
     def device_put(self, device=None, /):
+        """把索引与值移到指定设备."""
         return COOTensor(bm.device_put(self._indices, device),
                          bm.device_put(self._values, device),
                          self._spshape,
                          is_coalesced=self.is_coalesced)
 
-    ### 3. Format Conversion ###
+    ### 3. 格式转换 ###
     def to_dense(self, *, fill_value: Union[Number, bool] = 1, dtype=None) -> TensorLike:
+        """转为稠密张量, 重复索引的值相加; 参数见 ``SparseTensor.to_dense``."""
         if self.values is None:
             dtype = bm.float64 if (dtype is None) else dtype
             context = {"dtype": dtype, "device": bm.get_device(self.indices)}
@@ -137,11 +164,27 @@ class COOTensor(SparseTensor):
         return dense_tensor.reshape(self.shape)
 
     def tocoo(self, *, copy=False):
+        """返回自身, ``copy=True`` 时返回副本."""
         if copy:
             return self.copy()
         return self
 
     def tocsr(self, *, copy=False):
+        """转为 CSR 格式 (只支持两个稀疏维).
+
+        按行重排非零元, 不合并重复索引, 行内列的顺序不保证有序; 需要时先调用
+        ``coalesce``.
+
+        Parameters
+        ----------
+        copy : bool, optional
+            是否复制 ``values``. 默认 False.
+
+        Returns
+        -------
+        CSRTensor
+            CSR 格式稀疏张量.
+        """
         from .csr_tensor import CSRTensor
         # try:
         #     crow, col, values = bm.coo_tocsr(self.indices, self.values, self.sparse_shape)
@@ -163,8 +206,15 @@ class COOTensor(SparseTensor):
 
         return CSRTensor(crow, new_col, new_values, spshape=self._spshape)
 
-    ### 4. Object Conversion ###
+    ### 4. 对象转换 ###
     def to_scipy(self):
+        """转为 ``scipy.sparse.coo_matrix``.
+
+        Raises
+        ------
+        ValueError
+            带有稠密维 (批量).
+        """
         from scipy.sparse import coo_matrix
         if self.dense_ndim != 0:
             raise ValueError("Only COOTensor with 0 dense dimension "
@@ -178,17 +228,20 @@ class COOTensor(SparseTensor):
 
     @classmethod
     def from_scipy(cls, mat, /):
+        """由 ``scipy.sparse.coo_matrix`` 构造."""
         indices = bm.stack([bm.from_numpy(mat.row), bm.from_numpy(mat.col)], axis=0)
         values = bm.from_numpy(mat.data)
         return cls(indices, values, mat.shape)
 
-    ### 5. Manipulation ###
+    ### 5. 变形与操作 ###
     def copy(self):
+        """深拷贝索引与值."""
         if self._values is None:
             return COOTensor(bm.copy(self._indices), None, self._spshape)
         return COOTensor(bm.copy(self._indices), bm.copy(self._values), self._spshape)
 
     def coalesce(self, accumulate: bool=True) -> 'COOTensor':
+        """按字典序排序索引并合并重复项, 参数见 ``SparseTensor.coalesce``."""
         if self.is_coalesced or self.nnz == 0:
             return self
 
@@ -224,14 +277,17 @@ class COOTensor(SparseTensor):
     @overload
     def reshape(self, *shape: int) -> 'COOTensor': ...
     def reshape(self, *shape) -> 'COOTensor':
+        """改变稀疏维形状. 尚未实现: 函数体为空, 返回 None."""
         pass
 
     def ravel(self):
+        """把稀疏维展平为一维, 共享 ``values``."""
         spshape = self.sparse_shape
         new_indices = flatten_indices(self._indices, spshape)
         return COOTensor(new_indices, self._values, (prod(spshape),))
 
     def flatten(self):
+        """把稀疏维展平为一维, 复制 ``values``."""
         spshape = self.sparse_shape
         new_indices = flatten_indices(self._indices, spshape)
         if self._values is None:
@@ -242,6 +298,13 @@ class COOTensor(SparseTensor):
 
     @property
     def T(self):
+        """交换最后两个稀疏维, 共享 ``values``.
+
+        Raises
+        ------
+        ValueError
+            稀疏维数小于 2.
+        """
         _indices = self._indices
         _spshape = self._spshape
 
@@ -257,6 +320,7 @@ class COOTensor(SparseTensor):
         return COOTensor(new_indices, self._values, shape)
 
     def partial(self, index: Union[TensorLike, slice], /):
+        """按非零元的编号、掩码或切片取出部分非零元, 稀疏形状不变."""
         new_indices = bm.copy(self.indices[:, index])
         new_values = self.values
 
@@ -266,17 +330,26 @@ class COOTensor(SparseTensor):
         return COOTensor(new_indices, new_values, self._spshape)
 
     def tril(self, k: int = 0) -> 'COOTensor':
+        """取最后两个稀疏维中第 ``k`` 条对角线及以下的非零元."""
         indices = self.indices
         tril_loc = (indices[-2] + k) >= indices[-1]
         return self.partial(tril_loc)
 
     def triu(self, k: int = 0) -> 'COOTensor':
+        """取最后两个稀疏维中第 ``k`` 条对角线及以上的非零元."""
         indices = self.indices
         triu_loc = (indices[-1] - k) >= indices[-2]
         return self.partial(triu_loc)
 
     @classmethod
     def concat(cls, coo_tensors: Sequence['COOTensor'], /, *, axis: int=0) -> 'COOTensor':
+        """沿稀疏维 ``axis`` 拼接多个 COO 张量 (须带 ``values``).
+
+        Raises
+        ------
+        ValueError
+            列表为空.
+        """
         if len(coo_tensors) == 0:
             raise ValueError("coo_tensors cannot be empty")
 
@@ -305,9 +378,9 @@ class COOTensor(SparseTensor):
         spshape[axis] = prev_len
         return cls(new_indices, new_values, spshape)
 
-    ### 6. Arithmetic Operations ###
+    ### 6. 算术运算 ###
     def neg(self) -> 'COOTensor':
-        """Negation of the COO tensor. Returns self if values is None."""
+        """取负; 模式张量返回自身."""
         if self._values is None:
             return self
         else:
@@ -318,20 +391,34 @@ class COOTensor(SparseTensor):
     @overload
     def add(self, other: TensorLike, alpha: Number=1) -> TensorLike: ...
     def add(self, other: Union[Number, 'COOTensor', TensorLike], alpha: Number=1) -> Union['COOTensor', TensorLike]:
-        """Adds another tensor or scalar to this COOTensor, with an optional scaling factor.
+        """计算 ``self + alpha * other``.
 
-        Parameters:
-            other (Number | COOTensor | Tensor): The tensor or scalar to be added.\n
-            alpha (int | float, optional): The scaling factor for the other tensor. Defaults to 1.
+        与 COO 张量相加时拼接两者的非零元 (不合并重复索引); 与稠密张量相加时返回
+        稠密张量; 与数相加时只加到已有非零元上.
 
-        Raises:
-            TypeError: If the type of `other` is not supported for addition.\n
-            ValueError: If the shapes of `self` and `other` are not compatible.\n
-            ValueError: If one has value and another does not.
+        Parameters
+        ----------
+        other : int, float, COOTensor or TensorLike
+            加数.
+        alpha : int or float, optional
+            加数的系数, 默认 1.
 
-        Returns:
-            out (COOTensor | Tensor): A new COOTensor if `other` is a COOTensor,\
-            or a Tensor if `other` is a dense tensor.
+        Returns
+        -------
+        COOTensor or TensorLike
+            ``other`` 为稠密张量时返回稠密张量, 否则返回 COO 张量.
+
+        Raises
+        ------
+        TypeError
+            ``other`` 的类型不受支持.
+        ValueError
+            形状不匹配, 或一方有 ``values`` 而另一方没有.
+
+        Notes
+        -----
+        模式张量 (``values`` 为 None) 与稠密张量相加的分支有误
+        (``dense_ndim + (nnz,)`` 为 int 与 tuple 相加), 会抛 ``TypeError``.
         """
         if isinstance(other, COOTensor):
             check_shape_match(self.shape, other.shape)
@@ -371,10 +458,17 @@ class COOTensor(SparseTensor):
         else:
             raise TypeError(f"Unsupported type {type(other).__name__} in addition")
 
-    def mul(self, other: Union[Number, 'COOTensor', TensorLike]) -> 'COOTensor': # TODO: finish this
-        """Element-wise multiplication.
-        The result COO tensor will share the same indices with
-        the original if `other` is a number or a dense tensor.
+    def mul(self, other: Union[Number, 'COOTensor', TensorLike]) -> 'COOTensor': # TODO: 补齐与 COO 张量相乘
+        """逐元素乘法; 结果与原张量共享索引.
+
+        Raises
+        ------
+        NotImplementedError
+            ``other`` 为 COO 张量.
+        ValueError
+            模式张量乘以数.
+        TypeError
+            ``other`` 的类型不受支持.
         """
         if isinstance(other, COOTensor):
             raise NotImplementedError
@@ -396,9 +490,14 @@ class COOTensor(SparseTensor):
             raise TypeError(f"Unsupported type {type(other).__name__} in multiplication")
 
     def div(self, other: Union[Number, TensorLike]) -> 'COOTensor':
-        """Element-wise division.
-        The result COO tensor will share the same indices with
-        the original if `other` is a number or a dense tensor.
+        """逐元素除法; 结果与原张量共享索引.
+
+        Raises
+        ------
+        ValueError
+            模式张量不能做除法.
+        TypeError
+            ``other`` 的类型不受支持.
         """
         if self._values is None:
             raise ValueError("Cannot divide COOTensor without value")
@@ -417,9 +516,14 @@ class COOTensor(SparseTensor):
             raise TypeError(f"Unsupported type {type(other).__name__} in division")
 
     def pow(self, other: Union[TensorLike, Number]) -> 'COOTensor':
-        """Element-wise power of COOTensor.
-        The result COO tensor will share the same indices with
-        the original if `other` is a number or a dense tensor.
+        """逐元素乘方; 结果与原张量共享索引.
+
+        Raises
+        ------
+        ValueError
+            模式张量不能做乘方.
+        TypeError
+            ``other`` 的类型不受支持.
         """
         if self._values is None:
             raise ValueError("Cannot power COOTensor without value with tensor")
@@ -441,20 +545,25 @@ class COOTensor(SparseTensor):
     @overload
     def matmul(self, other: TensorLike) -> TensorLike: ...
     def matmul(self, other: Union['COOTensor', TensorLike]):
-        """Matrix-multiply this COOTensor with another tensor.
+        """矩阵乘法.
 
-        Parameters:
-            other (COOTensor | Tensor): A 1-D tensor for matrix-vector multiply,
-                or a 2-D tensor for matrix-matrix multiply.
-                Batched matrix-matrix multiply is available for dimensions
-                (*B, M, K) and (*B, K, N). *B means any number of batch dimensions.
+        Parameters
+        ----------
+        other : COOTensor or TensorLike
+            稀疏张量, 或稠密张量: 一维为矩阵--向量乘, 二维为矩阵--矩阵乘; 也支持
+            ``(*B, M, K)`` 与 ``(*B, K, N)`` 的批量矩阵乘.
 
-        Raises:
-            TypeError: If the type of `other` is not supported for matmul.
+        Returns
+        -------
+        CSRTensor or TensorLike
+            与稀疏张量相乘时返回 CSR 张量 (而非 COO), 与稠密张量相乘时返回稠密张量.
 
-        Returns:
-            out (COOTensor | Tensor): A new COOTensor if `other` is a COOTensor,\
-            or a Tensor if `other` is a dense tensor.
+        Raises
+        ------
+        ValueError
+            任一方为模式张量.
+        TypeError
+            ``other`` 的类型不受支持.
         """
         if isinstance(other, COOTensor):
             if (self.values is None) or (other.values is None):

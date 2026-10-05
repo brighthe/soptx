@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/sparse/_spmm.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""稀疏--稠密矩阵乘法的通用实现, 后端未提供专用内核时使用."""
 
 from typing import Tuple
 
@@ -30,6 +31,29 @@ def _shape_check(spshape: _Size, xshape: _Size):
 
 
 def spmm_coo(indices: _DT, values: _DT, spshape: _Size, x: _DT) -> _DT:
+    """COO 矩阵乘以稠密向量或矩阵.
+
+    Parameters
+    ----------
+    indices : TensorLike
+        行列索引, 形状 ``(2, nnz)``.
+    values : TensorLike
+        非零元的值, 形状 ``(*batch, nnz)``.
+    spshape : tuple of int
+        稀疏矩阵形状 ``(M, K)``.
+    x : TensorLike
+        形状 ``(K, )`` 或 ``(*batch, K, N)``.
+
+    Returns
+    -------
+    TensorLike
+        形状 ``(*batch, M)`` 或 ``(*batch, M, N)``.
+
+    Raises
+    ------
+    ValueError
+        形状不相容.
+    """
     _shape_check(spshape, x.shape)
     row = indices[0]
     col = indices[1]
@@ -50,6 +74,29 @@ def spmm_coo(indices: _DT, values: _DT, spshape: _Size, x: _DT) -> _DT:
 
 
 def spmm_csr(crow: _DT, col: _DT, values: _DT, spshape: _Size, x: _DT) -> _DT:
+    """CSR 矩阵乘以稠密向量或矩阵, 逐行计算.
+
+    Parameters
+    ----------
+    crow, col : TensorLike
+        压缩行指针与列索引.
+    values : TensorLike
+        非零元的值, 形状 ``(*batch, nnz)``.
+    spshape : tuple of int
+        稀疏矩阵形状 ``(M, K)``.
+    x : TensorLike
+        形状 ``(K, )`` 或 ``(*batch, K, N)``.
+
+    Returns
+    -------
+    TensorLike
+        形状 ``(M, )`` 或 ``(*batch, M, N)``.
+
+    Raises
+    ------
+    ValueError
+        形状不相容.
+    """
     _shape_check(spshape, x.shape)
     nrow = spshape[0]
     unsqueezed = False

@@ -1,5 +1,10 @@
 # 移植自 brighthe/fealpy ``fealpy/sparse/_spspmm.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""稀疏--稀疏矩阵乘法的通用实现, 后端未提供 ``csr_spspmm`` 时使用.
+
+numpy 与 pytorch 后端都提供 ``csr_spspmm``, 本模块目前只在 COO 格式且后端缺少
+专用内核时才会用到.
+"""
 
 from typing import Tuple
 
@@ -21,6 +26,18 @@ def _shape_check(spshape1: _Size, spshape2: _Size):
 
 def spspmm_coo(indices1: _DT, values1: _DT, spshape1: _Size,
                indices2: _DT, values2: _DT, spshape2: _Size) -> Tuple[_DT, _DT, _Size]:
+    """两个 COO 矩阵相乘: 对中间维逐个取外积后拼接, 结果未合并重复索引.
+
+    Returns
+    -------
+    tuple
+        ``(索引, 值, 形状)``.
+
+    Raises
+    ------
+    ValueError
+        稀疏维不是二维、形状不相容, 或两者的稠密维不同.
+    """
     _shape_check(spshape1, spshape2)
 
     structure = values1.shape[:-1]
@@ -62,6 +79,15 @@ def spspmm_coo(indices1: _DT, values1: _DT, spshape1: _Size,
 
 def spspmm_csr(crow1: _DT, col1: _DT, values1: _DT, spshape1: _Size,
                crow2: _DT, col2: _DT, values2: _DT, spshape2: _Size) -> Tuple[_DT, _DT, _Size]:
+    """两个 CSR 矩阵相乘, 返回 ``(crow, col, values, 形状)``.
+
+    Notes
+    -----
+    本实现有误, 不应使用: 行指针的累加被写成 ``set_at(new_crow, x+1,
+    new_crow[x+1])`` 而没有加 1, 行号为 0 的项会被 ``bm.any(row)`` 跳过, 且按
+    ``spshape1[0]`` 循环中间维. 非方阵相乘实测抛 ``IndexError``. numpy 与 pytorch
+    后端都提供 ``csr_spspmm``, ``CSRTensor.matmul`` 不会走到这里.
+    """
     _shape_check(spshape1, spshape2)
 
     structure = values1.shape[:-1]

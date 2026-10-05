@@ -1,5 +1,6 @@
 # 移植自 brighthe/fealpy ``fealpy/sparse/csr_tensor.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
+"""CSR (压缩稀疏行) 格式稀疏矩阵."""
 
 from typing import Optional, Union, overload, List,Tuple
 from math import prod
@@ -16,17 +17,29 @@ from ._spmm import spmm_csr
 from .coo_tensor import COOTensor
 
 class CSRTensor(SparseTensor):
+    """CSR (压缩稀疏行) 格式稀疏矩阵, 稀疏维固定为两维.
+
+    Parameters
+    ----------
+    crow : TensorLike
+        压缩行指针, 形状 ``(nrow + 1, )``, 第 ``i`` 行的非零元位于
+        ``[crow[i], crow[i+1])``.
+    col : TensorLike
+        非零元的列索引, 形状 ``(nnz, )``.
+    values : TensorLike or None
+        非零元的值, 形状 ``(..., nnz)``, 前导轴为稠密维; None 表示值均为 1 的
+        模式矩阵.
+    spshape : tuple of int, optional
+        稀疏维形状 ``(nrow, ncol)``, 默认由 ``crow`` 长度与最大列索引推断.
+
+    Raises
+    ------
+    ValueError
+        ``crow`` 或 ``col`` 不是一维, ``spshape`` 不是二元组或与 ``crow`` 不符,
+        ``values`` 末轴长度与 ``nnz`` 不符, 或 ``values`` 既不是张量也不是 None.
+    """
     def __init__(self, crow: TensorLike, col: TensorLike, values: Optional[TensorLike],
                  spshape: Optional[Size]=None) -> None:
-        """Initializes CSR format sparse tensor.
-
-        Parameters:
-            crow (Tensor): compressed row pointers.
-            col (Tensor): column indices of non-zero elements, shaped (nnz,).
-                Where nnz is the number of non-zeros.
-            values (Tensor | None): non-zero elements, shaped (..., nnz).
-            spshape (Size | None, optional): shape in the sparse dimensions.
-        """
         self._crow = crow
         self._col = col
         self._values = values
@@ -69,53 +82,68 @@ class CSRTensor(SparseTensor):
         return f"CSRTensor(crow={self._crow}, col={self._col}, "\
                + f"values={self._values}, shape={self.shape})"
 
-    ### 1. Data Fetching ###
+    ### 1. 数据获取 ###
     @property
     def device(self):
-        """返回底层 tensor 所在的设备 (cpu / cuda:0 等)."""
+        """列索引张量所在的设备 (cpu / cuda:0 等)."""
         return self._col.device
 
     @property
-    def itype(self): return self._col.dtype
+    def itype(self):
+        """索引的整数类型."""
+        return self._col.dtype
 
     @property
-    def nnz(self): return self._col.shape[-1]
+    def nnz(self):
+        """非零元个数 (含重复索引)."""
+        return self._col.shape[-1]
 
     @property
     def crow(self) -> TensorLike:
-        """Return the row location of non-zero elements."""
+        """压缩行指针."""
         return self._crow
 
     @property
-    def col(self): return self._col
+    def col(self):
+        """非零元的列索引."""
+        return self._col
 
     @property
     def values(self) -> Optional[TensorLike]:
-        """Return the non-zero elements"""
+        """非零元的值, 形状 ``(..., nnz)``; 模式矩阵为 None."""
         return self._values
 
     @property
     def row(self):
+        """由行指针展开得到的各非零元行索引."""
         count = self._crow[1:] - self._crow[:-1]
         nrow = self._crow.shape[0] - 1
         kargs = bm.context(self._crow)
         return bm.repeat(bm.arange(nrow, **kargs), count)
 
     @property
-    def indptr(self): return self._crow # scipy convention
+    def indptr(self):
+        """压缩行指针, 沿用 scipy 的命名."""
+        return self._crow
 
     @property
-    def indices(self): return self._col # scipy convention
+    def indices(self):
+        """列索引, 沿用 scipy 的命名."""
+        return self._col
 
     @property
-    def data(self): return self._values # scipy convention
+    def data(self):
+        """非零元的值, 沿用 scipy 的命名."""
+        return self._values
 
     @property
     def nonzero_slice(self) -> Tuple[Union[slice, TensorLike]]:
+        """在同形状稠密矩阵上取出各非零位置的 ``(row, col)`` 下标元组."""
         return self.row, self._col
 
-    ### 2. Data Type & Device Management ###
+    ### 2. 数据类型与设备管理 ###
     def astype(self, dtype=None, /, *, copy=True):
+        """转换 ``values`` 的数据类型; 模式矩阵转换为值全为 1 的矩阵."""
         if self._values is None:
             values = bm.ones(self.nnz, dtype=dtype)
         else:
@@ -124,13 +152,15 @@ class CSRTensor(SparseTensor):
         return CSRTensor(self._crow, self._col, values, self._spshape)
 
     def device_put(self, device=None, /):
+        """把行指针、列索引与值移到指定设备."""
         return CSRTensor(bm.device_put(self._crow, device),
                          bm.device_put(self._col, device),
                          bm.device_put(self._values, device),
                          self._spshape)
 
-    ### 3. Format Conversion ###
+    ### 3. 格式转换 ###
     def to_dense(self, *, fill_value: Union[Number, bool] = 1, dtype=None) -> TensorLike:
+        """转为稠密矩阵, 重复索引的值相加; 参数见 ``SparseTensor.to_dense``."""
         if self.values is None:
             dtype = bm.float64 if (dtype is None) else dtype
             context = {"dtype": dtype, "device": bm.get_device(self.indices)}
@@ -154,21 +184,28 @@ class CSRTensor(SparseTensor):
         return dense_tensor.reshape(self.shape)
 
     def tocoo(self, *, copy=False):
-        """
-        """
+        """转为 COO 格式; ``copy=True`` 时复制 ``values``."""
         from .coo_tensor import COOTensor
         indices = bm.stack(self.nonzero_slice, axis=0)
         new_values = bm.copy(self._values) if copy else self._values
         return COOTensor(indices, new_values, self.sparse_shape)
 
     def tocsr(self, *, copy=False):
+        """返回自身, ``copy=True`` 时返回副本."""
         if copy:
             return CSRTensor(bm.copy(self._crow), bm.copy(self._col),
                              bm.copy(self._values), self._spshape)
         return self
 
-    ### 4. Object Conversion ###
+    ### 4. 对象转换 ###
     def to_petsc(self):
+        """转为 PETSc AIJ 矩阵 (需要 petsc4py).
+
+        Raises
+        ------
+        ValueError
+            带有稠密维 (批量).
+        """
         from petsc4py import PETSc
 
         if self.dense_ndim != 0:
@@ -179,6 +216,13 @@ class CSRTensor(SparseTensor):
                 size=self._spshape, csr=(self._crow, self._col, self._values))
 
     def to_scipy(self):
+        """转为 ``scipy.sparse.csr_matrix``.
+
+        Raises
+        ------
+        ValueError
+            带有稠密维 (批量).
+        """
         from scipy.sparse import csr_matrix
 
         if self.dense_ndim != 0:
@@ -192,13 +236,15 @@ class CSRTensor(SparseTensor):
 
     @classmethod
     def from_scipy(cls, mat, /):
+        """由 ``scipy.sparse.csr_matrix`` 构造."""
         crow = bm.from_numpy(mat.indptr)
         col = bm.from_numpy(mat.indices)
         values = bm.from_numpy(mat.data)
         return cls(crow, col, values, mat.shape)
 
-    ### 5. Manipulation ###
+    ### 5. 变形与操作 ###
     def copy(self):
+        """深拷贝行指针、列索引与值."""
         if self._values is None:
             return CSRTensor(bm.copy(self._crow), bm.copy(self._col),
                              None, self._spshape)
@@ -206,13 +252,24 @@ class CSRTensor(SparseTensor):
                          bm.copy(self._values), self._spshape)
 
     def coalesce(self, accumulate: bool=True) -> 'CSRTensor':
-        """Sum duplicated ``(row, col)`` entries and return canonical CSR.
+        """合并重复的 ``(row, col)`` 项 (值相加), 返回行内列有序的规范 CSR.
 
-        Kyle/Edwin update: Kyle provided the backend-generic duplicate-summing
-        algorithm used here; Edwin requested its integration into FEALPy's
-        ``CSRTensor`` so sparse matrix additions return canonical CSR.  If this
-        path fails, report it directly instead of adding local solver-side
-        sparse format workarounds.
+        Parameters
+        ----------
+        accumulate : bool, optional
+            模式矩阵时是否把重复次数作为新的值. 默认 True.
+
+        Returns
+        -------
+        CSRTensor
+            规范 CSR 矩阵.
+
+        Notes
+        -----
+        numpy 后端且 ``values`` 为一维时交给 scipy 的 ``sum_duplicates``, 其余情况
+        走与后端无关的排序合并. 后者由 Kyle 提供, Edwin 提议并入 FEALPy 的
+        ``CSRTensor``, 使稀疏矩阵相加返回规范 CSR; 该路径出错时应直接报告, 而不是
+        在求解器一侧另做稀疏格式的变通.
         """
         nrow, ncol = self.sparse_shape
         if self.nnz == 0:
@@ -285,22 +342,25 @@ class CSRTensor(SparseTensor):
     @overload
     def reshape(self, *shape: int) -> 'CSRTensor': ...
     def reshape(self, *shape) -> 'CSRTensor':
+        """改变形状. 尚未实现: 函数体为空, 返回 None."""
         pass
 
     def ravel(self) -> 'CSRTensor':
+        """展平稀疏维. 尚未实现: 函数体为空, 返回 None."""
         pass
 
     def flatten(self) -> 'CSRTensor':
+        """展平稀疏维并复制. 尚未实现: 函数体为空, 返回 None."""
         pass
 
     @property
     def T(self):
-        """
-        """
+        """转置, 经 COO 格式中转."""
         A = self.tocoo()
         return A.T.tocsr()
 
     def partial(self, index: Union[TensorLike, slice]):
+        """按非零元的编号、掩码或切片取出部分非零元, 形状不变, 行指针随之重算."""
         crow = self.crow
         ZERO = bm.zeros([1], dtype=crow.dtype, device=bm.get_device(crow))
         new_col = bm.copy(self.col[..., index])
@@ -318,27 +378,40 @@ class CSRTensor(SparseTensor):
         return CSRTensor(new_crow, new_col, new_values, self._spshape)
 
     def tril(self, k: int = 0) -> 'CSRTensor':
+        """取第 ``k`` 条对角线及以下的非零元."""
         tril_loc = (self.row + k) >= self.col
         return self.partial(tril_loc)
 
     def triu(self, k: int = 0) -> 'CSRTensor':
+        """取第 ``k`` 条对角线及以上的非零元."""
         tril_loc = (self.col - k) >= self.row
         return self.partial(tril_loc)
 
     def sum(self, axis=0):
-        """
+        """按行或按列求和.
+
+        Parameters
+        ----------
+        axis : {0, 1}, optional
+            0 (默认) 返回各行之和 ``(nrow, )``, 1 返回各列之和 ``(ncol, )``.
+            注意与 numpy 的约定相反.
+
+        Returns
+        -------
+        TensorLike or None
+            求和结果; ``axis`` 取其他值时返回 None.
         """
         kargs = bm.context(self._values)
-        if axis == 0: # the sum of row
+        if axis == 0: # 各行之和
             return self@bm.ones(self._spshape[1], **kargs)
-        elif axis == 1: # the sum of column
+        elif axis == 1: # 各列之和
             r = bm.zeros(self._spshape[1], **kargs)
             r = bm.index_add(r, self._col, self._values)
             return r
 
-    ### 6. Arithmetic Operations ###
+    ### 6. 算术运算 ###
     def neg(self) -> 'CSRTensor':
-        """Negation of the CSR tensor. Returns self if values is None."""
+        """取负; 模式矩阵返回自身."""
         if self._values is None:
             return self
         else:
@@ -349,20 +422,35 @@ class CSRTensor(SparseTensor):
     @overload
     def add(self, other: TensorLike, alpha: Number=1) -> TensorLike: ...
     def add(self, other: Union[Number, 'CSRTensor', TensorLike], alpha: Number=1) -> Union['CSRTensor', TensorLike]:
-        """Adds another tensor or scalar to this CSRTensor, with an optional scaling factor.
+        """计算 ``self + alpha * other``.
 
-        Parameters:
-            other (Number | CSRTensor | Tensor): The tensor or scalar to be added.\n
-            alpha (float, optional): The scaling factor for the other tensor. Defaults to 1.0.
+        与 CSR 矩阵相加时逐行合并两者的非零元并 ``coalesce`` 为规范 CSR, 一方为
+        模式矩阵时其值按 1 计; 与稠密张量相加时返回稠密张量; 与数相加时只加到已有
+        非零元上.
 
-        Raises:
-            TypeError: If the type of `other` is not supported for addition.\n
-            ValueError: If the shapes of `self` and `other` are not compatible.\n
-            ValueError: If one has value and another does not.
+        Parameters
+        ----------
+        other : int, float, CSRTensor or TensorLike
+            加数.
+        alpha : int or float, optional
+            加数的系数, 默认 1.
 
-        Returns:
-            out (CSRTensor | Tensor): A new CSRTensor if `other` is a CSRTensor,\
-            or a Tensor if `other` is a dense tensor.
+        Returns
+        -------
+        CSRTensor or TensorLike
+            ``other`` 为稠密张量时返回稠密张量, 否则返回 CSR 矩阵.
+
+        Raises
+        ------
+        TypeError
+            ``other`` 的类型不受支持.
+        ValueError
+            形状不匹配.
+
+        Notes
+        -----
+        模式矩阵 (``values`` 为 None) 与稠密张量相加的分支有误
+        (``dense_ndim + (nnz,)`` 为 int 与 tuple 相加), 会抛 ``TypeError``.
         """
         self_indices = bm.stack(self.nonzero_slice, axis=0)
         if isinstance(other, CSRTensor):
@@ -430,10 +518,9 @@ class CSRTensor(SparseTensor):
                 other_values,
                 axis=-1,
             )
-            # Kyle/Edwin update: CSR addition must return canonical CSR.  This
-            # relies on Kyle's duplicate-summing path and keeps downstream
-            # diagonal extraction, nnz-based checks, and iterative solver inputs
-            # consistent after matrix additions.
+            # Kyle/Edwin 的修改: CSR 相加须返回规范 CSR. 这依赖 Kyle 的重复项合并
+            # 路径, 使矩阵相加之后的对角线提取、基于 nnz 的检查与迭代求解器的输入
+            # 保持一致.
             return CSRTensor(new_crow, new_col, new_values, self.sparse_shape).coalesce()
 
         elif isinstance(other, TensorLike):
@@ -460,9 +547,18 @@ class CSRTensor(SparseTensor):
             raise TypeError(f"Unsupported type {type(other).__name__} in addition")
 
     def mul(self, other: Union[Number, 'CSRTensor', TensorLike]) -> 'CSRTensor':
-        """Element-wise multiplication.
-        The result CSR tensor will share the same indices with
-        the original if `other` is a number or a dense tensor.
+        """逐元素乘法; 与数或稠密张量相乘时结果与原矩阵共享索引.
+
+        Raises
+        ------
+        ValueError
+            模式矩阵乘以数.
+        TypeError
+            ``other`` 的类型不受支持.
+
+        Notes
+        -----
+        与 CSR 矩阵相乘的分支尚未实现, 函数体为空, 会静默返回 None.
         """
         if isinstance(other, CSRTensor):
             pass
@@ -487,15 +583,22 @@ class CSRTensor(SparseTensor):
             raise TypeError(f"Unsupported type {type(other).__name__} in multiplication")
 
     def div(self, other: Union[Number, TensorLike]) -> 'CSRTensor':
-        """Element-wise division.
-        The result CSR tensor will share the same indices with
-        the original if `other` is a number or a dense tensor.
+        """逐元素除法; 结果与原矩阵共享索引.
+
+        一维张量的长度等于行数时按行广播, 等于列数时按列广播 (方阵时按行).
+
+        Raises
+        ------
+        ValueError
+            模式矩阵不能做除法, 或形状不匹配.
+        TypeError
+            ``other`` 的类型不受支持.
         """
         if self._values is None:
                 raise ValueError("Cannot divide CSRTensor without value")
 
         if isinstance(other, TensorLike):
-            if len(other.shape) == 1: #TODO: deal with case self.shape[0] == self.shape[1]
+            if len(other.shape) == 1: #TODO: 处理方阵 (行数等于列数) 时的歧义
                 if other.shape[0] == self.shape[0]:
                     other = bm.broadcast_to(other[:, None], self.shape)
                 elif other.shape[0] == self.shape[1]:
@@ -514,9 +617,14 @@ class CSRTensor(SparseTensor):
             raise TypeError(f"Unsupported type {type(other).__name__} in division")
 
     def pow(self, other: Union[TensorLike, Number]) -> 'CSRTensor':
-        """Element-wise power of CSRTensor.
-        The result CSR tensor will share the same indices with
-        the original if `other` is a number or a dense tensor.
+        """逐元素乘方; 结果与原矩阵共享索引.
+
+        Raises
+        ------
+        ValueError
+            模式矩阵不能做乘方.
+        TypeError
+            ``other`` 的类型不受支持.
         """
         if self._values is None:
             raise ValueError("Cannot power CSRTensor without value with tensor")
@@ -540,20 +648,25 @@ class CSRTensor(SparseTensor):
     @overload
     def matmul(self, other: TensorLike) -> TensorLike: ...
     def matmul(self, other: Union['CSRTensor', TensorLike]):
-        """Matrix-multiply this CSRTensor with another tensor.
+        """矩阵乘法.
 
-        Parameters:
-            other (CSRTensor | Tensor): A 1-D tensor for matrix-vector multiply,
-                or a 2-D tensor for matrix-matrix multiply.
-                Batched matrix-matrix multiply is available for dimensions
-                (*B, M, K) and (*B, K, N). *B means any number of batch dimensions.
+        Parameters
+        ----------
+        other : CSRTensor or TensorLike
+            CSR 矩阵, 或稠密张量: 一维为矩阵--向量乘, 二维为矩阵--矩阵乘; 也支持
+            ``(*B, M, K)`` 与 ``(*B, K, N)`` 的批量矩阵乘.
 
-        Raises:
-            TypeError: If the type of `other` is not supported for matmul.
+        Returns
+        -------
+        CSRTensor or TensorLike
+            与 CSR 矩阵相乘时返回 CSR 矩阵, 与稠密张量相乘时返回稠密张量.
 
-        Returns:
-            out (CSRTensor | Tensor): A new CSRTensor if `other` is a CSRTensor,\
-            or a Tensor if `other` is a dense tensor.
+        Raises
+        ------
+        ValueError
+            任一方为模式矩阵.
+        TypeError
+            ``other`` 的类型不受支持.
         """
         if isinstance(other, CSRTensor):
             if (self.values is None) or (other.values is None):
@@ -584,33 +697,39 @@ class CSRTensor(SparseTensor):
 
 
     def find(self):
-        """
-        Find the non-zero entries in the sparse matrix..
+        """找出存储值不为 0 的项.
 
-        Returns:
-                - row indices of non-zero values.
-                - column indices of non-zero values.
-                - non-zero values themselves.
+        Returns
+        -------
+        tuple
+            ``(行索引, 列索引, 值)``.
         """
         nz_mask = self.values != 0
         return self.row[nz_mask], self.col[nz_mask], self.values[nz_mask]
 
     def diags(self) -> 'CSRTensor':
-        """
-        Extract the diagonal elements from the sparse matrix.
+        """取出对角线上的非零元.
 
-        Returns:
-            CSRTensor: A new CSRTensor object containing the diagonal values.
+        Returns
+        -------
+        CSRTensor
+            只含对角元的同形状 CSR 矩阵 (不是对角线向量).
         """
         diags_loc = (self.row) == self.col
         return self.partial(diags_loc)
 
     def col_min(self):
-        """
-        Compute the minimum values in each column of the sparse matrix.
+        """各列非零元的最小值.
 
-        Returns:
-            Tensor: A tensor containing the minimum values for each column.
+        Returns
+        -------
+        TensorLike
+            形状 ``(ncol, )``.
+
+        Notes
+        -----
+        结果以 0 为初值, 全为正值的列返回 0; 依赖 numpy 的 ``minimum.at``,
+        其他后端不可用.
         """
         M = bm.zeros(self._spshape[1], dtype=self._values.dtype)
         bm.minimum.at(M, self._col, self._values)
@@ -691,8 +810,8 @@ class CSRTensor(SparseTensor):
         return CSRTensor(new_crow, new_col, new_values, spshape=(new_row_shape, new_col_shape))
     
     def sum_duplicates(self):
-        # Kyle/Edwin update: keep SciPy-style ``sum_duplicates`` as an alias of
-        # the canonical CSR coalesce implementation.  Kyle provided the
-        # duplicate-summing algorithm now used by ``coalesce``; Edwin requested
-        # this integration for large sparse FVM/FEM systems.
+        """``coalesce`` 的别名, 沿用 scipy 的命名."""
+        # Kyle/Edwin 的修改: 保留 scipy 风格的 sum_duplicates, 作为规范 CSR 合并
+        # 实现的别名. coalesce 现用的重复项合并算法由 Kyle 提供, Edwin 为大规模
+        # 稀疏 FVM/FEM 系统提议并入.
         return self.coalesce()

@@ -28,7 +28,6 @@ MISSING_DOCSTRING_BASELINE = 314
 PORTED_ROOTS = (
     "src/soptx/backend/",
     "src/soptx/mesh/",
-    "src/soptx/sparse/",
 )
 # PORTED_ROOTS 目录下的 SOPTX 自有文件, 照常计入.
 PORTED_EXCEPTIONS = {
