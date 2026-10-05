@@ -1,14 +1,12 @@
 # 移植自 brighthe/fealpy ``fealpy/mesh/view/entity_view.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
-"""Sector-bound homogeneous entity views.
+"""绑定在实体分区上的同类实体视图.
 
-``EntityView`` exposes geometry, quadrature, interpolation and relation access
-for one ``EntitySector`` inside a :class:`MeshBlock`.  The module also keeps
-private ``_legacy_*`` basis-order adapters used by the classic ``MeshView``
-historical shape-function contract; those helpers are not a public basis API
-and new FunctionSpace code should call ``EntitySchema`` or ``EntityView``
-interfaces directly.
+``EntityView`` 为 :class:`MeshBlock` 中的一个 ``EntitySector`` 提供几何、积分、插值与
+关系的访问. 本模块还保留私有的 ``_legacy_*`` 基函数顺序适配器, 供经典 ``MeshView`` 的
+历史形函数约定使用; 它们不是公开的基函数接口, 新的函数空间代码应直接调用
+``EntitySchema`` 或 ``EntityView`` 的接口.
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ def _normalized_legacy_order(
     schema: EntitySchema,
     p: int | tuple[int, ...],
 ) -> int | tuple[int, ...]:
-    """Normalize an order for the private classic-basis column adapter."""
+    """为私有的经典基函数列适配器规范化次数参数."""
     factor_count = getattr(schema, "factor_count", None)
     if factor_count is None:
         if type(p) is int:
@@ -52,7 +50,7 @@ def _legacy_basis_indices(
     schema: EntitySchema,
     p: int | tuple[int, ...],
 ) -> Tensor | None:
-    """Map the new local-node basis order back to the classic View order."""
+    """把新的局部节点基函数顺序映射回经典视图的顺序."""
     permutation_getter = getattr(schema, "_lagrange_basis_permutation", None)
     if permutation_getter is None:
         return None
@@ -90,7 +88,7 @@ def _restore_legacy_basis_order(
     *,
     gradient: bool,
 ) -> Tensor:
-    """Apply the private FEALPy-style View basis-column convention."""
+    """施加私有的 FEALPy 风格视图基函数列约定."""
     indices = _legacy_basis_indices(schema, p)
     if indices is None:
         return values
@@ -101,58 +99,61 @@ def _restore_legacy_basis_order(
 
 
 def _pyramid_geometry_order(p: int | tuple[int, ...]) -> bool:
-    """Return whether a transitional Pyramid View request is geometry p=1."""
+    """判断过渡期的四棱锥视图请求是否为几何 p=1."""
     return p == 1 or p == (1,)
 
 
 @final
 @dataclass(slots=True)
 class EntityView:
-    """View of one homogeneous mesh entity sector.
+    """一个同类网格实体分区的视图.
 
-    ``EntityView`` binds a mesh block to one sector by its stable sector id.
-    It does not own a second copy of :class:`EntitySector` state; :attr:`sector`
-    and :attr:`schema` resolve against the mesh block on every access.
+    ``EntityView`` 以稳定的分区 id 把网格块绑定到一个分区上; 它不另存一份
+    :class:`EntitySector` 的状态, :attr:`sector` 与 :attr:`schema` 每次访问都从网格块中
+    解析.
 
-    Attributes:
-        block: Mesh storage block containing coordinates, sectors, and
-            relations.
-        sector_id: Stable sector id resolved through ``block.sectors``.
+    Attributes
+    ----------
+    block : MeshBlock
+        含坐标、分区与关系的网格存储块.
+    sector_id : str
+        经 ``block.sectors`` 解析的稳定分区 id.
     """
     block: MeshBlock
     sector_id: str
 
     def __post_init__(self) -> None:
-        """Validate the bound sector id after dataclass initialization."""
+        """dataclass 初始化后校验绑定的分区 id."""
         if type(self.sector_id) is not str or not self.sector_id:
             raise TypeError("EntityView.sector_id must be a non-empty string")
         self.block.get_sector(self.sector_id)
 
     @property
     def sector(self) -> EntitySector:
-        """Return the bound :class:`EntitySector` from the mesh block."""
+        """从网格块中取得绑定的 :class:`EntitySector`."""
         return self.block.get_sector(self.sector_id)
 
     @property
     def schema(self) -> EntitySchema:
-        """Return the concrete immutable Schema value bound by the sector."""
+        """分区绑定的具体、不可变的 Schema 值."""
         return self.sector.schema
 
     def __len__(self) -> int:
-        """Return the number of entities in this sector."""
+        """本分区的实体个数."""
         return self.schema.size(self.context())
 
     def context(self) -> EntityContext:
-        """Return the schema context for this entity view.
+        """本实体视图的 Schema 计算上下文.
 
-        Returns:
-            EntityContext: Lightweight container holding the mesh block and the
-            current entity sector.
+        Returns
+        -------
+        EntityContext
+            含网格块与当前实体分区的轻量容器.
         """
         return EntityContext(self.block, self.sector)
 
     def _selected_connectivity(self, index: Index | None) -> Tensor:
-        """Return selected sector connectivity with an explicit entity axis."""
+        """返回选定的分区连接数组, 保留显式的实体轴."""
         connectivity = self.sector.indices
         if index is None:
             return connectivity
@@ -162,7 +163,7 @@ class EntityView:
         return selected
 
     def _default_geometry_quadrature_order(self) -> int:
-        """Return the deterministic default geometry quadrature order."""
+        """返回确定的默认几何积分阶."""
         order = getattr(self.schema, "p", None)
         if order is None:
             return 1
@@ -171,7 +172,7 @@ class EntityView:
         return max(int(order), 1) + 1
 
     def _reference_center_bcs(self) -> tuple[Tensor, ...]:
-        """Return the reference-entity canonical center barycentric input."""
+        """返回参考实体规范中心的重心坐标输入."""
         if self.schema.type_id == "lagrange_pyramid":
             center = bm.asarray([[0.5, 0.5]], dtype=bm.float64)
             return (center, center, center)
@@ -181,41 +182,42 @@ class EntityView:
             bcs = (bcs,)
         return bcs
 
-    # User APIs
+    # 用户接口
 
     def barycentric[**P, R](self, func: Callable[Concatenate[Tensor, P], R], /, *, index: Index | None = None):
-        """Wrap a Cartesian-coordinate function as a barycentric function.
+        """把直角坐标函数包装为重心坐标函数.
 
-        Parameters:
-            func (Callable): Function whose first positional argument is a
-                physical coordinate tensor.  The expected coordinate shape is
-                determined by the entity schema.
-            index (Index, optional): Entity subset used when converting
-                barycentric coordinates to physical points.
+        Parameters
+        ----------
+        func : callable
+            首个位置参数为物理坐标张量的函数, 坐标的形状由实体的 Schema 决定.
+        index : Index, optional
+            实体子集.
+            把重心坐标转换为物理点时使用.
 
-        Returns:
-            Callable: Function with the same remaining arguments as ``func``
-            whose first positional argument is a barycentric coordinate tensor,
-            or a tuple of barycentric coordinate tensors for tensor-product
-            entities.
+        Returns
+        -------
+        callable
+            其余参数与 ``func`` 相同、首个位置参数为重心坐标张量 (张量积实体为重心坐标
+            张量的元组) 的函数.
         """
         return self.schema.barycentric(self.context(), func, index)
 
     def barycenter(self, *, index: Index | None = None) -> Tensor:
-        """Return the mapped reference center of selected entities.
+        """选定实体的映射后参考中心.
 
-        The reference center is mapped through the same all-node geometry
-        interpolation used by :meth:`bc_to_point`.  For affine entities this
-        equals the usual vertex average; for curved entities it is not the
-        measure-weighted centroid.
+        参考中心经与 :meth:`bc_to_point` 相同的全节点几何插值映射. 对仿射实体它等于通常的
+        顶点平均; 对弯曲实体则不是按测度加权的形心.
 
-        Parameters:
-            index (Index, optional): Entity subset.  If ``None``, all entities
-                in this sector are used.
+        Parameters
+        ----------
+        index : Index, optional
+            实体子集. 为 None 时使用本分区的全部实体.
 
-        Returns:
-            Tensor: Barycenter coordinates with shape ``(NE, GD)`` or the
-            indexed subset shape, where ``GD`` is the geometric dimension.
+        Returns
+        -------
+        Tensor
+            重心坐标, 形状 ``(NE, GD)`` 或对应子集的形状, ``GD`` 为几何维数.
         """
         if self.sector.indptr is not None:
             return self.schema.barycenter(self.context(), index)
@@ -224,27 +226,29 @@ class EntityView:
         return bm.reshape(points, (points.shape[0], points.shape[-1]))
 
     def bc_to_point(self, bc: Tensor | tuple[Tensor, ...], *, index: Index | None = None) -> Tensor:
-        """Map barycentric coordinates to physical coordinates.
+        """把重心坐标映射为物理坐标.
 
-        The mapping uses the complete geometry local-node layout, so curved
-        high-order entities are evaluated with all geometry nodes rather than
-        only their vertex skeleton.
+        映射使用完整的几何局部节点布局, 因此弯曲的高阶实体用全部几何节点计算, 而不只是
+        顶点骨架.
 
-        Parameters:
-            bc (Tensor | tuple[Tensor, ...]): Barycentric coordinates.  Simplex
-                entities use a single tensor, while tensor-product entities may
-                use one tensor per factor.
-            index (Index, optional): Entity subset on which the mapping is
-                evaluated.
+        Parameters
+        ----------
+        bc : Tensor or tuple of Tensor
+            重心坐标: 单纯形实体为一个张量, 张量积实体可为各因子一个张量.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Physical points.  For common simplex entities the shape is
-            ``(NE, NQ, GD)`` after selecting entities and quadrature points.
+        Returns
+        -------
+        Tensor
+            物理点; 常见单纯形实体选定实体与积分点后的形状为 ``(NE, NQ, GD)``.
 
-        Raises:
-            TypeError: If the coordinate container type is invalid.
-            ValueError: If barycentric shapes are inconsistent with the bound
-                Schema.
+        Raises
+        ------
+        TypeError
+            坐标容器类型不合法.
+        ValueError
+            重心坐标的形状与绑定的 Schema 不符.
         """
         if not isinstance(bc, tuple):
             bc = (bc,)
@@ -253,12 +257,12 @@ class EntityView:
         return bm.einsum("qi,cij->cqj", values, points)
 
     def boundary(self) -> "BoundaryInfo":
-        """Infer boundary information for this entity sector.
+        """推断本实体分区的边界信息.
 
-        Returns:
-            BoundaryInfo:
-            - mask: Boolean tensor indicating which entities are on the boundary.
-            - index: Integer tensor of boundary entity indices.
+        Returns
+        -------
+        BoundaryInfo
+            ``mask`` 为标记边界实体的布尔张量, ``index`` 为边界实体的编号.
         """
         from ..topology.boundary import BoundaryInferencer
 
@@ -271,13 +275,17 @@ class EntityView:
         )
 
     def del_attribute(self, name: str) -> None:
-        """Delete a user attribute from the entity sector.
+        """删除实体分区上的用户属性.
 
-        Parameters:
-            name (str): Attribute name.
+        Parameters
+        ----------
+        name : str
+            属性名.
 
-        Raises:
-            KeyError: If ``name`` is not present in ``sector.attributes``.
+        Raises
+        ------
+        KeyError
+            ``sector.attributes`` 中没有 ``name``.
         """
         if name in self.sector.attributes:
             del self.sector.attributes[name]
@@ -295,25 +303,28 @@ class EntityView:
         cell_axis: bool = False,
         index: Index | None = None
     ) -> Tensor:
-        """Compute an integral error norm between two functions on the entity.
+        """计算两个函数之差在实体上的积分误差范数.
 
-        Functions not marked as barycentric are wrapped with
-        :meth:`barycentric` before integration.  The computed value is
+        未标记为重心坐标的函数先经 :meth:`barycentric` 包装. 计算的量为
         ``(integral(abs(f1 - f2)**power))**(1/power)``.
 
-        Parameters:
-            f1 (Callable[..., Tensor]): First function.
-            f2 (Callable[..., Tensor]): Second function.
-            power (float, optional): Norm power.  Default is 2.0.
-            q (int, optional): Quadrature order.  Default is 3.
-            cell_axis (bool, optional): If ``True``, return one error value per
-                selected entity.  If ``False``, return the global error over
-                all selected entities.
-            index (Index, optional): Entity subset.
+        Parameters
+        ----------
+        f1, f2 : callable
+            两个函数.
+        power : float, optional
+            范数的幂次, 默认 2.0.
+        q : int, optional
+            积分阶, 默认 3.
+        cell_axis : bool, optional
+            为 True 时返回每个选定实体上的误差, 否则返回全部选定实体上的总误差.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Scalar global error, or a tensor of entity-wise errors when
-            ``cell_axis`` is ``True``.
+        Returns
+        -------
+        Tensor
+            标量总误差; ``cell_axis`` 为 True 时为逐实体误差.
         """
         from ...decorator import barycentric
         if not getattr(f1, "coordtype", None) == "barycentric":
@@ -322,6 +333,7 @@ class EntityView:
             f2 = self.barycentric(f2, index=index)
         @barycentric
         def integrand(bcs: Tensor | tuple[Tensor, ...]) -> Tensor:
+            """被积函数 ``|f1 - f2| ** power``."""
             v1 = f1(bcs)
             v2 = f2(bcs)
             return bm.abs(v1 - v2) ** power
@@ -331,18 +343,21 @@ class EntityView:
         return bm.sum(self.integral(integrand, q=q, index=index)) ** (1.0 / power)
 
     def geo_dimension(self) -> int:
-        """Return the geometric dimension of the embedding space."""
+        """嵌入空间的几何维数."""
         return self.schema.geo_dimension(self.context())
 
     def get_attribute(self, name: str) -> Any:
-        """Return a user attribute stored on the entity sector.
+        """返回实体分区上存储的用户属性.
 
-        Parameters:
-            name (str): Attribute name.
+        Parameters
+        ----------
+        name : str
+            属性名.
 
-        Returns:
-            Any: Stored attribute value, or ``None`` if the attribute does not
-            exist.
+        Returns
+        -------
+        Any
+            属性值; 属性不存在时为 None.
         """
         return self.sector.attributes.get(name)
 
@@ -352,18 +367,19 @@ class EntityView:
         idx: int = 0,
         indexing: Literal["o", "s"] = "o",
     ) -> Tensor:
-        """Return local-to-global orientation permutations for sub-entities.
+        """返回子实体从局部到全局定向的置换.
 
-        Parameters:
-            name_or_topdim (str | int | EntityView): Target sub-entity schema
-                name, topological dimension, or explicit ``EntityView``.
-            idx (int, optional): Target sector index when ``name_or_topdim``
-                selects a dimension or entity type that has multiple sectors.  Default is 0.
+        Parameters
+        ----------
+        name_or_topdim : str, int or EntityView
+            目标子实体的 schema 名、拓扑维数或显式的 ``EntityView``.
+        idx : int, optional
+            ``name_or_topdim`` 选中的维数或实体类型有多个分区时, 目标分区的序号. 默认 0.
 
-        Returns:
-            Tensor: Integer tensor whose leading axes enumerate source entities
-            and their local target entities.  The last axis stores the vertex
-            permutation induced by global orientation.
+        Returns
+        -------
+        Tensor
+            整数张量: 前导轴依次枚举源实体及其局部目标实体, 末轴存全局定向诱导的顶点置换.
         """
         if indexing != "o":
             raise NotImplementedError(
@@ -418,21 +434,22 @@ class EntityView:
         *,
         ref: bool = False,
     ) -> Tensor:
-        """Return gradients of barycentric coordinate functions.
+        """重心坐标函数的梯度.
 
-        Parameters:
-            bcs (tuple[Tensor, ...] | None, optional): Evaluation points in
-                barycentric coordinates.  If provided, gradients may be
-                broadcast along the quadrature-point axis.
-            index (Index, optional): Entity subset.
-            ref (bool, optional): If ``True``, return gradients on the reference
-                entity.  If ``False``, return gradients in physical coordinates.
-                Default is ``False``.
+        Parameters
+        ----------
+        bcs : tuple of Tensor, optional
+            求值点的重心坐标; 给出时梯度可沿积分点轴广播.
+        index : Index, optional
+            实体子集.
+        ref : bool, optional
+            为 True 时返回参考实体上的梯度, 否则 (默认) 返回物理坐标下的梯度.
 
-        Returns:
-            Tensor: Gradients of barycentric coordinates.  Without ``bcs``, a
-            typical shape is ``(NE, NV, GD)`` for physical gradients or
-            ``(NE, NV, NR)`` for reference gradients.
+        Returns
+        -------
+        Tensor
+            重心坐标的梯度; 不给 ``bcs`` 时, 物理梯度的典型形状为 ``(NE, NV, GD)``, 参考梯度为
+            ``(NE, NV, NR)``.
         """
         return self.schema.grad_lambda(self.context(), index, bcs=bcs, ref=ref) # type: ignore
 
@@ -440,12 +457,10 @@ class EntityView:
         self,
         bcs: Tensor | tuple[Tensor, ...],
     ) -> Tensor:
-        """Evaluate gradients of this sector's geometry shape functions.
+        """本分区几何形函数的参考梯度.
 
-        The geometry order is fixed by the bound Schema value; this method does
-        not accept an independent solution order.  The result has shape
-        ``(Q, Lg, R)`` where ``Lg`` is the Schema's complete local-node count
-        and ``R`` is its reference dimension.
+        几何次数由绑定的 Schema 值确定, 本方法不接受独立的解次数. 结果形状为
+        ``(Q, Lg, R)``, ``Lg`` 为 Schema 的完整局部节点数, ``R`` 为参考维数.
         """
         return self.schema.grad_shape_function_reference(bcs)
 
@@ -455,20 +470,22 @@ class EntityView:
         *,
         index: Index | None = None,
     ) -> Tensor:
-        """Evaluate geometry shape-function gradients in physical coordinates.
+        """几何形函数在物理坐标下的梯度, 形状 ``(NE, Q, Lg, GD)``.
 
-        The result has shape ``(NE, Q, Lg, GD)``.  It is obtained by mapping
-        the reference gradient through the current all-node Jacobian and the
-        reference metric, so curved geometry is not silently replaced by a
-        vertex-only affine formula.
+        由参考梯度经当前全节点 Jacobi 矩阵与参考度量映射得到, 因此弯曲几何不会被静默地
+        替换为只用顶点的仿射公式.
 
-        Parameters:
-            bcs: Barycentric evaluation points, either one tensor for simplex
-                entities or one tensor per tensor-product factor.
-            index: Optional entity subset.
+        Parameters
+        ----------
+        bcs : Tensor or tuple of Tensor
+            求值点的重心坐标: 单纯形实体为一个张量, 张量积实体为各因子一个张量.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Physical-coordinate gradients with shape ``(NE, Q, Lg, GD)``.
+        Returns
+        -------
+        Tensor
+            物理坐标下的梯度, 形状 ``(NE, Q, Lg, GD)``.
         """
         if not isinstance(bcs, tuple):
             bcs = (bcs,)
@@ -492,12 +509,11 @@ class EntityView:
         variables: Literal["b", "u", "x"] = "u",
         mi = None,
     ) -> Tensor:
-        """Private classic arbitrary-order gradient entry point.
+        """私有的经典任意次梯度入口.
 
-        This helper preserves the historical FEALPy ``grad_shape_function(p)``
-        column convention for classic ``MeshView`` methods.  New code should
-        use :meth:`EntityView.grad_shape_function` or
-        ``EntitySchema.grad_lagrange_basis_function_reference`` directly.
+        为经典 ``MeshView`` 的方法保留 FEALPy 历史上 ``grad_shape_function(p)`` 的列约定.
+        新代码应直接使用 :meth:`EntityView.grad_shape_function` 或
+        ``EntitySchema.grad_lagrange_basis_function_reference``.
         """
         if isinstance(bcs, Tensor):
             bcs = (bcs,)
@@ -564,12 +580,12 @@ class EntityView:
 
     @property
     def indices(self) -> Tensor:
-        """Connectivity array of this entity sector."""
+        """本实体分区的连接数组."""
         return getattr(self.sector, "indices")
 
     @property
     def indptr(self) -> Tensor | None:
-        """Return ragged connectivity offsets, or ``None`` when homogeneous."""
+        """变长连接的偏移量; 定长分区为 None."""
         return self.sector.indptr
 
     def integral(
@@ -580,35 +596,42 @@ class EntityView:
         *,
         index: Index | None = None
     ) -> Tensor:
-        """Integrate a barycentric function over selected entities.
+        """在选定实体上积分重心坐标函数.
 
-        Parameters:
-            func (Callable[..., Tensor]): Function evaluated at barycentric
-                quadrature points.
-            q (int, optional): Quadrature order.  Default is 3.
-            index (Index, optional): Entity subset.
+        Parameters
+        ----------
+        func : callable
+            在重心坐标积分点处求值的函数.
+        q : int, optional
+            积分阶, 默认 3.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Integral values.  For scalar integrands this is typically
-            one value per selected entity before any caller-side reduction.
+        Returns
+        -------
+        Tensor
+            积分值; 标量被积函数通常在调用方归约之前每个选定实体一个值.
         """
         return self.schema.integral(self.context(), func, q, index)
 
     def jacobi_matrix(self, bcs: Tensor | tuple[Tensor, ...], *, index: Index | None = None) -> Tensor:
-        """Return Jacobian matrices of the reference-to-physical map.
+        """参考实体到物理实体映射的 Jacobi 矩阵.
 
-        The Jacobian is computed from the geometry reference gradient and all
-        geometry nodes:
+        由几何参考梯度与全部几何节点计算:
 
         ``J[c, q, d, r] = sum_i X[c, i, d] * dphi_ref[q, i, r]``
 
-        Parameters:
-            bcs (Tensor | tuple[Tensor, ...]): Barycentric evaluation points.
-            index (Index, optional): Entity subset.
+        Parameters
+        ----------
+        bcs : Tensor or tuple of Tensor
+            求值点的重心坐标: 单纯形实体为一个张量, 张量积实体为各因子一个张量.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Jacobian tensor, commonly with shape ``(NE, NQ, GD, ref_dim)``,
-            where ``ref_dim`` is the reference dimension.
+        Returns
+        -------
+        Tensor
+            Jacobi 张量, 通常形状为 ``(NE, NQ, GD, ref_dim)``, ``ref_dim`` 为参考维数.
         """
         if not isinstance(bcs, tuple):
             bcs = (bcs,)
@@ -617,18 +640,22 @@ class EntityView:
         return bm.einsum("cij,qir->cqjr", points, gradients)
 
     def metric_density(self, bcs: Tensor | tuple[Tensor, ...], *, index: Index | None = None) -> Tensor:
-        """Return the unsigned metric density of the reference-to-physical map.
+        """参考实体到物理实体映射的无符号度量密度.
 
-        For reference dimension ``r > 0`` this is ``sqrt(det(J^T J))``.  For a
-        zero-dimensional reference entity it follows the schema's zero-
-        dimensional convention and returns one density per sample.
+        参考维数 ``r > 0`` 时为 ``sqrt(det(J^T J))``; 零维参考实体按 Schema 的零维约定, 每个
+        采样点返回一个密度.
 
-        Parameters:
-            bcs (Tensor | tuple[Tensor, ...]): Barycentric evaluation points.
-            index (Index, optional): Entity subset.
+        Parameters
+        ----------
+        bcs : Tensor or tuple of Tensor
+            求值点的重心坐标: 单纯形实体为一个张量, 张量积实体为各因子一个张量.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Metric density with shape ``(NE, NQ)``.
+        Returns
+        -------
+        Tensor
+            度量密度, 形状 ``(NE, NQ)``.
         """
         jacobian = self.jacobi_matrix(bcs, index=index)
         ref_dim = int(jacobian.shape[-1])
@@ -638,21 +665,22 @@ class EntityView:
         return bm.sqrt(bm.linalg.det(metric))
 
     def measure(self, *, index: Index | None = None, q: int | None = None) -> Tensor:
-        """Return the physical measure of selected entities.
+        """选定实体的物理测度.
 
-        The measure is obtained by integrating the unsigned metric density over
-        the reference entity.  When ``q`` is omitted, the Schema's deterministic
-        default geometry quadrature order is used; callers may raise ``q`` to
-        check convergence for curved geometry.
+        由无符号度量密度在参考实体上积分得到. 省略 ``q`` 时使用 Schema 确定的默认几何积分
+        阶; 对弯曲几何可提高 ``q`` 检查收敛.
 
-        Parameters:
-            index (Index, optional): Entity subset.
-            q (int, optional): Geometry quadrature order.  If ``None``, the
-                default policy is used.
+        Parameters
+        ----------
+        index : Index, optional
+            实体子集.
+        q : int, optional
+            几何积分阶; 为 None 时按默认策略.
 
-        Returns:
-            Tensor: One measure per selected entity.  The measure is length for
-            edges, area for surface entities, and volume for volume entities.
+        Returns
+        -------
+        Tensor
+            每个选定实体一个测度: 边为长度, 面为面积, 体为体积.
         """
         if self.sector.indptr is not None:
             return self.schema.measure(self.context(), index)  # type: ignore[attr-defined]
@@ -670,45 +698,49 @@ class EntityView:
         return measure
 
     def multi_index_matrix(self, order: int | tuple[int, ...], *, internal: bool = False, tensorprod: bool = True):
-        """Return interpolation multi-indices for this entity type.
+        """本实体类型的插值多重指标.
 
-        Parameters:
-            order (int | tuple[int, ...]): Polynomial degree, or tensor-product
-                degrees.
-            internal (bool, optional): If ``True``, return only interior
-                interpolation-point multi-indices.  Default is ``False``.
-            tensorprod (bool, optional): If ``True``, use the tensor-product
-                ordering expected by interpolation utilities.  Default is
-                ``True``.
+        Parameters
+        ----------
+        order : int or tuple of int
+            多项式次数, 或张量积各方向的次数.
+        internal : bool, optional
+            为 True 时只返回内部插值点的多重指标. 默认 False.
+        tensorprod : bool, optional
+            为 True (默认) 时使用插值工具所期望的张量积顺序.
 
-        Returns:
-            Tensor: Integer tensor with one row per local interpolation point
-            and one column per local vertex or tensor-product coordinate.
+        Returns
+        -------
+        Tensor
+            整数张量, 每行对应一个局部插值点, 每列对应一个局部顶点或张量积坐标.
         """
         if isinstance(order, int):
             order = (order,)
         return self.schema.multi_index(order, internal=internal, tensorprod=tensorprod)
 
     def normal(self, bcs: Tensor | tuple[Tensor, ...] | None = None, *, index: Index | None = None) -> Tensor:
-        """Return intrinsic normal vectors associated with selected entities.
+        """选定实体的内蕴法向量.
 
-        When ``bcs`` is provided, the normal is evaluated pointwise from the
-        all-node Jacobian.  Without ``bcs`` the historical convenience behavior
-        is preserved for affine sectors.
+        给出 ``bcs`` 时由全节点 Jacobi 矩阵逐点计算法向; 不给时对仿射分区保留历史上的便捷
+        行为.
 
-        Parameters:
-            bcs (Tensor | tuple[Tensor, ...] | None, optional): Barycentric
-                evaluation points.
-            index (Index, optional): Entity subset.
+        Parameters
+        ----------
+        bcs : Tensor or tuple of Tensor, optional
+            求值点的重心坐标.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Normal vectors.  Schemas commonly return shape
-            ``(NE, NN, GD)`` without ``bcs`` and ``(NE, Q, NN, GD)`` with
-            ``bcs``, where ``NN`` is the number of normal directions.
+        Returns
+        -------
+        Tensor
+            法向量; 常见形状为不给 ``bcs`` 时 ``(NE, NN, GD)``, 给出时 ``(NE, Q, NN, GD)``,
+            ``NN`` 为法方向个数.
 
-        Raises:
-            NotImplementedError: If a pointwise normal frame is requested for a
-                higher-codimension entity whose convention is not frozen.
+        Raises
+        ------
+        NotImplementedError
+            对约定尚未确定的高余维实体请求逐点法标架.
         """
         if bcs is None:
             return self.schema.normal(self.context(), index)
@@ -742,40 +774,50 @@ class EntityView:
         )
 
     def num_multi_index(self, order: int | tuple[int, ...], *, internal: bool = False) -> int:
-        """Return the number of local interpolation multi-indices.
+        """局部插值多重指标的个数.
 
-        Parameters:
-            order (int | tuple[int, ...]): Polynomial degree, or tensor-product
-                degrees.
-            internal (bool, optional): If ``True``, count only interior
-                interpolation points.  Default is ``False``.
+        Parameters
+        ----------
+        order : int or tuple of int
+            多项式次数, 或张量积各方向的次数.
+        internal : bool, optional
+            为 True 时只计内部插值点. 默认 False.
 
-        Returns:
-            int: Number of local multi-indices for the requested order.
+        Returns
+        -------
+        int
+            所求次数下局部多重指标的个数.
         """
         if isinstance(order, int):
             order = (order,)
         return self.schema.num_multi_index(order, internal=internal)
 
     def quadrature_formula(self, q: int = 3, qtype: str = "legendre"):
-        """Return a quadrature formula on the reference entity.
+        """参考实体上的积分公式.
 
-        Parameters:
-            q (int, optional): Quadrature order.  Default is 3.
-            qtype (str, optional): Quadrature family.  Default is
-                ``"legendre"``.
+        Parameters
+        ----------
+        q : int, optional
+            积分阶, 默认 3.
+        qtype : str, optional
+            积分公式族, 默认 ``"legendre"``.
 
-        Returns:
-            Quadrature: Quadrature object supplied by the entity schema.
+        Returns
+        -------
+        Quadrature
+            由实体 Schema 提供的积分公式对象.
         """
         return self.schema.quadrature_formula(q, qtype)
 
     def set_attribute(self, name: str, value: Any) -> None:
-        """Set a user attribute on the entity sector.
+        """在实体分区上设置用户属性.
 
-        Parameters:
-            name (str): Attribute name.
-            value (Any): Attribute value.
+        Parameters
+        ----------
+        name : str
+            属性名.
+        value : Any
+            属性值.
         """
         self.sector.attributes[name] = value
 
@@ -783,12 +825,10 @@ class EntityView:
         self,
         bcs: Tensor | tuple[Tensor, ...],
     ) -> Tensor:
-        """Evaluate this sector's geometry shape functions.
+        """本分区的几何形函数值.
 
-        The output follows the concrete Schema's complete local-node layout,
-        so its final axis equals both ``schema.number_of_nodes()`` and the
-        connectivity width of ``indices``.  It does not accept an independent
-        solution order.
+        输出遵循具体 Schema 的完整局部节点布局, 末轴长度等于 ``schema.number_of_nodes()``,
+        也等于 ``indices`` 的连接宽度. 不接受独立的解次数.
         """
         return self.schema.shape_function(bcs)
 
@@ -801,12 +841,10 @@ class EntityView:
         variables: str = "u",
         mi = None,
     ) -> Tensor:
-        """Private classic arbitrary-order basis entry point.
+        """私有的经典任意次基函数入口.
 
-        This helper preserves the historical FEALPy ``shape_function(p)``
-        column convention for classic ``MeshView`` methods.  New code should
-        use :meth:`EntityView.shape_function` or
-        ``EntitySchema.lagrange_basis_function`` directly.
+        为经典 ``MeshView`` 的方法保留 FEALPy 历史上 ``shape_function(p)`` 的列约定. 新代码
+        应直接使用 :meth:`EntityView.shape_function` 或 ``EntitySchema.lagrange_basis_function``.
         """
         if isinstance(bcs, Tensor):
             bcs = (bcs,)
@@ -831,24 +869,26 @@ class EntityView:
             raise ValueError(f"Unsupported variable type: {variables}")
 
     def size(self) -> int:
-        """Return the number of entities in this sector."""
+        """本分区的实体个数."""
         return self.schema.size(self.context())
 
     def tangent(self, bcs: Tensor | tuple[Tensor, ...] | None = None, *, index: Index | None = None) -> Tensor:
-        """Return tangent vectors associated with selected entities.
+        """选定实体的切向量.
 
-        When ``bcs`` is provided, the tangent frame is the pointwise all-node
-        Jacobian with the reference axis transposed last.  Without ``bcs`` the
-        historical convenience behavior is preserved for affine sectors.
+        给出 ``bcs`` 时切标架为逐点的全节点 Jacobi 矩阵, 参考轴转置到最后; 不给时对仿射
+        分区保留历史上的便捷行为.
 
-        Parameters:
-            bcs (Tensor | tuple[Tensor, ...] | None, optional): Barycentric
-                evaluation points.
-            index (Index, optional): Entity subset.
+        Parameters
+        ----------
+        bcs : Tensor or tuple of Tensor, optional
+            求值点的重心坐标.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Tangent vectors, commonly with shape ``(NE, TD, GD)``
-            without ``bcs`` and ``(NE, Q, TD, GD)`` with ``bcs``.
+        Returns
+        -------
+        Tensor
+            切向量; 常见形状为不给 ``bcs`` 时 ``(NE, TD, GD)``, 给出时 ``(NE, Q, TD, GD)``.
         """
         if bcs is None:
             return self.schema.tangent(self.context(), index)
@@ -858,19 +898,19 @@ class EntityView:
         return bm.swapaxes(jacobian, -1, -2)
 
     def to(self, target: int | str | EntityView, idx: int = 0, /) -> Relation:
-        """Return the relation from this entity sector to a target sector.
+        """返回本实体分区到目标分区的关系.
 
-        Parameters:
-            target (int | str | EntityView): Target entity selector.  It may be
-                a topological dimension, an entity type/name, or another
-                ``EntityView``.
-            idx (int, optional): Target sector index when ``target`` selects a
-                dimension or entity type that has multiple sectors.  Default is
-                0.
+        Parameters
+        ----------
+        target : int, str or EntityView
+            目标实体选择器: 拓扑维数、实体类型名或另一个 ``EntityView``.
+        idx : int, optional
+            ``target`` 选中的维数或实体类型有多个分区时, 目标分区的序号. 默认 0.
 
-        Returns:
-            Relation: Relation object containing source and target indices and
-            conversion helpers such as array or COO representations.
+        Returns
+        -------
+        Relation
+            含源与目标索引的关系对象, 带数组、COO 等表示的转换工具.
         """
         from ..topology.relation import resolve_relation
 
@@ -893,16 +933,20 @@ class EntityView:
         return resolve_relation(self.block, self.sector_id, tgt)
 
     def to_ipoint(self, order: int, index: Index | None = None) -> Tensor:
-        """Map entities to global interpolation-point indices.
+        """实体到全局插值点编号的映射.
 
-        Parameters:
-            order (int): Interpolation order.
-            index (Index, optional): Entity subset.
+        Parameters
+        ----------
+        order : int
+            插值次数.
+        index : Index, optional
+            实体子集.
 
-        Returns:
-            Tensor: Integer tensor of shape ``(NE, NIP)`` or the indexed subset,
-            where ``NIP`` is the number of local interpolation points on this
-            entity type.
+        Returns
+        -------
+        Tensor
+            整数张量, 形状 ``(NE, NIP)`` 或对应子集的形状, ``NIP`` 为本实体类型上的局部
+            插值点数.
         """
         from ..ipoints import to_ipoint
         from .mesh_view import MeshView
@@ -915,5 +959,5 @@ class EntityView:
         return mapping if index is None else mapping[index]
 
     def top_dimension(self) -> int:
-        """Return the topological dimension of this entity type."""
+        """本实体类型的拓扑维数."""
         return self.schema.top_dim
