@@ -889,7 +889,18 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     **kwargs
                 ) -> TensorLike:
-        """求解伴随方程 K @ λ = rhs"""
+        """求解伴随方程 K @ λ = rhs, 伴随问题的 Dirichlet 条件为齐次.
+
+        Raises
+        ------
+        NotImplementedError
+            ``operator_level`` 不是 ``'fa'``: 矩阵自由层级的算子不支持按行列施加
+            边界条件.
+        """
+        if self._operator_level != 'fa':
+            raise NotImplementedError(
+                f"solve_adjoint 只支持 operator_level='fa', 当前为 {self._operator_level!r}."
+            )
         # 组装刚度矩阵
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 

@@ -25,6 +25,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Optional,
     Protocol,
     Sequence,
     runtime_checkable,
@@ -204,8 +205,8 @@ class MaterialInterpolation(Protocol):
         ...
 
     @property
-    def n_sub(self) -> int:
-        """每个位移单元内的子密度单元数, 仅多分辨率时有效."""
+    def n_sub(self) -> Optional[int]:
+        """每个位移单元内的子密度单元数; 非多分辨率时为 None."""
         ...
 
     @property

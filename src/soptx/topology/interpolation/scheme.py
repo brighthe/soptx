@@ -63,8 +63,8 @@ class MaterialInterpolationScheme(BaseLogged):
         return self._stress_interpolation_method
     
     @property
-    def n_sub(self) -> int:
-        """获取子密度单元数量 (仅多分辨率时有效)"""
+    def n_sub(self) -> Optional[int]:
+        """获取子密度单元数量 (非多分辨率时为 None)"""
         return getattr(self, '_n_sub', None)
     
     @property
