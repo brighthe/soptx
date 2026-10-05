@@ -13,7 +13,9 @@ class HuZhangFESpace:
             return HuZhangFESpace2d(mesh, p=p, ctype=ctype, use_relaxation=use_relaxation,
                                     corners=corners)
         elif TD == 3:
+            if use_relaxation:
+                raise ValueError("三维胡张元没有角点松弛, use_relaxation 只能为 False.")
             from .huzhang_fe_space_3d import HuZhangFESpace3d
-            return HuZhangFESpace3d(mesh, p=p, ctype=ctype, use_relaxation=use_relaxation)
+            return HuZhangFESpace3d(mesh, p=p, ctype=ctype)
         else:
             raise ValueError(f"Unsupported dimension: {TD}. Only 2D and 3D are supported.")

@@ -788,28 +788,42 @@ class HuZhangFESpace2d(FunctionSpace):
         return self.dof.number_of_global_dofs()
 
     def interpolation_points(self) -> TensorLike:
-        """自由度对应的插值点坐标; ``HuZhangFEDof2d`` 尚未实现该方法, 调用会抛出 AttributeError."""
-        return self.dof.interpolation_points()
+        """自由度对应的插值点坐标; 尚未实现.
+
+        Raises
+        ------
+        NotImplementedError
+            总是抛出.
+        """
+        raise NotImplementedError("HuZhangFESpace2d 尚未实现 interpolation_points.")
 
     def cell_to_dof(self, index: Index=_S) -> TensorLike:
         """单元到全局自由度的映射, 形状 ``(NC, ldof)``, 顺序为顶点 -> 边 -> 单元."""
         return self.dof.cell_to_dof(index=index)
 
     def face_to_dof(self, index: Index=_S) -> TensorLike:
-        """面到全局自由度的映射; ``HuZhangFEDof2d`` 尚未实现该方法, 调用会抛出 AttributeError."""
-        return self.dof.face_to_dof(index=index)
+        """面到全局自由度的映射; 二维的面即边, 与 ``edge_to_dof`` 相同."""
+        return self.edge_to_dof(index=index)
 
     def edge_to_dof(self, index=_S):
-        """边到全局自由度的映射.
+        """边到全局自由度的映射, 形状 ``(NE, 2(p+1))``, 只含跨边连续的自由度.
 
-        ``HuZhangFEDof2d.edge_to_dof`` 不接受 ``index``, 本方法目前会抛出 TypeError;
-        需要边自由度时直接调用 ``self.dof.edge_to_dof()``.
+        Parameters
+        ----------
+        index : Index, optional
+            边的子集, 默认全体.
         """
-        return self.dof.edge_to_dof(index=index)
+        return self.dof.edge_to_dof()[index]
 
     def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
-        """标记边界自由度; ``HuZhangFEDof2d`` 尚未实现该方法, 调用会抛出 AttributeError."""
-        return self.dof.is_boundary_dof(threshold, method=method)
+        """标记边界自由度; 尚未实现.
+
+        Raises
+        ------
+        NotImplementedError
+            总是抛出. 牵引边界的强施加见 ``boundary_interpolate``.
+        """
+        raise NotImplementedError("HuZhangFESpace2d 尚未实现 is_boundary_dof, 牵引边界见 boundary_interpolate.")
 
     def geo_dimension(self):
         """几何维数."""
@@ -1183,6 +1197,9 @@ class HuZhangFESpace2d(FunctionSpace):
             NC = mesh.number_of_cells()
         else:
             cell_indices = index
+            if getattr(cell_indices, 'dtype', None) == bm.bool:
+                # 布尔掩码先转成下标, 否则 len 给出的是全部单元数
+                cell_indices = bm.nonzero(cell_indices)[0]
             NC = len(cell_indices) if hasattr(cell_indices, '__len__') else 1
 
         cell = mesh.entity('cell')[cell_indices]

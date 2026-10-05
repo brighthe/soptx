@@ -346,8 +346,14 @@ class HuZhangFEDof3d():
         return edge2dof.reshape(NE, eldof)
 
     def edge_to_dof(self, index: Index=_S) -> TensorLike:
-        """边到全局自由度的映射; 尚未实现, 返回 None."""
-        pass
+        """边到全局自由度的映射; 尚未实现.
+
+        Raises
+        ------
+        NotImplementedError
+            总是抛出.
+        """
+        raise NotImplementedError("HuZhangFEDof3d 尚未实现 edge_to_dof.")
 
     def face_to_internal_dof(self) -> TensorLike:
         """Get the index array of the dofs defined on the faces of the mesh."""
@@ -365,8 +371,14 @@ class HuZhangFEDof3d():
         return face2dof.reshape(NF, fldof)
 
     def face_to_dof(self, index: Index=_S) -> TensorLike:
-        """面到全局自由度的映射; 尚未实现, 返回 None."""
-        pass
+        """面到全局自由度的映射; 尚未实现.
+
+        Raises
+        ------
+        NotImplementedError
+            总是抛出.
+        """
+        raise NotImplementedError("HuZhangFEDof3d 尚未实现 face_to_dof.")
 
     def cell_to_internal_dof(self) -> TensorLike:
         """Get the index array of the dofs defined on the cells of the mesh."""
@@ -468,8 +480,26 @@ class HuZhangFEDof3d():
         return c2d[index]
 
     def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
-        """Get the bool array of the boundary dofs."""
-        pass
+        """标记边界自由度; 尚未实现.
+
+        Raises
+        ------
+        NotImplementedError
+            总是抛出.
+        """
+        raise NotImplementedError("HuZhangFEDof3d 尚未实现 is_boundary_dof.")
+
+def _require_all_cells(index: Index, name: str) -> None:
+    """三维胡张元的单元量尚未按子集选取, ``index`` 不是全部单元时报错.
+
+    Raises
+    ------
+    NotImplementedError
+        ``index`` 不是 ``_S``.
+    """
+    if index is not _S:
+        raise NotImplementedError(f"HuZhangFESpace3d.{name} 只支持全部单元, 尚不支持 index 子集.")
+
 
 class HuZhangFESpace3d(FunctionSpace):
     r"""三维四面体网格上的胡张 (Hu-Zhang) 应力空间 :math:`\Sigma_h`, 不支持角点松弛.
@@ -515,23 +545,29 @@ class HuZhangFESpace3d(FunctionSpace):
         return self.dof.number_of_global_dofs()
 
     def interpolation_points(self) -> TensorLike:
-        """自由度对应的插值点坐标; ``HuZhangFEDof3d`` 尚未实现该方法, 调用会抛出 AttributeError."""
-        return self.dof.interpolation_points()
+        """自由度对应的插值点坐标; 尚未实现.
+
+        Raises
+        ------
+        NotImplementedError
+            总是抛出.
+        """
+        raise NotImplementedError("HuZhangFESpace3d 尚未实现 interpolation_points.")
 
     def cell_to_dof(self, index: Index=_S) -> TensorLike:
         """单元到全局自由度的映射, 形状 ``(NC, ldof)``, 顺序为顶点 -> 边 -> 面 -> 单元."""
         return self.dof.cell_to_dof(index=index)
 
     def face_to_dof(self, index: Index=_S) -> TensorLike:
-        """面到全局自由度的映射; ``HuZhangFEDof3d.face_to_dof`` 尚未实现, 返回 None."""
+        """面到全局自由度的映射; 尚未实现, 抛出 NotImplementedError."""
         return self.dof.face_to_dof(index=index)
 
     def edge_to_dof(self, index=_S):
-        """边到全局自由度的映射; ``HuZhangFEDof3d.edge_to_dof`` 尚未实现, 返回 None."""
+        """边到全局自由度的映射; 尚未实现, 抛出 NotImplementedError."""
         return self.dof.edge_to_dof(index=index)
 
     def is_boundary_dof(self, threshold=None, method=None) -> TensorLike:
-        """标记边界自由度; ``HuZhangFEDof3d.is_boundary_dof`` 尚未实现, 返回 None."""
+        """标记边界自由度; 尚未实现, 抛出 NotImplementedError."""
         return self.dof.is_boundary_dof(threshold, method=method)
 
     def geo_dimension(self):
@@ -702,13 +738,19 @@ class HuZhangFESpace3d(FunctionSpace):
         bc : TensorLike
             形状 ``(NQ, 4)`` 的重心坐标.
         index : Index, optional
-            只传给 ``mesh.shape_function``; 单元实体与标架始终取全部单元.
+            只支持全部单元; 单元实体与标架尚未按子集选取.
 
         Returns
         -------
         TensorLike
-            形状 ``(NC, NQ, ldof, 6)``, ``NC`` 为全部单元数.
+            形状 ``(NC, NQ, ldof, 6)``.
+
+        Raises
+        ------
+        NotImplementedError
+            ``index`` 不是全部单元.
         """
+        _require_all_cells(index, "basis")
         p = self.p
         mesh = self.mesh
         dof = self.dof
@@ -908,9 +950,9 @@ class HuZhangFESpace3d(FunctionSpace):
     def value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike: 
         """有限元函数在积分点处的值, 形状 ``(..., NC, NQ, 6)``.
 
-        ``index`` 只传给 ``basis``; 自由度映射取全部单元的 ``cell_to_dof()``,
-        故结果总覆盖全部单元.
+        ``index`` 只支持全部单元, 否则抛出 NotImplementedError.
         """
+        _require_all_cells(index, "value")
         if isinstance(bc, tuple):
             TD = len(bc)
         else :
@@ -925,9 +967,10 @@ class HuZhangFESpace3d(FunctionSpace):
     def div_value(self, uh: TensorLike, bc: TensorLike, index: Index=_S) -> TensorLike:
         """有限元函数在积分点处的散度, 形状 ``(NC, NQ, 3)``.
 
-        ``div_basis`` 总在全部单元上计算, 而自由度映射按 ``index`` 选取, 故目前只有
-        ``index`` 取全部单元时二者匹配.
+        ``div_basis`` 总在全部单元上计算, 故 ``index`` 只支持全部单元, 否则抛出
+        NotImplementedError.
         """
+        _require_all_cells(index, "div_value")
         if isinstance(bc, tuple):
             TD = len(bc)
         else :
