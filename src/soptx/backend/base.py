@@ -1,6 +1,13 @@
 # 移植自 brighthe/fealpy ``fealpy/backend/base.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""后端代理基类与张量类型协议.
+
+``TensorLike`` 是各后端张量类型的统一抽象 (numpy 的 ``ndarray``、pytorch 的
+``Tensor`` 在注册后端时登记为其虚拟子类); ``BackendProxy`` 是各后端代理类的基类,
+按本模块的名称映射从后端库复制函数与属性.
+"""
+
 from __future__ import annotations
 
 __all__ = ["dtype", "device", "Number", "Size", "Index", "TensorLike"]
@@ -24,24 +31,43 @@ Index = Union[int, slice, "TensorLike"]
 
 
 class TensorLike(metaclass=ABCMeta):
+    """各后端张量类型的统一抽象, 只用于 ``isinstance`` 判断与类型标注.
+
+    后端注册时把其张量类 (``DATA_CLASS``) 登记为本类的虚拟子类; 下列方法只声明
+    接口, 不提供实现.
+    """
     @property
-    def dtype(self) -> dtype: ...
+    def dtype(self) -> dtype:
+        """元素的数据类型."""
+        ...
     @property
-    def device(self) -> device: ...
+    def device(self) -> device:
+        """所在设备."""
+        ...
     @property
-    def mT(self: _Self) -> _Self: ...
+    def mT(self: _Self) -> _Self:
+        """最后两轴转置后的张量."""
+        ...
     @property
-    def ndim(self) -> int: ...
+    def ndim(self) -> int:
+        """维数."""
+        ...
     @property
-    def shape(self) -> Tuple[int, ...]: ...
+    def shape(self) -> Tuple[int, ...]:
+        """形状."""
+        ...
     @property
-    def size(self) -> int: ...
+    def size(self) -> int:
+        """元素个数."""
+        ...
     @property
-    def T(self: _Self) -> _Self: ...
+    def T(self: _Self) -> _Self:
+        """转置后的张量."""
+        ...
 
     def __len__(self) -> int: ...
-    # Scalar conversion of a zero-dimensional tensor. Every registered backend
-    # implements these, so `float(x)`, `int(x)` and use as an index are valid.
+    # 零维张量的标量转换. 已注册的后端都实现了这些方法, 因此 `float(x)`、`int(x)`
+    # 以及把零维张量用作下标都是合法的.
     def __float__(self) -> float: ...
     def __int__(self) -> int: ...
     def __index__(self) -> int: ...
@@ -68,7 +94,7 @@ class TensorLike(metaclass=ABCMeta):
     def __matmul__(self: _Self, other: _Self) -> _Self: ...
     def __pow__(self: _Self, other: Union[Number, _Self]) -> _Self: ...
     def __rpow__(self: _Self, other: Union[Number, _Self]) -> _Self: ...
-    # Bitwise operators, used mostly to combine boolean masks.
+    # 按位运算, 主要用于组合布尔掩码.
     def __invert__(self: _Self) -> _Self: ...
     def __and__(self: _Self, other: Union[bool, int, _Self]) -> _Self: ...
     def __rand__(self: _Self, other: Union[bool, int, _Self]) -> _Self: ...
@@ -83,44 +109,39 @@ class TensorLike(metaclass=ABCMeta):
     def reshape(self: _Self, newshape: Size, /) -> _Self: ...
     @overload
     def reshape(self: _Self, *newshape: int) -> _Self: ...
-    def reshape(self: _Self, *newshape) -> _Self: ...
+    def reshape(self: _Self, *newshape) -> _Self:
+        """改变形状."""
+        ...
 
 
-# NOTE: WHAT ARE THE NAMES LISTED BELOW?
+# NOTE: 下面列出的名字是什么?
 #
-# These are mappings with names of attributes and functions in fealpy backend as keys,
-# and the values are the corresponding names in the backend such as numpy.
+# 这些是映射表: 键为 SOPTX 后端中属性与函数的名字, 值为后端库 (如 numpy) 中对应的名字.
 #
-#   - If a functions is NOT defined in the subclass of Backend (the base), FEALPy will try to
-#     copy the function from the backend according to the mapping.
+#   - 某个函数若没有在后端子类中手动实现, 就按映射表从后端库复制过来.
 #
-#   - Each mapping have a format of {target_name: source_name}. Where `target_name` is
-#     how we call the function or attribute in FEALPy, while `source_name` is the original
-#     name in the backend.
+#   - 每个映射的格式为 {target_name: source_name}: `target_name` 是在 SOPTX 中调用该
+#     函数或属性所用的名字, `source_name` 是它在后端库中的原名.
 #
-#   - For example, the mapping {'transpose': 'permute'} means that the function `transpose` in
-#     FEALPy will be copied from the function `permute` in the backend, and we can
-#     use `backend_manager.transpose(x)` to use the `permute` function.
+#   - 例如映射 {'transpose': 'permute'} 表示 SOPTX 的 `transpose` 复制自后端库的
+#     `permute`, 于是可以用 `backend_manager.transpose(x)` 调用 `permute`.
 #
-#   - The names below are actually the target names. Using the function `_make_default_mapping`,
-#     a default mapping is created with the SAME source names.
-#     These default mappings will be imported by the Backend subclasses and
-#     may be updated to adapt to the backend.
+#   - 下面写出的其实是目标名. `_make_default_mapping` 以相同的源名构造默认映射;
+#     各后端子类导入这些默认映射, 再按后端的实际情况修改.
 
 
 def _make_default_mapping(*names: str):
     return {k: k for k in names}
 
 
-# NOTE: To add new attributes, just add the target names here, then for each
-# backend, see if the names are supported.
-# Update the source name in the backend file if necessary.
+# NOTE: 新增属性时只需在这里加上目标名, 再逐个后端确认是否支持;
+# 必要时在后端文件中修改源名.
 #
 ATTRIBUTE_MAPPING = _make_default_mapping(
-    # Constants
+    # 常量
     'pi', 'e', 'nan', 'inf', 'newaxis',
     'dtype', 'device',
-    # Dtype
+    # 数据类型
     'bool',
     'uint8', 'uint16', 'uint32', 'uint64',
     'int8', 'int16', 'int32', 'int64',
@@ -128,25 +149,23 @@ ATTRIBUTE_MAPPING = _make_default_mapping(
     'complex64', 'complex128',
 )
 
-# NOTE: For adding new functions:
+# NOTE: 新增函数的步骤:
 #
-# 1. Add the target function names in the correct category.
+# 1. 把目标函数名加到对应类别下.
 #
-# 2. Go to the stub file and add typehints for the functions.
-#    (define the args and return of the function)
+# 2. 在类型存根文件 (manager.pyi) 中补上该函数的类型标注 (参数与返回值).
 #
-# 3. For each backend, see if the functions we expected are supported. There may be some cases:
+# 3. 逐个后端确认是否支持, 分以下几种情况:
 #
-#    - Not supported: implement manually.
-#    - Supported, but with different names: update the source name in the backend file.
-#    - Supported, but the args or returns are in different format: make a wrapper function
-#      in the backend subclass.
-#    - Totally the same: nothing need to do.
+#    - 不支持: 手动实现.
+#    - 支持但名字不同: 在后端文件中修改源名.
+#    - 支持但参数或返回值的格式不同: 在后端子类中写包装函数.
+#    - 完全相同: 无需处理.
 #
 FUNCTION_MAPPING = _make_default_mapping(
 
-    ### Creation Functions ###
-    # python array API standard v2023.12
+    ### 创建函数 ###
+    # Python array API 标准 v2023.12
     'array',
     'asarray',
     'arange', 'linspace',
@@ -155,17 +174,17 @@ FUNCTION_MAPPING = _make_default_mapping(
     'eye', 'meshgrid',
     'tril', 'triu',
 
-    # non-standard
+    # 非标准
     'tensor',
 
-    ### Data Type Functions ###
-    # python array API standard v2023.12
+    ### 数据类型函数 ###
+    # Python array API 标准 v2023.12
     'astype', 'can_cast',
     'finfo', 'iinfo',
     'isdtype', 'result_type',
 
-    ### Element-wise Functions ###
-    # python array API standard v2023.12
+    ### 逐元素函数 ###
+    # Python array API 标准 v2023.12
     'abs', 'acos', 'acosh', 'add', 'asin', 'asinh', 'atan', 'atan2', 'atanh',
     'bitwise_and', 'bitwise_left_shift', 'bitwise_invert', 'bitwise_or',
     'bitwise_right_shift', 'bitwise_xor',
@@ -185,31 +204,31 @@ FUNCTION_MAPPING = _make_default_mapping(
     'sign', 'signbit', 'sin', 'sinh', 'square', 'sqrt', 'subtract',
     'tan', 'tanh', 'trunc',
 
-    # non-standard
+    # 非标准
     'arcsin', 'arccos', 'arctan', 'arctan2', 'arcsinh', 'arccosh', 'arctanh',
     'power',
 
-    ### Indexing Functions ###
-    # python array API standard v2023.12
+    ### 索引函数 ###
+    # Python array API 标准 v2023.12
     'take', 'take_along_axis',
 
-    ### Inspection ###
-    # python array API standard v2023.12
-    # non-standard
+    ### 检查 ###
+    # Python array API 标准 v2023.12
+    # 非标准
 
-    ### Linear Algebra Functions ###
-    # python array API standard v2023.12
+    ### 线性代数函数 ###
+    # Python array API 标准 v2023.12
     'matmul', 'matrix_transpose',
     'tensordot',
     'vecdot',
-    # non-standard
+    # 非标准
     'cross',
     'dot',
     'einsum',
     'trace',
 
-    ### Manipulation Functions ###
-    # python array API standard v2023.12
+    ### 变形函数 ###
+    # Python array API 标准 v2023.12
     'broadcast_arrays', 'broadcast_to',
     'concat',
     'expand_dims',
@@ -220,50 +239,50 @@ FUNCTION_MAPPING = _make_default_mapping(
     'squeeze', 'stack',
     'tile',
     'unstack',
-    # non-standard
+    # 非标准
     'concatenate', 'insert',
     'swapaxes', 'split', 'transpose',
 
-    ### Searching Functions ###
-    # python array API standard v2023.12
+    ### 查找函数 ###
+    # Python array API 标准 v2023.12
     'argmax', 'argmin', 'nonzero', 'searchsorted', 'where',
 
-    # non-standard
+    # 非标准
     'bincount', 'isin',
 
-    ### Set Functions ###
-    # python array API standard v2023.12
+    ### 集合函数 ###
+    # Python array API 标准 v2023.12
     'unique_all', 'unique_counts', 'unique_inverse', 'unique_values',
 
-    # non-standard
+    # 非标准
     'setdiff1d',
     'unique',
 
-    ### Sorting Functions ###
-    # python array API standard v2023.12
+    ### 排序函数 ###
+    # Python array API 标准 v2023.12
     'argsort', 'sort',
-    # non-standard
+    # 非标准
     'lexsort',
 
-    ### Statistical Functions ###
-    # python array API standard v2023.12
+    ### 统计函数 ###
+    # Python array API 标准 v2023.12
     'cumulative_sum',
     'max', 'mean', 'min',
     'prod',
     'std', 'sum',
     'var',
-    # non-standard
+    # 非标准
     'cumsum', 'cumprod',
 
-    ### Utility Functions ###
-    # python array API standard v2023.12
+    ### 工具函数 ###
+    # Python array API 标准 v2023.12
     'all', 'any',
-    # non-standard
+    # 非标准
     'allclose',
     'copy',
     'size',
 
-    ### Functional programming ###
+    ### 函数式编程 ###
     'apply_along_axis',
 )
 
@@ -273,8 +292,10 @@ TRANSFORMS_MAPPING = _make_default_mapping(
 
 
 class ModuleProxy():
+    """把后端库的属性与函数挂到代理类上的工具基类."""
     @classmethod
     def attach_attributes(cls, mapping: Dict[str, str], source: Any, /):
+        """按 ``{目标名: 源名}`` 映射把 ``source`` 的属性复制到类上; 源名为空或不存在时跳过."""
         for target_key, source_key in mapping.items():
             if (source_key is None) or (source_key == ''):
                 continue
@@ -283,11 +304,15 @@ class ModuleProxy():
 
     @classmethod
     def attach_methods(cls, mapping: Dict[str, str], source: Any, /):
+        """按 ``{目标名: 源名}`` 映射把 ``source`` 的函数作为静态方法复制到类上.
+
+        类中已手动实现的同名方法不被覆盖; 源中不存在的函数记一条 info 日志后跳过.
+        """
         for target_key, source_key in mapping.items():
             if (source_key is None) or (source_key == ''):
                 continue
             if hasattr(cls, target_key):
-                # Methods will not be copied from source if implemented manually.
+                # 已手动实现的方法不从源复制.
                 logger.debug(f"`{target_key}` already defined. "
                              f"Skip the copy from {source.__name__}.")
                 continue
@@ -299,6 +324,7 @@ class ModuleProxy():
 
     @classmethod
     def show_unsupported(cls, signal: bool, function_name: str, arg_name: str) -> None:
+        """``signal`` 为真时警告: 本后端不支持函数 ``function_name`` 的参数 ``arg_name``, 该参数被忽略."""
         if signal:
             logger.warning(f"{cls.__name__} does not support the "
                            f"'{arg_name}' argument in the function {function_name}. "
@@ -306,7 +332,16 @@ class ModuleProxy():
 
 
 class BackendProxy(ModuleProxy):
-    """Base class for all backend proxies."""
+    """所有后端代理类的基类.
+
+    子类以 ``class XxxBackend(BackendProxy, backend_name='xxx')`` 定义, 定义时自动
+    登记到可用后端表, 并把 ``DATA_CLASS`` 登记为 ``TensorLike`` 的虚拟子类.
+
+    Raises
+    ------
+    ValueError
+        ``backend_name`` 为空.
+    """
     DATA_CLASS: Optional[Type] = None
     _available_backends: Dict[str, Type["BackendProxy"]] = {}
 
@@ -322,7 +357,7 @@ class BackendProxy(ModuleProxy):
 
     @classmethod
     def is_tensor(cls, obj: Any, /) -> bool:
+        """判断对象是否为本后端的张量类型."""
         return isinstance(obj, cls.DATA_CLASS)
 
-    # NOTE: Backend is the base class is for the backend system.
-    # Do not implement any utils here.
+    # NOTE: 本类是后端系统的基类, 不要在这里实现任何工具函数.

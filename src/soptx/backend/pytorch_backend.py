@@ -1,6 +1,12 @@
 # 移植自 brighthe/fealpy ``fealpy/backend/pytorch_backend.py`` @ f474a5775.
 # FEALPy Copyright (C) Huayi Wei, GPL-3.0-or-later; 此后以 SOPTX 本文件为准演化.
 
+"""pytorch 计算后端.
+
+把 torch 的 ``dim``、``keepdim``、``size`` 等参数名统一为 array API 的 ``axis``、
+``keepdims``、``shape``; 未手动实现的函数按 ``base`` 的名称映射从 torch 复制.
+"""
+
 from typing import Union, Optional, Tuple, Any
 from itertools import combinations_with_replacement
 from functools import reduce, partial
@@ -28,6 +34,7 @@ _device = torch.device
 
 def _dim_to_axis(func):
     def wrapper(*args, axis=None, **kwargs):
+        """把 ``axis`` 参数改名为 torch 的 ``dim`` 后调用."""
         if axis is None:
             return func(*args, **kwargs)
         return func(*args, dim=axis, **kwargs)
@@ -35,6 +42,7 @@ def _dim_to_axis(func):
 
 def _dims_to_axes(func):
     def wrapper(*args, axes=None, **kwargs):
+        """把 ``axes`` 参数改名为 torch 的 ``dims`` 后调用."""
         if axes is None:
             return func(*args, **kwargs)
         return func(*args, dims=axes, **kwargs)
@@ -42,6 +50,7 @@ def _dims_to_axes(func):
 
 def _size_to_shape(func):
     def wrapper(*args, shape=None, **kwargs):
+        """把 ``shape`` 参数改名为 torch 的 ``size`` 后调用."""
         if shape is None:
             return func(*args, **kwargs)
         return func(*args, size=shape, **kwargs)
@@ -50,6 +59,7 @@ def _size_to_shape(func):
 def _axis_keepdims_dispatch(func, **defaults):
     if len(defaults) > 0:
         def wrapper(*args, **kwargs):
+            """把 ``axis``、``keepdims`` 改名为 torch 的 ``dim``、``keepdim``, 并补上默认参数后调用."""
             if 'axis' in kwargs:
                 kwargs['dim'] = kwargs.pop('axis')
             if 'keepdims' in kwargs:
@@ -59,6 +69,7 @@ def _axis_keepdims_dispatch(func, **defaults):
             return func(*args, **kwargs)
     else:
         def wrapper(*args, **kwargs):
+            """把 ``axis``、``keepdims`` 改名为 torch 的 ``dim``、``keepdim``, 并补上默认参数后调用."""
             if 'axis' in kwargs:
                 kwargs['dim'] = kwargs.pop('axis')
             if 'keepdims' in kwargs:
@@ -68,44 +79,58 @@ def _axis_keepdims_dispatch(func, **defaults):
 
 
 class PyTorchBackend(BackendProxy, backend_name='pytorch'):
+    """pytorch 后端代理, 张量类型为 ``torch.Tensor``."""
     DATA_CLASS = torch.Tensor
     linalg = torch.linalg
     random = torch.random
 
     @staticmethod
     def context(tensor: Tensor, /):
+        """张量的构造参数 ``{'dtype': ..., 'device': ...}``."""
         return {"dtype": tensor.dtype, "device": tensor.device}
 
     @staticmethod
     def set_default_device(device: Union[str, _device]) -> None:
+        """设置 torch 的默认设备."""
         torch.set_default_device(device)
 
     @staticmethod
-    def device_type(tensor_like: Tensor, /): return tensor_like.device.type
+    def device_type(tensor_like: Tensor, /):
+        """张量所在设备的类型, 如 ``'cpu'``、``'cuda'``."""
+        return tensor_like.device.type
 
     @staticmethod
-    def device_index(tensor_like: Tensor, /): return tensor_like.device.index
+    def device_index(tensor_like: Tensor, /):
+        """张量所在设备的编号, CPU 张量为 None."""
+        return tensor_like.device.index
 
     @staticmethod
-    def get_device(tensor_like: Tensor, /): return tensor_like.device
+    def get_device(tensor_like: Tensor, /):
+        """张量所在的设备."""
+        return tensor_like.device
 
     @staticmethod
     def device_put(tensor_like: Tensor, /, device=None) -> Tensor:
+        """把张量移到指定设备."""
         return tensor_like.to(device=device)
 
     @staticmethod
     def to_numpy(tensor_like: Tensor, /) -> Any:
+        """分离计算图并复制到 CPU 后转为 numpy 数组."""
         return tensor_like.detach().cpu().numpy()
 
     from_numpy = staticmethod(torch.from_numpy)
 
     @staticmethod
-    def tolist(tensor: Tensor, /): return tensor.tolist()
+    def tolist(tensor: Tensor, /):
+        """转为 Python 嵌套列表."""
+        return tensor.tolist()
 
-    ### Creation Functions ###
-    # python array API standard v2023.12
+    ### 创建函数 ###
+    # Python array API 标准 v2023.12
     @staticmethod
     def arange(start, /, stop=None, step=1, *, dtype=None, device=None):
+        """参数顺序与 numpy 一致的 ``torch.arange``: 只给一个位置参数时视为终点."""
         if stop is None:
             stop = start
             start = 0
@@ -113,6 +138,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def eye(n: int, m: Optional[int]=None, /, k: int=0, dtype=None, **kwargs) -> Tensor:
+        """``torch.eye``, 只支持 ``k=0``."""
         assert k == 0, "Only k=0 is supported by `eye` in PyTorchBackend."
         if m is None:
             m = n
@@ -120,6 +146,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def linspace(start, stop, /, num, *, dtype=None, device=None, endpoint=True):
+        """``torch.linspace``; ``start``、``stop`` 为张量时逐元素生成 (经 ``vmap``). 只支持 ``endpoint=True``."""
         assert endpoint == True
         if isinstance(start, (int, float)) and isinstance(stop, (int, float)):
             return torch.linspace(start, stop, num, dtype=dtype, device=device)
@@ -130,59 +157,73 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
             return vmap_fun(start, stop, num)
 
     @staticmethod
-    def tril(x, /, *, k=0): return torch.tril(x, k)
+    def tril(x, /, *, k=0):
+        """取第 ``k`` 条对角线及以下的部分."""
+        return torch.tril(x, k)
 
     @staticmethod
-    def triu(x, /, *, k=0): return torch.triu(x, k)
+    def triu(x, /, *, k=0):
+        """取第 ``k`` 条对角线及以上的部分."""
+        return torch.triu(x, k)
 
     @staticmethod
     def take_along_axis(x, indices, /, *, axis):
+        """``torch.take_along_dim``, 索引先转为 int64."""
         return torch.take_along_dim(x, indices.long(), dim=axis)
 
     @staticmethod
     def unique_counts(x, /):
+        """返回 ``(唯一值, 计数)``."""
         values, counts = torch.unique(x, return_counts=True)
         return values, counts
 
-    ### Data Type Functions ###
-    # python array API standard v2023.12
+    ### 数据类型函数 ###
+    # Python array API 标准 v2023.12
     @staticmethod
     def astype(x, dtype, /, *, copy=True, device=None):
+        """``Tensor.to``: 转换数据类型, 可同时换设备."""
         return x.to(dtype=dtype, device=device, copy=copy)
 
-    ### Element-wise Functions ###
-    @staticmethod # NOTE: PyTorch's build-in equal is actually `all(equal(x1, x2))`
-    def equal(x1, x2, /): return x1 == x2
+    ### 逐元素函数 ###
+    @staticmethod # NOTE: PyTorch 内置的 equal 实为 `all(equal(x1, x2))`, 这里改为逐元素比较
+    def equal(x1, x2, /):
+        """逐元素相等比较 ``x1 == x2``."""
+        return x1 == x2
 
-    ### Indexing Functions ###
+    ### 索引函数 ###
 
-    ### Linear Algebra Functions ###
-    # python array API standard v2023.12
+    ### 线性代数函数 ###
+    # Python array API 标准 v2023.12
     @staticmethod
-    def matrix_transpose(x, /): return x.transpose(-1, -2)
+    def matrix_transpose(x, /):
+        """交换最后两轴."""
+        return x.transpose(-1, -2)
 
     tensordot = staticmethod(_dims_to_axes(torch.tensordot))
     vecdot = staticmethod(_dim_to_axis(torch.linalg.vecdot))
 
-    # non-standard
+    # 非标准
     cross = staticmethod(_dim_to_axis(torch.cross))
 
     @staticmethod
     def dot(x1, x2, /, *, axis=-1):
+        """沿 ``axis`` 收缩两个张量 (``tensordot``)."""
         return torch.tensordot(x1, x2, dims=[[axis], [axis]])
 
     @staticmethod
     def trace(x, /, *, offset: int = 0, axis1=0, axis2=1):
+        """取偏移 ``offset`` 的对角线 (``axis1``、``axis2`` 两轴) 并求和."""
         data = torch.diagonal(x, offset=offset, dim1=axis1, dim2=axis2)
         return torch.sum(data, dim=-1)
 
-    ### Manipulation Functions ###
-    # python array API standard v2023.12
+    ### 变形函数 ###
+    # Python array API 标准 v2023.12
     broadcast_to = staticmethod(_size_to_shape(torch.broadcast_to))
     concat = staticmethod(_dim_to_axis(torch.concat))
     expand_dims = staticmethod(_dim_to_axis(torch.unsqueeze))
     @staticmethod
     def flip(a, axis=None):
+        """沿给定轴翻转; ``axis`` 为 None 时翻转所有轴."""
         if axis is None:
             axis = list(range(a.dim()))
         elif isinstance(axis, int):
@@ -195,21 +236,29 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
     repeat = staticmethod(_dim_to_axis(torch.repeat_interleave))
     @staticmethod
     def roll(x, /, shift, *, axis=None):
+        """沿 ``axis`` 循环平移 (``torch.roll``)."""
         return torch.roll(x, shifts=shift, dims=axis)
 
     squeeze = staticmethod(_dim_to_axis(torch.squeeze))
     stack = staticmethod(_dim_to_axis(torch.stack))
     unstack = staticmethod(_dim_to_axis(torch.unbind))
 
-    # non-standard
+    # 非标准
     @staticmethod
     def concatenate(arrays, /, axis=0, out=None, *, dtype=None):
+        """``torch.cat``, 可指定结果的数据类型."""
         if dtype is not None:
             arrays = [a.to(dtype) for a in arrays]
         return torch.cat(arrays, dim=axis, out=out)
 
     @staticmethod
     def insert(x, obj, values, /, *, axis=None):
+        """仿 ``np.insert``: 在 ``axis`` 轴的 ``obj`` 位置之前插入 ``values``; ``axis`` 为 None 时先展平.
+
+        Notes
+        -----
+        单个插入位置的分支残留一条调试用 ``print``.
+        """
         kwargs = {'dtype': x.dtype, 'device': x.device}
         ndim = x.ndim
         if axis is None:
@@ -217,7 +266,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
                 x = x.ravel()
             ndim = x.ndim
             axis = ndim - 1
-        else: # normalize axis
+        else: # 规范化 axis
             if axis < -ndim or axis > ndim:
                 raise IndexError(f"index {axis} is out of bounds for axis {axis} "
                                 f"with size {ndim}")
@@ -228,10 +277,10 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
         newshape = list(x.shape)
 
         if isinstance(obj, slice):
-            # turn it into a range object
+            # 转为 range 对象
             indices = torch.arange(*obj.indices(N), dtype=torch.int64, device=x.device)
         else:
-            # need to copy obj, because indices will be changed in-place
+            # 须复制 obj, 因为 indices 会被原地修改
             indices = torch.tensor(obj, dtype=torch.int64, device=x.device)
             if indices.dtype == bool:
                 indices = torch.as_tensor(indices, dtype=torch.int64, device=x.device)
@@ -251,9 +300,8 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
             if values.ndim < ndim:
                 values = values.reshape((1,)*(ndim - values.ndim) + (-1, ))
             if indices.ndim == 0:
-                # broadcasting is very different here, since a[:,0,:] = ... behaves
-                # very different from a[:,[0],:] = ...! This changes values so that
-                # it works likes the second case. (here a[:,0:1,:])
+                # 这里的广播行为差别很大: a[:,0,:] = ... 与 a[:,[0],:] = ... 截然不同!
+                # 下面调整 values, 使其按后一种方式工作 (即 a[:,0:1,:]).
                 values = torch.moveaxis(values, 0, axis)
             numnew = values.shape[axis]
             newshape[axis] += numnew
@@ -271,13 +319,13 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
             return new
 
         elif indices.numel() == 0 and not isinstance(obj, Tensor):
-            # Can safely cast the empty list to int64
+            # 空列表可以安全地转为 int64
             indices = torch.as_tensor(indices, torch.int64)
 
         indices[indices < 0] += N
 
         numnew = len(indices)
-        order = indices.argsort(stable=True)   # stable sort
+        order = indices.argsort(stable=True)   # 稳定排序
         indices[order] += torch.arange(numnew, dtype=torch.int64, device=x.device)
 
         newshape[axis] += numnew
@@ -295,6 +343,13 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def split(x, indices_or_sections, /, *, axis=0):
+        """仿 ``np.split``: 整数表示等分的段数, 一维序列表示分割点.
+
+        Raises
+        ------
+        ValueError
+            整数段数不能整除, 或分割点不是一维.
+        """
         # 语义对齐 np.split: int 表示等分段数, 1 维序列 (list/tuple/ndarray/Tensor)
         # 表示分割点; torch.split 吃的是各段长度, 这里做换算.
         if isinstance(indices_or_sections, int):
@@ -317,19 +372,21 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
         return torch.split(x, chunk_size, dim=axis)
 
-    ### Searching Functions ###
-    # python array API standard v2023.12
+    ### 查找函数 ###
+    # Python array API 标准 v2023.12
     argmax = staticmethod(_axis_keepdims_dispatch(torch.argmax))
     argmin = staticmethod(_axis_keepdims_dispatch(torch.argmin))
 
     @staticmethod
     def nonzero(x, /):
+        """返回各维非零索引组成的元组, 同 numpy."""
         return torch.nonzero(x, as_tuple=True)
 
-    ### Set Functions ###
-    # python array API standard v2023.12
+    ### 集合函数 ###
+    # Python array API 标准 v2023.12
     @staticmethod
     def unique_all(a, axis=None, **kwargs):
+        """返回 ``(唯一值, 首次出现位置, 逆映射, 计数)``; ``axis`` 为 None 时先展平."""
         if axis is None:
             a = torch.flatten(a)
             axis = 0
@@ -342,9 +399,10 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
         indices.scatter_(0, inverse.flip(dims=[0]), idx)
         return b, indices, inverse, counts
 
-    # non-standard
+    # 非标准
     @staticmethod
     def unique_all_(a, axis=None, **kwargs):
+        """返回 ``(唯一值, 首次出现位置, 最后出现位置, 逆映射, 计数)``; ``axis`` 为 None 时先展平."""
         if axis is None:
             a = torch.flatten(a)
             axis = 0
@@ -365,6 +423,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def unique(a, return_index=False, return_inverse=False, return_counts=False, axis=None, **kwargs):
+        """仿 ``np.unique``: 可选返回首次出现位置、逆映射与计数; ``axis`` 为 None 时先展平."""
         if axis is None:
             b, inverse, counts = torch.unique(a.flatten(), return_inverse=True,
                                               return_counts=True,
@@ -405,16 +464,24 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
         return result
 
-    ###Sorting Functions ###
-    # python array API standard v2023.12
+    ### 排序函数 ###
+    # Python array API 标准 v2023.12
     argsort = staticmethod(_dim_to_axis(torch.argsort))
     @staticmethod
     def sort(x, /, *, axis=-1, descending=False, stable=True):
+        """沿 ``axis`` 排序并只返回值, 默认稳定排序."""
         return torch.sort(x, dim=axis, descending=descending, stable=stable)[0]
 
-    # non-standard
+    # 非标准
     @staticmethod
     def lexsort(keys: Tuple[Tensor, ...], /, *, axis: int = -1):
+        """仿 ``np.lexsort``: 稳定的字典序排序, 最后一个键为主键, 返回排序下标.
+
+        Raises
+        ------
+        ValueError
+            键为零维, 或没有给出键.
+        """
         if keys[0].ndim < 1:
             raise ValueError("keys must be at least 2 dimensional, but got "
                              f"shape {keys.shape}.")
@@ -428,10 +495,11 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
         return idx
 
-    ### Statistical Functions ###
-    # python array API standard v2023.12
+    ### 统计函数 ###
+    # Python array API 标准 v2023.12
     @staticmethod
     def max(x, /, *, axis=None, keepdims=False):
+        """沿 ``axis`` 取最大值 (只返回值); ``axis`` 为 None 时对全部元素."""
         if axis is None:
             return torch.max(x)
         return torch.max(x, axis, keepdim=keepdims)[0]
@@ -440,6 +508,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def min(x, /, *, axis=None, keepdims=False):
+        """沿 ``axis`` 取最小值 (只返回值); ``axis`` 为 None 时对全部元素."""
         if axis is None:
             return torch.min(x)
         return torch.min(x, axis, keepdim=keepdims)[0]
@@ -449,54 +518,61 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
     sum = staticmethod(_axis_keepdims_dispatch(torch.sum))
     var = staticmethod(_axis_keepdims_dispatch(torch.var, correction=0.))
 
-    # non-standard
+    # 非标准
     # 语义对齐 np.cumsum/np.cumprod: axis=None 表示展平后累加;
     # torch.cumsum/torch.cumprod 的 dim 为必填参数, 不能直接省略.
     @staticmethod
     def cumsum(x, axis=None, dtype=None, out=None):
+        """累加, ``axis`` 为 None 时先展平, 同 numpy."""
         if axis is None:
             x, axis = x.reshape(-1), 0
         return torch.cumsum(x, dim=axis, dtype=dtype, out=out)
 
     @staticmethod
     def cumprod(x, axis=None, dtype=None, out=None):
+        """累乘, ``axis`` 为 None 时先展平, 同 numpy."""
         if axis is None:
             x, axis = x.reshape(-1), 0
         return torch.cumprod(x, dim=axis, dtype=dtype, out=out)
 
     cumulative_sum = staticmethod(_dim_to_axis(torch.cumsum))
 
-    ### Utility Functions ###
-    # python array API standard v2023.12
+    ### 工具函数 ###
+    # Python array API 标准 v2023.12
     all = staticmethod(_axis_keepdims_dispatch(torch.all))
     any = staticmethod(_axis_keepdims_dispatch(torch.any))
 
-    # non-standard
+    # 非标准
     @staticmethod
     def size(x, /, *, axis=None):
+        """元素个数; 给出 ``axis`` 时为该轴长度."""
         if axis is None:
             return x.numel()
         else:
             return x.size(axis)
 
-    ### Other Functions ###
+    ### 其他函数 ###
 
     @staticmethod
     def set_at(a: Tensor, indices, src, /):
+        """``a[indices] = src``, 原地修改并返回 ``a``."""
         a[indices] = src
         return a
 
     @staticmethod
     def add_at(a: Tensor, indices, src, /):
-        """Accumulate ``src`` into ``a`` at ``indices``, summing duplicates.
+        """在 ``indices`` 处把 ``src`` 累加到 ``a`` 上, 重复索引全部计入.
 
-        The cross-backend contract is numpy's ``np.add.at`` (jax's
-        ``.at[].add()`` matches it): every occurrence of a repeated index
-        contributes. ``a[indices] += src`` does not satisfy it -- advanced
-        indexing assignment keeps only one arbitrary contribution per repeated
-        index and silently drops the rest. ``index_put_(accumulate=True)`` is
-        the torch primitive corresponding to ``np.add.at``; like it, this
-        mutates ``a`` in place and returns it.
+        跨后端约定以 numpy 的 ``np.add.at`` 为准 (jax 的 ``.at[].add()`` 与之一致):
+        重复索引的每次出现都要计入. ``a[indices] += src`` 不满足这一点, 高级索引赋值
+        对重复索引只保留任意一次贡献, 其余被静默丢弃. ``index_put_(accumulate=True)``
+        是与 ``np.add.at`` 对应的 torch 原语; 与之相同, 本方法原地修改并返回 ``a``.
+
+        Raises
+        ------
+        NotImplementedError
+            ``indices`` 含切片分量; 应传入显式的索引张量, 或沿单轴累加时改用
+            ``index_add``.
         """
         if not isinstance(indices, tuple):
             indices = (indices,)
@@ -518,6 +594,10 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def index_add(a: Tensor, index, src, /, *, axis: int=0, alpha=1):
+        """``Tensor.index_add_``: 沿 ``axis`` 在 ``index`` 处累加 ``alpha * src``, 原地修改并返回 ``a``.
+
+        ``src`` 可以是数, 也可以是能广播到 ``index`` 展开形状的张量.
+        """
         axis = a.ndim + axis if (axis < 0) else axis
         src_flat_shape = a.shape[:axis] + (index.numel(), ) + a.shape[axis+1:]
 
@@ -534,28 +614,37 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def scatter(x: Tensor, index, src, /, *, axis: int=0):
+        """``Tensor.scatter_`` 的包装, 原地修改并返回 ``x``."""
         x.scatter_(dim=axis, index=index, src=src)
         return x
 
     @staticmethod
     def scatter_add(x: Tensor, index, src, /, *, axis: int=0):
+        """``Tensor.scatter_add_`` 的包装, 原地修改并返回 ``x``."""
         x.scatter_add_(dim=axis, index=index, src=src)
         return x
 
-    ### Functional programming ###
+    ### 函数式编程 ###
 
     @staticmethod
     def apply_along_axis(func1d, axis, x, *args, **kwargs):
-        """
-        Parameters:
-            func1d : function (M,) -> (Nj...)
-            This function should accept 1-D arrays. It is applied to 1-D slices of `arr` along the specified axis.
-            axis : integer
-                Axis along which `arr` is sliced.
-            arr : ndarray (Ni..., M, Nk...)
-            Input array.
-            args : any Additional arguments to `func1d`.
-            kwargs : any Additional named arguments to `func1d`.
+        """沿给定轴对一维切片调用 ``func1d`` (经 ``vmap``).
+
+        Parameters
+        ----------
+        func1d : callable
+            接受一维数组的函数, ``(M,) -> (Nj...)``.
+        axis : int
+            切片所沿的轴.
+        x : Tensor
+            输入张量 ``(Ni..., M, Nk...)``.
+        *args, **kwargs
+            未使用 (原意为传给 ``func1d`` 的附加参数).
+
+        Notes
+        -----
+        ``axis == 0`` 分支调用 ``torch.transpose(x)`` 缺少维度参数, 会抛 ``TypeError``;
+        其余取值直接对首轴 ``vmap``, 并不按 ``axis`` 切片.
         """
         if axis==0:
             x = torch.transpose(x)
@@ -563,19 +652,25 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def vmap(func, /, in_axes=0, out_axes=0, **kwargs):
+        """``torch.vmap``, 参数名对齐 jax 的 ``in_axes``、``out_axes``."""
         return torch.vmap(func, in_dims=in_axes, out_dims=out_axes, **kwargs)
 
-    ### Sparse Functions ###
+    ### 稀疏函数 ###
 
-    # Indices and index pointers handed to these constructors come from
-    # fealpy's own COOTensor/CSRTensor, which maintain the layout invariants.
-    # torch warns unless the check is explicitly opted into or out of; opting
-    # out keeps the per-call validation off the spmm path, which runs once per
-    # Krylov iteration.
+    # 传给这些构造函数的索引与行指针来自 SOPTX 自己的 COOTensor/CSRTensor, 它们
+    # 维护着布局不变量. torch 要求显式开启或关闭不变量检查, 否则给出警告; 这里关闭
+    # 检查, 免得 spmm 路径每次调用都做校验, 该路径在 Krylov 迭代中每步都要走.
     _SPARSE_KWARGS = {'check_invariants': False}
 
     @staticmethod
     def coo_spmm(indices, values, shape, other):
+        """COO 矩阵乘以一维或二维稠密张量 (``torch.sparse.mm``).
+
+        Raises
+        ------
+        NotImplementedError
+            ``values`` 带批量维.
+        """
         if values.ndim == 1:
             mat = torch.sparse_coo_tensor(indices, values, size=shape,
                                           **PyTorchBackend._SPARSE_KWARGS)
@@ -586,6 +681,13 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def csr_spmm(crow, col, values, shape, other):
+        """CSR 矩阵乘以一维或二维稠密张量 (``torch.sparse.mm``).
+
+        Raises
+        ------
+        NotImplementedError
+            ``values`` 带批量维.
+        """
         if values.ndim == 1:
             mat = torch.sparse_csr_tensor(crow, col, values, size=shape,
                                           **PyTorchBackend._SPARSE_KWARGS)
@@ -596,6 +698,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def csr_spspmm(crow1, col1, values1, shape1, crow2, col2, values2, shape2):
+        """两个 CSR 矩阵相乘, 返回 ``(crow, col, values, shape)``."""
         mat1 = torch.sparse_csr_tensor(crow1, col1, values1, size=shape1,
                                        **PyTorchBackend._SPARSE_KWARGS)
         mat2 = torch.sparse_csr_tensor(crow2, col2, values2, size=shape2,
@@ -612,6 +715,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def coo_tocsr(indices, values, shape):
+        """COO 转 CSR (``to_sparse_csr``), 返回 ``(crow, col, values)``."""
         mat = torch.sparse_coo_tensor(indices, values, size=shape,
                                       **PyTorchBackend._SPARSE_KWARGS)
         mat = mat.to_sparse_csr()
@@ -619,9 +723,41 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def query_point(x, y, h, box_size, mask_self=True, periodic=[True, True, True]):
+        """查找 ``y`` 中各点在 ``x`` 中半径 ``h`` 以内的近邻 (基于 scipy 的 KDTree).
+
+        Parameters
+        ----------
+        x, y : TensorLike
+            被查询点集与查询点集, 形状 ``(N, GD)``.
+        h : float
+            查询半径.
+        box_size : sequence of float
+            周期区域的尺寸, 只在周期边界下使用.
+        mask_self : bool, optional
+            为 False 时去掉点与自身配对的结果. 默认 True.
+        periodic : list of bool, optional
+            三个方向是否周期. 全为 True 时按二维周期区域把边界附近的点平移复制后
+            查询; 全为 False 时不考虑周期; 混合取值未实现. 默认 ``[True, True, True]``.
+
+        Returns
+        -------
+        tuple
+            ``(node_self, neighbors)``: 每对近邻中查询点与被查询点的编号.
+
+        Raises
+        ------
+        TypeError
+            ``periodic`` 不是三个布尔值的列表.
+        NotImplementedError
+            ``periodic`` 混合取值.
+        """
         if not isinstance(periodic, list) or len(periodic) != 3 or not all(isinstance(p, bool) for p in periodic):
             raise TypeError("periodic type is：[bool, bool, bool]")
         def map_points(a, b, r, positions):
+            """把靠近二维周期区域边界的点平移复制到对侧的像位置.
+
+            返回 ``(扩充后的点, 各点的原编号, 是否为原始点)``.
+            """
             x, y = positions[:, 0], positions[:, 1]
             cond_1 = (0 <= x) & (x <= r) & (r < y) & (y < b - r)  # 区域[(0, r), (r, b-r)]
             cond_2 = (a - r <= x) & (x <= a) & (r < y) & (y < b - r)  # 区域[(a-r, a), (r, b-r)]
@@ -731,13 +867,20 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
                     pass
         return node_self, neighbors
 
-    ### FEALPy functionals ###
+    ### 网格与有限元专用函数 ###
 
     @staticmethod
     def multi_index_matrix(p: int, dim: int, *, dtype=None) -> Tensor:
-        """
-        TODO:
-            1. context?
+        """``dim`` 维单纯形上 ``p`` 次 Lagrange 插值点的多重指标.
+
+        Returns
+        -------
+        Tensor
+            形状 ``(ldof, dim+1)``, 每行之和为 ``p``.
+
+        Notes
+        -----
+        TODO: 结果固定在默认设备上, 尚未接受设备参数.
         """
         dtype = dtype or torch.int
         sep = torch.flip(torch.tensor(
@@ -751,11 +894,20 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def edge_length(edge: Tensor, node: Tensor, *, out=None) -> Tensor:
+        """各边的长度."""
         points = node[edge, :]
         return norm(points[..., 0, :] - points[..., 1, :], dim=-1, out=out)
 
     @staticmethod
     def edge_normal(edge: Tensor, node: Tensor, unit=False, *, out=None) -> Tensor:
+        """二维网格各边的法向, 为切向 ``node[edge[:,1]] - node[edge[:,0]]`` 顺时针旋转 90 度;
+        ``unit`` 为 True 时单位化.
+
+        Raises
+        ------
+        ValueError
+            几何维数不是 2.
+        """
         points = node[edge, :]
         if points.shape[-1] != 2:
             raise ValueError("Only 2D meshes are supported.")
@@ -766,6 +918,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def edge_tangent(edge: Tensor, node: Tensor, unit=False, *, out=None) -> Tensor:
+        """各边的切向 ``node[edge[:,1]] - node[edge[:,0]]``, ``unit`` 为 True 时单位化."""
         v = torch.sub(node[edge[:, 1], :], node[edge[:, 0], :], out=out)
         if unit:
             l = torch.norm(v, dim=-1, keepdim=True)
@@ -774,6 +927,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def tensorprod(*tensors: Tensor) -> Tensor:
+        """多组一维重心坐标的张量积, 展平为 ``(NQ, NVC)``, ``NVC`` 为各组分量数之积."""
         num = len(tensors)
         NVC = reduce(lambda x, y: x * y.shape[-1], tensors, 1)
         desp1 = 'mnopq'
@@ -784,6 +938,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @classmethod
     def bc_to_points(cls, bcs: Union[Tensor, Tuple[Tensor, ...]], node: Tensor, entity: Tensor) -> Tensor:
+        """把重心坐标映射为各实体上的直角坐标, 形状 ``(NE, NQ, GD)``; 张量积重心坐标先做 ``tensorprod``."""
         points = node[entity, :]
 
         if not isinstance(bcs, Tensor):
@@ -792,10 +947,18 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def barycenter(entity: Tensor, node: Tensor, loc: Optional[Tensor]=None) -> Tensor:
+        """各实体顶点坐标的平均; ``loc`` 未使用."""
         return torch.mean(node[entity, :], dim=1) # TODO: polygon mesh case
 
     @staticmethod
     def simplex_measure(entity: Tensor, node: Tensor) -> Tensor:
+        """单纯形的有向测度 ``det(edges) / TD!``, 顶点逆序时为负.
+
+        Raises
+        ------
+        RuntimeError
+            几何维数不等于拓扑维数.
+        """
         points = node[entity, :]
         TD = points.size(-2) - 1
         if TD != points.size(-1):
@@ -827,6 +990,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @classmethod
     def simplex_shape_function(cls, bcs: Tensor, p: int, mi=None) -> Tensor:
+        """单纯形上 ``p`` 次 Lagrange 基函数在重心坐标处的值, 形状 ``(..., ldof)``, 沿首轴 ``vmap``."""
         fn = vmap(
             partial(cls._simplex_shape_function_kernel, p=p, mi=mi)
         )
@@ -834,6 +998,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @classmethod
     def simplex_grad_shape_function(cls, bcs: Tensor, p: int, mi=None) -> Tensor:
+        """``p`` 次 Lagrange 基函数对重心坐标的导数 (``jacfwd``), 形状 ``(..., ldof, TD+1)``."""
         fn = vmap(jacfwd(
             partial(cls._simplex_shape_function_kernel, p=p, mi=mi)
         ))
@@ -841,6 +1006,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @classmethod
     def simplex_hess_shape_function(cls, bcs: Tensor, p: int, mi=None) -> Tensor:
+        """``p`` 次 Lagrange 基函数对重心坐标的二阶导数 (两次 ``jacfwd``), 形状 ``(..., ldof, TD+1, TD+1)``."""
         fn = vmap(jacfwd(jacfwd(
             partial(cls._simplex_shape_function_kernel, p=p, mi=mi)
         )))
@@ -848,11 +1014,13 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def tensor_measure(entity: Tensor, node: Tensor) -> Tensor:
-        # TODO
+        """张量积单元的测度. 尚未实现, 调用即抛 ``NotImplementedError``."""
+        # TODO: 尚未实现
         raise NotImplementedError
 
     @staticmethod
     def interval_grad_lambda(line: Tensor, node: Tensor) -> Tensor:
+        """区间单元上两个重心坐标的梯度, 形状 ``(NC, 2, GD)``."""
         points = node[line, :]
         v = points[..., 1, :] - points[..., 0, :] # (NC, GD)
         h2 = torch.sum(v**2, dim=-1, keepdim=True)
@@ -861,6 +1029,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def triangle_area_3d(tri: Tensor, node: Tensor, out: Optional[Tensor]=None) -> Tensor:
+        """三维空间中三角形的面积."""
         points = node[tri, :]
         cross_product = cross(points[..., 1, :] - points[..., 0, :],
                     points[..., 2, :] - points[..., 0, :], dim=-1, out=out) / 2.0
@@ -869,6 +1038,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def triangle_grad_lambda_2d(tri: Tensor, node: Tensor) -> Tensor:
+        """二维三角形三个重心坐标的梯度, 形状 ``(NC, 3, 2)``."""
         shape = tri.shape[:-1] + (3, 2)
         result = torch.zeros(shape, dtype=node.dtype, device=node.device)
 
@@ -884,6 +1054,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def triangle_grad_lambda_3d(tri: Tensor, node: Tensor) -> Tensor:
+        """三维空间中三角形三个重心坐标在其所在平面内的梯度, 形状 ``(NC, 3, 3)``."""
         points = node[tri, :]
         e0 = points[..., 2, :] - points[..., 1, :] # (..., 3)
         e1 = points[..., 0, :] - points[..., 2, :]
@@ -899,10 +1070,15 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
     @staticmethod
     def quadrangle_grad_lambda_2d(quad: Tensor, node: Tensor) -> Tensor:
+        """四边形重心坐标的梯度. 尚未实现: 函数体为空, 返回 None."""
         pass
 
     @classmethod
     def tetrahedron_grad_lambda_3d(cls, tet: Tensor, node: Tensor, localFace: Tensor) -> Tensor:
+        """四面体四个重心坐标的梯度, 形状 ``(NC, 4, 3)``.
+
+        ``localFace[i]`` 为第 ``i`` 个顶点所对面的三个局部顶点.
+        """
         NC = tet.shape[0]
         kwargs = cls.context(node)
         Dlambda = torch.zeros((NC, 4, 3), **kwargs)
@@ -937,17 +1113,27 @@ PyTorchBackend.random.randperm = torch.randperm
 
 
 ##################################################
-### Random Submodule
+### 随机数子模块
 ##################################################
 
 class PyTorchRandom(ModuleProxy):
+    """torch 随机数函数的包装.
+
+    Notes
+    -----
+    当前未被使用: 后端的 ``random`` 直接取 ``torch.random`` 并在模块末尾挂上
+    ``rand``、``randint`` 等函数.
+    """
     def seed(self, seed: int):
+        """设置 torch 的全局随机种子."""
         torch.manual_seed(seed)
 
     def rand(self, *size, dtype=None, device=None):
+        """``[0, 1)`` 均匀分布随机数."""
         return torch.rand(*size, dtype=dtype, device=device)
 
     def randint(self, low, high=None, size=None, dtype=None, device=None):
+        """``[low, high)`` 均匀分布随机整数; 只给 ``low`` 时为 ``[0, low)``."""
         kwargs = {'dtype': dtype, 'device': device}
         if size is None:
             size = (1,)
@@ -958,6 +1144,7 @@ class PyTorchRandom(ModuleProxy):
         return torch.randint(low, high, size, **kwargs)
 
     def randn(self, *size, dtype=None, device=None):
+        """标准正态分布随机数."""
         return torch.randn(*size, dtype=dtype, device=device)
 
 
