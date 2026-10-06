@@ -345,6 +345,49 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         return B
 
+    def _uses_stabilization(self) -> bool:
+        """是否装配低阶跳量稳定化项: ``p <= GD`` 且未选 ``'none'``."""
+        return self._space_degree <= self._GD and self._stabilization != 'none'
+
+    def _jump_penalty_integrator(self) -> JumpPenaltyIntegrator:
+        """在内部面与位移边界面上施加惩罚的跳量积分子.
+
+        跳量形式由构造参数 ``stabilization`` 决定, 默认矩阵跳量; 默认使用固定基材系数,
+        只有显式 ``density_dependent`` 模式才传密度比.
+        """
+        mesh = self._mesh
+        face2cell = mesh.face_to_cell()
+        is_internal = face2cell[:, 0] != face2cell[:, 1]
+        bc_face = mesh.entity_barycenter('face')
+        is_dirichlet = self._pde.is_displacement_boundary(bc_face)
+        valid_faces_idx = bm.nonzero(is_internal | is_dirichlet)[0]
+        return JumpPenaltyIntegrator(
+            q=self._integration_order,
+            threshold=valid_faces_idx,
+            method=self._stabilization,
+            material=self._material,
+            penalty_scaling=self._stabilization_scaling,
+            density_shear_ratio=self._density_shear_ratio(),
+        )
+
+    def assemble_stabilization_bc_vector(self) -> TensorLike:
+        r"""跳量稳定化在位移边界面上的数据项 :math:`J_D(u_D, v)`, 形状 ``(gdof_u,)``.
+
+        位移边界面上的惩罚取迹本身; 精确解满足 :math:`u = u_D`, 相容的位移方程为
+        :math:`(\operatorname{div}\sigma, v) - J(u, v) = -(f, v) - J_D(u_D, v)`.
+        未用稳定化、或问题没有 ``displacement_bc`` (即 :math:`u_D = 0`) 时返回零向量.
+        """
+        space_u = self._tensor_space
+        gdof_u = space_u.number_of_global_dofs()
+        gd = getattr(self._pde, "displacement_bc", None)
+        if (not self._uses_stabilization()) or gd is None or (not callable(gd)):
+            return bm.zeros(gdof_u, dtype=bm.float64, device=space_u.device)
+        integrator = self._jump_penalty_integrator()
+        local = integrator.boundary_data_vector(space_u, gd)       # (NF_sel, 2*ldof)
+        face2dof = integrator.to_global_dof(space_u)               # (NF_sel, 2*ldof)
+        F = bm.zeros(gdof_u, dtype=bm.float64, device=space_u.device)
+        return bm.index_add(F, face2dof.reshape(-1), local.reshape(-1))
+
     def assemble_stiff_matrix(self, 
                         rho_val: Optional[Union[Function, TensorLike]] = None,
                         enable_timing: bool = False,
@@ -380,29 +423,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                       [B.T, None]], format='csr')
 
         else:
-            # 1. 获取所有的内部面
-            face2cell = mesh.face_to_cell()
-            is_internal = face2cell[:, 0] != face2cell[:, 1]
-            
-            # 2. 获取所有的位移边界面 (Dirichlet)
-            bc_face = mesh.entity_barycenter('face')
-            is_dirichlet = self._pde.is_displacement_boundary(bc_face)
-            
-            # 3. 合并: 只在内部面和位移边界上施加惩罚
-            valid_faces_bool = is_internal | is_dirichlet
-            valid_faces_idx = bm.nonzero(valid_faces_bool)[0]
-
             bform3 = BilinearForm(space_u)
-            # 跳量形式由构造参数 stabilization 决定, 默认矩阵跳量.
-            # 默认使用固定基材系数; 只有显式 density_dependent 模式才传密度比.
-            jpi_integrator = JumpPenaltyIntegrator(
-                                    q=self._integration_order,
-                                    threshold=valid_faces_idx,
-                                    method=self._stabilization,
-                                    material=self._material,
-                                    penalty_scaling=self._stabilization_scaling,
-                                    density_shear_ratio=self._density_shear_ratio(),
-                                )
+            jpi_integrator = self._jump_penalty_integrator()
             bform3.add_integrator(jpi_integrator)
             J = bform3.assembly(format='csr', method='coalesce') # 面积分子
 
@@ -856,6 +878,10 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # 组装体力源项 -> 对应位移测试函数 v
         F_body = self.assemble_body_force_vector()
         F0 = bm.set_at(F0, slice(gdof_sigmah, gdof), -F_body)
+
+        # 稳定化在非齐次位移边界上的数据项, 使离散方程对精确解相容
+        if self._uses_stabilization():
+            F0 = bm.set_at(F0, slice(gdof_sigmah, gdof), F0[gdof_sigmah:] - self.assemble_stabilization_bc_vector())
 
         # 自然边界条件处理 (位移边界 u = u_D)
         F_natural = self.assemble_displacement_bc_vector()

@@ -69,6 +69,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         # 仅保留作回归/对比.
         self.penalty_scaling = penalty_scaling
 
+        # 记下实际生效的变体, 供 boundary_data_vector 选用同一种跳量; 未注册的键回落到默认
+        self._jump_method = method if method in ('matrix_jump', 'vector_jump') else 'matrix_jump'
         self.assembly.set(method)
 
     def _face_penalty_scale(self, space: _FS) -> Optional[TensorLike]:
@@ -138,7 +140,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         return 2.0 * m_left * m_right / safe
 
     def _cell_to_face_sign(self, mesh):
-        """全局面法向是否指向本单元外侧, 形状 ``(NC, TD+1)`` 的布尔数组.
+        r"""全局面法向是否指向本单元外侧, 形状 ``(NC, TD+1)`` 的布尔数组.
 
         二维下 face 即 edge, 用网格的 ``cell_to_edge_sign`` (与下面的几何判据逐项相同,
         见测试). 三维网格没有对应方法, 按几何判据
@@ -397,38 +399,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
                 
         return ws, matrix_jump, hF, fm
 
-    @variantmethod('matrix_jump')
-    def assembly(self, space: _FS) -> TensorLike:
-        """``'matrix_jump'`` 变体: 对称化矩阵跳量的惩罚项局部矩阵.
-
-        内部面上矩阵跳量取 ``sym(v^+ n^T) - sym(v^- n^T)``, 边界面上取
-        ``sym(v n^T)``, 其中 ``sym(A) = (A + A^T) / 2``, ``n`` 为面的单位法向.
-
-        Parameters
-        ----------
-        space : FunctionSpace
-            位移空间.
-
-        Returns
-        -------
-        TensorLike
-            形状 ``(NF_sel, 2*ldof, 2*ldof)`` 的局部矩阵.
-
-        Warns
-        -----
-        UserWarning
-            材料杨氏模量不等于 1 (未做归一化).
-
-        Notes
-        -----
-        面系数 ``c_F``: ``penalty_scaling='gamma_hinv'`` 时为 ``gamma / hF``, ``gamma``
-        在位移空间为 ``P_0`` 时取 ``0.01 E``, 否则取 ``0.01 mu``; 其余情形为
-        ``mu / L0**2 * hF``, ``L0`` 为网格包围盒的最大边长. ``hF`` 在二维为面测度,
-        三维为面测度的平方根. 给出 ``density_shear_ratio`` 时再乘以
-        ``_face_penalty_scale`` 的逐面标度.
-        """
-        ws, matrix_jump, hF, fm = self.fetch_matrix_jump(space)
-        integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
+    def _matrix_jump_coefficient(self, space: _FS, hF: TensorLike) -> TensorLike:
+        """``'matrix_jump'`` 的逐面惩罚系数 ``c_F``, 形状同 ``hF``; 定义见该变体的 Notes."""
         
         # 构建缩放系数
         # k=1 用 E, k>=2 用 mu, 反映不同次数对稳定化强度的不同需求
@@ -491,6 +463,97 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         if scale is not None:
             coefficient = coefficient * scale
 
+        return coefficient
+
+    def boundary_data_vector(self, space: _FS, gd) -> TensorLike:
+        r"""边界面上的数据项 :math:`J_D(u_D, v) = \sum_F c_F \int_F [u_D] : [v]` 的局部向量.
+
+        边界面上跳量取迹本身, 精确解在位移边界上满足 :math:`u = u_D`, 故相容的离散
+        方程须把 :math:`J_D(u_D, v)` 移到右端. 所用积分点、法向、两侧符号与系数都与
+        ``assembly`` 的同一变体一致, 内部面上为零.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            位移空间.
+        gd : Callable
+            位移边界值, 以形状 ``(NF_sel, NQ, GD)`` 的面积分点坐标调用.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NF_sel, 2*ldof)`` 的局部向量, 与 ``to_global_dof`` 对应.
+        """
+        mesh = space.mesh
+        index, is_internal_flag = self.make_index(space)
+        ldof = space.number_of_local_dofs()
+
+        if self._jump_method == 'vector_jump':
+            ws, jump, hF, fm = self.fetch_vector_jump(space)        # (NF_sel, NQ, 2*ldof, GD)
+            coefficient = 1 / hF
+        else:
+            ws, jump, hF, fm = self.fetch_matrix_jump(space)        # (NF_sel, NQ, 2*ldof, GD, GD)
+            coefficient = self._matrix_jump_coefficient(space, hF)
+
+        q = space.p + 3 if self.q is None else self.q
+        bcs = mesh.quadrature_formula(q, 'face').get_quadrature_points_and_weights()[0]
+        # fetch_* 按全局面顶点次序取积分点 (见 _oriented_cell_basis), 这里同样按面映射
+        points = mesh.bc_to_point(bcs)[index]                      # (NF_sel, NQ, GD)
+
+        out = bm.zeros((jump.shape[0], 2 * ldof), dtype=bm.float64)
+        bd = bm.nonzero(~is_internal_flag)[0]
+        if len(bd) == 0:
+            return out
+        u_d = bm.asarray(gd(points[bd]), dtype=bm.float64)        # (NFb, NQ, GD)
+        weight = (fm * coefficient)[bd]
+
+        if self._jump_method == 'vector_jump':
+            # 边界迹存在 [-phi, 0] 或 [0, +phi] 中的一侧, 数据跳量取同一符号
+            on_left = bm.any(jump[bd][:, :, ldof:, :] != 0, axis=(1, 2, 3))
+            sign = bm.where(on_left, 1.0, -1.0)
+            data = sign[:, None, None] * u_d
+            vec = bm.einsum('q, f, fqd, fqjd -> fj', ws, weight, data, jump[bd])
+        else:
+            # 与 fetch_matrix_jump 相同, 边界面用不带符号的全局法向
+            n = mesh.face_unit_normal(index=index)[bd]
+            G = 0.5 * (bm.einsum('fqi, fj -> fqij', u_d, n) + bm.einsum('fi, fqj -> fqij', n, u_d))
+            vec = bm.einsum('q, f, fqkl, fqjkl -> fj', ws, weight, G, jump[bd])
+        out[bd] = vec
+        return out
+
+    @variantmethod('matrix_jump')
+    def assembly(self, space: _FS) -> TensorLike:
+        """``'matrix_jump'`` 变体: 对称化矩阵跳量的惩罚项局部矩阵.
+
+        内部面上矩阵跳量取 ``sym(v^+ n^T) - sym(v^- n^T)``, 边界面上取
+        ``sym(v n^T)``, 其中 ``sym(A) = (A + A^T) / 2``, ``n`` 为面的单位法向.
+
+        Parameters
+        ----------
+        space : FunctionSpace
+            位移空间.
+
+        Returns
+        -------
+        TensorLike
+            形状 ``(NF_sel, 2*ldof, 2*ldof)`` 的局部矩阵.
+
+        Warns
+        -----
+        UserWarning
+            材料杨氏模量不等于 1 (未做归一化).
+
+        Notes
+        -----
+        面系数 ``c_F``: ``penalty_scaling='gamma_hinv'`` 时为 ``gamma / hF``, ``gamma``
+        在位移空间为 ``P_0`` 时取 ``0.01 E``, 否则取 ``0.01 mu``; 其余情形为
+        ``mu / L0**2 * hF``, ``L0`` 为网格包围盒的最大边长. ``hF`` 在二维为面测度,
+        三维为面测度的平方根. 给出 ``density_shear_ratio`` 时再乘以
+        ``_face_penalty_scale`` 的逐面标度.
+        """
+        ws, matrix_jump, hF, fm = self.fetch_matrix_jump(space)
+        integrand = bm.einsum('q, f, fqikl, fqjkl -> fij', ws, fm, matrix_jump, matrix_jump)
+        coefficient = self._matrix_jump_coefficient(space, hF)
         KE = bm.einsum('f, fij -> fij', coefficient, integrand)
 
         return KE

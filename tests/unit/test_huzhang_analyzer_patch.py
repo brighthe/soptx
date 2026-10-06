@@ -149,3 +149,47 @@ def test_3d_stress_components_reordered_for_material():
     expected = np.stack([S[..., 0, 0], S[..., 1, 1], S[..., 2, 2], S[..., 1, 2], S[..., 0, 2], S[..., 0, 1]], axis=-1)
     got = bm.to_numpy(analyzer.extract_stress_at_quadrature_points(state["stress"][:]))
     assert np.abs(got - expected).max() < 1e-9 * np.abs(expected).max()
+
+
+@pytest.mark.parametrize("method", ["matrix_jump", "vector_jump"])
+@pytest.mark.parametrize(
+    "dim, p, u_degree",
+    [(2, 1, 0), (2, 2, 1), (3, 1, 0), (3, 2, 1), (3, 3, 2)],
+    ids=["2d-p1", "2d-p2", "3d-p1", "3d-p2", "3d-p3"],
+)
+def test_stabilized_patch_with_nonhomogeneous_displacement(dim, p, u_degree, method):
+    """低阶 (p <= GD) 跳量稳定化下, 非齐次位移边界的补丁仍精确.
+
+    位移边界面上的惩罚取迹本身, 须把 J_D(u_D, v) 移到右端; 缺少该项时离散方程
+    对精确解不相容, 二维 p=2 的线性位移补丁误差约 1e-2.
+    """
+    problem = QuadraticPatchProblem(dim, seed=1)
+    if u_degree < 2:
+        problem.H[:] = 0.0                        # 线性位移, 常应力
+    if u_degree < 1:
+        problem.B[:] = 0.0                        # 常位移, 零应力
+    if dim == 2:
+        mesh = TriangleMesh.from_box(problem.domain, nx=3, ny=3)
+        hypothesis = "plane_strain"
+    else:
+        mesh = TetrahedronMesh.from_box(problem.domain, nx=2, ny=2, nz=2)
+        hypothesis = "3D"
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis=hypothesis, enable_logging=False)
+    analyzer = HuZhangMFEMAnalyzer(
+        disp_mesh=mesh, pde=problem, material=material, interpolation_scheme=None,
+        space_degree=p, integration_order=p + 3, use_relaxation=False,
+        solve_method="scipy", topopt_algorithm=None, stabilization=method,
+    )
+    state = analyzer.solve_state(solver="scipy")
+    bcs = mesh.quadrature_formula(p + 2).get_quadrature_points_and_weights()[0]
+    points = bm.to_numpy(mesh.bc_to_point(bcs))
+
+    u = problem.displacement(points)
+    u_h = bm.to_numpy(state["displacement"](bcs))
+    assert np.abs(u_h - u).max() < 1e-9 * np.abs(u).max()
+
+    pairs = [(i, j) for i in range(dim) for j in range(i, dim)]
+    sigma = problem.stress_matrix(points)
+    sigma = np.stack([sigma[..., i, j] for i, j in pairs], axis=-1)
+    sigma_h = bm.to_numpy(analyzer.huzhang_space.value(state["stress"][:], bcs))
+    assert np.abs(sigma_h - sigma).max() < 1e-9 * max(np.abs(sigma).max(), np.abs(u).max())
