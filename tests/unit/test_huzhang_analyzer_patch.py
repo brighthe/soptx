@@ -3,7 +3,8 @@
 取二次位移 :math:`u`, 则应力 :math:`\\sigma = \\mathcal C \\varepsilon(u)` 为线性、体力为常数.
 当 :math:`u \\in P_{p-1}` 且 :math:`\\sigma \\in P_p(\\mathbb S)` 时 (二维 :math:`p=3`, 三维 :math:`p=4`),
 精确解满足离散方程, 而离散问题适定, 故离散解即精确解. 全边界给非齐次位移边界
-(自然施加), 检验与维数无关的位移边界项; 二维为对照.
+(自然施加) 检验与维数无关的位移边界项; 把 :math:`x = 1` 换成牵引边界 (强施加) 检验
+牵引写值与系统修改. 二维为对照.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from soptx.decorator import cartesian
 from soptx.fem.analyzers.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import TetrahedronMesh, TriangleMesh
-from soptx.problems.loads import BodyForceLoad
+from soptx.problems.loads import BodyForceLoad, BoundaryTractionLoad
 
 E, NU = 1.0, 0.3
 
@@ -35,9 +36,10 @@ class QuadraticPatchProblem:
     :math:`u_i = a_i + B_{ij} x_j + \\tfrac12 x^{\\mathsf T} H^{(i)} x`, 系数随机.
     """
 
-    def __init__(self, dim: int, seed: int = 0):
+    def __init__(self, dim: int, seed: int = 0, traction_on_x1: bool = False):
         rng = np.random.default_rng(seed)
         self.dim = dim
+        self.traction_on_x1 = traction_on_x1
         self.domain = [0.0, 1.0] * dim
         self.a = rng.standard_normal(dim)
         self.B = rng.standard_normal((dim, dim))
@@ -68,24 +70,38 @@ class QuadraticPatchProblem:
     def mark_corners(self, node):
         return bm.zeros((0, self.dim), dtype=bm.float64)
 
+    def _on_x1(self, points):
+        return bm.abs(points[..., 0] - 1.0) < 1e-12
+
     @cartesian
     def is_displacement_boundary(self, points):
+        if self.traction_on_x1:
+            return ~self._on_x1(points)
         return bm.ones(points.shape[:-1], dtype=bm.bool)
 
     @cartesian
     def is_traction_boundary(self, points):
+        if self.traction_on_x1:
+            return self._on_x1(points)
         return bm.zeros(points.shape[:-1], dtype=bm.bool)
+
+    def _traction_x1(self, points):
+        """x = 1 上的外法向牵引 sigma e_x."""
+        return bm.tensor(self.stress_matrix(bm.to_numpy(points))[..., :, 0])
 
     @cartesian
     def displacement_bc(self, points):
         return bm.tensor(self.displacement(bm.to_numpy(points)))
 
     def loads(self):
-        return (BodyForceLoad(self.dim, cartesian(lambda p: bm.tensor(self.body_force(bm.to_numpy(p))))),)
+        body = BodyForceLoad(self.dim, cartesian(lambda p: bm.tensor(self.body_force(bm.to_numpy(p)))))
+        if not self.traction_on_x1:
+            return (body,)
+        return (body, BoundaryTractionLoad(self.dim, self._on_x1, self._traction_x1))
 
 
-def _solve(dim: int, p: int):
-    problem = QuadraticPatchProblem(dim)
+def _solve(dim: int, p: int, traction_on_x1: bool = False):
+    problem = QuadraticPatchProblem(dim, traction_on_x1=traction_on_x1)
     if dim == 2:
         mesh = TriangleMesh.from_box(problem.domain, nx=2, ny=2)
         hypothesis = "plane_strain"
@@ -104,10 +120,11 @@ def _solve(dim: int, p: int):
     return problem, mesh, analyzer, state
 
 
+@pytest.mark.parametrize("traction_on_x1", [False, True], ids=["displacement", "traction-x1"])
 @pytest.mark.parametrize("dim, p", [(2, 3), (3, 4)], ids=["2d-p3", "3d-p4"])
-def test_quadratic_patch_with_nonhomogeneous_displacement(dim, p):
-    """全边界非齐次位移下, 应力与位移都精确复现."""
-    problem, mesh, analyzer, state = _solve(dim, p)
+def test_quadratic_patch(dim, p, traction_on_x1):
+    """非齐次位移边界 (及 x = 1 上的强施加牵引) 下, 应力与位移都精确复现."""
+    problem, mesh, analyzer, state = _solve(dim, p, traction_on_x1)
     bcs = mesh.quadrature_formula(p + 2).get_quadrature_points_and_weights()[0]
     points = bm.to_numpy(mesh.bc_to_point(bcs))
 

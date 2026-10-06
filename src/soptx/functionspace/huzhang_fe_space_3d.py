@@ -572,6 +572,175 @@ class HuZhangFESpace3d(FunctionSpace):
         """标记边界自由度; 尚未实现, 抛出 NotImplementedError."""
         return self.dof.is_boundary_dof(threshold, method=method)
 
+    def _traction_writes(self, gd, threshold, tangential_only: bool):
+        r"""边界面闭包格点上受牵引约束的自由度及其取值.
+
+        在格点上只有该点的标量 Lagrange 基为 1, 位于此点的局部基函数取值即其标架张量
+        :math:`S`. 记外法向 :math:`n`, :math:`P = I - nn^{\mathsf T}`:
+
+        - :math:`Sn = 0`: 不受牵引约束;
+        - :math:`PSP = 0`: :math:`S = \mathrm{sym}(n \otimes w)`, :math:`w = 2Sn - (n^{\mathsf T}Sn)n`,
+          故 :math:`\sigma : S = t \cdot w` 只依赖牵引 :math:`t = \sigma n`; 标架单位正交时系数为
+          :math:`(\sigma : S) / \|S\|_F^2`, 即 ``num_k * (sigma : S_k)``;
+        - 其余情况: 标架向量与边界法向既不平行也不正交, 无法只由牵引确定.
+
+        ``tangential_only`` 为 True 时只取 :math:`n^{\mathsf T}Sn = 0` 的切向分量.
+
+        Returns
+        -------
+        dofs : TensorLike
+            受约束的全局自由度编号 (去重, 升序).
+        values : TensorLike
+            对应取值; 被多个面写入的自由度取平均.
+
+        Raises
+        ------
+        NotImplementedError
+            某个受约束的标架张量含切向-切向分量 (非坐标对齐边界上的顶点等).
+        """
+        from .huzhang_fe_space_2d import boundary_outward_sign
+
+        mesh = self.mesh
+        p = self.p
+        flag = mesh.boundary_face_flag() if threshold is None else threshold
+        fidx = bm.nonzero(flag)[0] if getattr(flag, 'dtype', None) == bm.bool else bm.asarray(flag)
+        if len(fidx) == 0:
+            return bm.zeros((0,), dtype=self.itype), bm.zeros((0,), dtype=self.ftype)
+
+        f2c = mesh.face_to_cell()[fidx]
+        n_out = mesh.face_unit_normal()[fidx] * boundary_outward_sign(mesh, fidx)[:, None]
+        lattice = bm.multi_index_matrix(p, 2) / p                 # 面上的格点, (NL, 3)
+        c2d = self.cell_to_dof()
+        pairs = [(0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2)]
+        eye = bm.eye(3, dtype=self.ftype)
+        tol = 1e-10
+
+        dofs, values = [], []
+        for i in range(4):
+            on = f2c[:, 2] == i
+            if not bool(bm.any(on)):
+                continue
+            cids = f2c[on, 0]
+            n = n_out[on]                                          # (nf, 3)
+            bcs = bm.insert(lattice, i, 0, axis=-1)                 # 单元局部面 i 与顶点 i 相对
+            phi = self.basis(bcs)[cids]                            # (nf, NL, ldof, 6)
+            points = mesh.bc_to_point(bcs, index=cids)             # (nf, NL, 3)
+
+            t = gd(points) if callable(gd) else bm.broadcast_to(bm.tensor(gd, dtype=self.ftype), points.shape)
+            if t.shape[-1] == 6:                                   # Voigt 应力, 取 t = sigma n
+                T = bm.zeros(t.shape[:-1] + (3, 3), dtype=self.ftype)
+                for k, (a, b) in enumerate(pairs):
+                    T[..., a, b] = t[..., k]
+                    T[..., b, a] = t[..., k]
+                t = bm.einsum('fqab,fb->fqa', T, n)
+            elif t.shape[-1] != 3:
+                raise ValueError(f"gd 的最后一维须为 3 (牵引) 或 6 (Voigt 应力), 得到 {t.shape[-1]}.")
+
+            S = bm.zeros(phi.shape[:-1] + (3, 3), dtype=self.ftype)
+            for k, (a, b) in enumerate(pairs):
+                S[..., a, b] = phi[..., k]
+                S[..., b, a] = phi[..., k]
+            Sn = bm.einsum('fqlab,fb->fqla', S, n)
+            nSn = bm.einsum('fqla,fa->fql', Sn, n)
+            P = eye - n[:, :, None] * n[:, None, :]
+            tt = bm.einsum('fab,fqlbc,fcd->fqlad', P, S, P)
+            norm2 = bm.sum(S ** 2, axis=(-2, -1))
+
+            present = norm2 > tol
+            constrained = present & (bm.max(bm.abs(Sn), axis=-1) > tol)
+            if tangential_only:
+                constrained = constrained & (bm.abs(nSn) < tol)
+            misaligned = constrained & (bm.max(bm.abs(tt), axis=(-2, -1)) > tol)
+            if bool(bm.any(misaligned)):
+                raise NotImplementedError(
+                    "边界上的标架向量与边界法向既不平行也不正交 (如非坐标对齐边界上的顶点), "
+                    "牵引无法只由法向迹确定; 需要顶点标架对齐或角点松弛, 尚未实现."
+                )
+            w = 2.0 * Sn - nSn[..., None] * n[:, None, None, :]
+            val = bm.einsum('fqa,fqla->fql', t, w) / bm.where(present, norm2, 1.0)
+            gidx = bm.broadcast_to(c2d[cids][:, None, :], constrained.shape)
+            dofs.append(gidx[constrained])
+            values.append(val[constrained])
+
+        dofs = bm.concat(dofs) if dofs else bm.zeros((0,), dtype=self.itype)
+        values = bm.concat(values) if values else bm.zeros((0,), dtype=self.ftype)
+        unique, inverse = bm.unique(dofs, return_inverse=True)
+        total = bm.zeros(unique.shape, dtype=self.ftype)
+        count = bm.zeros(unique.shape, dtype=self.ftype)
+        total = bm.index_add(total, inverse, values)
+        count = bm.index_add(count, inverse, bm.ones_like(values))
+        return unique, total / count
+
+    def boundary_interpolate(self,
+                             gd: Union[Callable, TensorLike],
+                             uh: Optional[TensorLike] = None,
+                             *, threshold: Optional[Threshold] = None, method=None,
+                         ) -> TensorLike:
+        r"""在牵引边界上强施加法向迹 :math:`\sigma n = t` (混合法的本质边界).
+
+        取值规则见 ``_traction_writes``; 与二维约定一致, 写入的系数为
+        ``num_k * (sigma : S_k)``, 被多个面重复写入的自由度取平均.
+
+        Parameters
+        ----------
+        gd : Callable or TensorLike
+            边界数据. 可调用时以形状 ``(NFb, NL, 3)`` 的面格点坐标调用 (``NL`` 为面上
+            ``p`` 次格点数), 返回最后一维为 3 的外法向牵引, 或最后一维为 6 的 Voigt 应力;
+            非可调用时为常张量.
+        uh : TensorLike, optional
+            形状 ``(gdof,)`` 的自由度向量, 缺省为零向量.
+        threshold : TensorLike, optional
+            边界面的选取 (布尔标记或下标), 缺省取 ``mesh.boundary_face_flag()``.
+        method : optional
+            保留参数, 当前未使用.
+
+        Returns
+        -------
+        uh : TensorLike
+            写入边界值后的自由度向量.
+        isDDof : TensorLike
+            形状 ``(gdof,)`` 的布尔数组, 标记被写入的自由度.
+
+        Raises
+        ------
+        NotImplementedError
+            边界标架未与边界法向对齐 (非坐标对齐边界上的顶点等).
+        """
+        return self._write_traction(gd, uh, threshold, tangential_only=False)
+
+    set_dirichlet_bc = boundary_interpolate
+
+    def set_tangential_traction_bc(self,
+                                   gd: Union[Callable, TensorLike],
+                                   uh: Optional[TensorLike] = None,
+                                   *, threshold: Optional[Threshold] = None,
+                               ) -> TensorLike:
+        r"""只强施加切向牵引 (对称面), 法向-法向分量保持自由.
+
+        与 ``boundary_interpolate`` 相同, 但只写入 :math:`n^{\mathsf T} S n = 0` 的分量, 即
+        :math:`\sigma : \mathrm{sym}(n \otimes b)`, :math:`b \perp n`.
+
+        Returns
+        -------
+        uh : TensorLike
+            写入边界值后的自由度向量.
+        isDDof : TensorLike
+            形状 ``(gdof,)`` 的布尔数组, 标记被写入的自由度.
+        """
+        return self._write_traction(gd, uh, threshold, tangential_only=True)
+
+    def _write_traction(self, gd, uh, threshold, tangential_only: bool):
+        """把 ``_traction_writes`` 的结果写入自由度向量并给出标记."""
+        gdof = self.number_of_global_dofs()
+        if uh is None:
+            uh = bm.zeros((gdof,), dtype=self.ftype, device=self.device)
+        dofs, values = self._traction_writes(gd, threshold, tangential_only)
+        isDDof = bm.zeros((gdof,), dtype=bm.bool, device=self.device)
+        if len(dofs) > 0:
+            uh = bm.set_at(uh, dofs, values)
+            isDDof = bm.set_at(isDDof, dofs, True)
+        return uh, isDDof
+
     def geo_dimension(self):
         """几何维数."""
         return self.GD
@@ -587,7 +756,9 @@ class HuZhangFESpace3d(FunctionSpace):
         ``[n, t, n x t]``, 其中 ``n`` 为 ``face_unit_normal``, ``t`` 为该面第 0 条边的
         ``edge_unit_tangent``. 边标架为 ``[n, t x n, t]``, 其中 ``t`` 为
         ``edge_unit_tangent``, ``n`` 取某个相邻面的单位法向 (按 ``face_to_edge`` 写入,
-        同一条边多次写入时以最后一次为准; 任取一个都与 ``t`` 正交).
+        同一条边多次写入时以最后一次为准; 任取一个都与 ``t`` 正交). 边界边最后再按边界面
+        写一次, 使其 ``n`` 取边界面法向: 牵引强施加要求边界上的标架向量与边界法向平行或
+        正交, 见 ``boundary_interpolate``.
 
         Returns
         -------
@@ -628,6 +799,8 @@ class HuZhangFESpace3d(FunctionSpace):
         fframe[:, 2] = bm.cross(fframe[:, 0], fframe[:, 1])
 
         eframe[f2e, 0] = fn[:, None] 
+        isbdface = mesh.boundary_face_flag()
+        eframe[f2e[isbdface], 0] = fn[isbdface, None]
         eframe[:, 1] = bm.cross(et, eframe[:, 0])
         eframe[:, 2] = et 
 
