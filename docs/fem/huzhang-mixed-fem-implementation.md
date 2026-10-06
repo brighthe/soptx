@@ -1,6 +1,6 @@
 # 胡张混合有限元实现
 
-> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。其中 3D 空间尚无使用者、未经验证：自由度标架与基函数标架的约定与 2D 不一致（正应力分量相差因子 2），见 `docs/fealpy-migration.md` §2.3。
+> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。3D 空间的张成、$H(\mathrm{div})$ 协调性与自由度约定由 `tests/unit/test_huzhang_space_verification.py` 验证，$p=4$ 制造解收敛阶由 `examples/huzhang_elasticity/verify_3d_convergence.py` 验证（结果见该目录 `results_analysis.md` §5）；分析器的 3D 边界装配尚未实现。
 
 ## 程序架构
 

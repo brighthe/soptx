@@ -210,9 +210,10 @@
 - ~~`HuZhangMFEMAnalyzer.__init__` 重复赋值；Hu–Zhang 积分子 `q=0` 被当作未给出~~：已修。
 - ~~MMA 在 Hu–Zhang 分析器下 `is_store_stress` 报 `KeyError`~~：迭代前明确报 `NotImplementedError`；表观应力
   的记录口径待定。
-- 三维 Hu–Zhang 标架：**未改，待验证**。自由度标架与基函数标架的内积矩阵对角线，二维为 `[1, 0.25, 1]`，
-  三维为 `[2, 0.25, 0.25, 2, 0.25, 2]`；三维正应力分量多出的因子 2 恰与 `basis_frame_of_S` 乘的
-  `prod(alpha!)` 对应。二者约定不一致，孰对须有三维验证路径（插值复现或收敛阶），三维目前无使用者。
+- ~~三维 Hu–Zhang 标架约定与二维不一致~~：分支 `claude/huzhang-3d-verify` 先做代数验证（二维对照），表明三维空间
+  本身正确（张成 $P_p(\mathbb S)$、法向迹连续、散度精确），只是 `basis_frame_of_S` 多乘 `prod(alpha!)`、边与面
+  标架未归一化，使自由度系数含义与二维不同；已改为单位正交标架、基函数直接取自由度标架。$p=4$ 制造解收敛阶
+  逼近理论值（末对 4.73 / 3.92 / 3.92，理论 5 / 4 / 4），见 `examples/huzhang_elasticity/results_analysis.md` §5。
 
 ### 2.4 统一清理（已完成）
 

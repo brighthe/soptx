@@ -1,10 +1,11 @@
-# 胡张混合有限元 2D 求解算例 (Hu--Zhang Mixed FEM)
+# 胡张混合有限元算例: 二维求解与三维验证 (Hu--Zhang Mixed FEM)
 
 本目录提供二维线弹性 Hu--Zhang 混合有限元求解器：应力
 $\boldsymbol{\sigma}\in\Sigma_h\subset H(\mathrm{div})$ 与位移
 $\boldsymbol{u}\in V_h\subset[L_2]^d$ 联合求解，离散成应力--位移鞍点系统。
 
-算例采用自包含的单文件代码设计，方便快速阅读与二次扩展。
+算例采用自包含的单文件代码设计，方便快速阅读与二次扩展。另有一个三维收敛验证脚本
+`verify_3d_convergence.py`：分析器的边界装配只实现了二维，该脚本直接用积分子装配三维鞍点系统。
 
 ---
 
@@ -14,6 +15,7 @@ $\boldsymbol{u}\in V_h\subset[L_2]^d$ 联合求解，离散成应力--位移鞍�
 soptx/examples/huzhang_elasticity/
 ├── manufactured_convergence_demo.py  <-- [核心代码] 制造解收敛验证 (L2 观测阶 + 残差 + 对称性)
 ├── concentrated_load_demo.py         <-- [核心代码] 集中力工程基准 (残差 + 载荷等效性 + 结构合力)
+├── verify_3d_convergence.py          <-- [核心代码] 三维制造解收敛阶验证 (p >= 4, 零位移边界)
 ├── results_analysis.md               <-- [实验分析] 符号—代码映射、实测数据表与诊断报告
 ├── README.md                         <-- [使用说明] 本文件
 └── outputs/                          <-- [测试成果与报告]
@@ -157,6 +159,19 @@ python examples/huzhang_elasticity/concentrated_load_demo.py --solver mumps
 本目录只做实体材料（$\rho=1$、无材料插值）的单次状态求解。
 
 ---
+
+### 3. 三维收敛验证 (verify_3d_convergence)
+
+```bash
+# 默认 p=4, 网格 n=2,3,4 (约 2 分钟, 峰值内存约 8 GB)
+PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py
+# 只跑小网格检查流程 (秒级, 不判定渐近阶)
+PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --levels 1,2
+```
+
+制造解 $u_i = c_i\sin\pi x\sin\pi y\sin\pi z$ 在边界上为零, 因此不需要三维边界项. 三维跳量稳定化
+未实现, 只支持 $p \ge 4$. 门禁取最后一对网格的观测阶, 允许比理论阶低 0.3. 三维空间本身的代数
+验证 (张成、协调性、自由度约定) 在 `tests/unit/test_huzhang_space_verification.py`.
 
 ## 实验诊断与多 Case 分析
 
