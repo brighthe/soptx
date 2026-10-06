@@ -46,9 +46,8 @@ class ElementRestriction:
     -----
     多列右端项按自由度维在前的 (gdof, NB) 布局处理, 与 ``soptx.solvers`` 里迭代解法
     的规范布局一致 (``CG`` 在 ``batch_first=True`` 时先转成该布局再进迭代), 也与
-    ``ConstrainedOperator`` 用布尔掩码取边界行的写法一致. soptx.fem 的
-    ``BilinearForm.__matmul__`` 在这里按 (NB, gdof) 布局写, 散加却用了
-    ``bm.index_add`` 的默认 ``axis=0``, 两处不自洽, 多列下必然越界; 本类不照抄.
+    ``ConstrainedOperator`` 用布尔掩码取边界行的写法一致. ``BilinearForm.__matmul__``
+    则按 (NB, gdof) 布局, 两者不可互换.
     """
 
     def __init__(self, cell2dof: TensorLike, global_dofs: int) -> None:

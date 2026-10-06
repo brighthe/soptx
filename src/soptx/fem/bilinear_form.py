@@ -337,6 +337,7 @@ class BilinearForm(Form[LinearInt]):
             ve2dof = e2dofs_tuple[1] if (len(e2dofs_tuple) > 1) else ue2dof
             gu = u[..., ue2dof] # (..., NC, uldof)
             gv = bm.einsum(f'{gt_subs}, {gu_subs} -> {out_subs}', group_tensor, gu)
-            v = bm.index_add(v, ve2dof.reshape(-1), gv.reshape(gv_reshape))
+            # 输出按 (..., gdof) 布局, 沿最后一维散加
+            v = bm.index_add(v, ve2dof.reshape(-1), gv.reshape(gv_reshape), axis=-1)
 
         return v
