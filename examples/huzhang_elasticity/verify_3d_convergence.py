@@ -11,10 +11,11 @@
 
 其中 :math:`A` 为柔度项 :math:`(\\mathcal A\\sigma, \\tau)`, :math:`B` 为 :math:`(\\operatorname{div}\\tau, v)`.
 制造解 :math:`u_i = c_i \\sin\\pi x \\sin\\pi y \\sin\\pi z` 在边界上为零, 位移边界项消失.
-三维跳量稳定化未实现, 只验证 :math:`p \\ge 4` (原生格式稳定的最低次数).
+:math:`p \\ge 4` 为原生稳定格式; :math:`p \\le 3` 时分析器自动加矩阵跳量稳定化.
 
-理论阶 (Hu & Zhang): :math:`\\|\\sigma - \\sigma_h\\|_0 = O(h^{p+1})`,
-:math:`\\|u - u_h\\|_0 = O(h^{p})`, :math:`\\|\\operatorname{div}(\\sigma - \\sigma_h)\\|_0 = O(h^{p})`.
+理论阶 (Hu & Zhang): :math:`p \\ge 4` 时 :math:`\\|\\sigma - \\sigma_h\\|_0 = O(h^{p+1})`,
+:math:`\\|u - u_h\\|_0 = O(h^{p})`, :math:`\\|\\operatorname{div}(\\sigma - \\sigma_h)\\|_0 = O(h^{p})`;
+低阶稳定化情形三项均取 :math:`O(h^{p})`.
 门禁取最后一对网格的观测阶, 允许比理论阶低 ``ORDER_MARGIN``.
 
 用法::
@@ -224,7 +225,7 @@ def solve_level(n: int, p: int, q: int, assembly: str, boundary: str = "displace
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--degree", type=int, default=4, help="应力空间次数, 须 >= 4")
+    parser.add_argument("--degree", type=int, default=4, help="应力空间次数; <= 3 时加跳量稳定化")
     parser.add_argument("--levels", default="2,3,4", help="逗号分隔的每方向剖分数; n=1 在渐近区之外")
     parser.add_argument("--assembly", choices=["analyzer", "standalone"], default="analyzer",
                         help="经分析器求解, 或直接用积分子装配 (交叉核对); analyzer 的计时含装配")
@@ -232,19 +233,19 @@ def main() -> int:
                         help="全边界位移, 或 x=1 为强施加牵引、其余为位移 (仅 analyzer)")
     parser.add_argument("--json", type=Path, default=None, help="结果 JSON 路径, 缺省写入 outputs/")
     args = parser.parse_args()
-    if args.degree < 4:
-        parser.error("三维跳量稳定化未实现, 原生格式要求 degree >= 4.")
+    if args.degree < 4 and args.assembly == "standalone":
+        parser.error("独立装配不含跳量稳定化, degree <= 3 须配合 --assembly analyzer.")
     if args.boundary == "mixed" and args.assembly == "standalone":
         parser.error("独立装配不处理牵引边界, --boundary mixed 须配合 --assembly analyzer.")
 
     bm.set_backend("numpy")
     p = args.degree
-    q = 2 * p
+    q = max(2 * p, p + 3)
     levels = [int(s) for s in args.levels.split(",")]
     rows = [solve_level(n, p, q, args.assembly, args.boundary) for n in levels]
 
     keys = ("sigma_L2", "u_L2", "div_sigma_L2")
-    expected = {"sigma_L2": p + 1, "u_L2": p, "div_sigma_L2": p}
+    expected = {"sigma_L2": p + 1 if p >= 4 else p, "u_L2": p, "div_sigma_L2": p}
     for prev, cur in zip(rows, rows[1:]):
         ratio = prev["h"] / cur["h"]
         for k in keys:
