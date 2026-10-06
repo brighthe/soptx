@@ -1,6 +1,6 @@
 # 胡张混合有限元实现
 
-> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。3D 空间的张成、$H(\mathrm{div})$ 协调性与自由度约定由 `tests/unit/test_huzhang_space_verification.py` 验证，$p=4$ 制造解收敛阶由 `examples/huzhang_elasticity/verify_3d_convergence.py` 验证（结果见该目录 `results_analysis.md` §5）。分析器的 3D 边界装配（位移自然施加、牵引强施加）与 3D 低阶跳量稳定化（$p\le3$）均已实现并验证收敛阶，牵引强施加要求边界与坐标轴对齐。
+> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。3D 空间的张成、$H(\mathrm{div})$ 协调性与自由度约定由 `tests/unit/test_huzhang_space_verification.py` 验证，$p=4$ 制造解收敛阶由 `examples/huzhang_elasticity/verify_3d_convergence.py` 验证（结果见该目录 `results_analysis.md` §5）。分析器的 3D 边界装配（位移自然施加、牵引强施加）与 3D 低阶跳量稳定化（$p\le3$）均已实现并验证收敛阶；牵引强施加适用于分片平面边界，边界标架按牵引面法向对齐（`traction_face`），不要求与坐标轴对齐。
 
 ## 程序架构
 
@@ -180,7 +180,7 @@ $$
 
 左为 `create_huzhang_checkerboard_mesh`、右为 `create_huzhang_symmetric_single_diagonal_mesh` 的剖分结果，均取 `nx = 6`、`ny = 4`。两者的四个几何角点（绿点）都各连接 2 个三角形并共享一条内部边，满足上述拓扑条件；右图的红色虚线为镜像中缝，两个浅蓝单元是为满足角点条件而相对于单向对角规则翻转的四边形。插图由 `tools/plot_huzhang_meshes.py` 调用上述生成器绘制。
 
-松弛通过 DOF 变换矩阵 `TM` 实现：构造时计算变换矩阵，装配时施加到基函数和载荷向量上。**3D 不支持角点松弛**——工厂 `HuZhangFESpace` 在 3D 下收到 `use_relaxation=True` 时抛 `ValueError`。无松弛的 3D 求解链在 $p\ge4$、坐标对齐边界上已端到端验证（`examples/huzhang_elasticity/results_analysis.md` §5）；非坐标对齐边界上的牵引强施加需要顶点标架对齐或角点松弛，目前明确报错。
+松弛通过 DOF 变换矩阵 `TM` 实现：构造时计算变换矩阵，装配时施加到基函数和载荷向量上。**3D 不支持角点松弛**——工厂 `HuZhangFESpace` 在 3D 下收到 `use_relaxation=True` 时抛 `ValueError`。无松弛的 3D 求解链在 $p\ge4$、坐标对齐边界上已端到端验证（`examples/huzhang_elasticity/results_analysis.md` §5）；非坐标对齐边界上的牵引强施加靠按牵引面法向对齐边界标架、折棱与角点上联合多个面求值实现（`examples/huzhang_elasticity/results_analysis.md` §5.5），两个对称面以非 90° 折棱相交时仍明确报错，小平面逼近的曲面不在适用范围内。
 
 ### 求解器
 

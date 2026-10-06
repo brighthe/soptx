@@ -177,7 +177,7 @@ PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --lev
 ```
 
 制造解 $u_i = c_i\sin\pi x\sin\pi y\sin\pi z$ 在边界上为零. $p \le 3$ 时分析器加矩阵跳量稳定化,
-门禁三项均取 $O(h^p)$; 牵引强施加要求边界与坐标轴对齐 (否则分析器明确报错). 门禁取最后一对网格的观测阶,
+门禁三项均取 $O(h^p)$; 牵引强施加适用于分片平面边界, 不必与坐标轴对齐 (见 `results_analysis.md` §5.5). 门禁取最后一对网格的观测阶,
 允许比理论阶低 0.3. 三维空间本身的代数验证 (张成、协调性、自由度约定) 在
 `tests/unit/test_huzhang_space_verification.py`, 位移/牵引边界的补丁检验在
 `tests/unit/test_huzhang_analyzer_patch.py` 与 `tests/unit/test_huzhang_traction_3d.py`.
