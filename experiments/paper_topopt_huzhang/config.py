@@ -19,6 +19,7 @@ CASES_FILE = EXPERIMENT_DIR / "cases.toml"
 # .gitignore 排除, 其余入库.
 OUTPUT_DIR = EXPERIMENT_DIR / "results"
 FIGURE_DIR = OUTPUT_DIR / "figures"
+TABLE_DIR = OUTPUT_DIR / "tables"
 
 # 论文插图目录属于另一个仓库 (dut-postdoc), 默认取 WSL 下的挂载路径; 可用环境变量
 # HUZHANG_PAPER_FIGDIR 覆盖, 目录不存在时同步步骤自动跳过而非报错.
