@@ -45,12 +45,12 @@ experiments/paper_topopt_huzhang/
 |   `-- stress_hz_orders_topologies.py stress_traction_jump.py   # 图 5.10 / 5.11: HZMFEM k=2,4 构型; 六个构型实体带的牵引跳量
 |                               # 图 5.1 / 5.4 / 5.7 是论文侧 TikZ 示意图, 不在本目录; 图号以各模块 docstring 首行括注为准
 `-- results/                    # 论文证据, 入库: 第 5 章全部数值结果 (config.OUTPUT_DIR)
-    |-- manufactured_convergence.json  # 5.1 节: 表 5.1 / 5.2 全部数据 + 算例参数 + 溯源戳记
-    |-- table5_1.md table5_2.md        # 5.1 节: 由上述 JSON 生成, 可直接贴入草稿
+    |-- manufactured-convergence/      # 5.1 节: manufactured_convergence.json (全部数据 + 参数 + 溯源戳记)
     |-- <case>/<run>/                  # 5.2 节优化运行: summary.json / history.json / density_final.vtu
     |                                  # (逐步帧 vtu/ 由 .gitignore 排除, 不入库)
     |-- <case>/postprocess/            # 5.2 节冻结设计再分析与插图数据
-    |-- tables/                        # 论文表格 (table.py)
+    |-- tables/                        # 全部论文表格: table5_1.md / table5_2.md (manufactured_convergence.py),
+    |                                  # table5_3.md / table5_4.md (table.py); 可直接贴入草稿
     `-- figures/                       # 成图 (plot.py)
 ```
 
@@ -84,7 +84,7 @@ experiments/paper_topopt_huzhang/
 
 材料插值对象 `interpolation` 取三值: `E` 只插值 Young 模量 (Poisson 比固定为实体值), `E+nu` 同时按论文式 (4.3) 插值 Poisson 比 (只允许近不可压缩材料 `nu >= 0.49`, 可压缩材料上直接报错), `auto` 按材料自动决定。两条轴承 case 已显式登记 (`bearing-compressible` 为 `E`, `bearing-incompressible` 为 `E+nu`), 参数 `nu_penalty_factor` / `void_poisson_ratio` 同样在 `cases.toml` 登记。
 
-论文 5.1 节的制造解收敛阶 (表 5.1 / 5.2) 不是优化算例, 不进注册表: `manufactured_convergence.py` 把参数写成文件顶部常量, 一次跑完 $k=1,\dots,4$, 写出 `manufactured_convergence.json` (顶层一个溯源戳记) 与 `table5_1.md` / `table5_2.md`, 一律写入 `results/`。`--degree` 只回显, 不落盘。
+论文 5.1 节的制造解收敛阶 (表 5.1 / 5.2) 不是优化算例, 不进注册表: `manufactured_convergence.py` 把参数写成文件顶部常量, 一次跑完 $k=1,\dots,4$, 数据写入 `results/manufactured-convergence/manufactured_convergence.json` (顶层一个溯源戳记), 表格写入 `results/tables/table5_1.md` / `table5_2.md`。`--degree` 只回显, 不落盘。
 
 ```bash
 python experiments/paper_topopt_huzhang/manufactured_convergence.py

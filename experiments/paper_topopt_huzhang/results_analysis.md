@@ -92,7 +92,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 * **边界条件**：$\Gamma_D = \{x=0\}\cup\{y=0\}$ 弱加齐次位移，$\Gamma_N = \{x=1\}\cup\{y=1\}$ 强加解析牵引力，混合边界交界角点 $(1,0)$ 与 $(0,1)$ 开启两单元局部角点松弛；
 * **网格序列**：棋盘格结构化三角网格（`mesh_type = "triangle-checkerboard"`），剖分层次 $nx = 4, 8, 16, 32, 64$。
 
-数据来源：`results/manufactured_convergence.json`（由 `manufactured_convergence.py` 一次跑完 $k=1,\dots,4$ 写入，同目录 `table5_1.md` / `table5_2.md` 即表 5.1 / 5.2，不手工录入）。
+数据来源：`results/manufactured-convergence/manufactured_convergence.json`（由 `manufactured_convergence.py` 一次跑完 $k=1,\dots,4$ 写入；表 5.1 / 5.2 即 `results/tables/table5_1.md` / `table5_2.md`，同一次运行生成，不手工录入）。
 
 ### 2.2 高阶原生格式实测数据（$k=3,4$ / 论文表 5.1）
 

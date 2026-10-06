@@ -6,8 +6,9 @@
 - 表 5.2: k = 1, 2, 矩阵跳量稳定化 (alpha = mu / L0^2, 即论文 gamma_0 = 1).
 
 一次运行跑完全部阶次, 整份结果出自同一份代码, 只盖一个溯源戳记; 同时写出表 5.1 /
-5.2 的 Markdown 并回显. 结果写入入库的论文证据目录 ``results/``, 即
-``manufactured_convergence.json`` 与 ``table5_1.md`` / ``table5_2.md``; 溯源戳记
+5.2 的 Markdown 并回显. 结果写入入库的论文证据目录: 数据
+``results/manufactured-convergence/manufactured_convergence.json``, 表格
+``results/tables/table5_1.md`` / ``table5_2.md`` (与第 5.2 节各表同处); 溯源戳记
 如实记录工作区状态, 是否可复现以 ``provenance.reproducible`` 为准.
 
 用法::
@@ -34,6 +35,8 @@ from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import MixedBoundarySinusoidalElasticity2D
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
+DATA_DIR = RESULTS_DIR / "manufactured-convergence"
+TABLE_DIR = RESULTS_DIR / "tables"
 RESULT_FILE = "manufactured_convergence.json"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -219,7 +222,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.degrees:
         return 0
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    TABLE_DIR.mkdir(parents=True, exist_ok=True)
     summary = {
         "provenance": provenance(),
         "settings": {
@@ -233,10 +237,10 @@ def main(argv: list[str] | None = None) -> int:
         },
         "results": results,
     }
-    (RESULTS_DIR / RESULT_FILE).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (DATA_DIR / RESULT_FILE).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     for name, markdown in tables.items():
-        (RESULTS_DIR / f"{name}.md").write_text(markdown + "\n", encoding="utf-8")
-    print(f"\n[OK] 结果与表格已写入: {RESULTS_DIR}")
+        (TABLE_DIR / f"{name}.md").write_text(markdown + "\n", encoding="utf-8")
+    print(f"\n[OK] 数据写入 {DATA_DIR}, 表格写入 {TABLE_DIR}")
     return 0
 
 
