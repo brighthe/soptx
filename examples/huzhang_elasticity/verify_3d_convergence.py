@@ -42,7 +42,7 @@ from soptx.fem.linear_form import LinearForm
 from soptx.functionspace import HuZhangFESpace, LagrangeFESpace, TensorFunctionSpace
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import TetrahedronMesh
-from soptx.problems.loads import BodyForceLoad
+from soptx.problems.loads import BodyForceLoad, BoundaryTractionLoad
 from soptx.sparse.ops import bmat
 
 E, NU = 1.0, 0.3
@@ -110,31 +110,52 @@ def _body_force(points):
 
 
 class SineProblem3d:
-    """满足胡张分析器协议的制造解: 全边界为齐次位移边界, 只受体力."""
+    """满足胡张分析器协议的制造解.
+
+    ``boundary='displacement'``: 全边界为齐次位移边界 (自然施加), 只受体力.
+    ``boundary='mixed'``: :math:`x = 1` 为牵引边界 (强施加, :math:`t = \\sigma e_x`), 其余为齐次位移边界.
+    """
 
     domain = [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
+
+    def __init__(self, boundary: str = "displacement"):
+        self.boundary = boundary
 
     def mark_corners(self, node):
         return bm.zeros((0, 3), dtype=bm.float64)
 
+    def _on_x1(self, points):
+        return bm.abs(points[..., 0] - 1.0) < 1e-12
+
     @cartesian
     def is_displacement_boundary(self, points):
+        if self.boundary == "mixed":
+            return ~self._on_x1(points)
         return bm.ones(points.shape[:-1], dtype=bm.bool)
 
     @cartesian
     def is_traction_boundary(self, points):
+        if self.boundary == "mixed":
+            return self._on_x1(points)
         return bm.zeros(points.shape[:-1], dtype=bm.bool)
 
+    def _traction_x1(self, points):
+        """x = 1 上的外法向牵引 sigma e_x = (sigma_xx, sigma_xy, sigma_xz)."""
+        return bm.tensor(stress(bm.to_numpy(points))[..., :3])
+
     def loads(self):
-        return (BodyForceLoad(3, _body_force),)
+        body = BodyForceLoad(3, _body_force)
+        if self.boundary == "mixed":
+            return (body, BoundaryTractionLoad(3, self._on_x1, self._traction_x1))
+        return (body,)
 
 
-def _solve_with_analyzer(mesh, p: int, q: int):
+def _solve_with_analyzer(mesh, p: int, q: int, boundary: str = "displacement"):
     """经 HuZhangMFEMAnalyzer 求解, 返回 (应力空间, 位移空间, 应力系数, 位移系数, 装配秒数, 求解秒数)."""
     material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D", enable_logging=False)
     t0 = time.perf_counter()
     analyzer = HuZhangMFEMAnalyzer(
-        disp_mesh=mesh, pde=SineProblem3d(), material=material, interpolation_scheme=None,
+        disp_mesh=mesh, pde=SineProblem3d(boundary), material=material, interpolation_scheme=None,
         space_degree=p, integration_order=q, use_relaxation=False,
         solve_method="scipy", topopt_algorithm=None,
     )
@@ -144,7 +165,7 @@ def _solve_with_analyzer(mesh, p: int, q: int):
             state["stress"][:], state["displacement"][:], None, t2 - t0)
 
 
-def _solve_standalone(mesh, p: int, q: int):
+def _solve_standalone(mesh, p: int, q: int, boundary: str = "displacement"):
     """直接用积分子装配并求解, 返回值同 ``_solve_with_analyzer``."""
     space_sigma = HuZhangFESpace(mesh, p=p)
     space_u = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=p - 1, ctype="D"), shape=(-1, 3))
@@ -170,11 +191,11 @@ def _solve_standalone(mesh, p: int, q: int):
     return space_sigma, space_u, bm.tensor(x[:gs]), bm.tensor(x[gs:]), t1 - t0, t2 - t1
 
 
-def solve_level(n: int, p: int, q: int, assembly: str) -> dict:
+def solve_level(n: int, p: int, q: int, assembly: str, boundary: str = "displacement") -> dict:
     """在 n x n x n 剖分上求解并返回误差与规模."""
     mesh = TetrahedronMesh.from_box([0, 1, 0, 1, 0, 1], nx=n, ny=n, nz=n)
     solver = _solve_with_analyzer if assembly == "analyzer" else _solve_standalone
-    space_sigma, space_u, sigma_h, u_h, t_assembly, t_solve = solver(mesh, p, q)
+    space_sigma, space_u, sigma_h, u_h, t_assembly, t_solve = solver(mesh, p, q, boundary)
     gs = space_sigma.number_of_global_dofs()
     bcs, ws = mesh.quadrature_formula(q + 2).get_quadrature_points_and_weights()
     cm = bm.to_numpy(mesh.entity_measure("cell"))
@@ -207,16 +228,20 @@ def main() -> int:
     parser.add_argument("--levels", default="2,3,4", help="逗号分隔的每方向剖分数; n=1 在渐近区之外")
     parser.add_argument("--assembly", choices=["analyzer", "standalone"], default="analyzer",
                         help="经分析器求解, 或直接用积分子装配 (交叉核对); analyzer 的计时含装配")
+    parser.add_argument("--boundary", choices=["displacement", "mixed"], default="displacement",
+                        help="全边界位移, 或 x=1 为强施加牵引、其余为位移 (仅 analyzer)")
     parser.add_argument("--json", type=Path, default=None, help="结果 JSON 路径, 缺省写入 outputs/")
     args = parser.parse_args()
     if args.degree < 4:
         parser.error("三维跳量稳定化未实现, 原生格式要求 degree >= 4.")
+    if args.boundary == "mixed" and args.assembly == "standalone":
+        parser.error("独立装配不处理牵引边界, --boundary mixed 须配合 --assembly analyzer.")
 
     bm.set_backend("numpy")
     p = args.degree
     q = 2 * p
     levels = [int(s) for s in args.levels.split(",")]
-    rows = [solve_level(n, p, q, args.assembly) for n in levels]
+    rows = [solve_level(n, p, q, args.assembly, args.boundary) for n in levels]
 
     keys = ("sigma_L2", "u_L2", "div_sigma_L2")
     expected = {"sigma_L2": p + 1, "u_L2": p, "div_sigma_L2": p}
@@ -225,7 +250,7 @@ def main() -> int:
         for k in keys:
             cur[f"{k}_order"] = math.log(prev[k] / cur[k]) / math.log(ratio)
 
-    print(f"三维胡张元 p={p}, 制造解 u_i = c_i sin(pi x) sin(pi y) sin(pi z), c = {C.tolist()}")
+    print(f"三维胡张元 p={p}, 边界 {args.boundary}, 制造解 u_i = c_i sin(pi x) sin(pi y) sin(pi z), c = {C.tolist()}")
     print(f"{'n':>3} {'sigma dofs':>11} {'||s-sh||':>11} {'阶':>6} {'||u-uh||':>11} {'阶':>6} {'||div(s-sh)||':>14} {'阶':>6} {'求解(s)':>8}")
     for r in rows:
         o = [f"{r.get(k + '_order', float('nan')):6.2f}" for k in keys]
@@ -242,9 +267,9 @@ def main() -> int:
     else:
         print("[SKIP] 只有一层网格, 不判定收敛阶")
 
-    out = args.json or OUTPUT_DIR / f"huzhang_3d_convergence_p{p}_levels{'-'.join(map(str, levels))}.json"
+    out = args.json or OUTPUT_DIR / f"huzhang_3d_convergence_{args.boundary}_p{p}_levels{'-'.join(map(str, levels))}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"degree": p, "quadrature_order": q, "assembly": args.assembly,
+    out.write_text(json.dumps({"degree": p, "quadrature_order": q, "assembly": args.assembly, "boundary": args.boundary,
                                "E": E, "nu": NU, "c": C.tolist(),
                                "order_margin": ORDER_MARGIN, "passed": bool(passed), "levels": rows},
                               indent=2, ensure_ascii=False), encoding="utf-8")
