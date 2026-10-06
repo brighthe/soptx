@@ -218,6 +218,9 @@
   `boundary_interpolate` / `set_tangential_traction_bc`，按格点标架张量写牵引，边界边改取边界面法向。要求边界与
   坐标轴对齐，否则明确报错；三维 $p\le3$ 构造时报错（跳量稳定化未实现）。补丁检验精确，混合边界收敛阶
   4.76 / 3.92 / 3.92，见 `examples/huzhang_elasticity/results_analysis.md` §5.3。
+- 三维跳量稳定化（分支 `claude/huzhang-3d-jump`，known-issues「移植后遗留」最后一行）：面定向按几何判据；同时修复
+  非齐次位移边界加稳定化时缺少数据项 $J_D(u_D, v)$ 的不相容（二维同样存在，现有算例 $u_D=0$ 未受影响）。三维
+  $p=1,2,3$ 收敛阶见 `examples/huzhang_elasticity/results_analysis.md` §5.4，$p=1$ 仍在渐近区之前。
 
 ### 2.4 统一清理（已完成）
 

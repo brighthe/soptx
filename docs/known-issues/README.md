@@ -58,9 +58,7 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 
 移植一律原样复制，过程中发现的问题记在这里，不在移植中顺手修；修复后删除对应行。
 
-| 问题 | 位置 | 来源 | 根因与影响 | 修法 | 状态 |
-|---|---|---|---|---|---|
-| 三维跳量稳定化未实现 | `fem/integrators/jump_penalty_integrator.py` 的 `_cell_to_face_sign` | 原调用 v0.4 网格已不存在的 `mesh.cell_to_face_sign` | 三维低阶（$p \le 3$）Hu--Zhang 默认的跳量稳定化不可用，现明确抛 `NotImplementedError`；$p \ge 4$ 或 `stabilization='none'` 不受影响。二维的 `cell_to_edge_sign` 与「全局面法向指向本单元外侧」逐项相同，可按此判据推广，但尚无三维制造解验证收敛阶 | 有三维 Hu--Zhang 算例后按几何判据实现并验证收敛阶 | 未修 |
+目前没有移植后遗留问题 (最后一项三维跳量稳定化已于 2026-10-06 实现, 见 `docs/fealpy-migration.md` §2.3)。
 
 ## 记账约定
 

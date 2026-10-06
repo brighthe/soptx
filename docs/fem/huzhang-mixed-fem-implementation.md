@@ -1,6 +1,6 @@
 # 胡张混合有限元实现
 
-> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。3D 空间的张成、$H(\mathrm{div})$ 协调性与自由度约定由 `tests/unit/test_huzhang_space_verification.py` 验证，$p=4$ 制造解收敛阶由 `examples/huzhang_elasticity/verify_3d_convergence.py` 验证（结果见该目录 `results_analysis.md` §5）。分析器的 3D 边界装配（位移自然施加、牵引强施加）已实现，牵引强施加要求边界与坐标轴对齐。
+> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。3D 空间的张成、$H(\mathrm{div})$ 协调性与自由度约定由 `tests/unit/test_huzhang_space_verification.py` 验证，$p=4$ 制造解收敛阶由 `examples/huzhang_elasticity/verify_3d_convergence.py` 验证（结果见该目录 `results_analysis.md` §5）。分析器的 3D 边界装配（位移自然施加、牵引强施加）与 3D 低阶跳量稳定化（$p\le3$）均已实现并验证收敛阶，牵引强施加要求边界与坐标轴对齐。
 
 ## 程序架构
 
@@ -159,9 +159,9 @@ $$
 | `p >= GD + 1` | `[[A, B], [B^T, 0]]` | inf-sup 稳定，不需惩罚 |
 | `p <= GD` | `[[A, B], [B^T, -J]]` | 低阶跳量稳定化 |
 
-跳量稳定化施加在内部面和 Dirichlet 边界面上，使用矩阵跳量（`method='matrix_jump'`）。penalty 系数取论文式物理量纲缩放 `α·h_F`（`α = μ/L₀²`，$L_0$ 为计算域特征尺度；`penalty_scaling='physical_h'`），整体随 $h_F^2\to0$ 弱一致衰减，细层收敛恢复。
+跳量稳定化施加在内部面和 Dirichlet 边界面上，使用矩阵跳量（`method='matrix_jump'`）。Dirichlet 边界面上的惩罚取迹本身，故非齐次位移边界须把数据项 $J_D(u_D, v)$ 移到右端（`assemble_stabilization_bc_vector`），否则离散方程对精确解不相容。三维的面定向按几何判据 $(\bar x_F - \bar x_K)\cdot n_F > 0$ 计算。penalty 系数取论文式物理量纲缩放 `α·h_F`（`α = μ/L₀²`，$L_0$ 为计算域特征尺度；`penalty_scaling='physical_h'`），整体随 $h_F^2\to0$ 弱一致衰减，细层收敛恢复。
 
-已验证收敛的 degree：2（跳量稳定化，σ 2 阶、$H(\mathrm{div})$ 1 阶降阶）、3（无惩罚，σ 4 阶）、4（无惩罚，σ 5 阶）。制造解收敛阶由两个 case 覆盖：`manufactured-native`（`comparison_orders = [3, 4]`，原生高阶格式）与 `manufactured-stabilized`（`comparison_orders = [1, 2]`，低阶跳量稳定化格式）。
+已验证收敛的 degree：2（跳量稳定化，σ 2 阶、$H(\mathrm{div})$ 1 阶降阶）、3（无惩罚，σ 4 阶）、4（无惩罚，σ 5 阶）。3D 的 $p=1,2,3$（跳量稳定化）与 $p=4$ 见 `examples/huzhang_elasticity/results_analysis.md` §5。制造解收敛阶由两个 case 覆盖：`manufactured-native`（`comparison_orders = [3, 4]`，原生高阶格式）与 `manufactured-stabilized`（`comparison_orders = [1, 2]`，低阶跳量稳定化格式）。
 
 **k = 1 的适用边界**（本文档关于 $k=1$ 的唯一详述处，已知限制 5 只作交叉引用）：$k = 1$（$P_1$ 应力 / $P_0$ 位移）加跳量稳定化后静力可收敛，因此静力算例开放该阶次——[`examples/huzhang_elasticity/concentrated_load_demo.py`](../../examples/huzhang_elasticity/concentrated_load_demo.py) 的 `SUPPORTED_DEGREES = (1, 2, 3, 4)` 是 `--degrees` 的取值白名单，制造解 case `manufactured-stabilized` 也把 $k = 1$ 列入 `comparison_orders`。但 $P_0$ 位移不完备包含刚体位移空间（RM），在变密度演化中会使低密度区应变能评估失真、诱发非物理拓扑（博士论文 §5.6.2），故**拓扑优化族 case** 的 `comparison_orders` 下限取 2；$k = 1$ 只以 `supplementary_orders = [1]` 单列，供补充失效专题 `supp-k1` 取数，既不进缺省也不进 `--full`。
 
