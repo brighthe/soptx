@@ -1,14 +1,11 @@
-"""Low-level infrastructure shared by SOPTX subsystems.
+"""SOPTX 各子系统共用的底层基础设施.
 
-Everything here is domain-free: logging, timing, a small result record, the
-MUMPS-side MPI activation hook and the numeric defaults that the evidence
-tooling has to reproduce without an MPI runtime.
+这里的内容都与具体领域无关: 日志、计时、简单的结果记录、MUMPS 侧的 MPI 激活钩子,
+以及证据工具在没有 MPI runtime 时也要复现的数值缺省值.
 
-The structural protocols an analyzer requires of its ``pde`` and
-``interpolation_scheme`` are *not* infrastructure -- they name elasticity
-concepts -- so they live in :mod:`soptx.protocols` instead.  Keeping them out
-stops this package from becoming the place where domain types accumulate
-merely because it is the layer everyone is allowed to import.
+分析器要求 ``pde`` 与 ``interpolation_scheme`` 满足的结构协议 *不* 属于基础设施 (它们
+描述的是弹性力学概念), 因此放在 :mod:`soptx.protocols`. 把它们排除在外, 是为了不让
+本包仅因 "人人都可以导入" 而变成领域类型的堆放处.
 """
 
 from .logging import BaseLogged

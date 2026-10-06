@@ -151,4 +151,4 @@ python experiments/matrix_free_capability/run.py --collect
 
 7. **跨格对照表由人工维护。** [`results_analysis.md`](results_analysis.md) §4.4 那四行取自两个不同的 role(`mpi-strong` 与 `device-speedup`), `collect.py` 没有跨格提取器, 是全库唯一一处手抄数字的表。要闭环应加一个跨格核对函数, 按「同 `n`、同装配、同迭代数」把两个 role 的记录对起来并断言残差同量级。
 8. **MPI 五档是单次采样。** 实跑用 `--warmup 0 --repeats 1`(脚本默认 `1` / `3`), 秒数不带误差棒。曲线形状与正确性结论(迭代数逐档恒为 `493`)不受影响, 但这批数自 `2026-08-24` 起已经画在图面 (c) 上, 正式投递前须按默认口径重跑 `run.py --panel d` 并重绘图 2。
-9. **`dot_fn` 的强制同步未量化。** `matrix_free/krylov.py:146-147` 的 `float(bm.sum(x * y))` 使 GPU 侧每次求解被强制同步约 `986` 次(`n=64`)。这是一处不需自定义 kernel 就能改的点, 但修掉它能带来多少加速尚无实测 —— 需要 Nsight 时间线才能定量, 在此之前不得写成收益。
+9. **`dot_fn` 的强制同步未量化。** `soptx/solvers/overlap.py:91` 的 `float(bm.sum(x * y))` 使 GPU 侧每次求解被强制同步约 `986` 次(`n=64`)。这是一处不需自定义 kernel 就能改的点, 但修掉它能带来多少加速尚无实测 —— 需要 Nsight 时间线才能定量, 在此之前不得写成收益。

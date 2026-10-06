@@ -15,7 +15,7 @@
 | 1b | CPU 并行 EA（MPI 重叠副本） | 代码已就绪，见[下文](#阶段-1b可选的-cpu-并行路径) |
 | 1c | 单 GPU EA | 未开始 |
 
-1a 与 1b 共享同一份制造解定义（[`soptx.problems.elasticity`](../../src/soptx/problems/elasticity.py)）和
+1a 与 1b 共享同一份制造解定义（[`soptx.problems.elasticity`](../../src/soptx/problems/elasticity/)）和
 同一份阈值（[`tools/matrix_free_evidence/contract.py`](../../tools/matrix_free_evidence/contract.py)），因此 1b 的跨 rank 门禁与 1a 的串行
 结果始终可比。
 
@@ -57,7 +57,7 @@ MATERIAL_HYPOTHESES = {2: "plane_strain", 3: "3D"}
 - [`results_analysis.md`](results_analysis.md)：符号—代码映射契约、实测数值、证据 provenance 与证据边界的唯一事实源；
 
 本目录有四个可执行入口与两份文档。制造解已下沉到
-[`soptx.problems.elasticity`](../../src/soptx/problems/elasticity.py)（见上节）。证据流水线（`run`、`validate`、`sync_results`
+[`soptx.problems.elasticity`](../../src/soptx/problems/elasticity/)（见上节）。证据流水线（`run`、`validate`、`sync_results`
 及其 `contract`/`layout`/`schema`/`report`）住在
 [`tools/matrix_free_evidence/`](../../tools/matrix_free_evidence/)，因为它是仓库级的正式
 证据门禁，不只服务于这一个示例。依赖方向是单向的：那个包不导入
@@ -72,13 +72,13 @@ MATERIAL_HYPOTHESES = {2: "plane_strain", 3: "3D"}
 
 | 模块 | 内容 |
 |---|---|
-| [`soptx.problems.elasticity`](../../src/soptx/problems/elasticity.py) | `SinusoidalPlaneStrainElasticity2D` / `DivergenceFreePolynomialElasticity3D`：制造解的单一定义源，自带区域、弹性常数与维数 |
-| [`soptx.fem.matrix_free.krylov`](../../src/soptx/fem/matrix_free/krylov.py) | `weighted_cg` / `solve_matrix_free_system` / `PreparedLinearSystem` 与真残差、边界误差诊断。当前无预条件 |
+| [`soptx.problems.elasticity`](../../src/soptx/problems/elasticity/) | `SinusoidalPlaneStrainElasticity2D` / `DivergenceFreePolynomialElasticity3D`：制造解的单一定义源，自带区域、弹性常数与维数 |
+| [`soptx.solvers.overlap`](../../src/soptx/solvers/overlap.py) | `weighted_cg`：分布式重叠副本下以加权内积运行的 CG。当前无预条件 |
 | [`soptx.fem.analyzers.distributed_analyzer`](../../src/soptx/fem/analyzers/distributed_analyzer.py) | `DistributedElasticityAnalyzer`（`LagrangeFEMAnalyzer` 的重叠副本子类）与 `DISTRIBUTED_SOLVERS` 登记表 |
-| [`soptx.fem.distributed`](../../src/soptx/fem/distributed.py) | `OverlapOperator`（MPI 共享自由度同步归约）、单元分区与向量空间分发 |
+| [`soptx.fem.distributed`](../../src/soptx/fem/distributed/) | `OverlapOperator`（MPI 共享自由度同步归约）、单元分区与向量空间分发 |
 | [`soptx.fem.analyzers.builders`](../../src/soptx/fem/analyzers/builders.py) | `build_serial_analyzer` / `build_distributed_analyzer`：算子层级无关的分析器构造工厂，`fa` 与 `ea` 共用；只接受 `(space, pde, material)` |
 | [`soptx.fem.matrix_free.operator`](../../src/soptx/fem/matrix_free/operator.py) | demo 用的 EA 懒装配算子门面 `ElasticityEAOperator` |
-| [`soptx.fem.matrix_free.solve`](../../src/soptx/fem/matrix_free/solve.py) | `solve_ea_system`：装配 → 边界条件 → 加权 CG 的一步正向求解门面 |
+| [`soptx.fem.matrix_free.solve`](../../src/soptx/fem/matrix_free/solve.py) | `solve_ea_system`：装配 → 边界条件 → 加权 CG 的一步正向求解门面；`solve_matrix_free_system` / `PreparedLinearSystem` / `solver_diagnostics` 与真残差、边界误差诊断 |
 | [`soptx.fem.verification`](../../src/soptx/fem/verification.py) | `serial_references`（FA 黄金参考与 Scipy 直解）、`solution_error`、`relative_difference` |
 | [`soptx.core.numerics`](../../src/soptx/core/numerics.py) | 求解器默认容差与 `NORM_FLOOR`，由 [`tools/matrix_free_evidence/contract.py`](../../tools/matrix_free_evidence/contract.py) 复出口 |
 
@@ -243,7 +243,7 @@ main
       → run_solver
           → analyzer.apply_bc(assemble_stiff_matrix(), assemble_body_force_vector())
           → analyzer.solve_system → DISTRIBUTED_SOLVERS["cg"]
-              → krylov.weighted_cg
+              → overlap.weighted_cg
                   → CGSolver(dot_product=dof_comm.dot)
           → solver_diagnostics
       → dof_comm.gather_add(local_solution / references)

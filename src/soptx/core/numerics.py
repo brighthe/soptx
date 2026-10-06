@@ -1,36 +1,32 @@
-"""Shared numeric defaults for iterative solvers and evidence tooling.
+"""迭代求解器与证据工具共用的数值缺省值.
 
-These constants are needed on both sides of a validation pipeline: by the
-solvers themselves, and by the evidence tooling that has to reproduce a run's
-convergence criteria without ever constructing one.  That tooling must be able
-to run on machines without an MPI runtime, which is why this module sits in
-:mod:`soptx.core` -- layer 0, deliberately free of finite-element and mpi4py
-imports -- rather than under ``soptx.fem``, where importing anything pulls in
-the whole finite-element stack through the package ``__init__``.
+验证流水线的两端都需要这些常数: 求解器本身, 以及无需构造求解器就要复现一次运行的
+收敛判据的证据工具. 证据工具必须能在没有 MPI runtime 的机器上运行, 所以本模块放在
+:mod:`soptx.core` (第 0 层, 刻意不导入有限元与 mpi4py), 而不是 ``soptx.fem`` 下:
+在那里导入任何模块都会经包的 ``__init__`` 拉起整个有限元栈.
 
-It is intentionally not re-exported from ``soptx.core.__init__``: consumers
-import it by its full path, so the dependency shows up at every call site.
+本模块刻意不从 ``soptx.core.__init__`` 再导出: 使用方按完整路径导入, 让依赖在每个
+调用点都可见.
 
-Numbers that encode an *acceptance gate* rather than a solver default do not
-belong here; they belong to whichever example or study defines that gate.
+表达 *验收门槛* 而非求解器缺省值的数字不属于这里, 应放在定义该门槛的示例或研究中.
 """
 
 from __future__ import annotations
 
 
-#: Iteration cap for the Krylov solvers in :mod:`soptx.solvers.overlap`.
+#: :mod:`soptx.solvers.overlap` 中 Krylov 求解器的迭代上限.
 DEFAULT_MAX_ITERATIONS = 1000
 
-#: Relative residual tolerance.
+#: 相对残差容差.
 DEFAULT_RTOL = 1.0e-10
 
-#: Absolute residual tolerance.
+#: 绝对残差容差.
 DEFAULT_ATOL = 1.0e-12
 
-#: Iterations between true-residual recomputations inside CG.
+#: CG 内部两次重算真残差之间的迭代步数.
 RESIDUAL_REFRESH = 20
 
-#: Lower bound used whenever a norm appears in a denominator.
+#: 范数出现在分母时使用的下界.
 NORM_FLOOR = 1.0e-30
 
 

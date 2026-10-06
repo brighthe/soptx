@@ -587,29 +587,3 @@ class ProjectionStrategy(DensityStrategy):
 
         return change, False
     
-    def continuation_step_backup(self, change: float) -> Tuple[float, bool]:
-        """执行一步 beta continuation (更新 beta 值)"""
-        self._beta_iter += 1
-        
-        # 判断条件: beta 未达上限 且 (达到迭代间隔 或 收敛)
-        if (self.beta < self.beta_max and 
-                (self._beta_iter >= self.continuation_iter or change <= 0.01)):
-            
-            # 记录旧值用于日志
-            old_beta = self.beta
-            
-            # 1. 加倍 Beta
-            self.beta = min(self.beta * 2, self.beta_max)
-            
-            # 2. 重置计数器
-            self._beta_iter = 0
-            
-            if self._enable_logging:
-                trigger = "Interval" if self._beta_iter >= self.continuation_iter else "Convergence"
-                print(f"[{trigger}] Projection beta updated: {old_beta} -> {self.beta}")
-            
-            # 3. 关键: 强制返回 1.0, 防止外层循环提前退出
-            return 1.0, True
-        
-        # 如果没有更新, 保持原有的 change 值
-        return change, False

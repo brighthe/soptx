@@ -6,8 +6,8 @@ and ``sync_results.py`` read back. Before it existed the three sides each knew
 the field names independently, so renaming one key failed silently on the other
 two while ``SCHEMA_VERSION`` kept claiming the format was unchanged.
 
-Like :mod:`contract` and :mod:`layout`, this module must stay free of SOPTX
-and mpi4py imports.
+Like :mod:`layout`, this module must stay free of SOPTX and mpi4py imports;
+:mod:`contract` imports only the MPI-free :mod:`soptx.core.numerics`.
 """
 
 from __future__ import annotations

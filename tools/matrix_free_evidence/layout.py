@@ -8,8 +8,8 @@ being spelled out on each side.
 This harness lives outside the example it validates, so every path below is
 anchored on the repository root rather than on ``__file__``'s own parent.
 
-Like the example's ``contract`` module, this one must not import SOPTX or
-mpi4py.
+This module must not import SOPTX or mpi4py; the ``contract`` module imports
+only the MPI-free :mod:`soptx.core.numerics`.
 """
 
 from __future__ import annotations
