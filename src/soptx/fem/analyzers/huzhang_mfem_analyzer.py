@@ -122,11 +122,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         corners = self._pde.mark_corners(self._mesh.entity('node'))
 
         self._GD = self._mesh.geo_dimension()
-        if self._GD == 3 and self._space_degree <= 3 and self._stabilization != 'none':
-            raise NotImplementedError(
-                "三维跳量稳定化未实现: 三维须 space_degree >= 4, "
-                "或以 stabilization='none' 做不加稳定化的消融."
-            )
         self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation, corners=corners)
         self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))

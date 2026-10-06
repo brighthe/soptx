@@ -3,7 +3,7 @@
 节点密度分支曾调用 v0.4 网格已不存在的 ``cell_to_node`` / ``jacobi_matrix``, 插值格式
 的 SIMP 分支还读不存在的 ``self._mesh``、求导时未在积分点处求值, 整条链路从未跑通.
 这里用中心差分核对柔顺度与体积约束的灵敏度, 并检查节点过滤的测度权重. 同文件顺带
-覆盖两处同类问题: 三维跳量稳定化明确报错, ``Integrator.size`` 不再调用 ``mesh.count``.
+覆盖同类问题: ``Integrator.size`` 不再调用 ``mesh.count``.
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ import pytest
 from soptx.backend import backend_manager as bm
 from soptx.fem.analyzers.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.fem.bilinear_form import BilinearForm
-from soptx.fem.integrators import JumpPenaltyIntegrator, LinearElasticIntegrator
+from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.mesh import QuadrangleMesh, TetrahedronMesh, TriangleMesh
+from soptx.mesh import QuadrangleMesh, TriangleMesh
 from soptx.problems import HalfMBBBeamRight2d
 from soptx.topology.constraints.volume import VolumeConstraint
 from soptx.topology.filters import Filter
@@ -115,32 +115,6 @@ def test_node_filter_measure_sums_to_domain_area(mesh_type, filter_type):
 
     assert weight.shape == (mesh.number_of_nodes(), )
     assert weight.sum() == pytest.approx(12.0, rel=1e-14)
-
-
-def test_jump_penalty_rejects_3d():
-    """三维跳量稳定化缺 cell_to_face_sign 且无算例验证, 应明确报 NotImplementedError."""
-    mesh = TetrahedronMesh.from_box([0, 1, 0, 1, 0, 1], 1, 1, 1)
-    material = IsotropicLinearElasticMaterial(
-        lame_lambda=1.0, shear_modulus=0.5, hypothesis="3D", enable_logging=False
-    )
-    space = TensorFunctionSpace(
-        scalar_space=LagrangeFESpace(mesh, p=1, ctype="D"), shape=(-1, 3)
-    )
-    face2cell = mesh.face_to_cell()
-    internal = bm.nonzero(face2cell[:, 0] != face2cell[:, 1])[0]
-    form = BilinearForm(space)
-    form.add_integrator(
-        JumpPenaltyIntegrator(
-            q=3,
-            threshold=internal,
-            method="matrix_jump",
-            material=material,
-            penalty_scaling="physical_h",
-        )
-    )
-
-    with pytest.raises(NotImplementedError, match="三维跳量稳定化尚未实现"):
-        form.assembly(method="coalesce")
 
 
 def test_integrator_size_counts_entities():

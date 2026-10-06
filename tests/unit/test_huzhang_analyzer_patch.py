@@ -149,16 +149,3 @@ def test_3d_stress_components_reordered_for_material():
     expected = np.stack([S[..., 0, 0], S[..., 1, 1], S[..., 2, 2], S[..., 1, 2], S[..., 0, 2], S[..., 0, 1]], axis=-1)
     got = bm.to_numpy(analyzer.extract_stress_at_quadrature_points(state["stress"][:]))
     assert np.abs(got - expected).max() < 1e-9 * np.abs(expected).max()
-
-
-def test_3d_low_degree_requires_stabilization():
-    """三维 p <= 3 需要尚未实现的跳量稳定化, 构造时即明确报错."""
-    problem = QuadraticPatchProblem(3)
-    mesh = TetrahedronMesh.from_box(problem.domain, nx=1, ny=1, nz=1)
-    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D", enable_logging=False)
-    with pytest.raises(NotImplementedError, match="跳量稳定化"):
-        HuZhangMFEMAnalyzer(
-            disp_mesh=mesh, pde=problem, material=material, interpolation_scheme=None,
-            space_degree=3, integration_order=6, use_relaxation=False,
-            solve_method="scipy", topopt_algorithm=None,
-        )

@@ -18,8 +18,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
     在选定的面上装配 ``sum_F c_F int_F [[u]] : [[v]] ds``, 用于 Hu-Zhang 混合元在
     ``p <= GD`` 时的稳定化. 局部矩阵按面组织, 每个面的局部自由度由两侧单元的自由度
-    拼接而成, 见 ``to_global_dof``. 目前只支持二维网格, 三维在 ``_cell_to_face_sign``
-    处抛 ``NotImplementedError``.
+    拼接而成, 见 ``to_global_dof``. 二维与三维单纯形网格均适用.
 
     Parameters
     ----------
@@ -139,23 +138,19 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         return 2.0 * m_left * m_right / safe
 
     def _cell_to_face_sign(self, mesh):
-        """单元局部面的取向是否与全局面一致, 形状 ``(NC, TD+1)``.
+        """全局面法向是否指向本单元外侧, 形状 ``(NC, TD+1)`` 的布尔数组.
 
-        二维下 face 即 edge, 用网格的 ``cell_to_edge_sign``. 其值与 "全局面法向指向
-        本单元外侧" 逐项相同, 可按此几何判据推广到三维; 但目前没有三维 Hu--Zhang 制造解
-        可验证三维跳量稳定化的收敛阶, 故三维先明确拒绝, 不给出未经验证的结果.
-
-        Raises
-        ------
-        NotImplementedError
-            网格拓扑维数不是 2.
+        二维下 face 即 edge, 用网格的 ``cell_to_edge_sign`` (与下面的几何判据逐项相同,
+        见测试). 三维网格没有对应方法, 按几何判据
+        :math:`(\bar x_F - \bar x_K) \cdot n_F > 0` 计算: 单元 ``K`` 的局部面 ``F``
+        的全局法向 ``n_F`` 指向 ``K`` 外侧时为 True.
         """
         if mesh.top_dimension() == 2:
             return mesh.cell_to_edge_sign()
-        raise NotImplementedError(
-            "三维跳量稳定化尚未实现: 网格缺少 cell_to_face_sign, 且尚无三维算例验证. "
-            "三维 Hu--Zhang 请取 p >= 4 (原生稳定) 或 stabilization='none'"
-        )
+        c2f = mesh.cell_to_face()                                   # (NC, TD+1)
+        normal = mesh.face_unit_normal()[c2f]                      # (NC, TD+1, GD)
+        offset = mesh.entity_barycenter('face')[c2f] - mesh.entity_barycenter('cell')[:, None, :]
+        return bm.sum(offset * normal, axis=-1) > 0
 
     def _oriented_cell_basis(self, space: _FS, bcs: TensorLike, i: int) -> TensorLike:
         """把面上的积分点按各单元自身的局部面定向映入单元, 再取基函数值.

@@ -14,7 +14,7 @@ import pytest
 from soptx.backend import backend_manager as bm
 from soptx.fem.bilinear_form import BilinearForm
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
-from soptx.mesh import TriangleMesh
+from soptx.mesh import TetrahedronMesh, TriangleMesh
 
 from soptx.fem.integrators import JumpPenaltyIntegrator
 from soptx.materials import IsotropicLinearElasticMaterial
@@ -192,3 +192,102 @@ def test_vector_jump_boundary_trace_with_sign_change() -> None:
     expected = np.sum(trace_squared / length)  # 二维 h_F 即边长
 
     assert uh @ (matrix @ uh) == pytest.approx(expected, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# 三维: 面定向判据与上面三项相容性在四面体网格上的对应检验
+# ---------------------------------------------------------------------------
+
+def _continuous_field_3d(displacement_degree: int):
+    """三维的全局连续多项式场, 次数不超过位移空间次数."""
+    def field(points):
+        x, y, z = points[..., 0], points[..., 1], points[..., 2]
+        if displacement_degree == 0:
+            ones = bm.ones_like(x)
+            return bm.stack((ones, -2.0 * ones, 0.5 * ones), axis=-1)
+        if displacement_degree == 1:
+            return bm.stack((x + 2.0 * y - z, 3.0 * x - y + z, x - y + 2.0 * z), axis=-1)
+        return bm.stack(
+            (x**2 + y * z - z**2, x * y - y**2 + z, z**2 - x * z + y),
+            axis=-1,
+        )
+
+    return field
+
+
+def _internal_face_penalty_3d(mesh, degree: int, method: str):
+    """三维内部面上的跳量惩罚块, 及连续场对应的自由度向量."""
+    space = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=degree - 1, ctype="D"), shape=(-1, 3))
+    face2cell = mesh.face_to_cell()
+    internal = bm.nonzero(face2cell[:, 0] != face2cell[:, 1])[0]
+    material = IsotropicLinearElasticMaterial(
+        lame_lambda=1.0, shear_modulus=0.5, hypothesis="3D", enable_logging=False
+    )
+    form = BilinearForm(space)
+    form.add_integrator(
+        JumpPenaltyIntegrator(q=2 * degree + 2, threshold=internal, method=method,
+                              material=material, penalty_scaling="physical_h")
+    )
+    matrix = form.assembly(format="csr", method="coalesce").to_scipy()
+    vector = bm.to_numpy(space.interpolate(_continuous_field_3d(degree - 1))[:])
+    return space, matrix, vector
+
+
+@pytest.mark.parametrize("dim", (2, 3))
+def test_face_sign_is_geometric_and_splits_each_face(dim: int) -> None:
+    """面定向等于几何判据, 且每个内部面两侧恰有一侧为 True.
+
+    二维核对 cell_to_edge_sign 与几何判据逐项相同, 三维即按该判据实现. 跳量装配按
+    True / False 区分 w^+ 与 w^-, 若某个内部面两侧同号, 一侧的迹会被另一侧覆盖.
+    """
+    bm.set_backend("numpy")
+    if dim == 2:
+        mesh = TriangleMesh.from_box([0.0, 1.0, 0.0, 1.0], nx=3, ny=3)
+    else:
+        mesh = TetrahedronMesh.from_box([0.0, 1.0, 0.0, 1.0, 0.0, 1.0], nx=2, ny=2, nz=2)
+    sign = bm.to_numpy(JumpPenaltyIntegrator()._cell_to_face_sign(mesh)).astype(bool)
+
+    c2f = bm.to_numpy(mesh.cell_to_face())
+    normal = bm.to_numpy(mesh.face_unit_normal())[c2f]
+    offset = bm.to_numpy(mesh.entity_barycenter("face"))[c2f] - bm.to_numpy(mesh.entity_barycenter("cell"))[:, None, :]
+    np.testing.assert_array_equal(sign, np.sum(offset * normal, axis=-1) > 0)
+
+    f2c = bm.to_numpy(mesh.face_to_cell())
+    internal = f2c[:, 0] != f2c[:, 1]
+    left = sign[f2c[internal, 0], f2c[internal, 2]]
+    right = sign[f2c[internal, 1], f2c[internal, 3]]
+    assert (left != right).all()
+
+
+@pytest.mark.parametrize("method", ("matrix_jump", "vector_jump"))
+@pytest.mark.parametrize("degree", (1, 2, 3))
+def test_penalty_vanishes_on_continuous_fields_3d(method: str, degree: int) -> None:
+    """三维: 连续场落在惩罚块的零空间上."""
+    bm.set_backend("numpy")
+    mesh = TetrahedronMesh.from_box([0.0, 1.0, 0.0, 1.0, 0.0, 1.0], nx=2, ny=2, nz=2)
+    _, matrix, vector = _internal_face_penalty_3d(mesh, degree, method)
+    assert abs(float(vector @ (matrix @ vector))) <= 1e-12 * float(vector @ vector)
+    assert matrix.nnz > 0 and np.abs(matrix.data).max() > 1e-8
+
+
+def test_both_sides_of_a_face_see_the_same_trace_3d() -> None:
+    """三维: 内部面两侧对同一连续场取到相同的迹 (覆盖 6 种局部面定向)."""
+    bm.set_backend("numpy")
+    mesh = TetrahedronMesh.from_box([0.0, 1.0, 0.0, 1.0, 0.0, 1.0], nx=2, ny=2, nz=2)
+    space = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=2, ctype="D"), shape=(-1, 3))
+    uh = bm.to_numpy(space.interpolate(_continuous_field_3d(2))[:])
+    cell2dof = bm.to_numpy(space.cell_to_dof())
+    integrator = JumpPenaltyIntegrator(q=6, method="matrix_jump")
+    bcs, weights = mesh.quadrature_formula(6, "face").get_quadrature_points_and_weights()
+
+    f2c = bm.to_numpy(mesh.face_to_cell())
+    traces = np.full((mesh.number_of_faces(), 2, len(weights), 3), np.nan)
+    for local_face in range(4):
+        phi = bm.to_numpy(integrator._oriented_cell_basis(space, bcs, local_face))
+        value = np.einsum("cj, cqjd -> cqd", uh[cell2dof], phi)
+        for side in (0, 1):
+            on = f2c[:, 2 + side] == local_face
+            traces[on, side] = value[f2c[on, side]]
+
+    internal = f2c[:, 0] != f2c[:, 1]
+    assert np.abs(traces[internal, 0] - traces[internal, 1]).max() < 1e-12
