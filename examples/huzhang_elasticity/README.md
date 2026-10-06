@@ -5,7 +5,8 @@ $\boldsymbol{\sigma}\in\Sigma_h\subset H(\mathrm{div})$ 与位移
 $\boldsymbol{u}\in V_h\subset[L_2]^d$ 联合求解，离散成应力--位移鞍点系统。
 
 算例采用自包含的单文件代码设计，方便快速阅读与二次扩展。另有一个三维收敛验证脚本
-`verify_3d_convergence.py`：分析器的边界装配只实现了二维，该脚本直接用积分子装配三维鞍点系统。
+`verify_3d_convergence.py`：缺省经分析器求解，`--assembly standalone` 绕开分析器直接用积分子装配，
+供交叉核对。
 
 ---
 
@@ -165,13 +166,17 @@ python examples/huzhang_elasticity/concentrated_load_demo.py --solver mumps
 ```bash
 # 默认 p=4, 网格 n=2,3,4 (约 2 分钟, 峰值内存约 8 GB)
 PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py
+# x=1 面为强施加牵引, 其余为位移边界
+PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --boundary mixed
 # 只跑小网格检查流程 (秒级, 不判定渐近阶)
 PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --levels 1,2
 ```
 
-制造解 $u_i = c_i\sin\pi x\sin\pi y\sin\pi z$ 在边界上为零, 因此不需要三维边界项. 三维跳量稳定化
-未实现, 只支持 $p \ge 4$. 门禁取最后一对网格的观测阶, 允许比理论阶低 0.3. 三维空间本身的代数
-验证 (张成、协调性、自由度约定) 在 `tests/unit/test_huzhang_space_verification.py`.
+制造解 $u_i = c_i\sin\pi x\sin\pi y\sin\pi z$ 在边界上为零. 三维跳量稳定化未实现, 只支持
+$p \ge 4$; 牵引强施加要求边界与坐标轴对齐 (否则分析器明确报错). 门禁取最后一对网格的观测阶,
+允许比理论阶低 0.3. 三维空间本身的代数验证 (张成、协调性、自由度约定) 在
+`tests/unit/test_huzhang_space_verification.py`, 位移/牵引边界的补丁检验在
+`tests/unit/test_huzhang_analyzer_patch.py` 与 `tests/unit/test_huzhang_traction_3d.py`.
 
 ## 实验诊断与多 Case 分析
 

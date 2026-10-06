@@ -214,6 +214,10 @@
   本身正确（张成 $P_p(\mathbb S)$、法向迹连续、散度精确），只是 `basis_frame_of_S` 多乘 `prod(alpha!)`、边与面
   标架未归一化，使自由度系数含义与二维不同；已改为单位正交标架、基函数直接取自由度标架。$p=4$ 制造解收敛阶
   逼近理论值（末对 4.73 / 3.92 / 3.92，理论 5 / 4 / 4），见 `examples/huzhang_elasticity/results_analysis.md` §5。
+- 分析器的三维边界装配（分支 `claude/huzhang-3d-bc`）：边界按面标记、位移边界项按面求积；三维空间新增
+  `boundary_interpolate` / `set_tangential_traction_bc`，按格点标架张量写牵引，边界边改取边界面法向。要求边界与
+  坐标轴对齐，否则明确报错；三维 $p\le3$ 构造时报错（跳量稳定化未实现）。补丁检验精确，混合边界收敛阶
+  4.76 / 3.92 / 3.92，见 `examples/huzhang_elasticity/results_analysis.md` §5.3。
 
 ### 2.4 统一清理（已完成）
 
