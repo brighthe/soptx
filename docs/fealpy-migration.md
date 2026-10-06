@@ -203,15 +203,16 @@
 - `compute_stress_state` 两种分析器返回键不同（`stress_solid` / `stress_apparent`）：语义本就不同，各消费方按分析器
   分开取用，不是缺陷。
 
-尚未处理、只留档的问题：
+当时只留档的问题，已在分支 `claude/followups` 处理（`sympy`、`_bcakup`、FEALPy 字样见 2.4）：
 
-- 三维 Hu–Zhang 标架未归一化，二维 / 三维 `basis_frame_of_S` 系数不一致；是否为缺陷需从数学上判定，且无三维算例。
-- 二维 Hu–Zhang `boundary_interpolate` 的报错路径写错（实际抛 `AttributeError`），`gd` 不接受标量。
-- `HuZhangMFEMAnalyzer.__init__` 重复赋值 `_interpolation_scheme`；Hu–Zhang 积分子以 `q if q else p+3` 判断，
-  `q=0` 被当作未给出。
-- MMA 在 Hu–Zhang 分析器下打开 `is_store_stress` 时取 `stress_solid` 报 `KeyError`。
-- 删除符号积分后 `src/` 不再使用 `sympy`，`pyproject.toml` 的运行依赖可随兼容层清理一并评估。
-- 函数名拼写 `reshape_multiresolution_data_bcakup`、残留的 FEALPy 字样：并入 2.4。
+- ~~二维 Hu–Zhang `boundary_interpolate` 的报错路径与标量 `gd`~~：常值 `gd` 先转张量，标量明确报 `ValueError`
+  （无可投影的分量），分量数不对时报出实际分量数；`set_tangential_traction_bc` 同步。
+- ~~`HuZhangMFEMAnalyzer.__init__` 重复赋值；Hu–Zhang 积分子 `q=0` 被当作未给出~~：已修。
+- ~~MMA 在 Hu–Zhang 分析器下 `is_store_stress` 报 `KeyError`~~：迭代前明确报 `NotImplementedError`；表观应力
+  的记录口径待定。
+- 三维 Hu–Zhang 标架：**未改，待验证**。自由度标架与基函数标架的内积矩阵对角线，二维为 `[1, 0.25, 1]`，
+  三维为 `[2, 0.25, 0.25, 2, 0.25, 2]`；三维正应力分量多出的因子 2 恰与 `basis_frame_of_S` 乘的
+  `prod(alpha!)` 对应。二者约定不一致，孰对须有三维验证路径（插值复现或收敛阶），三维目前无使用者。
 
 ### 2.4 统一清理（已完成）
 
@@ -227,18 +228,21 @@
   `*_bcakup` / `*_inverse_backup`、运行依赖 `sympy`（证据 `environment` 仍记录该字段，未改 schema）、
   PINN 边界残差（重跑复现其余 7 项，实为 `5.3110e-04`）。
 
-留待处理：
+当时留待处理的事项，分支 `claude/followups` 处理结果：
+
+- ~~`BilinearForm.__matmul__` 多列右端项散加到批量轴~~：改为 `axis=-1`，补单列 / 多列对照测试（numpy 与 pytorch
+  均复现了原缺陷）。
+- ~~3 个无调用方的 `*_backup` 函数~~：删除。
+- ~~`core` 英文 docstring、`matrix_free_evidence` 与代码不符的说明、失效的 `krylov.weighted_cg` 链接~~：已修。
+- known-issues「移植后遗留」除三维跳量外的 11 行一并修复（见 `known-issues/README.md`）。
+
+仍未处理：
 
 - 用户有未提交改动的文件未动：`lagrange_fem_analyzer.py`、`mesh/topology/builder.py`、`mesh/view/entity_view.py`、
   `fem/matrix/csr_pattern.py` 中的 FEALPy 现行描述，`topology/objectives/compliance.py` 中的 `'jax'` 判断。
-- 无调用方的 `plot_optimization_history_backup`、`HuZhangMFEMAnalyzer.assemble_displacement_bc_vector_backup`、
-  `continuation_step_backup`。
-- `BilinearForm.__matmul__` 多列右端项按 `(B, gdof)` 布局，`index_add` 却沿默认 `axis=0`（读代码所得，未复现）。
 - `experiments/fa_assembly_capability/run.py` 匹配 `"/fealpy/"` 的帧过滤分支已不会命中；VTU 元数据数组名
   `FEALPY_MESH_META` 属文件格式字段，保留。
-- `core/__init__.py`、`core/numerics.py` 的 docstring 仍为英文；`matrix_free_evidence` 的 `schema.py` / `layout.py`
-  称 `contract` 不导入 SOPTX，与代码不符；`examples/matrix_free_elasticity/README.md` 等仍引用已不存在的
-  `krylov.weighted_cg`（现为 `soptx.solvers.overlap`）。
+- MMA 计算 von Mises 应力时无注释的 `/ 100.0` 缩放，用意待用户说明。
 
 ### 2.5 仓库之外的事项
 

@@ -61,17 +61,6 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 | 问题 | 位置 | 来源 | 根因与影响 | 修法 | 状态 |
 |---|---|---|---|---|---|
 | 三维跳量稳定化未实现 | `fem/integrators/jump_penalty_integrator.py` 的 `_cell_to_face_sign` | 原调用 v0.4 网格已不存在的 `mesh.cell_to_face_sign` | 三维低阶（$p \le 3$）Hu--Zhang 默认的跳量稳定化不可用，现明确抛 `NotImplementedError`；$p \ge 4$ 或 `stabilization='none'` 不受影响。二维的 `cell_to_edge_sign` 与「全局面法向指向本单元外侧」逐项相同，可按此判据推广，但尚无三维制造解验证收敛阶 | 有三维 Hu--Zhang 算例后按几何判据实现并验证收敛阶 | 未修 |
-| `Form` 的 `splitter` 分块装配不可用 | `fem/form.py` 的 `UniformSplitter` 与 `_assembly_kernel` | FEALPy 的分块接口，SOPTX 积分子未实现 | `add_integrator(splitter=...)` 会以 `indices=` 调用积分子的 `assembly`，SOPTX 的积分子均不接受该参数，报 `TypeError`；仓库内无人使用。`Integrator.size` 中的 `mesh.count` 已改为 `mesh.entity(etype)` | 需要分块装配时为积分子补 `indices` 参数，或删除该接口 | 未修 |
-| `process_coef_func` 的网格检查疑似写反 | `fem/coef.py` 的 `process_coef_func` | 移植原样保留 | 网格检查放在 `coordtype == 'barycentric'` 分支，报错信息却称直角坐标函数需要网格；直角坐标分支不检查，`mesh=None` 时在 `mesh.bc_to_point` 处报 `AttributeError` | 把网格检查移到直角坐标分支 | 未修 |
-| `get_semilinear_coef` 在 `coef=None` 时报错 | `fem/functional.py` 的 `get_semilinear_coef` | 移植原样保留 | `coef is None` 分支计算 `None * value`，抛 `TypeError`；仓库内无调用方 | `coef` 为 None 时返回 `value` | 未修 |
-| 积分子的 `Mesh` 协议仍声明 `count` | `fem/integrator.py` 的 `Mesh` | 移植原样保留 | 仅用于类型标注，v0.4 网格没有 `count`，`Integrator.size` 已改用 `mesh.entity` | 协议改为声明 `entity` | 未修 |
-| `ConstIntegrator` 以旧签名调用基类构造 | `fem/integrator.py` 的 `ConstIntegrator.__init__` | 移植原样保留 | `super().__init__('assembly', False, False)` 使 `keep_data='assembly'`（真值），缓存被意外开启；`ConstIntegrator` 自身不用 `enable_cache`，目前无实际影响 | 改为 `super().__init__()` | 未修 |
-| `multi_index2d_to_index` / `multi_index3d_to_index` 引用未定义变量 | `functionspace/functional.py` | 移植原样保留 | 函数体用 `a` 而参数名为 `midx`，调用即 `NameError`；仓库内无调用方 | 删除，或把 `a` 改为 `midx` | 未修 |
-| `spspmm_csr` 回退实现有误 | `sparse/_spspmm.py` | 移植原样保留 | 行指针累加写成 `set_at(new_crow, x+1, new_crow[x+1])` 未加 1，行号 0 的项被 `bm.any` 跳过，非方阵实测 `IndexError`。numpy 与 pytorch 后端都提供 `csr_spspmm`，`CSRTensor.matmul` 走不到这里 | 删除，或按 `spspmm_coo` 重写 | 未修 |
-| 稀疏张量的其他小缺陷 | `sparse/coo_tensor.py`、`csr_tensor.py` | 移植原样保留 | 模式张量 (`values` 为 None) 与稠密张量相加时 `dense_ndim + (nnz,)` 为 int 加 tuple，抛 `TypeError`；`CSRTensor.sum(axis=0)` 返回各行之和，与 numpy 约定相反 (已在 docstring 注明) | 逐项修正 | 未修 |
-| numpy 后端 `bc_to_points` 不接受张量积重心坐标 | `backend/numpy_backend.py` | 移植原样保留 | 对张量积重心坐标调用 `tensorprod(bcs)` 未解包，抛 `AttributeError`；pytorch 正常。仓库内未经 `bm` 调用 | 改为 `tensorprod(*bcs)` | 未修 |
-| 后端中的失效代码 | `backend/pytorch_backend.py`、`backend/numpy_backend.py` | 移植原样保留 | 两个后端的 `quadrangle_grad_lambda_2d` 函数体为空；`NumpyRandom` 把 `rng` 的 setter 定义成了名为 `setter` 的属性而无法实例化；`NumpyRandom`、`PyTorchRandom` 均未被使用 | 删除未使用的类与空函数 | 未修 |
-| 网格工厂与加密中的小问题 | `mesh/uniform_mesh/`、`mesh/factory/`、`mesh/transform/uniform.py` | 移植原样保留 | `UniformMesh*` 是无实现的占位类（原先唯一引用它的 `fem/integrators/utils.py` 已随符号积分删除）；四类网格 `from_box` 的 `threshold` 参数未使用；三棱柱一致加密在 `returnim=True` 时返回空列表 (未生成延拓矩阵) | 删除占位类；删除或实现 `threshold` | 未修 |
 
 ## 记账约定
 

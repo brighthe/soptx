@@ -1,6 +1,6 @@
 # 胡张混合有限元实现
 
-> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。
+> SOPTX 的胡张元实现覆盖 2D/3D 单纯形网格、任意次 Bubble 丰富应力空间、角点松弛、低阶跳量稳定化，以及混合边界条件。其中 3D 空间尚无使用者、未经验证：自由度标架与基函数标架的约定与 2D 不一致（正应力分量相差因子 2），见 `docs/fealpy-migration.md` §2.3。
 
 ## 程序架构
 
@@ -180,7 +180,7 @@ $$
 
 左为 `create_huzhang_checkerboard_mesh`、右为 `create_huzhang_symmetric_single_diagonal_mesh` 的剖分结果，均取 `nx = 6`、`ny = 4`。两者的四个几何角点（绿点）都各连接 2 个三角形并共享一条内部边，满足上述拓扑条件；右图的红色虚线为镜像中缝，两个浅蓝单元是为满足角点条件而相对于单向对角规则翻转的四边形。插图由 `tools/plot_huzhang_meshes.py` 调用上述生成器绘制。
 
-松弛通过 DOF 变换矩阵 `TM` 实现：构造时计算变换矩阵，装配时施加到基函数和载荷向量上。**3D 不支持角点松弛**——`HuZhangFESpace3d` 忽略 `use_relaxation` 参数，无松弛的 3D 求解链尚未端到端验证。
+松弛通过 DOF 变换矩阵 `TM` 实现：构造时计算变换矩阵，装配时施加到基函数和载荷向量上。**3D 不支持角点松弛**——工厂 `HuZhangFESpace` 在 3D 下收到 `use_relaxation=True` 时抛 `ValueError`；无松弛的 3D 求解链尚未端到端验证。
 
 ### 求解器
 
