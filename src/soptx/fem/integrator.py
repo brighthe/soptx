@@ -31,8 +31,8 @@ __all__ = [
 
 class Mesh(Protocol):
     """积分子对网格的最小接口要求, 仅用于类型标注."""
-    def count(self, etype: Union[int, str]) -> int:
-        """返回某类实体的个数. 注意 v0.4 网格没有此方法, ``Integrator.size`` 已改用 ``mesh.entity``."""
+    def entity(self, etype: Union[int, str]) -> TensorLike:
+        """返回某类实体的顶点编号数组, 第 0 轴为实体; ``Integrator.size`` 取其长度."""
         ...
 
 Self = TypeVar('Self')
@@ -290,7 +290,7 @@ class ConstIntegrator(Integrator, Generic[_GT]):
         自由度映射; 需要调用 ``to_global_dof`` 时必须给出.
     """
     def __init__(self, value: TensorLike, to_gdof: Optional[_GT] = None):
-        super().__init__('assembly', False, False)
+        super().__init__()
         self.value = value
         self.to_gdof = to_gdof
         self._region = slice(None)

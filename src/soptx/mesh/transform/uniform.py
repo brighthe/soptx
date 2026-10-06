@@ -504,25 +504,23 @@ def uniform_refine_prism(
     n : int, optional
         加密次数, 默认 1.
     returnim : bool, optional
-        是否返回各次加密的延拓矩阵. 默认 False.
+        是否返回各次加密的延拓矩阵; 三棱柱尚未实现, 只能为 False.
     root_id : str, optional
         被加密的根分区 id, 默认 ``prism``.
 
     Returns
     -------
-    list of scipy.sparse.csr_matrix or None
-        ``returnim`` 为 True 时返回延拓矩阵列表 (从最细一层到最粗一层),
-        否则返回 None.
+    None
 
-    Notes
-    -----
-    三棱柱尚未生成延拓矩阵, ``returnim`` 为 True 时返回空列表.
+    Raises
+    ------
+    NotImplementedError
+        ``returnim`` 为 True.
     """
-    im = [] if returnim else None
+    if returnim:
+        raise NotImplementedError("三棱柱一致加密尚未生成延拓矩阵, returnim 只能为 False.")
     for _ in range(n):
         _refine_prism_once(block, root_id)
-    if returnim:
-        return im
     return None
 
 

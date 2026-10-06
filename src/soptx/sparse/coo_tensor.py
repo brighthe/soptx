@@ -417,8 +417,7 @@ class COOTensor(SparseTensor):
 
         Notes
         -----
-        模式张量 (``values`` 为 None) 与稠密张量相加的分支有误
-        (``dense_ndim + (nnz,)`` 为 int 与 tuple 相加), 会抛 ``TypeError``.
+        模式张量 (``values`` 为 None) 与稠密张量相加时, 每个非零位置按 1 计入.
         """
         if isinstance(other, COOTensor):
             check_shape_match(self.shape, other.shape)
@@ -444,7 +443,7 @@ class COOTensor(SparseTensor):
 
             if self._values is None:
                 src = bm.ones((1,) * (self.dense_ndim + 1), **context)
-                src = bm.broadcast_to(src, self.dense_ndim + (self.nnz,))
+                src = bm.broadcast_to(src, self.dense_shape + (self.nnz,))
             else:
                 src = self._values
             output = bm.index_add(output, flattened, src, axis=-1)

@@ -12,7 +12,6 @@ from .utils import (
     flatten_indices,
     check_shape_match, check_spshape_match
 )
-from ._spspmm import spspmm_csr
 from ._spmm import spmm_csr
 from .coo_tensor import COOTensor
 
@@ -388,26 +387,31 @@ class CSRTensor(SparseTensor):
         return self.partial(tril_loc)
 
     def sum(self, axis=0):
-        """按行或按列求和.
+        """沿给定轴求和, 约定与 numpy 一致.
 
         Parameters
         ----------
         axis : {0, 1}, optional
-            0 (默认) 返回各行之和 ``(nrow, )``, 1 返回各列之和 ``(ncol, )``.
-            注意与 numpy 的约定相反.
+            0 (默认) 沿行方向累加, 得各列之和 ``(ncol, )``; 1 得各行之和 ``(nrow, )``.
 
         Returns
         -------
-        TensorLike or None
-            求和结果; ``axis`` 取其他值时返回 None.
+        TensorLike
+            求和结果.
+
+        Raises
+        ------
+        ValueError
+            ``axis`` 不是 0 或 1.
         """
         kargs = bm.context(self._values)
-        if axis == 0: # 各行之和
-            return self@bm.ones(self._spshape[1], **kargs)
-        elif axis == 1: # 各列之和
+        if axis == 0: # 各列之和
             r = bm.zeros(self._spshape[1], **kargs)
             r = bm.index_add(r, self._col, self._values)
             return r
+        elif axis == 1: # 各行之和
+            return self@bm.ones(self._spshape[1], **kargs)
+        raise ValueError(f"axis 只能为 0 或 1, 得到 {axis!r}.")
 
     ### 6. 算术运算 ###
     def neg(self) -> 'CSRTensor':
@@ -449,8 +453,7 @@ class CSRTensor(SparseTensor):
 
         Notes
         -----
-        模式矩阵 (``values`` 为 None) 与稠密张量相加的分支有误
-        (``dense_ndim + (nnz,)`` 为 int 与 tuple 相加), 会抛 ``TypeError``.
+        模式矩阵 (``values`` 为 None) 与稠密张量相加时, 每个非零位置按 1 计入.
         """
         self_indices = bm.stack(self.nonzero_slice, axis=0)
         if isinstance(other, CSRTensor):
@@ -532,7 +535,7 @@ class CSRTensor(SparseTensor):
 
             if self._values is None:
                 src = bm.ones((1,) * (self.dense_ndim + 1), **context)
-                src = bm.broadcast_to(src, self.dense_ndim + (self.nnz,))
+                src = bm.broadcast_to(src, self.dense_shape + (self.nnz,))
             else:
                 src = self._values
             output = bm.index_add(output, flattened, src, axis=-1)
@@ -670,16 +673,14 @@ class CSRTensor(SparseTensor):
             if (self.values is None) or (other.values is None):
                 raise ValueError("Matrix multiplication between CSRTensor without "
                                  "value is not implemented now")
-            if hasattr(bm, 'csr_spspmm'):
-                crow, col, values, spshape = bm.csr_spspmm(
-                    self.crow, self.col, self.values, self.sparse_shape,
-                    other.crow, other.col, other.values, other.sparse_shape
+            if not hasattr(bm, 'csr_spspmm'):
+                raise NotImplementedError(
+                    f"后端 {bm.backend_name!r} 没有提供 csr_spspmm, 无法计算 CSR 矩阵乘积."
                 )
-            else:
-                crow, col,values, spshape = spspmm_csr(
-                    self._crow,self._col ,self._values, self.sparse_shape,
-                    other._crow, other._col,other._values, other.sparse_shape,
-                )
+            crow, col, values, spshape = bm.csr_spspmm(
+                self.crow, self.col, self.values, self.sparse_shape,
+                other.crow, other.col, other.values, other.sparse_shape
+            )
             return CSRTensor(crow, col, values, spshape)
 
         elif isinstance(other, TensorLike):

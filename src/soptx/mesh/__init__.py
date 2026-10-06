@@ -14,7 +14,6 @@ from .storage import *
 from .view import *
 from .vtk_writter import write_mesh_to_vtu
 from .factory import *
-from .uniform_mesh import *
 from .mesh_base import *
 from .aggregate import Mesh
 

@@ -24,7 +24,6 @@ class QuadrangleMesh(ClassicMeshView):
         nx=10,
         ny=10,
         *,
-        threshold=None,
         device=None,
     ):
         """在 矩形区域上生成四边形网格.
@@ -35,8 +34,6 @@ class QuadrangleMesh(ClassicMeshView):
             区域范围 ``[x0, x1, y0, y1]``.
         nx, ny : int, optional
             各方向的剖分数, 默认 10.
-        threshold : optional
-            未使用.
         device : optional
             设备.
         """

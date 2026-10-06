@@ -25,7 +25,7 @@ except ImportError:
                       'See https://pytorch.org/ for installation.')
 
 from .base import (
-    BackendProxy, ModuleProxy,
+    BackendProxy,
     ATTRIBUTE_MAPPING, FUNCTION_MAPPING, TRANSFORMS_MAPPING
 )
 
@@ -1038,11 +1038,6 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
             cross(n, e2, dim=-1)
         ], dim=-2).div_(length.unsqueeze(-2)) # (..., 3, 3)
 
-    @staticmethod
-    def quadrangle_grad_lambda_2d(quad: Tensor, node: Tensor) -> Tensor:
-        """四边形重心坐标的梯度. 尚未实现: 函数体为空, 返回 None."""
-        pass
-
     @classmethod
     def tetrahedron_grad_lambda_3d(cls, tet: Tensor, node: Tensor, localFace: Tensor) -> Tensor:
         """四面体四个重心坐标的梯度, 形状 ``(NC, 4, 3)``.
@@ -1080,44 +1075,3 @@ PyTorchBackend.random.randint_like = torch.randint_like
 PyTorchBackend.random.randn = torch.randn
 PyTorchBackend.random.randn_like = torch.randn_like
 PyTorchBackend.random.randperm = torch.randperm
-
-
-##################################################
-### 随机数子模块
-##################################################
-
-class PyTorchRandom(ModuleProxy):
-    """torch 随机数函数的包装.
-
-    Notes
-    -----
-    当前未被使用: 后端的 ``random`` 直接取 ``torch.random`` 并在模块末尾挂上
-    ``rand``、``randint`` 等函数.
-    """
-    def seed(self, seed: int):
-        """设置 torch 的全局随机种子."""
-        torch.manual_seed(seed)
-
-    def rand(self, *size, dtype=None, device=None):
-        """``[0, 1)`` 均匀分布随机数."""
-        return torch.rand(*size, dtype=dtype, device=device)
-
-    def randint(self, low, high=None, size=None, dtype=None, device=None):
-        """``[low, high)`` 均匀分布随机整数; 只给 ``low`` 时为 ``[0, low)``."""
-        kwargs = {'dtype': dtype, 'device': device}
-        if size is None:
-            size = (1,)
-        elif isinstance(size, int):
-            size = (size,)
-
-        if high is None: return torch.randint(low, size, **kwargs)
-        return torch.randint(low, high, size, **kwargs)
-
-    def randn(self, *size, dtype=None, device=None):
-        """标准正态分布随机数."""
-        return torch.randn(*size, dtype=dtype, device=device)
-
-
-PyTorchRandom.attach_methods({'seed': 'manual_seed'}, torch)
-
-

@@ -52,8 +52,8 @@ def process_coef_func(
     Raises
     ------
     RuntimeError
-        系数为函数但缺少 ``index``、``bcs`` 或 ``etype``, 或重心坐标函数缺少
-        齐次网格.
+        系数为函数但缺少 ``index``、``bcs`` 或 ``etype``, 或直角坐标函数缺少
+        网格.
     """
     if callable(coef):
         if index is None:
@@ -63,12 +63,11 @@ def process_coef_func(
         if etype is None:
             raise RuntimeError('The etype should be provided for coef functions.')
         if getattr(coef, 'coordtype', 'barycentric') == 'barycentric':
-            if (mesh is None) or (not isinstance(mesh, HomogeneousMesh)):
-                raise RuntimeError('The mesh should be provided for cartesian coef functions.'
-                                   'Note that only homogeneous meshes are supported here.')
-
             coef_val = coef(bcs, index=index)
         else:
+            # 直角坐标函数要先把重心坐标映射为直角坐标, 因此需要网格
+            if (mesh is None) or (not hasattr(mesh, 'bc_to_point')):
+                raise RuntimeError('The mesh should be provided for cartesian coef functions.')
             ps = mesh.bc_to_point(bcs, index=index)
             ##TODO: 适应不同情况的 coef, coef 的接口应该是 coef(ps, n) 或者 coef(ps)
             import inspect

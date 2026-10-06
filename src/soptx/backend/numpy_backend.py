@@ -20,7 +20,7 @@ from numpy.linalg import det
 from scipy.sparse._sparsetools import coo_matvec, csr_matvec, csr_matvecs, coo_tocsr
 
 from .base import (
-    ModuleProxy, BackendProxy,
+    BackendProxy,
     ATTRIBUTE_MAPPING, FUNCTION_MAPPING
 )
 
@@ -522,17 +522,11 @@ class NumPyBackend(BackendProxy, backend_name='numpy'):
 
     @classmethod
     def bc_to_points(cls, bcs: Union[NDArray, Tuple[NDArray, ...]], node: NDArray, entity: NDArray) -> NDArray:
-        """把重心坐标映射为各实体上的直角坐标, 形状 ``(NE, NQ, GD)``.
-
-        Notes
-        -----
-        张量积重心坐标 (元组) 的分支调用 ``tensorprod(bcs)`` 时未解包, 会抛
-        ``AttributeError``; pytorch 后端无此问题.
-        """
+        """把重心坐标映射为各实体上的直角坐标, 形状 ``(NE, NQ, GD)``; 张量积重心坐标先做 ``tensorprod``."""
         points = node[entity, :]
 
         if not isinstance(bcs, np.ndarray):
-            bcs = cls.tensorprod(bcs)
+            bcs = cls.tensorprod(*bcs)
         return np.einsum('ijk, ...j -> i...k', points, bcs)
 
     @staticmethod
@@ -760,11 +754,6 @@ class NumPyBackend(BackendProxy, backend_name='numpy'):
             np.cross(n, e2, axis=-1)
         ], axis=-2) / length[..., np.newaxis]  # 除以长度完成归一化
 
-    @staticmethod
-    def quadrangle_grad_lambda_2d(quad: NDArray, node: NDArray) -> NDArray:
-        """四边形重心坐标的梯度. 尚未实现: 函数体为空, 返回 None."""
-        pass
-
     @classmethod
     def tetrahedron_grad_lambda_3d(cls, tet: NDArray, node: NDArray, localFace: NDArray) -> NDArray:
         """四面体四个重心坐标的梯度, 形状 ``(NC, 4, 3)``.
@@ -797,50 +786,3 @@ if int(np.__version__[:1]) < 2:
 
 NumPyBackend.attach_attributes(attribute_mapping, np)
 NumPyBackend.attach_methods(function_mapping, np)
-
-
-##################################################
-### 随机数子模块
-##################################################
-
-class NumpyRandom(ModuleProxy):
-    """numpy 随机数子模块的包装, 每个线程一个 ``Generator``.
-
-    Notes
-    -----
-    当前未被使用 (后端的 ``random`` 直接取 ``np.random``), 且不可实例化: ``rng`` 的
-    setter 被定义成了名为 ``setter`` 的新属性, ``__init__`` 中 ``self.rng = ...`` 会抛
-    ``AttributeError``.
-    """
-    def __init__(self):
-        super().__init__()
-        self._THREAD_LOCAL = threading.local()
-        self.rng = np.random.default_rng()
-
-    @property
-    def rng(self) -> np.random.Generator:
-        """当前线程的随机数生成器."""
-        return self._THREAD_LOCAL.rng
-
-    @rng.setter
-    def setter(self, value):
-        """本意为 ``rng`` 的 setter, 实际定义成了名为 ``setter`` 的属性."""
-        self._THREAD_LOCAL.rng = value
-
-    def seed(self, seed: int):
-        """以 ``seed`` 重建随机数生成器."""
-        self.rng = np.random.default_rng(seed)
-
-    def rand(self, *size, dtype=None, device=None):
-        """``[0, 1)`` 均匀分布随机数; ``device`` 被忽略."""
-        if len(size) == 1: size = size[0]
-        return self.rng.random(size=size, dtype=dtype)
-
-    def randint(self, low, high=None, size=None, dtype=None, device=None):
-        """``[low, high)`` 均匀分布随机整数; ``device`` 被忽略."""
-        return self.rng.integers(low, high, size=size, dtype=dtype)
-
-    def randn(self, *size, dtype=None, device=None):
-        """标准正态分布随机数; ``device`` 被忽略."""
-        if len(size) == 1: size = size[0]
-        return self.rng.standard_normal(size, dtype=dtype)

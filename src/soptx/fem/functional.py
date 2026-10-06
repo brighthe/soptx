@@ -164,7 +164,7 @@ def get_semilinear_coef(value:TensorLike, coef: Optional[CoefLike]=None, batched
     value : TensorLike
         半线性项在积分点上的值.
     coef : Number or TensorLike, optional
-        系数. 注意 None 时会计算 ``None * value`` 并抛 ``TypeError``.
+        系数, None 时原样返回 ``value``.
     batched : bool, optional
         系数是否带批量维. 默认 False.
 
@@ -180,7 +180,7 @@ def get_semilinear_coef(value:TensorLike, coef: Optional[CoefLike]=None, batched
     """
 
     if coef is None:
-        return coef * value
+        return value
 
     if is_scalar(coef):
         return coef * value

@@ -24,7 +24,6 @@ class TetrahedronMesh(ClassicMeshView):
         ny=10,
         nz=10,
         *,
-        threshold=None,
         device=None,
     ):
         """在 长方体区域上生成四面体网格.
@@ -35,8 +34,6 @@ class TetrahedronMesh(ClassicMeshView):
             区域范围 ``[x0, x1, y0, y1, z0, z1]``.
         nx, ny, nz : int, optional
             各方向的剖分数, 默认 10.
-        threshold : optional
-            未使用.
         device : optional
             设备.
         """
