@@ -82,7 +82,7 @@ experiments/paper_topopt_huzhang/
 
 生成器见 `soptx.mesh.create_huzhang_checkerboard_mesh` / `create_huzhang_symmetric_single_diagonal_mesh`。
 
-材料插值对象 `interpolation` 取三值: `E` 只插值 Young 模量 (Poisson 比固定为实体值), `E+nu` 同时按论文式 (4.3) 插值 Poisson 比 (只允许近不可压缩材料 `nu >= 0.49`, 可压缩材料上直接报错), `auto` 按材料自动决定。两条轴承 case 已显式登记 (`bearing-compressible` 为 `E`, `bearing-incompressible` 为 `E+nu`), 参数 `nu_penalty_factor` / `void_poisson_ratio` 走 `--override`。
+材料插值对象 `interpolation` 取三值: `E` 只插值 Young 模量 (Poisson 比固定为实体值), `E+nu` 同时按论文式 (4.3) 插值 Poisson 比 (只允许近不可压缩材料 `nu >= 0.49`, 可压缩材料上直接报错), `auto` 按材料自动决定。两条轴承 case 已显式登记 (`bearing-compressible` 为 `E`, `bearing-incompressible` 为 `E+nu`), 参数 `nu_penalty_factor` / `void_poisson_ratio` 同样在 `cases.toml` 登记。
 
 论文 5.1 节的制造解收敛阶 (表 5.1 / 5.2) 不是优化算例, 不进注册表: `manufactured_convergence.py` 把参数写成文件顶部常量, 一次跑完 $k=1,\dots,4$, 写出 `manufactured_convergence.json` (顶层一个溯源戳记) 与 `table5_1.md` / `table5_2.md`, 一律写入 `results/`。`--degree` 只回显, 不落盘。
 
@@ -105,14 +105,7 @@ python experiments/paper_topopt_huzhang/manufactured_convergence.py
 
 省略的维度取注册表全集: 不给 `--analyzer` 即 `methods` 全部, 不给 `--order` 即 `comparison_orders` 全部, 因此 `run.py --case <id>` 就是论文该算例的完整对比组。调试单组时显式给出两者, 如 `--analyzer huzhang --order 2`; 只给一个维度时另一个维度仍取全集。注册表里的 `methods` / `comparison_orders` 同时是白名单, 越界直接报错。
 
-覆盖参数有两个通道:
-
-| 通道 | 覆盖的字段 | 直接报错的情形 |
-|---|---|---|
-| 具名开关 `--mesh-type` / `--interpolation` / `--analyzer` / `--order` / `--nx` / `--ny` / `--optimizer` / `--filter-type` | 最常用的字段 | 与 `--override` 重复指定同一字段 |
-| `--override KEY=VALUE` (可重复) | `[cases.discretization]` / `[cases.optimization]` 的键, 另加运行组合维度 `analyzer` / `order` (多值用逗号分隔) | 字段名写错、类型转换失败 |
-
-取值按配置对象现有取值的类型转换, 不静默取一边。覆盖参数针对单条 case 的注册值, 因此只允许配合单个 `--case`。
+参数一律取 `cases.toml` 的注册值, 命令行没有覆盖通道。对照实验 (换优化器、网格、插值对象等) 需直接改注册值; 运行目录名只由分析链、阶次与应力算例的协议标签决定, 改注册值后重跑会写入同名目录、覆盖论文结果, 因此对照前先提交 `results/`, 用完以 git 恢复。
 
 ## 载荷引入垫片 (应力算例)
 
@@ -149,7 +142,7 @@ python experiments/paper_topopt_huzhang/manufactured_convergence.py
   `summary.json` 单列 `max_constraint_pad` 与 `max_solid_stress_ratio_pad`, 并把受约束
   区域单列为 `max_solid_stress_ratio_constrained`, 垫片掩盖了多大的应力可直接读出;
 - 非零半径恒进产物目录名 (`__load_pad_radius-1.5`), 2026-09-16 之前的产物不会被覆盖;
-  `--override load_pad_radius=0` 复原旧行为与旧目录名。
+  注册值改为 `load_pad_radius = 0` 复原旧行为与旧目录名。
 
 核对走 `plot.py discretization-probe` (下节): 构型冻结后在自身离散下重解, 不施加豁免,
 被动实体区的真实读数一并取回。

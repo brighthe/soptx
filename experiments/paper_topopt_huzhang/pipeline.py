@@ -442,7 +442,7 @@ def compliance_config_fields(parameters: dict[str, Any]) -> dict[str, Any]:
             str(parameters["optimizer"]), COMPLIANCE_OPTIMIZERS, "不支持的优化器"
         ),
         # D 算法: 优化器步长. 不写时取 OC / MMAOptions 的现行默认, 已有运行语义不变;
-        # 进 config 是为了能用 --override 扫描并让取值写进目录名与 summary.json.
+        # 进 config 是为了让取值写进 summary.json.
         "move_limit": float(parameters.get("move_limit", 0.2)),
         "asymp_init": float(parameters.get("asymp_init", 0.5)),
         # C 拓扑建模: 材料插值对象. 不写时 auto = 按材料近不可压缩与否自动决定,
@@ -455,7 +455,7 @@ def compliance_config_fields(parameters: dict[str, Any]) -> dict[str, Any]:
         "nu_penalty_factor": float(parameters.get("nu_penalty_factor", 1.0)),
         "void_poisson_ratio": float(parameters.get("void_poisson_ratio", 0.3)),
         # B 离散: 三角剖分方式 (见 MESH_TYPES). 不写时取棋盘格 (已有运行语义不变);
-        # 单向对角两种供低阶位移元体积闭锁对照, 命令行用 --mesh-type 切换.
+        # 单向对角两种供低阶位移元体积闭锁对照, 在 cases.toml 切换.
         "mesh_type": validate_choice(
             str(parameters.get("mesh_type", "triangle-checkerboard")),
             MESH_TYPES, "不支持的网格类型"

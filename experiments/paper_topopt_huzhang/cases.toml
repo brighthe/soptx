@@ -29,10 +29,7 @@
 #       P1 位移元的经典闭锁构型), 优化器均为 OC (工况 1 为 MMA);
 #       supplementary_orders = [1] 放开 lfem p=1 作同位移阶次的闭锁对照。
 #
-#   3.  cantilever-middle-2d-stress   悬臂梁应力约束   80x40  k=2,3,4    (注册默认网格)
-#       网格加密不另立 id, 用覆盖参数跑:
-#         run.py --case cantilever-middle-2d-stress --nx 160 --ny 80 --order 2 3
-#       注意 run.py --all 只按注册默认网格 80x40 跑, 细网格需单独执行上面这条。
+#   3.  cantilever-middle-2d-stress   悬臂梁应力约束   80x40  k=2,3,4
 #
 # 参数分类轴 = "改了它, 变的是题目还是解题路径":
 #   台账         id/title/role/status/methods/metrics/paper_table, 不进求解;
@@ -89,7 +86,7 @@ plane_type = "plane_stress"
 
 # -- B 离散 (有限维近似; nx/ny 同时决定设计空间分辨率) --
 [cases.discretization]
-# 网格类型 (进 config, 具名开关 --mesh-type): triangle-checkerboard = 棋盘格交替对角
+# 网格类型 (进 config): triangle-checkerboard = 棋盘格交替对角
 # (nx, ny 须为偶数; 本文算例默认); triangle-single-diagonal-symmetric = 左半 / 右半 \
 # 镜像对称单向对角 + 两个顶角落翻转 (nx 须为偶数), 低阶位移元体积闭锁对照用它.
 mesh_type = "triangle-checkerboard"
@@ -112,9 +109,9 @@ void_youngs_modulus = 1.0e-9
 # 自动决定, 若日后把 poisson_ratio 调到 0.4999 做变体, 会静默切成 E+nu, 而本条是
 # 柔顺度基准, 插值对象不应随材料变。
 interpolation_variables = "E"
-optimizer = "mma"   # 论文 5.2.1 节正文用 MMA; OC 对照用 --optimizer oc, 取值进目录名
+optimizer = "mma"   # 论文 5.2.1 节正文用 MMA
 # 与 MMAOptions 现行缺省同值, 显式登记是为了钉住: 上游改缺省时本条运行语义不变,
-# 且 results_analysis.md 5.2.1 节所记取值有注册表兜底。扫描仍走 --override。
+# 且 results_analysis.md 5.2.1 节所记取值有注册表兜底。
 move_limit = 0.2
 asymp_init = 0.5
 max_iterations = 500
@@ -152,7 +149,7 @@ plane_type = "plane_strain"
 [cases.discretization]
 # 对称单向对角网格: 左半 /, 右半 \, 与左右对称的轴承问题同对称性;
 # lfem p=1 在该剖分上出现经典体积闭锁, 棋盘格剖分 (triangle-checkerboard) 则基本不闭锁,
-# 棋盘格对照用 --mesh-type triangle-checkerboard 覆盖, 取值进产物目录名。
+# 棋盘格对照需把 mesh_type 改为 triangle-checkerboard (重跑会写入同名运行目录)。
 mesh_type = "triangle-single-diagonal-symmetric"
 nx = 120
 ny = 40
@@ -173,7 +170,7 @@ void_youngs_modulus = 1.0e-9
 # 插值对象只有 Young 模量, Poisson 比固定为 0.3 (论文 5.2.2 节: 可压缩基准组不插值 nu)
 interpolation_variables = "E"
 # 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 对照产物已删除);
-# MMA 对照用 --optimizer mma, 取值进目录名。
+# MMA 对照需把 optimizer 改为 mma (重跑会写入同名运行目录)。
 optimizer = "oc"
 # 与 OCOptions 现行缺省同值, 显式登记是为了钉住上游缺省变动 (论文 5.2.2 节: m = 0.2)。
 # 阻尼指数 eta_OC = 0.5 不经注册表, 硬编码于 pipeline.py; asymp_init 仅 MMA 读取, 不登记。
@@ -213,7 +210,7 @@ plane_type = "plane_strain"
 [cases.discretization]
 # 注册网格为对称单向对角 (同 2A): lfem p=1 / lfem p=2 / huzhang k=2 在同一网格上并排跑。
 # 表 5.4 的 4 阶参考列与图 5.5 的 h 收敛只做再分析, 由各模块覆盖 comparison_orders, 无需登记。
-# 棋盘格对照用 --mesh-type triangle-checkerboard 覆盖, 取值进产物目录名。
+# 棋盘格对照需把 mesh_type 改为 triangle-checkerboard (重跑会写入同名运行目录)。
 # 注册值切换前 (棋盘格 + OC) 的产物已删除, 两条 case 的 outputs/ 目录自 2026-09-14 起
 # 只含新注册值下的结果。
 mesh_type = "triangle-single-diagonal-symmetric"
@@ -233,12 +230,12 @@ interpolation_method = "msimp"
 penalty_factor = 3.0
 void_youngs_modulus = 1.0e-9
 # 论文 5.2.2 节: 近不可压缩组 E 与 nu 双参数插值, 式 (4.3) 取 nu_void=0.3, p_nu=1;
-# LFEM 与 Hu--Zhang 同一材料模型. 想对照 "只插值 E" 的旧做法用 --interpolation E.
+# LFEM 与 Hu--Zhang 同一材料模型. 想对照 "只插值 E" 的旧做法需把此值改为 E.
 interpolation_variables = "E+nu"
 nu_penalty_factor = 1.0
 void_poisson_ratio = 0.3
 # 两条轴承 case 用 OC (MMA 及其渐近线扫描不能复现三拱构型, 对照产物已删除);
-# MMA 对照用 --optimizer mma, 取值进目录名。
+# MMA 对照需把 optimizer 改为 mma (重跑会写入同名运行目录)。
 optimizer = "oc"
 # 与 OCOptions 现行缺省同值, 显式登记是为了钉住上游缺省变动 (论文 5.2.2 节: m = 0.2)。
 # 阻尼指数 eta_OC = 0.5 不经注册表, 硬编码于 pipeline.py; asymp_init 仅 MMA 读取, 不登记。
@@ -251,11 +248,7 @@ change_tolerance = 1.0e-2
 # 优化器换 AL-MMA (增广拉格朗日 + MMA), 无体积上限, 求的是应力约束下的
 # 体积最小化, 故 metrics 不含 compliance。
 #
-# 本工况只有一条 case: 网格是纯离散参数, 加密不另立 id。注册值是粗网格
-# 80x40 (论文 5.2.3 节插图与 metrics 的默认口径); 论文用到的细网格结果由
-#   run.py --case cantilever-middle-2d-stress --nx 160 --ny 80 --order 2 3
-# 产生, 写入 results/cantilever-middle-2d-stress/<method>-k<order>-al_mma-160x80/,
-# 与粗网格产物并存互不覆盖。细网格只跑 k=2,3 (k=4 在该规模下代价过高)。
+# 本工况只有一条 case, 注册网格 80x40 即论文 5.2.3 节插图与 metrics 的口径。
 # ---------------------------------------------------------------------
 [[cases]]
 # -- 台账 (不进求解) --
@@ -300,7 +293,7 @@ stress_limit = 180.0
 # 1.3-2.7) 的 g 钉在 0.003 附近, mu 饱和后 AL 只能靠往其邻域加材料慢慢压 (LFEM k=3 为此多花
 # 434 步, 体积反涨 0.003), 且阶次越高越重。1e-3 使这些单元直接满足约束 (k=3: 423 步, 拓扑不变,
 # 实体区 rho>0.7 应力比上限 1.004 不变, 仅 rho 0.5-0.7 灰度带放宽到 1.011)。
-# 论文 (4.7) 与 §5 参数段须同步改为 1e-3; 旧值对照走 --override epsilon=1e-4。
+# 论文 (4.7) 与 §5 参数段须同步改为 1e-3; 旧值为 1e-4。
 epsilon = 1.0e-3
 # 2026-09-16: 载荷引入垫片半径 (mm)。右端牵引在贴片端点 (80, 17) 与 (80, 23) 处
 # 跳变 P/l, 该间断点的应力奇异性是载荷模型自带的, 载荷分布化只消除点载荷的 r^-1
@@ -341,7 +334,7 @@ load_pad_radius = 1.5
 # 2026-09-16 那次只豁免不保留的事故。
 support_pad_radius = 0.0
 
-# -- B 离散 (有限维近似; nx/ny 是注册默认网格, 细网格用 --nx/--ny 覆盖) --
+# -- B 离散 (有限维近似; nx/ny 是注册网格) --
 [cases.discretization]
 mesh_type = "triangle-checkerboard"
 nx = 80
@@ -393,7 +386,7 @@ mu_0 = 50.0
 # 2026-09-11 曾 1e4 -> 1e5: Hu-Zhang k=2 在 mu 饱和 1e4 后 g_max 以每外层步约 1e-4
 # 缓慢下降 (0.007 -> 0.0033, 外层步 109-151), 当时把饱和当成 C2 的瓶颈。2026-09-15 查明
 # 该慢尾来自滤波尾部单元 (见 epsilon 注), 根因是 epsilon 过小与渐近线下限过高, 与 mu 上限无关,
-# 故退回论文 §4.6 / PolyStress 的 1e4; 若某阶次在 1e4 下拖尾, 对照走 --override mu_max=1e5。
+# 故退回论文 §4.6 / PolyStress 的 1e4; 若某阶次在 1e4 下拖尾, 对照可改为 1e5。
 mu_max = 10000.0
 alpha = 1.1
 lambda_0_init_val = 0.0
@@ -403,10 +396,10 @@ move_limit = 0.15
 # Hu-Zhang k=2 渐近线塌缩触发候选点公式相消崩溃而设 0.01, 但它高于末期移动限
 # 0.005, 等于关掉了这一逐变量阻尼, 灰度带单元被钉在 0.005 幅度上翻转 (2026-09-15
 # LFEM k=1 1000 步不收敛)。相消已由稳定候选点公式解决, 2026-09-15 起退回 1e-4
-# 只防下溢; 旧值对照用 --override asymptote_min_distance=0.01。
+# 只防下溢; 旧值为 0.01。
 asymptote_min_distance = 1.0e-4
-# 以下各项的消融与修复验证一律走 --override, 使输出目录被 _run_label 分开
-# 而不覆盖基线; 确证有效后再提升为此处的默认值。末期移动限制衰减 (move_limit_decay)、
+# 以下各项的消融与修复验证需改此处注册值 (重跑会写入同名运行目录);
+# 确证有效后保留为默认值。末期移动限制衰减 (move_limit_decay)、
 # 条件式罚因子放大 (mu_update_rule) 与 KKT 终态诊断论文未用, 已从注册表移除,
 # 取 soptx ALMMMAOptions 默认 (不衰减 / unconditional / 不诊断)。
 # 1) 停止准则 C1 的度量对象: "mean" 为外层步首末设计变量的平均绝对变化
@@ -420,7 +413,7 @@ change_measure = "mean"
 #    在 mu 触顶 1e4 后 lambda 无界爬升到 10082, AL 项压过体积目标, 850 步后进入极限环
 #    (1000 步不收敛)。3000 高于带垫片已收敛臂终值一倍以上, 不改变它们的极限点; 被它
 #    截断的只有无垫片 k=4 那两个灰度单元, 它们在 C2 实体子集之外 (见下一项)。
-#    对照 (无阈, 复现 09-17 之前行为): --override lambda_max=1e20。
+#    对照 (无阈, 复现 09-17 之前行为): lambda_max = 1e20。
 lambda_max = 3000.0
 # 3) 停止准则 C2 的验收子集: 只在 rho_phys >= 阈值的 (未豁免) 单元上取最大相对
 #    违反度; 全域值仍作诊断记录 (history 的 max_relative_violation、summary 的
@@ -430,5 +423,5 @@ lambda_max = 3000.0
 #    g_max=0.048 并不可用, 故实体子集验收与乘子安全阈须同时启用。取值与 driver 报告
 #    未加权实体应力比的 solid_region_threshold 同为 0.5。该字段恒进目录名
 #    (acceptance_solid_threshold-0.5), 09-17 之前的全域口径产物保留在旧目录作对照;
-#    命令行给 none 可复原全域口径 (--override acceptance_solid_threshold=none)。
+#    取 "none" 可复原全域口径。
 acceptance_solid_threshold = 0.5

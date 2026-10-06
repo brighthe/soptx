@@ -152,7 +152,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 |---|---|---|---|
 | 材料插值 | 只插值 Young 模量 $E$（Poisson 比固定为实体值 $\nu_0 = 0.4$） | `interpolation_variables = "E"` | 显式登记而非留给缺省 `"auto"`：后者随材料自动切换，而本条是柔顺度基准；可压缩材料上写 `"E+nu"` 直接报错 |
 | 拓扑参数 | 体积分数 $\bar{V} = 0.40$, 过滤半径 $r_{\min} = 2.4\,\mathrm{mm}$ | `volume_fraction = 0.4`, `filter_radius = 2.4`, `filter_type = "density"` | 密度过滤; MSIMP 惩罚 `interpolation_method = "msimp"`, `penalty_factor = 3.0` ($p=3$), `void_youngs_modulus = 1e-09` ($E_{\min}=10^{-9}\,\mathrm{MPa}$) |
-| 优化算法 | 三种离散共用同一优化器与停机准则 | `optimizer = "mma"`, `move_limit = 0.2`, `asymp_init = 0.5`, `change_tolerance = 0.01`, `max_iterations = 500` | 步长两项与 `MMAOptions` 缺省同值，显式登记以钉住上游缺省变动；扫描走 `--override`，取值进目录名与 `summary.json` |
+| 优化算法 | 三种离散共用同一优化器与停机准则 | `optimizer = "mma"`, `move_limit = 0.2`, `asymp_init = 0.5`, `change_tolerance = 0.01`, `max_iterations = 500` | 步长两项与 `MMAOptions` 缺省同值，显式登记以钉住上游缺省变动；扫描需改 `cases.toml` 注册值 |
 
 ### 3.2 实测优化结果汇总 (完整结构柔顺度，半域 $\times 2$)
 
@@ -214,7 +214,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 | 边界条件 | 底边完全固支 $u_x=u_y=0$；顶边竖直向下均布牵引 $t_0 = 8\times10^{-2}\,\mathrm{N/mm}$；左右边界自由 | `traction = -0.08` | 顶边为纯 Neumann 边，HZMFEM 上属本质边界（$\boldsymbol\sigma\cdot\boldsymbol n = \boldsymbol g_N$）；牵引以二分量给出, 走 `huzhang_fe_space_2d.py` 的 Case B 分支, 须乘 `boundary_outward_sign` (soptx `d8456cc` 修复) |
 | 本构假设 | 平面应变 ($\varepsilon_{zz}=0$) | `plane_type = "plane_strain"` | $\nu_0 \to 0.5$ 时 $\lambda \to \infty$, 施加 $\operatorname{div}\boldsymbol{u} \approx 0$ |
 | 材料参数 | $E_0 = 1\,\mathrm{MPa}$；基准组 $\nu_0=0.3$，近不可压缩组 $\nu_0=0.4999$ | `youngs_modulus = 1.0`, `poisson_ratio = 0.3` / `0.4999` | 两组其余参数完全相同，构成受控对照 |
-| 网格 | $120 \times 40$ 矩形格, 每格一条对角线, 左半 `/` 右半 `\`, 与问题左右对称 | `mesh_type = "triangle-single-diagonal-symmetric"`, `nx = 120`, `ny = 40` | 单元尺寸 $h = 1\,\mathrm{mm}$, 即 $r_{\min} = 2.0h$；低阶位移元在该剖分上体积闭锁，棋盘格对照用 `--mesh-type triangle-checkerboard` |
+| 网格 | $120 \times 40$ 矩形格, 每格一条对角线, 左半 `/` 右半 `\`, 与问题左右对称 | `mesh_type = "triangle-single-diagonal-symmetric"`, `nx = 120`, `ny = 40` | 单元尺寸 $h = 1\,\mathrm{mm}$, 即 $r_{\min} = 2.0h$；低阶位移元在该剖分上体积闭锁，棋盘格对照需把注册值 `mesh_type` 改为 `triangle-checkerboard` |
 | 比较阶次 | 优化: LFEM $p=1,2$ 与 HZMFEM $k=2$; 再分析参考: LFEM $p=4$ 与 HZMFEM $k=4$ | `comparison_orders = [2]`（基准组）/ `[2, 3, 4]`（近不可压缩组）, `supplementary_orders = [1]`; 参考离散写在 `bearing_reanalysis.REFERENCES`, 由 `build_pipeline` 覆盖 `comparison_orders` 组装, 不经 cases.toml | $p=1$ 只作闭锁对照，用 `--order 1` 单独运行；HZMFEM $k=1$ 拓扑优化不可用（$P_0$ 位移无刚体转动）；$k=3,4$ 只做前向再分析, 不跑优化 |
 | 离散与求解 | 三种离散在同一网格、同一载荷数据上对比 | `methods = ["lfem", "huzhang"]`, `use_relaxation = true`, `solve_method = "mumps"` | 角点松弛作用于矩形的四个几何角点（`mark_corners` → `axis_aligned_box_corners`）; 鞍点系统只能直接解, MUMPS 不引入迭代容差 |
 

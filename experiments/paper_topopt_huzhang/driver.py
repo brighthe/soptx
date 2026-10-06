@@ -21,18 +21,17 @@
 本模块同时承载能量恒等式诊断 (供 ``compliance_reanalysis``)、真相对残差与结果落盘
 (原 ``diagnostics.py``).
 
-使用方法:
-    # 1. 运行胡张元 (k=2) 拓扑优化 (冒烟测试 3 步)
-    python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --analyzer huzhang --order 2 --max-iterations 3 --solver scipy
+参数一律取 ``cases.toml`` 的注册值, 命令行只选运行组合. 使用方法:
+    # 1. 论文该算例的完整对比组 (LFEM 与 Hu--Zhang, k=2,3,4)
+    python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half
 
-    # 2. 运行全量论文矩阵对比 (LFEM 与 Hu--Zhang, k=2,3,4)
-    python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --analyzer all --solver scipy
+    # 2. 只跑其中一组
+    python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --analyzer huzhang --order 2
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import fields, replace
 import json
 from pathlib import Path
 import re
@@ -54,8 +53,6 @@ from config import (
     select_cases,
 )
 from pipeline import (
-    MESH_EVEN_AXES,
-    MESH_TYPES,
     assembler_for,
     resolve_stress_constraint_formulation,
 )
@@ -322,7 +319,7 @@ def write_optimization_result(
 
 
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
-    """解析算例选择、离散方法和临时覆盖参数.
+    """解析算例选择与运行组合 (分析链、阶次).
 
     返回:
         命令行参数命名空间对象.
@@ -349,125 +346,8 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         help="受控比较空间有限元次数 k, 可重复传入; 缺省为 cases.toml 的 comparison_orders 全部.",
     )
-    parser.add_argument("--solver", choices=("scipy", "mumps"), help="线性求解器后端.")
-    parser.add_argument(
-        "--optimizer", choices=("oc", "mma"), help="临时覆盖优化器 (OC 或 MMA), 默认取 cases.toml."
-    )
-    parser.add_argument(
-        "--interpolation",
-        choices=("auto", "E", "E+nu"),
-        help=(
-            "临时覆盖材料插值对象: E 只插值 Young 模量, E+nu 同时插值 Poisson 比 "
-            "(仅近不可压缩材料可用), auto 按材料自动决定; 默认取 cases.toml."
-        ),
-    )
-    parser.add_argument(
-        "--filter-type", choices=("density", "projection"),
-        help="临时覆盖过滤器类型 (density/projection), 默认取 cases.toml.",
-    )
-    parser.add_argument(
-        "--mesh-type",
-        dest="mesh_type",
-        choices=MESH_TYPES,
-        help=(
-            "临时覆盖三角剖分方式: triangle-checkerboard 棋盘格交替对角 (nx, ny 须为偶数); "
-            "triangle-single-diagonal-symmetric 左半 / 右半 \\ 镜像对称单向对角 (nx 须为偶数, "
-            "论文闭锁对照); 默认取 cases.toml."
-        ),
-    )
-    parser.add_argument("--nx", type=int, help="临时覆盖横向网格剖分数.")
-    parser.add_argument("--ny", type=int, help="临时覆盖纵向网格剖分数.")
-    parser.add_argument("--max-iterations", type=int, help="临时覆盖最大优化迭代次数.")
-    parser.add_argument(
-        # 具名开关只覆盖最常用的那几个字段; 其余字段走这个通用通道, 免得每加一个
-        # 参数就往 parser 里塞一个开关. 字段名以 build_config 造出的配置对象为准,
-        # 也就是 cases.toml 的 discretization/optimization 键名; 运行组合维度
-        # analyzer / order 也一并接住 (见 _apply_run_selection), 口径与 EA/FA
-        # 两个实验的 --override 一致.
-        "--override",
-        nargs="+",
-        action="append",
-        default=[],
-        metavar="KEY=VALUE",
-        help=(
-            "按 KEY=VALUE 临时覆盖配置字段或运行组合 (analyzer/order), 可重复给出; "
-            "如 --override optimizer=mma order=2,3."
-        ),
-    )
     parser.add_argument("--check-only", action="store_true", help="仅校验配置和运行组合.")
-    parser.add_argument(
-        "--output", type=Path, default=OUTPUT_DIR, help="运行产物输出根目录."
-    )
-    arguments = parser.parse_args(argv)
-    arguments.overrides = _collect_overrides(arguments.override, parser)
-    _apply_run_selection(arguments, arguments.overrides, parser)
-    return arguments
-
-
-def _collect_overrides(
-    groups: list[list[str]], parser: argparse.ArgumentParser
-) -> dict[str, str]:
-    """把 --override 的分组文本摊平成 {字段: 文本}; 语法错误当场由 parser 报错.
-
-    同一字段重复给出直接判错: 静默取最后一次会让命令行与实际跑的参数对不上.
-    """
-    overrides: dict[str, str] = {}
-    for item in (text for group in groups for text in group):
-        name, separator, value = item.partition("=")
-        if not separator or not name.strip():
-            parser.error(f"--override 需要 KEY=VALUE 形式: {item}")
-        name = name.strip()
-        if name in overrides:
-            parser.error(f"--override 重复指定了字段 {name}.")
-        overrides[name] = value.strip()
-    return overrides
-
-
-# 运行组合维度: 决定跑哪几组, 而不是某一组怎么算, 因此进不了配置对象.
-# EA/FA 侧的 --override 能改除登记项以外的全部字段, 这里保持同一套口径, 把这两个
-# 键接住后转写成对应具名开关的取值, 同一串命令行在三个实验里写法一致.
-_RUN_SELECTION_FIELDS = ("analyzer", "order")
-_ANALYZER_CHOICES = ("lfem", "huzhang", "all")
-
-
-def _apply_run_selection(
-    arguments: argparse.Namespace,
-    overrides: dict[str, str],
-    parser: argparse.ArgumentParser,
-) -> None:
-    """把 --override 里的 analyzer / order 转写成具名开关取值, 并从覆盖字典摘除.
-
-    多值用逗号分隔 (``order=2,3`` 等价于 ``--order 2 --order 3``), 与 EA/FA 侧
-    --override 的列表写法一致; ``analyzer`` 同时给出两条链等价于 ``all``.
-    与具名开关撞车时报错而不是定先后顺序, 口径同 ``_override_changes``.
-    """
-    for name in _RUN_SELECTION_FIELDS:
-        if name not in overrides:
-            continue
-        values = [
-            item.strip() for item in overrides.pop(name).split(",") if item.strip()
-        ]
-        if not values:
-            parser.error(f"--override {name}= 需要非空取值.")
-        if name == "analyzer":
-            if arguments.method is not None:
-                parser.error("--analyzer 与 --override analyzer= 重复指定了同一维度.")
-            invalid = sorted(set(values) - set(_ANALYZER_CHOICES))
-            if invalid:
-                parser.error(
-                    f"--override analyzer= 取值非法: {', '.join(invalid)}; "
-                    f"可选 {', '.join(_ANALYZER_CHOICES)}."
-                )
-            arguments.method = "all" if len(set(values)) > 1 else values[0]
-            continue
-        if arguments.order:
-            parser.error("--order 与 --override order= 重复指定了同一维度.")
-        try:
-            arguments.order = [int(item) for item in values]
-        except ValueError:
-            parser.error(
-                f"--override order= 需要整数 (可逗号分隔): {','.join(values)}."
-            )
+    return parser.parse_args(argv)
 
 
 # 产物目录第二层的标签分隔符; 与 experiments/topopt_simp_fa|ea 同一套写法.
@@ -477,85 +357,15 @@ _TAG_SEPARATOR = "__"
 # 目录名, summary.json 与 cases.toml 仍用完整字段名; metrics._parse_run_label 负责映回.
 _TAG_ALIASES = {"acceptance_solid_threshold": "solid_thr"}
 
-_BOOLEAN_TEXTS = {"true": True, "false": False}
-# 允许用 none/null 覆盖成 None 的 Optional 字段 (注册值非 None 时现值类型是 float,
-# 光看现值猜不出它可空): lambda_max=none 复原无阈更新, acceptance_solid_threshold=none
-# 复原 C2 全域口径.
-_OPTIONAL_OVERRIDE_FIELDS = frozenset({"lambda_max", "acceptance_solid_threshold"})
-_NONE_TEXTS = {"none", "null"}
-
-
-def _coerce(name: str, text: str, current: Any) -> Any:
-    """按配置对象里现有取值的类型转换覆盖文本; 类型不认识就原样当字符串.
-
-    不读 dataclass 的类型注解: 模块开头有 from __future__ import annotations,
-    注解此时是字符串, 拿现值的类型更可靠.
-    """
-    if isinstance(current, bool):
-        if text.lower() not in _BOOLEAN_TEXTS:
-            raise ConfigurationError(f"覆盖值非法: {name}={text} (需要 true/false).")
-        return _BOOLEAN_TEXTS[text.lower()]
-    if name in _OPTIONAL_OVERRIDE_FIELDS and text.strip().lower() in _NONE_TEXTS:
-        return None
-    for caster in (int, float):
-        if isinstance(current, caster):
-            try:
-                return caster(text)
-            except ValueError as error:
-                raise ConfigurationError(
-                    f"覆盖值非法: {name}={text} (需要 {caster.__name__})."
-                ) from error
-    if current is None:
-        # Optional 字段 (lambda_max、acceptance_solid_threshold) 的现值可能是 None,
-        # 按文本猜类型: 整数、浮点、none/null, 都不是才原样当字符串.
-        for caster in (int, float):
-            try:
-                return caster(text)
-            except ValueError:
-                continue
-        if text.strip().lower() in _NONE_TEXTS:
-            return None
-    return text
-
-
-def _override_changes(
-    config: Any, overrides: dict[str, str], named: dict[str, Any]
-) -> dict[str, Any]:
-    """校验并转换 --override, 返回可直接喂给 dataclasses.replace 的改动字典."""
-    if not overrides:
-        return {}
-    field_names = {field.name for field in fields(config)}
-    unknown = sorted(set(overrides) - field_names)
-    if unknown:
-        # analyzer / order 已在 _apply_run_selection 摘除, 但要进「可覆盖」清单,
-        # 否则报错信息会让人以为这两个维度不能用 --override 给.
-        available = sorted(field_names | set(_RUN_SELECTION_FIELDS))
-        raise ConfigurationError(
-            f"未知的覆盖字段: {', '.join(unknown)}; 可覆盖: {', '.join(available)}."
-        )
-    # 与具名开关撞车时报错而不是定一个先后顺序: 两个写法给同一个字段不同取值,
-    # 无论哪边赢都有一半命令行是假的.
-    conflicts = sorted(set(overrides) & set(named))
-    if conflicts:
-        raise ConfigurationError(
-            f"--override 与具名开关重复指定了同一字段: {', '.join(conflicts)}."
-        )
-    return {
-        name: _coerce(name, text, getattr(config, name))
-        for name, text in overrides.items()
-    }
-
-
-def _run_label(method: str, order: int, config: Any, changes: dict[str, Any]) -> str:
+def _run_label(method: str, order: int, config: Any) -> str:
     """产物目录第二层: 这一次运行相对注册表基准的参数标签.
 
     analyzer 与 order 是运行组合维度 —— 同一个 case 目录下并排躺着好几组, 故恒进
-    标签; 其余字段只在被覆盖时进标签, 探索性运行因此不会盖掉注册运行的产物. 标签
-    按字段名排序、用 ``__`` 连接, 与 experiments/topopt_simp_fa|ea 的第二层同一套
-    写法, 三个实验的 outputs/ 用同一种读法. 过长的字段名按 ``_TAG_ALIASES`` 缩写.
+    标签; 应力算例另把约束协议、垫片半径与 C2 验收子集写进标签 (见下). 标签按字段名
+    排序、用 ``__`` 连接, 与 experiments/topopt_simp_fa|ea 的第二层同一套写法. 过长
+    的字段名按 ``_TAG_ALIASES`` 缩写.
     """
     tags: dict[str, Any] = {"analyzer": method, "order": order}
-    tags.update({name: getattr(config, name) for name in changes})
     formulation = getattr(config, "stress_constraint_formulation", None)
     if formulation is not None:
         # 新旧 LFEM 约束协议必须恒进目录名, 防止注册默认值切换后覆盖历史产物.
@@ -573,7 +383,6 @@ def _run_label(method: str, order: int, config: Any, changes: dict[str, Any]) ->
             tags[pad_field] = pad_radius
     # C2 的验收子集改变的是停止准则本身 (2026-09-18 起注册 0.5), 同上恒进目录名;
     # 取 None (全域口径) 时标签复原成旧名, 与 09-17 之前的全域口径产物同名可比.
-    # lambda_max 与 mu_max 同类, 只在被覆盖时进标签.
     solid_threshold = getattr(config, "acceptance_solid_threshold", None)
     tags.pop("acceptance_solid_threshold", None)
     if solid_threshold is not None:
@@ -586,30 +395,14 @@ def _run_label(method: str, order: int, config: Any, changes: dict[str, Any]) ->
     )
 
 
-# 命令行临时覆盖: 配置字段名 -> 命名空间属性名 (迭代上限字段按算例另行确定)
-_OVERRIDE_FIELDS = (
-    ("mesh_type", "mesh_type"),
-    ("nx", "nx"),
-    ("ny", "ny"),
-    ("solve_method", "solver"),
-    ("optimizer", "optimizer"),
-    ("filter_type", "filter_type"),
-    ("interpolation_variables", "interpolation"),
-)
-
-
 def build_model_pipeline(
     case: dict[str, Any],
     method: str,
     order: int,
-    overrides: argparse.Namespace,
     *,
     analysis_only: bool = False,
-) -> tuple[Any, Any, dict[str, Any]]:
-    """按模型名从 pipeline.ASSEMBLERS 取装配器, 组装分析链或优化链, 并施加命令行覆盖.
-
-    第三个返回值是本次实际生效的覆盖改动, 供 run 目录名判断要不要另起标签.
-    """
+) -> tuple[Any, Any]:
+    """按模型名从 pipeline.ASSEMBLERS 取装配器, 按注册值组装分析链或优化链."""
     model_name = case["model"]["name"]
     try:
         assembler = assembler_for(model_name)
@@ -621,41 +414,10 @@ def build_model_pipeline(
     params = flatten_parameters(case)
     config = assembler.build_config(params)
 
-    # 应力约束算例的迭代上限字段是 max_al_iterations, 其 max_iterations 为只读属性
-    field_names = {field.name for field in fields(config)}
-    iteration_field = (
-        "max_al_iterations" if "max_al_iterations" in field_names else "max_iterations"
-    )
-    changes = {
-        field: value
-        for field, value in (
-            *((field, getattr(overrides, attribute, None)) for field, attribute in _OVERRIDE_FIELDS),
-            (iteration_field, overrides.max_iterations),
-        )
-        if value is not None
-    }
-    unsupported = set(changes) - field_names
-    if unsupported:
-        raise ConfigurationError(f"本算例不支持参数: {sorted(unsupported)}.")
-    changes.update(
-        _override_changes(config, getattr(overrides, "overrides", {}), changes)
-    )
-    config = replace(config, **changes)
-    if config.nx <= 0 or config.ny <= 0:
-        raise ConfigurationError("覆盖后的 nx 和 ny 必须为正数.")
-    # 奇偶性按剖分方式: 棋盘格要 nx, ny 偶数, 镜像对称单向对角只要 nx 偶数, 单向对角无要求
-    mesh_type = getattr(config, "mesh_type", "triangle-checkerboard")
-    sizes = {"nx": config.nx, "ny": config.ny}
-    odd = [axis for axis in MESH_EVEN_AXES.get(mesh_type, ("nx", "ny")) if sizes[axis] % 2]
-    if odd:
-        raise ConfigurationError(f"{mesh_type} 剖分要求覆盖后的 {' 和 '.join(odd)} 为偶数.")
-    if config.max_iterations <= 0:
-        raise ConfigurationError("覆盖后的最大迭代次数必须为正数.")
-
     factory = (
         assembler.build_analysis_pipeline if analysis_only else assembler.build_pipeline
     )
-    return factory(config, params, method, order, model_name), config, changes
+    return factory(config, params, method, order, model_name), config
 
 
 # 对称半域模型: 左半域柔顺度为完整域的一半, 报告完整结构柔顺度时乘以 2
@@ -729,11 +491,11 @@ def run_one(
 ) -> dict[str, Any]:
     """执行单一阶次与离散方法的完整拓扑优化管线."""
     model_name = case["model"]["name"]
-    pipeline, config, changes = build_model_pipeline(case, method, order, arguments)
+    pipeline, config = build_model_pipeline(case, method, order)
     if pipeline.optimizer is None:
         raise RuntimeError("优化模式要求已创建优化器.")
-    label = _run_label(method, order, config, changes)
-    output = arguments.output / case["id"] / label
+    label = _run_label(method, order, config)
+    output = OUTPUT_DIR / case["id"] / label
     print_run_banner(case, method, order, position, output)
 
     density, history = pipeline.optimizer.optimize(
@@ -781,7 +543,6 @@ def run_one(
         "termination_reason": termination_reason,
         "solver": config.solve_method,
         "interpolation": _effective_interpolation(pipeline),
-        "overrides": {name: str(value) for name, value in sorted(changes.items())} or None,
         "provenance": provenance.run_stamp(),
     }
     if volume_minimizing:
@@ -973,9 +734,9 @@ def main(argv: list[str] | None = None) -> int:
         for case in selected:
             runs = resolve_runs(case, arguments)
             if arguments.check_only:
-                pipeline, config, _ = build_model_pipeline(
+                pipeline, config = build_model_pipeline(
                     case, "lfem", int(case["discretization"]["comparison_orders"][0]),
-                    arguments, analysis_only=True,
+                    analysis_only=True,
                 )
                 prepared.append(
                     configuration_summary(case, config, runs, pipeline.problem.domain)

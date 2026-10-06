@@ -128,7 +128,7 @@ def test_unregistered_model_is_rejected(cases):
     case = copy.deepcopy(cases[0])
     case["model"]["name"] = "NotARegisteredModel2d"
     with pytest.raises(paper_config.UnsupportedModelError, match="尚未注册"):
-        paper_run.build_model_pipeline(case, "lfem", 2, _arguments())
+        paper_run.build_model_pipeline(case, "lfem", 2)
 
 
 def test_stress_protocol_defaults_to_unified_apparent(cases):
@@ -154,7 +154,7 @@ def test_stress_protocol_defaults_to_unified_apparent(cases):
     assert config.lambda_max == pytest.approx(3000.0)
     assert config.acceptance_solid_threshold == pytest.approx(0.5)
 
-    apparent_label = paper_run._run_label("lfem", 2, config, {})
+    apparent_label = paper_run._run_label("lfem", 2, config)
     assert "lfem_constraint-apparent" in apparent_label
 
 
@@ -169,12 +169,10 @@ def test_load_pad_radius_tags_run_directory_and_reverts_on_zero(cases):
     case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
     config = paper_pipeline.build_stress_config(paper_config.flatten_parameters(case))
 
-    changes = paper_run._override_changes(config, {"load_pad_radius": "0"}, {})
-    disabled = replace(config, **changes)
-    assert disabled.load_pad_radius == pytest.approx(0.0)
+    disabled = replace(config, load_pad_radius=0.0)
 
-    pad_label = paper_run._run_label("lfem", 2, config, {})
-    legacy_label = paper_run._run_label("lfem", 2, disabled, changes)
+    pad_label = paper_run._run_label("lfem", 2, config)
+    legacy_label = paper_run._run_label("lfem", 2, disabled)
     assert "load_pad_radius-1.5" in pad_label
     assert "load_pad_radius" not in legacy_label
     # 2026-09-18 起 acceptance_solid_threshold 同样恒进目录名 (别名 solid_thr, 控制
@@ -182,8 +180,7 @@ def test_load_pad_radius_tags_run_directory_and_reverts_on_zero(cases):
     assert legacy_label == (
         "analyzer-lfem__lfem_constraint-apparent__order-2__solid_thr-0.5")
     fully_legacy = paper_run._run_label(
-        "lfem", 2, replace(disabled, acceptance_solid_threshold=None),
-        {**changes, "acceptance_solid_threshold": None})
+        "lfem", 2, replace(disabled, acceptance_solid_threshold=None))
     assert fully_legacy == "analyzer-lfem__lfem_constraint-apparent__order-2"
 
 
@@ -200,55 +197,36 @@ def test_stress_config_rejects_negative_load_pad_radius(cases):
         paper_pipeline.build_stress_config(parameters)
 
 
-def test_stress_asymptote_min_distance_flows_through_override_and_al_options(cases):
-    """控制参数经 generic --override 进入 AL-MMA, 并保留在 summary 的 changes 中."""
+def test_stress_asymptote_min_distance_flows_into_al_options(cases):
+    """配置字段 asymptote_min_distance 原样进入 AL-MMA 选项."""
     from dataclasses import replace
 
     paper_config.bootstrap_source_path()
-    import driver as paper_run
     import pipeline as paper_pipeline
 
     case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
     config = paper_pipeline.build_stress_config(paper_config.flatten_parameters(case))
-    changes = paper_run._override_changes(
-        config, {"asymptote_min_distance": "0.001"}, {}
-    )
-    overridden = replace(config, **changes)
-    options = paper_pipeline._build_al_options(overridden)
+    options = paper_pipeline._build_al_options(replace(config, asymptote_min_distance=0.001))
 
-    assert changes["asymptote_min_distance"] == pytest.approx(0.001)
-    assert {name: str(value) for name, value in changes.items()} == {
-        "asymptote_min_distance": "0.001"
-    }
     assert options.asymptote_min_distance == pytest.approx(0.001)
 
 
-def test_stress_inner_stop_controls_flow_through_override_and_al_options(cases):
-    """新内层协议可经 generic --override 进入 AL-MMA, 默认配置仍是 legacy."""
+def test_stress_inner_stop_controls_flow_into_al_options(cases):
+    """内层停止协议的三个配置字段原样进入 AL-MMA 选项, 默认配置仍是 legacy."""
     from dataclasses import replace
 
     paper_config.bootstrap_source_path()
-    import driver as paper_run
     import pipeline as paper_pipeline
 
     case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
     config = paper_pipeline.build_stress_config(paper_config.flatten_parameters(case))
-    changes = paper_run._override_changes(
+    options = paper_pipeline._build_al_options(replace(
         config,
-        {
-            "inner_stop_rule": "projected_gradient",
-            "inner_relative_tolerance": "0.2",
-            "inner_absolute_tolerance": "2e-6",
-        },
-        {},
-    )
-    options = paper_pipeline._build_al_options(replace(config, **changes))
+        inner_stop_rule="projected_gradient",
+        inner_relative_tolerance=0.2,
+        inner_absolute_tolerance=2e-6,
+    ))
 
-    assert changes == {
-        "inner_stop_rule": "projected_gradient",
-        "inner_relative_tolerance": pytest.approx(0.2),
-        "inner_absolute_tolerance": pytest.approx(2e-6),
-    }
     assert options.inner_stop_rule == "projected_gradient"
     assert options.inner_relative_tolerance == pytest.approx(0.2)
     assert options.inner_absolute_tolerance == pytest.approx(2e-6)
@@ -353,7 +331,7 @@ def test_stress_config_keeps_mesh_type_and_rejects_unknown_or_odd_sizes(cases):
 
 
 def test_acceptance_solid_threshold_tags_run_directory_and_lambda_max_does_not(cases):
-    """C2 验收子集改变停止准则本身, 恒进目录名; lambda_max 与 mu_max 同类只在覆盖时进."""
+    """C2 验收子集改变停止准则本身, 恒进目录名; lambda_max 不进目录名."""
     from dataclasses import replace
 
     paper_config.bootstrap_source_path()
@@ -362,27 +340,21 @@ def test_acceptance_solid_threshold_tags_run_directory_and_lambda_max_does_not(c
 
     case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
     config = paper_pipeline.build_stress_config(paper_config.flatten_parameters(case))
-    label = paper_run._run_label("huzhang", 4, config, {})
+    label = paper_run._run_label("huzhang", 4, config)
     assert "solid_thr-0.5" in label
     assert "acceptance_solid_threshold" not in label
     assert "lambda_max" not in label
     # 全域口径 (None) 复原旧目录名, 与 09-17 之前的产物同名可比
     global_label = paper_run._run_label(
-        "huzhang", 4, replace(config, acceptance_solid_threshold=None),
-        {"acceptance_solid_threshold": None})
+        "huzhang", 4, replace(config, acceptance_solid_threshold=None))
     assert "solid_thr" not in global_label
-    # 覆盖 lambda_max 时进标签
-    capped_label = paper_run._run_label(
-        "huzhang", 4, replace(config, lambda_max=1000.0), {"lambda_max": 1000.0})
-    assert "lambda_max-1000.0" in capped_label
 
 
-def test_optional_float_fields_flow_through_override_and_al_options(cases):
-    """现值为 None 的 Optional 字段经 --override 得到数值或 None, 不会退化成字符串."""
+def test_optional_float_fields_flow_into_al_options(cases):
+    """Optional 字段可取 None (配置里写 none) 或数值, 数值原样进入 AL-MMA 选项."""
     from dataclasses import replace
 
     paper_config.bootstrap_source_path()
-    import driver as paper_run
     import pipeline as paper_pipeline
 
     case = next(c for c in cases if c["id"] == "cantilever-middle-2d-stress")
@@ -392,18 +364,10 @@ def test_optional_float_fields_flow_through_override_and_al_options(cases):
     assert config.lambda_max is None
     assert config.acceptance_solid_threshold is None
 
-    changes = paper_run._override_changes(
-        config, {"lambda_max": "1e3", "acceptance_solid_threshold": "0.7"}, {})
-    assert changes == {"lambda_max": pytest.approx(1000.0),
-                       "acceptance_solid_threshold": pytest.approx(0.7)}
-    options = paper_pipeline._build_al_options(replace(config, **changes))
+    options = paper_pipeline._build_al_options(
+        replace(config, lambda_max=1000.0, acceptance_solid_threshold=0.7))
     assert options.lambda_max == pytest.approx(1000.0)
     assert options.acceptance_solid_threshold == pytest.approx(0.7)
-
-    registered = paper_pipeline.build_stress_config(parameters)
-    changes = paper_run._override_changes(
-        registered, {"lambda_max": "none", "acceptance_solid_threshold": "null"}, {})
-    assert changes == {"lambda_max": None, "acceptance_solid_threshold": None}
 
 
 def test_stress_config_rejects_invalid_lambda_max_and_solid_threshold(cases):
