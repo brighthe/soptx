@@ -15,7 +15,9 @@ EXPERIMENT_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = EXPERIMENT_DIR.parents[1]
 SOURCE_DIR = REPOSITORY_ROOT / "src"
 CASES_FILE = EXPERIMENT_DIR / "cases.toml"
-OUTPUT_DIR = EXPERIMENT_DIR / "outputs"
+# 运行产物、再分析结果与成图统一写入入库的论文证据目录 results/; 逐步帧 vtu/ 由
+# .gitignore 排除, 其余入库.
+OUTPUT_DIR = EXPERIMENT_DIR / "results"
 FIGURE_DIR = OUTPUT_DIR / "figures"
 
 # 论文插图目录属于另一个仓库 (dut-postdoc), 默认取 WSL 下的挂载路径; 可用环境变量

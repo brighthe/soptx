@@ -38,20 +38,23 @@ experiments/paper_topopt_huzhang/
 |-- bearing_h_locking_probe.py  # 产出: 轴承全实体域 h 收敛闭锁考察, 两档 nu x 四级网格 x 四种离散 (论文图 5.5)
 |-- discretization_probe.py     # 产出: 应力算例冻结构型重分析, 应力比与牵引跳量 (图 5.8 / 5.10 / 5.11)
 |-- plots/                      # 唯一子目录: 每张图一个模块, 文件名为 <算例族>_<产物>
-|                               # (成图落在 outputs/figures/, 故不与之同名)
+|                               # (成图落在 results/figures/, 故不与之同名)
 |   |-- _base.py                # 八个成图模块的共用底座: 字体/vtu/产物定位/落盘 (论文口径: Palatino, 版心 5.9 in; 分片常值云图只出 PNG 600 dpi, 线图出 PDF+PNG)
 |   |-- compliance_topology.py compliance_convergence.py         # 图 5.2 / 5.3
 |   |-- bearing_solid_h_convergence.py bearing_topologies.py      # 图 5.5 / 5.6
 |   |-- stress_cubic_topologies.py stress_cubic_convergence.py   # 图 5.8 / 5.9: LFEM p=3 与 HZMFEM k=3 主对比
 |   `-- stress_hz_orders_topologies.py stress_traction_jump.py   # 图 5.10 / 5.11: HZMFEM k=2,4 构型; 六个构型实体带的牵引跳量
 |                               # 图 5.1 / 5.4 / 5.7 是论文侧 TikZ 示意图, 不在本目录; 图号以各模块 docstring 首行括注为准
-|-- results/                    # 论文证据, 入库: 第 5 章数值结果的定稿数据 (目前为 5.1 节)
-|   |-- manufactured_convergence.json  # 表 5.1 / 5.2 全部数据 + 算例参数 + 溯源戳记
-|   `-- table5_1.md table5_2.md        # 由上述 JSON 生成, 可直接贴入草稿
-`-- outputs/                    # 运行产物, 不提交 (仅本机原始运行, 可随时删除重跑)
+`-- results/                    # 论文证据, 入库: 第 5 章全部数值结果 (config.OUTPUT_DIR)
+    |-- manufactured_convergence.json  # 5.1 节: 表 5.1 / 5.2 全部数据 + 算例参数 + 溯源戳记
+    |-- table5_1.md table5_2.md        # 5.1 节: 由上述 JSON 生成, 可直接贴入草稿
+    |-- <case>/<run>/                  # 5.2 节优化运行: summary.json / history.json / density_final.vtu
+    |                                  # (逐步帧 vtu/ 由 .gitignore 排除, 不入库)
+    |-- <case>/postprocess/            # 5.2 节冻结设计再分析与插图数据
+    `-- figures/                       # 成图
 ```
 
-`results/` 与 `outputs/` 的分工: `outputs/` 是本机工作区, 不承担存证; 论文引用的数字只以 `results/` 为准, 是否可复现以其中 JSON 的 `provenance.reproducible` 为准。
+论文引用的数字只以 `results/` 为准, 是否可复现以其中 JSON 的 `provenance.reproducible` 为准。各运行每步迭代的 `vtu/` 帧较大, 只留在本机。
 
 ## 已注册算例
 
