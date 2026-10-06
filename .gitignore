@@ -92,6 +92,8 @@ dist/
 # 但优化运行的逐步帧 vtu/ (每个运行数百帧, 单个算例即数百 MB) 仍不入库;
 # density_final.vtu 等终态产物不在 vtu/ 下, 照常入库。须排在上一条之后。
 /experiments/paper_topopt_huzhang/results/**/vtu/
+# 逐步帧的 ParaView 集合文件与 vtu/ 同级, 引用的帧不入库, 故它也不入库。
+/experiments/paper_topopt_huzhang/results/**/evolution.pvd
 
 # 根目录兜底：figs/、logs/、outputs/、old/ 不是架构目录，正式产物一律放在
 # examples/<topic>/ 或 experiments/<topic>/ 内部；根目录出现的这些目录均为

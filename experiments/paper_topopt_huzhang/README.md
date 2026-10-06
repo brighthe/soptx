@@ -47,14 +47,15 @@ experiments/paper_topopt_huzhang/
 `-- results/                    # 论文证据, 入库: 第 5 章全部数值结果 (config.OUTPUT_DIR)
     |-- manufactured-convergence/      # 5.1 节: manufactured_convergence.json (全部数据 + 参数 + 溯源戳记)
     |-- <case>/<run>/                  # 5.2 节优化运行: summary.json / history.json / density_final.vtu
-    |                                  # (逐步帧 vtu/ 由 .gitignore 排除, 不入库)
     |-- <case>/postprocess/            # 5.2 节冻结设计再分析与插图数据
     |-- tables/                        # 全部论文表格: table5_1.md / table5_2.md (manufactured_convergence.py),
     |                                  # table5_3.md / table5_4.md (table.py); 可直接贴入草稿
     `-- figures/                       # 成图 (plot.py)
 ```
 
-论文引用的数字只以 `results/` 为准, 是否可复现以其中 JSON 的 `provenance.reproducible` 为准。各运行每步迭代的 `vtu/` 帧较大, 只留在本机。
+论文引用的数字只以 `results/` 为准, 是否可复现以其中 JSON 的 `provenance.reproducible` 为准。`results/` 的内容与 git 中一致, 不存逐步帧。
+
+各运行的逐步帧只供 ParaView 查看, 由 run 脚本直接写到 Windows 本地盘的查看目录 `C:\workspace\soptx-results\paper_topopt_huzhang\` (脚本常量 `VIEW_ROOT`; Windows 下的 ParaView 经 `\\wsl.localhost` 读大批帧很慢), 目录结构与 `results/` 一一对应, 每个运行含 `density_final.vtu`、`vtu/` 帧和与 `vtu/` 同级的时间序列集合文件 `evolution.pvd` (在 ParaView 中打开后者即可按迭代步播放)。帧在优化结束后从内存一次写出, 写 Windows 盘不拖慢迭代。该盘不可用时脚本退回写 `results/`, 此时 `vtu/` 与 `evolution.pvd` 由 `.gitignore` 排除, 不会入库。
 
 ## 已注册算例
 

@@ -32,6 +32,9 @@ from soptx.topology.optimizers import MMAOptimizer
 
 CASE_ID = "compliance-fixed-fixed-half"
 OUTPUT_DIR = Path(__file__).resolve().parent / "results" / CASE_ID
+# ParaView 查看副本 (Windows 本地盘; 经 \\wsl.localhost 读大批帧很慢): 最终密度、逐步帧 vtu/
+# 与 evolution.pvd 写到这里, 目录结构与 results/ 一一对应; 该盘不可用时退回 results/
+VIEW_ROOT = Path("/mnt/c/workspace/soptx-results/paper_topopt_huzhang")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 # 模型参数 (完整结构的载荷 P; 左半域承担 P / 2, 由模型类与 P1 迹投影自动给出)
@@ -155,8 +158,11 @@ def main(argv: list[str] | None = None) -> int:
 
     for method in args.analyzer or METHODS:
         for order in args.order or ORDERS:
-            output = OUTPUT_DIR / f"analyzer-{method}__order-{order}"
-            print(f"\n[run] {CASE_ID}: analyzer={method}, order={order} -> {output}", flush=True)
+            label = f"analyzer-{method}__order-{order}"
+            output = OUTPUT_DIR / label
+            view = VIEW_ROOT / CASE_ID / label if VIEW_ROOT.parent.is_dir() else output
+            print(f"\n[run] {CASE_ID}: analyzer={method}, order={order} -> {output} (帧: {view})",
+                  flush=True)
             parts = build(method, order)
             analyzer, problem = parts["analyzer"], parts["problem"]
 
@@ -213,12 +219,14 @@ def main(argv: list[str] | None = None) -> int:
                 "full_structure_factor": FULL_STRUCTURE_FACTOR,
             }
 
-            # 3. 落盘: 最终密度、逐步帧 vtu/ (不入库)、收敛历史与摘要
-            output.mkdir(parents=True, exist_ok=True)
+            # 3. 落盘: 摘要、收敛历史与最终密度写 output (入库, 计算依据); 最终密度、逐步帧
+            #    vtu/ 与 evolution.pvd 另写 view (ParaView 查看副本, 不入库)
             mesh = parts["mesh"]
-            write_vtu(mesh=mesh, filepath=str(output / "density_final"),
-                      cell_data={"density": to_cells(density[:])})
-            frames = output / "vtu"
+            for directory in {output, view}:
+                directory.mkdir(parents=True, exist_ok=True)
+                write_vtu(mesh=mesh, filepath=str(directory / "density_final"),
+                          cell_data={"density": to_cells(density[:])})
+            frames = view / "vtu"
             frames.mkdir(exist_ok=True)
             # 第 0 帧是优化前的初始构型 (优化器记录了才写), 其后每帧对应一次迭代
             if history.initial_physical_density is not None:
@@ -227,6 +235,14 @@ def main(argv: list[str] | None = None) -> int:
             for index, rho in enumerate(history.physical_densities, start=1):
                 write_vtu(mesh=mesh, filepath=str(frames / f"density_iter_{index:03d}"),
                           cell_data={"density": to_cells(rho)})
+            # ParaView 时间序列集合文件, 与 vtu/ 同级; 时间步即迭代步号
+            steps = ([0] if history.initial_physical_density is not None else []) + list(
+                range(1, len(history.physical_densities) + 1))
+            (view / "evolution.pvd").write_text(
+                '<?xml version="1.0"?>\n<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">\n'
+                '<Collection>\n' + "".join(
+                    f'<DataSet timestep="{i}" group="" part="0" file="vtu/density_iter_{i:03d}.vtu"/>\n'
+                    for i in steps) + '</Collection>\n</VTKFile>\n', encoding="utf-8")
             payload = {"iter_indices": history.iter_indices, "changes": history.changes,
                        "iteration_times": history.iteration_times,
                        "scalar_histories": history.scalar_histories}
