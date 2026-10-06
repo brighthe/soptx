@@ -4,7 +4,7 @@
 左列可压缩基准组右列近不可压实验组, 同一离散的两种材料左右并置, 六格的运行目录见
 REQUIRED_RUNS.
 
-输出: outputs/figures/bearing_topologies.png, 自动同步至 papers/huzhang-topopt/figures/
+输出: results/figures/bearing_topologies.png, 自动同步至 papers/huzhang-topopt/figures/
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
 原尺寸嵌入, 面板标题字号即纸面字号; 高度按 3 行 120x40 面板加 3 行标题算出. 面板标题只写
@@ -36,7 +36,7 @@ FIG_SIZE_IN = (5.9, 3.55)
 TITLE_PT = 9.0
 DPI = 600
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 # 可压缩基准组与近不可压实验组按 cases.toml 的口径是两条 case (nu 属 A 问题层, 改它
 # 等于换题目), 而本图正是要把两组并排, 故 SOURCE_CASE 是元组; REQUIRED_RUNS 的每项
 # 相应写全 <case>/<run>, 否则同名的 analyzer-*__order-* 分不清属于哪一组.

@@ -84,7 +84,7 @@ def collect() -> dict[str, Any]:
 def run_stamp() -> dict[str, Any]:
     """一次运行的溯源戳记: 本仓库的 revision/dirty + 是否可复现.
 
-    落盘时逐次盖上, 而不是事后汇总时统一盖: 同一个 outputs/ 目录常横跨多次运行与
+    落盘时逐次盖上, 而不是事后汇总时统一盖: 同一个 results/ 目录常横跨多次运行与
     多个代码版本, 事后补的戳记会把全部产物错标成最后一次的版本.
     """
     record = collect()

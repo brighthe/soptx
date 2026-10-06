@@ -4,11 +4,11 @@
 产物 case ``stress-hz-orders-topologies``: 与图 5.8 (stress_cubic_topologies) 同版式、
 同数据口径, 只是把两行换成 k=2 (跳量稳定化格式, k <= d) 与 k=4 (原生格式), 与图 5.8
 的 k=3 合起来覆盖稳定化低阶到原生高阶. 数据来自 postprocess/discretization_probe/ 下
-两份 fields.npz, 由 ``compare.py discretization-probe --design <运行目录>`` 产出; 密度与
+两份 fields.npz, 由 ``plot.py discretization-probe --design <运行目录>`` 产出; 密度与
 表观 von Mises 应力比取各自离散的自读数, 被动实体区照常着色, 体积分数含该区.
 
 与 stress_cubic_topologies 同理只出 600 dpi 的 PNG (至 papers/huzhang-topopt/figures 与本地
-outputs/figures), 尺寸、字号与字体常量也从该模块取, 两图版式保持一致.
+results/figures), 尺寸、字号与字体常量也从该模块取, 两图版式保持一致.
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
 原尺寸嵌入, 面板标题字号即纸面字号; 字体走 ``paper_rcparams`` 的 Palatino 口径, 标题与轴名
@@ -27,7 +27,7 @@ from .stress_cubic_topologies import DPI, FIG_SIZE_IN, TITLE_PT, load_design
 
 paper_rcparams()
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
     "postprocess/discretization_probe/huzhang-2-pad-solid__fields.npz",

@@ -2,7 +2,7 @@
 """三次离散下悬臂梁应力约束拓扑与应力分布 (论文图 5.8).
 
 产物 case ``stress-cubic-topologies``: 依赖 postprocess/discretization_probe/ 下的
-两份 fields.npz, 由 ``compare.py discretization-probe`` 产出 (不是 ``compare.py
+两份 fields.npz, 由 ``plot.py discretization-probe`` 产出 (不是 ``plot.py
 export``, 故 REQUIRED_RUNS 缺失时 run_case 打印的 run.py 命令不适用, 正确的补数据
 命令见本文件末尾注释).
 
@@ -11,7 +11,7 @@ export``, 故 REQUIRED_RUNS 缺失时 run_case 打印的 run.py 命令不适用,
 离散的自读数, 即 huzhang-3 构型读 huzhang-3、lfem-3 构型读 lfem-3, 与优化过程中约束
 所用的读数同口径; 被动实体区照常着色 (其密度为 1, 应力比为自读值), 体积分数含该区.
 
-仅输出 PNG 至 papers/huzhang-topopt/figures 与本地 outputs/figures: 密度与应力比都是
+仅输出 PNG 至 papers/huzhang-topopt/figures 与本地 results/figures: 密度与应力比都是
 分片常数场, 矢量输出会显出三角形接缝, 故只出 600 dpi 的 PNG.
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
@@ -37,7 +37,7 @@ FIG_SIZE_IN = (5.9, 3.15)
 TITLE_PT = 9.0
 DPI = 600
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
     "postprocess/discretization_probe/lfem-3-pad-solid__fields.npz",

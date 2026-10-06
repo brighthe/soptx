@@ -254,7 +254,7 @@ change_tolerance = 1.0e-2
 # 本工况只有一条 case: 网格是纯离散参数, 加密不另立 id。注册值是粗网格
 # 80x40 (论文 5.2.3 节插图与 metrics 的默认口径); 论文用到的细网格结果由
 #   run.py --case cantilever-middle-2d-stress --nx 160 --ny 80 --order 2 3
-# 产生, 写入 outputs/cantilever-middle-2d-stress/<method>-k<order>-al_mma-160x80/,
+# 产生, 写入 results/cantilever-middle-2d-stress/<method>-k<order>-al_mma-160x80/,
 # 与粗网格产物并存互不覆盖。细网格只跑 k=2,3 (k=4 在该规模下代价过高)。
 # ---------------------------------------------------------------------
 [[cases]]

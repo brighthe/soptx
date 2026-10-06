@@ -2,6 +2,8 @@
 
 > 本文档是论文草稿 `C:\workspace\dut-postdoc\papers\huzhang-topopt\high-order-huzhang-topopt-draft-zh.md` 第 5 章数值试验的唯一数据来源：
 > 草稿正文中的全部表格数字、图件与结论表述均以本文档记录的实测值为准。
+>
+> 2026-10-06 起运行产物一律写入 `results/` (`run.py` / `table.py` / `plot.py`, 原 `compare.py` 已拆为后两者)。下文第 5.2 节各处 `outputs/...` 路径是旧布局下的历史记录, 待按新布局重跑后逐节更新。
 
 ---
 
@@ -60,11 +62,10 @@
 从实验目录执行:
 
 ```bash
-R=outputs/fixed_coefficient_optimization/20260923T013529873586Z
-~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R compliance-reanalysis
-~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R bearing-reanalysis
-~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R discretization-probe --design analyzer-huzhang__lfem_constraint-apparent__load_pad_radius-1.5__order-2__solid_thr-0.5
-for c in compliance-topology compliance-convergence bearing-topologies stress-hz-orders-topologies stress-traction-jump; do ~/miniconda3/envs/ihpcm/bin/python compare.py --output-root $R --case $c; done
+~/miniconda3/envs/ihpcm/bin/python table.py compliance-reanalysis
+~/miniconda3/envs/ihpcm/bin/python table.py bearing-reanalysis
+~/miniconda3/envs/ihpcm/bin/python plot.py discretization-probe --design analyzer-huzhang__lfem_constraint-apparent__load_pad_radius-1.5__order-2__solid_thr-0.5
+for c in compliance-topology compliance-convergence bearing-topologies stress-hz-orders-topologies stress-traction-jump; do ~/miniconda3/envs/ihpcm/bin/python plot.py --case $c; done
 ```
 
 以上命令重算冻结设计, 不重新优化, 更新图 5.2、5.3、5.6、5.10、5.11 及两张 JSON 交叉表族. 新优化的逐 case 命令见 README. 图 5.5 的 rho=1 使密度剪切比等于 1, 两种系数一致; 制造解及原生高阶优化不受本次切换影响. 图 5.3 横轴改按实际最长运行自动设定, 避免旧 230 步上限截断曲线; 图 5.2 的 LFEM 阶次统一标 p.
@@ -91,7 +92,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 * **边界条件**：$\Gamma_D = \{x=0\}\cup\{y=0\}$ 弱加齐次位移，$\Gamma_N = \{x=1\}\cup\{y=1\}$ 强加解析牵引力，混合边界交界角点 $(1,0)$ 与 $(0,1)$ 开启两单元局部角点松弛；
 * **网格序列**：棋盘格结构化三角网格（`mesh_type = "triangle-checkerboard"`），剖分层次 $nx = 4, 8, 16, 32, 64$。
 
-数据来源：`outputs/manufactured_convergence/summary.json`（由 `manufactured_convergence.py` 一次跑完 $k=1,\dots,4$ 写入，同目录 `table5_1.md` / `table5_2.md` 即表 5.1 / 5.2，不手工录入）。
+数据来源：`results/manufactured_convergence.json`（由 `manufactured_convergence.py` 一次跑完 $k=1,\dots,4$ 写入，同目录 `table5_1.md` / `table5_2.md` 即表 5.1 / 5.2，不手工录入）。
 
 ### 2.2 高阶原生格式实测数据（$k=3,4$ / 论文表 5.1）
 
@@ -164,11 +165,11 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 | **HZMFEM** | $k=3$ (原生) | **32.109** | 0.400000 | 301 | 是 | mumps |
 | **HZMFEM** | $k=4$ (原生) | **31.910** | 0.400000 | 342 | 是 | mumps |
 
-<img src="outputs/figures/compliance_topology.png" width="760" alt="两端固支梁最终拓扑构型对比: 左列 LFEM, 右列 HZMFEM, 自上而下阶次 2/3/4">
+<img src="results/figures/compliance_topology.png" width="760" alt="两端固支梁最终拓扑构型对比: 左列 LFEM, 右列 HZMFEM, 自上而下阶次 2/3/4">
 
 **图 5.2**  采用 MMA 的两端固支梁最终拓扑构型对比（左列：Lagrange 位移元 LFEM，$p$ 为位移阶；右列：Hu–Zhang 混合元 HZMFEM，$k$ 为应力阶）
 
-<img src="outputs/figures/compliance_convergence.png" width="760" alt="两端固支梁 MMA 优化历史曲线对比: 彩色为柔顺度, 灰色为体积分数">
+<img src="results/figures/compliance_convergence.png" width="760" alt="两端固支梁 MMA 优化历史曲线对比: 彩色为柔顺度, 灰色为体积分数">
 
 **图 5.3**  两端固支梁 MMA 优化历史曲线对比（彩色曲线：完整结构柔顺度；灰色曲线：体积分数；末端圆点：各次运行的末步柔顺度，即表 5.3 的优化所得柔顺度；内嵌图：后期迭代放大）
 
@@ -190,7 +191,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 
 对角线自检: 六格与 `summary.json` 自评值相对差均为 0 (容差 $10^{-8}$), 全部通过。HZMFEM $k=2$ 运行于 2026-09-21 在当前代码 (soptx `8d6092f` 加未提交工作区改动) 上重跑, 09-10 运行 (`ad95594`, 自评 $32.640$) 的产物已删除, 下文与之对比的数字为删除前的记录。重跑原因是 `JumpPenaltyIntegrator` 工作区中的面积分点定向修正 (`_oriented_cell_basis`, 尚未提交): 旧实现对共享内部面的两个单元套用同一组面重心坐标, 结构化三角网格上约 1/3 内部面两侧取到镜像点, 装配出的不是跳量, 稳定化项失去相容性, 使 $\operatorname{div}\boldsymbol\sigma_h$ 掉一阶而 $L^2$ 阶不受影响 ($k=1$ 位移空间为 $P_0$, 不受影响); 修正后表 5.2 的 $k=2$ 应力 $H(\operatorname{div})$ 观测阶由 1 恢复为 2。另外 `891e6ed` (2026-09-20) 起跳量惩罚按相对剪切模量的调和平均做密度定标, 09-10 运行无此定标; 两处改动无对照开关, 自评值 $32.640 \to 32.764$ ($+0.38\%$) 为二者合并效应, 不单独归因。两次运行迭代步数同为 287, 最终密度逐单元最大差 $0.0089$、实体/空洞/灰单元计数一致, 六列再分析值保留三位小数后逐格不变; 收敛历史整体上移 (第 1 步均匀设计 $\rho=0.4$ 时 $+4.4\%$, 末段稳定在 $+0.37\%$ 至 $+0.38\%$)。LFEM 三列再分析值与 09-10 自评值相对差为 0, 说明工作区中 LFEM 装配架构的改动数值上无影响。HZ 三列的互补能与牵引对偶功在 18 格上一致, 相对耦合比均为 0。
 
-论文表 5.3 取自评列 (对角线) 与 LFEM $p=3,4$、HZ $k=3,4$ 四列, 保留两位小数; 对每个固定设计, LFEM 列随 $p$ 上升、HZ 列随 $k$ 下降, 同阶次两类泛函相对差由 3 阶的 $1.66\%$–$1.78\%$ 缩至 4 阶的 $0.82\%$–$0.89\%$ (六个设计的范围), 论文据此说明两种离散近似相向逼近。数据来源: `outputs/compliance-fixed-fixed-half/postprocess/frozen_reanalysis.json` (由 `compare.py compliance-reanalysis` 生成, 含逐格能量分量与自检记录); 本轮 JSON 的 `provenance` 为 soptx `8d6092f` (`git_dirty = true`)、FEALPy `f474a57` (干净), `reproducible = false`, 正式引用前需在干净工作区重跑。
+论文表 5.3 取自评列 (对角线) 与 LFEM $p=3,4$、HZ $k=3,4$ 四列, 保留两位小数; 对每个固定设计, LFEM 列随 $p$ 上升、HZ 列随 $k$ 下降, 同阶次两类泛函相对差由 3 阶的 $1.66\%$–$1.78\%$ 缩至 4 阶的 $0.82\%$–$0.89\%$ (六个设计的范围), 论文据此说明两种离散近似相向逼近。数据来源: `outputs/compliance-fixed-fixed-half/postprocess/frozen_reanalysis.json` (由 `table.py compliance-reanalysis` 生成, 含逐格能量分量与自检记录); 本轮 JSON 的 `provenance` 为 soptx `8d6092f` (`git_dirty = true`)、FEALPy `f474a57` (干净), `reproducible = false`, 正式引用前需在干净工作区重跑。
 
 ### 3.4 关键结论与分析
 
@@ -240,13 +241,13 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 
 HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代步数 796 → 470 / 702 → 278, 构型不变 (三拱, 仅边缘单元有差异)。
 
-<img src="outputs/figures/bearing_topologies.png" width="760" alt="二维轴承装置最终拓扑构型对比: 左列泊松比 0.30, 右列 0.4999, 自上而下 LFEM p=1、LFEM p=2、HZMFEM k=2">
+<img src="results/figures/bearing_topologies.png" width="760" alt="二维轴承装置最终拓扑构型对比: 左列泊松比 0.30, 右列 0.4999, 自上而下 LFEM p=1、LFEM p=2、HZMFEM k=2">
 
 **图 5.6**  二维轴承装置最终拓扑构型对比（左列：$\nu_0 = 0.30$；右列：$\nu_0 = 0.4999$；自上而下：LFEM $p=1$、LFEM $p=2$、HZMFEM $k=2$）
 
-数据来源：`outputs/<case>/analyzer-<lfem|huzhang>__order-<k>/summary.json`（OC 运行）；图 5.6 由 `compare.py --case bearing-topologies` 从各运行目录的 `density_final.vtu` 绘出 (PNG/PDF/EPS, 同步到论文 `figures/`)。
+数据来源：`outputs/<case>/analyzer-<lfem|huzhang>__order-<k>/summary.json`（OC 运行）；图 5.6 由 `plot.py --case bearing-topologies` 从各运行目录的 `density_final.vtu` 绘出 (PNG/PDF/EPS, 同步到论文 `figures/`)。
 
-上表柔顺度只在各自离散下可比: 位移元在近不可压缩材料上因体积闭锁低估柔顺度, 不同离散优化出的设计不能直接横比。下面两张表由 `compare.py bearing-reanalysis` 产生 (合并为论文表 5.4) (`outputs/<case>/postprocess/frozen_reanalysis.json`): 冻结每个最终设计 `density_final.vtu`, 用四种离散重新求解一次柔顺度, 只做前向求解不做优化。四种离散 = 三种参赛离散 (`DESIGNS`: lfem-1 / lfem-2 / huzhang-2) + 一列参考离散 (`REFERENCES`: huzhang-4, 不加稳定化的原生 Hu–Zhang 元)。每个设计用自身离散再分析与 `summary.json` 的 `compliance` 相对差为 0 (自检容差 $10^{-8}$)。偏差列一律相对 HZMFEM $k=4$ 再分析值 (`REFERENCE_LABEL`)。
+上表柔顺度只在各自离散下可比: 位移元在近不可压缩材料上因体积闭锁低估柔顺度, 不同离散优化出的设计不能直接横比。下面两张表由 `table.py bearing-reanalysis` 产生 (合并为论文表 5.4) (`outputs/<case>/postprocess/frozen_reanalysis.json`): 冻结每个最终设计 `density_final.vtu`, 用四种离散重新求解一次柔顺度, 只做前向求解不做优化。四种离散 = 三种参赛离散 (`DESIGNS`: lfem-1 / lfem-2 / huzhang-2) + 一列参考离散 (`REFERENCES`: huzhang-4, 不加稳定化的原生 Hu–Zhang 元)。每个设计用自身离散再分析与 `summary.json` 的 `compliance` 相对差为 0 (自检容差 $10^{-8}$)。偏差列一律相对 HZMFEM $k=4$ 再分析值 (`REFERENCE_LABEL`)。
 
 表 5.4(a) 交叉再分析, 可压缩基准组 $\nu_0 = 0.3$ (只插值 $E$; 行为优化设计, 列为再分析离散):
 
@@ -266,7 +267,7 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 
 论文表 5.4 合并 (a)(b) 为六行表, 只列 huzhang-4 参考值一列绝对值, lfem-1 / lfem-2 / huzhang-2 三列改为相对 huzhang-4 的偏差 (%), 不列 LFEM $p=4$ 列; 优化所得柔顺度 (对角线绝对值) 写在论文图 5.6 段正文。
 
-论文图 5.5 全实体域 h 收敛 (`bearing_h_locking_probe.py` → `postprocess/solid_h_sweep.json`, 成图 `compare.py --case bearing-solid-h-convergence`): 两档 $\nu_0$ x 四级网格 x 四种离散, $\rho_e \equiv 1$。参考值为 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken $\Delta^2$, $C_\infty = c_3 - (c_2-c_3)\,r/(1-r)$, $r=(c_2-c_3)/(c_1-c_2)$, 实测差比 0.484 / 0.483, 不假定收敛阶): $\nu_0=0.3$ 为 26.014807, $\nu_0=0.4999$ 为 15.496407; $k=4$ 在 240x80 上单次求解超过 20 min, 未跑。
+论文图 5.5 全实体域 h 收敛 (`bearing_h_locking_probe.py` → `postprocess/solid_h_sweep.json`, 成图 `plot.py --case bearing-solid-h-convergence`): 两档 $\nu_0$ x 四级网格 x 四种离散, $\rho_e \equiv 1$。参考值为 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken $\Delta^2$, $C_\infty = c_3 - (c_2-c_3)\,r/(1-r)$, $r=(c_2-c_3)/(c_1-c_2)$, 实测差比 0.484 / 0.483, 不假定收敛阶): $\nu_0=0.3$ 为 26.014807, $\nu_0=0.4999$ 为 15.496407; $k=4$ 在 240x80 上单次求解超过 20 min, 未跑。
 
 | $\nu_0$ | 网格 | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | HZMFEM $k=4$ | $p=1$ 误差 | $p=2$ 误差 | $k=2$ 误差 | $k=4$ 误差 |
 |---|---|---|---|---|---|---|---|---|---|
@@ -294,7 +295,7 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 
 位移序列与混合序列的外推值相差 0.015% 至 0.02%, 实测阶不同 (位移约 1.4, 混合约 1.05), 位移序列尚未进入单项渐近区; 参考值不确定度取 0.02%。$k=2$ 若同样只用前三级, 外推值为 26.024504 / 15.504576 ($+0.04\%$ / $+0.05\%$, $r$ = 0.467 / 0.466), 说明 $k=4$ 只有三级本身也是不确定度来源, 但 $k=4$ 的 $r$ (0.484) 已比 $k=2$ 前三级更接近渐近值。后果: $p=2$ 在 $\nu_0=0.3$ 最细两级的误差 (0.016%, 0.013%) 落在不确定度内, 无意义; "$p=2$ 放大 5 至 13 倍" 的下限 5 来自最细级, 分母是噪声, 论文改说 "约一个数量级" (粗两级 13.5 与 11.5 倍)。混合序列误差 0.3% 以上, $p=1$ 误差 0.02% 以上, "$\times 1.4$" 与 "两至三个数量级" 不受影响。
 
-上表说明表 5.4 参考列 (120x40 上 $k=4$) 自身偏高 $0.30\%$ ($\nu_0=0.3$) 与 $0.42\%$ ($\nu_0=0.4999$), 表 5.4 三列偏差整体偏低同量级百分点, 行间设计比较不受影响; 论文第 737 段据此加了一句。本表 json 的 `provenance.reproducible = false` (工作区不干净), 正式引用前需干净工作区重跑 `compare.py bearing-h-locking`。
+上表说明表 5.4 参考列 (120x40 上 $k=4$) 自身偏高 $0.30\%$ ($\nu_0=0.3$) 与 $0.42\%$ ($\nu_0=0.4999$), 表 5.4 三列偏差整体偏低同量级百分点, 行间设计比较不受影响; 论文第 737 段据此加了一句。本表 json 的 `provenance.reproducible = false` (工作区不干净), 正式引用前需干净工作区重跑 `plot.py bearing-h-locking`。
 
 证据口径: 再分析 JSON 的 `provenance` 为 soptx `8d6092f` (`git_dirty = true`)、FEALPy `f474a57` (干净), `reproducible = false`; HZ 两组优化 run 的戳记同为 `8d6092f` dirty (含 `_oriented_cell_basis` 定向修复等未提交改动), LFEM 四组为 09-14 批次 (`ad95594` dirty)。正式引用前需在干净工作区重跑六组优化与再分析。本批内部自洽判据: 六组运行 `relative_equilibrium_residual` 均 $\le 10^{-8}$ (HZ 可压缩组 $1.35\times10^{-8}$, 其余 $10^{-11}$ 量级), 且在 1000 步上限内达到停止准则; 三张扫描/交叉表共十八行全部满足 $C_{p=1} < C_{p=2} < C_{p=4} < C_{k=4} < C_{k=2}$; 全实体域扫描 $p=1$ 偏差随 $\nu_0 \to 0.5$ 单调放大而其余四列稳定, 与 2.2 节的理论极限一致; 各 run 的 `summary.json` 所记运行参数与 `cases.toml` 的两条 bearing case 逐项一致。再分析在 LFEM 路径上曾因 `linear_elastic_integrator.py` 未提交重构缺少 `cell_jacobi_det` 而报 `NameError`, 已在该模块补入模块级函数 (单纯形返回 `None`, 张量网格返回 $|\det J|$), 与 HEAD 原分支逐点一致 (四边形网格 max|d−ref| = 0), LFEM 三个自检相对差为 0。
 
@@ -352,7 +353,7 @@ python experiments/paper_topopt_huzhang/manufactured_convergence.py
 
 # 5.2.1 两端固支梁柔顺度 (--full 展开 comparison_orders = 2/3/4), 再冻结设计 6x6 交叉再分析 (表 5.3)
 python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --full
-python experiments/paper_topopt_huzhang/compare.py compliance-reanalysis
+python experiments/paper_topopt_huzhang/table.py compliance-reanalysis
 
 # 5.2.2 轴承装置近不可压缩: 三种离散 x 两组材料, 再冻结设计交叉再分析 (表 5.4), 全实体域 h 收敛 (图 5.5)
 for c in bearing-compressible bearing-incompressible; do
@@ -360,25 +361,25 @@ for c in bearing-compressible bearing-incompressible; do
   python experiments/paper_topopt_huzhang/run.py --case $c --analyzer lfem --order 2
   python experiments/paper_topopt_huzhang/run.py --case $c --analyzer huzhang --order 2
 done
-python experiments/paper_topopt_huzhang/compare.py bearing-reanalysis
-python experiments/paper_topopt_huzhang/compare.py bearing-h-locking
+python experiments/paper_topopt_huzhang/table.py bearing-reanalysis
+python experiments/paper_topopt_huzhang/plot.py bearing-h-locking
 
 # 5.2.3 悬臂梁局部应力约束 (--full 展开 comparison_orders = 2/3/4)
 # 图 5.8~5.11 的数据由 discretization-probe 冻结构型重分析导出 (不是 export); k=2 优化与探针在独立结果集 R 上
-# 产出 (run.py --output R / compare.py --output-root R), 见 README 首节
+# 产出 (固定系数已是默认, 无需单独结果集), 见 README 首节
 python experiments/paper_topopt_huzhang/run.py --case cantilever-middle-2d-stress --full
-python experiments/paper_topopt_huzhang/compare.py export
-python experiments/paper_topopt_huzhang/compare.py discretization-probe
+python experiments/paper_topopt_huzhang/plot.py export
+python experiments/paper_topopt_huzhang/plot.py discretization-probe
 
 # 全部插图
-python experiments/paper_topopt_huzhang/compare.py --case compliance-topology
-python experiments/paper_topopt_huzhang/compare.py --case compliance-convergence
-python experiments/paper_topopt_huzhang/compare.py --case bearing-topologies
-python experiments/paper_topopt_huzhang/compare.py --case bearing-solid-h-convergence
-python experiments/paper_topopt_huzhang/compare.py --case stress-cubic-topologies
-python experiments/paper_topopt_huzhang/compare.py --case stress-cubic-convergence
-python experiments/paper_topopt_huzhang/compare.py --case stress-hz-orders-topologies
-python experiments/paper_topopt_huzhang/compare.py --case stress-traction-jump
+python experiments/paper_topopt_huzhang/plot.py --case compliance-topology
+python experiments/paper_topopt_huzhang/plot.py --case compliance-convergence
+python experiments/paper_topopt_huzhang/plot.py --case bearing-topologies
+python experiments/paper_topopt_huzhang/plot.py --case bearing-solid-h-convergence
+python experiments/paper_topopt_huzhang/plot.py --case stress-cubic-topologies
+python experiments/paper_topopt_huzhang/plot.py --case stress-cubic-convergence
+python experiments/paper_topopt_huzhang/plot.py --case stress-hz-orders-topologies
+python experiments/paper_topopt_huzhang/plot.py --case stress-traction-jump
 ```
 
 证据口径: 论文数字一律以各 run 目录下的 `summary.json` 为准, 其 `provenance` 字段是该次运行落盘时盖的戳记; `reproducible` 为 `false` 时（工作区不干净或取不到 Git revision）该次运行不能作为定稿证据。戳记随运行写入, 不事后补盖, 故未重跑的过期目录会保留旧 revision。

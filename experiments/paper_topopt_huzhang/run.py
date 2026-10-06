@@ -1,8 +1,8 @@
 """Hu--Zhang 拓扑优化投稿论文实验的执行入口.
 
-模块平铺在实验根目录 (与 ``experiments/`` 下其余八个实验同构), 可直接执行的只有本
-文件与 ``compare.py``: 本文件跑算例、写运行产物, compare.py 把已有产物整理成论文
-里的图与数字:
+模块平铺在实验根目录 (与 ``experiments/`` 下其余八个实验同构), 可直接执行的是本
+文件与 ``plot.py`` / ``table.py``: 本文件跑算例、写运行产物, 后两者在已有产物上
+整理论文里的图与表:
 
 - 配置          ``config.py`` (路径/TOML 加载/参数拍平) ``provenance.py`` (溯源戳记);
 - 组装          ``pipeline.py``: 共享组装原语 + 三族算例的装配器 + 模型名注册表;
@@ -11,7 +11,7 @@
 - ``plots/``    唯一子目录: 每张图一个模块, 文件名是 ``<算例族>_<产物>`` 语义名
                 (论文图号只写在各模块 docstring 首行的括注里); ``_base.py`` 是
                 八个成图模块的共用底座 (字体/vtu 读取/产物定位/落盘口径)
-                (成图落在 ``outputs/figures/``, 与之同名会混淆, 故不叫 figures).
+                (成图落在 ``results/figures/``, 与之同名会混淆, 故不叫 figures).
 
 优化算例一律由 ``--case`` 驱动, 参数默认取自 ``cases.toml``::
 
@@ -29,9 +29,10 @@
 
     python run.py --case compliance-fixed-fixed-half --override optimizer=oc
 
-作用在已有产物上的后处理 (插图 / 冻结指标) 一律归 ``compare.py``::
+作用在已有产物上的后处理, 插图归 ``plot.py``, 表格归 ``table.py``::
 
-    python compare.py --list
+    python plot.py --list
+    python table.py --list
 
 论文 5.1 节的制造解收敛阶 (表 5.1 / 5.2) 不是优化算例, 由自包含脚本
 ``manufactured_convergence.py`` 直接运行, 不进本入口.
@@ -60,7 +61,7 @@ from config import (
 bootstrap_source_path()
 
 
-# 已迁往 compare.py 的动词: 老命令会落进本层的 parse_known_args, 报「需要给出
+# 已迁往 plot.py / table.py 的动词: 老命令会落进本层的 parse_known_args, 报「需要给出
 # --case」这种看不懂的错, 因此显式接住并指路.
 MOVED_COMMANDS = ("figure", "export", "gradients", "metrics")
 
@@ -245,7 +246,7 @@ def main() -> int:
         return 0 if argv else 1
     if argv[0] in MOVED_COMMANDS:
         moved = " ".join(argv)
-        print(f"{argv[0]} 已迁往后处理入口, 改用: python compare.py {moved}", file=sys.stderr)
+        print(f"{argv[0]} 已迁往后处理入口, 见 python plot.py --help 与 python table.py --help", file=sys.stderr)
         return 1
     try:
         return run_case_mode(argv)

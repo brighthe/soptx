@@ -6,11 +6,11 @@
 因 H(div, S) 协调该跳量恒为舍入量级, LFEM 由位移梯度逐单元恢复应力, 跳量非零;
 论文 5.2.3 节的牵引连续性对比即取自本模块.
 
-入口由 ``compare.py`` 派发, 本模块不直接执行::
+入口由 ``plot.py`` 派发, 本模块不直接执行::
 
-    compare.py discretization-probe [--design <目录名>]...
+    plot.py discretization-probe [--design <目录名>]...
 
-产出写到 ``outputs/<case>/postprocess/discretization_probe/``: 逐构型一份 npz (逐单元
+产出写到 ``results/<case>/postprocess/discretization_probe/``: 逐构型一份 npz (逐单元
 场, 供成图模块读取)、一份 json (跳量统计、验收门与 provenance) 与一份 vtu; 终端同时
 打印 Markdown 表.
 
@@ -597,12 +597,12 @@ def write_outputs(payload: dict[str, Any], fields: dict[str, np.ndarray], mesh) 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="compare.py discretization-probe",
+        prog="plot.py discretization-probe",
         description="应力算例: 冻结构型在自身离散下重分析, 导出应力比与牵引跳量.",
     )
     parser.add_argument(
         "--design", action="append", default=None, metavar="<目录名>",
-        help="outputs/<case>/ 下的运行目录名, 可重复; 默认论文 5.2.3 节的六份构型.",
+        help="results/<case>/ 下的运行目录名, 可重复; 默认论文 5.2.3 节的六份构型.",
     )
     return parser
 

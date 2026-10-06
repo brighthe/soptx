@@ -5,7 +5,7 @@
 设计做冻结重分析, 导出论文 5.2.3 节插图所需的场量 (原 ``export_fig_data.py``,
 2026-09-01 并入; 同期并入的梯度校验与冻结指标两段已随论文结果收口删除).
 
-入口函数由 ``compare.py`` 的 ``COMMAND_MODULES`` 派发, 本模块不直接执行.
+入口函数由 ``plot.py`` 的 ``COMMAND_MODULES`` 派发, 本模块不直接执行.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from soptx.postprocess.stress_report import StressPostProcessor  # noqa: E402
 
 
 # ============================================ 一、运行目录解析
-# 按注册口径 (cases.toml 当前参数) 在 outputs/cantilever-middle-2d-stress 下定位
+# 按注册口径 (cases.toml 当前参数) 在 results/cantilever-middle-2d-stress 下定位
 # apparent 正式运行目录, 拒绝目录标签或 summary 协议与注册值不符的旧产物.
 
 OUT = OUTPUT_DIR / "cantilever-middle-2d-stress"
@@ -288,9 +288,9 @@ def resolve_run_dir(
 
 # ============================================ 二、插图场数据导出 (npz)
 # 论文 5.2.3 节的图 5.9 (b)(d) 不直接读优化历程, 而是读带统一约束协议标签的
-# outputs/cantilever-middle-2d-stress/postprocess/lfem_constraint-apparent/
+# results/cantilever-middle-2d-stress/postprocess/lfem_constraint-apparent/
 # fig_data_<run>.npz; 本段是其唯一来源.
-# npz 属 outputs/ 下的中间产物, 不入版本控制; 数字的溯源依据是各 run 目录下
+# npz 写在 results/ 下随结果入库; 数字的溯源依据是各 run 目录下
 # summary.json 自带的运行戳记 (provenance.run_stamp).
 
 CASE_ID = "cantilever-middle-2d-stress"

@@ -9,11 +9,11 @@
 6x6 交叉表: 同一列内六个数字出自同一泛函, 其列内极差才是"设计相近"的定量表述.
 只做前向求解, 不做优化.
 
-入口由 ``compare.py`` 派发, 本模块不直接执行::
+入口由 ``table.py`` 派发, 本模块不直接执行::
 
-    compare.py compliance-reanalysis -> run_compliance_reanalysis()
+    table.py compliance-reanalysis -> run_compliance_reanalysis()
 
-产出写到 ``outputs/compliance-fixed-fixed-half/postprocess/frozen_reanalysis.json``,
+产出写到 ``results/compliance-fixed-fixed-half/postprocess/frozen_reanalysis.json``,
 带 provenance 戳记与六个 density_final.vtu 的 sha256. JSON 内柔顺度与能量均为半域
 原值, 另记 ``full_structure_factor``; 终端 Markdown 表按论文口径给完整结构值
 (半域 x 2). 每个 (设计, 分析) 组合同时记录 driver.energy_identity_diagnostics 的

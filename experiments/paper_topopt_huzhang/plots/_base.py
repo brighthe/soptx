@@ -3,7 +3,7 @@
 论文字体口径、vtu 读取、产物目录定位与统一落盘口径 (dpi、输出格式、论文插图同步
 目录) 只有一处定义, 八个成图模块都从这里取; 改一次插图口径不必逐个模块翻找.
 
-下划线开头有两重作用: 标明它不是一件可整理的产物, 且 ``compare.py:discover_cases()``
+下划线开头有两重作用: 标明它不是一件可整理的产物, 且 ``plot.py:discover_cases()``
 按 ``_`` 前缀跳过本模块, 扫描逻辑无须为它开特例.
 
 原为 ``report.py`` 的前半段, 2026-09-03 下沉进 plots 包内; ``report.py`` 余下的
@@ -78,7 +78,7 @@ def save_figure(
     formats: tuple[str, ...] = ("png",),
     dpi: int = 300,
 ) -> list[Path]:
-    """把插图写入本地 ``outputs/figures``, 并在论文插图目录存在时同步一份."""
+    """把插图写入本地 ``results/figures``, 并在论文插图目录存在时同步一份."""
     config.FIGURE_DIR.mkdir(parents=True, exist_ok=True)
     directories = [config.FIGURE_DIR]
     if config.PAPER_FIGURE_DIR.is_dir():

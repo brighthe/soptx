@@ -7,7 +7,7 @@
   的两组; 本模块启动时核对 summary 记录了 ``acceptance_solid_threshold``, 缺失即报错,
   免得静默画出旧口径的历史.
 - (b)(d) 主应力空间内的单元应力分布: 取 postprocess/ 下的 npz
-  (sig1/sig2/vm/solid_mask/pad_mask), 由 ``compare.py export --run lfem-k3 --run
+  (sig1/sig2/vm/solid_mask/pad_mask), 由 ``plot.py export --run lfem-k3 --run
   huzhang-k3`` 从 density_final.vtu 冻结重分析导出; export 认的运行目录与本模块的
   REQUIRED_RUNS 前两项是同一批 (metrics.resolve_run_dir 按注册口径解析). 散点只画
   判据集合 E_acc: solid_mask (rho > 0.5) 剔除 pad_mask (被动实体区, rho 固定 1 但不
@@ -17,7 +17,7 @@
 <= delta_g; 全域 (含灰度单元) 的 ``max_relative_violation`` 不画, 正文亦不引.
 参考线取 summary 记录的 ``relative_stress_tolerance``, 不另写常数.
 
-输出 PDF 矢量与 600 dpi PNG 至 papers/huzhang-topopt/figures 与本地 outputs/figures, 不再出 EPS.
+输出 PDF 矢量与 600 dpi PNG 至 papers/huzhang-topopt/figures 与本地 results/figures, 不再出 EPS.
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
 原尺寸嵌入, 面板标题字号即纸面字号; 字体走 ``paper_rcparams`` 的 Palatino 口径, 标题与轴名
@@ -56,7 +56,7 @@ STRESS_CMAP = "jet"
 LEGEND_STYLE = dict(fontsize=7.5, framealpha=0.95, edgecolor="#cccccc",
                     borderpad=0.4, labelspacing=0.3, handlelength=2.0)
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
     "analyzer-lfem__lfem_constraint-apparent__load_pad_radius-1.5__order-3__solid_thr-0.5",
@@ -105,7 +105,7 @@ def load_fields(base, relpath: str):
     path = base / relpath
     if not path.is_file():
         raise FileNotFoundError(
-            f"缺少 {path}; 请先运行 compare.py export --run lfem-k3 --run huzhang-k3")
+            f"缺少 {path}; 请先运行 plot.py export --run lfem-k3 --run huzhang-k3")
     with np.load(path) as npz:
         if "pad_mask" not in npz.files:
             raise RuntimeError(f"{path} 无 pad_mask, 是旧口径导出; 请重新 export.")

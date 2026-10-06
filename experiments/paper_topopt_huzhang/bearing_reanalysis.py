@@ -9,11 +9,11 @@
 给每个设计一个与参赛离散无关的柔顺度基准, 使 p=1 的闭锁、p=2 与 k=2 的残余
 离散误差各自可量化, 而不是互相为分母.
 
-入口由 ``compare.py`` 派发, 本模块不直接执行::
+入口由 ``table.py`` 派发, 本模块不直接执行::
 
-    compare.py bearing-reanalysis -> run_bearing_reanalysis()
+    table.py bearing-reanalysis -> run_bearing_reanalysis()
 
-产出写到 ``outputs/<case>/postprocess/frozen_reanalysis.json``, 带 provenance 戳记
+产出写到 ``results/<case>/postprocess/frozen_reanalysis.json``, 带 provenance 戳记
 与三个 density_final.vtu 的 sha256. 终端同时打印两张 Markdown 表, 偏差列一律相对
 Hu--Zhang k=4 参考值.
 """

@@ -13,9 +13,9 @@ HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑). 位�
 (0.016%, 0.013%) 不可信.
 
 数据不重解方程, 只读 ``bearing_h_locking_probe.py`` 落盘的
-``outputs/bearing-incompressible/postprocess/solid_h_sweep.json``; 缺文件即报错.
+``results/bearing-incompressible/postprocess/solid_h_sweep.json``; 缺文件即报错.
 
-输出: outputs/figures/bearing_solid_h_convergence.{pdf,png}, 自动同步至
+输出: results/figures/bearing_solid_h_convergence.{pdf,png}, 自动同步至
 papers/huzhang-topopt/figures/.
 
 2026-09-28 起按版心尺寸出图: 宽 6.3 in, 论文里以 ``width=\\textwidth`` (5.9 in) 嵌入,
@@ -39,7 +39,7 @@ from ._base import paper_rcparams, save_figure
 
 paper_rcparams()
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "bearing-incompressible"
 REQUIRED_RUNS = ("postprocess/solid_h_sweep.json",)
 
@@ -57,7 +57,7 @@ SERIES = (
 def load_rows() -> list[dict]:
     path = config.OUTPUT_DIR / SOURCE_CASE / REQUIRED_RUNS[0]
     if not path.is_file():
-        raise RuntimeError(f"缺少 {path}; 请先运行 compare.py bearing-h-locking")
+        raise RuntimeError(f"缺少 {path}; 请先运行 plot.py bearing-h-locking")
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("design") != "solid":
         raise RuntimeError(f"{path} 不是全实体域扫描产物")

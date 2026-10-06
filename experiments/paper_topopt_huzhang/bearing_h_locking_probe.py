@@ -13,7 +13,7 @@ k=4 求解过慢, 不跑). 目的是区分 "p=2 不闭锁" 与 "p=2 的闭锁被
 
     python bearing_h_locking_probe.py
 
-产出 ``outputs/bearing-incompressible/postprocess/solid_h_sweep.json``, 终端打印
+产出 ``results/bearing-incompressible/postprocess/solid_h_sweep.json``, 终端打印
 每档 nu 的绝对值表与相对参考值的偏差表.
 """
 

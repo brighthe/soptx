@@ -13,7 +13,7 @@
   ``1`` 只服务 LFEM p=1 的体积闭锁对照, 见 docs/fem/huzhang-mixed-fem-implementation.md.
 
 运行: 执行完整拓扑优化迭代, 产物写入
-  ``outputs/<case-id>/analyzer-<链>__order-<k>[__<字段>-<取值>...]/``,
+  ``results/<case-id>/analyzer-<链>__order-<k>[__<字段>-<取值>...]/``,
   包含最终密度场 ``density_final.vtu``、收敛历史 ``history.json`` 与运行摘要 ``summary.json``;
   应力约束算例的每帧 VTU 另带单元场 ``von_mises_normalized`` (归一化表观应力比),
   取自优化器在同一密度上求解得到的场 (2026-09-11 加).

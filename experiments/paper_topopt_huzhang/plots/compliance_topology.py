@@ -6,7 +6,7 @@
   Row 2: (c) LFEM p=3   | (d) HZMFEM k=3
   Row 3: (e) LFEM p=4   | (f) HZMFEM k=4
 
-输出: outputs/figures/compliance_topology.png, 自动同步至 papers/huzhang-topopt/figures/
+输出: results/figures/compliance_topology.png, 自动同步至 papers/huzhang-topopt/figures/
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以
 ``width=\\textwidth`` 原尺寸嵌入, 面板标题字号即纸面字号; 高度按 3 行 160x20 面板加
@@ -36,7 +36,7 @@ from ._base import (
 
 paper_rcparams()
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 # 这张图吃哪个算例的哪几次运行, 本就是绘图代码自己的事实, 故写在模块身上而
 # 不另立注册表; 两个常量都保持字面量, ast.literal_eval 才读得动.
 SOURCE_CASE = "compliance-fixed-fixed-half"

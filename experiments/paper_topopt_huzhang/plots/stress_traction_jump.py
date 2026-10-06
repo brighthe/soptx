@@ -2,7 +2,7 @@
 """冻结构型实体带上逐单元绝对牵引跳量 A_e 的空间分布与经验累积分布 (论文图 5.11).
 
 产物 case ``stress-traction-jump``: 依赖 postprocess/discretization_probe/ 下 LFEM p=2..4 与
-HZMFEM k=2..4 六份 fields.npz, 由 ``compare.py discretization-probe`` 产出, 不重解方程.
+HZMFEM k=2..4 六份 fields.npz, 由 ``plot.py discretization-probe`` 产出, 不重解方程.
 
 - (a) LFEM p=2 构型上实体带 (physical density > SOLID_THRESHOLD 且不在被动实体区)
   逐单元 ``A_e = max_{F in dT_e, F 为内边} ||[[sigma n]]||_rms(F) / sigma_bar``
@@ -17,7 +17,7 @@ HZMFEM k=2..4 六份 fields.npz, 由 ``compare.py discretization-probe`` 产出,
 1 - sigma_vm / sigma_bar.
 
 (a)(b) 是分片常数场, 矢量输出会显出三角形接缝, 故整图只出 600 dpi 的 PNG (至
-papers/huzhang-topopt/figures 与本地 outputs/figures), 不再出 PDF/EPS.
+papers/huzhang-topopt/figures 与本地 results/figures), 不再出 PDF/EPS.
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
 原尺寸嵌入, 面板标题字号即纸面字号; 字体走 ``paper_rcparams`` 的 Palatino 口径, 标题与轴名
@@ -45,7 +45,7 @@ LABEL_PT = 9.0
 TICK_PT = 8.0
 DPI = 600
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
     "postprocess/discretization_probe/lfem-2-pad-solid__fields.npz",
@@ -82,7 +82,7 @@ def load_design(base, label: str):
     key = f"absjump__{label}"
     if key not in fields.files:
         raise RuntimeError(
-            f"{tag}: npz 缺绝对跳量 {key}, 是旧口径探针; 请重新运行 compare.py discretization-probe."
+            f"{tag}: npz 缺绝对跳量 {key}, 是旧口径探针; 请重新运行 plot.py discretization-probe."
         )
     rho = fields["density"]
     design = {

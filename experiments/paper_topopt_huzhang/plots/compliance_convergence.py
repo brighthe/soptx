@@ -10,7 +10,7 @@
 右下角另开一个 inset 单框收敛段; 主轴与 inset 的纵向量程都取自全部六次运行, 两幅子图
 共用一套刻度, 否则 (a)(b) 横着对出来的差是缩放差而不是柔顺度差.
 
-输出: outputs/figures/ 下三张 —— 合并图 compliance_convergence 与两幅单图
+输出: results/figures/ 下三张 —— 合并图 compliance_convergence 与两幅单图
 compliance_convergence_{lfem,hzmfem}, 均自动同步至 papers/huzhang-topopt/figures/
 
 2026-09-28 起合并图按版心尺寸出图: 宽 6.3 in, 论文里以 ``width=\\textwidth`` (5.9 in)
@@ -35,7 +35,7 @@ from ._base import paper_rcparams, require_run_dir, save_figure
 
 paper_rcparams()
 
-# ---- 自描述元数据: compare.py 用 ast 静态解析读走, 不 import 本模块 ----
+# ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 # 这张图吃哪个算例的哪几次运行, 本就是绘图代码自己的事实, 故写在模块身上而
 # 不另立注册表; 两个常量都保持字面量, ast.literal_eval 才读得动.
 SOURCE_CASE = "compliance-fixed-fixed-half"

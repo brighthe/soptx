@@ -1,22 +1,20 @@
 # Hu--Zhang 拓扑优化投稿论文复现实验
 
-## 论文结果集 (固定稳定化系数)
+## 论文结果 (固定稳定化系数)
 
-论文第 5.2 节的 HZMFEM `k=2` 优化、冻结设计再分析和应力后处理统一使用固定系数. `HuZhangMFEMAnalyzer` 默认采用 `stabilization_coefficient="fixed"`, 普通 `run.py`/`compare.py` 即为固定系数. 对照实验可在构造分析器时显式指定 `stabilization_coefficient="density_dependent"`; 该选项独立于跳量形式 `stabilization` 和网格缩放律 `stabilization_scaling`.
+论文第 5.2 节的 HZMFEM `k=2` 优化、冻结设计再分析和应力后处理统一使用固定系数. `HuZhangMFEMAnalyzer` 默认采用 `stabilization_coefficient="fixed"`, 普通 `run.py` / `table.py` / `plot.py` 即为固定系数. 对照实验可在构造分析器时显式指定 `stabilization_coefficient="density_dependent"`; 该选项独立于跳量形式 `stabilization` 和网格缩放律 `stabilization_scaling`.
 
-当前论文结果集为 `outputs/fixed_coefficient_optimization/20260923T013529873586Z/` (下记 `R`): 四个 `k=2` 优化结果实际保存在该目录, 未受影响的 LFEM 和高阶结果以符号链接复用 `outputs/<case>/` 的运行. `outputs/<case>/` 下同名的 `k=2` 目录是密度相关系数的旧结果, 只作历史对比. 系数与源码摘要见 `R/manifest.json` 与 `R/paper_refresh_manifest.json`.
-
-优化走 `run.py --output`, 后处理走 `compare.py --output-root` (须写在最前面):
+运行产物、再分析结果、表格与成图一律写入 `results/` (`config.OUTPUT_DIR`, 布局见下节). 2026-10-06 之前的布局 (`outputs/<case>/` 与结果集 `outputs/fixed_coefficient_optimization/20260923T013529873586Z/`) 不再由脚本读取, 第 5.2 节结果按新布局重跑后入库. 以两端固支梁为例:
 
 ```bash
-# 在实验目录运行; 新优化应给一个新的独立结果集, 保留既有结果.
-~/miniconda3/envs/ihpcm/bin/python run.py --case compliance-fixed-fixed-half --analyzer huzhang --order 2 --output outputs/fixed_coefficient_optimization/<new-run>
-# 对结果集 R 重算再分析 / 重绘
-~/miniconda3/envs/ihpcm/bin/python compare.py --output-root outputs/fixed_coefficient_optimization/20260923T013529873586Z compliance-reanalysis
-~/miniconda3/envs/ihpcm/bin/python compare.py --output-root outputs/fixed_coefficient_optimization/20260923T013529873586Z --case bearing-topologies
+# 在实验目录运行
+~/miniconda3/envs/ihpcm/bin/python run.py --case compliance-fixed-fixed-half --full   # 六组优化
+~/miniconda3/envs/ihpcm/bin/python table.py compliance-reanalysis                     # 表 5.3
+~/miniconda3/envs/ihpcm/bin/python plot.py --case compliance-topology                 # 图 5.2
+~/miniconda3/envs/ihpcm/bin/python plot.py --case compliance-convergence              # 图 5.3
 ```
 
-新结果集需自行把未受影响的运行链接进来 (R 中的链接清单可作模板). 结果一致性检查不等于灵敏度公式验证.
+结果一致性检查不等于灵敏度公式验证.
 
 ## 目录结构
 
@@ -26,7 +24,8 @@ experiments/paper_topopt_huzhang/
 |-- results_analysis.md         # 实测数据、机理分析与全部复现命令 (端到端流水线见其 §6)
 |-- run.py                      # 执行入口: 按 --case 跑优化算例, 写运行产物
 |-- manufactured_convergence.py # 自包含: 制造解收敛阶验证 + 论文表 5.1 / 5.2 (论文 5.1 节, 不经 run.py)
-|-- compare.py                  # 后处理入口: 插图 / 冻结设计再分析
+|-- table.py                    # 表格入口: 冻结设计交叉再分析 + 论文表格 (表 5.3 / 5.4)
+|-- plot.py                     # 绘图入口: 插图数据 (重分析) + 成图
 |-- cases.toml                  # [[cases]] 算例参数注册表
 |-- config.py                   # 路径常量、TOML 加载校验与参数拍平
 |-- pipeline.py                 # 组装层: 共享原语 + 三族算例装配器 + 模型名注册表
@@ -51,7 +50,8 @@ experiments/paper_topopt_huzhang/
     |-- <case>/<run>/                  # 5.2 节优化运行: summary.json / history.json / density_final.vtu
     |                                  # (逐步帧 vtu/ 由 .gitignore 排除, 不入库)
     |-- <case>/postprocess/            # 5.2 节冻结设计再分析与插图数据
-    `-- figures/                       # 成图
+    |-- tables/                        # 论文表格 (table.py)
+    `-- figures/                       # 成图 (plot.py)
 ```
 
 论文引用的数字只以 `results/` 为准, 是否可复现以其中 JSON 的 `provenance.reproducible` 为准。各运行每步迭代的 `vtu/` 帧较大, 只留在本机。
@@ -92,17 +92,14 @@ python experiments/paper_topopt_huzhang/manufactured_convergence.py
 
 ## 调用方式
 
-`run.py` 解题并落盘, `compare.py` 在其产物之上做二次数值试验与成图: 五个动词都会按冻结设计重新
-组装并求解 (代码中的 `REANALYSIS` 集合), 给出 `run.py` 不产的数据 —— 表 5.3 / 5.4 的冻结设计交叉再分析、图 5.5 的
-全实体域 h 收敛、应力算例的插图场导出与冻结构型重分析, 都只能由这里产生。两者都以 `--case` 驱动,
-但 case 是两套命名:
+`run.py` 解题并落盘; `table.py` 与 `plot.py` 在其产物之上做二次数值试验, 分别产出表格与插图。`table.py` 的两个子命令做表 5.3 / 5.4 的冻结设计交叉再分析并写出论文表格; `plot.py` 的三个数据动词 (`export` / `bearing-h-locking` / `discretization-probe`, 代码中的 `REANALYSIS` 集合) 为图 5.5、5.8–5.11 按冻结设计重新求解, `--case` 成图。`run.py` 与 `plot.py` 都以 `--case` 驱动, 但 case 是两套命名:
 
-| | `run.py` | `compare.py` |
+| | `run.py` | `plot.py` |
 |---|---|---|
 | 一条 case | 一道要解的题 | 一件要产出的成果 (多数需重新求解) |
 | id 来源 | `cases.toml` 的 `[[cases]]` | `plots/` 下声明了 `SOURCE_CASE` / `REQUIRED_RUNS` 的模块, id 取模块文件名 |
 | 派发 | 一律归 `driver.py` | 由模块自描述决定, 绘图数据缺失或过期时自行触发冻结重分析 |
-| 列出 | `run.py --list` | `compare.py --list` |
+| 列出 | `run.py --list` | `plot.py --list` |
 
 调用方拿到 id 即可运行; 不支持按文件路径直接执行 `driver.py`。
 
@@ -154,7 +151,7 @@ python experiments/paper_topopt_huzhang/manufactured_convergence.py
 - 非零半径恒进产物目录名 (`__load_pad_radius-1.5`), 2026-09-16 之前的产物不会被覆盖;
   `--override load_pad_radius=0` 复原旧行为与旧目录名。
 
-核对走 `compare.py discretization-probe` (下节): 构型冻结后在自身离散下重解, 不施加豁免,
+核对走 `plot.py discretization-probe` (下节): 构型冻结后在自身离散下重解, 不施加豁免,
 被动实体区的真实读数一并取回。
 
 ## 冻结构型重分析与牵引跳量 (图 5.8 / 5.10 / 5.11)
@@ -177,11 +174,11 @@ $H(\mathrm{div}, S)$ 协调的原始变量, $[[\sigma \cdot n]] \equiv 0$; LFEM 
 
 ```bash
 # 默认重分析六份构型
-~/miniconda3/envs/ihpcm/bin/python compare.py discretization-probe
+~/miniconda3/envs/ihpcm/bin/python plot.py discretization-probe
 # 指定构型 (可重复)
-~/miniconda3/envs/ihpcm/bin/python compare.py discretization-probe --design <运行目录名>
+~/miniconda3/envs/ihpcm/bin/python plot.py discretization-probe --design <运行目录名>
 ```
 
-产物落在 `outputs/cantilever-middle-2d-stress/postprocess/discretization_probe/`:
+产物落在 `results/cantilever-middle-2d-stress/postprocess/discretization_probe/`:
 `<design>__probe.json` (跳量统计 + 验收门 + provenance + 构型 sha256)、`<design>__fields.npz`
 (逐单元场, 供图 5.8 / 5.10 / 5.11 读取)、`<design>__<disc>.vtu` (同一批场, 供 ParaView 查看)。
