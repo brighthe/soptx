@@ -179,10 +179,27 @@ class MMAOptimizer(BaseLogged):
         ----------
         design_variable : 设计变量
         density_distribution : 密度分布
+        is_store_stress : 是否逐步记录 von Mises 应力; 只支持 Lagrange 分析器
         **kwargs : 其他参数
+
+        Raises
+        ------
+        NotImplementedError
+            ``is_store_stress`` 为 True 而分析器是胡张混合元.
         """
         # ==================== 获取分析器引用 ====================
         analyzer = self._objective._analyzer
+
+        if is_store_stress:
+            from soptx.fem.analyzers import HuZhangMFEMAnalyzer
+            if isinstance(analyzer, HuZhangMFEMAnalyzer):
+                # 下面按实体应力 stress_solid 乘物理密度记录; 胡张混合元给出的是表观
+                # 应力 stress_apparent, 两者的对应口径未定, 不静默套用
+                raise NotImplementedError(
+                    "is_store_stress 只支持 Lagrange 分析器; 胡张混合元给出的是表观应力, "
+                    "记录口径尚未确定."
+                )
+
         interpolation_scheme = analyzer.interpolation_scheme
 
         # ==================== 问题规模参数初始化 ====================

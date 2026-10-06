@@ -101,7 +101,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._use_relaxation = use_relaxation
 
         self._topopt_algorithm = topopt_algorithm
-        self._interpolation_scheme = interpolation_scheme
 
         # 低阶稳定化缩放律透传给 JumpPenaltyIntegrator;
         # None 表示采用 integrator 默认 ('physical_h', 论文式物理量纲缩放)

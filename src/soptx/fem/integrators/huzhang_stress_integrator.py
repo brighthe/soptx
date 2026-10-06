@@ -72,7 +72,7 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
             积分权重, 形状 ``(NQ, )``.
         """
         p = space.p
-        q = self.q if self.q else p+3
+        q = p+3 if self.q is None else self.q
 
         mesh = getattr(space, 'mesh', None)
         TD = mesh.top_dimension()
@@ -227,7 +227,7 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
             ``(tr phi, tr phi)``, 形状 ``(NC, ldof, ldof)``.
         """
         p = space.p
-        q = self.q if self.q else p+3
+        q = p+3 if self.q is None else self.q
 
         mesh = getattr(space, 'mesh', None)
         TD = mesh.top_dimension()

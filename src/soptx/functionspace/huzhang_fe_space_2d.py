@@ -834,7 +834,7 @@ class HuZhangFESpace2d(FunctionSpace):
         return self.TD
     
     def boundary_interpolate(self,
-                            gd: Union[Callable, int, float, TensorLike],
+                            gd: Union[Callable, TensorLike],
                             uh: Optional[TensorLike] = None,
                             *, threshold: Optional[Threshold]=None, method=None,
                         ) -> TensorLike:
@@ -852,8 +852,8 @@ class HuZhangFESpace2d(FunctionSpace):
             边界数据. 可调用时以形状 ``(NEb, p+1, 2)`` 的点坐标调用, 返回最后一维为
             3 的 Voigt 应力 ``[xx, xy, yy]``, 或最后一维为 2 的外法向牵引
             :math:`t = \sigma \cdot n_{out}`; 后者两个分量都乘
-            ``boundary_outward_sign``. 非可调用时须带 ``shape`` 属性, 广播到
-            ``(NEb, p+1, gd.shape[-1])``.
+            ``boundary_outward_sign``. 非可调用时为最后一维长 2 或 3 的常张量,
+            广播到 ``(NEb, p+1, gd.shape[-1])``; 标量没有可投影的分量, 不接受.
         uh : TensorLike, optional
             形状 ``(gdof,)`` 的自由度向量, 缺省为零向量.
         threshold : Threshold, optional
@@ -891,6 +891,9 @@ class HuZhangFESpace2d(FunctionSpace):
         if callable(gd):
             gd_vals = gd(points)     # (NEb, Nbasis, 3) 或 (NEb, Nbasis, 3)
         else:
+            gd = bm.tensor(gd, dtype=self.ftype)
+            if gd.ndim == 0:
+                raise ValueError("常数 gd 须为张量, 最后一维给出各分量, 不能是标量.")
             gd_vals = bm.broadcast_to(gd, (NEb, len(bcs), gd.shape[-1]))
 
         # 获取边界标架
@@ -937,7 +940,7 @@ class HuZhangFESpace2d(FunctionSpace):
             val = val * sign[:, None, None]
 
         else:
-            raise ValueError(f"Unknown gd output dimension: {dim_gd.shape[-1]}")
+            raise ValueError(f"gd 的最后一维须为 2 (外法向牵引) 或 3 (Voigt 应力), 得到 {dim_gd}.")
         
         # 赋值
         # bcs = multi_index_matrix(p,1)/p 按 λ0 降序排列: q0 在 edge[:,0] 端,
@@ -1004,7 +1007,7 @@ class HuZhangFESpace2d(FunctionSpace):
     set_dirichlet_bc = boundary_interpolate
 
     def set_tangential_traction_bc(self,
-                                   gd: Union[Callable, int, float, TensorLike],
+                                   gd: Union[Callable, TensorLike],
                                    uh: Optional[TensorLike] = None,
                                    *, threshold: Optional[Threshold]=None,
                                  ) -> TensorLike:
@@ -1041,6 +1044,9 @@ class HuZhangFESpace2d(FunctionSpace):
         if callable(gd):
             gd_vals = gd(points)  # (NEb, p+1, 2) 牵引向量 [g_n, g_t]
         else:
+            gd = bm.tensor(gd, dtype=self.ftype)
+            if gd.ndim == 0:
+                raise ValueError("常数 gd 须为张量, 最后一维给出各分量, 不能是标量.")
             gd_vals = bm.broadcast_to(gd, (NEb, len(bcs), gd.shape[-1]))
 
         et = mesh.edge_unit_tangent()[ebdflag]  # (NEb, 2)

@@ -68,7 +68,7 @@ class HuZhangMixIntegrator(LinearInt, OpInt, CellInt):
         space1 = space[1]
 
         p = space0.p
-        q = self.q if self.q else p+3
+        q = p+3 if self.q is None else self.q
         mesh = space1.mesh
         qf = mesh.quadrature_formula(q, 'cell')
         cm = mesh.entity_measure('cell')
