@@ -225,6 +225,9 @@
 - 非坐标对齐边界上的牵引强施加（分支 `claude/huzhang-3d-oblique-traction`）：三维空间新增 `traction_face`，边界标架
   按牵引面法向对齐，折棱与角点上联合多个面求值；坐标对齐网格逐位不变。剪切立方体补丁精确，见
   `examples/huzhang_elasticity/results_analysis.md` §5.5。仍不支持：非 90° 折棱上的对称面、小平面逼近的曲面。
+- 删除跳量稳定化的 `vector_jump` 变体（系数 $1/h_F$，$p=1$ 锁死不收敛）与 `matrix_jump` 的旧缩放 `gamma_hinv`（分支
+  `claude/remove-vector-jump`）：二者都无调用方；分析器 `stabilization` 只余 `'none'` / `'matrix_jump'`，`stabilization_scaling`
+  与积分子 `penalty_scaling` 只接受 `'physical_h'`（或 None），其余取值明确报错。
 
 ### 2.4 统一清理（已完成）
 

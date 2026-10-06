@@ -194,13 +194,12 @@ def test_3d_stress_components_reordered_for_material():
     assert np.abs(got - expected).max() < 1e-9 * np.abs(expected).max()
 
 
-@pytest.mark.parametrize("method", ["matrix_jump", "vector_jump"])
 @pytest.mark.parametrize(
     "dim, p, u_degree",
     [(2, 1, 0), (2, 2, 1), (3, 1, 0), (3, 2, 1), (3, 3, 2)],
     ids=["2d-p1", "2d-p2", "3d-p1", "3d-p2", "3d-p3"],
 )
-def test_stabilized_patch_with_nonhomogeneous_displacement(dim, p, u_degree, method):
+def test_stabilized_patch_with_nonhomogeneous_displacement(dim, p, u_degree):
     """低阶 (p <= GD) 跳量稳定化下, 非齐次位移边界的补丁仍精确.
 
     位移边界面上的惩罚取迹本身, 须把 J_D(u_D, v) 移到右端; 缺少该项时离散方程
@@ -221,7 +220,7 @@ def test_stabilized_patch_with_nonhomogeneous_displacement(dim, p, u_degree, met
     analyzer = HuZhangMFEMAnalyzer(
         disp_mesh=mesh, pde=problem, material=material, interpolation_scheme=None,
         space_degree=p, integration_order=p + 3, use_relaxation=False,
-        solve_method="scipy", topopt_algorithm=None, stabilization=method,
+        solve_method="scipy", topopt_algorithm=None, stabilization="matrix_jump",
     )
     state = analyzer.solve_state(solver="scipy")
     bcs = mesh.quadrature_formula(p + 2).get_quadrature_points_and_weights()[0]
@@ -264,3 +263,20 @@ def test_sheared_cube_patch_with_oblique_traction(traction_axes):
     u = problem.displacement(points)
     u_h = bm.to_numpy(state["displacement"](bcs))
     assert np.abs(u_h - u).max() < 1e-9 * np.abs(u).max()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"stabilization": "vector_jump"}, {"stabilization_scaling": "gamma_hinv"}],
+    ids=["vector_jump", "gamma_hinv"],
+)
+def test_removed_stabilization_options_are_rejected(kwargs):
+    """已删除的向量跳量与旧缩放律在构造期明确报错."""
+    problem = QuadraticPatchProblem(2)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="plane_strain", enable_logging=False)
+    with pytest.raises(RuntimeError, match="不支持"):
+        HuZhangMFEMAnalyzer(
+            disp_mesh=TriangleMesh.from_box(problem.domain, nx=2, ny=2), pde=problem, material=material,
+            interpolation_scheme=None, space_degree=2, integration_order=5, use_relaxation=False,
+            solve_method="scipy", topopt_algorithm=None, **kwargs,
+        )

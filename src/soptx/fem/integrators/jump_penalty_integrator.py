@@ -34,13 +34,12 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
     threshold : TensorLike, optional
         参与积分的面编号; 为 None 时取全部面.
     method : str, optional
-        装配变体: ``'matrix_jump'`` (默认, 对称化的矩阵跳量) 或 ``'vector_jump'``
-        (向量跳量); 未注册的键回落到默认变体.
+        装配变体, 只支持 ``'matrix_jump'`` (对称化的矩阵跳量, 默认); 其余取值抛出 ValueError.
     material : LinearElasticMaterial, optional
         基材. ``'matrix_jump'`` 变体用其杨氏模量与剪切模量定惩罚系数, 此时必须给出.
     penalty_scaling : str, optional
-        ``'matrix_jump'`` 的惩罚缩放律: ``'gamma_hinv'`` 为旧缩放, 其余取值 (默认
-        ``'physical_h'``) 均按物理量纲缩放.
+        惩罚缩放律, 只支持 ``'physical_h'`` (物理量纲缩放, 默认; None 等同于它); 其余取值
+        抛出 ValueError.
     density_shear_ratio : TensorLike, optional
         逐单元相对剪切模量, 形状 ``(NC, )``; None 时不做密度定标.
     density_coupling : str, optional
@@ -70,14 +69,14 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         self.density_shear_ratio = density_shear_ratio
         self.density_coupling = density_coupling
 
-        # 稳定化项缩放律选择. 默认 'physical_h' 为论文式物理量纲缩放
-        # (α=μ/L0²·hF, 已实测在 k=1,2 恢复细层收敛, 复现论文表 5.2);
-        # 'gamma_hinv' 为旧缩放 (γ/hF, 净效果 O(γ) 无 hF 缩放, 细层发散),
-        # 仅保留作回归/对比.
-        self.penalty_scaling = penalty_scaling
-
-        # 记下实际生效的变体, 供 boundary_data_vector 选用同一种跳量; 未注册的键回落到默认
-        self._jump_method = method if method in ('matrix_jump', 'vector_jump') else 'matrix_jump'
+        # 稳定化项缩放律: 论文式物理量纲缩放 (α=μ/L0²·hF, 已实测在 k=1,2 恢复细层收敛,
+        # 复现论文表 5.2). 旧缩放 'gamma_hinv' (γ/hF, 细层发散) 与向量跳量变体 'vector_jump'
+        # (1/hF, P0 位移锁死) 已删除
+        if penalty_scaling not in (None, 'physical_h'):
+            raise ValueError(f"penalty_scaling 只支持 'physical_h', 收到 {penalty_scaling!r}")
+        if method not in (None, 'matrix_jump'):
+            raise ValueError(f"method 只支持 'matrix_jump', 收到 {method!r}")
+        self.penalty_scaling = 'physical_h'
         self.assembly.set(method)
 
     def _face_penalty_scale(self, space: _FS) -> Optional[TensorLike]:
@@ -409,8 +408,6 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
     def _matrix_jump_coefficient(self, space: _FS, hF: TensorLike) -> TensorLike:
         """``'matrix_jump'`` 的逐面惩罚系数 ``c_F``, 形状同 ``hF``; 定义见该变体的 Notes."""
         
-        # 构建缩放系数
-        # k=1 用 E, k>=2 用 mu, 反映不同次数对稳定化强度的不同需求
         # 应力空间的次数
         p = space.p + 1
         mesh = space.mesh
@@ -438,34 +435,18 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
             warnings.warn(msg, UserWarning)
         # ======================================================================
         
-        # 跳量惩罚缩放律二选一:
-        #
-        # 1) 'physical_h' (默认, 论文式物理量纲缩放):
+        # 跳量惩罚缩放律 (论文式物理量纲缩放):
         #    c = Σ_F (μ/L0²)·hF·∫[[u]]:[[v]]ds, hF 幂次为 +1, 系数 α=μ/L0².
         #    integrand 已含面测度 fm(=hF, 2D), 故此处再乘 hF 一次方对齐论文.
         #    三维 p=1 另乘经验因子 10, 见 _PHYSICAL_H_FACTOR.
         #    实测 (sinusoidal 混合边界制造解, k=1,2, nx=2..32) 恢复细层收敛:
         #    k=1: u→1 阶, σ→1.53 阶 (超收敛), H(div)→1 阶;
         #    k=2: u→2 阶, σ→2.02 阶, H(div)→1 阶 (降阶, 与论文表 5.2 逐格一致).
-        #
-        # 2) 'gamma_hinv' (旧缩放, 仅回归/对比): γ 取材料模量的小比例系数.
-        #    由于 integrand 含 fm, 净效果是 O(γ) 常数系数、无 hF 缩放 ——
-        #    与论文的 hF¹ 缩放律不同, 细层 (h -> 0) 位移/应力阶塌陷、div 发散.
-        #    调参历史: 原 E/L0²·hF 与裸模量 γ/hF 都过大, 惩罚块量级远超柔度块,
-        #    会压坏 div; γ ~ 1e-2·模量时粗层阶正常 (σ ~ 2.4, div ~ 1.6),
-        #    但该缩放律本身仍不足以支撑细层收敛, 已由 'physical_h' 取代.
-        if self.penalty_scaling == 'gamma_hinv':
-            if p == 1:
-                gamma = 0.01 * E
-            else:
-                gamma = 0.01 * mu
+        #    曾用的 γ/hF (净效果 O(γ) 常数系数, 无 hF 缩放) 细层位移/应力阶塌陷、div 发散, 已删除.
+        alpha = _PHYSICAL_H_FACTOR.get((mesh.geo_dimension(), p), 1.0) * mu / L0 ** 2
+        coefficient = alpha * hF
 
-            coefficient = gamma * hF ** -1
-        else:
-            alpha = _PHYSICAL_H_FACTOR.get((mesh.geo_dimension(), p), 1.0) * mu / L0 ** 2
-            coefficient = alpha * hF
-
-        # 两条缩放律的系数都取自基材; 密度型拓扑优化下再按两侧单元的相对剪切
+        # 系数取自基材; 密度型拓扑优化下再按两侧单元的相对剪切
         # 模量逐面定标, 使惩罚块与柔度块同步随密度缩放 (见 _face_penalty_scale).
         scale = self._face_penalty_scale(space)
         if scale is not None:
@@ -478,7 +459,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         边界面上跳量取迹本身, 精确解在位移边界上满足 :math:`u = u_D`, 故相容的离散
         方程须把 :math:`J_D(u_D, v)` 移到右端. 所用积分点、法向、两侧符号与系数都与
-        ``assembly`` 的同一变体一致, 内部面上为零.
+        ``assembly`` 一致, 内部面上为零.
 
         Parameters
         ----------
@@ -496,12 +477,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         index, is_internal_flag = self.make_index(space)
         ldof = space.number_of_local_dofs()
 
-        if self._jump_method == 'vector_jump':
-            ws, jump, hF, fm = self.fetch_vector_jump(space)        # (NF_sel, NQ, 2*ldof, GD)
-            coefficient = 1 / hF
-        else:
-            ws, jump, hF, fm = self.fetch_matrix_jump(space)        # (NF_sel, NQ, 2*ldof, GD, GD)
-            coefficient = self._matrix_jump_coefficient(space, hF)
+        ws, jump, hF, fm = self.fetch_matrix_jump(space)            # (NF_sel, NQ, 2*ldof, GD, GD)
+        coefficient = self._matrix_jump_coefficient(space, hF)
 
         q = space.p + 3 if self.q is None else self.q
         bcs = mesh.quadrature_formula(q, 'face').get_quadrature_points_and_weights()[0]
@@ -515,17 +492,10 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         u_d = bm.asarray(gd(points[bd]), dtype=bm.float64)        # (NFb, NQ, GD)
         weight = (fm * coefficient)[bd]
 
-        if self._jump_method == 'vector_jump':
-            # 边界迹存在 [-phi, 0] 或 [0, +phi] 中的一侧, 数据跳量取同一符号
-            on_left = bm.any(jump[bd][:, :, ldof:, :] != 0, axis=(1, 2, 3))
-            sign = bm.where(on_left, 1.0, -1.0)
-            data = sign[:, None, None] * u_d
-            vec = bm.einsum('q, f, fqd, fqjd -> fj', ws, weight, data, jump[bd])
-        else:
-            # 与 fetch_matrix_jump 相同, 边界面用不带符号的全局法向
-            n = mesh.face_unit_normal(index=index)[bd]
-            G = 0.5 * (bm.einsum('fqi, fj -> fqij', u_d, n) + bm.einsum('fi, fqj -> fqij', n, u_d))
-            vec = bm.einsum('q, f, fqkl, fqjkl -> fj', ws, weight, G, jump[bd])
+        # 与 fetch_matrix_jump 相同, 边界面用不带符号的全局法向
+        n = mesh.face_unit_normal(index=index)[bd]
+        G = 0.5 * (bm.einsum('fqi, fj -> fqij', u_d, n) + bm.einsum('fi, fqj -> fqij', n, u_d))
+        vec = bm.einsum('q, f, fqkl, fqjkl -> fj', ws, weight, G, jump[bd])
         out[bd] = vec
         return out
 
@@ -553,9 +523,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
         Notes
         -----
-        面系数 ``c_F``: ``penalty_scaling='gamma_hinv'`` 时为 ``gamma / hF``, ``gamma``
-        在位移空间为 ``P_0`` 时取 ``0.01 E``, 否则取 ``0.01 mu``; 其余情形为
-        ``c * mu / L0**2 * hF``, ``L0`` 为网格包围盒的最大边长, 经验因子 ``c`` 在三维应力
+        面系数 ``c_F`` 为 ``c * mu / L0**2 * hF``, ``L0`` 为网格包围盒的最大边长, 经验因子 ``c`` 在三维应力
         次数 1 时为 10, 其余为 1 (见 ``_PHYSICAL_H_FACTOR``). ``hF`` 在二维为面测度,
         三维为面测度的平方根. 给出 ``density_shear_ratio`` 时再乘以
         ``_face_penalty_scale`` 的逐面标度.
@@ -566,94 +534,3 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         KE = bm.einsum('f, fij -> fij', coefficient, integrand)
 
         return KE
-
-    @enable_cache
-    def fetch_vector_jump(self, space: _FS):
-        """计算向量跳量"""
-        mesh = getattr(space, 'mesh', None)
-        index, is_internal_flag = self.make_index(space)
-        
-        q = space.p + 3 if self.q is None else self.q
-        qf = mesh.quadrature_formula(q, 'face')
-        bcs, ws = qf.get_quadrature_points_and_weights()
-
-        NC = mesh.number_of_cells()
-        NF = mesh.number_of_faces()
-        TD = mesh.top_dimension()
-        GD = mesh.geo_dimension()
-        NQ = len(ws)
-
-        fm = mesh.entity_measure('face', index=index) 
-        if GD == 2:
-            hF = fm  
-        elif GD == 3:
-            hF = bm.sqrt(fm)  
-        else:
-            raise ValueError(f"Unsupported dimension: {GD}")
-
-        cell2face = mesh.cell_to_face()               # (NC, TD+1)
-        # 单元内局部面的局部取向是否与该全局面的全局取向一致
-        cell2facesign = self._cell_to_face_sign(mesh)      # (NC, TD+1)  True: 全局面法向指向本单元外侧, 即左侧 (w^+); False: 右侧 (w^-)
-        ldof = space.number_of_local_dofs()
-
-        val_all = bm.zeros((NF, NQ, 2*ldof, GD), dtype=bm.float64) 
-        # 内部面构建 [ -φ_R, +φ_L ]
-        for i in range(TD+1):
-            # 每个单元的第 i 个局部面对应的全局面号
-            fidx = cell2face[:, i]                          # (NC,)
-            pos  = cell2facesign[:, i]                      # (NC,)  True/False
-
-            # 根据 cell2facesign 识别左侧单元(L, 对应 w^+)和右侧单元(R, 对应 w^-)
-            L = bm.nonzero(pos)[0]                          
-            R = bm.nonzero(~pos)[0]                         
-
-            # 面上的积分点定义在 "面参考域", 基函数评估需要 "单元参考域" 的重心坐标;
-            # 该映射按各单元自身的局部面定向进行, 见 _oriented_cell_basis 的 Notes
-            phi = self._oriented_cell_basis(space, bcs, i)     # (NC, NQ, LDOF, GD)
-
-            # [w] = w^+ - w^-, 构建算子 [ -φ_R, +φ_L ]
-            if R.size > 0:
-                val_all[fidx[R], :, 0:ldof, :]   =  - phi[R, :, :, :]
-            if L.size > 0:
-                val_all[fidx[L], :, ldof:,  :]   =  + phi[L, :, :, :]
-
-        val = val_all[index] # (NF[index], NQ, 2*LDOF, GD)
-
-        # 边界面上跳量即迹本身 [w] = w, 而这里只填了 [-φ, 0] 或 [0, +φ] 中的一侧.
-        # 罚项对 val 是二次的, 整体符号不影响结果, 故无需翻转; 不能逐项取绝对值,
-        # 否则基函数在面上变号时 (p >= 2) 结果出错
-
-        return ws, val, hF, fm
-
-    @assembly.register('vector_jump')
-    def assembly(self, space: _FS) -> TensorLike:
-        """``'vector_jump'`` 变体: 向量跳量 ``[[v]] = v^+ - v^-`` 的惩罚项局部矩阵.
-
-        Parameters
-        ----------
-        space : FunctionSpace
-            位移空间.
-
-        Returns
-        -------
-        TensorLike
-            形状 ``(NF_sel, 2*ldof, 2*ldof)`` 的局部矩阵, 面系数为 ``1 / hF``.
-
-        Notes
-        -----
-        本变体不读 ``material``, ``penalty_scaling`` 与 ``density_shear_ratio``.
-        边界面上跳量取迹本身.
-        系数 ``1 / hF`` 对 ``P_0`` 位移 (应力 p=1) 过强: 二维、三维正弦制造解上
-        位移与应力误差都不随加密下降, 散度误差反而增长, 此时应选 ``'matrix_jump'``.
-        """
-        ws, vector_jump, hF, fm = self.fetch_vector_jump(space)
-        # hF: (NF, )
-        # ws: (NQ, )
-        # fm: (NF, )
-        # vector_jump: (NF, NQ, 2*LDOF, GD)
-
-        integrand = bm.einsum('q, f, fqid, fqjd -> fij', ws, fm, vector_jump, vector_jump)
-        KE = bm.einsum('f, fij -> fij', 1 / hF, integrand)
-
-        return KE
-    

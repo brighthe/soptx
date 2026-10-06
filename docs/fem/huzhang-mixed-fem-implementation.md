@@ -159,7 +159,7 @@ $$
 | `p >= GD + 1` | `[[A, B], [B^T, 0]]` | inf-sup 稳定，不需惩罚 |
 | `p <= GD` | `[[A, B], [B^T, -J]]` | 低阶跳量稳定化 |
 
-跳量稳定化施加在内部面和 Dirichlet 边界面上，使用矩阵跳量（`method='matrix_jump'`）。Dirichlet 边界面上的惩罚取迹本身，故非齐次位移边界须把数据项 $J_D(u_D, v)$ 移到右端（`assemble_stabilization_bc_vector`），否则离散方程对精确解不相容。三维的面定向按几何判据 $(\bar x_F - \bar x_K)\cdot n_F > 0$ 计算。penalty 系数取论文式物理量纲缩放 `α·h_F`（`α = μ/L₀²`，$L_0$ 为计算域特征尺度；`penalty_scaling='physical_h'`），整体随 $h_F^2\to0$ 弱一致衰减，细层收敛恢复。三维 $p=1$ 在该系数下稳定性不足（$n=16$ 时位移仍只有约 0.7 阶），故再乘经验因子 10（`_PHYSICAL_H_FACTOR`）；惩罚越大散度误差越大，三维 $p=2,3$ 在原系数下已达理论阶，保持不变，扫描数据见 `examples/huzhang_elasticity/results_analysis.md` §5.4。
+跳量稳定化施加在内部面和 Dirichlet 边界面上，使用矩阵跳量（`method='matrix_jump'`，唯一的变体；曾有的向量跳量 `vector_jump` 系数为 $1/h_F$，$k=1$ 时锁死不收敛，与旧缩放 `gamma_hinv` 一并删除）。Dirichlet 边界面上的惩罚取迹本身，故非齐次位移边界须把数据项 $J_D(u_D, v)$ 移到右端（`assemble_stabilization_bc_vector`），否则离散方程对精确解不相容。三维的面定向按几何判据 $(\bar x_F - \bar x_K)\cdot n_F > 0$ 计算。penalty 系数取论文式物理量纲缩放 `α·h_F`（`α = μ/L₀²`，$L_0$ 为计算域特征尺度；`penalty_scaling='physical_h'`），整体随 $h_F^2\to0$ 弱一致衰减，细层收敛恢复。三维 $p=1$ 在该系数下稳定性不足（$n=16$ 时位移仍只有约 0.7 阶），故再乘经验因子 10（`_PHYSICAL_H_FACTOR`）；惩罚越大散度误差越大，三维 $p=2,3$ 在原系数下已达理论阶，保持不变，扫描数据见 `examples/huzhang_elasticity/results_analysis.md` §5.4。
 
 已验证收敛的 degree：2（跳量稳定化，σ 2 阶、$H(\mathrm{div})$ 1 阶降阶）、3（无惩罚，σ 4 阶）、4（无惩罚，σ 5 阶）。3D 的 $p=1,2,3$（跳量稳定化）与 $p=4$ 见 `examples/huzhang_elasticity/results_analysis.md` §5。制造解收敛阶由两个 case 覆盖：`manufactured-native`（`comparison_orders = [3, 4]`，原生高阶格式）与 `manufactured-stabilized`（`comparison_orders = [1, 2]`，低阶跳量稳定化格式）。
 
@@ -211,4 +211,3 @@ $$
 3. **网格拓扑约束**：角点松弛要求每个几何角点恰好连接两个三角形且共享内部边（`_get_corner_data` 对不满足的角点直接报错）。当前 `triangle-checkerboard`、`triangle-single-diagonal-symmetric` 两种结构剖分满足该要求；`TriangleMesh.from_box` 的纯单向对角剖分在右下、左上角点只有 1 个三角形，不能直接使用。推广到一般顶点扇需要把 `TM` 改为每角点 $3m\times(m+2)$ 的长方块并拆分组装/求解两套自由度计数，$m=1$ 角点还需单独处理两条牵引边写入同一节点自由度的冲突（$m\ge 2$ 的常规角点由上文要点 6 的角点分裂覆盖，$m=1$ 无从分裂，该冲突仍开放）。
 4. **3D 扩展**：3D 无松弛求解链 `div_basis` 已确认正确（有限差分 $3.4\times 10^{-10}$），3D 混合边界制造解已由 `examples/huzhang_elasticity/verify_3d_convergence.py --boundary mixed` 覆盖（结果见该目录 `results_analysis.md` §5）；端到端角点松弛集成仍留作后续扩展。
 5. **空间阶次与拓扑优化适用性**：$k=1$ 的位移空间为 $P_0$（分片常数），无法表达二维刚体旋转模态 $\boldsymbol{u}=[-\omega y, \omega x]^{\mathsf T}$，因而静力可用但拓扑优化不可用。详见[次数与稳定化分支](#次数与稳定化分支)一节的「k = 1 的适用边界」。
-6. **`vector_jump` 不适用于 $k=1$**：向量跳量的面系数 $1/h_F$ 对 $P_0$ 位移过强，二维、三维正弦制造解上位移与应力误差都不随加密下降（观测阶约 0），散度误差反而按 1 阶增长；$k=1$ 须用默认的 `matrix_jump`。$k\ge2$ 下 `vector_jump` 的收敛阶未经验证。

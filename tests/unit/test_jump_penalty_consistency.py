@@ -45,7 +45,7 @@ def _continuous_field(displacement_degree: int):
     return field
 
 
-def _internal_face_penalty(mesh, degree: int, method: str):
+def _internal_face_penalty(mesh, degree: int):
     """只在内部面装配跳量惩罚块, 并返回连续场对应的自由度向量."""
     scalar_space = LagrangeFESpace(mesh, p=degree - 1, ctype="D")
     space = TensorFunctionSpace(scalar_space=scalar_space, shape=(-1, 2))
@@ -64,7 +64,7 @@ def _internal_face_penalty(mesh, degree: int, method: str):
         JumpPenaltyIntegrator(
             q=2 * degree + 2,
             threshold=internal,
-            method=method,
+            method="matrix_jump",
             material=material,
             penalty_scaling="physical_h",
         )
@@ -75,12 +75,9 @@ def _internal_face_penalty(mesh, degree: int, method: str):
     return matrix, vector
 
 
-@pytest.mark.parametrize("method", ("matrix_jump", "vector_jump"))
 @pytest.mark.parametrize("degree", (1, 2, 3))
 @pytest.mark.parametrize("nx", (4, 7))
-def test_penalty_vanishes_on_globally_continuous_fields(
-    method: str, degree: int, nx: int
-) -> None:
+def test_penalty_vanishes_on_globally_continuous_fields(degree: int, nx: int) -> None:
     """连续场落在惩罚块的零空间上, 即 ``v^T J v`` 为机器零.
 
     ``nx`` 取偶数与奇数各一, 以覆盖两种局部面定向的分布.
@@ -88,25 +85,24 @@ def test_penalty_vanishes_on_globally_continuous_fields(
     bm.set_backend("numpy")
     mesh = TriangleMesh.from_box([0.0, 1.0, 0.0, 1.0], nx=nx, ny=nx)
 
-    matrix, vector = _internal_face_penalty(mesh, degree, method)
+    matrix, vector = _internal_face_penalty(mesh, degree)
 
     quadratic = float(vector @ (matrix @ vector))
     reference = float(vector @ vector)
 
     assert abs(quadratic) <= 1e-12 * reference, (
-        f"{method} (k={degree}, nx={nx}) 的跳量惩罚对连续场不为零: "
+        f"matrix_jump (k={degree}, nx={nx}) 的跳量惩罚对连续场不为零: "
         f"v^T J v = {quadratic:.6e}, |v|^2 = {reference:.6e}; "
         "稳定化项不相容, 会污染 div sigma_h 的收敛阶"
     )
 
 
-@pytest.mark.parametrize("method", ("matrix_jump", "vector_jump"))
-def test_penalty_is_not_identically_zero(method: str) -> None:
+def test_penalty_is_not_identically_zero() -> None:
     """反向对照: 惩罚块本身非退化, 上一测试不是被零矩阵蒙混过关."""
     bm.set_backend("numpy")
     mesh = TriangleMesh.from_box([0.0, 1.0, 0.0, 1.0], nx=4, ny=4)
 
-    matrix, _ = _internal_face_penalty(mesh, 2, method)
+    matrix, _ = _internal_face_penalty(mesh, 2)
 
     assert matrix.nnz > 0
     assert np.abs(matrix.data).max() > 1e-8
@@ -157,41 +153,15 @@ def test_both_sides_of_a_face_see_the_same_trace(nx: int) -> None:
     )
 
 
-def test_vector_jump_boundary_trace_with_sign_change() -> None:
-    """边界面上 vector_jump 罚项等于迹的平方积分 sum_F h_F^{-1} int_F |w|^2 ds.
-
-    位移取 P2 间断空间, 基函数在面上变号; 曾对边界面的基函数逐项取绝对值, 此时
-    罚项偏离. 场在边界上也取正负两种值, 使比较不依赖迹的符号.
-    """
-    bm.set_backend("numpy")
-    mesh = TriangleMesh.from_box([0.0, 1.0, 0.0, 1.0], nx=3, ny=3)
-    scalar_space = LagrangeFESpace(mesh, p=2, ctype="D")
-    space = TensorFunctionSpace(scalar_space=scalar_space, shape=(-1, 2))
-
-    def field(points):
-        x, y = points[..., 0], points[..., 1]
-        return bm.stack(((x - 0.5) ** 2 - 0.1, x * y - 0.2), axis=-1)
-
-    face2cell = mesh.face_to_cell()
-    boundary = bm.nonzero(face2cell[:, 0] == face2cell[:, 1])[0]
-    form = BilinearForm(space)
-    form.add_integrator(JumpPenaltyIntegrator(q=6, threshold=boundary, method="vector_jump"))
-    matrix = form.assembly(format="csr", method="coalesce").to_scipy()
-    uh = bm.to_numpy(space.interpolate(field)[:])
-
-    # 直接按 3 点 Gauss 公式积分 (|w|^2 为 4 次多项式, 积分精确)
-    node = bm.to_numpy(mesh.entity("node"))
-    edge = bm.to_numpy(mesh.entity("face"))[bm.to_numpy(boundary)]
-    t, w = np.polynomial.legendre.leggauss(3)
-    t, w = 0.5 * (t + 1.0), 0.5 * w
-    x0, x1 = node[edge[:, 0]], node[edge[:, 1]]
-    length = np.linalg.norm(x1 - x0, axis=-1)
-    points = x0[:, None, :] + t[None, :, None] * (x1 - x0)[:, None, :]
-    values = bm.to_numpy(field(bm.tensor(points)))
-    trace_squared = np.einsum("q, fqd, fqd -> f", w, values, values) * length  # int_F |w|^2 ds
-    expected = np.sum(trace_squared / length)  # 二维 h_F 即边长
-
-    assert uh @ (matrix @ uh) == pytest.approx(expected, rel=1e-12)
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [({"method": "vector_jump"}, "method"), ({"penalty_scaling": "gamma_hinv"}, "penalty_scaling")],
+    ids=["vector_jump", "gamma_hinv"],
+)
+def test_removed_variants_are_rejected(kwargs, match) -> None:
+    """已删除的向量跳量变体与旧缩放律明确报错, 不再静默回落到默认变体."""
+    with pytest.raises(ValueError, match=match):
+        JumpPenaltyIntegrator(q=4, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +185,7 @@ def _continuous_field_3d(displacement_degree: int):
     return field
 
 
-def _internal_face_penalty_3d(mesh, degree: int, method: str):
+def _internal_face_penalty_3d(mesh, degree: int):
     """三维内部面上的跳量惩罚块, 及连续场对应的自由度向量."""
     space = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=degree - 1, ctype="D"), shape=(-1, 3))
     face2cell = mesh.face_to_cell()
@@ -225,7 +195,7 @@ def _internal_face_penalty_3d(mesh, degree: int, method: str):
     )
     form = BilinearForm(space)
     form.add_integrator(
-        JumpPenaltyIntegrator(q=2 * degree + 2, threshold=internal, method=method,
+        JumpPenaltyIntegrator(q=2 * degree + 2, threshold=internal, method="matrix_jump",
                               material=material, penalty_scaling="physical_h")
     )
     matrix = form.assembly(format="csr", method="coalesce").to_scipy()
@@ -259,13 +229,12 @@ def test_face_sign_is_geometric_and_splits_each_face(dim: int) -> None:
     assert (left != right).all()
 
 
-@pytest.mark.parametrize("method", ("matrix_jump", "vector_jump"))
 @pytest.mark.parametrize("degree", (1, 2, 3))
-def test_penalty_vanishes_on_continuous_fields_3d(method: str, degree: int) -> None:
+def test_penalty_vanishes_on_continuous_fields_3d(degree: int) -> None:
     """三维: 连续场落在惩罚块的零空间上."""
     bm.set_backend("numpy")
     mesh = TetrahedronMesh.from_box([0.0, 1.0, 0.0, 1.0, 0.0, 1.0], nx=2, ny=2, nz=2)
-    _, matrix, vector = _internal_face_penalty_3d(mesh, degree, method)
+    _, matrix, vector = _internal_face_penalty_3d(mesh, degree)
     assert abs(float(vector @ (matrix @ vector))) <= 1e-12 * float(vector @ vector)
     assert matrix.nnz > 0 and np.abs(matrix.data).max() > 1e-8
 

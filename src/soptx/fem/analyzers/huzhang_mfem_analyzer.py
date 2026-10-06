@@ -60,7 +60,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 enable_logging: bool = False,
                 logger_name: Optional[str] = None,
                 stabilization_scaling: Optional[str] = None,
-                stabilization: Literal['none', 'matrix_jump', 'vector_jump'] = 'matrix_jump',
+                stabilization: Literal['none', 'matrix_jump'] = 'matrix_jump',
                 stabilization_coefficient: Literal['fixed', 'density_dependent'] = 'fixed',
             ) -> None:
         """初始化胡张混合有限元分析器
@@ -71,11 +71,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                        'scipy' 与 'mumps', 都经 soptx.solvers.registry 分派;
                        'mumps' 需要环境装有 PyMUMPS 包 (pip install pymumps)
                        与系统 MUMPS 库.
-        stabilization : 低阶 (p <= GD) 稳定化项的选取.'matrix_jump' (默认) 与
-                        'vector_jump' 对应 JumpPenaltyIntegrator 的两种跳量形式;
-                        'vector_jump' 在 p=1 时不收敛, 见该积分子的 Notes;
-                        'none' 则不加稳定化项, 用于消融验证低阶失稳.
-                        p >= GD + 1 时原生格式本身稳定, 本参数被忽略.
+        stabilization_scaling : 低阶稳定化的惩罚缩放律, 透传给 JumpPenaltyIntegrator 的
+                        penalty_scaling; 只支持 None 或 'physical_h' (物理量纲缩放).
+        stabilization : 低阶 (p <= GD) 稳定化项的选取. 'matrix_jump' (默认) 为
+                        JumpPenaltyIntegrator 的矩阵跳量; 'none' 则不加稳定化项,
+                        用于消融验证低阶失稳. 曾有的 'vector_jump' (系数 1/hF,
+                        P0 位移锁死) 已删除. p >= GD + 1 时原生格式本身稳定,
+                        本参数被忽略.
         stabilization_coefficient : {'fixed', 'density_dependent'}, optional
             低阶稳定化系数模式. 默认 'fixed' 使用基材常数, 不随密度更新;
             'density_dependent' 额外乘逐单元相对剪切模量的面调和平均.
@@ -104,14 +106,17 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._topopt_algorithm = topopt_algorithm
 
         # 低阶稳定化缩放律透传给 JumpPenaltyIntegrator;
-        # None 表示采用 integrator 默认 ('physical_h', 论文式物理量纲缩放)
+        # None 表示采用 integrator 默认 ('physical_h', 论文式物理量纲缩放), 这也是唯一的缩放律
+        if stabilization_scaling not in (None, 'physical_h'):
+            self._log_error(
+                f"不支持的稳定化缩放律: {stabilization_scaling}, 只支持 None 或 'physical_h'"
+            )
         self._stabilization_scaling = stabilization_scaling
 
         # 低阶稳定化方法; 只在 p <= GD 时生效, 'none' 表示做消融不加稳定化项
-        if stabilization not in ('none', 'matrix_jump', 'vector_jump'):
+        if stabilization not in ('none', 'matrix_jump'):
             self._log_error(
-                f"不支持的稳定化方法: {stabilization}, "
-                "可选 'none' / 'matrix_jump' / 'vector_jump'"
+                f"不支持的稳定化方法: {stabilization}, 可选 'none' / 'matrix_jump'"
             )
         self._stabilization = stabilization
 
@@ -359,7 +364,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
     def _jump_penalty_integrator(self) -> JumpPenaltyIntegrator:
         """在内部面与位移边界面上施加惩罚的跳量积分子.
 
-        跳量形式由构造参数 ``stabilization`` 决定, 默认矩阵跳量; 默认使用固定基材系数,
+        跳量形式为矩阵跳量 (``stabilization="matrix_jump"``); 默认使用固定基材系数,
         只有显式 ``density_dependent`` 模式才传密度比.
         """
         mesh = self._mesh
