@@ -1,0 +1,453 @@
+{
+  "case_id": "compliance-fixed-fixed-half",
+  "discretizations": [
+    [
+      "lfem",
+      2
+    ],
+    [
+      "lfem",
+      3
+    ],
+    [
+      "lfem",
+      4
+    ],
+    [
+      "huzhang",
+      2
+    ],
+    [
+      "huzhang",
+      3
+    ],
+    [
+      "huzhang",
+      4
+    ]
+  ],
+  "paper_columns": [
+    "lfem-4",
+    "huzhang-4"
+  ],
+  "provenance": {
+    "generated_at_utc": "2026-10-06T11:59:35+00:00",
+    "git_revision": "23083d63ee4e4532c2851a3573b12c1178abcb23",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "cross": {
+    "poisson_ratio": 0.4,
+    "full_structure_factor": 2.0,
+    "self_check": {
+      "lfem-2": {
+        "summary_compliance": 15.865447858449876,
+        "reanalysis_compliance": 15.865447858605197,
+        "rel_diff": 9.789896302281544e-12,
+        "passed": true
+      },
+      "lfem-3": {
+        "summary_compliance": 15.91260934380614,
+        "reanalysis_compliance": 15.912609345316888,
+        "rel_diff": 9.494024834946222e-11,
+        "passed": true
+      },
+      "lfem-4": {
+        "summary_compliance": 15.92456493929453,
+        "reanalysis_compliance": 15.924564939248379,
+        "rel_diff": 2.898134248589554e-12,
+        "passed": true
+      },
+      "huzhang-2": {
+        "summary_compliance": 16.380941995660084,
+        "reanalysis_compliance": 16.380941995660162,
+        "rel_diff": 4.771380116864977e-15,
+        "passed": true
+      },
+      "huzhang-3": {
+        "summary_compliance": 16.054534611524705,
+        "reanalysis_compliance": 16.054534611526044,
+        "rel_diff": 8.342646419325811e-14,
+        "passed": true
+      },
+      "huzhang-4": {
+        "summary_compliance": 15.954920477008528,
+        "reanalysis_compliance": 15.954920477225562,
+        "rel_diff": 1.3602919713315673e-11,
+        "passed": true
+      }
+    },
+    "designs": {
+      "lfem-2": {
+        "run_dir": "compliance-fixed-fixed-half/analyzer-lfem__order-2",
+        "optimization_iterations": 230,
+        "converged": true,
+        "volume_fraction": 0.39999997656092806,
+        "summary_compliance": 15.865447858449876,
+        "density_final": {
+          "path": "experiments/paper_topopt_huzhang/results/compliance-fixed-fixed-half/analyzer-lfem__order-2/density_final.vtu",
+          "sha256": "0a022cbb3ee73abbf8ee77521be594de833281481fe0145dac7682dab9a9df80",
+          "bytes": 131303
+        }
+      },
+      "lfem-3": {
+        "run_dir": "compliance-fixed-fixed-half/analyzer-lfem__order-3",
+        "optimization_iterations": 230,
+        "converged": true,
+        "volume_fraction": 0.39999998662468533,
+        "summary_compliance": 15.91260934380614,
+        "density_final": {
+          "path": "experiments/paper_topopt_huzhang/results/compliance-fixed-fixed-half/analyzer-lfem__order-3/density_final.vtu",
+          "sha256": "dd74644fbf03b7bb518c4522006c5ac23cc467af6522f88925d47945fa15efec",
+          "bytes": 131303
+        }
+      },
+      "lfem-4": {
+        "run_dir": "compliance-fixed-fixed-half/analyzer-lfem__order-4",
+        "optimization_iterations": 254,
+        "converged": true,
+        "volume_fraction": 0.39999999147354004,
+        "summary_compliance": 15.92456493929453,
+        "density_final": {
+          "path": "experiments/paper_topopt_huzhang/results/compliance-fixed-fixed-half/analyzer-lfem__order-4/density_final.vtu",
+          "sha256": "d78cd1bb7ed0a387d29ddc621ee022a05a595245de66b6f070fa698ef17c7bdf",
+          "bytes": 131303
+        }
+      },
+      "huzhang-2": {
+        "run_dir": "compliance-fixed-fixed-half/analyzer-huzhang__order-2",
+        "optimization_iterations": 311,
+        "converged": true,
+        "volume_fraction": 0.3999999635002898,
+        "summary_compliance": 16.380941995660084,
+        "density_final": {
+          "path": "experiments/paper_topopt_huzhang/results/compliance-fixed-fixed-half/analyzer-huzhang__order-2/density_final.vtu",
+          "sha256": "be794144cbfa2b8118ff485893b42b3ef41505b94fb2af5e5adf691338fbc7bd",
+          "bytes": 131303
+        }
+      },
+      "huzhang-3": {
+        "run_dir": "compliance-fixed-fixed-half/analyzer-huzhang__order-3",
+        "optimization_iterations": 301,
+        "converged": true,
+        "volume_fraction": 0.3999999703997384,
+        "summary_compliance": 16.054534611524705,
+        "density_final": {
+          "path": "experiments/paper_topopt_huzhang/results/compliance-fixed-fixed-half/analyzer-huzhang__order-3/density_final.vtu",
+          "sha256": "8699a82e14212a0a9a3a2d6234cc24c7b3b7861c1ce509dd7c7e724ce6b867b7",
+          "bytes": 131303
+        }
+      },
+      "huzhang-4": {
+        "run_dir": "compliance-fixed-fixed-half/analyzer-huzhang__order-4",
+        "optimization_iterations": 342,
+        "converged": true,
+        "volume_fraction": 0.39999999169892,
+        "summary_compliance": 15.954920477008528,
+        "density_final": {
+          "path": "experiments/paper_topopt_huzhang/results/compliance-fixed-fixed-half/analyzer-huzhang__order-4/density_final.vtu",
+          "sha256": "494057875bcdd558f5395e8d761c6d49d6482bd4a76eea06e0ca100d46e3c7ff",
+          "bytes": 131303
+        }
+      }
+    },
+    "compliance": {
+      "lfem-2": {
+        "lfem-2": 15.865447858605197,
+        "lfem-3": 15.912806047361226,
+        "lfem-4": 15.924957582343536,
+        "huzhang-2": 16.55310216307179,
+        "huzhang-3": 16.192422204741096,
+        "huzhang-4": 16.06683358921596
+      },
+      "lfem-3": {
+        "lfem-2": 15.865738675176296,
+        "lfem-3": 15.912609345316888,
+        "lfem-4": 15.924597134931087,
+        "huzhang-2": 16.551765692107818,
+        "huzhang-3": 16.191298929716442,
+        "huzhang-4": 16.066087598176313
+      },
+      "lfem-4": {
+        "lfem-2": 15.865926694988183,
+        "lfem-3": 15.912640359363358,
+        "lfem-4": 15.924564939248379,
+        "huzhang-2": 16.551413968191053,
+        "huzhang-3": 16.190955105606744,
+        "huzhang-4": 16.065886581121077
+      },
+      "huzhang-2": {
+        "lfem-2": 15.751785738156242,
+        "lfem-3": 15.80082861275388,
+        "lfem-4": 15.81333637306494,
+        "huzhang-2": 16.380941995660162,
+        "huzhang-3": 16.06333888328012,
+        "huzhang-4": 15.942441897334813
+      },
+      "huzhang-3": {
+        "lfem-2": 15.733891908288065,
+        "lfem-3": 15.783580182778394,
+        "lfem-4": 15.79620121897069,
+        "huzhang-2": 16.383300095350695,
+        "huzhang-3": 16.054534611526044,
+        "huzhang-4": 15.929433030046946
+      },
+      "huzhang-4": {
+        "lfem-2": 15.75370746080655,
+        "lfem-3": 15.804824695706404,
+        "lfem-4": 15.81805239229216,
+        "huzhang-2": 16.417906089592233,
+        "huzhang-3": 16.08559884965052,
+        "huzhang-4": 15.954920477225562
+      }
+    },
+    "energy": {
+      "lfem-2": {
+        "lfem-2": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.865447858605197,
+          "internal_energy": 15.865447858625064,
+          "relative_defect": 1.2522038500840013e-12
+        },
+        "lfem-3": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.912806047361226,
+          "internal_energy": 15.912806047437664,
+          "relative_defect": 4.8035783838958895e-12
+        },
+        "lfem-4": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.924957582343536,
+          "internal_energy": 15.924957582208075,
+          "relative_defect": 8.50623426521238e-12
+        },
+        "huzhang-2": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.55310216307179,
+          "coupling_work": 0.0005449545881976749,
+          "traction_dual_work": 16.553647117659988,
+          "relative_coupling_ratio": 3.292159879333135e-05
+        },
+        "huzhang-3": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.192422204741096,
+          "coupling_work": 3.485343896223467e-11,
+          "traction_dual_work": 16.192422204775948,
+          "relative_coupling_ratio": 2.152453692322183e-12
+        },
+        "huzhang-4": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.06683358921596,
+          "coupling_work": 1.1456378972926357e-10,
+          "traction_dual_work": 16.066833589330525,
+          "relative_coupling_ratio": 7.130452250788149e-12
+        }
+      },
+      "lfem-3": {
+        "lfem-2": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.865738675176296,
+          "internal_energy": 15.865738675282158,
+          "relative_defect": 6.672364143353169e-12
+        },
+        "lfem-3": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.912609345316888,
+          "internal_energy": 15.912609345436273,
+          "relative_defect": 7.502565284652539e-12
+        },
+        "lfem-4": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.924597134931087,
+          "internal_energy": 15.924597134973194,
+          "relative_defect": 2.6441336106884034e-12
+        },
+        "huzhang-2": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.551765692107818,
+          "coupling_work": 0.0005434892178396433,
+          "traction_dual_work": 16.552309181325658,
+          "relative_coupling_ratio": 3.283572447492952e-05
+        },
+        "huzhang-3": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.191298929716442,
+          "coupling_work": 1.5705679907106716e-11,
+          "traction_dual_work": 16.19129892973215,
+          "relative_coupling_ratio": 9.70007408008603e-13
+        },
+        "huzhang-4": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.066087598176313,
+          "coupling_work": 7.086986992941484e-11,
+          "traction_dual_work": 16.066087598247183,
+          "relative_coupling_ratio": 4.411146739761296e-12
+        }
+      },
+      "lfem-4": {
+        "lfem-2": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.865926694988183,
+          "internal_energy": 15.865926695047,
+          "relative_defect": 3.707123601419457e-12
+        },
+        "lfem-3": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.912640359363358,
+          "internal_energy": 15.912640359472435,
+          "relative_defect": 6.8547512706895864e-12
+        },
+        "lfem-4": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.924564939248379,
+          "internal_energy": 15.92456493920324,
+          "relative_defect": 2.8345517644094754e-12
+        },
+        "huzhang-2": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.551413968191053,
+          "coupling_work": 0.0005433384226249897,
+          "traction_dual_work": 16.551957306613676,
+          "relative_coupling_ratio": 3.28273115317635e-05
+        },
+        "huzhang-3": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.190955105606744,
+          "coupling_work": 3.1533663989057785e-11,
+          "traction_dual_work": 16.190955105638277,
+          "relative_coupling_ratio": 1.9476098712754775e-12
+        },
+        "huzhang-4": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.065886581121077,
+          "coupling_work": 6.471738649946627e-11,
+          "traction_dual_work": 16.065886581185794,
+          "relative_coupling_ratio": 4.028248685355172e-12
+        }
+      },
+      "huzhang-2": {
+        "lfem-2": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.751785738156242,
+          "internal_energy": 15.751785738242953,
+          "relative_defect": 5.504841431942524e-12
+        },
+        "lfem-3": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.80082861275388,
+          "internal_energy": 15.800828612889408,
+          "relative_defect": 8.577217586718794e-12
+        },
+        "lfem-4": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.81333637306494,
+          "internal_energy": 15.813336373069058,
+          "relative_defect": 2.6038750182683357e-13
+        },
+        "huzhang-2": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.380941995660162,
+          "coupling_work": 0.0005004549217193215,
+          "traction_dual_work": 16.381442450581883,
+          "relative_coupling_ratio": 3.055104656691344e-05
+        },
+        "huzhang-3": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.06333888328012,
+          "coupling_work": 3.9972729099435004e-11,
+          "traction_dual_work": 16.063338883320093,
+          "relative_coupling_ratio": 2.4884446122867705e-12
+        },
+        "huzhang-4": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 15.942441897334813,
+          "coupling_work": 1.5798230335284076e-11,
+          "traction_dual_work": 15.942441897350612,
+          "relative_coupling_ratio": 9.909542363096305e-13
+        }
+      },
+      "huzhang-3": {
+        "lfem-2": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.733891908288065,
+          "internal_energy": 15.733891908277412,
+          "relative_defect": 6.770614688328812e-13
+        },
+        "lfem-3": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.783580182778394,
+          "internal_energy": 15.783580182780675,
+          "relative_defect": 1.4450727625653456e-13
+        },
+        "lfem-4": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.79620121897069,
+          "internal_energy": 15.796201219062974,
+          "relative_defect": 5.842133363865554e-12
+        },
+        "huzhang-2": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.383300095350695,
+          "coupling_work": 0.0005143507090610063,
+          "traction_dual_work": 16.383814446059755,
+          "relative_coupling_ratio": 3.139481704342158e-05
+        },
+        "huzhang-3": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.054534611526044,
+          "coupling_work": 3.3478319058356755e-11,
+          "traction_dual_work": 16.05453461155952,
+          "relative_coupling_ratio": 2.085287419936897e-12
+        },
+        "huzhang-4": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 15.929433030046946,
+          "coupling_work": -3.141549650967552e-11,
+          "traction_dual_work": 15.929433030015531,
+          "relative_coupling_ratio": 1.9721666458823698e-12
+        }
+      },
+      "huzhang-4": {
+        "lfem-2": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.75370746080655,
+          "internal_energy": 15.75370746082853,
+          "relative_defect": 1.395154964542806e-12
+        },
+        "lfem-3": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.804824695706404,
+          "internal_energy": 15.804824695708442,
+          "relative_defect": 1.2891514673652767e-13
+        },
+        "lfem-4": {
+          "identity": "fTu_equals_uKu",
+          "external_work": 15.81805239229216,
+          "internal_energy": 15.818052392194785,
+          "relative_defect": 6.155912905741312e-12
+        },
+        "huzhang-2": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.417906089592233,
+          "coupling_work": 0.0005500471432756896,
+          "traction_dual_work": 16.418456136735507,
+          "relative_coupling_ratio": 3.350288034747499e-05
+        },
+        "huzhang-3": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 16.08559884965052,
+          "coupling_work": 3.6221592826496786e-11,
+          "traction_dual_work": 16.08559884968674,
+          "relative_coupling_ratio": 2.2518025698050865e-12
+        },
+        "huzhang-4": {
+          "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+          "complementary_energy": 15.954920477225562,
+          "coupling_work": -8.433393572918795e-11,
+          "traction_dual_work": 15.954920477141227,
+          "relative_coupling_ratio": 5.285763463977664e-12
+        }
+      }
+    }
+  }
+}

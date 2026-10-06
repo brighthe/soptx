@@ -1,0 +1,31 @@
+{
+  "case_id": "compliance-fixed-fixed-half",
+  "model": "FixedFixedBeamHalfDomain2d",
+  "method": "lfem",
+  "order": 4,
+  "nx": 80,
+  "ny": 20,
+  "optimizer": "mma",
+  "load_discretization": "p1_trace_l2_projection",
+  "integration_order": 10,
+  "volume_fraction": 0.39999999147354004,
+  "relative_equilibrium_residual": 2.769484853635664e-11,
+  "optimization_iterations": 254,
+  "converged": true,
+  "termination_reason": null,
+  "solver": "mumps",
+  "overrides": {
+    "optimizer": "mma"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-09-10T14:11:53+00:00",
+    "git_revision": "ad95594848d57a19202a64d377f9a9cc4c281c46",
+    "git_dirty": true,
+    "fealpy_git_revision": "f474a5775240544674037b5b5f830042dda710e3",
+    "fealpy_git_dirty": false,
+    "reproducible": false
+  },
+  "compliance": 15.92456493929453,
+  "compliance_domain": "half",
+  "full_structure_factor": 2.0
+}
