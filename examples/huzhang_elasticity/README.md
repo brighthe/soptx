@@ -170,6 +170,8 @@ PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py
 PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --boundary mixed
 # 低阶 p<=3 (自动加矩阵跳量稳定化)
 PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --degree 2 --levels 2,4,8
+# p=1 要到 n=16 才看清渐近阶 (约 4 分钟, 峰值内存约 9 GB; --boundary mixed 约 16 分钟)
+PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --degree 1 --levels 4,8,16
 # 只跑小网格检查流程 (秒级, 不判定渐近阶)
 PYTHONPATH=src python examples/huzhang_elasticity/verify_3d_convergence.py --levels 1,2
 ```

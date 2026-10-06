@@ -220,7 +220,8 @@
   4.76 / 3.92 / 3.92，见 `examples/huzhang_elasticity/results_analysis.md` §5.3。
 - 三维跳量稳定化（分支 `claude/huzhang-3d-jump`，known-issues「移植后遗留」最后一行）：面定向按几何判据；同时修复
   非齐次位移边界加稳定化时缺少数据项 $J_D(u_D, v)$ 的不相容（二维同样存在，现有算例 $u_D=0$ 未受影响）。三维
-  $p=1,2,3$ 收敛阶见 `examples/huzhang_elasticity/results_analysis.md` §5.4，$p=1$ 仍在渐近区之前。
+  $p=1,2,3$ 均达理论阶，见 `examples/huzhang_elasticity/results_analysis.md` §5.4；三维 $p=1$ 在原惩罚系数下稳定性不足，
+  系数另乘经验因子 10（`_PHYSICAL_H_FACTOR`），$p=2,3$ 不变。另记 `vector_jump` 在 $p=1$ 时不收敛（二维同样）。
 
 ### 2.4 统一清理（已完成）
 

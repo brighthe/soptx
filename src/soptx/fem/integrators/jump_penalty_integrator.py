@@ -13,6 +13,13 @@ from soptx.fem.integrator import LinearInt, OpInt, FaceInt, enable_cache
 
 from soptx.materials import LinearElasticMaterial
 
+# 'physical_h' 缩放律 alpha = c * mu / L0**2 中的经验因子 c, 以 (几何维数, 应力次数) 为键,
+# 未列出的取 1 (二维复现论文表 5.2). 只有三维 p=1 加大: 单位立方体正弦制造解的扫描中,
+# 1 倍时稳定性不足, n=16 上 u 仍只有约 0.7 阶; 10 倍误差最小, u -> 1 阶, sigma -> 1.5 阶;
+# 100 倍以上逐渐锁死. 惩罚越大 div sigma 误差越大, 三维 p=2, 3 在 1 倍下已达理论阶, 加大反而
+# 使 div 误差增加 2 至 6 成, 故保持 1. 见 examples/huzhang_elasticity/results_analysis.md §5.4.
+_PHYSICAL_H_FACTOR = {(3, 1): 10.0}
+
 class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
     """位移跳量惩罚项的面积分子.
 
@@ -436,6 +443,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         # 1) 'physical_h' (默认, 论文式物理量纲缩放):
         #    c = Σ_F (μ/L0²)·hF·∫[[u]]:[[v]]ds, hF 幂次为 +1, 系数 α=μ/L0².
         #    integrand 已含面测度 fm(=hF, 2D), 故此处再乘 hF 一次方对齐论文.
+        #    三维 p=1 另乘经验因子 10, 见 _PHYSICAL_H_FACTOR.
         #    实测 (sinusoidal 混合边界制造解, k=1,2, nx=2..32) 恢复细层收敛:
         #    k=1: u→1 阶, σ→1.53 阶 (超收敛), H(div)→1 阶;
         #    k=2: u→2 阶, σ→2.02 阶, H(div)→1 阶 (降阶, 与论文表 5.2 逐格一致).
@@ -454,7 +462,7 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
 
             coefficient = gamma * hF ** -1
         else:
-            alpha = mu / L0 ** 2
+            alpha = _PHYSICAL_H_FACTOR.get((mesh.geo_dimension(), p), 1.0) * mu / L0 ** 2
             coefficient = alpha * hF
 
         # 两条缩放律的系数都取自基材; 密度型拓扑优化下再按两侧单元的相对剪切
@@ -547,7 +555,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         -----
         面系数 ``c_F``: ``penalty_scaling='gamma_hinv'`` 时为 ``gamma / hF``, ``gamma``
         在位移空间为 ``P_0`` 时取 ``0.01 E``, 否则取 ``0.01 mu``; 其余情形为
-        ``mu / L0**2 * hF``, ``L0`` 为网格包围盒的最大边长. ``hF`` 在二维为面测度,
+        ``c * mu / L0**2 * hF``, ``L0`` 为网格包围盒的最大边长, 经验因子 ``c`` 在三维应力
+        次数 1 时为 10, 其余为 1 (见 ``_PHYSICAL_H_FACTOR``). ``hF`` 在二维为面测度,
         三维为面测度的平方根. 给出 ``density_shear_ratio`` 时再乘以
         ``_face_penalty_scale`` 的逐面标度.
         """
@@ -634,6 +643,8 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         -----
         本变体不读 ``material``, ``penalty_scaling`` 与 ``density_shear_ratio``.
         边界面上跳量取迹本身.
+        系数 ``1 / hF`` 对 ``P_0`` 位移 (应力 p=1) 过强: 二维、三维正弦制造解上
+        位移与应力误差都不随加密下降, 散度误差反而增长, 此时应选 ``'matrix_jump'``.
         """
         ws, vector_jump, hF, fm = self.fetch_vector_jump(space)
         # hF: (NF, )

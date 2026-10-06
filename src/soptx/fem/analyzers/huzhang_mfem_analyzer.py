@@ -73,6 +73,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                        与系统 MUMPS 库.
         stabilization : 低阶 (p <= GD) 稳定化项的选取.'matrix_jump' (默认) 与
                         'vector_jump' 对应 JumpPenaltyIntegrator 的两种跳量形式;
+                        'vector_jump' 在 p=1 时不收敛, 见该积分子的 Notes;
                         'none' 则不加稳定化项, 用于消融验证低阶失稳.
                         p >= GD + 1 时原生格式本身稳定, 本参数被忽略.
         stabilization_coefficient : {'fixed', 'density_dependent'}, optional
