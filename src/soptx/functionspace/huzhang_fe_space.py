@@ -5,10 +5,12 @@ from soptx.mesh import MeshView
 class HuZhangFESpace:
     """Factory class for creating HuZhang finite element spaces."""
     def __new__(cls, mesh: MeshView, p: int = 1, ctype: str = 'C', use_relaxation: bool = False,
-                corners=None):
+                corners=None, traction_face=None):
         TD = mesh.top_dimension()
 
         if TD == 2:
+            if traction_face is not None:
+                raise ValueError("traction_face 只用于三维胡张元的标架对齐, 二维不接受.")
             from .huzhang_fe_space_2d import HuZhangFESpace2d
             return HuZhangFESpace2d(mesh, p=p, ctype=ctype, use_relaxation=use_relaxation,
                                     corners=corners)
@@ -16,6 +18,6 @@ class HuZhangFESpace:
             if use_relaxation:
                 raise ValueError("三维胡张元没有角点松弛, use_relaxation 只能为 False.")
             from .huzhang_fe_space_3d import HuZhangFESpace3d
-            return HuZhangFESpace3d(mesh, p=p, ctype=ctype)
+            return HuZhangFESpace3d(mesh, p=p, ctype=ctype, traction_face=traction_face)
         else:
             raise ValueError(f"Unsupported dimension: {TD}. Only 2D and 3D are supported.")

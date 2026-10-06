@@ -513,6 +513,9 @@ class HuZhangFESpace3d(FunctionSpace):
         应力多项式次数 ``k``, 默认 1.
     ctype : str, optional
         保留参数, 当前未使用.
+    traction_face : TensorLike, optional
+        形状 ``(NF,)`` 的布尔数组, 标记将强施加牵引 (含对称面切向牵引) 的边界面;
+        边界顶点与边界边的标架按这些面的法向对齐, 见 ``dof_frame``. 缺省取全部边界面.
 
     Attributes
     ----------
@@ -520,10 +523,13 @@ class HuZhangFESpace3d(FunctionSpace):
         自由度管理对象.
     use_relaxation : bool
         恒为 False; 与二维空间同名, 供分析器统一判断.
+    traction_face : TensorLike
+        形状 ``(NF,)`` 的布尔数组, 标架对齐所依据的牵引面.
     """
-    def __init__(self, mesh, p: int=1, ctype='C'):
+    def __init__(self, mesh, p: int=1, ctype='C', traction_face: Optional[TensorLike]=None):
         self.mesh = mesh
         self.p = p
+        self.traction_face = mesh.boundary_face_flag() if traction_face is None else bm.asarray(traction_face)
 
         self.dof = HuZhangFEDof3d(mesh, p)
 
@@ -582,21 +588,23 @@ class HuZhangFESpace3d(FunctionSpace):
         - :math:`PSP = 0`: :math:`S = \mathrm{sym}(n \otimes w)`, :math:`w = 2Sn - (n^{\mathsf T}Sn)n`,
           故 :math:`\sigma : S = t \cdot w` 只依赖牵引 :math:`t = \sigma n`; 标架单位正交时系数为
           :math:`(\sigma : S) / \|S\|_F^2`, 即 ``num_k * (sigma : S_k)``;
-        - 其余情况: 标架向量与边界法向既不平行也不正交, 无法只由牵引确定.
+        - 其余情况: 单个面的牵引不足以确定 :math:`\sigma : S` (折棱与角点上), 联合包含该点的
+          全部牵引面求值, 见 ``_joint_traction_values``.
 
-        ``tangential_only`` 为 True 时只取 :math:`n^{\mathsf T}Sn = 0` 的切向分量.
+        ``tangential_only`` 为 True 时只取切向约束 :math:`\sigma : \mathrm{sym}(n \otimes b)`,
+        :math:`b \perp n`, 即 :math:`P S n \neq 0` 的分量.
 
         Returns
         -------
         dofs : TensorLike
             受约束的全局自由度编号 (去重, 升序).
         values : TensorLike
-            对应取值; 被多个面写入的自由度取平均.
+            对应取值; 由逐面公式确定且被多个面写入的自由度取平均.
 
         Raises
         ------
         NotImplementedError
-            某个受约束的标架张量含切向-切向分量 (非坐标对齐边界上的顶点等).
+            某个受约束的标架张量不在牵引约束子空间内 (如非 90 度折棱上的对称面切向约束).
         """
         from .huzhang_fe_space_2d import boundary_outward_sign
 
@@ -615,7 +623,7 @@ class HuZhangFESpace3d(FunctionSpace):
         eye = bm.eye(3, dtype=self.ftype)
         tol = 1e-10
 
-        dofs, values = [], []
+        entries = []
         for i in range(4):
             on = f2c[:, 2] == i
             if not bool(bm.any(on)):
@@ -647,29 +655,97 @@ class HuZhangFESpace3d(FunctionSpace):
             norm2 = bm.sum(S ** 2, axis=(-2, -1))
 
             present = norm2 > tol
-            constrained = present & (bm.max(bm.abs(Sn), axis=-1) > tol)
+            PSn = Sn - nSn[..., None] * n[:, None, None, :]
             if tangential_only:
-                constrained = constrained & (bm.abs(nSn) < tol)
-            misaligned = constrained & (bm.max(bm.abs(tt), axis=(-2, -1)) > tol)
-            if bool(bm.any(misaligned)):
-                raise NotImplementedError(
-                    "边界上的标架向量与边界法向既不平行也不正交 (如非坐标对齐边界上的顶点), "
-                    "牵引无法只由法向迹确定; 需要顶点标架对齐或角点松弛, 尚未实现."
-                )
+                touch = present & (bm.max(bm.abs(PSn), axis=-1) > tol)
+                single = bm.max(bm.abs(tt), axis=(-2, -1)) < tol
+                single = single & (bm.abs(nSn) < tol)
+            else:
+                touch = present & (bm.max(bm.abs(Sn), axis=-1) > tol)
+                single = bm.max(bm.abs(tt), axis=(-2, -1)) < tol
             w = 2.0 * Sn - nSn[..., None] * n[:, None, None, :]
             val = bm.einsum('fqa,fqla->fql', t, w) / bm.where(present, norm2, 1.0)
-            gidx = bm.broadcast_to(c2d[cids][:, None, :], constrained.shape)
-            dofs.append(gidx[constrained])
-            values.append(val[constrained])
+            gidx = bm.broadcast_to(c2d[cids][:, None, :], present.shape)
+            nb = bm.broadcast_to(n[:, None, None, :], Sn.shape)
+            tb = bm.broadcast_to(t[:, :, None, :], Sn.shape)
+            entries.append((gidx[present], S[present], nb[present], tb[present],
+                            touch[present], single[present], val[present], norm2[present]))
 
-        dofs = bm.concat(dofs) if dofs else bm.zeros((0,), dtype=self.itype)
-        values = bm.concat(values) if values else bm.zeros((0,), dtype=self.ftype)
-        unique, inverse = bm.unique(dofs, return_inverse=True)
+        g, S, n, t, touch, single, val, norm2 = [bm.concat(a) for a in zip(*entries)] if entries else [None] * 8
+        if g is None or not bool(bm.any(touch)):
+            return bm.zeros((0,), dtype=self.itype), bm.zeros((0,), dtype=self.ftype)
+
+        # 某个面上不能单独由该面牵引确定的自由度, 联合包含该点的全部牵引面求值
+        joint = bm.zeros((self.number_of_global_dofs(),), dtype=bm.bool)
+        joint = bm.set_at(joint, g[touch & ~single], True)
+        in_joint = joint[g]
+
+        # 其余自由度: 逐面公式, 被多个面写入的取平均
+        old = touch & ~in_joint
+        unique, inverse = bm.unique(g[old], return_inverse=True)
         total = bm.zeros(unique.shape, dtype=self.ftype)
         count = bm.zeros(unique.shape, dtype=self.ftype)
-        total = bm.index_add(total, inverse, values)
-        count = bm.index_add(count, inverse, bm.ones_like(values))
-        return unique, total / count
+        total = bm.index_add(total, inverse, val[old])
+        count = bm.index_add(count, inverse, bm.ones_like(val[old]))
+        dofs, values = unique, total / count
+
+        if bool(bm.any(in_joint)):
+            jd, jv = self._joint_traction_values(g[in_joint], S[in_joint], n[in_joint], t[in_joint],
+                                                 norm2[in_joint], tangential_only)
+            dofs = bm.concat([dofs, jd])
+            values = bm.concat([values, jv])
+            order = bm.argsort(dofs)
+            dofs, values = dofs[order], values[order]
+        return dofs, values
+
+    def _joint_traction_values(self, g, S, n, t, norm2, tangential_only: bool):
+        r"""联合同一格点上全部牵引面求标架系数.
+
+        对每个自由度 :math:`g`, 记包含该点的牵引面法向与牵引为 :math:`(n_j, t_j)`, 以最小
+        二乘求 :math:`S = \sum_j \mathrm{sym}(n_j \otimes w_j)` (切向版本要求 :math:`w_j \perp n_j`),
+        则 :math:`\sigma : S = \sum_j t_j \cdot w_j`, 系数为其除以 :math:`\|S\|_F^2`. 数据相容时
+        结果与 :math:`w_j` 的取法无关, 不相容时 (如受载面与自由面相交的角点) 为最小二乘折中.
+
+        Raises
+        ------
+        NotImplementedError
+            :math:`S` 不在牵引约束子空间内 (如非 90 度折棱上的对称面切向约束).
+        """
+        order = bm.argsort(g, stable=True)
+        g, S, n, t, norm2 = g[order], S[order], n[order], t[order], norm2[order]
+        dofs, start, counts = bm.unique(g, return_index=True, return_counts=True)
+        group = bm.cumsum(bm.concat([bm.zeros((1,), dtype=self.itype),
+                                     bm.astype(g[1:] != g[:-1], self.itype)]), axis=0)
+        pos = bm.arange(len(g)) - start[group]
+        G, m = len(dofs), int(bm.max(counts))
+
+        eye = bm.eye(3, dtype=self.ftype)
+        M = 0.5 * (bm.einsum('ea,bc->eabc', n, eye) + bm.einsum('ac,eb->eabc', eye, n)).reshape(-1, 9, 3)
+        data = t
+        if tangential_only:
+            k = bm.argmin(bm.abs(n), axis=-1)
+            t1 = bm.cross(n, eye[k])
+            t1 = t1 / bm.linalg.norm(t1, axis=-1, keepdims=True)
+            T = bm.stack([t1, bm.cross(n, t1)], axis=-1)                      # (E, 3, 2) 切向基
+            M = bm.einsum('eic,ecd->eid', M, T)
+            data = bm.einsum('ea,ead->ed', t, T)
+        k = M.shape[-1]
+
+        A = bm.zeros((G, 9, m, k), dtype=self.ftype)
+        A[group, :, pos, :] = M
+        A = A.reshape(G, 9, m * k)
+        D = bm.zeros((G, m, k), dtype=self.ftype)
+        D[group, pos, :] = data
+        b = S[start].reshape(G, 9)
+        x = bm.einsum('gij,gj->gi', bm.linalg.pinv(A), b)
+        residual = bm.linalg.norm(bm.einsum('gij,gj->gi', A, x) - b, axis=-1) / bm.linalg.norm(b, axis=-1)
+        if bool(bm.any(residual > 1e-8)):
+            raise NotImplementedError(
+                "边界上的标架张量不在牵引约束子空间内 (如非 90 度折棱上的对称面切向约束), "
+                "牵引无法只由法向迹确定, 尚未实现."
+            )
+        values = bm.sum(D.reshape(G, m * k) * x, axis=-1) / norm2[start]
+        return dofs, values
 
     def boundary_interpolate(self,
                              gd: Union[Callable, TensorLike],
@@ -679,7 +755,9 @@ class HuZhangFESpace3d(FunctionSpace):
         r"""在牵引边界上强施加法向迹 :math:`\sigma n = t` (混合法的本质边界).
 
         取值规则见 ``_traction_writes``; 与二维约定一致, 写入的系数为
-        ``num_k * (sigma : S_k)``, 被多个面重复写入的自由度取平均.
+        ``num_k * (sigma : S_k)``. 边界不必与坐标轴对齐: 标架按 ``traction_face`` 的法向
+        对齐, 折棱与角点上联合多个面的牵引求值. 用小平面逼近的曲面会被当作真实折棱处理,
+        顶点应力被过度约束, 不在适用范围内.
 
         Parameters
         ----------
@@ -704,7 +782,8 @@ class HuZhangFESpace3d(FunctionSpace):
         Raises
         ------
         NotImplementedError
-            边界标架未与边界法向对齐 (非坐标对齐边界上的顶点等).
+            受约束的标架张量不在牵引约束子空间内 (如 ``threshold`` 选了 ``traction_face``
+            之外的面, 使标架未按其法向对齐).
         """
         return self._write_traction(gd, uh, threshold, tangential_only=False)
 
@@ -718,7 +797,8 @@ class HuZhangFESpace3d(FunctionSpace):
         r"""只强施加切向牵引 (对称面), 法向-法向分量保持自由.
 
         与 ``boundary_interpolate`` 相同, 但只写入 :math:`n^{\mathsf T} S n = 0` 的分量, 即
-        :math:`\sigma : \mathrm{sym}(n \otimes b)`, :math:`b \perp n`.
+        :math:`\sigma : \mathrm{sym}(n \otimes b)`, :math:`b \perp n`. 两个对称面以非 90 度
+        折棱相交时, 切向约束与任何单位正交标架都不对齐, 抛出 NotImplementedError.
 
         Returns
         -------
@@ -757,8 +837,15 @@ class HuZhangFESpace3d(FunctionSpace):
         ``edge_unit_tangent``. 边标架为 ``[n, t x n, t]``, 其中 ``t`` 为
         ``edge_unit_tangent``, ``n`` 取某个相邻面的单位法向 (按 ``face_to_edge`` 写入,
         同一条边多次写入时以最后一次为准; 任取一个都与 ``t`` 正交). 边界边最后再按边界面
-        写一次, 使其 ``n`` 取边界面法向: 牵引强施加要求边界上的标架向量与边界法向平行或
-        正交, 见 ``boundary_interpolate``.
+        写一次, 使其 ``n`` 取边界面法向.
+
+        牵引强施加要求每个受约束的标架张量落在牵引约束子空间内, 见 ``_traction_writes``.
+        为此按 ``traction_face`` 的法向对齐边界顶点与边界边的标架, 已对齐的保持不变
+        (坐标对齐的网格上即原标架): 邻接法向不全坐标对齐的顶点, 只有一个法向 ``n`` 时改取
+        ``[n, t1, t2]``, 有两个以上不同法向 ``n1, n2, ...`` 时改取 ``n1`` 与 ``n2`` 正交化所得的
+        ``[n1, n2', n1 x n2']``: 折棱上 ``n1 x n2'`` 即公共切向, 90 度折棱与角点上各向量即各面法向.
+        只邻接一个牵引法向的边界边, 若其 ``n`` 与该法向既不平行也不正交, 改取该法向. 标架只改变
+        基底, 不改变离散空间.
 
         Returns
         -------
@@ -801,10 +888,59 @@ class HuZhangFESpace3d(FunctionSpace):
         eframe[f2e, 0] = fn[:, None] 
         isbdface = mesh.boundary_face_flag()
         eframe[f2e[isbdface], 0] = fn[isbdface, None]
+        self._align_traction_frames(nframe, eframe)
         eframe[:, 1] = bm.cross(et, eframe[:, 0])
         eframe[:, 2] = et 
 
         return nframe, eframe, fframe, cframe
+
+    def _align_traction_frames(self, nframe: TensorLike, eframe: TensorLike) -> None:
+        """按牵引面法向原地对齐边界顶点标架与边界边标架的第 0 个向量, 规则见 ``dof_frame``."""
+        mesh = self.mesh
+        tol = 1e-10
+        fidx = bm.nonzero(self.traction_face)[0]
+        if len(fidx) == 0:
+            return
+        fn = mesh.face_unit_normal()[fidx]                                    # (NFt, 3)
+
+        def incident(entity, NE):
+            """每个实体任取的一个邻接牵引法向 a, 一个与 a 不平行的邻接法向 b (无则为零), 是否邻接非坐标对齐法向."""
+            ids = entity.reshape(-1)
+            nrm = bm.repeat(fn, entity.shape[1], axis=0)
+            a = bm.zeros((NE, 3), dtype=self.ftype)
+            a[ids] = nrm
+            other = bm.abs(bm.sum(a[ids] * nrm, axis=-1)) < 1 - tol
+            b = bm.zeros((NE, 3), dtype=self.ftype)
+            b[ids[other]] = nrm[other]
+            oblique = bm.astype(bm.max(bm.abs(nrm), axis=-1) < 1 - tol, self.ftype)
+            oblique = bm.index_add(bm.zeros((NE,), dtype=self.ftype), ids, oblique) > 0
+            has = bm.max(bm.abs(a), axis=-1) > 0
+            twofold = bm.max(bm.abs(b), axis=-1) > 0
+            return a, b, has, twofold, oblique
+
+        # 顶点: 邻接法向都坐标对齐时保留笛卡尔基, 否则由 a 与 b 正交化得 [a, b', a x b'],
+        # 只有一个法向时取 [a, t1, t2]
+        a, b, has, twofold, oblique = incident(mesh.entity('face')[fidx], mesh.number_of_nodes())
+        flat = has & oblique & ~twofold
+        if bool(bm.any(flat)):
+            nv = a[flat]
+            k = bm.argmin(bm.abs(nv), axis=-1)
+            t1 = bm.cross(nv, bm.eye(3, dtype=self.ftype)[k])
+            t1 = t1 / bm.linalg.norm(t1, axis=-1, keepdims=True)
+            nframe[bm.nonzero(flat)[0]] = bm.stack([nv, t1, bm.cross(nv, t1)], axis=1)
+        sharp = has & oblique & twofold
+        if bool(bm.any(sharp)):
+            av, bv = a[sharp], b[sharp]
+            bv = bv - bm.sum(av * bv, axis=-1, keepdims=True) * av
+            bv = bv / bm.linalg.norm(bv, axis=-1, keepdims=True)
+            nframe[bm.nonzero(sharp)[0]] = bm.stack([av, bv, bm.cross(av, bv)], axis=1)
+
+        # 边: 只邻接一个牵引法向时, 现有 n 须与之平行或正交; 邻接两个时标架含公共切向 t 即可
+        a, b, has, twofold, _ = incident(mesh.face_to_edge()[fidx], mesh.number_of_edges())
+        d = bm.abs(bm.sum(eframe[:, 0] * a, axis=-1))
+        fix = has & ~twofold & (d > tol) & (d < 1 - tol)
+        if bool(bm.any(fix)):
+            eframe[bm.nonzero(fix)[0], 0] = a[fix]
 
     def dof_frame_of_S(self):
         r"""由 ``dof_frame`` 张成的对称张量标架, 以 Voigt 分量 ``[xx, xy, xz, yy, yz, zz]`` 表示.

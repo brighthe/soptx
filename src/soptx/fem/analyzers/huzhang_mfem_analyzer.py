@@ -123,7 +123,13 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         corners = self._pde.mark_corners(self._mesh.entity('node'))
 
         self._GD = self._mesh.geo_dimension()
-        self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation, corners=corners)
+        if self._GD == 3:
+            # 三维边界标架按牵引面与对称面的法向对齐, 标记与 solve_state 相同
+            self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree,
+                                                 use_relaxation=self._use_relaxation,
+                                                 traction_face=self._traction_face_flag())
+        else:
+            self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation, corners=corners)
         self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
@@ -817,6 +823,16 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 close()
 
         return x
+
+    def _traction_face_flag(self) -> TensorLike:
+        """强施加牵引的边界面 (牵引面与对称面), 形状 ``(NF,)``, 按面重心调用 Problem 的标记."""
+        mesh = self._mesh
+        bc = mesh.entity_barycenter('face')
+        flag = self._pde.is_traction_boundary(bc)
+        symmetry_marker = getattr(self._pde, "is_symmetry_boundary", None)
+        if symmetry_marker is not None:
+            flag = flag | symmetry_marker(bc)
+        return mesh.boundary_face_flag() & flag
 
     def solve_state(self,
                     rho_val: Optional[Union[TensorLike, Function]] = None, 

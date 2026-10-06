@@ -4,7 +4,8 @@
 当 :math:`u \\in P_{p-1}` 且 :math:`\\sigma \\in P_p(\\mathbb S)` 时 (二维 :math:`p=3`, 三维 :math:`p=4`),
 精确解满足离散方程, 而离散问题适定, 故离散解即精确解. 全边界给非齐次位移边界
 (自然施加) 检验与维数无关的位移边界项; 把 :math:`x = 1` 换成牵引边界 (强施加) 检验
-牵引写值与系统修改. 二维为对照.
+牵引写值与系统修改. 二维为对照. 三维另在剪切立方体 (折棱非 90 度) 上把一个或两个相邻面
+换成牵引边界, 检验非坐标对齐边界上的牵引强施加.
 """
 
 from __future__ import annotations
@@ -100,6 +101,48 @@ class QuadraticPatchProblem:
         return (body, BoundaryTractionLoad(self.dim, self._on_x1, self._traction_x1))
 
 
+class ShearedPatchProblem(QuadraticPatchProblem):
+    """剪切立方体 :math:`x = A \\hat x` 上的二次位移补丁.
+
+    参考坐标 :math:`\\hat x_a = 1` (``a`` 取自 ``traction_axes``) 的面为牵引边界, 外法向
+    :math:`n \\propto A^{-\\mathsf T} e_a`, 牵引 :math:`\\sigma n`; 其余为非齐次位移边界.
+    """
+
+    def __init__(self, A, traction_axes):
+        super().__init__(3)
+        self.A = np.asarray(A, dtype=float)
+        self.A_inv = np.linalg.inv(self.A)
+        self.traction_axes = tuple(traction_axes)
+
+    def _on(self, points, axis):
+        ref = bm.to_numpy(points) @ self.A_inv.T
+        return bm.tensor(np.abs(ref[..., axis] - 1.0) < 1e-12)
+
+    @cartesian
+    def is_traction_boundary(self, points):
+        flag = bm.zeros(points.shape[:-1], dtype=bm.bool)
+        for axis in self.traction_axes:
+            flag = flag | self._on(points, axis)
+        return flag
+
+    @cartesian
+    def is_displacement_boundary(self, points):
+        return ~self.is_traction_boundary(points)
+
+    def _traction(self, axis):
+        n = self.A_inv[axis] / np.linalg.norm(self.A_inv[axis])
+        return lambda points: bm.tensor(self.stress_matrix(bm.to_numpy(points)) @ n)
+
+    def loads(self):
+        body = BodyForceLoad(3, cartesian(lambda p: bm.tensor(self.body_force(bm.to_numpy(p)))))
+        tractions = tuple(BoundaryTractionLoad(3, lambda x, a=a: self._on(x, a), self._traction(a))
+                          for a in self.traction_axes)
+        return (body,) + tractions
+
+
+SHEAR = np.array([[1.0, 0.4, 0.2], [0.0, 1.0, -0.3], [0.0, 0.0, 1.0]])
+
+
 def _solve(dim: int, p: int, traction_on_x1: bool = False):
     problem = QuadraticPatchProblem(dim, traction_on_x1=traction_on_x1)
     if dim == 2:
@@ -193,3 +236,31 @@ def test_stabilized_patch_with_nonhomogeneous_displacement(dim, p, u_degree, met
     sigma = np.stack([sigma[..., i, j] for i, j in pairs], axis=-1)
     sigma_h = bm.to_numpy(analyzer.huzhang_space.value(state["stress"][:], bcs))
     assert np.abs(sigma_h - sigma).max() < 1e-9 * max(np.abs(sigma).max(), np.abs(u).max())
+
+
+@pytest.mark.parametrize("traction_axes", [(0,), (0, 1)], ids=["one-face", "two-faces"])
+def test_sheared_cube_patch_with_oblique_traction(traction_axes):
+    """剪切立方体上牵引面与位移面, 牵引面与牵引面都以非 90 度折棱相交, p=4 补丁仍精确."""
+    p = 4
+    problem = ShearedPatchProblem(SHEAR, traction_axes)
+    cube = TetrahedronMesh.from_box([0, 1, 0, 1, 0, 1], nx=1, ny=1, nz=1)
+    mesh = TetrahedronMesh(bm.tensor(bm.to_numpy(cube.entity("node")) @ SHEAR.T), cube.entity("cell"))
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D", enable_logging=False)
+    analyzer = HuZhangMFEMAnalyzer(
+        disp_mesh=mesh, pde=problem, material=material, interpolation_scheme=None,
+        space_degree=p, integration_order=p + 3, use_relaxation=False,
+        solve_method="scipy", topopt_algorithm=None,
+    )
+    state = analyzer.solve_state(solver="scipy")
+    bcs = mesh.quadrature_formula(p + 2).get_quadrature_points_and_weights()[0]
+    points = bm.to_numpy(mesh.bc_to_point(bcs))
+
+    pairs = [(i, j) for i in range(3) for j in range(i, 3)]
+    sigma = problem.stress_matrix(points)
+    sigma = np.stack([sigma[..., i, j] for i, j in pairs], axis=-1)
+    sigma_h = bm.to_numpy(analyzer.huzhang_space.value(state["stress"][:], bcs))
+    assert np.abs(sigma_h - sigma).max() < 1e-9 * np.abs(sigma).max()
+
+    u = problem.displacement(points)
+    u_h = bm.to_numpy(state["displacement"](bcs))
+    assert np.abs(u_h - u).max() < 1e-9 * np.abs(u).max()
