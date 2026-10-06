@@ -95,7 +95,7 @@ plane_type = "plane_stress"
 mesh_type = "triangle-checkerboard"
 nx = 80
 ny = 20
-# 正文对比组 (--full 展开的就是它); 论文 5.2.1 节排除 k=1: P_0 位移丧失刚体转动 RM 完备性.
+# 正文对比组 (run.py --case 缺省展开的就是它); 论文 5.2.1 节排除 k=1: P_0 位移丧失刚体转动 RM 完备性.
 comparison_orders = [2, 3, 4]
 use_relaxation = true
 solve_method = "mumps"
@@ -157,7 +157,7 @@ mesh_type = "triangle-single-diagonal-symmetric"
 nx = 120
 ny = 40
 comparison_orders = [2]
-# lfem p=1 只作闭锁对照, 不进缺省也不进 --full; huzhang k=1 拓扑优化不可用 (P0 位移无刚体转动)。
+# lfem p=1 只作闭锁对照, 不进缺省展开; huzhang k=1 拓扑优化不可用 (P0 位移无刚体转动)。
 supplementary_orders = [1]
 use_relaxation = true
 solve_method = "mumps"

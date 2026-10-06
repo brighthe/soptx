@@ -103,9 +103,8 @@ class ProductCase:
     def run_commands(self) -> tuple[str, ...]:
         """补齐**尚缺**依赖要跑的命令; 已经齐的 source case 不出现在这里.
 
-        --full 的判据仍看该 case 在 REQUIRED_RUNS 里的**全部**依赖数而不是缺失数:
-        裸跑一条 case 只出注册表的缺省单条组合 (见 run.py 的 registered_defaults),
-        缺的那条未必就是缺省的那条, 只剩一个缺口时照样要靠这个旗标补上.
+        裸跑一条 case 即展开注册表的 methods x comparison_orders 全集 (见
+        config.resolve_runs), 缺哪几条都由同一条命令补上.
 
         缺失里带扩展名的那些 (postprocess/*.npz) 不是 run.py 的落盘产物, 而是
         ``plot.py export`` 从 density_final.vtu 冻结重分析导出的, 故补一条 export;
@@ -117,13 +116,7 @@ class ProductCase:
             root = config.OUTPUT_DIR / case
             if not any(self.resolve(run).is_relative_to(root) for run in missing):
                 continue
-            total = sum(
-                1
-                for run in self.required_runs
-                if self.resolve(run).is_relative_to(root)
-            )
-            suffix = " --full" if total > 1 else ""
-            commands.append(f"run.py --case {case}{suffix}")
+            commands.append(f"run.py --case {case}")
         if any(self.resolve(run).suffix for run in missing):
             commands.append("plot.py export")
         return tuple(commands)

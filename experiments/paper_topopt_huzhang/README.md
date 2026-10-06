@@ -8,7 +8,7 @@
 
 ```bash
 # 在实验目录运行
-~/miniconda3/envs/ihpcm/bin/python run.py --case compliance-fixed-fixed-half --full   # 六组优化
+~/miniconda3/envs/ihpcm/bin/python run.py --case compliance-fixed-fixed-half          # 六组优化
 ~/miniconda3/envs/ihpcm/bin/python table.py compliance-reanalysis                     # 表 5.3
 ~/miniconda3/envs/ihpcm/bin/python plot.py --case compliance-topology                 # 图 5.2
 ~/miniconda3/envs/ihpcm/bin/python plot.py --case compliance-convergence              # 图 5.3
@@ -70,7 +70,7 @@ experiments/paper_topopt_huzhang/
 每个 `[[cases]]` 必须包含三类独立参数:
 
 - `[cases.model]`: `name` 和 `parameters`, 选择 `soptx.problems` 中的物理模型并给出载荷、材料、平面假设等参数。
-- `[cases.discretization]`: 三角剖分方式 `mesh_type` (取值见 `pipeline.MESH_TYPES`, 由 `pipeline.create_mesh` 分派)、网格剖分、受控比较阶次 `comparison_orders`、可选的 `supplementary_orders` (只放宽 `--order` 白名单, 不进缺省与 `--full`)、角点松弛和线性求解器。
+- `[cases.discretization]`: 三角剖分方式 `mesh_type` (取值见 `pipeline.MESH_TYPES`, 由 `pipeline.create_mesh` 分派)、网格剖分、受控比较阶次 `comparison_orders`、可选的 `supplementary_orders` (只放宽 `--order` 白名单, 不进缺省展开)、角点松弛和线性求解器。
 - `[cases.optimization]`: 体积分数、过滤器、材料插值、优化器 (`oc` / `mma` / `al_mma`) 及其迭代参数。
 
 `mesh_type` 的两种取值:
@@ -103,7 +103,7 @@ python experiments/paper_topopt_huzhang/manufactured_convergence.py
 
 调用方拿到 id 即可运行; 不支持按文件路径直接执行 `driver.py`。
 
-省略 `--analyzer` / `--order` 时只展开一个组合: 方法取 `huzhang` (该 case 未注册时退回 `methods` 首项), 阶次取 `comparison_orders` 的最小值。论文那套方法/阶次对比是显式动作, 用 `--full` 展开成 `methods x comparison_orders` 全集, 也可以用 `--analyzer all` / `--order 2 3` 精确指定; 注册表里的 `methods` / `comparison_orders` 同时是白名单, 越界直接报错。
+省略的维度取注册表全集: 不给 `--analyzer` 即 `methods` 全部, 不给 `--order` 即 `comparison_orders` 全部, 因此 `run.py --case <id>` 就是论文该算例的完整对比组。调试单组时显式给出两者, 如 `--analyzer huzhang --order 2`; 只给一个维度时另一个维度仍取全集。注册表里的 `methods` / `comparison_orders` 同时是白名单, 越界直接报错。
 
 覆盖参数有两个通道:
 

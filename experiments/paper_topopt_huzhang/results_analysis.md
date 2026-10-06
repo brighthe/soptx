@@ -143,7 +143,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 | 外载荷 | 底边中点集中力 $P = 3\,\mathrm{N}$ ($l=1\,\mathrm{mm}$) | `load = -3.0`, `load_width = 1.0`, `load_discretization = "p1_trace_l2_projection"` | 采用 P1 迹 $L^2$ 投影施加均布面力；`load` 给的是完整域合力，载荷区以对称面为中心，左半域只落一半，故实际承担 $P/2 = 1.5\,\mathrm{N}$（与图 5.1 右图一致） |
 | 材料参数 | $E_0 = 30\,\mathrm{MPa}, \nu_0 = 0.4$ | `youngs_modulus = 30.0`, `poisson_ratio = 0.4`, `plane_type = "plane_stress"` | 平面应力 |
 | 网格 | 半域 $80 \times 20$ 矩形格, 每格一条对角线按 $(i+j)$ 奇偶交替 | `mesh_type = "triangle-checkerboard"`, `nx = 80`, `ny = 20` | 单元尺寸 $h = 1\,\mathrm{mm}$, 即 $r_{\min} = 2.4h$、载荷区宽 $l = h$ |
-| 比较阶次 | $k = 2, 3, 4$ | `comparison_orders = [2, 3, 4]` | $k=1$ 单列 `supplementary_orders`，不进缺省与 `--full` |
+| 比较阶次 | $k = 2, 3, 4$ | `comparison_orders = [2, 3, 4]` | $k=1$ 单列 `supplementary_orders`，不进缺省展开 |
 | 离散与求解 | 位移法与 Hu–Zhang 混合法在同一网格、同一载荷数据上对比 | `methods = ["lfem", "huzhang"]`, `use_relaxation = true`, `solve_method = "mumps"` | 角点松弛作用于半域矩形的四个几何角点（`mark_corners` → `axis_aligned_box_corners`）; 鞍点系统只能直接解, MUMPS 不引入迭代容差 |
 
 **优化参数**（状态方程之外、只服务于拓扑优化；对应 `[cases.optimization]` 的 C 拓扑建模 与 D 算法）
@@ -351,8 +351,8 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 # 5.1 前向制造解收敛阶 + 表 5.1 / 5.2
 python experiments/paper_topopt_huzhang/manufactured_convergence.py
 
-# 5.2.1 两端固支梁柔顺度 (--full 展开 comparison_orders = 2/3/4), 再冻结设计 6x6 交叉再分析 (表 5.3)
-python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half --full
+# 5.2.1 两端固支梁柔顺度 (缺省展开 comparison_orders = 2/3/4), 再冻结设计 6x6 交叉再分析 (表 5.3)
+python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half
 python experiments/paper_topopt_huzhang/table.py compliance-reanalysis
 
 # 5.2.2 轴承装置近不可压缩: 三种离散 x 两组材料, 再冻结设计交叉再分析 (表 5.4), 全实体域 h 收敛 (图 5.5)
@@ -364,10 +364,10 @@ done
 python experiments/paper_topopt_huzhang/table.py bearing-reanalysis
 python experiments/paper_topopt_huzhang/plot.py bearing-h-locking
 
-# 5.2.3 悬臂梁局部应力约束 (--full 展开 comparison_orders = 2/3/4)
+# 5.2.3 悬臂梁局部应力约束 (缺省展开 comparison_orders = 2/3/4)
 # 图 5.8~5.11 的数据由 discretization-probe 冻结构型重分析导出 (不是 export); k=2 优化与探针在独立结果集 R 上
 # 产出 (固定系数已是默认, 无需单独结果集), 见 README 首节
-python experiments/paper_topopt_huzhang/run.py --case cantilever-middle-2d-stress --full
+python experiments/paper_topopt_huzhang/run.py --case cantilever-middle-2d-stress
 python experiments/paper_topopt_huzhang/plot.py export
 python experiments/paper_topopt_huzhang/plot.py discretization-probe
 

@@ -341,18 +341,13 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "--method",
         dest="method",
         choices=("lfem", "huzhang", "all"),
-        help="分析链: LFEM 基线 / Hu--Zhang 混合元 / 全部; 缺省只跑 huzhang.",
+        help="分析链: LFEM 基线 / Hu--Zhang 混合元 / 全部; 缺省为 cases.toml 的 methods 全部.",
     )
     parser.add_argument(
         "--order",
         type=int,
         action="append",
-        help="受控比较空间有限元次数 k, 可重复传入; 缺省只跑 comparison_orders 的最小值.",
-    )
-    parser.add_argument(
-        "--full",
-        action="store_true",
-        help="按 cases.toml 的 methods x comparison_orders 全跑, 即论文的完整对比组.",
+        help="受控比较空间有限元次数 k, 可重复传入; 缺省为 cases.toml 的 comparison_orders 全部.",
     )
     parser.add_argument("--solver", choices=("scipy", "mumps"), help="线性求解器后端.")
     parser.add_argument(

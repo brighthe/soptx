@@ -31,7 +31,7 @@ def cases():
 
 
 def _arguments(**overrides) -> argparse.Namespace:
-    defaults = {"method": "all", "order": None, "check_only": False, "full": False}
+    defaults = {"method": None, "order": None, "check_only": False}
     return argparse.Namespace(**{**defaults, **overrides})
 
 
@@ -70,23 +70,25 @@ def test_flatten_parameters_merges_three_sections(cases):
     assert case["model"]["parameters"].items() <= flattened.items()
 
 
-def test_resolve_runs_defaults_to_one_combination(cases):
-    case = next(c for c in cases if set(c["methods"]) == {"lfem", "huzhang"})
+def test_resolve_runs_defaults_to_full_comparison(cases):
+    case = next(
+        c for c in cases
+        if set(c["methods"]) == {"lfem", "huzhang"} and len(c["discretization"]["comparison_orders"]) > 1
+    )
     orders = tuple(int(o) for o in case["discretization"]["comparison_orders"])
-    smallest = min(orders)
 
-    # 缺省 = 一个方法 x 一个阶次, 裸跑一条 case 就是一次运行
-    expected_method = paper_config.default_method(tuple(case["methods"]))
-    assert paper_config.resolve_runs(case, _arguments(method=None)) == [(expected_method, smallest)]
-    # 显式 --method all 只放开方法, 阶次仍是缺省的单值
-    assert paper_config.resolve_runs(case, _arguments()) == [
-        ("lfem", smallest),
-        ("huzhang", smallest),
+    # 缺省 = methods x comparison_orders 全集, 裸跑一条 case 就是论文该算例的完整对比组
+    full_runs = [("lfem", o) for o in orders] + [("huzhang", o) for o in orders]
+    assert paper_config.resolve_runs(case, _arguments()) == full_runs
+    assert paper_config.resolve_runs(case, _arguments(method="all")) == full_runs
+    # 只给一个维度时, 另一个维度仍取全集
+    assert paper_config.resolve_runs(case, _arguments(method="huzhang")) == [
+        ("huzhang", o) for o in orders
     ]
-
-    # --full 才展开成论文的完整对比组
-    full_runs = paper_config.resolve_runs(case, _arguments(method=None, full=True))
-    assert full_runs == [("lfem", o) for o in orders] + [("huzhang", o) for o in orders]
+    assert paper_config.resolve_runs(case, _arguments(order=[orders[-1]])) == [
+        ("lfem", orders[-1]),
+        ("huzhang", orders[-1]),
+    ]
 
     single = paper_config.resolve_runs(case, _arguments(method="huzhang", order=[orders[0]]))
     assert single == [("huzhang", orders[0])]
@@ -97,7 +99,7 @@ def test_resolve_runs_defaults_to_one_combination(cases):
 
 
 def test_supplementary_orders_are_whitelisted_but_never_swept(cases):
-    """补充专题阶次 (如半域梁的 k=1) 可显式点名跑, 但不该混进缺省与 --full."""
+    """补充专题阶次 (如半域梁的 k=1) 可显式点名跑, 但不该混进缺省展开."""
     case = next(
         (c for c in cases if c["discretization"].get("supplementary_orders")),
         None,
@@ -106,8 +108,6 @@ def test_supplementary_orders_are_whitelisted_but_never_swept(cases):
         pytest.skip("当前注册表没有声明 supplementary_orders 的算例")
     extra = int(case["discretization"]["supplementary_orders"][0])
 
-    swept = {order for _, order in paper_config.resolve_runs(case, _arguments(full=True))}
-    assert extra not in swept
     assert extra not in {order for _, order in paper_config.resolve_runs(case, _arguments())}
     assert paper_config.resolve_runs(case, _arguments(method="huzhang", order=[extra])) == [
         ("huzhang", extra)

@@ -54,7 +54,6 @@ from config import (
     CASES_FILE,
     ConfigurationError,
     bootstrap_source_path,
-    default_method,
     load_cases,
 )
 
@@ -106,17 +105,17 @@ def registered_defaults(case: dict) -> tuple[str, str, str, str, str, str]:
 
     阶次单列, 记号按各方法的惯用写法 (``huzhang`` 的 k 是应力阶, ``lfem`` 的 p 是
     位移阶, 见 ORDER_SYMBOLS), 因此列里带记号而不是裸数字: 同一个 2 在两条链上不是
-    同一个量. 分析链与阶次都是单值, 与 resolve_runs 的缺省口径一致: 裸跑一条 case
-    就是一次运行. 注册表里的完整对比组 (methods x comparison_orders) 要 --full 才展开.
+    同一个量. 与 resolve_runs 的缺省口径一致: 裸跑一条 case 即 methods x
+    comparison_orders 全集, 故两列列出全部取值.
     字段一律 get: 骨架状态的 planned case 允许缺项, --list 不该因此崩掉.
     """
     discretization = case.get("discretization", {})
     orders = discretization.get("comparison_orders")
     methods = tuple(case.get("methods", ()))
-    analyzer = default_method(methods) if methods else "-"
-    symbol = ORDER_SYMBOLS.get(analyzer, "p")
+    analyzer = ",".join(methods) or "-"
+    symbol = "/".join(ORDER_SYMBOLS.get(method, "p") for method in methods) or "p"
     order_text = (
-        f"{symbol}={min(int(order) for order in orders)}" if orders else "-"
+        f"{symbol}={','.join(str(int(order)) for order in orders)}" if orders else "-"
     )
     mesh_type = str(discretization.get("mesh_type", ""))
     kind = MESH_CLASS_NAMES.get(mesh_type, mesh_type) or "-"

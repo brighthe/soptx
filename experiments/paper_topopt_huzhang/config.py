@@ -152,25 +152,17 @@ def flatten_parameters(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# 缺省求解链取本文方法; 该 case 没注册 huzhang 时退回它声明的首项.
-DEFAULT_METHOD = "huzhang"
-
-
-def default_method(methods: tuple[str, ...]) -> str:
-    """给出该 case 缺省使用的求解链, 供 resolve_runs 与 run.py --list 共用一个口径."""
-    return DEFAULT_METHOD if DEFAULT_METHOD in methods else methods[0]
-
-
 def resolve_runs(
     case: dict[str, Any],
     arguments: argparse.Namespace,
 ) -> list[tuple[str, int]]:
     """将方法和空间次数选择展开为确定的运行组合.
 
-    ``--method`` 与 ``--order`` 省略时只跑一个默认组合 (见 ``default_method`` 与
-    ``comparison_orders`` 的最小值); ``--full`` 才展开成 ``cases.toml`` 声明的完整
-    对比组. 注册表里的 ``methods`` / ``comparison_orders`` 同时是这两个选项的白名单,
-    ``supplementary_orders`` 额外放宽 ``--order`` 的白名单但不参与任何自动展开.
+    命令行未指定的维度取注册表全集: 省略 ``--method`` 即 ``methods`` 全部, 省略
+    ``--order`` 即 ``comparison_orders`` 全部, 因此裸跑一条 case 就是论文该算例的完整
+    对比组; 调试单组时显式给出两者. 注册表里的 ``methods`` / ``comparison_orders``
+    同时是这两个选项的白名单, ``supplementary_orders`` 额外放宽 ``--order`` 的白名单
+    但不参与自动展开.
 
     参数:
         case: 目标算例配置字典.
@@ -182,28 +174,19 @@ def resolve_runs(
     异常:
         ConfigurationError: 当指定了不支持的方法或未注册的阶次时抛出.
     """
-    # 缺省只展开一个组合: 一条命令一次运行, 便于探索与调试; 论文那套方法/阶次
-    # 对比是显式动作, 走 --full (或显式 --method all / --order k1 k2).
-    full = bool(getattr(arguments, "full", False))
-
     discretization = case["discretization"]
     methods = tuple(case.get("methods", ()))
     if not methods:
         raise ConfigurationError(f"{case['id']}: 未声明 methods.")
-    requested = arguments.method or ("all" if full else default_method(methods))
+    requested = arguments.method or "all"
     if requested != "all" and requested not in methods:
         raise ConfigurationError(f"{case['id']}: 未配置方法 {requested}.")
 
     comparison_orders = tuple(int(o) for o in discretization["comparison_orders"])
-    # 补充专题阶次只进白名单, 不进缺省也不进 --full: 如半域梁的 k=1 只服务 supp-k1
+    # 补充专题阶次只进白名单, 不进缺省展开: 如半域梁的 k=1 只服务 supp-k1
     # 失效专题, 混进论文对比组会跑出一批不该进表的数.
     supplementary_orders = tuple(int(o) for o in discretization.get("supplementary_orders", ()))
-    if arguments.order:
-        selected_orders = tuple(arguments.order)
-    elif full:
-        selected_orders = comparison_orders
-    else:
-        selected_orders = (min(comparison_orders),)
+    selected_orders = tuple(arguments.order) if arguments.order else comparison_orders
     invalid = sorted(set(selected_orders) - set(comparison_orders) - set(supplementary_orders))
     if invalid:
         raise ConfigurationError(f"{case['id']}: 比较阶次不在配置中: {invalid}.")

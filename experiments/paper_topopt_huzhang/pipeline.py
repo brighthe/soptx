@@ -525,7 +525,7 @@ class FixedFixedBeamExperimentConfig:
     void_poisson_ratio: float = 0.3
     # 三角剖分方式, 取值见 MESH_TYPES
     mesh_type: MeshType = "triangle-checkerboard"
-    # 补充专题阶次: 只放宽 --order 白名单, 不进缺省也不进 --full (与 config.resolve_runs 同口径)
+    # 补充专题阶次: 只放宽 --order 白名单, 不进缺省展开 (与 config.resolve_runs 同口径)
     supplementary_orders: tuple[int, ...] = ()
 
 
@@ -675,7 +675,7 @@ class BearingDeviceExperimentConfig:
     void_poisson_ratio: float = 0.3
     # 三角剖分方式, 取值见 MESH_TYPES
     mesh_type: MeshType = "triangle-checkerboard"
-    # 补充专题阶次: 只放宽 --order 白名单, 不进缺省也不进 --full (与 config.resolve_runs 同口径)
+    # 补充专题阶次: 只放宽 --order 白名单, 不进缺省展开 (与 config.resolve_runs 同口径)
     supplementary_orders: tuple[int, ...] = ()
 
 
