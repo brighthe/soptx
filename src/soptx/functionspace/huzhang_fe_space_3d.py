@@ -518,6 +518,8 @@ class HuZhangFESpace3d(FunctionSpace):
     ----------
     dof : HuZhangFEDof3d
         自由度管理对象.
+    use_relaxation : bool
+        恒为 False; 与二维空间同名, 供分析器统一判断.
     """
     def __init__(self, mesh, p: int=1, ctype='C'):
         self.mesh = mesh
@@ -531,6 +533,8 @@ class HuZhangFESpace3d(FunctionSpace):
         self.device = mesh.device
         self.TD = mesh.top_dimension()
         self.GD = mesh.geo_dimension()
+        # 三维没有角点松弛; 与二维空间同名的属性供分析器统一判断
+        self.use_relaxation = False
 
 
     ## 自由度接口

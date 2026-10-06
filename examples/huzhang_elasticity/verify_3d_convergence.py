@@ -1,7 +1,7 @@
 """三维胡张混合元的制造解收敛阶验证.
 
-``HuZhangMFEMAnalyzer`` 的边界装配只实现了二维, 本脚本绕开分析器, 直接用
-``BilinearForm`` 与两个胡张积分子装配三维鞍点系统
+缺省经 ``HuZhangMFEMAnalyzer`` 求解; ``--assembly standalone`` 则绕开分析器, 直接用
+``BilinearForm`` 与两个胡张积分子装配同一个三维鞍点系统, 供交叉核对
 
 .. math::
 
@@ -35,11 +35,14 @@ import scipy.sparse.linalg as spla
 
 from soptx.backend import backend_manager as bm
 from soptx.decorator import cartesian
+from soptx.fem.analyzers.huzhang_mfem_analyzer import HuZhangMFEMAnalyzer
 from soptx.fem.bilinear_form import BilinearForm
 from soptx.fem.integrators import HuZhangMixIntegrator, HuZhangStressIntegrator, SourceIntegrator
 from soptx.fem.linear_form import LinearForm
 from soptx.functionspace import HuZhangFESpace, LagrangeFESpace, TensorFunctionSpace
+from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import TetrahedronMesh
+from soptx.problems.loads import BodyForceLoad
 from soptx.sparse.ops import bmat
 
 E, NU = 1.0, 0.3
@@ -100,9 +103,49 @@ def div_stress(x):
     return MU * lap[..., None] * C + (MU + LAM) * np.einsum("...ij,j->...i", H, C)
 
 
-def solve_level(n: int, p: int, q: int) -> dict:
-    """在 n x n x n 剖分上求解并返回误差与规模."""
-    mesh = TetrahedronMesh.from_box([0, 1, 0, 1, 0, 1], nx=n, ny=n, nz=n)
+@cartesian
+def _body_force(points):
+    """f = -div sigma."""
+    return bm.tensor(-div_stress(bm.to_numpy(points)))
+
+
+class SineProblem3d:
+    """满足胡张分析器协议的制造解: 全边界为齐次位移边界, 只受体力."""
+
+    domain = [0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
+
+    def mark_corners(self, node):
+        return bm.zeros((0, 3), dtype=bm.float64)
+
+    @cartesian
+    def is_displacement_boundary(self, points):
+        return bm.ones(points.shape[:-1], dtype=bm.bool)
+
+    @cartesian
+    def is_traction_boundary(self, points):
+        return bm.zeros(points.shape[:-1], dtype=bm.bool)
+
+    def loads(self):
+        return (BodyForceLoad(3, _body_force),)
+
+
+def _solve_with_analyzer(mesh, p: int, q: int):
+    """经 HuZhangMFEMAnalyzer 求解, 返回 (应力空间, 位移空间, 应力系数, 位移系数, 装配秒数, 求解秒数)."""
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D", enable_logging=False)
+    t0 = time.perf_counter()
+    analyzer = HuZhangMFEMAnalyzer(
+        disp_mesh=mesh, pde=SineProblem3d(), material=material, interpolation_scheme=None,
+        space_degree=p, integration_order=q, use_relaxation=False,
+        solve_method="scipy", topopt_algorithm=None,
+    )
+    state = analyzer.solve_state(solver="scipy")
+    t2 = time.perf_counter()
+    return (analyzer.huzhang_space, analyzer.tensor_space,
+            state["stress"][:], state["displacement"][:], None, t2 - t0)
+
+
+def _solve_standalone(mesh, p: int, q: int):
+    """直接用积分子装配并求解, 返回值同 ``_solve_with_analyzer``."""
     space_sigma = HuZhangFESpace(mesh, p=p)
     space_u = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=p - 1, ctype="D"), shape=(-1, 3))
 
@@ -116,20 +159,23 @@ def solve_level(n: int, p: int, q: int) -> dict:
     B = bform.assembly(format="csr", method="coalesce")
     K = bmat([[A, B], [B.T, None]], format="csr").to_scipy().tocsc()
 
-    @cartesian
-    def body_force(points):
-        return bm.tensor(-div_stress(bm.to_numpy(points)))
-
     lform = LinearForm(space_u)
-    lform.add_integrator(SourceIntegrator(source=body_force, q=q))
+    lform.add_integrator(SourceIntegrator(source=_body_force, q=q))
     f = bm.to_numpy(lform.assembly(format="dense"))
     gs = space_sigma.number_of_global_dofs()
     rhs = np.concatenate([np.zeros(gs), -f])
     t1 = time.perf_counter()
     x = spla.spsolve(K, rhs)
     t2 = time.perf_counter()
+    return space_sigma, space_u, bm.tensor(x[:gs]), bm.tensor(x[gs:]), t1 - t0, t2 - t1
 
-    sigma_h, u_h = bm.tensor(x[:gs]), bm.tensor(x[gs:])
+
+def solve_level(n: int, p: int, q: int, assembly: str) -> dict:
+    """在 n x n x n 剖分上求解并返回误差与规模."""
+    mesh = TetrahedronMesh.from_box([0, 1, 0, 1, 0, 1], nx=n, ny=n, nz=n)
+    solver = _solve_with_analyzer if assembly == "analyzer" else _solve_standalone
+    space_sigma, space_u, sigma_h, u_h, t_assembly, t_solve = solver(mesh, p, q)
+    gs = space_sigma.number_of_global_dofs()
     bcs, ws = mesh.quadrature_formula(q + 2).get_quadrature_points_and_weights()
     cm = bm.to_numpy(mesh.entity_measure("cell"))
     ws = bm.to_numpy(ws)
@@ -150,8 +196,8 @@ def solve_level(n: int, p: int, q: int) -> dict:
         "sigma_L2": l2(np.einsum("cqk,k->cq", e_sigma ** 2, voigt_weight)),
         "u_L2": l2(np.sum(e_u ** 2, axis=-1)),
         "div_sigma_L2": l2(np.sum(e_div ** 2, axis=-1)),
-        "assembly_seconds": round(t1 - t0, 3),
-        "solve_seconds": round(t2 - t1, 3),
+        "assembly_seconds": None if t_assembly is None else round(t_assembly, 3),
+        "solve_seconds": round(t_solve, 3),
     }
 
 
@@ -159,6 +205,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--degree", type=int, default=4, help="应力空间次数, 须 >= 4")
     parser.add_argument("--levels", default="2,3,4", help="逗号分隔的每方向剖分数; n=1 在渐近区之外")
+    parser.add_argument("--assembly", choices=["analyzer", "standalone"], default="analyzer",
+                        help="经分析器求解, 或直接用积分子装配 (交叉核对); analyzer 的计时含装配")
     parser.add_argument("--json", type=Path, default=None, help="结果 JSON 路径, 缺省写入 outputs/")
     args = parser.parse_args()
     if args.degree < 4:
@@ -168,7 +216,7 @@ def main() -> int:
     p = args.degree
     q = 2 * p
     levels = [int(s) for s in args.levels.split(",")]
-    rows = [solve_level(n, p, q) for n in levels]
+    rows = [solve_level(n, p, q, args.assembly) for n in levels]
 
     keys = ("sigma_L2", "u_L2", "div_sigma_L2")
     expected = {"sigma_L2": p + 1, "u_L2": p, "div_sigma_L2": p}
@@ -196,7 +244,8 @@ def main() -> int:
 
     out = args.json or OUTPUT_DIR / f"huzhang_3d_convergence_p{p}_levels{'-'.join(map(str, levels))}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"degree": p, "quadrature_order": q, "E": E, "nu": NU, "c": C.tolist(),
+    out.write_text(json.dumps({"degree": p, "quadrature_order": q, "assembly": args.assembly,
+                               "E": E, "nu": NU, "c": C.tolist(),
                                "order_margin": ORDER_MARGIN, "passed": bool(passed), "levels": rows},
                               indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"结果写入 {out}")

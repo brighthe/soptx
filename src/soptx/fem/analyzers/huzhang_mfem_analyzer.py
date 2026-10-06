@@ -122,6 +122,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         corners = self._pde.mark_corners(self._mesh.entity('node'))
 
         self._GD = self._mesh.geo_dimension()
+        if self._GD == 3 and self._space_degree <= 3 and self._stabilization != 'none':
+            raise NotImplementedError(
+                "三维跳量稳定化未实现: 三维须 space_degree >= 4, "
+                "或以 stabilization='none' 做不加稳定化的消融."
+            )
         self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation, corners=corners)
         self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
@@ -604,15 +609,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         mesh = self._mesh
         gdof = space_sigma.number_of_global_dofs()
 
-        # 网格没有 mesh.edgedata, 边界标记由分析器持有
+        # 网格没有 mesh.edgedata, 边界标记由分析器持有; 二维下面即边
         if self._natural_bc is not None:
-            disp_edge_flag = self._natural_bc
+            disp_face_flag = self._natural_bc
         else:
-            bc_edge = mesh.entity_barycenter('edge')
-            disp_edge_flag = self._pde.is_displacement_boundary(bc_edge)
+            bc_face = mesh.entity_barycenter('face')
+            disp_face_flag = self._pde.is_displacement_boundary(bc_face)
 
-        bdedge = mesh.boundary_edge_flag() & disp_edge_flag
-        NBF = int(bdedge.sum())
+        bdface = mesh.boundary_face_flag() & disp_face_flag
+        NBF = int(bdface.sum())
         if NBF == 0:
             return bm.zeros(gdof, dtype=bm.float64, device=space_sigma.device)
 
@@ -621,33 +626,38 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             # 未定义位移边界函数, 默认 u_D = 0 (齐次), 直接返回零向量
             return bm.zeros(gdof, dtype=bm.float64, device=space_sigma.device)
 
-        e2c = mesh.face_to_cell()[bdedge]           # (NBF, 3): [cell, neighbor, loc]
-        # <u_D, tau . n> 要的是外法向; face_unit_normal() 由全局边定向决定,
-        # 边界上有一半朝内, 必须乘回符号 (u_D = 0 时看不出来, 非齐次位移边界会反号)
-        en = mesh.face_unit_normal()[bdedge] * boundary_outward_sign(mesh, bdedge)[:, None]  # (NBF, GD)
-        edge_measure = mesh.entity_measure('edge')[bdedge]
+        GD = mesh.geo_dimension()
+        TD = mesh.top_dimension()
+        e2c = mesh.face_to_cell()[bdface]           # (NBF, 3): [cell, neighbor, loc]
+        # <u_D, tau . n> 要的是外法向; face_unit_normal() 由全局面定向决定,
+        # 边界上有一部分朝内, 必须乘回符号 (u_D = 0 时看不出来, 非齐次位移边界会反号)
+        en = mesh.face_unit_normal()[bdface] * boundary_outward_sign(mesh, bdface)[:, None]  # (NBF, GD)
+        face_measure = mesh.entity_measure('face')[bdface]
 
-        qf = mesh.quadrature_formula(self._integration_order, 'edge')
+        qf = mesh.quadrature_formula(self._integration_order, 'face')
         bcs, ws = qf.get_quadrature_points_and_weights()
         NQ = len(bcs)
-        bcsi = [bm.insert(bcs, i, 0, axis=-1) for i in range(3)]
+        # 单纯形的第 i 个局部面与顶点 i 相对, 面上的点在该单元的重心坐标第 i 个分量为 0
+        bcsi = [bm.insert(bcs, i, 0, axis=-1) for i in range(TD + 1)]
 
-        symidx = [[0, 1], [1, 2]]
+        # (tau n)_r = sum_s tau_rs n_s; symidx[r][s] 为 tau_rs 在 Voigt 分量中的位置
+        pairs = [(r, c) for r in range(GD) for c in range(r, GD)]
+        symidx = [[pairs.index((min(r, c), max(r, c))) for c in range(GD)] for r in range(GD)]
         ldof = space_sigma.number_of_local_dofs()
-        phin = bm.zeros((NBF, NQ, ldof, 2), dtype=space_sigma.ftype)
-        gval = bm.zeros((NBF, NQ, 2), dtype=space_sigma.ftype)
-        for i in range(3):
+        phin = bm.zeros((NBF, NQ, ldof, GD), dtype=space_sigma.ftype)
+        gval = bm.zeros((NBF, NQ, GD), dtype=space_sigma.ftype)
+        for i in range(TD + 1):
             flag = e2c[:, 2] == i
             if not bool(bm.any(flag)):
                 continue
             cids = e2c[flag, 0].astype(int)
-            phi = space_sigma.basis(bcsi[i], index=cids)   # (nflag, NQ, ldof, 3)
-            phin[flag, ..., 0] = bm.sum(phi[..., symidx[0]] * en[flag, None, None], axis=-1)
-            phin[flag, ..., 1] = bm.sum(phi[..., symidx[1]] * en[flag, None, None], axis=-1)
+            phi = space_sigma.basis(bcsi[i])[cids]   # (nflag, NQ, ldof, NS)
+            for r in range(GD):
+                phin[flag, ..., r] = bm.sum(phi[..., symidx[r]] * en[flag, None, None], axis=-1)
             points = mesh.bc_to_point(bcsi[i], index=cids)  # (nflag, NQ, GD)
             gval[flag] = gd(points)
 
-        b = bm.einsum('q, c, cqld, cqd -> cl', ws, edge_measure, phin, gval)
+        b = bm.einsum('q, c, cqld, cqd -> cl', ws, face_measure, phin, gval)
         cell2dof = space_sigma.cell_to_dof()[e2c[:, 0].astype(int)]
         F_vec = bm.zeros(gdof, dtype=space_sigma.ftype, device=space_sigma.device)
         bm.add.at(F_vec, cell2dof, b)
@@ -797,8 +807,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 ) -> Dict[str, Function]:
         """组装并直接求解鞍点系统, 得到应力与位移.
 
-        按边重心调用 ``pde.is_traction_boundary`` 与 ``pde.is_displacement_boundary``
-        标记边界边; 若 Problem 提供 ``is_symmetry_boundary``, 同时标记对称面.
+        按面重心 (二维即边重心) 调用 ``pde.is_traction_boundary`` 与
+        ``pde.is_displacement_boundary`` 标记边界面; 若 Problem 提供
+        ``is_symmetry_boundary``, 同时标记对称面.
         施加牵引边界条件后的系统矩阵, 右端项与解向量会被缓存, 供 ``solve_adjoint``,
         ``relative_state_residual`` 与 ``state_matrix_symmetry_error`` 复用.
 
@@ -824,7 +835,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         mesh = self._mesh
         pde = self._pde
-        bc = mesh.entity_barycenter('edge')
+        bc = mesh.entity_barycenter('face')
 
         # 网格不挂载 edgedata 用户数据字典, 边界标记由分析器持有
         self._essential_bc = pde.is_traction_boundary(bc)      # σ·n = t (强施加)
@@ -971,7 +982,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # --- 施加齐次边界条件: 边界应力自由度上的伴随载荷置零 ---
         essential_bc = self._essential_bc
         if essential_bc is None:
-            bc = self._mesh.entity_barycenter('edge')
+            bc = self._mesh.entity_barycenter('face')
             essential_bc = self._pde.is_traction_boundary(bc)
         _, is_bd_dof = space_sigma.set_dirichlet_bc(
             self._prescribed_traction_on_edges,
@@ -1135,11 +1146,15 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         # 原生 value 负责松弛坐标到基函数坐标的变换, 避免遗漏 TM.
         stress_vector = space.value(stress_dof[:], bcs) # (NC, NQ, NS)
 
+        # 空间按 [xx, xy, yy] / [xx, xy, xz, yy, yz, zz] 存储, 材料按先正应力后剪应力
+        # [xx, yy, xy] / [xx, yy, zz, yz, xz, xy] (与 strain_matrix 缺省 shear_order 一致)
         if stress_vector.shape[-1] == 3:
             perm_indices = [0, 2, 1]
-            stress_vector = stress_vector[..., perm_indices]
+        elif stress_vector.shape[-1] == 6:
+            perm_indices = [0, 3, 5, 4, 2, 1]
         else:
-            raise NotImplementedError("仅支持二维问题的应力分量重排")
+            raise NotImplementedError(f"不支持 {stress_vector.shape[-1]} 个应力分量的重排")
+        stress_vector = stress_vector[..., perm_indices]
         
         return stress_vector
 
