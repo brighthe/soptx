@@ -18,8 +18,6 @@ from .function import Function
 from .functional import symmetry_span_array, symmetry_index
 from soptx.decorator import barycentric, cartesian
 
-from scipy.special import factorial, comb
-
 
 def number_of_multiindex(p, d):
     """``d`` 维单纯形上 ``p`` 次多重指标的个数, 即 :math:`P_p` 的维数.
@@ -581,11 +579,11 @@ class HuZhangFESpace3d(FunctionSpace):
     def dof_frame(self) -> TensorLike:
         """顶点, 边, 面, 单元上的向量标架.
 
-        顶点与单元取笛卡尔基. 面标架为 ``[n, t, n x t]``, 其中 ``n`` 为
-        ``face_unit_normal``, ``t`` 为该面第 0 条边的 ``edge_tangent``. 边标架为
-        ``[n, t x n, t]``, 其中 ``t`` 为 ``edge_tangent``, ``n`` 取某个相邻面的单位
-        法向 (按 ``face_to_edge`` 写入, 同一条边多次写入时以最后一次为准).
-        ``edge_tangent`` 未归一化, 故含 ``t`` 的标架向量长度为边长.
+        各标架均为单位正交基, 与 2D 一致. 顶点与单元取笛卡尔基. 面标架为
+        ``[n, t, n x t]``, 其中 ``n`` 为 ``face_unit_normal``, ``t`` 为该面第 0 条边的
+        ``edge_unit_tangent``. 边标架为 ``[n, t x n, t]``, 其中 ``t`` 为
+        ``edge_unit_tangent``, ``n`` 取某个相邻面的单位法向 (按 ``face_to_edge`` 写入,
+        同一条边多次写入时以最后一次为准; 任取一个都与 ``t`` 正交).
 
         Returns
         -------
@@ -611,7 +609,7 @@ class HuZhangFESpace3d(FunctionSpace):
         cframe = bm.zeros((NC, 3, 3), dtype=mesh.ftype)
 
         f2e = mesh.face_to_edge()
-        et  = mesh.edge_tangent()
+        et  = mesh.edge_unit_tangent()
         fn  = mesh.face_unit_normal()
 
         node = mesh.entity('node')
@@ -681,50 +679,9 @@ class HuZhangFESpace3d(FunctionSpace):
 
     basis_frame = dof_frame
 
-    def basis_frame_of_S(self):
-        r"""基函数所用的对称张量标架: ``dof_frame_of_S`` 的第 ``i`` 个张量乘以 ``prod(alpha_i!)``.
-
-        ``alpha_i`` 为 ``bm.multi_index_matrix(2, 2)`` 的第 ``i`` 行, 故
-        :math:`v_j \otimes v_j` 型张量乘 2, 混合型张量不变. 与 2D 不同, 2D 的
-        ``basis_frame_of_S`` 是 ``dof_frame_of_S`` 的别名, 不带该系数.
-
-        Returns
-        -------
-        nsframe, esframe, fsframe, csframe : TensorLike
-            形状分别为 ``(NN, 6, 6)``, ``(NE, 6, 6)``, ``(NF, 6, 6)``, ``(NC, 6, 6)``.
-        """
-        mesh = self.mesh
-
-        NN = mesh.number_of_nodes()
-        NE = mesh.number_of_edges()
-        NF = mesh.number_of_faces()
-        NC = mesh.number_of_cells()
-
-        nframe, eframe, fframe, cframe = self.dof_frame()
-        multiindex = bm.multi_index_matrix(2, 2)
-        idx, num = symmetry_index(d=3, r=2)
-
-        nsframe = bm.zeros((NN, 6, 6), dtype=self.ftype)
-        for i, alpha in enumerate(multiindex): 
-            a = bm.prod(factorial(alpha))
-            nsframe[:, i] = a*symmetry_span_array(nframe, alpha).reshape(NN, -1)[:, idx]
-
-        esframe = bm.zeros((NE, 6, 6), dtype=self.ftype)
-        for i, alpha in enumerate(multiindex): 
-            a = bm.prod(factorial(alpha))
-            esframe[:, i] = a*symmetry_span_array(eframe, alpha).reshape(NE, -1)[:, idx]
-
-        fsframe = bm.zeros((NF, 6, 6), dtype=self.ftype)
-        for i, alpha in enumerate(multiindex): 
-            a = bm.prod(factorial(alpha))
-            fsframe[:, i] = a*symmetry_span_array(fframe, alpha).reshape(NF, -1)[:, idx]
-
-        csframe = bm.zeros((NC, 6, 6), dtype=self.ftype)
-        for i, alpha in enumerate(multiindex): 
-            a = bm.prod(factorial(alpha))
-            csframe[:, i] = a*symmetry_span_array(cframe, alpha).reshape(NC, -1)[:, idx]
-
-        return nsframe, esframe, fsframe, csframe
+    # 基函数直接取自由度标架, 与 2D 一致: 自由度系数按 Voigt 重数解释,
+    # 即 ``c_k = num_k * (sigma : S_k)``, ``num = [1, 2, 2, 1, 2, 1]``.
+    basis_frame_of_S = dof_frame_of_S
 
     def basis(self, bc: TensorLike, index: Index=_S):
         """单元积分点处的基函数值, 取值为 Voigt 对称张量 ``[xx, xy, xz, yy, yz, zz]``.
@@ -772,8 +729,7 @@ class HuZhangFESpace3d(FunctionSpace):
         c2e = mesh.cell_to_edge()
         c2f = mesh.cell_to_face()
 
-        nsframe, esframe, fsframe, csframe = self.basis_frame_of_S() 
-        dnsframe, desframe, dfsframe, dcsframe = self.dof_frame_of_S()
+        nsframe, esframe, fsframe, csframe = self.basis_frame_of_S()
 
         phi_s = self.mesh.shape_function(bc, self.p, index=index) # (NC, NQ, ldof)
 

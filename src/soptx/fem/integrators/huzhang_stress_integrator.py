@@ -132,7 +132,7 @@ class HuZhangStressIntegrator(LinearInt, OpInt, CellInt):
 
         # 获取对称张量的权重系数
         # 2D: num = [1, 2, 1]
-        # 3D: num = [1, 1, 1, 2, 2, 2]
+        # 3D: num = [1, 2, 2, 1, 2, 1], 分量顺序 [xx, xy, xz, yy, yz, zz]
         _, num = symmetry_index(d=TD, r=2)
 
         if enable_timing:
