@@ -20,6 +20,9 @@ CASES_FILE = EXPERIMENT_DIR / "cases.toml"
 OUTPUT_DIR = EXPERIMENT_DIR / "results"
 FIGURE_DIR = OUTPUT_DIR / "figures"
 TABLE_DIR = OUTPUT_DIR / "tables"
+# ParaView 查看副本 (Windows 本地盘): 只供查看的大文件写到这里, 目录结构与 results/ 一一对应;
+# 各 run 脚本另有同值常量 VIEW_ROOT. 该盘不可用时调用方退回 results/ (由 .gitignore 排除)
+VIEW_DIR = Path("/mnt/c/workspace/soptx-results/paper_topopt_huzhang")
 
 # 论文插图目录属于另一个仓库 (dut-postdoc), 默认取 WSL 下的挂载路径; 可用环境变量
 # HUZHANG_PAPER_FIGDIR 覆盖, 目录不存在时同步步骤自动跳过而非报错.

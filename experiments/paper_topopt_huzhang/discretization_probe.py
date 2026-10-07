@@ -41,6 +41,7 @@ from soptx.topology.constraints import build_exemption_mask
 from config import (
     CASES_FILE,
     OUTPUT_DIR,
+    VIEW_DIR,
     bootstrap_source_path,
     flatten_parameters,
     load_cases,
@@ -570,9 +571,17 @@ def print_markdown(payload: dict[str, Any]) -> None:
 
 
 def write_outputs(payload: dict[str, Any], fields: dict[str, np.ndarray], mesh) -> Path:
-    """写 npz / json / vtu, 返回输出目录."""
+    """写 npz / json / vtu, 返回输出目录.
+
+    json (跳量统计、验收门与 provenance) 入库; npz (逐单元场, 每构型约 12 MB) 留在
+    results/ 但不入库, 缺失时重跑本探针即可; vtu 只供 ParaView 查看, 写到 Windows
+    查看目录 ``VIEW_DIR`` 下的同名路径, 该盘不可用时退回 results/ (同样不入库).
+    """
     target = OUTPUT_DIR / CASE_ID / "postprocess" / "discretization_probe"
     target.mkdir(parents=True, exist_ok=True)
+    view = (VIEW_DIR / CASE_ID / "postprocess" / "discretization_probe"
+            if VIEW_DIR.parent.is_dir() else target)
+    view.mkdir(parents=True, exist_ok=True)
     label = payload["design"]
     discretization = payload["discretization"]
 
@@ -582,7 +591,7 @@ def write_outputs(payload: dict[str, Any], fields: dict[str, np.ndarray], mesh) 
     )
     write_vtu(
         mesh=mesh,
-        filepath=str(target / f"{label}__{discretization}"),
+        filepath=str(view / f"{label}__{discretization}"),
         cell_data={
             "density": fields["density"],
             "pad_mask": fields["pad_mask"].astype(np.float64),

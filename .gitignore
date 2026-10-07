@@ -94,6 +94,10 @@ dist/
 /experiments/paper_topopt_huzhang/results/**/vtu/
 # 逐步帧的 ParaView 集合文件与 vtu/ 同级, 引用的帧不入库, 故它也不入库。
 /experiments/paper_topopt_huzhang/results/**/evolution.pvd
+# discretization-probe 的逐单元场 npz (每构型约 12 MB) 与查看用 vtu 不入库: 前者重跑探针即得,
+# 后者正常写到 Windows 查看目录, 只在该盘不可用时落在这里。probe.json 照常入库。
+/experiments/paper_topopt_huzhang/results/**/postprocess/discretization_probe/*.npz
+/experiments/paper_topopt_huzhang/results/**/postprocess/discretization_probe/*.vtu
 
 # 根目录兜底：figs/、logs/、outputs/、old/ 不是架构目录，正式产物一律放在
 # examples/<topic>/ 或 experiments/<topic>/ 内部；根目录出现的这些目录均为

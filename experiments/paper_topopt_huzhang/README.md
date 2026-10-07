@@ -58,6 +58,8 @@ experiments/paper_topopt_huzhang/
 
 各运行的逐步帧只供 ParaView 查看, 由 run 脚本直接写到 Windows 本地盘的查看目录 `C:\workspace\soptx-results\paper_topopt_huzhang\` (脚本常量 `VIEW_ROOT`; Windows 下的 ParaView 经 `\\wsl.localhost` 读大批帧很慢), 目录结构与 `results/` 一一对应, 每个运行只含 `vtu/` 帧和与之同级的时间序列集合文件 `evolution.pvd` (在 ParaView 中打开后者即可按迭代步播放, 末帧即最终构型); `density_final.vtu` 只在 `results/`, 每个文件只存一处。帧在优化结束后从内存一次写出, 写 Windows 盘不拖慢迭代。该盘不可用时脚本退回写 `results/`, 此时 `vtu/` 与 `evolution.pvd` 由 `.gitignore` 排除, 不会入库。
 
+`plot.py discretization-probe` (图 5.8 / 5.10 / 5.11 的数据) 同理: `__probe.json` 入库; 逐单元场 `__fields.npz` 每构型约 12 MB, 留在 `results/` 但不入库, 克隆后需重跑该探针再成图; 查看用的 `.vtu` 写到查看目录 (`config.VIEW_DIR`) 下的同名路径。
+
 ## 已注册算例
 
 | case id | `role` | 模型 | 组装入口 | 论文位置 |
