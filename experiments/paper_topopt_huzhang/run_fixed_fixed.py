@@ -32,8 +32,8 @@ from soptx.topology.optimizers import MMAOptimizer
 
 CASE_ID = "compliance-fixed-fixed-half"
 OUTPUT_DIR = Path(__file__).resolve().parent / "results" / CASE_ID
-# ParaView 查看副本 (Windows 本地盘; 经 \\wsl.localhost 读大批帧很慢): 最终密度、逐步帧 vtu/
-# 与 evolution.pvd 写到这里, 目录结构与 results/ 一一对应; 该盘不可用时退回 results/
+# ParaView 查看副本 (Windows 本地盘; 经 \\wsl.localhost 读大批帧很慢): 逐步帧 vtu/ 与
+# evolution.pvd 写到这里 (最终密度只在 results/), 目录结构与 results/ 一一对应; 该盘不可用时退回 results/
 VIEW_ROOT = Path("/mnt/c/workspace/soptx-results/paper_topopt_huzhang")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -219,15 +219,14 @@ def main(argv: list[str] | None = None) -> int:
                 "full_structure_factor": FULL_STRUCTURE_FACTOR,
             }
 
-            # 3. 落盘: 摘要、收敛历史与最终密度写 output (入库, 计算依据); 最终密度、逐步帧
-            #    vtu/ 与 evolution.pvd 另写 view (ParaView 查看副本, 不入库)
+            # 3. 落盘: 摘要、收敛历史与最终密度写 output (入库, 计算依据); 逐步帧 vtu/ 与
+            #    evolution.pvd 写 view (ParaView 查看副本, 不入库), 每个文件只存一处
             mesh = parts["mesh"]
-            for directory in {output, view}:
-                directory.mkdir(parents=True, exist_ok=True)
-                write_vtu(mesh=mesh, filepath=str(directory / "density_final"),
-                          cell_data={"density": to_cells(density[:])})
+            output.mkdir(parents=True, exist_ok=True)
+            write_vtu(mesh=mesh, filepath=str(output / "density_final"),
+                      cell_data={"density": to_cells(density[:])})
             frames = view / "vtu"
-            frames.mkdir(exist_ok=True)
+            frames.mkdir(parents=True, exist_ok=True)
             # 第 0 帧是优化前的初始构型 (优化器记录了才写), 其后每帧对应一次迭代
             if history.initial_physical_density is not None:
                 write_vtu(mesh=mesh, filepath=str(frames / "density_iter_000"),

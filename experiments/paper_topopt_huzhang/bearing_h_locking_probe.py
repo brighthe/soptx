@@ -13,7 +13,8 @@ k=4 求解过慢, 不跑). 目的是区分 "p=2 不闭锁" 与 "p=2 的闭锁被
 
     python bearing_h_locking_probe.py
 
-产出 ``results/bearing-incompressible/postprocess/solid_h_sweep.json``, 终端打印
+分析链由 ``run_bearing.build`` 组装 (与优化运行同一份代码), 两档 nu 即其两组材料.
+产出 ``results/bearing/postprocess/solid_h_sweep.json``, 终端打印
 每档 nu 的绝对值表与相对参考值的偏差表.
 """
 
@@ -31,12 +32,13 @@ from config import OUTPUT_DIR, bootstrap_source_path
 
 bootstrap_source_path()
 
-from bearing_reanalysis import case_parameters  # noqa: E402
-from pipeline import build_bearing_analysis_pipeline, build_bearing_config  # noqa: E402
 import provenance  # noqa: E402
+import run_bearing  # noqa: E402
 
-CASE_ID = "bearing-incompressible"
-NU_LEVELS: tuple[float, ...] = (0.3, 0.4999)
+CASE_ID = run_bearing.CASE_ID
+# 两档 nu 与 run_bearing 的两组材料一一对应 (组名 -> 泊松比)
+NU_GROUPS: dict[float, str] = {nu: group for group, (nu, _) in run_bearing.GROUPS.items()}
+NU_LEVELS: tuple[float, ...] = tuple(NU_GROUPS)
 MESH_LEVELS: tuple[tuple[int, int], ...] = ((30, 10), (60, 20), (120, 40), (240, 80))
 ANALYSES: tuple[tuple[str, int], ...] = (("lfem", 1), ("lfem", 2), ("huzhang", 2), ("huzhang", 4))
 REFERENCE = "huzhang-4"
@@ -47,19 +49,12 @@ def _label(method: str, order: int) -> str:
 
 
 def solid_compliance(nu: float, nx: int, ny: int, method: str, order: int) -> tuple[float, int, float]:
-    parameters = case_parameters(CASE_ID)
-    parameters["comparison_orders"] = [order]
-    parameters["nx"] = nx
-    parameters["ny"] = ny
-    parameters["poisson_ratio"] = float(nu)
-    parameters["interpolation_variables"] = "auto"
-    config = build_bearing_config(parameters)
-    pipeline = build_bearing_analysis_pipeline(config, parameters, method, order)
-    rho = pipeline.density_distribution
+    parts = run_bearing.build(NU_GROUPS[nu], method, order, nx, ny)
+    rho = parts["density"]
     rho[:] = 1.0
     started = time.perf_counter()
-    state = pipeline.analyzer.solve_state(rho_val=rho)
-    compliance = float(pipeline.objective.fun(density=rho, state=state))
+    state = parts["analyzer"].solve_state(rho_val=rho)
+    compliance = float(parts["objective"].fun(density=rho, state=state))
     return compliance, int(rho.shape[0]), time.perf_counter() - started
 
 

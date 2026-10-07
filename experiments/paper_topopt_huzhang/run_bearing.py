@@ -5,13 +5,8 @@
 同时插值 Young 模量与 Poisson 比). 每组以 LFEM p = 1, 2 与 HZMFEM k = 2 (跳量
 稳定化) 各做一次 OC 优化, 共六次; LFEM p = 1 用于对照线性位移元的体积自锁.
 
-网格为对称单向对角三角网格 (左半 "/", 右半 "\", 与问题左右对称), 低阶位移元在该
-剖分上出现经典体积自锁. 每组的摘要、收敛历史与最终密度写入
-``results/<case>/analyzer-<lfem|huzhang>__order-<k>/``, 逐步帧写入 ``VIEW_ROOT`` 下的同名目录.
-用法::
-
     python run_bearing.py                                          # 两组材料 x 三种离散
-    python run_bearing.py --case bearing-incompressible --analyzer lfem --order 1
+    python run_bearing.py --group nu-0.4999 --analyzer lfem --order 1
 """
 
 from __future__ import annotations
@@ -37,9 +32,10 @@ from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.topology.objectives import ComplianceObjective
 from soptx.topology.optimizers import OCOptimizer
 
+CASE_ID = "bearing"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
-# ParaView 查看副本 (Windows 本地盘; 经 \\wsl.localhost 读大批帧很慢): 最终密度、逐步帧 vtu/
-# 与 evolution.pvd 写到这里, 目录结构与 results/ 一一对应; 该盘不可用时退回 results/
+# ParaView 查看副本 (Windows 本地盘; 经 \\wsl.localhost 读大批帧很慢): 逐步帧 vtu/ 与
+# evolution.pvd 写到这里 (最终密度只在 results/), 目录结构与 results/ 一一对应; 该盘不可用时退回 results/
 VIEW_ROOT = Path("/mnt/c/workspace/soptx-results/paper_topopt_huzhang")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -47,10 +43,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 TRACTION = -0.08             # N/mm, 顶边均布牵引
 E0 = 1.0                     # MPa
 PLANE_TYPE = "plane_strain"
-# 两组材料: 算例 id -> (实体 Poisson 比, 材料插值对象)
-CASES = {
-    "bearing-compressible": (0.3, "E"),
-    "bearing-incompressible": (0.4999, "E+nu"),
+# 两组材料: 组名 (即 results/bearing/ 下的子目录名) -> (实体 Poisson 比, 材料插值对象)
+GROUPS = {
+    "nu-0.3": (0.3, "E"),
+    "nu-0.4999": (0.4999, "E+nu"),
 }
 NU_VOID = 0.3                # E+nu 插值: 空材料 Poisson 比
 NU_PENALTY = 1.0             # E+nu 插值: Poisson 比惩罚指数
@@ -77,7 +73,7 @@ CHANGE_TOLERANCE = 1.0e-2
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """解析要跑的材料组、分析链与阶次; 缺省为两组材料 x 三种离散."""
     parser = argparse.ArgumentParser(description="二维轴承装置近不可压缩拓扑优化 (论文 5.2.2 节)")
-    parser.add_argument("--case", choices=tuple(CASES), action="append",
+    parser.add_argument("--group", choices=tuple(GROUPS), action="append",
                         help="只跑指定材料组 (可重复); 缺省为两组")
     parser.add_argument("--analyzer", choices=("lfem", "huzhang"), action="append",
                         help="只跑指定分析链 (可重复)")
@@ -86,13 +82,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build(case_id: str, method: str, order: int, nx: int = NX, ny: int = NY) -> dict[str, Any]:
+def build(group: str, method: str, order: int, nx: int = NX, ny: int = NY) -> dict[str, Any]:
     """按受控比较协议组装一条分析链: 问题、网格、分析器、初始密度、目标与约束.
 
     Parameters
     ----------
-    case_id : str
-        材料组, ``CASES`` 的键.
+    group : str
+        材料组, ``GROUPS`` 的键.
     method : {'lfem', 'huzhang'}
         分析链.
     order : int
@@ -106,7 +102,7 @@ def build(case_id: str, method: str, order: int, nx: int = NX, ny: int = NY) -> 
     dict[str, Any]
         组装好的对象; 冻结设计再分析只用其中的分析链, 不挂优化器.
     """
-    nu, variables = CASES[case_id]
+    nu, variables = GROUPS[group]
     problem = BearingDevice2d(t=TRACTION, E=E0, nu=nu, plane_type=PLANE_TYPE)
     xmin, xmax, ymin, ymax = problem.domain
     mesh: Any = create_huzhang_symmetric_single_diagonal_mesh(box=problem.domain, nx=nx, ny=ny)
@@ -139,7 +135,7 @@ def build(case_id: str, method: str, order: int, nx: int = NX, ny: int = NY) -> 
     design_variable, density = interpolation.setup_density_distribution(
         design_variable_mesh=mesh, displacement_mesh=mesh, relative_density=VOLFRAC)
     return {
-        "case_id": case_id, "method": method, "order": order, "problem": problem, "mesh": mesh,
+        "group": group, "method": method, "order": order, "problem": problem, "mesh": mesh,
         "analyzer": analyzer, "design_variable": design_variable, "density": density,
         "objective": ComplianceObjective(analyzer=analyzer, state_variable=state_variable,
                                          diff_mode="manual", enable_logging=False),
@@ -171,14 +167,14 @@ def main(argv: list[str] | None = None) -> int:
 
     runs = [(m, o) for m, o in RUNS
             if (not args.analyzer or m in args.analyzer) and (not args.order or o in args.order)]
-    for case_id in args.case or CASES:
+    for group in args.group or GROUPS:
         for method, order in runs:
             label = f"analyzer-{method}__order-{order}"
-            output = RESULTS_DIR / case_id / label
-            view = VIEW_ROOT / case_id / label if VIEW_ROOT.parent.is_dir() else output
-            print(f"\n[run] {case_id}: analyzer={method}, order={order} -> {output} (帧: {view})",
+            output = RESULTS_DIR / CASE_ID / group / label
+            view = VIEW_ROOT / CASE_ID / group / label if VIEW_ROOT.parent.is_dir() else output
+            print(f"\n[run] {CASE_ID}/{group}: analyzer={method}, order={order} -> {output} (帧: {view})",
                   flush=True)
-            parts = build(case_id, method, order)
+            parts = build(group, method, order)
             analyzer, problem = parts["analyzer"], parts["problem"]
 
             # 1. 密度过滤 + OC 优化
@@ -208,12 +204,14 @@ def main(argv: list[str] | None = None) -> int:
                 residual = float(bm.linalg.norm(r[free])) / max(
                     float(bm.linalg.norm(analyzer.force_vector[free])), 1.0e-30)
 
-            nu, variables = CASES[case_id]
-            interpolation = {"variables": variables}
+            nu, variables = GROUPS[group]
+            interpolation: dict[str, Any] = {"variables": variables}
             if variables == "E+nu":
                 interpolation.update(nu_penalty_factor=NU_PENALTY, void_poisson_ratio=NU_VOID)
             summary = {
-                "case_id": case_id,
+                "case_id": CASE_ID,
+                "group": group,
+                "poisson_ratio": nu,
                 "model": "BearingDevice2d",
                 "method": method,
                 "order": order,
@@ -237,15 +235,14 @@ def main(argv: list[str] | None = None) -> int:
                 "full_structure_factor": 1.0,
             }
 
-            # 3. 落盘: 摘要、收敛历史与最终密度写 output (入库, 计算依据); 最终密度、逐步帧
-            #    vtu/ 与 evolution.pvd 另写 view (ParaView 查看副本, 不入库)
+            # 3. 落盘: 摘要、收敛历史与最终密度写 output (入库, 计算依据); 逐步帧 vtu/ 与
+            #    evolution.pvd 写 view (ParaView 查看副本, 不入库), 每个文件只存一处
             mesh = parts["mesh"]
-            for directory in {output, view}:
-                directory.mkdir(parents=True, exist_ok=True)
-                write_vtu(mesh=mesh, filepath=str(directory / "density_final"),
-                          cell_data={"density": to_cells(density[:])})
+            output.mkdir(parents=True, exist_ok=True)
+            write_vtu(mesh=mesh, filepath=str(output / "density_final"),
+                      cell_data={"density": to_cells(density[:])})
             frames = view / "vtu"
-            frames.mkdir(exist_ok=True)
+            frames.mkdir(parents=True, exist_ok=True)
             # 第 0 帧是优化前的初始构型 (优化器记录了才写), 其后每帧对应一次迭代
             if history.initial_physical_density is not None:
                 write_vtu(mesh=mesh, filepath=str(frames / "density_iter_000"),
@@ -268,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             (output / "summary.json").write_text(
                 json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"[done] {case_id} {method} k={order}: {summary['optimization_iterations']} 步, "
+            print(f"[done] {CASE_ID}/{group} {method} k={order}: {summary['optimization_iterations']} 步, "
                   f"C={compliance:.6f}, volfrac={summary['volume_fraction']:.6f}", flush=True)
     return 0
 

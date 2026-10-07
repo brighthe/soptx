@@ -13,7 +13,7 @@ HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑). 位�
 (0.016%, 0.013%) 不可信.
 
 数据不重解方程, 只读 ``bearing_h_locking_probe.py`` 落盘的
-``results/bearing-incompressible/postprocess/solid_h_sweep.json``; 缺文件即报错.
+``results/bearing/postprocess/solid_h_sweep.json``; 缺文件即报错.
 
 输出: results/figures/bearing_solid_h_convergence.{pdf,png}, 自动同步至
 papers/huzhang-topopt/figures/.
@@ -40,7 +40,7 @@ from ._base import paper_rcparams, save_figure
 paper_rcparams()
 
 # ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
-SOURCE_CASE = "bearing-incompressible"
+SOURCE_CASE = "bearing"
 REQUIRED_RUNS = ("postprocess/solid_h_sweep.json",)
 
 REFERENCE_LABEL = "huzhang-4"

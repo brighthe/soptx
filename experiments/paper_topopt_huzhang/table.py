@@ -7,7 +7,7 @@
     python table.py bearing-reanalysis      # 轴承 3x4 交叉再分析 (表 5.4)
 
 再分析的完整结果 (含能量分量与自检) 照旧写入 ``results/<case>/postprocess/
-frozen_reanalysis.json``; 本入口只在其后把论文表格写到 ``results/tables/``.
+frozen_reanalysis.json`` (轴承两组材料合在 ``results/bearing/postprocess/`` 一个文件里); 本入口只在其后把论文表格写到 ``results/tables/``.
 子命令沿用语义名, 表号只出现在说明与输出文件名里.
 """
 
@@ -82,8 +82,9 @@ def bearing_table() -> str:
         + " | ".join(_paper_name(d) for d in deviations) + " |",
         "| :---: | :--- | :---: | :---: | :---: |" + " :---: |" * len(deviations),
     ]
-    for case_id in ("bearing-compressible", "bearing-incompressible"):
-        cross = _reanalysis(case_id)["cross"]
+    groups = _reanalysis("bearing")["groups"]
+    for group in ("nu-0.3", "nu-0.4999"):
+        cross = groups[group]
         nu = _poisson(cross["poisson_ratio"])
         for design, info in cross["designs"].items():
             row = cross["compliance"][design]

@@ -3,7 +3,7 @@
 
 优化跑出的柔顺度只在各自离散下可比: 低阶位移元在近不可压缩材料上因体积闭锁
 低估柔顺度, 不同离散优化出的设计不能直接横比. 本模块只做前向求解, 不做优化:
-把每条轴承 case 的三个最终设计 (density_final.vtu) 冻结, 分别用四种离散 (三种
+把每组材料 (nu = 0.3 / 0.4999) 的三个最终设计 (density_final.vtu) 冻结, 分别用四种离散 (三种
 参赛离散 lfem p=1 / lfem p=2 / Hu--Zhang k=2, 加一列参考离散 Hu--Zhang k=4)
 重新求解一次柔顺度, 得到按"设计"逐行的交叉表. 参考列的作用是
 给每个设计一个与参赛离散无关的柔顺度基准, 使 p=1 的闭锁、p=2 与 k=2 的残余
@@ -13,9 +13,10 @@
 
     table.py bearing-reanalysis -> run_bearing_reanalysis()
 
-产出写到 ``results/<case>/postprocess/frozen_reanalysis.json``, 带 provenance 戳记
-与三个 density_final.vtu 的 sha256. 终端同时打印两张 Markdown 表, 偏差列一律相对
-Hu--Zhang k=4 参考值.
+分析链由 ``run_bearing.build`` 组装, 与优化运行同一份代码. 两组材料的交叉表写进同一个
+``results/bearing/postprocess/frozen_reanalysis.json``, 带 provenance 戳记与六个
+density_final.vtu 的 sha256. 终端同时打印两张 Markdown 表, 偏差列一律相对 Hu--Zhang
+k=4 参考值.
 """
 
 from __future__ import annotations
@@ -29,32 +30,20 @@ import numpy as np
 
 from soptx.postprocess.vtk_export import read_vtu_cell_data
 
-from config import (
-    CASES_FILE,
-    OUTPUT_DIR,
-    bootstrap_source_path,
-    flatten_parameters,
-    load_cases,
-)
+from config import OUTPUT_DIR, bootstrap_source_path
 
 bootstrap_source_path()
 
-from pipeline import (  # noqa: E402
-    build_bearing_analysis_pipeline,
-    build_bearing_config,
-    build_bearing_problem,
-    build_material,
-    resolve_interpolation_variables,
-)
 import provenance  # noqa: E402
+import run_bearing  # noqa: E402
 
-CASES = ("bearing-compressible", "bearing-incompressible")
+CASE = run_bearing.CASE_ID
+GROUPS = tuple(run_bearing.GROUPS)
 
-# 参赛离散 (各自跑过优化, 有 density_final.vtu): lfem p=1 (supplementary_orders) /
+# 参赛离散 (各自跑过优化, 有 density_final.vtu): lfem p=1 /
 # lfem p=2 / Hu--Zhang k=2 (跳量稳定化, 位移分片 P1)
 DESIGNS: tuple[tuple[str, int], ...] = (("lfem", 1), ("lfem", 2), ("huzhang", 2))
-# 参考离散 (只做再分析, 不跑优化): Hu--Zhang k=4; build_pipeline 覆盖 comparison_orders,
-# 不要求 cases.toml 登记该阶次
+# 参考离散 (只做再分析, 不跑优化): Hu--Zhang k=4
 REFERENCES: tuple[tuple[str, int], ...] = (("huzhang", 4),)
 ANALYSES: tuple[tuple[str, int], ...] = DESIGNS + REFERENCES
 # 偏差列的分母
@@ -74,15 +63,8 @@ def _split(label: str) -> tuple[str, int]:
 
 
 def _run_dir(case_id: str, method: str, order: int) -> Path:
-    """注册缺省组合的运行目录 (run.py 不给覆盖时的目录名, 不带 optimizer 标签)."""
+    """运行目录; ``case_id`` 可含子目录, 如轴承的 ``bearing/nu-0.3``."""
     return OUTPUT_DIR / case_id / f"analyzer-{method}__order-{order}"
-
-
-def case_parameters(case_id: str) -> dict[str, Any]:
-    for case in load_cases(CASES_FILE):
-        if case["id"] == case_id:
-            return flatten_parameters(case)
-    raise SystemExit(f"cases.toml 中没有算例 {case_id}.")
 
 
 def load_design(case_id: str, method: str, order: int) -> tuple[np.ndarray, dict[str, Any]]:
@@ -91,53 +73,37 @@ def load_design(case_id: str, method: str, order: int) -> tuple[np.ndarray, dict
     summary_file = run_dir / "summary.json"
     for path in (density_file, summary_file):
         if not path.is_file():
-            raise SystemExit(f"缺少 {path}; 先运行 run.py --case {case_id} "
-                             f"--analyzer {method} --order {order}.")
+            raise SystemExit(f"缺少 {path}; 先运行对应算例的 run 脚本 "
+                             f"(--analyzer {method} --order {order}).")
     rho = np.asarray(read_vtu_cell_data(density_file, "density"), dtype=np.float64)
     summary = json.loads(summary_file.read_text(encoding="utf-8"))
     return rho, summary
 
 
-def build_pipeline(case_id: str, method: str, order: int):
-    """按 cases.toml 口径组装分析链.
-
-    返回 (分析链, 配置, 实际生效的插值对象): 配置里的 ``auto`` 要按材料是否近
-    不可压缩落成 ``E`` 或 ``E+nu``, 写进产出的是落成后的值.
-    """
-    parameters = case_parameters(case_id)
-    parameters["comparison_orders"] = [order]
-    config = build_bearing_config(parameters)
-    pipeline = build_bearing_analysis_pipeline(config, parameters, method, order)
-    effective = resolve_interpolation_variables(
-        build_material(build_bearing_problem(parameters)), config.interpolation_variables
-    )
-    return pipeline, config, effective
-
-
-def frozen_compliance(pipeline, rho_np: np.ndarray) -> tuple[float, float]:
-    rho = pipeline.density_distribution
+def frozen_compliance(parts: dict[str, Any], rho_np: np.ndarray) -> tuple[float, float]:
+    """把冻结密度写进 ``run_bearing.build`` 组装的分析链, 前向求解一次."""
+    rho = parts["density"]
     if rho.shape[0] != rho_np.shape[0]:
         raise ValueError(f"网格单元数 {rho.shape[0]} 与构型 {rho_np.shape[0]} 不符.")
     rho[:] = rho_np
     started = time.perf_counter()
-    state = pipeline.analyzer.solve_state(rho_val=rho)
-    compliance = float(pipeline.objective.fun(density=rho, state=state))
+    state = parts["analyzer"].solve_state(rho_val=rho)
+    compliance = float(parts["objective"].fun(density=rho, state=state))
     return compliance, time.perf_counter() - started
 
 
-# ============================================ 一、交叉表: 每条 case 3 设计 x 4 离散
+# ============================================ 一、交叉表: 每组材料 3 设计 x 4 离散
 
-def cross_table(case_id: str) -> dict[str, Any]:
+def cross_table(group: str) -> dict[str, Any]:
+    case_id = f"{CASE}/{group}"
+    nu, interpolation = run_bearing.GROUPS[group]
     designs = {_label(m, o): load_design(case_id, m, o) for m, o in DESIGNS}
     table: dict[str, dict[str, float]] = {name: {} for name in designs}
-    interpolation = None
-    nu = None
     for method, order in ANALYSES:
         analysis = _label(method, order)
-        pipeline, config, interpolation = build_pipeline(case_id, method, order)
-        nu = float(config.poisson_ratio)
+        parts = run_bearing.build(group, method, order)
         for design, (rho, summary) in designs.items():
-            compliance, elapsed = frozen_compliance(pipeline, rho)
+            compliance, elapsed = frozen_compliance(parts, rho)
             table[design][analysis] = compliance
             note = ""
             if design == analysis:
@@ -184,9 +150,9 @@ def _deviation_cells(c: dict[str, float]) -> str:
     return " | ".join(_deviation(c[_label(m, o)], ref) for m, o in DESIGNS)
 
 
-def print_cross_markdown(case_id: str, block: dict[str, Any]) -> None:
+def print_cross_markdown(group: str, block: dict[str, Any]) -> None:
     labels = [_label(m, o) for m, o in ANALYSES]
-    print(f"\n{case_id}: nu={block['poisson_ratio']}, 插值 {block['interpolation_variables']} "
+    print(f"\n{CASE}/{group}: nu={block['poisson_ratio']}, 插值 {block['interpolation_variables']} "
           f"(行: 优化设计, 列: 再分析离散, 偏差相对 {REFERENCE_LABEL})")
     print("| 设计 \\ 分析 | " + " | ".join(labels) + " | " + _deviation_header() + " |")
     print("|---|" + "---|" * (len(labels) + len(DESIGNS)))
@@ -196,8 +162,8 @@ def print_cross_markdown(case_id: str, block: dict[str, Any]) -> None:
         print(f"| {design} ({iters} 步) | {cells} | {_deviation_cells(row)} |")
 
 
-def write_json(case_id: str, payload: dict[str, Any]) -> Path:
-    target = OUTPUT_DIR / case_id / "postprocess" / "frozen_reanalysis.json"
+def write_json(payload: dict[str, Any]) -> Path:
+    target = OUTPUT_DIR / CASE / "postprocess" / "frozen_reanalysis.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return target
@@ -205,23 +171,17 @@ def write_json(case_id: str, payload: dict[str, Any]) -> Path:
 
 def run_bearing_reanalysis() -> int:
     stamp = provenance.run_stamp()
-    results: dict[str, dict[str, Any]] = {}
-    for case_id in CASES:
-        results[case_id] = {
-            "case_id": case_id,
-            "designs": [list(d) for d in DESIGNS],
-            "analyses": [list(d) for d in ANALYSES],
-            "reference": REFERENCE_LABEL,
-            "provenance": stamp,
-            "cross": cross_table(case_id),
-        }
-
-    for case_id in CASES:
-        print_cross_markdown(case_id, results[case_id]["cross"])
-
-    print()
-    for case_id in CASES:
-        print(f"写入 {write_json(case_id, results[case_id])}")
+    payload = {
+        "case_id": CASE,
+        "designs": [list(d) for d in DESIGNS],
+        "analyses": [list(d) for d in ANALYSES],
+        "reference": REFERENCE_LABEL,
+        "provenance": stamp,
+        "groups": {group: cross_table(group) for group in GROUPS},
+    }
+    for group, block in payload["groups"].items():
+        print_cross_markdown(group, block)
+    print(f"\n写入 {write_json(payload)}")
     if not stamp.get("reproducible"):
         print("注意: 工作区不干净, 本次数字不满足 provenance.reproducible, 不可直接引用.")
     return 0

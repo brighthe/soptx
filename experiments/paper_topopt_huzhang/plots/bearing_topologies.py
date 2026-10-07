@@ -37,20 +37,19 @@ TITLE_PT = 9.0
 DPI = 600
 
 # ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
-# 可压缩基准组与近不可压实验组按 cases.toml 的口径是两条 case (nu 属 A 问题层, 改它
-# 等于换题目), 而本图正是要把两组并排, 故 SOURCE_CASE 是元组; REQUIRED_RUNS 的每项
-# 相应写全 <case>/<run>, 否则同名的 analyzer-*__order-* 分不清属于哪一组.
-SOURCE_CASE = ("bearing-compressible", "bearing-incompressible")
+# 两组材料是同一算例 results/bearing/ 下的两个子目录 nu-0.3 / nu-0.4999; REQUIRED_RUNS 的
+# 每项写全 <组>/<run>, 否则同名的 analyzer-*__order-* 分不清属于哪一组.
+SOURCE_CASE = "bearing"
 REQUIRED_RUNS = (
-    "bearing-compressible/analyzer-lfem__order-1",
-    "bearing-incompressible/analyzer-lfem__order-1",
-    "bearing-compressible/analyzer-lfem__order-2",
-    "bearing-incompressible/analyzer-lfem__order-2",
-    "bearing-compressible/analyzer-huzhang__order-2",
-    "bearing-incompressible/analyzer-huzhang__order-2",
+    "nu-0.3/analyzer-lfem__order-1",
+    "nu-0.4999/analyzer-lfem__order-1",
+    "nu-0.3/analyzer-lfem__order-2",
+    "nu-0.4999/analyzer-lfem__order-2",
+    "nu-0.3/analyzer-huzhang__order-2",
+    "nu-0.4999/analyzer-huzhang__order-2",
 )
 
-OUTPUTS_ROOT = config.OUTPUT_DIR
+OUTPUTS_ROOT = config.OUTPUT_DIR / SOURCE_CASE
 
 # 面板顺序与 REQUIRED_RUNS 逐项对齐, 按 subplots 的行优先展开: 每排一种离散
 # (LFEM p=1 / LFEM p=2 / HZMFEM k=2), 排内左可压缩右近不可压. 下面 zip 起来即成
@@ -75,15 +74,15 @@ def main():
     fig.get_layout_engine().set(w_pad=0.02, h_pad=0.02, wspace=0.03, hspace=0.06)
     axes = axes.flat
 
-    for idx, (tag, method, order_label, nu_label, case_id, folder_name) in enumerate(PANELS):
+    for idx, (tag, method, order_label, nu_label, group, folder_name) in enumerate(PANELS):
         # 本图缺数据时按设计画占位面板, 故用 resolve 而非 require
-        run_dir = resolve_run_dir(OUTPUTS_ROOT / case_id, folder_name)
+        run_dir = resolve_run_dir(OUTPUTS_ROOT / group, folder_name)
         vtu_path = run_dir / "density_final.vtu" if run_dir else None
         ax = axes[idx]
 
         if vtu_path is None or not vtu_path.is_file():
             ax.text(
-                0.5, 0.5, f"{case_id}/{folder_name}\n(Pending calculation)",
+                0.5, 0.5, f"{group}/{folder_name}\n(Pending calculation)",
                 ha="center", va="center", transform=ax.transAxes, fontsize=8, color="gray"
             )
             ax.set_title(f"{tag} {method}, ${order_label}$, ${nu_label}$", fontsize=TITLE_PT, pad=2.5)
