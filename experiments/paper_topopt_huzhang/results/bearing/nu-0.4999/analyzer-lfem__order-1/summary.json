@@ -1,0 +1,37 @@
+{
+  "case_id": "bearing-incompressible",
+  "model": "BearingDevice2d",
+  "method": "lfem",
+  "order": 1,
+  "mesh_type": "triangle-single-diagonal-symmetric",
+  "nx": 120,
+  "ny": 40,
+  "optimizer": "oc",
+  "load_discretization": null,
+  "integration_order": 4,
+  "volume_fraction": 0.3499992322448161,
+  "relative_equilibrium_residual": 1.1609734207433546e-10,
+  "optimization_iterations": 372,
+  "converged": true,
+  "termination_reason": null,
+  "solver": "mumps",
+  "interpolation": {
+    "variables": "E+nu",
+    "nu_penalty_factor": 1.0,
+    "void_poisson_ratio": 0.3
+  },
+  "overrides": {
+    "optimizer": "oc"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-09-14T11:23:09+00:00",
+    "git_revision": "ad95594848d57a19202a64d377f9a9cc4c281c46",
+    "git_dirty": true,
+    "fealpy_git_revision": "f474a5775240544674037b5b5f830042dda710e3",
+    "fealpy_git_dirty": false,
+    "reproducible": false
+  },
+  "compliance": 76.43465478188544,
+  "compliance_domain": "full",
+  "full_structure_factor": 1.0
+}

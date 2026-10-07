@@ -1,0 +1,162 @@
+{
+  "case_id": "bearing",
+  "designs": [
+    [
+      "lfem",
+      1
+    ],
+    [
+      "lfem",
+      2
+    ],
+    [
+      "huzhang",
+      2
+    ]
+  ],
+  "analyses": [
+    [
+      "lfem",
+      1
+    ],
+    [
+      "lfem",
+      2
+    ],
+    [
+      "huzhang",
+      2
+    ],
+    [
+      "huzhang",
+      4
+    ]
+  ],
+  "reference": "huzhang-4",
+  "provenance": {
+    "generated_at_utc": "2026-10-07T01:53:58+00:00",
+    "git_revision": "6ead0982450bedf458b53b06dd5f31e79171b8ee",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "groups": {
+    "nu-0.3": {
+      "poisson_ratio": 0.3,
+      "interpolation_variables": "E",
+      "designs": {
+        "lfem-1": {
+          "run_dir": "bearing/nu-0.3/analyzer-lfem__order-1",
+          "optimization_iterations": 281,
+          "converged": true,
+          "summary_compliance": 119.32933101070951,
+          "density_final": {
+            "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.3/analyzer-lfem__order-1/density_final.vtu",
+            "sha256": "3df4dd046e400402d39682c02b14832d5b920592a794ca02d856c906edfa4d53",
+            "bytes": 388746
+          }
+        },
+        "lfem-2": {
+          "run_dir": "bearing/nu-0.3/analyzer-lfem__order-2",
+          "optimization_iterations": 351,
+          "converged": true,
+          "summary_compliance": 122.73318411962417,
+          "density_final": {
+            "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.3/analyzer-lfem__order-2/density_final.vtu",
+            "sha256": "8ed1ac56de3cf9eb2d39ad79c046acd17edfe8d09781696da6626a59a5783442",
+            "bytes": 388746
+          }
+        },
+        "huzhang-2": {
+          "run_dir": "bearing/nu-0.3/analyzer-huzhang__order-2",
+          "optimization_iterations": 464,
+          "converged": true,
+          "summary_compliance": 127.67811313267983,
+          "density_final": {
+            "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.3/analyzer-huzhang__order-2/density_final.vtu",
+            "sha256": "8d8269989cdb25ad04cd5224c7eeb12c57b4e9228029448b2caa22a85d05e46d",
+            "bytes": 388746
+          }
+        }
+      },
+      "compliance": {
+        "lfem-1": {
+          "lfem-1": 119.32933101071151,
+          "lfem-2": 123.46120001622123,
+          "huzhang-2": 131.9305405786719,
+          "huzhang-4": 125.82576337731628
+        },
+        "lfem-2": {
+          "lfem-1": 119.60496677283983,
+          "lfem-2": 122.73318411962249,
+          "huzhang-2": 129.56690294805213,
+          "huzhang-4": 124.6379014945303
+        },
+        "huzhang-2": {
+          "lfem-1": 120.00727541394642,
+          "lfem-2": 122.8057241413473,
+          "huzhang-2": 127.6781131326798,
+          "huzhang-4": 124.29661914512062
+        }
+      }
+    },
+    "nu-0.4999": {
+      "poisson_ratio": 0.4999,
+      "interpolation_variables": "E+nu",
+      "designs": {
+        "lfem-1": {
+          "run_dir": "bearing/nu-0.4999/analyzer-lfem__order-1",
+          "optimization_iterations": 372,
+          "converged": true,
+          "summary_compliance": 76.43465478188544,
+          "density_final": {
+            "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.4999/analyzer-lfem__order-1/density_final.vtu",
+            "sha256": "909cf4c23905827503071051781de0769aea18bc7fb00e86ebe6f8e81f5ff7e7",
+            "bytes": 388746
+          }
+        },
+        "lfem-2": {
+          "run_dir": "bearing/nu-0.4999/analyzer-lfem__order-2",
+          "optimization_iterations": 245,
+          "converged": true,
+          "summary_compliance": 98.0610547158118,
+          "density_final": {
+            "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.4999/analyzer-lfem__order-2/density_final.vtu",
+            "sha256": "7d924111c646b3c1f722080a30a689590b0c8c6c91c1257768ad69859880e1ed",
+            "bytes": 388746
+          }
+        },
+        "huzhang-2": {
+          "run_dir": "bearing/nu-0.4999/analyzer-huzhang__order-2",
+          "optimization_iterations": 343,
+          "converged": true,
+          "summary_compliance": 102.37374554479587,
+          "density_final": {
+            "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.4999/analyzer-huzhang__order-2/density_final.vtu",
+            "sha256": "bc1a8872100f3259a9e0359a4ba77ae50ad2335f0cc2bc79039f4511956ce26b",
+            "bytes": 388746
+          }
+        }
+      },
+      "compliance": {
+        "lfem-1": {
+          "lfem-1": 76.43465478088737,
+          "lfem-2": 120.28415395417233,
+          "huzhang-2": 129.55600708214342,
+          "huzhang-4": 123.48944009944678
+        },
+        "lfem-2": {
+          "lfem-1": 82.24081395039993,
+          "lfem-2": 98.06105471955019,
+          "huzhang-2": 104.03199776882265,
+          "huzhang-4": 100.00588721332213
+        },
+        "huzhang-2": {
+          "lfem-1": 82.80957439104024,
+          "lfem-2": 98.0020373529985,
+          "huzhang-2": 102.37374554479631,
+          "huzhang-4": 99.55654916337663
+        }
+      }
+    }
+  }
+}

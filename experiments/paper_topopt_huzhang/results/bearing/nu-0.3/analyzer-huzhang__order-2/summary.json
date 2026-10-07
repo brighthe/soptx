@@ -1,0 +1,31 @@
+{
+  "case_id": "bearing-compressible",
+  "model": "BearingDevice2d",
+  "method": "huzhang",
+  "order": 2,
+  "mesh_type": "triangle-single-diagonal-symmetric",
+  "nx": 120,
+  "ny": 40,
+  "optimizer": "oc",
+  "load_discretization": null,
+  "integration_order": 6,
+  "stabilization_coefficient": "fixed",
+  "volume_fraction": 0.3500223152782315,
+  "relative_equilibrium_residual": 1.0111236276740134e-10,
+  "optimization_iterations": 464,
+  "converged": true,
+  "termination_reason": null,
+  "solver": "mumps",
+  "interpolation": {
+    "variables": "E"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-06T13:43:23+00:00",
+    "git_revision": "f70fe7f06bf27ebc0b3fd1e09a5c5ab2322752c6",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "compliance": 127.67811313267983,
+  "compliance_domain": "full",
+  "full_structure_factor": 1.0
+}
