@@ -28,7 +28,7 @@ from matplotlib.colorbar import ColorbarBase
 from matplotlib import cm
 
 import config
-from ._base import load_density, paper_rcparams, save_figure
+from ._base import load_probe_mesh, paper_rcparams, save_figure
 
 paper_rcparams()
 
@@ -66,9 +66,9 @@ def load_design(base, tag: str, label: str):
     """
     directory = base / PROBE_DIR
     fields = np.load(directory / f"{tag}__fields.npz")
-    # 网格拓扑只存在 vtu 里, npz 只有单元量; 两者的单元序由探针同一次导出保证一致,
-    # 这里用密度逐单元核对一次, 不一致即报错而非画出错位的图.
-    points, cells, density_vtu = load_density(directory / f"{tag}__{label}.vtu")
+    # npz 只有单元量, 网格拓扑取自被冻结运行的 density_final.vtu; 单元序由探针读同一
+    # 文件保证一致, 这里用密度逐单元核对一次, 不一致即报错而非画出错位的图.
+    points, cells, density_vtu = load_probe_mesh(directory, tag)
     rho = fields["density"]
     if not np.allclose(rho, density_vtu):
         raise RuntimeError(f"{tag}: npz 与 vtu 的密度不一致, 单元序可能错位.")

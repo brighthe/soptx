@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -135,6 +136,29 @@ def load_density(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     density_array = grid.GetCellData().GetArray("density")
     density = np.array([density_array.GetValue(i) for i in range(grid.GetNumberOfCells())])
     return points, connectivity, density
+
+
+def load_probe_mesh(probe_dir: Path, tag: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """取 discretization-probe 某构型的网格与密度, 来源为其冻结的运行目录.
+
+    探针的 ``__fields.npz`` 只有单元量, 网格拓扑取自它冻结的那个运行的
+    ``density_final.vtu`` (入库, 单元序与探针相同); 查看用的探针 vtu 写在 Windows
+    查看目录, 成图不依赖它. 运行目录由 ``<tag>__probe.json`` 的 ``design_run_dir`` 给出.
+
+    Parameters
+    ----------
+    probe_dir : Path
+        探针产物目录 ``results/<case>/postprocess/discretization_probe``.
+    tag : str
+        构型前缀, 如 ``lfem-3-pad-solid``.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+        节点坐标、三角形连接与单元密度.
+    """
+    probe = json.loads((probe_dir / f"{tag}__probe.json").read_text(encoding="utf-8"))
+    return load_density(config.OUTPUT_DIR / probe["design_run_dir"] / "density_final.vtu")
 
 
 def mirror_half_beam(

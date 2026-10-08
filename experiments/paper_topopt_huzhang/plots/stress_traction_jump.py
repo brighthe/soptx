@@ -34,7 +34,7 @@ from matplotlib.colorbar import ColorbarBase
 from matplotlib import cm
 
 import config
-from ._base import load_density, paper_rcparams, save_figure
+from ._base import load_probe_mesh, paper_rcparams, save_figure
 
 paper_rcparams()
 
@@ -93,7 +93,7 @@ def load_design(base, label: str):
         "headroom": -fields[f"g__{label}"],
     }
     if label in MAP_LABELS:
-        points, cells, density_vtu = load_density(directory / f"{tag}__{label}.vtu")
+        points, cells, density_vtu = load_probe_mesh(directory, tag)
         if not np.allclose(rho, density_vtu):
             raise RuntimeError(f"{tag}: npz 与 vtu 的密度不一致, 单元序可能错位.")
         design["triangulation"] = Triangulation(points[:, 0], points[:, 1], cells)
