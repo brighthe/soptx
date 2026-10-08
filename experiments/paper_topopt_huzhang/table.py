@@ -1,6 +1,6 @@
 """Hu--Zhang 拓扑优化投稿论文实验的表格入口 (论文 5.2 节).
 
-在 ``run.py`` 的优化产物之上做冻结设计再分析, 再按论文表格的列排出 Markdown::
+在各 run 脚本的优化产物之上做冻结设计再分析, 再按论文表格的列排出 Markdown::
 
     python table.py --list
     python table.py compliance-reanalysis   # 固支梁 6x6 交叉再分析 (表 5.3)

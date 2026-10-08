@@ -3,8 +3,7 @@
 
 产物 case ``stress-cubic-topologies``: 依赖 postprocess/discretization_probe/ 下的
 两份 fields.npz, 由 ``plot.py discretization-probe`` 产出 (不是 ``plot.py
-export``, 故 REQUIRED_RUNS 缺失时 run_case 打印的 run.py 命令不适用, 正确的补数据
-命令见本文件末尾注释).
+export``); 缺失时 plot.py 会提示运行该探针.
 
 与图 5.7 的区别: 图 5.7 是 k=2, 本图是 k=3, 对应 §5.2.3 的主对比; 两者同为 pad 1.5 mm,
 本图的运行另按判据集合 (rho >= 0.5, 区外) 验收. 密度与表观 von Mises 应力比都取各自

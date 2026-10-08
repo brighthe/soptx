@@ -3,7 +3,7 @@
 
 产物 case ``stress-cubic-convergence``: 与图 5.8 同构, 2x2 四宫格 ——
 - (a)(c) 收敛历史: 只读两次优化运行目录下的 history.json 与 summary.json, 不重解方程.
-  运行目录按 driver 的 _run_label 命名, 取 pad 1.5 mm 且按判据集合验收 (solid_thr-0.5)
+  运行目录按 run_cantilever_stress.run_label 命名, 取 pad 1.5 mm 且按判据集合验收 (solid_thr-0.5)
   的两组; 本模块启动时核对 summary 记录了 ``acceptance_solid_threshold``, 缺失即报错,
   免得静默画出旧口径的历史.
 - (b)(d) 主应力空间内的单元应力分布: 取 postprocess/ 下的 npz

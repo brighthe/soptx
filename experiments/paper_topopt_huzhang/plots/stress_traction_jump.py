@@ -58,7 +58,7 @@ REQUIRED_RUNS = (
 
 PROBE_DIR = "postprocess/discretization_probe"
 SOLID_THRESHOLD = 0.9
-# 停止准则容差, 与 discretization_probe.DELTA_G / cases.toml 的 stress_tolerance 同值.
+# 停止准则容差, 与 discretization_probe.DELTA_G (即 run_cantilever_stress.STRESS_TOLERANCE) 同值.
 DELTA_G = 5.0e-3
 ORDERS = (2, 3, 4)
 ORDER_COLORS = ("#5a5a5a", "#1f77b4", "#ff7f0e")

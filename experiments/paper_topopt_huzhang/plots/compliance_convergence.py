@@ -52,7 +52,7 @@ ORDERS = (2, 3, 4)
 LFEM_RUNS = list(zip(REQUIRED_RUNS[: len(ORDERS)], ORDERS))
 HZ_RUNS = list(zip(REQUIRED_RUNS[len(ORDERS) :], ORDERS))
 
-# 阶次记号随方法走, 与 run.py 的 ORDER_SYMBOLS 同口径: Hu--Zhang 的 k 是应力空间次数
+# 阶次记号随方法走: Hu--Zhang 的 k 是应力空间次数
 # (位移阶为 k-1), LFEM 的 p 是位移阶. 两幅子图统一写成 k 会把 LFEM 的位移阶读成应力阶,
 # 图上同样标 2 的两条线就不是同一个量了.
 ORDER_SYMBOLS = {"huzhang": "k", "lfem": "p"}

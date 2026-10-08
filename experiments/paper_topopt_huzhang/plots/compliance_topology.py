@@ -82,7 +82,7 @@ def main():
             if summary.get("compliance_domain") != "half":
                 raise ValueError(
                     f"{run_dir}: summary.json 未明确采用半域柔顺度口径, "
-                    "请先核查并迁移旧摘要, 或使用当前 driver 重新运行."
+                    "请先核查并迁移旧摘要, 或用 run_fixed_fixed.py 重新运行."
                 )
             pts, conn, rho = load_density(run_dir / "density_final.vtu")
 

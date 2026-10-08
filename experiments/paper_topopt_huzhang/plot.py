@@ -1,6 +1,7 @@
 """Hu--Zhang 拓扑优化投稿论文实验的绘图入口 (论文 5.2 节).
 
-``run.py`` 负责执行算例, 把运行产物写进 ``results/<case>/<run>/``; 表格归 ``table.py``;
+各算例的 run 脚本 (``run_fixed_fixed.py`` / ``run_bearing.py`` / ``run_cantilever_stress.py``)
+负责执行优化, 把运行产物写进 ``results/<case>/<run>/``; 表格归 ``table.py``;
 本文件整理论文里的图::
 
     python plot.py --list                      # 列出产物 case
@@ -9,8 +10,8 @@
     python plot.py bearing-h-locking           # 图的数据: 轴承全实体域 h 收敛
     python plot.py discretization-probe        # 图的数据: 应力算例冻结构型重分析
 
-一件产物 = 一条 ``--case``, 与 ``run.py --case`` 同一个词: 那边一条 case 是一道要解的
-题, 这边一条 case 是一件要整理出来的产物. 产物 case 不另立注册表, 由 ``plots/`` 下声明
+一件产物 = 一条 ``--case``, 即一件要整理出来的产物 (区别于算例目录, 后者是一道要解
+的题). 产物 case 不另立注册表, 由 ``plots/`` 下声明
 了 ``SOURCE_CASE`` 的模块自描述 (见 discover_cases) —— 图读哪个算例的哪几次运行, 本就
 是绘图代码的事实, 存第二份必然漂移. case id 取模块文件名, 论文图号只留在各模块
 docstring 首行的括注里, 排版改号不波及命令行.
@@ -63,12 +64,27 @@ DESCRIPTIONS: dict[str, str] = {
 }
 
 
+# 算例目录 -> 产出它的 run 脚本 (缺运行目录时提示补跑)
+RUN_SCRIPTS: dict[str, str] = {
+    "compliance-fixed-fixed-half": "run_fixed_fixed.py",
+    "bearing": "run_bearing.py",
+    "cantilever-middle-2d-stress": "run_cantilever_stress.py",
+}
+
+# 冻结重分析导出的数据文件 -> 产出它的数据动词, 按路径片段匹配 (未命中时退回 export).
+# 探针的 __fields.npz 不入库, 克隆后缺它属常态, 必须指到 discretization-probe.
+DATA_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("discretization_probe", "plot.py discretization-probe"),
+    ("solid_h_sweep", "plot.py bearing-h-locking"),
+    ("fig_data_", "plot.py export"),
+)
+
+
 @dataclass(frozen=True)
 class ProductCase:
     """一件可整理出来的产物: id, 来源算例, 依赖的产物, 一句话说明.
 
-    ``source_cases`` 是元组而非单值: 图 5.5 要把可压缩基准组与近不可压实验组并排,
-    两者按 cases.toml 的口径是两条 case (nu 属 A 问题层), 故一件产物可以跨 case.
+    ``source_cases`` 是元组而非单值, 以便一件产物跨多个算例目录取数.
     """
 
     id: str
@@ -103,22 +119,23 @@ class ProductCase:
     def run_commands(self) -> tuple[str, ...]:
         """补齐**尚缺**依赖要跑的命令; 已经齐的 source case 不出现在这里.
 
-        裸跑一条 case 即展开注册表的 methods x comparison_orders 全集 (见
-        config.resolve_runs), 缺哪几条都由同一条命令补上.
-
-        缺失里带扩展名的那些 (postprocess/*.npz) 不是 run.py 的落盘产物, 而是
-        ``plot.py export`` 从 density_final.vtu 冻结重分析导出的, 故补一条 export;
-        它同样要先有运行目录, 所以排在 run.py 之后.
+        缺运行目录时补跑该算例的 run 脚本 (缺省即论文的全部组合). 缺失里带扩展名的
+        (postprocess/ 下的 json / npz) 不是 run 脚本的落盘产物, 而是冻结重分析导出的,
+        按文件归属补对应的数据动词; 它们同样要先有运行目录, 所以排在 run 脚本之后.
         """
         missing = self.missing_runs()
         commands = []
         for case in self.source_cases:
             root = config.OUTPUT_DIR / case
-            if not any(self.resolve(run).is_relative_to(root) for run in missing):
+            if any(not self.resolve(run).suffix and self.resolve(run).is_relative_to(root)
+                   for run in missing):
+                commands.append(RUN_SCRIPTS.get(case, f"<{case} 的 run 脚本>"))
+        for run in missing:
+            if not self.resolve(run).suffix:
                 continue
-            commands.append(f"run.py --case {case}")
-        if any(self.resolve(run).suffix for run in missing):
-            commands.append("plot.py export")
+            verb = next((verb for key, verb in DATA_COMMANDS if key in run), "plot.py export")
+            if verb not in commands:
+                commands.append(verb)
         return tuple(commands)
 
 
@@ -218,7 +235,7 @@ def figure_summary(module_name: str) -> str:
 def list_targets() -> int:
     """列出全部产物 case.
 
-    只列 case, 与 ``run.py --list`` 同一个口径. 动词与尚未迁移的图号由 argparse 的
+    只列 case. 动词与尚未迁移的图号由 argparse 的
     ``--help`` 逐条列出, 在这里重印一遍只是同一份信息的第二个出口.
     """
     cases = discover_cases()
@@ -266,7 +283,7 @@ def run_case(identifier: str) -> int:
         )
         if related:
             print(
-                f"{identifier} 是算例 id (run.py 那边的); 它的产物 case: "
+                f"{identifier} 是算例目录名, 不是产物 case; 它的产物 case: "
                 + "  ".join(related),
                 file=sys.stderr,
             )

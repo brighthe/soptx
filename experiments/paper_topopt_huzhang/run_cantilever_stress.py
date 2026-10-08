@@ -106,7 +106,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def run_label(method: str, order: int) -> str:
-    """运行目录名: 约束协议、垫片半径与 C2 验收子集恒进目录名 (沿用 driver 的标签规则)."""
+    """运行目录名: 约束协议、垫片半径与 C2 验收子集恒进目录名 (沿用旧 driver 的标签规则, 已有产物目录名不变)."""
     return (f"analyzer-{method}__lfem_constraint-apparent__load_pad_radius-{LOAD_PAD_RADIUS}"
             f"__order-{order}__solid_thr-{ACCEPTANCE_SOLID_THRESHOLD}")
 

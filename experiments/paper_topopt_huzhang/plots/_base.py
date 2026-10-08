@@ -98,10 +98,9 @@ def save_figure(
 def resolve_run_dir(case_dir: Path, folder: str) -> Path | None:
     """定位一次优化运行的产物目录.
 
-    ``folder`` 是产物目录第二层的参数标签, 按 driver 的命名
-    ``analyzer-<链>__order-<k>[__<字段>-<取值>...]`` 书写 (见 driver.py 的
-    _run_label). 标签自描述且与参数一一对应, 故不做名字回落: 目录不在就返回
-    None, 由调用方决定报错还是画占位面板.
+    ``folder`` 是 run 脚本写出的运行目录名, 形如 ``analyzer-<链>__order-<k>``
+    (应力算例另带协议标签, 见 ``run_cantilever_stress.run_label``). 目录名与参数一一
+    对应, 故不做名字回落: 目录不在就返回 None, 由调用方决定报错还是画占位面板.
     """
     candidate = case_dir / folder
     return candidate if candidate.is_dir() else None
@@ -113,7 +112,8 @@ def require_run_dir(case_dir: Path, folder: str) -> Path:
     if run_dir is None:
         raise FileNotFoundError(
             f"缺少产物目录 {case_dir.name}/{folder}; "
-            f"请先运行 run.py --case {case_dir.name}"
+            "请先运行对应算例的 run 脚本 (run_fixed_fixed.py / run_bearing.py / "
+            "run_cantilever_stress.py)"
         )
     return run_dir
 
