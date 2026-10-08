@@ -13,7 +13,7 @@ flowchart TD
     R --> DS["DirectSolver<br>需要显式矩阵"]
     R --> CG["CGSolver<br>只需 @"]
     W --> CG
-    CG -. "M=" .-> P["DiagonalPreconditioner<br>(占位: Chebyshev · Multigrid · AMG · MINRES)"]
+    CG -. "M=" .-> P["DiagonalPreconditioner · Multigrid<br>(占位: Chebyshev · AMG · MINRES)"]
 
     DS --> B
     CG --> B
@@ -33,9 +33,9 @@ flowchart TD
 | `direct.py` | `DirectSolver` (scipy SuperLU / MUMPS), 函数式 `spsolve` | 已实现 |
 | `cg.py` | `CGSolver`, 函数式 `cg` | 已实现 |
 | `overlap.py` | `weighted_cg` / `weighted_norm` | 已实现 |
-| `preconditioners.py` | `DiagonalPreconditioner` | 已实现 |
+| `preconditioners.py` | `DiagonalPreconditioner`, `JacobiSmoother`, `estimate_lambda_max` | 已实现 |
 | `preconditioners.py` | `ChebyshevSmoother` | 占位 |
-| `multigrid.py` | `Multigrid` | 占位 |
+| `multigrid.py` | `Multigrid`, `MultigridLevel` (V 循环) | 已实现 |
 | `amg.py` | `AMGSolver` | 占位 |
 | `minres.py` | `MINRESSolver` | 占位 |
 
@@ -59,7 +59,7 @@ flowchart TD
 | 标签 | 探测方式 | 需要它的求解器 |
 |------|----------|----------------|
 | `CAP_MATRIX` | 算子有 `to_scipy` 或 `tocsr` | `DirectSolver`, `AMGSolver` |
-| `CAP_DIAGONAL` | 算子有 `diagonal` 或 `diags` | 暂无 |
+| `CAP_DIAGONAL` | 算子有 `diagonal` 或 `diags` | `DiagonalPreconditioner`, `JacobiSmoother` (均为未显式给对角时) |
 | `CAP_HIERARCHY` | 保留 | 暂无 |
 
 `setup` 缺能力时抛 `OperatorCapabilityError`。'ea' 层级的 matrix-free 算子只支持 `@`,
@@ -133,6 +133,17 @@ PyMUMPS 都是 CPU 求解器, 求解层没有 GPU 直接法后端。
 
 `DiagonalPreconditioner(diag)`: 构造时校验 `diag` 一维且严格为正, `M @ r = r / diag`。
 
+`JacobiSmoother(omega=None, sweeps=1)`: 加权 Jacobi 光滑子。`omega` 缺省时在 `setup` 中取
+$4 / (3 \cdot 1.1\, \hat\lambda)$, $\hat\lambda$ 为 `estimate_lambda_max` 对 $D^{-1}A$ 的幂迭代估计
+(Rayleigh 商, 不超过真值)。固定的 $\omega = 0.6$ 不稳健: 单元系数剧烈跳变时
+$\lambda_{\max}(D^{-1}A)$ 可达 4.6, 光滑发散, 作 PCG 预条件子会失去正定性。
+
+`Multigrid(levels, coarse_solver, n_pre=1, n_post=1)`: V 循环, 层次由粗到细排列, 每层给
+算子、光滑子与由更粗一层到本层的延拓 $P$ (限制取 $P^{\mathsf T}$)。`setup(op)` 以 `op` 作最细层
+算子; `n_pre` 须等于 `n_post`, 使 V 循环对称。层次由离散侧构造: 结构化六面体网格上的
+Q1 位移空间见 `soptx.fem.multigrid.StructuredHexHierarchy` (三线性延拓, 第 2 层按单元组合
+$K_E = \sum_c s_c P_c^{\mathsf T} K^0 P_c$, 更粗层做稀疏 Galerkin 投影, 目前只支持 numpy 后端)。
+
 `weighted_cg(operator, load, *, dof_comm, ...)`: 把 `dof_comm.dot` 注入
 `CGSolver` 的 `dot_product`; `dof_comm=None` 时退化为普通内积, 不依赖 `mpi4py`。
 默认 `maxiter` 1000, `rtol` 1e-10, `atol` 1e-12, `residual_refresh` 20
@@ -147,9 +158,12 @@ PyMUMPS 都是 CPU 求解器, 求解层没有 GPU 直接法后端。
 | `DistributedAnalyzer` | 重叠副本布局, 对称正定 | `'cg'` (`weighted_cg`) | `'cg'` |
 
 `LagrangeFEMAnalyzer` 的 `'cg'` 选项 (`kwargs` 优先于构造时 `solver_options`):
-`maxiter` 5000, `atol` 1e-12, `rtol` 1e-12, `precond` `None` 或 `'jacobi'`,
-`residual_refresh` 0; 开 Jacobi 后 `norm_type` 改为 `'unpreconditioned'`,
-`residual_refresh` 未指定时取 50。`'mumps'` 读 `kwargs['sym']`。迭代解法的初值经
+`maxiter` 5000, `atol` 1e-12, `rtol` 1e-12, `precond` `None`、`'jacobi'` 或 `'mg'`,
+`residual_refresh` 0; 开预条件后 `norm_type` 改为 `'unpreconditioned'`,
+`residual_refresh` 未指定时取 50。`'mg'` 支持 'fa' 与 'ea' 层级下单元密度的拓扑优化与
+结构化六面体网格, 另读 `mg_omega` (None, 自动)、`mg_sweeps` (1)、`mg_coarse_solver` (`'scipy'`)
+与 `mg_coarse_max_dofs` (20000); 粗层取自最近一次装配的单元系数, 层次的拓扑部分跨调用
+缓存。`'mumps'` 读 `kwargs['sym']`。迭代解法的初值经
 `kwargs['x0']` 显式给出。两个分析器的分解都不跨调用复用, 求解后即 `close()`。
 
 `HuZhangMFEMAnalyzer` 对 `'cg'` 直接拒绝, 对称不定的迭代路径待 `MINRESSolver` 落地。
@@ -168,6 +182,8 @@ PyMUMPS 都是 CPU 求解器, 求解层没有 GPU 直接法后端。
 |------|------|
 | `tests/unit/test_solvers_direct*.py` | `spsolve`, `DirectSolver` |
 | `tests/unit/test_solvers_cg*.py` | `cg`, `CGSolver` |
+| `tests/unit/test_multigrid_solver.py` | `JacobiSmoother`, `estimate_lambda_max`, `Multigrid` (一维 Poisson) |
+| `tests/unit/test_multigrid_structured_hex.py` | `StructuredHexHierarchy` 粗层与代数 Galerkin 逐元一致, MGCG 与直接法同解, 分析器 `precond='mg'` |
 | `examples/linear_solvers/` | 直接法: 完整矩阵残差、收敛阶、矩阵是否被改写、`sym` 守卫; CG 按预条件子分 case (无预条件、Jacobi): 与直接法一致、'fa' / 'ea' 同解、判据范数、真残差、批量右端项、`info` 契约、逐层迭代数与收敛阶 |
 
 > 机器相关的运行环境配置(如 MPI ABI)不在本仓库文档范围, 见各机器的环境说明。

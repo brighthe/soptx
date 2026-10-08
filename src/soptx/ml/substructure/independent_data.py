@@ -19,7 +19,7 @@ from .independent_contract import (
 
 def generate_samples(
     provider, output_dir, *, file_prefix, n_samples, rng,
-    batch_size=64, min_modulus=1e-6,
+    batch_size=64, min_modulus=1e-6, input_sampler=None,
 ):
     """分批生成一组独立随机材料及精确标签并写入磁盘.
 
@@ -40,6 +40,10 @@ def generate_samples(
         每次局部精确计算的样本数.
     min_modulus : float
         归一化杨氏模量的严格正下界, 避免零刚度样本.
+
+    input_sampler : callable or None
+        可选采样回调 (rng, count, n_cells), 返回有限且位于 [min_modulus, 1] 的输入.
+        None 保持原有独立均匀采样. 回调状态及分组由调用方记录.
 
     Returns
     -------
@@ -78,7 +82,13 @@ def generate_samples(
     }
     for start in range(0, n_samples, batch_size):
         stop = min(start + batch_size, n_samples)
-        inputs = rng.uniform(min_modulus, 1.0, size=(stop - start, widths["inputs"]))
+        inputs = (rng.uniform(min_modulus, 1.0, size=(stop - start, widths["inputs"]))
+                  if input_sampler is None else
+                  np.asarray(input_sampler(rng, stop - start, widths["inputs"]), dtype=np.float64))
+        if (inputs.shape != (stop - start, widths["inputs"])
+                or not np.isfinite(inputs).all()
+                or np.any(inputs < min_modulus) or np.any(inputs > 1.0)):
+            raise ValueError(f"{file_prefix} 样本 {start}:{stop} 的输入形状或取值非法")
         targets = provider(inputs)
         arrays["inputs"][start:stop] = inputs
         for name in ("shape_targets", "stiffness_targets"):
@@ -184,12 +194,12 @@ def find_training_data(
     samples_root, provider, *, n_train=400_000, n_validation=40_000,
     min_modulus=1e-6, seed=2026,
 ):
-    """在样本根目录下查找与给定配置一致的最新已完成数据集.
+    """在样本根目录下按目录名降序查找与给定配置一致的已完成数据集.
 
     Parameters
     ----------
     samples_root : str or Path
-        prepare_training_data 输出目录的父目录, 其子目录名为 UTC 时间戳.
+        prepare_training_data 输出目录的父目录, 支持配置名称或旧时间戳目录.
     provider : callable
         局部精确求解提供器, 仅使用 metadata() 与数据集记录比较.
     n_train, n_validation : int
@@ -202,7 +212,7 @@ def find_training_data(
     Returns
     -------
     path : Path or None
-        目录名最大 (即时间戳最新) 的匹配数据集目录, 无匹配时为 None.
+        按目录名降序命中的首个匹配数据集目录, 无匹配时为 None.
     skipped : list of Path
         遍历至命中目录前遇到的缺少 manifest.json、无法解析或 complete
         不为 True 的子目录, 按目录名降序排列. 这些目录不参与匹配,

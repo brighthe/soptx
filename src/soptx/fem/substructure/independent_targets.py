@@ -7,7 +7,8 @@ Cholesky 参数化.
 
 from __future__ import annotations
 
-from copy import copy
+from copy import copy, deepcopy
+from math import prod
 from numbers import Integral, Real
 from typing import Any, Optional, Sequence
 
@@ -251,7 +252,7 @@ class StiffnessIndependentCodec:
 
 
 class IndependentPredictionDecoder:
-    """基于已有参考子结构构造接口空间及网络输出编解码器.
+    """从参考子结构或保存的元数据构造网络输出编解码器.
 
     Parameters
     ----------
@@ -275,6 +276,7 @@ class IndependentPredictionDecoder:
         if trace_kind not in trace_types:
             raise ValueError("trace_kind 必须为 linear_corner 或 full_trace")
 
+        self._saved_metadata = None
         self.prototype = prototype
         self.trace_kind = trace_kind
         self.trace = trace_types[trace_kind].from_prototype(prototype)
@@ -296,8 +298,78 @@ class IndependentPredictionDecoder:
         }
         self.nu = float(prototype.nu)
 
+    @classmethod
+    def from_metadata(cls, metadata: dict[str, Any]) -> IndependentPredictionDecoder:
+        """从保存的独立条目契约恢复训练及预测补全器.
+
+        Parameters
+        ----------
+        metadata : dict
+            数据集或权重保存的完整提供器记录, 包含刚体基和独立条目编号.
+
+        Returns
+        -------
+        IndependentPredictionDecoder
+            使用保存的基和 pivot 索引构建的 decoder.
+
+        Notes
+        -----
+        不创建有限元参考子结构, prototype 与 trace 为 None. 返回对象仅用于
+        codec 编解码及 metadata 读取, 不提供局部刚度装配或精确标签生成.
+        """
+        if cls is not IndependentPredictionDecoder:
+            raise TypeError("from_metadata 仅用于 IndependentPredictionDecoder")
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata 必须为完整的提供器记录")
+        saved = deepcopy(metadata)
+        dim = saved.get("spatial_dimension")
+        trace_kind = saved.get("trace")
+        n_fine = saved.get("n_fine")
+        if (dim not in (2, 3) or trace_kind not in ("linear_corner", "full_trace")
+                or not isinstance(n_fine, (list, tuple)) or len(n_fine) != dim
+                or any(isinstance(n, bool) or not isinstance(n, Integral) or n < 2
+                       for n in n_fine)):
+            raise ValueError("空间维数, 接口类型或细网格划分非法")
+        n_i = dim * prod(n - 1 for n in n_fine)
+        n_boundary = prod(n + 1 for n in n_fine) - n_i // dim
+        n_trace = dim * (2**dim if trace_kind == "linear_corner" else n_boundary)
+        n_rigid = dim * (dim + 1) // 2
+        n_free = n_trace - n_rigid
+        expected = {
+            "n_cells": prod(n_fine), "n_i": n_i, "n_trace": n_trace,
+            "n_rigid": n_rigid, "n_shape_targets": n_i * n_free,
+            "n_stiffness_targets": n_free * (n_free + 1) // 2,
+            "shape_encoding": "free_matrix_entries_with_rigid_pivot_completion",
+            "stiffness_encoding": "symmetric_free_block_with_rigid_pivot_completion",
+        }
+        if any(saved.get(key) != value for key, value in expected.items()):
+            raise ValueError("保存的维度或独立条目编码方式不一致")
+        q = np.asarray(saved.get("rigid_basis"), dtype=np.float64)
+        phi = np.asarray(saved.get("rigid_interior"), dtype=np.float64)
+        if (q.shape != (n_trace, n_rigid) or phi.shape != (n_i, n_rigid)
+                or not np.isfinite(q).all() or not np.isfinite(phi).all()):
+            raise ValueError("保存的刚体基维度或数值非法")
+        pivots = saved.get("pivot_indices")
+        if (not isinstance(pivots, (list, tuple))
+                or any(isinstance(i, bool) or not isinstance(i, Integral) for i in pivots)):
+            raise ValueError("pivot_indices 必须为整数索引序列")
+        decoder = cls.__new__(cls)
+        decoder.prototype = None
+        decoder.trace = None
+        decoder.trace_kind = trace_kind
+        decoder.nu = float(saved["poisson_ratio"])
+        decoder.shape_codec = ShapeIndependentCodec(q, phi, pivot_indices=pivots)
+        decoder.stiffness_codec = StiffnessIndependentCodec(q, pivot_indices=pivots)
+        decoder.codecs = {"shape": decoder.shape_codec, "stiffness": decoder.stiffness_codec}
+        if decoder.shape_codec.free_indices.tolist() != saved.get("free_indices"):
+            raise ValueError("保存的 free_indices 与 pivot_indices 不一致")
+        decoder._saved_metadata = saved
+        return decoder
+
     def metadata(self) -> dict[str, Any]:
         """返回可写入 JSON 的独立条目配置与编号契约."""
+        if self._saved_metadata is not None:
+            return deepcopy(self._saved_metadata)
         geometry = (
             "axis_aligned_quadrilateral"
             if self.prototype.dim == 2

@@ -1,4 +1,5 @@
 from time import time
+from math import isfinite
 from typing import Any, Callable, Dict, Optional, Union, Tuple
 
 from soptx.backend import backend_manager as bm
@@ -332,10 +333,40 @@ class OCOptimizer(BaseLogged):
 
         该公共接口供自定义分析流程复用 OC 的二分搜索与密度更新. 调用方提供
         当前设计变量、目标与约束梯度, 以及候选设计的约束函数; 返回值大于零
-        表示候选设计违反约束.
+        表示候选设计违反约束. 初始乘子上界必须对应可行候选; 二分结束后
+        返回已确认可行的上界候选, 不返回可能超体积的最后一次中点候选.
+
+        Raises
+        ------
+        ValueError
+            initial_lambda 非有限或非正, 或 bisection_tol 不在 (0, 1) 内.
+        FloatingPointError
+            约束函数返回非有限值.
+        RuntimeError
+            初始乘子上界未给出可行候选.
         """
         l1, l2 = 0.0, float(initial_lambda)
-        dv_new = bm.copy(design_variable[:])
+        if not isfinite(l2) or l2 <= 0.0:
+            raise ValueError("initial_lambda 必须为有限正数.")
+        if not isfinite(bisection_tol) or not 0.0 < bisection_tol < 1.0:
+            raise ValueError("bisection_tol 必须为 (0, 1) 内的有限数.")
+        feasible = OCOptimizer._compute_density_candidate(
+            design_variable=design_variable,
+            dc=objective_gradient,
+            dg=constraint_gradient,
+            lmid=l2,
+            move_limit=move_limit,
+            damping_coef=damping_coef,
+            design_variable_min=design_variable_min,
+        )
+        constraint_value = float(constraint_function(feasible))
+        if not isfinite(constraint_value):
+            raise FloatingPointError("OC 初始上界候选的约束值非有限.")
+        if constraint_value > 0.0:
+            raise RuntimeError(
+                "OC 初始乘子上界未给出满足约束的候选; "
+                "请检查 initial_lambda, 移动限及约束可行性."
+            )
         while (
             (l2 - l1) / (l2 + l1 + 1.0e-12) > bisection_tol
             and l2 > 1.0e-40
@@ -350,11 +381,15 @@ class OCOptimizer(BaseLogged):
                 damping_coef=damping_coef,
                 design_variable_min=design_variable_min,
             )
-            if float(constraint_function(dv_new)) > 0.0:
+            constraint_value = float(constraint_function(dv_new))
+            if not isfinite(constraint_value):
+                raise FloatingPointError("OC 二分候选的约束值非有限.")
+            if constraint_value > 0.0:
                 l1 = lmid
             else:
                 l2 = lmid
-        return dv_new
+                feasible = dv_new
+        return feasible
 
     @staticmethod
     def _compute_density_candidate(

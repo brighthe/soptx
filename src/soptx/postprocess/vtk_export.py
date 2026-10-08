@@ -54,7 +54,7 @@ def write_vtu(
 
     参数:
         mesh: soptx.mesh 网格, 需提供 ``entity('node')`` / ``entity('cell')``.
-        point_data: 节点场字典, 值为 ``(n_nodes,)`` 或 ``(n_nodes, gd)`` 数组.
+        point_data: 节点场字典, 值为 ``(n_nodes,)`` 或 ``(n_nodes, 3)`` 数组.
         filepath: 输出路径 (不含扩展名时 pyevtk 自动补 ``.vtu``).
         cell_data: 单元场字典, 值为 ``(n_cells,)`` 或 ``(n_cells, ...)`` 数组.
     """
@@ -81,15 +81,20 @@ def write_vtu(
     )
     cell_types = np.full(n_cells, cell_type, dtype=np.int32)
 
-    # 点数据一律转成连续的一维列
+    # 三分量节点向量按分量传给 pyevtk, 标量保持连续一维列.
     point_data_vtu = None
     if point_data:
         point_data_vtu = {}
         for name, value in point_data.items():
             arr = np.asarray(value, dtype=np.float64)
-            if arr.ndim > 1:
-                arr = arr.reshape(-1)
-            point_data_vtu[name] = np.ascontiguousarray(arr)
+            if arr.ndim == 2 and arr.shape == (n_nodes, 3):
+                point_data_vtu[name] = tuple(
+                    np.ascontiguousarray(arr[:, component]) for component in range(3)
+                )
+            else:
+                if arr.ndim > 1:
+                    arr = arr.reshape(-1)
+                point_data_vtu[name] = np.ascontiguousarray(arr)
 
     # 单元数据
     cell_data_vtu = None

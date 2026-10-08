@@ -14,13 +14,16 @@ Concrete helpers live in the submodules:
 * :mod:`soptx.postprocess.optimization_history` -- persist and reload an
   optimization history as JSON, and plot the convergence curves;
 * :mod:`soptx.postprocess.stress_report` -- post-optimization stress-constraint
-  checking, solid-element statistics and von Mises yield-surface plots.
+  checking, solid-element statistics and von Mises yield-surface plots;
+* :mod:`soptx.postprocess.sync_visualization` -- incrementally copy (or move) the
+  per-iteration ParaView frames of a run to a viewing directory, e.g. a Windows
+  local disk under WSL (``python -m soptx.postprocess.sync_visualization``).
 
 The package is named for what it does, not for one of the things it does: only
 ``vtk_render`` and the plotting helpers are visualization.  ``vtk_export``
 serializes, ``optimization_history`` also persists and reloads, and
 ``stress_report`` mostly computes.  "Post-processing" is the term that covers
-all four.
+all of them.
 
 The two reporting modules read
 :class:`soptx.topology.optimizers.history.OptimizationHistory` -- layer 4

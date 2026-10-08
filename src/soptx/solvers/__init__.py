@@ -36,6 +36,7 @@ from .overlap import weighted_cg, weighted_norm
 from .preconditioners import (
     ChebyshevSmoother,
     DiagonalPreconditioner,
+    JacobiSmoother,
     estimate_lambda_max,
 )
 from .registry import available, create, register
@@ -70,6 +71,7 @@ __all__ = [
     # 预条件子与光滑子
     "ChebyshevSmoother",
     "DiagonalPreconditioner",
+    "JacobiSmoother",
     "estimate_lambda_max",
     # 多重网格
     "AMGSolver",

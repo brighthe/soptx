@@ -67,6 +67,31 @@ class ShapeFunctionSurrogateNet(SubstructureSurrogateNet):
     """
 
 
+def _normalize_independent_input(x, mode):
+    """按指定方式处理独立分量网络的材料输入.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        最后一维为局部单元模量, 可带任意批量维度.
+    mode : {"none", "per_sample_max"}
+        后者按每个样本最大模量归一化, 保留 autograd 计算图.
+
+    Returns
+    -------
+    torch.Tensor
+        原输入或与其同形状的无量纲材料比例.
+    """
+    if mode == "none":
+        return x
+    if mode != "per_sample_max":
+        raise ValueError("未知的材料输入归一化方式")
+    scale = x.amax(dim=-1, keepdim=True)
+    if not bool(torch.isfinite(x).all() and (x >= 0).all() and (scale > 0).all()):
+        raise ValueError("归一化输入须有限, 非负, 且每个样本最大值为正")
+    return x / scale
+
+
 class SplitOutputNet(nn.Module):
     """使用多个独立网络分组预测独立输出分量.
 
@@ -148,6 +173,7 @@ class SplitOutputNet(nn.Module):
         torch.Tensor
             形状为 (..., output_dim) 的标准顺序独立分量.
         """
+        x = _normalize_independent_input(x, getattr(self, "input_normalization", "none"))
         grouped_output = torch.cat([net(x) for net in self.nets], dim=-1)
         return grouped_output.index_select(-1, self.restore_order)
 
@@ -178,6 +204,23 @@ class IndependentOutputNet(SubstructureSurrogateNet):
     约束由后续补全器施加, 不能使用 ReducedStiffnessCondensation
     的 Cholesky 重构逻辑解码.
     """
+
+
+    def forward(self, x):
+        """使用保存的材料输入处理方式预测独立分量.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            最后一维为局部单元模量.
+
+        Returns
+        -------
+        torch.Tensor
+            标准输出顺序的独立分量.
+        """
+        x = _normalize_independent_input(x, getattr(self, "input_normalization", "none"))
+        return super().forward(x)
 
 
 class DirectStiffnessNet(IndependentOutputNet):

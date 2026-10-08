@@ -111,6 +111,48 @@ def test_full_mbb3d_end_lines_dirichlet_dofs_on_a_mesh() -> None:
     np.testing.assert_array_equal(is_ddof.sum(axis=0), [nz + 1, 2 * (nz + 1), nz + 1])
 
 
+def test_full_mbb3d_end_corners_constrains_bottom_end_corners_only() -> None:
+    bm.set_backend("numpy")
+    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN, support="end_corners")
+    z1 = MBB3D_DOMAIN[5]
+    points = bm.array([
+        [0.0, 0.0, 0.0],   # 左端底边角点
+        [0.0, 0.0, z1],    # 左端底边另一角点
+        [0.0, 0.0, 0.5],   # 左端底边中部, 不约束
+        [6.0, 0.0, 0.0],   # 右端底边角点
+        [6.0, 0.0, z1],    # 右端底边另一角点
+        [0.0, 1.0, 0.0],   # 左端顶角, 不约束
+    ])
+
+    dirichlet_x, dirichlet_y, dirichlet_z = problem.is_dirichlet_boundary()
+    np.testing.assert_array_equal(bm.to_numpy(dirichlet_x(points)), [True, True, False, False, False, False])
+    np.testing.assert_array_equal(bm.to_numpy(dirichlet_y(points)), [True, True, False, True, True, False])
+    np.testing.assert_array_equal(bm.to_numpy(dirichlet_z(points)), [True, True, False, False, False, False])
+
+
+def test_full_mbb3d_end_corners_removes_rigid_body_modes_on_a_mesh() -> None:
+    bm.set_backend("numpy")
+    from soptx.fem.analyzers import LagrangeFEMAnalyzer
+    from soptx.materials import IsotropicLinearElasticMaterial
+
+    nx, ny, nz = 6, 2, 3
+    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN, support="end_corners", load_subdivisions=(nx, nz))
+    mesh, space = _mbb3d_mesh_space(nx, ny, nz)
+    is_ddof = bm.to_numpy(space.is_boundary_dof(threshold=problem.is_dirichlet_boundary(),
+                                                method="interp")).reshape(-1, 3)
+    # 左端两角点各约束 3 个分量, 右端两角点各约束 u_y
+    np.testing.assert_array_equal(is_ddof.sum(axis=0), [2, 4, 2])
+
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="3D",
+                                              enable_logging=False)
+    analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
+                                   integration_order=2, solve_method="scipy", enable_logging=False)
+    K, _ = analyzer.apply_bc(analyzer.assemble_stiff_matrix(), analyzer.assemble_body_force_vector())
+    eigenvalues = np.linalg.eigvalsh(K.to_scipy().toarray())
+    # 刚体运动全部被消除: 消元后的刚度矩阵正定
+    assert eigenvalues.min() > 1e-8 * eigenvalues.max()
+
+
 def test_full_mbb3d_splits_load_by_subdivision_parity() -> None:
     expected_counts = {(6, 4): 1, (6, 3): 2, (5, 3): 4}
     for (nx, nz), count in expected_counts.items():

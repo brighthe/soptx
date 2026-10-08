@@ -238,6 +238,7 @@ def load_independent_network(checkpoint_path, provider_metadata, *, route):
         model = build_network(
             provider_metadata, route=name, num_networks=count,
             hidden_dims=hidden_dims, activation=activation,
+            input_normalization=payload.get("input_normalization", "none"),
         )
     except (TypeError, ValueError) as error:
         raise ValueError(f"无法按权重记录重建网络结构: {path}") from error
@@ -289,7 +290,10 @@ def load_independent_network(checkpoint_path, provider_metadata, *, route):
         "path": str(path.resolve()), "sha256": digest.hexdigest(),
         "epoch": payload.get("epoch"),
         "validation_loss": payload.get("validation_loss"),
+        "loss": payload.get("loss", "decoded_full_matrix_mse"),
+        "loss_settings": payload.get("loss_settings"),
         "architecture": architecture,
+        "input_normalization": model.input_normalization,
         "dataset_seed": dataset.get("seed"),
         "dataset_sampling": dataset.get("sampling"),
     }

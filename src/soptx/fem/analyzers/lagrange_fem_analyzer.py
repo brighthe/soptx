@@ -32,11 +32,13 @@ from soptx.fem.integrators import (
 from soptx.fem.kernels import ElementRestriction
 from soptx.fem.levels import (
     AssemblyLevelExtension,
+    FullAssembly,
     SharedReferenceElementAssembly,
     available_levels,
     create_level,
 )
 from soptx.fem.load_projection import project_nodal_loads
+from soptx.fem.matrix import assemble_csr, build_csr_pattern
 from soptx.fem.operators import ConstrainedOperator
 from soptx.materials import LinearElasticMaterial
 
@@ -64,7 +66,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 interpolation_scheme: Optional[MaterialInterpolation] = None,
                 enable_logging: bool = False,
-                logger_name: Optional[str] = None
+                logger_name: Optional[str] = None,
+                reference_classes: Optional[int] = None,
             ) -> None:
         """初始化拉格朗日有限元分析器.
 
@@ -80,8 +83,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             - 'fa': 装配全局稀疏矩阵 (full assembly), 支持直接解法与伴随求解;
             - 'ea': 只保留单元矩阵 (element assembly), matvec 时 gather-作用-scatter,
-              不形成全局矩阵, 只能用迭代解法; 单元密度下只常驻 K_e^0 (与敏度共用) 与
-              逐单元标量 s_e, 不另存 K_e;
+              不形成全局矩阵, 只能用迭代解法; 单元密度下只常驻 K_e^0 (与敏度共用, 给出
+              ``reference_classes`` 时按平移类各一份) 与逐单元标量 s_e, 不另存 K_e;
             - 'pa': 只保留积分点上的几何与材料数据 (partial assembly), matvec 时
               gather-B-D-B^T-scatter, 高阶下比 'ea' 省内存, 只能用迭代解法;
             - 'ua': 什么都不常驻 (unassembled), 每次 matvec 现算几何与材料, 只用于取证.
@@ -92,13 +95,19 @@ class LagrangeFEMAnalyzer(BaseLogged):
             - None: 预条件子绑主算子本身, 不另建层级;
             - 其余: 另建一个该层级的算子, 只供预条件子使用.
         solve_method : 求解方式.
-        solver_options : 迭代解法的默认参数 (maxiter, atol, rtol).
+        solver_options : 迭代解法的默认参数 (maxiter, atol, rtol, precond); precond='mg' 时另读
+            mg_* 选项, 见 ``_multigrid_preconditioner``.
         tensor_space : 外部构造的张量函数空间; 为 None 时内部自动构造.
         dof_comm : 分布式重叠自由度通信器.
         topopt_algorithm : 拓扑优化算法类型.
         interpolation_scheme : 密度插值方案.
         enable_logging : 是否开启日志记录.
         logger_name : 日志记录器名称.
+        reference_classes : 单元按 ``create_box_mesh`` / ``from_box`` 的编号约定排列时的平移类数
+            N_k (六面体、四边形为 1, 三角形 2, 四面体 6). 给出时单元密度下的 K_e^0 只按类各存
+            一份 (N_k, TLDOF, TLDOF), 单元 e 取第 e % N_k 份, 供 FA 缩放装配、'ea' 层级、单元
+            能量导数与多重网格共用; 缺省 (None) 时逐单元各存一份. 约定由调用方保证, 首次计算
+            时只抽查少数单元, 见 ``_reference_stiffness_matrices``.
         """
 
         super().__init__(enable_logging=enable_logging, logger_name=logger_name)
@@ -171,6 +180,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._F = None
         self._prescribed_solution = None  # 满足 Dirichlet 值、内部为零的基准向量
         self._csr_pattern = None  # 模式先行 (Pattern-First) 静态拓扑骨架缓存
+        # Dirichlet 数据与对称消元的槽位只依赖空间、问题与 CSR 骨架, 与密度无关, 各算一次
+        self._dirichlet_cache = None
+        self._elimination_cache = None
+        # 几何多重网格层次的拓扑部分 (网格序列, 延拓, 粗层骨架), 只依赖空间与约束
+        self._mg_hierarchy = None
+        # 纯集中力的非体力载荷: (载荷指纹, 载荷向量), 见 _non_body_loads_by_boundary_type
+        self._non_body_cache = None
         # 当前的装配层级对象, self._operator_level 是它的名字
         self._level = None
         # self._level 建在哪个张量空间上; 空间换了层级就不能复用
@@ -183,6 +199,15 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._cached_ke0 = None
         self._cached_ke0_sub = None
+        # 平移类参考单元矩阵 (N_k, TLDOF, TLDOF); 只在给出 reference_classes 时使用
+        if reference_classes is not None:
+            n_cells = int(self._mesh.number_of_cells())
+            if (isinstance(reference_classes, bool) or int(reference_classes) != reference_classes
+                    or reference_classes < 1 or n_cells % int(reference_classes) != 0):
+                self._log_error(f"reference_classes 须为整除单元数 {n_cells} 的正整数, 得到 {reference_classes!r}")
+            reference_classes = int(reference_classes)
+        self._reference_classes = reference_classes
+        self._reference_ke0 = None
 
         self._cached_stiffness_absolute = None # 绝对刚度 (带量纲)
         self._cached_stiffness_relative = None # 相对刚度 (无量纲)
@@ -308,6 +333,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._level = None
         self._level_space = None
         self._cached_ke0 = None
+        self._reference_ke0 = None
+        self._dirichlet_cache = None
+        self._elimination_cache = None
+        self._mg_hierarchy = None
+        self._non_body_cache = None
 
     
     ##############################################################################################
@@ -414,15 +444,23 @@ class LagrangeFEMAnalyzer(BaseLogged):
             self._level.update(coef)
             level = self._level
         elif self._scaled_reference_ea(coef):
-            # 单元密度下 K_e = s_e K_e^0: 只常驻 K_e^0 与 s_e, K_e^0 与敏度共用分析器
+            # 单元密度下 K_e = s_e K_e^0: 只常驻参考单元矩阵与 s_e, 参考矩阵与敏度共用分析器
             # 缓存的这一份, 不另存 K_e; update 只换 s_e
             restriction = ElementRestriction.from_integrator(self._integrator,
                                                             self._tensor_space,
                                                             layout='flat')
             level = SharedReferenceElementAssembly(self._tensor_space,
                                                 restriction=restriction,
-                                                reference_matrices=self._solid_stiffness_matrix(),
+                                                reference_matrices=self._reference_stiffness_matrices(),
                                                 scale=coef)
+            self._level_space = self._tensor_space
+        elif self._scaled_reference_fa(coef):
+            # 单元密度下 K_e = s_e K_e^0: 用与敏度共用的缓存 K_e^0 逐分量块缩放后装配, 不再
+            # 逐单元重新积分; CSR 骨架与积分路线相同, 首次装配时建好后复用
+            if self._csr_pattern is None:
+                self._csr_pattern = build_csr_pattern(self._tensor_space)
+            matrix = assemble_csr(self._reference_stiffness_matrices(), self._csr_pattern, scale=coef)
+            level = FullAssembly(self._tensor_space, matrix, pattern=self._csr_pattern)
             self._level_space = self._tensor_space
         else:
             # 多分辨率、逐点、泊松比插值等系数不是单元标量, 'ea' 走标准 EA 逐单元积分
@@ -490,12 +528,68 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 and self._topopt_algorithm == 'density_based'
                 and coef is not None and coef.ndim == 1)
 
+    def _scaled_reference_fa(self, coef: Optional[TensorLike]) -> bool:
+        """'fa' 层级能否由缓存的 K_e^0 按单元系数缩放装配, 而不逐单元重新积分.
+
+        Parameters
+        ----------
+        coef : 积分子的系数.
+
+        Returns
+        -------
+        scaled : 'fa' 层级、密度拓扑优化且系数为单元密度 (NC, ) 时为 True; 泊松比插值的
+            系数为逐单元本构矩阵, 不满足此条件, 仍走积分.
+        """
+        return (self._operator_level == 'fa'
+                and self._topopt_algorithm == 'density_based'
+                and coef is not None and coef.ndim == 1)
+
     def _solid_stiffness_matrix(self) -> TensorLike:
         """取缓存的实体单元矩阵 K_e^0, 未缓存时现算一次"""
         if self._cached_ke0 is None:
             return self.compute_solid_stiffness_matrix()
 
         return self._cached_ke0
+
+    def _reference_stiffness_matrices(self) -> TensorLike:
+        """单元密度下 K_e = s_e K^0_{k(e)} 所用的参考单元矩阵, 首次计算后缓存.
+
+        Returns
+        -------
+        reference : (N_k, TLDOF, TLDOF) 的参考单元矩阵, 单元 e 取第 e % N_k 份. 未给
+            ``reference_classes`` 时 N_k = NC, 即 ``_solid_stiffness_matrix`` 的逐单元缓存.
+
+        Notes
+        -----
+        给出 ``reference_classes`` 时只积分前 N_k 个代表单元, 不形成逐单元的 (NC, TLDOF, TLDOF).
+        另积分中间与最后一个单元, 与其所属类的代表比较, 相对偏差超过 1e-10 即报错; 这只能
+        拦住重编号、非等距之类的明显误用, 不能证明每个单元都满足平移类约定.
+        """
+        if self._reference_classes is None:
+            return self._solid_stiffness_matrix()
+        if self._reference_ke0 is None:
+            n_classes = self._reference_classes
+            n_cells = int(self._mesh.number_of_cells())
+
+            def integrate(index):
+                integrator = LinearElasticIntegrator(material=self._material, coef=None,
+                                                     q=self._integration_order, index=index,
+                                                     method=self._assembly_method)
+                return integrator.assembly(space=self.tensor_space)
+
+            reference = integrate(slice(0, n_classes))
+            sample = bm.tensor(sorted({n_cells // 2, n_cells - 1}), dtype=bm.int64)
+            sampled = integrate(sample)
+            expected = reference[sample % n_classes]
+            scale = float(bm.max(bm.abs(reference)))
+            if float(bm.max(bm.abs(sampled - expected))) > 1e-10 * scale:
+                self._log_error(
+                    f"reference_classes={n_classes} 与网格不符: 抽查单元的 K_e^0 与其平移类代表不一致, "
+                    f"网格须按 create_box_mesh / from_box 的编号约定生成且等距"
+                )
+            self._reference_ke0 = reference
+
+        return self._reference_ke0
 
     def assemble_spring_stiff_matrix(self):
         """组装弹簧刚度矩阵"""
@@ -572,11 +666,26 @@ class LagrangeFEMAnalyzer(BaseLogged):
                         给出非体力载荷, 说明边界类型与载荷契约矛盾, 显式报错而不是
                         静默丢弃;
         - 其他        : 尚未定义装配语义, 报错.
+
+        非伴随且非体力载荷全是集中力时, 载荷向量首次装配后缓存, 以各集中力的作用点与力向量
+        为指纹: 指纹不变即返回缓存的副本 (逐位相同), 载荷被改动则重新装配; 换空间时作废.
+        线载荷、边界牵引由可调用对象给出, 无从比较取值, 不缓存.
         """
         boundary_type = self._pde.boundary_type
 
         if boundary_type == 'mixed':
-            return self._assemble_non_body_loads(adjoint)
+            loads = [load for load in self._pde.loads() if not isinstance(load, BodyForce)]
+            fingerprint = None
+            if not adjoint and loads and all(isinstance(load, PointForce) for load in loads):
+                fingerprint = tuple((tuple(float(v) for v in load.point),
+                                     tuple(float(v) for v in load.force())) for load in loads)
+                cache = self._non_body_cache
+                if cache is not None and cache[0] == fingerprint:
+                    return self._tensor_space.function(bm.copy(cache[1]))
+            F_non_body = self._assemble_non_body_loads(adjoint)
+            if fingerprint is not None:
+                self._non_body_cache = (fingerprint, bm.copy(F_non_body[:]))
+            return F_non_body
 
         if boundary_type == 'dirichlet':
             unused = [
@@ -700,23 +809,21 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._F = F
 
         #* 2. Dirichlet 边界条件处理 - 强形式施加 *#
-        gd_uh = self._pde.dirichlet_bc
-        threshold_uh = self._pde.is_dirichlet_boundary()
-
-        uh_bd, isBdDof = space_uh.boundary_interpolate(
-                                                    gd=gd_uh,
-                                                    threshold=threshold_uh,
-                                                    method='interp'
-                                                )
+        # u_D 与自由度掩码只依赖空间与问题, 首次计算后缓存; 交出副本, 免得下游原地改写缓存
+        uh_bd, isBdDof, bd_nonzero = self._dirichlet_data()
+        uh_bd = bm.copy(uh_bd[:])
         self._prescribed_solution = uh_bd
 
         if adjoint:
             uh_bd = bm.repeat(uh_bd.reshape(-1, 1), 2, axis=1)
+            # u_D 恒为零 (齐次约束) 时 K u_D = 0, 跳过; 大规模下 tocoo 与这次乘法都很昂贵
             #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-            F = F - K.tocoo().matmul(uh_bd[:])
+            if bd_nonzero:
+                F = F - K.tocoo().matmul(uh_bd[:])
             F = bm.set_at(F, (isBdDof, slice(None)), uh_bd[isBdDof, :])
         else:
-            F = F - K.tocoo().matmul(uh_bd[:])
+            if bd_nonzero:
+                F = F - K.tocoo().matmul(uh_bd[:])
             F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
 
         K = self._apply_matrix(K, isDDof=isBdDof)
@@ -751,18 +858,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
         F = self.reduce_load(F)
         self._F = F
 
-        space_uh = self._tensor_space
-        threshold_uh = self._pde.is_dirichlet_boundary()
-        isBdDof = space_uh.is_boundary_dof(threshold=threshold_uh, method='interp')
+        # 边界自由度取给定值、内部自由度取零的基准向量与自由度掩码只依赖空间与问题, 与 'fa'
+        # 共用首次计算后的缓存; 交出副本, 免得下游原地改写缓存
+        uh_bd, isBdDof, bd_nonzero = self._dirichlet_data()
+        uh_bd = bm.copy(uh_bd[:])
 
         operator = ConstrainedOperator(self.wrap_operator(K),
                                     gd=self._pde.dirichlet_bc,
                                     isDDof=isBdDof)
 
-        # 边界自由度取给定值, 内部自由度取零, 作为消去边界贡献的基准向量
-        uh_bd = operator.init_solution(dtype=bm.float64)
-        uh_bd = bm.set_at(uh_bd, ~isBdDof, 0.0)
-        F = operator.apply(F, uh_bd)
+        # u_D 恒为零时 K u_D = 0, 只需把边界行置为 u_D, 与完整的 apply 逐位相同 (x - 0.0 = x).
+        # 分布式下算子作用含跨 rank 的重叠归约, bd_nonzero 又是各 rank 自己判定的, 若只有部分
+        # rank 跳过会使集体通信失配, 故只在串行时跳过
+        if bd_nonzero or self._dof_comm is not None:
+            F = operator.apply(F, uh_bd)
+        else:
+            F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
 
         self._prescribed_solution = uh_bd
 
@@ -1075,6 +1186,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
                 if precond in ('jacobi', 'diagonal'):
                     M = DiagonalPreconditioner()
+                elif precond == 'mg':
+                    M = self._multigrid_preconditioner(**kwargs)
                 elif precond in ('scipy', 'mumps'):
                     # 直接法当预条件子: LinearSolver.__matmul__ 本就是"零初值解一
                     # 次"的预条件子模式, 不需要适配层. 它是精确逆, CG 应一步收敛,
@@ -1083,7 +1196,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 else:
                     self._log_error(
                         f"未知的预条件子类型: {precond}; "
-                        f"可选 'jacobi'/'diagonal', 'scipy', 'mumps'"
+                        f"可选 'jacobi'/'diagonal', 'mg', 'scipy', 'mumps'"
                     )
 
                 try:
@@ -1124,6 +1237,56 @@ class LagrangeFEMAnalyzer(BaseLogged):
             return create('mumps', sym=mumps_sym), K, {'sym': mumps_sym}, None
 
         return create(solver_type), K, {}, None
+
+    def _multigrid_preconditioner(self, **kwargs):
+        """几何多重网格预条件子, 粗层按最近一次装配的单元系数重建.
+
+        Parameters
+        ----------
+        **kwargs : 求解调用的选项, 优先于构造时的 ``solver_options``. 读取
+            ``mg_omega`` (默认 None, 各层自动取值), ``mg_sweeps`` (默认 1),
+            ``mg_coarse_solver`` (默认 'scipy') 与 ``mg_coarse_max_dofs`` (默认 20000,
+            只在首次构造层次时生效).
+
+        Returns
+        -------
+        mg : 尚未 setup 的 ``Multigrid``; 最细层算子由调用方 setup 时给出.
+
+        Notes
+        -----
+        粗层算子取自 ``self._integrator.coef``, 即最近一次 ``assemble_stiff_matrix`` 的系数,
+        因此须先装配、再求解同一个矩阵. 层次的拓扑部分首次构造后缓存, 换空间时作废.
+        支持 'fa' 与 'ea' 层级下单元密度的拓扑优化, 网格须为结构化六面体网格. 两个层级下
+        施加边界条件后的最细层算子都是 Pi_I K Pi_I + Pi_D ('fa' 为保结构消元的 CSR 矩阵,
+        'ea' 为 ``ConstrainedOperator``), 粗层只由单元系数、K^0 与 Dirichlet 掩码构造, 与最细层
+        的常驻形式无关.
+        """
+        from soptx.fem.multigrid import StructuredHexHierarchy
+
+        coef = self._integrator.coef
+        if not (self._scaled_reference_fa(coef) or self._scaled_reference_ea(coef)):
+            self._log_error(
+                "precond='mg' 目前只支持 'fa' 或 'ea' 层级下单元密度的拓扑优化 "
+                f"(operator_level={self._operator_level!r}, "
+                f"topopt_algorithm={self._topopt_algorithm!r})"
+            )
+
+        def option(name, default):
+            return kwargs.get(name, self._solver_options.get(name, default))
+
+        if self._mg_hierarchy is None:
+            _, isBdDof, _ = self._dirichlet_data()
+            try:
+                self._mg_hierarchy = StructuredHexHierarchy(
+                    self._tensor_space, isBdDof, self._reference_stiffness_matrices()[0],
+                    coarse_max_dofs=int(option('mg_coarse_max_dofs', 20000)))
+            except (ValueError, NotImplementedError) as exc:
+                self._log_error(f"precond='mg' 无法构造多重网格层次: {exc}")
+        self._mg_hierarchy.update(coef)
+
+        return self._mg_hierarchy.build_multigrid(omega=option('mg_omega', None),
+                                                  sweeps=int(option('mg_sweeps', 1)),
+                                                  coarse_solver=option('mg_coarse_solver', 'scipy'))
 
     def solve_system(self, K, F, out, **kwargs):
         """在给定算子上求解线性系统, 解就地写入 out
@@ -1217,11 +1380,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
     ###############################################################################################
 
     def compute_solid_stiffness_matrix(self):
-        """计算实体材料的刚度矩阵"""
+        """计算并缓存实体材料的逐单元刚度矩阵 K_e^0.
+
+        Returns
+        -------
+        ke0 : (NC, TLDOF, TLDOF) 的逐单元刚度矩阵.
+
+        Notes
+        -----
+        装配方法取分析器的 ``assembly_method``, 与全局刚度矩阵一致, 使灵敏度与刚度在舍入
+        意义上也自洽. 不固定用 ``'standard'``: 它带积分点维的中间数组, 大规模下一次性峰值
+        约为结果的 10 倍.
+        """
         lea = LinearElasticIntegrator(material=self._material,
                             coef=None,
                             q=self._integration_order,
-                            method='standard')
+                            method=self._assembly_method)
         ke0 = lea.assembly(space=self.tensor_space)
 
         self._cached_ke0 = ke0
@@ -1418,6 +1592,53 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._cached_ke0_sub = ke0_sub
 
         return ke0_sub
+
+    def compute_element_energy_derivative(self,
+                                          rho_val: Union[TensorLike, Function],
+                                          uhe: TensorLike,
+                                        ) -> TensorLike:
+        """计算单元密度下每个单元的 u_e^T (dK_e / drho_e) u_e.
+
+        Parameters
+        ----------
+        rho_val : (NC, ) 的单元物理密度.
+        uhe : (NC, TLDOF) 的单元位移.
+
+        Returns
+        -------
+        energy : (NC, ) 的单元能量导数; 柔顺度灵敏度为其相反数.
+
+        Notes
+        -----
+        泊松比不随密度插值时 dK_e / drho_e = (E'(rho_e) / E_0) K_e^0, 故按
+        (E'(rho_e) / E_0) (u_e^T K_e^0 u_e) 计算, 不构造 (NC, TLDOF, TLDOF) 的导数矩阵;
+        泊松比随密度插值时退回 ``compute_stiffness_matrix_derivative`` 后缩并.
+        """
+        material_params = self._interpolation_scheme.interpolate_material(
+                                            material=self._material,
+                                            rho_val=rho_val,
+                                            integration_order=self._integration_order,
+                                            displacement_mesh=self._mesh,
+                                        )
+        if isinstance(material_params, tuple):
+            diff_ke = self.compute_stiffness_matrix_derivative(rho_val=rho_val)
+            return bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
+
+        material_derivs = self._interpolation_scheme.interpolate_material_derivative(
+                                                material=self._material,
+                                                rho_val=rho_val,
+                                                integration_order=self._integration_order,
+                                            )
+        dE_rho = material_derivs[0] if isinstance(material_derivs, tuple) else material_derivs
+        ke0 = self._reference_stiffness_matrices()
+        n_classes = int(ke0.shape[0])
+        if n_classes == uhe.shape[0]:
+            energy = bm.einsum('ci, cij, cj -> c', uhe, ke0, uhe)
+        else:
+            # 按平移类收缩: 单元 e = g N_k + k 取第 k 份参考矩阵
+            grouped = bm.reshape(uhe, (-1, n_classes, uhe.shape[-1]))
+            energy = bm.reshape(bm.einsum('gki, kij, gkj -> gk', grouped, ke0, grouped), (-1, ))
+        return (dE_rho / self._material.youngs_modulus) * energy
 
     def compute_stiffness_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部刚度矩阵关于物理密度的导数 (灵敏度)"""
@@ -1668,6 +1889,72 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # 内部方法
     ##############################################################################################
 
+    def _dirichlet_data(self) -> tuple[TensorLike, TensorLike, bool]:
+        """取 Dirichlet 基准向量 u_D, 自由度掩码及 u_D 是否非零, 首次计算后缓存.
+
+        Returns
+        -------
+        uh_bd : (gdof, ) 的基准向量, Dirichlet 自由度取给定值, 其余为零; 调用方不得原地改写.
+        isBdDof : (gdof, ) 的 Dirichlet 自由度布尔掩码.
+        nonzero : u_D 是否含非零分量; 为 False 时 K u_D = 0, 右端项无需修正.
+
+        Notes
+        -----
+        只依赖张量空间与问题, 与密度无关; 换空间时由 ``tensor_space`` 的 setter 作废.
+        """
+        space = self._tensor_space
+        if self._dirichlet_cache is None or self._dirichlet_cache[0] is not space:
+            uh_bd, isBdDof = space.boundary_interpolate(gd=self._pde.dirichlet_bc,
+                                                        threshold=self._pde.is_dirichlet_boundary(),
+                                                        method='interp')
+            self._dirichlet_cache = (space, uh_bd, isBdDof, bool(bm.any(uh_bd[:] != 0)))
+        return self._dirichlet_cache[1:]
+
+    def _elimination_slots(self, matrix: CSRTensor, isDDof: TensorLike) -> tuple[TensorLike, TensorLike]:
+        """对称消元要改写的 CSR 槽位: 受约束行或列的全部槽位, 及受约束行的对角槽位.
+
+        Parameters
+        ----------
+        matrix : 原始全局刚度矩阵.
+        isDDof : (gdof, ) 的 Dirichlet 自由度布尔掩码.
+
+        Returns
+        -------
+        zero_slots : 须置零的槽位 (可含重复).
+        diag_slots : 受约束行的对角槽位, 须置 1.
+
+        Raises
+        ------
+        RuntimeError
+            某受约束行在稀疏结构中没有对角元.
+
+        Notes
+        -----
+        只依赖 CSR 骨架与掩码: 骨架 (crow, col) 为同一对象且掩码不变时复用缓存. 受约束行的
+        槽位按行区间展开, 规模只与受约束行数成正比; 受约束列的槽位需扫描一遍 col.
+        """
+        cache = self._elimination_cache
+        if (cache is not None and cache[0] is matrix.crow and cache[1] is matrix.col
+                and bool(bm.all(cache[2] == isDDof))):
+            return cache[3], cache[4]
+
+        crow, col = matrix.crow, matrix.col
+        rows = bm.nonzero(isDDof)[0]
+        starts = crow[rows]
+        lengths = crow[rows + 1] - starts
+        offsets = bm.cumsum(lengths, axis=0) - lengths
+        local = bm.arange(int(bm.sum(lengths)), **bm.context(col)) - bm.repeat(offsets, lengths)
+        row_slots = bm.repeat(starts, lengths) + local
+        row_ids = bm.repeat(rows, lengths)
+        diag_slots = row_slots[col[row_slots] == row_ids]
+        if int(diag_slots.shape[0]) != int(rows.shape[0]):
+            raise RuntimeError("对称消元要求每个受约束行在稀疏结构中含对角元")
+        col_slots = bm.nonzero(isDDof[col])[0]
+        zero_slots = bm.concat([row_slots, col_slots], axis=0)
+
+        self._elimination_cache = (crow, col, bm.copy(isDDof), zero_slots, diag_slots)
+        return zero_slots, diag_slots
+
     def _apply_matrix(self, matrix, isDDof, check=True):
         """只对左端矩阵施加 Dirichlet 边界条件.
 
@@ -1701,33 +1988,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
             A = A.add(A1).coalesce()
 
         elif isinstance(A, CSRTensor):
-            isIDof = bm.logical_not(isDDof)
-            crow = A.crow
-            col = A.col
-            indices_context = bm.context(col)
-            ZERO = bm.array([0], **indices_context)
-
-            nnz_per_row = crow[1:] - crow[:-1]
-            remain_flag = bm.repeat(isIDof, nnz_per_row) & isIDof[col] # 保留行列均为内部自由度的非零元素
-            rm_cumsum = bm.concat([ZERO, bm.cumsum(remain_flag, axis=0)], axis=0) # 被保留的非零元素数量累积
-            nnz_per_row = rm_cumsum[crow[1:]] - rm_cumsum[crow[:-1]] + isDDof # 计算每行的非零元素数量
-
-            new_crow = bm.cumsum(bm.concat([ZERO, nnz_per_row], axis=0), axis=0)
-
-            NNZ = new_crow[-1]
-            non_diag = bm.ones((NNZ,), dtype=bm.bool, device=bm.get_device(isDDof)) # Field: non-zero elements
-            loc_flag = bm.logical_and(new_crow[:-1] < NNZ, isDDof)
-            non_diag = bm.set_at(non_diag, new_crow[:-1][loc_flag], False)
-
-            bd_rows = bm.where(loc_flag)[0]
-            new_col = bm.empty((NNZ,), **indices_context)
-            new_col = bm.set_at(new_col, new_crow[:-1][loc_flag], bd_rows)
-            new_col = bm.set_at(new_col, non_diag, col[remain_flag])
-
-            new_values = bm.empty((NNZ,), **kwargs)
-            new_values = bm.set_at(new_values, new_crow[:-1][loc_flag], 1.)
-            new_values = bm.set_at(new_values, non_diag, A.values[remain_flag])
-
-            A = CSRTensor(new_crow, new_col, new_values, A.sparse_shape)
+            # 保结构消元: 不删行列, 复制数值后把受约束行与列置零、对角置 1, 共用原骨架. 与删除
+            # 行列定义同一矩阵, 只多出显式零; 改写的槽位只依赖骨架, 首次算好后缓存, 也不改写
+            # 原矩阵 (self._K 仍为未施加边界条件的刚度矩阵)
+            zero_slots, diag_slots = self._elimination_slots(A, isDDof)
+            values = bm.copy(A.values)
+            values = bm.set_at(values, zero_slots, 0.0)
+            values = bm.set_at(values, diag_slots, 1.0)
+            return CSRTensor(A.crow, A.col, values, A.sparse_shape)
 
         return A

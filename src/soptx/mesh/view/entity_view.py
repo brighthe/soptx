@@ -29,6 +29,28 @@ __all__ = ["EntityView"]
 P = ParamSpec("P")
 
 
+def _small_square_det(matrix: Tensor) -> Tensor:
+    """最后两维为 1x1, 2x2 或 3x3 方阵时, 按展开式逐元素计算行列式.
+
+    Parameters
+    ----------
+    matrix : 形状 ``(..., n, n)``, ``n`` 取 1, 2 或 3.
+
+    Returns
+    -------
+    det : 形状 ``(...)`` 的行列式.
+    """
+    a = matrix
+    n = int(a.shape[-1])
+    if n == 1:
+        return a[..., 0, 0]
+    if n == 2:
+        return a[..., 0, 0] * a[..., 1, 1] - a[..., 0, 1] * a[..., 1, 0]
+    return (a[..., 0, 0] * (a[..., 1, 1] * a[..., 2, 2] - a[..., 1, 2] * a[..., 2, 1])
+            - a[..., 0, 1] * (a[..., 1, 0] * a[..., 2, 2] - a[..., 1, 2] * a[..., 2, 0])
+            + a[..., 0, 2] * (a[..., 1, 0] * a[..., 2, 1] - a[..., 1, 1] * a[..., 2, 0]))
+
+
 def _normalized_legacy_order(
     schema: EntitySchema,
     p: int | tuple[int, ...],
@@ -643,7 +665,9 @@ class EntityView:
         """参考实体到物理实体映射的无符号度量密度.
 
         参考维数 ``r > 0`` 时为 ``sqrt(det(J^T J))``; 零维参考实体按 Schema 的零维约定, 每个
-        采样点返回一个密度.
+        采样点返回一个密度. ``J`` 为不超过 3 阶的方阵 (参考维数等于几何维数, 如体单元或平面
+        上的面单元) 时两者相等, 改按 ``|det J|`` 的展开式直接计算: 免去构造 ``J^T J`` 与逐个
+        小矩阵做 LU 分解的 ``det``, 结果只差舍入.
 
         Parameters
         ----------
@@ -661,6 +685,8 @@ class EntityView:
         ref_dim = int(jacobian.shape[-1])
         if ref_dim == 0:
             return bm.ones(jacobian.shape[:2], dtype=jacobian.dtype, device=bm.get_device(jacobian))
+        if ref_dim == int(jacobian.shape[-2]) and ref_dim <= 3:
+            return bm.abs(_small_square_det(jacobian))
         metric = bm.einsum("cqdr,cqds->cqrs", jacobian, jacobian)
         return bm.sqrt(bm.linalg.det(metric))
 

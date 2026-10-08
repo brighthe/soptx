@@ -4,18 +4,19 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import json
+import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from time import perf_counter
 from types import SimpleNamespace
 from math import isfinite
 
-# 固定模型与算法参数. 命令行默认值直接定义在 parse_args 中.
-DOMAIN = (0.0, 6.0, 0.0, 1.0, 0.0, 1.0)
+# 固定模型与算法参数.
+FINE_CELL_SIZE = 1.0
 E0, EMIN, NU = 1.0, 1.0e-7, 0.3
 LOAD, SUPPORT = -1.0, "end_lines"
-TRACE, SOLVER = "linear_corner", "mumps"
+TRACE = "linear_corner"
 INTEGRATION_ORDER = 2
 VOLUME_FRACTION, INITIAL_DENSITY = 0.12, 0.12
 SIMP_PENALTY, FILTER_RADIUS_CELLS = 3.0, 3.0
@@ -40,9 +41,24 @@ def parse_args(argv=None):
         "--chunk-size", type=int, default=256,
         help="局部刚度装配、内部消元与位移恢复时每批最多处理的子结构数",
     )
+    parser.add_argument(
+        "--solver", choices=("cg", "scipy", "mumps"), default="cg",
+        help="接口求解器 (默认: cg); scipy 和 mumps 使用稀疏直接法",
+    )
+    parser.add_argument("--cg-tol", type=float, default=None,
+                        help="CG 自由载荷相对残差容差 (默认: 1e-6)")
+    parser.add_argument("--cg-maxiter", type=int, default=None,
+                        help="CG 最大迭代次数 (默认: 20000)")
+    parser.add_argument("--precond", choices=("none", "jacobi"), default=None,
+                        help="CG 预条件子 (默认: jacobi)")
     parser.add_argument("--max-iter", type=int, default=300, help="最大分析次数 (默认: 300)")
-    parser.add_argument("--output-dir", type=Path, default=Path(__file__).parent / "outputs",
-                        help="结果根目录, 每次运行创建独立子目录")
+    parser.add_argument("--output-dir", type=Path, default=None,
+                        help="结果保存目录 (默认: 脚本目录下 outputs/接口_求解器), 重复运行覆盖同名文件")
+    parser.add_argument(
+        "--vtu-fields", nargs="+",
+        choices=("density", "design_density", "displacement"), default=["density"],
+        help="每轮及最终 VTU 保存的场, 可多选 (默认: density); displacement 写为向量 u",
+    )
     parser.add_argument(
         "--backend", choices=("numpy", "pytorch"), default="numpy",
         help="全流程张量计算后端 (默认: numpy)",
@@ -51,6 +67,18 @@ def parse_args(argv=None):
         "--device", default="cpu", help="密度与消元等数值计算设备: cpu, cuda 或 cuda:N (默认: cpu)",
     )
     args = parser.parse_args(argv)
+    if args.solver != "cg" and any(
+        value is not None for value in (args.cg_tol, args.cg_maxiter, args.precond)
+    ):
+        parser.error("cg-tol, cg-maxiter 和 precond 仅用于 solver=cg")
+    if args.solver == "cg":
+        args.cg_tol = 1.0e-6 if args.cg_tol is None else args.cg_tol
+        args.cg_maxiter = 20000 if args.cg_maxiter is None else args.cg_maxiter
+        args.precond = "jacobi" if args.precond is None else args.precond
+        if not isfinite(args.cg_tol) or not 0.0 < args.cg_tol < 1.0:
+            parser.error("cg-tol 必须为 (0, 1) 内的有限数")
+        if args.cg_maxiter < 1:
+            parser.error("cg-maxiter 必须为正整数")
     if args.device != "cpu" and args.device != "cuda" and not (
         args.device.startswith("cuda:") and args.device[5:].isascii() and args.device[5:].isdigit()
     ):
@@ -63,6 +91,9 @@ def parse_args(argv=None):
         parser.error("n-sub 各方向必须为正整数")
     if args.n_fine < 2:
         parser.error("n-fine 至少为 2，以保留内部节点")
+    args.vtu_fields = list(dict.fromkeys(args.vtu_fields))
+    if args.output_dir is None:
+        args.output_dir = Path(__file__).resolve().parent / "outputs" / f"{TRACE}_{args.solver}"
     return args
 
 
@@ -83,10 +114,11 @@ def main(argv=None):
     )
     from soptx.topology.optimizers import OCOptimizer
 
-    try:
-        from mumps import DMumpsContext
-    except ImportError as exc:
-        raise RuntimeError("MUMPS 依赖不可用, 需要能导入 mumps.DMumpsContext 的环境.") from exc
+    if args.solver == "mumps":
+        try:
+            from mumps import DMumpsContext
+        except ImportError as exc:
+            raise RuntimeError("MUMPS 依赖不可用, 需要能导入 mumps.DMumpsContext 的环境.") from exc
 
     device = args.device
     if args.backend == "pytorch":
@@ -107,28 +139,31 @@ def main(argv=None):
     cpu_context = dict(dtype=bm.float64, device="cpu")
     n_sub = tuple(args.n_sub)
     n_fine = (args.n_fine,) * 3
-    solver = SOLVER
-    domain_size = tuple(DOMAIN[2 * d + 1] - DOMAIN[2 * d] for d in range(3))
+    solver = args.solver
     grid = tuple(a * b for a, b in zip(n_sub, n_fine))
-    spacing = tuple(a / b for a, b in zip(domain_size, grid))
+    domain_size = tuple(FINE_CELL_SIZE * n for n in grid)
+    domain = tuple(value for length in domain_size for value in (0.0, length))
+    spacing: tuple[float, float, float] = (FINE_CELL_SIZE, FINE_CELL_SIZE, FINE_CELL_SIZE)
     radius = FILTER_RADIUS_CELLS * spacing[0]
     volume = VOLUME_FRACTION
     emin, penalty = EMIN / E0, SIMP_PENALTY
     oc_options = dict(OC_OPTIONS)
-    output = args.output_dir / datetime.now(timezone.utc).strftime("linear_corner_%Y%m%dT%H%M%S_%fZ")
-    output.mkdir(parents=True, exist_ok=False)
-    config = dict(trace=TRACE, domain=DOMAIN, backend=args.backend, device=device,
-                  cpu_stages=["mesh", "local_assembly", "global_assembly", "mumps", "output"],
+    output = args.output_dir
+    output.mkdir(parents=True, exist_ok=True)
+    config = dict(trace=TRACE, domain=domain, fine_cell_size=FINE_CELL_SIZE, backend=args.backend, device=device,
+                  cpu_stages=["mesh", "local_assembly", "global_assembly", solver, "output"],
                   n_sub=n_sub, n_fine=n_fine, grid=grid, spacing=spacing, integration_order=INTEGRATION_ORDER,
                   E0=E0, Emin=EMIN, nu=NU, penalty=penalty, volfrac=volume,
                   initial_density=INITIAL_DENSITY, load=LOAD, filter_radius_cells=FILTER_RADIUS_CELLS,
                   filter_type="density", filter_radius=radius, optimizer=oc_options,
                   support=SUPPORT, support_status="建模选择，未确认与论文一致",
-                  solver=solver, chunk_size=args.chunk_size, max_iter=args.max_iter,
+                  solver=solver, cg_tol=args.cg_tol, cg_maxiter=args.cg_maxiter,
+                  precond=args.precond, cg_warm_start=(solver == "cg"), chunk_size=args.chunk_size, max_iter=args.max_iter,
                   tolerance=CONVERGENCE_TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
-                  volume_tolerance=VOLUME_TOLERANCE)
+                  volume_tolerance=VOLUME_TOLERANCE, vtu_fields=args.vtu_fields)
     (output / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[配置] {TRACE}, 网格 {grid}, 支承 {SUPPORT}, 计算后端 {args.backend}, 数值设备 {device}, 输出 {output}", flush=True)
+    print(f"[配置] {TRACE}, 网格 {grid}, 支承 {SUPPORT}, 计算后端 {args.backend}, 数值设备 {device}, 求解器 {solver}, 输出 {output}", flush=True)
+    print(f"[尺度] h={FINE_CELL_SIZE}, 计算域尺寸 {domain_size}, 过滤半径 {radius}", flush=True)
     print("[初始化] 创建布局、参考子结构和接口空间", flush=True)
     layout = StructuredSubstructureLayout(
         domain_size=domain_size, n_sub=n_sub, n_fine=n_fine,
@@ -142,7 +177,7 @@ def main(argv=None):
         kind=TRACE, assembler=assembler, sub_meshes=sub_meshes, prototype=prototype,
     )
     problem = FullMBBBeam3d(
-        domain=DOMAIN, E=E0, nu=NU, P=LOAD,
+        domain=domain, E=E0, nu=NU, P=LOAD,
         support=SUPPORT, load_subdivisions=(grid[0], grid[2]),
     )
     print("[初始化] 投影载荷与支承约束", flush=True)
@@ -165,9 +200,15 @@ def main(argv=None):
     volume_gradient = weights
     physical = None
     displacement = None
+    previous_interface_displacement = None
     history = []
     recent = []
     converged = False
+    export_mesh = None
+    iteration_dir = output / "iterations"
+    iteration_dir.mkdir(exist_ok=True)
+    pvd_root = ET.Element("VTKFile", type="Collection", version="0.1", byte_order="LittleEndian")
+    pvd_collection = ET.SubElement(pvd_root, "Collection")
     run_started = perf_counter()
     for iteration in range(1, args.max_iter + 1):
         started = perf_counter()
@@ -198,7 +239,15 @@ def main(argv=None):
         assembly_seconds = perf_counter() - started
         stamp = perf_counter()
         print("[接口求解] 开始", flush=True)
-        solved = solve_constrained_system(system=system, load=load, constraints=constraints, solver=solver)
+        cg_options = (dict(cg_tol=args.cg_tol, cg_maxiter=args.cg_maxiter,
+                           precond=args.precond, x0=previous_interface_displacement)
+                      if solver == "cg" else {})
+        solved = solve_constrained_system(
+            system=system, load=load, constraints=constraints, solver=solver, **cg_options)
+        if solver == "cg":
+            previous_interface_displacement = solved.displacement
+            print(f"[CG] 迭代 {solved.iterations}, "
+                  f"真实相对残差 {solved.equilibrium_relative_residual:.3e}", flush=True)
         Q = bm.asarray(solved.displacement, **compute_context)
         compliance = float(bm.sum(bm.asarray(load, **compute_context) * Q))
         if not isfinite(compliance) or compliance <= 0:
@@ -250,9 +299,45 @@ def main(argv=None):
         converged = len(recent) == CONVERGENCE_WINDOW and all(value < CONVERGENCE_TOLERANCE for value in recent)
         record = dict(iteration=iteration, compliance=compliance, volume_fraction=float(physical.mean()),
                       relative_change=relative, equilibrium_residual=float(solved.equilibrium_relative_residual),
-                      constraint_residual=float(solved.constraint_relative_residual), energy_relative_error=energy_error,
+                      solver_iterations=solved.iterations, solver_converged=solved.converged,
+                         constraint_residual=float(solved.constraint_relative_residual), energy_relative_error=energy_error,
                       assembly_seconds=assembly_seconds, solve_seconds=solve_seconds,
                       recovery_seconds=recovery_seconds, analysis_seconds=perf_counter() - started)
+        # 每轮分析完成后保存所选场, VTU 发布后才更新 PVD.
+        export_started = perf_counter()
+        if export_mesh is None:
+            full_mesh = layout.full_mesh
+            export_mesh = SimpleNamespace(entity=lambda kind: bm.to_numpy(full_mesh.entity(kind)))
+        cell_data = {}
+        point_data = {}
+        if "density" in args.vtu_fields:
+            cell_data["density"] = bm.to_numpy(physical).reshape(-1)
+        if "design_density" in args.vtu_fields:
+            cell_data["design_density"] = bm.to_numpy(rho).reshape(-1)
+        if "displacement" in args.vtu_fields:
+            point_data["u"] = bm.to_numpy(displacement).reshape(-1, 3)
+        frame = iteration_dir / f"iter_{iteration:04d}.vtu"
+        temporary_base = iteration_dir / f".iter_{iteration:04d}.tmp"
+        temporary_vtu = Path(str(temporary_base) + ".vtu")
+        try:
+            write_vtu(mesh=export_mesh, filepath=str(temporary_base),
+                      cell_data=cell_data, point_data=point_data)
+            temporary_vtu.replace(frame)
+        finally:
+            temporary_vtu.unlink(missing_ok=True)
+        relative_frame = frame.relative_to(output).as_posix()
+        ET.SubElement(pvd_collection, "DataSet", timestep=str(iteration),
+                      group="", part="0", file=relative_frame)
+        temporary_pvd = output / ".evolution.pvd.tmp"
+        try:
+            ET.ElementTree(pvd_root).write(temporary_pvd, encoding="utf-8", xml_declaration=True)
+            temporary_pvd.replace(output / "evolution.pvd")
+        finally:
+            temporary_pvd.unlink(missing_ok=True)
+        del cell_data, point_data
+        record["vtu_file"] = relative_frame
+        record["export_seconds"] = perf_counter() - export_started
+        print(f"[输出] {relative_frame}, 字段 {args.vtu_fields}", flush=True)
         history.append(record)
         print(f"[迭代结果] C={compliance:.10e}，体积分数 {physical.mean():.6f}，相对变化 {relative}，能量相对差 {energy_error:.3e}", flush=True)
         (output / "history.json").write_text(json.dumps(history, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
@@ -281,16 +366,13 @@ def main(argv=None):
     np.save(output / "design_density_final.npy", bm.to_numpy(rho))
     np.save(output / "density_final.npy", bm.to_numpy(physical))
     np.save(output / "displacement_final.npy", bm.to_numpy(displacement))
-    print("[输出] 构建全局细网格并导出 VTU", flush=True)
-    nodal_u = bm.to_numpy(displacement).reshape(-1, 3)
-    full_mesh = layout.full_mesh
-    export_mesh = SimpleNamespace(entity=lambda kind: bm.to_numpy(full_mesh.entity(kind)))
-    write_vtu(
-        mesh=export_mesh, filepath=str(output / "result_final"),
-        cell_data={"density": bm.to_numpy(physical).reshape(-1), "design_density": bm.to_numpy(rho).reshape(-1)},
-        point_data={"u_x": nodal_u[:, 0], "u_y": nodal_u[:, 1],
-                    "u_z": nodal_u[:, 2], "u_mag": np.linalg.norm(nodal_u, axis=1)},
-    )
+    # 最后一帧与最终 NPY 对应同一次分析, 复用已导出的所选场.
+    final_temporary = output / ".result_final.vtu.tmp"
+    try:
+        shutil.copyfile(output / history[-1]["vtu_file"], final_temporary)
+        final_temporary.replace(output / "result_final.vtu")
+    finally:
+        final_temporary.unlink(missing_ok=True)
     summary = dict(history[-1], converged=converged,
                    termination="converged" if converged else "max_iter",
                    total_seconds=perf_counter() - run_started)

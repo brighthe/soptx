@@ -19,6 +19,40 @@ from soptx.backend import TensorLike
 from .base import CAP_DIAGONAL, LinearSolver, SolveInfo, operator_diagonal
 
 
+def _inverse_diagonal(diag: TensorLike, owner: str) -> TensorLike:
+    """校验对角并返回其倒数.
+
+    Parameters
+    ----------
+    diag : 系统矩阵的主对角, 一维张量.
+    owner : 报错信息里的类名.
+
+    Returns
+    -------
+    inv_diag : (n, ) 的对角倒数.
+
+    Raises
+    ------
+    ValueError
+        对角不是一维张量, 或含非正元素 (不能用于 SPD 系统).
+    """
+    if diag.ndim != 1:
+        raise ValueError(f"diag 必须是一维张量, 得到 ndim={diag.ndim}")
+    if float(bm.min(diag)) <= 0.0:
+        raise ValueError(
+            f"diag 含非正元素, 不能作 SPD 系统的 {owner}: "
+            f"min(diag)={float(bm.min(diag)):.16e}"
+        )
+    return 1.0 / diag
+
+
+def _scale_rows(values: TensorLike, weights: TensorLike) -> TensorLike:
+    """按自由度维逐行缩放; 2D 右端的第一维是自由度维 (与 cg 的 batch_first=False 一致)."""
+    if values.ndim == 1:
+        return values * weights
+    return values * weights[:, None]
+
+
 class DiagonalPreconditioner(LinearSolver):
     """Jacobi (对角) 预条件子: ``M @ r = r / diag``.
 
@@ -53,14 +87,7 @@ class DiagonalPreconditioner(LinearSolver):
 
     def _accept_diag(self, diag: TensorLike) -> None:
         """校验并存下对角的倒数"""
-        if diag.ndim != 1:
-            raise ValueError(f"diag 必须是一维张量, 得到 ndim={diag.ndim}")
-        if float(bm.min(diag)) <= 0.0:
-            raise ValueError(
-                "diag 含非正元素, 不能作 SPD 系统的 Jacobi 预条件子: "
-                f"min(diag)={float(bm.min(diag)):.16e}"
-            )
-        self._inv_diag = 1.0 / diag
+        self._inv_diag = _inverse_diagonal(diag, "Jacobi 预条件子")
 
     def setup(self, op) -> "DiagonalPreconditioner":
         """绑定算子; 构造时没给对角就在这里向算子要"""
@@ -78,10 +105,7 @@ class DiagonalPreconditioner(LinearSolver):
                 "DiagonalPreconditioner 构造时未给对角, 请先 setup(op) 让它"
                 "从算子取"
             )
-        if other.ndim == 1:
-            return other * self._inv_diag
-        # 2D 右端: 第一维是自由度维 (与 cg 内部 batch_first=False 布局一致)
-        return other * self._inv_diag[:, None]
+        return _scale_rows(other, self._inv_diag)
 
     def _solve(
         self, b: TensorLike, x0: Optional[TensorLike] = None
@@ -92,18 +116,129 @@ class DiagonalPreconditioner(LinearSolver):
         return self @ b, {"niter": 1, "relres": None, "converged": True}
 
 
-def estimate_lambda_max(
-    op, *, n_iter: int = 10, seed: Optional[int] = None
-) -> float:
-    """幂迭代估计算子最大特征值.
+class JacobiSmoother(LinearSolver):
+    """加权 Jacobi 光滑子: 重复 ``sweeps`` 次 :math:`x \\leftarrow x + \\omega D^{-1}(b - A x)`.
 
-    Chebyshev 需要谱区间上界, 而 'ea' 层级下拿不到矩阵, 只能靠 matvec 估计.
-    实践中取估计值乘一个安全系数 (1.1 左右) 作上界: 低估会让高频分量不被
-    衰减, 多重网格随之失效; 高估只是收敛慢一点.
+    多重网格的默认光滑子, 只用 matvec 与对角. 对 SPD 的 :math:`A`, 误差传播算子
+    :math:`I - \\omega D^{-1} A` 关于 :math:`A` 内积自伴, 因此前后光滑用同一个对象、
+    同样次数时 V 循环是对称的, 可作 PCG 的预条件子.
 
-    .. todo:: 占位, 尚无实现.
+    Parameters
+    ----------
+    omega : 松弛因子, 须满足 :math:`0 < \\omega < 2 / \\lambda_{\\max}(D^{-1} A)` 才收敛.
+        缺省 (None) 时在 ``setup`` 中取 :math:`\\omega = 4 / (3 \\cdot 1.1\\, \\hat\\lambda)`,
+        :math:`\\hat\\lambda` 由 :func:`estimate_lambda_max` 给出.
+    sweeps : 每次调用的扫描次数, 正整数.
+    diag : 系统矩阵的主对角, 一维张量; 缺省时在 ``setup`` 中向算子要. 给出时
+        ``requires`` 退成空集, 与 :class:`DiagonalPreconditioner` 相同.
+    power_iterations : 自动取 ``omega`` 时幂迭代的 matvec 次数.
+
+    Raises
+    ------
+    ValueError
+        ``omega`` 不为正, ``sweeps`` 不是正整数, 或对角不合法.
+
+    Notes
+    -----
+    固定的 ``omega`` 不稳健: 三维 Q1 线弹性在均匀材料下 :math:`\\lambda_{\\max}(D^{-1} A)`
+    约为 3, 但单元系数剧烈跳变时可达 4.6 以上, 此时 :math:`\\omega = 0.6` 已使光滑发散,
+    作 PCG 预条件子会失去正定性. 自动取值的 :math:`4/3` 是加权 Jacobi 光滑的常用最优
+    系数, 1.1 抵消幂迭代对 :math:`\\lambda_{\\max}` 的低估.
+
+    从零初值出发时第一次扫描化为 :math:`x = \\omega D^{-1} b`, 省一次 matvec.
+    ``info`` 中 ``converged`` 恒为 False: 光滑子只做固定次数的扫描, 不判断收敛.
     """
-    raise NotImplementedError
+
+    requires = frozenset({CAP_DIAGONAL})
+
+    def __init__(self, *, omega: Optional[float] = None, sweeps: int = 1,
+                 diag: Optional[TensorLike] = None, power_iterations: int = 15) -> None:
+        super().__init__()
+        if omega is not None and not omega > 0.0:
+            raise ValueError(f"omega 须为正数, 得到 {omega!r}")
+        if isinstance(sweeps, bool) or int(sweeps) != sweeps or sweeps < 1:
+            raise ValueError(f"sweeps 须为正整数, 得到 {sweeps!r}")
+        self._given_omega = None if omega is None else float(omega)
+        self.omega: Optional[float] = self._given_omega
+        self.sweeps = int(sweeps)
+        self.power_iterations = int(power_iterations)
+        self._diag: Optional[TensorLike] = None
+        self._weights: Optional[TensorLike] = None
+        if diag is not None:
+            self.requires = frozenset()
+            _inverse_diagonal(diag, "Jacobi 光滑子")
+            self._diag = diag
+
+    def setup(self, op) -> "JacobiSmoother":
+        """绑定算子; 构造时没给对角就在这里向算子要, 没给 ``omega`` 就在这里估计"""
+        super().setup(op)
+        diag = self._diag if self._diag is not None else operator_diagonal(op)
+        inverse = _inverse_diagonal(diag, "Jacobi 光滑子")
+        if self._given_omega is None:
+            lam = estimate_lambda_max(op, diag=diag, n_iter=self.power_iterations)
+            self.omega = 4.0 / (3.0 * 1.1 * lam)
+        self._weights = self.omega * inverse
+
+        return self
+
+    def _solve(
+        self, b: TensorLike, x0: Optional[TensorLike] = None
+    ) -> "tuple[TensorLike, SolveInfo]":
+        op = self.op
+        if x0 is None:
+            x = _scale_rows(b, self._weights)
+            remaining = self.sweeps - 1
+        else:
+            x = x0
+            remaining = self.sweeps
+        for _ in range(remaining):
+            x = x + _scale_rows(b - op @ x, self._weights)
+
+        return x, {"niter": self.sweeps, "relres": None, "converged": False}
+
+
+def estimate_lambda_max(
+    op, *, diag: Optional[TensorLike] = None, n_iter: int = 15
+) -> float:
+    """幂迭代估计 :math:`D^{-1} A` 的最大特征值, :math:`D` 缺省为单位阵.
+
+    Chebyshev 与加权 Jacobi 都需要谱上界, 而 'ea' 层级下拿不到矩阵, 只能靠 matvec
+    估计. 实践中取估计值乘一个安全系数 (1.1 左右) 作上界: 低估会让高频分量不被
+    衰减甚至放大, 多重网格随之失效; 高估只是收敛慢一点.
+
+    Parameters
+    ----------
+    op : 对称正定算子, 支持 ``@`` 与 ``shape``.
+    diag : (n, ) 的正对角缩放; 给出时估计 :math:`D^{-1} A` 的最大特征值.
+    n_iter : 幂迭代次数, 即 matvec 次数.
+
+    Returns
+    -------
+    lam : 最后一步的 Rayleigh 商 :math:`v^{\\mathsf T} A v / v^{\\mathsf T} D v`. 它是
+        :math:`D^{-1/2} A D^{-1/2}` 的 Rayleigh 商, 因此不超过真值, 不会因 :math:`D^{-1} A`
+        非正规而高估.
+
+    Notes
+    -----
+    初值取确定性的伪随机向量 :math:`\\mathrm{frac}(43758.5453 \\sin(12.9898\\, i)) - 1/2`,
+    含各频率分量且不依赖随机数发生器, 同一输入的估计逐位可重复.
+    """
+    if n_iter < 1:
+        raise ValueError(f"n_iter 须为正整数, 得到 {n_iter!r}")
+    n = op.shape[0]
+    context = bm.context(diag) if diag is not None else dict(dtype=bm.float64)
+    index = bm.arange(n, **context)
+    v = 43758.5453 * bm.sin(12.9898 * index)
+    v = v - bm.floor(v) - 0.5
+    lam = 0.0
+    for _ in range(n_iter):
+        w = op @ v
+        scaled = v if diag is None else diag * v
+        lam = float(bm.sum(v * w) / bm.sum(v * scaled))
+        z = w if diag is None else w / diag
+        v = z / bm.linalg.norm(z)
+
+    return lam
 
 
 class ChebyshevSmoother(LinearSolver):

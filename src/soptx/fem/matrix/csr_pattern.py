@@ -33,7 +33,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator, Optional, Tuple
 
 import numpy as np
@@ -105,6 +105,22 @@ def _iter_blocks(
                 yield a, b, Kv[:, :, a, :, b]
 
 
+def _cell_blocks(block: TensorLike, NC: int, scale: Optional[TensorLike]) -> TensorLike:
+    """把 ``(N_k, ldof_s, ldof_s)`` 的分量块展开成逐单元的 ``(NC, ldof_s, ldof_s)``, 并乘逐单元标量.
+
+    单元 c 取第 ``c % N_k`` 份. N_k = NC 时不展开, 与逐单元单刚的原有算法逐位一致.
+    """
+    n_reference = int(block.shape[0])
+    if n_reference == NC:
+        return block if scale is None else block * scale[:, None, None]
+    shape = (NC // n_reference, n_reference) + tuple(block.shape[1:])
+    if scale is None:
+        expanded = bm.broadcast_to(block[None], shape)
+    else:
+        expanded = bm.reshape(scale, shape[:2] + (1, 1)) * block[None]
+    return bm.reshape(expanded, (NC, ) + tuple(block.shape[1:]))
+
+
 @dataclass
 class CSRPattern:
     """CSR 稀疏矩阵静态拓扑骨架与标量级槽位映射.
@@ -123,6 +139,8 @@ class CSRPattern:
         device: 所在的硬件计算设备.
         backend (str): 后端类型名称 ('numpy' | 'pytorch').
         buffer (TensorLike): 预分配的原地数值缓冲张量 (nnz,).
+        scatter_plan: numpy 端的累加方案, 首次 ``assemble_csr`` 时按需构建并缓存, 见
+            ``_numpy_scatter_plan``; 只依赖拓扑, 不参与比较与打印.
     """
 
     crow: TensorLike
@@ -136,6 +154,7 @@ class CSRPattern:
     device: Any = None
     backend: str = "numpy"
     buffer: Optional[TensorLike] = None
+    scatter_plan: Optional[Tuple[np.ndarray, int, dict]] = field(default=None, repr=False, compare=False)
 
     @property
     def nnz(self) -> int:
@@ -560,10 +579,59 @@ def _add_csr_chunk(
         bm.add_at(buffer, pattern.slot_of(a, b, cell_slice), values)
 
 
+def _index_dtype(upper: int) -> type:
+    """取值范围为 [0, upper) 的索引所用整型: upper 不超过 2^31 时为 int32, 否则为 int64.
+
+    Parameters
+    ----------
+    upper : 被索引数组的长度.
+
+    Returns
+    -------
+    dtype : ``np.int32`` 或 ``np.int64``; 与 scipy 稀疏矩阵选取索引类型的规则一致.
+    """
+    return np.int32 if upper <= np.iinfo(np.int32).max + 1 else np.int64
+
+
+def _numpy_scatter_plan(pattern: CSRPattern) -> Tuple[np.ndarray, int, dict]:
+    """numpy 端的累加方案, 首次使用时构建并缓存在 ``pattern.scatter_plan``.
+
+    Parameters
+    ----------
+    pattern : 符号阶段预建的 CSR 模式.
+
+    Returns
+    -------
+    sid : (NC * ldof_s ** 2, ) 的标量条目压缩编号.
+    n_scalar : 不同标量条目的个数, 即 ``sid`` 的取值上界.
+    targets : 分量对 ``(a, b)`` 到 (n_scalar, ) 目标槽位的映射.
+
+    Notes
+    -----
+    同一分量块内, 张量槽位是标量条目的单射函数, 故各块的重复槽位分组相同, 由 ``slot_base``
+    决定. 把 ``slot_base`` 压缩为连续编号后, 每块用 ``bincount`` 在长度 n_scalar 的数组上
+    累加, 再整体写到该块的目标槽位.
+
+    整数类型: ``sid`` 保持平台整型, ``bincount`` 每次调用都会把其他整型转回平台整型, 存成
+    int32 反而更慢; 目标槽位只用于赋值索引, 按 ``_index_dtype`` 在 nnz 小于 2^31 时存为 int32,
+    常驻量减半而不影响速度.
+    """
+    if pattern.scatter_plan is None:
+        base = np.asarray(pattern.slot_base).reshape(-1)
+        _, first, sid = np.unique(base, return_index=True, return_inverse=True)
+        GD = pattern.dof_numel
+        target_dtype = _index_dtype(pattern.nnz)
+        targets = {(a, b): np.asarray(pattern.slot_of(a, b)).reshape(-1)[first].astype(target_dtype)
+                   for a in range(GD) for b in range(GD)}
+        pattern.scatter_plan = (sid.reshape(-1), int(first.shape[0]), targets)
+    return pattern.scatter_plan
+
+
 def assemble_csr(
     K_e: TensorLike,
     pattern: CSRPattern,
     buffer: Optional[TensorLike] = None,
+    scale: Optional[TensorLike] = None,
 ) -> CSRTensor:
     """利用静态模式与槽位映射进行数值装配 (数值阶段).
 
@@ -571,9 +639,14 @@ def assemble_csr(
     算出, 瞬时索引量为 ``NC * ldof_s ** 2``, 不出现 ``NC * ldof ** 2`` 的全长索引.
 
     Parameters:
-        K_e: 单元刚度张量, 形状为 ``(NC, ldof, ldof)``.
+        K_e: 单元刚度张量, 形状为 ``(NC, ldof, ldof)``; 也可为 ``(N_k, ldof, ldof)`` 的参考单元
+            矩阵, N_k 须整除 NC, 单元 c 取第 ``c % N_k`` 份 (平移类约定, 见
+            ``soptx.fem.levels.shared_reference``).
         pattern: 符号阶段预建的 ``CSRPattern`` 对象.
         buffer: 可选的原地缓冲数组/张量. 若为 ``None``, 则使用 ``pattern.buffer``.
+        scale: 可选的逐单元标量, 形状 ``(NC, )``. 给出时装配 ``scale[c] * K_e[c]``: 逐分量块
+            缩放后再累加, 不物化完整的 ``(NC, ldof, ldof)`` 缩放副本; 单元密度下配合缓存的
+            实体单刚 ``K_e^0`` 使用, 免去逐单元重新积分.
 
     Returns:
         matrix (CSRTensor): 装配完成的标准 FEALPy ``CSRTensor`` 稀疏矩阵.
@@ -581,6 +654,9 @@ def assemble_csr(
     GD = pattern.dof_numel
     NC = pattern.n_cells
     ldof_s = pattern.scalar_ldof
+    n_reference = int(K_e.shape[0])
+    if n_reference < 1 or NC % n_reference != 0:
+        raise ValueError(f"K_e 的第一维须为 NC={NC} 或其约数 N_k, 得到 {n_reference}.")
 
     if buffer is None:
         buffer = pattern.buffer
@@ -592,8 +668,16 @@ def assemble_csr(
     # 索引与源都保持 (NC, ldof_s, ldof_s) 形状而不展平: 分量块是 ``K_e`` 的跨步视图,
     # ``reshape(-1)`` 会强制物化一份 ``NC * ldof_s ** 2`` 的连续副本.
     bm.set_at(buffer, slice(None), 0.0)
-    for a, b, block in _iter_blocks(K_e, NC, ldof_s, GD, pattern.dof_priority):
-        bm.add_at(buffer, pattern.slot_of(a, b), block)
+    if bm.backend_name == 'numpy':
+        # numpy 的 np.add.at 走无缓冲慢路径; 改用缓存的累加方案, 按块 bincount 后写回, 累加
+        # 次序与 np.add.at 相同, 结果逐位一致
+        sid, n_scalar, targets = _numpy_scatter_plan(pattern)
+        for a, b, block in _iter_blocks(K_e, n_reference, ldof_s, GD, pattern.dof_priority):
+            weights = _cell_blocks(block, NC, scale).reshape(-1)
+            buffer[targets[(a, b)]] = np.bincount(sid, weights=weights, minlength=n_scalar)
+    else:
+        for a, b, block in _iter_blocks(K_e, n_reference, ldof_s, GD, pattern.dof_priority):
+            bm.add_at(buffer, pattern.slot_of(a, b), _cell_blocks(block, NC, scale))
 
     return CSRTensor(
         crow=pattern.crow,

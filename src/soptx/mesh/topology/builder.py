@@ -30,6 +30,8 @@ __all__ = [
 from collections.abc import Iterable, Iterator
 from typing import NamedTuple, TYPE_CHECKING
 
+import numpy as np
+
 from ...backend import bm
 from ...backend import Tensor
 from ..schema import (
@@ -228,39 +230,62 @@ def _validate_conforming_occurrences(
 ) -> None:
     """在一个根分区内校验双键协调规则.
 
-    拓扑键为 ``(type(子 Schema), 规范顶点元组)``. 首次出现时记录具体 Schema 的 id
-    与规范完整节点元组; 之后的出现须有相同的具体 Schema id 与相同的规范完整节点,
-    否则网格不协调.
+    拓扑键为 ``(type(子 Schema), 规范顶点元组)``. 拓扑键相同的全部出现须有相同的具体
+    Schema id 与相同的规范完整节点元组, 否则网格不协调.
+
+    Raises
+    ------
+    NotImplementedError
+        同一拓扑键下出现不同的具体 Schema id (p 非协调或 Schema 不相容).
+    ValueError
+        同一拓扑键下规范完整节点不同 (非法协调网格).
+
+    Notes
+    -----
+    向量化实现: 按 (Schema 类型, 顶点数) 分组拼接各出现的规范顶点行, 按行字典序排序后
+    相同顶点行相邻; 组内相等可传递, 故只需比较相邻且顶点行相同的出现对, 与逐个同首次
+    出现比较等价. 先在组内比较 Schema id, 再按 id 分子组比较完整节点行 (同 id 的完整
+    节点数相同). 多处同时违规时, 先报 Schema id 不一致. 不同顶点数的元组不可能相等,
+    故按顶点数分组不改变语义.
     """
-    seen: dict[
-        tuple[type["EntitySchema"], tuple[int, ...]],
-        tuple[str, tuple[int, ...]],
-    ] = {}
-
+    groups: dict[tuple[type, int], list[tuple[str, np.ndarray, np.ndarray]]] = {}
     for schema, canonical in canonical_by_schema.items():
-        schema_type = type(schema)
-        vertices = bm.to_numpy(canonical.canonical_vertices).tolist()
-        full_nodes = bm.to_numpy(canonical.indices).tolist()
-        for vertex_row, full_row in zip(vertices, full_nodes):
-            vertex_key = tuple(int(value) for value in vertex_row)
-            full_key = tuple(int(value) for value in full_row)
-            identity_key = (schema_type, vertex_key)
+        vertices = np.asarray(bm.to_numpy(canonical.canonical_vertices))
+        full_nodes = np.asarray(bm.to_numpy(canonical.indices))
+        groups.setdefault((type(schema), int(vertices.shape[1])), []).append(
+            (schema.id, vertices, full_nodes))
 
-            if identity_key not in seen:
-                seen[identity_key] = (schema.id, full_key)
-                continue
-
-            expected_schema_id, expected_full = seen[identity_key]
-            if schema.id != expected_schema_id:
+    for entries in groups.values():
+        ids = sorted({schema_id for schema_id, _, _ in entries})
+        if len(ids) > 1:
+            vertices = np.concatenate([item[1] for item in entries], axis=0)
+            codes = np.concatenate([np.full(item[1].shape[0], ids.index(item[0])) for item in entries])
+            order, same = _adjacent_equal_rows(vertices)
+            if bool(np.any(codes[order][1:][same] != codes[order][:-1][same])):
                 raise NotImplementedError(
                     "p-nonconforming or Schema-incompatible subentities are "
                     "not supported for one root sector"
                 )
-            if full_key != expected_full:
+
+        for schema_id in ids:
+            members = [item for item in entries if item[0] == schema_id]
+            vertices = np.concatenate([item[1] for item in members], axis=0)
+            full_nodes = np.concatenate([item[2] for item in members], axis=0)
+            order, same = _adjacent_equal_rows(vertices)
+            full_sorted = full_nodes[order]
+            if bool(np.any(np.any(full_sorted[1:][same] != full_sorted[:-1][same], axis=1))):
                 raise ValueError(
                     "illegal conforming mesh: the same canonical vertices "
                     "have different canonical full nodes"
                 )
+
+
+def _adjacent_equal_rows(rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """按行字典序排序, 返回排序置换与 "第 i+1 行与第 i 行相同" 的布尔标记 (长度 n - 1)."""
+    order = np.lexsort(rows.T[::-1])
+    sorted_rows = rows[order]
+    same = np.all(sorted_rows[1:] == sorted_rows[:-1], axis=1)
+    return order, same
 
 
 class ConstructResult(NamedTuple):

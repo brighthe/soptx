@@ -151,14 +151,15 @@ class ComplianceObjective(BaseLogged):
             cell2dof = space_uh.cell_to_dof()
             uhe = uh[cell2dof]
 
-            diff_KE = self._analyzer.compute_stiffness_matrix_derivative(rho_val=density)
-
             if density_location in ['element']:
-                dc = -bm.einsum('ci, cij, cj -> c', uhe, diff_KE, uhe) # (NC, )
+                # 不构造 (NC, TLDOF, TLDOF) 的导数矩阵, 见 compute_element_energy_derivative
+                dc = -self._analyzer.compute_element_energy_derivative(rho_val=density, uhe=uhe) # (NC, )
 
                 return dc[:]
-            
-            elif density_location in ['element_multiresolution']:
+
+            diff_KE = self._analyzer.compute_stiffness_matrix_derivative(rho_val=density)
+
+            if density_location in ['element_multiresolution']:
                 dc = -bm.einsum('ci, cnij, cj -> cn', uhe, diff_KE, uhe) # (NC, n_sub)
 
                 return dc[:]

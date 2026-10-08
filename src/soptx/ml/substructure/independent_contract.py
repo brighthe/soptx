@@ -59,7 +59,7 @@ def provider_metadata_matches(saved, current):
 
 def build_network(
     provider_metadata, *, route="shape", seed=2026, num_networks=4,
-    hidden_dims=HIDDEN_DIMS, activation=ACTIVATIONS,
+    hidden_dims=HIDDEN_DIMS, activation=ACTIVATIONS, input_normalization="none",
 ):
     """根据接口空间元数据构建一条路线的全连接模型.
 
@@ -81,6 +81,9 @@ def build_network(
         隐藏层激活模块类, 语义同 MLP: 单个类为各层共用, 序列须与
         hidden_dims 等长并逐层取用. 默认 ACTIVATIONS 与 HIDDEN_DIMS 配套.
 
+    input_normalization : {"none", "per_sample_max"}
+        输入处理方式. 最大模量归一化仅用于尺度不变的 shape 路线.
+
     Returns
     -------
     nn.Module
@@ -89,6 +92,10 @@ def build_network(
     """
     if route not in ("shape", "stiffness"):
         raise ValueError("route 必须为 shape 或 stiffness")
+    if input_normalization not in ("none", "per_sample_max"):
+        raise ValueError("未知的材料输入归一化方式")
+    if route != "shape" and input_normalization != "none":
+        raise ValueError("最大模量归一化仅支持 shape 路线")
     widths = metadata_widths(provider_metadata)
     if (isinstance(num_networks, bool) or not isinstance(num_networks, Integral)
             or num_networks <= 0):
@@ -124,6 +131,7 @@ def build_network(
             activation=activation,
         )
     )
+    model.input_normalization = input_normalization
     return model.to(dtype=torch.float64)
 
 

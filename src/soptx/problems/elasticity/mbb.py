@@ -211,6 +211,8 @@ class FullMBBBeam3d:
       (x = x1, y = y0) 约束 u_y = 0, 底面中线 (y = y0, z = zm) 约束 u_z = 0 以消除
       刚体运动;
     - ``'end_lines'``: 左端底边铰支, u_x = u_y = u_z = 0; 右端底边滚支, u_y = 0.
+    - ``'end_corners'``: 只在两端底边的两个角点 (z = z0 与 z = z1) 支承: 左端两角点铰支,
+      u_x = u_y = u_z = 0; 右端两角点滚支, u_y = 0. 恰好消除全部刚体运动, 且关于 z 中面对称.
 
     Parameters
     ----------
@@ -219,7 +221,7 @@ class FullMBBBeam3d:
     E : 杨氏模量.
     nu : 泊松比.
     plane_type : 本构假设, 三维固定为 ``'3D'``.
-    support : 支承方式, 取 ``'centerline'`` (默认) 或 ``'end_lines'``.
+    support : 支承方式, 取 ``'centerline'`` (默认), ``'end_lines'`` 或 ``'end_corners'``.
     load_subdivisions : 调用方网格在 x, z 向的剖分数 (nx, nz), 用于把集中力离散
         到节点上, 须与实际网格一致; 为 None (默认) 时返回作用于几何中心的单个
         点力.
@@ -229,26 +231,12 @@ class FullMBBBeam3d:
     ValueError
         ``support`` 取值未知, ``load_subdivisions`` 不是两个正整数, 或在 z 向剖分数为
         奇数时选用 ``'centerline'``.
-
-    Notes
-    -----
-    ``'centerline'`` 的 u_z 约束取底面上距中线最近的全部节点. z 向剖分数为偶数
-    时这些节点在中面上, 对称解在那里本就有 u_z = 0, 约束不改变解; 为奇数时中线
-    不落在节点上, 约束落在偏离中面的两排节点上, 改变问题本身. 因此给出
-    ``load_subdivisions`` 且 z 向剖分数为奇数时, ``'centerline'`` 直接报错, 须改用
-    ``'end_lines'``; 不给出时剖分数未知, 不做检查. 支承属于问题定义, 不随网格自动
-    切换, 否则不同网格求解的是不同的边值问题.
-
-    几何中心的点力只有在中心恰为网格节点时才能按 ``mode='exact'`` 投影 (LFEM
-    分析器的做法). 给出 ``load_subdivisions`` 后, 某方向剖分数为偶数时中心落在
-    节点上, 为奇数时落在单元棱中点, 合力均分给两侧节点, 即线性单元下该点力的
-    一致节点载荷; ``loads()`` 因此返回 1、2 或 4 个落在节点上的点力, 合力恒为 P.
     """
 
     dimension = 3
     boundary_type = "mixed"
     _eps = 1.0e-12
-    _supports = ("centerline", "end_lines")
+    _supports = ("centerline", "end_lines", "end_corners")
 
     def __init__(
         self,
@@ -258,7 +246,7 @@ class FullMBBBeam3d:
         E: float = 1.0,
         nu: float = 0.3,
         plane_type: str = "3D",
-        support: Literal["centerline", "end_lines"] = "centerline",
+        support: Literal["centerline", "end_lines", "end_corners"] = "centerline",
         load_subdivisions: Optional[tuple[int, int]] = None,
     ) -> None:
         if support not in self._supports:
@@ -276,7 +264,7 @@ class FullMBBBeam3d:
             if support == "centerline" and values[1] % 2 == 1:
                 raise ValueError(
                     f"z 向剖分数 nz = {values[1]} 为奇数, 中线不落在节点上, 'centerline' 的 "
-                    "u_z 约束会改变问题本身; 请改用 support='end_lines'"
+                    "u_z 约束会改变问题本身; 请改用 support='end_lines' 或 'end_corners'"
                 )
         self._domain = validated_domain(domain, self.dimension)
         self._P = float(P)
@@ -325,28 +313,36 @@ class FullMBBBeam3d:
         x, y = points[..., 0], points[..., 1]
         return (bm.abs(x - x_value) < self._eps) & (bm.abs(y - self.domain[2]) < self._eps)
 
+    def _on_support(self, points: TensorLike, x_value: float) -> TensorLike:
+        """标记 x = x_value 一端的支承点: ``'end_corners'`` 下只取底边两端的角点, 其余取整条底边."""
+        on_edge = self._on_bottom_edge(points, x_value)
+        if self._support != "end_corners":
+            return on_edge
+        z = points[..., 2]
+        return on_edge & ((bm.abs(z - self.domain[4]) < self._eps) | (bm.abs(z - self.domain[5]) < self._eps))
+
     @cartesian
     def is_dirichlet_boundary_dof_x(
         self,
         points: TensorLike,
     ) -> TensorLike:
-        return self._on_bottom_edge(points, self.domain[0])
+        return self._on_support(points, self.domain[0])
 
     @cartesian
     def is_dirichlet_boundary_dof_y(
         self,
         points: TensorLike,
     ) -> TensorLike:
-        return (self._on_bottom_edge(points, self.domain[0])
-                | self._on_bottom_edge(points, self.domain[1]))
+        return (self._on_support(points, self.domain[0])
+                | self._on_support(points, self.domain[1]))
 
     @cartesian
     def is_dirichlet_boundary_dof_z(
         self,
         points: TensorLike,
     ) -> TensorLike:
-        if self._support == "end_lines":
-            return self._on_bottom_edge(points, self.domain[0])
+        if self._support in ("end_lines", "end_corners"):
+            return self._on_support(points, self.domain[0])
 
         y, z = points[..., 1], points[..., 2]
         z_mid = (self.domain[4] + self.domain[5]) / 2.0
