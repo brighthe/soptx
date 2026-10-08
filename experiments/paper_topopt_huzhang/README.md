@@ -41,7 +41,6 @@ python plot.py --case stress-traction-jump                  # 图 5.11
 ```text
 experiments/paper_topopt_huzhang/
 |-- README.md                   # 本文件: 目录结构、算例与入口、调用方式
-|-- results_analysis.md         # 实测数据、机理分析与历史记录
 |-- run_manufactured.py         # 5.1 节: 制造解收敛阶验证 + 表 5.1 / 5.2 (自包含, 参数为文件顶部常量)
 |-- run_fixed_fixed.py          # 5.2.1 节: 两端固支梁六组 MMA 优化 (自包含, 参数为文件顶部常量)
 |-- run_bearing.py              # 5.2.2 节: 轴承两组材料 x 三种离散 OC 优化 (同上)
