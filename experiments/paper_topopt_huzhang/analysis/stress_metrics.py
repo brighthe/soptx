@@ -18,14 +18,11 @@ from typing import Any
 
 import numpy as np
 
+from soptx.postprocess.stress_report import StressPostProcessor
 from soptx.postprocess.vtk_export import read_vtu_cell_data
 
-from config import EXPERIMENT_DIR, OUTPUT_DIR, REPOSITORY_ROOT, bootstrap_source_path
-
-bootstrap_source_path()
-
-import run_cantilever_stress  # noqa: E402
-from soptx.postprocess.stress_report import StressPostProcessor  # noqa: E402
+import run_cantilever_stress
+from config import EXPERIMENT_DIR, OUTPUT_DIR, REPOSITORY_ROOT
 
 
 # ============================================ 一、运行目录解析

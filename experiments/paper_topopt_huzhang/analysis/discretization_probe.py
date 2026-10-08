@@ -39,12 +39,10 @@ from soptx.backend import backend_manager as bm
 from soptx.postprocess.vtk_export import read_vtu_cell_data, write_vtu
 from soptx.topology.constraints import build_exemption_mask
 
-from config import OUTPUT_DIR, VIEW_DIR, bootstrap_source_path
+import run_cantilever_stress
+from config import OUTPUT_DIR, VIEW_DIR
 
-bootstrap_source_path()
-
-from . import provenance  # noqa: E402
-import run_cantilever_stress  # noqa: E402
+from . import provenance
 
 CASE_ID = run_cantilever_stress.CASE_ID
 # 停止准则的容差 delta_g; 仅作跳量的尺度参照.

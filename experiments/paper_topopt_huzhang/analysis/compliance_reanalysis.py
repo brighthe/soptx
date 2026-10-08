@@ -31,21 +31,19 @@ from typing import Any
 
 import numpy as np
 
-from config import OUTPUT_DIR, bootstrap_source_path
+from soptx.backend import backend_manager as bm
 
-bootstrap_source_path()
+import run_fixed_fixed
+from config import OUTPUT_DIR
 
-from soptx.backend import backend_manager as bm  # noqa: E402
-
-from .bearing_reanalysis import (  # noqa: E402
+from . import provenance
+from .bearing_reanalysis import (
     SELF_CHECK_RTOL,
     _label,
     _run_dir,
     _split,
     load_design,
 )
-from . import provenance  # noqa: E402
-import run_fixed_fixed  # noqa: E402
 
 CASE = run_fixed_fixed.CASE_ID
 

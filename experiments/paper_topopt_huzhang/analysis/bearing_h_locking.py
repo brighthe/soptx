@@ -27,12 +27,10 @@ from typing import Any
 
 import numpy as np
 
-from config import OUTPUT_DIR, bootstrap_source_path
+import run_bearing
+from config import OUTPUT_DIR
 
-bootstrap_source_path()
-
-from . import provenance  # noqa: E402
-import run_bearing  # noqa: E402
+from . import provenance
 
 CASE_ID = run_bearing.CASE_ID
 # 两档 nu 与 run_bearing 的两组材料一一对应 (组名 -> 泊松比)

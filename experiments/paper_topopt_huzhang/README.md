@@ -13,7 +13,7 @@ experiments/paper_topopt_huzhang/
 |-- run_cantilever_stress.py    # 5.2.3 节 / 图 5.8~5.11: CantileverMiddle2d, AL-MMA -> results/cantilever-middle-2d-stress/
 |-- table.py                    # 表格入口: 冻结设计交叉再分析 + 论文表格 (表 5.3 / 5.4)
 |-- plot.py                     # 绘图入口: 插图数据 (重分析) + 成图
-|-- config.py                   # 路径常量与源码路径注入 (各入口、analysis/ 与 plots/ 共用)
+|-- config.py                   # 共用路径常量 (table.py / plot.py、analysis/ 与 plots/ 使用; run 脚本各自定义)
 |-- analysis/                   # table.py / plot.py 背后的数值计算, 由入口派发, 不直接运行
 |   |-- compliance_reanalysis.py    # 表 5.3: 固支梁六个冻结设计 x 六种离散的柔顺度交叉再分析
 |   |-- bearing_reanalysis.py       # 表 5.4: 轴承冻结设计 x 四种离散的柔顺度交叉再分析

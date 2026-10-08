@@ -25,9 +25,6 @@ if str(EXPERIMENT_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_DIR))
 
 import config
-from config import bootstrap_source_path
-
-bootstrap_source_path()
 
 
 def _reanalysis(case_id: str) -> dict[str, Any]:

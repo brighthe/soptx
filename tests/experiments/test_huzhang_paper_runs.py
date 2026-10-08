@@ -20,9 +20,6 @@ if str(EXPERIMENT_ROOT) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_ROOT))
 
 import config  # noqa: E402
-
-config.bootstrap_source_path()
-
 import plot  # noqa: E402
 import run_bearing  # noqa: E402
 import run_cantilever_stress  # noqa: E402

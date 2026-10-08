@@ -30,12 +30,10 @@ import numpy as np
 
 from soptx.postprocess.vtk_export import read_vtu_cell_data
 
-from config import OUTPUT_DIR, bootstrap_source_path
+import run_bearing
+from config import OUTPUT_DIR
 
-bootstrap_source_path()
-
-from . import provenance  # noqa: E402
-import run_bearing  # noqa: E402
+from . import provenance
 
 CASE = run_bearing.CASE_ID
 GROUPS = tuple(run_bearing.GROUPS)
