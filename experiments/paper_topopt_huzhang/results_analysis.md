@@ -3,7 +3,7 @@
 > 本文档是论文草稿 `C:\workspace\dut-postdoc\papers\huzhang-topopt\high-order-huzhang-topopt-draft-zh.md` 第 5 章数值试验的唯一数据来源：
 > 草稿正文中的全部表格数字、图件与结论表述均以本文档记录的实测值为准。
 >
-> 2026-10-06 起运行产物一律写入 `results/` (`run.py` / `table.py` / `plot.py`, 原 `compare.py` 已拆为后两者)。下文第 5.2 节各处 `outputs/...` 路径是旧布局下的历史记录, 待按新布局重跑后逐节更新。
+> 2026-10-06 起运行产物一律写入 `results/`; 2026-10-08 起优化由三个自包含 run 脚本 (`run_fixed_fixed.py` / `run_bearing.py` / `run_cantilever_stress.py`) 执行, 参数为脚本顶部常量, 原 `run.py` / `driver.py` / `pipeline.py` / `cases.toml` 已删除, 后处理归 `table.py` / `plot.py`, 其背后的再分析与导出模块移入 `analysis/` (`metrics.py` 改名 `stress_metrics.py`, `bearing_h_locking_probe.py` 改名 `bearing_h_locking.py`), `manufactured_convergence.py` 改名 `run_manufactured.py`。下文各处 `outputs/...` 路径与 `cases.toml` 键名是旧布局下的历史记录, 待按新布局逐节更新。
 
 ---
 
@@ -87,12 +87,12 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 
 ### 2.1 算例参数与代码映射契约
 
-* **模型实现**：`MixedBoundarySinusoidalElasticity2D`（`src/soptx/problems/elasticity/manufactured_2d.py`），制造解取 $u_1 = u_2 = \sin(\pi x)\sin(\pi y)$；$k=3,4$ 不加稳定化、$k=1,2$ 用 `matrix_jump`，参数为 `manufactured_convergence.py` 顶部常量；
+* **模型实现**：`MixedBoundarySinusoidalElasticity2D`（`src/soptx/problems/elasticity/manufactured_2d.py`），制造解取 $u_1 = u_2 = \sin(\pi x)\sin(\pi y)$；$k=3,4$ 不加稳定化、$k=1,2$ 用 `matrix_jump`，参数为 `run_manufactured.py`（原 `manufactured_convergence.py`）顶部常量；
 * **物理问题**：$[0,1]^2$ 正方形域平面应变线弹性体（$\lambda=1.0, \mu=0.5$，对应模型入参 `lame_lambda` / `shear_modulus` 的缺省值）；
 * **边界条件**：$\Gamma_D = \{x=0\}\cup\{y=0\}$ 弱加齐次位移，$\Gamma_N = \{x=1\}\cup\{y=1\}$ 强加解析牵引力，混合边界交界角点 $(1,0)$ 与 $(0,1)$ 开启两单元局部角点松弛；
 * **网格序列**：棋盘格结构化三角网格（`mesh_type = "triangle-checkerboard"`），剖分层次 $nx = 4, 8, 16, 32, 64$。
 
-数据来源：`results/manufactured-convergence/manufactured_convergence.json`（由 `manufactured_convergence.py` 一次跑完 $k=1,\dots,4$ 写入；表 5.1 / 5.2 即 `results/tables/table5_1.md` / `table5_2.md`，同一次运行生成，不手工录入）。
+数据来源：`results/manufactured-convergence/manufactured_convergence.json`（由 `run_manufactured.py` 一次跑完 $k=1,\dots,4$ 写入；表 5.1 / 5.2 即 `results/tables/table5_1.md` / `table5_2.md`，同一次运行生成，不手工录入）。
 
 ### 2.2 高阶原生格式实测数据（$k=3,4$ / 论文表 5.1）
 
@@ -134,9 +134,9 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 
 **图 5.1**  两端固支梁几何尺寸、载荷与对称边界条件示意（dut-postdoc 侧 TikZ 图件，不由本流水线产出）
 
-**分析参数**（求解一次状态方程所需；对应 `cases.toml` 的 `[cases.model]` A 问题 与 `[cases.discretization]` B 离散）
+**分析参数**（求解一次状态方程所需；对应 run 脚本顶部的模型与离散常量; 映射列沿用原 `cases.toml` 键名）
 
-| 项目 | 论文设定 (5.2.1 节) | cases.toml / 代码映射 | 说明 |
+| 项目 | 论文设定 (5.2.1 节) | 代码映射 (原 cases.toml 键名) | 说明 |
 |---|---|---|---|
 | 设计域 | 矩形域 $160\,\mathrm{mm} \times 20\,\mathrm{mm}$ ($L \times 0.125L$) | case `compliance-fixed-fixed-half` (取左半域 $80 \times 20$ 求解) | 模型 `FixedFixedBeamHalfDomain2d` |
 | 边界条件 | 左右垂直边界完全固支 $\boldsymbol{u}=\mathbf{0}$；对称面施加对称边界 | 分量级 Dirichlet ($u_x=0$) / Hu–Zhang 弱对称边界 | 完整域与半域严格等价 |
@@ -148,7 +148,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 
 **优化参数**（状态方程之外、只服务于拓扑优化；对应 `[cases.optimization]` 的 C 拓扑建模 与 D 算法）
 
-| 项目 | 论文设定 (5.2.1 节) | cases.toml / 代码映射 | 说明 |
+| 项目 | 论文设定 (5.2.1 节) | 代码映射 (原 cases.toml 键名) | 说明 |
 |---|---|---|---|
 | 材料插值 | 只插值 Young 模量 $E$（Poisson 比固定为实体值 $\nu_0 = 0.4$） | `interpolation_variables = "E"` | 显式登记而非留给缺省 `"auto"`：后者随材料自动切换，而本条是柔顺度基准；可压缩材料上写 `"E+nu"` 直接报错 |
 | 拓扑参数 | 体积分数 $\bar{V} = 0.40$, 过滤半径 $r_{\min} = 2.4\,\mathrm{mm}$ | `volume_fraction = 0.4`, `filter_radius = 2.4`, `filter_type = "density"` | 密度过滤; MSIMP 惩罚 `interpolation_method = "msimp"`, `penalty_factor = 3.0` ($p=3$), `void_youngs_modulus = 1e-09` ($E_{\min}=10^{-9}\,\mathrm{MPa}$) |
@@ -206,9 +206,9 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 
 **图 5.4**  二维轴承装置几何与边界条件示意（dut-postdoc 侧 TikZ 图件，不由本流水线产出）
 
-**分析参数**（求解一次状态方程所需；对应 `cases.toml` 的 `[cases.model]` A 问题 与 `[cases.discretization]` B 离散）
+**分析参数**（求解一次状态方程所需；对应 run 脚本顶部的模型与离散常量; 映射列沿用原 `cases.toml` 键名）
 
-| 项目 | 论文设定 (5.2.2 节) | cases.toml / 代码映射 | 说明 |
+| 项目 | 论文设定 (5.2.2 节) | 代码映射 (原 cases.toml 键名) | 说明 |
 |---|---|---|---|
 | 设计域 | 矩形域 $120\,\mathrm{mm} \times 40\,\mathrm{mm}$ ($3L \times L, L=40\,\mathrm{mm}$) | case `bearing-compressible` / `bearing-incompressible`, 模型 `BearingDevice2d` | 两条 case 只差 `poisson_ratio`；$\nu$ 属 A 问题层，改它等于换题目，故另立 id |
 | 边界条件 | 底边完全固支 $u_x=u_y=0$；顶边竖直向下均布牵引 $t_0 = 8\times10^{-2}\,\mathrm{N/mm}$；左右边界自由 | `traction = -0.08` | 顶边为纯 Neumann 边，HZMFEM 上属本质边界（$\boldsymbol\sigma\cdot\boldsymbol n = \boldsymbol g_N$）；牵引以二分量给出, 走 `huzhang_fe_space_2d.py` 的 Case B 分支, 须乘 `boundary_outward_sign` (soptx `d8456cc` 修复) |
@@ -220,7 +220,7 @@ for c in compliance-topology compliance-convergence bearing-topologies stress-hz
 
 **优化参数**（状态方程之外、只服务于拓扑优化；对应 `[cases.optimization]` 的 C 拓扑建模 与 D 算法）
 
-| 项目 | 论文设定 (5.2.2 节) | cases.toml / 代码映射 | 说明 |
+| 项目 | 论文设定 (5.2.2 节) | 代码映射 (原 cases.toml 键名) | 说明 |
 |---|---|---|---|
 | 材料插值 | 基准组只插值 $E$；近不可压缩组按式 (4.3) 同时插值 $E$ 与 $\nu$, $\nu_{\mathrm{void}}=0.3, p_\nu=1$ | `interpolation_variables = "E"` / `"E+nu"`, `nu_penalty_factor = 1.0`, `void_poisson_ratio = 0.3` | 两组均显式登记而非留给缺省 `"auto"`：插值对象是对照实验的受控量，不应随材料静默切换；`"E+nu"` 只允许 $\nu_0 \ge 0.49$, 可压缩材料上直接报错 |
 | 拓扑参数 | 体积分数 $\bar{V} = 0.35$, 过滤半径 $r_{\min} = 2.0\,\mathrm{mm}$ | `volume_fraction = 0.35`, `filter_radius = 2.0`, `filter_type = "density"` | 密度过滤; MSIMP 惩罚 `interpolation_method = "msimp"`, `penalty_factor = 3.0` ($p=3$), `void_youngs_modulus = 1e-09` ($E_{\min}=10^{-9}\,\mathrm{MPa}$) |
@@ -267,7 +267,7 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 
 论文表 5.4 合并 (a)(b) 为六行表, 只列 huzhang-4 参考值一列绝对值, lfem-1 / lfem-2 / huzhang-2 三列改为相对 huzhang-4 的偏差 (%), 不列 LFEM $p=4$ 列; 优化所得柔顺度 (对角线绝对值) 写在论文图 5.6 段正文。
 
-论文图 5.5 全实体域 h 收敛 (`bearing_h_locking_probe.py` → `postprocess/solid_h_sweep.json`, 成图 `plot.py --case bearing-solid-h-convergence`): 两档 $\nu_0$ x 四级网格 x 四种离散, $\rho_e \equiv 1$。参考值为 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken $\Delta^2$, $C_\infty = c_3 - (c_2-c_3)\,r/(1-r)$, $r=(c_2-c_3)/(c_1-c_2)$, 实测差比 0.484 / 0.483, 不假定收敛阶): $\nu_0=0.3$ 为 26.014807, $\nu_0=0.4999$ 为 15.496407; $k=4$ 在 240x80 上单次求解超过 20 min, 未跑。
+论文图 5.5 全实体域 h 收敛 (`plot.py bearing-h-locking`, 即 `analysis/bearing_h_locking.py` → `postprocess/solid_h_sweep.json`, 成图 `plot.py --case bearing-solid-h-convergence`): 两档 $\nu_0$ x 四级网格 x 四种离散, $\rho_e \equiv 1$。参考值为 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken $\Delta^2$, $C_\infty = c_3 - (c_2-c_3)\,r/(1-r)$, $r=(c_2-c_3)/(c_1-c_2)$, 实测差比 0.484 / 0.483, 不假定收敛阶): $\nu_0=0.3$ 为 26.014807, $\nu_0=0.4999$ 为 15.496407; $k=4$ 在 240x80 上单次求解超过 20 min, 未跑。
 
 | $\nu_0$ | 网格 | LFEM $p=1$ | LFEM $p=2$ | HZMFEM $k=2$ | HZMFEM $k=4$ | $p=1$ 误差 | $p=2$ 误差 | $k=2$ 误差 | $k=4$ 误差 |
 |---|---|---|---|---|---|---|---|---|---|
@@ -322,7 +322,7 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 | 优化算法 | 增广拉格朗日法 (ALM) + 移动渐近线法 (MMA)，$\mu_0 = 50.0$，$\alpha = 1.1$，$\mu_{\max} = 10^4$，$\lambda_{\max}=3000$，内层 $N_{\mathrm{in}}^{\max}=5$ 步 MMA / 最大外层 $N_{\mathrm{out}}^{\max}=200$ 步，移动限制 0.15，渐近线最小间距 $10^{-4}$；停止判据 $\delta_\rho=0.002$、$\delta_g=0.005$、$N_{\mathrm{hold}}=3$ | `mu_0 = 50.0`, `alpha = 1.1`, `mu_max = 10000.0`, `lambda_max = 3000.0`, `mma_iters_per_al = 5`, `max_al_iterations = 200`, `move_limit = 0.15`, `asymptote_min_distance = 1.0e-4`, `change_tolerance = 2.0e-3`, `stress_tolerance = 5.0e-3`, `hold_steps = 3` | 超参出自 legacy driver 的两条悬臂梁；论文 4.6.4 节写的 $\mu_0 = 10$ 是 L 型件的取值，不适用于本算例 |
 | 被动实体区与判据集合 | 以接触区两端点为中心、半径 $r_{\mathrm{pad}}=1.5\,\mathrm{mm}$ 的被动实体区 $\Omega_{\mathrm{pad}}$（16 单元，占设计域 $0.25\%$）：$\overline\rho_e=1$、导数置零、不施加应力约束、体积计入；判据集合 $\mathcal E_{\mathrm{acc}}=\{e\notin\Omega_{\mathrm{pad}}:\overline\rho_e\ge0.5\}$ | `load_pad_radius = 1.5`, `support_pad_radius = 0.0`, `acceptance_solid_threshold = 0.5`（summary 记 `pad_cells = 16`） | 正文主对比 LFEM $p=3$ / HZMFEM $k=3$，另有 HZMFEM $k=2$（跳量稳定化）与 $k=4$；牵引跳量图另含 LFEM $p=2,4$；`comparison_orders = [1, 2, 3, 4]` 中 $p=1$ 不进论文 |
 
-> **参数出处**：本节参数以 `cases.toml` 注册值为准。早期以 legacy driver `test_phd_section5_stress_constraint.py`（已在提交 `5b832b6` 中删除，可由 git 历史取回）为据时，正文有两处落差（漏记 tanh 投影；$E = 70\,000\,\mathrm{MPa}$ 与归一化 $E = 1.0$ 不一致），2026-09-28 正文改写后已消除，上表按当前正文核对。
+> **参数出处**：本节参数以 `run_cantilever_stress.py` 顶部常量为准（原 `cases.toml` 注册值逐项迁入）。早期以 legacy driver `test_phd_section5_stress_constraint.py`（已在提交 `5b832b6` 中删除，可由 git 历史取回）为据时，正文有两处落差（漏记 tanh 投影；$E = 70\,000\,\mathrm{MPa}$ 与归一化 $E = 1.0$ 不一致），2026-09-28 正文改写后已消除，上表按当前正文核对。
 
 ### 5.2 实测优化结果汇总 (论文 5.2.3 节正文数字)
 
@@ -349,26 +349,20 @@ HZ 两组重跑相对 09-14 旧产物: 柔顺度 $+1.35\%$ / $+1.79\%$, 迭代�
 
 ```bash
 # 5.1 前向制造解收敛阶 + 表 5.1 / 5.2
-python experiments/paper_topopt_huzhang/manufactured_convergence.py
+python experiments/paper_topopt_huzhang/run_manufactured.py
 
-# 5.2.1 两端固支梁柔顺度 (缺省展开 comparison_orders = 2/3/4), 再冻结设计 6x6 交叉再分析 (表 5.3)
-python experiments/paper_topopt_huzhang/run.py --case compliance-fixed-fixed-half
+# 5.2.1 两端固支梁柔顺度 (LFEM / HZMFEM x 阶次 2,3,4), 再冻结设计 6x6 交叉再分析 (表 5.3)
+python experiments/paper_topopt_huzhang/run_fixed_fixed.py
 python experiments/paper_topopt_huzhang/table.py compliance-reanalysis
 
-# 5.2.2 轴承装置近不可压缩: 三种离散 x 两组材料, 再冻结设计交叉再分析 (表 5.4), 全实体域 h 收敛 (图 5.5)
-for c in bearing-compressible bearing-incompressible; do
-  python experiments/paper_topopt_huzhang/run.py --case $c --analyzer lfem --order 1
-  python experiments/paper_topopt_huzhang/run.py --case $c --analyzer lfem --order 2
-  python experiments/paper_topopt_huzhang/run.py --case $c --analyzer huzhang --order 2
-done
+# 5.2.2 轴承装置近不可压缩: 两组材料 x 三种离散, 再冻结设计交叉再分析 (表 5.4), 全实体域 h 收敛 (图 5.5)
+python experiments/paper_topopt_huzhang/run_bearing.py
 python experiments/paper_topopt_huzhang/table.py bearing-reanalysis
 python experiments/paper_topopt_huzhang/plot.py bearing-h-locking
 
-# 5.2.3 悬臂梁局部应力约束 (缺省展开 comparison_orders = 2/3/4)
-# 图 5.8~5.11 的数据由 discretization-probe 冻结构型重分析导出 (不是 export); k=2 优化与探针在独立结果集 R 上
-# 产出 (固定系数已是默认, 无需单独结果集), 见 README 首节
-python experiments/paper_topopt_huzhang/run.py --case cantilever-middle-2d-stress
-python experiments/paper_topopt_huzhang/plot.py export
+# 5.2.3 悬臂梁局部应力约束 (LFEM / HZMFEM x 阶次 2,3,4)
+# 图 5.8 / 5.10 / 5.11 的数据由 discretization-probe 冻结构型重分析导出; 图 5.9 的数据在成图时自动导出
+python experiments/paper_topopt_huzhang/run_cantilever_stress.py
 python experiments/paper_topopt_huzhang/plot.py discretization-probe
 
 # 全部插图
@@ -382,4 +376,4 @@ python experiments/paper_topopt_huzhang/plot.py --case stress-hz-orders-topologi
 python experiments/paper_topopt_huzhang/plot.py --case stress-traction-jump
 ```
 
-证据口径: 论文数字一律以各 run 目录下的 `summary.json` 为准, 其 `provenance` 字段是该次运行落盘时盖的戳记; `reproducible` 为 `false` 时（工作区不干净或取不到 Git revision）该次运行不能作为定稿证据。戳记随运行写入, 不事后补盖, 故未重跑的过期目录会保留旧 revision。
+证据口径: 论文数字一律以各 run 目录下的 `summary.json` 为准, 其 `provenance` 字段是该次运行开始时盖的戳记 (2026-10-08 之前由旧 driver 在落盘时盖); `reproducible` 为 `false` 时（工作区不干净或取不到 Git revision）该次运行不能作为定稿证据。戳记随运行写入, 不事后补盖, 故未重跑的过期目录会保留旧 revision。

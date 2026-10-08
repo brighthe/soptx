@@ -23,14 +23,16 @@ import config  # noqa: E402
 
 config.bootstrap_source_path()
 
-import bearing_reanalysis  # noqa: E402
-import compliance_reanalysis  # noqa: E402
-import discretization_probe  # noqa: E402
-import metrics  # noqa: E402
 import plot  # noqa: E402
 import run_bearing  # noqa: E402
 import run_cantilever_stress  # noqa: E402
 import run_fixed_fixed  # noqa: E402
+from analysis import (  # noqa: E402
+    bearing_reanalysis,
+    compliance_reanalysis,
+    discretization_probe,
+    stress_metrics,
+)
 
 
 def _module_literal(path: Path, name: str):
@@ -60,7 +62,7 @@ def test_stress_consumers_use_run_script_labels():
         for order in run_cantilever_stress.ORDERS
     )
     assert discretization_probe.DEFAULT_DESIGNS == expected
-    assert metrics.OUT == config.OUTPUT_DIR / run_cantilever_stress.CASE_ID
+    assert stress_metrics.OUT == config.OUTPUT_DIR / run_cantilever_stress.CASE_ID
     required = _module_literal(EXPERIMENT_ROOT / "plots" / "stress_cubic_convergence.py", "REQUIRED_RUNS")
     assert required[:2] == (
         run_cantilever_stress.run_label("lfem", 3),

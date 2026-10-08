@@ -9,9 +9,9 @@ k=4 求解过慢, 不跑). 目的是区分 "p=2 不闭锁" 与 "p=2 的闭锁被
 在 nu=0.4999 的粗网格误差显著高于 nu=0.3 档且收敛率下降, 而 k=2 两档曲线重合,
 则 p=2 的闭锁只是被 120x40 掩盖.
 
-直接运行::
+入口由 ``plot.py`` 派发, 本模块不直接执行::
 
-    python bearing_h_locking_probe.py
+    plot.py bearing-h-locking -> run()
 
 分析链由 ``run_bearing.build`` 组装 (与优化运行同一份代码), 两档 nu 即其两组材料.
 产出 ``results/bearing/postprocess/solid_h_sweep.json``, 终端打印
@@ -21,7 +21,6 @@ k=4 求解过慢, 不跑). 目的是区分 "p=2 不闭锁" 与 "p=2 的闭锁被
 from __future__ import annotations
 
 import json
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -32,7 +31,7 @@ from config import OUTPUT_DIR, bootstrap_source_path
 
 bootstrap_source_path()
 
-import provenance  # noqa: E402
+from . import provenance  # noqa: E402
 import run_bearing  # noqa: E402
 
 CASE_ID = run_bearing.CASE_ID
@@ -111,6 +110,3 @@ def run() -> int:
         print("注意: 工作区不干净, 本次数字不满足 provenance.reproducible, 不可直接引用.")
     return 0
 
-
-if __name__ == "__main__":
-    sys.exit(run())

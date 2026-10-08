@@ -45,9 +45,9 @@ PLOTS_DIR = EXPERIMENT_DIR / "plots"
 
 # 子命令 -> "模块:入口函数". 入口名不统一, 故显式给出.
 COMMAND_MODULES: dict[str, str] = {
-    "export": "metrics:run_export",
-    "bearing-h-locking": "bearing_h_locking_probe:run",
-    "discretization-probe": "discretization_probe:run_discretization_probe",
+    "export": "analysis.stress_metrics:run_export",
+    "bearing-h-locking": "analysis.bearing_h_locking:run",
+    "discretization-probe": "analysis.discretization_probe:run_discretization_probe",
 }
 
 # 需要把子命令之后的参数透传下去的模块 (其余不接受参数)
@@ -296,7 +296,7 @@ def run_case(identifier: str) -> int:
         "stress-cubic-convergence": ["lfem-k3", "huzhang-k3"],
     }
     if identifier in EXPORTS_BY_CASE:
-        from metrics import prepare_exports
+        from analysis.stress_metrics import prepare_exports
         try:
             prepare_exports(EXPORTS_BY_CASE[identifier])
         except FileNotFoundError as error:

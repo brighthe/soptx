@@ -8,11 +8,11 @@ HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑). 位�
 
 参考值不是任一离散在某网格上的值: 120x40 上 $k=4$ 自身仍高出真值 0.3% 至 0.4%, 与被评估
 离散的误差同量级. 这里取 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken delta^2, 按实测差比,
-不假定收敛阶), 与 ``bearing_h_locking_probe.py`` 终端表同一公式; 改用其余序列外推, 参考值变化
+不假定收敛阶), 与 ``analysis/bearing_h_locking.py`` 终端表同一公式; 改用其余序列外推, 参考值变化
 不超过 0.06% (实测 0.01% 至 0.05%), 即其不确定度, 因此 $p=2$ 在 $\\nu_0 = 0.3$ 最细两级的点
 (0.016%, 0.013%) 不可信.
 
-数据不重解方程, 只读 ``bearing_h_locking_probe.py`` 落盘的
+数据不重解方程, 只读 ``analysis/bearing_h_locking.py`` 落盘的
 ``results/bearing/postprocess/solid_h_sweep.json``; 缺文件即报错.
 
 输出: results/figures/bearing_solid_h_convergence.{pdf,png}, 自动同步至
@@ -65,7 +65,7 @@ def load_rows() -> list[dict]:
 
 
 def extrapolated_reference(block: list[dict]) -> float:
-    """k=4 前三级 (由粗到细) 按逐级差等比递减外推的极限 (Aitken delta^2); 与 bearing_h_locking_probe 同一公式."""
+    """k=4 前三级 (由粗到细) 按逐级差等比递减外推的极限 (Aitken delta^2); 与 analysis.bearing_h_locking 同一公式."""
     c1, c2, c3 = (block[i]["compliance"][REFERENCE_LABEL] for i in range(3))
     ratio = (c2 - c3) / (c1 - c2)
     return c3 - (c2 - c3) * ratio / (1.0 - ratio)

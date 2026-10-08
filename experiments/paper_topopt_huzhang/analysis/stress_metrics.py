@@ -20,7 +20,7 @@ import numpy as np
 
 from soptx.postprocess.vtk_export import read_vtu_cell_data
 
-from config import OUTPUT_DIR, bootstrap_source_path
+from config import EXPERIMENT_DIR, OUTPUT_DIR, REPOSITORY_ROOT, bootstrap_source_path
 
 bootstrap_source_path()
 
@@ -148,7 +148,7 @@ def export_run(name: str) -> dict[str, Any]:
     mesh = parts["mesh"]
     # 被动实体区掩码: 按 summary 记录的圆心与半径复原, 供插图从 solid_mask 中剔除
     # 该区 (rho 固定为 1 但不施加约束, 不属于判据集合). 无 pad 的运行得全 False.
-    from discretization_probe import pad_mask_from_summary  # 延迟导入: 该模块拉起求解栈
+    from .discretization_probe import pad_mask_from_summary  # 延迟导入: 该模块拉起求解栈
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     pad_mask = pad_mask_from_summary(mesh, summary, int(rho_final.shape[0]))
     return {
@@ -184,10 +184,10 @@ def export_fingerprint(name: str) -> str:
     """计算源结果与本地后处理实现的内容指纹."""
     method, order = RUNS[name]
     run_dir, _ = resolve_run_dir(method, order, announce=False)
-    root = Path(__file__).resolve().parents[2]
     paths = [run_dir / "density_final.vtu", run_dir / "summary.json"]
-    paths.extend(sorted(Path(__file__).parent.glob("*.py")))
-    paths.extend(sorted((root / "src" / "soptx").rglob("*.py")))
+    paths.extend(sorted(EXPERIMENT_DIR.glob("*.py")))
+    paths.extend(sorted((EXPERIMENT_DIR / "analysis").glob("*.py")))
+    paths.extend(sorted((REPOSITORY_ROOT / "src" / "soptx").rglob("*.py")))
     digest = hashlib.sha256()
     for path in paths:
         digest.update(str(path).encode())

@@ -13,8 +13,8 @@
 
 用法::
 
-    python manufactured_convergence.py                # 论文口径, 全部阶次
-    python manufactured_convergence.py --degree 2     # 调试单个阶次, 只回显不落盘
+    python run_manufactured.py                # 论文口径, 全部阶次
+    python run_manufactured.py --degree 2     # 调试单个阶次, 只回显不落盘
 """
 
 from __future__ import annotations

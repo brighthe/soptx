@@ -9,7 +9,7 @@
 - (b)(d) 主应力空间内的单元应力分布: 取 postprocess/ 下的 npz
   (sig1/sig2/vm/solid_mask/pad_mask), 由 ``plot.py export --run lfem-k3 --run
   huzhang-k3`` 从 density_final.vtu 冻结重分析导出; export 认的运行目录与本模块的
-  REQUIRED_RUNS 前两项是同一批 (metrics.resolve_run_dir 按注册口径解析). 散点只画
+  REQUIRED_RUNS 前两项是同一批 (analysis.stress_metrics.resolve_run_dir 按注册口径解析). 散点只画
   判据集合 E_acc: solid_mask (rho > 0.5) 剔除 pad_mask (被动实体区, rho 固定 1 但不
   施加约束).
 

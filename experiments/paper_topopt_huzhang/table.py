@@ -102,11 +102,11 @@ def bearing_table() -> str:
 # 子命令 -> (再分析入口 "模块:函数", 表格生成函数, 输出文件名, 说明)
 TABLES: dict[str, tuple[str, Callable[[], str], str, str]] = {
     "compliance-reanalysis": (
-        "compliance_reanalysis:run_compliance_reanalysis", compliance_table, "table5_3.md",
+        "analysis.compliance_reanalysis:run_compliance_reanalysis", compliance_table, "table5_3.md",
         "固支梁六个冻结设计 x 六种离散的柔顺度交叉再分析 (论文表 5.3)",
     ),
     "bearing-reanalysis": (
-        "bearing_reanalysis:run_bearing_reanalysis", bearing_table, "table5_4.md",
+        "analysis.bearing_reanalysis:run_bearing_reanalysis", bearing_table, "table5_4.md",
         "轴承冻结设计 x 四种离散的柔顺度交叉再分析 (论文表 5.4)",
     ),
 }

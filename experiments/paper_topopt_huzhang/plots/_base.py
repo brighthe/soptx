@@ -7,7 +7,7 @@
 按 ``_`` 前缀跳过本模块, 扫描逻辑无须为它开特例.
 
 原为 ``report.py`` 的前半段, 2026-09-03 下沉进 plots 包内; ``report.py`` 余下的
-论文表 5.1 / 5.2 已并入自包含脚本 ``manufactured_convergence.py``.
+论文表 5.1 / 5.2 已并入自包含脚本 ``run_manufactured.py`` (原 ``manufactured_convergence.py``).
 """
 
 from __future__ import annotations

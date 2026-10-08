@@ -43,7 +43,7 @@ from config import OUTPUT_DIR, VIEW_DIR, bootstrap_source_path
 
 bootstrap_source_path()
 
-import provenance  # noqa: E402
+from . import provenance  # noqa: E402
 import run_cantilever_stress  # noqa: E402
 
 CASE_ID = run_cantilever_stress.CASE_ID

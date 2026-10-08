@@ -34,7 +34,7 @@ from config import OUTPUT_DIR, bootstrap_source_path
 
 bootstrap_source_path()
 
-import provenance  # noqa: E402
+from . import provenance  # noqa: E402
 import run_bearing  # noqa: E402
 
 CASE = run_bearing.CASE_ID
