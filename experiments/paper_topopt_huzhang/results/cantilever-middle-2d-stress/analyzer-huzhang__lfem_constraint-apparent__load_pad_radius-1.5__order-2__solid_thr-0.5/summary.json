@@ -1,0 +1,95 @@
+{
+  "case_id": "cantilever-middle-2d-stress",
+  "model": "CantileverMiddle2d",
+  "method": "huzhang",
+  "order": 2,
+  "mesh_type": "triangle-checkerboard",
+  "nx": 80,
+  "ny": 40,
+  "optimizer": "al_mma",
+  "load_discretization": "patch",
+  "integration_order": 6,
+  "stabilization_coefficient": "fixed",
+  "volume_fraction": 0.348638623403185,
+  "relative_equilibrium_residual": 2.7843696566319192e-11,
+  "optimization_iterations": 253,
+  "converged": true,
+  "termination_reason": "criterion-met: C0-C2 held for 3 consecutive ALM steps (change=1.500e-01, change_phys=2.548e-02, change_outer_mean=6.671e-04, measure=mean, max_rel_solid=2.795e-03 (C2 quantity, threshold=0.5), max_rel_global=7.276e-03, beta=10.0, p=3.5)",
+  "solver": "mumps",
+  "interpolation": {
+    "variables": "E"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-07T02:40:44+00:00",
+    "git_revision": "5a8ab5a96e794d1e7b1b28ac8ea2041a37caf05e",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "stress_constraint_type": "HuZhangStressConstraint",
+  "lfem_stress_constraint_formulation": "apparent",
+  "stress_constraint_formulation": "apparent",
+  "max_constraint": 0.007275982863194466,
+  "max_von_mises": 1.001243973336156,
+  "max_apparent_stress_ratio": 1.001243973336156,
+  "max_relative_violation": 0.007275982863194466,
+  "relative_stress_tolerance": 0.005,
+  "acceptance_solid_threshold": 0.5,
+  "max_relative_violation_solid_region": 0.002794968896078359,
+  "relative_stress_feasible": true,
+  "stress_feasible": true,
+  "max_solid_stress_ratio": 5.831911997942283,
+  "solid_region_threshold": 0.5,
+  "max_solid_stress_ratio_solid_region": 1.0274314940884135,
+  "load_pad_radius": 1.5,
+  "support_pad_radius": 0.0,
+  "load_pad_centers": [
+    [
+      80.0,
+      17.0
+    ],
+    [
+      80.0,
+      23.0
+    ]
+  ],
+  "support_pad_centers": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      40.0
+    ]
+  ],
+  "pad_cells": 16,
+  "load_pad_cells": 16,
+  "support_pad_cells": 0,
+  "max_solid_stress_ratio_constrained": 5.831911997942283,
+  "max_solid_stress_ratio_pad": 0.6380158476192459,
+  "max_constraint_pad": -0.3619841523807541,
+  "max_solid_stress_ratio_support_pad": null,
+  "max_constraint_support_pad": null,
+  "penalty_parameter": 7812.361259143757,
+  "max_multiplier": 862.8685292903625,
+  "complementarity_residual": 6.278216632306489,
+  "multiplier_relative_change": 0.06728383528019083,
+  "change_measure": "mean",
+  "change_outer_mean": 0.000667146146053945,
+  "change_outer_max": 0.15000000000000002,
+  "lambda_max": 3000.0,
+  "multiplier_capped_count": 0,
+  "move_limit_base": 0.15,
+  "asymptote_min_distance": 0.0001,
+  "optimizer_state": {
+    "file": "final_optimizer_state.npz",
+    "purpose": "frozen-analysis-and-inner-diagnostics",
+    "exact_restart_supported": false,
+    "beta": 10.0,
+    "inner_stop_rule": "legacy",
+    "inner_relative_tolerance": 0.1,
+    "inner_absolute_tolerance": 1e-06,
+    "max_inner_iterations": 5,
+    "last_inner_diagnostics": null
+  }
+}
