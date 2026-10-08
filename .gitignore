@@ -85,7 +85,8 @@ dist/
 /experiments/*/outputs/
 /experiments/*/logs/
 # 旧运行归档 archives/ 与固定密度单次分析 outputs_analysis/ 同为运行产物 (npy、vtu、json,
-# 单组即上百 MB); validation/ 下的位移等 npy 由脚本重跑即得, 脚本与 json 照常入库。
+# 单组即上百 MB); validation/ 下的位移等 npy 由脚本重跑即得, 脚本照常入库, json 与 png
+# 已由上方全局规则忽略。
 /experiments/*/archives/
 /experiments/*/outputs_analysis/
 /experiments/*/validation/**/*.npy
