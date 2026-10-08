@@ -15,7 +15,7 @@ from math import isfinite
 # 固定模型与算法参数.
 FINE_CELL_SIZE = 1.0
 E0, EMIN, NU = 1.0, 1.0e-7, 0.3
-LOAD, SUPPORT = -1.0, "end_lines"
+LOAD, SUPPORT = -1.0, "end_corners"
 TRACE = "linear_corner"
 INTEGRATION_ORDER = 2
 VOLUME_FRACTION, INITIAL_DENSITY = 0.12, 0.12
@@ -52,6 +52,9 @@ def parse_args(argv=None):
     parser.add_argument("--precond", choices=("none", "jacobi"), default=None,
                         help="CG 预条件子 (默认: jacobi)")
     parser.add_argument("--max-iter", type=int, default=300, help="最大分析次数 (默认: 300)")
+    parser.add_argument("--symmetry", choices=("z", "none"), default="z",
+                        help="设计对称约束 (默认: z, 每轮把灵敏度投影到关于 z 中面对称的子空间; "
+                             "none 时不加约束, 长时间运行中舍入误差可能逐渐破坏对称)")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="结果保存目录 (默认: 脚本目录下 outputs/接口_求解器), 重复运行覆盖同名文件")
     parser.add_argument(
@@ -156,13 +159,13 @@ def main(argv=None):
                   E0=E0, Emin=EMIN, nu=NU, penalty=penalty, volfrac=volume,
                   initial_density=INITIAL_DENSITY, load=LOAD, filter_radius_cells=FILTER_RADIUS_CELLS,
                   filter_type="density", filter_radius=radius, optimizer=oc_options,
-                  support=SUPPORT, support_status="建模选择，未确认与论文一致",
+                  support=SUPPORT, symmetry=args.symmetry,
                   solver=solver, cg_tol=args.cg_tol, cg_maxiter=args.cg_maxiter,
                   precond=args.precond, cg_warm_start=(solver == "cg"), chunk_size=args.chunk_size, max_iter=args.max_iter,
                   tolerance=CONVERGENCE_TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
                   volume_tolerance=VOLUME_TOLERANCE, vtu_fields=args.vtu_fields)
     (output / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[配置] {TRACE}, 网格 {grid}, 支承 {SUPPORT}, 计算后端 {args.backend}, 数值设备 {device}, 求解器 {solver}, 输出 {output}", flush=True)
+    print(f"[配置] {TRACE}, 网格 {grid}, 支承 {SUPPORT}, 对称约束 {args.symmetry}, 计算后端 {args.backend}, 数值设备 {device}, 求解器 {solver}, 输出 {output}", flush=True)
     print(f"[尺度] h={FINE_CELL_SIZE}, 计算域尺寸 {domain_size}, 过滤半径 {radius}", flush=True)
     print("[初始化] 创建布局、参考子结构和接口空间", flush=True)
     layout = StructuredSubstructureLayout(
@@ -193,11 +196,13 @@ def main(argv=None):
     count = len(sub_meshes)
     batches = (count + args.chunk_size - 1) // args.chunk_size
     rho = bm.full(grid, INITIAL_DENSITY, **compute_context)
-    # 等体积网格: W^T 1 同时用于物理体积判断及其设计梯度.
+    # 等体积网格: 体积分数对设计密度的梯度 W^T 1 / N, 同时用于物理体积判断. 取与 run_fa.py 的
+    # 归一化约束灵敏度相同的尺度, OC 乘子的二分序列才与 FA 逐轮一致
     weights = apply_structured_density_filter_adjoint(
         gradient=bm.ones(grid, **compute_context), rmin=radius, spacing=spacing,
-    )
-    volume_gradient = weights
+    ) / (grid[0] * grid[1] * grid[2])
+    # 理论上已对称, 取与 z 向镜像的平均, 消去过滤求和顺序留下的舍入差异
+    volume_gradient = 0.5 * (weights + bm.flip(weights, axis=2)) if args.symmetry == "z" else weights
     physical = None
     displacement = None
     previous_interface_displacement = None
@@ -292,13 +297,21 @@ def main(argv=None):
         dc = apply_structured_density_filter_adjoint(gradient=dc_physical, rmin=radius, spacing=spacing)
         if not bm.all(bm.isfinite(dc)):
             raise FloatingPointError("柔顺度灵敏度非有限")
+        # 取与 z 向镜像的平均, 投影到对称设计的子空间: 共用变量的梯度为镜像两单元之和, 取平均
+        # 只差常数因子, 不影响 OC 的乘子; 浮点加法可交换, 结果逐位对称
+        if args.symmetry == "z":
+            dc = 0.5 * (dc + bm.flip(dc, axis=2))
         relative = None if not history else abs(compliance - history[-1]["compliance"]) / compliance
         if relative is not None:
             recent.append(relative)
             recent = recent[-CONVERGENCE_WINDOW:]
         converged = len(recent) == CONVERGENCE_WINDOW and all(value < CONVERGENCE_TOLERANCE for value in recent)
+        # 逐轮记录关于 z 中面的不对称量; 开启 z 对称约束时设计密度的不对称量应恒为 0
+        symmetry_z = float(bm.max(bm.abs(physical - bm.flip(physical, axis=2))))
+        design_symmetry_z = float(bm.max(bm.abs(rho - bm.flip(rho, axis=2))))
         record = dict(iteration=iteration, compliance=compliance, volume_fraction=float(physical.mean()),
-                      relative_change=relative, equilibrium_residual=float(solved.equilibrium_relative_residual),
+                      relative_change=relative, symmetry_error_z=symmetry_z,
+                      design_symmetry_error_z=design_symmetry_z, equilibrium_residual=float(solved.equilibrium_relative_residual),
                       solver_iterations=solved.iterations, solver_converged=solved.converged,
                          constraint_residual=float(solved.constraint_relative_residual), energy_relative_error=energy_error,
                       assembly_seconds=assembly_seconds, solve_seconds=solve_seconds,
@@ -349,13 +362,13 @@ def main(argv=None):
             design_variable=rho,
             objective_gradient=dc,
             constraint_gradient=volume_gradient,
-            constraint_function=lambda candidate: bm.mean(volume_gradient * candidate) - volume,
+            constraint_function=lambda candidate: bm.sum(volume_gradient * candidate) - volume,
             **oc_options,
         )
         rho_new = bm.asarray(updated_density, **compute_context)
         if not bm.all(bm.isfinite(rho_new)) or bm.min(rho_new) < 0 or bm.max(rho_new) > 1:
             raise FloatingPointError("OC 更新得到无效密度")
-        candidate_volume = float(bm.mean(weights * rho_new))
+        candidate_volume = float(bm.sum(weights * rho_new))
         if candidate_volume > volume + VOLUME_TOLERANCE:
             raise RuntimeError("OC 乘子搜索未满足物理体积约束")
         print(f"[OC] 最大密度变化 {bm.max(bm.abs(rho_new - rho)):.3e}", flush=True)
@@ -373,8 +386,11 @@ def main(argv=None):
         final_temporary.replace(output / "result_final.vtu")
     finally:
         final_temporary.unlink(missing_ok=True)
+    # x 向两端支承不同, 只作诊断记录, 不施加约束
+    symmetry_x = float(bm.max(bm.abs(physical - bm.flip(physical, axis=0))))
     summary = dict(history[-1], converged=converged,
                    termination="converged" if converged else "max_iter",
+                   symmetry_error_x=symmetry_x,
                    total_seconds=perf_counter() - run_started)
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     print(f"[完成] {summary['termination']}，结果保存到 {output}", flush=True)

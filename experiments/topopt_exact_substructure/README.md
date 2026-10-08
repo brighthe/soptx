@@ -242,7 +242,6 @@ MG 复用 StructuredHexHierarchy 的对称 V 循环，接口预条件子为 R B 
       --backend numpy --device cpu \
       --solver cg --precond mg \
       --n-sub 78 13 13 --n-fine 5 --chunk-size 32 \
-      --cg-tol 1e-8 --cg-maxiter 20000 \
       --max-iter 300 --vtu-fields density \
       --output-dir outputs/full_trace_cg_mg
 

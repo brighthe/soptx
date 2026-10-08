@@ -79,7 +79,7 @@ def parse_args(argv=None):
                         help='线性求解器 (默认: cg, 即预条件共轭梯度法; mumps/scipy 为直接法, 仅适合小网格)')
     parser.add_argument('--symmetry', choices=('z', 'none'), default='z',
                         help='设计对称约束 (默认: z, 每轮把灵敏度投影到关于 z 中面对称的子空间; '
-                             'none 时对称解不稳定, 舍入误差会把设计推向非对称分支)')
+                             'none 时不加约束, 长时间运行中舍入误差可能逐渐破坏对称)')
     parser.add_argument('--max-iter', type=int, default=300, help='优化最大迭代数 (默认: 300)')
     parser.add_argument('--vtu-fields', nargs='+', choices=('density', 'displacement'), default=['density'],
                         help='每轮及最终 VTU 保存的场, 可多选 (默认: density); displacement 写为节点向量 u')
