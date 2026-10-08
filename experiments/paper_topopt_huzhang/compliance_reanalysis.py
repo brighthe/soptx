@@ -16,9 +16,10 @@
 产出写到 ``results/compliance-fixed-fixed-half/postprocess/frozen_reanalysis.json``,
 带 provenance 戳记与六个 density_final.vtu 的 sha256. JSON 内柔顺度与能量均为半域
 原值, 另记 ``full_structure_factor``; 终端 Markdown 表按论文口径给完整结构值
-(半域 x 2). 每个 (设计, 分析) 组合同时记录 driver.energy_identity_diagnostics 的
+(半域 x 2). 每个 (设计, 分析) 组合同时记录 ``energy_identity_diagnostics`` 的
 能量分量 (LFEM: 外载功 / 应变能; Hu--Zhang: 互补能 / 耦合功 / 牵引对偶功), 供正文
-说明两类泛函在离散层面的差别.
+说明两类泛函在离散层面的差别. 分析链由 ``run_fixed_fixed.build`` 组装, 与优化运行同一
+份代码.
 """
 
 from __future__ import annotations
@@ -30,15 +31,11 @@ from typing import Any
 
 import numpy as np
 
-from config import (
-    CASES_FILE,
-    OUTPUT_DIR,
-    bootstrap_source_path,
-    flatten_parameters,
-    load_cases,
-)
+from config import OUTPUT_DIR, bootstrap_source_path
 
 bootstrap_source_path()
+
+from soptx.backend import backend_manager as bm  # noqa: E402
 
 from bearing_reanalysis import (  # noqa: E402
     SELF_CHECK_RTOL,
@@ -47,60 +44,74 @@ from bearing_reanalysis import (  # noqa: E402
     _split,
     load_design,
 )
-from driver import energy_identity_diagnostics  # noqa: E402
-from pipeline import (  # noqa: E402
-    build_fixed_fixed_analysis_pipeline,
-    build_fixed_fixed_config,
-)
 import provenance  # noqa: E402
+import run_fixed_fixed  # noqa: E402
 
-CASE = "compliance-fixed-fixed-half"
+CASE = run_fixed_fixed.CASE_ID
 
-# 六种离散 = 论文 5.2.1 节正文对比组 (cases.toml comparison_orders = 2/3/4 x 两条链);
+# 六种离散 = 论文 5.2.1 节正文对比组 (run_fixed_fixed 的两条链 x 阶次 2/3/4);
 # 既是设计来源 (行) 也是再分析离散 (列).
-DISCRETIZATIONS: tuple[tuple[str, int], ...] = (
-    ("lfem", 2), ("lfem", 3), ("lfem", 4),
-    ("huzhang", 2), ("huzhang", 3), ("huzhang", 4),
+DISCRETIZATIONS: tuple[tuple[str, int], ...] = tuple(
+    (method, order) for method in run_fixed_fixed.METHODS for order in run_fixed_fixed.ORDERS
 )
 
 # 论文正文摘出的两列: 两条链各自的最高阶, 作为"统一泛函"给六个设计打分.
 PAPER_COLUMNS: tuple[str, ...] = ("lfem-4", "huzhang-4")
 
 
-def case_record(case_id: str) -> dict[str, Any]:
-    for case in load_cases(CASES_FILE):
-        if case["id"] == case_id:
-            return case
-    raise SystemExit(f"cases.toml 中没有算例 {case_id}.")
+def energy_identity_diagnostics(parts: dict[str, Any], state: dict[str, Any]) -> dict[str, float | str]:
+    """计算给定密度场下各离散可直接验证的能量恒等式.
 
+    Parameters
+    ----------
+    parts : dict[str, Any]
+        ``run_fixed_fixed.build`` 组装的分析链.
+    state : dict[str, Any]
+        前向求解状态.
 
-def build_pipeline(case_id: str, method: str, order: int):
-    """按 cases.toml 口径组装一条分析链 (不含优化器), 与 run.py 的优化运行同参数.
-
-    模型名取自 [cases.model] name (左半域对称降维模型), 载荷走 P1 迹 L2 投影,
-    与优化运行完全一致, 故对角线自检可复现 summary.json 的 compliance.
+    Returns
+    -------
+    dict[str, float | str]
+        能量分量; LFEM 为外载功与应变能, Hu--Zhang 为互补能、耦合功与牵引对偶功.
     """
-    case = case_record(case_id)
-    parameters = flatten_parameters(case)
-    config = build_fixed_fixed_config(parameters)
-    pipeline = build_fixed_fixed_analysis_pipeline(
-        config, parameters, method, order, case["model"]["name"]
-    )
-    return pipeline, config
+    analyzer = parts["analyzer"]
+    if parts["method"] == "lfem":
+        displacement = state["displacement"][:]
+        force = analyzer.force_vector
+        external_work = float(bm.einsum("i, i ->", displacement, force[:]))
+        strain_energy = float(bm.einsum("i, i ->", displacement, analyzer.stiffness_matrix.matmul(displacement)))
+        return {
+            "identity": "fTu_equals_uKu",
+            "external_work": external_work,
+            "internal_energy": strain_energy,
+            "relative_defect": abs(external_work - strain_energy) / max(abs(external_work), 1.0e-30),
+        }
+    stress = state["stress"][:]
+    displacement = state["displacement"][:]
+    stress_matrix = analyzer.get_stress_matrix(rho_val=parts["density"])
+    complementary_energy = float(bm.einsum("i, i ->", stress, stress_matrix.matmul(stress)))
+    coupling_work = float(bm.einsum("i, i ->", stress, analyzer.mix_matrix.matmul(displacement)))
+    return {
+        "identity": "sigmaAsigma_plus_sigmaBu_equals_traction_dual_work",
+        "complementary_energy": complementary_energy,
+        "coupling_work": coupling_work,
+        "traction_dual_work": complementary_energy + coupling_work,
+        "relative_coupling_ratio": abs(coupling_work) / max(abs(complementary_energy), 1.0e-30),
+    }
 
 
-def frozen_solve(pipeline, rho_np: np.ndarray) -> tuple[float, dict[str, Any], float]:
+def frozen_solve(parts: dict[str, Any], rho_np: np.ndarray) -> tuple[float, dict[str, Any], float]:
     """把冻结密度写进分析链, 前向求解一次, 返回 (柔顺度, 能量分量, 耗时)."""
-    rho = pipeline.density_distribution
+    rho = parts["density"]
     if rho.shape[0] != rho_np.shape[0]:
         raise ValueError(f"网格单元数 {rho.shape[0]} 与构型 {rho_np.shape[0]} 不符.")
     rho[:] = rho_np
     started = time.perf_counter()
-    state = pipeline.analyzer.solve_state(rho_val=rho)
-    compliance = float(pipeline.objective.fun(density=rho, state=state))
+    state = parts["analyzer"].solve_state(rho_val=rho)
+    compliance = float(parts["objective"].fun(density=rho, state=state))
     energy = {
         key: (float(value) if not isinstance(value, str) else value)
-        for key, value in energy_identity_diagnostics(pipeline, state).items()
+        for key, value in energy_identity_diagnostics(parts, state).items()
     }
     return compliance, energy, time.perf_counter() - started
 
@@ -117,13 +128,12 @@ def cross_table(case_id: str = CASE) -> dict[str, Any]:
     table: dict[str, dict[str, float]] = {name: {} for name in designs}
     energy: dict[str, dict[str, dict[str, Any]]] = {name: {} for name in designs}
     self_check: dict[str, dict[str, Any]] = {}
-    nu = None
+    nu = run_fixed_fixed.NU
     for method, order in DISCRETIZATIONS:
         analysis = _label(method, order)
-        pipeline, config = build_pipeline(case_id, method, order)
-        nu = float(config.poisson_ratio)
+        parts = run_fixed_fixed.build(method, order)
         for design, (rho, summary) in designs.items():
-            compliance, diagnostics, elapsed = frozen_solve(pipeline, rho)
+            compliance, diagnostics, elapsed = frozen_solve(parts, rho)
             table[design][analysis] = compliance
             energy[design][analysis] = diagnostics
             note = ""

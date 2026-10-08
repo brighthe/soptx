@@ -29,6 +29,7 @@ import json
 import re
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -38,26 +39,16 @@ from soptx.backend import backend_manager as bm
 from soptx.postprocess.vtk_export import read_vtu_cell_data, write_vtu
 from soptx.topology.constraints import build_exemption_mask
 
-from config import (
-    CASES_FILE,
-    OUTPUT_DIR,
-    VIEW_DIR,
-    bootstrap_source_path,
-    flatten_parameters,
-    load_cases,
-)
+from config import OUTPUT_DIR, VIEW_DIR, bootstrap_source_path
 
 bootstrap_source_path()
 
-from pipeline import (  # noqa: E402
-    build_stress_analysis_pipeline,
-    build_stress_config,
-)
 import provenance  # noqa: E402
+import run_cantilever_stress  # noqa: E402
 
-CASE_ID = "cantilever-middle-2d-stress"
-# 停止准则的容差, 与 cases.toml 的 stress_tolerance 同值; 仅作跳量的尺度参照.
-DELTA_G = 5.0e-3
+CASE_ID = run_cantilever_stress.CASE_ID
+# 停止准则的容差 delta_g; 仅作跳量的尺度参照.
+DELTA_G = run_cantilever_stress.STRESS_TOLERANCE
 # 实体带: 密度高于该值且不在被动实体区的单元, 与 plots/stress_traction_jump 同口径.
 SOLID_THRESHOLD = 0.9
 # Hu--Zhang 相对跳量的硬门.
@@ -66,22 +57,13 @@ HUZHANG_JUMP_GATE = 1e-10
 # 论文 5.2.3 节的六份构型 (pad 1.5 mm, 判据集合 rho >= 0.5): LFEM p=2..4 与
 # Hu--Zhang k=2..4.
 DEFAULT_DESIGNS: tuple[str, ...] = tuple(
-    f"analyzer-{method}__lfem_constraint-apparent__load_pad_radius-1.5"
-    f"__order-{order}__solid_thr-0.5"
-    for method in ("lfem", "huzhang")
-    for order in (2, 3, 4)
+    run_cantilever_stress.run_label(method, order)
+    for method in run_cantilever_stress.METHODS
+    for order in run_cantilever_stress.ORDERS
 )
 
 
 # ================================================================ 一、工具
-
-
-def case_parameters(case_id: str = CASE_ID) -> dict[str, Any]:
-    """从 cases.toml 取该算例的扁平参数, 保证与优化时同口径."""
-    for case in load_cases(CASES_FILE):
-        if case["id"] == case_id:
-            return flatten_parameters(case)
-    raise SystemExit(f"cases.toml 中没有算例 {case_id}.")
 
 
 def load_design(design_dir: Path) -> tuple[np.ndarray, dict[str, Any]]:
@@ -172,23 +154,16 @@ def _stats(values: np.ndarray) -> dict[str, float | None]:
     }
 
 
-def evaluate(
-    parameters: dict[str, Any],
-    method: str,
-    order: int,
-    design: np.ndarray,
-) -> dict[str, Any]:
-    """在冻结构型上做一次前向求解, 返回逐单元的表观应力比与约束值."""
-    run_parameters = {
-        **parameters,
-        "comparison_orders": [order],
-        # 在不豁免的约束对象上求值, 被动实体区的真实读数一并取回; 构型由
-        # rho[:] = design 整体覆写, 不经过过滤链, 实体保留与否不影响前向求解.
-        "load_pad_radius": 0.0,
-    }
-    config = build_stress_config(run_parameters)
-    pipeline = build_stress_analysis_pipeline(config, run_parameters, method, order)
-    rho = pipeline.density_distribution
+def evaluate(method: str, order: int, design: np.ndarray) -> dict[str, Any]:
+    """在冻结构型上做一次前向求解, 返回逐单元的表观应力比与约束值.
+
+    分析链由 ``run_cantilever_stress.build`` 组装 (与优化运行同一份代码), 但垫片半径
+    取 0: 在不豁免的约束对象上求值, 被动实体区的真实读数一并取回; 构型由
+    ``rho[:] = design`` 整体覆写, 不经过过滤链, 实体保留与否不影响前向求解.
+    """
+    parts = run_cantilever_stress.build(method, order, load_pad_radius=0.0)
+    pipeline = SimpleNamespace(**parts)
+    rho = parts["density"]
     if rho.shape[0] != design.shape[0]:
         raise SystemExit(
             f"{method}-{order}: 网格单元数 {rho.shape[0]} 与构型 {design.shape[0]} 不符; "
@@ -454,14 +429,13 @@ def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray
     mesh : Mesh
         出 vtu 用的网格.
     """
-    parameters = case_parameters()
     design, design_summary = load_design(design_dir)
     method, order = design_discretization(design_dir.name)
     discretization = f"{method}-{order}"
-    stress_limit = float(parameters["stress_limit"])
+    stress_limit = run_cantilever_stress.STRESS_LIMIT
     solid_threshold = design_summary.get("acceptance_solid_threshold")
 
-    result = evaluate(parameters, method, order, design)
+    result = evaluate(method, order, design)
     pipeline = result["pipeline"]
     mesh = pipeline.mesh
     g = result["constraint_value"]

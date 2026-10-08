@@ -105,6 +105,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def run_label(method: str, order: int) -> str:
+    """运行目录名: 约束协议、垫片半径与 C2 验收子集恒进目录名 (沿用 driver 的标签规则)."""
+    return (f"analyzer-{method}__lfem_constraint-apparent__load_pad_radius-{LOAD_PAD_RADIUS}"
+            f"__order-{order}__solid_thr-{ACCEPTANCE_SOLID_THRESHOLD}")
+
+
 def al_options() -> ALMMMAOptions:
     """AL-MMA 选项; 增广拉格朗日目标与优化器共用同一组."""
     return ALMMMAOptions(
@@ -120,7 +126,7 @@ def al_options() -> ALMMMAOptions:
     )
 
 
-def build(method: str, order: int) -> dict[str, Any]:
+def build(method: str, order: int, load_pad_radius: float = LOAD_PAD_RADIUS) -> dict[str, Any]:
     """按受控比较协议组装一条分析链: 问题、网格、分析器、垫片、应力约束与 AL 目标.
 
     Parameters
@@ -129,6 +135,8 @@ def build(method: str, order: int) -> dict[str, Any]:
         分析链.
     order : int
         阶次 k (LFEM 位移阶 p = k, HZMFEM 应力阶 k).
+    load_pad_radius : float, optional
+        载荷侧垫片半径; 冻结构型探针取 0, 在不豁免的约束上取回被动实体区的真实读数.
 
     Returns
     -------
@@ -163,7 +171,7 @@ def build(method: str, order: int) -> dict[str, Any]:
     # 两处几何应力奇点按各自的固定物理半径处置, 两条分析链用同一组掩码: 剔除其应力
     # 评价点, 并经 problem 与过滤器把这些单元钉为实体
     load_pad_mask = build_exemption_mask(
-        mesh=mesh, centers=problem.traction_patch_endpoints, radius=LOAD_PAD_RADIUS)
+        mesh=mesh, centers=problem.traction_patch_endpoints, radius=load_pad_radius)
     support_pad_mask = build_exemption_mask(
         mesh=mesh, centers=problem.clamped_corner_points, radius=SUPPORT_PAD_RADIUS)
     pad_mask = bm.logical_or(load_pad_mask, support_pad_mask)
@@ -212,9 +220,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for method in args.analyzer or METHODS:
         for order in args.order or ORDERS:
-            # 目录名沿用 driver 的标签规则: 约束协议、垫片半径与 C2 验收子集恒进目录名
-            label = (f"analyzer-{method}__lfem_constraint-apparent__load_pad_radius-{LOAD_PAD_RADIUS}"
-                     f"__order-{order}__solid_thr-{ACCEPTANCE_SOLID_THRESHOLD}")
+            label = run_label(method, order)
             output = OUTPUT_DIR / label
             view = VIEW_ROOT / CASE_ID / label if VIEW_ROOT.parent.is_dir() else output
             print(f"\n[run] {CASE_ID}: analyzer={method}, order={order} -> {output} (帧: {view})",
