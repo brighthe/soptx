@@ -39,46 +39,12 @@ def read_vtu_cell_density(path: Path | str) -> np.ndarray:
     return read_vtu_cell_data(path, "density")
 
 
-def _summary_constraint_formulation(
-    run_dir: Path,
-) -> tuple[str, str]:
-    """优先读取当前计算链的实际模型, 兼容旧运行的 LFEM 协议字段."""
-    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-    formulation = summary.get("stress_constraint_formulation")
-    source = "summary.stress_constraint_formulation"
-    if formulation is None:
-        formulation = summary.get("lfem_stress_constraint_formulation")
-        source = "summary.lfem_stress_constraint_formulation"
-    if formulation is None:
-        constraint_type = summary.get("stress_constraint_type")
-        type_to_formulation = {
-            "ApparentStressConstraint": "apparent",
-            "LagrangeApparentStressConstraint": "apparent",
-            "VanishingStressConstraint": "vanishing",
-        }
-        if constraint_type is not None:
-            if constraint_type not in type_to_formulation:
-                raise ValueError(
-                    f"{run_dir}: 未知 stress_constraint_type={constraint_type!r}."
-                )
-            formulation = type_to_formulation[constraint_type]
-            source = "summary.stress_constraint_type"
-        else:
-            raise ValueError(
-                f"{run_dir}: apparent 正式运行缺少约束列式元数据；"
-                "不能仅凭目录名重解释历史结果."
-            )
-    if formulation not in {"apparent", "vanishing"}:
-        raise ValueError(f"{run_dir}: 未知应力约束列式 {formulation!r}.")
-    return formulation, source
-
-
 def resolve_run_dir(
     method: str,
     order: int,
     *,
     announce: bool = True,
-) -> tuple[Path, str]:
+) -> Path:
     """定位 run_cantilever_stress 写出的正式运行, 并核对其收敛与约束元数据.
 
     目录名由 ``run_cantilever_stress.run_label`` 给出; 缺文件、未收敛或元数据不是
@@ -98,17 +64,18 @@ def resolve_run_dir(
             f"{run_dir}: 该运行未收敛 ({summary.get('termination_reason')}); "
             "未收敛构型不作为插图与冻结评估的来源."
         )
-    formulation, source = _summary_constraint_formulation(run_dir)
+    formulation = summary.get("stress_constraint_formulation")
     if formulation != "apparent":
-        raise ValueError(f"{run_dir}: 元数据记录的约束列式为 {formulation}, 不是 apparent.")
+        raise ValueError(
+            f"{run_dir}: summary.stress_constraint_formulation 为 {formulation!r}, 不是 apparent."
+        )
     if announce:
         print(json.dumps({
             "run_source": f"{method}-k{order}",
             "run_dir": str(run_dir),
             "stress_constraint_formulation": formulation,
-            "formulation_source": source,
         }, ensure_ascii=False), flush=True)
-    return run_dir, formulation
+    return run_dir
 
 
 # ============================================ 二、插图场数据导出 (npz)
@@ -131,7 +98,7 @@ RUNS: dict[str, tuple[str, int]] = {
 def export_run(name: str) -> dict[str, Any]:
     """对单次运行做冻结重分析, 返回 npz 待写入的场量字典."""
     method, order = RUNS[name]
-    run_dir, _ = resolve_run_dir(method, order)
+    run_dir = resolve_run_dir(method, order)
     density_file = run_dir / "density_final.vtu"
     parts = run_cantilever_stress.build(method, order)
 
@@ -183,7 +150,7 @@ def compare(fields: dict[str, Any], path: Path) -> list[str]:
 def export_fingerprint(name: str) -> str:
     """计算源结果与本地后处理实现的内容指纹."""
     method, order = RUNS[name]
-    run_dir, _ = resolve_run_dir(method, order, announce=False)
+    run_dir = resolve_run_dir(method, order, announce=False)
     paths = [run_dir / "density_final.vtu", run_dir / "summary.json"]
     paths.extend(sorted(EXPERIMENT_DIR.glob("*.py")))
     paths.extend(sorted((EXPERIMENT_DIR / "analysis").glob("*.py")))

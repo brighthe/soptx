@@ -292,7 +292,6 @@ def main(argv: list[str] | None = None) -> int:
                 "interpolation": {"variables": "E"},
                 "provenance": stamp,
                 "stress_constraint_type": type(constraint).__name__,
-                "lfem_stress_constraint_formulation": "apparent",
                 "stress_constraint_formulation": "apparent",
                 # 表观应力比用于展示, 约束对象定义的相对超限量 g 用于验收
                 "max_constraint": float(to_np(constraint_values).max()),
