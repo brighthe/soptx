@@ -439,9 +439,9 @@ class JumpPenaltyIntegrator(LinearInt, OpInt, FaceInt):
         #    c = Σ_F (μ/L0²)·hF·∫[[u]]:[[v]]ds, hF 幂次为 +1, 系数 α=μ/L0².
         #    integrand 已含面测度 fm(=hF, 2D), 故此处再乘 hF 一次方对齐论文.
         #    三维 p=1 另乘经验因子 10, 见 _PHYSICAL_H_FACTOR.
-        #    实测 (sinusoidal 混合边界制造解, k=1,2, nx=2..32) 恢复细层收敛:
-        #    k=1: u→1 阶, σ→1.53 阶 (超收敛), H(div)→1 阶;
-        #    k=2: u→2 阶, σ→2.02 阶, H(div)→1 阶 (降阶, 与论文表 5.2 逐格一致).
+        #    实测 (二维正弦混合边界制造解, n_x=4..64, 即论文表 5.2, run_manufactured.py):
+        #    k=1: u→1 阶, σ→1.5 阶 (高于 O(h^k) 估计, 低于最优的 2 阶), H(div)→1 阶;
+        #    k=2: u→2 阶, σ→3 阶, H(div)→2 阶, 三项均达最优阶.
         #    曾用的 γ/hF (净效果 O(γ) 常数系数, 无 hF 缩放) 细层位移/应力阶塌陷、div 发散, 已删除.
         alpha = _PHYSICAL_H_FACTOR.get((mesh.geo_dimension(), p), 1.0) * mu / L0 ** 2
         coefficient = alpha * hF
