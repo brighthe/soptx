@@ -1,0 +1,449 @@
+{
+  "description": "两侧末轮场: 各场的统计指纹与 sha256, 及两侧比对, 按对照对分组. 原始 npy 未存档; sha256 只能确认逐字节相同的文件, 重跑结果按容差与统计指纹比较",
+  "pairs": {
+    "full_trace_vs_fa_210x35x35": {
+      "description": "full_trace 与 FA 代数等价, 两侧差应为舍入级",
+      "sides": {
+        "a": "full_trace",
+        "b": "fa"
+      },
+      "fields": {
+        "full_trace": {
+          "directory": "outputs/full_trace_hex_210x35x35_m5_cg",
+          "density_final.npy": {
+            "sha256": "847d2220dbeb2820d6065eadee5d2beef1bd7fc1390fcd0ccc1634084ccf01e3",
+            "shape": [
+              210,
+              35,
+              35
+            ],
+            "dtype": "float64",
+            "min": 0.0,
+            "max": 1.0,
+            "mean": 0.11999887677476892,
+            "l2_norm": 147.68385715868877,
+            "n_solid": 29403
+          },
+          "design_density_final.npy": {
+            "sha256": "b34e1ada30d435028e1f3f535f1fc6895f8684daf104b024df23abfa803d830e",
+            "shape": [
+              210,
+              35,
+              35
+            ],
+            "dtype": "float64",
+            "min": 0.0,
+            "max": 1.0,
+            "mean": 0.12125344319973425,
+            "l2_norm": 175.17257304374397
+          },
+          "displacement_final.npy": {
+            "sha256": "7f781e6b8729f66aae0d45e7ca29d373385053352869b96b11980f4073c103c4",
+            "shape": [
+              820368
+            ],
+            "dtype": "float64",
+            "min": -18.909500056351416,
+            "max": 7.704691608875729,
+            "mean": -2.542017634153892,
+            "l2_norm": 6830.112189872508
+          }
+        },
+        "fa": {
+          "directory": "outputs/fa_hex_210x35x35_cg",
+          "density_final.npy": {
+            "sha256": "3dbb4e04c25911683f31cd23e9a224fb04f04c3995172f8f368f8a55bbbaaa83",
+            "shape": [
+              210,
+              35,
+              35
+            ],
+            "dtype": "float64",
+            "min": 0.0,
+            "max": 1.0,
+            "mean": 0.11999887739752602,
+            "l2_norm": 147.68385811527946,
+            "n_solid": 29403
+          },
+          "design_density_final.npy": {
+            "sha256": "97c8c190c2b76631dd7b3a38958c52a02fc46368cad3955e5705199c3fe57069",
+            "shape": [
+              210,
+              35,
+              35
+            ],
+            "dtype": "float64",
+            "min": 0.0,
+            "max": 1.0,
+            "mean": 0.1212534437631114,
+            "l2_norm": 175.17257355991111
+          },
+          "displacement_final.npy": {
+            "sha256": "b523d4e62df98433c98672268a8d83157adf764a00d94037ec0b03d1950b5eac",
+            "shape": [
+              820368
+            ],
+            "dtype": "float64",
+            "min": -18.909500231783305,
+            "max": 7.704691281802384,
+            "mean": -2.5420177894622475,
+            "l2_norm": 6830.112319317506
+          }
+        }
+      },
+      "comparison": {
+        "physical_density_max_abs_diff": {
+          "definition": "max |rho_FULL_TRACE - rho_FA|, density_final.npy",
+          "value": 5.009005165701463e-06
+        },
+        "design_density_max_abs_diff": {
+          "definition": "max |x_FULL_TRACE - x_FA|, design_density_final.npy",
+          "value": 6.0318193796260466e-05
+        },
+        "displacement_relative_l2_diff": {
+          "definition": "||u_FULL_TRACE - u_FA||_2 / ||u_FA||_2, displacement_final.npy",
+          "value": 1.0262522899636314e-07
+        },
+        "binary_topology": {
+          "definition": "density_final.npy 取 rho > 0.5 后逐单元比较",
+          "identical": true,
+          "n_mismatch": 0,
+          "min_distance_to_threshold": 1.109993829462308e-05
+        }
+      }
+    },
+    "full_trace_vs_fa_60x10x10_mgcg": {
+      "description": "full_trace 与 FA 代数等价, 两侧差应为舍入级",
+      "sides": {
+        "a": "full_trace",
+        "b": "fa"
+      },
+      "fields": {
+        "full_trace": {
+          "directory": "outputs/full_trace_hex_60x10x10_m5_cg",
+          "density_final.npy": {
+            "sha256": "ae8f67213b70bb93f8aaf614b50fe056a3288c41f50e18e97c8d6c33ad6c9685",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 9.388295015663693e-138,
+            "max": 0.7534813633852329,
+            "mean": 0.11998281277509587,
+            "l2_norm": 14.756189003849096,
+            "n_solid": 128
+          },
+          "design_density_final.npy": {
+            "sha256": "040c24ddb207eeb3fc9727bb846472a1d7c88a4594d93cc50bc4fe5add0d072b",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 0.0,
+            "max": 1.0,
+            "mean": 0.13334012238629359,
+            "l2_norm": 27.422536331449336
+          },
+          "displacement_final.npy": {
+            "sha256": "5e70b58941f5d5e2eec593d0d078da0047fa11c7a28218dc2f29659776fd856e",
+            "shape": [
+              22143
+            ],
+            "dtype": "float64",
+            "min": -365.35077639976026,
+            "max": 159.15181783294906,
+            "mean": -48.59564566271463,
+            "l2_norm": 22418.74629249787
+          }
+        },
+        "fa": {
+          "directory": "outputs/fa_hex_60x10x10_cg",
+          "density_final.npy": {
+            "sha256": "df2ae023cbf216f2a0be370434895d9541a6fde2b7ac13e0b5c3fddb24e8ec48",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 9.388309762210952e-138,
+            "max": 0.7534813582985364,
+            "mean": 0.11998281196531822,
+            "l2_norm": 14.756188937816903,
+            "n_solid": 128
+          },
+          "design_density_final.npy": {
+            "sha256": "95dc774b5b1d130c22fa0d577c389035c6b45a46fa9a31ae7380563cc1b890c0",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 0.0,
+            "max": 1.0,
+            "mean": 0.13334012099041284,
+            "l2_norm": 27.422536129202268
+          },
+          "displacement_final.npy": {
+            "sha256": "4a91de45511fcc1ac97ec3f56ab85a1bb7957f5ea9b2b03706afcd7c9499f916",
+            "shape": [
+              22143
+            ],
+            "dtype": "float64",
+            "min": -365.35078107219556,
+            "max": 159.15186207110867,
+            "mean": -48.59564575239606,
+            "l2_norm": 22418.746737764744
+          }
+        }
+      },
+      "comparison": {
+        "physical_density_max_abs_diff": {
+          "definition": "max |rho_FULL_TRACE - rho_FA|, density_final.npy",
+          "value": 1.4350480548319666e-07
+        },
+        "design_density_max_abs_diff": {
+          "definition": "max |x_FULL_TRACE - x_FA|, design_density_final.npy",
+          "value": 2.2730398380743644e-06
+        },
+        "displacement_relative_l2_diff": {
+          "definition": "||u_FULL_TRACE - u_FA||_2 / ||u_FA||_2, displacement_final.npy",
+          "value": 6.985377371983705e-08
+        },
+        "binary_topology": {
+          "definition": "density_final.npy 取 rho > 0.5 后逐单元比较",
+          "identical": true,
+          "n_mismatch": 0,
+          "min_distance_to_threshold": 0.00085111679781813
+        }
+      }
+    },
+    "full_trace_vs_fa_60x10x10_direct": {
+      "description": "full_trace 与 FA 代数等价, 两侧差应为舍入级",
+      "sides": {
+        "a": "full_trace",
+        "b": "fa"
+      },
+      "fields": {
+        "full_trace": {
+          "directory": "outputs/full_trace_hex_60x10x10_m5_scipy",
+          "density_final.npy": {
+            "sha256": "859dcb7b55529d85e633bd49acd939dbc477ac95be9410c91e7815b72364089d",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 0.01611948845450776,
+            "max": 0.3714410495679227,
+            "mean": 0.11999938974571679,
+            "l2_norm": 10.04356315282796,
+            "n_solid": 0
+          },
+          "design_density_final.npy": {
+            "sha256": "131c7b7b212750b4c69457335b552f4b567392e782a39a84b079d0d6ef80d99c",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 0.005380446900944789,
+            "max": 0.52,
+            "mean": 0.12206028723779927,
+            "l2_norm": 10.811845532018848
+          },
+          "displacement_final.npy": {
+            "sha256": "602b42e9d3b6e602da8f4801e18045c99b85657057c2f1896efc2b9b26a1c42a",
+            "shape": [
+              22143
+            ],
+            "dtype": "float64",
+            "min": -1785.196561068103,
+            "max": 696.9348974641842,
+            "mean": -212.79754013846858,
+            "l2_norm": 101389.88946125141
+          }
+        },
+        "fa": {
+          "directory": "outputs/fa_hex_60x10x10_scipy",
+          "density_final.npy": {
+            "sha256": "2df68dd3009b20abfd726c4900bb83b81c646f669c6a7d1bf60c5b32d9ae8688",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 0.016119488454542013,
+            "max": 0.37144104956829715,
+            "mean": 0.11999938974557943,
+            "l2_norm": 10.043563152817022,
+            "n_solid": 0
+          },
+          "design_density_final.npy": {
+            "sha256": "17373188a01f84afeb3af61d41cc248f868b86bf207d399ba3780e1495316d38",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 0.005380446901080228,
+            "max": 0.52,
+            "mean": 0.12206028723765917,
+            "l2_norm": 10.811845532007323
+          },
+          "displacement_final.npy": {
+            "sha256": "f05b2b9b5f259b16ef159a5bafc58272e78fec6f5e54c6e0ac064b9e2b29a90c",
+            "shape": [
+              22143
+            ],
+            "dtype": "float64",
+            "min": -1785.1965610749796,
+            "max": 696.9348974681166,
+            "mean": -212.79754013831914,
+            "l2_norm": 101389.88946168775
+          }
+        }
+      },
+      "comparison": {
+        "physical_density_max_abs_diff": {
+          "definition": "max |rho_FULL_TRACE - rho_FA|, density_final.npy",
+          "value": 1.2242429292541601e-12
+        },
+        "design_density_max_abs_diff": {
+          "definition": "max |x_FULL_TRACE - x_FA|, design_density_final.npy",
+          "value": 1.7463808177353712e-12
+        },
+        "displacement_relative_l2_diff": {
+          "definition": "||u_FULL_TRACE - u_FA||_2 / ||u_FA||_2, displacement_final.npy",
+          "value": 5.187962041709584e-12
+        },
+        "binary_topology": {
+          "definition": "density_final.npy 取 rho > 0.5 后逐单元比较",
+          "identical": true,
+          "n_mismatch": 0,
+          "min_distance_to_threshold": 0.12855895043170285
+        }
+      }
+    },
+    "linear_corner_vs_full_trace_60x10x10": {
+      "description": "linear_corner 的角点线性插值是方法近似, 两侧差是方法误差而非舍入",
+      "sides": {
+        "a": "linear_corner",
+        "b": "full_trace"
+      },
+      "fields": {
+        "linear_corner": {
+          "directory": "outputs/linear_corner_hex_60x10x10_m5_mumps",
+          "density_final.npy": {
+            "sha256": "638f50d08c71b82f89789812fcc0e9f224307e296a29dead1dc31a72f677a5cb",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 1.009829063325967e-47,
+            "max": 0.799532560804753,
+            "mean": 0.11999866966939048,
+            "l2_norm": 16.40243974272925,
+            "n_solid": 320
+          },
+          "design_density_final.npy": {
+            "sha256": "a813e8df0c83de7e6164f75104ae5c2d9beb8700080541e3876af284c0c927dd",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 3.2118956424993667e-189,
+            "max": 1.0,
+            "mean": 0.13280911894505257,
+            "l2_norm": 27.90645150062099
+          },
+          "displacement_final.npy": {
+            "sha256": "ea9f686bb11babb98d42382df5e73fcdeea3c9737d64bd8abefd33533222e255",
+            "shape": [
+              22143
+            ],
+            "dtype": "float64",
+            "min": -139.53136252742087,
+            "max": 69.25104247278823,
+            "mean": -19.044931400769794,
+            "l2_norm": 9053.314091353332
+          }
+        },
+        "full_trace": {
+          "directory": "outputs/full_trace_hex_60x10x10_m5_cg",
+          "density_final.npy": {
+            "sha256": "ae8f67213b70bb93f8aaf614b50fe056a3288c41f50e18e97c8d6c33ad6c9685",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 9.388295015663693e-138,
+            "max": 0.7534813633852329,
+            "mean": 0.11998281277509587,
+            "l2_norm": 14.756189003849096,
+            "n_solid": 128
+          },
+          "design_density_final.npy": {
+            "sha256": "040c24ddb207eeb3fc9727bb846472a1d7c88a4594d93cc50bc4fe5add0d072b",
+            "shape": [
+              60,
+              10,
+              10
+            ],
+            "dtype": "float64",
+            "min": 0.0,
+            "max": 1.0,
+            "mean": 0.13334012238629359,
+            "l2_norm": 27.422536331449336
+          },
+          "displacement_final.npy": {
+            "sha256": "5e70b58941f5d5e2eec593d0d078da0047fa11c7a28218dc2f29659776fd856e",
+            "shape": [
+              22143
+            ],
+            "dtype": "float64",
+            "min": -365.35077639976026,
+            "max": 159.15181783294906,
+            "mean": -48.59564566271463,
+            "l2_norm": 22418.74629249787
+          }
+        }
+      },
+      "comparison": {
+        "physical_density_max_abs_diff": {
+          "definition": "max |rho_LINEAR_CORNER - rho_FULL_TRACE|, density_final.npy",
+          "value": 0.403581932034993
+        },
+        "design_density_max_abs_diff": {
+          "definition": "max |x_LINEAR_CORNER - x_FULL_TRACE|, design_density_final.npy",
+          "value": 1.0
+        },
+        "displacement_relative_l2_diff": {
+          "definition": "||u_LINEAR_CORNER - u_FULL_TRACE||_2 / ||u_FULL_TRACE||_2, displacement_final.npy",
+          "value": 0.5977406625470665
+        },
+        "binary_topology": {
+          "definition": "density_final.npy 取 rho > 0.5 后逐单元比较",
+          "identical": false,
+          "n_mismatch": 192,
+          "min_distance_to_threshold": 0.0008512019493854828
+        }
+      }
+    }
+  }
+}

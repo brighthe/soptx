@@ -81,7 +81,7 @@ dist/
 *.log
 
 # 实验运行产物：experiments/*/outputs/ 与 logs/ 整体忽略，与 examples 同口径；
-# 可入库的证据只有 figure_data/ 下的快照（见上方两条例外）
+# 可入库的证据是 figure_data/ 下的快照（见上方两条例外）与下方逐目录放行的 results/
 /experiments/*/outputs/
 /experiments/*/logs/
 # 旧运行归档 archives/ 与固定密度单次分析 outputs_analysis/ 同为运行产物 (npy、vtu、json,
@@ -104,6 +104,14 @@ dist/
 # 后者正常写到 Windows 查看目录, 只在该盘不可用时落在这里。probe.json 照常入库。
 /experiments/paper_topopt_huzhang/results/**/postprocess/discretization_probe/*.npz
 /experiments/paper_topopt_huzhang/results/**/postprocess/discretization_probe/*.vtu
+
+# 例外: topopt_simp_fem 的证据目录 results/ 整体入库。运行脚本只写 outputs/ (不入库),
+# 由 sync_results.py 把选定运行的 config/summary/history.json 与末轮场的指纹和比对
+# (final_fields.json) 固化到这里, 故 results/ 只含小体积 json, 无需另设排除规则。
+# 须排在上面 *.json 等规则之后。
+!/experiments/topopt_simp_fem/results/**
+# 同理: topopt_simp_substructure_fa 的 results/ 由其 sync_results.py 固化, 整体入库。
+!/experiments/topopt_simp_substructure_fa/results/**
 
 # 根目录兜底：figs/、logs/、outputs/、old/ 不是架构目录，正式产物一律放在
 # examples/<topic>/ 或 experiments/<topic>/ 内部；根目录出现的这些目录均为
