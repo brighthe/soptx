@@ -64,7 +64,7 @@ def test_structure_preserving_elimination_matches_row_column_deletion() -> None:
     load = analyzer.assemble_body_force_vector()
 
     matrix, rhs = analyzer.apply_bc(stiffness, load)
-    expected_matrix, expected_rhs = _reference_system(analyzer, stiffness, load + analyzer._non_body_loads_by_boundary_type(False))
+    expected_matrix, expected_rhs = _reference_system(analyzer, stiffness, load + analyzer._non_body_loads_by_boundary_type())
 
     np.testing.assert_array_equal(matrix.to_scipy().toarray(), expected_matrix)
     np.testing.assert_allclose(np.asarray(rhs[:]), expected_rhs, rtol=0.0, atol=1e-15)

@@ -84,10 +84,6 @@ class DirichletElasticityProblem(ElasticityProblem, Protocol):
     """``LagrangeFEMAnalyzer`` 消费的 Problem 契约.
 
     物理外载荷统一由 ``loads()`` 提供.
-
-    伴随右端项以及弹簧支承不是物理外载荷对象, 仍分别使用
-    ``adjoint_load_bc`` / ``is_adjoint_load_boundary`` 和
-    ``k_in`` / ``k_out`` / ``is_spring_boundary``.
     """
 
     @property
@@ -263,8 +259,7 @@ class AnalysisStage(Protocol):
         rho_val : TensorLike or Function, optional
             密度场; 拓扑优化模式下必须提供.
         **kwargs
-            分析器特有的选项, 例如 ``enable_timing``, 以及 ``LagrangeFEMAnalyzer``
-            的 ``adjoint``.
+            分析器特有的选项, 例如 ``enable_timing``.
 
         Returns
         -------

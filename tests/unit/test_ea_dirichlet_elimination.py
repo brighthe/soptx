@@ -54,7 +54,7 @@ def _reference(analyzer, K, F):
     operator = ConstrainedOperator(analyzer.wrap_operator(K), gd=analyzer.pde.dirichlet_bc, isDDof=isBdDof)
     uh_bd = operator.init_solution(dtype=bm.float64)
     uh_bd = bm.set_at(uh_bd, ~isBdDof, 0.0)
-    non_body = analyzer._non_body_loads_by_boundary_type(adjoint=False)
+    non_body = analyzer._non_body_loads_by_boundary_type()
     F_full = F if non_body is None else F + non_body
     return operator, np.asarray(operator.apply(F_full, uh_bd)), np.asarray(uh_bd), np.asarray(isBdDof)
 

@@ -296,7 +296,6 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     def apply_bc(self,
                 K: Any,
                 F: TensorLike,
-                adjoint: bool = False
             ) -> tuple[Any, TensorLike]:
         """装配细网格载荷并记为 ``force_vector``, 返回投影到接口未知量的载荷.
 
@@ -305,7 +304,6 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         K : InterfaceSystem
             ``assemble_stiff_matrix`` 返回的接口系统, 原样返回.
         F : 细网格体力向量, 本方法把非体力载荷加到它上面.
-        adjoint : 不支持, 为 True 时报错.
 
         Returns
         -------
@@ -319,9 +317,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         子结构缩聚不缩聚载荷, 载荷与支承须落在接口自由度上, 由接口空间的投影检查.
         Dirichlet 数据只支持零位移; 基准向量照基类记录, 作为位移的 Dirichlet 分量参照.
         """
-        if adjoint:
-            self._log_error("子结构分析器不支持伴随双列右端项")
-        F_non_body = self._non_body_loads_by_boundary_type(adjoint=False)
+        F_non_body = self._non_body_loads_by_boundary_type()
         if F_non_body is not None:
             F = F + F_non_body
         self._F = self.reduce_load(F)
@@ -392,7 +388,6 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
 
     def solve_state(self,
                     rho_val: Optional[Union[TensorLike, Function]] = None,
-                    adjoint: bool = False,
                     enable_timing: bool = False,
                     **kwargs
                 ) -> Dict[str, Any]:
@@ -404,8 +399,6 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             基类的 ``'displacement'`` 与 ``'solver'`` 之外另含 ``'interface_displacement'``,
             即接口未知量 ``Q``, 可作下一次 ``solve_state(x0=...)`` 的热启动初值.
         """
-        if adjoint:
-            self._log_error("子结构分析器不支持伴随求解")
         state = super().solve_state(rho_val=rho_val, enable_timing=enable_timing, **kwargs)
         return {**state, 'interface_displacement': self._interface_displacement}
 

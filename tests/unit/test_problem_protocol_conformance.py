@@ -71,16 +71,7 @@ HUZHANG_PROBLEM_CLASSES = (
 
 HUZHANG_OPTIONAL_MEMBERS = frozenset()
 
-# 伴随右端项和弹簧支承不属于物理外载荷对象, 仍由分析器单独消费.
-LAGRANGE_OPTIONAL_MEMBERS = frozenset(
-    {
-        "adjoint_load_bc",
-        "is_adjoint_load_boundary",
-        "is_spring_boundary",
-        "k_in",
-        "k_out",
-    }
-)
+LAGRANGE_OPTIONAL_MEMBERS = frozenset()
 
 ANALYZER_CONTRACTS = (
     (

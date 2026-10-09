@@ -51,7 +51,7 @@ problems/loads.py (提供 4 类 frozen dataclass 实现)
 
 #### 边界类型门禁
 装配前由 `_non_body_loads_by_boundary_type` 统一做边界语义拦截：
-- `'mixed'`：正常装配体力、边界牵引、线载荷与点力（以及伴随载荷双列）；
+- `'mixed'`：正常装配体力、边界牵引、线载荷与点力；
 - `'dirichlet'`：纯位移边界问题（如制造解算例）。自然边界项不应进入右端，若 `pde.loads()` 仍声明了非体力载荷，显式抛出错误，严禁静默丢弃；
 - 其他未定义边界类型：报错拒绝。
 
@@ -144,13 +144,11 @@ $$
 | 模块 / 限制项 | 具体约束与现状 |
 |---|---|
 | **算子层级 `'fa'`** | 对称消元没有重叠归约插入点，目前仅支持单 rank（`lagrange_fem_analyzer.apply_bc('fa')`）。 |
-| **算子层级 `'ea'`** | 暂不支持伴随双列右端项。 |
 | **边界类型定义** | `boundary_type` 当前仅覆盖 `'mixed'` 与 `'dirichlet'`。 |
 | **子结构分布载荷** | `problem_adapter._assemble_integrated_load` 当前仅验证了 $p=1$ 全尺度 Lagrange 空间。 |
 | **宏观角点系统** | 仅支持 `PointForce` 与 `LineTraction`，且固定按 $degree=1$ 投影。 |
 | **内部自由度载荷** | 完整接口缩聚拒绝直接作用在子结构内部自由度上的载荷与约束。 |
 | **面求值形状** | `CantileverMiddle2d._step_traction` 仅接受按面成批的求值点 `(..., NP, GD)`。 |
-| **转置分支测试** | `_assemble_non_body_loads` 中 `dof_priority=True` 时的转置分支暂无测试覆盖。 |
 
 ---
 

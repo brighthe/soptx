@@ -10,10 +10,7 @@ from soptx.functionspace import Function
 from soptx.core import BaseLogged, timer
 from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.filters import Filter
-from soptx.topology.objectives import (
-    ComplianceObjective,
-    CompliantMechanismObjective,
-)
+from soptx.topology.objectives import ComplianceObjective
 from soptx.topology.optimizers.history import OptimizationHistory
 from soptx.topology.optimizers.utils import solve_mma_subproblem
 
@@ -92,7 +89,7 @@ class MMAOptions:
 
 class MMAOptimizer(BaseLogged):
     def __init__(self,
-                objective: Union[ComplianceObjective, CompliantMechanismObjective],
+                objective: ComplianceObjective,
                 constraint: VolumeConstraint,
                 filter: Filter,
                 options: Union[MMAOptions, Dict[str, Any], None] = None,
@@ -251,10 +248,7 @@ class MMAOptimizer(BaseLogged):
             self._epoch = iter_idx + 1
 
             # 基于物理密度求解状态变量
-            if hasattr(analyzer, 'solve_state'):
-                state = analyzer.solve_state(rho_val=rho_phys)
-            elif isinstance(self._objective, CompliantMechanismObjective):
-                state = analyzer.solve_state(rho_val=rho_phys, adjoint=True)
+            state = analyzer.solve_state(rho_val=rho_phys)
             if enable_timing:
                 t.send('位移场求解')
 

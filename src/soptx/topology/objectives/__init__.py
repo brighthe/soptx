@@ -12,7 +12,6 @@ if TYPE_CHECKING:
         AugmentedLagrangianObjective as AugmentedLagrangianObjective,
     )
     from .compliance import ComplianceObjective as ComplianceObjective
-    from .mechanism import CompliantMechanismObjective as CompliantMechanismObjective
     from .volume import VolumeObjective as VolumeObjective
 
 _EXPORTS = {
@@ -21,10 +20,6 @@ _EXPORTS = {
         "AugmentedLagrangianObjective",
     ),
     "ComplianceObjective": (".compliance", "ComplianceObjective"),
-    "CompliantMechanismObjective": (
-        ".mechanism",
-        "CompliantMechanismObjective",
-    ),
     "VolumeObjective": (".volume", "VolumeObjective"),
 }
 

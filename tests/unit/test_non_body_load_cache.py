@@ -7,6 +7,7 @@ import pytest
 
 from soptx.backend import backend_manager as bm
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
+from soptx.fem.analyzers import lagrange_fem_analyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import HexahedronMesh
 from soptx.problems import CantileverRightBottomEdge3d, FullMBBBeam3d
@@ -34,14 +35,15 @@ def _mbb(operator_level):
 
 
 def _count_assembly(monkeypatch, analyzer):
+    """统计分析器装配非体力载荷的次数 (替换分析器模块里引用的装配函数)."""
     calls = []
-    original = analyzer._assemble_non_body_loads
+    original = lagrange_fem_analyzer.assemble_non_body_loads
 
-    def counted(adjoint=False):
-        calls.append(adjoint)
-        return original(adjoint)
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(analyzer, '_assemble_non_body_loads', counted)
+    monkeypatch.setattr(lagrange_fem_analyzer, 'assemble_non_body_loads', counted)
     return calls
 
 

@@ -474,37 +474,15 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return self._K
 
-    def assemble_spring_stiff_matrix(self):
-        """组装弹簧刚度矩阵"""
-        tspace = self._tensor_space
-        TGDOF = tspace.number_of_global_dofs()
-
-        k_in = self._pde.k_in
-        k_out = self._pde.k_out
-        threshold_spring = self._pde.is_spring_boundary()
-        isBdDof = tspace.is_boundary_dof(threshold=threshold_spring, method='interp')
-        spring_dofs = bm.where(isBdDof)[0]
-        indices = bm.stack([spring_dofs, spring_dofs], axis=0)
-        values = bm.tensor([k_in, k_out], dtype=bm.float64, device=tspace.device)
-        spshape = (TGDOF, TGDOF)
-
-        K = COOTensor(indices=indices, values=values, spshape=spshape)
-
-        return K
-
     def assemble_body_force_vector(self) -> TensorLike:
         """组装 ``Problem.loads()`` 中全部体力的体积分."""
         return assemble_body_forces(self._tensor_space, self._pde.loads(), q=self._integration_order)
 
-    def assemble_external_load(self, adjoint: bool = False) -> TensorLike:
+    def assemble_external_load(self) -> TensorLike:
         """组装施加 Dirichlet 条件之前的全局外载向量.
 
-        参数:
-            adjoint: 为 ``True`` 时返回结构载荷与伴随载荷堆叠成的两列右端项.
-
         返回:
-            F: 全部物理载荷的等效节点力之和, 形状 ``(n_dof,)``; ``adjoint`` 为
-                ``True`` 时形状 ``(n_dof, 2)``.
+            F: 全部物理载荷的等效节点力之和, 形状 ``(n_dof,)``.
 
         说明:
             该向量与 ``apply_bc`` 存入 ``force_vector`` 的是同一个量, 但不需要先
@@ -514,32 +492,27 @@ class LagrangeFEMAnalyzer(BaseLogged):
             本方法不写入 ``self._F``, 因此不会干扰分析器自身的求解状态.
         """
         F = self.assemble_body_force_vector()
-        if adjoint:
-            F = bm.stack([F, bm.zeros_like(F)], axis=1)
 
-        F_non_body = self._non_body_loads_by_boundary_type(adjoint)
+        F_non_body = self._non_body_loads_by_boundary_type()
         if F_non_body is not None:
             F = F + F_non_body
 
         # 载荷必须在施加边界条件之前完成跨 rank 归约; 串行下为恒等操作.
         return self.reduce_load(F)
 
-    def _non_body_loads_by_boundary_type(
-                self,
-                adjoint: bool = False
-            ) -> Optional[TensorLike]:
+    def _non_body_loads_by_boundary_type(self) -> Optional[TensorLike]:
         """按 pde.boundary_type 决定是否装配自然边界载荷
 
         assemble_external_load 与两个 apply_bc 变体都经过本方法, 保证「只消费外载
         的调用方」(子结构缩聚等) 与「求解全尺度系统的调用方」看到的是同一个载荷.
 
-        - 'mixed'     : 装配点力、线载荷与边界牵引 (以及伴随载荷列);
+        - 'mixed'     : 装配点力、线载荷与边界牵引;
         - 'dirichlet' : 全边界都是本质边界, 自然边界项不进入右端. 此时 pde 若仍
                         给出非体力载荷, 说明边界类型与载荷契约矛盾, 显式报错而不是
                         静默丢弃;
         - 其他        : 尚未定义装配语义, 报错.
 
-        非伴随且非体力载荷全是集中力时, 载荷向量首次装配后缓存, 以各集中力的作用点与力向量
+        非体力载荷全是集中力时, 载荷向量首次装配后缓存, 以各集中力的作用点与力向量
         为指纹: 指纹不变即返回缓存的副本 (逐位相同), 载荷被改动则重新装配; 换空间时作废.
         线载荷、边界牵引由可调用对象给出, 无从比较取值, 不缓存.
         """
@@ -548,13 +521,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if boundary_type == 'mixed':
             loads = [load for load in self._pde.loads() if not isinstance(load, BodyForce)]
             fingerprint = None
-            if not adjoint and loads and all(isinstance(load, PointForce) for load in loads):
+            if loads and all(isinstance(load, PointForce) for load in loads):
                 fingerprint = tuple((tuple(float(v) for v in load.point),
                                      tuple(float(v) for v in load.force())) for load in loads)
                 cache = self._non_body_cache
                 if cache is not None and cache[0] == fingerprint:
                     return self._tensor_space.function(bm.copy(cache[1]))
-            F_non_body = self._assemble_non_body_loads(adjoint)
+            F_non_body = assemble_non_body_loads(self._tensor_space, self._pde.loads(),
+                                                 q=self._integration_order)
             if fingerprint is not None:
                 self._non_body_cache = (fingerprint, bm.copy(F_non_body[:]))
             return F_non_body
@@ -574,48 +548,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._log_error(f"Unsupported boundary type: {boundary_type}")
 
-    def _assemble_non_body_loads(self, adjoint: bool = False) -> TensorLike:
-        """组装点力、线载荷和边界牵引, 并保留现有伴随载荷入口."""
-        space_uh = self._tensor_space
-        F_physical = assemble_non_body_loads(space_uh, self._pde.loads(), q=self._integration_order)
-
-        if not adjoint:
-            return F_physical
-
-        gd_adjoint = self._pde.adjoint_load_bc
-        threshold_adjoint = self._pde.is_adjoint_load_boundary()
-
-        isBdTDof = space_uh.is_boundary_dof(
-            threshold=threshold_adjoint,
-            method='interp',
-        )
-        isBdSDof = space_uh.scalar_space.is_boundary_dof(
-            threshold=threshold_adjoint,
-            method='interp',
-        )
-        ipoints_uh = space_uh.interpolation_points()
-        gd_adjoint_val = gd_adjoint(ipoints_uh[isBdSDof])
-
-        F_adjoint = space_uh.function()
-        if space_uh.dof_priority:
-            F_adjoint[:] = bm.set_at(
-                F_adjoint[:],
-                isBdTDof,
-                gd_adjoint_val.T.reshape(-1),
-            )
-        else:
-            F_adjoint[:] = bm.set_at(
-                F_adjoint[:],
-                isBdTDof,
-                gd_adjoint_val.reshape(-1),
-            )
-        return bm.stack([F_physical, F_adjoint], axis=1)
-
     @variantmethod('fa')
     def apply_bc(self,
                 K: Union[CSRTensor, COOTensor],
                 F: TensorLike,
-                adjoint: bool = False
             ) -> tuple[Union[CSRTensor, COOTensor], TensorLike]:
         """在全局矩阵上施加边界条件 (对称消元)
 
@@ -636,7 +572,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         space_uh = self._tensor_space
 
         #* 1. 非体力载荷处理 (边界类型分派由 _non_body_loads_by_boundary_type 统一负责) *#
-        F_non_body = self._non_body_loads_by_boundary_type(adjoint)
+        F_non_body = self._non_body_loads_by_boundary_type()
         if F_non_body is not None:
             F = F + F_non_body
         self._F = F
@@ -647,16 +583,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
         uh_bd = bm.copy(uh_bd[:])
         self._prescribed_solution = uh_bd
 
-        if adjoint:
-            uh_bd = bm.repeat(uh_bd.reshape(-1, 1), 2, axis=1)
-            # u_D 恒为零 (齐次约束) 时 K u_D = 0, 跳过; 大规模下这次乘法很昂贵
-            if bd_nonzero:
-                F = F - K.matmul(uh_bd[:])
-            F = bm.set_at(F, (isBdDof, slice(None)), uh_bd[isBdDof, :])
-        else:
-            if bd_nonzero:
-                F = F - K.matmul(uh_bd[:])
-            F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
+        # u_D 恒为零 (齐次约束) 时 K u_D = 0, 跳过; 大规模下这次乘法很昂贵
+        if bd_nonzero:
+            F = F - K.matmul(uh_bd[:])
+        F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
 
         # 保结构消元, 不改写原矩阵 (self._K 仍为未施加边界条件的刚度矩阵)
         K = self._elimination.apply(K, isBdDof)
@@ -667,7 +597,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def apply_bc(self,
                 K: AssemblyLevelExtension,
                 F: TensorLike,
-                adjoint: bool = False
             ) -> tuple[ConstrainedOperator, TensorLike]:
         """在矩阵自由算子上施加边界条件
 
@@ -677,13 +606,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         本变体只用到 AssemblyLevelExtension 的接口, 不碰常驻形式, 因此 'ea' 与
         'pa' 共用它.
         """
-        if adjoint:
-            self._log_error(
-                f"operator_level={self._operator_level!r} 不支持伴随双列右端项, "
-                "请改用 operator_level='fa'"
-            )
-
-        F_non_body = self._non_body_loads_by_boundary_type(adjoint=False)
+        F_non_body = self._non_body_loads_by_boundary_type()
         if F_non_body is not None:
             F = F + F_non_body
 
@@ -745,7 +668,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def solve_state(self,
                     rho_val: Optional[Union[TensorLike, Function]] = None,
-                    adjoint: bool = False,
                     enable_timing: bool = False, 
                     **kwargs
                 ) -> Dict[str, Function]:
@@ -755,9 +677,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         ----------
         rho_val : TensorLike or Function, optional
             密度场. 拓扑优化模式下必须提供; 标准有限元分析下被忽略并告警.
-        adjoint : bool, optional
-            为 ``True`` 时在刚度中叠加弹簧刚度, 右端项取物理载荷与伴随载荷两列,
-            一次求解两个右端. 仅 ``operator_level='fa'`` 支持.
         enable_timing : bool, optional
             是否打印各阶段耗时.
         **kwargs
@@ -767,8 +686,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Returns
         -------
         dict
-            ``'displacement'`` 为位移解: ``adjoint=False`` 时是有限元函数,
-            ``adjoint=True`` 时是形状 ``(gdof, 2)`` 的张量, 第 0 列为物理解.
+            ``'displacement'`` 为位移解 (有限元函数).
             ``'solver'`` 为 ``solve_system`` 返回的求解诊断.
         """
         t = None
@@ -785,32 +703,19 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 error_msg = f"拓扑优化算法 '{self._topopt_algorithm}' 需要提供密度分布参数 rho"
                 self._log_error(error_msg)
 
-        if adjoint:
-            K_struct = self.assemble_stiff_matrix(rho_val=rho_val)
-            K_spring = self.assemble_spring_stiff_matrix()
-            K0 = K_struct + K_spring
-            F0_struct = self.assemble_body_force_vector()
-            F0_spring = bm.zeros_like(F0_struct)
-            F0 = bm.stack([F0_struct, F0_spring], axis=1)
+        K0 = self.assemble_stiff_matrix(rho_val=rho_val)
+        if t is not None:
+            t.send('双线性型组装')
 
-            K, F = self.apply_bc(K0, F0, adjoint)
+        F0 = self.assemble_body_force_vector()
+        if t is not None:
+            t.send('线性型组装')
 
-            uh = bm.zeros(F.shape, dtype=bm.float64, device=F.device)
-        
-        else:
-            K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-            if t is not None:
-                t.send('双线性型组装')
+        K, F = self.apply_bc(K0, F0)
+        if t is not None:
+            t.send('边界条件处理')
 
-            F0 = self.assemble_body_force_vector()
-            if t is not None:
-                t.send('线性型组装')
-
-            K, F = self.apply_bc(K0, F0)
-            if t is not None:
-                t.send('边界条件处理')
-
-            uh = self._tensor_space.function()
+        uh = self._tensor_space.function()
 
         # 矩阵自由层级从刚刚由 apply_bc 得到的 Dirichlet 基准向量起步; 显式传入
         # 而非让 solve_system 去读实例状态

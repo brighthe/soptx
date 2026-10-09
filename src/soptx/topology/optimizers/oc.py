@@ -9,10 +9,7 @@ from soptx.functionspace import Function
 from soptx.core import BaseLogged, timer
 from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.filters import Filter
-from soptx.topology.objectives import (
-    ComplianceObjective,
-    CompliantMechanismObjective,
-)
+from soptx.topology.objectives import ComplianceObjective
 from soptx.topology.optimizers.history import OptimizationHistory
 from soptx.topology.optimizers.utils import compute_volume
 
@@ -86,7 +83,7 @@ class OCOptions:
 
 class OCOptimizer(BaseLogged):
     def __init__(self,
-                objective: Union[ComplianceObjective, CompliantMechanismObjective],
+                objective: ComplianceObjective,
                 constraint: VolumeConstraint,
                 filter: Filter,
                 # 只接受用户级参数字典 (max_iterations, change_tolerance),
@@ -189,10 +186,8 @@ class OCOptimizer(BaseLogged):
 
             start_time = time()
 
-            # TODO 基于物理密度求解状态变量 (待完善)
+            # 基于物理密度求解状态变量
             state = analyzer.solve_state(rho_val=rho_phys)
-            if isinstance(self._objective, CompliantMechanismObjective):
-                state = analyzer.solve_state(rho_val=rho_phys, adjoint=True)
 
             if enable_timing:
                 t.send('位移场求解')

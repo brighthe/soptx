@@ -166,19 +166,6 @@ def test_ea_rejects_a_direct_solver() -> None:
         analyzer.solve_state()
 
 
-def test_ea_rejects_an_adjoint_right_hand_side() -> None:
-    """The batched adjoint right-hand side is FA-only for now."""
-
-    analyzer = make_analyzer(4, "ea", "cg")
-
-    with pytest.raises(RuntimeError, match="fa"):
-        analyzer.apply_bc(
-            analyzer.assemble_stiff_matrix(),
-            analyzer.assemble_body_force_vector(),
-            adjoint=True,
-        )
-
-
 def test_an_externally_built_space_gives_the_same_solution() -> None:
     """The injection seam kept for distributed spaces must be transparent."""
 
