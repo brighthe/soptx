@@ -40,7 +40,7 @@ from soptx.fem.levels import (
 from soptx.fem.load_projection import project_nodal_loads
 from soptx.fem.matrix import assemble_csr, build_csr_pattern
 from soptx.fem.operators import ConstrainedOperator
-from soptx.materials import LinearElasticMaterial
+from soptx.materials import IsotropicLinearElasticMaterial
 
 class LagrangeFEMAnalyzer(BaseLogged):
     """Lagrange 位移有限元的线弹性分析器.
@@ -53,7 +53,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def __init__(self,
                 disp_mesh: HomogeneousMesh,
                 pde: DirichletElasticityProblem,
-                material: LinearElasticMaterial,
+                material: IsotropicLinearElasticMaterial,
                 space_degree: int = 1,
                 integration_order: int = 4,
                 assembly_method: Literal['standard', 'voigt', 'fast'] = 'standard',
@@ -75,7 +75,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         ----------
         disp_mesh : 位移有限元网格.
         pde : 弹性力学边值问题或制造解对象.
-        material : 弹性材料本构模型.
+        material : 各向同性线弹性材料; 密度插值与灵敏度要用到其杨氏模量与假设类型.
         space_degree : 有限元基函数多项式阶数.
         integration_order : 数值求积公式的代数精度阶数.
         assembly_method : 单元刚度矩阵缩并算法.
@@ -187,10 +187,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._mg_hierarchy = None
         # 纯集中力的非体力载荷: (载荷指纹, 载荷向量), 见 _non_body_loads_by_boundary_type
         self._non_body_cache = None
-        # 当前的装配层级对象, self._operator_level 是它的名字
-        self._level = None
-        # self._level 建在哪个张量空间上; 空间换了层级就不能复用
-        self._level_space = None
+        # 当前的装配层级对象, self._operator_level 是它的名字; 换空间时由 tensor_space 置空
+        self._level: Optional[AssemblyLevelExtension] = None
 
         self._integrator = LinearElasticIntegrator(material=self._material,
                                                 q=self._integration_order,
@@ -248,14 +246,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._integration_order
     
     @property
-    def material(self) -> LinearElasticMaterial:
+    def material(self) -> IsotropicLinearElasticMaterial:
         """获取当前的材料类"""
         return self._material
     
     @property
     def interpolation_scheme(self) -> MaterialInterpolation:
-        """获取当前的材料插值方案"""
-        return self._interpolation_scheme
+        """当前的材料插值方案; 标准有限元分析 (topopt_algorithm=None) 下没有, 访问即报错"""
+        scheme = self._interpolation_scheme
+        if scheme is None:
+            self._log_error("当前分析器没有材料插值方案: topopt_algorithm 为 None 时不做材料插值")
+        return scheme
     
     @property
     def assembly_method(self) -> str:
@@ -287,8 +288,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._cached_nu_rho is not None
     
     @property
-    def stiffness_matrix(self) -> Union[CSRTensor, COOTensor]:
-        """获取当前的刚度矩阵"""
+    def stiffness_matrix(self) -> Union[CSRTensor, COOTensor, AssemblyLevelExtension]:
+        """最近一次 assemble_stiff_matrix 构造的刚度算子: 'fa' 下为未施加边界条件的全局稀疏矩阵, 其余层级下为装配层级对象"""
         return self._K
     
     @property
@@ -331,7 +332,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._csr_pattern = None
         # 层级与 K_e^0 都依赖空间, 换空间后作废, 下次装配重建
         self._level = None
-        self._level_space = None
         self._cached_ke0 = None
         self._reference_ke0 = None
         self._dirichlet_cache = None
@@ -346,7 +346,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def _update_density_coefficient(self,
                             rho_val: Optional[Union[Function, TensorLike]] = None,
-                        ) -> None:
+                        ) -> Optional[TensorLike]:
         """按拓扑优化算法更新积分子的相对刚度系数
 
         Parameters
@@ -358,6 +358,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
         - 节点密度 - Fucntion
             - 单分辨率 - (NN, )
             - 多分辨率 - (NN, )
+
+        Returns
+        -------
+        coef : 写入积分子的系数. 标准有限元分析下为 None; 单元密度只插值 E 时为 (NC, ) 的
+            相对刚度; 多分辨率、节点密度或泊松比插值时为更高维的数组.
         """
         if self._topopt_algorithm is None:
             if rho_val is not None:
@@ -374,7 +379,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             if rho_val is None:
                 self._log_error("基于密度的拓扑优化算法需要提供相对密度 rho")
 
-            material_params = self._interpolation_scheme.interpolate_material(
+            material_params = self.interpolation_scheme.interpolate_material(
                                             material=self._material,
                                             rho_val=rho_val,
                                             integration_order=self._integration_order,
@@ -408,44 +413,38 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 更新积分子的材料系数, 形状约定见 LinearElasticIntegrator.assembly('standard')
         self._integrator.coef = coef
 
+        return coef
+
     def assemble_stiff_matrix(self,
                             rho_val: Optional[Union[Function, TensorLike]] = None,
-                            enable_timing: bool = False,
                         ) -> Union[CSRTensor, COOTensor, AssemblyLevelExtension]:
         """按当前算子层级构造刚度算子.
-
-        层级名到类的分派由 soptx.fem.levels.registry 完成, 本方法不再按 'fa'/'ea'
-        分支: 两者只差在同一个离散算子以什么形式常驻, 那是层级类自己的事.
 
         Parameters
         ----------
         rho_val : 材料物理密度场分布, 用于变密度拓扑优化中的刚度矩阵插值; 为 None 时
             取基准实体刚度. 形状约定见 ``_update_density_coefficient``.
-        enable_timing : 是否输出装配过程细分计时.
 
         Returns
         -------
         operator : 'fa' 层级下为全局稀疏矩阵 K, 其余层级下为对应的
             ``AssemblyLevelExtension`` 算子, 其 ``@`` 运算与 'fa' 对应同一个离散算子.
         """
-        t = None
-        if enable_timing:
-            t = timer(f"刚度算子构造内部 ({self._operator_level})")
-            next(t)
+        coef = self._update_density_coefficient(rho_val)
+        level = self._level
+        scaled = (coef is not None and coef.ndim == 1
+                  and self._operator_level in ('fa', 'ea'))
 
-        self._update_density_coefficient(rho_val)
-
-        if enable_timing:
-            t.send('预备')
-
-        coef = self._integrator.coef
-        if self._level_reusable(coef):
-            # 'ea' / 'pa' / 'ua' 的拓扑与几何数据不随密度变, 只按新系数更新
-            self._level.update(coef)
-            level = self._level
-        elif self._scaled_reference_ea(coef):
-            # 单元密度下 K_e = s_e K_e^0: 只常驻参考单元矩阵与 s_e, 参考矩阵与敏度共用分析器
-            # 缓存的这一份, 不另存 K_e; update 只换 s_e
+        if (level is not None and self._operator_level != 'fa'
+                and (level.scale is not None) == scaled):
+            level.update(coef)
+        elif scaled and self._operator_level == 'fa':
+            if self._csr_pattern is None:
+                self._csr_pattern = build_csr_pattern(self._tensor_space)
+            matrix = assemble_csr(self._reference_stiffness_matrices(), self._csr_pattern, scale=coef)
+            level = FullAssembly(self._tensor_space, matrix, pattern=self._csr_pattern, scale=coef)
+        elif scaled:
+            # 只常驻参考单元矩阵与 s_e, 不另存 K_e; update 只换 s_e
             restriction = ElementRestriction.from_integrator(self._integrator,
                                                             self._tensor_space,
                                                             layout='flat')
@@ -453,23 +452,11 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                 restriction=restriction,
                                                 reference_matrices=self._reference_stiffness_matrices(),
                                                 scale=coef)
-            self._level_space = self._tensor_space
-        elif self._scaled_reference_fa(coef):
-            # 单元密度下 K_e = s_e K_e^0: 用与敏度共用的缓存 K_e^0 逐分量块缩放后装配, 不再
-            # 逐单元重新积分; CSR 骨架与积分路线相同, 首次装配时建好后复用
-            if self._csr_pattern is None:
-                self._csr_pattern = build_csr_pattern(self._tensor_space)
-            matrix = assemble_csr(self._reference_stiffness_matrices(), self._csr_pattern, scale=coef)
-            level = FullAssembly(self._tensor_space, matrix, pattern=self._csr_pattern)
-            self._level_space = self._tensor_space
         else:
-            # 多分辨率、逐点、泊松比插值等系数不是单元标量, 'ea' 走标准 EA 逐单元积分
             level = create_level(self._operator_level,
                                 space=self._tensor_space,
                                 integrator=self._integrator,
                                 pattern=self._csr_pattern)
-            self._level_space = self._tensor_space
-
             # 'fa' 下层级把首次装配建好的 CSR 骨架交回来供下次复用; 其余层级没有骨架
             pattern = getattr(level, 'pattern', None)
             if pattern is not None:
@@ -478,118 +465,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._level = level
         self._K = level.operator
 
-        if enable_timing:
-            t.send('组装')
-            t.send(None)
-
         return self._K
-
-
-    def _level_reusable(self, coef: Optional[TensorLike]) -> bool:
-        """当前层级能否只按新系数原地更新, 而不重建.
-
-        Parameters
-        ----------
-        coef : 积分子的新系数.
-
-        Returns
-        -------
-        reusable : 已有层级, 空间未变, 层级为 'ea' / 'pa' / 'ua', 且 'ea' 下已有实例的
-            形式 (逐单元参考或标准) 与新系数相符时为 True.
-
-        Notes
-        -----
-        'fa' 每次重建: 它的 ``update`` 接受的是装配好的全局矩阵而非系数, 骨架复用
-        已由 ``self._csr_pattern`` 负责.
-        """
-        if (self._level is None
-                or self._level_space is not self._tensor_space
-                or self._operator_level not in ('ea', 'pa', 'ua')):
-            return False
-
-        if self._operator_level == 'ea':
-            scaled = isinstance(self._level, SharedReferenceElementAssembly)
-            return scaled == self._scaled_reference_ea(coef)
-
-        return True
-
-    def _scaled_reference_ea(self, coef: Optional[TensorLike]) -> bool:
-        """'ea' 层级能否取逐单元参考形式, 即只常驻 K_e^0 与 s_e.
-
-        Parameters
-        ----------
-        coef : 积分子的系数.
-
-        Returns
-        -------
-        scaled : 'ea' 层级、密度拓扑优化且系数为单元密度 (NC, ) 时为 True.
-        """
-        return (self._operator_level == 'ea'
-                and self._topopt_algorithm == 'density_based'
-                and coef is not None and coef.ndim == 1)
-
-    def _scaled_reference_fa(self, coef: Optional[TensorLike]) -> bool:
-        """'fa' 层级能否由缓存的 K_e^0 按单元系数缩放装配, 而不逐单元重新积分.
-
-        Parameters
-        ----------
-        coef : 积分子的系数.
-
-        Returns
-        -------
-        scaled : 'fa' 层级、密度拓扑优化且系数为单元密度 (NC, ) 时为 True; 泊松比插值的
-            系数为逐单元本构矩阵, 不满足此条件, 仍走积分.
-        """
-        return (self._operator_level == 'fa'
-                and self._topopt_algorithm == 'density_based'
-                and coef is not None and coef.ndim == 1)
-
-    def _solid_stiffness_matrix(self) -> TensorLike:
-        """取缓存的实体单元矩阵 K_e^0, 未缓存时现算一次"""
-        if self._cached_ke0 is None:
-            return self.compute_solid_stiffness_matrix()
-
-        return self._cached_ke0
-
-    def _reference_stiffness_matrices(self) -> TensorLike:
-        """单元密度下 K_e = s_e K^0_{k(e)} 所用的参考单元矩阵, 首次计算后缓存.
-
-        Returns
-        -------
-        reference : (N_k, TLDOF, TLDOF) 的参考单元矩阵, 单元 e 取第 e % N_k 份. 未给
-            ``reference_classes`` 时 N_k = NC, 即 ``_solid_stiffness_matrix`` 的逐单元缓存.
-
-        Notes
-        -----
-        给出 ``reference_classes`` 时只积分前 N_k 个代表单元, 不形成逐单元的 (NC, TLDOF, TLDOF).
-        另积分中间与最后一个单元, 与其所属类的代表比较, 相对偏差超过 1e-10 即报错; 这只能
-        拦住重编号、非等距之类的明显误用, 不能证明每个单元都满足平移类约定.
-        """
-        if self._reference_classes is None:
-            return self._solid_stiffness_matrix()
-        if self._reference_ke0 is None:
-            n_classes = self._reference_classes
-            n_cells = int(self._mesh.number_of_cells())
-
-            def integrate(index):
-                integrator = LinearElasticIntegrator(material=self._material, coef=None,
-                                                     q=self._integration_order, index=index,
-                                                     method=self._assembly_method)
-                return integrator.assembly(space=self.tensor_space)
-
-            reference = integrate(slice(0, n_classes))
-            sample = bm.tensor(sorted({n_cells // 2, n_cells - 1}), dtype=bm.int64)
-            sampled = integrate(sample)
-            expected = reference[sample % n_classes]
-            scale = float(bm.max(bm.abs(reference)))
-            if float(bm.max(bm.abs(sampled - expected))) > 1e-10 * scale:
-                self._log_error(
-                    f"reference_classes={n_classes} 与网格不符: 抽查单元的 K_e^0 与其平移类代表不一致, "
-                    f"网格须按 create_box_mesh / from_box 的编号约定生成且等距"
-                )
-            self._reference_ke0 = reference
-
-        return self._reference_ke0
 
     def assemble_spring_stiff_matrix(self):
         """组装弹簧刚度矩阵"""
@@ -965,15 +841,15 @@ class LagrangeFEMAnalyzer(BaseLogged):
         
         else:
             K0 = self.assemble_stiff_matrix(rho_val=rho_val)
-            if enable_timing:
+            if t is not None:
                 t.send('双线性型组装')
 
             F0 = self.assemble_body_force_vector()
-            if enable_timing:
+            if t is not None:
                 t.send('线性型组装')
 
             K, F = self.apply_bc(K0, F0)
-            if enable_timing:
+            if t is not None:
                 t.send('边界条件处理')
 
             uh = self._tensor_space.function()
@@ -985,7 +861,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         _, solver_info = self.solve_system(K, F, uh, **kwargs)
 
-        if enable_timing:
+        if t is not None:
             t.send('求解')
             t.send(None)
 
@@ -1238,11 +1114,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return create(solver_type), K, {}, None
 
-    def _multigrid_preconditioner(self, **kwargs):
-        """几何多重网格预条件子, 粗层按最近一次装配的单元系数重建.
+    def _multigrid_preconditioner(self, level: Optional[AssemblyLevelExtension] = None, **kwargs):
+        """几何多重网格预条件子, 粗层按层级对象所带的单元系数重建.
 
         Parameters
         ----------
+        level : 提供粗层系数的层级对象, 须与最细层算子出自同一次装配. 缺省取最近一次
+            ``assemble_stiff_matrix`` 产出的 ``self._level``; 最细层算子不经
+            ``assemble_stiff_matrix`` 产出的子类须显式传入.
         **kwargs : 求解调用的选项, 优先于构造时的 ``solver_options``. 读取
             ``mg_omega`` (默认 None, 各层自动取值), ``mg_sweeps`` (默认 1),
             ``mg_coarse_solver`` (默认 'scipy') 与 ``mg_coarse_max_dofs`` (默认 20000,
@@ -1254,21 +1133,23 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         Notes
         -----
-        粗层算子取自 ``self._integrator.coef``, 即最近一次 ``assemble_stiff_matrix`` 的系数,
-        因此须先装配、再求解同一个矩阵. 层次的拓扑部分首次构造后缓存, 换空间时作废.
-        支持 'fa' 与 'ea' 层级下单元密度的拓扑优化, 网格须为结构化六面体网格. 两个层级下
+        粗层系数取自层级对象的 ``scale``; 只有由单元系数缩放参考刚度装配的层级 ('fa' 与 'ea' 下
+        单元密度的拓扑优化) 带这组系数, 其余层级下报错. 层次的拓扑部分首次构造后缓存, 换空间
+        时作废. 网格须为结构化六面体网格. 两个层级下
         施加边界条件后的最细层算子都是 Pi_I K Pi_I + Pi_D ('fa' 为保结构消元的 CSR 矩阵,
         'ea' 为 ``ConstrainedOperator``), 粗层只由单元系数、K^0 与 Dirichlet 掩码构造, 与最细层
         的常驻形式无关.
         """
         from soptx.fem.multigrid import StructuredHexHierarchy
 
-        coef = self._integrator.coef
-        if not (self._scaled_reference_fa(coef) or self._scaled_reference_ea(coef)):
+        if level is None:
+            level = self._level
+        scale = None if level is None else level.scale
+        if scale is None:
             self._log_error(
-                "precond='mg' 目前只支持 'fa' 或 'ea' 层级下单元密度的拓扑优化 "
-                f"(operator_level={self._operator_level!r}, "
-                f"topopt_algorithm={self._topopt_algorithm!r})"
+                "precond='mg' 需要由单元系数缩放参考刚度装配的层级, 即 'fa' 或 'ea' 下单元密度的"
+                f"拓扑优化; 当前 operator_level={self._operator_level!r}, "
+                f"topopt_algorithm={self._topopt_algorithm!r}, 层级 {level!r}"
             )
 
         def option(name, default):
@@ -1282,7 +1163,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                     coarse_max_dofs=int(option('mg_coarse_max_dofs', 20000)))
             except (ValueError, NotImplementedError) as exc:
                 self._log_error(f"precond='mg' 无法构造多重网格层次: {exc}")
-        self._mg_hierarchy.update(coef)
+        self._mg_hierarchy.update(scale)
 
         return self._mg_hierarchy.build_multigrid(omega=option('mg_omega', None),
                                                   sweeps=int(option('mg_sweeps', 1)),
@@ -1402,6 +1283,48 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return ke0
 
+    def _reference_stiffness_matrices(self) -> TensorLike:
+        """单元密度下 K_e = s_e K^0_{k(e)} 所用的参考单元矩阵, 首次计算后缓存.
+
+        Returns
+        -------
+        reference : (N_k, TLDOF, TLDOF) 的参考单元矩阵, 单元 e 取第 e % N_k 份. 未给
+            ``reference_classes`` 时 N_k = NC, 即 ``compute_solid_stiffness_matrix`` 的逐单元缓存.
+
+        Notes
+        -----
+        给出 ``reference_classes`` 时只积分前 N_k 个代表单元, 不形成逐单元的 (NC, TLDOF, TLDOF).
+        另积分中间与最后一个单元, 与其所属类的代表比较, 相对偏差超过 1e-10 即报错; 这只能
+        拦住重编号、非等距之类的明显误用, 不能证明每个单元都满足平移类约定.
+        """
+        if self._reference_classes is None:
+            if self._cached_ke0 is None:
+                self.compute_solid_stiffness_matrix()
+            return self._cached_ke0
+        if self._reference_ke0 is None:
+            n_classes = self._reference_classes
+            n_cells = int(self._mesh.number_of_cells())
+
+            def integrate(index):
+                integrator = LinearElasticIntegrator(material=self._material, coef=None,
+                                                     q=self._integration_order, index=index,
+                                                     method=self._assembly_method)
+                return integrator.assembly(space=self.tensor_space)
+
+            reference = integrate(slice(0, n_classes))
+            sample = bm.tensor(sorted({n_cells // 2, n_cells - 1}), dtype=bm.int64)
+            sampled = integrate(sample)
+            expected = reference[sample % n_classes]
+            scale = float(bm.max(bm.abs(reference)))
+            if float(bm.max(bm.abs(sampled - expected))) > 1e-10 * scale:
+                self._log_error(
+                    f"reference_classes={n_classes} 与网格不符: 抽查单元的 K_e^0 与其平移类代表不一致, "
+                    f"网格须按 create_box_mesh / from_box 的编号约定生成且等距"
+                )
+            self._reference_ke0 = reference
+
+        return self._reference_ke0
+
     # ------------------------------------------------------------------
     # 泊松比随密度插值 (近不可压缩算例)
     #
@@ -1466,7 +1389,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def _check_poisson_interpolation_support(self) -> None:
         """泊松比插值只在逐单元本构矩阵能进入装配的组合下允许, 其余组合直接报错"""
-        density_location = self._interpolation_scheme.density_location
+        density_location = self.interpolation_scheme.density_location
         if density_location != 'element':
             self._log_error(
                 f"泊松比随密度插值只支持 density_location='element', "
@@ -1538,7 +1461,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         s_space  = space.scalar_space
         mesh_u   = space.mesh
         GD       = mesh_u.geo_dimension()
-        n_sub    = self._interpolation_scheme.n_sub
+        n_sub    = self.interpolation_scheme.n_sub
         NC       = mesh_u.number_of_cells()
         LDOF     = s_space.number_of_local_dofs()
 
@@ -1614,7 +1537,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         (E'(rho_e) / E_0) (u_e^T K_e^0 u_e) 计算, 不构造 (NC, TLDOF, TLDOF) 的导数矩阵;
         泊松比随密度插值时退回 ``compute_stiffness_matrix_derivative`` 后缩并.
         """
-        material_params = self._interpolation_scheme.interpolate_material(
+        material_params = self.interpolation_scheme.interpolate_material(
                                             material=self._material,
                                             rho_val=rho_val,
                                             integration_order=self._integration_order,
@@ -1624,7 +1547,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             diff_ke = self.compute_stiffness_matrix_derivative(rho_val=rho_val)
             return bm.einsum('ci, cij, cj -> c', uhe, diff_ke, uhe)
 
-        material_derivs = self._interpolation_scheme.interpolate_material_derivative(
+        material_derivs = self.interpolation_scheme.interpolate_material_derivative(
                                                 material=self._material,
                                                 rho_val=rho_val,
                                                 integration_order=self._integration_order,
@@ -1642,9 +1565,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def compute_stiffness_matrix_derivative(self, rho_val: Union[TensorLike, Function]) -> TensorLike:
         """计算局部刚度矩阵关于物理密度的导数 (灵敏度)"""
-        density_location = self._interpolation_scheme.density_location
+        density_location = self.interpolation_scheme.density_location
 
-        material_derivs = self._interpolation_scheme.interpolate_material_derivative(
+        material_derivs = self.interpolation_scheme.interpolate_material_derivative(
                                                 material=self._material, 
                                                 rho_val=rho_val,
                                                 integration_order=self._integration_order,
@@ -1656,7 +1579,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         # 泊松比是否随密度插值以 interpolate_material 的返回为准: 可压缩材料下
         # interpolate_material_derivative 仍会返回 dν, 但 ν 本身并未插值
-        material_params = self._interpolation_scheme.interpolate_material(
+        material_params = self.interpolation_scheme.interpolate_material(
                                             material=self._material,
                                             rho_val=rho_val,
                                             integration_order=self._integration_order,
@@ -1804,12 +1727,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if integration_order is None:
             integration_order = self._integration_order
 
-        density_location = self._interpolation_scheme.density_location
+        density_location = self.interpolation_scheme.density_location
 
         if density_location in ['element_multiresolution']:
             from soptx.fem.utils import (calculate_multiresolution_gphi_eg,
                                             reshape_multiresolution_data_inverse)
-            n_sub = self._interpolation_scheme.n_sub
+            n_sub = self.interpolation_scheme.n_sub
             gphi_eg_reshaped = calculate_multiresolution_gphi_eg(
                                         s_space_u=self._scalar_space,
                                         q=integration_order,

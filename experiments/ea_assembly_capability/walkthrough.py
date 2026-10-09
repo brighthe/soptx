@@ -171,7 +171,7 @@ def main(argv=None):
 
     # 分析器中的实际调用链 (LagrangeFEMAnalyzer):
     # - assemble_stiff_matrix: 单元密度下构造 N_k = NC 的 SharedReferenceElementAssembly (K_k^0 即
-    #   _solid_stiffness_matrix 缓存的 K_e^0), 其余系数走 create_level('ea') -> ElementAssembly.build;
+    #   _reference_stiffness_matrices 缓存的 K_e^0), 其余系数走 create_level('ea') -> ElementAssembly.build;
     # - apply_bc ('matrix_free' 变体): 包成 ConstrainedOperator 并修正右端, 同本段;
     # - _build_solver: precond='jacobi' 时 DiagonalPreconditioner().setup(A), 再交给 cg
 

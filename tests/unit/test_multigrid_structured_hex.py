@@ -108,7 +108,7 @@ def test_coarse_operators_match_algebraic_galerkin(grid, dof_priority) -> None:
     assert space.dof_priority is False
     K_dense = K.to_scipy().toarray()
     fixed = np.asarray(analyzer._dirichlet_data()[1])
-    K0 = np.asarray(analyzer._solid_stiffness_matrix()[0])
+    K0 = np.asarray(analyzer._reference_stiffness_matrices()[0])
 
     if dof_priority:
         # 被测空间换成自由度优先编号: 全局与单元局部自由度同时置换
@@ -130,7 +130,7 @@ def test_coarse_operators_match_algebraic_galerkin(grid, dof_priority) -> None:
 def test_mgcg_matches_direct_solution() -> None:
     analyzer, K, F, coef = _mbb_system((24, 4, 4), seed=1)
     hierarchy = StructuredHexHierarchy(analyzer.tensor_space, analyzer._dirichlet_data()[1],
-                                       analyzer._solid_stiffness_matrix()[0], coarse_max_dofs=200)
+                                       analyzer._reference_stiffness_matrices()[0], coarse_max_dofs=200)
     hierarchy.update(bm.tensor(coef))
     mg = hierarchy.build_multigrid().setup(K)
     solver = create('cg', M=mg, atol=0.0, rtol=1e-10, maxit=500, norm_type='unpreconditioned')
@@ -147,7 +147,7 @@ def test_mgcg_matches_direct_solution() -> None:
 def test_update_rejects_wrong_coefficient_shape() -> None:
     analyzer, _, _, coef = _mbb_system((6, 2, 2))
     hierarchy = StructuredHexHierarchy(analyzer.tensor_space, analyzer._dirichlet_data()[1],
-                                       analyzer._solid_stiffness_matrix()[0], coarse_max_dofs=30)
+                                       analyzer._reference_stiffness_matrices()[0], coarse_max_dofs=30)
     with pytest.raises(ValueError, match='coef'):
         hierarchy.update(bm.tensor(coef[:-1]))
     with pytest.raises(RuntimeError, match='尚未 update'):

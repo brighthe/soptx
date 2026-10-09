@@ -66,8 +66,9 @@ def test_scaled_reference_is_reused_across_density_updates() -> None:
 
 def test_poisson_interpolation_keeps_integration_route() -> None:
     analyzer, density = _analyzer('standard', nu=0.4999, target_variables=('E', 'nu'))
-    assert not analyzer._scaled_reference_fa(analyzer._integrator.coef)
     stiffness = _dense(analyzer.assemble_stiff_matrix(rho_val=density))
+    # 系数为逐单元本构矩阵, 不是单元标量: 层级由积分装配, 不带缩放系数
+    assert analyzer._level.scale is None
 
     np.testing.assert_array_equal(stiffness, _dense(_integrated(analyzer)))
 

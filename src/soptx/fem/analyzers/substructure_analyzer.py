@@ -248,18 +248,18 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         只支持 ``full_trace``: 其接口未知量就是细网格的接口自由度, ``R`` 为提取矩阵.
         最细层算子取 ``Pi_I K Pi_I + Pi_D`` 形式的细网格 EA 算子 (共享参考单元矩阵乘以
         当前相对刚度系数), 与基类 'ea' 层级下的最细层相同; 受约束接口分量落在 Dirichlet
-        自由度上, MG 在其上为恒等, 与 CG 对固定分量的处理一致. 层级拓扑与粗层算子由基类
-        按最近一次 ``assemble_stiff_matrix`` 的系数构造与更新.
+        自由度上, MG 在其上为恒等, 与 CG 对固定分量的处理一致. 层级拓扑由基类构造, 粗层
+        算子由基类按本方法构造的最细层算子所带系数更新, 粗细两层出自同一组系数.
         """
         if self._trace != 'full_trace':
             self._log_error("precond='mg' 目前只支持 trace='full_trace': 角点接口的未知量不是细网格自由度")
-        mg = self._multigrid_preconditioner(**kwargs)
         if self._fine_restriction is None:
             self._fine_restriction = ElementRestriction.from_integrator(
                 self._integrator, self._tensor_space, layout='flat')
         fine_level = SharedReferenceElementAssembly(
             self._tensor_space, restriction=self._fine_restriction,
             reference_matrices=self._reference_stiffness_matrices(), scale=self._integrator.coef)
+        mg = self._multigrid_preconditioner(fine_level, **kwargs)
         _, is_dirichlet, _ = self._dirichlet_data()
         mg.setup(ConstrainedOperator(fine_level, gd=self._pde.dirichlet_bc, isDDof=is_dirichlet))
         return RestrictedPreconditioner(
@@ -271,14 +271,12 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
 
     def assemble_stiff_matrix(self,
                             rho_val: Optional[Union[Function, TensorLike]] = None,
-                            enable_timing: bool = False,
                         ) -> Any:
         """逐批局部装配、精确 Schur 缩聚、迹降阶并散加成全局接口刚度.
 
         Parameters
         ----------
         rho_val : (NC, ) 的细网格单元物理密度; 标准有限元分析下忽略.
-        enable_timing : 未使用, 保留基类签名.
 
         Returns
         -------

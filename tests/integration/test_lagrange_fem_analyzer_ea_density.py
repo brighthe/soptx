@@ -116,11 +116,11 @@ def test_element_density_uses_per_element_reference(p: int) -> None:
     level = ea._level
     assert isinstance(level, SharedReferenceElementAssembly)
     assert level.num_classes == ea.disp_mesh.number_of_cells()
-    assert level.reference_matrices is ea._solid_stiffness_matrix()
+    assert level.reference_matrices is ea._reference_stiffness_matrices()
 
     assert_matches_fa(ea, fa, random_density(ea, seed=11))
     assert ea._level is level
-    assert level.reference_matrices is ea._solid_stiffness_matrix()
+    assert level.reference_matrices is ea._reference_stiffness_matrices()
 
 
 def test_poisson_interpolation_uses_standard_ea() -> None:
@@ -147,7 +147,7 @@ def test_without_topopt_uses_standard_ea() -> None:
     assert type(ea._level) is ElementAssembly
 
 
-def test_level_is_rebuilt_when_the_coefficient_form_changes() -> None:
+def test_level_is_rebuilt_when_the_coefficient_form_changes(monkeypatch) -> None:
     """同一分析器上系数形式改变时重建层级, 不以旧形式原地更新."""
     ea = make_analyzer("ea")
     fa = make_analyzer("fa")
@@ -156,7 +156,16 @@ def test_level_is_rebuilt_when_the_coefficient_form_changes() -> None:
     assert_matches_fa(ea, fa, rho)
     assert isinstance(ea._level, SharedReferenceElementAssembly)
 
-    # 单元标量系数可原地复用; 逐积分点形状 (NC, NQ) 的系数不是单元标量, 应拒绝复用
-    coef = ea._integrator.coef
-    assert ea._level_reusable(coef)
-    assert not ea._level_reusable(bm.stack([coef, coef], axis=1))
+    # 把同一组单元系数广播成逐积分点形状 (NC, NQ): 算子不变, 但它不是单元标量,
+    # 应重建为标准 EA, 而不是在逐单元参考形式上原地换系数
+    scalar = ea._integrator.coef
+    NQ = ea.disp_mesh.quadrature_formula(ea.integration_order).number_of_quadrature_points()
+    pointwise = bm.broadcast_to(scalar[:, None], (scalar.shape[0], NQ))
+
+    def update_pointwise(rho_val=None):
+        ea._integrator.coef = pointwise
+        return pointwise
+
+    monkeypatch.setattr(ea, "_update_density_coefficient", update_pointwise)
+    assert_matches_fa(ea, fa, rho)
+    assert type(ea._level) is ElementAssembly

@@ -35,6 +35,8 @@ class FullAssembly(AssemblyLevelExtension):
     space : 该双线性型所在的函数空间.
     matrix : 装配好的全局稀疏矩阵.
     pattern : 装配用的 CSR 拓扑骨架, 交回给调用方以便下一次装配复用; 可为 None.
+    scale : 矩阵由参考单元矩阵按单元系数缩放装配时的 (NC, ) 系数 s_e; 逐单元积分装配时
+        为 None. 本类只持有引用, 不复制.
     """
 
     level = 'fa'
@@ -43,10 +45,13 @@ class FullAssembly(AssemblyLevelExtension):
                 space,
                 matrix: Union[CSRTensor, COOTensor],
                 pattern: Optional[Any] = None,
+                *,
+                scale: Optional[TensorLike] = None,
             ) -> None:
         super().__init__(spaces=(space, ), shape=tuple(matrix.shape))
         self._matrix = matrix
         self._pattern = pattern
+        self._scale = scale
 
     @classmethod
     def build(cls,
@@ -79,6 +84,11 @@ class FullAssembly(AssemblyLevelExtension):
     def pattern(self) -> Optional[Any]:
         """本次装配用的 CSR 拓扑骨架, 供下一次装配复用"""
         return self._pattern
+
+    @property
+    def scale(self) -> Optional[TensorLike]:
+        """缩放参考形式下装配本矩阵所用的逐单元系数; 逐单元积分装配时为 None"""
+        return self._scale
 
     @property
     def operator(self) -> Union[CSRTensor, COOTensor]:

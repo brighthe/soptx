@@ -21,7 +21,7 @@
     ``__matmul__`` 与 ``diagonal`` 不修改对象状态, 只有 ``update`` 会.
 """
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 from soptx.typing import TensorLike
 
@@ -67,6 +67,15 @@ class AssemblyLevelExtension:
     def shape(self) -> Tuple[int, int]:
         """算子形状 (vgdof, ugdof)"""
         return self._shape
+
+    @property
+    def scale(self) -> Optional[TensorLike]:
+        """缩放参考形式 K_e = s_e K^0 下的逐单元系数 s_e; 其它形式为 None.
+
+        几何多重网格的粗层只由这组系数、参考单元矩阵与 Dirichlet 掩码构造, 预条件子据此
+        判断层级是否可用并取得与最细层同一次装配的系数.
+        """
+        return None
 
     @property
     def operator(self) -> "AssemblyLevelExtension":
