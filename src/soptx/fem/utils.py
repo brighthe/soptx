@@ -1,8 +1,8 @@
 """多分辨率拓扑优化的有限元辅助函数.
 
-包括把位移单元积分点映射到子密度单元, 计算子密度单元积分点处的形函数梯度,
-以及位移单元布局 ``(NC, n_sub, ...)`` 与密度单元布局 ``(NC * n_sub, ...)`` 之间
-的数据重排.
+包括把位移单元积分点映射到子密度单元, 计算子密度单元积分点处的形函数梯度与子单元
+实体刚度, 以及位移单元布局 ``(NC, n_sub, ...)`` 与密度单元布局 ``(NC * n_sub, ...)``
+之间的数据重排.
 """
 
 from __future__ import annotations
@@ -146,6 +146,61 @@ def calculate_multiresolution_gphi_eg(
     gphi_eg_reshaped = reshape_multiresolution_data(mesh=mesh_u, data=gphi_eg)  # (NC*n_sub, NQ, LDOF, GD)
 
     return gphi_eg_reshaped
+
+def multiresolution_sub_element_matrices(space: TensorFunctionSpace,
+                                         material,
+                                         *,
+                                         q: int,
+                                         n_sub: int,
+                                    ) -> TensorLike:
+    """各子密度单元上的实体刚度 K^0_{e,n} = ∫_{子单元 n} B^T D_0 B.
+
+    Parameters
+    ----------
+    space : 位移张量函数空间 (父位移单元).
+    material : 线弹性材料, 提供 ``strain_matrix`` 与实体本构 ``elastic_matrix``.
+    q : 父参考单元上生成积分点的积分阶次.
+    n_sub : 每个位移单元内的子密度单元数, 须为完全平方数.
+
+    Returns
+    -------
+    ke0_sub : (NC, n_sub, TLDOF, TLDOF) 的子单元刚度, 对 n 求和即位移单元的 K_e^0.
+
+    Notes
+    -----
+    只支持二维张量积网格 (``map_bcs_to_sub_elements`` 的限制). 积分点映射到子单元后仍用
+    父参考单元坐标表达, 故形函数梯度与 ``|det J|`` 都取父单元的, 子单元面积占父单元的
+    1 / n_sub, 由该因子补上. ``strain_matrix`` 对每个 (单元, 积分点) 独立计算, 因此这里
+    直接按 (NC * n_sub, ...) 展平调用, 无需 ``reshape_multiresolution_data`` 的重排, 也不读
+    ``meshdata``.
+    """
+    s_space = space.scalar_space
+    mesh = space.mesh
+    GD = mesh.geo_dimension()
+    NC = mesh.number_of_cells()
+    LDOF = s_space.number_of_local_dofs()
+
+    qf_e = mesh.quadrature_formula(q)
+    bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()  # ws_e: (NQ, )
+    bcs_eg_x, bcs_eg_y = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
+    NQ = ws_e.shape[0]
+
+    gphi_eg = bm.zeros((NC, n_sub, NQ, LDOF, GD))
+    detJ_eg = bm.zeros((NC, n_sub, NQ))
+    for s_idx in range(n_sub):
+        sub_bcs = (bcs_eg_x[s_idx], bcs_eg_y[s_idx])
+        gphi_eg[:, s_idx] = s_space.grad_basis(sub_bcs, variable='x')   # (NC, NQ, LDOF, GD)
+        J_sub = mesh.entity_view('cell').jacobi_matrix(sub_bcs)         # (NC, NQ, GD, GD)
+        detJ_eg[:, s_idx] = bm.abs(bm.linalg.det(J_sub))                # (NC, NQ)
+
+    B_flat = material.strain_matrix(dof_priority=space.dof_priority,
+                                    gphi=gphi_eg.reshape(NC * n_sub, NQ, LDOF, GD))  # (NC*n_sub, NQ, NS, TLDOF)
+    B_eg = B_flat.reshape(NC, n_sub, *B_flat.shape[1:])                  # (NC, n_sub, NQ, NS, TLDOF)
+
+    J_g = 1.0 / n_sub
+    D0 = material.elastic_matrix()[0, 0]  # (NS, NS)
+
+    return J_g * bm.einsum('q, cnq, cnqki, kl, cnqlj -> cnij', ws_e, detJ_eg, B_eg, D0, B_eg)
 
 def reshape_multiresolution_data(mesh, data: TensorLike) -> TensorLike:
     """将多分辨率数据从位移单元布局映射到密度单元布局.

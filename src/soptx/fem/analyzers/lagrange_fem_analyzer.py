@@ -39,6 +39,7 @@ from soptx.fem.levels import (
 )
 from soptx.fem.load_projection import project_nodal_loads
 from soptx.fem.matrix import SymmetricElimination, assemble_csr, build_csr_pattern
+from soptx.fem.utils import multiresolution_sub_element_matrices
 from soptx.fem.operators import ConstrainedOperator
 from soptx.materials import (
     IsotropicLinearElasticMaterial,
@@ -1403,69 +1404,27 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 + bm.einsum('c, cij -> cij', dmu, self._cached_ke_mu))
     
     def compute_sub_element_stiffness_matrix(self) -> TensorLike:
-        """计算各子单元对位移单元刚度矩阵的贡献 (单位弹性模量 E=1)
+        """计算并缓存多分辨率下各子密度单元上的实体刚度.
 
         Returns
         -------
-        ke0_sub : TensorLike, shape (NC, n_sub, TLDOF, TLDOF)
-            满足: K_e = Σ_s E(ρ_{e,s}) · ke0_sub[c, s]
-            因此: ∂K_e/∂ρ_{e,i} = E'(ρ_{e,i}) · ke0_sub[c, i]
-        """
-        space    = self.tensor_space
-        s_space  = space.scalar_space
-        mesh_u   = space.mesh
-        GD       = mesh_u.geo_dimension()
-        n_sub    = self.interpolation_scheme.n_sub
-        NC       = mesh_u.number_of_cells()
-        LDOF     = s_space.number_of_local_dofs()
+        ke0_sub : (NC, n_sub, TLDOF, TLDOF), 与 K_e^0 同口径 (含 E_0), 满足
+            K_e = Σ_n (E(ρ_{e,n}) / E_0) ke0_sub[e, n], 因而
+            ∂K_e/∂ρ_{e,n} = (E'(ρ_{e,n}) / E_0) ke0_sub[e, n].
 
-        # --- 多分辨率的积分点、gphi、detJ ---
+        Notes
+        -----
+        积分阶按 n_sub 选取: 4 <= n_sub <= 9 取 3, n_sub >= 16 取 2, 其余取 p + 3.
+        """
+        n_sub = self.interpolation_scheme.n_sub
         if 4 <= n_sub <= 9:
             q = 3
         elif n_sub >= 16:
             q = 2
         else:
-            q = s_space.p + 3
+            q = self._scalar_space.p + 3
 
-        qf_e = mesh_u.quadrature_formula(q)
-        bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()  # ws_e: (NQ,)
-
-        from soptx.fem.utils import map_bcs_to_sub_elements
-        bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-        bcs_eg_x, bcs_eg_y = bcs_eg[0], bcs_eg[1]
-
-        NQ = ws_e.shape[0]
-        gphi_eg = bm.zeros((NC, n_sub, NQ, LDOF, GD))
-        detJ_eg = bm.zeros((NC, n_sub, NQ))
-
-        for s_idx in range(n_sub):
-            sub_bcs = (bcs_eg_x[s_idx], bcs_eg_y[s_idx])
-            gphi_eg[:, s_idx] = s_space.grad_basis(sub_bcs, variable='x')  # (NC, NQ, LDOF, GD)
-            J_sub = mesh_u.entity_view('cell').jacobi_matrix(sub_bcs)           # (NC, NQ, GD, GD)
-            detJ_eg[:, s_idx] = bm.abs(bm.linalg.det(J_sub))              # (NC, NQ)
-
-        # --- 计算 B 矩阵 ---
-        from soptx.fem.utils import (reshape_multiresolution_data,
-                                        reshape_multiresolution_data_inverse)
-        B_eg = reshape_multiresolution_data_inverse(
-                    mesh_u,
-                    self._material.strain_matrix(
-                        dof_priority=space.dof_priority,
-                        gphi=reshape_multiresolution_data(mesh_u, gphi_eg)  # (NC*n_sub, NQ, NS, TLDOF)
-                    ),
-                    n_sub=n_sub
-            )  # (NC, n_sub, NQ, NS, TLDOF)
-
-        # --- 核心改动: coef=1, 保留 n_sub 维度 ---
-        J_g = 1.0 / n_sub
-        D0  = self._material.elastic_matrix()[0, 0]  # (NS, NS)
-
-        # voigt assembly:  'q, cnq, cnqki, cnkl, cnqlj -> cij'  (消掉 n)
-        # 此处:            'q, cnq, cnqki,   kl, cnqlj -> cnij' (保留 n)
-        ke0_sub = J_g * bm.einsum('q, cnq, cnqki, kl, cnqlj -> cnij',
-                                ws_e, detJ_eg, B_eg, D0, B_eg)
-        # shape: (NC, n_sub, TLDOF, TLDOF)
-
+        ke0_sub = multiresolution_sub_element_matrices(self.tensor_space, self._material, q=q, n_sub=n_sub)
         self._cached_ke0_sub = ke0_sub
 
         return ke0_sub
@@ -1558,80 +1517,16 @@ class LagrangeFEMAnalyzer(BaseLogged):
             return diff_ke
         
         elif density_location in ['element_multiresolution']:
-            # rho_val.shape = (NC, n_sub)
+            # rho_val.shape = (NC, n_sub); 子单元上材料系数为常数, 提到积分外
             if nu_interpolated:
                 self._log_error("泊松比随密度插值不支持 density_location='element_multiresolution'")
 
             diff_coef_sub_element = dE_rho / self._material.youngs_modulus # (NC, n_sub)
+            ke0_sub = multiresolution_sub_element_matrices(self._tensor_space, self._material,
+                                                        q=self._integration_order, n_sub=rho_val.shape[1])
 
-            mesh_u = self._mesh
-            s_space_u = self._scalar_space
-            q = self._integration_order
-            NC, n_sub = rho_val.shape
-            GD = mesh_u.geo_dimension()
+            return bm.einsum('cn, cnij -> cnij', diff_coef_sub_element, ke0_sub) # (NC, n_sub, TLDOF, TLDOF)
 
-            # 计算位移单元 (父参考单元) 高斯积分点处的重心坐标
-            qf_e = mesh_u.quadrature_formula(q)
-            # bcs_e.shape = ( (NQ_x, GD), (NQ_y, GD) ), ws_e.shape = (NQ, )
-            bcs_e, ws_e = qf_e.get_quadrature_points_and_weights()
-            NQ = ws_e.shape[0]
-
-            # 把位移单元高斯积分点处的重心坐标映射到子密度单元 (子参考单元) 高斯积分点处的重心坐标 (仍表达在位移单元中)
-            from soptx.fem.utils import map_bcs_to_sub_elements
-            # bcs_eg.shape = ( (n_sub, NQ_x, GD), (n_sub, NQ_y, GD) ), ws_e.shape = (NQ, )
-            bcs_eg = map_bcs_to_sub_elements(bcs_e=bcs_e, n_sub=n_sub)
-            bcs_eg_x, bcs_eg_y = bcs_eg
-
-            # 计算子密度单元内高斯积分点处的基函数梯度和 jacobi 矩阵
-            LDOF = s_space_u.number_of_local_dofs()
-            gphi_eg = bm.zeros((NC, n_sub, NQ, LDOF, GD)) # (NC, n_sub, NQ, LDOF, GD)
-            detJ_eg = None
-
-            if isinstance(mesh_u, SimplexMesh):
-                for s_idx in range(n_sub):
-                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
-                    gphi_sub = s_space_u.grad_basis(sub_bcs, variable='x')    # (NC, NQ, LDOF, GD)
-                    gphi_eg[:, s_idx, :, :, :] = gphi_sub
-
-            else:
-                detJ_eg = bm.zeros((NC, n_sub, NQ)) # (NC, n_sub, NQ)
-                for s_idx in range(n_sub):
-                    sub_bcs = (bcs_eg_x[s_idx, :, :], bcs_eg_y[s_idx, :, :])  # ((NQ_x, GD), (NQ_y, GD))
-                    gphi_sub = s_space_u.grad_basis(sub_bcs, variable='x') # (NC, NQ, LDOF, GD)
-                    J_sub = mesh_u.entity_view('cell').jacobi_matrix(sub_bcs) # (NC, NQ, GD, GD)
-                    detJ_sub = bm.abs(bm.linalg.det(J_sub)) # (NC, NQ)
-                    gphi_eg[:, s_idx, :, :, :] = gphi_sub
-                    detJ_eg[:, s_idx, :] = detJ_sub
-
-            # 计算 B 矩阵
-            from soptx.fem.utils import reshape_multiresolution_data, reshape_multiresolution_data_inverse
-            gphi_eg_reshaped = reshape_multiresolution_data(mesh=mesh_u, data=gphi_eg) # (NC*n_sub, NQ, NS, TLDOF)
-            B_eg_reshaped = self._material.strain_matrix(
-                                                dof_priority=self._tensor_space.dof_priority,
-                                                gphi=gphi_eg_reshaped
-                                            ) # (NC*n_sub, NQ, NS, TLDOF)
-            B_eg = reshape_multiresolution_data_inverse(mesh=mesh_u, data_flat=B_eg_reshaped, n_sub=n_sub) # (NC, n_sub, NQ, NS, TLDOF)
-
-            # 位移单元 → 子密度单元的缩放
-            J_g = 1 / n_sub
-
-            # 计算 D 矩阵的导数
-            D0 = self._material.elastic_matrix()[0, 0] # (NS, NS)
-            diff_D_g = bm.einsum('kl, cn -> cnkl', D0, diff_coef_sub_element) # (NC, n_sub, NS, NS)
-
-            # 数值积分
-            # diff_ke - (NC, n_sub, TLDOF, TLDOF)
-            if isinstance(mesh_u, SimplexMesh):
-                cm = mesh_u.entity_measure('cell')
-                cm_eg = bm.tile(cm.reshape(NC, 1), (1, n_sub)) / n_sub # (NC, n_sub)
-                diff_ke = J_g * bm.einsum('q, cn, cnqki, cnkl, cnqlj -> cnij',
-                                    ws_e, cm_eg, B_eg, diff_D_g, B_eg)
-            else:
-                diff_ke = J_g * bm.einsum('q, cnq, cnqki, cnkl, cnqlj -> cnij',
-                                    ws_e, detJ_eg, B_eg, diff_D_g, B_eg)
-
-            return diff_ke
-        
         elif density_location in ['node']:
             # rho_val.shape = (NN, )
             diff_coef_q = dE_rho / self._material.youngs_modulus # (NC, NQ)
