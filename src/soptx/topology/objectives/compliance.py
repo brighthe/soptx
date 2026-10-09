@@ -140,7 +140,7 @@ class ComplianceObjective(BaseLogged):
         """手动计算柔顺度目标函数相对于物理密度的灵敏度"""
         density_location = self._interpolation_scheme.density_location
 
-        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+        if isinstance(self._analyzer, LagrangeFEMAnalyzer):
             #* 拉格朗日位移有限元 *#
             if state is None:
                 state = self._analyzer.solve_state(rho_val=density)
@@ -254,7 +254,7 @@ class ComplianceObjective(BaseLogged):
 
         density_location = self._interpolation_scheme.density_location
 
-        if self._analyzer.__class__ in [LagrangeFEMAnalyzer]:
+        if isinstance(self._analyzer, LagrangeFEMAnalyzer):
             #* 拉格朗日位移有限元 *#
             if state is None:
                 state = self._analyzer.solve_state(rho_val=density)

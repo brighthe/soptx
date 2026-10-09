@@ -5,8 +5,8 @@
 Windows 本地目录 (WSL 下为 ``/mnt/c/...``) 供 ParaView 查看. 只处理 ``evolution.pvd`` 已发布的帧;
 源端须以临时文件替换的方式发布完整的 VTU 与 PVD.
 
-逻辑取自 ``experiments/topopt_exact_substructure/sync_visualization.py``, 去掉写死的默认路径并
-增加迁移模式, 供各实验共用.
+原为 ``experiments/topopt_simp_substructure_fa`` 目录内的脚本, 去掉写死的默认路径并增加迁移模式后
+并入本模块, 供各实验共用.
 
 用法::
 

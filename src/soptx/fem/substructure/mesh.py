@@ -8,7 +8,7 @@
 批量子结构对应前导维 ``B``, 与 ``condensation`` 模块的形状约定一致.
 """
 
-from typing import Tuple, Any, Optional, Sequence, List, Dict, Iterator
+from typing import Tuple, Any, Callable, Optional, Sequence, List, Dict, Iterator
 
 from soptx.backend import backend_manager as bm
 from soptx.mesh import QuadrangleMesh, HexahedronMesh
@@ -140,6 +140,8 @@ class SubstructurePrototype:
         self.nu: float = float(nu)
         self.penal: float = float(penal)
         self.rho_min: float = float(rho_min)
+        # 外部注入的相对刚度系数函数 rho -> coef(rho); 为 None 时按 penal 与 rho_min 做 SIMP 插值
+        self.coefficient_function: Optional[Callable[[Any], Any]] = None
 
         # 原型网格取在原点处; 位置不影响刚度矩阵, 由 SubstructureMesh 单独记录.
         box = [c for s in self.cell_size for c in (0.0, s)]
@@ -782,6 +784,33 @@ class SubstructurePrototype:
             end = min(start + chunk_size, n_batch)
             yield start, end, self._assemble_chunk(rho_flat[start:end])
 
+    def stiffness_coefficient(self, rho: Any) -> Any:
+        """单元相对刚度系数 ``coef(rho)``, 单元刚度为 ``coef(rho) * KE_unit``.
+
+        Parameters
+        ----------
+        rho : TensorLike
+            单元密度, 任意形状, 逐元素计算.
+
+        Returns
+        -------
+        TensorLike
+            与 ``rho`` 同形状的相对刚度系数.
+
+        Notes
+        -----
+        ``coefficient_function`` 为 None 时按 ``penal`` 与 ``rho_min`` 做 SIMP 插值:
+        ``rho_min`` 为 0 退化为纯幂律 ``rho**penal``, 与 soptx 的 'simp' 方案一致, 否则为
+        ``rho_min + (1 - rho_min) * rho**penal``. 设置 ``coefficient_function`` 后插值完全
+        由它给出, 供分析器注入统一的 ``MaterialInterpolationScheme``, 使插值公式只在一处定义.
+        """
+        if self.coefficient_function is not None:
+            return self.coefficient_function(rho)
+        coef = rho ** self.penal
+        if self.rho_min != 0.0:
+            coef = self.rho_min + (1.0 - self.rho_min) * coef
+        return coef
+
     def _assemble_chunk(self, rho_chunk: Any, *, backend: Any = None) -> Any:
         """装配一批局部刚度矩阵.
 
@@ -800,12 +829,7 @@ class SubstructurePrototype:
         backend = bm.get_current_backend() if backend is None else backend
         n_chunk = rho_chunk.shape[0]
         n_dof = self.n_total_dofs
-
-        # SIMP 插值: rho_min 为 0 时退化为纯幂律, 与 soptx 的 'simp' 方案一致.
-        coef = rho_chunk ** self.penal
-        if self.rho_min != 0.0:
-            coef = self.rho_min + (1.0 - self.rho_min) * coef
-
+        coef = self.stiffness_coefficient(rho_chunk)
         KE = backend.einsum('be, eij -> beij', coef, self.KE_unit)
 
         # 把 batch 编号并入平坦索引, 一次 bincount 完成全批散加.

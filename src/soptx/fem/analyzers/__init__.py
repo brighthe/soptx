@@ -18,12 +18,14 @@ from .substructure import (
     FullInterfaceAnalysisResult,
     FullInterfaceSubstructureAnalyzer,
 )
+from .substructure_analyzer import SubstructureAnalyzer
 
 __all__ = [
     "FullInterfaceAnalysisResult",
     "FullInterfaceSubstructureAnalyzer",
     "HuZhangMFEMAnalyzer",
     "LagrangeFEMAnalyzer",
+    "SubstructureAnalyzer",
     "build_distributed_analyzer",
     "build_serial_analyzer",
 ]

@@ -11,6 +11,7 @@ from .analyzers import (
     FullInterfaceSubstructureAnalyzer,
     HuZhangMFEMAnalyzer,
     LagrangeFEMAnalyzer,
+    SubstructureAnalyzer,
 )
 from .bilinear_form import BilinearForm
 from .boundary_loads import (
@@ -54,6 +55,7 @@ __all__ = [
     "HuZhangMFEMAnalyzer",
     "LagrangeFEMAnalyzer",
     "LinearElasticIntegrator",
+    "SubstructureAnalyzer",
     "LinearElasticQFunction",
     "LinearForm",
     "LoadResultantReport",

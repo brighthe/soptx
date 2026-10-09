@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 from scipy.linalg import qr
@@ -160,8 +160,9 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, cg_tol, cg_maxiter,
         相对于自由载荷二范数的真实残差容差.
     cg_maxiter : int
         最大迭代次数.
-    precond : str
-        "none" 或 "jacobi".
+    precond : str or object
+        "none", "jacobi", 或任何支持 ``M @ r`` 返回 ``M^{-1} r`` 的预条件子对象, 作用于
+        含受约束分量的完整接口向量, 受约束分量上须为恒等 (由细网格 Dirichlet 掩码保证).
     x0 : TensorLike or None
         上一轮接口位移, 在受约束位置清零.
 
@@ -174,8 +175,11 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, cg_tol, cg_maxiter,
         raise ValueError("cg_tol 必须为 (0, 1) 内的有限数.")
     if cg_maxiter < 1 or int(cg_maxiter) != cg_maxiter:
         raise ValueError("cg_maxiter 必须为正整数.")
-    if precond not in ("none", "jacobi"):
-        raise ValueError("precond 必须为 none 或 jacobi.")
+    if isinstance(precond, str):
+        if precond not in ("none", "jacobi"):
+            raise ValueError("precond 必须为 none, jacobi 或预条件子对象.")
+    elif not hasattr(precond, "__matmul__"):
+        raise TypeError("预条件子对象须支持 @ 运算.")
     if np.any(values != 0.0):
         raise ValueError("CG 目前仅支持齐次固定自由度约束, 非齐次约束请使用直接法.")
     counts = np.diff(matrix.indptr)
@@ -199,8 +203,11 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, cg_tol, cg_maxiter,
         diagonal[fixed] = 1.0
         if not np.all(np.isfinite(diagonal)) or np.any(diagonal <= 0.0):
             raise ValueError("CG 要求消元后的刚度对角线有限且为正.")
-        preconditioner = (DiagonalPreconditioner(diag=bm.from_numpy(diagonal))
-                          if precond == "jacobi" else None)
+        if isinstance(precond, str):
+            preconditioner = (DiagonalPreconditioner(diag=bm.from_numpy(diagonal))
+                              if precond == "jacobi" else None)
+        else:
+            preconditioner = precond
         linear_solver = CGSolver(M=preconditioner, rtol=0.0, atol=cg_tol * scale,
                                  maxit=cg_maxiter, norm_type="unpreconditioned")
         displacement, info = linear_solver.setup(operator).solve(
@@ -230,7 +237,7 @@ def solve_constrained_system(
     solver: str = "scipy",
     cg_tol: float = 1.0e-6,
     cg_maxiter: int = 20000,
-    precond: str = "jacobi",
+    precond: Union[str, Any] = "jacobi",
     x0: Optional[Any] = None,
 ) -> ConstrainedSolveResult:
     """求解满足 C u = d 的接口系统.
@@ -251,8 +258,8 @@ def solve_constrained_system(
         CG 相对于自由载荷二范数的真实残差容差.
     cg_maxiter : int
         CG 最大迭代次数.
-    precond : str
-        CG 预条件子, none 或 jacobi.
+    precond : str or object
+        CG 预条件子: none, jacobi, 或支持 ``@`` 的预条件子对象, 见 ``_solve_fixed_cg``.
     x0 : TensorLike, optional
         CG 初始接口位移, 直接法忽略.
 

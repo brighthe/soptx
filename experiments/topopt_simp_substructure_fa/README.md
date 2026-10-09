@@ -118,7 +118,7 @@ $$
 
 ```bash
 # 论文第一档网格，最多分析 300 次。
-python experiments/topopt_exact_substructure/run_linear_corner.py
+python experiments/topopt_simp_substructure_fa/run_linear_corner.py
 ```
 
 可用 `--n-sub NX NY NZ` 和 `--n-fine M` 设置子结构网格与每方向细分数，默认分别为 `78 13 13` 和 `5`。全局细网格由上述参数推导，细单元边长固定为 1，计算域尺寸等于各方向细单元数，并写入 `config.json`。改变网格数量也会改变域尺寸；保持 MBB 长宽高比时，应使各方向数量之比保持为 6∶1∶1。`--n-sub` 各项须为正整数，`--n-fine` 至少为 2。过滤半径固定为三个细单元边长，即 $r_{\min}=3$。`--chunk-size`、`--max-iter` 和 `--output-dir` 控制分块、迭代上限和输出目录。接口固定为 `linear_corner`，求解器通过 --solver scipy|mumps 选择，默认 mumps。scipy 为稀疏直接法，不是 CG。
@@ -158,8 +158,8 @@ python run_linear_corner.py --vtu-fields density displacement
 待授权后，可在仓库根目录分别执行以下命令，使用默认论文网格完成两次分析及一次 OC 更新：
 
 ```bash
-python experiments/topopt_exact_substructure/run_linear_corner.py --backend numpy --device cpu --max-iter 2
-python experiments/topopt_exact_substructure/run_linear_corner.py --backend pytorch --device cpu --max-iter 2
+python experiments/topopt_simp_substructure_fa/run_linear_corner.py --backend numpy --device cpu --max-iter 2
+python experiments/topopt_simp_substructure_fa/run_linear_corner.py --backend pytorch --device cpu --max-iter 2
 ```
 
 两条命令默认使用同一输出目录；需要比较结果时，应先保存上一组结果，或为各组指定不同的绝对输出路径。验收时核对两种后端的柔顺度、过滤结果及 OC 更新一致性，检查结果有限性、体积分数约束、接口与能量残差，并确认 VTU 字段与 NPY 对应。CUDA 路径需在上述核对后单独验证。
@@ -168,7 +168,7 @@ python experiments/topopt_exact_substructure/run_linear_corner.py --backend pyto
 
 ### Windows 本地可视化副本
 
-WSL 的 `outputs/` 是计算与验证依据；Windows 本地目录仅保存 ParaView 查看副本。`sync_visualization.py` 手动执行一次增量同步，不自动监控，不改动求解流程。默认将 PVD 已发布的 VTU 和 `evolution.pvd` 同步至 `C:\workspace\soptx-results\topopt_exact_substructure\linear_corner_mumps`，不复制配置、NPY 或验证文件，不删除目标已有文件。
+WSL 的 `outputs/` 是计算与验证依据；Windows 本地目录仅保存 ParaView 查看副本。`sync_visualization.py` 手动执行一次增量同步，不自动监控，不改动求解流程。默认将 PVD 已发布的 VTU 和 `evolution.pvd` 同步至 `C:\workspace\soptx-results\topopt_simp_substructure_fa\linear_corner_mumps`，不复制配置、NPY 或验证文件，不删除目标已有文件。
 
 在 WSL 的算例目录执行：
 
@@ -184,8 +184,8 @@ python sync_visualization.py
 
 ```bash
 python sync_visualization.py \
-  --source-dir /home/brighthe/codespace/soptx/experiments/topopt_exact_substructure/outputs/linear_corner_mumps \
-  --destination-dir /mnt/c/workspace/soptx-results/topopt_exact_substructure/linear_corner_mumps
+  --source-dir /home/brighthe/codespace/soptx/experiments/topopt_simp_substructure_fa/outputs/linear_corner_mumps \
+  --destination-dir /mnt/c/workspace/soptx-results/topopt_simp_substructure_fa/linear_corner_mumps
 ```
 
 同步完成后，在 Windows ParaView 打开目标目录下的 `evolution.pvd`。保留 `iterations/` 与 PVD 的相对位置。每帧先复制为目标临时文件，经摘要与源文件变化检查后发布；全部帧就绪后才更新 PVD。同步期间新增的帧在下次执行时纳入。失败时原 PVD 保留，已复制的完整帧可供重试复用。
@@ -196,7 +196,7 @@ python sync_visualization.py \
 
 ### 历史结果归档
 
-早期采用 $h=1/65$、执行两次分析的结果已从重复目录 `topopt_exact_substructure/outputs` 移至 `archives/legacy_h_1_over_65/`。归档保留原始配置、密度、位移、VTU 和收敛记录，七个文件在移动前后均通过 SHA-256 一致性检查。当前完整优化保存在 `outputs/linear_corner_mumps/`，尺度核对结果仍在 `outputs_analysis/`。
+早期采用 $h=1/65$、执行两次分析的结果已从重复目录 `topopt_simp_substructure_fa/outputs` 移至 `archives/legacy_h_1_over_65/`。归档保留原始配置、密度、位移、VTU 和收敛记录，七个文件在移动前后均通过 SHA-256 一致性检查。当前完整优化保存在 `outputs/linear_corner_mumps/`，尺度核对结果仍在 `outputs_analysis/`。
 
 `outputs_analysis/config.json` 中的 `physical_density_source` 保留当次运行时的原始路径，作为历史来源记录；重新读取该密度时使用下方示例中的归档路径。
 
@@ -207,10 +207,10 @@ python sync_visualization.py \
 例如，在仓库根目录使用第一档网格的旧物理密度：
 
 ```bash
-python experiments/topopt_exact_substructure/run_linear_corner.py \
+python experiments/topopt_simp_substructure_fa/run_linear_corner.py \
   --backend numpy --device cpu \
   --n-sub 78 13 13 --n-fine 5 --chunk-size 256 \
-  --physical-density /home/brighthe/codespace/soptx/experiments/topopt_exact_substructure/archives/legacy_h_1_over_65/density_final.npy
+  --physical-density /home/brighthe/codespace/soptx/experiments/topopt_simp_substructure_fa/archives/legacy_h_1_over_65/density_final.npy
 ```
 
 此模式忽略 `--max-iter` 的分析次数设置，只分析一次。默认输出到脚本旁的 `outputs_analysis`，显式指定目录时必须使用新的或空的目录，且不能与输入文件所在目录相同。保留逐批进度日志；输出物理密度、位移、VTU、配置和诊断结果，不输出设计密度及其对称误差。`summary.json` 的 `termination` 为 `analysis_only`，不代表优化收敛。
