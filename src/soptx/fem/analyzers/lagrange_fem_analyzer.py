@@ -38,7 +38,7 @@ from soptx.fem.levels import (
     create_level,
 )
 from soptx.fem.load_projection import project_nodal_loads
-from soptx.fem.matrix import assemble_csr, build_csr_pattern
+from soptx.fem.matrix import SymmetricElimination, assemble_csr, build_csr_pattern
 from soptx.fem.operators import ConstrainedOperator
 from soptx.materials import (
     IsotropicLinearElasticMaterial,
@@ -187,7 +187,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._csr_pattern = None  # 模式先行 (Pattern-First) 静态拓扑骨架缓存
         # Dirichlet 数据与对称消元的槽位只依赖空间、问题与 CSR 骨架, 与密度无关, 各算一次
         self._dirichlet_cache = None
-        self._elimination_cache = None
+        self._elimination = SymmetricElimination()
         # 几何多重网格层次的拓扑部分 (网格序列, 延拓, 粗层骨架), 只依赖空间与约束
         self._mg_hierarchy = None
         # 纯集中力的非体力载荷: (载荷指纹, 载荷向量), 见 _non_body_loads_by_boundary_type
@@ -340,7 +340,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._cached_ke0 = None
         self._reference_ke0 = None
         self._dirichlet_cache = None
-        self._elimination_cache = None
+        self._elimination = SymmetricElimination()
         self._mg_hierarchy = None
         self._non_body_cache = None
 
@@ -707,7 +707,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 F = F - K.matmul(uh_bd[:])
             F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
 
-        K = self._apply_matrix(K, isDDof=isBdDof)
+        # 保结构消元, 不改写原矩阵 (self._K 仍为未施加边界条件的刚度矩阵)
+        K = self._elimination.apply(K, isBdDof)
 
         return K, F
 
@@ -910,7 +911,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         rhs_bc[isBdDof] = 0.0
 
         # 再处理刚度矩阵
-        K = self._apply_matrix(K0, isDDof=isBdDof)
+        K = self._elimination.apply(K0, isBdDof)
         
         # 初始化结果并求解
         adjoint_lambda = bm.zeros_like(rhs_bc)
@@ -1006,7 +1007,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                             integrator=self._integrator)
 
         if self._preconditioner_level == 'fa':
-            return self._apply_matrix(level.operator, isDDof=isBdDof)
+            # 每次另装配一份骨架, 槽位缓存必然失效; 用临时实例, 不挤掉主算子的缓存
+            return SymmetricElimination().apply(level.operator, isBdDof)
 
         return ConstrainedOperator(self.wrap_operator(level.operator),
                                 gd=self._pde.dirichlet_bc,
@@ -1784,92 +1786,3 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                                         method='interp')
             self._dirichlet_cache = (space, uh_bd, isBdDof, bool(bm.any(uh_bd[:] != 0)))
         return self._dirichlet_cache[1:]
-
-    def _elimination_slots(self, matrix: CSRTensor, isDDof: TensorLike) -> tuple[TensorLike, TensorLike]:
-        """对称消元要改写的 CSR 槽位: 受约束行或列的全部槽位, 及受约束行的对角槽位.
-
-        Parameters
-        ----------
-        matrix : 原始全局刚度矩阵.
-        isDDof : (gdof, ) 的 Dirichlet 自由度布尔掩码.
-
-        Returns
-        -------
-        zero_slots : 须置零的槽位 (可含重复).
-        diag_slots : 受约束行的对角槽位, 须置 1.
-
-        Raises
-        ------
-        RuntimeError
-            某受约束行在稀疏结构中没有对角元.
-
-        Notes
-        -----
-        只依赖 CSR 骨架与掩码: 骨架 (crow, col) 为同一对象且掩码不变时复用缓存. 受约束行的
-        槽位按行区间展开, 规模只与受约束行数成正比; 受约束列的槽位需扫描一遍 col.
-        """
-        cache = self._elimination_cache
-        if (cache is not None and cache[0] is matrix.crow and cache[1] is matrix.col
-                and bool(bm.all(cache[2] == isDDof))):
-            return cache[3], cache[4]
-
-        crow, col = matrix.crow, matrix.col
-        rows = bm.nonzero(isDDof)[0]
-        starts = crow[rows]
-        lengths = crow[rows + 1] - starts
-        offsets = bm.cumsum(lengths, axis=0) - lengths
-        local = bm.arange(int(bm.sum(lengths)), **bm.context(col)) - bm.repeat(offsets, lengths)
-        row_slots = bm.repeat(starts, lengths) + local
-        row_ids = bm.repeat(rows, lengths)
-        diag_slots = row_slots[col[row_slots] == row_ids]
-        if int(diag_slots.shape[0]) != int(rows.shape[0]):
-            raise RuntimeError("对称消元要求每个受约束行在稀疏结构中含对角元")
-        col_slots = bm.nonzero(isDDof[col])[0]
-        zero_slots = bm.concat([row_slots, col_slots], axis=0)
-
-        self._elimination_cache = (crow, col, bm.copy(isDDof), zero_slots, diag_slots)
-        return zero_slots, diag_slots
-
-    def _apply_matrix(self, matrix, isDDof, check=True):
-        """只对左端矩阵施加 Dirichlet 边界条件.
-
-        Parameters
-        ----------
-        matrix : 线性系统原始的左端稀疏矩阵.
-        isDDof : (gdof, ) 的布尔掩码, 标记 Dirichlet 自由度.
-        check : 是否检查矩阵.
-
-        Returns
-        -------
-        A : 施加边界条件后的左端稀疏矩阵.
-        """
-        A = matrix
-        kwargs = A.values_context()
-        if isinstance(A, COOTensor):
-            indices = A.indices
-            remove_flag = bm.logical_or(
-                isDDof[indices[0, :]], isDDof[indices[1, :]]
-            )
-            retain_flag = bm.logical_not(remove_flag)
-            new_indices = indices[:, retain_flag]
-            new_values = A.values[..., retain_flag]
-            A = COOTensor(new_indices, new_values, A.sparse_shape)
-
-            index = bm.nonzero(isDDof)[0]
-            shape = new_values.shape[:-1] + (len(index), )
-            one_values = bm.ones(shape, **kwargs)
-            one_indices = bm.stack([index, index], axis=0)
-            A1 = COOTensor(one_indices, one_values, A.sparse_shape)
-            A = A.add(A1).coalesce()
-
-        elif isinstance(A, CSRTensor):
-            # 保结构消元: 不删行列, 复制数值后把受约束行与列置零、对角置 1, 共用原骨架. 与删除
-            # 行列定义同一矩阵, 只多出显式零; 改写的槽位只依赖骨架, 首次算好后缓存, 也不改写
-            # 原矩阵 (self._K 仍为未施加边界条件的刚度矩阵)
-            zero_slots, diag_slots = self._elimination_slots(A, isDDof)
-            values = bm.copy(A.values)
-            values = bm.set_at(values, zero_slots, 0.0)
-            values = bm.set_at(values, diag_slots, 1.0)
-            return CSRTensor(A.crow, A.col, values, A.sparse_shape)
-
-        return A

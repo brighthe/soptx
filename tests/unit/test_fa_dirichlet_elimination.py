@@ -80,12 +80,12 @@ def test_elimination_slots_are_cached_across_density_updates() -> None:
 
     analyzer.apply_bc(analyzer.assemble_stiff_matrix(rho_val=bm.tensor(rng.uniform(0.1, 1.0, NC))),
                       analyzer.assemble_body_force_vector())
-    cache = analyzer._elimination_cache
+    cache = analyzer._elimination._cache
     stiffness = analyzer.assemble_stiff_matrix(rho_val=bm.tensor(rng.uniform(0.1, 1.0, NC)))
     load = analyzer.assemble_body_force_vector()
     matrix, _ = analyzer.apply_bc(stiffness, load)
 
-    assert analyzer._elimination_cache is cache
+    assert analyzer._elimination._cache is cache
     expected, _ = _reference_system(analyzer, stiffness, load)
     np.testing.assert_array_equal(matrix.to_scipy().toarray(), expected)
 

@@ -1,7 +1,7 @@
 """``LagrangeFEMAnalyzer.solve_adjoint`` 装配层级前提的回归测试.
 
 ``solve_adjoint`` 按行列施加齐次 Dirichlet 条件, 只适用于显式矩阵 (``'fa'``); 矩阵自由
-层级下曾在 ``_apply_matrix`` 中报含义不明的错误, 现改为明确的 NotImplementedError.
+层级下曾在对称消元 (现 ``SymmetricElimination.apply``) 中报含义不明的错误, 现改为明确的 NotImplementedError.
 """
 
 from __future__ import annotations
