@@ -38,9 +38,9 @@
 | 物理密度 $z$ 向不对称量 | $1.8\times10^{-15}$ | $1.3\times10^{-15}$ |
 | 设计密度 $z$ 向不对称量 | $0$ | $0$ |
 
-来源：`results/fa_hex_210x35x35_cg/`、`results/full_trace_hex_210x35x35_m5_cg/` 的 `summary.json` 与 `history.json`。
+数据来源：`results/fa_hex_210x35x35_cg/`、`results/full_trace_hex_210x35x35_m5_cg/` 的 `summary.json` 与 `history.json`。
 
-两侧差异（逐轮与最终柔顺度来自两侧 `history.json`，其余来自 `final_fields.json` 的 `full_trace_vs_fa_210x35x35`）：
+两侧差异：
 
 | 量 | 最大差 |
 |---|---|
@@ -51,9 +51,7 @@
 | 最终位移相对 $L^2$ 差 | $1.0\times10^{-7}$ |
 | 阈值 $0.5$ 二值化拓扑 | 逐单元相同，实体单元 $29\,403$ 个 |
 
-差异处于 CG 容差 $10^{-6}$ 的量级。full_trace 的 `--precond mg` 把细网格几何 MG 的 V 循环 $B$ 限制到接口自由度，$M=RBR^{\mathsf T}$，依据是 $RK^{-1}R^{\mathsf T}=S^{-1}$；CG 步数逐轮比 FA 少 0 到 2 步，接口上的 $RBR^{\mathsf T}$ 与细网格 MG 效果相当。
-
-**直接法核对**　网格 $60\times10\times10$（$12\times2\times2$ 个子结构、$m=5$，$22\,143$ 个自由度），两侧都用 SciPy 直接法跑 3 轮，去掉迭代解法的容差：逐轮柔顺度相对差最大 $3.9\times10^{-12}$，第 3 轮物理密度最大差 $1.2\times10^{-12}$、位移相对 $L^2$ 差 $5.2\times10^{-12}$，为舍入量级。与上表合在一起，full_trace 与 FA 可视为同一离散算子在不同未知量上的求解。来源：`results/fa_hex_60x10x10_scipy/`、`results/full_trace_hex_60x10x10_m5_scipy/`，`final_fields.json` 的 `full_trace_vs_fa_60x10x10_direct`。
+数据来源：柔顺度相对差来自两侧 `history.json`，其余来自 `results/final_fields.json` 的 `full_trace_vs_fa_210x35x35`。
 
 ### 2.2 计算成本
 
@@ -117,7 +115,7 @@ linear_corner 对 full_trace：接口位移被约束在角点线性插值的子�
 | 设计密度 $z$ 向不对称量 | $0$ | $0$ |
 | 阈值 $0.5$ 二值化拓扑 | 实体单元 $128$ 个 | 实体单元 $320$ 个，与 full_trace 不一致 $192$ 个 |
 
-来源：`results/full_trace_hex_60x10x10_m5_cg/`、`results/linear_corner_hex_60x10x10_m5_mumps/`，`final_fields.json` 的 `linear_corner_vs_full_trace_60x10x10`。
+数据来源：`results/full_trace_hex_60x10x10_m5_cg/`、`results/linear_corner_hex_60x10x10_m5_mumps/`，`final_fields.json` 的 `linear_corner_vs_full_trace_60x10x10`。
 
 linear_corner 的柔顺度低得多，方向是对的：接口位移被约束后结构更刚，同一载荷下位移更小，$-\tfrac12C$ 是总势能在子空间上的极小值，大于全空间的极小值，所以 $C_{\text{corner}}\le C_{\text{full}}$。文献结论第 1 条也指出沿子结构边界的线性位移插值会高估子结构刚度，子结构数量较少时尤甚；这一档每向只有 2 个子结构，比值 0.38 不代表首档。两种设计的差别也体现在 $x$ 向不对称量与二值化拓扑上。
 
@@ -136,6 +134,6 @@ linear_corner 的柔顺度低得多，方向是对的：接口位移被约束后
 | 输出 | 0.006 | 0.005 |
 | 每轮合计 | 1.40 | 1.22 |
 
-来源：`results/full_trace_hex_60x10x10_m5_cg/`、`results/linear_corner_hex_60x10x10_m5_mumps/` 的 `history.json`。
+数据来源：`results/full_trace_hex_60x10x10_m5_cg/`、`results/linear_corner_hex_60x10x10_m5_mumps/` 的 `history.json`。
 
 小档上两者的装配耗时相近，都由 48 个子结构的缩聚主导；linear_corner 的接口系统只有 351 个自由度，求解耗时主要是恢复。

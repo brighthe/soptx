@@ -50,8 +50,6 @@ SOLID_THRESHOLD = 0.5
 DEFAULT_PAIRS: List[Tuple[str, Path, Path]] = [
     ('full_trace_vs_fa_210x35x35',
      OUTPUTS / 'full_trace_hex_210x35x35_m5_cg', OUTPUTS / 'fa_hex_210x35x35_cg'),
-    ('full_trace_vs_fa_60x10x10_direct',
-     OUTPUTS / 'full_trace_hex_60x10x10_m5_scipy', OUTPUTS / 'fa_hex_60x10x10_scipy'),
     ('linear_corner_vs_full_trace_60x10x10',
      OUTPUTS / 'linear_corner_hex_60x10x10_m5_mumps', OUTPUTS / 'full_trace_hex_60x10x10_m5_cg'),
     ('linear_corner_vs_fa_390x65x65',
