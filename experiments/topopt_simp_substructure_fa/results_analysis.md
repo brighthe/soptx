@@ -51,7 +51,7 @@
 | 最终位移相对 $L^2$ 差 | $1.0\times10^{-7}$ |
 | 阈值 $0.5$ 二值化拓扑 | 逐单元相同，实体单元 $29\,403$ 个 |
 
-数据来源：柔顺度相对差来自两侧 `history.json`，其余来自 `results/final_fields.json` 的 `full_trace_vs_fa_210x35x35`。
+数据来源：柔顺度相对差来自两侧 `history.json`，其余来自 `results/final_fields.json` 中 `full_trace_vs_fa_210x35x35` 的 `comparison`。
 
 ### 2.2 计算成本
 
@@ -115,7 +115,7 @@ linear_corner 对 full_trace：接口位移被约束在角点线性插值的子�
 | 设计密度 $z$ 向不对称量 | $0$ | $0$ |
 | 阈值 $0.5$ 二值化拓扑 | 实体单元 $128$ 个 | 实体单元 $320$ 个，与 full_trace 不一致 $192$ 个 |
 
-数据来源：`results/full_trace_hex_60x10x10_m5_cg/`、`results/linear_corner_hex_60x10x10_m5_mumps/`，`final_fields.json` 的 `linear_corner_vs_full_trace_60x10x10`。
+数据来源：`results/full_trace_hex_60x10x10_m5_cg/`、`results/linear_corner_hex_60x10x10_m5_mumps/`，`results/final_fields.json` 中 `linear_corner_vs_full_trace_60x10x10` 的 `comparison`。
 
 linear_corner 的柔顺度低得多，方向是对的：接口位移被约束后结构更刚，同一载荷下位移更小，$-\tfrac12C$ 是总势能在子空间上的极小值，大于全空间的极小值，所以 $C_{\text{corner}}\le C_{\text{full}}$。文献结论第 1 条也指出沿子结构边界的线性位移插值会高估子结构刚度，子结构数量较少时尤甚；这一档每向只有 2 个子结构，比值 0.38 不代表首档。两种设计的差别也体现在 $x$ 向不对称量与二值化拓扑上。
 
