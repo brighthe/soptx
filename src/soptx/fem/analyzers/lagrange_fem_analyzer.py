@@ -11,24 +11,17 @@ from soptx.backend import backend_manager as bm
 from soptx.typing import TensorLike
 from soptx.mesh import SimplexMesh, HomogeneousMesh
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
-from soptx.fem.linear_form import LinearForm
 from soptx.decorator import variantmethod
 from soptx.sparse import CSRTensor, COOTensor
 
 from soptx.core import BaseLogged, timer
 from soptx.protocols import (
     BodyForce,
-    BoundaryTraction,
     DirichletElasticityProblem,
-    LineTraction,
     MaterialInterpolation,
     PointForce,
 )
-from soptx.fem.integrators import (
-    LagrangeBoundarySourceIntegrator,
-    LinearElasticIntegrator,
-    SourceIntegrator,
-)
+from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.fem.kernels import ElementRestriction
 from soptx.fem.levels import (
     AssemblyLevelExtension,
@@ -37,7 +30,7 @@ from soptx.fem.levels import (
     available_levels,
     create_level,
 )
-from soptx.fem.load_projection import project_nodal_loads
+from soptx.fem.load_assembly import assemble_body_forces, assemble_non_body_loads
 from soptx.fem.matrix import SymmetricElimination, assemble_csr, build_csr_pattern
 from soptx.fem.utils import multiresolution_sub_element_matrices
 from soptx.fem.operators import ConstrainedOperator
@@ -494,18 +487,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
     def assemble_body_force_vector(self) -> TensorLike:
         """组装 ``Problem.loads()`` 中全部体力的体积分."""
-        F = self._tensor_space.function()
-        for load in self._pde.loads():
-            if not isinstance(load, BodyForce):
-                continue
-            integrator = SourceIntegrator(
-                source=load.body_force,
-                q=self._integration_order,
-            )
-            lform = LinearForm(self._tensor_space)
-            lform.add_integrator(integrator)
-            F = F + lform.assembly(format='dense')
-        return F
+        return assemble_body_forces(self._tensor_space, self._pde.loads(), q=self._integration_order)
 
     def assemble_external_load(self, adjoint: bool = False) -> TensorLike:
         """组装施加 Dirichlet 条件之前的全局外载向量.
@@ -588,46 +570,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def _assemble_non_body_loads(self, adjoint: bool = False) -> TensorLike:
         """组装点力、线载荷和边界牵引, 并保留现有伴随载荷入口."""
         space_uh = self._tensor_space
-        F_physical = space_uh.function()
-        nodal_loads = []
-
-        for load in self._pde.loads():
-            if isinstance(load, BodyForce):
-                continue
-            if isinstance(load, (PointForce, LineTraction)):
-                nodal_loads.append(load)
-                continue
-            if isinstance(load, BoundaryTraction):
-                integrator = LagrangeBoundarySourceIntegrator(
-                    source=load.traction,
-                    q=self._integration_order,
-                    threshold=load.is_load_boundary,
-                )
-                lform = LinearForm(space_uh)
-                lform.add_integrator(integrator)
-                F_physical = F_physical + lform.assembly(format='dense')
-                continue
-            raise TypeError(
-                "LFEM 不支持载荷对象 "
-                f"{type(load).__name__}; 请提供已定义装配语义的 Load."
-            )
-
-        if nodal_loads:
-            node_major = project_nodal_loads(
-                nodal_loads,
-                space_uh.interpolation_points(),
-                self._GD,
-                degree=self._scalar_space.p,
-            )
-            if space_uh.dof_priority:
-                node_values = bm.reshape(node_major, (-1, self._GD))
-                nodal_vector = bm.reshape(
-                    bm.transpose(node_values, (1, 0)),
-                    (-1,),
-                )
-            else:
-                nodal_vector = node_major
-            F_physical = F_physical + nodal_vector
+        F_physical = assemble_non_body_loads(space_uh, self._pde.loads(), q=self._integration_order)
 
         if not adjoint:
             return F_physical
