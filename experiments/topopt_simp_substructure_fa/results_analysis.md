@@ -1,8 +1,8 @@
 # 子结构与传统有限元拓扑优化结果对照
 
-硬件：AMD Ryzen 9 9950X（16 核 32 线程），运行内存 45 GiB；NVIDIA GeForce RTX 5070 Ti，显存 16 GB。第 2 节的 $210\times35\times35$ 网格与第 3 节的首档在另一台机器上运行，硬件待填。
+硬件：Intel Core i9-14900KF（24 核 32 线程，8P+16E），运行内存 45 GiB；NVIDIA GeForce RTX 5080，显存 16 GB。
 
-软件：`ihpcm` 环境，Python 3.12.13，NumPy 2.5.3，SciPy 1.18.1，PyTorch 2.11.0（CUDA 12.8）。
+软件：Ubuntu 24.04（WSL2），`ihpcm` 环境，Python 3.12.13；NumPy 2.5.3（内置 scipy-openblas 0.3.34），SciPy 1.18.1（内置 scipy-openblas 0.3.31），PyTorch 2.13.0（CUDA 13.0）；PyMUMPS 0.4.0，链接系统 MUMPS 5.6.2（OpenBLAS 0.3.26、Open MPI 4.1.6、ScaLAPACK 2.2.1，单进程运行）；pyevtk 1.7.0。
 
 ## 1. 研究对象
 
