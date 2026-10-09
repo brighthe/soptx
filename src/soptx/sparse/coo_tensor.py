@@ -173,7 +173,8 @@ class COOTensor(SparseTensor):
         """转为 CSR 格式 (只支持两个稀疏维).
 
         按行重排非零元, 不合并重复索引, 行内列的顺序不保证有序; 需要时先调用
-        ``coalesce``.
+        ``coalesce``. ``crow`` 与 ``col`` 取同一索引 dtype: 沿用 COO 索引的 dtype,
+        ``nnz`` 超出其范围时一并提升为 int64.
 
         Parameters
         ----------
@@ -197,6 +198,14 @@ class COOTensor(SparseTensor):
         crow = bm.concat([bm.tensor([0], **bm.context(crow)), crow])
         order = bm.argsort(self._indices[0])
         new_col = bm.copy(self._indices[-1, order])
+        # crow 由 bincount/cumsum 生成, 恒为 int64; 须与列索引同 dtype, 否则 pytorch 后端
+        # torch CSR 在 CUDA 上的 SpMV 越界访问 (check_invariants=False 时不报错).
+        # nnz 超出索引 dtype 范围时, 两者一并提升为 int64.
+        index_dtype = self._indices.dtype
+        if self.nnz > bm.iinfo(index_dtype).max:
+            index_dtype = bm.int64
+            new_col = bm.astype(new_col, index_dtype)
+        crow = bm.astype(crow, index_dtype)
 
         if self.values is None:
             new_values = None

@@ -655,9 +655,14 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
 
         Raises
         ------
+        ValueError
+            ``crow`` 与 ``col`` 的 dtype 不一致; 构造时关闭了不变量检查, CUDA 上会越界访问并
+            破坏 CUDA 上下文, 故在此先行拒绝.
         NotImplementedError
             ``values`` 带批量维.
         """
+        if crow.dtype != col.dtype:
+            raise ValueError(f"crow 与 col 的 dtype 须一致, 得到 {crow.dtype} 与 {col.dtype}")
         if values.ndim == 1:
             mat = torch.sparse_csr_tensor(crow, col, values, size=shape,
                                           **PyTorchBackend._SPARSE_KWARGS)

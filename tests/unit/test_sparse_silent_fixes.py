@@ -3,7 +3,8 @@
 ``bmat`` 不含 None 块时曾走 hstack/vstack 快路径: 单块列静默只返回首块, 单块行返回
 列表; 组装路径还会因首块无非零元而重置块行列尺寸, 并改写调用方的块列表.
 ``CSRTensor.mul(CSRTensor)`` 与几个 ``reshape``/``ravel``/``flatten`` 函数体为空,
-静默返回 None.
+静默返回 None. ``COOTensor.tocsr`` (``CSRTensor.T`` 经它中转) 曾产出 int64 的 ``crow``
+配原 dtype 的 ``col``, pytorch 后端在 CUDA 上的 SpMV 因此越界访问.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scipy.sparse as sp
+import torch
 
 from soptx.backend import backend_manager as bm
 from soptx.sparse import COOTensor, CSRTensor
@@ -100,3 +102,53 @@ def test_unimplemented_sparse_methods_raise():
         A.flatten()
     with pytest.raises(NotImplementedError):
         A.tocoo().reshape(6)
+
+
+def _rect_scipy(m: int, n: int, seed: int) -> sp.csr_matrix:
+    """形状 ``(m, n)`` 的随机 scipy CSR 矩阵, 索引为 int32."""
+    matrix = sp.random(m, n, density=0.2, random_state=seed, format="csr")
+    assert matrix.indices.dtype == np.int32
+    return matrix
+
+
+@pytest.mark.parametrize("backend", ["numpy", "pytorch"])
+def test_tocsr_index_dtype_consistent(backend):
+    """经 COO 中转的转置: crow 与 col 同为 COO 索引的 dtype (此处 int32), 数值与 scipy 一致."""
+    bm.set_backend(backend)
+    P_sp = _rect_scipy(40, 12, 5)
+    PT = CSRTensor.from_scipy(P_sp).T
+    assert PT.crow.dtype == PT.col.dtype
+    assert str(PT.crow.dtype).endswith("int32")
+    np.testing.assert_array_equal(PT.to_scipy().toarray(), P_sp.T.toarray())
+
+
+def test_tocsr_int64_indices_unchanged():
+    """COO 索引为 int64 时, tocsr 后 crow 与 col 仍为 int64."""
+    indices = np.array([[0, 2, 1, 2], [1, 0, 2, 2]], dtype=np.int64)
+    csr = COOTensor(indices, np.array([1.0, 2.0, 3.0, 4.0]), (3, 3)).tocsr()
+    assert csr.crow.dtype == np.int64 and csr.col.dtype == np.int64
+    expected = sp.coo_matrix(([1.0, 2.0, 3.0, 4.0], (indices[0], indices[1])), shape=(3, 3))
+    np.testing.assert_array_equal(csr.to_scipy().toarray(), expected.toarray())
+
+
+def test_pytorch_csr_spmm_rejects_mixed_index_dtype():
+    """pytorch 后端的 csr_spmm 拒绝 dtype 不一致的 crow 与 col, 不交给 torch 去越界."""
+    bm.set_backend("pytorch")
+    P_sp = _rect_scipy(40, 12, 6)
+    crow = torch.from_numpy(P_sp.indptr.astype(np.int64))
+    col = torch.from_numpy(P_sp.indices)
+    mixed = CSRTensor(crow, col, torch.from_numpy(P_sp.data), P_sp.shape)
+    with pytest.raises(ValueError, match="dtype 须一致"):
+        mixed @ torch.ones(12, dtype=torch.float64)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="需要 CUDA GPU 支持")
+def test_transpose_matvec_cuda():
+    """CUDA 上转置 CSR 的 matvec (多重网格的限制步) 与 scipy 一致, 不再越界访问."""
+    bm.set_backend("pytorch")
+    P_sp = _rect_scipy(400, 50, 7)
+    r = np.random.default_rng(7).standard_normal(400)
+    PT = CSRTensor.from_scipy(P_sp).device_put("cuda").T
+    result = PT @ torch.from_numpy(r).to("cuda")
+    torch.cuda.synchronize()
+    np.testing.assert_allclose(bm.to_numpy(result), P_sp.T @ r, rtol=1e-13, atol=1e-13)
