@@ -23,7 +23,7 @@ from soptx.backend import backend_manager as bm
 
 from soptx.fem import LagrangeFEMAnalyzer
 from soptx.mesh import create_huzhang_checkerboard_mesh
-from soptx.materials import IsotropicLinearElasticMaterial
+from soptx.materials import IsotropicLinearElasticMaterial, lame_parameters
 from soptx.problems import BearingDevice2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
@@ -175,7 +175,7 @@ def test_lame_split_reproduces_element_matrices(plane_type: str) -> None:
 
     E_rho = analyzer._cached_stiffness_absolute
     nu_rho = analyzer._cached_nu_rho
-    lam, mu = analyzer._lame_parameters(E_rho, nu_rho)[:2]
+    lam, mu = lame_parameters(E_rho, nu_rho, analyzer.material.hypothesis)
     ke_lam, ke_mu = analyzer.compute_lame_basis_matrices()
     KE_split = (
         np.einsum("c, cij -> cij", bm.to_numpy(lam), bm.to_numpy(ke_lam))

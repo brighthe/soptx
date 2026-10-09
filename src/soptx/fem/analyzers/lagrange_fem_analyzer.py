@@ -40,7 +40,12 @@ from soptx.fem.levels import (
 from soptx.fem.load_projection import project_nodal_loads
 from soptx.fem.matrix import assemble_csr, build_csr_pattern
 from soptx.fem.operators import ConstrainedOperator
-from soptx.materials import IsotropicLinearElasticMaterial
+from soptx.materials import (
+    IsotropicLinearElasticMaterial,
+    elastic_matrices,
+    lame_basis_matrices,
+    lame_parameter_derivatives,
+)
 
 class LagrangeFEMAnalyzer(BaseLogged):
     """Lagrange 位移有限元的线弹性分析器.
@@ -404,7 +409,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
             else:
                 # E 与 ν 同时插值: D_e 不再是 D0 的标量倍, 把逐单元本构矩阵交给积分子
                 self._check_poisson_interpolation_support()
-                coef = self._elastic_matrix_from(E_rho, nu_rho)   # (NC, NS, NS)
+                coef = elastic_matrices(E_rho, nu_rho, self._material.hypothesis,
+                                        device=self._mesh.device)   # (NC, NS, NS)
         
         else:
             error_msg = f"不支持的拓扑优化算法: {self._topopt_algorithm}"
@@ -1328,64 +1334,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
     # ------------------------------------------------------------------
     # 泊松比随密度插值 (近不可压缩算例)
     #
-    # 各向同性本构矩阵总可写成 D = λ* D_λ + μ D_μ, D_λ、D_μ 为常数矩阵:
-    #   平面应变 / 3D : λ* = λ = E ν / ((1+ν)(1-2ν))
-    #   平面应力      : λ* = λ̄ = E ν / (1-ν²) = 2λμ / (λ+2μ)
-    #   μ = E / (2(1+ν))
-    # 于是 K_e = λ*_e K_e^λ + μ_e K_e^μ, 两个基矩阵与设计无关; 对 ρ 求导只需
-    # 对 λ*、μ 做链式法则, 不必重新积分.
+    # K_e = λ*_e K_e^λ + μ_e K_e^μ, 两个基矩阵与设计无关; λ*、μ 的定义与导数见
+    # soptx.materials.lame_split, 这里只负责基矩阵的积分与链式法则.
     # ------------------------------------------------------------------
-
-    def _lame_basis_matrices(self) -> tuple:
-        """返回常数矩阵 (D_λ, D_μ), 满足 D = λ* D_λ + μ D_μ"""
-        kwargs = dict(dtype=bm.float64, device=self._mesh.device)
-        if self._GD == 2:
-            D_lam = bm.tensor([[1.0, 1.0, 0.0],
-                               [1.0, 1.0, 0.0],
-                               [0.0, 0.0, 0.0]], **kwargs)
-            D_mu = bm.tensor([[2.0, 0.0, 0.0],
-                              [0.0, 2.0, 0.0],
-                              [0.0, 0.0, 1.0]], **kwargs)
-        else:
-            D_lam = bm.zeros((6, 6), **kwargs)
-            D_lam = bm.set_at(D_lam, (slice(0, 3), slice(0, 3)), 1.0)
-            D_mu = bm.tensor([[2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                              [0.0, 2.0, 0.0, 0.0, 0.0, 0.0],
-                              [0.0, 0.0, 2.0, 0.0, 0.0, 0.0],
-                              [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                              [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                              [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]], **kwargs)
-        return D_lam, D_mu
-
-    def _lame_parameters(self, E: TensorLike, nu: TensorLike) -> tuple:
-        """由逐单元 (E, ν) 计算 (λ*, μ, ∂λ*/∂E, ∂λ*/∂ν, ∂μ/∂E, ∂μ/∂ν)
-
-        λ* 按材料的 hypothesis 取 λ (平面应变、3D) 或 λ̄ (平面应力).
-        """
-        one_plus = 1.0 + nu
-        mu = E / (2.0 * one_plus)
-        dmu_dE = 1.0 / (2.0 * one_plus)
-        dmu_dnu = -E / (2.0 * one_plus**2)
-
-        if self._material.hypothesis == 'plane_stress':
-            denom = 1.0 - nu**2
-            lam = E * nu / denom
-            dlam_dE = nu / denom
-            dlam_dnu = E * (1.0 + nu**2) / denom**2
-        else:
-            denom = one_plus * (1.0 - 2.0 * nu)
-            lam = E * nu / denom
-            dlam_dE = nu / denom
-            dlam_dnu = E * (1.0 + 2.0 * nu**2) / denom**2
-
-        return lam, mu, dlam_dE, dlam_dnu, dmu_dE, dmu_dnu
-
-    def _elastic_matrix_from(self, E_rho: TensorLike, nu_rho: TensorLike) -> TensorLike:
-        """由逐单元 (E, ν) 构造逐单元本构矩阵 D_e, 形状 (NC, NS, NS)"""
-        lam, mu = self._lame_parameters(E_rho, nu_rho)[:2]
-        D_lam, D_mu = self._lame_basis_matrices()
-        return (bm.einsum('c, kl -> ckl', lam, D_lam)
-                + bm.einsum('c, kl -> ckl', mu, D_mu))
 
     def _check_poisson_interpolation_support(self) -> None:
         """泊松比插值只在逐单元本构矩阵能进入装配的组合下允许, 其余组合直接报错"""
@@ -1416,7 +1367,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         NC = self._mesh.number_of_cells()
         ones = bm.ones((NC, ), dtype=bm.float64, device=self._mesh.device)
         results = []
-        for D_basis in self._lame_basis_matrices():
+        for D_basis in lame_basis_matrices(self._material.hypothesis, device=self._mesh.device):
             lea = LinearElasticIntegrator(material=self._material,
                                 coef=bm.einsum('c, kl -> ckl', ones, D_basis),
                                 q=self._integration_order,
@@ -1438,7 +1389,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         E_rho, nu_rho = material_params[0], material_params[1]
         dE_rho, dnu_rho = material_derivs[0], material_derivs[1]
 
-        _, _, dlam_dE, dlam_dnu, dmu_dE, dmu_dnu = self._lame_parameters(E_rho, nu_rho)
+        dlam_dE, dlam_dnu, dmu_dE, dmu_dnu = lame_parameter_derivatives(E_rho, nu_rho,
+                                                                        self._material.hypothesis)
         dlam = dlam_dE * dE_rho + dlam_dnu * dnu_rho   # (NC, )
         dmu = dmu_dE * dE_rho + dmu_dnu * dnu_rho      # (NC, )
 
