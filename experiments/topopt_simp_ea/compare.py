@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 from soptx.backend import backend_manager as bm
+from soptx.fem.linear_solve import as_iterative_operator
 from soptx.postprocess.vtk_export import read_vtu_cell_data
 
 from config import (
@@ -246,7 +247,7 @@ def _solve_at_density(case: TopOptCase, operator_level: str, snapshot: np.ndarra
     K0 = analyzer.assemble_stiff_matrix(rho_val=density)
     F0 = analyzer.assemble_body_force_vector()
     K, F = analyzer.apply_bc(K0, F0)
-    operator = analyzer._as_iterative_operator(K)
+    operator = as_iterative_operator(K)
     residual_vector = np.asarray(
         bm.to_numpy(operator @ uh[:]) - bm.to_numpy(F[:]), dtype=np.float64
     )

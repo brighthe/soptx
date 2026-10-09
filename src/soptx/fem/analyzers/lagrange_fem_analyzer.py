@@ -30,10 +30,17 @@ from soptx.fem.levels import (
     available_levels,
     create_level,
 )
+from soptx.fem.linear_solve import as_iterative_operator, build_solver, run_solver
 from soptx.fem.load_assembly import assemble_body_forces, assemble_non_body_loads
 from soptx.fem.matrix import SymmetricElimination, assemble_csr, build_csr_pattern
 from soptx.fem.utils import multiresolution_sub_element_matrices
 from soptx.fem.operators import ConstrainedOperator
+from soptx.solvers import (
+    DiagonalPreconditioner,
+    OperatorCapabilityError,
+    available as available_solvers,
+    create as create_solver,
+)
 from soptx.materials import (
     IsotropicLinearElasticMaterial,
     elastic_matrices,
@@ -841,15 +848,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
         # 组装刚度矩阵
         K0 = self.assemble_stiff_matrix(rho_val=rho_val)
 
-        # 获取 Dirichlet 边界自由度
-        gd = self._pde.dirichlet_bc
-        threshold = self._pde.is_dirichlet_boundary()
-        _, isBdDof = self._tensor_space.boundary_interpolate(
-                                        gd=gd,
-                                        threshold=threshold,
-                                        method='interp'
-                                    )
-        
+        # Dirichlet 自由度掩码与状态方程共用缓存
+        _, isBdDof, _ = self._dirichlet_data()
+
         # 先处理右端项 (伴随问题边界条件为齐次, λ = 0)
         rhs_bc = bm.copy(rhs)
         rhs_bc[isBdDof] = 0.0
@@ -864,32 +865,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return adjoint_lambda
 
 
-    def _as_iterative_operator(self, K):
-        """把刚度算子转成迭代解法可以直接作用的形式
-
-        矩阵自由层级下 K 本身就支持 @ 运算; 'fa' 下 PyTorch 后端需要绕开 FEALPy
-        的 CSRTensor, 其余后端直接用 CSR: numpy 后端的 csr_spmm 就是 scipy 的
-        csr_matvec, 转 COO 只会多出 (2, nnz) 的 int64 索引 (首档约 6 GiB).
-        """
-        if self._operator_level != 'fa':
-            return K
-
-        if bm.backend_name == 'pytorch':
-            #? 需要使用 PyTorch 原始的稀疏矩阵, FEALPy 中的 CSRTensor 存在问题
-            import torch
-            K_coo_torch = torch.sparse_coo_tensor(
-                                            indices=bm.stack([K.row, K.col]),
-                                            values=bm.tensor(K.data),
-                                            size=K.shape,
-                                            device=K.data.device
-                                        )
-            #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-            K._values = bm.copy(K._values)
-
-            return K_coo_torch.to_sparse_csr()
-
-        return K
-
     def assemble_operator_diagonal(self, K) -> TensorLike:
         """取已施加 Dirichlet 条件的系统算子对角, 供 Jacobi 类预条件使用
 
@@ -898,7 +873,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         为 1, 其余转发内层算子, 跨 rank 归约由 OverlapOperator 完成), 'fa' 下扫
         对称消元后稀疏矩阵的 COO 取主对角.
 
-        analyzer 内部已不再调用本方法: ``_build_solver`` 把算子直接交给
+        analyzer 内部已不再调用本方法: ``_make_preconditioner`` 把算子直接交给
         ``DiagonalPreconditioner``, 由它在 setup 时取. 本方法保留为一层转发,
         供 examples 与 experiments 里的既有脚本沿用.
 
@@ -935,14 +910,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
         -----
         必须在 ``assemble_stiff_matrix`` 之后调用: 层级从 ``self._integrator``
         构造, 而密度系数是 ``_update_density_coefficient`` 在装配时写进积分子的,
-        提前调用会读到上一步的密度. ``_build_solver`` 的调用点天然满足这一点.
+        提前调用会读到上一步的密度. ``_make_preconditioner`` 的调用点天然满足这一点.
 
         结果刻意不缓存: 拓扑优化每步都改密度, 缓存必然读到陈旧的刚度. 代价是每次
         求解多一次装配 —— 这是第一版的取舍, 把失效管理与本轴解耦.
         """
         space_uh = self._tensor_space
-        threshold_uh = self._pde.is_dirichlet_boundary()
-        isBdDof = space_uh.is_boundary_dof(threshold=threshold_uh, method='interp')
+        _, isBdDof, _ = self._dirichlet_data()
 
         # 不传 pattern: self._csr_pattern 是主算子的 CSR 骨架缓存,
         # assemble_stiff_matrix 会回写它, 共用会让两根轴互相干扰
@@ -958,113 +932,62 @@ class LagrangeFEMAnalyzer(BaseLogged):
                                 gd=self._pde.dirichlet_bc,
                                 isDDof=isBdDof)
 
-    def _build_solver(self, solver_type, K, **kwargs):
-        """按名字造出求解器, 并选定它要绑定的算子
+    def _merged_solver_options(self, kwargs: Dict) -> Dict:
+        """求解选项: 求解调用的 kwargs 优先于构造时的 solver_options; 缺省值由使用处给出"""
+        return {**self._solver_options, **kwargs}
 
-        名字到类的分派由 soptx.solvers.registry 完成, 本方法只剩两件本地的事:
-        各后端读哪些选项, 以及 'fa'/'ea' 下算子形态的差异.
+    def _make_preconditioner(self, precond: str, K, kwargs: Dict):
+        """按名字构造预条件子, 并 setup 到已施加边界条件的预条件算子上.
+
+        Parameters
+        ----------
+        precond : 'jacobi' / 'diagonal', 'mg', 'scipy' 或 'mumps'.
+        K : 已施加边界条件的主算子.
+        kwargs : 求解调用的选项, 'mg' 时转交给 ``_multigrid_preconditioner``.
 
         Returns
         -------
-        solver : LinearSolver
-            尚未 setup 的求解器实例
-        op     : 该求解器要绑定的算子
-        extra  : 并入返回 info 的后端专属诊断键
-        tol    : 迭代解法的 (atol, rtol), 直接法为 None
-        """
-        from soptx.solvers import available, create
+        M : 已 setup 的预条件子.
 
-        if solver_type not in available():
+        Notes
+        -----
+        预条件算子默认就是主算子本身, 给了 preconditioner_level 就另建一个; 两者都已施加
+        边界条件, 对预条件子而言等价. 先在 fem 侧的算子上 setup 再交给 CG (CG 只对未 setup
+        的预条件子做级联): 一是 ``as_iterative_operator`` 的产物在 pytorch 后端是原生 torch
+        稀疏张量, 取对角要另说; 二是级联用的是主算子, 那样 preconditioner_level 就白设了.
+
+        直接法当预条件子: ``LinearSolver.__matmul__`` 本就是"零初值解一次"的预条件子模式.
+        它是精确逆, CG 应一步收敛, 因此主要用途是验证两个层级确实是同一个离散算子.
+        """
+        pc_level = self._preconditioner_level or self._operator_level
+        if self._preconditioner_level is None:
+            K_pc = K
+        else:
+            K_pc = self._preconditioner_operator()
+
+        if precond in ('jacobi', 'diagonal'):
+            M = DiagonalPreconditioner()
+        elif precond == 'mg':
+            M = self._multigrid_preconditioner(**kwargs)
+        elif precond in ('scipy', 'mumps'):
+            M = create_solver(precond)
+        else:
             self._log_error(
-                f"未知的求解器类型: {solver_type}; "
-                f"可用: {', '.join(available())}"
+                f"未知的预条件子类型: {precond}; "
+                f"可选 'jacobi'/'diagonal', 'mg', 'scipy', 'mumps'"
             )
 
-        if solver_type == 'cg':
-            # 优先级: 调用方 kwargs > 构造时的 solver_options > 硬编码默认
-            maxiter = kwargs.get('maxiter', self._solver_options.get('maxiter', 5000))
-            atol = kwargs.get('atol', self._solver_options.get('atol', 1e-12))
-            rtol = kwargs.get('rtol', self._solver_options.get('rtol', 1e-12))
-            precond = kwargs.get('precond',
-                                self._solver_options.get('precond', None))
-            residual_refresh = int(kwargs.get('residual_refresh',
-                                self._solver_options.get('residual_refresh', 0)))
+        try:
+            M.setup(K_pc)
+        except OperatorCapabilityError as exc:
+            self._log_error(
+                f"预条件子 {precond!r} 无法绑定到 {pc_level!r} 层级的算子 "
+                f"(operator_level={self._operator_level!r}, "
+                f"preconditioner_level={self._preconditioner_level!r}): "
+                f"{exc} 请把 preconditioner_level 设为 'fa'"
+            )
 
-            M = None
-            # 无预条件子时三个 norm_type 数值等价, 取默认的 natural
-            norm_type = 'natural'
-            if precond is not None:
-                from soptx.solvers import (
-                    DiagonalPreconditioner,
-                    OperatorCapabilityError,
-                )
-
-                # 预条件子的算子源: 默认就是主算子本身, 给了 preconditioner_level
-                # 就另建一个. 两者都是已施加边界条件的算子, 对预条件子而言等价.
-                #
-                # 先在 fem 侧的算子上 setup 再交给 CG (CG 只对未 setup 的预条件子
-                # 做级联): 一是 _as_iterative_operator 的产物在 pytorch 后端是原生
-                # torch 稀疏张量, 取对角要另说; 二是级联用的是主算子, 那样
-                # preconditioner_level 就白设了
-                pc_level = self._preconditioner_level or self._operator_level
-                if self._preconditioner_level is None:
-                    K_pc = K
-                else:
-                    K_pc = self._preconditioner_operator()
-
-                if precond in ('jacobi', 'diagonal'):
-                    M = DiagonalPreconditioner()
-                elif precond == 'mg':
-                    M = self._multigrid_preconditioner(**kwargs)
-                elif precond in ('scipy', 'mumps'):
-                    # 直接法当预条件子: LinearSolver.__matmul__ 本就是"零初值解一
-                    # 次"的预条件子模式, 不需要适配层. 它是精确逆, CG 应一步收敛,
-                    # 因此主要用途是验证两个层级确实是同一个离散算子
-                    M = create(precond)
-                else:
-                    self._log_error(
-                        f"未知的预条件子类型: {precond}; "
-                        f"可选 'jacobi'/'diagonal', 'mg', 'scipy', 'mumps'"
-                    )
-
-                try:
-                    M.setup(K_pc)
-                except OperatorCapabilityError as exc:
-                    self._log_error(
-                        f"预条件子 {precond!r} 无法绑定到 {pc_level!r} 层级的算子 "
-                        f"(operator_level={self._operator_level!r}, "
-                        f"preconditioner_level={self._preconditioner_level!r}): "
-                        f"{exc} 请把 preconditioner_level 设为 'fa'"
-                    )
-
-                # 判据范数与下游口径对齐: cg 默认在 natural 范数
-                # sqrt(r^T M^-1 r) 下停机, 而本方法返回的 relres 是 2-范数,
-                # Jacobi 的 diag^-1 可达 1e6 量级, 两个口径能差几个数量级.
-                # 显式选 unpreconditioned 让停机判据也用 ||r||_2, 不多做 matvec
-                norm_type = 'unpreconditioned'
-                # 与范数选择正交: 递推残差在长迭代下会漂移, 周期性用 b - A x
-                # 校正. 撤掉它需要单独的数值证据, 故与 M 绑定保持开启
-                if residual_refresh <= 0:
-                    residual_refresh = 50
-
-            # cg 支持批量求解, batch_first 为 False 时, 表示第一个维度为自由度维度
-            solver = create('cg', M=M, atol=atol, rtol=rtol, maxit=maxiter,
-                            batch_first=False,
-                            norm_type=norm_type,
-                            residual_refresh=residual_refresh)
-
-            return (solver, self._as_iterative_operator(K),
-                    {'maxit': maxiter, 'precond': precond}, (atol, rtol))
-
-        if solver_type == 'mumps':
-            # sym=0 按一般非对称矩阵分解; 位移元刚度阵经对称消元后仍是对称正定,
-            # 传 1 (正定) 或 2 (一般对称) 只让 MUMPS 读下三角, 因子存储与运算量
-            # 大致减半. 默认保持 0, 由调用方显式开启
-            mumps_sym = int(kwargs.get('sym', 0))
-
-            return create('mumps', sym=mumps_sym), K, {'sym': mumps_sym}, None
-
-        return create(solver_type), K, {}, None
+        return M
 
     def _multigrid_preconditioner(self, level: Optional[AssemblyLevelExtension] = None, **kwargs):
         """几何多重网格预条件子, 粗层按层级对象所带的单元系数重建.
@@ -1104,22 +1027,21 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 f"topopt_algorithm={self._topopt_algorithm!r}, 层级 {level!r}"
             )
 
-        def option(name, default):
-            return kwargs.get(name, self._solver_options.get(name, default))
+        options = self._merged_solver_options(kwargs)
 
         if self._mg_hierarchy is None:
             _, isBdDof, _ = self._dirichlet_data()
             try:
                 self._mg_hierarchy = StructuredHexHierarchy(
                     self._tensor_space, isBdDof, self._reference_stiffness_matrices()[0],
-                    coarse_max_dofs=int(option('mg_coarse_max_dofs', 20000)))
+                    coarse_max_dofs=int(options.get('mg_coarse_max_dofs', 20000)))
             except (ValueError, NotImplementedError) as exc:
                 self._log_error(f"precond='mg' 无法构造多重网格层次: {exc}")
         self._mg_hierarchy.update(scale)
 
-        return self._mg_hierarchy.build_multigrid(omega=option('mg_omega', None),
-                                                  sweeps=int(option('mg_sweeps', 1)),
-                                                  coarse_solver=option('mg_coarse_solver', 'scipy'))
+        return self._mg_hierarchy.build_multigrid(omega=options.get('mg_omega', None),
+                                                  sweeps=int(options.get('mg_sweeps', 1)),
+                                                  coarse_solver=options.get('mg_coarse_solver', 'scipy'))
 
     def solve_system(self, K, F, out, **kwargs):
         """在给定算子上求解线性系统, 解就地写入 out
@@ -1139,6 +1061,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         Note
         ----
+        求解器的构造、运行与诊断整理见 ``soptx.fem.linear_solve``; 本方法只补上与分析器
+        状态有关的部分: 预条件子 (``_make_preconditioner``) 与报错上下文.
+
         本方法不读取任何由 apply_bc 留下的状态. 迭代解法的初值必须由调用方通过
         kwargs['x0'] 显式给出——对 'ea' 而言通常就是 apply_bc 产生的
         prescribed_solution, 它已满足 Dirichlet 值.
@@ -1160,50 +1085,32 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 "提供带 overlap 加权内积的 CG, 参考 examples/matrix_free_elasticity"
             )
 
-        from soptx.solvers import OperatorCapabilityError
-
         solver_type = kwargs.get('solver', self._solve_method)
-        solver, op, extra, tol = self._build_solver(solver_type, K, **kwargs)
+        if solver_type not in available_solvers():
+            self._log_error(
+                f"未知的求解器类型: {solver_type}; "
+                f"可用: {', '.join(available_solvers())}"
+            )
 
+        options = self._merged_solver_options(kwargs)
+        operator, M = K, None
+        if solver_type == 'cg':
+            precond = options.get('precond', None)
+            if precond is not None:
+                M = self._make_preconditioner(precond, K, kwargs)
+            operator = as_iterative_operator(K)
+
+        solver, extra, tol = build_solver(solver_type, options, preconditioner=M)
         try:
-            try:
-                solver.setup(op)
-            except OperatorCapabilityError as exc:
-                self._log_error(
-                    f"operator_level={self._operator_level!r} 下无法使用求解器 "
-                    f"'{solver_type}': {exc} 请改用 solver='cg'; "
-                    f"若是想要显式矩阵上的预条件, 可保留 solver='cg' 并设 "
-                    f"preconditioner_level='fa'"
-                )
-
-            out[:], raw = solver.solve(F[:], kwargs.get('x0', None))
-        finally:
-            # 直接法持有 SuperLU 分解或 MUMPS 上下文, 用完即释放. 预条件子位上的
-            # 直接法 (preconditioner_level 配 precond='scipy'/'mumps') 持有的是
-            # 另一份, 一并释放, 否则 MUMPS 侧的内存不回收
-            for owner in (solver, getattr(solver, 'M', None)):
-                close = getattr(owner, 'close', None)
-                if close is not None:
-                    close()
-
-        info = {'name': solver_type, **extra,
-                'niter': int(raw['niter']),
-                'relres': float(raw['relres']),
-                'converged': bool(raw['converged'])}
-
-        if tol is not None:
-            # 收敛与否以求解器自己的退出原因为准, 不在这里重判. 原来那段用
-            # max(atol, rtol * ||F||_2) 重算是错的: solve_system 支持传 x0,
-            # 热启动时 rtol 的参照量是 ||r0|| 而非 ||F||. 判据口径的对齐已在
-            # 求解器内部完成 (见上面 _build_solver 的 norm_type)
-            reason = raw.get('reason', None)
-            if reason is not None:
-                info['reason'] = reason.name
-            info['reference_norm'] = float(raw.get('reference_norm', 0.0))
-            info['recursive_residual'] = float(raw['residual'])
-            true_residual = raw.get('true_residual', None)
-            info['true_residual'] = (None if true_residual is None
-                                     else float(true_residual))
+            info = run_solver(solver, operator, F, out, name=solver_type, extra=extra, tol=tol,
+                              x0=kwargs.get('x0', None))
+        except OperatorCapabilityError as exc:
+            self._log_error(
+                f"operator_level={self._operator_level!r} 下无法使用求解器 "
+                f"'{solver_type}': {exc} 请改用 solver='cg'; "
+                f"若是想要显式矩阵上的预条件, 可保留 solver='cg' 并设 "
+                f"preconditioner_level='fa'"
+            )
 
         return out, info
 
