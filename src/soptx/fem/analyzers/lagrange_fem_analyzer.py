@@ -816,14 +816,13 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         if adjoint:
             uh_bd = bm.repeat(uh_bd.reshape(-1, 1), 2, axis=1)
-            # u_D 恒为零 (齐次约束) 时 K u_D = 0, 跳过; 大规模下 tocoo 与这次乘法都很昂贵
-            #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
+            # u_D 恒为零 (齐次约束) 时 K u_D = 0, 跳过; 大规模下这次乘法很昂贵
             if bd_nonzero:
-                F = F - K.tocoo().matmul(uh_bd[:])
+                F = F - K.matmul(uh_bd[:])
             F = bm.set_at(F, (isBdDof, slice(None)), uh_bd[isBdDof, :])
         else:
             if bd_nonzero:
-                F = F - K.tocoo().matmul(uh_bd[:])
+                F = F - K.matmul(uh_bd[:])
             F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
 
         K = self._apply_matrix(K, isDDof=isBdDof)
@@ -1042,7 +1041,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         """把刚度算子转成迭代解法可以直接作用的形式
 
         矩阵自由层级下 K 本身就支持 @ 运算; 'fa' 下 PyTorch 后端需要绕开 FEALPy
-        的 CSRTensor, 其余后端直接用 COO.
+        的 CSRTensor, 其余后端直接用 CSR: numpy 后端的 csr_spmm 就是 scipy 的
+        csr_matvec, 转 COO 只会多出 (2, nnz) 的 int64 索引 (首档约 6 GiB).
         """
         if self._operator_level != 'fa':
             return K
@@ -1061,7 +1061,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             return K_coo_torch.to_sparse_csr()
 
-        return K.tocoo()
+        return K
 
     def assemble_operator_diagonal(self, K) -> TensorLike:
         """取已施加 Dirichlet 条件的系统算子对角, 供 Jacobi 类预条件使用

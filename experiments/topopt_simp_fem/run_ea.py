@@ -37,6 +37,8 @@ E0 = 1.0
 EMIN = 1.0e-7
 NU = 0.3
 SUPPORT = 'end_corners'
+# 设计关于 z 中面对称: 问题本身严格对称, 每轮把灵敏度投影到对称设计子空间, 使优化停在文献的对称分支上
+SYMMETRY = 'z'
 
 # 有限元离散与求解
 SPACE_DEGREE = 1
@@ -51,6 +53,8 @@ OC_OPTIONS = dict(move_limit=0.2, damping_coef=0.5, initial_lambda=1.0e9,
                   bisection_tol=1.0e-3, design_variable_min=0.0)
 TOLERANCE = 2.0e-4
 CONVERGENCE_WINDOW = 5
+# OC 乘子只有 bisection_tol 的相对精度, 更新后的物理体积分数允许超出 VOLFRAC 的量; 再大视为乘子搜索失败
+VOLUME_TOLERANCE = 1.0e-6
 
 
 def parse_args(argv=None):
@@ -72,9 +76,6 @@ def parse_args(argv=None):
                         help='CG 预条件子: mg 为几何多重网格 V 循环, jacobi 为对角 (默认: mg)')
     parser.add_argument('--solver', choices=('cg', ), default='cg',
                         help='线性求解器 (默认: cg, 即预条件共轭梯度法; EA 没有全局矩阵, 直接法不可用)')
-    parser.add_argument('--symmetry', choices=('z', 'none'), default='z',
-                        help='设计对称约束 (默认: z, 每轮把灵敏度投影到关于 z 中面对称的子空间; '
-                             'none 时不加约束, 长时间运行中舍入误差可能逐渐破坏对称)')
     parser.add_argument('--max-iter', type=int, default=300, help='优化最大迭代数 (默认: 300)')
     parser.add_argument('--vtu-fields', nargs='+', choices=('density', 'displacement'), default=['density'],
                         help='每轮及最终 VTU 保存的场, 可多选 (默认: density); displacement 写为节点向量 u')
@@ -142,10 +143,11 @@ def main(argv=None):
                   E0=E0, Emin=EMIN, nu=NU, penalty=PENALTY, volfrac=VOLFRAC,
                   filter_type='density', filter_radius=radius, optimizer=OC_OPTIONS,
                   support=SUPPORT, load=LOAD,
-                  symmetry=args.symmetry,
+                  symmetry=SYMMETRY,
                   operator_level=OPERATOR_LEVEL, assembly_method=args.assembly_method, solver=args.solver,
                   backend=args.backend, device=args.device,
                   max_iter=args.max_iter, tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
+                  volume_tolerance=VOLUME_TOLERANCE,
                   vtu_fields=args.vtu_fields,
                   cg_options=cg_options, cg_tolerance=args.cg_tol)
     (output / 'config.json').write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -158,7 +160,7 @@ def main(argv=None):
     print(f'[配置] EA, {args.backend}/{args.device}, 装配 {args.assembly_method}, '
           f'求解 {args.solver} ({args.precond}, tol {args.cg_tol:g}, maxiter {args.cg_maxiter}), '
           f'网格 {args.mesh} {grid} = {n_cells} 单元 / {n_dofs} 自由度, 载荷点 {len(problem.loads())} 个, '
-          f'支承 {SUPPORT}, 对称约束 {args.symmetry}, 输出 {output}',
+          f'支承 {SUPPORT}, 对称约束 {SYMMETRY}, 输出 {output}',
           flush=True)
 
     setup_stages = {}
@@ -202,9 +204,8 @@ def main(argv=None):
         volume_gradient = density_filter.filter_constraint_sensitivities(
             design_variable=rho, con_grad_rho=constraint.jac(density=rho))
         # 理论上已对称, 取与 z 向镜像的平均, 消去过滤求和顺序留下的舍入差异
-        if args.symmetry == 'z':
-            gradient_grid = bm.reshape(volume_gradient, grid)
-            volume_gradient = bm.reshape(0.5 * (gradient_grid + bm.flip(gradient_grid, axis=2)), (-1, ))
+        gradient_grid = bm.reshape(volume_gradient, grid)
+        volume_gradient = bm.reshape(0.5 * (gradient_grid + bm.flip(gradient_grid, axis=2)), (-1, ))
 
     history = []
     recent = []
@@ -259,9 +260,8 @@ def main(argv=None):
                 raise FloatingPointError('柔顺度灵敏度非有限')
             # 取与 z 向镜像的平均, 投影到对称设计的子空间: 共用变量的梯度为镜像两单元之和, 取平均
             # 只差常数因子, 不影响 OC 的乘子; 浮点加法可交换, 结果逐位对称
-            if args.symmetry == 'z':
-                dc_grid = bm.reshape(dc, grid)
-                dc = bm.reshape(0.5 * (dc_grid + bm.flip(dc_grid, axis=2)), (-1, ))
+            dc_grid = bm.reshape(dc, grid)
+            dc = bm.reshape(0.5 * (dc_grid + bm.flip(dc_grid, axis=2)), (-1, ))
 
         analysis_seconds = perf_counter() - started
 
@@ -329,7 +329,7 @@ def main(argv=None):
                 if (not bool(bm.all(bm.isfinite(rho_new)))
                         or float(bm.min(rho_new)) < 0 or float(bm.max(rho_new)) > 1):
                     raise FloatingPointError('OC 更新得到无效密度')
-                if float(bm.sum(volume_gradient * rho_new)) > VOLFRAC + 1.0e-6:
+                if float(bm.sum(volume_gradient * rho_new)) > VOLFRAC + VOLUME_TOLERANCE:
                     raise RuntimeError('OC 乘子搜索未满足物理体积约束')
             rho = rho_new
 

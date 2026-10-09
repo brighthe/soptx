@@ -717,6 +717,39 @@ class CSRTensor(SparseTensor):
         diags_loc = (self.row) == self.col
         return self.partial(diags_loc)
 
+    def diagonal(self) -> TensorLike:
+        """主对角线向量, 重复索引按散加求和.
+
+        numpy 后端调 scipy 的 ``csr_diagonal`` 内核, 不展开行索引; 其余后端由行指针展开
+        行索引后掩码取值. 与 ``diags()`` 不同, 返回一维向量而不是稀疏矩阵, 供
+        ``soptx.solvers.operator_diagonal`` 直接使用, 免去转 COO.
+
+        Returns
+        -------
+        TensorLike
+            ``(min(M, N), )`` 的主对角.
+
+        Raises
+        ------
+        ValueError
+            模式矩阵没有值.
+        NotImplementedError
+            ``values`` 带批量维.
+        """
+        if self._values is None:
+            raise ValueError("模式矩阵没有值, 无法取对角")
+        if self._values.ndim != 1:
+            raise NotImplementedError("带批量维的 CSR 矩阵尚不支持取对角")
+        M, N = self._spshape
+        if bm.backend_name == 'numpy':
+            from scipy.sparse._sparsetools import csr_diagonal
+            diag = bm.zeros((min(M, N), ), **bm.context(self._values))
+            csr_diagonal(0, M, N, self._crow, self._col, self._values, diag)
+            return diag
+        on_diagonal = self.row == self._col
+        diag = bm.zeros((min(M, N), ), **bm.context(self._values))
+        return bm.index_add(diag, self._col[on_diagonal], self._values[on_diagonal])
+
     def __getitem__(self, index):
         if isinstance(index, Tuple):
             crow_index, col_index = index 

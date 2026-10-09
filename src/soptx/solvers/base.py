@@ -151,9 +151,9 @@ def operator_capabilities(op: Any) -> frozenset:
     # to_scipy: soptx.sparse 稀疏张量; tocsr: 已经是 scipy 稀疏矩阵
     if hasattr(op, "to_scipy") or hasattr(op, "tocsr"):
         caps.add(CAP_MATRIX)
-    # diagonal: 算子自报对角, 一维向量 (SOPTX 的算子包装, scipy 稀疏, numpy
-    # 稠密都是这个口径); tocoo: soptx.sparse 稀疏张量自己给不出一维对角, 但能扫 COO
-    # 取出来.
+    # diagonal: 算子自报对角, 一维向量 (SOPTX 的算子包装, soptx.sparse 的 CSR,
+    # scipy 稀疏, numpy 稠密都是这个口径); tocoo: soptx.sparse 的 COO 自己给不出一维
+    # 对角, 但能扫 COO 取出来.
     #
     # 刻意不认 soptx.sparse 的 ``diags()``: 它返回的是只保留对角的稀疏矩阵而不是一
     # 维向量, 认了会让 CAP_DIAGONAL 通过, 而下游拿到一个形状不对的东西.

@@ -1,4 +1,4 @@
-# 传统有限元 + EA 拓扑优化
+# 传统有限元 + FA 拓扑优化
 
 ## MBB 梁算例
 
@@ -25,17 +25,17 @@
 | 数值积分 | 二阶高斯积分 |
 | 分析网格 | $390\times65\times65$ |
 
-### EA 与线性求解
+### FA 与线性求解
 
 | 参数 | 数值或设置 |
 |---|---|
-| 刚度算子 | EA：结构化网格上唯一一份参考单元刚度 $K^0$，乘逐单元系数 $E(\tilde\rho_e)/E_0$ |
-| 边界条件 | 对称消元算子 $\Pi_IK\Pi_I+\Pi_D$，不形成矩阵 |
-| 线性求解器 | 默认几何多重网格预条件共轭梯度法（MGCG），可选 Jacobi 预条件；没有全局矩阵，不能用直接法 |
-| 多重网格 | 与 FA 版本相同，见 [`topopt_simp_fem_fa`](../topopt_simp_fem_fa/README.md)；最细层为 EA 算子 |
-| 停机准则 | $\lVert b-Au\rVert_2/\lVert b\rVert_2\le10^{-6}$ |
-| 初值 | 上一轮位移热启动，首轮取 Dirichlet 基准向量（本例为零） |
-| 最大迭代数 | $20000$，逐轮记录实际迭代步数 |
+| 刚度算子 | FA：全局 CSR 稀疏矩阵；结构化网格上只存一份实体参考单元刚度 $K^0$，乘逐单元系数 $E(\tilde\rho_e)/E_0$ 装配，不逐单元重新积分 |
+| 边界条件 | 保结构对称消元：受约束行列置零、对角置 $1$，沿用原 CSR 骨架 |
+| 线性求解器 | 默认几何多重网格预条件共轭梯度法（MGCG）；可选 Jacobi 预条件，或直接法 MUMPS / SciPy（仅适合小网格） |
+| 多重网格 | V 循环；三线性延拓，粗网格各向单元数取 $\lceil n/2\rceil$；Galerkin 粗层算子（第 2 层按单元组合 $\sum_c s_cP_c^{\mathsf T}K^0P_c$）；加权 Jacobi 前后各 1 步，$\omega=4/(3\cdot1.1\,\hat\lambda)$；最粗层不超过 $20000$ 个自由度，直接分解 |
+| 停机准则（PCG） | $\lVert b-Au\rVert_2/\lVert b\rVert_2\le10^{-6}$ |
+| 初值（PCG） | 上一轮位移热启动，首轮取零 |
+| 最大迭代数（PCG） | $20000$，逐轮记录实际迭代步数 |
 
 ### 优化参数
 
@@ -67,7 +67,7 @@
 每轮帧 `iterations/*.vtu` 与 `evolution.pvd` 体积大，运行结束后迁移到 Windows 本地目录查看，WSL 的结果目录只保留 json、npy 与 `result_final.vtu`，迁移位置记在 `visualization_location.json`：
 
 ```bash
-python -m soptx.postprocess.sync_visualization --source-dir outputs/ea_hex_390x65x65_cg --destination-dir /mnt/c/workspace/soptx-results/topopt_simp_fem_ea/ea_hex_390x65x65_cg --move
+python -m soptx.postprocess.sync_visualization --source-dir outputs/fa_hex_390x65x65_cg --destination-dir /mnt/c/workspace/soptx-results/topopt_simp_fem/fa_hex_390x65x65_cg --move
 ```
 
 ## 参考文献

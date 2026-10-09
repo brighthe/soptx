@@ -1,7 +1,7 @@
 """传统有限元 + FA 拓扑优化: 三维 MBB 梁.
 
 每轮依次为密度过滤, 分析, 柔顺度与灵敏度, 停止判断, OC 更新; 停止判断在更新之前, 落盘的
-密度即最后一次分析的设计. 各阶段的耗时与内存由 ``measure`` 记录.
+密度即最后一次分析的设计. 
 """
 
 import argparse
@@ -37,32 +37,36 @@ E0 = 1.0
 EMIN = 1.0e-7
 NU = 0.3
 SUPPORT = 'end_corners'
+# 设计关于 z 中面对称
+SYMMETRY = 'z'
 
 # 有限元离散与求解
 SPACE_DEGREE = 1
-INTEGRATION_ORDER = 2        
+INTEGRATION_ORDER = 2
 OPERATOR_LEVEL = 'fa'
 
 # 优化参数
 VOLFRAC = 0.12
-FILTER_RADIUS_CELLS = 3.0    
+FILTER_RADIUS_CELLS = 3.0
 PENALTY = 3.0
 OC_OPTIONS = dict(move_limit=0.2, damping_coef=0.5, initial_lambda=1.0e9,
                   bisection_tol=1.0e-3, design_variable_min=0.0)
 TOLERANCE = 2.0e-4
 CONVERGENCE_WINDOW = 5
+VOLUME_TOLERANCE = 1.0e-6
 
 
 def parse_args(argv=None):
     """解析网格, 迭代与输出参数."""
-    # CG 选项在命令行中默认为 None, 以便识别直接法下的误传; 实际默认值取自这里
     cg_defaults = dict(cg_tol=1.0e-6, cg_maxiter=20000, precond='mg')
 
     parser = argparse.ArgumentParser(description='传统有限元 + FA 拓扑优化 (MBB 梁)')
     parser.add_argument('--mesh', choices=('hex', ), default='hex',
                         help='网格类型 (目前只支持 hex: Q1 单元与结构化密度过滤均要求六面体网格)')
+    
     parser.add_argument('--grid', type=int, nargs=3, default=(390, 65, 65), metavar=('NX', 'NY', 'NZ'),
                         help='网格剖分, 须满足 NX = 6 NY 且 NY = NZ (默认: 390 65 65, 文献首档)')
+    
     parser.add_argument('--backend', choices=('numpy', 'pytorch'), default='numpy', help='计算后端 (默认: numpy)')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu',
                         help='计算设备 (默认: cpu); cuda 须配 pytorch 后端')
@@ -77,9 +81,6 @@ def parse_args(argv=None):
                              f'(默认: {cg_defaults["precond"]}, 仅 cg)')
     parser.add_argument('--solver', choices=('cg', 'mumps', 'scipy'), default='cg',
                         help='线性求解器 (默认: cg, 即预条件共轭梯度法; mumps/scipy 为直接法, 仅适合小网格)')
-    parser.add_argument('--symmetry', choices=('z', 'none'), default='z',
-                        help='设计对称约束 (默认: z, 每轮把灵敏度投影到关于 z 中面对称的子空间; '
-                             'none 时不加约束, 长时间运行中舍入误差可能逐渐破坏对称)')
     parser.add_argument('--max-iter', type=int, default=300, help='优化最大迭代数 (默认: 300)')
     parser.add_argument('--vtu-fields', nargs='+', choices=('density', 'displacement'), default=['density'],
                         help='每轮及最终 VTU 保存的场, 可多选 (默认: density); displacement 写为节点向量 u')
@@ -152,10 +153,11 @@ def main(argv=None):
                   E0=E0, Emin=EMIN, nu=NU, penalty=PENALTY, volfrac=VOLFRAC,
                   filter_type='density', filter_radius=radius, optimizer=OC_OPTIONS,
                   support=SUPPORT, load=LOAD,
-                  symmetry=args.symmetry,
+                  symmetry=SYMMETRY,
                   operator_level=OPERATOR_LEVEL, assembly_method=args.assembly_method, solver=args.solver,
                   backend=args.backend, device=args.device,
                   max_iter=args.max_iter, tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
+                  volume_tolerance=VOLUME_TOLERANCE,
                   vtu_fields=args.vtu_fields)
     is_cg = args.solver == 'cg'
     cg_options = None
@@ -177,7 +179,7 @@ def main(argv=None):
                    if is_cg else args.solver)
     print(f'[配置] FA, {args.backend}/{args.device}, 装配 {args.assembly_method}, 求解 {solver_text}, '
           f'网格 {args.mesh} {grid} = {n_cells} 单元 / {n_dofs} 自由度, 载荷点 {len(problem.loads())} 个, '
-          f'支承 {SUPPORT}, 对称约束 {args.symmetry}, 输出 {output}',
+          f'支承 {SUPPORT}, 对称约束 {SYMMETRY}, 输出 {output}',
           flush=True)
 
     setup_stages = {}
@@ -221,9 +223,8 @@ def main(argv=None):
         volume_gradient = density_filter.filter_constraint_sensitivities(
             design_variable=rho, con_grad_rho=constraint.jac(density=rho))
         # 理论上已对称, 取与 z 向镜像的平均, 消去过滤求和顺序留下的舍入差异
-        if args.symmetry == 'z':
-            gradient_grid = bm.reshape(volume_gradient, grid)
-            volume_gradient = bm.reshape(0.5 * (gradient_grid + bm.flip(gradient_grid, axis=2)), (-1, ))
+        gradient_grid = bm.reshape(volume_gradient, grid)
+        volume_gradient = bm.reshape(0.5 * (gradient_grid + bm.flip(gradient_grid, axis=2)), (-1, ))
 
     history = []
     recent = []
@@ -277,9 +278,8 @@ def main(argv=None):
                 raise FloatingPointError('柔顺度灵敏度非有限')
             # 取与 z 向镜像的平均, 投影到对称设计的子空间: 共用变量的梯度为镜像两单元之和, 取平均
             # 只差常数因子, 不影响 OC 的乘子; 浮点加法可交换, 结果逐位对称
-            if args.symmetry == 'z':
-                dc_grid = bm.reshape(dc, grid)
-                dc = bm.reshape(0.5 * (dc_grid + bm.flip(dc_grid, axis=2)), (-1, ))
+            dc_grid = bm.reshape(dc, grid)
+            dc = bm.reshape(0.5 * (dc_grid + bm.flip(dc_grid, axis=2)), (-1, ))
 
         analysis_seconds = perf_counter() - started
 
@@ -347,7 +347,7 @@ def main(argv=None):
                 if (not bool(bm.all(bm.isfinite(rho_new)))
                         or float(bm.min(rho_new)) < 0 or float(bm.max(rho_new)) > 1):
                     raise FloatingPointError('OC 更新得到无效密度')
-                if float(bm.sum(volume_gradient * rho_new)) > VOLFRAC + 1.0e-6:
+                if float(bm.sum(volume_gradient * rho_new)) > VOLFRAC + VOLUME_TOLERANCE:
                     raise RuntimeError('OC 乘子搜索未满足物理体积约束')
             rho = rho_new
 
