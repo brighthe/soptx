@@ -15,6 +15,10 @@ Concrete helpers live in the submodules:
   optimization history as JSON, and plot the convergence curves;
 * :mod:`soptx.postprocess.stress_report` -- post-optimization stress-constraint
   checking, solid-element statistics and von Mises yield-surface plots;
+* :mod:`soptx.postprocess.iteration_frames` -- write one ParaView frame per
+  optimization iteration under the run directory and, once the run has
+  finished, move the frames to a viewing directory
+  (:class:`soptx.postprocess.iteration_frames.IterationFrameWriter`);
 * :mod:`soptx.postprocess.sync_visualization` -- incrementally copy (or move) the
   per-iteration ParaView frames of a run to a viewing directory, e.g. a Windows
   local disk under WSL (``python -m soptx.postprocess.sync_visualization``).
