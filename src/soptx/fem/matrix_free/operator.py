@@ -2,10 +2,7 @@
 
 ``ElasticityEAOperator`` 封装 EA (无矩阵单元装配) 模式下的装配生命周期与算子代数接口:
 首次访问时才触发装配并缓存、Dirichlet 自由度掩码推导, 以及可直接传入 Krylov
-求解器的 ``@`` 矩阵乘接口. 串行与分布式由 ``dof_comm`` 是否为 ``None`` 决定,
-底层分析器统一由 ``soptx.fem.analyzers.builders`` 构造.
-
-分析器构造工厂见 ``soptx.fem.analyzers.builders``, 一步正向求解见 ``solve``.
+求解器的 ``@`` 矩阵乘接口. 底层分析器由 ``soptx.fem.analyzers.builders`` 构造.
 """
 
 from __future__ import annotations
@@ -15,10 +12,7 @@ from typing import Any, Optional
 from soptx.functionspace import TensorFunctionSpace
 from soptx.typing import TensorLike
 
-from soptx.fem.analyzers.builders import (
-    build_distributed_analyzer,
-    build_serial_analyzer,
-)
+from soptx.fem.analyzers.builders import build_serial_analyzer
 from soptx.fem.analyzers.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 
 
@@ -29,10 +23,6 @@ class ElasticityEAOperator:
         1. 懒加载与结果缓存: 首次访问刚度算子或载荷向量时才触发装配, 之后自动复用, 避免重复装配开销;
         2. Dirichlet 自由度掩码推导: 自动提取并缓存边界自由度索引掩码 ``boundary_dofs``;
         3. 算子矩阵乘接口 (``@``): 实现 ``__matmul__``, 使其实例可作为线性算子直接传入 Krylov 求解器.
-
-    串行与分布式统一:
-        - 当 ``dof_comm=None`` 时, 底层自动调用 ``LagrangeFEMAnalyzer`` 串行分析器;
-        - 当提供 ``dof_comm`` 时, 底层自动调用 ``DistributedElasticityAnalyzer`` 分布式分析器.
     """
 
     def __init__(
@@ -41,18 +31,16 @@ class ElasticityEAOperator:
         pde: Any,
         material: Any,
         degree: int = 1,
-        dof_comm: Any = None,
         assembly_method: str = "standard",
         integration_order: Optional[int] = None,
     ) -> None:
         """初始化 EA 算子门面.
 
         参数:
-            space (TensorFunctionSpace): 局部或全局交错布局的向量有限元空间.
+            space (TensorFunctionSpace): 向量有限元空间.
             pde (Any): 物理工程问题或制造解对象.
             material (Any): 弹性力学本构材料模型.
             degree (int, 可选): 有限元基函数多项式次数. 默认值为 1.
-            dof_comm (EntityMPI | None, 可选): 自由度跨进程通信器. 串行传入 None. 默认值为 None.
             assembly_method (str, 可选): 单元矩阵的收缩顺序, 可选 ``"standard"``、``"voigt"`` 或 ``"fast"``.
                 它只改变中间张量的规模与峰值内存, 不改变单元矩阵的数值. 默认值为 ``"standard"``.
             integration_order (int | None, 可选): 积分参数 q, 张量积单元为每方向点数; 为 None 时取
@@ -61,20 +49,12 @@ class ElasticityEAOperator:
         self.space = space
         self.pde = pde
         self.degree = degree
-        self.dof_comm = dof_comm
         self.assembly_method = assembly_method
 
-        self.analyzer: LagrangeFEMAnalyzer
-        if dof_comm is None:
-            self.analyzer = build_serial_analyzer(
-                space, pde, material, degree, "ea", assembly_method,
-                integration_order=integration_order,
-            )
-        else:
-            self.analyzer = build_distributed_analyzer(
-                space, pde, material, degree, "ea", assembly_method,
-                dof_comm=dof_comm, integration_order=integration_order,
-            )
+        self.analyzer: LagrangeFEMAnalyzer = build_serial_analyzer(
+            space, pde, material, degree, "ea", assembly_method,
+            integration_order=integration_order,
+        )
 
         self._system_operator: Any = None
         self._load_vector: Optional[TensorLike] = None
@@ -89,7 +69,6 @@ class ElasticityEAOperator:
                刚度矩阵集 :math:`\\{\\mathbf{K}_e\\}`, 不拼接全局大矩阵;
             2. 体力荷载装配 (全通用实现): 调用 ``assemble_body_force_vector()`` 组装一维稠密载荷向量 :math:`\\mathbf{f}` (与 FA 共享);
             3. 边界条件施加 (EA 投影多态): 调用 ``apply_bc()`` 构建无矩阵对角投影算子 :math:`\\mathbf{A} = \\boldsymbol{\\Pi}_I \\mathbf{K} \\boldsymbol{\\Pi}_I + \\boldsymbol{\\Pi}_D`
-               (多进程下自动包含 ``OverlapOperator`` 重叠同步包装);
             4. 边界几何信息提取 (全通用实现): 提取指定位移值 ``prescribed_solution`` 与边界自由度掩码 ``boundary_dofs``.
 
         返回:
@@ -101,7 +80,7 @@ class ElasticityEAOperator:
         stiff_matrix = self.analyzer.assemble_stiff_matrix()
         # 2. 体力荷载: 走通用线性型积分, 组装稠密右端项载荷向量
         body_force = self.analyzer.assemble_body_force_vector()
-        # 3. 边界条件: 走 EA 对角投影算子包装 (分布式下自动提升为 OverlapOperator)
+        # 3. 边界条件: 走 EA 对角投影算子包装
         operator, load = self.analyzer.apply_bc(stiff_matrix, body_force)
 
         self._system_operator = operator

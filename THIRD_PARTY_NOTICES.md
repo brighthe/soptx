@@ -16,7 +16,8 @@ SOPTX 自有代码采用 `GPL-3.0-only`（见 [`LICENSE`](LICENSE)）。本仓�
 | 移植时间 | 2026-10（搬入 `bf2f362`，引用切换 `b55f265`，依赖移除 `6712050`） |
 
 SOPTX 不再依赖 FEALPy 发行版或 fork。下列代码移植后即为 SOPTX 的一部分，此后以 SOPTX
-仓库为准演化，不再跟随上游；每个移植文件的头部注明了源文件路径与源提交。
+仓库为准演化，不再跟随上游；除 `src/soptx/solvers/` 下的文件外，每个移植文件的头部注明了源文件
+路径与源提交，`src/soptx/solvers/` 下的来源以本表为准。
 
 ### 移植范围
 
@@ -25,12 +26,12 @@ SOPTX 不再依赖 FEALPy 发行版或 fork。下列代码移植后即为 SOPTX 
 | `src/soptx/backend/` | `fealpy/backend/` | 仅 `base`、`manager`（含 `manager.pyi`）、numpy 与 pytorch 后端；logger 改为 `logging.getLogger(__name__)`，后端加载路径改为 `soptx.backend`。jax、cupy、paddle、mindspore、taichi 后端未移植 |
 | `src/soptx/typing.py`、`src/soptx/decorator/` | `fealpy/typing.py`、`fealpy/decorator/` | 原样 |
 | `src/soptx/sparse/`、`src/soptx/quadrature/` | `fealpy/sparse/`、`fealpy/quadrature/` | 原样 |
-| `src/soptx/mesh/`（`structured_box.py`、`structured_triangle.py` 除外） | `fealpy/mesh/`（v0.4 网格树） | 只保留三角形、四边形、四面体、六面体四类经典网格的依赖闭包；未移植绘图、半边结构、局部加密与粗化、多边形等网格工厂、读写与合并；`schema/classic` 中 3 处 `fealpy.quadrature` 绝对导入改为相对导入 |
+| `src/soptx/mesh/` | `fealpy/mesh/`（v0.4 网格树） | 只保留三角形、四边形、四面体、六面体四类经典网格的依赖闭包；未移植绘图、半边结构、局部加密与粗化、多边形等网格工厂、读写与合并；`schema/classic` 中 3 处 `fealpy.quadrature` 绝对导入改为相对导入 |
 | `src/soptx/functionspace/` | `fealpy/functionspace/` 中 `space`、`function`、`dofs`、`lagrange_fe_space`、`tensor_space`、`functional`、`utils` | 2 处 `fealpy.decorator` 绝对导入改为相对导入；其余空间与 `functionspace()` 工厂未移植。同目录的 `huzhang_fe_space*.py` 是 SOPTX 自有代码，不在本行范围内 |
 | `src/soptx/fem/integrator.py`、`form.py`；`bilinear_form.py`、`linear_form.py` 中的 coalesce 路线 | `fealpy/fem/integrator.py`、`form.py`、`bilinear_form.py`、`linear_form.py` | 两个 Form 类先以 `_bilinear_form_base.py`、`_linear_form_base.py` 移入，后与 SOPTX 同名子类合并为单个类（`bilinear_form.py`、`linear_form.py` 文件头注明部分移植） |
 | `src/soptx/fem/functional.py`、`src/soptx/fem/coef.py` | `fealpy/functional.py`、`fealpy/utils/utils.py` | `coef.py` 只保留 `process_coef_func`、`is_scalar`、`is_tensor`、`fill_axis` |
-| `src/soptx/solvers/cg.py`、`src/soptx/solvers/direct.py` | `fealpy/solver/cg.py` @ `40016dc56`、`fealpy/solver/direct.py` @ `30ca15599` | 早于本次移植，文件头已注明 |
-| `src/soptx/fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` | `fealpy/distributed/`（`distributed_mesh.py`、`entity_mpi.py`、`distributed_space.py`） | 早于本次移植（`abd0945`），源提交未记录；来源由与 fork 逐行比对推断，相同行分别约 192/256、166/292、80/286，已补注于文件头 |
+| `src/soptx/solvers/cg.py`、`src/soptx/solvers/direct.py` | `fealpy/solver/cg.py` @ `40016dc56`、`fealpy/solver/direct.py` @ `30ca15599` | 早于本次移植；`cg.py` 含上游 `suanhaitech/fealpy` 没有的收敛时真残差验证（`verify_residual`）扩展，`direct.py` 以上游为参考重新设计；来源只在本表登记，文件头不另注明 |
+| `src/soptx/fem/distributed/` 中 `mesh.py`、`entity_mpi.py`、`space.py` | `fealpy/distributed/`（`distributed_mesh.py`、`entity_mpi.py`、`distributed_space.py`） | 早于本次移植（`abd0945`），源提交未记录；来源由与 fork 逐行比对推断，相同行分别约 192/256、166/292、80/286，已补注于文件头。2026-10-10 移出主线，归档于标签 `archive/distributed-mpi`（见 [`docs/archive.md`](docs/archive.md)） |
 | `examples/pinn_elasticity/_pinn_support.py` | `fealpy/ml/`（`grad.py`、`sampler/`、`modules/module.py`） | 只保留示例用到的部分，修正 v0.4 下 `quadrature_formula` 的调用 |
 
 fork 上存活补丁在 SOPTX 中的落点与移植后遗留问题见

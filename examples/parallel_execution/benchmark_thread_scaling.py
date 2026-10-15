@@ -176,7 +176,6 @@ def build_workload(args: argparse.Namespace) -> Workload:
         operator_level=args.operator_level,
         solve_method="cg",
         topopt_algorithm=None,
-        enable_logging=False,
     )
 
     # 滤波器只在选到带宽受限段时才需要, 但构造很便宜, 一并建好.
@@ -188,7 +187,6 @@ def build_workload(args: argparse.Namespace) -> Workload:
         filter_type="density",
         rmin=args.rmin_cells * cell_size,
         density_location="element",
-        enable_logging=False,
     )
 
     return Workload(

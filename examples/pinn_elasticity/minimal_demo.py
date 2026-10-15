@@ -9,7 +9,7 @@
 而本 minimal_demo.py 属于完全自包含的单文件脚本, 不依赖本目录的任何本地模块.
 想看工程级自动化校验, 去读那些模块; 想看 PINN 是怎么把弹性力学方程解出来的, 读这一个文件就够.
 
-问题类和材料类直接取自 soptx.problems.elasticity:
+问题类和材料类直接取自 soptx.problems:
 - 2D: ExponentialSineManufacturedElasticity2D (平面应变, lambda=1.0, mu=0.5)
 - 3D: DivergenceFreePolynomialElasticity3D (3D各向同性, lambda=1.0, mu=1.0)
 
@@ -35,7 +35,7 @@ from soptx.backend import bm
 from soptx.mesh import TetrahedronMesh, TriangleMesh
 from _pinn_support import BoxBoundarySampler, ISampler, Solution, gradient
 
-from soptx.problems.elasticity import (
+from soptx.problems import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
 )

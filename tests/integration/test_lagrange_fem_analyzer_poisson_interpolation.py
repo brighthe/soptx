@@ -22,9 +22,9 @@ import pytest
 from soptx.backend import backend_manager as bm
 
 from soptx.fem import LagrangeFEMAnalyzer
-from soptx.mesh import create_huzhang_checkerboard_mesh
+from soptx.mesh import TriangleMesh
 from soptx.materials import IsotropicLinearElasticMaterial, lame_parameters
-from soptx.problems import BearingDevice2d
+from soptx.problems import BearingTraction2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 NX, NY = 12, 4
@@ -36,20 +36,19 @@ P_E = 3.0
 NU_VOID = 0.3
 
 
-def make_problem(nu: float, plane_type: str = "plane_strain") -> BearingDevice2d:
-    return BearingDevice2d(t=-8.0e-2, E=E0, nu=nu, plane_type=plane_type)
+def make_problem(nu: float, plane_type: str = "plane_strain") -> BearingTraction2d:
+    return BearingTraction2d(P=-9.6, E=E0, nu=nu, plane_type=plane_type)
 
 
-def make_mesh(problem: BearingDevice2d):
-    return create_huzhang_checkerboard_mesh(box=problem.domain, nx=NX, ny=NY)
+def make_mesh(problem: BearingTraction2d):
+    return TriangleMesh.from_checkerboard_box(box=problem.domain, nx=NX, ny=NY)
 
 
-def make_material(problem: BearingDevice2d) -> IsotropicLinearElasticMaterial:
+def make_material(problem: BearingTraction2d) -> IsotropicLinearElasticMaterial:
     return IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
         hypothesis=problem.plane_type,
-        enable_logging=False,
     )
 
 
@@ -64,7 +63,6 @@ def make_interpolation(target_variables, nu_void: float = NU_VOID) -> MaterialIn
             "nu_penalty_factor": 1.0,
             "void_poisson_ratio": nu_void,
         },
-        enable_logging=False,
     )
 
 

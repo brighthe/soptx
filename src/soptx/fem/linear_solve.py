@@ -2,7 +2,7 @@
 
 按名字构造求解器 (``build_solver``), 在给定算子上运行并整理诊断 (``run_solver``).
 与分析器状态有关的部分 -- 预条件子绑定哪个算子, 几何多重网格的层次 -- 留在分析器,
-以构造好的预条件子传入. 分布式与子结构分析器各有自己的求解路径, 不经过本模块.
+以构造好的预条件子传入. 子结构分析器另有自己的求解路径, 不经过本模块.
 
 选项字典由调用方合并好再传入, 约定优先级为: 求解调用的 kwargs > 构造时的
 ``solver_options`` > 本模块的默认值.
@@ -17,8 +17,6 @@ from soptx.sparse import COOTensor, CSRTensor
 DEFAULT_CG_MAXITER = 5000
 DEFAULT_CG_ATOL = 1e-12
 DEFAULT_CG_RTOL = 1e-12
-# 带预条件子时周期性用 b - A x 校正递推残差的间隔
-DEFAULT_RESIDUAL_REFRESH = 50
 
 
 def build_solver(solver_type: str,
@@ -31,7 +29,8 @@ def build_solver(solver_type: str,
     Parameters
     ----------
     solver_type : 求解器名字, 须已在 ``soptx.solvers.registry`` 注册.
-    options : 合并后的求解选项. 'cg' 读 maxiter, atol, rtol, residual_refresh 与 precond
+    options : 合并后的求解选项. 'cg' 读 maxiter, atol, rtol, rtol_reference,
+        norm_type, verify_residual 与 precond
         (只记入诊断); 'mumps' 读 sym.
     preconditioner : 已 setup 的预条件子, 只用于 'cg'; 为 None 时不带预条件.
 
@@ -45,8 +44,9 @@ def build_solver(solver_type: str,
     -----
     带预条件子时 CG 改在 ||r||_2 下停机 (norm_type='unpreconditioned'): 默认的 natural
     范数 sqrt(r^T M^-1 r) 与分析器返回的 2-范数 relres 口径不同, Jacobi 的 diag^-1 可达
-    1e6 量级, 两者能差几个数量级; 同时开启递推残差刷新 (未显式给出时取 50), 抵消长迭代
-    下的漂移. 不带预条件子时三种范数数值等价, 取默认的 natural.
+    1e6 量级, 两者能差几个数量级; 同时开启收敛时的真残差验证 (未显式给出时), 递推残差
+    宣布达标时以 b - A x 复核, 否决长迭代下递推漂移造成的虚假收敛. 不带预条件子时三种
+    范数数值等价, 取默认的 natural, 也不默认开启验证.
 
     'mumps' 的 sym=0 按一般非对称矩阵分解; 对称消元后的刚度阵仍对称正定, 传 1 (正定)
     或 2 (一般对称) 只读下三角, 因子存储与运算量大致减半, 由调用方显式开启.
@@ -55,18 +55,16 @@ def build_solver(solver_type: str,
         maxiter = options.get('maxiter', DEFAULT_CG_MAXITER)
         atol = options.get('atol', DEFAULT_CG_ATOL)
         rtol = options.get('rtol', DEFAULT_CG_RTOL)
-        residual_refresh = int(options.get('residual_refresh', 0))
-        norm_type = 'natural'
-        if preconditioner is not None:
-            norm_type = 'unpreconditioned'
-            if residual_refresh <= 0:
-                residual_refresh = DEFAULT_RESIDUAL_REFRESH
+        verify_residual = bool(options.get('verify_residual', preconditioner is not None))
+        norm_type = options.get('norm_type',
+                                'unpreconditioned' if preconditioner is not None else 'natural')
 
         # batch_first=False: 批量右端项的第一维是自由度维
         solver = create('cg', M=preconditioner, atol=atol, rtol=rtol, maxit=maxiter,
                         batch_first=False,
                         norm_type=norm_type,
-                        residual_refresh=residual_refresh)
+                        rtol_reference=options.get('rtol_reference', 'initial_residual'),
+                        verify_residual=verify_residual)
 
         return solver, {'maxit': maxiter, 'precond': options.get('precond', None)}, (atol, rtol)
 
@@ -131,8 +129,10 @@ def run_solver(solver: LinearSolver,
             'converged': bool(raw['converged'])}
 
     if tol is not None:
-        # 收敛与否以求解器自己的退出原因为准, 不在这里重判: 热启动时 rtol 的参照量是
-        # ||r0|| 而非 ||F||, 判据口径已在求解器内部对齐 (见 build_solver 的 norm_type)
+        # 收敛与否以求解器自己的退出原因为准, 同时保留实际使用的参照量和阈值.
+        for key in ('rtol_reference', 'norm_type', 'rhs_norm',
+                    'initial_residual_norm', 'stopping_threshold'):
+            info[key] = raw.get(key)
         reason = raw.get('reason', None)
         if reason is not None:
             info['reason'] = reason.name

@@ -11,7 +11,7 @@ from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.filters import Filter
 from soptx.topology.objectives import ComplianceObjective
 from soptx.topology.optimizers.history import OptimizationHistory
-from soptx.topology.optimizers.utils import compute_volume
+from soptx.topology.optimizers.utils import compute_volume, merge_passive_masks
 
 class OCOptions:
     """OC 算法的配置选项"""
@@ -113,15 +113,8 @@ class OCOptimizer(BaseLogged):
                     self._log_error(error_msg)
 
         # 获取被动单元掩码
-        self._passive_mask = None
-
         analyzer = getattr(objective, '_analyzer', None)
-        pde = getattr(analyzer, 'pde', None)
-        design_mesh = getattr(self._filter, 'design_mesh', None)
-
-        if pde is not None and design_mesh is not None:
-            if hasattr(pde, 'get_passive_element_mask'):
-                self._passive_mask = pde.get_passive_element_mask(mesh=design_mesh)
+        self._passive_mask = merge_passive_masks(self._filter, getattr(analyzer, 'pde', None))
 
     def optimize(self, 
                 design_variable: Union[Function, TensorLike],

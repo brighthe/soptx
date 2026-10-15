@@ -1,5 +1,6 @@
 """应力约束协议与原问题 KKT 诊断的纯代数回归测试."""
 
+import inspect
 from types import SimpleNamespace
 
 import numpy as np
@@ -7,6 +8,11 @@ import pytest
 
 from soptx.backend import backend_manager as bm
 
+from soptx.topology.constraints import (
+    HuZhangStressConstraint,
+    LagrangeStressConstraint,
+    StressConstraintProtocol,
+)
 from soptx.topology.objectives import AugmentedLagrangianObjective
 from soptx.topology.optimizers.al_mma import ALMMMAOptimizer, ALMMMAOptions
 
@@ -144,3 +150,26 @@ def test_kkt_tolerances_reject_nonfinite_values_even_without_acceptance():
         ALMMMAOptions(kkt_stationarity_tolerance=float("nan"))
     with pytest.raises(ValueError, match="有限的非负数"):
         ALMMMAOptions(kkt_dual_tolerance=float("inf"))
+
+
+def _protocol_members():
+    """协议声明的公开成员名."""
+    return [name for name, value in vars(StressConstraintProtocol).items()
+            if not name.startswith("_") and (callable(value) or isinstance(value, property))]
+
+
+@pytest.mark.parametrize("constraint_class", [LagrangeStressConstraint, HuZhangStressConstraint])
+def test_adapters_conform_to_stress_constraint_protocol(constraint_class):
+    """两个适配器逐项提供协议成员: 属性仍是属性, 方法的参数名与协议一致."""
+    members = _protocol_members()
+    assert members, "协议成员为空, 成员收集方式失效"
+    for name in members:
+        expected = inspect.getattr_static(StressConstraintProtocol, name)
+        missing = object()
+        actual = inspect.getattr_static(constraint_class, name, missing)
+        assert actual is not missing, f"{constraint_class.__name__} 缺少 {name}"
+        if isinstance(expected, property):
+            assert isinstance(actual, property), f"{constraint_class.__name__}.{name} 应为属性"
+        else:
+            assert list(inspect.signature(actual).parameters) == list(inspect.signature(expected).parameters), (
+                f"{constraint_class.__name__}.{name} 的参数与协议不一致")

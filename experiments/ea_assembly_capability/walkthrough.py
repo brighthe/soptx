@@ -6,7 +6,7 @@ Dirichlet 条件用 Jacobi-PCG 求解, 以 FA 直接解为基准.
 1. 标准 EA (ElementAssembly): 常驻 K_e, update 带新系数重新积分, apply 走 y = sum_e G_e^T K_e G_e x;
 2. 参考 EA (SharedReferenceElementAssembly): 同一平移类的单元共用一份参考单元矩阵, 常驻 N_k 份 K_k^0
    与 s_e, update 只换 s_e, apply 走 y = sum_e s_e G_e^T K_k(e)^0 G_e x, k(e) = e mod N_k;
-   依赖 ``create_box_mesh`` 的单元编号约定, 平移类由其返回的 ``classes`` 给出;
+   依赖 ``from_box`` 的单元编号约定: 前 N_k 个单元即各类代表;
 3. 求解: 两种 EA 包成 ConstrainedOperator (A = Pi_I K Pi_I + Pi_D), 用 diagonal 做 Jacobi 预条件跑 PCG;
    FA 装出全局 CSR 后直接解, 作为位移基准, 并对比三者的常驻字节数.
 """
@@ -21,14 +21,19 @@ from soptx.fem.kernels import ElementRestriction
 from soptx.fem.levels import ElementAssembly, FullAssembly, SharedReferenceElementAssembly
 from soptx.fem.operators import ConstrainedOperator
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.mesh import MESH_TYPES, create_box_mesh
+from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
 from soptx.solvers import DiagonalPreconditioner, cg, spsolve
+
+
+# 网格类型 -> (网格类, from_box 编号约定下每个格子剖出的单元数 N_k)
+MESH_CLASSES = {'tri': (TriangleMesh, 2), 'quad': (QuadrangleMesh, 1),
+                'tet': (TetrahedronMesh, 6), 'hex': (HexahedronMesh, 1)}
 
 
 def parse_args(argv=None):
     """解析 EA 单元装配走查的命令行参数."""
     parser = argparse.ArgumentParser(description='EA 单元装配走查')
-    parser.add_argument('--mesh', default='tri', choices=MESH_TYPES, help='网格类型')
+    parser.add_argument('--mesh', default='tri', choices=tuple(MESH_CLASSES), help='网格类型')
     parser.add_argument('-n', '--n', type=int, default=2, help='每方向网格剖分数')
     parser.add_argument('-p', '--p', type=int, default=1, help='拉格朗日元次数')
     args = parser.parse_args(argv)
@@ -48,8 +53,8 @@ def main(argv=None):
     bm.set_backend('numpy')
 
     GD = 2 if args.mesh in ('tri', 'quad') else 3
-    # 网格与 from_box 逐位一致, 另给出平移类划分 classes
-    mesh, classes = create_box_mesh(args.mesh, [0, 1] * GD, *(n, ) * GD)
+    mesh_class, N_k = MESH_CLASSES[args.mesh]
+    mesh = mesh_class.from_box([0, 1] * GD, *(n, ) * GD)
     space = TensorFunctionSpace(LagrangeFESpace(mesh, p=p, ctype='C'), shape=(-1, GD))
     material = IsotropicLinearElasticMaterial(hypothesis='plane_strain' if GD == 2 else '3D',
                                             lame_lambda=1.0, shear_modulus=0.75,
@@ -98,8 +103,7 @@ def main(argv=None):
     # ========================================================================
     # setup 阶段: 只积第一个格子的 N_k 个单元, 按编号约定每类恰有一个, 作为该类的代表
     # 分析器在单元密度下也用本类, 但取 N_k = NC 直接引用 K_e^0 (K_k0 = K_e0), 其余流程不变
-    N_k = classes.num_classes
-    integrator_rEA = LinearElasticIntegrator(material=material, index=classes.representatives(),
+    integrator_rEA = LinearElasticIntegrator(material=material, index=bm.arange(N_k, dtype=bm.int32),
                                             method='fast')
     K_k0 = integrator_rEA.assembly(space)  # (N_k, ldof * GD, ldof * GD)
 

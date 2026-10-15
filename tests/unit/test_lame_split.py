@@ -32,7 +32,7 @@ def reset_backend():
 @pytest.mark.parametrize("E, nu", [(1.0, 0.3), (210.0, 0.4999)])
 def test_elastic_matrices_match_material(hypothesis: str, E: float, nu: float) -> None:
     material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=nu,
-                                              hypothesis=hypothesis, enable_logging=False)
+                                              hypothesis=hypothesis)
     E_c = bm.full((4, ), E, dtype=bm.float64)
     nu_c = bm.full((4, ), nu, dtype=bm.float64)
 

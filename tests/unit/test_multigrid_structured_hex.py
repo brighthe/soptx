@@ -18,10 +18,19 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.multigrid import StructuredHexGrid, StructuredHexHierarchy
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import HexahedronMesh
-from soptx.problems import FullMBBBeam3d
+from soptx.problems import FullMBBBeamLine3d
+from soptx.problems.loads import PointForceLoad
 from soptx.solvers import DiagonalPreconditioner, create
 from soptx.sparse import CSRTensor
 from soptx.topology.interpolation import MaterialInterpolationScheme
+
+
+class _PointLoadMBB3d(FullMBBBeamLine3d):
+    """顶面中心受集中力的三维 MBB 梁: 本测试与载荷形式无关, 点力使奇数 x 向剖分可用."""
+
+    def loads(self):
+        x0, x1, _, y1, z0, z1 = self.domain
+        return (PointForceLoad(point=((x0 + x1) / 2.0, y1, (z0 + z1) / 2.0), vector=(0.0, self.P, 0.0)),)
 
 
 def _mbb_system(grid, seed=0):
@@ -29,17 +38,15 @@ def _mbb_system(grid, seed=0):
     bm.set_backend('numpy')
     domain = (0.0, float(grid[0]), 0.0, float(grid[1]), 0.0, float(grid[2]))
     mesh = HexahedronMesh.from_box(list(domain), *grid)
-    problem = FullMBBBeam3d(domain=domain, support='end_lines', load_subdivisions=(grid[0], grid[2]))
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D',
-                                              enable_logging=False)
+    problem = _PointLoadMBB3d(domain=domain)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D')
     interpolation = MaterialInterpolationScheme(
         density_location='element', interpolation_method='msimp',
-        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']},
-        enable_logging=False)
+        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']})
     analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
                                    integration_order=2, assembly_method='fast', operator_level='fa',
                                    solve_method='scipy', topopt_algorithm='density_based',
-                                   interpolation_scheme=interpolation, enable_logging=False)
+                                   interpolation_scheme=interpolation)
     density = bm.tensor(np.random.default_rng(seed).uniform(0.0, 1.0, mesh.number_of_cells()))
     K, F = analyzer.apply_bc(analyzer.assemble_stiff_matrix(rho_val=density),
                              analyzer.assemble_body_force_vector())
@@ -158,23 +165,20 @@ def _analyzer_with_options(grid, operator_level='fa', **solver_options):
     bm.set_backend('numpy')
     domain = (0.0, float(grid[0]), 0.0, float(grid[1]), 0.0, float(grid[2]))
     mesh = HexahedronMesh.from_box(list(domain), *grid)
-    problem = FullMBBBeam3d(domain=domain, support='end_lines', load_subdivisions=(grid[0], grid[2]))
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D',
-                                              enable_logging=False)
+    problem = _PointLoadMBB3d(domain=domain)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D')
     interpolation = MaterialInterpolationScheme(
         density_location='element', interpolation_method='msimp',
-        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']},
-        enable_logging=False)
+        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']})
     return LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
                                integration_order=2, assembly_method='fast', operator_level=operator_level,
                                solve_method='cg', solver_options=solver_options,
-                               topopt_algorithm='density_based', interpolation_scheme=interpolation,
-                               enable_logging=False)
+                               topopt_algorithm='density_based', interpolation_scheme=interpolation)
 
 
-def test_analyzer_mg_preconditioner_reuses_hierarchy_across_densities() -> None:
-    analyzer = _analyzer_with_options((24, 4, 4), precond='mg', rtol=0.0, atol=1e-12, maxiter=500,
-                                      mg_coarse_max_dofs=200)
+def test_analyzer_gmg_preconditioner_reuses_hierarchy_across_densities() -> None:
+    analyzer = _analyzer_with_options((24, 4, 4), precond='gmg', rtol=0.0, atol=1e-12, maxiter=500,
+                                      gmg_coarse_max_dofs=200)
     rng = np.random.default_rng(4)
     NC = analyzer.tensor_space.mesh.number_of_cells()
     hierarchies = []
@@ -185,25 +189,27 @@ def test_analyzer_mg_preconditioner_reuses_hierarchy_across_densities() -> None:
         u = analyzer.tensor_space.function()
         _, info = analyzer.solve_system(K, F, u)
         reference = spsolve(K.to_scipy().tocsc(), np.asarray(F[:]))
-        assert info['converged'] and info['precond'] == 'mg' and info['niter'] < 150
+        assert info['converged'] and info['precond'] == 'gmg' and info['niter'] < 150
         np.testing.assert_allclose(np.asarray(u[:]), reference, rtol=0.0,
                                    atol=1e-8 * np.max(np.abs(reference)))
-        hierarchies.append(analyzer._mg_hierarchy)
+        hierarchies.append(analyzer._gmg_hierarchy)
     assert hierarchies[0] is hierarchies[1]
 
 
-def test_analyzer_mg_preconditioner_on_ea_matches_fa() -> None:
+def test_analyzer_gmg_preconditioner_on_ea_matches_fa() -> None:
     grid = (24, 4, 4)
     density = bm.tensor(np.random.default_rng(5).uniform(0.0, 1.0, grid[0] * grid[1] * grid[2]))
     solutions, iterations = {}, {}
+    # atol 取 1e-10 而非舍入底线附近的 1e-12 (||F|| = 1): 带预条件子时分析器默认开启收敛时
+    # 的真残差验证, 容差贴着舍入底线时, 'fa' 与 'ea' 真残差的舍入差异会让两者差一步停机
     for level in ('fa', 'ea'):
-        analyzer = _analyzer_with_options(grid, operator_level=level, precond='mg', rtol=0.0, atol=1e-12,
-                                          maxiter=500, mg_coarse_max_dofs=200)
+        analyzer = _analyzer_with_options(grid, operator_level=level, precond='gmg', rtol=0.0, atol=1e-10,
+                                          maxiter=500, gmg_coarse_max_dofs=200)
         K, F = analyzer.apply_bc(analyzer.assemble_stiff_matrix(rho_val=density),
                                  analyzer.assemble_body_force_vector())
         u = analyzer.tensor_space.function()
         _, info = analyzer.solve_system(K, F, u, x0=analyzer._prescribed_solution)
-        assert info['converged'] and info['precond'] == 'mg'
+        assert info['converged'] and info['precond'] == 'gmg'
         solutions[level], iterations[level] = np.asarray(u[:]), info['niter']
         if level == 'fa':
             reference = spsolve(K.to_scipy().tocsc(), np.asarray(F[:]))
@@ -213,30 +219,29 @@ def test_analyzer_mg_preconditioner_on_ea_matches_fa() -> None:
                                    atol=1e-8 * np.max(np.abs(reference)))
 
 
-def test_analyzer_mg_preconditioner_requires_element_density() -> None:
+def test_analyzer_gmg_preconditioner_requires_element_density() -> None:
     bm.set_backend('numpy')
     grid = (6, 2, 2)
     domain = (0.0, 6.0, 0.0, 2.0, 0.0, 2.0)
     mesh = HexahedronMesh.from_box(list(domain), *grid)
-    problem = FullMBBBeam3d(domain=domain, support='end_lines', load_subdivisions=(grid[0], grid[2]))
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D',
-                                              enable_logging=False)
+    problem = _PointLoadMBB3d(domain=domain)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D')
     # 不做密度拓扑优化时没有单元系数, 粗层无从构造
     analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
                                    integration_order=2, assembly_method='fast', operator_level='fa',
-                                   solve_method='cg', solver_options=dict(precond='mg'), enable_logging=False)
+                                   solve_method='cg', solver_options=dict(precond='gmg'))
     K, F = analyzer.apply_bc(analyzer.assemble_stiff_matrix(), analyzer.assemble_body_force_vector())
-    with pytest.raises(RuntimeError, match="precond='mg'"):
+    with pytest.raises(RuntimeError, match="precond='gmg'"):
         analyzer.solve_system(K, F, analyzer.tensor_space.function())
 
 
 def test_hierarchy_coarsens_at_least_once_so_ea_has_a_factorizable_coarse_level() -> None:
     # 6x2x2 只有 189 个自由度, 远小于默认的 coarse_max_dofs; 'ea' 的最细层算子不能直接分解
-    analyzer = _analyzer_with_options((6, 2, 2), operator_level='ea', precond='mg', rtol=0.0, atol=1e-13,
+    analyzer = _analyzer_with_options((6, 2, 2), operator_level='ea', precond='gmg', rtol=0.0, atol=1e-13,
                                       maxiter=200)
     density = bm.tensor(np.random.default_rng(6).uniform(0.0, 1.0, 24))
     K, F = analyzer.apply_bc(analyzer.assemble_stiff_matrix(rho_val=density),
                              analyzer.assemble_body_force_vector())
     u = analyzer.tensor_space.function()
     _, info = analyzer.solve_system(K, F, u, x0=analyzer._prescribed_solution)
-    assert analyzer._mg_hierarchy.num_levels >= 2 and info['converged']
+    assert analyzer._gmg_hierarchy.num_levels >= 2 and info['converged']

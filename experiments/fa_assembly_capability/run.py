@@ -297,7 +297,7 @@ def _build_problem_space(n: int, device: Any = None) -> Tuple[Any, Any, Any, Any
     from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
     from soptx.mesh import TetrahedronMesh
     from soptx.materials import IsotropicLinearElasticMaterial
-    from soptx.problems.elasticity import DivergenceFreePolynomialElasticity3D
+    from soptx.problems import DivergenceFreePolynomialElasticity3D
 
     problem = DivergenceFreePolynomialElasticity3D()
     mesh = TetrahedronMesh.from_box(list(problem.domain), nx=n, ny=n, nz=n)
@@ -327,7 +327,7 @@ def _import_fe_stack_cpu() -> None:
     import soptx.fem.integrators  # noqa: F401
     import soptx.fem.matrix.csr_pattern  # noqa: F401
     import soptx.materials  # noqa: F401
-    import soptx.problems.elasticity  # noqa: F401
+    import soptx.problems  # noqa: F401
 
 
 def _mesh_facts(mesh: Any, vs: Any) -> Dict[str, int]:
@@ -661,7 +661,7 @@ def measure_mesh(n: int, device_str: str = "cpu") -> dict:
     from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
     from soptx.mesh import TetrahedronMesh
     from soptx.materials import IsotropicLinearElasticMaterial
-    from soptx.problems.elasticity import DivergenceFreePolynomialElasticity3D
+    from soptx.problems import DivergenceFreePolynomialElasticity3D
 
     problem = DivergenceFreePolynomialElasticity3D()
     meter = StageMeter()

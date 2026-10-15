@@ -5,7 +5,7 @@
 强施加.
 """
 
-from typing import Optional, Union, Literal, Tuple, Dict
+from typing import TYPE_CHECKING, Optional, Sequence, Union, Literal, Tuple, Dict
 from time import time
 
 from soptx.backend import backend_manager as bm
@@ -13,6 +13,7 @@ from soptx.typing import TensorLike
 from soptx.mesh import HomogeneousMesh
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from soptx.fem.bilinear_form import BilinearForm
+from soptx.fem.boundary_loads import check_traction_patch_alignment
 from soptx.fem.linear_form import LinearForm
 from soptx.decorator import cartesian
 from soptx.decorator.variantmethod import variantmethod
@@ -36,6 +37,10 @@ from soptx.fem.integrators import (
     SourceIntegrator,
 )
 from soptx.functionspace import HuZhangFESpace, boundary_outward_sign
+
+if TYPE_CHECKING:
+    from soptx.functionspace import HuZhangFESpace2d, HuZhangFESpace3d
+    HuZhangSpace = Union[HuZhangFESpace2d, HuZhangFESpace3d]
 from soptx.materials import LinearElasticMaterial
 
 class HuZhangMFEMAnalyzer(BaseLogged):
@@ -62,6 +67,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 stabilization_scaling: Optional[str] = None,
                 stabilization: Literal['none', 'matrix_jump'] = 'matrix_jump',
                 stabilization_coefficient: Literal['fixed', 'density_dependent'] = 'fixed',
+                relaxed_corners: Optional[Sequence[Sequence[float]]] = None,
             ) -> None:
         """初始化胡张混合有限元分析器
 
@@ -82,6 +88,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             低阶稳定化系数模式. 默认 'fixed' 使用基材常数, 不随密度更新;
             'density_dependent' 额外乘逐单元相对剪切模量的面调和平均.
             无密度插值或原生高阶格式下, 两种模式不产生差别.
+        relaxed_corners : Sequence[Sequence[float]], optional
+            二维角点松弛所用的角点坐标, 形状 ``(N, 2)``. 默认 None 时由网格自动检出
+            几何角点 (``mesh.boundary_corner_index``), 其中不满足两单元松弛拓扑的角点
+            被跳过并发 ``UserWarning``, 见 ``skipped_corners``; 显式传入时每个角点都
+            必须满足该拓扑, 用于有意只松弛某个子集的对照实验.
         """
 
         if stabilization_coefficient not in ('fixed', 'density_dependent'):
@@ -98,6 +109,8 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         self._pde = pde
         self._material = material
         self._interpolation_scheme = interpolation_scheme
+        # 整边选取的局部载荷区要求端点与网格节点对齐, 否则合力静默偏离 P
+        check_traction_patch_alignment(disp_mesh, pde)
 
         self._space_degree = space_degree
         self._integration_order = integration_order
@@ -125,7 +138,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             self._log_error(f"不支持的求解器类型: {solve_method}, 可选 'mumps' 或 'scipy'")
         self._solve_method = solve_method
 
-        corners = self._pde.mark_corners(self._mesh.entity('node'))
+        # 松弛角点: 缺省由网格自动检出几何角点, 调用方可显式指定子集
+        corners = (None if relaxed_corners is None
+                   else bm.tensor(relaxed_corners, dtype=bm.float64))
 
         self._GD = self._mesh.geo_dimension()
         if self._GD == 3:
@@ -134,7 +149,11 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                                  use_relaxation=self._use_relaxation,
                                                  traction_face=self._traction_face_flag())
         else:
-            self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree, use_relaxation=self._use_relaxation, corners=corners)
+            # 二维边界顶点标架优先取全牵引边、其次对称边, 使牵引写入的顶点自由度与之对齐
+            traction_edge, symmetry_edge = self._strong_edge_flags()
+            self._huzhang_space = HuZhangFESpace(mesh=self._mesh, p=self._space_degree,
+                                                 use_relaxation=self._use_relaxation, corners=corners,
+                                                 traction_edge=traction_edge, symmetry_edge=symmetry_edge)
         self._scalar_space = LagrangeFESpace(mesh=self._mesh, p=self._space_degree-1, ctype='D')
         self._tensor_space = TensorFunctionSpace(scalar_space=self._scalar_space, shape=(-1, self._GD))
 
@@ -181,9 +200,23 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         return self._mesh
     
     @property
-    def huzhang_space(self) -> HuZhangFESpace:
-        """获取当前的 Hu-Zhang 混合有限元空间"""
+    def huzhang_space(self) -> "HuZhangSpace":
+        """获取当前的 Hu-Zhang 混合有限元空间 (二维或三维实现的实例)"""
         return self._huzhang_space
+
+    @property
+    def relaxed_corners(self) -> tuple[tuple[float, ...], ...]:
+        """实际参与角点松弛的角点坐标; 未启用松弛或三维时为空元组."""
+        corner = getattr(self._huzhang_space, 'corner', None)
+        if corner is None:
+            return ()
+        coords = bm.to_numpy(corner['coords'])
+        return tuple(tuple(float(v) for v in row) for row in coords)
+
+    @property
+    def skipped_corners(self) -> tuple[tuple[tuple[float, ...], str], ...]:
+        """自动检出但因不满足松弛拓扑而跳过的角点, 每项为 ``(坐标, 原因)``."""
+        return tuple(getattr(self._huzhang_space, 'skipped_corners', ()))
     
     @property
     def scalar_space(self) -> LagrangeFESpace:
@@ -236,7 +269,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
             return self._calculate_stress_matrix(rho_val=rho_val, enable_timing=False)
 
     @huzhang_space.setter
-    def huzhang_space(self, space: HuZhangFESpace) -> None:
+    def huzhang_space(self, space: "HuZhangSpace") -> None:
         """设置 Hu-Zhang 混合有限元空间"""
         self._huzhang_space = space
 
@@ -703,11 +736,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                                         space_sigma: HuZhangFESpace,
                                     ) -> Tuple[CSRTensor, TensorLike]:
         """施加本质边界条件  σ·n = g_N"""
-        # 计算边界自由度的值 (threshold 传入牵引边界标记, 与 solve_state 写入一致)
-        uh_val, is_bd_dof = space_sigma.set_dirichlet_bc(
-            self._prescribed_traction_on_edges,
-            threshold=self._essential_bc,
-        )
+        uh_val, is_bd_dof = self._strong_boundary_dofs(space_sigma)
 
         gdof_total = K.shape[0]
         gdof_sigma = space_sigma.number_of_global_dofs()
@@ -719,21 +748,6 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
         is_fixed_dof = bm.set_at(is_fixed_dof, sigma_slice, is_bd_dof)
-
-        # 对称面: 仅强加切向牵引分量 σ_nt=0, 法向牵引 σ_nn 保持自由.
-        # 切向值为零不改变 U_fixed, 只需把切向自由度纳入固定集合.
-        if self._symmetry_bc is not None and bool(self._symmetry_bc.any()):
-            sym_gd = getattr(self._pde, "symmetry_traction_bc", None)
-            if sym_gd is None:
-                sym_gd = getattr(self._pde, "dirichlet_bc", lambda points: bm.zeros(points.shape, **bm.context(points)))
-            _, is_sym_dof = space_sigma.set_tangential_traction_bc(
-                sym_gd, threshold=self._symmetry_bc
-            )
-            is_fixed_dof = bm.set_at(
-                is_fixed_dof,
-                sigma_slice,
-                bm.logical_or(is_fixed_dof[sigma_slice], is_sym_dof),
-            )
 
         #* 修改线性系统 (标准的置 1 置 0 法)
         # 移项: 将已知非零值的贡献移到右端项
@@ -798,7 +812,7 @@ class HuZhangMFEMAnalyzer(BaseLogged):
 
         CG 在状态解与伴随解两处一律拒绝: K 为 [[A, B], [B^T, 0]] 或
         [[A, B], [B^T, -J]], 对称不定; CG 只对对称正定矩阵成立, 用在这里会给出
-        不收敛或静默错误的解. 等 MINRESSolver 落地后再放开对称不定的迭代路径.
+        不收敛或静默错误的解. 等 MINRES 与鞍点块预条件子实现后再放开对称不定的迭代路径.
 
         分解不跨调用复用: 求解完即释放, MUMPS 上下文逐次建销.
         """
@@ -828,6 +842,71 @@ class HuZhangMFEMAnalyzer(BaseLogged):
                 close()
 
         return x
+
+    def _strong_edge_flags(self) -> Tuple[TensorLike, TensorLike]:
+        """二维强约束边界边标记 ``(全牵引边, 对称边)``, 形状均为 ``(NE,)``, 按边重心判定.
+
+        与 ``solve_state`` 写入 ``_essential_bc`` / ``_symmetry_bc`` 的标记相同, 只是
+        限定在边界边上; 构造期用它选取边界顶点标架.
+        """
+        mesh = self._mesh
+        bc = mesh.entity_barycenter('face')
+        is_bd = mesh.boundary_face_flag()
+        traction = is_bd & self._pde.is_traction_boundary(bc)
+        symmetry_marker = getattr(self._pde, "is_symmetry_boundary", None)
+        symmetry = (is_bd & symmetry_marker(bc)) if symmetry_marker is not None else bm.zeros_like(traction)
+        return traction, symmetry
+
+    def _strong_boundary_dofs(self, space_sigma: HuZhangFESpace) -> Tuple[TensorLike, TensorLike]:
+        r"""强施加的应力边界自由度及其取值, 状态方程与伴随方程共用同一固定集合.
+
+        依次为: 全牵引边的 :math:`\sigma_{nn}, \sigma_{nt}` (逐边写入); 对称边的切向
+        牵引 :math:`\sigma_{nt}` (法向自由); 二维未松弛的几何角点上两侧强约束联立
+        后的全部顶点自由度 (``set_corner_traction_bc``, Hu & Ma 2021 式 (4.1)).
+
+        Returns
+        -------
+        uh_val : TensorLike
+            形状 ``(gdof_sigma,)`` 的边界值, 非固定自由度为零.
+        is_fixed : TensorLike
+            形状 ``(gdof_sigma,)`` 的布尔数组.
+        """
+        if self._essential_bc is None:
+            bc = self._mesh.entity_barycenter('face')
+            self._essential_bc = self._pde.is_traction_boundary(bc)
+            symmetry_marker = getattr(self._pde, "is_symmetry_boundary", None)
+            self._symmetry_bc = symmetry_marker(bc) if symmetry_marker is not None else None
+
+        # threshold 传入牵引边界标记, 与 solve_state 写入一致
+        uh_val, is_fixed = space_sigma.set_dirichlet_bc(
+            self._prescribed_traction_on_edges,
+            threshold=self._essential_bc,
+        )
+        uh_val = uh_val[:]
+
+        # 对称面: 仅强加切向牵引分量 σ_nt=0, 法向牵引 σ_nn 保持自由.
+        # 切向值为零不改变 uh_val, 只需把切向自由度纳入固定集合.
+        has_symmetry = self._symmetry_bc is not None and bool(self._symmetry_bc.any())
+        sym_gd = None
+        if has_symmetry:
+            sym_gd = getattr(self._pde, "symmetry_traction_bc", None)
+            if sym_gd is None:
+                sym_gd = getattr(self._pde, "dirichlet_bc", lambda points: bm.zeros(points.shape, **bm.context(points)))
+            _, is_sym_dof = space_sigma.set_tangential_traction_bc(sym_gd, threshold=self._symmetry_bc)
+            is_fixed = bm.logical_or(is_fixed, is_sym_dof)
+
+        # 未松弛的几何角点: 逐边写入只落实了与顶点标架对齐的一侧, 联立两侧后覆盖全部顶点自由度
+        if self._GD == 2:
+            corner_val, is_corner_dof = space_sigma.set_corner_traction_bc(
+                self._prescribed_traction_on_edges, uh_val,
+                traction_edge=self._essential_bc,
+                symmetry_edge=self._symmetry_bc if has_symmetry else None,
+                symmetry_gd=sym_gd,
+            )
+            uh_val = corner_val[:]
+            is_fixed = bm.logical_or(is_fixed, is_corner_dof)
+
+        return uh_val, is_fixed
 
     def _traction_face_flag(self) -> TensorLike:
         """强施加牵引的边界面 (牵引面与对称面), 形状 ``(NF,)``, 按面重心调用 Problem 的标记."""
@@ -1023,14 +1102,9 @@ class HuZhangMFEMAnalyzer(BaseLogged):
         rhs_full = bm.set_at(rhs_full, slice(0, gdof_sigma), rhs)
 
         # --- 施加齐次边界条件: 边界应力自由度上的伴随载荷置零 ---
-        essential_bc = self._essential_bc
-        if essential_bc is None:
-            bc = self._mesh.entity_barycenter('face')
-            essential_bc = self._pde.is_traction_boundary(bc)
-        _, is_bd_dof = space_sigma.set_dirichlet_bc(
-            self._prescribed_traction_on_edges,
-            threshold=essential_bc,
-        )
+        # 固定集合须与状态方程一致 (含对称边切向自由度与未松弛角点), 否则缓存 K 中
+        # 置 1 的行会把伴随载荷原样当作 λ_σ 的值
+        _, is_bd_dof = self._strong_boundary_dofs(space_sigma)
 
         is_fixed_dof = bm.zeros(gdof_total, dtype=bm.bool)
         is_fixed_dof = bm.set_at(is_fixed_dof, slice(0, gdof_sigma), is_bd_dof)

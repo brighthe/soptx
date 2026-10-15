@@ -10,27 +10,34 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.analyzers import lagrange_fem_analyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import HexahedronMesh
-from soptx.problems import CantileverRightBottomEdge3d, FullMBBBeam3d
+from soptx.problems import CantileverBottomEdgeLine3d, FullMBBBeamLine3d
+from soptx.problems.loads import PointForceLoad
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 
+class _PointLoadMBB3d(FullMBBBeamLine3d):
+    """顶面中心受集中力的三维 MBB 梁: 本测试检验纯集中力载荷的缓存."""
+
+    def loads(self):
+        x0, x1, _, y1, z0, z1 = self.domain
+        return (PointForceLoad(point=((x0 + x1) / 2.0, y1, (z0 + z1) / 2.0), vector=(0.0, self.P, 0.0)),)
+
+
 def _analyzer(problem, mesh, operator_level):
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D',
-                                              enable_logging=False)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D')
     interpolation = MaterialInterpolationScheme(
         density_location='element', interpolation_method='msimp',
-        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']},
-        enable_logging=False)
+        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']})
     return LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
                                integration_order=2, assembly_method='fast', operator_level=operator_level,
                                solve_method='cg', topopt_algorithm='density_based',
-                               interpolation_scheme=interpolation, enable_logging=False)
+                               interpolation_scheme=interpolation)
 
 
 def _mbb(operator_level):
     bm.set_backend('numpy')
     grid, domain = (6, 2, 3), (0.0, 6.0, 0.0, 2.0, 0.0, 3.0)
-    problem = FullMBBBeam3d(domain=domain, support='end_lines', load_subdivisions=(grid[0], grid[2]))
+    problem = _PointLoadMBB3d(domain=domain)
     return _analyzer(problem, HexahedronMesh.from_box(list(domain), *grid), operator_level), problem
 
 
@@ -80,7 +87,7 @@ def test_changed_point_force_is_reassembled(monkeypatch) -> None:
 def test_line_traction_loads_are_not_cached(monkeypatch) -> None:
     bm.set_backend('numpy')
     domain = (0.0, 6.0, 0.0, 2.0, 0.0, 2.0)
-    analyzer = _analyzer(CantileverRightBottomEdge3d(domain=domain),
+    analyzer = _analyzer(CantileverBottomEdgeLine3d(domain=domain),
                          HexahedronMesh.from_box(list(domain), 6, 2, 2), 'fa')
     calls = _count_assembly(monkeypatch, analyzer)
     first = np.asarray(analyzer._non_body_loads_by_boundary_type()[:]).copy()

@@ -17,6 +17,36 @@ Problem 如何提供这些载荷, 以及各消费方可以依赖哪些成员.
 ``runtime_checkable`` 只检查成员是否存在, 不检查方法签名. 分析器新增对 Problem
 成员的依赖时, 必须同步更新相应协议; ``test_problem_protocol_conformance.py``
 负责检查这项约束.
+
+Problem 接口分层
+----------------
+工程基准问题类按"核心层 + 可选能力层"组织. 一个类实现哪些层由其载荷类型与用途
+决定, 不实现的层不提供占位成员; 同一层内的成员同名同义. 层 1 至层 3 由下列协议
+强制, 层 1 中的材料属性、层 4 与层 5 是约定, 由消费它们的算例层依赖.
+
+1. 核心层 (所有问题): ``dimension``, ``domain``, ``E``, ``nu``, ``plane_type``,
+   ``P``, ``loads()``; 边界与角点的几何判定用绝对容差
+   ``soptx.core.numerics.GEOMETRIC_TOL``, 类内以 ``_eps`` 持有. 对应
+   ``ElasticityProblem``.
+2. Lagrange 层: ``boundary_type``, ``dirichlet_bc``, ``is_dirichlet_boundary()``
+   及逐分量的 ``is_dirichlet_boundary_dof_*``. 对应 ``DirichletElasticityProblem``.
+3. Hu--Zhang 层 (载荷可表示为面牵引的问题): ``is_displacement_boundary``,
+   ``is_traction_boundary``, 可选 ``displacement_bc`` 与 ``is_symmetry_boundary``. 对应
+   ``MixedBoundaryElasticityProblem``. 集中力与线载荷不能按应力迹强施加, 这类问题
+   不实现本层.
+4. 局部牵引描述层 (载荷为边界上一段局部牵引的问题): ``load_width``,
+   ``traction_patch``, ``traction_axis``, ``traction_level``, ``traction_intensity``,
+   ``uses_step_traction``, 以及构造参数 ``traction`` (注入 P1 迹载荷等受控牵引).
+   未注入 ``traction`` 时按整边选取施加牵引, 载荷区端点须是网格节点, 由分析器构造时
+   经 ``soptx.fem.check_traction_patch_alignment`` 检查.
+5. 应力奇点层 (用于应力约束的问题): ``traction_patch_endpoints`` (载荷侧),
+   ``support_corner_points`` (支承侧 Dirichlet--Neumann 角点).
+
+数值处置不进入问题类: 被动实体区掩码经 ``Filter(passive_mask=...)`` 传入; Hu--Zhang
+角点松弛的几何角点由网格检出 (``mesh.boundary_corner_index``), 有意只松弛某个子集时
+经 ``HuZhangMFEMAnalyzer(relaxed_corners=...)`` 传入. 物理非设计区 (如
+简支桥桥面) 是例外, 由 ``get_passive_element_mask(mesh)`` 给出. 三维问题由二维
+问题沿第三方向拉伸得到时, 支承与载荷一并拉伸, 只补消除新增刚体运动所必需的约束.
 """
 
 from __future__ import annotations
@@ -131,25 +161,17 @@ class MixedBoundaryElasticityProblem(ElasticityProblem, Protocol):
 
     Hu--Zhang 混合形式中, 位移边界数据按自然边界条件弱施加, 牵引边界数据
     作为应力法向迹的本质边界条件强施加. 两个边界标记必须明确划分边界;
-    牵引值由 ``loads()`` 中的 ``BoundaryTraction`` 提供. ``mark_corners``
-    为 Hu--Zhang 角点松弛提供几何角点.
+    牵引值由 ``loads()`` 中的 ``BoundaryTraction`` 提供. 角点松弛所需的几何角点
+    由分析器从网格检出, 不是 Problem 的成员.
+
+    以下成员可选, 分析器按 ``getattr`` 探测, 不列入协议方法 (否则缺这些成员的
+    问题类无法通过 ``isinstance`` 检查):
+
+    - ``displacement_bc(points)``: 位移边界上弱施加的位移数据 :math:`u_D`;
+      缺省时视为 :math:`u_D = 0`.
+    - ``is_symmetry_boundary(points)``: 只强加切向牵引 :math:`\\sigma_{nt} = 0`
+      的边界 (对称面或滚动支承), 法向位移为自然条件; 缺省时视为无此类边界.
     """
-
-    def mark_corners(self, node: TensorLike) -> TensorLike:
-        """从网格节点中挑出区域的几何角点.
-
-        Parameters
-        ----------
-        node : TensorLike
-            形状 ``(NN, GD)`` 的网格节点坐标.
-
-        Returns
-        -------
-        TensorLike
-            形状 ``(N_corner, GD)`` 的角点坐标, 作为 ``HuZhangFESpace`` 的
-            ``corners`` 参数用于角点松弛.
-        """
-        ...
 
     def is_displacement_boundary(self, points: TensorLike) -> TensorLike:
         """判定点是否位于位移边界 (弱施加 ``u = u_D``).

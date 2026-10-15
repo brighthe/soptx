@@ -71,7 +71,6 @@ def timed_solve(
         operator_level="fa",
         solve_method="cg",
         topopt_algorithm=None,
-        enable_logging=False,
     )
 
     # ---- 装配 ----
@@ -346,7 +345,6 @@ def main() -> int:
         hypothesis="plane_strain",
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
-        enable_logging=False,
     )
 
     print(f"mesh={args.mesh_type}, base={args.base}, levels={args.levels}")

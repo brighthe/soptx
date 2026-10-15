@@ -32,6 +32,7 @@ class ConstrainedSolveResult:
     mode: str
     iterations: Optional[int] = None
     converged: bool = True
+    solver_info: Optional[dict] = None
 
 
 def solve_interface_system(
@@ -142,8 +143,8 @@ class _FixedDofOperator:
         return result
 
 
-def _solve_fixed_cg(stiffness, force, matrix, values, *, cg_tol, cg_maxiter,
-                    precond, x0):
+def _solve_fixed_cg(stiffness, force, matrix, values, *, atol, rtol,
+                    rtol_reference, norm_type, verify_residual, cg_maxiter, precond, x0):
     """对可等价为齐次固定自由度的约束执行 CPU CG.
 
     Parameters
@@ -156,8 +157,12 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, cg_tol, cg_maxiter,
         约束矩阵.
     values : numpy.ndarray
         约束右端, 须全零.
-    cg_tol : float
-        相对于自由载荷二范数的真实残差容差.
+    atol, rtol : float
+        原样传入 CG 的绝对与相对容差.
+    rtol_reference, norm_type : str
+        相对容差参照量与停机范数, 语义同 CGSolver.
+    verify_residual : bool
+        是否在迭代中复核真实残差; 返回前始终额外验收真实残差.
     cg_maxiter : int
         最大迭代次数.
     precond : str or object
@@ -171,8 +176,6 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, cg_tol, cg_maxiter,
     ConstrainedSolveResult
         经真实残差验收的位移与迭代信息.
     """
-    if not np.isfinite(cg_tol) or not 0.0 < cg_tol < 1.0:
-        raise ValueError("cg_tol 必须为 (0, 1) 内的有限数.")
     if cg_maxiter < 1 or int(cg_maxiter) != cg_maxiter:
         raise ValueError("cg_maxiter 必须为正整数.")
     if isinstance(precond, str):
@@ -195,36 +198,45 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, cg_tol, cg_maxiter,
     guess[fixed] = 0.0
     # from_numpy 保留当前张量后端, 接口系统及迭代向量驻留 CPU.
     operator = _FixedDofOperator(CSRTensor.from_scipy(stiffness), bm.from_numpy(fixed))
-    if scale == 0.0:
-        q = np.zeros_like(rhs)
-        info = dict(niter=0, converged=True)
+    diagonal = stiffness.diagonal().copy()
+    diagonal[fixed] = 1.0
+    if not np.all(np.isfinite(diagonal)) or np.any(diagonal <= 0.0):
+        raise ValueError("CG 要求消元后的刚度对角线有限且为正.")
+    if isinstance(precond, str):
+        preconditioner = (DiagonalPreconditioner(diag=bm.from_numpy(diagonal))
+                          if precond == "jacobi" else None)
     else:
-        diagonal = stiffness.diagonal().copy()
-        diagonal[fixed] = 1.0
-        if not np.all(np.isfinite(diagonal)) or np.any(diagonal <= 0.0):
-            raise ValueError("CG 要求消元后的刚度对角线有限且为正.")
-        if isinstance(precond, str):
-            preconditioner = (DiagonalPreconditioner(diag=bm.from_numpy(diagonal))
-                              if precond == "jacobi" else None)
-        else:
-            preconditioner = precond
-        linear_solver = CGSolver(M=preconditioner, rtol=0.0, atol=cg_tol * scale,
-                                 maxit=cg_maxiter, norm_type="unpreconditioned")
-        displacement, info = linear_solver.setup(operator).solve(
-            bm.from_numpy(rhs), x0=bm.from_numpy(guess))
-        q = np.asarray(bm.to_numpy(displacement), dtype=np.float64)
+        preconditioner = precond
+    linear_solver = CGSolver(M=preconditioner, rtol=rtol, atol=atol,
+                             rtol_reference=rtol_reference, norm_type=norm_type,
+                             verify_residual=verify_residual, maxit=cg_maxiter)
+    displacement, info = linear_solver.setup(operator).solve(
+        bm.from_numpy(rhs), x0=bm.from_numpy(guess))
+    q = np.asarray(bm.to_numpy(displacement), dtype=np.float64)
     residual = stiffness @ q - force
     residual[fixed] = 0.0
     relative = float(np.linalg.norm(residual)) / max(scale, np.finfo(float).tiny)
-    if not info["converged"] or not np.all(np.isfinite(q)) or not np.isfinite(relative) or relative > cg_tol:
+    residual_norm = float(np.linalg.norm(residual))
+    if preconditioner is not None and norm_type != 'unpreconditioned':
+        z = np.asarray(bm.to_numpy(preconditioner @ bm.from_numpy(residual)))
+        product = float(residual @ z)
+        if product < 0.0:
+            raise RuntimeError("真实残差验收遇到非正定预条件子.")
+        residual_norm = (float(np.sqrt(product)) if norm_type == 'natural'
+                         else float(np.linalg.norm(z)))
+    threshold = info['stopping_threshold']
+    info['true_residual'] = residual_norm
+    if (not info["converged"] or not np.all(np.isfinite(q))
+            or not np.isfinite(residual_norm) or residual_norm > threshold):
         raise RuntimeError(f"CG 未通过真实残差验收: iterations={info['niter']}, "
-                           f"relative_residual={relative:.3e}, tolerance={cg_tol:.3e}.")
+                           f"residual={residual_norm:.3e}, threshold={threshold:.3e}.")
     constraint_error = float(np.linalg.norm(matrix @ q)) / max(float(np.linalg.norm(q)), np.finfo(float).tiny)
     return ConstrainedSolveResult(
         displacement=bm.from_numpy(q), constraint_rank=len(fixed),
         equilibrium_relative_residual=relative,
         constraint_relative_residual=constraint_error,
         mode="齐次固定自由度 / CG", iterations=int(info["niter"]), converged=True,
+        solver_info=info,
     )
 
 
@@ -235,7 +247,12 @@ def solve_constrained_system(
     *,
     prescribed: Optional[Any] = None,
     solver: str = "scipy",
-    cg_tol: float = 1.0e-6,
+    cg_tol: Optional[float] = None,
+    atol: float = 0.0,
+    rtol: Optional[float] = None,
+    rtol_reference: str = 'rhs',
+    norm_type: str = 'unpreconditioned',
+    verify_residual: bool = True,
     cg_maxiter: int = 20000,
     precond: Union[str, Any] = "jacobi",
     x0: Optional[Any] = None,
@@ -255,7 +272,16 @@ def solve_constrained_system(
     solver : str
         scipy, mumps 或 cg.
     cg_tol : float
-        CG 相对于自由载荷二范数的真实残差容差.
+        旧接口的相对自由载荷二范数容差, 不能与 rtol 同时指定.
+        未指定 cg_tol 或 rtol 时, rtol 默认 1e-6.
+    atol, rtol : float
+        直接传入 CG 的绝对与相对容差.
+    rtol_reference : {'initial_residual', 'rhs'}
+        相对容差参照量, 默认 rhs.
+    norm_type : str
+        停机范数, 默认 unpreconditioned; 语义同 CGSolver.
+    verify_residual : bool
+        迭代中是否复核真残差, 默认 True; 返回前始终验收真残差.
     cg_maxiter : int
         CG 最大迭代次数.
     precond : str or object
@@ -337,7 +363,16 @@ def solve_constrained_system(
         )
 
     if solver == "cg":
-        return _solve_fixed_cg(stiffness, force, matrix, values, cg_tol=cg_tol,
+        if cg_tol is not None:
+            if rtol is not None or rtol_reference != 'rhs' or norm_type != 'unpreconditioned':
+                raise ValueError("cg_tol 仅支持 rhs 二范数, 且不能与 rtol 同时指定.")
+            if not np.isfinite(cg_tol) or not 0.0 < cg_tol < 1.0:
+                raise ValueError("cg_tol 必须为 (0, 1) 内的有限数.")
+            rtol = cg_tol
+        return _solve_fixed_cg(stiffness, force, matrix, values,
+                               atol=atol, rtol=1e-6 if rtol is None else rtol,
+                               rtol_reference=rtol_reference, norm_type=norm_type,
+                               verify_residual=verify_residual,
                                cg_maxiter=cg_maxiter, precond=precond, x0=x0)
 
     if matrix.shape[0] == 0:

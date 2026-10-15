@@ -39,8 +39,8 @@ DPI = 600
 # ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
-    "postprocess/discretization_probe/lfem-3-pad-solid__fields.npz",
-    "postprocess/discretization_probe/huzhang-3-pad-solid__fields.npz",
+    "postprocess/discretization_probe/lfem-3__fields.npz",
+    "postprocess/discretization_probe/huzhang-3__fields.npz",
 )
 
 PROBE_DIR = "postprocess/discretization_probe"
@@ -54,7 +54,7 @@ def load_design(base, tag: str, label: str):
     base : Path
         算例产物根目录.
     tag : str
-        探针产物前缀, 如 ``lfem-3-nopad``.
+        探针产物前缀, 如 ``lfem-3``.
     label : str
         自读离散标签, 如 ``lfem-3``; 决定取哪一列 ``vm_app__``.
 
@@ -79,8 +79,8 @@ def load_design(base, tag: str, label: str):
 def main() -> None:
     base = config.OUTPUT_DIR / SOURCE_CASE
 
-    lf_tri, lf_rho, lf_vm, lf_vol = load_design(base, "lfem-3-pad-solid", "lfem-3")
-    hz_tri, hz_rho, hz_vm, hz_vol = load_design(base, "huzhang-3-pad-solid", "huzhang-3")
+    lf_tri, lf_rho, lf_vm, lf_vol = load_design(base, "lfem-3", "lfem-3")
+    hz_tri, hz_rho, hz_vm, hz_vol = load_design(base, "huzhang-3", "huzhang-3")
 
     # 版式与图 5.7 一致: 两行 (位移法 / 混合法) x 两栏 (构型 / 应力) + 逐行色标
     fig = plt.figure(figsize=FIG_SIZE_IN, layout="constrained")

@@ -72,10 +72,10 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     solve_method : {'cg', 'mumps', 'scipy'}
         接口系统求解器.
     solver_options : dict, optional
-        迭代解法参数, 词汇与基类相同: ``precond`` (``'jacobi'``, ``'mg'``, ``'none'`` 或 None),
+        迭代解法参数, 词汇与基类相同: ``precond`` (``'jacobi'``, ``'gmg'``, ``'none'`` 或 None),
         ``maxiter``, ``atol``, ``rtol``. 接口求解器的停机判据是自由接口上的真实残差
-        相对接口载荷二范数, 由 ``atol / ||F_Q||_2`` 给出, ``atol`` 缺省时取 ``rtol``.
-    topopt_algorithm, interpolation_scheme, enable_logging, logger_name
+        按 ``norm_type`` 度量; ``rtol_reference`` 选择初始残差或施加支承后的右端项.
+    topopt_algorithm, interpolation_scheme
         同基类.
 
     Notes
@@ -100,8 +100,6 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         solver_options: Optional[Dict] = None,
         topopt_algorithm: Literal[None, 'density_based'] = 'density_based',
         interpolation_scheme: Optional[Any] = None,
-        enable_logging: bool = False,
-        logger_name: Optional[str] = None,
     ) -> None:
         if trace not in TRACES:
             raise ValueError(f"trace 须为 {TRACES} 之一, 得到 {trace!r}")
@@ -117,14 +115,13 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if topopt_algorithm not in (None, 'density_based'):
             raise ValueError(f"子结构分析器只支持 topopt_algorithm=None 或 'density_based', 得到 {topopt_algorithm!r}")
         # 布局的细网格与张量空间交给基类, 编号与 layout 的局部到全局映射一致;
-        # 接口系统是显式 CSR, 对应基类的 'fa' 层级; 结构化网格只需一份参考单元刚度
+        # 接口系统是显式 CSR, 对应基类的 'fa' 层级; 结构化细网格由基类判定为单一平移类, 只存一份参考单元刚度
         super().__init__(
             disp_mesh=layout.full_mesh, pde=pde, material=material,
             space_degree=space_degree, integration_order=integration_order,
             assembly_method='fast', operator_level='fa', solve_method=solve_method,
             solver_options=solver_options, tensor_space=layout.space_full,
             topopt_algorithm=topopt_algorithm, interpolation_scheme=interpolation_scheme,
-            enable_logging=enable_logging, logger_name=logger_name, reference_classes=1,
         )
         self._layout = layout
         self._trace = trace
@@ -229,12 +226,12 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     # 接口系统的多重网格预条件子
     ##############################################################################################
 
-    def _interface_multigrid_preconditioner(self, **kwargs) -> RestrictedPreconditioner:
+    def _interface_gmg_preconditioner(self, **kwargs) -> RestrictedPreconditioner:
         """细网格几何多重网格限制到接口自由度的预条件子 ``R B R^T``.
 
         Parameters
         ----------
-        **kwargs : 求解调用的选项, 透传给基类 ``_multigrid_preconditioner`` (``mg_*`` 项).
+        **kwargs : 求解调用的选项, 透传给基类 ``_gmg_preconditioner`` (``gmg_*`` 项).
 
         Returns
         -------
@@ -252,14 +249,14 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         算子由基类按本方法构造的最细层算子所带系数更新, 粗细两层出自同一组系数.
         """
         if self._trace != 'full_trace':
-            self._log_error("precond='mg' 目前只支持 trace='full_trace': 角点接口的未知量不是细网格自由度")
+            self._log_error("precond='gmg' 目前只支持 trace='full_trace': 角点接口的未知量不是细网格自由度")
         if self._fine_restriction is None:
             self._fine_restriction = ElementRestriction.from_integrator(
                 self._integrator, self._tensor_space, layout='flat')
         fine_level = SharedReferenceElementAssembly(
             self._tensor_space, restriction=self._fine_restriction,
             reference_matrices=self._reference_stiffness_matrices(), scale=self._integrator.coef)
-        mg = self._multigrid_preconditioner(fine_level, **kwargs)
+        mg = self._gmg_preconditioner(fine_level, **kwargs)
         _, is_dirichlet, _ = self._dirichlet_data()
         mg.setup(ConstrainedOperator(fine_level, gd=self._pde.dirichlet_bc, isDDof=is_dirichlet))
         return RestrictedPreconditioner(
@@ -320,7 +317,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         F_non_body = self._non_body_loads_by_boundary_type()
         if F_non_body is not None:
             F = F + F_non_body
-        self._F = self.reduce_load(F)
+        self._F = F
         uh_bd, _, bd_nonzero = self._dirichlet_data()
         if bd_nonzero:
             self._log_error("子结构分析器只支持齐次 Dirichlet 条件")
@@ -338,7 +335,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         out : 全场位移向量 (有限元函数或张量), 就地写入.
         **kwargs
             ``x0``: CG 的初值, 为接口未知量 ``Q`` 而非全场位移, 通常取上一次的
-            ``interface_displacement``; ``solver``: 覆盖构造时的求解器名; ``mg_*``: 多重网格选项.
+            ``interface_displacement``; ``solver``: 覆盖构造时的求解器名; ``gmg_*``: 几何多重网格选项.
 
         Returns
         -------
@@ -349,23 +346,18 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if self._density_cells is None:
             self._log_error("solve_system 之前须先调用 assemble_stiff_matrix")
         solver_type = kwargs.get('solver', self._solve_method)
-        options = dict(self._solver_options)
+        options = self._merged_solver_options(kwargs)
         cg_kwargs: Dict[str, Any] = {}
         if solver_type == 'cg':
-            load_norm = float(bm.linalg.norm(F))
-            atol = options.get('atol', None)
-            rtol = options.get('rtol', None)
-            cg_tol: Optional[float] = None
-            if atol is not None and atol > 0 and load_norm > 0:
-                cg_tol = float(atol) / load_norm
-            elif rtol is not None and rtol > 0:
-                cg_tol = float(rtol)
-            if cg_tol is None:
-                raise ValueError("solver_options 须给出正的 atol 或 rtol 作为 CG 停机容差")
             precond = options.get('precond', 'jacobi')
-            if precond == 'mg':
-                precond = self._interface_multigrid_preconditioner(**kwargs)
-            cg_kwargs = dict(cg_tol=cg_tol, cg_maxiter=int(options.get('maxiter', 20000)),
+            if precond == 'gmg':
+                precond = self._interface_gmg_preconditioner(**kwargs)
+            cg_kwargs = dict(atol=options.get('atol', 1e-12),
+                             rtol=options.get('rtol', 1e-12),
+                             rtol_reference=options.get('rtol_reference', 'initial_residual'),
+                             norm_type=options.get('norm_type', 'unpreconditioned'),
+                             verify_residual=options.get('verify_residual', True),
+                             cg_maxiter=options.get('maxiter', 20000),
                              precond='none' if precond is None else precond, x0=kwargs.get('x0', None))
         result = solve_constrained_system(
             system=K, load=F, constraints=self._constraints, solver=solver_type, **cg_kwargs,
@@ -384,6 +376,12 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
                 'converged': bool(result.converged),
                 'constraint_relres': float(result.constraint_relative_residual),
                 'mode': result.mode}
+        if result.solver_info is not None:
+            for key in ('rtol_reference', 'norm_type', 'rhs_norm', 'reference_norm',
+                        'initial_residual_norm', 'stopping_threshold',
+                        'recursive_residual', 'true_residual'):
+                info[key] = result.solver_info.get(key)
+            info['reason'] = result.solver_info['reason'].name
         return out, info
 
     def solve_state(self,

@@ -36,7 +36,8 @@ viz = [
   "pyevtk",
   "vtk",
 ]
-mpi = [
+mumps = [
+  "PyMUMPS",
   "mpi4py>=4,<5",
 ]
 pinn = [

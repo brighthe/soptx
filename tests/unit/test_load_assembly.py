@@ -3,7 +3,7 @@
 以离散合力作检验, 不依赖实现细节:
 
 1. 体力: 常值体力 f 在矩形域上的合力为 f * 面积;
-2. 体力 + 边界牵引 + 集中力: 合力为三者之和 (``BearingDevice2d`` 顶边均布牵引的合力为 t * 边长);
+2. 体力 + 边界牵引 + 集中力: 合力为三者之和 (``BearingTraction2d`` 顶边均布牵引的合力为 t * 边长);
 3. 线载荷: 三维悬臂梁右端底边的总力为 P;
 4. 分量优先与节点优先两种自由度排序给出同一组载荷, 只差一个置换.
 """
@@ -20,7 +20,7 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import HexahedronMesh, QuadrangleMesh
-from soptx.problems import BearingDevice2d, CantileverRightBottomEdge3d
+from soptx.problems import BearingTraction2d, CantileverBottomEdgeLine3d
 from soptx.problems.loads import BodyForceLoad, PointForceLoad
 
 BODY_FORCE = (0.3, -0.5)
@@ -35,7 +35,7 @@ def reset_backend():
     bm.set_backend("numpy")
 
 
-class _AllLoadsBearing(BearingDevice2d):
+class _AllLoadsBearing(BearingTraction2d):
     """在顶边均布牵引之外再加常值体力与一个集中力的轴承算例."""
 
     @cartesian
@@ -55,11 +55,10 @@ def _analyzer(problem, mesh, dof_priority: bool) -> LagrangeFEMAnalyzer:
     shape = (GD, -1) if dof_priority else (-1, GD)
     space = TensorFunctionSpace(LagrangeFESpace(mesh, p=1, ctype='C'), shape=shape)
     material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3,
-                                              hypothesis="plane_stress" if GD == 2 else "3D",
-                                              enable_logging=False)
+                                              hypothesis="plane_stress" if GD == 2 else "3D")
     return LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
                                integration_order=3, operator_level='fa', solve_method='scipy',
-                               tensor_space=space, enable_logging=False)
+                               tensor_space=space)
 
 
 def _bearing(dof_priority: bool) -> LagrangeFEMAnalyzer:
@@ -69,7 +68,7 @@ def _bearing(dof_priority: bool) -> LagrangeFEMAnalyzer:
 
 
 def _cantilever(dof_priority: bool) -> LagrangeFEMAnalyzer:
-    problem = CantileverRightBottomEdge3d()
+    problem = CantileverBottomEdgeLine3d()
     mesh = HexahedronMesh.from_box(list(problem.domain), nx=6, ny=2, nz=2)
     return _analyzer(problem, mesh, dof_priority)
 
@@ -105,7 +104,7 @@ def test_external_load_resultant_with_all_load_types(dof_priority: bool) -> None
     problem = analyzer.pde
     xmin, xmax, ymin, ymax = problem.domain
     expected = (np.array(BODY_FORCE) * (xmax - xmin) * (ymax - ymin)
-                + np.array([0.0, problem.t * (xmax - xmin)])
+                + np.array([0.0, problem.P])
                 + np.array(POINT_FORCE))
 
     resultant = _resultant(analyzer, analyzer.assemble_external_load())

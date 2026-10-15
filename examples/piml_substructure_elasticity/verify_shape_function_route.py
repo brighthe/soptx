@@ -41,7 +41,6 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import (
     ExactSchurCondensation,
     GlobalAssembler,
-    InterfaceDofsView,
     LinearCornerTraceBasis,
     LocalReductionBatchResult,
     ReductionDiagnostics,
@@ -54,7 +53,7 @@ from soptx.fem.substructure import (
     solve_interface_system,
 )
 from soptx.ml.substructure import ShapeFunctionSurrogateNet
-from soptx.problems.elasticity import FullMBBBeam2d
+from soptx.problems import FullMBBBeamPoint2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -113,14 +112,14 @@ def solve_with_condensors(
 ) -> Tuple[Any, Any, int]:
     """用给定的缩聚结果装配并求解全局接口系统, 再恢复全场位移 (full_trace 路径)."""
     system = assembler.assemble_interface_system(sub_meshes, condensors)
-    interface_fixed = assembler.project_global_dofs(system, fixed_global_dofs)
+    interface_fixed = assembler.project_global_dofs(system.global_dofs, fixed_global_dofs)
     u_interface = solve_interface_system(
         system,
-        assembler.project_global_vector(system, global_load),
+        assembler.project_global_vector(system.global_dofs, global_load),
         interface_fixed,
     )
     u_full = assembler.recover_full_displacement(
-        sub_meshes, condensors, system, u_interface
+        sub_meshes, condensors, system.global_dofs, u_interface
     )
     n_free = int(len(system.global_dofs)) - int(len(interface_fixed))
     return u_interface, u_full, n_free
@@ -324,7 +323,7 @@ def step4_solution_layer(
     ev: Eq17Evaluator, net: ShapeFunctionSurrogateNet
 ) -> Dict[str, Any]:
     """在完整 MBB 梁上比较形函数路径与精确缩聚的解层误差 (适配 full_trace 与 linear_corner)."""
-    problem = FullMBBBeam2d(domain=DOMAIN, P=P_LOAD, E=E_BASE, nu=NU)
+    problem = FullMBBBeamPoint2d(domain=DOMAIN, P=P_LOAD, E=E_BASE, nu=NU)
     domain_size = (problem.domain[1], problem.domain[3])
     assembler = GlobalAssembler(
         domain_size, N_SUB, N_FINE, E_base=problem.E, nu=problem.nu
@@ -345,7 +344,6 @@ def step4_solution_layer(
             interpolation_method="simp",
             options={"penalty_factor": 3.0, "stress_penalty_factor": 1.0},
         ),
-        enable_logging=False,
     )
     global_load = bm.asarray(analyzer.assemble_external_load(), dtype=bm.float64)
     _, fixed_mask = analyzer.tensor_space.boundary_interpolate(
@@ -419,16 +417,15 @@ def step4_solution_layer(
         # linear_corner 系统求解
         trace_basis = LinearCornerTraceBasis.from_prototype(prototype)
         interface_dofs = assembler.build_interface_dofs(sub_meshes)
-        interface_view = InterfaceDofsView(global_dofs=interface_dofs)
         projection = assembler.build_linear_corner_projection(
-            sub_meshes, interface_view, trace_basis
+            sub_meshes, interface_dofs, trace_basis
         )
 
         interface_force = np.asarray(bm.to_numpy(
-            assembler.project_global_vector(interface_view, global_load)
+            assembler.project_global_vector(interface_dofs, global_load)
         ))
         fixed_interface = np.asarray(bm.to_numpy(
-            assembler.project_global_dofs(interface_view, fixed_global_dofs)
+            assembler.project_global_dofs(interface_dofs, fixed_global_dofs)
         ), dtype=np.int64)
         force = projection.T @ interface_force
         constraints = projection[fixed_interface]
@@ -442,7 +439,7 @@ def step4_solution_layer(
         q_exact = exact_solve.displacement
         interface_u_exact = bm.asarray(projection @ bm.to_numpy(q_exact), dtype=bm.float64)
         u_full_exact = assembler.recover_full_displacement(
-            sub_meshes, exact_condensor, interface_view, interface_u_exact
+            sub_meshes, exact_condensor, interface_dofs, interface_u_exact
         )
         u_b_exact = interface_u_exact
 
@@ -453,7 +450,7 @@ def step4_solution_layer(
         interface_u_route = bm.asarray(projection @ bm.to_numpy(q_route), dtype=bm.float64)
 
         u_full_route = assembler.recover_full_displacement(
-            sub_meshes, predicted_result, interface_view, interface_u_route
+            sub_meshes, predicted_result, interface_dofs, interface_u_route
         )
         solve_diagnostics = {
             "equilibrium_relative_residual_max": max(
@@ -815,7 +812,7 @@ def run_verification(args) -> None:
 
     print("\n【配置摘要】")
     print(f"组别 / 路线 : {1 if args.trace_basis == 'full_trace' else 2} / shape_function")
-    print(f"问题 / 材料 : FullMBBBeam2d, domain={DOMAIN_SIZE}, "
+    print(f"问题 / 材料 : FullMBBBeamPoint2d, domain={DOMAIN_SIZE}, "
           f"{ev.prototype.material.hypothesis}, E0={E_BASE:g}, nu={NU:g}, SIMP penalty={SHAPE_SIMP_PENALTY:g}")
     print(f"载荷        : 顶边中点竖向集中力 P={P_LOAD:g}")
     print(f"网格 / 接口 : Q1, 子结构={N_SUB}, 每块细单元={N_FINE}, "

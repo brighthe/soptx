@@ -41,7 +41,7 @@ from soptx.backend import backend_manager as bm
 from soptx.solvers import CGSolver
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
-from soptx.problems.elasticity import FullMBBBeam2d
+from soptx.problems import FullMBBBeamPoint2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.fem.substructure import (
     ExactSchurCondensation,
@@ -142,7 +142,7 @@ def run_verification(
     set_random_seed(seed)
     rng = np.random.default_rng(seed)
 
-    problem = FullMBBBeam2d(domain=DOMAIN, P=-1.0, E=1.0, nu=0.3)
+    problem = FullMBBBeamPoint2d(domain=DOMAIN, P=-1.0, E=1.0, nu=0.3)
     domain_size = (problem.domain[1], problem.domain[3])
 
     assembler = GlobalAssembler(
@@ -152,7 +152,7 @@ def run_verification(
     density = make_density_fields(sub_meshes, domain_size, DENSITY_RANGE)
 
     print("=" * 78)
-    print("PIML 近似 Matrix-Free vs 精确 Matrix-Free (FullMBBBeam2d)")
+    print("PIML 近似 Matrix-Free vs 精确 Matrix-Free (FullMBBBeamPoint2d)")
     print("=" * 78)
     print(f"后端           : {backend}")
     print(f"子结构划分     : {N_SUB[0]} x {N_SUB[1]} (共 {len(sub_meshes)} 个)")
@@ -204,7 +204,6 @@ def run_verification(
             interpolation_method="simp",
             options={"penalty_factor": 3.0, "stress_penalty_factor": 1.0},
         ),
-        enable_logging=False,
     )
     global_load = bm.asarray(analyzer.assemble_external_load(), dtype=bm.float64)
     _, fixed_mask = analyzer.tensor_space.boundary_interpolate(
@@ -213,7 +212,7 @@ def run_verification(
         method="interp",
     )
     fixed_global_dofs = bm.nonzero(fixed_mask)[0]
-    fixed_interface_dofs = assembler.project_global_dofs(system, fixed_global_dofs)
+    fixed_interface_dofs = assembler.project_global_dofs(system.global_dofs, fixed_global_dofs)
 
     op_free = InterfaceOperator(
         assembler, sub_meshes, piml_condensors, fixed_dofs=fixed_interface_dofs
@@ -225,7 +224,7 @@ def run_verification(
     n_free = op_free.n_free
     K_free = system.stiffness[free, free]
 
-    load_interface = assembler.project_global_vector(system, global_load)
+    load_interface = assembler.project_global_vector(system.global_dofs, global_load)
     b_f = load_interface[free]
 
     # ------------------------------------------------------------------

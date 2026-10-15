@@ -68,9 +68,6 @@ class QuadraticPatchProblem:
         f = -(self.mu * tr_H + (self.mu + self.lam) * grad_div)
         return np.broadcast_to(f, x.shape).copy()
 
-    def mark_corners(self, node):
-        return bm.zeros((0, self.dim), dtype=bm.float64)
-
     def _on_x1(self, points):
         return bm.abs(points[..., 0] - 1.0) < 1e-12
 
@@ -152,7 +149,7 @@ def _solve(dim: int, p: int, traction_on_x1: bool = False):
         mesh = TetrahedronMesh.from_box(problem.domain, nx=1, ny=1, nz=1)
         hypothesis = "3D"
     material = IsotropicLinearElasticMaterial(
-        youngs_modulus=E, poisson_ratio=NU, hypothesis=hypothesis, enable_logging=False
+        youngs_modulus=E, poisson_ratio=NU, hypothesis=hypothesis
     )
     analyzer = HuZhangMFEMAnalyzer(
         disp_mesh=mesh, pde=problem, material=material, interpolation_scheme=None,
@@ -216,7 +213,7 @@ def test_stabilized_patch_with_nonhomogeneous_displacement(dim, p, u_degree):
     else:
         mesh = TetrahedronMesh.from_box(problem.domain, nx=2, ny=2, nz=2)
         hypothesis = "3D"
-    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis=hypothesis, enable_logging=False)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis=hypothesis)
     analyzer = HuZhangMFEMAnalyzer(
         disp_mesh=mesh, pde=problem, material=material, interpolation_scheme=None,
         space_degree=p, integration_order=p + 3, use_relaxation=False,
@@ -244,7 +241,7 @@ def test_sheared_cube_patch_with_oblique_traction(traction_axes):
     problem = ShearedPatchProblem(SHEAR, traction_axes)
     cube = TetrahedronMesh.from_box([0, 1, 0, 1, 0, 1], nx=1, ny=1, nz=1)
     mesh = TetrahedronMesh(bm.tensor(bm.to_numpy(cube.entity("node")) @ SHEAR.T), cube.entity("cell"))
-    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D", enable_logging=False)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D")
     analyzer = HuZhangMFEMAnalyzer(
         disp_mesh=mesh, pde=problem, material=material, interpolation_scheme=None,
         space_degree=p, integration_order=p + 3, use_relaxation=False,
@@ -273,7 +270,7 @@ def test_sheared_cube_patch_with_oblique_traction(traction_axes):
 def test_removed_stabilization_options_are_rejected(kwargs):
     """已删除的向量跳量与旧缩放律在构造期明确报错."""
     problem = QuadraticPatchProblem(2)
-    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="plane_strain", enable_logging=False)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="plane_strain")
     with pytest.raises(RuntimeError, match="不支持"):
         HuZhangMFEMAnalyzer(
             disp_mesh=TriangleMesh.from_box(problem.domain, nx=2, ny=2), pde=problem, material=material,

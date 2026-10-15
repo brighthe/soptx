@@ -139,15 +139,15 @@ def _solve(
     import numpy as np
     from soptx.backend import backend_manager as bm
     from soptx.fem.substructure import (
-        InterfaceDofsView, solve_constrained_system, solve_interface_system,
+        solve_constrained_system, solve_interface_system,
     )
     if trace_kind == "full_trace":
         force = np.asarray(
-            bm.to_numpy(assembler.project_global_vector(system, load)),
+            bm.to_numpy(assembler.project_global_vector(system.global_dofs, load)),
             dtype=np.float64,
         )
         retained_fixed = np.asarray(
-            bm.to_numpy(assembler.project_global_dofs(system, fixed)),
+            bm.to_numpy(assembler.project_global_dofs(system.global_dofs, fixed)),
             dtype=np.int64,
         )
         displacement = np.asarray(
@@ -179,16 +179,15 @@ def _solve(
         }
 
     interface_dofs = assembler.build_interface_dofs(list(sub_meshes))
-    interface_view = InterfaceDofsView(global_dofs=interface_dofs)
     projection = assembler.build_linear_corner_projection(
-        sub_meshes, interface_view, trace
+        sub_meshes, interface_dofs, trace
     )
     full_force = np.asarray(
-        bm.to_numpy(assembler.project_global_vector(interface_view, load)),
+        bm.to_numpy(assembler.project_global_vector(interface_dofs, load)),
         dtype=np.float64,
     )
     full_fixed = np.asarray(
-        bm.to_numpy(assembler.project_global_dofs(interface_view, fixed)),
+        bm.to_numpy(assembler.project_global_dofs(interface_dofs, fixed)),
         dtype=np.int64,
     )
     solved = solve_constrained_system(

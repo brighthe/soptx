@@ -1,6 +1,6 @@
 """生成 ``docs/fem/assets/`` 下的胡张元结构网格示意图.
 
-图形直接由 :mod:`soptx.mesh.structured_triangle` 的生成器构造出的网格绘制,
+图形直接由 ``TriangleMesh.from_checkerboard_box`` / ``from_mirror_box`` 构造出的网格绘制,
 而不是手工摆放线段, 因此剖分规则一旦改动, 重跑本脚本即可让插图跟上代码.
 
 两种剖分共用同一套视觉约定: 灰色三角形边、四个几何角点标绿点并注 "2 tri"
@@ -32,10 +32,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from soptx.backend import backend_manager as bm  # noqa: E402
 
-from soptx.mesh import (  # noqa: E402
-    create_huzhang_checkerboard_mesh,
-    create_huzhang_symmetric_single_diagonal_mesh,
-)
+from soptx.mesh import TriangleMesh  # noqa: E402
 
 ASSETS_DIR = REPO_ROOT / "docs" / "fem" / "assets"
 
@@ -170,13 +167,13 @@ def _draw(mesh, **kwargs):
 
 def _checkerboard_panel():
     """返回棋盘格剖分的 (网格, 绘制选项)."""
-    mesh = create_huzhang_checkerboard_mesh(box=BOX, nx=NX, ny=NY)
+    mesh = TriangleMesh.from_checkerboard_box(box=BOX, nx=NX, ny=NY)
     return mesh, {}
 
 
 def _symmetric_panel():
     """返回镜像对称单向对角剖分的 (网格, 绘制选项)."""
-    mesh = create_huzhang_symmetric_single_diagonal_mesh(box=BOX, nx=NX, ny=NY)
+    mesh = TriangleMesh.from_mirror_box(box=BOX, nx=NX, ny=NY)
     opts = dict(
         highlight_quads=((0, NY - 1), (NX - 1, NY - 1)),
         mirror_line=True,

@@ -8,7 +8,7 @@ from soptx.backend import backend_manager as bm
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import HexahedronMesh, QuadrangleMesh
-from soptx.problems import ExponentialSineManufacturedElasticity2D, FullMBBBeam3d
+from soptx.problems import ExponentialSineManufacturedElasticity2D, FullMBBBeamLine3d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 
@@ -17,17 +17,15 @@ def _mbb_analyzer():
     bm.set_backend('numpy')
     grid, domain = (6, 2, 2), (0.0, 6.0, 0.0, 2.0, 0.0, 2.0)
     mesh = HexahedronMesh.from_box(list(domain), *grid)
-    problem = FullMBBBeam3d(domain=domain, support='end_lines', load_subdivisions=(grid[0], grid[2]))
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D',
-                                              enable_logging=False)
+    problem = FullMBBBeamLine3d(domain=domain)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis='3D')
     interpolation = MaterialInterpolationScheme(
         density_location='element', interpolation_method='msimp',
-        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']},
-        enable_logging=False)
+        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': ['E']})
     return LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
                                integration_order=2, assembly_method='fast', operator_level='fa',
                                solve_method='scipy', topopt_algorithm='density_based',
-                               interpolation_scheme=interpolation, enable_logging=False)
+                               interpolation_scheme=interpolation)
 
 
 def _manufactured_analyzer():
@@ -35,11 +33,9 @@ def _manufactured_analyzer():
     bm.set_backend('numpy')
     problem = ExponentialSineManufacturedElasticity2D(lame_lambda=1.0, shear_modulus=1.0)
     mesh = QuadrangleMesh.from_box(list(problem.domain), 6, 6)
-    material = IsotropicLinearElasticMaterial(lame_lambda=1.0, shear_modulus=1.0, hypothesis='plane_strain',
-                                              enable_logging=False)
+    material = IsotropicLinearElasticMaterial(lame_lambda=1.0, shear_modulus=1.0, hypothesis='plane_strain')
     return LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
-                               integration_order=3, operator_level='fa', solve_method='scipy',
-                               enable_logging=False)
+                               integration_order=3, operator_level='fa', solve_method='scipy')
 
 
 def _reference_system(analyzer, stiffness, load):

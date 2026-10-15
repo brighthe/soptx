@@ -20,7 +20,7 @@
 | [`concentrated_load_demo.py`](concentrated_load_demo.py) | 集中力工程基准（MBB 梁）：真相对残差与载荷等效性验证；可选导出最密层位移场为 VTU。 |
 | [`results_analysis.md`](results_analysis.md) | 数学—代码映射、验收契约、实测证据、结果解释与已知缺口。 |
 
-物理模型统一来自 [`soptx.problems.elasticity`](../../src/soptx/problems/elasticity/)；制造解和工程基准分别见 [`docs/problems/manufactured-elasticity.md`](../../docs/problems/manufactured-elasticity.md) 与 [`docs/problems/engineering-benchmarks.md`](../../docs/problems/engineering-benchmarks.md)。
+物理模型统一来自 [`soptx.problems`](../../src/soptx/problems/)；制造解和工程基准分别见 [`docs/problems/manufactured-elasticity.md`](../../docs/problems/manufactured-elasticity.md) 与 [`docs/problems/engineering-benchmarks.md`](../../docs/problems/engineering-benchmarks.md)。
 
 ## 快速运行
 

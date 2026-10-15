@@ -345,6 +345,9 @@ F=~/workspace/fealpy; git -C $F show suanhai/develop:fealpy/backend/base.py | gr
 
 ## 三、solver / distributed 层
 
+> 2026-10-10 起, 本节涉及的 `fem/distributed/`、CG 的 `dot_product` 与其分布式调用方已移出主线,
+> 归档于标签 `archive/distributed-mpi` (见 [`docs/archive.md`](../archive.md)); 下文为历史记录, 不再更新.
+
 | 组 | 性质 | 补丁 |
 |---|---|---|
 | [3.1](#31-cg-可插拔内积补丁栈) CG 可插拔内积与真残差刷新（含 fork 自造的 5 条回归） | 能力增强 + fork 内部回归修复 | `875496d` + `40016dc56`、`4c5887d` |

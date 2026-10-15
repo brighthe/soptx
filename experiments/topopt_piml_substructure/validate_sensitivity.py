@@ -3,7 +3,8 @@
 Notes
 -----
 复用已保存的光滑密度场, 分别视为物理密度和待过滤的设计密度.
-共用 linear_corner 接口, 单位载荷, end_lines 支承和 SIMP 插值.
+共用 linear_corner 接口, ``FullMBBBeamPoint3d`` (Huang2023 第 4.1 节) 的四角点支承与
+顶面中心单位集中力, 以及 SIMP 插值.
 全程禁用均匀子结构替代, 不执行优化或更新网络权重.
 """
 
@@ -24,7 +25,7 @@ from soptx.ml.substructure.independent_checkpoints import (
     decoder_metadata_matches, load_analysis_provider, load_independent_network,
 )
 from soptx.fem.substructure.independent_targets import IndependentPredictionDecoder
-from soptx.problems.elasticity import FullMBBBeam3d
+from soptx.problems import FullMBBBeamPoint3d
 from soptx.topology.filters.structured import (
     apply_structured_density_filter, apply_structured_density_filter_adjoint,
 )
@@ -70,10 +71,9 @@ def build_evaluator(previous, provider, network, uniform_threshold=None):
     assert decoder_metadata_matches(metadata, decoder.metadata())
     space = build_interface_space("linear_corner", GlobalAssembler(layout), meshes, proto)
     psi = np.asarray(provider.trace.matrix)
-    problem = FullMBBBeam3d(
+    problem = FullMBBBeamPoint3d(
         domain=tuple(v for d in previous["domain"] for v in (0, d)),
-        P=-1., E=1., nu=metadata["poisson_ratio"], support="end_lines",
-        load_subdivisions=(previous["fine_grid"][0], previous["fine_grid"][2]),
+        P=-1., E=1., nu=metadata["poisson_ratio"],
     )
     load, constraints = space.constrained_conditions(problem)
     indices = np.asarray(space.local_dofs)

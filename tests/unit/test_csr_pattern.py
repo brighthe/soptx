@@ -282,7 +282,7 @@ def _pattern_guard_case():
     """4x4 三角形网格上的 P1 向量空间、线弹性材料与单刚积分子."""
     mesh = TriangleMesh.from_box([0, 1, 0, 1], nx=4, ny=4)
     mat = IsotropicLinearElasticMaterial(
-        lame_lambda=1.0, shear_modulus=0.5, hypothesis="plane_strain", enable_logging=False
+        lame_lambda=1.0, shear_modulus=0.5, hypothesis="plane_strain"
     )
     tspace = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=1), shape=(-1, 2))
     return mesh, mat, tspace

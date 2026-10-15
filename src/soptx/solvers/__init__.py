@@ -2,11 +2,13 @@
 
 直接法, Krylov 迭代, 预条件子与多重网格都是同一个类型
 :class:`~soptx.solvers.base.LinearSolver`, 区别只在 ``setup`` 需要算子提供
-什么, 不在接口形状. 3D 大规模是主线, 故默认装配全程 matrix-free:
-``CGSolver(M=Multigrid(...))``, 只有多重网格最粗层才落到直接法.
+什么, 不在接口形状. 3D 大规模主线的装配是全程 matrix-free 的
+``CGSolver(M=Multigrid(...))``, 只有多重网格最粗层才落到直接法. 这是推荐配置而非
+默认值: 各分析器的默认求解器见其 ``solve_method``, 如 ``LagrangeFEMAnalyzer`` 默认
+``'mumps'``.
 
-SOPTX 依赖的求解器扩展 (CG 的可插拔内积与真残差刷新, MUMPS 的 sym 对称性
-标志) 上游 fealpy 都没有, 故整层由 SOPTX 拥有并演化, 不再依赖 fealpy fork.
+SOPTX 依赖的求解器扩展 (CG 收敛时的真残差验证, MUMPS 的 sym 对称性标志) 上游
+fealpy 都没有, 故整层由 SOPTX 拥有并演化, 不再依赖 fealpy fork.
 
 对外只暴露本文件导出的名字; 包内文件布局按需重组, 不影响调用方. 各后端模块
 在此被导入, 从而完成向 :mod:`soptx.solvers.registry` 的注册.
@@ -27,14 +29,10 @@ from .base import (
     operator_diagonal,
     reason_text,
 )
-from .amg import AMGSolver
 from .cg import CGSolver, cg
 from .direct import DirectSolver, spsolve
-from .minres import MINRESSolver
 from .multigrid import Multigrid, MultigridLevel
-from .overlap import weighted_cg, weighted_norm
 from .preconditioners import (
-    ChebyshevSmoother,
     DiagonalPreconditioner,
     JacobiSmoother,
     estimate_lambda_max,
@@ -64,17 +62,12 @@ __all__ = [
     "spsolve",
     # Krylov
     "CGSolver",
-    "MINRESSolver",
     "cg",
-    "weighted_cg",
-    "weighted_norm",
     # 预条件子与光滑子
-    "ChebyshevSmoother",
     "DiagonalPreconditioner",
     "JacobiSmoother",
     "estimate_lambda_max",
     # 多重网格
-    "AMGSolver",
     "Multigrid",
     "MultigridLevel",
 ]

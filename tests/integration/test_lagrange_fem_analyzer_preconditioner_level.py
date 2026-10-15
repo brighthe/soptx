@@ -21,7 +21,7 @@ from soptx.mesh import TriangleMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems.elasticity import SinusoidalPlaneStrainElasticity2D
+from soptx.problems import SinusoidalPlaneStrainElasticity2D
 
 DEGREE = 1
 INTEGRATION_ORDER = DEGREE + 3

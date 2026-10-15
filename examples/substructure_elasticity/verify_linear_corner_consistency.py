@@ -6,10 +6,10 @@
 
 使用方法:
     # 2D MBB 梁角点一致性验证 (默认 6x2 子结构, 每块 5x5 细网格)
-    python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem HalfMBBBeamRight2d
+    python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem HalfMBBBeamPoint2d
 
     # 3D MBB 梁角点一致性验证 (默认 6x2x2 子结构, 每块 4x4x4 细网格)
-    python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem FullMBBBeam3d
+    python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem FullMBBBeamLine3d
 """
 
 from __future__ import annotations
@@ -29,12 +29,11 @@ from scipy.sparse.linalg import norm as sparse_norm
 from soptx.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
-from soptx.problems.elasticity import HalfMBBBeamRight2d, FullMBBBeam3d
+from soptx.problems import HalfMBBBeamPoint2d, FullMBBBeamLine3d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.fem.substructure import (
     ExactSchurCondensation,
     GlobalAssembler,
-    InterfaceDofsView,
     LinearCornerTraceBasis,
     SubstructureMesh,
     SubstructurePrototype,
@@ -49,7 +48,7 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 
 DEFAULT_DENSITY = "cell"
 CONSISTENCY_TOLERANCE = 1.0e-9
-PROBLEMS = {"HalfMBBBeamRight2d": 2, "FullMBBBeam3d": 3}
+PROBLEMS = {"HalfMBBBeamPoint2d": 2, "FullMBBBeamLine3d": 3}
 LINEAR_CORNER_CONSISTENCY_KEYS = (
     "equilibrium_relative_residual",
     "constraint_relative_residual",
@@ -117,9 +116,8 @@ def build_corner_projection(
     trace_basis: Any,
 ) -> Any:
     """复用核心角点投影, 并保留既有实验导入入口."""
-    interface_view = InterfaceDofsView(global_dofs=interface_dofs)
     return assembler.build_linear_corner_projection(
-        sub_meshes, interface_view, trace_basis
+        sub_meshes, interface_dofs, trace_basis
     )
 
 
@@ -165,17 +163,16 @@ def analyze_linear_corner(
     )
     interface_dofs = assembler.build_interface_dofs(sub_meshes)
     # 仅恢复时使用完整接口编号, 不装配另一个完整接口刚度.
-    interface_view = InterfaceDofsView(global_dofs=interface_dofs)
     projection = build_corner_projection(
         assembler, sub_meshes, interface_dofs, trace_basis
     )
     phases["interface_assembly"] = time.perf_counter() - tick
     tick = time.perf_counter()
     interface_force = np.asarray(bm.to_numpy(
-        assembler.project_global_vector(interface_view, full_force)
+        assembler.project_global_vector(interface_dofs, full_force)
     ))
     fixed_interface = np.asarray(bm.to_numpy(
-        assembler.project_global_dofs(interface_view, full_fixed)
+        assembler.project_global_dofs(interface_dofs, full_fixed)
     ), dtype=np.int64)
     # 以原完整载荷的虚功为准; 不在宏观角点上重新生成物理载荷.
     force = projection.T @ interface_force
@@ -187,7 +184,7 @@ def analyze_linear_corner(
     tick = time.perf_counter()
     interface_u = bm.asarray(projection @ bm.to_numpy(q), dtype=bm.float64)
     displacement = assembler.recover_full_displacement(
-        sub_meshes, condensor, interface_view, interface_u
+        sub_meshes, condensor, interface_dofs, interface_u
     )
     phases["recovery"] = time.perf_counter() - tick
     phases["total"] = time.perf_counter() - start
@@ -256,11 +253,11 @@ def validate_linear_corner_consistency(record: Dict[str, Any]) -> None:
 def make_mbb_problem(dim: int) -> Any:
     """构造 MBB 梁问题."""
     if dim == 2:
-        return HalfMBBBeamRight2d(
+        return HalfMBBBeamPoint2d(
             domain=(0.0, 60.0, 0.0, 20.0), P=-1.0, E=1.0, nu=0.3,
         )
     if dim == 3:
-        return FullMBBBeam3d(
+        return FullMBBBeamLine3d(
             domain=(0.0, 6.0, 0.0, 1.0, 0.0, 1.0), P=-1.0, E=1.0, nu=0.3,
         )
     raise ValueError("dim 必须为 2 或 3.")
@@ -276,7 +273,6 @@ def make_fa_analyzer(mesh: Any, pde: Any, material: Any, solve_method: str = "sc
             density_location="element", interpolation_method="simp",
             options={"penalty_factor": 3.0, "stress_penalty_factor": 1.0},
         ),
-        enable_logging=False,
     )
 
 
@@ -444,8 +440,8 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     parser.add_argument(
-        "--problem", choices=tuple(PROBLEMS), default="HalfMBBBeamRight2d",
-        help="MBB 梁 Problem; 同时确定计算维度. 默认 HalfMBBBeamRight2d.",
+        "--problem", choices=tuple(PROBLEMS), default="HalfMBBBeamPoint2d",
+        help="MBB 梁 Problem; 同时确定计算维度. 默认 HalfMBBBeamPoint2d.",
     )
     parser.add_argument(
         "--n-sub", type=int, nargs="+", metavar="N",

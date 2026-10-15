@@ -1,6 +1,6 @@
 # 工程基准算例
 
-本文档说明 **没有解析解**的工程基准问题。与[制造解](manufactured-elasticity.md)不同，这类问题没有精确位移场；载荷是真实物理载荷（集中力、分布力等），而非从精确解反推的体积力。实现位于 `soptx.problems.elasticity`。
+本文档说明 **没有解析解**的工程基准问题。与[制造解](manufactured-elasticity.md)不同，这类问题没有精确位移场；载荷是真实物理载荷（集中力、分布力等），而非从精确解反推的体积力。实现位于 `soptx.problems.benchmarks`，公开类从 `soptx.problems` 导入。
 
 ---
 
@@ -52,16 +52,20 @@ C 与 D 的差别只在载荷区是不是整条边界，而这一条决定了两
 2. **载荷等效性** $\left|\sum F_{\sigma_h} - P\right|$ — 等效节点力装配无丢力/多分力，且必须在 `apply_bc` *之前*测量（否则被强加自由度吞掉的载荷不可见）
 
 两条判据都只验证装配，不验证收敛。收敛阶验证要求连续解具备 $H^1$ 正则性，A、B 组的奇异
-载荷不满足（见 A 组），因此论文的收敛算例取 D 组的 `FixedFixedBeamHalfDomain2d`。
+载荷不满足（见 A 组），因此论文的收敛算例取 D 组的 `HalfFixedFixedBeamPatch2d`。
 
 ---
 
 ## A 组：集中力
 
-载荷对象是 `PointForceLoad`，作用点与总力绑定在同一个对象上。`LagrangeFEMAnalyzer` 按
-`mode="exact"` 投影：作用点必须与唯一插值节点重合，命中数不为 $1$ 时报错。
+载荷对象是 `PointForceLoad`，作用点与总力绑定在同一个对象上。模型不提供网格剖分数，
+`LagrangeFEMAnalyzer` 与子结构全尺度载荷共用 `assemble_point_force(space, load)`，
+按实际位移空间形成 $\boldsymbol f_a=N_a(\boldsymbol x_P)\boldsymbol P$。
+首轮非节点点力支持标准顶点顺序的轴对齐 Q1 六面体；其他网格保留精确节点点力，
+不支持的非节点点力明确报错。共享面或边上的点仅装配一次，不吸附到最近节点。
+子结构先装配细网格载荷，再作接口迹投影；涉及子结构内部自由度载荷时仍明确拒绝。
 
-`mode="exact"` 保证的是载荷向量装配无误差：$\delta$ 与基函数配对就是基函数在该点的取值，
+形函数分配不引入载荷数值积分误差：$\delta$ 与基函数配对就是基函数在该点的取值，
 不含求积误差。它不保证解收敛——$d \geqslant 2$ 时 $\delta \notin H^{-1}$，连续问题的解不在
 $[H^1(\Omega)]^d$ 中（二维 $\boldsymbol{u} \sim \log r$，三维 $\boldsymbol{u} \sim r^{-1}$，
 应变能发散）：
@@ -81,7 +85,7 @@ Hu--Zhang 混合元拒绝这类载荷：混合位移空间 $V = [L_2(\Omega)]^d$
 
 ---
 
-### HalfMBBBeamRight2d
+### HalfMBBBeamPoint2d
 
 二维 MBB 梁的对称右半域。
 
@@ -90,7 +94,7 @@ Hu--Zhang 混合元拒绝这类载荷：混合位移空间 $V = [L_2(\Omega)]^d$
 区域为 $[0,60]\times[0,20]$ mm，采用 plane stress（默认 $E=1$ MPa，$\nu=0.3$）。
 全梁左右对称，取右半域建模：
 
-![MBB 梁对称右半域](./assets/images/mbb-beam-half-domain.png)
+![MBB 梁对称右半域](./assets/images/half-mbb-beam-point-2d.png)
 
 - **左边界** ($x=0$)：一排滚轴支座 $\rightarrow$ $u_x = 0$（对称约束）
 - **右下角** ($x=60$, $y=0$)：固定铰支座 $\rightarrow$ $u_y = 0$
@@ -101,9 +105,9 @@ Hu--Zhang 混合元拒绝这类载荷：混合位移空间 $V = [L_2(\Omega)]^d$
 集中力由一个 `PointForceLoad` 同时描述作用点和力向量：
 
 ```python
-from soptx.problems import HalfMBBBeamRight2d
+from soptx.problems import HalfMBBBeamPoint2d
 
-problem = HalfMBBBeamRight2d(
+problem = HalfMBBBeamPoint2d(
     domain=(0.0, 60.0, 0.0, 20.0),
     P=-1.0,
     E=1.0,
@@ -128,9 +132,9 @@ assert load.vector == (0.0, -1.0)
 from soptx.mesh import TriangleMesh
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import HalfMBBBeamRight2d
+from soptx.problems import HalfMBBBeamPoint2d
 
-problem = HalfMBBBeamRight2d(domain=(0.0, 60.0, 0.0, 20.0))
+problem = HalfMBBBeamPoint2d(domain=(0.0, 60.0, 0.0, 20.0))
 material = IsotropicLinearElasticMaterial(
     hypothesis=problem.plane_type,
     youngs_modulus=problem.E,
@@ -147,43 +151,7 @@ analyzer.solve()
 
 ---
 
-### HalfMBBBeamRight3d
-
-三维 MBB 梁的对称右半域，`HalfMBBBeamRight2d` 的三维推广。
-
-#### 问题描述
-
-区域默认为 $[0,60]\times[0,20]\times[0,20]$ mm，三维线弹性（默认 $E=1$ MPa，$\nu=0.3$）。
-
-![3D MBB 梁对称右半域](./assets/images/mbb-beam-3d-right-half.png)
-
-- **左对称面** ($x=0$)：$u_x = 0$
-- **右下底线** ($x=L_x$, $y=0$)：$u_y = 0$
-- **底面中心平面** ($y=0$, $z=L_z/2$)：$u_z = 0$，消去沿 $z$ 的刚体平动
-- **左上顶线中点** ($x=0$, $y=L_y$, $z=L_z/2$)：竖直向下集中力 $P = -1$ N
-
-三处位移约束分别对应对称、竖向支承与面外定位，缺一会留下刚体模式。
-
-#### 使用示例
-
-```python
-from soptx.problems import HalfMBBBeamRight3d
-
-problem = HalfMBBBeamRight3d(
-    domain=(0.0, 60.0, 0.0, 20.0, 0.0, 20.0),
-    P=-1.0,
-    E=1.0,
-    nu=0.3,
-)
-
-(load,) = problem.loads()
-assert load.point == (0.0, 20.0, 10.0)
-assert load.vector == (0.0, -1.0, 0.0)
-```
-
----
-
-### FullMBBBeam2d
+### FullMBBBeamPoint2d
 
 完整二维 MBB 梁，不利用对称性简化（对应 Huang et al. 2023 第 4.1 节）。
 
@@ -191,21 +159,21 @@ assert load.vector == (0.0, -1.0, 0.0)
 
 区域默认为 $[0,120]\times[0,20]$ mm，采用 plane stress（默认 $E=1$ MPa，$\nu=0.3$）。
 
-![完整二维 MBB 梁](./assets/images/mbb-beam-2d-full.png)
+![完整二维 MBB 梁](./assets/images/full-mbb-beam-point-2d.png)
 
 - **左下角** ($x=0$, $y=0$)：固定铰支座 $\rightarrow$ $u_x = 0$, $u_y = 0$
 - **右下角** ($x=L_x$, $y=0$)：滚轴支座 $\rightarrow$ $u_y = 0$
 - **顶边中点** ($x=L_x/2$, $y=L_y$)：竖直向下集中力 $P = -1$ N
 
-与 `HalfMBBBeamRight2d` 是同一个物理问题的两种建模方式：后者取右半域，在对称面上加
+与 `HalfMBBBeamPoint2d` 是同一个物理问题的两种建模方式：后者取右半域，在对称面上加
 $u_x = 0$ 并把合力折半。同一目标体积分数下两者的最优拓扑互为镜像。
 
 #### 使用示例
 
 ```python
-from soptx.problems import FullMBBBeam2d
+from soptx.problems import FullMBBBeamPoint2d
 
-problem = FullMBBBeam2d(
+problem = FullMBBBeamPoint2d(
     domain=(0.0, 120.0, 0.0, 20.0),
     P=-1.0,
     E=1.0,
@@ -219,66 +187,44 @@ assert load.point == (60.0, 20.0)
 
 ---
 
-### FullMBBBeam3d
+### FullMBBBeamPoint3d
 
-完整三维 MBB 梁实体模型（与 Huang et al. 2023 Section 4.1 设置一致）。
+完整三维 MBB 梁，两端底角点支承、顶面中心受集中力，对应 Huang et al. 2023 第 4.1 节图 5。
+它不是 `FullMBBBeamPoint2d` 沿 $z$ 的拉伸（拉伸版是 B 组的 `FullMBBBeamLine3d`）。
 
 #### 问题描述
 
-区域默认为 $[0,120]\times[0,20]\times[0,20]$ mm（也可指定通用比例如 $[0,6]\times[0,1]\times[0,1]$），三维线弹性模型（默认 $E=1$ MPa，$\nu=0.3$）。
-该问题未利用对称性简化，而是对整体全尺寸 3D 梁实体建模：
+区域默认为 $[0,120]\times[0,20]\times[0,20]$ mm（Huang2023 的比例为 $6:1:1$，首档
+$390\times65\times65$），三维线弹性模型（默认 $E=1$ MPa，$\nu=0.3$）。
 
-![完整 3D MBB 梁实体模型](./assets/images/mbb-beam-3d-half-domain.png)
+- **左端两底角点** ($x=0$, $y=0$, $z\in\{0,L_z\}$)：铰支 $\rightarrow$ $u_x = u_y = u_z = 0$
+- **右端两底角点** ($x=L_x$, $y=0$, $z\in\{0,L_z\}$)：滚支 $\rightarrow$ $u_y = 0$
+- **顶面中心** ($x=L_x/2$, $y=L_y$, $z=L_z/2$)：竖直向下集中力 $P = -1$ N
 
-- **左下底线** ($x=0$, $y=0$)：固定铰支座 $\rightarrow$ $u_x = 0, u_y = 0$
-- **右下底线** ($x=L_x$, $y=0$)：滑移支座 $\rightarrow$ $u_y = 0$
-- **底面中心线** ($y=0$, $z=L_z/2$)：$u_z = 0$（防止刚体运动）
-- **顶面中心点** ($x=L_x/2$, $y=L_y$, $z=L_z/2$)：竖直向下集中荷载 $P = -1$ N ($y$ 方向)
+共 8 个约束，消除全部 6 个刚体运动（另有 2 个冗余），且关于 $z$ 中面对称。原文图 5 只给出
+示意：正视图左端铰支、右端滚支，侧视图支承画在两端底棱的两个角点；角点约束分量是按示意图
+补定的实现选择。顶面中心不必是网格节点（如首档 $n_z=65$），非节点点力按本组开头的形函数分配
+处理。点力与点支承处位移奇异，柔顺度随网格加密无极限，跨网格不可比。
 
-#### 接口
+#### 使用示例
 
 ```python
-from soptx.problems import FullMBBBeam3d
+from soptx.problems import FullMBBBeamPoint3d
 
-problem3d = FullMBBBeam3d(
-    domain=(0.0, 120.0, 0.0, 20.0, 0.0, 20.0),
+problem3d = FullMBBBeamPoint3d(
+    domain=(0.0, 210.0, 0.0, 35.0, 0.0, 35.0),
     P=-1.0,
     E=1.0,
     nu=0.3,
 )
 
-# 边界标记 (x, y, z 分量分离)
-is_dof_x, is_dof_y, is_dof_z = problem3d.is_dirichlet_boundary()
-
-# 集中力载荷对象
 (load,) = problem3d.loads()
-assert load.vector == (0.0, -1.0, 0.0)
-```
-
-#### 使用示例
-
-```python
-from soptx.mesh import HexahedronMesh
-from soptx.fem.analyzers import LagrangeFEMAnalyzer
-from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import FullMBBBeam3d
-
-problem3d = FullMBBBeam3d(domain=(0.0, 6.0, 0.0, 1.0, 0.0, 1.0))
-material3d = IsotropicLinearElasticMaterial(
-    hypothesis=problem3d.plane_type,
-    youngs_modulus=problem3d.E,
-    poisson_ratio=problem3d.nu,
-    enable_logging=False,
-)
-mesh3d = HexahedronMesh.from_box(list(problem3d.domain), nx=24, ny=8, nz=8)
-
-analyzer3d = LagrangeFEMAnalyzer(problem=problem3d, material=material3d, mesh=mesh3d)
-analyzer3d.solve()
+assert load.point == (105.0, 35.0, 17.5)
 ```
 
 ---
 
-### CantileverCorner2d
+### CantileverCornerPoint2d
 
 二维悬臂梁，右下角受集中载荷。
 
@@ -286,7 +232,7 @@ analyzer3d.solve()
 
 区域默认为 $[0,160]\times[0,100]$ mm，采用 plane stress（默认 $E=1$ MPa，$\nu=0.3$）。
 
-![2D 悬臂梁角点载荷](./assets/images/cantilever-corner-2d.png)
+![2D 悬臂梁角点载荷](./assets/images/cantilever-corner-point-2d.png)
 
 - **左边界** ($x=0$)：完全固支，$u_x = u_y = 0$
 - **右下角** ($x=160$, $y=0$)：竖直向下集中力 $P = -1$ N
@@ -295,9 +241,9 @@ analyzer3d.solve()
 `loads()` 返回一个 `PointForceLoad`，其位置和力向量完整描述该集中荷载。
 
 ```python
-from soptx.problems import CantileverCorner2d
+from soptx.problems import CantileverCornerPoint2d
 
-problem = CantileverCorner2d(
+problem = CantileverCornerPoint2d(
     domain=(0.0, 160.0, 0.0, 100.0),
     P=-1.0,
     E=1.0,
@@ -315,9 +261,105 @@ problem = CantileverCorner2d(
 `degree` 必须等于提供节点坐标的位移空间阶次，否则节点数与单元划分对不上。Hu--Zhang
 混合元同样拒绝这类载荷，理由与 A 组相同。
 
+三维 MBB 梁（`HalfMBBBeamLine3d`、`FullMBBBeamLine3d`）是对应二维 A 组算例沿 $z$ 的拉伸，二维集中力随之拉伸为线载荷，归入本组。
+
 ---
 
-### CantileverRightBottomEdge3d
+### HalfMBBBeamLine3d
+
+三维 MBB 梁的对称右半域，`HalfMBBBeamPoint2d` 的三维推广。
+
+#### 问题描述
+
+区域默认为 $[0,60]\times[0,20]\times[0,20]$ mm，三维线弹性（默认 $E=1$ MPa，$\nu=0.3$）。
+
+![3D MBB 梁对称右半域](./assets/images/half-mbb-beam-line-3d.png)
+
+- **左对称面** ($x=0$)：$u_x = 0$
+- **右下底线** ($x=L_x$, $y=0$)：$u_y = 0$
+- **角点** ($x=0$, $y=0$, $z=0$)：$u_z = 0$，只消去沿 $z$ 的刚体平动，不改变应力与柔度
+- **对称面顶棱** ($x=0$, $y=L_y$)：沿 $z$ 的竖直向下均布线载荷，强度 $P/L_z$，合力 $P = -1$ N
+
+支承与载荷都是 `HalfMBBBeamPoint2d` 沿 $z$ 的拉伸：二维左上角集中力拉伸为对称面顶棱线载荷；拉伸后唯一剩余的刚体运动是 $z$ 向平移，由单点 $u_z$ 约束消除，对任意 $n_z$ 成立。
+
+#### 使用示例
+
+```python
+from soptx.problems import HalfMBBBeamLine3d
+
+problem = HalfMBBBeamLine3d(
+    domain=(0.0, 60.0, 0.0, 20.0, 0.0, 20.0),
+    P=-1.0,
+    E=1.0,
+    nu=0.3,
+)
+
+(load,) = problem.loads()          # LineTractionLoad, 作用于对称面顶棱
+```
+
+---
+
+### FullMBBBeamLine3d
+
+完整三维 MBB 梁实体模型，`FullMBBBeamPoint2d` 沿宽度 $z$ 方向的拉伸。
+
+#### 问题描述
+
+区域默认为 $[0,120]\times[0,20]\times[0,20]$ mm（也可指定通用比例如 $[0,6]\times[0,1]\times[0,1]$），三维线弹性模型（默认 $E=1$ MPa，$\nu=0.3$）。
+该问题未利用对称性简化，而是对整体全尺寸 3D 梁实体建模：
+
+![完整 3D MBB 梁实体模型](./assets/images/full-mbb-beam-line-3d.png)
+
+- **左下底线** ($x=0$, $y=0$)：固定铰支座 $\rightarrow$ $u_x = 0, u_y = 0$
+- **右下底线** ($x=L_x$, $y=0$)：滑移支座 $\rightarrow$ $u_y = 0$
+- **角点** ($x=0$, $y=0$, $z=0$)：$u_z = 0$，只消去沿 $z$ 的刚体平动，不改变应力与柔度
+- **顶面中线** ($x=L_x/2$, $y=L_y$)：沿 $z$ 的竖直向下均布线载荷，强度 $P/L_z$，合力 $P = -1$ N
+
+支承与载荷都是 `FullMBBBeamPoint2d` 沿 $z$ 的拉伸：二维顶边中点集中力拉伸为顶面中线线载荷，中线须落在网格节点上（$x$ 向剖分数为偶数，子结构角点宏观系统要求 $x$ 向子结构数为偶数）；拉伸后唯一剩余的刚体运动是 $z$ 向平移，由单点 $u_z$ 约束消除，结构恰好静定，对任意 $n_z$ 成立。Huang2023 第 4.1 节的四角点支承加顶面中心集中力设置见 A 组的 `FullMBBBeamPoint3d`。
+
+#### 接口
+
+```python
+from soptx.problems import FullMBBBeamLine3d
+
+problem3d = FullMBBBeamLine3d(
+    domain=(0.0, 120.0, 0.0, 20.0, 0.0, 20.0),
+    P=-1.0,
+    E=1.0,
+    nu=0.3,
+)
+
+# 边界标记 (x, y, z 分量分离)
+is_dof_x, is_dof_y, is_dof_z = problem3d.is_dirichlet_boundary()
+
+# 线载荷对象 (顶面中线, 合力 P)
+(load,) = problem3d.loads()
+```
+
+#### 使用示例
+
+```python
+from soptx.mesh import HexahedronMesh
+from soptx.fem.analyzers import LagrangeFEMAnalyzer
+from soptx.materials import IsotropicLinearElasticMaterial
+from soptx.problems import FullMBBBeamLine3d
+
+problem3d = FullMBBBeamLine3d(domain=(0.0, 6.0, 0.0, 1.0, 0.0, 1.0))
+material3d = IsotropicLinearElasticMaterial(
+    hypothesis=problem3d.plane_type,
+    youngs_modulus=problem3d.E,
+    poisson_ratio=problem3d.nu,
+    enable_logging=False,
+)
+mesh3d = HexahedronMesh.from_box(list(problem3d.domain), nx=24, ny=8, nz=8)
+
+analyzer3d = LagrangeFEMAnalyzer(problem=problem3d, material=material3d, mesh=mesh3d)
+analyzer3d.solve()
+```
+
+---
+
+### CantileverBottomEdgeLine3d
 
 三维悬臂梁，右端底边受载。
 
@@ -325,7 +367,7 @@ problem = CantileverCorner2d(
 
 区域默认为 $[0,60]\times[0,20]\times[0,4]$ mm，三维线弹性（默认 $E=1$ MPa，$\nu=0.3$）。
 
-![3D 悬臂梁右端底边载荷](./assets/images/cantilever-right-bottom-edge-3d.png)
+![3D 悬臂梁右端底边载荷](./assets/images/cantilever-bottom-edge-line-3d.png)
 
 - **左端面** ($x=0$)：完全固支，$u_x = u_y = u_z = 0$
 - **右端底边** ($x=60$, $y=0$)：沿负 $y$ 方向的总力 $P = -1$ N，由 `LagrangeFEMAnalyzer`
@@ -335,9 +377,9 @@ problem = CantileverCorner2d(
 `loads()` 返回一个 `LineTractionLoad`；装配器沿目标边积分，并保持给定总合力。
 
 ```python
-from soptx.problems import CantileverRightBottomEdge3d
+from soptx.problems import CantileverBottomEdgeLine3d
 
-problem = CantileverRightBottomEdge3d(
+problem = CantileverBottomEdgeLine3d(
     domain=(0.0, 60.0, 0.0, 20.0, 0.0, 4.0),
     P=-1.0,
     E=1.0,
@@ -355,7 +397,7 @@ problem = CantileverRightBottomEdge3d(
 
 ---
 
-### BearingDevice2d
+### BearingTraction2d
 
 二维轴承装置，顶边整边受均布压载。
 
@@ -363,10 +405,10 @@ problem = CantileverRightBottomEdge3d(
 
 区域默认为 $[0,120]\times[0,40]$ mm（长宽比 3:1），采用 plane stress。
 
-![2D 轴承装置顶边均布压载](./assets/images/bearing-device-2d.png)
+![2D 轴承装置顶边均布压载](./assets/images/bearing-traction-2d.png)
 
 - **底边** ($y=0$)：完全固支，$u_x = u_y = 0$
-- **顶边** ($y=40$)：竖直向下均布牵引 $t = (0, -8\times 10^{-2})$ N/mm（`t` 为牵引强度，非合力）
+- **顶边** ($y=40$)：竖直向下均布牵引，合力 $P = -9.6$ N，强度 `traction_intensity` $= P/120 = -8\times 10^{-2}$ N/mm
 - **左右侧边**：自由，零牵引
 
 `loads()` 返回一个 `BoundaryTractionLoad`；其 `is_load_boundary()` 与 `traction()` 分别描述加载边界和牵引向量。
@@ -375,11 +417,11 @@ problem = CantileverRightBottomEdge3d(
 Poisson 比（如 $\nu = 0.3$），否则会体积锁定。
 
 ```python
-from soptx.problems import BearingDevice2d
+from soptx.problems import BearingTraction2d
 
-problem = BearingDevice2d(
+problem = BearingTraction2d(
     domain=(0.0, 120.0, 0.0, 40.0),
-    t=-8.0e-2,
+    P=-9.6,
     E=1.0,
     nu=0.3,
     plane_type="plane_stress",
@@ -388,7 +430,7 @@ problem = BearingDevice2d(
 
 ---
 
-### SimplySupportedBridge2d
+### BridgeTraction2d
 
 二维简支桥梁，顶边整边受均布压载（博士论文算例 3.2）。
 
@@ -397,14 +439,14 @@ problem = BearingDevice2d(
 区域默认为 $[0,120]\times[0,40]$ mm（长宽比 3:1），采用 plane stress（默认
 $E=350$ MPa，$\nu=0.3$）。
 
-![二维简支桥梁顶边均布压载](./assets/images/bridge-simply-supported-2d.png)
+![二维简支桥梁顶边均布压载](./assets/images/bridge-traction-2d.png)
 
 - **左下角** ($x=0$, $y=0$)：固定铰支座 $\rightarrow$ $u_x = 0$, $u_y = 0$
 - **右下角** ($x=120$, $y=0$)：滑动铰支座 $\rightarrow$ $u_y = 0$
-- **顶边** ($y=40$)：竖直向下均布牵引 $t = (0, -1)$ N/mm，`t` 是牵引强度而非合力
+- **顶边** ($y=40$)：竖直向下均布牵引，合力 $P = -120$ N，强度 `traction_intensity` $= P/120 = -1$ N/mm
 - **其余边界**：自由，零牵引
 
-位移约束只落在两个角节点上，与 `BearingDevice2d` 的整边固支不同。载荷对象的 `marker`
+位移约束只落在两个角节点上，与 `BearingTraction2d` 的整边固支不同。载荷对象的 `marker`
 直接就是 `_on_top_boundary`，连 `logical_or` 都没有。
 
 #### 桥面被动区
@@ -417,15 +459,15 @@ $E=350$ MPa，$\nu=0.3$）。
 #### 使用示例
 
 ```python
-from soptx.problems import SimplySupportedBridge2d
+from soptx.problems import BridgeTraction2d
 
-problem = SimplySupportedBridge2d(
+problem = BridgeTraction2d(
     domain=(0.0, 120.0, 0.0, 40.0),
-    t=-1.0,
+    P=-120.0,
+    deck_height=4.0,
     E=350.0,
     nu=0.3,
     plane_type="plane_stress",
-    deck_height=4.0,
 )
 
 passive = problem.get_passive_element_mask(mesh)
@@ -465,25 +507,26 @@ P1 迹载荷——几何、材料与边界标记全部不变，只替换牵引�
 
 ---
 
-### CantileverMiddle2d
+### CantileverMiddlePatch2d
 
 二维悬臂梁，右端中部局部区段受载。
 
 #### 问题描述
 
 区域默认为 $[0,80]\times[0,40]$ mm（长宽比 2:1），采用 plane stress（默认
-$E=70000$ MPa，$\nu=0.25$）。
+$E=70000$ MPa，$\nu=0.25$）。默认参数与论文第 5.2.3 节的局部应力约束悬臂梁算例一致；
+算例中弹性模量的同比缩放、被动实体区与网格属于算例层，不进入模型类。
 
-![二维悬臂梁右端中部局部载荷](./assets/images/cantilever-middle-2d.png)
+![二维悬臂梁右端中部局部载荷](./assets/images/cantilever-middle-patch-2d.png)
 
 - **左边界** ($x=0$)：完全固支，$u_x = u_y = 0$
-- **右边界中部**（$x=80$，$y$ 落在以中线为中心、长 `load_width` 的区间内）：竖直向下均布牵引，合力 $P = -100$ N
+- **右边界中部**（$x=80$，$y$ 落在以中线为中心、长 `load_width` 的区间内）：竖直向下均布牵引，合力 $P = -400$ N，强度 $\bar t = P/l$
 - **顶、底边界**：自由，零牵引
 
 | `load_width` | 载荷区 | $ny=40$（$h=1$）下的端点 |
 | --- | --- | --- |
-| $4.0$（默认） | $[18, 22]$ | 落在网格节点 |
-| $6.0$（论文算例） | $[17, 23]$ | 落在网格节点 |
+| $6.0$（默认，论文算例） | $[17, 23]$ | 落在网格节点 |
+| $4.0$ | $[18, 22]$ | 落在网格节点 |
 
 两种取值下检查一都不触发；`is_traction_boundary` 是右、顶、底三条边的 `logical_or`，
 没有排除项，检查二也不触发。这是 D 组里唯一两条都不命中的算例。
@@ -497,11 +540,11 @@ $E=70000$ MPa，$\nu=0.25$）。
 #### 使用示例
 
 ```python
-from soptx.problems import CantileverMiddle2d
+from soptx.problems import CantileverMiddlePatch2d
 
-problem = CantileverMiddle2d(
+problem = CantileverMiddlePatch2d(
     domain=(0.0, 80.0, 0.0, 40.0),
-    P=-100.0,
+    P=-400.0,
     load_width=6.0,
     E=70000.0,
     nu=0.25,
@@ -511,7 +554,7 @@ problem = CantileverMiddle2d(
 
 ---
 
-### FixedFixedBeamCenterLoad2d
+### FixedFixedBeamPatch2d
 
 二维两端固支梁全域基准。物理定义与博士论文第五章的 Hu--Zhang 算例一致，不采用对称半域简化。
 
@@ -525,16 +568,16 @@ problem = CantileverMiddle2d(
 
 #### 统一载荷接口
 
-`FixedFixedBeamCenterLoad2d` 只定义一个物理问题，不按有限元类型拆分：
+`FixedFixedBeamPatch2d` 只定义一个物理问题，不按有限元类型拆分：
 
 - `loads()` 返回同一个 `BoundaryTractionLoad`，其 `is_load_boundary()` 描述受牵引边界，`traction()` 给出牵引向量；
 - Lagrange 位移元与 Hu--Zhang 混合元直接消费该对象，并按各自变分形式离散；
 - 两条路径共享 `P`、`load_width`、材料参数与完整设计域，不做半域载荷折算。
 
 ```python
-from soptx.problems import FixedFixedBeamCenterLoad2d
+from soptx.problems import FixedFixedBeamPatch2d
 
-problem = FixedFixedBeamCenterLoad2d(
+problem = FixedFixedBeamPatch2d(
     domain=(0.0, 160.0, 0.0, 20.0),
     P=-3.0,
     load_width=1.0,
@@ -558,10 +601,10 @@ $nx=160$ 是论文算例用的网格，端点不对齐，因此做两条路径�
 
 ```python
 from soptx.fem import project_patch_traction_to_p1_trace
-from soptx.problems import FixedFixedBeamCenterLoad2d
+from soptx.problems import FixedFixedBeamPatch2d
 
 nx = 160
-problem = FixedFixedBeamCenterLoad2d(
+problem = FixedFixedBeamPatch2d(
     domain=(0.0, 160.0, 0.0, 20.0),
     P=-3.0,
     load_width=1.0,
@@ -572,8 +615,9 @@ common_load = project_patch_traction_to_p1_trace(
     level=problem.traction_level,
     patch=problem.traction_patch,
     intensity=problem.traction_intensity,
+    axis=problem.traction_axis,
 )
-problem = FixedFixedBeamCenterLoad2d(
+problem = FixedFixedBeamPatch2d(
     domain=(0.0, 160.0, 0.0, 20.0),
     P=-3.0,
     load_width=1.0,
@@ -583,16 +627,16 @@ problem = FixedFixedBeamCenterLoad2d(
 
 ---
 
-### FixedFixedBeamHalfDomain2d
+### HalfFixedFixedBeamPatch2d
 
-`FixedFixedBeamCenterLoad2d` 的对称半域版本，是本仓库唯一同时命中两条检查的算例。
+`FixedFixedBeamPatch2d` 的对称半域版本，是本仓库唯一同时命中两条检查的算例。
 
 #### 问题描述
 
 完整域 $[0,160]\times[0,20]$ mm 关于竖直中线 $x=80$ 对称，本类只离散左半域
 $[0,80]\times[0,20]$ mm，材料参数与全域模型一致（默认 $E=30$ MPa，$\nu=0.4$）。
 
-![两端固支梁对称左半域](./assets/images/fixed-fixed-beam-half-domain-2d.png)
+![两端固支梁对称左半域](./assets/images/half-fixed-fixed-beam-patch-2d.png)
 
 - **左端** ($x=0$)：完全固支，$u_x = u_y = 0$
 - **对称面** ($x=80$)：法向位移 $u_x = 0$，切向牵引 $\sigma_{xy} = 0$
@@ -616,10 +660,10 @@ $[0,80]\times[0,20]$ mm，材料参数与全域模型一致（默认 $E=30$ MPa�
 
 ```python
 from soptx.fem import project_patch_traction_to_p1_trace
-from soptx.problems import FixedFixedBeamHalfDomain2d
+from soptx.problems import HalfFixedFixedBeamPatch2d
 
 nx = 80
-problem = FixedFixedBeamHalfDomain2d(
+problem = HalfFixedFixedBeamPatch2d(
     domain=(0.0, 80.0, 0.0, 20.0), P=-3.0, load_width=1.0,
 )
 
@@ -629,9 +673,10 @@ common_load = project_patch_traction_to_p1_trace(
     level=problem.traction_level,
     patch=problem.traction_patch,
     intensity=problem.traction_intensity,
+    axis=problem.traction_axis,
 )
 
-problem = FixedFixedBeamHalfDomain2d(
+problem = HalfFixedFixedBeamPatch2d(
     domain=(0.0, 80.0, 0.0, 20.0),
     P=-3.0,
     load_width=1.0,

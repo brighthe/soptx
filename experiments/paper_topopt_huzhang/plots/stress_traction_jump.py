@@ -48,12 +48,12 @@ DPI = 600
 # ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
-    "postprocess/discretization_probe/lfem-2-pad-solid__fields.npz",
-    "postprocess/discretization_probe/lfem-3-pad-solid__fields.npz",
-    "postprocess/discretization_probe/lfem-4-pad-solid__fields.npz",
-    "postprocess/discretization_probe/huzhang-2-pad-solid__fields.npz",
-    "postprocess/discretization_probe/huzhang-3-pad-solid__fields.npz",
-    "postprocess/discretization_probe/huzhang-4-pad-solid__fields.npz",
+    "postprocess/discretization_probe/lfem-2__fields.npz",
+    "postprocess/discretization_probe/lfem-3__fields.npz",
+    "postprocess/discretization_probe/lfem-4__fields.npz",
+    "postprocess/discretization_probe/huzhang-2__fields.npz",
+    "postprocess/discretization_probe/huzhang-3__fields.npz",
+    "postprocess/discretization_probe/huzhang-4__fields.npz",
 )
 
 PROBE_DIR = "postprocess/discretization_probe"
@@ -76,7 +76,7 @@ LEGEND_STYLE = dict(fontsize=7.5, framealpha=0.95, edgecolor="#cccccc",
 
 def load_design(base, label: str):
     """读标签为 label 的构型的密度、实体带掩码、自读 A_e 与余量 -g_e; 地图面板另读网格."""
-    tag = f"{label}-pad-solid"
+    tag = label
     directory = base / PROBE_DIR
     fields = np.load(directory / f"{tag}__fields.npz")
     key = f"absjump__{label}"

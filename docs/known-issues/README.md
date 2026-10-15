@@ -35,10 +35,10 @@ fork 中的提交，需要看原始 diff 时 `git -C ~/codespace/fealpy show <SH
 | `88cf4fa` | `COOTensor` / `CSRTensor` 暴露 `device` 属性 | `sparse/coo_tensor.py`、`sparse/csr_tensor.py`、`sparse/sparse_tensor.py` | 无专门 pytest |
 | `66a040cfd` | `hstack` 列偏移修正 | `sparse/ops.py` | 无 pytest（fork 测试未移植） |
 | `c33db98ae` | backend 层静态类型标注补齐 | `backend/base.py`、`backend/manager.pyi` | 纯静态 |
-| `875496d` + `40016dc56` | CG 可插拔内积与真残差刷新，及其 5 条回归修复 | `solvers/cg.py`（早于本次移植） | `tests/unit/test_solvers_cg*.py` |
-| `4c5887d` | `EntityMPI.dot()` 重叠修正内积工厂 | `fem/distributed/entity_mpi.py`（早于本次移植） | 需 mpi4py |
+| `875496d` + `40016dc56` | CG 可插拔内积与真残差刷新，及其 5 条回归修复 | `solvers/cg.py`（早于本次移植）；可插拔内积 `dot_product` 已于 2026-10-10 归档至 `archive/distributed-mpi`，真残差刷新仍在主线 | `tests/unit/test_solvers_cg*.py` |
+| `4c5887d` | `EntityMPI.dot()` 重叠修正内积工厂 | 已归档至 `archive/distributed-mpi`（原 `fem/distributed/entity_mpi.py`） | 不适用 |
 | `30ca15599` | MUMPS 直接解法暴露对称性标志 `sym` | `solvers/direct.py`（早于本次移植） | 需 PyMUMPS |
-| `ffbb1fde3` | `distribute_mesh` 注释汉化 | `fem/distributed/mesh.py`（早于本次移植） | 不适用 |
+| `ffbb1fde3` | `distribute_mesh` 注释汉化 | 已归档至 `archive/distributed-mpi`（原 `fem/distributed/mesh.py`） | 不适用 |
 | `a1ec1086d` | `linear_integral` 避免把与单元无关的基函数沿单元轴广播物化 | `fem/functional.py` | 无 pytest |
 
 **缺陷 8 与 9 是风险最高的两条**：都是静默错误，装配出的刚度矩阵照样对称正定、CG 照样
@@ -55,6 +55,11 @@ PYTHONPATH=$PWD/src python examples/lagrange_elasticity/manufactured_convergence
 的 `lag2d_quad_p2.txt`、`lag3d_hex.txt`，复核时逐行比对。
 
 ## 移植后遗留
+
+2026-10-13: `solvers/cg.py` 新增显式 `rtol_reference='rhs'`, 默认仍以初始残差为参照.
+右端项模式按所选范数逐列计算阈值, 不再将小于 `1e-15` 的非零载荷直接视作零载荷;
+FEM/子结构对照实验改用实际约束后右端项二范数, 并开启真残差验收.
+新增回归用例位于 `tests/unit/test_cg_rhs_reference.py`, 本轮仅静态检查, 未运行测试或实验.
 
 移植一律原样复制，过程中发现的问题记在这里，不在移植中顺手修；修复后删除对应行。
 

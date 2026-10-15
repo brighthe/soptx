@@ -51,7 +51,7 @@ from soptx.fem.substructure import (
     train_reduced_stiffness_surrogate,
 )
 from soptx.ml.substructure import ReducedStiffnessSurrogateNet
-from soptx.problems.elasticity import FullMBBBeam2d
+from soptx.problems import FullMBBBeamPoint2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -111,14 +111,14 @@ def solve_with_condensors(
 ) -> Tuple[Any, Any, int]:
     """用给定的缩聚结果装配并求解全局接口系统, 再恢复全场位移."""
     system = assembler.assemble_interface_system(sub_meshes, condensors)
-    interface_fixed = assembler.project_global_dofs(system, fixed_global_dofs)
+    interface_fixed = assembler.project_global_dofs(system.global_dofs, fixed_global_dofs)
     u_interface = solve_interface_system(
         system,
-        assembler.project_global_vector(system, global_load),
+        assembler.project_global_vector(system.global_dofs, global_load),
         interface_fixed,
     )
     u_full = assembler.recover_full_displacement(
-        sub_meshes, condensors, system, u_interface
+        sub_meshes, condensors, system.global_dofs, u_interface
     )
     n_free = int(len(system.global_dofs)) - int(len(interface_fixed))
     return u_interface, u_full, n_free
@@ -547,7 +547,7 @@ def run_comparison(
     bm.set_backend(backend)
     set_random_seed(seed)
 
-    problem = FullMBBBeam2d(domain=DOMAIN, P=P_LOAD, E=E_BASE, nu=NU)
+    problem = FullMBBBeamPoint2d(domain=DOMAIN, P=P_LOAD, E=E_BASE, nu=NU)
     domain_size = (problem.domain[1], problem.domain[3])
     n_sub = N_SUB
     n_fine = N_FINE
@@ -560,7 +560,7 @@ def run_comparison(
 
     print("\n【配置摘要】")
     print("组别 / 路线 : 1 / stiffness")
-    print(f"问题 / 材料 : FullMBBBeam2d, domain={domain_size}, "
+    print(f"问题 / 材料 : FullMBBBeamPoint2d, domain={domain_size}, "
           f"{prototype.material.hypothesis}, E0={E_BASE:g}, nu={NU:g}, SIMP penalty=3")
     print(f"载荷        : 顶边中点竖向集中力 P={P_LOAD:g}")
     print(f"网格 / 接口 : Q1, 子结构={n_sub}, 每块细单元={n_fine}, "
@@ -590,7 +590,6 @@ def run_comparison(
             interpolation_method="simp",
             options={"penalty_factor": 3.0, "stress_penalty_factor": 1.0},
         ),
-        enable_logging=False,
     )
     global_load = bm.asarray(analyzer.assemble_external_load(), dtype=bm.float64)
     _, fixed_mask = analyzer.tensor_space.boundary_interpolate(

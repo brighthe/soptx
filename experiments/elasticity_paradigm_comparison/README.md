@@ -7,7 +7,7 @@
 | 全局解场 $u(x)$ | `lagrange` | `pinn` |
 | 缩聚算子 $(\mathbf N, \mathbf K_s)$ | `substructure` | `piml` |
 
-物理模型位于 `src/soptx/problems/elasticity/`，求解能力位于 `src/soptx/fem/` 与 `src/soptx/ml/`；本目录只通过 `cases.toml` 冻结算例与比较契约，并调用核心库的公共接口，不含任何求解实现。
+物理模型位于 `src/soptx/problems/`，求解能力位于 `src/soptx/fem/` 与 `src/soptx/ml/`；本目录只通过 `cases.toml` 冻结算例与比较契约，并调用核心库的公共接口，不含任何求解实现。
 
 ## 为什么在 `experiments/` 而不是 `examples/`
 
@@ -48,7 +48,7 @@ experiments/elasticity_paradigm_comparison/
 
 两档必须成对报告。只跑 Tier B 时 PINN 因应力在单元界面不连续而失效，单独给出构成打靶；只跑 Tier A 则测不出 PIML 的结构保持边界。
 
-算例参数沿用 `verify_stiffness_route.py` 已冻结的设置（`FullMBBBeam2d`，域 `12 × 2`，`n_sub = 12×2`，`n_fine = 5×5`），与既有证据可比。
+算例参数沿用 `verify_stiffness_route.py` 已冻结的设置（`FullMBBBeamPoint2d`，域 `12 × 2`，`n_sub = 12×2`，`n_fine = 5×5`），与既有证据可比。
 
 ## 命令
 

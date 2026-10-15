@@ -76,6 +76,13 @@ def to_tensor_dof(to_dof: TensorLike, dof_numel: int, gdof: int, dof_priority: b
     ------
     NotImplementedError
         压缩格式输入且不是 2 分量、自由度优先.
+    IndexError
+        普通数组输入的标量自由度编号超出整数索引范围.
+
+    Notes
+    -----
+    普通数组路径按输入编号直接计算张量编号, 不分配全局自由度长度的索引数组.
+    两种排列与压缩格式接口保持原有约定.
     """
     if isinstance(to_dof, tuple):
         if dof_numel != 2 or not dof_priority:
@@ -109,16 +116,17 @@ def to_tensor_dof(to_dof: TensorLike, dof_numel: int, gdof: int, dof_priority: b
         #    return cell2dof, cell2dofLocation
     else:
         context = bm.context(to_dof)
-        indices = bm.arange(gdof*dof_numel, **context)
+        components = bm.arange(dof_numel, **context)
         num_entity = to_dof.shape[0]
 
+        # 保留整数索引的合法范围及负编号解释, 避免直接计算后静默接受越界编号.
+        if bool(bm.any((to_dof < -gdof) | (to_dof >= gdof))):
+            raise IndexError("标量自由度编号超出全局空间范围.")
+        scalar_dofs = bm.where(to_dof < 0, to_dof + gdof, to_dof)
         if dof_priority:
-            indices = indices.reshape(dof_numel, gdof)
-            indices = indices[:, to_dof] # (dof_numel, entity, ldof)
-            indices = bm.swapaxes(indices, 0, 1) # (entity, dof_numel, ldof)
+            indices = scalar_dofs[:, None, :] + components[None, :, None] * gdof
         else:
-            indices = indices.reshape(gdof, dof_numel)
-            indices = indices[to_dof, :] # (entity, ldof, dof_numel)
+            indices = scalar_dofs[:, :, None] * dof_numel + components[None, None, :]
 
         return indices.reshape(num_entity, -1)
 

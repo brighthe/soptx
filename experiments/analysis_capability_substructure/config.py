@@ -22,8 +22,8 @@ _TASKS = {
 _PROBLEM_DIMENSIONS = {
     "HarmonicPoly2D": 2,
     "HarmonicPoly3D": 3,
-    "CantileverCorner2d": 2,
-    "FullMBBBeam3d": 3,
+    "CantileverCornerPoint2d": 2,
+    "FullMBBBeamLine3d": 3,
 }
 _SOLVERS = {"scipy", "mumps"}
 _ROUTES = {"fa", "full_trace", "linear_corner"}
@@ -120,8 +120,8 @@ def _parse_case(raw: dict[str, Any]) -> AnalysisCase:
         return AnalysisCase(**common, degree=degree, levels=levels)
 
     if task == "density_update_consistency":
-        if problem not in ("CantileverCorner2d", "FullMBBBeam3d"):
-            raise ConfigError(f"{case_id}: 密度更新工况必须使用 CantileverCorner2d/FullMBBBeam3d")
+        if problem not in ("CantileverCornerPoint2d", "FullMBBBeamLine3d"):
+            raise ConfigError(f"{case_id}: 密度更新工况必须使用 CantileverCornerPoint2d/FullMBBBeamLine3d")
         degree = _positive_int(raw, "degree", case_id)
         if degree != 1:
             raise ConfigError(f"{case_id}: 当前实验固定使用 Q1")
@@ -150,9 +150,9 @@ def _parse_case(raw: dict[str, Any]) -> AnalysisCase:
         )
 
     if task == "route_cost":
-        if problem != "CantileverCorner2d":
+        if problem != "CantileverCornerPoint2d":
             raise ConfigError(
-                f"{case_id}: route_cost 必须使用 CantileverCorner2d"
+                f"{case_id}: route_cost 必须使用 CantileverCornerPoint2d"
             )
         if solve_method != "mumps":
             raise ConfigError(f"{case_id}: route_cost 必须使用 MUMPS")

@@ -238,7 +238,6 @@ def main(argv=None):
             "void_youngs_modulus": 0.0,
             "target_variables": ["E"],
         },
-        enable_logging=False,
     )
     young_modulus = interpolation.interpolate_material(
         material=material, rho_val=bm.reshape(density, (-1,)),
@@ -346,7 +345,7 @@ def main(argv=None):
     # # 当前仅支持齐次内部恢复, 不缩聚内部载荷.
     # # 载荷与支承必须落在接口自由度上; 与精确走查复用同一投影函数.
     # conditions = project_problem_conditions_to_interface_system(
-    #     pde, assembler, interface_view,
+    #     pde, assembler, interface_dofs,
     # )
     # macro_force = projection.T @ conditions.interface_force
     # constraints = projection[conditions.interface_fixed_dofs]

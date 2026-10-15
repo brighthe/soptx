@@ -12,7 +12,7 @@
 - N_k = NC (逐单元参考): 每个单元自成一类, K_k^0 即 K_e^0, 对任意网格成立. 分析器
   在单元密度下的 'ea' 层级取这一种, K_e^0 与敏度共用同一份缓存.
 - N_k < NC (共享参考): 在平移类结构化网格上, 同一平移类的单元只差平移, 共用一份
-  K_k^0. 平移类取自 ``from_box`` 的单元编号约定 (见 ``soptx.mesh.structured_box``):
+  K_k^0. 平移类取自 ``from_box`` 的单元编号约定 (见各网格类 ``from_box`` 的 docstring):
   每个格子剖出的 N_k 个单元连续编号, 故 k(e) = e mod N_k, 前 N_k 个单元即各类代表.
   类归属由编号现算, 不常驻.
 
@@ -29,6 +29,10 @@ from soptx.typing import TensorLike
 from soptx.fem.kernels import ElementRestriction
 
 from .base import AssemblyLevelExtension
+
+# 平移类数不超过此值时逐类做二维收缩 (from_box 的平移类数: 四边形 / 六面体 1, 三角形 2,
+# 四面体 6); 更多类 (含逐单元参考 N_k = NC) 时逐类循环的 Python 开销反成瓶颈, 走批量 einsum
+_MAX_GEMM_CLASSES = 64
 
 
 class SharedReferenceElementAssembly(AssemblyLevelExtension):
@@ -131,7 +135,14 @@ class SharedReferenceElementAssembly(AssemblyLevelExtension):
 
         # 单元 e = g * N_k + k, 按 (格子, 类) 重排后第 1 维即 k(e)
         x_G = bm.reshape(x_E, (n_cells // num_classes, num_classes, local_dofs) + batch_shape)
-        y_G = bm.einsum('kij, gkj... -> gki...', self._reference_matrices, x_G)
+        if num_classes <= _MAX_GEMM_CLASSES:
+            # 类少时逐类收缩: 不带类下标的二维收缩可走 BLAS GEMM 并随 BLAS 线程数并行; 带
+            # 类下标的三维 einsum 只能分批小矩阵乘, 在 N_k = 1 的大网格上慢约 2 倍
+            y_parts = [bm.einsum('ij, gj... -> gi...', self._reference_matrices[k], x_G[:, k])
+                       for k in range(num_classes)]
+            y_G = y_parts[0][:, None] if num_classes == 1 else bm.stack(y_parts, axis=1)
+        else:
+            y_G = bm.einsum('kij, gkj... -> gki...', self._reference_matrices, x_G)
         y_E = bm.reshape(y_G, (n_cells, local_dofs) + batch_shape)
         y_E = y_E * bm.reshape(self._scale, (n_cells, ) + (1, ) * (1 + len(batch_shape)))
 

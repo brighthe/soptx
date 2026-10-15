@@ -9,10 +9,7 @@
 输入在 Dirichlet 自由度上置零, 作用内层算子, 再把这些自由度还原成输入原值, 与
 'fa' 的对称消元定义同一个离散系统.
 
-与 FA 的对称消元相比, 这一层不需要矩阵元, 因此 EA 及以下的所有层级共用它; 也因
-此它可以套在 ``OverlapOperator`` 外面 —— 包装次序必须是
-``ConstrainedOperator(OverlapOperator(level))``: 跨 rank 归约要先把局部作用拼成
-完整的算子作用, 再谈边界自由度.
+与 FA 的对称消元相比, 这一层不需要矩阵元, 因此 EA 及以下的所有层级共用它.
 
 本类替代 FEALPy 的 ``DirichletBCOperator``: 数学定义与后者逐位一致, 多出来的是
 ``diagonal()`` —— 有了它, Jacobi 类预条件不必再回到 analyzer 里按算子层级取对角.
@@ -31,8 +28,8 @@ class ConstrainedOperator:
 
     Parameters
     ----------
-    form : 内层算子, 需支持 ``@``, 并提供 ``shape`` 与 ``spaces``; 串行下是装配
-        层级对象, 分布式下是包住层级的 ``OverlapOperator``.
+    form : 内层算子, 需支持 ``@``, 并提供 ``shape`` 与 ``spaces``; 通常是装配
+        层级对象.
     gd : Dirichlet 边界值, 可以是常数, 数组或可调用对象; 只有 ``init_solution``
         用得上.
     isDDof : (gdof, ) 的布尔标记, 为 None 时由函数空间按 ``threshold`` 现算.
@@ -114,8 +111,7 @@ class ConstrainedOperator:
         """取算子对角.
 
         Dirichlet 自由度上恒为 1 (那里的方程就是 u_D = g), 其余取内层算子的对角.
-        内层算子负责把对角交成与自己的 ``@`` 同口径的向量: 串行下装配层级给的是
-        本 rank 的对角, 分布式下 ``OverlapOperator`` 给的是已跨 rank 求和的对角.
+        内层算子负责把对角交成与自己的 ``@`` 同口径的向量.
 
         Returns
         -------

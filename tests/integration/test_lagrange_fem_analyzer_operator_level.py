@@ -19,7 +19,7 @@ from soptx.mesh import TriangleMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems.elasticity import SinusoidalPlaneStrainElasticity2D
+from soptx.problems import SinusoidalPlaneStrainElasticity2D
 
 DEGREE = 1
 INTEGRATION_ORDER = DEGREE + 3
@@ -167,7 +167,7 @@ def test_ea_rejects_a_direct_solver() -> None:
 
 
 def test_an_externally_built_space_gives_the_same_solution() -> None:
-    """The injection seam kept for distributed spaces must be transparent."""
+    """An externally built tensor space must give the same solution."""
 
     internal = make_analyzer(8, "ea", "cg")
     external = make_analyzer(8, "ea", "cg", tensor_space="external")
@@ -181,69 +181,6 @@ def test_an_externally_built_space_gives_the_same_solution() -> None:
 def test_an_unknown_operator_level_is_rejected() -> None:
     with pytest.raises(RuntimeError, match="算子层级"):
         make_analyzer(4, "eba", "cg")
-
-
-class TransparentWrapper:
-    """Stands in for distributed.OverlapOperator: forwards without changing it."""
-
-    def __init__(self, form) -> None:
-        self.form = form
-        self.matvec_calls = 0
-
-    def __matmul__(self, vector):
-        self.matvec_calls += 1
-        return self.form @ vector
-
-    def __getattr__(self, name):
-        return getattr(self.form, name)
-
-
-class SeamRecordingAnalyzer(LagrangeFEMAnalyzer):
-    """Overrides the two distributed extension points, keeping them identities."""
-
-    wrapped = None
-    reduced_loads = 0
-
-    def wrap_operator(self, form):
-        self.wrapped = TransparentWrapper(form)
-        return self.wrapped
-
-    def reduce_load(self, F):
-        self.reduced_loads += 1
-        return F
-
-
-def test_distributed_seams_are_used_by_the_ea_path() -> None:
-    """A distributed subclass must be able to reach both extension points."""
-
-    reference = make_analyzer(8, "ea", "cg")
-    baseline = reference.solve_state()["displacement"]
-
-    problem = SinusoidalPlaneStrainElasticity2D()
-    mesh = TriangleMesh.from_box(list(problem.domain), nx=8, ny=8)
-    analyzer = SeamRecordingAnalyzer(
-        disp_mesh=mesh,
-        pde=problem,
-        material=IsotropicLinearElasticMaterial(
-            youngs_modulus=problem.E,
-            poisson_ratio=problem.nu,
-            hypothesis="plane_strain",
-            device=bm.get_device(mesh),
-        ),
-        space_degree=DEGREE,
-        integration_order=INTEGRATION_ORDER,
-        operator_level="ea",
-        solve_method="cg",
-        topopt_algorithm=None,
-    )
-    solution = analyzer.solve_state()["displacement"]
-
-    assert analyzer.reduced_loads == 1
-    assert analyzer.wrapped is not None
-    # 包装必须真的参与 matvec, 而不是被 ConstrainedOperator 绕过
-    assert analyzer.wrapped.matvec_calls > 0
-    # 恒等包装不得改变结果
-    assert relative_difference(solution[:], baseline[:]) < 1.0e-12
 
 
 def test_solve_system_does_not_depend_on_apply_bc_state() -> None:
@@ -270,17 +207,6 @@ def test_solve_system_does_not_depend_on_apply_bc_state() -> None:
     )
 
     assert relative_difference(from_zero, from_prescribed) < 1.0e-8
-
-
-def test_dof_comm_is_readable_from_the_base_class() -> None:
-    """A distributed subclass must not have to re-expose what it was given."""
-
-    communicator = FakeDofComm(mpi_size=2)
-    analyzer = make_analyzer(4, "ea", "cg")
-    assert analyzer.dof_comm is None
-
-    analyzer._dof_comm = communicator
-    assert analyzer.dof_comm is communicator
 
 
 def test_cg_reports_solver_diagnostics() -> None:
@@ -310,110 +236,3 @@ def test_a_direct_solve_does_not_fabricate_iteration_counts() -> None:
     assert info["relres"] < 1.0e-10
     assert "maxit" not in info
     assert "recursive_residual" not in info
-
-
-class FakeDofComm:
-    """Just enough of EntityMPI for the rank-count guards."""
-
-    def __init__(self, mpi_size: int) -> None:
-        self.mpi_size = mpi_size
-
-
-def test_fa_refuses_a_multi_rank_system() -> None:
-    """Symmetric elimination has no seam for the overlap reduction.
-
-    Without this guard a multi-rank FA run would not fail -- each rank would
-    quietly solve its own local matrix.
-    """
-
-    analyzer = make_analyzer(4, "fa", "scipy")
-    analyzer._dof_comm = FakeDofComm(mpi_size=2)
-
-    with pytest.raises(RuntimeError, match="ea"):
-        analyzer.apply_bc(
-            analyzer.assemble_stiff_matrix(),
-            analyzer.assemble_body_force_vector(),
-        )
-
-
-def test_fa_accepts_a_single_rank_communicator() -> None:
-    """Overlap reduction is the identity on one rank, so FA stays usable.
-
-    The example builds a dof_comm even for one rank, and its FA reference runs
-    through this path.
-    """
-
-    analyzer = make_analyzer(4, "fa", "scipy")
-    analyzer._dof_comm = FakeDofComm(mpi_size=1)
-
-    matrix, load = analyzer.apply_bc(
-        analyzer.assemble_stiff_matrix(),
-        analyzer.assemble_body_force_vector(),
-    )
-
-    assert matrix is not None
-    assert load is not None
-
-
-def test_ea_accepts_a_multi_rank_system_at_the_boundary_step() -> None:
-    """The EA path must stay open: it is the supported distributed level."""
-
-    analyzer = make_analyzer(4, "ea", "cg")
-    analyzer._dof_comm = FakeDofComm(mpi_size=2)
-
-    operator, load = analyzer.apply_bc(
-        analyzer.assemble_stiff_matrix(),
-        analyzer.assemble_body_force_vector(),
-    )
-
-    assert operator is not None
-    assert load is not None
-
-
-def test_a_serial_solver_refuses_a_distributed_system() -> None:
-    """dof_comm must be rejected by the solver, not by solve_state."""
-
-    analyzer = make_analyzer(4, "ea", "cg")
-    analyzer._dof_comm = object()
-
-    with pytest.raises(NotImplementedError, match="solve_system"):
-        analyzer.solve_state()
-
-
-def test_overriding_the_solver_lifts_the_distributed_guard() -> None:
-    """A distributed subclass supplies its own solver and must not be blocked."""
-
-    class OwnSolverAnalyzer(LagrangeFEMAnalyzer):
-        def solve_system(self, K, F, out, **kwargs):
-            from soptx.solvers import cg
-
-            out[:], _ = cg(K, F[:], x0=self._prescribed_solution,
-                           batch_first=False, atol=1e-12, rtol=1e-12,
-                           maxit=1000, returninfo=True)
-            return out, {"name": "overridden"}
-
-    reference = make_analyzer(8, "ea", "cg")
-    baseline = reference.solve_state()["displacement"]
-
-    problem = SinusoidalPlaneStrainElasticity2D()
-    mesh = TriangleMesh.from_box(list(problem.domain), nx=8, ny=8)
-    analyzer = OwnSolverAnalyzer(
-        disp_mesh=mesh,
-        pde=problem,
-        material=IsotropicLinearElasticMaterial(
-            youngs_modulus=problem.E,
-            poisson_ratio=problem.nu,
-            hypothesis="plane_strain",
-            device=bm.get_device(mesh),
-        ),
-        space_degree=DEGREE,
-        integration_order=INTEGRATION_ORDER,
-        operator_level="ea",
-        solve_method="cg",
-        dof_comm=object(),
-        topopt_algorithm=None,
-    )
-    state = analyzer.solve_state()
-
-    assert state["solver"]["name"] == "overridden"
-    assert relative_difference(state["displacement"][:], baseline[:]) < 1.0e-12

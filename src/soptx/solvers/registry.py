@@ -6,7 +6,7 @@ analyzer 侧只认字符串 (配置里的 ``solve_method``), 不认类. 注册�
 自己的模块里 ``@register("名字")``, 不必回头改 analyzer.
 
 能不能用不由注册表判断: 注册表只负责造出实例, 算子能力协商在
-:meth:`LinearSolver.setup` 里做. 因此注册 AMG 这类只能吃显式矩阵的后端是安全
+:meth:`LinearSolver.setup` 里做. 因此注册直接法这类只能吃显式矩阵的后端是安全
 的 -- 它在 'ea' 层级下会在 setup 处抛 :class:`OperatorCapabilityError`, 而不是
 在查表处被静默排除.
 
@@ -14,8 +14,8 @@ analyzer 侧只认字符串 (配置里的 ``solve_method``), 不认类. 注册�
 ``DirectSolver`` 用 ``backend`` 的两个取值注册成 ``"scipy"`` 与 ``"mumps"``
 两个键, 不必为一个字符串多造一个类.
 
-尚未实现的后端 (AMG, MINRES, 多重网格) 暂不注册: 它们的 ``__init__`` 直接抛
-:class:`NotImplementedError`, 登记进来只会让 :func:`available` 谎报可用键.
+只注册能直接按名字构造的后端. 几何多重网格的层次要由分析器构造, 经
+:mod:`soptx.fem.preconditioners` 的 ``'gmg'`` 键接入, 不在本注册表里.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def register(
         注册键, 与配置里的 ``solve_method`` 取值一致.
     **preset
         该键固有的构造参数, 用于把同一个类分成多个键 (如 ``backend``).
-        :func:`create` 的同名参数覆盖它.
+        它决定了键的含义, :func:`create` 不能覆盖.
 
     Returns
     -------
@@ -48,12 +48,12 @@ def register(
 
     Raises
     ------
-    KeyError
+    ValueError
         该键已被占用 (重复注册通常意味着模块被重复导入或键名撞车).
     """
     def _decorate(cls: Type[LinearSolver]) -> Type[LinearSolver]:
         if name in _REGISTRY:
-            raise KeyError(
+            raise ValueError(
                 f"求解器键 {name!r} 已被 {_REGISTRY[name][0].__name__} 占用, "
                 f"不能再注册给 {cls.__name__}"
             )
@@ -71,7 +71,7 @@ def create(name: str, **kwargs: Any) -> LinearSolver:
     name : str
         注册键.
     **kwargs
-        转发给求解器构造函数的参数 (容差, 最大迭代数等), 覆盖注册时的预置参数.
+        转发给求解器构造函数的参数 (容差, 最大迭代数等); 不能与注册时的预置参数同名.
 
     Returns
     -------
@@ -82,6 +82,9 @@ def create(name: str, **kwargs: Any) -> LinearSolver:
     ------
     KeyError
         键未注册.
+    ValueError
+        ``kwargs`` 试图覆盖预置参数, 如 ``create('scipy', backend='mumps')``: 那样造出的
+        求解器与键名不符.
     """
     entry = _REGISTRY.get(name)
     if entry is None:
@@ -89,7 +92,13 @@ def create(name: str, **kwargs: Any) -> LinearSolver:
             f"未注册的求解器键: {name!r}; 可用: {', '.join(available())}"
         )
     cls, preset = entry
-    return cls(**{**preset, **kwargs})
+    clashes = sorted(set(preset) & set(kwargs))
+    if clashes:
+        raise ValueError(
+            f"求解器键 {name!r} 的预置参数 {clashes} 决定了键的含义, 不能在 create 中覆盖; "
+            f"需要别的取值请改用对应的键"
+        )
+    return cls(**preset, **kwargs)
 
 
 def available() -> Tuple[str, ...]:

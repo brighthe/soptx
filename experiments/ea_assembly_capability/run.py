@@ -244,11 +244,8 @@ def _build_facade(method: str, n: int) -> tuple[Dict[str, Any], StageMeter]:
 
 
 def _num_classes() -> int:
-    """当前网格类型的平移类数 N_k (每个格子剖出的单元数), 由单格子的 ``create_box_mesh`` 读出."""
-    from soptx.mesh import create_box_mesh
-
-    GD = MESH_SPECS[MESH].GD
-    return int(create_box_mesh(MESH, [0.0, 1.0] * GD, *(1, ) * GD).classes.num_classes)
+    """当前网格类型的平移类数 N_k, 即 ``from_box`` 编号约定下每个格子剖出的单元数."""
+    return {"tri": 2, "quad": 1, "tet": 6, "hex": 1}[MESH]
 
 
 def _build_reference(method: str, n: int) -> tuple[Dict[str, Any], StageMeter]:

@@ -21,7 +21,7 @@ class ExperimentContext:
     同一外载与同一 Dirichlet 约束; 任何路径私自重建其中一项都会破坏受控比较.
 
     属性:
-        problem: ``soptx.problems.elasticity`` 中的物理问题对象.
+        problem: ``soptx.problems`` 中的物理问题对象.
         assembler: ``GlobalAssembler``, 持有细网格, 子结构划分与材料.
         prototype: ``SubstructurePrototype``, 提供 ``rigid_basis`` 等结构信息.
         density: 按子结构组织的单元密度场, 形状 ``(M, NC)``.

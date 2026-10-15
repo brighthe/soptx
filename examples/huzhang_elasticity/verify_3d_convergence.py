@@ -122,9 +122,6 @@ class SineProblem3d:
     def __init__(self, boundary: str = "displacement"):
         self.boundary = boundary
 
-    def mark_corners(self, node):
-        return bm.zeros((0, 3), dtype=bm.float64)
-
     def _on_x1(self, points):
         return bm.abs(points[..., 0] - 1.0) < 1e-12
 
@@ -153,7 +150,7 @@ class SineProblem3d:
 
 def _solve_with_analyzer(mesh, p: int, q: int, boundary: str = "displacement"):
     """经 HuZhangMFEMAnalyzer 求解, 返回 (应力空间, 位移空间, 应力系数, 位移系数, 装配秒数, 求解秒数)."""
-    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D", enable_logging=False)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E, poisson_ratio=NU, hypothesis="3D")
     t0 = time.perf_counter()
     analyzer = HuZhangMFEMAnalyzer(
         disp_mesh=mesh, pde=SineProblem3d(boundary), material=material, interpolation_scheme=None,

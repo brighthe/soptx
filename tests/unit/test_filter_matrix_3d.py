@@ -65,7 +65,7 @@ def test_density_filter_matches_structured_convolution(case) -> None:
     bm.set_backend('numpy')
     nx, ny, nz, hx, hy, hz, rmin = case
     density_filter = Filter(design_mesh=_structured_hex_mesh(nx, ny, nz, hx, hy, hz), filter_type='density',
-                            rmin=rmin, density_location='element', enable_logging=False)
+                            rmin=rmin, density_location='element')
     design = np.random.default_rng(0).uniform(0.0, 1.0, nx * ny * nz)
 
     physical = density_filter.filter_design_variable(design_variable=bm.tensor(design),
@@ -84,8 +84,7 @@ def test_density_filter_torch_backend_matches_numpy() -> None:
         for backend in ('numpy', 'pytorch'):
             bm.set_backend(backend)
             density_filter = Filter(design_mesh=_structured_hex_mesh(nx, ny, nz, hx, hy, hz),
-                                    filter_type='density', rmin=rmin, density_location='element',
-                                    enable_logging=False)
+                                    filter_type='density', rmin=rmin, density_location='element')
             physical = density_filter.filter_design_variable(
                 design_variable=bm.tensor(design, dtype=bm.float64),
                 physical_density=bm.zeros(nx * ny * nz, dtype=bm.float64))

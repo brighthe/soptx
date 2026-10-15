@@ -21,9 +21,9 @@ import numpy as np
 from soptx.backend import backend_manager as bm
 from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer, project_patch_traction_to_p1_trace
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.mesh import create_huzhang_checkerboard_mesh
+from soptx.mesh import TriangleMesh
 from soptx.postprocess.vtk_export import write_vtu
-from soptx.problems import FixedFixedBeamHalfDomain2d
+from soptx.problems import HalfFixedFixedBeamPatch2d
 from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.filters import Filter
 from soptx.topology.interpolation import MaterialInterpolationScheme
@@ -90,28 +90,28 @@ def build(method: str, order: int) -> dict[str, Any]:
         组装好的对象; 冻结设计再分析只用其中的分析链, 不挂优化器.
     """
     # 先按原始物理问题取载荷区几何, 再把牵引换成它在底边 P1 迹空间上的 L2 投影
-    problem = FixedFixedBeamHalfDomain2d(
+    problem = HalfFixedFixedBeamPatch2d(
         P=LOAD, E=E0, nu=NU, load_width=LOAD_WIDTH, plane_type=PLANE_TYPE)
     xmin, xmax, ymin, ymax = problem.domain
     traction = project_patch_traction_to_p1_trace(
         line=(xmin, xmax), n_cells=NX, level=problem.traction_level,
         patch=problem.traction_patch, intensity=problem.traction_intensity,
+        axis=problem.traction_axis,
     )
-    problem = FixedFixedBeamHalfDomain2d(
+    problem = HalfFixedFixedBeamPatch2d(
         P=LOAD, E=E0, nu=NU, load_width=LOAD_WIDTH, plane_type=PLANE_TYPE, traction=traction)
 
-    mesh: Any = create_huzhang_checkerboard_mesh(box=problem.domain, nx=NX, ny=NY)
+    mesh: Any = TriangleMesh.from_checkerboard_box(box=problem.domain, nx=NX, ny=NY)
     # 过滤矩阵等依赖网格上的 meshdata 元数据
     mesh.meshdata = {"domain": list(problem.domain), "mesh_type": "triangle-checkerboard",
                      "nx": NX, "ny": NY, "hx": (xmax - xmin) / NX, "hy": (ymax - ymin) / NY}
 
     material = IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E, poisson_ratio=problem.nu,
-        hypothesis=problem.plane_type, enable_logging=False)
+        hypothesis=problem.plane_type)
     interpolation = MaterialInterpolationScheme(
         density_location="element", interpolation_method="msimp",
         options={"penalty_factor": PENALTY, "void_youngs_modulus": EMIN, "target_variables": ["E"]},
-        enable_logging=False,
     )
     common = dict(disp_mesh=mesh, pde=problem, material=material, space_degree=order,
                   integration_order=2 * order + 2, solve_method=SOLVER,
@@ -129,9 +129,9 @@ def build(method: str, order: int) -> dict[str, Any]:
         "method": method, "order": order, "problem": problem, "mesh": mesh,
         "analyzer": analyzer, "design_variable": design_variable, "density": density,
         "objective": ComplianceObjective(analyzer=analyzer, state_variable=state_variable,
-                                         diff_mode="manual", enable_logging=False),
+                                         diff_mode="manual"),
         "constraint": VolumeConstraint(analyzer=analyzer, volume_fraction=VOLFRAC,
-                                       diff_mode="manual", enable_logging=False),
+                                       diff_mode="manual"),
     }
 
 
@@ -168,8 +168,7 @@ def main(argv: list[str] | None = None) -> int:
 
             # 1. 密度过滤 + MMA 优化
             density_filter = Filter(design_mesh=parts["mesh"], filter_type="density",
-                                    rmin=FILTER_RADIUS, density_location="element", filter_q=3,
-                                    enable_logging=False)
+                                    rmin=FILTER_RADIUS, density_location="element", filter_q=3)
             optimizer = MMAOptimizer(
                 objective=parts["objective"], constraint=parts["constraint"], filter=density_filter,
                 options={"max_iterations": MAX_ITERATIONS, "change_tolerance": CHANGE_TOLERANCE},
@@ -195,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
 
             summary = {
                 "case_id": CASE_ID,
-                "model": "FixedFixedBeamHalfDomain2d",
+                "model": "HalfFixedFixedBeamPatch2d",
                 "method": method,
                 "order": order,
                 "mesh_type": "triangle-checkerboard",

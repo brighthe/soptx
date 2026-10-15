@@ -49,7 +49,7 @@ $$\widehat{\mathbf K}_s \;=\; \mathbf R_\perp\,\mathbf L\mathbf L^{\mathsf T}\,\
 
 ### 2.2 算例与两层误差口径
 
-采用 Huang 2023 第 4.1 节完整 MBB 梁物理问题 (`soptx.problems.elasticity.FullMBBBeam2d`)，$12 \times 2$ 子结构划分（共 24 个子结构），每个子结构 $5 \times 5$ Q1 单元（全网格 600 单元）。两条路径共用同一批 `SubstructureMesh`，因此接口自由度编号一致，接口位移可逐分量直接相减：
+采用 Huang 2023 第 4.1 节完整 MBB 梁物理问题 (`soptx.problems.FullMBBBeamPoint2d`)，$12 \times 2$ 子结构划分（共 24 个子结构），每个子结构 $5 \times 5$ Q1 单元（全网格 600 单元）。两条路径共用同一批 `SubstructureMesh`，因此接口自由度编号一致，接口位移可逐分量直接相减：
 
 - **路径 A**：`ExactSchurCondensation` 批量 Schur 补，一次装配 + 一次缩聚；
 - **路径 B**：`PIMLStaticCondensation` 逐子结构代理预测，复用路径 A 已装配的 `K_local_batch`。
@@ -123,7 +123,7 @@ python examples/piml_substructure_elasticity/verify_shape_function_route.py
 python examples/piml_substructure_elasticity/verify_shape_function_route.py --skip-train
 ```
 
-配置与 §2 完全对齐：$5\times5$ Q1 子结构原型（$n_i=32$、$n_b=40$、$m=37$），训练 2000 样本 / 4000 epochs / lr 0.005，留出 200 样本，`--seed 2026`；解层复用 §2 的 `FullMBBBeam2d` 装配与求解链路。
+配置与 §2 完全对齐：$5\times5$ Q1 子结构原型（$n_i=32$、$n_b=40$、$m=37$），训练 2000 样本 / 4000 epochs / lr 0.005，留出 200 样本，`--seed 2026`；解层复用 §2 的 `FullMBBBeamPoint2d` 装配与求解链路。
 
 ### 3.1 输出解读（`--seed 2026`）
 
@@ -137,7 +137,7 @@ python examples/piml_substructure_elasticity/verify_shape_function_route.py --sk
 式 (17) 变分构造缩聚刚度误差 eps_K    | eps_K ~ C * eps_N^2  | 0.44% (max 1.22%)
 变分抗噪机理平方压缩降幅              | --                   | 20.6 倍
 ----------------------------------------------------------------------------
-【图 3(c) 全系统装配求解精度】(FullMBBBeam2d, 24 子结构装配系统)
+【图 3(c) 全系统装配求解精度】(FullMBBBeamPoint2d, 24 子结构装配系统)
 ----------------------------------------------------------------------------
 在役局部缩聚刚度相对差 (max)          | --                   | 0.15%
 接口位移相对误差                     | --                   | 0.15%
@@ -157,7 +157,7 @@ python examples/piml_substructure_elasticity/verify_shape_function_route.py --sk
 
 （终端未打印的 [0][1] 两步为解析自检：精确 $\mathbf N^{\ast}$ 代入式 (17) 恢复 $\mathbf K_s$ 至 $6.3\times10^{-16}$，恒等式与半正定性验证到机器精度。）
 
-**图 3(c) 解层（`FullMBBBeam2d`，24 子结构装配系统）**，在役密度为逐细单元变化的实际场，非训练分布：
+**图 3(c) 解层（`FullMBBBeamPoint2d`，24 子结构装配系统）**，在役密度为逐细单元变化的实际场，非训练分布：
 
 - **在役 $\mathbf K_s$ 相对差 max `0.15%`**：算子层误差在真实输入上的水平（mean $0.092\%$）。
 - **接口位移 `0.15%` / 全场回填 `0.15%`**：算子误差经全局接口系统求解后**未被放大**，仍是千分级。
@@ -257,7 +257,7 @@ PINN 学的是绑定单个定解问题的位移场，PIML 学的是与外载、�
 ## 11. 后续工作与路线规划
 
 - [x] 基于 `bm` 重构代理与矩阵计算；
-- [x] 对齐 Huang 2023 第 4.1 节完整 MBB 梁算例 (`FullMBBBeam2d`)；
+- [x] 对齐 Huang 2023 第 4.1 节完整 MBB 梁算例 (`FullMBBBeamPoint2d`)；
 - [x] 引入 Cholesky 下三角预测范式；
 - [x] 开发 PIML vs PINN 跨范式对比程序 (`compare_piml_pinn.py`)；
 - [x] 共享参考子结构 + 批量缩聚，消除同构子结构上的 Python 循环；

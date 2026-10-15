@@ -109,6 +109,7 @@ class LagrangeStressConstraint(BaseLogged):
             )
 
     def _stress_ratio(self, state: Dict) -> TensorLike:
+        """原生 von Mises 应力除以许用应力."""
         return state['von_mises'] / self._stress_limit
 
     def compute_unexempted_constraint(
@@ -120,7 +121,7 @@ class LagrangeStressConstraint(BaseLogged):
         """计算未施加豁免的局部约束值.
 
         与 ``fun`` 的唯一差别是不把豁免单元换成 ``EXEMPT_CONSTRAINT_VALUE``,
-        因此垫片内部的真实超限量可被诊断到. 优化过程不应调用本方法: 豁免区
+        因此被动实体区内部的真实超限量可被诊断到. 优化过程不应调用本方法: 豁免区
         的约束值发散, 进入 AL 会重现被豁免掉的病态.
 
         Parameters
@@ -156,7 +157,20 @@ class LagrangeStressConstraint(BaseLogged):
         state: Optional[Dict] = None,
         **kwargs,
     ) -> TensorLike:
-        """计算当前松弛公式的局部约束值."""
+        """计算注入公式的局部约束值, 豁免单元取严格可行的常值.
+
+        Parameters
+        ----------
+        density : TensorLike
+            物理密度场.
+        state : dict, optional
+            求解状态缓存; 为 None 时新建并就地填充.
+
+        Returns
+        -------
+        TensorLike
+            形状 (NC, NQ) 或 (NC, n_sub, NQ) 的约束值.
+        """
         constraint_value = self.compute_unexempted_constraint(
             density=density, state=state, **kwargs
         )
@@ -165,7 +179,18 @@ class LagrangeStressConstraint(BaseLogged):
         )
 
     def compute_partial_gradient_wrt_mE(self, state: Dict) -> TensorLike:
-        """计算固定 LFEM 状态时约束对相对刚度的显式偏导数."""
+        """计算 LFEM 状态固定时约束对相对刚度的显式偏导数.
+
+        Parameters
+        ----------
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            与约束值同形的偏导数, 豁免单元为 0.
+        """
         partial = self._formulation.partial_wrt_stiffness_ratio(
             stress_ratio=self._stress_ratio(state),
             stiffness_ratio=state['stiffness_ratio'],
@@ -174,7 +199,18 @@ class LagrangeStressConstraint(BaseLogged):
         return apply_exemption(partial, self._exemption_mask, 0.0)
 
     def compute_gradient_wrt_von_mises(self, state: Dict) -> TensorLike:
-        """计算约束对实体 von Mises 应力的偏导数."""
+        """计算约束对实体 von Mises 应力的偏导数.
+
+        Parameters
+        ----------
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            与约束值同形的偏导数, 已除以许用应力; 豁免单元为 0.
+        """
         derivative = self._formulation.gradient_wrt_stress_ratio(
             stress_ratio=self._stress_ratio(state),
             stiffness_ratio=state['stiffness_ratio'],
@@ -223,12 +259,12 @@ class LagrangeStressConstraint(BaseLogged):
         # --- 计算 dVM / dSigma (von Mises 应力相对于 Cauchy 应力张量的导数)---
         stress_vector = state['stress_solid'] # 单分辨率: (NC, NQ, NS) | 多分辨率: (NC, n_sub, NQ, NS)
         vm_val = state['von_mises']           # 单分辨率: (NC, NQ)     | 多分辨率: (NC, n_sub, NQ)
-        vm_safe = bm.where(vm_val < 1e-12, 1.0, vm_val)
+        # 除零由 calculate_von_mises_stress 的平方量下限 1e-12 兜住, 即 vm >= 1e-6
 
         if self._is_multiresolution:
             # (NC, n_sub, NQ, NS)
             M_sigma = bm.einsum('ij, csnj -> csni', M, stress_vector)
-            dVM_dSigma = M_sigma / vm_safe[..., None]
+            dVM_dSigma = M_sigma / vm_val[..., None]
 
             term1_eps = bm.einsum('kl, csnk -> csnl', D, dVM_dSigma) # # (NC, n_sub, NQ, NS)
 
@@ -241,7 +277,7 @@ class LagrangeStressConstraint(BaseLogged):
         else:
             # (NC, NQ, NS)
             M_sigma = bm.einsum('ij, cqj -> cqi', M, stress_vector)
-            dVM_dSigma = M_sigma / vm_safe[..., None]
+            dVM_dSigma = M_sigma / vm_val[..., None]
 
             # --- 应力 -> 应变 ( D^T * dVM/dSigma ) ---
             term1_eps = bm.einsum('kl, cqk -> cql', D, dVM_dSigma) # (NC, NQ, NS)
@@ -264,7 +300,7 @@ class LagrangeStressConstraint(BaseLogged):
 
         # 初始化全局载荷向量
         gdofs = disp_space.number_of_global_dofs()
-        adjoint_load = bm.zeros((gdofs, ), dtype=bm.float64)
+        adjoint_load = bm.zeros((gdofs, ), dtype=bm.float64, device=bm.get_device(values))
 
         # 累加组装
         bm.add_at(adjoint_load, indices, values)
@@ -275,8 +311,20 @@ class LagrangeStressConstraint(BaseLogged):
                                           adjoint_vector: TensorLike,
                                           state: Dict
                                         ) -> TensorLike:
-        """计算伴随法隐式灵敏度项
-            ξ^T · (∂F_int/∂E_ℓ)"""
+        """计算对相对刚度的隐式灵敏度项 ψ_e^T K⁰_e U_e.
+
+        Parameters
+        ----------
+        adjoint_vector : TensorLike
+            伴随方程 K ψ = F_adj 的解.
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存, 须含 ``displacement``.
+
+        Returns
+        -------
+        TensorLike
+            形状 (NC,) 或多分辨率下 (NC, n_sub) 的隐式灵敏度项.
+        """
         # 提取位移向量 U 和伴随向量 ψ
         uh = state['displacement']
 
@@ -308,7 +356,20 @@ class LagrangeStressConstraint(BaseLogged):
         return implicit_term
 
     def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
-        """返回当前公式用于展示的无量纲应力测度."""
+        """返回当前公式用于展示的无量纲应力测度.
+
+        Parameters
+        ----------
+        rho : TensorLike
+            物理密度场, 本方法不用到, 保留以统一签名.
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            与约束值同形的应力测度 (epsilon 松弛下为表观应力比).
+        """
         return self._formulation.stress_measure(
             stress_ratio=self._stress_ratio(state),
             stiffness_ratio=state['stiffness_ratio'],
@@ -316,17 +377,45 @@ class LagrangeStressConstraint(BaseLogged):
         )
 
     def compute_solid_stress_ratio(self, rho: TensorLike, state: Dict) -> TensorLike:
-        """返回未加权的实体材料应力比, 仅用于物理诊断."""
+        """返回未加权的实体材料应力比, 仅用于物理诊断.
+
+        Parameters
+        ----------
+        rho : TensorLike
+            物理密度场, 本方法不用到, 保留以统一签名.
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            与约束值同形的实体应力比 sigma^solid_vm / sigma_lim.
+        """
         return self._stress_ratio(state)
 
     def compute_relative_violation(self, rho: TensorLike, state: Dict) -> TensorLike:
         """返回当前公式定义的验收超限量.
 
-        对多项式消失约束, 该量沿用历史加权口径
-        m_E * sigma_vm_solid / sigma_lim - 1, 不等于 AL 使用的多项式约束值 g.
-        对 epsilon 松弛约束, 该量就是 AL 约束值 g.
+        具体尺度由注入公式定义; 对 epsilon 松弛约束, 该量就是 AL 约束值 g.
         豁免单元返回严格可行的常值, 因此不进入 C2 验收; 这些单元的真实应力
         水平由 ``compute_solid_stress_ratio`` 如实报告, 不被掩盖.
+
+        Parameters
+        ----------
+        rho : TensorLike
+            物理密度场, 本方法不用到, 保留以统一签名.
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            与约束值同形的超限量, 非正表示满足验收判据.
+
+        Raises
+        ------
+        ValueError
+            相对刚度非有限或非正, 或超限量含非有限值.
         """
         stiffness_ratio = state['stiffness_ratio']
         if not bool(bm.all(bm.isfinite(stiffness_ratio) & (stiffness_ratio > 0))):

@@ -6,18 +6,14 @@ import numpy as np
 import pytest
 
 from soptx.backend import backend_manager as bm
-from soptx.mesh import (
-    TriangleMesh,
-    create_huzhang_checkerboard_mesh,
-    create_huzhang_symmetric_single_diagonal_mesh,
-)
+from soptx.mesh import TriangleMesh
 
 from soptx.functionspace import HuZhangFESpace
 
 
 def _box_mesh() -> TriangleMesh:
     bm.set_backend("numpy")
-    return create_huzhang_checkerboard_mesh(
+    return TriangleMesh.from_checkerboard_box(
         box=(0.0, 1.0, 0.0, 1.0),
         nx=2,
         ny=2,
@@ -101,11 +97,11 @@ def _geometric_edges(mesh: TriangleMesh) -> set:
 
 
 @pytest.mark.parametrize(("nx", "ny"), [(2, 2), (4, 3), (6, 4)])
-def test_symmetric_single_diagonal_mesh_is_mirror_symmetric_with_two_cell_corners(
+def test_mirror_box_mesh_is_mirror_symmetric_with_two_cell_corners(
     nx: int, ny: int
 ) -> None:
     bm.set_backend("numpy")
-    mesh = create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
+    mesh = TriangleMesh.from_mirror_box(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
     assert mesh.number_of_cells() == 2 * nx * ny
 
     geometric_edges = _geometric_edges(mesh)
@@ -136,22 +132,22 @@ def test_symmetric_single_diagonal_mesh_is_mirror_symmetric_with_two_cell_corner
 
 
 @pytest.mark.parametrize(("nx", "ny"), [(3, 2), (5, 4)])
-def test_symmetric_single_diagonal_mesh_requires_even_nx(nx: int, ny: int) -> None:
+def test_mirror_box_mesh_requires_even_nx(nx: int, ny: int) -> None:
     bm.set_backend("numpy")
-    with pytest.raises(ValueError, match="even"):
-        create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
+    with pytest.raises(ValueError, match="偶数"):
+        TriangleMesh.from_mirror_box(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
 
 
 @pytest.mark.parametrize(("nx", "ny"), [(0, 2), (2, 1), (2, 0)])
-def test_symmetric_single_diagonal_mesh_requires_at_least_two_subdivisions(nx: int, ny: int) -> None:
+def test_mirror_box_mesh_requires_at_least_two_subdivisions(nx: int, ny: int) -> None:
     bm.set_backend("numpy")
-    with pytest.raises(ValueError, match=">= 2"):
-        create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
+    with pytest.raises(ValueError, match="不小于 2"):
+        TriangleMesh.from_mirror_box(box=(0.0, 1.0, 0.0, 1.0), nx=nx, ny=ny)
 
 
-def test_symmetric_single_diagonal_mesh_supports_two_cell_corner_relaxation() -> None:
+def test_mirror_box_mesh_supports_two_cell_corner_relaxation() -> None:
     bm.set_backend("numpy")
-    mesh = create_huzhang_symmetric_single_diagonal_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=4, ny=2)
+    mesh = TriangleMesh.from_mirror_box(box=(0.0, 1.0, 0.0, 1.0), nx=4, ny=2)
     conforming = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=False)
     relaxed = HuZhangFESpace(
         mesh=mesh,
@@ -179,8 +175,8 @@ def test_checkerboard_mesh_requires_positive_even_subdivisions(
     ny: int,
 ) -> None:
     bm.set_backend("numpy")
-    with pytest.raises(ValueError, match="positive even integer"):
-        create_huzhang_checkerboard_mesh(
+    with pytest.raises(ValueError, match="正偶数"):
+        TriangleMesh.from_checkerboard_box(
             box=(0.0, 1.0, 0.0, 1.0),
             nx=nx,
             ny=ny,
@@ -308,3 +304,31 @@ def test_vertex_fan_with_more_than_two_cells_is_rejected() -> None:
             use_relaxation=True,
             corners=node[[0]],
         )
+
+
+def test_auto_detected_corners_match_explicit_box_corners() -> None:
+    """缺省 corners=None 时由网格自动检出, 与显式传入四个角点得到同一组松弛角点."""
+    mesh = _box_mesh()
+    explicit = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=True, corners=_box_corners())
+    auto = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=True)
+
+    assert auto.NCP == explicit.NCP == 4
+    assert sorted(bm.to_numpy(auto.corner["idx"]).tolist()) == sorted(
+        bm.to_numpy(explicit.corner["idx"]).tolist()
+    )
+    assert auto.skipped_corners == []
+    assert auto.number_of_global_dofs() == explicit.number_of_global_dofs()
+
+
+def test_auto_detection_skips_unsupported_corners_with_warning() -> None:
+    """单向对角剖分的两个单单元角点: 自动检出时跳过并发 warning, 显式传入仍报错."""
+    mesh = _fixed_diagonal_box_mesh()
+
+    with pytest.warns(UserWarning, match="跳过几何角点"):
+        space = HuZhangFESpace(mesh=mesh, p=2, use_relaxation=True)
+
+    assert space.NCP == 2
+    assert len(space.skipped_corners) == 2
+    skipped = sorted(coordinate for coordinate, _ in space.skipped_corners)
+    assert skipped == [(0.0, 1.0), (1.0, 0.0)]
+    assert all("has 1 incident cells" in reason for _, reason in space.skipped_corners)

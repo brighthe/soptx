@@ -8,17 +8,17 @@ SOPTX（Structural Optimization Topology Simulation Software）是最初基于
 ## 快速开始
 
 本仓库位于 WSL（Ubuntu-24.04）的 `~/workspace/soptx`，所有安装、运行与 Git
-操作均在该发行版的 bash 中执行。以二维线弹性 Matrix-Free EA 基线为例，从仓库
-根目录执行：
+操作均在该发行版的 bash 中执行。以二维线弹性制造解在 EA 算子层级上的收敛阶为例，
+从仓库根目录执行：
 
 ```bash
 conda activate ihpcm
-python -m pip install -e ".[mpi,test]"
-mpiexec -n 1 python tools/matrix_free_evidence/run.py --dim 2 --operator-level ea --p 1 --nx 8 --ny 8
+python -m pip install -e ".[test]"
+python examples/lagrange_elasticity/manufactured_convergence_demo.py --operator-level ea --solver cg
 ```
 
-完整参数、3D 与 FA 路径、MPI 分区约束见
-[`examples/matrix_free_elasticity/README.md`](examples/matrix_free_elasticity/README.md)。
+FA 路径、3D 与其他参数见
+[`examples/lagrange_elasticity/README.md`](examples/lagrange_elasticity/README.md)。
 PINN 示例入口见
 [`examples/pinn_elasticity/README.md`](examples/pinn_elasticity/README.md)。
 
@@ -51,12 +51,12 @@ fork 上的缺陷修复随代码一并内联，在 SOPTX 中的落点见
 | Extra | 内容 | 用途 |
 | --- | --- | --- |
 | `viz` | matplotlib、pillow、pyevtk、vtk | 可视化与 VTU 输出；基础导入不要求该 extra |
-| `mpi` | mpi4py | Matrix-Free 分布式算子与多 rank 运行 |
+| `mumps` | PyMUMPS、mpi4py | MUMPS 直接法后端，安装方式见 [`docs/solvers/direct.md`](docs/solvers/direct.md)「依赖」 |
 | `pinn` | torch | PINN 示例训练 |
 | `test` | pytest、build | 测试与 wheel 构建 |
 
-示例目录各自绑定一个已验证的本机 conda 环境：Matrix-Free/MPI 与拉格朗日位移元
-使用 `ihpcm`，PINN 使用 `soptx-gpu`。
+示例目录各自绑定一个已验证的本机 conda 环境：拉格朗日位移元使用 `ihpcm`，
+PINN 使用 `soptx-gpu`。
 
 ## 公共 API
 
@@ -77,8 +77,6 @@ from soptx.fem.integrators import LinearElasticIntegrator
 本地重验证入口：
 
 ```bash
-python tools/matrix_free_evidence/validate.py --dim all
-python tools/matrix_free_evidence/sync_results.py --dim all --check
 python experiments/huzhang_topopt_paper/dry_run.py --json
 ```
 
@@ -96,7 +94,7 @@ evidence 的 `environment` 自 schema 5 起不再记录 `fealpy`：全部数值�
 | --- | --- |
 | `src/soptx/` | 分层的软件包实现与公共 API |
 | `tests/` | 快速 unit、integration 与 regression 测试 |
-| `examples/` | Matrix-Free、PINN 等孵化示例和阶段验证 |
+| `examples/` | 线弹性、子结构、PINN 等孵化示例和阶段验证 |
 | `experiments/` | 论文矩阵、provenance 与长期运行 |
 | `docs/` | 架构、数学模型、验证和引用文档 |
 | `reference_code/` | 待归档且许可证未核实的第三方参考代码 |
@@ -128,9 +126,8 @@ python tools/generate_repository_inventory.py --check
 python -m pytest tests -q
 ```
 
-CI 另有一个 Matrix-Free fast job，装上 `mpi4py` 后重跑 `tests -q -k matrix_free`，
-补上 `fast` job 里被 `importorskip` 跳过的那部分；它同样不运行 MPI benchmark
-或正式 validation。
+分布式/MPI 线与 Matrix-Free 能力证据子系统已移出主线，归档于 git 标签
+`archive/distributed-mpi`，说明见 [`docs/archive.md`](docs/archive.md)。
 
 ## 仓库职责与跨仓库边界
 

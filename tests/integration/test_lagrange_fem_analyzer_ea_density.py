@@ -17,10 +17,10 @@ import pytest
 from soptx.backend import backend_manager as bm
 
 from soptx.fem import LagrangeFEMAnalyzer
-from soptx.mesh import create_huzhang_checkerboard_mesh
+from soptx.mesh import TriangleMesh
 from soptx.fem.levels import ElementAssembly, SharedReferenceElementAssembly
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import BearingDevice2d
+from soptx.problems import BearingTraction2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 NX, NY = 12, 4
@@ -40,15 +40,14 @@ def make_analyzer(operator_level: str,
                   target_variables=("E", ),
                   topopt: bool = True,
                   p: int = 2) -> LagrangeFEMAnalyzer:
-    problem = BearingDevice2d(t=-8.0e-2, E=1.0, nu=nu, plane_type="plane_strain")
+    problem = BearingTraction2d(P=-9.6, E=1.0, nu=nu, plane_type="plane_strain")
     material = IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
         hypothesis=problem.plane_type,
-        enable_logging=False,
     )
     kwargs = dict(
-        disp_mesh=create_huzhang_checkerboard_mesh(box=problem.domain, nx=NX, ny=NY),
+        disp_mesh=TriangleMesh.from_checkerboard_box(box=problem.domain, nx=NX, ny=NY),
         pde=problem,
         material=material,
         space_degree=p,
@@ -70,7 +69,6 @@ def make_analyzer(operator_level: str,
                     "nu_penalty_factor": 1.0,
                     "void_poisson_ratio": 0.3,
                 },
-                enable_logging=False,
             ),
         )
     else:

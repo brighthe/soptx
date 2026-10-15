@@ -5,12 +5,18 @@ import numpy as np
 from soptx.backend import backend_manager as bm
 
 from soptx.protocols import DirichletElasticityProblem, ElasticityProblem
-from soptx.problems import FullMBBBeam3d, HalfMBBBeamRight2d
+from soptx.problems import (
+    FullMBBBeamLine3d,
+    FullMBBBeamPoint3d,
+    HalfMBBBeamLine3d,
+    HalfMBBBeamPoint2d,
+)
 from soptx.problems.loads import PointForceLoad
+from soptx.protocols import LineTraction
 
 
 def test_half_mbb_problem_is_mesh_independent_and_satisfies_lagrange_contract() -> None:
-    problem = HalfMBBBeamRight2d()
+    problem = HalfMBBBeamPoint2d()
 
     assert isinstance(problem, ElasticityProblem)
     assert isinstance(problem, DirichletElasticityProblem)
@@ -20,7 +26,7 @@ def test_half_mbb_problem_is_mesh_independent_and_satisfies_lagrange_contract() 
 
 def test_half_mbb_problem_boundary_conditions_and_concentrated_load() -> None:
     bm.set_backend("numpy")
-    problem = HalfMBBBeamRight2d(P=-2.5)
+    problem = HalfMBBBeamPoint2d(P=-2.5)
     points = bm.array([[0.0, 20.0], [60.0, 0.0], [30.0, 10.0]])
 
     np.testing.assert_allclose(
@@ -63,149 +69,142 @@ def _mbb3d_mesh_space(nx: int, ny: int, nz: int):
     return mesh, space
 
 
-def test_full_mbb3d_defaults_keep_centerline_support_and_center_load() -> None:
+def _assert_rigid_body_modes_removed(problem, mesh) -> None:
+    """消元后的刚度矩阵正定, 即刚体运动全部被消除."""
+    from soptx.fem.analyzers import LagrangeFEMAnalyzer
+    from soptx.materials import IsotropicLinearElasticMaterial
+
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="3D")
+    analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
+                                   integration_order=2, solve_method="scipy")
+    K, _ = analyzer.apply_bc(analyzer.assemble_stiff_matrix(), analyzer.assemble_body_force_vector())
+    eigenvalues = np.linalg.eigvalsh(K.to_scipy().toarray())
+    assert eigenvalues.min() > 1e-8 * eigenvalues.max()
+
+
+def test_full_mbb3d_defaults_and_extruded_line_load() -> None:
     bm.set_backend("numpy")
-    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN)
-    assert problem.support == "centerline"
-    assert problem.load_subdivisions is None
+    problem = FullMBBBeamLine3d(domain=MBB3D_DOMAIN)
+    assert problem.plane_type == "3D"
+    assert not hasattr(problem, "support_layout")
 
-    loads = problem.loads()
-    assert len(loads) == 1
-    assert tuple(loads[0].point) == (3.0, 1.0, 0.5)
-    assert tuple(loads[0].force()) == (0.0, -1.0, 0.0)
-
-    # u_z 只约束底面上距中线最近的点, 左端底边上偏离中线的点不约束 u_z
-    _, _, dirichlet_z = problem.is_dirichlet_boundary()
-    points = bm.array([[3.0, 0.0, 0.5], [0.0, 0.0, 0.5], [0.0, 0.0, 0.0], [3.0, 1.0, 0.5]])
-    np.testing.assert_array_equal(bm.to_numpy(dirichlet_z(points)), [True, True, False, False])
+    (load,) = problem.loads()
+    assert isinstance(load, LineTraction)
+    points = bm.array([[3.0, 1.0, 0.0], [3.0, 1.0, 0.4], [3.0, 0.0, 0.4], [2.0, 1.0, 0.4]])
+    np.testing.assert_array_equal(bm.to_numpy(load.is_load_line(points)), [True, True, False, False])
+    np.testing.assert_allclose(bm.to_numpy(load.traction(points[:1])), [[0.0, -1.0, 0.0]])
 
 
-def test_full_mbb3d_end_lines_constrains_bottom_end_edges_only() -> None:
+def test_full_mbb3d_supports_are_2d_supports_extruded_along_z() -> None:
+    """两端底棱为二维支承沿 z 的拉伸, u_z 只在角点 (x0, y0, z0) 约束."""
     bm.set_backend("numpy")
-    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN, support="end_lines")
+    problem = FullMBBBeamLine3d(domain=MBB3D_DOMAIN)
     points = bm.array([
-        [0.0, 0.0, 0.0],   # 左端底边
-        [0.0, 0.0, 0.7],   # 左端底边
-        [6.0, 0.0, 0.4],   # 右端底边
+        [0.0, 0.0, 0.0],   # 左端底棱 z0 端点
+        [0.0, 0.0, 0.7],   # 左端底棱中部
+        [6.0, 0.0, 0.0],   # 右端底棱 z0 端点
         [3.0, 0.0, 0.5],   # 底面中线, 不约束
-        [0.0, 1.0, 0.5],   # 左端顶边, 不约束
+        [0.0, 1.0, 0.0],   # 左端顶棱, 不约束
     ])
 
     dirichlet_x, dirichlet_y, dirichlet_z = problem.is_dirichlet_boundary()
     np.testing.assert_array_equal(bm.to_numpy(dirichlet_x(points)), [True, True, False, False, False])
     np.testing.assert_array_equal(bm.to_numpy(dirichlet_y(points)), [True, True, True, False, False])
-    np.testing.assert_array_equal(bm.to_numpy(dirichlet_z(points)), [True, True, False, False, False])
+    np.testing.assert_array_equal(bm.to_numpy(dirichlet_z(points)), [True, False, False, False, False])
     np.testing.assert_array_equal(bm.to_numpy(problem.dirichlet_bc(points)), np.zeros((5, 3)))
 
 
-def test_full_mbb3d_end_lines_dirichlet_dofs_on_a_mesh() -> None:
+def test_full_mbb3d_is_statically_determinate_on_any_mesh() -> None:
+    """奇数 nz 下同样成立: 线支承加单点 u_z 恰好消除全部刚体运动."""
     bm.set_backend("numpy")
     nx, ny, nz = 6, 2, 3
-    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN, support="end_lines")
-    _, space = _mbb3d_mesh_space(nx, ny, nz)
+    problem = FullMBBBeamLine3d(domain=MBB3D_DOMAIN)
+    mesh, space = _mbb3d_mesh_space(nx, ny, nz)
 
     is_ddof = bm.to_numpy(space.is_boundary_dof(threshold=problem.is_dirichlet_boundary(),
                                                 method="interp")).reshape(-1, 3)
-    # 左端底边每个节点约束 3 个分量, 右端底边每个节点只约束 u_y
-    assert is_ddof.sum() == 3 * (nz + 1) + (nz + 1)
-    np.testing.assert_array_equal(is_ddof.sum(axis=0), [nz + 1, 2 * (nz + 1), nz + 1])
+    np.testing.assert_array_equal(is_ddof.sum(axis=0), [nz + 1, 2 * (nz + 1), 1])
+    _assert_rigid_body_modes_removed(problem, mesh)
 
 
-def test_full_mbb3d_end_corners_constrains_bottom_end_corners_only() -> None:
+def test_half_mbb3d_is_statically_determinate_on_any_mesh() -> None:
+    """对称面 u_x, 右端底棱 u_y, 单点 u_z; 奇数 nz 下不再出现奇异刚度矩阵."""
     bm.set_backend("numpy")
-    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN, support="end_corners")
-    z1 = MBB3D_DOMAIN[5]
+    nx, ny, nz = 6, 2, 3
+    problem = HalfMBBBeamLine3d(domain=MBB3D_DOMAIN)
+    assert problem.plane_type == "3D"
+    mesh, space = _mbb3d_mesh_space(nx, ny, nz)
+
+    is_ddof = bm.to_numpy(space.is_boundary_dof(threshold=problem.is_dirichlet_boundary(),
+                                                method="interp")).reshape(-1, 3)
+    np.testing.assert_array_equal(is_ddof.sum(axis=0), [(ny + 1) * (nz + 1), nz + 1, 1])
+    _assert_rigid_body_modes_removed(problem, mesh)
+
+
+def test_mbb3d_line_loads_keep_the_resultant_on_a_mesh() -> None:
+    """全域与半域线载荷装配后合力均为 P, 且只作用在载荷线的节点上."""
+    from soptx.fem.load_assembly import assemble_non_body_loads
+
+    bm.set_backend("numpy")
+    for problem, x_line in ((FullMBBBeamLine3d(domain=MBB3D_DOMAIN, P=-2.0), 3.0),
+                            (HalfMBBBeamLine3d(domain=MBB3D_DOMAIN, P=-2.0), 0.0)):
+        _, space = _mbb3d_mesh_space(6, 2, 3)
+        vector = bm.to_numpy(assemble_non_body_loads(space, problem.loads(), q=2)).reshape(-1, 3)
+        points = bm.to_numpy(space.interpolation_points())
+        loaded = np.flatnonzero(vector[:, 1])
+        np.testing.assert_allclose(vector.sum(axis=0), [0.0, -2.0, 0.0], atol=1e-14)
+        np.testing.assert_allclose(points[loaded][:, :2], np.tile([x_line, 1.0], (loaded.size, 1)), atol=1e-14)
+        assert loaded.size == 4
+
+
+def test_full_mbb3d_point_supports_are_the_four_bottom_end_corners() -> None:
+    """左端两底角点约束全部分量, 右端两底角点只约束 u_y, 底棱中部不约束."""
+    bm.set_backend("numpy")
+    problem = FullMBBBeamPoint3d(domain=MBB3D_DOMAIN)
+    assert problem.plane_type == "3D"
     points = bm.array([
-        [0.0, 0.0, 0.0],   # 左端底边角点
-        [0.0, 0.0, z1],    # 左端底边另一角点
-        [0.0, 0.0, 0.5],   # 左端底边中部, 不约束
-        [6.0, 0.0, 0.0],   # 右端底边角点
-        [6.0, 0.0, z1],    # 右端底边另一角点
+        [0.0, 0.0, 0.0],   # 左端底角 z0
+        [0.0, 0.0, 1.0],   # 左端底角 z1
+        [6.0, 0.0, 0.0],   # 右端底角 z0
+        [6.0, 0.0, 1.0],   # 右端底角 z1
+        [0.0, 0.0, 0.5],   # 左端底棱中部, 不约束
         [0.0, 1.0, 0.0],   # 左端顶角, 不约束
     ])
 
     dirichlet_x, dirichlet_y, dirichlet_z = problem.is_dirichlet_boundary()
     np.testing.assert_array_equal(bm.to_numpy(dirichlet_x(points)), [True, True, False, False, False, False])
-    np.testing.assert_array_equal(bm.to_numpy(dirichlet_y(points)), [True, True, False, True, True, False])
+    np.testing.assert_array_equal(bm.to_numpy(dirichlet_y(points)), [True, True, True, True, False, False])
     np.testing.assert_array_equal(bm.to_numpy(dirichlet_z(points)), [True, True, False, False, False, False])
+    np.testing.assert_array_equal(bm.to_numpy(problem.dirichlet_bc(points)), np.zeros((6, 3)))
 
 
-def test_full_mbb3d_end_corners_removes_rigid_body_modes_on_a_mesh() -> None:
+def test_full_mbb3d_point_removes_rigid_body_modes_on_any_mesh() -> None:
+    """奇数 nz 下四角点支承同样消除全部刚体运动."""
     bm.set_backend("numpy")
-    from soptx.fem.analyzers import LagrangeFEMAnalyzer
-    from soptx.materials import IsotropicLinearElasticMaterial
+    problem = FullMBBBeamPoint3d(domain=MBB3D_DOMAIN)
+    mesh, space = _mbb3d_mesh_space(6, 2, 3)
 
-    nx, ny, nz = 6, 2, 3
-    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN, support="end_corners", load_subdivisions=(nx, nz))
-    mesh, space = _mbb3d_mesh_space(nx, ny, nz)
     is_ddof = bm.to_numpy(space.is_boundary_dof(threshold=problem.is_dirichlet_boundary(),
                                                 method="interp")).reshape(-1, 3)
-    # 左端两角点各约束 3 个分量, 右端两角点各约束 u_y
     np.testing.assert_array_equal(is_ddof.sum(axis=0), [2, 4, 2])
-
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="3D",
-                                              enable_logging=False)
-    analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
-                                   integration_order=2, solve_method="scipy", enable_logging=False)
-    K, _ = analyzer.apply_bc(analyzer.assemble_stiff_matrix(), analyzer.assemble_body_force_vector())
-    eigenvalues = np.linalg.eigvalsh(K.to_scipy().toarray())
-    # 刚体运动全部被消除: 消元后的刚度矩阵正定
-    assert eigenvalues.min() > 1e-8 * eigenvalues.max()
+    _assert_rigid_body_modes_removed(problem, mesh)
 
 
-def test_full_mbb3d_splits_load_by_subdivision_parity() -> None:
-    expected_counts = {(6, 4): 1, (6, 3): 2, (5, 3): 4}
-    for (nx, nz), count in expected_counts.items():
-        loads = FullMBBBeam3d(domain=MBB3D_DOMAIN, P=-2.0, support="end_lines",
-                              load_subdivisions=(nx, nz)).loads()
-
-        assert len(loads) == count
-        assert all(isinstance(load, PointForceLoad) for load in loads)
-        np.testing.assert_allclose(sum(load.force()[1] for load in loads), -2.0, rtol=0.0, atol=1e-15)
-        assert all(load.force()[0] == 0.0 and load.force()[2] == 0.0 for load in loads)
-        assert all(load.point[1] == 1.0 for load in loads)
-        # 载荷点关于 x = 3, z = 0.5 两个中面对称
-        np.testing.assert_allclose(np.mean([load.point[0] for load in loads]), 3.0, atol=1e-14)
-        np.testing.assert_allclose(np.mean([load.point[2] for load in loads]), 0.5, atol=1e-14)
-
-
-def test_full_mbb3d_split_loads_project_exactly_onto_mesh_nodes() -> None:
-    from soptx.fem.load_projection import project_nodal_loads
+def test_full_mbb3d_point_load_is_the_top_center_force() -> None:
+    """顶面中心集中力在非节点位置 (奇数 nz) 装配后合力为 P, 只作用在顶面中线两侧节点上."""
+    from soptx.fem.load_assembly import assemble_non_body_loads
 
     bm.set_backend("numpy")
-    nx, ny, nz = 6, 2, 3
-    problem = FullMBBBeam3d(domain=MBB3D_DOMAIN, P=-1.0, support="end_lines",
-                            load_subdivisions=(nx, nz))
-    _, space = _mbb3d_mesh_space(nx, ny, nz)
+    problem = FullMBBBeamPoint3d(domain=MBB3D_DOMAIN, P=-2.0)
+    (load,) = problem.loads()
+    assert isinstance(load, PointForceLoad)
+    assert load.point == (3.0, 1.0, 0.5)
+    assert load.force() == (0.0, -2.0, 0.0)
 
-    # 分析器以 mode='exact' 投影点力, 作用点不在节点上会报错
-    vector = bm.to_numpy(project_nodal_loads(problem.loads(), space.interpolation_points(),
-                                             dimension=3)).reshape(-1, 3)
-    loaded = np.nonzero(vector[:, 1])[0]
-
-    assert loaded.size == 2
-    np.testing.assert_allclose(vector[loaded, 1], [-0.5, -0.5], rtol=0.0, atol=1e-15)
-    np.testing.assert_allclose(vector.sum(axis=0), [0.0, -1.0, 0.0], rtol=0.0, atol=1e-15)
-
-
-def test_full_mbb3d_rejects_invalid_options() -> None:
-    import pytest
-
-    for kwargs in ({"support": "corner"},
-                   {"load_subdivisions": (0, 3)}, {"load_subdivisions": (6, -1)},
-                   {"load_subdivisions": (6.0, 3)}, {"load_subdivisions": (True, 3)},
-                   {"load_subdivisions": (6, 3, 3)}):
-        with pytest.raises(ValueError):
-            FullMBBBeam3d(**kwargs)
-
-
-def test_full_mbb3d_rejects_centerline_with_odd_nz() -> None:
-    import pytest
-
-    with pytest.raises(ValueError, match="end_lines"):
-        FullMBBBeam3d(support="centerline", load_subdivisions=(6, 3))
-
-    # nz 为偶数时中线落在节点上, centerline 合法; 不给剖分数时不做检查
-    assert FullMBBBeam3d(support="centerline", load_subdivisions=(6, 4)).support == "centerline"
-    assert FullMBBBeam3d(support="centerline").load_subdivisions is None
-    assert FullMBBBeam3d(support="end_lines", load_subdivisions=(6, 3)).support == "end_lines"
+    _, space = _mbb3d_mesh_space(6, 2, 3)
+    vector = bm.to_numpy(assemble_non_body_loads(space, problem.loads(), q=2)).reshape(-1, 3)
+    points = bm.to_numpy(space.interpolation_points())
+    loaded = np.flatnonzero(vector[:, 1])
+    np.testing.assert_allclose(vector.sum(axis=0), [0.0, -2.0, 0.0], atol=1e-14)
+    np.testing.assert_allclose(points[loaded][:, :2], np.tile([3.0, 1.0], (loaded.size, 1)), atol=1e-14)
+    np.testing.assert_allclose(np.sort(points[loaded][:, 2]), [1.0 / 3.0, 2.0 / 3.0], atol=1e-14)

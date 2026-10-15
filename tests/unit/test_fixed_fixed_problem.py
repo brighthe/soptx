@@ -9,12 +9,12 @@ from soptx.protocols import (
     ElasticityProblem,
     MixedBoundaryElasticityProblem,
 )
-from soptx.problems import FixedFixedBeamCenterLoad2d
+from soptx.problems import FixedFixedBeamPatch2d
 from soptx.problems.loads import BoundaryTractionLoad
 
 
 def test_fixed_fixed_problem_satisfies_both_analyzer_contracts() -> None:
-    problem = FixedFixedBeamCenterLoad2d()
+    problem = FixedFixedBeamPatch2d()
 
     assert isinstance(problem, ElasticityProblem)
     assert isinstance(problem, DirichletElasticityProblem)
@@ -24,7 +24,7 @@ def test_fixed_fixed_problem_satisfies_both_analyzer_contracts() -> None:
 
 def test_fixed_fixed_problem_shares_one_load_for_both_discretizations() -> None:
     bm.set_backend("numpy")
-    problem = FixedFixedBeamCenterLoad2d()
+    problem = FixedFixedBeamPatch2d()
     points = bm.array(
         [
             [0.0, 10.0],

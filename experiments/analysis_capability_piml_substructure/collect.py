@@ -87,13 +87,13 @@ def build(cases: tuple[config.AnalysisCase, ...], figure: dict[str, Any]) -> dic
         "gate": PANEL_A_TOLERANCE,
         "details": {
             "2d": {
-                "problem": data_2d.get("problem", "HalfMBBBeamRight2d"),
+                "problem": data_2d.get("problem", "HalfMBBBeamPoint2d"),
                 "full_dofs": data_2d.get("full_dofs", 682),
                 "compliance_relative_error": val_2d_comp,
                 "displacement_relative_error": val_2d_disp,
             },
             "3d": {
-                "problem": data_3d.get("problem", "FullMBBBeam3d"),
+                "problem": data_3d.get("problem", "FullMBBBeamLine3d"),
                 "full_dofs": data_3d.get("full_dofs", 6075),
                 "compliance_relative_error": val_3d_comp,
                 "displacement_relative_error": val_3d_disp,
@@ -137,7 +137,7 @@ def build(cases: tuple[config.AnalysisCase, ...], figure: dict[str, Any]) -> dic
         }
     }
 
-    # --- Panel (c): PIML 端到端全系统求解保真度 (FullMBBBeam2d 24 子结构装配) ---
+    # --- Panel (c): PIML 端到端全系统求解保真度 (FullMBBBeamPoint2d 24 子结构装配) ---
     sol_piml = data_shape.get("solution_layer", {})
     sol_labels = ["局部刚度相对差 (max)", "接口位移相对差", "全场位移相对差", "结构柔度相对差"]
     piml_sol_vals = [
@@ -161,7 +161,7 @@ def build(cases: tuple[config.AnalysisCase, ...], figure: dict[str, Any]) -> dic
         "piml_values": piml_sol_vals,
         "direct_values": direct_sol_vals,
         "details": {
-            "problem": "FullMBBBeam2d",
+            "problem": "FullMBBBeamPoint2d",
             "n_substructures": 24,
             "full_dofs": 682,
             "piml_compliance_error": piml_sol_vals[3],

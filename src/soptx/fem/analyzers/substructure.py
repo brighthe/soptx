@@ -253,7 +253,7 @@ class FullInterfaceSubstructureAnalyzer:
             project_problem_conditions_to_interface_system(
                 self._problem,
                 self._assembler,
-                system,
+                system.global_dofs,
             )
         )
         interface_displacement = solve_interface_system(
@@ -265,7 +265,7 @@ class FullInterfaceSubstructureAnalyzer:
         displacement = self._assembler.recover_full_displacement(
             list(self._sub_meshes),
             reduction,
-            system,
+            system.global_dofs,
             interface_displacement,
         )
         cell_energy = self._cell_energy(displacement)

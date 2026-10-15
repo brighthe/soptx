@@ -58,3 +58,28 @@ def test_no_record_when_block_raises() -> None:
 def test_missing_status_field_raises() -> None:
     with pytest.raises(RuntimeError, match='NoSuchField'):
         _status_kib('NoSuchField')
+
+
+def test_cpu_device_adds_no_gpu_fields() -> None:
+    records = {}
+    with measure(records, 'cpu', device='cpu'):
+        pass
+
+    assert not any(key.startswith('gpu_') for key in records['cpu'])
+
+
+def test_cuda_device_records_gpu_memory(capsys) -> None:
+    torch = pytest.importorskip('torch')
+    if not torch.cuda.is_available():
+        pytest.skip('需要 CUDA 设备')
+    records = {}
+    with measure(records, 'allocate', label='显存', device='cuda'):
+        block = torch.ones(256 * 2 ** 20 // 8, dtype=torch.float64, device='cuda')   # 256 MiB
+        del block
+
+    record = records['allocate']
+    assert {'gpu_peak_gib', 'gpu_net_gib', 'gpu_after_gib', 'gpu_reserved_gib'} <= set(record)
+    # 张量在阶段内已释放, 但阶段显存峰值须计入这 256 MiB
+    assert record['gpu_net_gib'] >= 0.2
+    assert record['gpu_peak_gib'] >= record['gpu_after_gib']
+    assert '显存峰值' in capsys.readouterr().out

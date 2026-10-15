@@ -31,10 +31,10 @@
     python examples/lagrange_elasticity/concentrated_load_demo.py --solver cg --rtol 1e-12
     python examples/lagrange_elasticity/concentrated_load_demo.py --save-vtu
 
-    # 3D: 完整全域 MBB 梁 (FullMBBBeam3d, 默认 120x20x20)
+    # 3D: 完整全域 MBB 梁 (FullMBBBeamLine3d 换为顶面中心集中力, 默认 120x20x20)
     python examples/lagrange_elasticity/concentrated_load_demo.py --dim 3 --levels 1
     python examples/lagrange_elasticity/concentrated_load_demo.py --dim 3 --nx 30 --ny 10 --nz 10
-    # 3D: 对称半域 MBB 梁 (HalfMBBBeamRight3d)
+    # 3D: 对称半域 MBB 梁 (HalfMBBBeamLine3d 换为对称面顶部中点集中力)
     python examples/lagrange_elasticity/concentrated_load_demo.py --dim 3 --problem mbb-half-3d --levels 1
 """
 
@@ -56,8 +56,32 @@ from soptx.mesh import HexahedronMesh, QuadrangleMesh, TriangleMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import FullMBBBeam3d, HalfMBBBeamRight2d, HalfMBBBeamRight3d
+from soptx.problems import FullMBBBeamLine3d, HalfMBBBeamPoint2d, HalfMBBBeamLine3d, PointForceLoad
 from soptx.postprocess.vtk_export import export_vtu
+
+
+# ---------------------------------------------------------------------------
+# 三维集中力变体: 库中三维 MBB 梁按二维拉伸施加线载荷, 本示例检验集中力路径,
+# 故在此把载荷换回原作用点上的集中力, 区域、材料与支承不变
+# ---------------------------------------------------------------------------
+
+
+class _HalfMBBBeamPoint3d(HalfMBBBeamLine3d):
+    """对称面顶部中点受集中力的三维半域 MBB 梁."""
+
+    def loads(self) -> tuple[PointForceLoad, ...]:
+        """返回 ``(x0, y1, (z0 + z1)/2)`` 处的集中力."""
+        x0, _, _, y1, z0, z1 = self.domain
+        return (PointForceLoad(point=(x0, y1, (z0 + z1) / 2.0), vector=(0.0, self.P, 0.0)),)
+
+
+class _FullMBBBeamPoint3d(FullMBBBeamLine3d):
+    """顶面中心受集中力的三维全域 MBB 梁."""
+
+    def loads(self) -> tuple[PointForceLoad, ...]:
+        """返回顶面几何中心处的集中力."""
+        x0, x1, _, y1, z0, z1 = self.domain
+        return (PointForceLoad(point=((x0 + x1) / 2.0, y1, (z0 + z1) / 2.0), vector=(0.0, self.P, 0.0)),)
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +108,7 @@ PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
     "mbb-half": ConcentratedLoadProblemEntry(
         name="mbb-half",
         label="MBB 梁对称右半域 (2D)",
-        factory=lambda **kw: HalfMBBBeamRight2d(
+        factory=lambda **kw: HalfMBBBeamPoint2d(
             domain=kw.pop("domain", (0.0, 60.0, 0.0, 20.0)),
             P=kw.pop("P", -1.0),
             E=kw.pop("E", 1.0),
@@ -99,7 +123,7 @@ PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
     "mbb-half-3d": ConcentratedLoadProblemEntry(
         name="mbb-half-3d",
         label="MBB 梁对称右半域 (3D)",
-        factory=lambda **kw: HalfMBBBeamRight3d(
+        factory=lambda **kw: _HalfMBBBeamPoint3d(
             domain=kw.pop("domain", (0.0, 60.0, 0.0, 20.0, 0.0, 20.0)),
             P=kw.pop("P", -1.0),
             E=kw.pop("E", 1.0),
@@ -114,7 +138,7 @@ PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
     "mbb-full-3d": ConcentratedLoadProblemEntry(
         name="mbb-full-3d",
         label="MBB 梁完整全域 (3D)",
-        factory=lambda **kw: FullMBBBeam3d(
+        factory=lambda **kw: _FullMBBBeamPoint3d(
             domain=kw.pop("domain", (0.0, 120.0, 0.0, 20.0, 0.0, 20.0)),
             P=kw.pop("P", -1.0),
             E=kw.pop("E", 1.0),
@@ -129,7 +153,7 @@ PROBLEM_REGISTRY: dict[str, ConcentratedLoadProblemEntry] = {
 }
 
 
-# 与 manufactured_convergence_demo.py / tools/matrix_free_evidence/contract.py 的残差门禁保持一致
+# 与 manufactured_convergence_demo.py 的残差门禁保持一致
 RESIDUAL_TOLERANCE = 1.0e-10
 # 施加节点力总和与 P 的偏差门禁
 LOAD_TOLERANCE = 1.0e-10
@@ -157,7 +181,6 @@ def create_problem_and_material(
         hypothesis=problem.plane_type,
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
-        enable_logging=False,
     )
     return problem, material
 
@@ -202,7 +225,6 @@ def solve_one_level(
         operator_level="fa",
         solve_method=solver,
         topopt_algorithm=None,
-        enable_logging=False,
     )
 
     # 计时覆盖装配到求解的完整链路, 不含网格生成与载荷和校验
@@ -494,7 +516,6 @@ def run_concentrated_load_benchmark(
             operator_level="fa",
             solve_method=solver,
             topopt_algorithm=None,
-            enable_logging=False,
         )
         K0_f = finest_analyzer.assemble_stiff_matrix()
         F0_f = finest_analyzer.assemble_body_force_vector()

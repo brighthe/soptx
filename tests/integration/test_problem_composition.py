@@ -3,7 +3,7 @@ from __future__ import annotations
 from soptx.mesh import TetrahedronMesh, TriangleMesh
 
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems.elasticity import (
+from soptx.problems import (
     DivergenceFreePolynomialElasticity3D,
     SinusoidalPlaneStrainElasticity2D,
 )

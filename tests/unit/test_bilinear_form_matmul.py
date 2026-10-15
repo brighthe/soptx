@@ -31,7 +31,7 @@ def _form_and_matrix(backend: str):
     mesh = TriangleMesh.from_box([0, 1, 0, 1], nx=3, ny=3)
     space = TensorFunctionSpace(scalar_space=LagrangeFESpace(mesh, p=2), shape=(-1, 2))
     material = IsotropicLinearElasticMaterial(
-        lame_lambda=1.0, shear_modulus=0.5, hypothesis="plane_strain", enable_logging=False
+        lame_lambda=1.0, shear_modulus=0.5, hypothesis="plane_strain"
     )
 
     def build():

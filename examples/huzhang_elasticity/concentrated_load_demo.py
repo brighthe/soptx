@@ -29,11 +29,9 @@ from soptx.fem import (
     P1TraceLoad,
     project_patch_traction_to_p1_trace,
 )
-from soptx.mesh import (
-    create_huzhang_checkerboard_mesh,
-)
+from soptx.mesh import TriangleMesh
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems import FixedFixedBeamCenterLoad2d
+from soptx.problems import FixedFixedBeamPatch2d
 
 
 # 与 manufactured_convergence_demo.py / cases.toml 的 acceptance 一致
@@ -51,7 +49,7 @@ MethodName = Literal["lfem", "huzhang"]
 
 def _build_fixed_fixed_problem(
     nx: int,
-) -> tuple[FixedFixedBeamCenterLoad2d, P1TraceLoad]:
+) -> tuple[FixedFixedBeamPatch2d, P1TraceLoad]:
     """构造两端固支梁并注入底边 P1 迹投影后的共同牵引.
 
     载荷区几何全部从物理问题自身的属性读取, 本文件不复述几何或载荷常数.
@@ -62,15 +60,16 @@ def _build_fixed_fixed_problem(
     返回:
         包含更新后物理问题对象与 P1 迹载荷投影对象的二元组.
     """
-    baseline = FixedFixedBeamCenterLoad2d()
+    baseline = FixedFixedBeamPatch2d()
     common_load = project_patch_traction_to_p1_trace(
         line=(baseline.domain[0], baseline.domain[1]),
         n_cells=nx,
         level=baseline.traction_level,
         patch=baseline.traction_patch,
         intensity=baseline.traction_intensity,
+        axis=baseline.traction_axis,
     )
-    return FixedFixedBeamCenterLoad2d(traction=common_load), common_load
+    return FixedFixedBeamPatch2d(traction=common_load), common_load
 
 
 PROBLEM_FACTORIES = {
@@ -81,7 +80,7 @@ PROBLEM_FACTORIES = {
 def build_problem(
     model: str,
     nx: int,
-) -> tuple[FixedFixedBeamCenterLoad2d, P1TraceLoad]:
+) -> tuple[FixedFixedBeamPatch2d, P1TraceLoad]:
     """根据模型名称构造物理问题并注入 P1 迹投影载荷.
 
     参数:
@@ -97,7 +96,7 @@ def build_problem(
 def huzhang_structural_resultant(
     mesh: Any,
     space: Any,
-    problem: FixedFixedBeamCenterLoad2d,
+    problem: FixedFixedBeamPatch2d,
     stress: Any,
     integration_order: int,
 ) -> list[float]:
@@ -183,7 +182,7 @@ def _component_sums(space: Any, vector: TensorLike) -> list[float]:
 
 def lfem_structural_resultants(
     analyzer: Any,
-    problem: FixedFixedBeamCenterLoad2d,
+    problem: FixedFixedBeamPatch2d,
     displacement: Any,
 ) -> tuple[list[float], list[float]]:
     """计算 LFEM 支座反力合力与被强加自由度吞掉的右端项载荷.
@@ -217,7 +216,7 @@ def lfem_structural_resultants(
 
 def lfem_relative_residual(
     analyzer: Any,
-    problem: FixedFixedBeamCenterLoad2d,
+    problem: FixedFixedBeamPatch2d,
     displacement: Any,
 ) -> float:
     """在自由节点自由度上计算 LFEM 相对代数残差 ``||K u - F|| / ||F||``.
@@ -243,7 +242,7 @@ def lfem_relative_residual(
 
 
 def solve_one(
-    problem: FixedFixedBeamCenterLoad2d,
+    problem: FixedFixedBeamPatch2d,
     material: Any,
     mesh: Any,
     method: MethodName,
@@ -461,9 +460,8 @@ def main() -> int:
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
         hypothesis=problem.plane_type,
-        enable_logging=False,
     )
-    mesh: Any = create_huzhang_checkerboard_mesh(
+    mesh: Any = TriangleMesh.from_checkerboard_box(
         box=problem.domain, nx=arguments.nx, ny=arguments.ny
     )
 

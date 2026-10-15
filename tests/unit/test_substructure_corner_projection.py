@@ -3,7 +3,7 @@
 import numpy as np
 from soptx.backend import backend_manager as bm
 from soptx.fem.substructure import (
-    GlobalAssembler, InterfaceDofsView, LinearCornerTraceBasis, build_substructures,
+    GlobalAssembler, LinearCornerTraceBasis, build_substructures,
 )
 
 
@@ -14,7 +14,7 @@ def test_shared_interface_reproduces_affine_displacement():
     prototype, meshes, _ = build_substructures(assembler)
     interface = assembler.build_interface_dofs(meshes)
     projection = assembler.build_linear_corner_projection(
-        meshes, InterfaceDofsView(global_dofs=interface),
+        meshes, interface,
         LinearCornerTraceBasis.from_prototype(prototype),
     )
     def affine(nodes):

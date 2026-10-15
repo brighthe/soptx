@@ -23,7 +23,7 @@ from soptx.fem.substructure import (
     solve_constrained_system,
     solve_interface_system,
 )
-from soptx.problems.elasticity import HarmonicPoly2D, HarmonicPoly3D
+from soptx.problems import HarmonicPoly2D, HarmonicPoly3D
 
 
 CONSISTENCY_TOLERANCE = 1.0e-9
@@ -189,9 +189,8 @@ def _solve_one_level(
         sub_meshes, condensor, trace_basis=trace_basis
     )
     interface_dofs = assembler.build_interface_dofs(sub_meshes)
-    interface_view = InterfaceSystem(macro.stiffness, interface_dofs)
     interface_projection = assembler.build_linear_corner_projection(
-        sub_meshes, interface_view, trace_basis
+        sub_meshes, interface_dofs, trace_basis
     )
     constraints, values = _macro_constraints(assembler, pde)
     zero_force = np.zeros(assembler.total_macro_dofs)
@@ -203,7 +202,7 @@ def _solve_one_level(
     interface_u = np.asarray(interface_projection @ macro_u)
     displacement = np.asarray(
         bm.to_numpy(assembler.recover_full_displacement(
-            sub_meshes, condensor, interface_view, bm.asarray(interface_u)
+            sub_meshes, condensor, interface_dofs, bm.asarray(interface_u)
         ))
     )
 
@@ -220,7 +219,6 @@ def _solve_one_level(
         operator_level="fa",
         solve_method=solve_method,
         tensor_space=assembler.space_full,
-        enable_logging=False,
     )
     full_stiffness = _as_scipy(fa.assemble_stiff_matrix())
     reference_stiffness = (extension.T @ full_stiffness @ extension).tocsr()

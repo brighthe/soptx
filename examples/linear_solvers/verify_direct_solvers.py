@@ -81,7 +81,7 @@ from soptx.mesh import (
 from soptx.fem.analyzers import build_serial_analyzer
 from soptx.fem.verification import relative_difference
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.problems.elasticity import (
+from soptx.problems import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
     SinusoidalElasticity2D,
@@ -165,8 +165,7 @@ TOLERANCES = {
 # --------------------------------------------------------------------------
 # 问题构造 (verify_cg_solver.py 按路径加载本文件后借用)
 # --------------------------------------------------------------------------
-# 模型与网格的可选项. 与 examples/matrix_free_elasticity/verify_ea_correctness.py
-# 保持同一套字典表约定: 维数决定问题、网格与材料假设, 其余参数一律向问题对象要.
+# 模型与网格的可选项. 字典表约定: 维数决定问题、网格与材料假设, 其余参数一律向问题对象要.
 #
 # 对求解器而言, 换模型换网格改变的是**稀疏模式与条件数**而非物理: 维数决定直接法
 # 的填充增长 (2D 约 O(n^1.5), 3D 约 O(n^2)), 单元类型与阶数决定每行非零数与稠密

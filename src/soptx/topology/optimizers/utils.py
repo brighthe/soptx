@@ -425,3 +425,94 @@ def compute_volume(
 
     else:
         raise ValueError(f"Unsupported density_location: {density_location}")
+
+
+
+def compute_volume_gradient(
+    density: Union[Function, TensorLike],
+    mesh: HomogeneousMesh,
+    density_location: Literal['element', 'element_multiresolution', 'node'] = 'element',
+    integration_order: Optional[int] = None,
+) -> TensorLike:
+    """计算材料总体积对物理密度的梯度, 与 ``compute_volume`` 配套.
+
+    体积对密度线性, 梯度与密度取值无关; 返回值未除以设计域总体积, 归一化由调用方做.
+
+    Parameters
+    ----------
+    density : Function or TensorLike
+        物理密度. 单元密度只用到形状; 多分辨率密度形状为 (NC, n_sub); 节点密度须为
+        带 ``space`` 的 ``Function``, 用其基函数积分.
+    mesh : HomogeneousMesh
+        密度所在的网格.
+    density_location : {'element', 'element_multiresolution', 'node'}, optional
+        密度表示, 默认 'element'.
+    integration_order : int, optional
+        节点密度的积分阶, 与 ``compute_volume`` 取同一个值.
+
+    Returns
+    -------
+    TensorLike
+        与密度自由度同形的梯度: 单元密度 (NC,), 多分辨率 (NC, n_sub), 节点密度 (NN,).
+
+    Raises
+    ------
+    NotImplementedError
+        密度表示不受支持, 或节点密度所在的网格既非单纯形也非张量积网格.
+    """
+    if density_location == 'element':
+        return mesh.entity_measure('cell')
+
+    if density_location == 'element_multiresolution':
+        NC, n_sub = density.shape
+        cell_measure = mesh.entity_measure('cell')
+        return bm.tile(bm.reshape(cell_measure, (NC, 1)), (1, n_sub)) / n_sub  # (NC, n_sub)
+
+    if density_location == 'node':
+        qf = mesh.quadrature_formula(integration_order)
+        bcs, ws = qf.get_quadrature_points_and_weights()
+        phi = density.space.basis(bcs)[0]  # (NQ, NCN)
+        if isinstance(mesh, SimplexMesh):
+            local = bm.einsum('q, c, ql -> cl', ws, mesh.entity_measure('cell'), phi)  # (NC, NCN)
+        elif isinstance(mesh, TensorMesh):
+            J = mesh.entity_view('cell').jacobi_matrix(bcs)  # (NC, NQ, GD, GD)
+            detJ = bm.abs(bm.linalg.det(J))                 # (NC, NQ)
+            local = bm.einsum('q, cq, ql -> cl', ws, detJ, phi)  # (NC, NCN)
+        else:
+            raise NotImplementedError(
+                f"节点密度的体积梯度只支持单纯形与张量积网格, 实为 {type(mesh).__name__}")
+        gradient = bm.zeros((mesh.number_of_nodes(),), dtype=bm.float64, device=mesh.device)
+        return bm.add_at(gradient, bm.reshape(mesh.cell, (-1,)), bm.reshape(local, (-1,)))
+
+    raise NotImplementedError(f"体积梯度不支持密度表示 {density_location!r}")
+
+def merge_passive_masks(filter, pde) -> Optional[TensorLike]:
+    """合并过滤器与问题类给出的实体保留单元掩码.
+
+    两个来源语义不同: ``filter.passive_mask`` 是算例层按数值处置注入的被动实体区
+    (如应力奇点周围), ``pde.get_passive_element_mask(mesh)`` 是物理问题自带的
+    非设计区 (如简支桥的桥面). 二者取并集; 任一方缺失时取另一方.
+
+    Parameters
+    ----------
+    filter : Filter
+        过滤器, 读取其 ``passive_mask`` 与 ``design_mesh``.
+    pde : object, optional
+        物理问题; 定义 ``get_passive_element_mask`` 时参与合并.
+
+    Returns
+    -------
+    TensorLike or None
+        形状 ``(NC,)`` 的布尔张量; 两方都没有掩码时为 None.
+    """
+    filter_mask = getattr(filter, 'passive_mask', None)
+    design_mesh = getattr(filter, 'design_mesh', None)
+    problem_mask = None
+    if pde is not None and design_mesh is not None and hasattr(pde, 'get_passive_element_mask'):
+        problem_mask = pde.get_passive_element_mask(mesh=design_mesh)
+
+    if filter_mask is None:
+        return problem_mask
+    if problem_mask is None:
+        return filter_mask
+    return bm.logical_or(filter_mask, problem_mask)

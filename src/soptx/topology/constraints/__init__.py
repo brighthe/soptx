@@ -14,10 +14,9 @@ if TYPE_CHECKING:
     from .lagrange_stress import LagrangeStressConstraint as LagrangeStressConstraint
     from .stress_formulation import (
         EpsilonRelaxedStressFormulation as EpsilonRelaxedStressFormulation,
-        PolynomialVanishingStressFormulation as PolynomialVanishingStressFormulation,
-        StressConstraintProtocol as StressConstraintProtocol,
         StressRelaxationFormulation as StressRelaxationFormulation,
     )
+    from .stress_protocol import StressConstraintProtocol as StressConstraintProtocol
     from .volume import VolumeConstraint as VolumeConstraint
 
 _EXPORTS = {
@@ -27,11 +26,8 @@ _EXPORTS = {
     "validate_exemption_mask": (".exemption", "validate_exemption_mask"),
     "HuZhangStressConstraint": (".huzhang_stress", "HuZhangStressConstraint"),
     "LagrangeStressConstraint": (".lagrange_stress", "LagrangeStressConstraint"),
-    "StressConstraintProtocol": (".stress_formulation", "StressConstraintProtocol"),
+    "StressConstraintProtocol": (".stress_protocol", "StressConstraintProtocol"),
     "StressRelaxationFormulation": (".stress_formulation", "StressRelaxationFormulation"),
-    "PolynomialVanishingStressFormulation": (
-        ".stress_formulation", "PolynomialVanishingStressFormulation",
-    ),
     "EpsilonRelaxedStressFormulation": (
         ".stress_formulation", "EpsilonRelaxedStressFormulation",
     ),

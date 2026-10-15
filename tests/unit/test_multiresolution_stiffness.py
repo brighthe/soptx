@@ -20,7 +20,7 @@ from soptx.backend import backend_manager as bm
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import QuadrangleMesh
-from soptx.problems import HalfMBBBeamRight2d
+from soptx.problems import HalfMBBBeamPoint2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 DOMAIN = (0.0, 6.0, 0.0, 2.0)
@@ -44,20 +44,18 @@ def _analyzer(n_sub: int):
     mesh.meshdata = {'nx': NX, 'ny': NY,
                      'hx': (DOMAIN[1] - DOMAIN[0]) / NX, 'hy': (DOMAIN[3] - DOMAIN[2]) / NY}
     material = IsotropicLinearElasticMaterial(youngs_modulus=E0, poisson_ratio=0.3,
-                                              hypothesis="plane_stress", enable_logging=False)
+                                              hypothesis="plane_stress")
     scheme = MaterialInterpolationScheme(
         density_location="element_multiresolution", interpolation_method="msimp",
-        options={"penalty_factor": 3.0, "void_youngs_modulus": 1e-9, "target_variables": ["E"]},
-        enable_logging=False)
+        options={"penalty_factor": 3.0, "void_youngs_modulus": 1e-9, "target_variables": ["E"]})
     refine = int(math.isqrt(n_sub))
     design_mesh = QuadrangleMesh.from_box(list(DOMAIN), nx=NX * refine, ny=NY * refine)
     scheme.setup_density_distribution(design_variable_mesh=design_mesh, displacement_mesh=mesh,
                                       sub_density_element=n_sub)
-    analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=HalfMBBBeamRight2d(domain=DOMAIN), material=material,
+    analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=HalfMBBBeamPoint2d(domain=DOMAIN), material=material,
                                    space_degree=1, integration_order=INTEGRATION_ORDER,
                                    assembly_method="standard", operator_level="fa", solve_method="scipy",
-                                   topopt_algorithm="density_based", interpolation_scheme=scheme,
-                                   enable_logging=False)
+                                   topopt_algorithm="density_based", interpolation_scheme=scheme)
     return analyzer
 
 

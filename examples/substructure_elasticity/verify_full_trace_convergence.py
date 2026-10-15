@@ -55,7 +55,7 @@ from soptx.fem.substructure import (
 )
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.fem.substructure.solve import DIRECT_BACKENDS
-from soptx.problems.elasticity import (
+from soptx.problems import (
     HarmonicPoly2D,
     HarmonicPoly3D,
 )
@@ -188,8 +188,8 @@ def solve_one_level(
     fixed_global_dofs = bm.nonzero(fixed_mask)[0]
     if not bool(bm.all(bm.isin(fixed_global_dofs, system.global_dofs))):
         raise ValueError("存在未保留在接口系统的 Dirichlet 自由度.")
-    fixed_interface_dofs = assembler.project_global_dofs(system, fixed_global_dofs)
-    prescribed_interface = assembler.project_global_vector(system, dofs_val)
+    fixed_interface_dofs = assembler.project_global_dofs(system.global_dofs, fixed_global_dofs)
+    prescribed_interface = assembler.project_global_vector(system.global_dofs, dofs_val)
 
     # 非齐次边界由给定接口位移驱动, 不把边界反力当成外载.
     zero_load = bm.zeros((len(system.global_dofs),), dtype=bm.float64)
@@ -202,7 +202,7 @@ def solve_one_level(
     )
 
     U_sub = assembler.recover_full_displacement(
-        sub_meshes, condensor, system, u_interface
+        sub_meshes, condensor, system.global_dofs, u_interface
     )
     uh_sub = space.function()
     uh_sub[:] = bm.reshape(U_sub, (-1,))
@@ -232,7 +232,6 @@ def solve_one_level(
             operator_level="fa",
             solve_method=solve_method,
             tensor_space=space,
-            enable_logging=False,
         )
         full_stiffness = _as_scipy(fa.assemble_stiff_matrix())
         full_system = InterfaceSystem(
@@ -420,7 +419,6 @@ def run_convergence_benchmark(
         hypothesis=hypothesis,
         youngs_modulus=pde.E,
         poisson_ratio=pde.nu,
-        enable_logging=False,
     )
 
     base_sub = 2

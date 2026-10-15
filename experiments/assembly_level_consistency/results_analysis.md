@@ -17,7 +17,7 @@ EA 以下的层级都不组装全局矩阵（`ea` 只持有逐单元的 $\mathbf
 
 ### 2.1 算例设置
 
-四个层级都经 `soptx.fem.levels.create_level` 按层级名构造，即 `FullAssembly`、`ElementAssembly`、`PartialAssembly`、`UnassembledAssembly` 四个生产层级类本身；制造解问题取 2D 的 [`SinusoidalElasticity2D`](../../src/soptx/problems/elasticity/manufactured_2d.py) 与 3D 的 [`DivergenceFreePolynomialElasticity3D`](../../src/soptx/problems/elasticity/manufactured_3d.py)。
+四个层级都经 `soptx.fem.levels.create_level` 按层级名构造，即 `FullAssembly`、`ElementAssembly`、`PartialAssembly`、`UnassembledAssembly` 四个生产层级类本身；制造解问题取 2D 的 [`SinusoidalElasticity2D`](../../src/soptx/problems/manufactured/sinusoidal.py) 与 3D 的 [`DivergenceFreePolynomialElasticity3D`](../../src/soptx/problems/manufactured/divergence_free_poly.py)。
 
 | 项 | 值 |
 |---|---|

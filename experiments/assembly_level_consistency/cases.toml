@@ -31,7 +31,7 @@
 #   panel        眼下只有 "convergence" (该层级求解链的制造解收敛阶) 一个取值。字段保留而不
 #                去掉, 是因为 id 的命名规则 <panel>_<scheme> 靠它, 且将来若再开面板不必改 id 格式。
 #   scheme       该工况的装配层级, 取值 fa / ea / pa / ua, 一层级一条工况。
-#   problem      写上游脚本实例化的制造解类名 (soptx.problems.elasticity 下), 照抄类名而不
+#   problem      写上游脚本实例化的制造解类名 (soptx.problems 下), 照抄类名而不
 #                另起描述性标签, 免得改了类名这里还留着旧说法。
 #   min_l2_order convergence 的 L2 收敛阶下限, 与上游脚本的 MINIMUM_L2_ORDER 保持一致。
 #
@@ -72,7 +72,7 @@ consumer = "dut-postdoc:research/piml-matrix-free-gpu/project-plan.md"
 # 复用 examples/lagrange_elasticity/manufactured_convergence_demo.py, 本目录不重写数值代码。
 #
 # 一个层级的收敛阶证据要盖住四族网格 (单纯形 tri/tet 与张量积 quad/hex): 两族的形函数、
-# Jacobian 与积分点数都不同, 单纯形上的收敛阶盖不住张量积。tri 那格与 ../matrix_free_capability/ 的 a-fa-2d 是同一条命令 (产物也
+# Jacobian 与积分点数都不同, 单纯形上的收敛阶盖不住张量积。tri 那格与 matrix_free_capability (已归档于标签 archive/distributed-mpi) 的 a-fa-2d 是同一条命令 (产物也
 # 同名, 只是各落各的 outputs/): 那边把它当作 matrix-free 叙事的基线, 这里则是 FA 这一
 # 层级自己的证据, 两处的用途不同, 故各自注册。tet 那格只借了 a-fa-3d 的模型与装配路径,
 # 档位改成与 hex 对齐, 见下面那格的注释。
@@ -149,7 +149,7 @@ grid = "4->32"
 problem = "DivergenceFreePolynomialElasticity3D"
 n = 32
 
-# base 与 hex 那格取齐 (2 -> 32), 不用 ../matrix_free_capability/ a-fa-3d 的 4 -> 64:
+# base 与 hex 那格取齐 (2 -> 32), 不用 matrix_free_capability (已归档于标签 archive/distributed-mpi) a-fa-3d 的 4 -> 64:
 # 两个 3D 格档位一致才能并读, 差一档时误差是网格族与分辨率两个因素混在一起。n=64 那档
 # 单点就要 225 s (MUMPS 分解 823,875 自由度, 常驻近 19 GiB), 而定阶只看末档观测阶 ——
 # 收到 n=32 (107,811 自由度) 同样是五档, 已足够压住 >= 1.5 的门禁。
@@ -189,7 +189,7 @@ min_l2_order = 1.5
 # 源码反推缺省, 而 niter 那一列离了这个前提没法判读。
 # 四格的网格与档位与 convergence_fa 逐项取齐 (quad/tri 4->64, hex/tet 2->32), 只换
 # --operator-level 与求解器: 同一格两个层级并排放, 差异才只剩"算子怎么存", 别的都一样。
-# 裸 CG 的代价可控 —— ../matrix_free_capability/ 的 3D tet EA 实测 (n=8/16/32/64) 是
+# 裸 CG 的代价可控 —— matrix_free_capability (已归档于标签 archive/distributed-mpi) 的 3D tet EA 实测 (n=8/16/32/64) 是
 # 64/134/250/493 次迭代、0.02/0.12/2.09/35.01 s, 收到 n=32 那档只要 2 s 量级。
 # 迭代数逐档翻倍是 κ ~ h^-2 的必然, 不是异常; 若哪天要收到 n=64 以上再考虑
 # --preconditioner jacobi。

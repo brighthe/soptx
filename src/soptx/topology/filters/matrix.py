@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from math import ceil
+from math import ceil, isfinite
 
 from soptx.backend import backend_manager as bm
 from soptx.mesh import HomogeneousMesh
@@ -20,16 +20,40 @@ class FilterMatrixBuilder(BaseLogged):
     两条路径在 ``q = 1`` 时权重函数一致 (相差常数因子 rmin, 被行归一化
     ``H / Hs`` 约掉); ``q > 1`` 是 PolyFilter (Giraldo-Londono & Paulino,
     2020) 的非线性权重, 与结构化路径不可比, 故 q 必须由调用方显式给定.
+
+    设计对称化 (``symmetry_planes``) 沿用 PolyFilter 的 ``Sym`` 选项: 建矩阵前把
+    设计点坐标关于给定平面折叠, ``x_k -> c_k + |x_k - c_k|``, 互为镜像的设计点折叠
+    后坐标相同, 因而权重行相同, 过滤输出自动关于该平面对称. 它只改变邻域的
+    几何判定, 不要求网格对称, 也不改行归一化与灵敏度链; 给定时一律走通用路径.
+
+    Parameters
+    ----------
+    mesh : HomogeneousMesh
+        设计变量所在网格.
+    rmin : float
+        过滤半径.
+    density_location : str
+        设计变量位置, ``'element'`` / ``'node'`` / ``'element_multiresolution'``.
+    q : int, optional
+        权重幂次, 默认 ``1``.
+    symmetry_planes : dict[int, float], optional
+        设计对称面, 键为坐标轴下标, 值为该轴上对称面的坐标; 例如 ``{0: 6.0}``
+        表示关于 ``x = 6`` 对称. 默认不对称化.
+
+    Raises
+    ------
+    ValueError
+        ``rmin`` 非正, ``q`` 小于 1, 或 ``symmetry_planes`` 的轴下标越界 / 坐标非有限.
     """
     def __init__(self,
                 mesh: HomogeneousMesh,
                 rmin: float,
                 density_location: str,
                 q: int = 1,
-                enable_logging: bool = False,
-                logger_name: Optional[str] = None,
+                symmetry_planes: Optional[Dict[int, float]] = None,
             ) -> None:
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_error, 不受日志开关影响
+        super().__init__(enable_logging=False)
 
         if rmin <= 0:
             raise ValueError("Filter radius must be positive")
@@ -40,8 +64,30 @@ class FilterMatrixBuilder(BaseLogged):
         self._rmin = rmin
         self._density_location = density_location
         self._q = q
+        self._symmetry_planes = self._validated_symmetry_planes(symmetry_planes, mesh.geo_dimension())
 
         self._device = mesh.device
+
+    @staticmethod
+    def _validated_symmetry_planes(planes: Optional[Dict[int, float]], GD: int) -> Dict[int, float]:
+        """校验对称面字典, 返回 ``{轴下标: 坐标}`` 的浮点副本; None 返回空字典."""
+        if not planes:
+            return {}
+        result: Dict[int, float] = {}
+        for axis, value in planes.items():
+            if not isinstance(axis, int) or isinstance(axis, bool) or not 0 <= axis < GD:
+                raise ValueError(f"symmetry_planes 的轴下标须为 0..{GD - 1} 的整数, 实际为 {axis!r}")
+            value = float(value)
+            if not isfinite(value):
+                raise ValueError(f"symmetry_planes[{axis}] 须为有限数, 实际为 {value!r}")
+            result[axis] = value
+        return result
+
+    def _fold_coordinates(self, coords: Any) -> Any:
+        """把设计点坐标关于各对称面折叠: ``x_k -> c_k + |x_k - c_k|``."""
+        for axis, value in self._symmetry_planes.items():
+            coords = bm.set_at(coords, (slice(None), axis), value + bm.abs(coords[:, axis] - value))
+        return coords
 
     def build(self) -> COOTensor:
         """构建并返回权重矩阵 H
@@ -50,7 +96,8 @@ class FilterMatrixBuilder(BaseLogged):
         只有当密度定义在单元上、``meshdata`` 同时给出 ``nx/ny(/nz)`` 与
         ``hx/hy(/hz)``、且单元数恰好等于 ``nx*ny(*nz)`` (设计变量确实排在一张
         均匀笛卡尔网格上) 时, 才走结构化快路径; 其余一律走 KD-tree 通用路径,
-        后者对任意非结构网格 (gmsh 三角/四面体网格等) 同样成立.
+        后者对任意非结构网格 (gmsh 三角/四面体网格等) 同样成立. 给定
+        ``symmetry_planes`` 时坐标折叠只在通用路径实现, 因此一律走通用路径.
 
         ``meshdata`` 不是 soptx.mesh 网格的固有属性, 而是各 experiment 的 pipeline
         手工挂上去的元数据字典, 因此这里一律用 ``get`` 探测: 缺键时安静退回通
@@ -63,7 +110,7 @@ class FilterMatrixBuilder(BaseLogged):
         nx, ny, nz = meshdata.get('nx'), meshdata.get('ny'), meshdata.get('nz')
         hx, hy, hz = meshdata.get('hx'), meshdata.get('hy'), meshdata.get('hz')
 
-        if cell_centered and None not in (nx, ny, hx, hy):
+        if cell_centered and not self._symmetry_planes and None not in (nx, ny, hx, hy):
             if nx * ny == NC and nz in (None, 1):
                 return self._compute_weighted_matrix_2d(self._rmin, nx, ny, hx, hy)
 
@@ -146,8 +193,10 @@ class FilterMatrixBuilder(BaseLogged):
             else:
                 self._log_error(f"Unsupported density location for general filter: {self._density_location}")
 
-            # 使用 KD-tree 查询邻近点
-            density_coords = bm.device_put(density_coords, 'cpu')        
+            # 使用 KD-tree 查询邻近点; 设计对称化时先把坐标关于对称面折叠
+            density_coords = bm.device_put(density_coords, 'cpu')
+            if self._symmetry_planes:
+                density_coords = self._fold_coordinates(bm.copy(density_coords))
             density_indices, neighbor_indices = bm.query_point(
                                                     x=density_coords, y=density_coords, h=rmin, 
                                                     box_size=domain, mask_self=False, periodic=periodic

@@ -10,7 +10,14 @@
 
 ## 求解器
 
-- [`solvers.md`](solvers.md) — scipy/mumps/cg 三种求解方式、各分析器的可用组合与依赖。
+- [`solvers/architecture.md`](solvers/architecture.md) — 求解层架构: `LinearSolver` 统一契约与能力协商、
+  求解层与有限元层的分工、两张注册表、组合约束、各分析器的接入与开放的设计问题。
+- [`solvers/direct.md`](solvers/direct.md) — 直接法: `DirectSolver` 与 `spsolve`、SuperLU / MUMPS
+  后端、MUMPS 的 `job` 划分与依赖安装。
+- [`solvers/iterative.md`](solvers/iterative.md) — 迭代法: 迭代法分类与 SOPTX 的实现状态;
+  CG 的停机判据、判据范数、退出原因、批量右端项与收敛时的真残差验证; MINRES 未实现。
+- [`solvers/preconditioners.md`](solvers/preconditioners.md) — 预条件子: 对角、几何多重网格与
+  直接法精确逆的实现位置、使用条件与构造方式, 以及未实现的预条件子。
 
 ## 机器学习基础设施
 
@@ -48,6 +55,10 @@
   快速 CI、本地重验证和正式 evidence 要求；
 - [`references/README.md`](references/README.md) — 第三方参考代码治理。
 
+## 归档
+
+- [`archive.md`](archive.md) — 移出主线、只保留在 git 标签上的代码登记 (分布式/MPI 线等)。
+
 ## 已知问题
 
 - [`fealpy-migration.md`](fealpy-migration.md) — **FEALPy 依赖移植汇总**：做法、提交清单、
@@ -64,8 +75,6 @@
   2D/3D 线弹性子结构静力缩聚精确基线；
 - [`examples/piml_substructure_elasticity/README.md`](../examples/piml_substructure_elasticity/README.md) —
   PIML 增强子结构缩聚原型（神经网络代理 + 精确回退）；
-- [`examples/matrix_free_elasticity/README.md`](../examples/matrix_free_elasticity/README.md) —
-  2D/3D 线弹性 Matrix-Free 与 MPI 基线；
 - [`examples/pinn_elasticity/README.md`](../examples/pinn_elasticity/README.md) —
   二维平面应变与三维各向同性线弹性 PINN 的标准框架、schema v3
   运行报告、训练配置、验证门禁与 clean-revision evidence 流程。

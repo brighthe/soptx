@@ -12,11 +12,10 @@ class ComplianceObjective(BaseLogged):
                 analyzer: Union[LagrangeFEMAnalyzer, HuZhangMFEMAnalyzer],
                 state_variable: Literal['u', 'sigma'] = 'u',
                 diff_mode: Literal["auto", "manual"] = "manual",
-                enable_logging: bool = False,
-                logger_name: Optional[str] = None
             ) -> None:
         
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_error, 不受日志开关影响
+        super().__init__(enable_logging=False)
 
         self._analyzer = analyzer
         self._state_variable = state_variable

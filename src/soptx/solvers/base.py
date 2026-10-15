@@ -9,10 +9,10 @@
 
 分层的依据是 ``setup`` 需要算子提供什么:
 
-- 什么都不需要 (CG, MINRES): 任何支持 ``@`` 的算子都能用;
-- 需要对角线 (Jacobi, Chebyshev): 算子须能给出自己的对角;
-- 需要显式矩阵 (scipy, MUMPS, AMG): 算子须能转成稀疏矩阵, 'ea' 层级下
-  的 matrix-free 算子给不出, 该类后端在其上不可用;
+- 什么都不需要 (如 CG): 任何支持 ``@`` 的算子都能用;
+- 需要对角线 (Jacobi 预条件子与光滑子): 算子须能给出自己的对角;
+- 需要显式矩阵 (scipy, MUMPS 直接法): 算子须能转成稀疏矩阵, 'ea' 层级下的
+  matrix-free 算子给不出, 该类后端在其上不可用;
 - 需要外部层次 (几何多重网格): 层次由 fem 侧构造后传入, 不从算子推导.
 
 ``setup`` 拿不到所需输入即抛 :class:`OperatorCapabilityError`. 这取代了在
@@ -76,10 +76,12 @@ class ConvergedReason(IntEnum):
     DIVERGED_DTOL = -4
     #: 残差内积非正, 迭代无法继续.
     DIVERGED_BREAKDOWN = -5
-    #: 出现非正曲率, 算子在该方向上不是正定的.
-    DIVERGED_INDEFINITE_MAT = -8
+    #: 预条件子不正定: :math:`(r, M^{-1} r) < 0`.
+    DIVERGED_INDEFINITE_PC = -8
     #: 判据量出现 NaN 或 Inf.
     DIVERGED_NANORINF = -9
+    #: 出现非正曲率, 算子在该方向上不是正定的.
+    DIVERGED_INDEFINITE_MAT = -10
 
 
 _REASON_TEXT = {
@@ -90,8 +92,9 @@ _REASON_TEXT = {
     ConvergedReason.DIVERGED_ITS: "maxit 耗尽而未收敛",
     ConvergedReason.DIVERGED_DTOL: "残差相对初值放大超过 divtol",
     ConvergedReason.DIVERGED_BREAKDOWN: "残差内积非正, 迭代中断",
-    ConvergedReason.DIVERGED_INDEFINITE_MAT: "遇到非正曲率, 算子非正定",
+    ConvergedReason.DIVERGED_INDEFINITE_PC: "预条件子非正定",
     ConvergedReason.DIVERGED_NANORINF: "判据量出现 NaN 或 Inf",
+    ConvergedReason.DIVERGED_INDEFINITE_MAT: "遇到非正曲率, 算子非正定",
 }
 
 
@@ -169,8 +172,7 @@ def operator_diagonal(op: Any) -> TensorLike:
     能不能取, 这里真取. 两条路径按算子自己的形态选:
 
     - 算子有 ``diagonal()``: 直接问它. matrix-free 一侧走这条 -- 对角怎么算是
-      算子自己的事 (逐单元取小矩阵对角再散加, 边界自由度置 1, 分布式下跨 rank
-      归约), 求解层不必知道.
+      算子自己的事 (逐单元取小矩阵对角再散加, 边界自由度置 1), 求解层不必知道.
     - 算子只是个稀疏矩阵: 扫一遍 COO 取主对角, 重复元按散加求和.
 
     Parameters
@@ -203,7 +205,7 @@ def operator_diagonal(op: Any) -> TensorLike:
 
     raise OperatorCapabilityError(
         f"{type(op).__name__} 给不出对角: 既没有 diagonal(), 也不是可扫 COO 的"
-        f"稀疏矩阵. 需要对角的求解器 (Jacobi, Chebyshev) 在其上不可用, "
+        f"稀疏矩阵. 需要对角的求解器 (如 Jacobi 预条件子与光滑子) 在其上不可用, "
         f"或由调用方显式把对角传进去."
     )
 
@@ -269,6 +271,7 @@ class LinearSolver(ABC):
 
     @property
     def is_setup(self) -> bool:
+        """是否已绑定算子."""
         return self._op is not None
 
     def setup(self, op: Any) -> "LinearSolver":
@@ -295,11 +298,12 @@ class LinearSolver(ABC):
         available = operator_capabilities(op)
         missing = self.requires - available
         if missing:
+            # 缺显式矩阵时最常见的原因是传了 matrix-free 算子, 单独点明
+            hint = ("matrix-free 算子没有可分解的全局矩阵, " if CAP_MATRIX in missing else "")
             raise OperatorCapabilityError(
                 f"{type(self).__name__} 需要算子提供 {sorted(missing)}, "
                 f"但 {type(op).__name__} 只提供 {sorted(available)}. "
-                f"matrix-free 算子没有可分解的全局矩阵, "
-                f"请改用对算子无此要求的求解器."
+                f"{hint}请改用对算子无此要求的求解器."
             )
         self._op = op
         return self

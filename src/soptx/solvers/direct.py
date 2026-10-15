@@ -1,11 +1,10 @@
-# 移植自 brighthe/fealpy ``fealpy/solver/direct.py`` @ 30ca15599 的 scipy 与
-# MUMPS 两条路径 (cupy 路径 soptx 不用, 未移植); sym 对称性标志为 fork 扩展,
-# 上游 suanhaitech/fealpy 没有. 此后以 SOPTX 本文件为准演化.
-# 相对 fealpy 版的行为差异: (1) A 已是 scipy 稀疏矩阵时直接使用, 不再强求
-# ``to_scipy()`` (substructure 接口系统传入的就是 scipy csr); (2) scipy 路径
-# 内部统一转 CSR 并复制, 使 SuperLU 的原地改写不会破坏调用方持有的矩阵;
-# (3) DirectSolver 的 MUMPS 分解在工作空间不足 (INFOG(1) = -8/-9) 时放大
-# ICNTL(14) 重试.
+"""稀疏直接法: 一次性求解的 :func:`spsolve` 与缓存分解的 :class:`DirectSolver`.
+
+两者都在主机上用 scipy (SuperLU) 或 MUMPS 分解. 系数矩阵与右端项可以在任意设备上:
+入口处经 ``to_scipy`` 与 ``bm.to_numpy`` 转到主机, 解放回右端项所在的设备. 3D 主线里
+:class:`DirectSolver` 主要作几何多重网格的最粗层求解器, 规模小, 主机与设备间的往返
+开销可以忽略.
+"""
 
 from __future__ import annotations
 
@@ -32,41 +31,71 @@ def _as_scipy(A):
     return A.to_scipy() if hasattr(A, "to_scipy") else A
 
 
+def _import_dmumps_context():
+    """导入 PyMUMPS 的 ``DMumpsContext``; 未安装时给出安装与替代提示.
+
+    Returns
+    -------
+    type
+        ``mumps.DMumpsContext``.
+
+    Raises
+    ------
+    ImportError
+        未安装 PyMUMPS, 或其依赖的 MUMPS 共享库加载失败.
+    """
+    try:
+        from mumps import DMumpsContext
+    except ImportError as exc:
+        raise ImportError(
+            "MUMPS 后端需要 PyMUMPS 与 MUMPS 库: 推荐 "
+            "`conda install -c conda-forge pymumps`, 或 `pip install -e \".[mumps]\"` "
+            "(需预装系统 MUMPS); 也可改用 'scipy' 后端."
+        ) from exc
+    return DMumpsContext
+
+
 def _mumps_solve(A, b, sym: int = 0):
     """用 MUMPS 求解线性方程组.
 
     Parameters
     ----------
     A : COOTensor, CSRTensor or scipy sparse matrix
-        系数矩阵, 须在 CPU 上.
+        系数矩阵; 在设备上时经 ``to_scipy`` 转到主机.
     b : TensorLike
         右端项.
     sym : int, default 0
         MUMPS 对称性标志: 0 一般非对称, 1 对称正定, 2 一般对称.
         取 1 或 2 时只把下三角部分传给 MUMPS, 分解的存储与浮点开销
-        约减半; 默认 0 保持既有调用方行为不变.
+        约减半.
 
     Returns
     -------
     numpy.ndarray
         解向量.
 
+    Raises
+    ------
+    ValueError
+        ``sym`` 不是 0, 1, 2 之一.
+    ImportError
+        未安装 PyMUMPS, 见 :func:`_import_dmumps_context`.
+
     Notes
     -----
     对实际不对称的矩阵传 ``sym`` 1 或 2 会静默解另一个方程组:
     严格上三角部分被直接丢弃, 不做校验.
 
-    依赖 ``mumps`` 包::
-
-        sudo apt install libmumps64-scotch-dev
-        pip3 install PyMUMPS
+    分析, 分解与回代以 ``job=6`` 一次做完, 不缓存分解. 安装方式见
+    ``docs/solvers/direct.md`` 的"依赖"一节.
     """
-    from mumps import DMumpsContext
+    DMumpsContext = _import_dmumps_context()
     A = _as_scipy(A)
-    x = bm.to_numpy(b).copy()
+    # set_rhs 原地改写并把解写回同一块内存, 须给一份连续的 float64 副本
+    x = np.array(bm.to_numpy(b), dtype=np.float64, order="C")
 
     if sym not in (0, 1, 2):
-        raise ValueError(f"MUMPS sym must be 0, 1 or 2, got {sym}.")
+        raise ValueError(f"MUMPS 的 sym 须为 0, 1 或 2, 得到 {sym!r}")
     if sym != 0:
         # MUMPS 在 SYM=1/2 下只接受下三角部分, 上三角若一并传入会被重复计入
         from scipy.sparse import tril
@@ -89,9 +118,11 @@ def _scipy_solve(A, b):
     -----
     SuperLU 会对输入矩阵做原地的列置换与缩放, 而 ``to_scipy()`` 返回的是与
     soptx.sparse 张量共享内存的视图; 对已经是 CSR 的 scipy 矩阵, ``tocsr()`` 默认
-    也不复制. 两者叠加会让调用方持有的 K 在求解后被破坏 -- 拓扑优化里同一个
-    K 还要用于伴随求解. 因此转 CSR 与保护性复制统一在本函数内完成, 调用方不
-    必再自行 ``to_scipy().tocsr()`` 或预先缓存副本.
+    也不复制. 两者叠加会让调用方持有的 K 在求解后被破坏, 而调用方之后往往还要
+    用它 (算真残差, 再次求解等). 因此转 CSR 与保护性复制统一在本函数内完成, 调用方
+    不必再自行 ``to_scipy().tocsr()`` 或预先缓存副本.
+
+    每次调用都重新分解; 同一矩阵多次求解应改用 :class:`DirectSolver`.
     """
     from scipy.sparse.linalg import spsolve as spsol
 
@@ -120,14 +151,27 @@ def spsolve(A, b, solver: str = "scipy", sym: int = 0):
     Returns
     -------
     TensorLike
-        解向量.
+        解向量, 与 ``b`` 在同一设备上.
+
+    Raises
+    ------
+    ValueError
+        ``solver`` 不是 'scipy' 或 'mumps'.
+    ImportError
+        ``solver='mumps'`` 而未安装 PyMUMPS.
+
+    Notes
+    -----
+    每次调用都重新分解, 适合一次性求解; 同一矩阵多次求解应改用 :class:`DirectSolver`.
     """
     if solver == "mumps":
-        return bm.tensor(_mumps_solve(A, b, sym=sym))
+        x = _mumps_solve(A, b, sym=sym)
     elif solver == "scipy":
-        return bm.tensor(_scipy_solve(A, b))
+        x = _scipy_solve(A, b)
     else:
-        raise ValueError(f"Unknown solver: {solver}")
+        raise ValueError(f"未知的直接法后端: {solver!r}; 可选 'scipy' 或 'mumps'")
+
+    return bm.tensor(x, device=bm.get_device(b))
 
 
 @register("mumps", backend="mumps")
@@ -139,12 +183,19 @@ class DirectSolver(LinearSolver):
     稀疏矩阵. 'ea' 层级的 matrix-free 算子在 :meth:`setup` 处即被拒绝, 而不
     是等到求解时才以难懂的属性错误暴露.
 
-    在 3D 主线里本类只出现在多重网格最粗层: 3D 嵌套剖分的因子存储是
-    :math:`\\mathcal{O}(n^{4/3})`, 直接分解细网格不可行.
+    用途: 'fa' 层级的中小规模算例, Hu--Zhang 鞍点系统, 子结构接口系统, 以及
+    3D 主线里几何多重网格的最粗层. 3D 嵌套剖分的因子存储是
+    :math:`\\mathcal{O}(n^{4/3})`, 大规模细网格不宜直接分解, 走 MGCG.
 
     相对 :func:`spsolve` 的实质区别是**分解被缓存**: :meth:`setup` 做分解,
-    :meth:`solve` 只做回代. 拓扑优化每步要用同一个 K 解状态方程和伴随方程,
-    走 :func:`spsolve` 会分解两次. 密度更新后调用方须重新 :meth:`setup`.
+    :meth:`solve` 只做回代. 同一矩阵要反复回代时这是必需的: 作多重网格最粗层
+    时每个 V 循环回代一次, 作 CG 的预条件子时每步回代一次. 矩阵数值改变 (如
+    密度更新) 后调用方须重新 :meth:`setup`.
+
+    两个后端的能力不对称: scipy (SuperLU) 支持二维的多右端项; MUMPS 只支持
+    一维右端项, 多右端须逐列调用 :meth:`solve`. MUMPS 的 :meth:`setup` 每次都以
+    ``job=4`` 重做符号分析与数值分解, 稀疏结构不变时也不复用符号分析, 见
+    ``docs/solvers/direct.md``.
 
     MUMPS 路径自行调用 ``ensure_mpi_initialized``, 调用方不必再各自准备 MPI
     上下文.
@@ -188,7 +239,7 @@ class DirectSolver(LinearSolver):
                 f"未知的直接法后端: {backend!r}; 可选 'scipy' 或 'mumps'"
             )
         if sym not in (0, 1, 2):
-            raise ValueError(f"MUMPS sym must be 0, 1 or 2, got {sym}.")
+            raise ValueError(f"MUMPS 的 sym 须为 0, 1 或 2, 得到 {sym!r}")
         self._backend = backend
         self._sym = sym
         self._residual_tol = residual_tol
@@ -200,12 +251,32 @@ class DirectSolver(LinearSolver):
 
     @property
     def backend(self) -> str:
+        """直接法后端, ``'scipy'`` 或 ``'mumps'``."""
         return self._backend
 
     def setup(self, op) -> "DirectSolver":
         """能力协商后取出矩阵并做分解.
 
         能力协商失败时旧分解保持不变: 先让基类校验通过, 再释放旧资源.
+
+        Parameters
+        ----------
+        op : Any
+            系数算子, 须能转成稀疏矩阵 (soptx.sparse 张量或 scipy 稀疏矩阵).
+
+        Returns
+        -------
+        DirectSolver
+            返回 self.
+
+        Raises
+        ------
+        OperatorCapabilityError
+            算子给不出显式矩阵, 如 'ea' 层级的 matrix-free 算子.
+        ImportError
+            MUMPS 后端而未安装 PyMUMPS.
+        RuntimeError
+            MUMPS 分解失败, 见 :meth:`_mumps_factorize`.
         """
         super().setup(op)
         self._release()
@@ -251,11 +322,13 @@ class DirectSolver(LinearSolver):
 
         Raises
         ------
+        ImportError
+            未安装 PyMUMPS.
         RuntimeError
             MUMPS 报非工作空间类错误, 或按 ``_MUMPS_ICNTL14_SCHEDULE`` 放大到最后
             一档仍工作空间不足.
         """
-        from mumps import DMumpsContext
+        DMumpsContext = _import_dmumps_context()
 
         last = len(_MUMPS_ICNTL14_SCHEDULE) - 1
         for attempt, icntl14 in enumerate(_MUMPS_ICNTL14_SCHEDULE):
@@ -307,7 +380,8 @@ class DirectSolver(LinearSolver):
             "relres": relres,
             "converged": bool(relres <= self._residual_tol),
         }
-        return bm.tensor(x), info
+        # 分解与回代在主机上, 解放回右端项所在的设备, 免得作多重网格最粗层时与 GPU 上的向量混用
+        return bm.tensor(x, device=bm.get_device(b)), info
 
     def _relative_residual(self, b_np, x) -> float:
         """真残差 ``||b - A x|| / ||b||``; 2D 右端按 Frobenius 范数."""

@@ -31,13 +31,12 @@ from soptx.fem.substructure import (
     ExactSchurCondensation,
     FullTraceBasis,
     GlobalAssembler,
-    InterfaceDofsView,
     LinearCornerTraceBasis,
     build_substructures,
     solve_constrained_system,
     solve_interface_system,
 )
-from soptx.problems.elasticity import CantileverCorner2d, FullMBBBeam3d
+from soptx.problems import CantileverCornerPoint2d, FullMBBBeamLine3d
 from examples.substructure_elasticity.verify_linear_corner_consistency import (
     build_corner_projection,
     make_fa_analyzer,
@@ -67,11 +66,11 @@ def density_update_config() -> dict[str, Any]:
 
 def _problem(dim: int) -> Any:
     if dim == 2:
-        return CantileverCorner2d(
+        return CantileverCornerPoint2d(
             domain=(0.0, 2.0, 0.0, 1.0), P=-1.0, E=1.0, nu=0.3,
         )
     if dim == 3:
-        return FullMBBBeam3d(
+        return FullMBBBeamLine3d(
             domain=(0.0, 6.0, 0.0, 1.0, 0.0, 1.0),
             P=-1.0, E=1.0, nu=0.3,
         )
@@ -242,9 +241,8 @@ def _build_context(
         context["trace"] = trace
     if route == "linear_corner":
         interface_dofs = assembler.build_interface_dofs(sub_meshes)
-        interface_view = InterfaceDofsView(global_dofs=interface_dofs)
         context.update(
-            interface_view=interface_view,
+            interface_dofs=interface_dofs,
             projection=build_corner_projection(
                 assembler, sub_meshes, interface_dofs, trace
             ),
@@ -278,11 +276,8 @@ def _validate_retained_conditions(
     assembler = context["assembler"]
     interface_dofs = np.asarray(
         bm.to_numpy(
-            context.get("interface_view", InterfaceDofsView(
-                global_dofs=assembler.build_interface_dofs(
-                    context["sub_meshes"]
-                )
-            )).global_dofs
+            context["interface_dofs"] if "interface_dofs" in context
+            else assembler.build_interface_dofs(context["sub_meshes"])
         ),
         dtype=np.int64,
     )
@@ -363,27 +358,27 @@ def _analyze(
         system = assembler.assemble_trace_system(
             sub_meshes, condensor, trace_basis=context["trace"]
         )
-        interface_force = assembler.project_global_vector(system, force)
-        interface_fixed = assembler.project_global_dofs(system, fixed)
+        interface_force = assembler.project_global_vector(system.global_dofs, force)
+        interface_fixed = assembler.project_global_dofs(system.global_dofs, fixed)
         interface_u = solve_interface_system(
             system, interface_force, interface_fixed, solver=solve_method
         )
         residual = _free_residual(
             system, interface_u, interface_force, interface_fixed
         )
-        full_view = system
+        full_interface_dofs = system.global_dofs
     elif route == "linear_corner":
         trace = context["trace"]
         projection = context["projection"]
-        full_view = context["interface_view"]
+        full_interface_dofs = context["interface_dofs"]
         system = assembler.assemble_trace_system(
             sub_meshes, condensor, trace_basis=trace
         )
         full_force = np.asarray(
-            bm.to_numpy(assembler.project_global_vector(full_view, force))
+            bm.to_numpy(assembler.project_global_vector(full_interface_dofs, force))
         )
         full_fixed = np.asarray(
-            bm.to_numpy(assembler.project_global_dofs(full_view, fixed)),
+            bm.to_numpy(assembler.project_global_dofs(full_interface_dofs, fixed)),
             dtype=np.int64,
         )
         macro_force = projection.T @ full_force
@@ -414,7 +409,7 @@ def _analyze(
 
     tick = time.perf_counter()
     displacement = assembler.recover_full_displacement(
-        sub_meshes, condensor, full_view, interface_u
+        sub_meshes, condensor, full_interface_dofs, interface_u
     )
     timings["recovery"] = time.perf_counter() - tick
     _record_dense(

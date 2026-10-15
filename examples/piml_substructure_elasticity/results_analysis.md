@@ -6,7 +6,7 @@
 
 ### 1.1 算例与维数
 
-两个脚本共用同一算例：`FullMBBBeam2d`，`DOMAIN = (0.0, 12.0, 0.0, 2.0)`，`N_SUB = (12, 2)`，`N_FINE = (5, 5)`，`P_LOAD = -1.0`，`E_BASE = 1.0`，`NU = 0.3`，`DENSITY_RANGE = (0.3, 1.0)`。训练与留出密度在 `DENSITY_RANGE` 上逐单元独立均匀采样；在役密度由 `make_density_fields` 生成光滑场。形函数路线的采样用脚本内 `sample_random_density`（`np.random.default_rng(SHAPE_SEED + offset)`），`--seed` 只影响网络初始化；刚度路线用 `soptx.fem.substructure.sample_random_density`，`--seed` 同时固定采样与初始化。比较基准一律为同接口空间的 `ExactSchurCondensation`，$\mathbf N = -\mathbf K_{ii}^{-1}\mathbf K_{ib}$，$\mathbf K_s = \mathbf K_{bb} - \mathbf K_{ib}^{\mathsf T}\mathbf K_{ii}^{-1}\mathbf K_{ib}$。
+两个脚本共用同一算例：`FullMBBBeamPoint2d`，`DOMAIN = (0.0, 12.0, 0.0, 2.0)`，`N_SUB = (12, 2)`，`N_FINE = (5, 5)`，`P_LOAD = -1.0`，`E_BASE = 1.0`，`NU = 0.3`，`DENSITY_RANGE = (0.3, 1.0)`。训练与留出密度在 `DENSITY_RANGE` 上逐单元独立均匀采样；在役密度由 `make_density_fields` 生成光滑场。形函数路线的采样用脚本内 `sample_random_density`（`np.random.default_rng(SHAPE_SEED + offset)`），`--seed` 只影响网络初始化；刚度路线用 `soptx.fem.substructure.sample_random_density`，`--seed` 同时固定采样与初始化。比较基准一律为同接口空间的 `ExactSchurCondensation`，$\mathbf N = -\mathbf K_{ii}^{-1}\mathbf K_{ib}$，$\mathbf K_s = \mathbf K_{bb} - \mathbf K_{ib}^{\mathsf T}\mathbf K_{ii}^{-1}\mathbf K_{ib}$。
 
 记迹矩阵 $\mathbf T \in \mathbb R^{n_b \times n_q}$，$\boldsymbol u_b = \mathbf T \boldsymbol q$；$n_{\mathrm{rigid}} = 3$，变形子空间维数 $m = n_q - n_{\mathrm{rigid}}$。
 

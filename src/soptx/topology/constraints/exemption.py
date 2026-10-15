@@ -22,11 +22,11 @@ ALM 会用密度去追一个发散量, 表现为个别单元长期卡住、外�
 - 密度设计侧: ``apply_passive_solid`` 把该邻域的物理密度钉在 1, 并把对应的
   密度灵敏度置零, 使这些单元既不参与设计更新, 也不产生减料动机.
 
-物理上这就是"载荷引入垫片": 载荷总要通过一块实体传入结构, 该处的应力奇异性
+物理上这就是载荷端点的"被动实体区": 载荷总要通过一块实体传入结构, 该处的应力奇异性
 是边界条件的性质而非设计的缺陷, 既约束不了, 也不该让优化器去动它.
 
 本模块只负责几何判定与张量施加, 不决定邻域中心在哪里: 中心由物理问题给出
-(如 ``CantileverMiddle2d.traction_patch_endpoints``), 半径由算例配置给出.
+(如 ``CantileverMiddlePatch2d.traction_patch_endpoints``), 半径由算例配置给出.
 
 References
 ----------
@@ -56,7 +56,7 @@ __all__ = [
 # (compute_relative_violation 对非有限值直接报错).
 EXEMPT_CONSTRAINT_VALUE = -1.0
 
-# 实体保留单元的物理密度. 取 1.0 (满密度), 即载荷引入垫片按实体材料计入体积,
+# 实体保留单元的物理密度. 取 1.0 (满密度), 即被动实体区按实体材料计入体积,
 # 其密度不再是设计变量的函数, 故对应的密度灵敏度恒为 0.
 PASSIVE_SOLID_DENSITY = 1.0
 
@@ -115,7 +115,7 @@ def validate_exemption_mask(
     mask: Optional[TensorLike],
     n_cells: int,
 ) -> Optional[TensorLike]:
-    """校验豁免掩码的形状与类型, 全 False 掩码归一为 None.
+    """校验豁免掩码的形状, 全 False 掩码归一为 None.
 
     Parameters
     ----------
@@ -128,6 +128,10 @@ def validate_exemption_mask(
     -------
     TensorLike or None
         校验通过的掩码; 未豁免任何单元时返回 None, 使下游走无掩码快路径.
+
+    Notes
+    -----
+    不检查 dtype: 非布尔掩码按非零为 True 处理, 与 ``bm.where`` 的语义一致.
     """
     if mask is None:
         return None

@@ -39,7 +39,7 @@ metrics = [
 notes = "PINN 主场档; 比较精度-成本, 不比较适用边界."
 
 [cases.model]
-name = "FullMBBBeam2d"
+name = "FullMBBBeamPoint2d"
 
 [cases.model.parameters]
 domain = [0.0, 12.0, 0.0, 2.0]
@@ -99,7 +99,7 @@ metrics = [
 notes = "PIML 主场档; 比较适用边界与结构保持退化."
 
 [cases.model]
-name = "FullMBBBeam2d"
+name = "FullMBBBeamPoint2d"
 
 [cases.model.parameters]
 domain = [0.0, 12.0, 0.0, 2.0]

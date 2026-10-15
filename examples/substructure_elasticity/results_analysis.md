@@ -15,7 +15,7 @@
 | $\mathbf N_{\mathrm{int}}^j=-(\mathbf K_{ii}^j)^{-1}\mathbf K_{ib}^j$ | `ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)` 调用 `condense` 后的 `condensor.N` | `(B, n_i, n_b)` | `bm.linalg.solve(K_ii, K_ib)`，不显式求逆 |
 | $\mathbf K_s^j=\mathbf K_{bb}^j-\mathbf K_{bi}^j(\mathbf K_{ii}^j)^{-1}\mathbf K_{ib}^j$ | `condensor.K_s` | `(B, n_b, n_b)` | 以 `bm.matrix_transpose(K_ib)` 代替 $\mathbf K_{bi}^j$，依赖刚度对称 |
 | $\mathbf u_i^j=\mathbf N_{\mathrm{int}}^j\mathbf u_b^j$ | `condensor.recover(u_b)` | `(B, n_i)` | `bm.einsum('...ij, ...j -> ...i', ...)` |
-| 全场位移 | `assembler.recover_full_displacement(sub_meshes, condensor, system, u_interface)` | `(total_full_dofs,)` | 接口分量按 `system.global_dofs` 写回，内部分量由上式恢复 |
+| 全场位移 | `assembler.recover_full_displacement(sub_meshes, condensor, system.global_dofs, u_interface)` | `(total_full_dofs,)` | 接口分量按 `system.global_dofs` 写回，内部分量由上式恢复 |
 
 **建模假设：内部自由度不受载。** `ExactSchurCondensation` 只缩聚刚度、不缩聚载荷，恢复式没有 $(\mathbf K_{ii}^j)^{-1}\mathbf f_i^j$ 项，因此只对 $\mathbf f_i^j=\mathbf 0$ 的问题成立。两个脚本在求解前检查该前提：`verify_full_trace_convergence.py` 装配 `pde.loads()` 中的体力并要求全为零，非 `BodyForce` 载荷直接拒绝；`verify_linear_corner_consistency.py` 的 `prepare_consistency_problem` 要求载荷与支承只落在子结构分割面节点上。
 
@@ -40,14 +40,14 @@
 
 ### 1.3 `verify_linear_corner_consistency.py`
 
-算例为 `HalfMBBBeamRight2d`（定义域 $[0,60]\times[0,20]$，默认 `n_sub=6x2`、`n_fine=5x5`）与 `FullMBBBeam3d`（$[0,6]\times[0,1]\times[0,1]$，默认 `6x2x2`、`4x4x4`），均取 $E=1$、$\nu=0.3$、$P=-1$，固定 Q1。密度 `make_cell_density` 默认 `cell`：在细单元中心取 $0.7+0.3\sin(\pi x)\cos(\pi y)$（三维再乘 $\sin(\pi z)$），坐标按全局细网格归一化；`uniform` 取常数 0.7。载荷与支承由 `make_fa_analyzer(...)` 的 `assemble_external_load()` 与 `tensor_space.boundary_interpolate(...)` 生成。
+算例为 `HalfMBBBeamPoint2d`（定义域 $[0,60]\times[0,20]$，默认 `n_sub=6x2`、`n_fine=5x5`）与 `FullMBBBeamLine3d`（$[0,6]\times[0,1]\times[0,1]$，默认 `6x2x2`、`4x4x4`），均取 $E=1$、$\nu=0.3$、$P=-1$，固定 Q1。密度 `make_cell_density` 默认 `cell`：在细单元中心取 $0.7+0.3\sin(\pi x)\cos(\pi y)$（三维再乘 $\sin(\pi z)$），坐标按全局细网格归一化；`uniform` 取常数 0.7。载荷与支承由 `make_fa_analyzer(...)` 的 `assemble_external_load()` 与 `tensor_space.boundary_interpolate(...)` 生成。
 
 | 数学量 | 代码 | 形状 / 说明 |
 |---|---|---|
 | $\mathbf L_j$ | `LinearCornerTraceBasis.from_prototype(prototype)`，矩阵即 `prototype.linear_boundary_matrix` | `(n_b, d·2^d)`，角点（双/三）线性插值 |
 | $\mathbf K_c^j=\mathbf L_j^{\mathsf T}\mathbf K_s^j\mathbf L_j$ | `trace_basis.project_stiffness(condensor.K_s)` | `(B, d·2^d, d·2^d)` |
 | $\mathbf K_C=\sum_j\mathbf A_{c,j}^{\mathsf T}\mathbf K_c^j\mathbf A_{c,j}$ | `assembler.assemble_macro_system(sub_meshes, ...)` 返回的 `macro.stiffness` | `(total_macro_dofs, total_macro_dofs)` |
-| $\mathbf U_\Gamma=\mathbf P\mathbf U_C$ | `assembler.build_linear_corner_projection(sub_meshes, interface_view, trace_basis)`（脚本经 `build_corner_projection` 调用） | SciPy CSR，`(n_Γ, total_macro_dofs)` |
+| $\mathbf U_\Gamma=\mathbf P\mathbf U_C$ | `assembler.build_linear_corner_projection(sub_meshes, interface_dofs, trace_basis)`（脚本经 `build_corner_projection` 调用） | SciPy CSR，`(n_Γ, total_macro_dofs)` |
 | $\mathbf F_C=\mathbf P^{\mathsf T}\mathbf F_\Gamma$ | `projection.T @ interface_force` | 以原完整载荷的虚功为准，不在角点重新生成物理载荷 |
 | $\mathbf C_D\mathbf U_C=\mathbf 0$ | `constraints = projection[fixed_interface]` | $\mathbf P$ 在受约束接口自由度上的行 |
 | 约束求解 | `solve_constrained_system(macro, force, constraints)`（缺省 `solver="scipy"`） | 返回 `ConstrainedSolveResult`：`displacement`、`constraint_rank`、`equilibrium_relative_residual`、`constraint_relative_residual`、`mode` |
@@ -102,5 +102,5 @@
 |---|---|---|---|
 | `full_trace` 收敛（2D） | `python examples/substructure_elasticity/verify_full_trace_convergence.py --problem HarmonicPoly2D` | §2.1，$p=1$ 时末阶 $\ge$ 1.8 / 0.8 | 待跑 |
 | `full_trace` 收敛（3D） | `python examples/substructure_elasticity/verify_full_trace_convergence.py --problem HarmonicPoly3D` | 同上 | 待跑 |
-| `linear_corner` 一致性（2D） | `python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem HalfMBBBeamRight2d` | §2.2，七项 $\le 10^{-9}$ | 待跑 |
-| `linear_corner` 一致性（3D） | `python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem FullMBBBeam3d` | 同上 | 待跑 |
+| `linear_corner` 一致性（2D） | `python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem HalfMBBBeamPoint2d` | §2.2，七项 $\le 10^{-9}$ | 待跑 |
+| `linear_corner` 一致性（3D） | `python examples/substructure_elasticity/verify_linear_corner_consistency.py --problem FullMBBBeamLine3d` | 同上 | 待跑 |

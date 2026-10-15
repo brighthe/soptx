@@ -78,7 +78,7 @@ def main(argv=None):
         build_substructures,
         solve_constrained_system,
     )
-    from soptx.problems.elasticity import CantileverCorner2d, FullMBBBeam3d
+    from soptx.problems import CantileverCornerPoint2d, FullMBBBeamLine3d
 
     bm.set_backend("numpy")
 
@@ -97,11 +97,9 @@ def main(argv=None):
 
     # 载荷与支承.
     if dim == 3:
-        pde = FullMBBBeam3d(
-            domain=domain, P=-1.0, E=E_base, nu=nu, plane_type=hypothesis,
-        )
+        pde = FullMBBBeamLine3d(domain=domain, P=-1.0, E=E_base, nu=nu)
     else:
-        pde = CantileverCorner2d(
+        pde = CantileverCornerPoint2d(
             domain=domain, P=-1.0, E=E_base, nu=nu, plane_type=hypothesis,
         )
 

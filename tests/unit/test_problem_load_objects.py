@@ -7,10 +7,12 @@ import numpy as np
 from soptx.backend import backend_manager as bm
 
 from soptx.problems import (
-    BearingDevice2d,
-    CantileverRightBottomEdge3d,
+    BearingTraction2d,
+    CantileverBottomEdgeLine3d,
     DivergenceFreePolynomialElasticity3D,
-    FullMBBBeam3d,
+    FullMBBBeamPoint2d,
+    FullMBBBeamLine3d,
+    FullMBBBeamPoint3d,
 )
 from soptx.protocols import (
     BodyForce,
@@ -22,11 +24,13 @@ from soptx.protocols import (
 
 
 def test_representative_problems_provide_physical_load_objects() -> None:
-    """四类代表 Problem 分别返回对应物理载荷对象."""
+    """代表 Problem 分别返回对应物理载荷对象."""
     problems_and_protocols = (
-        (FullMBBBeam3d(), PointForce),
-        (CantileverRightBottomEdge3d(), LineTraction),
-        (BearingDevice2d(), BoundaryTraction),
+        (FullMBBBeamPoint2d(), PointForce),
+        (FullMBBBeamLine3d(), LineTraction),
+        (FullMBBBeamPoint3d(), PointForce),
+        (CantileverBottomEdgeLine3d(), LineTraction),
+        (BearingTraction2d(), BoundaryTraction),
         (DivergenceFreePolynomialElasticity3D(), BodyForce),
     )
 
@@ -37,20 +41,24 @@ def test_representative_problems_provide_physical_load_objects() -> None:
         assert any(isinstance(load, protocol) for load in loads)
 
 
-def test_full_mbb_point_force_keeps_the_physical_resultant() -> None:
-    """完整三维 MBB 梁载荷对象保存顶面中心点和总力."""
-    problem = FullMBBBeam3d(P=-2.5)
+def test_full_mbb3d_line_load_is_the_extruded_center_force() -> None:
+    """完整三维 MBB 梁的载荷为顶面中线线载荷, 强度乘线长等于总力."""
+    bm.set_backend("numpy")
+    problem = FullMBBBeamLine3d(P=-2.5)
     load = problem.loads()[0]
+    points = bm.array([[60.0, 20.0, 0.0], [60.0, 20.0, 7.0], [60.0, 0.0, 7.0], [59.0, 20.0, 7.0]])
 
-    assert isinstance(load, PointForce)
-    assert tuple(load.point) == (60.0, 20.0, 10.0)
-    assert tuple(load.force()) == (0.0, -2.5, 0.0)
+    assert isinstance(load, LineTraction)
+    np.testing.assert_array_equal(bm.to_numpy(load.is_load_line(points)), [True, True, False, False])
+    values = bm.to_numpy(load.traction(points[:2]))
+    line_length = problem.domain[5] - problem.domain[4]
+    np.testing.assert_allclose(values * line_length, [[0.0, -2.5, 0.0], [0.0, -2.5, 0.0]])
 
 
 def test_cantilever_edge_load_is_per_unit_length() -> None:
     """三维悬臂梁棱边载荷强度乘线长等于给定总力."""
     bm.set_backend("numpy")
-    problem = CantileverRightBottomEdge3d(P=-4.0)
+    problem = CantileverBottomEdgeLine3d(P=-4.0)
     load = problem.loads()[0]
     points = bm.array([[60.0, 0.0, 0.0], [60.0, 0.0, 2.0]])
 

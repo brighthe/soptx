@@ -86,10 +86,10 @@ def test_hex_schur_mg_matches_independent_full_assembly():
     from soptx.fem.multigrid import StructuredHexHierarchy
     from soptx.fem.operators import ConstrainedOperator
     from soptx.fem.substructure import (
-        StructuredSubstructureLayout, GlobalAssembler, InterfaceDofsView,
+        StructuredSubstructureLayout, GlobalAssembler,
         build_substructures, project_problem_conditions_to_interface_system,
     )
-    from soptx.problems.elasticity import FullMBBBeam3d
+    from soptx.problems import FullMBBBeamLine3d
     from soptx.solvers import CGSolver
 
     previous_backend = bm.backend_name
@@ -104,11 +104,10 @@ def test_hex_schur_mg_matches_independent_full_assembly():
             assembler, integration_order=2, penal=3., rho_min=1e-7)
         rho = np.random.default_rng(31).uniform(.2, .9, (4, 2, 2))
         interface = layout.build_interface_dofs(meshes)
-        problem = FullMBBBeam3d(domain=(0., 4., 0., 2., 0., 2.),
-                               E=1., nu=.3, P=-1., support="end_lines",
-                               load_subdivisions=(4, 2))
+        problem = FullMBBBeamLine3d(domain=(0., 4., 0., 2., 0., 2.),
+                               E=1., nu=.3, P=-1.)
         conditions = project_problem_conditions_to_interface_system(
-            problem, assembler, InterfaceDofsView(global_dofs=interface))
+            problem, assembler, interface)
         fixed = np.asarray(conditions.full_fixed_dofs)
         free_interface = np.setdiff1d(interface, fixed)
         space = layout.space_full

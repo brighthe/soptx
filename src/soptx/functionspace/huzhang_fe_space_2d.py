@@ -11,12 +11,15 @@ from typing import Optional, Union, Callable
 from soptx.typing import TensorLike, Index, _S, Threshold
 
 from soptx.backend import backend_manager as bm
+from soptx.core.numerics import GEOMETRIC_TOL
 from soptx.mesh.mesh_base import Mesh
 from soptx.sparse import COOTensor
 from soptx.sparse.ops import spdiags
 from .space import FunctionSpace
 from .functional import symmetry_span_array, symmetry_index
 from soptx.decorator import barycentric
+
+import warnings
 
 import numpy as np
 
@@ -513,8 +516,18 @@ class HuZhangFESpace2d(FunctionSpace):
     use_relaxation : bool, optional
         是否启用角点松弛, 默认 False.
     corners : TensorLike, optional
-        形状 ``(N, GD)`` 的几何角点坐标, ``use_relaxation=True`` 时必需; 每个角点须
-        恰好连接 2 个三角形并共享一条从角点出发的内部边.
+        形状 ``(N, GD)`` 的待松弛角点坐标. 缺省 ``None`` 时由
+        ``mesh.boundary_corner_index()`` 自动检出几何角点, 其中不满足两单元松弛
+        拓扑 (恰好连接 2 个三角形并共享一条从角点出发的内部边) 的角点被跳过并发
+        ``UserWarning``, 跳过项记录在 ``skipped_corners``; 显式传入时每个角点都必须
+        满足该拓扑, 否则抛出 ``ValueError``.
+    traction_edge : TensorLike, optional
+        形状 ``(NE,)`` 的布尔数组, 标记强施加全牵引 :math:`\sigma n = g` 的边界边.
+        边界顶点标架优先取自这类边, 使牵引写入的顶点自由度与该边对齐, 不再取决于
+        全局边编号. 缺省 ``None`` 不调整.
+    symmetry_edge : TensorLike, optional
+        形状 ``(NE,)`` 的布尔数组, 标记只强施加切向牵引 :math:`\sigma_{nt}` 的边界边
+        (对称面, 滚动支承). 标架优先级低于 ``traction_edge``, 高于其余边界边.
 
     Attributes
     ----------
@@ -522,15 +535,21 @@ class HuZhangFESpace2d(FunctionSpace):
         自由度管理对象.
     NCP : int
         松弛角点个数, 未松弛时为 0.
+    skipped_corners : list of tuple
+        自动检出模式下因不满足松弛拓扑而跳过的角点, 每项为 ``(坐标, 原因)``;
+        显式传入或未启用松弛时为空列表.
     nsframe, esframe, csframe : TensorLike
         顶点, 边, 单元上的对称张量标架, 见 ``dof_frame_of_S``.
     TM : CSRTensor
         形状 ``(gdof, gdof)`` 的基底变换矩阵, 未松弛时为单位阵.
     """
     def __init__(self, mesh, p: int=1, ctype='C', use_relaxation: bool=False,
-                 corners=None):
+                 corners=None, traction_edge=None, symmetry_edge=None):
         self.mesh = mesh
         self.p = p
+        # 强约束边标记, 只用于选取边界顶点标架 (见 dof_frame)
+        self.traction_edge = None if traction_edge is None else bm.asarray(traction_edge, dtype=bm.bool)
+        self.symmetry_edge = None if symmetry_edge is None else bm.asarray(symmetry_edge, dtype=bm.bool)
 
         cell_type = mesh.entity('cell').shape[1]
         if cell_type != 3:
@@ -540,12 +559,16 @@ class HuZhangFESpace2d(FunctionSpace):
         # TODO 保持开关状态
         self.use_relaxation = use_relaxation
 
-        # 角点坐标是 PDE 的几何信息, 由调用方直接传入, 不经由 mesh 挂载
+        # 角点是网格边界的几何属性: 缺省由网格自动检出, 调用方也可显式指定子集
         self._corners = corners
+        self.skipped_corners: list[tuple[tuple[float, ...], str]] = []
 
-        # TODO 仅在需要松弛时计算角点拓扑
         if self.use_relaxation:
-            self.corner = self._get_corner_data() 
+            if corners is None:
+                candidates = mesh.entity('node')[mesh.boundary_corner_index()]
+                self.corner = self._get_corner_data(candidates, strict=False)
+            else:
+                self.corner = self._get_corner_data(corners, strict=True)
             self.NCP = len(self.corner['coords'])
         else:
             self.corner = None
@@ -610,14 +633,20 @@ class HuZhangFESpace2d(FunctionSpace):
 
         return TM
     
-    def _get_corner_data(self):
-        """Build topology for corners supported by the two-cell relaxation.
+    def _get_corner_data(self, corners, *, strict: bool):
+        """构造两单元松弛所需的角点拓扑.
 
-        Every candidate geometric corner must be incident to exactly two
-        triangles.  Those triangles must contain one distinct boundary edge
-        each and share one interior edge incident to the corner.  The current
-        four-DOF construction is not defined for any other vertex fan, so an
-        unsupported candidate is rejected instead of being filtered silently.
+        每个候选角点须恰好连接两个三角形, 两者各含一条经过该点的边界边, 并共享一条
+        经过该点的内部边; 当前四自由度构造只对这种顶点扇有定义.
+
+        Parameters
+        ----------
+        corners : TensorLike
+            形状 ``(N, GD)`` 的候选角点坐标.
+        strict : bool
+            True 时不满足拓扑的候选直接抛 ``ValueError`` (调用方显式点名的角点);
+            False 时跳过并发 ``UserWarning``, 跳过项追加到 ``skipped_corners``
+            (网格自动检出的几何角点).
         """
         mesh = self.mesh
         node = mesh.entity('node')     # (NN, 2)
@@ -626,13 +655,6 @@ class HuZhangFESpace2d(FunctionSpace):
         c2e  = mesh.cell_to_edge()     # (NC, 3)
 
         isbdedge = mesh.boundary_edge_flag()  # (NE,)
-
-        corners = self._corners
-        if corners is None:
-            raise ValueError(
-                "use_relaxation=True 需要角点坐标, 请通过构造参数 corners 传入, "
-                "例如 pde.mark_corners(mesh.entity('node'))"
-            )
 
         corner_nids = []
         corner_cells = []
@@ -652,24 +674,8 @@ class HuZhangFESpace2d(FunctionSpace):
                 f"{corners_array.shape}"
             )
 
-        for corner in corners_array:
-            coordinate = tuple(float(value) for value in corner)
-            matches = np.flatnonzero(
-                np.max(np.abs(node_array - corner[None, :]), axis=-1) < 1e-12
-            )
-            if matches.size != 1:
-                raise ValueError(
-                    f"corner {coordinate} must match exactly one mesh node, "
-                    f"found {matches.size}"
-                )
-
-            nid = int(matches[0])
-            if nid in seen_nids:
-                raise ValueError(
-                    f"corner {coordinate} duplicates mesh node {nid}"
-                )
-            seen_nids.add(nid)
-
+        def topology(nid: int, coordinate) -> tuple:
+            """返回角点 ``nid`` 的 ``(cells, boundary_edges, midedge)``, 不满足拓扑则抛 ValueError."""
             cids, locs = np.nonzero(cell_array == nid)
             incident_count = cids.size
             if incident_count != 2:
@@ -727,8 +733,41 @@ class HuZhangFESpace2d(FunctionSpace):
                     "interior edge incident to the corner"
                 )
 
+            return [cid0, loc0, cid1, loc1], boundary_data, midedge
+
+        for corner in corners_array:
+            coordinate = tuple(float(value) for value in corner)
+            matches = np.flatnonzero(
+                np.max(np.abs(node_array - corner[None, :]), axis=-1) < GEOMETRIC_TOL
+            )
+            if matches.size != 1:
+                raise ValueError(
+                    f"corner {coordinate} must match exactly one mesh node, "
+                    f"found {matches.size}"
+                )
+
+            nid = int(matches[0])
+            if nid in seen_nids:
+                raise ValueError(
+                    f"corner {coordinate} duplicates mesh node {nid}"
+                )
+            seen_nids.add(nid)
+
+            try:
+                cells, boundary_data, midedge = topology(nid, coordinate)
+            except ValueError as error:
+                if strict:
+                    raise
+                self.skipped_corners.append((coordinate, str(error)))
+                warnings.warn(
+                    f"Hu-Zhang 角点松弛跳过几何角点 {coordinate}: {error}",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                continue
+
             corner_nids.append(nid)
-            corner_cells.append([cid0, loc0, cid1, loc1])
+            corner_cells.append(cells)
             corner_edges.append(boundary_data)
             corner_midedges.append(midedge)
 
@@ -1065,13 +1104,166 @@ class HuZhangFESpace2d(FunctionSpace):
 
         return self.function(uh), isDDof
 
+    def set_corner_traction_bc(self,
+                               gd: Callable,
+                               uh: Optional[TensorLike] = None,
+                               *, traction_edge: TensorLike,
+                               symmetry_edge: Optional[TensorLike] = None,
+                               symmetry_gd: Optional[Callable] = None,
+                               rtol: float = 1e-8,
+                            ) -> tuple:
+        r"""在未松弛的几何角点上联立两侧强约束, 写入受约束的顶点自由度.
+
+        ``boundary_interpolate`` 与 ``set_tangential_traction_bc`` 逐边写入, 顶点
+        自由度只有一组标架: 两条法向不平行的强约束边交于一点时, 只有与顶点标架
+        对齐的那条边的条件真正落到顶点上, 另一条边在顶点处的法向迹是自由的, 牵引从
+        该边端部漏出, 且漏在哪一侧取决于全局边编号. 本方法按 Hu & Ma (2021) 式 (4.1)
+        求角点处的对称张量 :math:`S`: 全牵引边给出 :math:`S n = g` 两个方程, 对称边
+        (滚动支承) 给出 :math:`t^T S n = g \cdot t` 一个方程, 换算到顶点标架后求解并
+        只固定受约束的自由度: 两条全牵引边相交时秩为 3, 三个顶点自由度全部固定; 直角处
+        牵引边与对称边的条件线性相关 (秩 2), 只固定与牵引边对齐的两个. 两侧数据不相容
+        (残差超过 ``rtol``), 或约束无法表示为顶点自由度子集上的强施加时, 须改用角点
+        松弛, 此时抛出 ``ValueError``.
+
+        只处理至少两条强约束边且其法向不平行的边界顶点; 已松弛的角点 (各侧自由度
+        已分裂) 与只连一条强约束边的顶点 (如位移边与牵引边的交点, 由
+        ``traction_edge`` 的标架优先级保证对齐) 不在此列.
+
+        Parameters
+        ----------
+        gd : Callable
+            全牵引边上的外法向牵引 :math:`g = \sigma n_{out}`, 以形状
+            ``(NEb, p+1, 2)`` 的按边成批点调用, 与 ``boundary_interpolate`` 相同.
+        uh : TensorLike, optional
+            形状 ``(gdof,)`` 的自由度向量, 角点自由度被覆盖, 其余不变; 缺省为零向量.
+        traction_edge : TensorLike
+            形状 ``(NE,)`` 的布尔数组, 全牵引边.
+        symmetry_edge : TensorLike, optional
+            形状 ``(NE,)`` 的布尔数组, 只强加切向牵引的边.
+        symmetry_gd : Callable, optional
+            对称边上的外法向牵引, 只取其切向分量; 缺省为零.
+        rtol : float, optional
+            相容性判据: 最小二乘残差不超过 ``rtol * max(1, |b|)``.
+
+        Returns
+        -------
+        uh : Function
+            写入角点值后的有限元函数.
+        isDDof : TensorLike
+            形状 ``(gdof,)`` 的布尔数组, 只标记本方法写入的角点自由度.
+
+        Raises
+        ------
+        ValueError
+            某个角点两侧的牵引数据不相容, 或其约束不能在当前顶点标架下强施加.
+        """
+        if uh is None:
+            uh = bm.zeros((self.number_of_global_dofs(),), dtype=self.ftype, device=self.device)
+        isDDof = bm.zeros((uh.shape[0],), dtype=bm.bool)
+
+        mesh = self.mesh
+        p = self.p
+        isbd = bm.to_numpy(mesh.boundary_edge_flag()).astype(bool)
+        trac = isbd & bm.to_numpy(traction_edge).astype(bool)
+        sym = (isbd & bm.to_numpy(symmetry_edge).astype(bool)) if symmetry_edge is not None \
+            else np.zeros_like(trac)
+        sym &= ~trac
+        if int(trac.sum()) + int(sym.sum()) < 2:
+            return self.function(uh), isDDof
+
+        edge = bm.to_numpy(mesh.entity('edge'))
+        normal = bm.to_numpy(mesh.face_unit_normal())
+        bcs = bm.multi_index_matrix(p, 1) / p
+        points = mesh.bc_to_point(bcs)  # (NE, p+1, 2), q0 在 edge[:, 0] 端, qp 在 edge[:, 1] 端
+
+        def endpoint_values(flag, fn):
+            """返回各标记边两端点处的牵引 (n_flag, 2, 2): [边, 端点 0/1, 分量]."""
+            if not flag.any():
+                return np.zeros((0, 2, 2))
+            if fn is None:
+                return np.zeros((int(flag.sum()), 2, 2))
+            vals = bm.to_numpy(fn(points[bm.asarray(flag)]))
+            return np.stack([vals[:, 0], vals[:, -1]], axis=1)
+
+        rows: dict[int, list] = {}
+        normals: dict[int, list] = {}
+        for flag, fn, kind in ((trac, gd, 't'), (sym, symmetry_gd, 's')):
+            eidx = np.flatnonzero(flag)
+            if eidx.size == 0:
+                continue
+            sign = bm.to_numpy(boundary_outward_sign(mesh, bm.asarray(eidx)))
+            n_out = normal[eidx] * sign[:, None]
+            g = endpoint_values(flag, fn)
+            for i, e in enumerate(eidx):
+                n = n_out[i]
+                t = np.array([-n[1], n[0]])
+                for end in (0, 1):
+                    v = int(edge[e, end])
+                    gv = g[i, end]
+                    if kind == 't':
+                        # S n = g, S 以 Voigt [xx, xy, yy] 为未知量
+                        rows.setdefault(v, []).extend([([n[0], n[1], 0.0], gv[0]), ([0.0, n[0], n[1]], gv[1])])
+                    else:
+                        rows.setdefault(v, []).append(
+                            ([t[0] * n[0], t[0] * n[1] + t[1] * n[0], t[1] * n[1]], float(gv @ t)))
+                    normals.setdefault(v, []).append(n)
+
+        relaxed = set()
+        if self.NCP > 0:
+            relaxed = {int(i) for i in bm.to_numpy(self.corner['idx'])}
+        node2dof = bm.to_numpy(self.dof.node_to_internal_dof()[0])
+        nsframe = bm.to_numpy(self.nsframe)
+
+        corner_dofs, corner_values = [], []
+        for v, ns in normals.items():
+            if v in relaxed or len(ns) < 2:
+                continue
+            ns = np.asarray(ns)
+            cross = np.abs(ns[:, None, 0] * ns[None, :, 1] - ns[:, None, 1] * ns[None, :, 0])
+            if cross.max() < 1e-8:
+                continue  # 同一直线上的边界顶点, 逐边写入已一致
+            # 顶点自由度 c 满足 S = M c, M 的第 i 列为 nsframe[v, i] (Voigt); 约束改写为 (A M) c = b
+            A = np.array([r[0] for r in rows[v]]) @ nsframe[v].T
+            b = np.array([r[1] for r in rows[v]])
+            scale = max(1.0, float(np.abs(A).max()))
+            rank = np.linalg.matrix_rank(A, tol=1e-10 * scale)
+            # 只固定受约束的自由度: 直角处的牵引边与对称边条件线性相关 (秩 2), 与牵引边
+            # 对齐的标架下只涉及两个自由度, 第三个 (沿牵引边的正应力) 应保持自由
+            involved = np.flatnonzero(np.abs(A).max(axis=0) > 1e-10 * scale)
+            point = tuple(float(x) for x in bm.to_numpy(mesh.entity('node'))[v])
+            if rank != involved.size:
+                raise ValueError(
+                    f"角点 {point} 的强约束 (秩 {rank}) 不能表示为顶点自由度子集上的强施加; "
+                    "请对该角点启用角点松弛.")
+            c, *_ = np.linalg.lstsq(A[:, involved], b, rcond=None)
+            if np.linalg.norm(A[:, involved] @ c - b) > rtol * max(1.0, float(np.linalg.norm(b))):
+                raise ValueError(
+                    f"角点 {point} 两侧的强约束牵引不相容, 离散应力在该点无解 "
+                    "(Hu & Ma 2021, 4.1 节); 请对该角点启用角点松弛.")
+            corner_dofs.append(node2dof[v][involved])
+            corner_values.append(c)
+
+        if corner_dofs:
+            dofs = bm.asarray(np.concatenate(corner_dofs))
+            vals = bm.asarray(np.concatenate(corner_values), dtype=self.ftype)
+            uh = bm.set_at(uh, dofs, vals)
+            isDDof = bm.set_at(isDDof, dofs, True)
+
+        return self.function(uh), isDDof
+
     def dof_frame(self) -> TensorLike:
-        """顶点, 边, 单元上的向量标架.
+        r"""顶点, 边, 单元上的向量标架.
 
         边标架为 ``[face_unit_normal, edge_unit_tangent]``, 即 :math:`(n_f, t_f)`;
         单元标架为笛卡尔基. 顶点标架先置为笛卡尔基, 再依次被所在边的标架覆盖
-        (同一顶点多次写入时以最后一次为准), 然后边界顶点改取边界边的标架,
+        (同一顶点多次写入时以最后一次为准), 然后边界顶点改取边界边的标架, 其中
+        ``symmetry_edge`` 优先于其余边界边, ``traction_edge`` 优先于前两者;
         松弛角点改取 ``corner['to_midedge']`` 所指内部边的标架.
+
+        边界顶点的标架决定牵引写入的是哪两个顶点自由度. 位移边与牵引边相交的角点
+        若取位移边的标架, 牵引边的 :math:`\sigma_{nn}, \sigma_{nt}` 会被写进与之
+        不对齐的自由度 (如把 :math:`\sigma_{xx} = 0` 写成 :math:`\sigma_{yy} = 0`),
+        故按强约束边优先.
 
         Returns
         -------
@@ -1106,9 +1298,13 @@ class HuZhangFESpace2d(FunctionSpace):
         eframe[:, 1] = mesh.edge_unit_tangent()
         nframe[edge] = eframe[:, None]
 
-        # 修改边界点的标架
+        # 修改边界点的标架: 后写者胜, 故按 其余边界边 -> 对称边 -> 牵引边 的顺序覆盖
         isbdege = mesh.boundary_edge_flag()
         nframe[edge[isbdege]] = eframe[isbdege, None]
+        for flag in (self.symmetry_edge, self.traction_edge):
+            if flag is not None:
+                strong = isbdege & flag
+                nframe[edge[strong]] = eframe[strong, None]
 
         # 修改角点的标架 (仅在松弛模式有效)
         # 如果 self.NCP == 0 (未开启松弛), 循环自动跳过

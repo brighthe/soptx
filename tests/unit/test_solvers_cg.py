@@ -5,8 +5,7 @@ reference solve, batched right-hand sides, the Jacobi preconditioner,
 true-residual refresh, and maxit exhaustion.  Also pins the semantics
 borrowed from PETSc / MFEM: ``norm_type``, ``ConvergedReason``, per-column
 freezing of batched right-hand sides, ``divtol``, ``monitor`` and
-``print_level``.  The distributed dot_product path is covered separately by
-``test_matrix_free_cg.py``.
+``print_level``.
 """
 
 from __future__ import annotations
@@ -81,14 +80,14 @@ def test_diagonal_preconditioner_rejects_nonpositive_diag() -> None:
         DiagonalPreconditioner(np.eye(3))
 
 
-def test_residual_refresh_reports_true_residual() -> None:
+def test_verify_residual_reports_true_residual() -> None:
     A = poisson_1d()
     rng = np.random.default_rng(3)
     b = rng.standard_normal(A.shape[0])
 
     x, info = cg(
         A, b, atol=1e-12, rtol=1e-12, maxit=1000,
-        residual_refresh=5, returninfo=True,
+        verify_residual=True, returninfo=True,
     )
 
     assert info["converged"]
@@ -444,3 +443,94 @@ def test_print_level_controls_log_volume(print_level: int,
     # 每步日志含 it=0 那条; final 那次不打, 摘要归 _finalize 负责
     assert len(per_step) == (info["niter"] + 1 if per_iteration else 0)
     assert len(messages) - len(per_step) == summary
+
+
+# --------------------------------------------------------------------------
+# 收敛时的真残差验证 (verify_residual): 达标时以真残差替换递推残差, 否决虚假收敛
+# --------------------------------------------------------------------------
+
+class _DriftingOperator:
+    """每次作用都带一个微小扰动的 SPD 算子, 让 CG 的递推残差与真残差漂开."""
+
+    def __init__(self, A: np.ndarray, eps: float, seed: int = 0) -> None:
+        E = np.random.default_rng(seed).standard_normal(A.shape)
+        self.A, self.E, self.eps, self.calls = A, (E + E.T) / 2.0, eps, 0
+
+    def __matmul__(self, v):
+        self.calls += 1
+        return self.A @ v + self.eps * np.sin(1.0 + self.calls) * (self.E @ v)
+
+
+def test_verify_residual_vetoes_drifted_convergence() -> None:
+    A = poisson_1d()
+    b = np.random.default_rng(3).standard_normal(A.shape[0])
+    tol = 1e-14 * np.linalg.norm(b)
+    kwargs = dict(rtol=1e-14, atol=0.0, maxit=300, returninfo=True, print_level=0)
+
+    # 不替换: 递推残差掉到容差以下就停机, 但真残差远高于容差
+    x, info = cg(_DriftingOperator(A, 1e-9), b, verify_residual=False, **kwargs)
+    assert info["converged"]
+    assert np.linalg.norm(b - A @ x) > 1e3 * tol
+
+    # 验证: 达标时换上真残差, 达不到容差就如实报告 maxit 耗尽
+    _, info = cg(_DriftingOperator(A, 1e-9), b, verify_residual=True, **kwargs)
+    assert not info["converged"]
+    assert info["reason"] == ConvergedReason.DIVERGED_ITS
+
+
+@pytest.mark.parametrize("preconditioned", [False, True])
+def test_verify_residual_is_transparent_on_an_exact_operator(preconditioned: bool) -> None:
+    """算子精确时验证不改变迭代轨迹: 迭代数相同, 解一致.
+
+    这是只在达标时替换、不做周期替换的理由: 周期替换在这个病态算例上会让迭代数
+    增加 15%--30%.
+    """
+    A = spd(80, 4.0, seed=5)
+    b = np.random.default_rng(8).standard_normal(80)
+    M = DiagonalPreconditioner(np.diag(A).copy()) if preconditioned else None
+    kwargs = dict(M=M, rtol=1e-10, atol=0.0, maxit=2000, returninfo=True, print_level=0)
+
+    x_plain, info_plain = cg(A, b, verify_residual=False, **kwargs)
+    x_verified, info_verified = cg(A, b, verify_residual=True, **kwargs)
+
+    assert info_plain["converged"] and info_verified["converged"]
+    assert info_verified["niter"] == info_plain["niter"]
+    assert info_verified["true_residual"] is not None
+    np.testing.assert_allclose(x_verified, x_plain, rtol=0.0,
+                               atol=1e-8 * np.linalg.norm(x_plain))
+
+
+def test_verify_residual_keeps_batched_columns_independent() -> None:
+    """替换只作用于活跃列: 批量解仍等于逐列单独求解."""
+    A, columns = _mixed_difficulty_batch()
+    B = np.stack(columns, axis=1)
+    kwargs = dict(maxit=5000, rtol=1e-8, verify_residual=True, returninfo=True, print_level=0)
+
+    X, info = cg(A, B, **kwargs)
+
+    assert info["converged"]
+    for j, column in enumerate(columns):
+        reference, _ = cg(A, column, **kwargs)
+        diff = np.linalg.norm(X[:, j] - reference) / np.linalg.norm(reference)
+        assert diff < 1e-6, f"col {j} 与单列解不一致"
+
+
+class _NegatedIdentity:
+    """不正定的预条件子: ``M @ r = -r``, 使 :math:`(r, M^{-1} r) < 0`."""
+
+    def __matmul__(self, r):
+        return -r
+
+
+@pytest.mark.parametrize("norm_type", NORM_TYPES)
+def test_indefinite_preconditioner_is_not_reported_as_converged(norm_type: str) -> None:
+    """natural 范数下负的 (r, M^-1 r) 曾被截断为零而误判收敛."""
+    A = poisson_1d(20)
+    b = np.random.default_rng(23).standard_normal(A.shape[0])
+
+    _, info = cg(A, b, M=_NegatedIdentity(), norm_type=norm_type,
+                 returninfo=True, print_level=0)
+
+    assert info["converged"] is False
+    assert info["reason"] == ConvergedReason.DIVERGED_INDEFINITE_PC
+    assert "indefinite preconditioner" in info["breakdown"]

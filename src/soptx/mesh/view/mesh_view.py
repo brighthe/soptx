@@ -456,7 +456,12 @@ class MeshView:
                     cell_view.indices[:, local_vertices],
                     (-1,),
                 )
-                vertex_count = int(bm.unique(vertex_ids).shape[0])
+                # 只计被单元引用的顶点 (网格块可含未被引用的节点). 用布尔掩码计数, 线性时间,
+                # 不用 unique 排序: 本方法随每次 space.function() 调用, 大网格上排序可达秒级
+                used = bm.zeros((sector_view.size(),), dtype=bm.bool,
+                                device=bm.get_device(vertex_ids))
+                used = bm.set_at(used, vertex_ids, True)
+                vertex_count = int(bm.sum(used))
                 total += sector_view.num_multi_index(
                     p,
                     internal=True,
@@ -638,6 +643,51 @@ class MeshView:
     def boundary_node_index(self):
         """边界节点的全局编号."""
         return self.entity_view(0).boundary().index
+
+    def boundary_corner_index(self, *, sine_tol: float = 1.0e-8):
+        """二维网格边界上的几何角点编号, 即两条相邻边界边不共线的边界顶点.
+
+        边界按流形处理: 每个边界顶点恰有两条边界边, 否则报错. 共线性按两条边
+        单位切向的叉积绝对值 (夹角正弦) 判定, 小于 ``sine_tol`` 视为共线.
+        角点是网格边界的几何属性, 与问题类无关; Hu--Zhang 角点松弛以此为候选.
+
+        Parameters
+        ----------
+        sine_tol : float, optional
+            共线判定的夹角正弦阈值, 默认 ``1e-8``.
+
+        Returns
+        -------
+        Tensor
+            形状 ``(N_corner,)`` 的升序顶点编号.
+
+        Raises
+        ------
+        ValueError
+            网格不是二维, 或某个边界顶点的边界边数不为 2.
+        """
+        if self.top_dimension() != 2 or self.geo_dimension() != 2:
+            raise ValueError("boundary_corner_index 只支持二维网格.")
+        boundary_edges = self.boundary_edge_index()
+        edge = self.entity("edge")[boundary_edges]
+        tangent = self.edge_unit_tangent(index=boundary_edges)
+        # 每条边界边的两个端点各记一次, 按顶点归并后每个边界顶点应恰出现两次
+        nodes = bm.concat([edge[:, 0], edge[:, 1]], axis=0)
+        local_edges = bm.concat(
+            [bm.arange(edge.shape[0]), bm.arange(edge.shape[0])], axis=0
+        )
+        order = bm.argsort(nodes, stable=True)
+        nodes, local_edges = nodes[order], local_edges[order]
+        unique_nodes, counts = bm.unique(nodes, return_counts=True)
+        if bm.any(counts != 2):
+            bad = unique_nodes[counts != 2]
+            raise ValueError(
+                "边界顶点的边界边数须为 2, 以下顶点不满足: "
+                f"{bm.to_numpy(bad).tolist()}"
+            )
+        first, second = tangent[local_edges[0::2]], tangent[local_edges[1::2]]
+        sine = bm.abs(first[:, 0] * second[:, 1] - first[:, 1] * second[:, 0])
+        return unique_nodes[sine > sine_tol]
 
     # [几何]
 

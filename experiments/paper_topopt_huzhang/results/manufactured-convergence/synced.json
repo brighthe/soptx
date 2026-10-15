@@ -1,0 +1,9 @@
+{
+  "synced_at_utc": "2026-10-14T14:12:06+00:00",
+  "source": "outputs/manufactured-convergence/relaxation-on",
+  "files": {
+    "manufactured-convergence/manufactured_convergence.json": "8425e0e9bd0e0b73b9792a727f30a02cbb03a9087a5455ec43a4f949ee6e9dda",
+    "tables/table5_1.md": "cf1d28771e62eedcfeb2c276bbbc2453754b960815f2d6a5650f18f7b85f9d22",
+    "tables/table5_2.md": "7bc882272dcc790f520fb9e02ca309b0e54aeb9f70247495e157b9f510422295"
+  }
+}

@@ -115,7 +115,7 @@ def test_linear_corner_dispatch_forwards_grid_and_density(monkeypatch, tmp_path)
     output_dir = str(tmp_path / "results")
 
     assert module.main([
-        "--problem", "FullMBBBeam3d",
+        "--problem", "FullMBBBeamLine3d",
         "--n-sub", "6", "2", "2", "--n-fine", "4", "4", "4",
         "--density", "cell", "--output-dir", output_dir,
     ]) == 0
@@ -149,7 +149,7 @@ def test_omitted_problem_preserves_2d_linear_corner_default(monkeypatch):
 @pytest.mark.parametrize(("name", "arguments"), (
     ("verify_full_trace_convergence", ["--case", "full_trace_convergence"]),
     ("verify_full_trace_convergence", ["--dim", "3"]),
-    ("verify_full_trace_convergence", ["--problem", "FullMBBBeam3d"]),
+    ("verify_full_trace_convergence", ["--problem", "FullMBBBeamLine3d"]),
     ("verify_full_trace_convergence", ["--levels", "1"]),
     ("verify_full_trace_convergence", ["--solve_method", "scipy"]),
     ("verify_linear_corner_consistency", ["--problem", "HarmonicPoly2D"]),

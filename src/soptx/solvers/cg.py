@@ -1,17 +1,18 @@
-# 移植自 brighthe/fealpy ``fealpy/solver/cg.py`` @ 40016dc56, 含上游
-# suanhaitech/fealpy 没有的 dot_product / residual_refresh 扩展.
-# 此后以 SOPTX 本文件为准演化, 不再跟随 fealpy.solver.cg.
-#
-# 停机判据已对齐 MFEM ``CGSolver::Mult`` (linalg/solvers.cpp): 参照量取初始
-# 残差而非右端项, 判据两边同在迭代内积下度量, 批量右端项逐列独立判定.
-# 上游 fealpy 的 ``rtol * ||b||_2`` 口径不再沿用, 原因见 :func:`cg` 的 Notes.
-#
-# 语义模型借自 PETSc: ``norm_type`` 对应 ``KSPSetNormType``, ``divtol`` 与
-# 退出原因 ``ConvergedReason`` 对应 ``KSPConvergedReason``; ``monitor`` 与
-# ``print_level`` 对应 MFEM 的 ``IterativeSolverMonitor`` 与 ``PrintLevel``.
-# 借的是语义不是代码, 本文件不依赖 PETSc/MFEM.
+"""共轭梯度法: 函数式 :func:`cg` 与 :class:`~soptx.solvers.base.LinearSolver` 包装 :class:`CGSolver`.
+
+默认停机判据对齐 MFEM ``CGSolver::Mult``: 参照量取初始残差;
+显式设置 rtol_reference='rhs' 时改以实际右端项为参照,
+判据两边同在迭代内积下度量, 批量右端项逐列独立判定. 上游 fealpy 的 ``rtol * ||b||_2``
+混合范数口径不再沿用, 原因见 :func:`cg` 的 Notes.
+
+语义模型借自 PETSc: ``norm_type`` 对应 ``KSPSetNormType``, ``divtol`` 与退出原因
+``ConvergedReason`` 对应 ``KSPConvergedReason``; ``monitor`` 与 ``print_level`` 对应
+MFEM 的 ``IterativeSolverMonitor`` 与 ``PrintLevel``. 借的是语义不是代码, 本文件不依赖
+PETSc/MFEM.
+"""
 
 from itertools import count
+from math import isfinite
 import logging
 from typing import Optional, Callable
 
@@ -29,23 +30,26 @@ logger = logging.getLogger(__name__)
 
 #: ``norm_type`` 的合法取值, 命名对齐 PETSc ``KSPNormType``.
 NORM_TYPES = ("natural", "unpreconditioned", "preconditioned")
+RTOL_REFERENCES = ("initial_residual", "rhs")
+
+_INDEFINITE_PC_MESSAGE = "CG encountered an indefinite preconditioner: (r, M^-1 r) < 0"
 
 
-def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike]=None,
+def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike] = None,
        M: Optional[SupportsMatmul] = None, *,
-       batch_first: bool=False,
-       atol: float=1e-12, rtol: float=1e-8,
-       maxit: Optional[int]=10000,
-       returninfo: bool=False,
+       batch_first: bool = False,
+       atol: float = 1e-12, rtol: float = 1e-8,
+       maxit: Optional[int] = 10000,
+       returninfo: bool = False,
        # 借自 PETSc: 判据在哪个范数下度量 + 发散阈值
-       norm_type: str='natural',
-       divtol: float=1e5,
+       norm_type: str = 'natural',
+       rtol_reference: str = 'initial_residual',
+       divtol: float = 1e5,
        # 借自 MFEM IterativeSolver: 残差监视器与打印档位
-       monitor: Optional[Callable[[int, float, TensorLike, bool], None]]=None,
-       print_level: int=1,
-       # 相对 fealpy 上游的扩展: 可插拔内积 + 真残差刷新
-       dot_product: Optional[Callable[[TensorLike, TensorLike], float]] = None,
-       residual_refresh: int = 0,
+       monitor: Optional[Callable[[int, float, TensorLike, bool], None]] = None,
+       print_level: int = 1,
+       # 相对 fealpy 上游的扩展: 收敛时用真残差验证
+       verify_residual: bool = False,
        ) -> TensorLike:
     r"""用共轭梯度法 (CG) 求解线性方程组 Ax = b.
 
@@ -64,8 +68,13 @@ def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike]=None,
     atol : float, default 1e-12
         绝对收敛容差.
     rtol : float, default 1e-8
-        相对收敛容差; 参照量是初始残差 ``||r0||`` 而不是 ``||b||``, 且与
-        判据左边同在迭代内积 (有预条件时即 M^-1 内积) 下度量. 见 Notes.
+        相对收敛容差; 默认参照量是初始残差 ``||r0||``, 设置 rtol_reference='rhs' 时取 ``||b||``, 且与
+        判据左边在同一范数下度量. 热启动时 ``||r0||`` 已经很小, 想要以
+        ``||b||`` 为参照的精度目标时设置 ``rtol_reference='rhs'``.
+        见 Notes.
+    rtol_reference : {'initial_residual', 'rhs'}, default 'initial_residual'
+        相对容差参照量. rhs 模式逐列取右端项在 norm_type 下的范数,
+        停机精度不随热启动改变; divtol 仍以初始残差为参照.
     maxit : int, optional
         最大迭代数, 默认 10000; 传 ``None`` 则迭代到满足任一容差为止.
     returninfo : bool, default False
@@ -94,16 +103,11 @@ def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike]=None,
     print_level : int, default 1
         日志档位, 对应 MFEM ``IterativeSolver::PrintLevel``: ``0`` 全静默,
         ``1`` 只在停机时打一条摘要 (原有行为), ``2`` 另打每步残差.
-    dot_product : callable, optional
-        自定义内积 ``dot(x, y) -> float``. 缺省用
-        ``bm.sum(bm.conj(x) * y, axis=0)``; MPI 分布式求解时传入
-        overlap 修正内积 (如 ``entity_mpi.dot(local_size)[0]``).
-        仅支持 1D 右端项: 这类内积只返回单个标量, 无法区分 batch
-        的各列.
-    residual_refresh : int, default 0
-        大于 0 时每隔该迭代数 (以及最后一次迭代) 重算真残差
-        ``||b - A @ x||`` 并参与收敛判定; 为 0 时只用递推残差
-        (标准 CG 行为).
+    verify_residual : bool, default False
+        为 True 时, 递推残差达到判据或到达最后一次迭代时, 把活跃列的递推残差
+        换成真残差 ``b - A @ x`` 并重算预条件残差后再判定; 递推漂移造成的虚假
+        收敛因此被否决, 未达标的列以替换后的残差继续迭代. 每次验证多一次 matvec
+        与一次预条件子作用. 为 False 时只用递推残差 (标准 CG 行为). 见 Notes.
 
     Returns
     -------
@@ -112,11 +116,20 @@ def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike]=None,
         ``'residual'``, ``'niter'``, ``'breakdown'``, ``'converged'``,
         ``'true_residual'``, ``'recursive_residual'``, ``'reference_norm'``,
         以及退出原因 ``'reason'`` (:class:`~soptx.solvers.base.ConvergedReason`,
-        约定 ``reason > 0`` 等价于 ``converged`` 为 True).
+        约定 ``reason > 0`` 等价于 ``converged`` 为 True) 与批量右端项的逐列退出
+        原因 ``'column_reasons'`` (一维右端项为 None).
+
+    Raises
+    ------
+    TypeError
+        ``b`` 或 ``x0`` 不是张量.
+    ValueError
+        ``b`` 不是一维或二维, ``x0`` 与 ``b`` 形状不同, 或 ``norm_type``、
+        ``divtol``、``print_level``、``verify_residual`` 取值不合法.
 
     Notes
     -----
-    **停机判据 (对齐 MFEM)**. 判据为
+    **默认停机判据 (对齐 MFEM)**. 判据为
 
     ``||r_n||_{M^-1}^2 <= max(rtol^2 * ||r_0||_{M^-1}^2, atol^2)``
 
@@ -125,8 +138,9 @@ def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike]=None,
     (``nom0 = (B r_0, r_0)``). 相对上游 fealpy 有三点不同:
 
     1. 参照量取初始残差 ``||r_0||`` 而非右端项 ``||b||``. 二者只在
-       ``x0 = 0`` 时相等; 热启动 (如 'ea' 路径用 prescribed 作初值) 下
-       用 ``||b||`` 会让 rtol 失去标定意义.
+       ``x0 = 0`` 时相等. ``||r_0||`` 参照下 ``rtol`` 表示残差的下降倍数;
+       热启动时 ``||r_0||`` 已经很小, 同一个 ``rtol`` 会比以 ``||b||`` 为
+       参照更严. 需要与初值无关的精度目标时, 设置 ``rtol_reference='rhs'``.
     2. 判据两边同范数. 上游左边是 M^-1 内积下的递推残差, 右边是
        ``rtol * ||b||_2``; 开 Jacobi 后 ``diag^-1`` 可达 1e6 量级, 左边
        被放大约三个数量级, 同一个 rtol 在有无预条件时含义不同.
@@ -141,45 +155,54 @@ def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike]=None,
     :class:`~soptx.solvers.base.ConvergedReason`, 取值与整数编码都照
     ``KSPConvergedReason``: 非正曲率记 ``DIVERGED_INDEFINITE_MAT``, 判据量
     出现 NaN/Inf 记 ``DIVERGED_NANORINF``, 超过 ``divtol`` 记
-    ``DIVERGED_DTOL``, maxit 耗尽记 ``DIVERGED_ITS``. 其中非正曲率一律停机,
+    ``DIVERGED_DTOL``, maxit 耗尽记 ``DIVERGED_ITS``, 预条件子不正定
+    (:math:`(r, M^{-1} r) < 0`) 记 ``DIVERGED_INDEFINITE_PC``. 后者须在收敛判定之前
+    拦下: ``natural`` 范数下判据量就是 :math:`(r, M^{-1} r)`, 负值截断为零后会被
+    误判为收敛. 非正曲率一律停机,
     这一点跟随 PETSc 而非 MFEM -- MFEM 在 ``den <= 0`` 时只告警, 仅
     ``den == 0`` 才返回; 停机是为了把误用在鞍点系统上的情形暴露出来.
 
-    ``dot_product`` 与 ``residual_refresh`` 是 SOPTX 相对上游
-    suanhaitech/fealpy 的扩展, 服务于分布式 overlap 修正内积与
-    周期性真残差刷新, MFEM 与 PETSc 的 CG 都没有对应机制.
+    **收敛时的真残差验证**. ``verify_residual`` 是 SOPTX 相对上游
+    suanhaitech/fealpy 的扩展, MFEM 与 PETSc 的 CG 都没有对应机制. 它只在
+    递推残差宣布达标时 (以及最后一次迭代) 做一次残差替换, 不做周期替换:
+    周期性地用真残差替换递推残差会破坏 CG 递推的局部正交性, 病态问题上
+    迭代数可增加 15%--30%; 只在达标时替换, 算子精确时迭代轨迹与标准 CG
+    完全一致. 代价是不提高可达精度, 只保证报告收敛时真残差确实达标.
     """
 
-    assert isinstance(b, TensorLike), "b must be a Tensor"
-    if x0 is not None:
-        assert isinstance(x0, TensorLike), "x0 must be a Tensor if not None"
+    if not isinstance(b, TensorLike):
+        raise TypeError(f"b 须为张量, 得到 {type(b).__name__}")
+    if x0 is not None and not isinstance(x0, TensorLike):
+        raise TypeError(f"x0 须为张量或 None, 得到 {type(x0).__name__}")
     single_vector = b.ndim == 1
 
     if b.ndim not in {1, 2}:
-        raise ValueError("b must be a 1D or 2D dense tensor")
+        raise ValueError(f"b 须为一维或二维稠密张量, 得到 ndim={b.ndim}")
 
     if x0 is None:
         x0 = bm.zeros_like(b)
     else:
         if x0.shape != b.shape:
-            raise ValueError("x0 and b must have the same shape")
-
-    if (dot_product is not None) and (not single_vector):
-        raise NotImplementedError(
-            "dot_product collapses a batch to one scalar and cannot drive "
-            "per-column steps; use a 1-D right-hand side"
-        )
+            raise ValueError(f"x0 与 b 的形状须一致, 得到 {tuple(x0.shape)} 与 {tuple(b.shape)}")
 
     if norm_type not in NORM_TYPES:
         raise ValueError(
             f"norm_type 必须是 {NORM_TYPES} 之一, 得到 {norm_type!r}"
         )
 
+    if rtol_reference not in RTOL_REFERENCES:
+        raise ValueError(f"rtol_reference 须为 {RTOL_REFERENCES}, 得到 {rtol_reference!r}")
+    if not all(isfinite(v) and v >= 0.0 for v in (atol, rtol)):
+        raise ValueError("atol 与 rtol 须为有限非负数.")
+
     if divtol <= 0.0:
         raise ValueError(f"divtol 必须为正, 得到 {divtol}")
 
     if print_level < 0:
         raise ValueError(f"print_level 必须非负, 得到 {print_level}")
+
+    if not isinstance(verify_residual, bool):
+        raise ValueError(f"verify_residual 必须是 bool, 得到 {verify_residual!r}")
 
     if (not single_vector) and batch_first:
         b = bm.swapaxes(b, 0, 1)
@@ -188,9 +211,9 @@ def cg(A: SupportsMatmul, b: TensorLike, x0: Optional[TensorLike]=None,
     sol, info = _cg_impl(
         A, b, x0, M,
         atol=atol, rtol=rtol, maxit=maxit,
-        dot_product=dot_product,
-        residual_refresh=residual_refresh,
+        verify_residual=verify_residual,
         norm_type=norm_type,
+        rtol_reference=rtol_reference,
         divtol=divtol,
         monitor=monitor,
         print_level=print_level,
@@ -223,16 +246,13 @@ def _column_squares(value):
     MFEM 一次只解一个右端项, 每列有各自的参照量与阈值. 这里保留列维,
     把批量当成 N 次独立的 MFEM 求解: :func:`_cg_impl` 逐列判定、逐列冻
     结, 而不是先聚合成一个标量再比一次.
-
-    ``dot_product`` 只支持一维右端项且返回单个标量, 走 0 维分支, 行为
-    与改造前一致.
     """
     v = bm.asarray(value)
     return bm.maximum(v, bm.zeros_like(v))
 
 
 def _tolerance_squares(reference_squares, atol: float, rtol: float):
-    """逐列阈值 ``max(rtol^2 * ||r0||^2, atol^2)``.
+    """逐列阈值 ``max(rtol^2 * reference_squares, atol^2)``.
 
     与 MFEM 的 ``r0 = std::max(nom*rel_tol*rel_tol, abs_tol*abs_tol)``
     同构: 全程比较平方量, 不开方.
@@ -247,10 +267,10 @@ def _report_norm(squares) -> float:
 
 
 def _cg_impl(A, b, x0, M, atol, rtol, maxit,
-             dot_product=None, residual_refresh=0,
-             norm_type='natural', divtol=1e5,
+             verify_residual=False,
+             norm_type='natural', rtol_reference='initial_residual', divtol=1e5,
              monitor=None, print_level=1):
-    """CG 主循环: 逐列独立停机与冻结, 支持自定义内积、真残差刷新与判据范数.
+    """CG 主循环: 逐列独立停机与冻结, 支持收敛时的真残差验证与判据范数选择.
 
     批量右端项按 N 次独立求解处理: 每列各有自己的阈值、退出原因与冻结时
     刻. 达标或失效的列把 ``alpha`` / ``beta`` 置零, 其 ``x`` 与 ``r`` 从此
@@ -263,22 +283,23 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
         'niter': 0,
         'breakdown': None,
         'converged': False,
-        'true_residual': None,   # 仅 residual_refresh > 0 时填充
+        'true_residual': None,   # 仅 verify_residual 为 True 且做过验证时填充
         'recursive_residual': 0.0,
-        # rtol 的参照量 ||r0||, 供下游门禁与判据对齐; x0 = 0 时等于 ||b||
+        # rtol 的参照量, 由 rtol_reference 和 norm_type 共同决定.
         'reference_norm': 0.0,
+        'rtol_reference': rtol_reference,
+        'norm_type': norm_type,
+        'rhs_norm': 0.0,
+        'stopping_threshold': float(atol),
+        'initial_residual_norm': 0.0,
         # 退出原因, 约定 reason > 0 等价于 converged 为 True
         'reason': ConvergedReason.ITERATING,
         # 批量右端项的逐列退出原因; 一维右端项为 None
         'column_reasons': None,
     }
 
-    if dot_product is None:
-        def _dot(x, y):
-            return bm.sum(bm.conj(x) * y, axis=0)
-    else:
-        def _dot(x, y):
-            return dot_product(x, y)
+    def _dot(x, y):
+        return bm.sum(bm.conj(x) * y, axis=0)
 
     def _squares(x):
         return _column_squares(_dot(x, x))
@@ -296,20 +317,6 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
             return _squares(r)
         return _squares(z)
 
-    def _criterion_of(r):
-        """从残差本身算判据量, 供真残差刷新使用.
-
-        与 :func:`_criterion` 同口径, 因此真残差与递推残差共用同一个阈值
-        ``tol_sq`` -- 真残差刷新防的是递推漂移, 与判据取哪个范数正交, 不该
-        再引入第二套阈值.
-        """
-        if norm_type == 'unpreconditioned':
-            return _squares(r)
-        z = M @ r if M is not None else r
-        if norm_type == 'preconditioned':
-            return _squares(z)
-        return _column_squares(_dot(r, z))
-
     def _notify(iteration, norm, residual, final):
         """每步残差的出口: print_level 走日志, monitor 走调用方回调.
 
@@ -321,8 +328,15 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
         if monitor is not None:
             monitor(iteration, norm, residual, final)
 
-    if _report_norm(_squares(b)) < 1e-15:
+    rhs_norm = _report_norm(_squares(b))
+    info['rhs_norm'] = rhs_norm
+    # rhs 模式仅对严格零右端返回零解, 不将极小但非零的载荷误判为零.
+    zero_rhs = (not bool(bm.any(b != 0.0)) if rtol_reference == 'rhs'
+                else rhs_norm < 1e-15)
+    if zero_rhs:
         info['converged'] = True
+        if verify_residual:
+            info['true_residual'] = 0.0
         info['reason'] = ConvergedReason.CONVERGED_ATOL
         solution = bm.zeros_like(b)
         _notify(0, 0.0, solution, True)
@@ -337,12 +351,24 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
     true_norm = None
 
     recursive_sq = _criterion(r, z, rhssq)
-    reference_sq = recursive_sq
+    initial_sq = recursive_sq
+    reference_sq = initial_sq
+    if rtol_reference == 'rhs':
+        if norm_type == 'unpreconditioned' or M is None:
+            reference_sq = _squares(b)
+        else:
+            z_rhs = M @ b
+            rhs_product = _dot(b, z_rhs)
+            if bool(bm.any(bm.asarray(rhs_product) < 0.0)):
+                raise ValueError(_INDEFINITE_PC_MESSAGE)
+            reference_sq = _criterion(b, z_rhs, rhs_product)
     tol_sq = _tolerance_squares(reference_sq, atol, rtol)
-    # divtol 的基准与 PETSc 一致: 判据量相对初值放大 divtol 倍即判发散.
-    div_sq = (divtol * divtol) * reference_sq
+    # 发散判据始终相对初始残差, 不随相对收敛容差的参考量改变.
+    div_sq = (divtol * divtol) * initial_sq
     recursive_norm = _report_norm(recursive_sq)
-    info['reference_norm'] = recursive_norm
+    info['initial_residual_norm'] = recursive_norm
+    info['reference_norm'] = _report_norm(reference_sq)
+    info['stopping_threshold'] = _report_norm(tol_sq)
     # 监视器从 0 起算, 与 MFEM 一样先报初始残差.
     residual_vector = r
     _notify(0, recursive_norm, residual_vector, False)
@@ -391,6 +417,9 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
         if info['breakdown'] is None and int(info['reason']) < 0:
             info['breakdown'] = reason_text(info['reason'])
 
+        if verify_residual and info['converged'] and true_norm is None:
+            # 初值已经通过判据时, r 本身就是直接计算的真残差.
+            info['true_residual'] = float(recursive_norm)
         info['residual'] = float(recursive_norm)
         info['recursive_residual'] = float(recursive_norm)
         info['niter'] = n_iter
@@ -401,7 +430,7 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
             if info['converged']:
                 logger.info(f"CG: converged in {n_iter} iterations, "
                             f"||r||={recursive_norm:.6e} <= "
-                            f"max(rtol*||r0||, atol).")
+                            f"max(rtol*reference_norm, atol), reference={rtol_reference}.")
             elif info['reason'] == ConvergedReason.DIVERGED_ITS:
                 logger.info(f"CG: failed, stopped by maxit ({maxit}).")
             else:
@@ -412,8 +441,10 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
 
         return sol, info
 
-    _freeze(~bm.isfinite(recursive_sq),
+    _freeze(~bm.isfinite(recursive_sq) | ~bm.isfinite(reference_sq),
             float(ConvergedReason.DIVERGED_NANORINF))
+    _freeze(bm.asarray(rhssq) < 0.0, float(ConvergedReason.DIVERGED_INDEFINITE_PC),
+            _INDEFINITE_PC_MESSAGE)
     _freeze(recursive_sq <= tol_sq, converged_codes)
 
     iterations = count(1) if maxit is None else range(1, maxit + 1)
@@ -451,9 +482,6 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
             rhssq_new = _dot(r_new, z_new)
 
             recursive_sq = _criterion(r_new, z_new, rhssq_new)
-            recursive_norm = _report_norm(recursive_sq)
-            residual_vector = r_new
-            _notify(n_iter, recursive_norm, residual_vector, False)
 
             _freeze(~bm.isfinite(recursive_sq),
                     float(ConvergedReason.DIVERGED_NANORINF))
@@ -464,21 +492,35 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
 
             reached = recursive_sq <= tol_sq
 
-            # 真残差刷新: 递推残差在长迭代下会漂移, 定期用 b - A @ x 校正.
-            # 与递推残差同范数, 因此共用 tol_sq.
-            refresh = (residual_refresh > 0 and
-                       (n_iter % residual_refresh == 0 or
-                        bool(bm.any(active & reached)) or
-                        n_iter == maxit))
+            # 收敛时的真残差验证: 递推残差可能与真残差漂开, 有列宣布达标 (或到最后
+            # 一次迭代) 时把活跃列的 r 换成 b - A x, 并重算 z 与 (r, z), 再判定.
+            # 替换后判据量就是真残差, 虚假达标随之被否决, 未达标的列以替换后的残差
+            # 继续迭代. 搜索方向 p 不动; 冻结列的 r 与 z 保持原值. 不做周期替换:
+            # 那会破坏递推的局部正交性, 拖慢收敛.
+            verify = (verify_residual and
+                      (bool(bm.any(active & reached)) or n_iter == maxit))
 
-            if refresh:
-                true_sq = _criterion_of(b - A @ x)
-                true_norm = _report_norm(true_sq)
+            if verify:
+                r_true = b - A @ x
+                z_true = M @ r_true if M is not None else r_true
+                rz_true = _dot(r_true, z_true)
+                true_norm = _report_norm(_criterion(r_true, z_true, rz_true))
                 info['true_residual'] = float(true_norm)
-                # 真残差只能额外促成收敛, 不能否决递推残差已给出的判定.
-                reached = reached | (bm.isfinite(true_sq) &
-                                     (true_sq <= tol_sq))
+                r_new = bm.where(active, r_true, r_new)
+                z_new = bm.where(active, z_true, z_new)
+                rhssq_new = _dot(r_new, z_new)
+                recursive_sq = _criterion(r_new, z_new, rhssq_new)
+                reached = recursive_sq <= tol_sq
 
+            recursive_norm = _report_norm(recursive_sq)
+            residual_vector = r_new
+            _notify(n_iter, recursive_norm, residual_vector, False)
+
+            # 先拦不正定的预条件子, 再判收敛: natural 范数下负的 (r, M^-1 r) 被截断为零,
+            # 会被误判为达标
+            _freeze(bm.asarray(rhssq_new) < 0.0,
+                    float(ConvergedReason.DIVERGED_INDEFINITE_PC),
+                    _INDEFINITE_PC_MESSAGE)
             _freeze(reached, converged_codes)
 
             if not bool(bm.any(active)):
@@ -503,7 +545,6 @@ def _cg_impl(A, b, x0, M, atol, rtol, maxit,
     return _finalize(x)
 
 
-
 @register("cg")
 class CGSolver(LinearSolver):
     """共轭梯度法的 LinearSolver 包装, 3D 主线的外层 Krylov.
@@ -511,11 +552,12 @@ class CGSolver(LinearSolver):
     ``requires`` 为空: 只需算子支持 ``@``, 因此 'fa' 的稀疏矩阵与 'ea' 的
     matrix-free 算子都能用 -- 这是 3D 大规模主线选它作外层的根本原因.
 
-    ``M`` 位接任意 :class:`LinearSolver` 或任何支持 ``@`` 的对象: 对角预条件
-    子, 多重网格, 乃至另一个 Krylov. 求解器位与预条件子位是两个独立自由度,
-    组合合法性由调用点负责, 包内不预设.
+    ``M`` 位接任意 :class:`LinearSolver` 或任何支持 ``@`` 的对象, 例如对角
+    预条件子、多重网格与直接法. PCG 要求它是固定、对称、正定的线性算子: 按容差
+    停止的内层迭代与 Krylov 求解器的输出对右端项是非线性的, 不能填进来, 嵌套
+    Krylov 需要柔性 CG (FCG), 本包没有. 组合是否合法由调用点负责, 包内不检查.
 
-    要求算子对称正定. 鞍点系统请用 :class:`~soptx.solvers.minres.MINRESSolver`.
+    要求算子对称正定. 鞍点系统需要 MINRES 一类的方法, 本包尚未实现.
 
     Parameters
     ----------
@@ -523,6 +565,9 @@ class CGSolver(LinearSolver):
         预条件子, ``M @ r`` 返回 :math:`M^{-1} r`.
     atol, rtol : float
         绝对与相对收敛容差.
+    rtol_reference : {'initial_residual', 'rhs'}, default 'initial_residual'
+        相对容差参照量. rhs 模式逐列取右端项在 norm_type 下的范数,
+        停机精度不随热启动改变; divtol 仍以初始残差为参照.
     maxit : int, optional
         最大迭代数; ``None`` 表示不设上限.
     batch_first : bool, default False
@@ -535,11 +580,8 @@ class CGSolver(LinearSolver):
         残差监视器, 签名照 MFEM ``MonitorResidual``; 见 :func:`cg`.
     print_level : int, default 1
         日志档位 (0 静默 / 1 摘要 / 2 每步); 见 :func:`cg`.
-    dot_product : callable, optional
-        自定义内积, 分布式求解时传 overlap 修正内积; 见 :func:`cg`.
-        只支持一维右端项.
-    residual_refresh : int, default 0
-        真残差刷新间隔; 见 :func:`cg`.
+    verify_residual : bool, default False
+        收敛时是否用真残差验证; 见 :func:`cg`.
 
     Notes
     -----
@@ -554,7 +596,7 @@ class CGSolver(LinearSolver):
     注意 ``relres`` 是**报告量**, 与停机判据不是同一个口径: 判据按 MFEM
     逐列比 :math:`\\|r\\|_{M^{-1}}` 与 :math:`\\mathrm{rtol}\\|r_0\\|_{M^{-1}}`,
     ``relres`` 则按 Frobenius 聚合并以 :math:`\\|b\\|` 为分母, 以保持与
-    ``DirectSolver`` 可比. 参照量 :math:`\\|r_0\\|` 另由 ``reference_norm``
+    ``DirectSolver`` 可比. 所选参照量另由 ``reference_norm``
     给出.
     """
 
@@ -569,22 +611,24 @@ class CGSolver(LinearSolver):
         maxit: Optional[int] = 10000,
         batch_first: bool = False,
         norm_type: str = 'natural',
+        rtol_reference: str = 'initial_residual',
         divtol: float = 1e5,
         monitor: Optional[
             Callable[[int, float, TensorLike, bool], None]] = None,
         print_level: int = 1,
-        dot_product: Optional[Callable[[TensorLike, TensorLike], float]] = None,
-        residual_refresh: int = 0,
+        verify_residual: bool = False,
     ) -> None:
         super().__init__()
-        if residual_refresh < 0:
+        if not isinstance(verify_residual, bool):
             raise ValueError(
-                f"residual_refresh 必须非负, 得到 {residual_refresh}"
+                f"verify_residual 必须是 bool, 得到 {verify_residual!r}"
             )
         if norm_type not in NORM_TYPES:
-            raise ValueError(
-                f"norm_type 必须是 {NORM_TYPES} 之一, 得到 {norm_type!r}"
-            )
+            raise ValueError(f"norm_type 须为 {NORM_TYPES}, 得到 {norm_type!r}")
+        if rtol_reference not in RTOL_REFERENCES:
+            raise ValueError(f"rtol_reference 须为 {RTOL_REFERENCES}, 得到 {rtol_reference!r}")
+        if not all(isfinite(v) and v >= 0.0 for v in (atol, rtol)):
+            raise ValueError("atol 与 rtol 须为有限非负数.")
         if divtol <= 0.0:
             raise ValueError(f"divtol 必须为正, 得到 {divtol}")
         if print_level < 0:
@@ -595,14 +639,15 @@ class CGSolver(LinearSolver):
         self._maxit = maxit
         self._batch_first = batch_first
         self._norm_type = norm_type
+        self._rtol_reference = rtol_reference
         self._divtol = divtol
         self._monitor = monitor
         self._print_level = print_level
-        self._dot_product = dot_product
-        self._residual_refresh = residual_refresh
+        self._verify_residual = verify_residual
 
     @property
     def M(self) -> Optional[SupportsMatmul]:
+        """预条件子; 未给出时为 None."""
         return self._M
 
     def setup(self, op) -> "CGSolver":
@@ -628,24 +673,20 @@ class CGSolver(LinearSolver):
             maxit=self._maxit,
             returninfo=True,
             norm_type=self._norm_type,
+            rtol_reference=self._rtol_reference,
             divtol=self._divtol,
             monitor=self._monitor,
             print_level=self._print_level,
-            dot_product=self._dot_product,
-            residual_refresh=self._residual_refresh,
+            verify_residual=self._verify_residual,
         )
         info = dict(info)
         info['relres'] = self._relative_residual(b, x)
         return x, info
 
     def _relative_residual(self, b: TensorLike, x: TensorLike) -> float:
-        """真相对残差, 用与迭代同一个内积度量."""
-        if self._dot_product is None:
-            def _dot(u, v):
-                return bm.sum(bm.conj(u) * v, axis=0)
-        else:
-            def _dot(u, v):
-                return self._dot_product(u, v)
+        """真相对残差 ``||b - A x|| / ||b||``; 2D 右端按 Frobenius 范数."""
+        def _dot(u, v):
+            return bm.sum(bm.conj(u) * v, axis=0)
 
         def _norm(u) -> float:
             return max(_collapse(_dot(u, u)), 0.0) ** 0.5
@@ -657,6 +698,8 @@ class CGSolver(LinearSolver):
 
         b_norm = _norm(b)
         # 与 cg 内部同一判据: 右端为零时直接返回零解, 相对残差记 0.
-        if b_norm < 1e-15:
+        zero_rhs = (not bool(bm.any(b != 0.0)) if self._rtol_reference == 'rhs'
+                    else b_norm < 1e-15)
+        if zero_rhs:
             return 0.0
         return float(_norm(b - self.op @ x) / b_norm)

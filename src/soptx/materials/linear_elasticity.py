@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from math import isclose, isfinite
 from typing import Optional, Sequence
 
@@ -6,24 +6,15 @@ from soptx.backend import backend_manager as bm
 from soptx.functionspace.utils import flatten_indices
 from soptx.typing import TensorLike
 
-from ..core import BaseLogged
 
-
-class LinearElasticMaterial(BaseLogged):
+class LinearElasticMaterial(ABC):
     """线弹性材料模型的抽象基类."""
 
     def __init__(
         self,
         density: Optional[float] = None,
         device: Optional[str] = None,
-        enable_logging: bool = True,
-        logger_name: Optional[str] = None,
     ) -> None:
-        super().__init__(
-            enable_logging=enable_logging,
-            logger_name=logger_name,
-        )
-
         if density is not None:
             density = float(density)
             if not isfinite(density) or density < 0.0:
@@ -301,14 +292,10 @@ class IsotropicLinearElasticMaterial(LinearElasticMaterial):
         hypothesis: str = "3D",
         density: Optional[float] = None,
         device: Optional[str] = None,
-        enable_logging: bool = False,
-        logger_name: Optional[str] = None,
     ) -> None:
         super().__init__(
             density=density,
             device=device,
-            enable_logging=enable_logging,
-            logger_name=logger_name,
         )
 
         if hypothesis not in self._VALID_HYPOTHESES:

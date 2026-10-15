@@ -605,9 +605,9 @@ def install_analysis_modules(
         IsotropicLinearElasticMaterial=lambda **kwargs: SimpleNamespace(**kwargs),
     )
     install(
-        monkeypatch, "soptx.problems.elasticity",
-        CantileverCorner2d=lambda **kwargs: SimpleNamespace(**kwargs),
-        FullMBBBeam3d=lambda **kwargs: SimpleNamespace(**kwargs),
+        monkeypatch, "soptx.problems",
+        CantileverCornerPoint2d=lambda **kwargs: SimpleNamespace(**kwargs),
+        FullMBBBeamLine3d=lambda **kwargs: SimpleNamespace(**kwargs),
     )
 
     def interpolation(**kwargs):

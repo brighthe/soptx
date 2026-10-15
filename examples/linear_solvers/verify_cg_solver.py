@@ -12,8 +12,9 @@ case 轴是预条件子 (``--case``), 与 verify_direct_solvers 的"一个 case 
     none    无预条件, M=None
     jacobi  DiagonalPreconditioner(diag), diag 由 assemble_operator_diagonal 取出
 
-尚未实现的预条件子 (Chebyshev, AMG, 多重网格) 不在注册表里; 落地后加一条注册项
-即可, 可用性由 ``case_available`` 探测.
+尚未实现的预条件子 (AMG) 不在注册表里; 落地后加一条注册项即可, 可用性由
+``case_available`` 探测. 几何多重网格 (键 ``gmg``) 已实现, 但需要结构化六面体网格的
+层次, 不在本脚本的 case 表里.
 
 同一个离散算子以两种形态进入 CG:
 
@@ -32,7 +33,7 @@ consistency  'fa' 上 CG 解与 DirectSolver('scipy') 解一致, 对完整算子
              在阈值内.
 level        同一参数、同一初值下 'fa' 与 'ea' 同解, 迭代数相差不超过 1.
 norm         三档 norm_type 都收敛且同解; 无预条件时三档迭代数相同.
-refresh      residual_refresh=0 与 =20 同解; info['relres'] 与脚本独立算的
+refresh      verify_residual 开与关同解; info['relres'] 与脚本独立算的
              ||b - A x|| / ||b|| 一致.
 batch        两列尺度相差 1e3 的右端项批量求解, 逐列与单独求解一致;
              batch_first 两种布局同解.
@@ -197,16 +198,13 @@ BATCH_SCALE = 1.0e-3
 BATCH_NOISE = 0.1
 BATCH_SEED = 0
 
-# refresh 的真残差刷新间隔.
-REFRESH_INTERVAL = 20
-
 NORM_FLOOR = 1.0e-300
 
 
 def case_available(case: dict[str, Any]) -> tuple[bool, str]:
     """预条件子在当前代码里是否已实现, 及不可用的原因.
 
-    占位类 (Chebyshev, AMG, 多重网格) 在 ``__init__`` 就抛 NotImplementedError,
+    尚未实现的预条件子若以占位类接入, 约定在 ``__init__`` 就抛 NotImplementedError,
     用一个极小的假层级探一下即可, 不必装配真实系统.
     """
     probe = {"diag": bm.ones(2, dtype=bm.float64), "operator": None}
@@ -471,7 +469,7 @@ def check_norm(context: dict[str, Any], case: dict[str, Any]) -> dict[str, Any]:
 # refresh
 # --------------------------------------------------------------------------
 def check_refresh(context: dict[str, Any], case: dict[str, Any]) -> dict[str, Any]:
-    """residual_refresh 不改变解; info['relres'] 与脚本独立算的真残差一致."""
+    """verify_residual 不改变解; info['relres'] 与脚本独立算的真残差一致."""
     entries: dict[str, Any] = {}
     lines: list[str] = []
     passed = True
@@ -481,34 +479,34 @@ def check_refresh(context: dict[str, Any], case: dict[str, Any]) -> dict[str, An
         level = entry["level"]
         solutions = {}
         group: dict[str, Any] = {}
-        for refresh in (0, REFRESH_INTERVAL):
+        for verify in (False, True):
             x, info = solve_cg(
                 entry["operator"], entry["load"], x0,
-                M=preconditioner(case, entry), residual_refresh=refresh,
+                M=preconditioner(case, entry), verify_residual=verify,
             )
-            remember(context, f"refresh {level} refresh={refresh}", info)
+            remember(context, f"refresh {level} verify={verify}", info)
             own = true_relative_residual(entry["operator"], entry["load"], x)
             reported = float(info["relres"])
             relres_diff = abs(reported - own) / max(own, NORM_FLOOR)
             ok = bool(info["converged"]) and relres_diff <= TOLERANCES["relres_rel_diff"]
             passed = passed and ok
-            solutions[refresh] = x
-            group[f"refresh={refresh}"] = {
+            solutions[verify] = x
+            group[f"verify={verify}"] = {
                 "solve": summarize(info),
                 "own_relres": own,
                 "relres_rel_diff": relres_diff,
             }
             lines.append(
-                f"  {level} refresh={refresh:2d}: niter {info['niter']:5d}"
+                f"  {level} verify={str(verify):5s}: niter {info['niter']:5d}"
                 f"  relres 报告 {reported:.3e} / 独立 {own:.3e}"
                 f"  相对差 {relres_diff:.1e}  [{verdict(ok)}]"
             )
-        _, diff = relative_difference(solutions[REFRESH_INTERVAL], solutions[0])
+        _, diff = relative_difference(solutions[True], solutions[False])
         ok_diff = diff <= TOLERANCES["solution_rel_diff"]
         passed = passed and ok_diff
         group["solution_rel_diff"] = diff
         lines.append(
-            f"  {level}: ||x_{REFRESH_INTERVAL} - x_0|| / ||x_0||  {diff:.3e}"
+            f"  {level}: ||x_verify - x|| / ||x||  {diff:.3e}"
             f"  (阈值 {TOLERANCES['solution_rel_diff']:.0e})  [{verdict(ok_diff)}]"
         )
         entries[level] = group
@@ -662,7 +660,7 @@ def check_contract(context: dict[str, Any], case: dict[str, Any]) -> dict[str, A
         ("diag 含负元素", lambda: DiagonalPreconditioner(diag_with_negative)),
         ("diag 非一维", lambda: DiagonalPreconditioner(bm.reshape(diag, (-1, 1)))),
         ("非法 norm_type", lambda: CGSolver(norm_type="euclidean")),
-        ("residual_refresh=-1", lambda: CGSolver(residual_refresh=-1)),
+        ("verify_residual 非 bool", lambda: CGSolver(verify_residual=5)),
         ("divtol=0", lambda: CGSolver(divtol=0.0)),
     ]
     guard_entries: dict[str, Any] = {}

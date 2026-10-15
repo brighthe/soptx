@@ -43,6 +43,11 @@ class Filter(BaseLogged):
 
     这一层次关系在实现上由 ``ProjectionStrategy(DensityStrategy)`` 的继承
     表达; 扁平枚举只是配置层的门面, 读配置时不要把后两者理解成互斥选项.
+
+    ``symmetry_planes`` 在过滤矩阵里实现设计对称化 (PolyFilter 的 ``Sym``
+    选项): 设计点坐标关于给定平面折叠后再取邻域, 过滤输出关于该平面对称.
+    字典的键为坐标轴下标, 值为对称面坐标, 例如 ``{0: 6.0}`` 表示关于 ``x = 6``
+    对称; 见 ``FilterMatrixBuilder``.
     """
     def __init__(self,
                 design_mesh: HomogeneousMesh,
@@ -53,11 +58,11 @@ class Filter(BaseLogged):
                 filter_q: int = 1,
                 projection_params: Optional[Dict] = None,
                 passive_mask: Optional[TensorLike] = None,
-                enable_logging: bool = True,
-                logger_name: Optional[str] = None,
+                symmetry_planes: Optional[Dict[int, float]] = None,
             ) -> None:
 
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_error, 不受日志开关影响
+        super().__init__(enable_logging=False)
         
         self._design_mesh = design_mesh
         self._filter_type = filter_type
@@ -90,8 +95,7 @@ class Filter(BaseLogged):
                                     rmin=self._rmin, 
                                     density_location=self._density_location,
                                     q=self._filter_q,
-                                    enable_logging=enable_logging,
-                                    logger_name=logger_name,
+                                    symmetry_planes=symmetry_planes,
                                 )
             self._H = builder.build()
             self._cell_measure = self._design_mesh.entity_measure('cell')
@@ -114,9 +118,7 @@ class Filter(BaseLogged):
                             'H': self._H,
                             'design_mesh': self._design_mesh,
                             'density_location': self._density_location,
-                            'disp_mesh': self._disp_mesh, 
-                            'enable_logging': enable_logging, 
-                            'logger_name': logger_name
+                            'disp_mesh': self._disp_mesh,
                         }
         
         if self._filter_type == 'projection' and projection_params:
@@ -133,9 +135,9 @@ class Filter(BaseLogged):
     def design_mesh(self) -> HomogeneousMesh:
         """设计变量所在网格.
 
-        优化器 (如 OC) 据此向问题类索取被动单元掩码
-        (``pde.get_passive_element_mask(mesh=design_mesh)``); 问题类不定义
-        该方法时优化器不设掩码, 现有无被动区的工况不受影响.
+        优化器据此向问题类索取物理非设计区掩码
+        (``pde.get_passive_element_mask(mesh=design_mesh)``), 再与 ``passive_mask``
+        取并集, 见 ``soptx.topology.optimizers.utils.merge_passive_masks``.
         """
         return self._design_mesh
 
@@ -144,7 +146,7 @@ class Filter(BaseLogged):
         """实体保留单元的布尔掩码; 无保留区时为 None.
 
         消费端 (驱动层的产物汇总、冻结评价) 需要知道哪些单元的密度不是设计
-        结果而是硬约束, 否则会把垫片的体积算成优化得到的体积.
+        结果而是硬约束, 否则会把被动实体区的体积算成优化得到的体积.
         """
         return self._passive_mask
 

@@ -25,7 +25,6 @@ from soptx.fem.matrix.csr_pattern import (
     build_csr_pattern_from_dofmap,
 )
 
-from .layout import InterfaceDofsView
 from .problem_adapter import (
     project_problem_conditions_to_interface_system,
     project_problem_conditions_to_macro_system,
@@ -445,7 +444,7 @@ class InterfaceSpace:
         conditions = project_problem_conditions_to_interface_system(
             problem,
             self.assembler,
-            InterfaceDofsView(global_dofs=self.global_dofs),
+            self.global_dofs,
         )
         return conditions.interface_force, conditions.interface_fixed_dofs
 
@@ -480,7 +479,7 @@ class InterfaceSpace:
         conditions = project_problem_conditions_to_interface_system(
             problem,
             self.assembler,
-            InterfaceDofsView(global_dofs=interface_dofs),
+            interface_dofs,
         )
         return conditions.interface_force, conditions.interface_fixed_dofs
 

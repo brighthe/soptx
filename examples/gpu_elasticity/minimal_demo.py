@@ -82,7 +82,6 @@ def solve_once(
         operator_level="fa",
         solve_method="cg",
         topopt_algorithm=None,
-        enable_logging=False,
     )
 
     K0 = analyzer.assemble_stiff_matrix()
@@ -152,7 +151,6 @@ def main() -> int:
         hypothesis="plane_strain",
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
-        enable_logging=False,
     )
 
     # 1. pytorch CPU 参考解

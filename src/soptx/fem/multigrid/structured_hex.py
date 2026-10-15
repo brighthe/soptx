@@ -19,8 +19,8 @@
 细单元先把受约束的局部自由度置零再组合. 这一步不需要细层的全局矩阵, 也不产生
 :math:`K P` 这样的大中间乘积. 第 2 层以下的矩阵已经很小, 直接做稀疏的 Galerkin 投影.
 
-网格编号遵循 :mod:`soptx.mesh.structured_box` 的公开约定: 节点与单元都按 x 最慢、z 最快的
-字典序排列, 单元局部顶点顺序取该模块的六面体模板.
+网格编号遵循 ``HexahedronMesh.from_box`` 的公开约定: 节点与单元都按 x 最慢、z 最快的
+字典序排列, 单元局部顶点顺序见其 docstring.
 """
 
 from __future__ import annotations
@@ -34,14 +34,14 @@ import scipy.sparse as sp
 
 from soptx.backend import backend_manager as bm
 from soptx.backend import TensorLike
-from soptx.mesh.structured_box import _TEMPLATES, _grid_cells
 from soptx.solvers import DirectSolver, JacobiSmoother, Multigrid, operator_diagonal
 from soptx.sparse import CSRTensor
 
 from ..matrix.csr_pattern import assemble_csr, build_csr_pattern_from_dofmap
 
-# 六面体模板的局部顶点偏移 (8, 3), 顺序即单元的局部顶点顺序
-_HEX_OFFSETS = np.asarray(_TEMPLATES['hex'][2][0], dtype=np.int64)
+# 六面体的局部顶点偏移 (8, 3), 顺序即 HexahedronMesh.from_box 单元的局部顶点顺序
+_HEX_OFFSETS = np.asarray([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+                           (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)], dtype=np.int64)
 # 子单元位置 (a, b, c), a 最慢; 第 c 个子单元为细单元 (2I + a, 2J + b, 2K + c)
 _CHILD_OFFSETS = np.asarray(list(product((0, 1), repeat=3)), dtype=np.int64)
 # 粗层对角不超过最大对角的这一倍时, 视为与自由自由度无耦合, 置单位对角
@@ -50,7 +50,7 @@ _DECOUPLED_RTOL = 1.0e-14
 
 @dataclass(frozen=True)
 class StructuredHexGrid:
-    """按 ``create_box_mesh`` 编号约定的结构化六面体网格, 只记形状与范围.
+    """按 ``HexahedronMesh.from_box`` 编号约定的结构化六面体网格, 只记形状与范围.
 
     Parameters
     ----------
@@ -106,7 +106,7 @@ class StructuredHexGrid:
                            atol=rtol * float(np.max(upper - lower))):
             raise ValueError('节点坐标与结构化编号约定不符 (编号顺序或步长不等距)')
         if not np.array_equal(cell, grid.cell_to_node()):
-            raise ValueError('单元连接与 create_box_mesh 的编号约定不符')
+            raise ValueError('单元连接与 HexahedronMesh.from_box 的编号约定不符')
 
         return grid
 
@@ -122,8 +122,13 @@ class StructuredHexGrid:
         return np.stack([g.ravel() for g in grids], axis=1)
 
     def cell_to_node(self) -> np.ndarray:
-        """(NC, 8) 的单元顶点编号, 与 ``create_box_mesh('hex', ...)`` 一致."""
-        return np.asarray(bm.to_numpy(_grid_cells(self.shape, _TEMPLATES['hex'][2], None)))
+        """(NC, 8) 的单元顶点编号, 与 ``HexahedronMesh.from_box`` 一致."""
+        nx, ny, nz = self.shape
+        strides = np.asarray([(ny + 1) * (nz + 1), nz + 1, 1], dtype=np.int64)
+        # 各单元最小角点的格点编号, 单元按 x 最慢、z 最快的字典序排列
+        corner = np.arange((nx + 1) * (ny + 1) * (nz + 1)).reshape(nx + 1, ny + 1, nz + 1)
+        corner = corner[:nx, :ny, :nz].reshape(-1, 1)
+        return (corner + _HEX_OFFSETS @ strides).astype(np.int32)
 
 
 def _tensor_dof(node: np.ndarray, component: int, num_nodes: int, dof_priority: bool) -> np.ndarray:

@@ -13,7 +13,6 @@
 | [`lagrange_elasticity/`](lagrange_elasticity/) | CPU 串行全装配，L2 收敛阶验证 + 集中力载荷等效性 | README + results_analysis（已按两文档模板），门禁通过后落盘 JSON 证据 |
 | [`gpu_elasticity/`](gpu_elasticity/) | GPU 正确性对比 + 性能 benchmark | 脚本级，缺文档模板 |
 | [`parallel_execution/`](parallel_execution/) | 并行层级性能测量：线程级扩展性 benchmark（进程级待补） | README（工具目录，证据不落本目录） |
-| [`matrix_free_elasticity/`](matrix_free_elasticity/) | MPI 并行 matrix-free，FA/EA 双路 | README + results_analysis（已按两文档模板）；证据流水线在 `tools/matrix_free_evidence/` |
 | [`substructure_elasticity/`](substructure_elasticity/) | 精确子结构静力缩聚基线（2D/3D Schur 补与轻量验证） | README（契约与验证；性能与证据见 `experiments/analysis_capability_substructure/`） |
 | [`piml_substructure_elasticity/`](piml_substructure_elasticity/) | PIML 预测子结构缩聚表示 + 精确回退（早期原型） | README + results_analysis（已按两文档模板），预测器未进全局接口 |
 | [`pinn_elasticity/`](pinn_elasticity/) | 2D/3D 线弹性 PINN 强形式求解 | 旧三文档结构，待收敛 |
@@ -30,7 +29,7 @@ substructure_elasticity    精确真值 / Schur 补基线（已维护）
         ↓
 piml_substructure_elasticity            预测器：K_s / N + 结构检查 + 精确回退（早期原型，文档已对齐）
         ↓
-matrix_free_elasticity / gpu_elasticity    未来全局接入（规划，非现状）
+gpu_elasticity                          未来全局接入（规划，非现状）
 ```
 
 - 精确标签、接口系统与细尺度恢复的数学与验收契约见 `substructure_elasticity/`；

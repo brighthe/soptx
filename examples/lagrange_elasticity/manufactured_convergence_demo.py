@@ -10,10 +10,8 @@
 结果相同"更强: 后者在 K_e 本身算错时会一致通过. ``ea``/``pa`` 没有显式矩阵,
 只能配 ``--solver cg``.
 
-与 ``examples/matrix_free_elasticity`` 的关系: 那里同时承担 MPI 重叠副本、
-FA/EA 双路对照和可重放 evidence 三件事, 因此有十余个模块. 本算例只保留 CPU
-串行这一条主路径, 不导入那个目录的任何模块, 也不生成 evidence. 想看并行,
-去读那个目录; 想看"有限元怎么把方程解出来", 读这一个文件就够.
+本算例只保留 CPU 串行这一条主路径, 不生成 evidence; 想看"有限元怎么把方程解出来",
+读这一个文件就够.
 
 问题类和材料类直接取自 ``soptx``, 没有本地适配层 —— 这本身就是算例的一部分:
 它验证维护中的 Problem 满足 ``DirichletElasticityProblem`` 契约.
@@ -22,7 +20,7 @@ FA/EA 双路对照和可重放 evidence 三件事, 因此有十余个模块. 本
 
 * 真相对残差 ``||K u - F|| / ||F||`` —— 线性系统是否真的解开了;
 * 最细一档的 L2 观测收敛阶 —— 离散是否正确. P1 与 Q1 元的 L2 误差理论阶都是
-  2, 阈值取 1.5, 与 ``tools/matrix_free_evidence/contract.py`` 的门禁一致.
+  2, 阈值取 1.5.
 
 用 ``cg`` 时额外要求每一层都收敛: 迭代解法的真残差达标只说明这一次侥幸解对了,
 没收敛却残差合格不能算通过.
@@ -96,7 +94,6 @@ from soptx.problems import (
 )
 
 
-# 与 tools/matrix_free_evidence/contract.py 的对应门禁保持一致
 RESIDUAL_TOLERANCE = 1.0e-10
 MINIMUM_L2_ORDER = 1.5
 
@@ -182,7 +179,6 @@ def _sinusoidal_2d() -> tuple:
         hypothesis="plane_strain",
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
-        enable_logging=False,
     )
     return problem, material, domain
 
@@ -199,7 +195,6 @@ def _exponential_sine_2d() -> tuple:
         hypothesis="plane_strain",
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
-        enable_logging=False,
     )
     return problem, material, domain
 
@@ -213,7 +208,6 @@ def _divergence_free_3d() -> tuple:
         hypothesis="3D",
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
-        enable_logging=False,
     )
     return problem, material, domain
 
@@ -230,7 +224,6 @@ def _mixed_sinusoidal_2d() -> tuple:
         hypothesis="plane_strain",
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
-        enable_logging=False,
     )
     return problem, material, problem.domain
 
@@ -243,7 +236,6 @@ def _mixed_exponential_sine_2d() -> tuple:
         hypothesis="plane_strain",
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
-        enable_logging=False,
     )
     return problem, material, problem.domain
 
@@ -332,7 +324,6 @@ def solve_one_level(
         assembly_method=assembly_method,
         solve_method=solver,
         topopt_algorithm=None,
-        enable_logging=False,
     )
 
     # 计时覆盖装配到求解的完整链路, 不含网格生成与误差积分
@@ -360,8 +351,7 @@ def solve_one_level(
     load_norm = float(np.linalg.norm(np.asarray(F)))
     # 绝对与相对两个口径都记: 观测阶只看比值, 两者给出同一个数; 但跨维度、跨
     # 算例比较误差大小时, 只有除掉精确解范数的相对误差可比. 定义取自
-    # ``soptx.fem.verification``, 与 matrix-free 那条路径共用同一个函数, 两边的
-    # 数字因此可以直接对照.
+    # ``soptx.fem.verification``, 与其他示例共用同一个函数, 数字因此可以直接对照.
     l2_error, l2_relative = solution_error(mesh, uh, problem, degree)
 
     return {

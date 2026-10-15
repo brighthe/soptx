@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Tuple
 
 from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 from soptx.decorator import cartesian
 from soptx.fem.linear_form import LinearForm
 
@@ -14,6 +15,7 @@ from soptx.fem.integrators import (
     SourceIntegrator,
 )
 from soptx.fem.load_projection import project_line_traction, project_point_force
+from soptx.fem.load_assembly import assemble_point_force
 from soptx.protocols import (
     BodyForce,
     BoundaryTraction,
@@ -54,8 +56,8 @@ def project_problem_conditions_to_nodes(
         均可使用.
     tensor_space : TensorFunctionSpace, optional
         与 ``node_coordinates`` 对应的全尺度 Lagrange 位移空间. 提供后可通过
-        数值积分装配 ``BodyForce`` 与 ``BoundaryTraction``; 省略时只支持
-        ``PointForce`` 与 ``LineTraction``.
+        形函数分配 ``PointForce`` 及数值积分装配 ``BodyForce`` 与
+        ``BoundaryTraction``. 省略时保留旧宏观节点投影接口.
     coordinate_offset : TensorLike, optional
         ``tensor_space`` 局部坐标到 Problem 物理坐标的平移量.
     degree : int, optional
@@ -127,6 +129,16 @@ def project_problem_conditions_to_nodes(
             )
 
         if isinstance(load, PointForce):
+            if tensor_space is not None:
+                if int(tensor_space.number_of_global_dofs()) != dim * n_nodes:
+                    raise ValueError('tensor_space 与 node_coordinates 的自由度数不一致.')
+                assembled = assemble_point_force(
+                    tensor_space, load, coordinate_offset=coordinate_offset,
+                )
+                if tensor_space.dof_priority:
+                    assembled = bm.transpose(bm.reshape(assembled, (dim, n_nodes)), (1, 0)).reshape(-1)
+                force = force + assembled
+                continue
             force = force + project_point_force(
                 load,
                 coordinates,
@@ -278,14 +290,14 @@ def project_problem_conditions_to_full_system(
         )
     origin = bm.asarray(domain[0::2], dtype=bm.float64)
     physical_coordinates = assembler.node_coordinates() + origin
-    needs_integration = any(
-        isinstance(load, (BodyForce, BoundaryTraction))
+    needs_space = any(
+        isinstance(load, (PointForce, BodyForce, BoundaryTraction))
         for load in problem.loads()
     )
     return project_problem_conditions_to_nodes(
         problem,
         physical_coordinates,
-        tensor_space=assembler.space_full if needs_integration else None,
+        tensor_space=assembler.space_full if needs_space else None,
         coordinate_offset=origin,
         integration_order=max(4, int(assembler.degree) + 2),
         degree=int(assembler.degree),
@@ -295,20 +307,40 @@ def project_problem_conditions_to_full_system(
 def project_problem_conditions_to_interface_system(
     problem: Any,
     assembler: Any,
-    system: Any,
+    interface_dofs: TensorLike,
 ) -> InterfaceConditions:
-    """把完整网格载荷与约束无损投影到完整接口系统.
+    """把完整网格载荷与约束投影到完整接口.
 
-    当前静力缩聚结果只包含齐次内部恢复 ``u_i = N u_b``, 尚不包含内部载荷
-    引起的 particular solution. 因此本函数显式拒绝作用在子结构内部自由度上的
-    等效节点载荷或 Dirichlet 约束, 避免静默丢失右端项或改变缩聚问题. MBB 等载荷
-    与支承位于子结构外边界的基准满足该契约.
+    Parameters
+    ----------
+    problem : Any
+        提供载荷与支承的弹性问题.
+    assembler : Any
+        提供全局空间及接口投影方法的装配器.
+    interface_dofs : TensorLike
+        完整细网格接口的全局自由度编号, 升序且无重复, 形状 (n_interface,).
+
+    Returns
+    -------
+    conditions : InterfaceConditions
+        完整网格及接口上的载荷与固定自由度.
+
+    Raises
+    ------
+    ValueError
+        等效节点载荷或 Dirichlet 约束落在子结构内部自由度上.
+
+    Notes
+    -----
+    当前静力缩聚只包含齐次内部恢复 u_i = N u_b, 不含内部载荷引起的
+    特解. 因此拒绝内部载荷和约束, 避免静默丢失右端项或改变缩聚问题.
+    接口数组不自动排序, 其顺序须与接口向量及投影矩阵一致.
     """
     full_force, full_fixed_dofs = project_problem_conditions_to_full_system(
         problem,
         assembler,
     )
-    interface_global_dofs = bm.asarray(system.global_dofs, dtype=bm.int64)
+    interface_global_dofs = bm.asarray(interface_dofs, dtype=bm.int64)
 
     nonzero_load_dofs = bm.nonzero(bm.abs(full_force) > 0.0)[0]
     load_on_interface = bm.isin(nonzero_load_dofs, interface_global_dofs)
@@ -328,9 +360,9 @@ def project_problem_conditions_to_interface_system(
         )
 
     return InterfaceConditions(
-        interface_force=assembler.project_global_vector(system, full_force),
+        interface_force=assembler.project_global_vector(interface_dofs, full_force),
         interface_fixed_dofs=assembler.project_global_dofs(
-            system,
+            interface_dofs,
             full_fixed_dofs,
         ),
         full_force=full_force,

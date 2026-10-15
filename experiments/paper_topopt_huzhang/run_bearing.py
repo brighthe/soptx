@@ -23,9 +23,9 @@ import numpy as np
 from soptx.backend import backend_manager as bm
 from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.mesh import create_huzhang_symmetric_single_diagonal_mesh
+from soptx.mesh import TriangleMesh
 from soptx.postprocess.vtk_export import write_vtu
-from soptx.problems import BearingDevice2d
+from soptx.problems import BearingTraction2d
 from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.filters import Filter
 from soptx.topology.interpolation import MaterialInterpolationScheme
@@ -40,7 +40,8 @@ VIEW_ROOT = Path("/mnt/c/workspace/soptx-results/paper_topopt_huzhang")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 # 模型参数
-TRACTION = -0.08             # N/mm, 顶边均布牵引
+DOMAIN = (0.0, 120.0, 0.0, 40.0)
+TRACTION = -0.08             # N/mm, 顶边均布牵引强度; 问题类收合力 P = t * 跨度
 E0 = 1.0                     # MPa
 PLANE_TYPE = "plane_strain"
 # 两组材料: 组名 (即 results/bearing/ 下的子目录名) -> (实体 Poisson 比, 材料插值对象)
@@ -103,16 +104,17 @@ def build(group: str, method: str, order: int, nx: int = NX, ny: int = NY) -> di
         组装好的对象; 冻结设计再分析只用其中的分析链, 不挂优化器.
     """
     nu, variables = GROUPS[group]
-    problem = BearingDevice2d(t=TRACTION, E=E0, nu=nu, plane_type=PLANE_TYPE)
+    problem = BearingTraction2d(domain=DOMAIN, P=TRACTION * (DOMAIN[1] - DOMAIN[0]),
+                              E=E0, nu=nu, plane_type=PLANE_TYPE)
     xmin, xmax, ymin, ymax = problem.domain
-    mesh: Any = create_huzhang_symmetric_single_diagonal_mesh(box=problem.domain, nx=nx, ny=ny)
+    mesh: Any = TriangleMesh.from_mirror_box(box=problem.domain, nx=nx, ny=ny)
     # 过滤矩阵等依赖网格上的 meshdata 元数据
     mesh.meshdata = {"domain": list(problem.domain), "mesh_type": MESH_TYPE,
                      "nx": nx, "ny": ny, "hx": (xmax - xmin) / nx, "hy": (ymax - ymin) / ny}
 
     material = IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E, poisson_ratio=problem.nu,
-        hypothesis=problem.plane_type, enable_logging=False)
+        hypothesis=problem.plane_type)
     options: dict[str, Any] = {"penalty_factor": PENALTY, "void_youngs_modulus": EMIN,
                                "target_variables": ["E"]}
     if variables == "E+nu":
@@ -120,8 +122,7 @@ def build(group: str, method: str, order: int, nx: int = NX, ny: int = NY) -> di
         options.update(target_variables=["E", "nu"], nu_penalty_factor=NU_PENALTY,
                        void_poisson_ratio=NU_VOID)
     interpolation = MaterialInterpolationScheme(
-        density_location="element", interpolation_method="msimp", options=options,
-        enable_logging=False)
+        density_location="element", interpolation_method="msimp", options=options)
     common = dict(disp_mesh=mesh, pde=problem, material=material, space_degree=order,
                   integration_order=2 * order + 2, solve_method=SOLVER,
                   topopt_algorithm="density_based", interpolation_scheme=interpolation)
@@ -138,9 +139,9 @@ def build(group: str, method: str, order: int, nx: int = NX, ny: int = NY) -> di
         "group": group, "method": method, "order": order, "problem": problem, "mesh": mesh,
         "analyzer": analyzer, "design_variable": design_variable, "density": density,
         "objective": ComplianceObjective(analyzer=analyzer, state_variable=state_variable,
-                                         diff_mode="manual", enable_logging=False),
+                                         diff_mode="manual"),
         "constraint": VolumeConstraint(analyzer=analyzer, volume_fraction=VOLFRAC,
-                                       diff_mode="manual", enable_logging=False),
+                                       diff_mode="manual"),
     }
 
 
@@ -179,8 +180,7 @@ def main(argv: list[str] | None = None) -> int:
 
             # 1. 密度过滤 + OC 优化
             density_filter = Filter(design_mesh=parts["mesh"], filter_type="density",
-                                    rmin=FILTER_RADIUS, density_location="element", filter_q=3,
-                                    enable_logging=False)
+                                    rmin=FILTER_RADIUS, density_location="element", filter_q=3)
             optimizer = OCOptimizer(
                 objective=parts["objective"], constraint=parts["constraint"], filter=density_filter,
                 options={"max_iterations": MAX_ITERATIONS, "change_tolerance": CHANGE_TOLERANCE},
@@ -212,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
                 "case_id": CASE_ID,
                 "group": group,
                 "poisson_ratio": nu,
-                "model": "BearingDevice2d",
+                "model": "BearingTraction2d",
                 "method": method,
                 "order": order,
                 "mesh_type": MESH_TYPE,

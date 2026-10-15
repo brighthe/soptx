@@ -40,7 +40,7 @@ def test_scipy_path_accepts_scipy_matrix() -> None:
 
 def test_unknown_solver_rejected() -> None:
     A, b, _ = spd_system(5)
-    with pytest.raises(ValueError, match="Unknown solver"):
+    with pytest.raises(ValueError, match="未知的直接法后端"):
         spsolve(A, b, solver="cupy")
 
 
@@ -62,5 +62,5 @@ def test_mumps_rejects_invalid_sym() -> None:
     ensure_mpi_initialized()
 
     A, b, _ = spd_system(5)
-    with pytest.raises(ValueError, match="sym must be 0, 1 or 2"):
+    with pytest.raises(ValueError, match="sym 须为 0, 1 或 2"):
         spsolve(A, b, solver="mumps", sym=3)

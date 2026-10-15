@@ -11,6 +11,7 @@ from soptx.topology.filters import Filter
 from soptx.topology.objectives import AugmentedLagrangianObjective
 from soptx.topology.optimizers.history import OptimizationHistory
 from soptx.topology.optimizers.mma import MMAOptions, MMAOptimizer
+from soptx.topology.optimizers.utils import merge_passive_masks
 
 @dataclass
 class ALMMMAOptions(MMAOptions):
@@ -327,11 +328,7 @@ class ALMMMAOptimizer(MMAOptimizer):
         rho_phys = self._filter.get_initial_density(density=rho)
 
         # --- 被动单元处理 ---
-        pde = analyzer.pde
-        passive_mask = None
-        if hasattr(pde, 'get_passive_element_mask'):
-            design_mesh = getattr(self._filter, 'design_mesh', None)
-            passive_mask = pde.get_passive_element_mask(mesh=design_mesh)
+        passive_mask = merge_passive_masks(self._filter, analyzer.pde)
 
         if passive_mask is not None:
             dv[passive_mask] = 1.0

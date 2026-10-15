@@ -151,6 +151,23 @@ def test_setup_validates_hierarchy() -> None:
         Multigrid(coarse_solver=DirectSolver()).add_level(_poisson(3)).add_level(None).setup(A)
     with pytest.raises(RuntimeError, match='尚未 setup'):
         Multigrid(coarse_solver=DirectSolver()).add_level(None) @ bm.ones((7, ))
+    with pytest.raises(ValueError, match='最粗层不应有'):
+        Multigrid(coarse_solver=DirectSolver()).add_level(_poisson(3), JacobiSmoother()).setup(A)
+    mg, fine = _hierarchy(3, 2)
+    mg.levels[0].op = None
+    with pytest.raises(ValueError, match='非最细层的算子'):
+        mg.setup(fine)
+
+
+def test_failed_setup_leaves_multigrid_unset() -> None:
+    bm.set_backend('numpy')
+    A = _poisson(7)
+    mg = Multigrid(coarse_solver=DirectSolver()).add_level(_poisson(3)).add_level(None)
+    with pytest.raises(ValueError):
+        mg.setup(A)
+    assert not mg.is_setup
+    with pytest.raises(RuntimeError, match='尚未 setup'):
+        mg @ bm.ones((7, ))
 
 
 def test_estimate_lambda_max_is_a_tight_lower_bound() -> None:

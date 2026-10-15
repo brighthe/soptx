@@ -18,7 +18,7 @@ PIML 近似 x Matrix-Free 的**交集目录**: 验证 PIML 预测的缩聚刚度
 
 ## 验证设计: 直接对比 + 归因 + 前提
 
-`verify_piml_matrix_free.py` 在同一算例 (FullMBBBeam2d, 12x2 子结构, 每子结构
+`verify_piml_matrix_free.py` 在同一算例 (FullMBBBeamPoint2d, 12x2 子结构, 每子结构
 5x5 细网格) 上先在脚本内训练 Cholesky 因子代理 (默认 2000 样本 / 4000 轮 /
 lr 0.005 / seed 2026, 与 `verify_stiffness_route.py` 一致), 然后:
 

@@ -5,7 +5,7 @@ from soptx.typing import TensorLike
 from soptx.functionspace import Function
 
 from soptx.core import BaseLogged, timer
-from soptx.topology.constraints.stress_formulation import StressConstraintProtocol
+from soptx.topology.constraints.stress_protocol import StressConstraintProtocol
 from soptx.topology.objectives.volume import VolumeObjective
 
 # 使用 TYPE_CHECKING 避免循环导入, 仅用于类型提示

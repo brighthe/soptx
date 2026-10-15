@@ -7,7 +7,7 @@ import pytest
 
 from soptx.backend import backend_manager as bm
 
-from soptx.problems.elasticity import (
+from soptx.problems import (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
     HarmonicPoly2D,
@@ -29,13 +29,13 @@ def test_harmonic_poly_public_names(dimension, problem_type) -> None:
     assert type(problem_type()).__name__ == class_name
     for module_name in (
         "soptx.problems",
-        "soptx.problems.elasticity",
-        f"soptx.problems.elasticity.manufactured_{dimension}d",
+        "soptx.problems.manufactured",
+        "soptx.problems.manufactured.harmonic_poly",
     ):
         module = import_module(module_name)
         assert getattr(module, class_name) is problem_type
         assert getattr(module, legacy_name) is problem_type
-        if module_name in ("soptx.problems", "soptx.problems.elasticity"):
+        if module_name in ("soptx.problems", "soptx.problems.manufactured"):
             assert class_name in module.__all__
             assert legacy_name in module.__all__
 

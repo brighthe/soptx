@@ -11,7 +11,9 @@
 3. 逐单元参考 (N_k = NC) 在节点扰动后的非结构网格上也与标准 EA 一致;
 4. 标准 EA 的 ``update`` 按新系数重新积分;
 5. 常驻内存只含 K_k^0、s_e 与 cell2dof;
-6. 非法输入报错, 且不在层级注册表中.
+6. 非法输入报错, 且不在层级注册表中;
+7. 逐类二维收缩与批量 einsum 两条单元作用路径一致;
+8. numpy 后端 ``scatter_add`` 的 bincount 快路径与 ``bm.index_add`` 逐位相同.
 """
 
 import pytest
@@ -20,10 +22,10 @@ from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.fem.kernels import ElementRestriction
-from soptx.fem.levels import ElementAssembly, SharedReferenceElementAssembly
+from soptx.fem.levels import ElementAssembly, SharedReferenceElementAssembly, shared_reference
 from soptx.fem.levels.registry import _REGISTRY
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.mesh import create_box_mesh
+from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, TriangleMesh
 
 
 RTOL = 1.0e-11
@@ -38,6 +40,9 @@ MESHES = [
     ('hex', BOX_3D, (2, 3, 2)),
 ]
 DEGREES = (1, 2)
+# 网格类型 -> (网格类, from_box 编号约定下每个格子剖出的单元数 N_k)
+MESH_CLASSES = {'tri': (TriangleMesh, 2), 'quad': (QuadrangleMesh, 1),
+                'tet': (TetrahedronMesh, 6), 'hex': (HexahedronMesh, 1)}
 
 
 @pytest.fixture(autouse=True)
@@ -52,9 +57,10 @@ def _make_fixture(mesh_type, box, shape, p, perturb=False):
     """造出空间、材料、平移类与确定性测试数据 (不用随机数, 失败时可直接复现).
 
     ``perturb`` 为 True 时对节点做确定性小扰动, 同类单元不再只差平移, 平移类失效;
-    此时返回的 ``classes`` 不再可用.
+    此时返回的 ``num_classes`` 不再可用.
     """
-    mesh, classes = create_box_mesh(mesh_type, box, *shape)
+    mesh_class, num_classes = MESH_CLASSES[mesh_type]
+    mesh = mesh_class.from_box(box, *shape)
     if perturb:
         node = mesh.entity('node')
         phase = bm.arange(node.shape[0], dtype=bm.float64)[:, None] \
@@ -75,7 +81,7 @@ def _make_fixture(mesh_type, box, shape, p, perturb=False):
     return {
         'space': space,
         'material': material,
-        'classes': classes,
+        'num_classes': num_classes,
         'x': bm.sin(13.0 * t) + 0.3 * bm.cos(7.0 * t),
         'X': bm.stack([bm.cos(5.0 * t), bm.sin(3.0 * t) - 0.2], axis=1),
         'coef': 0.4 + 0.5 * bm.abs(bm.sin(bm.linspace(0.0, 9.0, NC, dtype=bm.float64))),
@@ -91,7 +97,7 @@ def _standard_ea(fx, coef):
 
 def _shared_ea(fx, coef):
     """共享参考 EA: 只对各类代表单元积分, G 取全体单元."""
-    reps = fx['classes'].representatives()
+    reps = bm.arange(fx['num_classes'], dtype=bm.int32)  # 前 N_k 个单元即各类代表
     K0 = LinearElasticIntegrator(fx['material'], coef=None, index=reps,
                                  method='standard').assembly(fx['space'])
     g = ElementRestriction.from_integrator(LinearElasticIntegrator(fx['material']),
@@ -130,11 +136,43 @@ def test_matches_standard_ea(mesh_type, box, shape, p, with_coef):
     coef = fx['coef'] if with_coef else None
     ea, shared = _standard_ea(fx, coef), _shared_ea(fx, coef)
 
-    assert shared.num_classes == fx['classes'].num_classes
+    assert shared.num_classes == fx['num_classes']
     assert shared.shape == ea.shape
     assert _relerr(shared @ fx['x'], ea @ fx['x']) < RTOL
     assert _relerr(shared @ fx['X'], ea @ fx['X']) < RTOL
     assert _relerr(shared.diagonal(), ea.diagonal()) < RTOL
+
+
+@pytest.mark.parametrize("mesh_type,box,shape,p", _cases())
+def test_gemm_and_batched_paths_agree(mesh_type, box, shape, p, monkeypatch):
+    """逐类二维收缩与批量 einsum 给出同一结果, 共享参考与逐单元参考、单列与多列皆然."""
+    fx = _make_fixture(mesh_type, box, shape, p)
+    operators = (_shared_ea(fx, fx['coef']), _per_element_ea(fx, fx['coef']))
+    results = []
+    for limit in (10 ** 9, 0):
+        monkeypatch.setattr(shared_reference, '_MAX_GEMM_CLASSES', limit)
+        results.append([(op @ fx['x'], op @ fx['X']) for op in operators])
+
+    for (y_gemm, Y_gemm), (y_batch, Y_batch) in zip(*results):
+        assert _relerr(y_gemm, y_batch) < RTOL
+        assert _relerr(Y_gemm, Y_batch) < RTOL
+
+
+@pytest.mark.parametrize("layout", ["flat", "component"])
+def test_scatter_add_bincount_matches_index_add(layout):
+    """numpy 后端的 bincount 散加与 bm.index_add 逐位相同, 单列与多列皆然."""
+    fx = _make_fixture('tet', BOX_3D, (2, 3, 2), 2)
+    g = ElementRestriction.from_integrator(LinearElasticIntegrator(fx['material']),
+                                           fx['space'], layout=layout)
+    for x in (fx['x'], fx['X']):
+        y_E = g.gather(x) * 1.7 - 0.3
+        batch_shape = tuple(y_E.shape[g.cell2dof.ndim:])
+        expected = bm.index_add(bm.zeros((g.global_dofs, ) + batch_shape, dtype=bm.float64),
+                                bm.reshape(g.cell2dof, (-1, )),
+                                bm.reshape(y_E, (-1, ) + batch_shape))
+        actual = g.scatter_add(y_E)
+        assert actual.shape == expected.shape
+        assert bool(bm.all(actual == expected))
 
 
 @pytest.mark.parametrize("mesh_type,box,shape,p", _cases())

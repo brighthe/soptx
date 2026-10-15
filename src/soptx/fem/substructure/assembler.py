@@ -16,6 +16,7 @@ from typing import (
 import numpy as np
 
 from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
 from soptx.sparse import CSRTensor
 from soptx.fem.matrix.csr_pattern import (
@@ -24,11 +25,7 @@ from soptx.fem.matrix.csr_pattern import (
     build_csr_pattern_from_dofmap,
 )
 
-from .layout import (
-    HasGlobalDofs,
-    InterfaceDofsView,
-    StructuredSubstructureLayout,
-)
+from .layout import StructuredSubstructureLayout
 from .recovery import recover_full_displacement
 from .reduction_adapter import normalize_local_reduction
 from .interface_space import (
@@ -109,7 +106,8 @@ class GlobalAssembler:
 
     @_full_mesh.setter
     def _full_mesh(self, value: Any) -> None:
-        self.layout._full_mesh = value
+        self.layout._set_full_mesh(value)
+        self._interface_pattern_cache = None
 
     @property
     def _material(self) -> Any:
@@ -127,7 +125,8 @@ class GlobalAssembler:
 
     @_sspace_full.setter
     def _sspace_full(self, value: Any) -> None:
-        self.layout._sspace_full = value
+        self.layout._set_sspace_full(value)
+        self._interface_pattern_cache = None
 
     @property
     def _space_full(self) -> Any:
@@ -136,7 +135,8 @@ class GlobalAssembler:
 
     @_space_full.setter
     def _space_full(self, value: Any) -> None:
-        self.layout._space_full = value
+        self.layout._set_space_full(value)
+        self._interface_pattern_cache = None
 
     @property
     def _node_of_grid(self) -> Any:
@@ -185,27 +185,32 @@ class GlobalAssembler:
     def build_linear_corner_projection(
         self,
         sub_meshes: Sequence[Any],
-        interface_system: HasGlobalDofs,
+        interface_dofs: TensorLike,
         trace_basis: Any,
     ) -> Any:
-        """构造全局角点线性迹投影 ``u_interface = P q``.
+        """构造全局角点线性迹投影 u_interface = P q.
 
-        参数:
-            sub_meshes: 参与接口装配的子结构.
-            interface_system: 完整接口系统或至少具有 ``global_dofs`` 属性的视图.
-            trace_basis: 局部角点迹基, 其矩阵把局部宏观角点自由度映射为
-                完整局部边界位移.
+        Parameters
+        ----------
+        sub_meshes : sequence
+            参与接口装配的子结构.
+        interface_dofs : TensorLike
+            完整细网格接口的全局自由度编号, 升序且无重复.
+        trace_basis : Any
+            局部角点迹基, 把局部宏观角点自由度映射为完整局部边界位移.
 
-        返回:
-            scipy.sparse.csr_matrix: 形状为
-                ``(n_interface_dofs, total_macro_dofs)`` 的全局投影 ``P``.
+        Returns
+        -------
+        projection : scipy.sparse.csr_matrix
+            全局投影 P, 形状 (n_interface, total_macro_dofs).
 
-        异常:
-            ValueError: 当局部维度不匹配, 投影未覆盖完整接口, 或相邻子结构
-                在共享接口上给出不一致的插值时抛出.
+        Raises
+        ------
+        ValueError
+            局部维度不匹配, 投影未覆盖完整接口, 或共享接口上的插值不一致.
         """
         return linear_corner_global_map(
-            self, sub_meshes, interface_system.global_dofs, trace_basis
+            self, sub_meshes, interface_dofs, trace_basis
         )
 
     def assemble_macro_system_batches(
@@ -510,14 +515,14 @@ class GlobalAssembler:
         self,
         sub_meshes: List[Any],
         condensors: Any,
-        system: HasGlobalDofs,
+        interface_dofs: TensorLike,
         interface_displacement: Any,
     ) -> Any:
-        """兼容旧入口; 委托独立全局位移恢复函数."""
+        """以完整接口编号数组委托独立全局位移恢复函数."""
         return recover_full_displacement(
             self.layout,
             sub_meshes,
             condensors,
-            system,
+            interface_dofs,
             interface_displacement,
         )

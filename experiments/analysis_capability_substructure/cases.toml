@@ -40,9 +40,9 @@ solve_method = "mumps"
 
 [[cases]]
 id = "full_trace_density_update_2d"
-summary = "CantileverCorner2d 上的 full_trace 密度更新一致性验证"
+summary = "CantileverCornerPoint2d 上的 full_trace 密度更新一致性验证"
 task = "density_update_consistency"
-problem = "CantileverCorner2d"
+problem = "CantileverCornerPoint2d"
 n_sub = [8, 4]
 n_fine = [5, 5]
 degree = 1
@@ -52,9 +52,9 @@ monitor_interval = 0.5
 
 [[cases]]
 id = "full_trace_density_update_3d"
-summary = "FullMBBBeam3d 上的 full_trace 密度更新一致性验证"
+summary = "FullMBBBeamLine3d 上的 full_trace 密度更新一致性验证"
 task = "density_update_consistency"
-problem = "FullMBBBeam3d"
+problem = "FullMBBBeamLine3d"
 n_sub = [6, 2, 2]
 n_fine = [4, 4, 4]
 degree = 1
@@ -64,9 +64,9 @@ monitor_interval = 0.5
 
 [[cases]]
 id = "linear_corner_density_update_2d"
-summary = "CantileverCorner2d 上的 linear_corner 密度更新一致性验证"
+summary = "CantileverCornerPoint2d 上的 linear_corner 密度更新一致性验证"
 task = "density_update_consistency"
-problem = "CantileverCorner2d"
+problem = "CantileverCornerPoint2d"
 n_sub = [8, 4]
 n_fine = [5, 5]
 degree = 1
@@ -76,9 +76,9 @@ monitor_interval = 0.5
 
 [[cases]]
 id = "linear_corner_density_update_3d"
-summary = "FullMBBBeam3d 上的 linear_corner 密度更新一致性验证"
+summary = "FullMBBBeamLine3d 上的 linear_corner 密度更新一致性验证"
 task = "density_update_consistency"
-problem = "FullMBBBeam3d"
+problem = "FullMBBBeamLine3d"
 n_sub = [6, 2, 2]
 n_fine = [4, 4, 4]
 degree = 1
@@ -87,9 +87,9 @@ routes = ["linear_corner"]
 monitor_interval = 0.5
 [[cases]]
 id = "full_trace_cost_2d"
-summary = "CantileverCorner2d 上的 full_trace 独立进程计算成本测量"
+summary = "CantileverCornerPoint2d 上的 full_trace 独立进程计算成本测量"
 task = "route_cost"
-problem = "CantileverCorner2d"
+problem = "CantileverCornerPoint2d"
 n_sub = [640, 320]
 n_fine = [5, 5]
 degree = 1
@@ -101,9 +101,9 @@ repeat = 3
 monitor_interval = 0.5
 [[cases]]
 id = "full_trace_reference_2d"
-summary = "CantileverCorner2d 上的 full_trace 大规模位移参考"
+summary = "CantileverCornerPoint2d 上的 full_trace 大规模位移参考"
 task = "route_cost"
-problem = "CantileverCorner2d"
+problem = "CantileverCornerPoint2d"
 n_sub = [640, 320]
 n_fine = [5, 5]
 degree = 1
@@ -118,9 +118,9 @@ expected_strain_energy = 82.37255563788909
 
 [[cases]]
 id = "fa_cost_2d"
-summary = "CantileverCorner2d 上的 FA 独立进程计算成本测量"
+summary = "CantileverCornerPoint2d 上的 FA 独立进程计算成本测量"
 task = "route_cost"
-problem = "CantileverCorner2d"
+problem = "CantileverCornerPoint2d"
 n_sub = [640, 320]
 n_fine = [5, 5]
 degree = 1
@@ -133,9 +133,9 @@ monitor_interval = 0.5
 
 [[cases]]
 id = "linear_corner_cost_2d"
-summary = "CantileverCorner2d 上的 linear_corner 独立进程计算成本测量"
+summary = "CantileverCornerPoint2d 上的 linear_corner 独立进程计算成本测量"
 task = "route_cost"
-problem = "CantileverCorner2d"
+problem = "CantileverCornerPoint2d"
 n_sub = [640, 320]
 n_fine = [5, 5]
 degree = 1

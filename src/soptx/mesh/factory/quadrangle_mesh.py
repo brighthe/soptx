@@ -26,7 +26,7 @@ class QuadrangleMesh(ClassicMeshView):
         *,
         device=None,
     ):
-        """在 矩形区域上生成四边形网格.
+        """在矩形区域上生成四边形网格.
 
         Parameters
         ----------
@@ -36,6 +36,12 @@ class QuadrangleMesh(ClassicMeshView):
             各方向的剖分数, 默认 10.
         device : optional
             设备.
+
+        Notes
+        -----
+        单元编号约定 (公开契约, 平移类依赖它): 节点与单元均按 x 最慢、y 最快的字典序
+        排列, 每个格子一个单元 (N_k = 1), 局部顶点相对格子最小角点的偏移依次为
+        ``(0,0), (1,0), (1,1), (0,1)``.
         """
         from ..generation import Box2d
 

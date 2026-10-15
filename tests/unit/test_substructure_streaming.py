@@ -11,7 +11,6 @@ from soptx.fem.substructure import (
     ExactSchurReduction,
     FullTraceBasis,
     GlobalAssembler,
-    InterfaceDofsView,
     LinearCornerTraceBasis,
     SubstructurePrototype,
     assemble_exact_interface_system,
@@ -502,7 +501,7 @@ def test_streamed_full_displacement_matches_batch_recovery(
     expected = assembler.recover_full_displacement(
         sub_meshes,
         reduced_full,
-        InterfaceDofsView(global_dofs=full_space.global_dofs),
+        full_space.global_dofs,
         u_interface,
     )
 

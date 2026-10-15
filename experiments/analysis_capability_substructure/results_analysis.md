@@ -24,7 +24,7 @@
 ```python
 from scipy.sparse import csr_matrix, identity
 from soptx.fem.substructure import (
-    ExactSchurCondensation, FullTraceBasis, GlobalAssembler, InterfaceDofsView,
+    ExactSchurCondensation, FullTraceBasis, GlobalAssembler,
     LinearCornerTraceBasis, build_substructures,
 )
 
@@ -56,18 +56,17 @@ condensor = ExactSchurCondensation(prototype.i_dofs, prototype.b_dofs)
 
 # 创建接口空间: 全局接口自由度, 局部迹基 T_j 与全局迹延拓 P (U_Gamma = P U_C).
 interface_dofs = assembler.build_interface_dofs(sub_meshes)
-interface_view = InterfaceDofsView(global_dofs=interface_dofs)
 if trace_kind == "full_trace":
     trace = FullTraceBasis.from_prototype(prototype)
     projection = csr_matrix(identity(len(interface_dofs)))  # T_j = I, 故 P = I.
 else:
     trace = LinearCornerTraceBasis.from_prototype(prototype)
     projection = assembler.build_linear_corner_projection(
-        sub_meshes, interface_view, trace,
+        sub_meshes, interface_dofs, trace,
     )
 ```
 
-接口空间分两层：局部迹基 `trace` 给出单个子结构的 $\mathbf T_j$，由参考子结构构造一次、全部子结构共用；全局层面，`interface_dofs` 为全部子结构接口自由度升序去重后的全局编号，迹延拓 $\mathbf P$ 把接口系统的未知量 $\mathbf U_C$ 映射为完整接口位移 $\mathbf U_\Gamma=\mathbf P\mathbf U_C$，供边界处理（§3.4）与位移恢复（§3.5）使用。`full_trace` 的接口系统即以 `interface_dofs` 为自由度（`assemble_interface_system` 内部调用同一个 `build_interface_dofs`），因此 $\mathbf U_C=\mathbf U_\Gamma$，$\mathbf P=\mathbf I$；`linear_corner` 的 $\mathbf U_C$ 为宏观角点位移，$\mathbf P$ 由各子结构的 $\mathbf L_j$ 按全局编号拼成。两种接口空间此后走同一条代码路径，分支只出现在这里。`interface_view` 只携带 `global_dofs`，为载荷与支承投影及位移恢复提供完整接口编号。
+接口空间分两层：局部迹基 `trace` 给出单个子结构的 $\mathbf T_j$，由参考子结构构造一次、全部子结构共用；全局层面，`interface_dofs` 为全部子结构接口自由度升序去重后的全局编号，迹延拓 $\mathbf P$ 把接口系统的未知量 $\mathbf U_C$ 映射为完整接口位移 $\mathbf U_\Gamma=\mathbf P\mathbf U_C$，供边界处理（§3.4）与位移恢复（§3.5）使用。`full_trace` 的接口系统即以 `interface_dofs` 为自由度（`assemble_interface_system` 内部调用同一个 `build_interface_dofs`），因此 $\mathbf U_C=\mathbf U_\Gamma$，$\mathbf P=\mathbf I$；`linear_corner` 的 $\mathbf U_C$ 为宏观角点位移，$\mathbf P$ 由各子结构的 $\mathbf L_j$ 按全局编号拼成。两种接口空间此后走同一条代码路径，分支只出现在这里。载荷与支承投影及位移恢复直接接收 `interface_dofs` 数组，不需要接口编号包装对象。
 
 `build_substructures()` 按装配器布局铺开全部子结构。全部子结构同构，离散结构、自由度划分与单位密度单元刚度 `KE_unit` 只在 `prototype` 中构造一次；`positions` 记录各子结构在子结构网格中的整数位置，用于局部到全局的自由度映射。
 
@@ -100,7 +99,7 @@ $$
 
 ## 3. 精确分析主线
 
-沿用第 2 节的 `assembler`、`prototype`、`sub_meshes`、`condensor`、`trace`、`interface_view` 和 `projection`，给定全局单元密度 `density` 与弹性问题 `pde`（提供载荷与支承，如 `FullMBBBeam3d`）后，一次分析依次执行局部刚度装配、静力缩聚、接口装配、边界处理与求解、完整位移恢复。
+沿用第 2 节的 `assembler`、`prototype`、`sub_meshes`、`condensor`、`trace`、`interface_dofs` 和 `projection`，给定全局单元密度 `density` 与弹性问题 `pde`（提供载荷与支承，如 `FullMBBBeamLine3d`）后，一次分析依次执行局部刚度装配、静力缩聚、接口装配、边界处理与求解、完整位移恢复。
 
 数学符号沿用[子结构有限元与静力缩聚](C:/workspace/dut-postdoc/concepts/substructural-condensation.md)。$i$、$b$ 分别表示子结构内部与接口自由度。当前实现采用内部载荷 $\mathbf f_i^j=\mathbf0$ 的模型；`full_trace` 保留完整接口，`linear_corner` 在精确缩聚后引入接口迹降阶。以下代码摘录核心语句，省略参数检查、计时与日志。
 
@@ -197,7 +196,7 @@ $\boldsymbol\lambda_D$ 为支承约束反力的乘子。`full_trace` 下 $\mathb
 
 ```python
 conditions = project_problem_conditions_to_interface_system(
-    pde, assembler, interface_view,
+    pde, assembler, interface_dofs,
 )
 macro_force = projection.T @ conditions.interface_force
 constraints = projection[conditions.interface_fixed_dofs]
@@ -211,7 +210,7 @@ macro_u = solved.displacement
 
 `solve_constrained_system` 忽略零行且右端为零的约束，将重复或线性相关的行约化为独立约束；每行只有一个非零元的坐标选择约束复用 `solve_interface_system` 消元（`full_trace` 总是如此，返回的 `mode` 标签为“固定角点消元”），混合约束通过稀疏 Lagrange 乘子系统求解。返回值同时给出约束秩、平衡相对残差与约束相对残差。非零给定位移通过 `prescribed` 参数传入；本文的密度更新与成本工况均采用零位移支承。
 
-第 4—6 节的实测入口在载荷与求解两处与上面的写法不同。载荷与支承由 `_density_update._conditions` 经同网格 FA 分析器的 `assemble_external_load` 与 `boundary_interpolate` 生成，点力要求精确落在节点上，并另行检查非齐次约束；作用点落在节点上时两者应给出相同的载荷与支承（经 `_conditions` 的工况均满足这一条件，否则 FA 路径直接报错），但尚无单元测试逐项比对；[walkthrough.py](walkthrough.py) 的同网格 FA 自检可间接检查。求解按接口空间分别调用：`full_trace` 直接以 `system` 投影载荷与支承并调用 `solve_interface_system`，与上面的统一写法求解同一消元方程，只是省去 $\mathbf P=\mathbf I$ 的构造与约束秩检查。`solve_constrained_system` 用于第 4、5 节的 `linear_corner` 工况。第 6 节成本工况的 `_cost_measurement.py` 未调用该函数，而是内联实现同一鞍点系统：对 `projection[full_fixed]`（受约束接口自由度对应的 $\mathbf P$ 行）的活跃列做列主元 QR 提取独立约束行，用 `scipy.sparse.bmat` 组装鞍点矩阵后以 MUMPS 求解。两种实现尚未做逐项对照。
+第 4—6 节的实测入口在载荷与求解两处与上面的写法不同。载荷与支承由 `_density_update._conditions` 经同网格 FA 分析器的 `assemble_external_load` 与 `boundary_interpolate` 生成，点力要求精确落在节点上，并另行检查非齐次约束；作用点落在节点上时两者应给出相同的载荷与支承（经 `_conditions` 的工况均满足这一条件，否则 FA 路径直接报错），但尚无单元测试逐项比对；[walkthrough.py](walkthrough.py) 的同网格 FA 自检可间接检查。求解按接口空间分别调用：`full_trace` 直接以 `system.global_dofs` 投影载荷与支承并调用 `solve_interface_system`，与上面的统一写法求解同一消元方程，只是省去 $\mathbf P=\mathbf I$ 的构造与约束秩检查。`solve_constrained_system` 用于第 4、5 节的 `linear_corner` 工况。第 6 节成本工况的 `_cost_measurement.py` 未调用该函数，而是内联实现同一鞍点系统：对 `projection[full_fixed]`（受约束接口自由度对应的 $\mathbf P$ 行）的活跃列做列主元 QR 提取独立约束行，用 `scipy.sparse.bmat` 组装鞍点矩阵后以 MUMPS 求解。两种实现尚未做逐项对照。
 
 ### 3.5 完整位移恢复
 
@@ -224,7 +223,7 @@ interface_u = bm.asarray(
     projection @ bm.to_numpy(macro_u), dtype=bm.float64,
 )
 displacement = assembler.recover_full_displacement(
-    sub_meshes, condensor, interface_view, interface_u,
+    sub_meshes, condensor, interface_dofs, interface_u,
 )
 ```
 
@@ -344,7 +343,7 @@ $$
 
 ### 5.1 算例设置
 
-二维采用 `CantileverCorner2d`（定义域 $[0,2]\times[0,1]$），三维采用 `FullMBBBeam3d`（定义域 $[0,6]\times[0,1]\times[0,1]$），均取 $E=1$、$\nu=0.3$、$P=-1$，两个算例均验证 `full_trace` 与 `linear_corner`。固定网格、子结构划分、材料参数、载荷与支承，仅更新单元密度。
+二维采用 `CantileverCornerPoint2d`（定义域 $[0,2]\times[0,1]$），三维采用 `FullMBBBeamLine3d`（定义域 $[0,6]\times[0,1]\times[0,1]$），均取 $E=1$、$\nu=0.3$、$P=-1$，两个算例均验证 `full_trace` 与 `linear_corner`。固定网格、子结构划分、材料参数、载荷与支承，仅更新单元密度。
 
 密度依次切换为均匀场、非均匀场 A、非均匀场 B、初始均匀场。每步比较两条路径的结果：更新路径复用网格、子结构编号、迹映射及同一个 `ExactSchurCondensation` 实例，按第 3 节流程重新计算；重建路径按当前密度独立重新构造上述对象。最后检查是否恢复初始状态。两种接口各自对照，不要求 `linear_corner` 与 FA 等价。
 
@@ -354,8 +353,8 @@ $$
 
 | 算例 | 子结构划分 `n_sub` | 块内单元数 `n_fine` | 全局细网格 | 全细网格位移自由度 | `full_trace` 接口自由度 | `linear_corner` 接口自由度 |
 |---|---|---|---|---:|---:|---:|
-| `CantileverCorner2d` | `8x4` | `5x5` | `40x20` | 1,722 | 698 | 90 |
-| `FullMBBBeam3d` | `6x2x2` | `4x4x4` | `24x8x8` | 6,075 | 4,131 | 189 |
+| `CantileverCornerPoint2d` | `8x4` | `5x5` | `40x20` | 1,722 | 698 | 90 |
+| `FullMBBBeamLine3d` | `6x2x2` | `4x4x4` | `24x8x8` | 6,075 | 4,131 | 189 |
 
 自由度数均为施加支承约束前的数量，`linear_corner` 按宏观角点的位移分量计数。
 
@@ -416,7 +415,7 @@ $$
 
 #### 算例设置
 
-采用 `CantileverCorner2d`，在相同网格、非均匀密度场 A、材料参数、载荷与支承下比较 FA、`full_trace` 和 `linear_corner`。各路径每次在独立进程中完整构建并分析，试运行 1 次、正式测量 3 次，报告正式测量的中位数。
+采用 `CantileverCornerPoint2d`，在相同网格、非均匀密度场 A、材料参数、载荷与支承下比较 FA、`full_trace` 和 `linear_corner`。各路径每次在独立进程中完整构建并分析，试运行 1 次、正式测量 3 次，报告正式测量的中位数。
 
 #### 网格与子结构划分
 
@@ -497,7 +496,7 @@ FA 检查全细网格自由自由度平衡，`full_trace` 检查自由接口平�
 
 ### 6.2 三维计算成本（待接入）
 
-三维计算成本拟采用 Huang2023 的 `FullMBBBeam3d`，按论文规模及规模序列比较 FA、`full_trace` 与 `linear_corner`。当前成本工况的 Worker 仅支持二维（`_cost_measurement.py` 对 `dim != 2` 直接报错），`cases.toml` 中尚无三维成本工况。
+三维计算成本拟采用 Huang2023 的 `FullMBBBeamLine3d`，按论文规模及规模序列比较 FA、`full_trace` 与 `linear_corner`。当前成本工况的 Worker 仅支持二维（`_cost_measurement.py` 对 `dim != 2` 直接报错），`cases.toml` 中尚无三维成本工况。
 
 | 路径 | 子结构划分 `n_sub` | 块内单元数 `n_fine` | 分析阶段合计 | 峰值 RSS | 相对 FA 位移误差 | 结果目录 / 汇总 |
 |---|---|---|---:|---:|---:|---|

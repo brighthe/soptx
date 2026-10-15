@@ -8,7 +8,7 @@ solve path rather than attribute presence.
 from __future__ import annotations
 
 from soptx.backend import backend_manager as bm
-from soptx.mesh import TriangleMesh, create_huzhang_checkerboard_mesh
+from soptx.mesh import TriangleMesh
 
 from soptx.fem import (
     HuZhangMFEMAnalyzer,
@@ -42,10 +42,9 @@ def _solve_coarsest_state(
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
         hypothesis=problem.plane_type,
-        enable_logging=False,
     )
     mesh = (
-        create_huzhang_checkerboard_mesh(
+        TriangleMesh.from_checkerboard_box(
             box=problem.domain,
             nx=2,
             ny=2,

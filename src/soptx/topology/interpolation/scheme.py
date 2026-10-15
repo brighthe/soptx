@@ -17,11 +17,10 @@ class MaterialInterpolationScheme(BaseLogged):
                 interpolation_method: Literal['simp', 'msimp', 'ramp'] = 'simp',
                 stress_interpolation_method: Literal['power_law'] = 'power_law',
                 options: Optional[dict] = None,
-                enable_logging: bool = True,
-                logger_name: Optional[str] = None
             ) -> None:
         """材料插值方法变体示例"""
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_warning 与 _log_error, 二者不受日志开关影响
+        super().__init__(enable_logging=False)
 
         self._density_location = density_location
         self._interpolation_method = interpolation_method
@@ -240,7 +239,7 @@ class MaterialInterpolationScheme(BaseLogged):
                 )
             
             if not material.is_incompressible and 'nu' in target_variables:
-                self._log_info(
+                self._log_warning(
                     f"材料为可压缩 (ν={material.poisson_ratio:.4f}), "
                     f"无需对泊松比进行插值，'nu' 配置将被忽略。"
                 )

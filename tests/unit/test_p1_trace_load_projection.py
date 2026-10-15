@@ -6,16 +6,17 @@ import pytest
 from soptx.backend import backend_manager as bm
 
 from soptx.fem import project_patch_traction_to_p1_trace
-from soptx.problems import FixedFixedBeamCenterLoad2d
+from soptx.problems import FixedFixedBeamPatch2d
 
 
-def _projected(n_cells: int, problem: FixedFixedBeamCenterLoad2d):
+def _projected(n_cells: int, problem: FixedFixedBeamPatch2d):
     return project_patch_traction_to_p1_trace(
         line=(problem.domain[0], problem.domain[1]),
         n_cells=n_cells,
         level=problem.traction_level,
         patch=problem.traction_patch,
         intensity=problem.traction_intensity,
+        axis=problem.traction_axis,
     )
 
 
@@ -23,7 +24,7 @@ def _projected(n_cells: int, problem: FixedFixedBeamCenterLoad2d):
 def test_projection_preserves_the_resultant(n_cells: int) -> None:
     """常数在 P1 迹空间内, 因此 L2 投影必须精确保持合力, 与载荷区是否对齐无关."""
     bm.set_backend("numpy")
-    problem = FixedFixedBeamCenterLoad2d()
+    problem = FixedFixedBeamPatch2d()
 
     load = _projected(n_cells, problem)
 
@@ -33,7 +34,7 @@ def test_projection_preserves_the_resultant(n_cells: int) -> None:
 def test_projection_preserves_the_first_moment() -> None:
     """一次多项式同样落在 P1 迹空间内, 因此载荷的一阶矩也被精确保持."""
     bm.set_backend("numpy")
-    problem = FixedFixedBeamCenterLoad2d()
+    problem = FixedFixedBeamPatch2d()
     load = _projected(160, problem)
 
     nodes = load.start + load.h * np.arange(load.coefficients.shape[0])
@@ -52,8 +53,8 @@ def test_projection_preserves_the_first_moment() -> None:
 def test_injected_traction_replaces_only_the_load() -> None:
     """注入后几何、材料与边界标记全部不变, 只有牵引函数被替换."""
     bm.set_backend("numpy")
-    baseline = FixedFixedBeamCenterLoad2d()
-    problem = FixedFixedBeamCenterLoad2d(traction=_projected(160, baseline))
+    baseline = FixedFixedBeamPatch2d()
+    problem = FixedFixedBeamPatch2d(traction=_projected(160, baseline))
 
     assert problem.domain == baseline.domain
     assert problem.P == baseline.P

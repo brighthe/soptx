@@ -18,7 +18,7 @@ from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import QuadrangleMesh, TriangleMesh
-from soptx.problems import HalfMBBBeamRight2d
+from soptx.problems import HalfMBBBeamPoint2d
 from soptx.topology.constraints.volume import VolumeConstraint
 from soptx.topology.filters import Filter
 from soptx.topology.interpolation.scheme import MaterialInterpolationScheme
@@ -39,16 +39,15 @@ def reset_backend():
 
 def _node_density_case(mesh_type, method: str):
     """6x2 网格上的半 MBB 梁, 节点密度取 [0.3, 0.9] 内的固定随机值."""
-    problem = HalfMBBBeamRight2d(domain=DOMAIN)
+    problem = HalfMBBBeamPoint2d(domain=DOMAIN)
     mesh = mesh_type.from_box(list(DOMAIN), nx=6, ny=2)
     material = IsotropicLinearElasticMaterial(
-        youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="plane_stress", enable_logging=False
+        youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="plane_stress"
     )
     scheme = MaterialInterpolationScheme(
         density_location="node",
         interpolation_method=method,
         options={"penalty_factor": 3.0, "void_youngs_modulus": 1e-9},
-        enable_logging=False,
     )
     analyzer = LagrangeFEMAnalyzer(
         disp_mesh=mesh,
@@ -59,7 +58,6 @@ def _node_density_case(mesh_type, method: str):
         integration_order=3,
         solve_method="scipy",
         topopt_algorithm="density_based",
-        enable_logging=False,
     )
     _, rho = scheme.setup_density_distribution(
         design_variable_mesh=mesh, displacement_mesh=mesh, relative_density=0.5
@@ -109,7 +107,6 @@ def test_node_filter_measure_sums_to_domain_area(mesh_type, filter_type):
         filter_type=filter_type,
         rmin=1.5,
         density_location="node",
-        enable_logging=False,
     )
     weight = bm.to_numpy(filt._strategy._measure_weight)
 
@@ -121,7 +118,7 @@ def test_integrator_size_counts_entities():
     """未指定 region 时, Integrator.size 按 etype 返回网格实体数."""
     mesh = TriangleMesh.from_box([0, 1, 0, 1], nx=4, ny=4)
     material = IsotropicLinearElasticMaterial(
-        lame_lambda=1.0, shear_modulus=0.5, hypothesis="plane_strain", enable_logging=False
+        lame_lambda=1.0, shear_modulus=0.5, hypothesis="plane_strain"
     )
     integrator = LinearElasticIntegrator(material=material, method="fast")
 

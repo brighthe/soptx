@@ -2,7 +2,7 @@
 
 ``InterfaceOperator`` 与 ``GlobalAssembler.assemble_interface_system`` 是同一装配
 的两种形式: 前者保留批量缩聚刚度按需作用, 后者散加成显式 ``CSRTensor``. 验证分
-两组判据, 共享同一算例设置 (FullMBBBeam2d, 精确 Schur 补缩聚), 全脚本只构造一次
+两组判据, 共享同一算例设置 (FullMBBBeamPoint2d, 精确 Schur 补缩聚), 全脚本只构造一次
 接口系统.
 
 算子级判据 (7 条, 阈值相对 1e-13): 算子的单次作用与显式装配代数恒等, 不是近似,
@@ -62,7 +62,7 @@ from soptx.backend import backend_manager as bm
 from soptx.solvers import CGSolver, create
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
-from soptx.problems.elasticity import FullMBBBeam2d
+from soptx.problems import FullMBBBeamPoint2d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.fem.substructure import (
     ExactSchurCondensation,
@@ -172,7 +172,7 @@ def run_verification(
     bm.set_backend(backend)
     rng = np.random.default_rng(seed)
 
-    problem = FullMBBBeam2d(domain=(0.0, 12.0, 0.0, 2.0), P=-1.0, E=1.0, nu=0.3)
+    problem = FullMBBBeamPoint2d(domain=(0.0, 12.0, 0.0, 2.0), P=-1.0, E=1.0, nu=0.3)
     domain_size = (problem.domain[1], problem.domain[3])
     n_sub = (12, 2)
     n_fine = (5, 5)
@@ -184,7 +184,7 @@ def run_verification(
     density = make_density_fields(sub_meshes, domain_size, DENSITY_RANGE)
 
     print("=" * 78)
-    print("子结构缩聚 EA Matrix-Free 验证 · 算子级 + 求解级 (FullMBBBeam2d)")
+    print("子结构缩聚 EA Matrix-Free 验证 · 算子级 + 求解级 (FullMBBBeamPoint2d)")
     print("=" * 78)
     print(f"后端           : {backend}")
     print(f"子结构划分     : {n_sub[0]} x {n_sub[1]} (共 {len(sub_meshes)} 个)")
@@ -215,7 +215,6 @@ def run_verification(
             interpolation_method="simp",
             options={"penalty_factor": 3.0, "stress_penalty_factor": 1.0},
         ),
-        enable_logging=False,
     )
     global_load = bm.asarray(analyzer.assemble_external_load(), dtype=bm.float64)
     _, fixed_mask = analyzer.tensor_space.boundary_interpolate(
@@ -224,7 +223,7 @@ def run_verification(
         method="interp",
     )
     fixed_global_dofs = bm.nonzero(fixed_mask)[0]
-    fixed_interface_dofs = assembler.project_global_dofs(system, fixed_global_dofs)
+    fixed_interface_dofs = assembler.project_global_dofs(system.global_dofs, fixed_global_dofs)
 
     op_full = InterfaceOperator(assembler, sub_meshes, exact_condensor)
     op_free = InterfaceOperator(
@@ -308,7 +307,7 @@ def run_verification(
     # ------------------------------------------------------------------
     # 求解级判据: 完整迭代求解流程中显式矩阵可整个拿掉.
     # ------------------------------------------------------------------
-    load_interface = assembler.project_global_vector(system, global_load)
+    load_interface = assembler.project_global_vector(system.global_dofs, global_load)
     b_f = load_interface[free]
 
     # 路径 1: 显式子块直接法 (SuperLU), 作为参照解.

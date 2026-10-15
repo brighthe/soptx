@@ -113,7 +113,7 @@ $[0,1]\times[0,1]$ 单位正方形域, 混合边界条件 (顶底位移弱施加
 
 工程算例没有解析解, 判据由收敛阶改为**载荷路径**: 真相对残差 + 结构合力守恒 (详见
 [README.md](README.md#2-集中力工程基准-concentrated_load_demo)). 物理问题为
-[`FixedFixedBeamCenterLoad2d`](../../docs/problems/engineering-benchmarks.md#fixedfixedbeamcenterload2d):
+[`FixedFixedBeamPatch2d`](../../docs/problems/engineering-benchmarks.md#fixedfixedbeampatch2d):
 $160\times20$ 全域两端固支梁, 底边中点长度 $l=1$ 的载荷区上作用 $t=P/l$, $P=-3\,\mathrm{N}$.
 
 两条离散链共用同一载荷函数——原始局部牵引在底边连续 P1 迹空间上的 L2 投影

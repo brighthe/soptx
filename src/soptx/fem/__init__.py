@@ -1,10 +1,4 @@
-"""Finite-element integrators, analyzers and matrix-free operators.
-
-``soptx.fem.distributed`` and ``soptx.fem.analyzers.distributed_analyzer`` are
-deliberately *not* re-exported here: both import ``mpi4py``, which is an
-optional extra, so importing them eagerly would make ``import soptx.fem`` fail
-on an installation without it.  Import those two by their full module path.
-"""
+"""Finite-element integrators, analyzers and matrix-free operators."""
 
 from .analyzers import (
     FullInterfaceAnalysisResult,
@@ -19,6 +13,7 @@ from .boundary_loads import (
     P1TraceLoad,
     boundary_load_resultant,
     check_boundary_load_resultant,
+    check_traction_patch_alignment,
     project_patch_traction_to_p1_trace,
 )
 from .integrators import LinearElasticIntegrator, SourceIntegrator
@@ -68,6 +63,7 @@ __all__ = [
     "boundary_load_resultant",
     "build_csr_pattern",
     "check_boundary_load_resultant",
+    "check_traction_patch_alignment",
     "create_level",
     "project_patch_traction_to_p1_trace",
     "register_level",

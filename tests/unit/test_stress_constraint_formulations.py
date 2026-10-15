@@ -10,7 +10,6 @@ from soptx.topology.constraints import (
     EpsilonRelaxedStressFormulation,
     HuZhangStressConstraint,
     LagrangeStressConstraint,
-    PolynomialVanishingStressFormulation,
 )
 
 
@@ -100,7 +99,6 @@ def test_epsilon_formulation_rejects_invalid_values(epsilon):
     [
         (EpsilonRelaxedStressFormulation(0.03), "solid"),
         (EpsilonRelaxedStressFormulation(0.03), "apparent"),
-        (PolynomialVanishingStressFormulation(), "solid"),
     ],
 )
 @pytest.mark.parametrize("multiresolution", [False, True])
@@ -145,27 +143,6 @@ def test_formulation_partials_match_finite_difference(
         rtol=1e-8,
         atol=1e-9,
     )
-
-
-def test_polynomial_acceptance_proxy_matches_reported_stress_measure():
-    """Polynomial 历史验收量应与其展示应力测度保持同一尺度."""
-    bm.set_backend("numpy")
-    formulation = PolynomialVanishingStressFormulation()
-    solid_ratio = np.array([[2.0], [0.5]])
-    stiffness_ratio = np.array([0.25, 0.75])
-
-    measure = formulation.stress_measure(
-        solid_ratio,
-        stiffness_ratio,
-        "solid",
-    )
-    violation = formulation.acceptance_violation(
-        solid_ratio,
-        stiffness_ratio,
-        "solid",
-    )
-
-    np.testing.assert_allclose(violation, measure - 1.0)
 
 
 def test_generic_adapters_match_for_equivalent_epsilon_state():

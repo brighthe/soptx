@@ -57,7 +57,7 @@ from soptx.backend import backend_manager as bm
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.substructure import GlobalAssembler
-from soptx.problems.elasticity import FullMBBBeam2d
+from soptx.problems import FullMBBBeamPoint2d
 from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.filters import Filter
 from soptx.topology.interpolation import MaterialInterpolationScheme
@@ -206,7 +206,7 @@ def run_trajectory(args: argparse.Namespace) -> Tuple[Dict[str, Any], Dict[str, 
         全链路不涉及任何代理模型: 状态方程由直接法求解, 局部刚度由精确单元装配得到,
         因此轨迹本身即为 PIML 侧的精确参照工况.
     """
-    problem = FullMBBBeam2d(domain=DOMAIN, P=P_LOAD, E=E_BASE, nu=NU)
+    problem = FullMBBBeamPoint2d(domain=DOMAIN, P=P_LOAD, E=E_BASE, nu=NU)
     domain_size = (problem.domain[1], problem.domain[3])
     assembler = GlobalAssembler(
         domain_size, N_SUB, N_FINE, E_base=problem.E, nu=problem.nu
@@ -232,7 +232,6 @@ def run_trajectory(args: argparse.Namespace) -> Tuple[Dict[str, Any], Dict[str, 
             "void_youngs_modulus": args.void_youngs_modulus,
             "target_variables": ["E"],
         },
-        enable_logging=False,
     )
     analyzer = LagrangeFEMAnalyzer(
         disp_mesh=mesh,
@@ -245,7 +244,6 @@ def run_trajectory(args: argparse.Namespace) -> Tuple[Dict[str, Any], Dict[str, 
         solve_method=args.solve_method,
         topopt_algorithm="density_based",
         interpolation_scheme=interpolation,
-        enable_logging=False,
     )
 
     design_variable, density = interpolation.setup_density_distribution(
@@ -257,20 +255,17 @@ def run_trajectory(args: argparse.Namespace) -> Tuple[Dict[str, Any], Dict[str, 
         analyzer=analyzer,
         state_variable="u",
         diff_mode="manual",
-        enable_logging=False,
     )
     constraint = VolumeConstraint(
         analyzer=analyzer,
         volume_fraction=args.volume_fraction,
         diff_mode="manual",
-        enable_logging=False,
     )
     density_filter = Filter(
         design_mesh=mesh,
         filter_type=args.filter_type,
         rmin=args.rmin,
         density_location="element",
-        enable_logging=False,
     )
     optimizer = OCOptimizer(
         objective=objective,
@@ -317,7 +312,7 @@ def run_trajectory(args: argparse.Namespace) -> Tuple[Dict[str, Any], Dict[str, 
             arrays[key] = np.asarray(values, dtype=np.float64)
 
     config: Dict[str, Any] = {
-        "problem": "FullMBBBeam2d",
+        "problem": "FullMBBBeamPoint2d",
         "domain": list(DOMAIN),
         "P": P_LOAD,
         "E": E_BASE,

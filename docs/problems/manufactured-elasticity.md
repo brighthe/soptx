@@ -1,7 +1,7 @@
 # 制造解线弹性模型
 
 本文档说明 SOPTX 当前活跃制造解的方程、材料假设、边界条件和返回 shape。
-实现位于 `soptx.problems.elasticity`；Problem 不创建网格，也不保存 Material 对象。
+实现位于 `soptx.problems.manufactured`，公开类从 `soptx.problems` 导入；Problem 不创建网格，也不保存 Material 对象。
 
 ## 通用方程
 
@@ -42,8 +42,9 @@ $$
 | `MixedBoundaryExponentialSineElasticity2D` | `mixed` | $x=0$、$y=0$、$y=1$ | $x=1$ |
 | `MixedBoundarySinusoidalElasticity2D` | `mixed` | $x=0$、$y=0$ | $x=1$、$y=1$ |
 
-边界判定一律是坐标到区域边界值的距离比较，容差 `_eps = 1e-12`：$x=0$ 这条边
-对应 `bm.abs(x - domain[0]) < 1e-12`。
+边界判定一律是坐标到区域边界值的距离比较，绝对容差 `GEOMETRIC_TOL = 1e-12`
+（定义在 `soptx.core.numerics`，问题类以 `_eps` 持有）：$x=0$ 这条边对应
+`bm.abs(x - domain[0]) < self._eps`。
 
 ### 齐次与非齐次 Dirichlet 模型的边界值
 
@@ -74,7 +75,7 @@ $$
 
 ### 全位移边界模型在混合形式下的默认实现
 
-`AllDisplacementBoundaryMixin`（`_base.py`）为全位移边界模型补齐混合
+`AllDisplacementBoundaryMixin`（`manufactured/_all_dirichlet.py`，2D 与 3D 模型共用）为全位移边界模型补齐混合
 形式所需的成员，使它们无需适配层即满足 `MixedBoundaryElasticityProblem`
 协议：
 

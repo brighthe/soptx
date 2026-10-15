@@ -52,11 +52,10 @@ class NoneStrategy(_FilterStrategy, BaseLogged):
                 density_location: Literal['element', 'node', 'element_multiresolution'],
                 disp_mesh: Optional[HomogeneousMesh] = None,
                 integration_order: int = 4,
-                enable_logging: bool = False,
-                logger_name: Optional[str] = None,
                 **kwargs
             ) -> None:
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_error, 不受日志开关影响
+        super().__init__(enable_logging=False)
 
         self._design_mesh = design_mesh
         self._density_location = density_location
@@ -116,11 +115,10 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
                 design_mesh: HomogeneousMesh, 
                 density_location: Literal['element', 'node', 'element_multiresolution'], 
                 disp_mesh: Optional[HomogeneousMesh] = None, 
-                enable_logging: bool = False,
-                logger_name: Optional[str] = None
             ) -> None:
         
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_error, 不受日志开关影响
+        super().__init__(enable_logging=False)
         
         H_device = H.data.device
         if H_device != design_mesh.device:
@@ -250,11 +248,10 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
                 design_mesh: HomogeneousMesh, 
                 density_location: Literal['element', 'node', 'element_multiresolution'],
                 disp_mesh: Optional[HomogeneousMesh] = None, 
-                enable_logging: bool = False,
-                logger_name: Optional[str] = None
             ) -> None:
         
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_error, 不受日志开关影响
+        super().__init__(enable_logging=False)
 
         self._H = H
         self._design_mesh = design_mesh                           
@@ -399,11 +396,9 @@ class ProjectionStrategy(DensityStrategy):
                 beta_increment: float = 1.0,
                 beta_multiplier: float = 2.0,
                 disp_mesh: Optional[HomogeneousMesh] = None, 
-                enable_logging: bool = False,
-                logger_name: Optional[str] = None
             ) -> None:
         
-        super().__init__(H, design_mesh, density_location, disp_mesh, enable_logging, logger_name)
+        super().__init__(H, design_mesh, density_location, disp_mesh)
         
         # 投影参数
         self.projection_type = projection_type
@@ -579,8 +574,7 @@ class ProjectionStrategy(DensityStrategy):
             # 重置计数器
             self._beta_iter = 0
 
-            if self._enable_logging:
-                print(f"[{trigger}] beta: {old_beta:.4f} -> {self.beta:.4f}")
+            print(f"[{trigger}] beta: {old_beta:.4f} -> {self.beta:.4f}")
 
             # 强制返回 change=1.0, 防止外层优化循环因收敛判断提前退出
             return 1.0, True

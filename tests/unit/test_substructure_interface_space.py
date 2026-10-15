@@ -12,7 +12,6 @@ from soptx.fem.substructure import (
     ExactSchurReduction,
     FullTraceBasis,
     GlobalAssembler,
-    InterfaceDofsView,
     InterfaceSpace,
     LinearCornerTraceBasis,
     TraceBasis,
@@ -25,7 +24,7 @@ from soptx.fem.substructure import (
     solve_constrained_system,
     solve_interface_system,
 )
-from soptx.problems.elasticity import FullMBBBeam2d
+from soptx.problems import FullMBBBeamPoint2d
 
 
 def _components():
@@ -41,7 +40,7 @@ def _components():
     prototype, sub_meshes, _ = build_substructures(assembler)
     prototype.penal = 3.0
     prototype.rho_min = 1.0e-3
-    problem = FullMBBBeam2d(domain=(0.0, 3.0, 0.0, 1.0), P=-1.0)
+    problem = FullMBBBeamPoint2d(domain=(0.0, 3.0, 0.0, 1.0), P=-1.0)
     density = np.linspace(0.3, 0.95, 12).reshape(3, 2, 2)
     return assembler, prototype, sub_meshes, problem, density
 
@@ -154,7 +153,7 @@ def test_project_conditions_match_kind_specific_functions(kind: str) -> None:
         conditions = project_problem_conditions_to_interface_system(
             problem,
             assembler,
-            InterfaceDofsView(global_dofs=space.global_dofs),
+            space.global_dofs,
         )
         expected_load = conditions.interface_force
         expected_fixed = conditions.interface_fixed_dofs
@@ -175,7 +174,7 @@ def test_global_trace_map_matches_legacy_projection_and_compatibility() -> None:
     P = corner.global_trace_map()
     expected = assembler.build_linear_corner_projection(
         sub_meshes,
-        InterfaceDofsView(global_dofs=full.global_dofs),
+        full.global_dofs,
         corner.trace_basis,
     )
     assert isinstance(P, csr_matrix)

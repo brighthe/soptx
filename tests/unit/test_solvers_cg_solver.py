@@ -70,9 +70,10 @@ def test_solve_before_setup_raises() -> None:
         CGSolver().solve(b)
 
 
-def test_negative_residual_refresh_rejected() -> None:
-    with pytest.raises(ValueError, match="residual_refresh"):
-        CGSolver(residual_refresh=-1)
+def test_non_bool_verify_residual_rejected() -> None:
+    # 旧的整数周期 residual_refresh 已改为开关, 传整数视为误用
+    with pytest.raises(ValueError, match="verify_residual"):
+        CGSolver(verify_residual=5)
 
 
 def test_setup_returns_self_for_chaining() -> None:
@@ -132,12 +133,12 @@ def test_zero_rhs_reports_zero_residual() -> None:
     assert info["converged"] is True
 
 
-def test_residual_refresh_reports_true_residual() -> None:
+def test_verify_residual_reports_true_residual() -> None:
     A = poisson_1d()
     rng = np.random.default_rng(3)
     b = rng.standard_normal(A.shape[0])
 
-    _, info = CGSolver(rtol=1e-12, residual_refresh=5).setup(A).solve(b)
+    _, info = CGSolver(rtol=1e-12, verify_residual=True).setup(A).solve(b)
 
     assert info["true_residual"] is not None
     assert info["converged"] is True
@@ -235,13 +236,6 @@ def test_batched_rhs(batch_first: bool) -> None:
     assert info["relres"] < 1e-10
 
 
-def test_dot_product_rejects_batched_rhs() -> None:
-    A = poisson_1d(20)
-    b = np.ones((20, 2))
-    solver = CGSolver(dot_product=lambda u, v: float(np.sum(u * v))).setup(A)
-
-    with pytest.raises(NotImplementedError, match="dot_product"):
-        solver.solve(b)
 # --------------------------------------------------------------------------
 # 入口类型归一化: 算法里的断言保持严格, 放宽发生在向量层
 # --------------------------------------------------------------------------

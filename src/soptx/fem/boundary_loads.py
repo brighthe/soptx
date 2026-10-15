@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from soptx.backend import backend_manager as bm
+from soptx.core.numerics import GEOMETRIC_TOL
 from soptx.decorator import cartesian
 from soptx.typing import TensorLike
 
@@ -31,7 +32,7 @@ class P1TraceLoad:
     - level : 该直线在垂直方向上的坐标, 用于把非本条边界上的点置零
     - axis : 直线所沿的坐标轴 (二维中 0 表示水平边, 1 表示竖直边)
     - component : 牵引作用的分量下标
-    - tolerance : 判定"点落在该直线上"的几何容差
+    - tolerance : 判定"点落在该直线上"的几何容差, 默认 ``GEOMETRIC_TOL``
     """
 
     start: float
@@ -40,7 +41,7 @@ class P1TraceLoad:
     level: float
     axis: int = 0
     component: int = 1
-    tolerance: float = 1.0e-12
+    tolerance: float = GEOMETRIC_TOL
 
     @cartesian
     def __call__(self, points: TensorLike) -> TensorLike:
@@ -250,3 +251,52 @@ def check_boundary_load_resultant(
         relative_error=relative_error,
         within_tolerance=relative_error <= relative_tolerance,
     )
+
+
+def check_traction_patch_alignment(mesh, pde) -> None:
+    """检查整边选取的局部载荷区端点是否都是网格节点.
+
+    带局部载荷区的基准问题在未注入 ``traction`` 时按整边选取施加牵引: 边中心落在
+    载荷区内则整条边取满强度, 否则取零. 载荷区端点不是网格节点时, 跨端点的边被整体
+    计入或整体丢弃, 离散合力偏离 ``P``; 载荷区整个落在一条边内部时合力直接为零.
+    这些偏差都不报错, 本函数把它们变成构造时的显式错误.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        位移网格, 需支持 ``entity('node')``.
+    pde : Problem
+        物理问题. 没有 ``traction_patch``, 或 ``uses_step_traction`` 为 False
+        (已注入与网格无关的牵引, 如 P1 迹投影) 时不做检查.
+
+    Raises
+    ------
+    ValueError
+        载荷区某个端点与所有网格节点的距离都超过容差.
+
+    Notes
+    -----
+    端点由 ``traction_patch``、``traction_axis`` 与 ``traction_level`` 给出 (见
+    ``soptx.protocols`` 第 4 层), 只检查二维问题. 容差取 ``GEOMETRIC_TOL`` 与
+    1e-10 倍区域尺寸中的较大者, 以容纳非结构网格的节点坐标舍入.
+    """
+    if not getattr(pde, "uses_step_traction", False):
+        return
+    if int(getattr(pde, "dimension", 2)) != 2:
+        return
+
+    axis, level = int(pde.traction_axis), float(pde.traction_level)
+    node = bm.to_numpy(mesh.entity("node"))
+    extent = float(max(node.max(axis=0) - node.min(axis=0)))
+    tolerance = max(GEOMETRIC_TOL, 1.0e-10 * extent)
+    for value in pde.traction_patch:
+        endpoint = [0.0, 0.0]
+        endpoint[axis], endpoint[1 - axis] = float(value), level
+        distance = abs(node - endpoint).max(axis=1).min()
+        if distance > tolerance:
+            raise ValueError(
+                f"{type(pde).__name__} 的载荷区端点 {tuple(endpoint)} 不是网格节点 "
+                f"(最近节点距离 {distance:.3g}): 整边选取会使离散合力偏离 P, 载荷区落在"
+                "单元内部时合力为零. 请调整网格使载荷区端点与节点对齐, 或经构造参数 "
+                "traction= 注入 soptx.fem.project_patch_traction_to_p1_trace 的 P1 迹载荷."
+            )

@@ -30,16 +30,16 @@ paper_rcparams()
 # ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
-    "postprocess/discretization_probe/huzhang-2-pad-solid__fields.npz",
-    "postprocess/discretization_probe/huzhang-4-pad-solid__fields.npz",
+    "postprocess/discretization_probe/huzhang-2__fields.npz",
+    "postprocess/discretization_probe/huzhang-4__fields.npz",
 )
 
 
 def main() -> None:
     base = config.OUTPUT_DIR / SOURCE_CASE
 
-    k2_tri, k2_rho, k2_vm, k2_vol = load_design(base, "huzhang-2-pad-solid", "huzhang-2")
-    k4_tri, k4_rho, k4_vm, k4_vol = load_design(base, "huzhang-4-pad-solid", "huzhang-4")
+    k2_tri, k2_rho, k2_vm, k2_vol = load_design(base, "huzhang-2", "huzhang-2")
+    k4_tri, k4_rho, k4_vm, k4_vol = load_design(base, "huzhang-4", "huzhang-4")
 
     fig = plt.figure(figsize=FIG_SIZE_IN, layout="constrained")
     gs = fig.add_gridspec(2, 3, width_ratios=[1.0, 1.0, 0.035], wspace=0.06, hspace=0.12)

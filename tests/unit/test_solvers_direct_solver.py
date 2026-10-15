@@ -64,7 +64,7 @@ def test_unknown_backend_rejected() -> None:
 
 
 def test_invalid_sym_rejected() -> None:
-    with pytest.raises(ValueError, match="sym must be 0, 1 or 2"):
+    with pytest.raises(ValueError, match="sym 须为 0, 1 或 2"):
         DirectSolver("mumps", sym=3)
 
 
@@ -289,3 +289,28 @@ def test_mumps_workspace_error_raises_after_last_retry(fake_mumps) -> None:
         DirectSolver("mumps").setup(A)
     assert [ctx.icntl14 for ctx in fake_mumps.created] == [None, 100, 400, 1600]
     assert all(ctx.destroyed for ctx in fake_mumps.created)
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+    except ImportError:
+        return False
+    return torch.cuda.is_available()
+
+
+@pytest.mark.skipif(not _cuda_available(), reason="需要 PyTorch 与 CUDA")
+def test_solution_follows_rhs_device() -> None:
+    from soptx.solvers import spsolve
+
+    A, b, reference = spd_system()
+    bm.set_backend("pytorch")
+    try:
+        b_cuda = bm.tensor(b, device="cuda")
+        x, info = DirectSolver("scipy").setup(A).solve(b_cuda)
+        assert x.device.type == "cuda"
+        assert info["converged"]
+        np.testing.assert_allclose(bm.to_numpy(x), reference, atol=1e-10)
+        assert spsolve(A, b_cuda, solver="scipy").device.type == "cuda"
+    finally:
+        bm.set_backend("numpy")

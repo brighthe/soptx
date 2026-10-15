@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import ast
-import dataclasses
 import sys
 from pathlib import Path
 
@@ -44,48 +43,28 @@ def _module_literal(path: Path, name: str):
 
 
 def test_stress_run_label_matches_existing_result_directories():
-    """应力算例目录名沿用旧标签规则, 已入库的运行目录因此无需改名."""
-    assert run_cantilever_stress.run_label("huzhang", 2) == (
-        "analyzer-huzhang__lfem_constraint-apparent__load_pad_radius-1.5"
-        "__order-2__solid_thr-0.5"
-    )
+    """应力算例目录名与柔顺度算例同格式, 且六组运行目录均已入库."""
+    assert run_cantilever_stress.RUN_LABEL.format(method="huzhang", order=2) == "analyzer-huzhang__order-2"
+    case_dir = config.OUTPUT_DIR / run_cantilever_stress.CASE_ID
+    for method in run_cantilever_stress.METHODS:
+        for order in run_cantilever_stress.ORDERS:
+            label = run_cantilever_stress.RUN_LABEL.format(method=method, order=order)
+            assert (case_dir / label / "summary.json").is_file(), label
 
 
 def test_stress_consumers_use_run_script_labels():
     """探针默认构型、图 5.9 的运行目录与 run 脚本的命名一致."""
+    label = run_cantilever_stress.RUN_LABEL.format
     expected = tuple(
-        run_cantilever_stress.run_label(method, order)
+        label(method=method, order=order)
         for method in run_cantilever_stress.METHODS
         for order in run_cantilever_stress.ORDERS
     )
     assert discretization_probe.DEFAULT_DESIGNS == expected
+    assert discretization_probe.DELTA_G == run_cantilever_stress.STRESS_TOLERANCE
     assert stress_metrics.OUT == config.OUTPUT_DIR / run_cantilever_stress.CASE_ID
     required = _module_literal(EXPERIMENT_ROOT / "plots" / "stress_cubic_convergence.py", "REQUIRED_RUNS")
-    assert required[:2] == (
-        run_cantilever_stress.run_label("lfem", 3),
-        run_cantilever_stress.run_label("huzhang", 3),
-    )
-
-
-def test_stress_al_options_follow_script_constants():
-    """AL 目标与优化器共用的选项逐项取自脚本常量."""
-    options = dataclasses.asdict(run_cantilever_stress.al_options())
-    module = run_cantilever_stress
-    expected = {
-        "change_tolerance": module.CHANGE_TOLERANCE,
-        "stress_tolerance": module.STRESS_TOLERANCE,
-        "hold_steps": module.HOLD_STEPS,
-        "max_al_iterations": module.MAX_AL_ITERATIONS,
-        "mma_iters_per_al": module.MMA_ITERS_PER_AL,
-        "mu_0": module.MU_0,
-        "mu_max": module.MU_MAX,
-        "lambda_max": module.LAMBDA_MAX,
-        "move_limit": module.MOVE_LIMIT,
-        "change_measure": module.CHANGE_MEASURE,
-        "acceptance_solid_threshold": module.ACCEPTANCE_SOLID_THRESHOLD,
-    }
-    assert {key: options[key] for key in expected} == expected
-    assert discretization_probe.DELTA_G == module.STRESS_TOLERANCE
+    assert required[:2] == (label(method="lfem", order=3), label(method="huzhang", order=3))
 
 
 def test_reanalysis_modules_cover_run_script_combinations():

@@ -31,7 +31,7 @@
 | $\beta_{k} = \rho_{k+1} / \rho_{k}$ | `beta` | — |
 | $p_{k+1} = z_{k+1} + \beta_{k} p_{k}$ | `p` | $p_{0} = z_{0}$ |
 
-`_dot` 是可插拔内积：默认逐列点积，分布式时由 `overlap.weighted_cg` 注入重叠加权内积。
+`_dot` 是逐列点积。
 
 ### 1.3 停机判据
 
@@ -51,15 +51,17 @@ $$
 
 进入循环前先做一次判定，$q_{0} \le \tau^{2}$ 时 `niter = 0`；$\lVert b\rVert < 10^{-15}$ 时直接返回零解。
 
-### 1.4 真残差刷新
+### 1.4 收敛时的真残差验证
 
-`residual_refresh = m > 0` 时每 $m$ 步重算 $r_{k} = b - A x_{k}$ 并得 `true_sq`。判定为
+`verify_residual=True` 时，递推残差宣布达标（或到达最后一次迭代）的那一步重算 $r_{k} = b - A x_{k}$，把活跃列的递推残差替换为它，并重算预条件残差与 $(r_{k}, z_{k})$，再以替换后的判据量判定：
 
 $$
-\text{reached} = (\texttt{recursive\_sq} \le \tau^{2}) \ \lor\ (\texttt{true\_sq} \le \tau^{2})
+\text{reached} = \texttt{recursive\_sq}' \le \tau^{2}
 $$
 
-真残差只能额外促成收敛，不能否决递推残差已达标的列。`CGSolver` 的 `info['relres']` 与刷新无关，一律在返回前按 $\lVert b - Ax\rVert / \lVert b\rVert$ 现算。
+其中 $\texttt{recursive\_sq}'$ 是替换后的判据量。递推漂移造成的虚假达标因此被否决，未达标的列以替换后的残差继续迭代；搜索方向不动，冻结列保持原值。不做周期替换：周期替换会破坏递推的局部正交性，病态问题上迭代数可增加 15%–30%。`CGSolver` 的 `info['relres']` 与验证无关，一律在返回前按 $\lVert b - Ax\rVert / \lVert b\rVert$ 现算。
+
+（2026-10-12 前的实现是整数参数 `residual_refresh`：周期重算真残差，但只能额外促成收敛、不能否决，也不写回递推量。）
 
 ### 1.5 退出原因
 
@@ -70,8 +72,9 @@ $$
 | `DIVERGED_ITS` (-3) | 循环结束仍活跃 | `_finalize` |
 | `DIVERGED_DTOL` (-4) | $q_{k} > \mathrm{divtol}^{2}\, q_{0}$ | `div_sq` |
 | `DIVERGED_BREAKDOWN` (-5) | 上一步 $\rho_{k} \le 0$ | `_freeze(rhssq <= 0)` |
-| `DIVERGED_INDEFINITE_MAT` (-8) | $\gamma_{k} \le 0$ | `negative` |
+| `DIVERGED_INDEFINITE_PC` (-8) | $\rho_{k} < 0$, 先于收敛判定 | `_freeze(rhssq_new < 0)` |
 | `DIVERGED_NANORINF` (-9) | $q_{k}$ 或 $\gamma_{k}$ 非有限 | `_freeze(~isfinite)` |
+| `DIVERGED_INDEFINITE_MAT` (-10) | $\gamma_{k} \le 0$ | `negative` |
 
 多列时 `info['reason']` 取各列码的最小值，`info['column_reasons']` 保留逐列码；`converged` 为全部列 `reason > 0`。
 
@@ -96,9 +99,8 @@ $\Pi_{I}$、$\Pi_{D}$ 分别是内部与 Dirichlet 自由度的投影。右端�
 | `CGSolver` 递推、判据、`info` | 是 | `verify_cg_solver.py` |
 | `DiagonalPreconditioner` 接入 `M=` 位 | 是 | `verify_cg_solver.py` |
 | `assemble_operator_diagonal` 两层级一致 | 是 | `verify_cg_solver.py` |
-| `'fa'` 与 `'ea'` 算子作用一致 | 否 | `matrix_free_elasticity/`、`soptx.fem.verification` |
+| `'fa'` 与 `'ea'` 算子作用一致 | 否 | operator_level 集成测试、`soptx.fem.verification` |
 | 离散格式收敛阶 | 否，`solution` 一项只借用其判定 | `lagrange_elasticity/` |
-| 多 rank `weighted_cg` | 否 | `matrix_free_elasticity/` |
 
 ## 3. 验收契约
 
@@ -134,7 +136,7 @@ case 轴是预条件子（`none`、`jacobi`），下表每一行在每个 case �
 | `contract` | $x_{0} = x_{\mathrm{d}}$、`atol=1e-8` 时 `niter == 0` 且 `reason == CONVERGED_ATOL` | — | 精确 |
 | `contract` | `maxit=3` 时 `converged is False` 且 `reason == DIVERGED_ITS` | — | 精确 |
 | `contract` | `DiagonalPreconditioner(diag)` 对含 0、负元素或非一维的 `diag` 抛 `ValueError` | — | 精确 |
-| `contract` | `CGSolver` 对非法 `norm_type`、`residual_refresh < 0`、`divtol <= 0` 抛 `ValueError` | — | 精确 |
+| `contract` | `CGSolver` 对非法 `norm_type`、非 bool 的 `verify_residual`、`divtol <= 0` 抛 `ValueError` | — | 精确 |
 | `precond` | $\delta(d_{\mathrm{ea}}, d_{\mathrm{fa}}) \le$ 阈值 | `diag_rel_diff` | $10^{-12}$ |
 | `precond` | 两层级各自 $\delta(x_{M}, x_{\mathrm{d}}) \le$ 阈值 | `solution_rel_diff` | $10^{-6}$ |
 | `precond` | 两层级各自 $n_{M} < n_{\mathrm{none}}$ | — | 严格 |
@@ -249,11 +251,9 @@ case `jacobi`：
 | 鞍点系统上的直接法（`--system saddle`） | `HuZhangMFEMAnalyzer` 接线后 |
 | 三后端耗时、多右端项与因子复用的横向对比 | 需要选型依据时另起脚本 |
 | MUMPS 分阶段 `job=1/2/3` 的因子复用 | `soptx.solvers` 新增分阶段接口后 |
-| 多 rank `weighted_cg` | `matrix_free_elasticity/` |
 | GPU 后端 | `gpu_elasticity/` |
-| 对称不定系统的迭代法 | `MINRESSolver` 落地后 |
-| 多重网格 / AMG 预条件 | `Multigrid` / `AMGSolver` 落地后 |
-| `'natural'` 范数下 $(r, M^{-1} r) < 0$ 的截断语义 | 非 SPD 预条件子出现后 |
+| 对称不定系统的迭代法 | MINRES 与鞍点块预条件子实现后 |
+| 多重网格 / AMG 预条件 | GMG 已实现但需要结构化六面体层次, 不在本示例; AMG 实现后 |
 
 ### 5.3 复现命令
 

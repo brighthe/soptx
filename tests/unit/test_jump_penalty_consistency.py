@@ -57,7 +57,6 @@ def _internal_face_penalty(mesh, degree: int):
         hypothesis="plane_strain",
         lame_lambda=1.0,
         shear_modulus=0.5,
-        enable_logging=False,
     )
     form = BilinearForm(space)
     form.add_integrator(
@@ -191,7 +190,7 @@ def _internal_face_penalty_3d(mesh, degree: int):
     face2cell = mesh.face_to_cell()
     internal = bm.nonzero(face2cell[:, 0] != face2cell[:, 1])[0]
     material = IsotropicLinearElasticMaterial(
-        lame_lambda=1.0, shear_modulus=0.5, hypothesis="3D", enable_logging=False
+        lame_lambda=1.0, shear_modulus=0.5, hypothesis="3D"
     )
     form = BilinearForm(space)
     form.add_integrator(

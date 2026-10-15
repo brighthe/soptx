@@ -38,12 +38,12 @@ analysis_capability_substructure/
 
 | case-id | problem | 接口 |
 |---|---|---|
-| `full_trace_density_update_2d` | `CantileverCorner2d` | `full_trace` |
-| `full_trace_density_update_3d` | `FullMBBBeam3d` | `full_trace` |
-| `linear_corner_density_update_2d` | `CantileverCorner2d` | `linear_corner` |
-| `linear_corner_density_update_3d` | `FullMBBBeam3d` | `linear_corner` |
+| `full_trace_density_update_2d` | `CantileverCornerPoint2d` | `full_trace` |
+| `full_trace_density_update_3d` | `FullMBBBeamLine3d` | `full_trace` |
+| `linear_corner_density_update_2d` | `CantileverCornerPoint2d` | `linear_corner` |
+| `linear_corner_density_update_3d` | `FullMBBBeamLine3d` | `linear_corner` |
 
-二维计算成本包含以下 case，task 均为 `route_cost`。四个 case 采用相同的 `CantileverCorner2d`、`n_sub=640x320`、`n_fine=5x5`、`density=pattern_a` 和 MUMPS：
+二维计算成本包含以下 case，task 均为 `route_cost`。四个 case 采用相同的 `CantileverCornerPoint2d`、`n_sub=640x320`、`n_fine=5x5`、`density=pattern_a` 和 MUMPS：
 
 | case-id | 路径 | 试运行 / 正式测量 |
 |---|---|---|

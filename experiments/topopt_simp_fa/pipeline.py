@@ -10,12 +10,12 @@ from soptx.mesh import HexahedronMesh, QuadrangleMesh, TetrahedronMesh, Triangle
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import (
-    BearingDevice2d,
-    CantileverCorner2d,
-    CantileverMiddle2d,
-    CantileverRightBottomEdge3d,
-    HalfMBBBeamRight2d,
-    SimplySupportedBridge2d,
+    BearingTraction2d,
+    CantileverCornerPoint2d,
+    CantileverMiddlePatch2d,
+    CantileverBottomEdgeLine3d,
+    HalfMBBBeamPoint2d,
+    BridgeTraction2d,
 )
 from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.filters import Filter
@@ -57,7 +57,7 @@ MESH_DATA_TYPES = {
 def _create_problem(case: TopOptCase) -> Any:
     if case.problem == "cantilever_corner":
         lx, ly = case.domain
-        return CantileverCorner2d(
+        return CantileverCornerPoint2d(
             domain=(0.0, lx, 0.0, ly),
             P=case.load,
             E=case.emax,
@@ -65,7 +65,7 @@ def _create_problem(case: TopOptCase) -> Any:
         )
     if case.problem == "cantilever_middle":
         lx, ly = case.domain
-        return CantileverMiddle2d(
+        return CantileverMiddlePatch2d(
             domain=(0.0, lx, 0.0, ly),
             P=case.load,
             E=case.emax,
@@ -73,17 +73,17 @@ def _create_problem(case: TopOptCase) -> Any:
         )
     if case.problem == "bearing_device":
         lx, ly = case.domain
-        # load 字段映射为顶边均布牵引强度 t (N/mm), 而非合力.
-        return BearingDevice2d(
+        # load 字段是顶边均布牵引强度 t (N/mm), 问题类收合力 P = t * lx.
+        return BearingTraction2d(
             domain=(0.0, lx, 0.0, ly),
-            t=case.load,
+            P=case.load * lx,
             E=case.emax,
             nu=case.nu,
         )
     if case.problem == "half_mbb_beam_right":
         lx, ly = case.domain
         # domain 是对称右半域 (整梁跨度为 2 * lx); 左边界为对称面.
-        return HalfMBBBeamRight2d(
+        return HalfMBBBeamPoint2d(
             domain=(0.0, lx, 0.0, ly),
             P=case.load,
             E=case.emax,
@@ -91,17 +91,17 @@ def _create_problem(case: TopOptCase) -> Any:
         )
     if case.problem == "simply_supported_bridge":
         lx, ly = case.domain
-        # load 字段映射为顶边均布牵引强度 t (N/mm), 而非合力. 桥面实体非设计域
-        # 厚度取 H/10 (博士论文算例 3.2: L/30, H = L/3), 随 domain 走, 不进注册表.
-        return SimplySupportedBridge2d(
+        # load 字段是顶边均布牵引强度 t (N/mm), 问题类收合力 P = t * lx. 桥面实体
+        # 非设计域厚度取 H/10 (博士论文算例 3.2: L/30, H = L/3), 随 domain 走, 不进注册表.
+        return BridgeTraction2d(
             domain=(0.0, lx, 0.0, ly),
-            t=case.load,
+            P=case.load * lx,
             E=case.emax,
             nu=case.nu,
             deck_height=ly / 10.0,
         )
     lx, ly, lz = case.domain
-    return CantileverRightBottomEdge3d(
+    return CantileverBottomEdgeLine3d(
         domain=(0.0, lx, 0.0, ly, 0.0, lz),
         P=case.load,
         E=case.emax,
@@ -143,7 +143,6 @@ def build_pipeline(case: TopOptCase) -> tuple[Any, Any, Any, Any, Any]:
         youngs_modulus=problem.E,
         poisson_ratio=problem.nu,
         hypothesis=problem.plane_type,
-        enable_logging=False,
     )
     interpolation = MaterialInterpolationScheme(
         density_location="element",
@@ -153,7 +152,6 @@ def build_pipeline(case: TopOptCase) -> tuple[Any, Any, Any, Any, Any]:
             "void_youngs_modulus": case.void_youngs_modulus,
             "target_variables": ["E"],
         },
-        enable_logging=False,
     )
     solver_options = None
     if case.solve_method == "cg":
@@ -177,7 +175,6 @@ def build_pipeline(case: TopOptCase) -> tuple[Any, Any, Any, Any, Any]:
         solver_options=solver_options,
         topopt_algorithm="density_based",
         interpolation_scheme=interpolation,
-        enable_logging=False,
     )
     design_variable, density = interpolation.setup_density_distribution(
         design_variable_mesh=mesh,
@@ -188,13 +185,11 @@ def build_pipeline(case: TopOptCase) -> tuple[Any, Any, Any, Any, Any]:
         analyzer=analyzer,
         state_variable="u",
         diff_mode="manual",
-        enable_logging=False,
     )
     constraint = VolumeConstraint(
         analyzer=analyzer,
         volume_fraction=case.volfrac,
         diff_mode="manual",
-        enable_logging=False,
     )
     projection_params = None
     if case.filter_type == "projection":
@@ -218,7 +213,6 @@ def build_pipeline(case: TopOptCase) -> tuple[Any, Any, Any, Any, Any]:
         # 这里显式钉住 3, 保持既有结果不变.
         filter_q=3,
         projection_params=projection_params,
-        enable_logging=False,
     )
     common = {
         "objective": objective,

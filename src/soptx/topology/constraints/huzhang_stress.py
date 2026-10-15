@@ -64,6 +64,7 @@ class HuZhangStressConstraint(BaseLogged):
 
     @property
     def analyzer(self) -> HuZhangMFEMAnalyzer:
+        """获取当前的分析器."""
         return self._analyzer
 
     @property
@@ -82,6 +83,7 @@ class HuZhangStressConstraint(BaseLogged):
         return "混合元"
 
     def _stress_ratio(self, state: Dict) -> TensorLike:
+        """原生 von Mises 应力除以许用应力."""
         return state['von_mises'] / self._stress_limit
 
     def compute_unexempted_constraint(self,
@@ -92,7 +94,7 @@ class HuZhangStressConstraint(BaseLogged):
         """计算未施加豁免的局部约束值.
 
         与 ``fun`` 的唯一差别是不把豁免单元换成 ``EXEMPT_CONSTRAINT_VALUE``,
-        因此垫片内部的真实超限量可被诊断到. 优化过程不应调用本方法: 豁免区
+        因此被动实体区内部的真实超限量可被诊断到. 优化过程不应调用本方法: 豁免区
         的约束值发散, 进入 AL 会重现被豁免掉的病态.
 
         Parameters
@@ -144,7 +146,20 @@ class HuZhangStressConstraint(BaseLogged):
             state: Optional[Dict] = None,
             **kwargs
         ) -> TensorLike:
-        """计算注入公式的局部约束值."""
+        """计算注入公式的局部约束值, 豁免单元取严格可行的常值.
+
+        Parameters
+        ----------
+        density : TensorLike
+            物理密度场.
+        state : dict, optional
+            求解状态缓存; 为 None 时新建并就地填充.
+
+        Returns
+        -------
+        TensorLike
+            形状 (NC, NQ) 的约束值.
+        """
         constraint_value = self.compute_unexempted_constraint(
             density=density, state=state, **kwargs
         )
@@ -153,7 +168,18 @@ class HuZhangStressConstraint(BaseLogged):
         )
 
     def compute_partial_gradient_wrt_mE(self, state: Dict) -> TensorLike:
-        """计算固定混合元状态时约束对相对刚度的显式偏导数."""
+        """计算混合元状态固定时约束对相对刚度的显式偏导数.
+
+        Parameters
+        ----------
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            形状 (NC, NQ) 的偏导数, 豁免单元为 0.
+        """
         partial = self._formulation.partial_wrt_stiffness_ratio(
             stress_ratio=self._stress_ratio(state),
             stiffness_ratio=state['stiffness_ratio'],
@@ -162,7 +188,18 @@ class HuZhangStressConstraint(BaseLogged):
         return apply_exemption(partial, self._exemption_mask, 0.0)
 
     def compute_gradient_wrt_von_mises(self, state: Dict) -> TensorLike:
-        """计算约束对表观 von Mises 应力的偏导数."""
+        """计算约束对表观 von Mises 应力的偏导数.
+
+        Parameters
+        ----------
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            形状 (NC, NQ) 的偏导数, 已除以许用应力; 豁免单元为 0.
+        """
         derivative = self._formulation.gradient_wrt_stress_ratio(
             stress_ratio=self._stress_ratio(state),
             stiffness_ratio=state['stiffness_ratio'],
@@ -172,11 +209,26 @@ class HuZhangStressConstraint(BaseLogged):
         return derivative / self._stress_limit
 
     def compute_adjoint_load(self, dPenaldVM: TensorLike, state: Dict) -> TensorLike:
-        """
-        计算伴随载荷 (右端项).
+        """计算伴随载荷 (右端项).
 
-        对于混合元, 伴随载荷直接作用在应力自由度 Σ 上:
-            F_adj = -(∂σ^v/∂Σ)^T * dPenaldVM
+        混合元的伴随载荷直接作用在应力自由度 Σ 上:
+
+            F_adj = (∂σ^v/∂Σ)^T · dP/dσ^v,
+
+        取正号, 与伴随方程 [A B^T; B 0] [λ_σ; λ_u] = [F_adj; 0] 及隐式项
+        +(1/m_E^2) λ_σ^T A⁰ Σ 的符号约定配套 (LFEM 路径取负号, 配套的是另一套约定).
+
+        Parameters
+        ----------
+        dPenaldVM : TensorLike
+            AL 罚项对表观 von Mises 应力的偏导数, 形状 (NC, NQ).
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存, 须含 ``stress_apparent`` 与 ``von_mises``.
+
+        Returns
+        -------
+        TensorLike
+            形状 (gdof_sigma,) 的伴随载荷; 启用角点松弛时已变换到求解系数坐标.
         """
         material = self._analyzer.material
         stress_vector = state['stress_apparent']  # (NC, NQ, NS)
@@ -211,7 +263,7 @@ class HuZhangStressConstraint(BaseLogged):
 
         # 5. 全局组装至应力自由度
         gdofs = stress_space.number_of_global_dofs()
-        adjoint_load = bm.zeros((gdofs,), dtype=bm.float64)
+        adjoint_load = bm.zeros((gdofs,), dtype=bm.float64, device=bm.get_device(element_loads))
 
         cell2dof = stress_space.cell_to_dof()  # (NC, LDOF)
         indices = cell2dof.flatten()
@@ -225,9 +277,26 @@ class HuZhangStressConstraint(BaseLogged):
         return adjoint_load
 
     def compute_implicit_sensitivity_term(self, adjoint_vector: TensorLike, state: Dict) -> TensorLike:
-        """
-        计算隐式灵敏度项 (预除 m_E²): (1/m_E²) * λ_σ,e^T * A⁰_e * Σ_e
-        通过物理掩码 (Mask) 防范孔洞区域除零溢出.
+        """计算对相对刚度的隐式灵敏度项 (1/m_E^2) λ_σ,e^T A⁰_e Σ_e.
+
+        Parameters
+        ----------
+        adjoint_vector : TensorLike
+            伴随方程的解, 前 gdof_sigma 个分量为应力伴随 λ_σ.
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存, 须含 ``stress`` 与 ``stiffness_ratio``.
+
+        Returns
+        -------
+        TensorLike
+            形状 (NC,) 的隐式灵敏度项.
+
+        Notes
+        -----
+        为防止空洞单元除以 m_E^2 时数值溢出, 只在 m_E > 1e-4 的单元上计算, 其余单元
+        置 0. 这是有意的截断, 被截断单元 (penalty_factor = 3.5 时约为 rho < 0.072)
+        的梯度因此不精确: 论文悬臂梁网格上 rho = 0.03 的单元, 解析梯度为 1.56e-4,
+        中心差分为 6.5e-5. LFEM 路径没有这一截断. 论文结果按带截断的梯度算出.
         """
         # --- 1. 提取基础数据 ---
         A0 = self._analyzer._cached_Ae0
@@ -262,7 +331,20 @@ class HuZhangStressConstraint(BaseLogged):
         return term
 
     def compute_stress_measure(self, rho: TensorLike, state: Dict) -> TensorLike:
-        """返回当前公式用于展示的无量纲应力测度."""
+        """返回当前公式用于展示的无量纲应力测度.
+
+        Parameters
+        ----------
+        rho : TensorLike
+            物理密度场, 本方法不用到, 保留以统一签名.
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            与约束值同形的应力测度 (epsilon 松弛下为表观应力比).
+        """
         return self._formulation.stress_measure(
             stress_ratio=self._stress_ratio(state),
             stiffness_ratio=state['stiffness_ratio'],
@@ -316,6 +398,23 @@ class HuZhangStressConstraint(BaseLogged):
         具体尺度由注入公式定义, 不根据有限元类型推断. 豁免单元返回严格可行的
         常值, 因此不进入 C2 验收; 这些单元的真实应力水平由
         ``compute_solid_stress_ratio`` 如实报告, 不被掩盖.
+
+        Parameters
+        ----------
+        rho : TensorLike
+            物理密度场, 本方法不用到, 保留以统一签名.
+        state : dict
+            已由 ``fun`` 填充的求解状态缓存.
+
+        Returns
+        -------
+        TensorLike
+            与约束值同形的超限量, 非正表示满足验收判据.
+
+        Raises
+        ------
+        ValueError
+            相对刚度非有限或非正, 或超限量含非有限值.
         """
         stiffness_ratio = state['stiffness_ratio']
         if not bool(bm.all(bm.isfinite(stiffness_ratio) & (stiffness_ratio > 0))):

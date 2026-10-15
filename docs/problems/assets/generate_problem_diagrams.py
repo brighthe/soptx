@@ -4,11 +4,11 @@ SOPTX 工程基准算例物理示意图生成脚本
 将 tikz/ 下的 TikZ 源码批量编译为高分辨率 (300 DPI) PNG：
 按 engineering-benchmarks.md 的 A/B/C/D 分组排列, 每个工程基准算例一张:
 
-  A 组 集中力      HalfMBBBeamRight2d, HalfMBBBeamRight3d, FullMBBBeam2d,
-                   FullMBBBeam3d, CantileverCorner2d
-  B 组 线载荷      CantileverRightBottomEdge3d
-  C 组 满布牵引    BearingDevice2d, SimplySupportedBridge2d
-  D 组 局部牵引    CantileverMiddle2d, FixedFixedBeamHalfDomain2d
+  A 组 集中力      HalfMBBBeamPoint2d, FullMBBBeamPoint2d, FullMBBBeamPoint3d,
+                   CantileverCornerPoint2d
+  B 组 线载荷      HalfMBBBeamLine3d, FullMBBBeamLine3d, CantileverBottomEdgeLine3d
+  C 组 满布牵引    BearingTraction2d, BridgeTraction2d
+  D 组 局部牵引    CantileverMiddlePatch2d, HalfFixedFixedBeamPatch2d, PortalFramePatch2d
 
 依赖: pdflatex + pdftoppm (缺任一则直接报错退出, 无回退渲染)。
 tikz/ 下的 .tex 源码可直接 \\input{...} 进论文复用。
@@ -25,19 +25,24 @@ import sys
 # (tex 源码, 输出 png)
 DIAGRAMS = [
     # A 组: 集中力
-    ("mbb_2d_half_beam.tex", "mbb-beam-half-domain.png"),
-    ("mbb_3d_half_beam_right.tex", "mbb-beam-3d-right-half.png"),
-    ("mbb_2d_full_beam.tex", "mbb-beam-2d-full.png"),
-    ("mbb_3d_full_beam.tex", "mbb-beam-3d-half-domain.png"),
-    ("cantilever_2d_corner.tex", "cantilever-corner-2d.png"),
+    ("half_mbb_beam_point_2d.tex", "half-mbb-beam-point-2d.png"),
+    ("full_mbb_beam_point_2d.tex", "full-mbb-beam-point-2d.png"),
+    ("full_mbb_beam_point_3d.tex", "full-mbb-beam-point-3d.png"),
+    ("cantilever_corner_point_2d.tex", "cantilever-corner-point-2d.png"),
     # B 组: 线载荷
-    ("cantilever_3d_right_bottom_edge.tex", "cantilever-right-bottom-edge-3d.png"),
+    ("half_mbb_beam_line_3d.tex", "half-mbb-beam-line-3d.png"),
+    ("full_mbb_beam_line_3d.tex", "full-mbb-beam-line-3d.png"),
+    ("cantilever_bottom_edge_line_3d.tex", "cantilever-bottom-edge-line-3d.png"),
     # C 组: 满布边界牵引
-    ("bearing_2d_device.tex", "bearing-device-2d.png"),
-    ("bridge_2d_simply_supported.tex", "bridge-simply-supported-2d.png"),
+    ("bearing_traction_2d.tex", "bearing-traction-2d.png"),
+    ("bridge_traction_2d.tex", "bridge-traction-2d.png"),
     # D 组: 局部边界牵引
-    ("cantilever_2d_middle.tex", "cantilever-middle-2d.png"),
-    ("fixed_fixed_2d_half_beam.tex", "fixed-fixed-beam-half-domain-2d.png"),
+    ("cantilever_middle_point_2d.tex", "cantilever-middle-point-2d.png"),
+    ("cantilever_middle_patch_2d.tex", "cantilever-middle-patch-2d.png"),
+    ("half_fixed_fixed_beam_patch_2d.tex", "half-fixed-fixed-beam-patch-2d.png"),
+    ("portal_frame_patch_2d.tex", "portal-frame-patch-2d.png"),
+    # 制造解
+    ("mixed_boundary_sinusoidal_elasticity_2d.tex", "mixed-boundary-sinusoidal-elasticity-2d.png"),
 ]
 
 

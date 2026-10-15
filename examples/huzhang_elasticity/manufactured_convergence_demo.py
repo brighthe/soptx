@@ -28,9 +28,7 @@ from soptx.typing import TensorLike
 from soptx.fem import (
     HuZhangMFEMAnalyzer,
 )
-from soptx.mesh import (
-    create_huzhang_checkerboard_mesh,
-)
+from soptx.mesh import TriangleMesh
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import (
     MixedBoundaryExponentialSineElasticity2D,
@@ -117,7 +115,6 @@ def _mixed_sinusoidal_2d() -> tuple[
         hypothesis=problem.plane_type,
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
-        enable_logging=False,
     )
     return problem, material
 
@@ -137,7 +134,6 @@ def _mixed_exponential_sine_2d() -> tuple[
         hypothesis=problem.plane_type,
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
-        enable_logging=False,
     )
     return problem, material
 
@@ -198,7 +194,7 @@ def create_mesh(domain: tuple[float, ...], subdivisions: int) -> Any:
     返回:
         构建完成的棋盘格三角形网格对象 (``soptx.mesh.TriangleMesh``).
     """
-    return create_huzhang_checkerboard_mesh(
+    return TriangleMesh.from_checkerboard_box(
         box=domain,
         nx=subdivisions,
         ny=subdivisions,

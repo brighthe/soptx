@@ -22,11 +22,11 @@ src/soptx/fem/
 └── analyzers/
     └── huzhang_mfem_analyzer.py     ← 分析器：装配、边界条件、求解、后处理
 
-src/soptx/mesh/
-└── structured_triangle.py           ← 与角点松弛兼容的结构网格生成器
+src/soptx/mesh/factory/
+└── triangle_mesh.py                 ← TriangleMesh 的结构网格类方法 (含与角点松弛兼容的两种)
 ```
 
-两个空间类都实现 DOF 枚举、`basis` 与 `div_basis`；`huzhang_fe_space_2d.py` 另外提供角点松弛变换矩阵 `TM` 的构造。应力空间只依赖网格与 `soptx.functionspace` 的基类，与 Lagrange 空间同放在 `soptx.functionspace` 下；结构网格生成器只构造 `TriangleMesh`、不依赖任何应力空间对象，因此独立放在 `soptx.mesh` 下。原 `soptx.fem` 与 `soptx.fem.spaces` 中的转发别名已在 `1.2` 删除。
+两个空间类都实现 DOF 枚举、`basis` 与 `div_basis`；`huzhang_fe_space_2d.py` 另外提供角点松弛变换矩阵 `TM` 的构造。应力空间只依赖网格与 `soptx.functionspace` 的基类，与 Lagrange 空间同放在 `soptx.functionspace` 下；结构网格生成器是 `TriangleMesh` 的类方法、不依赖任何应力空间对象，因此放在 `soptx.mesh` 下。原 `soptx.fem` 与 `soptx.fem.spaces` 中的转发别名已在 `1.2` 删除。
 
 ### 核心类关系
 
@@ -105,7 +105,12 @@ HuZhangMFEMAnalyzer
 
 6. **顶点自由度被多条边界边重复写入时取平均**：牵引数据按边成批写入 `uh[e2d]`，几何顶点同时属于相邻两条边界边，因而被写两次。直接赋值是「后写者胜」，胜者由全局边编号决定、与几何无关；牵引数据在该顶点两侧不连续时（贴片载荷的两个端点即是），端点值被整个判给其中一侧，离散载荷失去镜像对称并产生净力矩，误差是 $O(1)$ 的一个节点值，不随 $k$ 收敛。`_average_boundary_writes` 改为对同一自由度的多次写入取平均：数据连续处各次写入本就相同，平均是恒等操作；数据间断处给出唯一的、与边编号无关的对称值，且贴片两端各取半值恰好保住载荷合力。
 
-   角点是例外：几何角点两侧的边标架不同，各次写入表达在不同标架里，取平均与后写者胜同样没有良定义的极限。该情形的正确处理是 `use_relaxation=True` 的角点自由度分裂，分裂后每条边各有独立自由度、写入次数为 1，本机制自动退化为直接赋值。共享顶点三种情形的良定义性讨论见 `dut-postdoc:concepts/huzhang/huzhang-mixed-fem.md` §2.5.3。
+   角点是例外：几何角点两侧的边标架不同，逐边写入只能落到顶点标架下的两个自由度上，只有与顶点标架对齐的那条边的条件真正施加到顶点，另一条边在顶点处的法向迹是自由的，牵引从该边端部漏出，漏在哪一侧由全局边编号决定。这不是数据大小的问题：两侧都是零牵引时同样会漏（底边固支、其余自由的体力矩形块，截面合力差约 2.5%；镜像对称网格上解失去对称）。处理分两种：
+
+   - **启用角点松弛**（`use_relaxation=True`，角点须恰有两个相邻单元）：自由度分裂后每条边各有独立自由度、写入次数为 1，本机制自动退化为直接赋值。两侧数据不相容时只能用这一种。
+   - **未松弛的角点**：分析器在逐边写入之后调用 `HuZhangFESpace2d.set_corner_traction_bc`，按 Hu & Ma (2021) 式 (4.1) 联立两侧强约束（全牵引边 $S n = g$ 两个方程，对称边 $t^{\mathsf T} S n = g\cdot t$ 一个方程），在顶点标架下只固定受约束的自由度：两条全牵引边相交时三个都固定；直角处牵引边与对称边的条件线性相关，只固定与牵引边对齐的两个。数据不相容、或约束不能表示为顶点自由度子集上的强施加时直接报错，提示改用松弛。
+
+   位移边与牵引边的交点只有一侧强约束，正确性取决于顶点标架是否取自牵引边，由 `dof_frame` 的强约束边优先级保证（见下文「实现特性」的标架说明）。状态方程与伴随方程共用同一固定集合（`HuZhangMFEMAnalyzer._strong_boundary_dofs`），伴随解在全部强施加自由度（含对称边切向与角点）上为零。共享顶点三种情形的良定义性讨论见 `dut-postdoc:concepts/huzhang/huzhang-mixed-fem.md` §2.5.3。
 
 ## 实现特性
 
@@ -118,7 +123,7 @@ HuZhangMFEMAnalyzer
 - **标量因子按重心多重指标枚举**：`bm.multi_index_matrix(p, TD)` 给出 $TD+1$ 个分量的多重指标 $\alpha$，自由度归属直接由"$\alpha$ 的非零分量集合 = 该自由度所属的子单纯形"判定（`dof_classfication` 中的 `flag0` / `flag1`）。子实体与重心指标子集的一一对应是单纯形独有的结构，四边形上没有重心坐标，这套枚举无从建立；`number_of_multiindex` 也只实现了 $p+1$、$(p+1)(p+2)/2$、$(p+1)(p+2)(p+3)/6$ 三档，即 1/2/3 维单纯形上 $P_p$ 的维数。
 - **张量标架按子单纯形维数分级**：$i$ 维子单纯形上，$TD(TD+1)/2$ 个对称张量标架分量中恰有 $i(i+1)/2$ 个跨单元断开、其余保持连续（`dof_classfication` 中的 `N_c = NS - i*(i+1)//2`）。以 2D 为例：顶点上 3 个分量全连续，边上 2 连续 1 断开，单元内部 3 个全断开。正是这个分级同时给出 $H(\mathrm{div})$ 协调性与逐点对称性，而它的计数只在单纯形的面格结构上成立。
 
-标架本身由 `dof_frame` 给出：边上取该边的单位法向与单位切向，单元内部取笛卡尔基；顶点取某条相邻边的标架（边界顶点取边界边的标架，松弛角点取 `corner['to_midedge']` 所指内部边的标架），再经 `symmetry_span_array` 张成对称张量。顶点处应力全部分量连续，任一组单位正交标架张成的对称张量都是完整基；标架按节点全局存放，相邻单元取到的是同一组，不影响协调性。
+标架本身由 `dof_frame` 给出：边上取该边的单位法向与单位切向，单元内部取笛卡尔基；顶点取某条相邻边的标架（边界顶点取边界边的标架，二维下按 `traction_edge` > `symmetry_edge` > 其余边界边的优先级选取，由分析器在构造空间时传入；松弛角点取 `corner['to_midedge']` 所指内部边的标架），再经 `symmetry_span_array` 张成对称张量。顶点处应力全部分量连续，任一组单位正交标架张成的对称张量都是完整基；标架按节点全局存放，相邻单元取到的是同一组，不影响协调性。
 
 矩形与长方体网格上的对称张量 $H(\mathrm{div})$ 协调元是另一族构造，不是把胡张元的基底搬到四边形上就能得到，需要另写空间类，不在当前范围内。
 
@@ -169,16 +174,18 @@ $$
 
 胡张应力空间的对称张量约束在角点附近会过度限制应力场，导致收敛阶退化。角点松弛通过在每个几何角点的两个 incident 三角形上引入额外的 DOF 变换来解除这一约束。
 
-**拓扑要求（当前实现）**：每个几何角点必须恰好连接 2 个三角形，且两者共享一条从角点出发的内部边。矩形域上的规则四边形网格按对角线剖分即可满足该条件，`soptx.mesh` 提供两个这样的生成器，棋盘格只是其中一种剖分方式：
+**角点来源**：几何角点由网格自动检出（`mesh.boundary_corner_index()`：边界顶点上两条边界边不共线即为角点），不是 Problem 的成员；`HuZhangMFEMAnalyzer(relaxed_corners=...)` 可显式指定只松弛某个子集。
 
-| 生成器 | 对角线规则 | 尺寸约束 | 内部结点扇 | 用途 |
+**拓扑要求（当前实现）**：每个几何角点必须恰好连接 2 个三角形，且两者共享一条从角点出发的内部边。自动检出的角点不满足该要求时被跳过并发 `UserWarning`，跳过项记录在空间的 `skipped_corners` 与分析器的同名属性上；显式传入的角点不满足时抛 `ValueError`。矩形域上的规则四边形网格按对角线剖分即可满足该条件，`TriangleMesh` 提供两个这样的类方法，棋盘格只是其中一种剖分方式（默认的 `from_box` 全部取 `/`，有两个角点只连接 1 个三角形，不满足该条件）：
+
+| 类方法 | 对角线规则 | 尺寸约束 | 内部结点扇 | 用途 |
 |---|---|---|---|---|
-| `create_huzhang_checkerboard_mesh` | `(i+j)` 偶数取 `/`，奇数取 `\` | `nx`、`ny` 为正偶数 | 4 / 8 三角形交替 | 固支梁、悬臂梁与制造解算例的注册值 |
-| `create_huzhang_symmetric_single_diagonal_mesh` | 左半 `i < nx/2` 取 `/`，右半取 `\`，顶角落 `(0,ny-1)`、`(nx-1,ny-1)` 分别翻转为 `\`、`/` | `nx` 为偶数 ≥ 2，`ny` ≥ 2 | 一律 6 三角形（中缝结点左 3 右 3） | 两条轴承 case 的注册值；低阶位移元体积闭锁对照（与左右对称问题同对称性） |
+| `TriangleMesh.from_checkerboard_box` | `(i+j)` 偶数取 `/`，奇数取 `\` | `nx`、`ny` 为正偶数 | 4 / 8 三角形交替 | 固支梁、悬臂梁与制造解算例的注册值 |
+| `TriangleMesh.from_mirror_box` | 左半 `i < nx/2` 取 `/`，右半取 `\`，顶角落 `(0,ny-1)`、`(nx-1,ny-1)` 分别翻转为 `\`、`/` | `nx` 为偶数 ≥ 2，`ny` ≥ 2 | 一律 6 三角形（中缝结点左 3 右 3） | 两条轴承 case 的注册值；低阶位移元体积闭锁对照（与左右对称问题同对称性） |
 
 ![两种与角点松弛兼容的结构网格](assets/corner-relaxation-meshes.png)
 
-左为 `create_huzhang_checkerboard_mesh`、右为 `create_huzhang_symmetric_single_diagonal_mesh` 的剖分结果，均取 `nx = 6`、`ny = 4`。两者的四个几何角点（绿点）都各连接 2 个三角形并共享一条内部边，满足上述拓扑条件；右图的红色虚线为镜像中缝，两个浅蓝单元是为满足角点条件而相对于单向对角规则翻转的四边形。插图由 `tools/plot_huzhang_meshes.py` 调用上述生成器绘制。
+左为 `TriangleMesh.from_checkerboard_box`、右为 `TriangleMesh.from_mirror_box` 的剖分结果，均取 `nx = 6`、`ny = 4`。两者的四个几何角点（绿点）都各连接 2 个三角形并共享一条内部边，满足上述拓扑条件；右图的红色虚线为镜像中缝，两个浅蓝单元是为满足角点条件而相对于单向对角规则翻转的四边形。插图由 `tools/plot_huzhang_meshes.py` 调用上述类方法绘制。
 
 松弛通过 DOF 变换矩阵 `TM` 实现：构造时计算变换矩阵，装配时施加到基函数和载荷向量上。**3D 不支持角点松弛**——工厂 `HuZhangFESpace` 在 3D 下收到 `use_relaxation=True` 时抛 `ValueError`。无松弛的 3D 求解链在 $p\ge4$、坐标对齐边界上已端到端验证（`examples/huzhang_elasticity/results_analysis.md` §5）；非坐标对齐边界上的牵引强施加靠按牵引面法向对齐边界标架、折棱与角点上联合多个面求值实现（`examples/huzhang_elasticity/results_analysis.md` §5.5），两个对称面以非 90° 折棱相交时仍明确报错，小平面逼近的曲面不在适用范围内。
 
@@ -208,6 +215,6 @@ $$
 
 1. **全 Dirichlet 制造解路径**：`sinusoidal` / `exp-sine` 全位移边界问题理论上可走 `AllDisplacementBoundaryMixin` 的混合形式边界接口，但该路径未经充分独立测试，当前算例聚焦于混合边界条件。
 2. **低阶跳量稳定化在混合边界下的行为**：$k\le 2$ 时跳量惩罚项 $c(\boldsymbol{u}_h,\boldsymbol{v}_h)$ 加在内部面与位移边界（$\Gamma_D$）上，不施加于 $\Gamma_N$。这使得 $k=2$ 在混合边界下的 $H(\mathrm{div})$ 误差出现向 1 阶的降阶，属于物理与离散截断的预期现象；惩罚系数采用物理量纲缩放 $\alpha=\mu/L_0^2\cdot h_F$（$\alpha=\mu$ 于单位域；三维 $p=1$ 再乘 10）。
-3. **网格拓扑约束**：角点松弛要求每个几何角点恰好连接两个三角形且共享内部边（`_get_corner_data` 对不满足的角点直接报错）。当前 `triangle-checkerboard`、`triangle-single-diagonal-symmetric` 两种结构剖分满足该要求；`TriangleMesh.from_box` 的纯单向对角剖分在右下、左上角点只有 1 个三角形，不能直接使用。推广到一般顶点扇需要把 `TM` 改为每角点 $3m\times(m+2)$ 的长方块并拆分组装/求解两套自由度计数，$m=1$ 角点还需单独处理两条牵引边写入同一节点自由度的冲突（$m\ge 2$ 的常规角点由上文要点 6 的角点分裂覆盖，$m=1$ 无从分裂，该冲突仍开放）。
+3. **网格拓扑约束**：角点松弛要求每个几何角点恰好连接两个三角形且共享内部边（自动检出的角点不满足时跳过并发 warning，显式传入的角点不满足时 `_get_corner_data` 报错）。当前 `triangle-checkerboard`、`triangle-single-diagonal-symmetric` 两种结构剖分满足该要求；`TriangleMesh.from_box` 的纯单向对角剖分在右下、左上角点只有 1 个三角形，自动检出下只松弛另外两个角点。推广到一般顶点扇需要把 `TM` 改为每角点 $3m\times(m+2)$ 的长方块并拆分组装/求解两套自由度计数，$m=1$ 角点还需单独处理两条牵引边写入同一节点自由度的冲突（$m\ge 2$ 的常规角点由上文要点 6 的角点分裂覆盖，$m=1$ 无从分裂，该冲突仍开放）。
 4. **3D 扩展**：3D 无松弛求解链 `div_basis` 已确认正确（有限差分 $3.4\times 10^{-10}$），3D 混合边界制造解已由 `examples/huzhang_elasticity/verify_3d_convergence.py --boundary mixed` 覆盖（结果见该目录 `results_analysis.md` §5）；端到端角点松弛集成仍留作后续扩展。
 5. **空间阶次与拓扑优化适用性**：$k=1$ 的位移空间为 $P_0$（分片常数），无法表达二维刚体旋转模态 $\boldsymbol{u}=[-\omega y, \omega x]^{\mathsf T}$，因而静力可用但拓扑优化不可用。详见[次数与稳定化分支](#次数与稳定化分支)一节的「k = 1 的适用边界」。

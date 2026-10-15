@@ -34,13 +34,14 @@ from soptx.fem.analyzers import (
     lagrange_fem_analyzer,
 )
 from soptx.problems import (
-    CantileverCorner2d,
+    CantileverCornerPoint2d,
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
-    FixedFixedBeamCenterLoad2d,
-    FullMBBBeam2d,
-    FullMBBBeam3d,
-    HalfMBBBeamRight2d,
+    FixedFixedBeamPatch2d,
+    FullMBBBeamPoint2d,
+    FullMBBBeamLine3d,
+    FullMBBBeamPoint3d,
+    HalfMBBBeamPoint2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
@@ -48,13 +49,14 @@ from soptx.problems import (
 
 
 LAGRANGE_PROBLEM_CLASSES = (
-    CantileverCorner2d,
+    CantileverCornerPoint2d,
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
-    FixedFixedBeamCenterLoad2d,
-    FullMBBBeam2d,
-    FullMBBBeam3d,
-    HalfMBBBeamRight2d,
+    FixedFixedBeamPatch2d,
+    FullMBBBeamPoint2d,
+    FullMBBBeamLine3d,
+    FullMBBBeamPoint3d,
+    HalfMBBBeamPoint2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,
@@ -63,7 +65,7 @@ LAGRANGE_PROBLEM_CLASSES = (
 HUZHANG_PROBLEM_CLASSES = (
     DivergenceFreePolynomialElasticity3D,
     ExponentialSineManufacturedElasticity2D,
-    FixedFixedBeamCenterLoad2d,
+    FixedFixedBeamPatch2d,
     MixedBoundaryExponentialSineElasticity2D,
     MixedBoundarySinusoidalElasticity2D,
     SinusoidalPlaneStrainElasticity2D,

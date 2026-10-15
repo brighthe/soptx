@@ -3,8 +3,8 @@
 
 产物 case ``stress-cubic-convergence``: 与图 5.8 同构, 2x2 四宫格 ——
 - (a)(c) 收敛历史: 只读两次优化运行目录下的 history.json 与 summary.json, 不重解方程.
-  运行目录按 run_cantilever_stress.run_label 命名, 取 pad 1.5 mm 且按判据集合验收 (solid_thr-0.5)
-  的两组; 本模块启动时核对 summary 记录了 ``acceptance_solid_threshold``, 缺失即报错,
+  运行目录按 run_cantilever_stress.RUN_LABEL 命名, 取 k = 3 的两组 (按判据集合验收);
+  本模块启动时核对 summary 记录了 ``acceptance_solid_threshold``, 缺失即报错,
   免得静默画出旧口径的历史.
 - (b)(d) 主应力空间内的单元应力分布: 取 postprocess/ 下的 npz
   (sig1/sig2/vm/solid_mask/pad_mask), 由 ``plot.py export --run lfem-k3 --run
@@ -59,10 +59,10 @@ LEGEND_STYLE = dict(fontsize=7.5, framealpha=0.95, edgecolor="#cccccc",
 # ---- 自描述元数据: plot.py 用 ast 静态解析读走, 不 import 本模块 ----
 SOURCE_CASE = "cantilever-middle-2d-stress"
 REQUIRED_RUNS = (
-    "analyzer-lfem__lfem_constraint-apparent__load_pad_radius-1.5__order-3__solid_thr-0.5",
-    "analyzer-huzhang__lfem_constraint-apparent__load_pad_radius-1.5__order-3__solid_thr-0.5",
-    "postprocess/lfem_constraint-apparent/fig_data_lfem-k3.npz",
-    "postprocess/lfem_constraint-apparent/fig_data_huzhang-k3.npz",
+    "analyzer-lfem__order-3",
+    "analyzer-huzhang__order-3",
+    "postprocess/stress_fields/fig_data_lfem-k3.npz",
+    "postprocess/stress_fields/fig_data_huzhang-k3.npz",
 )
 
 

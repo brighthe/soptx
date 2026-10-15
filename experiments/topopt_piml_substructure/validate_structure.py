@@ -1,4 +1,4 @@
-"""对固定密度的三维 MBB 梁比较精确子结构与 shape 网络分析.
+"""对固定密度的三维 MBB 梁 (``FullMBBBeamPoint3d``) 比较精确子结构与 shape 网络分析.
 
 Notes
 -----
@@ -27,7 +27,7 @@ from soptx.fem.substructure import (
 from soptx.ml.substructure.independent_checkpoints import (
     decoder_metadata_matches, load_analysis_provider, load_independent_network,
 )
-from soptx.problems.elasticity import FullMBBBeam3d
+from soptx.problems import FullMBBBeamPoint3d
 
 DATA_ROOT = Path.home() / "codespace/data/soptx/piml_substructure"
 LAYOUT = "independent_15_layer"
@@ -175,10 +175,9 @@ def main(argv=None):
     psi = np.asarray(provider.trace.matrix)
     if not np.allclose(psi, np.asarray(space.trace_basis.matrix), rtol=1e-12, atol=1e-12):
         raise ValueError("整体接口迹与权重接口迹不一致")
-    problem = FullMBBBeam3d(
+    problem = FullMBBBeamPoint3d(
         domain=(0, domain[0], 0, domain[1], 0, domain[2]), P=-1.0,
-        E=1.0, nu=metadata["poisson_ratio"], support="end_lines",
-        load_subdivisions=(grid[0], grid[2]),
+        E=1.0, nu=metadata["poisson_ratio"],
     )
     load, constraints = space.constrained_conditions(problem)
     density_source = {"pattern": args.density_pattern}
@@ -254,7 +253,7 @@ def main(argv=None):
         "physical_density_statistics": density_statistics, "filter_applied": False,
         "min_modulus": args.min_modulus, "penal": args.penal,
         "backend": args.backend, "inference_backend": "pytorch", "device": args.device,
-        "batch_size": args.batch_size, "support": "end_lines", "total_load_y": -1.0,
+        "batch_size": args.batch_size, "problem": type(problem).__name__, "total_load_y": -1.0,
         "uniform_shortcut": summary["uniform_shortcut"],
     }
     args.output_dir.mkdir(parents=True, exist_ok=False)

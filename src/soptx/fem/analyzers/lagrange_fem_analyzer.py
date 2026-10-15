@@ -2,14 +2,15 @@
 
 在 Lagrange 张量空间上组装线弹性刚度算子与外载荷, 施加 Dirichlet 边界条件并
 求解状态与伴随方程. 算子层级 ``'fa'``, ``'ea'``, ``'pa'``, ``'ua'`` 共用同一套
-离散; ``reduce_load`` 与 ``wrap_operator`` 是串行下为恒等操作的分布式扩展点.
+离散.
 """
 
 from typing import Optional, Union, Literal, Dict
 
 from soptx.backend import backend_manager as bm
 from soptx.typing import TensorLike
-from soptx.mesh import SimplexMesh, HomogeneousMesh
+from soptx.mesh import (HexahedronMesh, HomogeneousMesh, QuadrangleMesh, SimplexMesh, TetrahedronMesh,
+                        TriangleMesh)
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace, Function
 from soptx.decorator import variantmethod
 from soptx.sparse import CSRTensor, COOTensor
@@ -21,6 +22,7 @@ from soptx.protocols import (
     MaterialInterpolation,
     PointForce,
 )
+from soptx.fem.boundary_loads import check_traction_patch_alignment
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.fem.kernels import ElementRestriction
 from soptx.fem.levels import (
@@ -35,11 +37,10 @@ from soptx.fem.load_assembly import assemble_body_forces, assemble_non_body_load
 from soptx.fem.matrix import SymmetricElimination, assemble_csr, build_csr_pattern
 from soptx.fem.utils import multiresolution_sub_element_matrices
 from soptx.fem.operators import ConstrainedOperator
+from soptx.fem.preconditioners import available_preconditioners, create_preconditioner
 from soptx.solvers import (
-    DiagonalPreconditioner,
     OperatorCapabilityError,
     available as available_solvers,
-    create as create_solver,
 )
 from soptx.materials import (
     IsotropicLinearElasticMaterial,
@@ -47,6 +48,13 @@ from soptx.materials import (
     lame_basis_matrices,
     lame_parameter_derivatives,
 )
+
+# from_box 编号约定下各网格的平移类数 N_k: 每个格子剖出的 N_k 个单元连续编号,
+# 单元 e 属于第 e % N_k 类, 见各网格类 from_box 的 docstring
+_TRANSLATION_CLASS_COUNTS = ((HexahedronMesh, 1), (QuadrangleMesh, 1), (TriangleMesh, 2), (TetrahedronMesh, 6))
+# 平移类几何检查每块的格子数, 限制取单元顶点坐标的临时内存
+_TRANSLATION_CHECK_CHUNK = 1 << 17
+
 
 class LagrangeFEMAnalyzer(BaseLogged):
     """Lagrange 位移有限元的线弹性分析器.
@@ -68,12 +76,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 solve_method: Literal['mumps', 'scipy', 'cg'] = 'mumps',
                 solver_options: Optional[Dict] = None,
                 tensor_space: Optional[TensorFunctionSpace] = None,
-                dof_comm: Optional[object] = None,
                 topopt_algorithm: Literal[None, 'density_based', 'level_set'] = None,
                 interpolation_scheme: Optional[MaterialInterpolation] = None,
-                enable_logging: bool = False,
-                logger_name: Optional[str] = None,
-                reference_classes: Optional[int] = None,
             ) -> None:
         """初始化拉格朗日有限元分析器.
 
@@ -89,8 +93,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
             - 'fa': 装配全局稀疏矩阵 (full assembly), 支持直接解法与伴随求解;
             - 'ea': 只保留单元矩阵 (element assembly), matvec 时 gather-作用-scatter,
-              不形成全局矩阵, 只能用迭代解法; 单元密度下只常驻 K_e^0 (与敏度共用, 给出
-              ``reference_classes`` 时按平移类各一份) 与逐单元标量 s_e, 不另存 K_e;
+              不形成全局矩阵, 只能用迭代解法; 单元密度下只常驻 K_e^0 (与敏度共用, 网格满足
+              平移类约定时按类各一份, 见 ``_translation_class_count``) 与逐单元标量 s_e, 不另存 K_e;
             - 'pa': 只保留积分点上的几何与材料数据 (partial assembly), matvec 时
               gather-B-D-B^T-scatter, 高阶下比 'ea' 省内存, 只能用迭代解法;
             - 'ua': 什么都不常驻 (unassembled), 每次 matvec 现算几何与材料, 只用于取证.
@@ -101,27 +105,22 @@ class LagrangeFEMAnalyzer(BaseLogged):
             - None: 预条件子绑主算子本身, 不另建层级;
             - 其余: 另建一个该层级的算子, 只供预条件子使用.
         solve_method : 求解方式.
-        solver_options : 迭代解法的默认参数 (maxiter, atol, rtol, precond); precond='mg' 时另读
-            mg_* 选项, 见 ``_multigrid_preconditioner``.
+        solver_options : 迭代解法的默认参数 (maxiter, atol, rtol, precond); precond='gmg' 时另读
+            gmg_* 选项, 见 ``_gmg_preconditioner``.
         tensor_space : 外部构造的张量函数空间; 为 None 时内部自动构造.
-        dof_comm : 分布式重叠自由度通信器.
         topopt_algorithm : 拓扑优化算法类型.
         interpolation_scheme : 密度插值方案.
-        enable_logging : 是否开启日志记录.
-        logger_name : 日志记录器名称.
-        reference_classes : 单元按 ``create_box_mesh`` / ``from_box`` 的编号约定排列时的平移类数
-            N_k (六面体、四边形为 1, 三角形 2, 四面体 6). 给出时单元密度下的 K_e^0 只按类各存
-            一份 (N_k, TLDOF, TLDOF), 单元 e 取第 e % N_k 份, 供 FA 缩放装配、'ea' 层级、单元
-            能量导数与多重网格共用; 缺省 (None) 时逐单元各存一份. 约定由调用方保证, 首次计算
-            时只抽查少数单元, 见 ``_reference_stiffness_matrices``.
         """
 
-        super().__init__(enable_logging=enable_logging, logger_name=logger_name)
+        # 只用 BaseLogged 的 _log_warning 与 _log_error, 二者不受日志开关影响
+        super().__init__(enable_logging=False)
 
         # 私有属性 (建议通过属性访问器访问, 不要直接修改)
         self._mesh = disp_mesh
         self._pde = pde
         self._material = material
+        # 整边选取的局部载荷区要求端点与网格节点对齐, 否则合力静默偏离 P
+        check_traction_patch_alignment(disp_mesh, pde)
 
         self._space_degree = space_degree
         self._integration_order = integration_order
@@ -138,7 +137,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._solve_method = solve_method
         self._solver_options = dict(solver_options) if solver_options else {}
-        self._dof_comm = dof_comm
 
         if operator_level not in available_levels():
             self._log_error(
@@ -152,15 +150,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 self._log_error(
                     f"不支持的预条件子层级: {preconditioner_level}, "
                     f"可选 {available_levels()}"
-                )
-            # 与 apply_bc('fa') 的多 rank 拒绝同因: 对称消元没有重叠归约的插入点
-            if (preconditioner_level == 'fa'
-                    and self._dof_comm is not None
-                    and self._dof_comm.mpi_size > 1):
-                self._log_error(
-                    f"preconditioner_level='fa' 只支持单 rank, 当前为 "
-                    f"{self._dof_comm.mpi_size} 个 rank: 全局矩阵的对称消元没有重叠"
-                    f"归约的插入点。多 rank 请使用 preconditioner_level='ea' 或 'pa'"
                 )
         self._preconditioner_level = preconditioner_level
 
@@ -190,7 +179,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._dirichlet_cache = None
         self._elimination = SymmetricElimination()
         # 几何多重网格层次的拓扑部分 (网格序列, 延拓, 粗层骨架), 只依赖空间与约束
-        self._mg_hierarchy = None
+        self._gmg_hierarchy = None
         # 纯集中力的非体力载荷: (载荷指纹, 载荷向量), 见 _non_body_loads_by_boundary_type
         self._non_body_cache = None
         # 当前的装配层级对象, self._operator_level 是它的名字; 换空间时由 tensor_space 置空
@@ -203,14 +192,9 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         self._cached_ke0 = None
         self._cached_ke0_sub = None
-        # 平移类参考单元矩阵 (N_k, TLDOF, TLDOF); 只在给出 reference_classes 时使用
-        if reference_classes is not None:
-            n_cells = int(self._mesh.number_of_cells())
-            if (isinstance(reference_classes, bool) or int(reference_classes) != reference_classes
-                    or reference_classes < 1 or n_cells % int(reference_classes) != 0):
-                self._log_error(f"reference_classes 须为整除单元数 {n_cells} 的正整数, 得到 {reference_classes!r}")
-            reference_classes = int(reference_classes)
-        self._reference_classes = reference_classes
+        # 平移类数 N_k 只依赖网格, 首次用到时由 _translation_class_count 判定;
+        # 平移类参考单元矩阵 (N_k, TLDOF, TLDOF) 依赖空间, 换空间时置空
+        self._reference_classes: Optional[int] = None
         self._reference_ke0 = None
 
         self._cached_stiffness_absolute = None # 绝对刚度 (带量纲)
@@ -313,11 +297,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         return self._F
 
     @property
-    def dof_comm(self):
-        """获取分布式重叠自由度通信器, 串行下为 None"""
-        return self._dof_comm
-
-    @property
     def prescribed_solution(self) -> Optional[TensorLike]:
         """最近一次 apply_bc 得到的 Dirichlet 基准向量
 
@@ -342,7 +321,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         self._reference_ke0 = None
         self._dirichlet_cache = None
         self._elimination = SymmetricElimination()
-        self._mg_hierarchy = None
+        self._gmg_hierarchy = None
         self._non_body_cache = None
 
     
@@ -497,8 +476,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if F_non_body is not None:
             F = F + F_non_body
 
-        # 载荷必须在施加边界条件之前完成跨 rank 归约; 串行下为恒等操作.
-        return self.reduce_load(F)
+        return F
 
     def _non_body_loads_by_boundary_type(self) -> Optional[TensorLike]:
         """按 pde.boundary_type 决定是否装配自然边界载荷
@@ -553,22 +531,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
                 K: Union[CSRTensor, COOTensor],
                 F: TensorLike,
             ) -> tuple[Union[CSRTensor, COOTensor], TensorLike]:
-        """在全局矩阵上施加边界条件 (对称消元)
-
-        Note
-        ----
-        本分支不经过 reduce_load / wrap_operator: 对称消元直接改写一个已经装配好
-        的全局矩阵, 没有可供插入重叠归约的位置. 因此 'fa' 只能在单 rank 上用——
-        多 rank 若放行, 各 rank 会在自己的局部矩阵上求解, 不报错但结果是错的.
-        单 rank 下重叠归约本身是恒等操作, 带 dof_comm 也是安全的.
-        """
-        if self._dof_comm is not None and self._dof_comm.mpi_size > 1:
-            self._log_error(
-                f"operator_level='fa' 只支持单 rank, 当前为 "
-                f"{self._dof_comm.mpi_size} 个 rank: 全局矩阵的对称消元没有重叠归约"
-                f"的插入点。多 rank 请使用 operator_level='ea'"
-            )
-
+        """在全局矩阵上施加边界条件 (对称消元)"""
         space_uh = self._tensor_space
 
         #* 1. 非体力载荷处理 (边界类型分派由 _non_body_loads_by_boundary_type 统一负责) *#
@@ -610,8 +573,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if F_non_body is not None:
             F = F + F_non_body
 
-        # 载荷必须在施加边界条件之前完成跨 rank 归约
-        F = self.reduce_load(F)
         self._F = F
 
         # 边界自由度取给定值、内部自由度取零的基准向量与自由度掩码只依赖空间与问题, 与 'fa'
@@ -619,14 +580,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
         uh_bd, isBdDof, bd_nonzero = self._dirichlet_data()
         uh_bd = bm.copy(uh_bd[:])
 
-        operator = ConstrainedOperator(self.wrap_operator(K),
+        operator = ConstrainedOperator(K,
                                     gd=self._pde.dirichlet_bc,
                                     isDDof=isBdDof)
 
         # u_D 恒为零时 K u_D = 0, 只需把边界行置为 u_D, 与完整的 apply 逐位相同 (x - 0.0 = x).
-        # 分布式下算子作用含跨 rank 的重叠归约, bd_nonzero 又是各 rank 自己判定的, 若只有部分
-        # rank 跳过会使集体通信失配, 故只在串行时跳过
-        if bd_nonzero or self._dof_comm is not None:
+        if bd_nonzero:
             F = operator.apply(F, uh_bd)
         else:
             F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
@@ -635,32 +594,6 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return operator, F
 
-
-    ##############################################################################################
-    # 分布式扩展点 (串行下均为恒等操作)
-    ##############################################################################################
-
-    def wrap_operator(self, form: AssemblyLevelExtension):
-        """在施加边界条件之前对单元级算子做一层包装
-
-        串行下原样返回. 分布式实现覆盖本方法, 返回一个把 matvec 结果在重叠自由度
-        上求和的包装 (示例中的 `distributed.OverlapOperator`), 之后的边界条件处理
-        和求解都不需要知道它的存在.
-
-        Note
-        ----
-        包装必须发生在 ConstrainedOperator 之前: 先跨 rank 组装出完整的算子作用,
-        再在其上消去 Dirichlet 自由度. 顺序反过来会把边界行的置换也带进通信.
-        """
-        return form
-
-    def reduce_load(self, F: TensorLike) -> TensorLike:
-        """把按自由度分布的右端项在重叠自由度上归约
-
-        串行下原样返回. 分布式实现覆盖本方法, 通常是 `dof_comm.sync_add(F)`.
-        必须在施加 Dirichlet 边界条件之前调用, 否则边界行会被重复累加.
-        """
-        return F
 
     ##############################################################################################
     # 求解
@@ -775,7 +708,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         取对角已下沉到求解层的 ``soptx.solvers.operator_diagonal``, 按算子实际
         能提供什么分派: 'ea' 下 ConstrainedOperator 自报 (Dirichlet 自由度上恒
-        为 1, 其余转发内层算子, 跨 rank 归约由 OverlapOperator 完成), 'fa' 下扫
+        为 1, 其余转发内层算子), 'fa' 下扫
         对称消元后稀疏矩阵的 COO 取主对角.
 
         analyzer 内部已不再调用本方法: ``_make_preconditioner`` 把算子直接交给
@@ -803,8 +736,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
         奇异矩阵做分解, 因此本方法负责补上矩阵侧的边界条件.
 
         不复用 ``apply_bc``: 它是按 ``operator_level`` 定死变体的 variantmethod,
-        预条件层级可能属于另一个变体; 它还同时做载荷侧的事 (累加非体力载荷, 跨
-        rank 归约, 写 ``_F`` 与 ``_prescribed_solution``), 二次调用会重复加载荷并
+        预条件层级可能属于另一个变体; 它还同时做载荷侧的事 (累加非体力载荷,
+        写 ``_F`` 与 ``_prescribed_solution``), 二次调用会重复加载荷并
         覆盖状态. 这里只取两个变体的矩阵侧, 各自都已经是现成的单句.
 
         Returns
@@ -833,7 +766,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
             # 每次另装配一份骨架, 槽位缓存必然失效; 用临时实例, 不挤掉主算子的缓存
             return SymmetricElimination().apply(level.operator, isBdDof)
 
-        return ConstrainedOperator(self.wrap_operator(level.operator),
+        return ConstrainedOperator(level.operator,
                                 gd=self._pde.dirichlet_bc,
                                 isDDof=isBdDof)
 
@@ -846,9 +779,10 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         Parameters
         ----------
-        precond : 'jacobi' / 'diagonal', 'mg', 'scipy' 或 'mumps'.
+        precond : 预条件子键, 见 ``soptx.fem.preconditioners``: 'jacobi', 'gmg', 'scipy'
+            或 'mumps'.
         K : 已施加边界条件的主算子.
-        kwargs : 求解调用的选项, 'mg' 时转交给 ``_multigrid_preconditioner``.
+        kwargs : 求解调用的选项, 原样交给预条件子工厂; 'gmg' 读其中的 gmg_* 项.
 
         Returns
         -------
@@ -870,17 +804,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
         else:
             K_pc = self._preconditioner_operator()
 
-        if precond in ('jacobi', 'diagonal'):
-            M = DiagonalPreconditioner()
-        elif precond == 'mg':
-            M = self._multigrid_preconditioner(**kwargs)
-        elif precond in ('scipy', 'mumps'):
-            M = create_solver(precond)
-        else:
+        if precond not in available_preconditioners():
             self._log_error(
-                f"未知的预条件子类型: {precond}; "
-                f"可选 'jacobi'/'diagonal', 'mg', 'scipy', 'mumps'"
+                f"未知的预条件子类型: {precond!r}; "
+                f"可用: {', '.join(available_preconditioners())}"
             )
+        M = create_preconditioner(precond, self, kwargs)
 
         try:
             M.setup(K_pc)
@@ -894,7 +823,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return M
 
-    def _multigrid_preconditioner(self, level: Optional[AssemblyLevelExtension] = None, **kwargs):
+    def _gmg_preconditioner(self, level: Optional[AssemblyLevelExtension] = None, **kwargs):
         """几何多重网格预条件子, 粗层按层级对象所带的单元系数重建.
 
         Parameters
@@ -903,8 +832,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
             ``assemble_stiff_matrix`` 产出的 ``self._level``; 最细层算子不经
             ``assemble_stiff_matrix`` 产出的子类须显式传入.
         **kwargs : 求解调用的选项, 优先于构造时的 ``solver_options``. 读取
-            ``mg_omega`` (默认 None, 各层自动取值), ``mg_sweeps`` (默认 1),
-            ``mg_coarse_solver`` (默认 'scipy') 与 ``mg_coarse_max_dofs`` (默认 20000,
+            ``gmg_omega`` (默认 None, 各层自动取值), ``gmg_sweeps`` (默认 1),
+            ``gmg_coarse_solver`` (默认 'scipy') 与 ``gmg_coarse_max_dofs`` (默认 20000,
             只在首次构造层次时生效).
 
         Returns
@@ -927,26 +856,29 @@ class LagrangeFEMAnalyzer(BaseLogged):
         scale = None if level is None else level.scale
         if scale is None:
             self._log_error(
-                "precond='mg' 需要由单元系数缩放参考刚度装配的层级, 即 'fa' 或 'ea' 下单元密度的"
+                "precond='gmg' 需要由单元系数缩放参考刚度装配的层级, 即 'fa' 或 'ea' 下单元密度的"
                 f"拓扑优化; 当前 operator_level={self._operator_level!r}, "
                 f"topopt_algorithm={self._topopt_algorithm!r}, 层级 {level!r}"
             )
 
         options = self._merged_solver_options(kwargs)
 
-        if self._mg_hierarchy is None:
+        if self._gmg_hierarchy is None:
+            # 层次只接受一份参考单元刚度, 须为等距结构化六面体网格 (平移类数 1)
+            if self._translation_class_count() != 1:
+                self._log_error("precond='gmg' 需要按 HexahedronMesh.from_box 约定生成的等距六面体网格")
             _, isBdDof, _ = self._dirichlet_data()
             try:
-                self._mg_hierarchy = StructuredHexHierarchy(
+                self._gmg_hierarchy = StructuredHexHierarchy(
                     self._tensor_space, isBdDof, self._reference_stiffness_matrices()[0],
-                    coarse_max_dofs=int(options.get('mg_coarse_max_dofs', 20000)))
+                    coarse_max_dofs=int(options.get('gmg_coarse_max_dofs', 20000)))
             except (ValueError, NotImplementedError) as exc:
-                self._log_error(f"precond='mg' 无法构造多重网格层次: {exc}")
-        self._mg_hierarchy.update(scale)
+                self._log_error(f"precond='gmg' 无法构造多重网格层次: {exc}")
+        self._gmg_hierarchy.update(scale)
 
-        return self._mg_hierarchy.build_multigrid(omega=options.get('mg_omega', None),
-                                                  sweeps=int(options.get('mg_sweeps', 1)),
-                                                  coarse_solver=options.get('mg_coarse_solver', 'scipy'))
+        return self._gmg_hierarchy.build_multigrid(omega=options.get('gmg_omega', None),
+                                                   sweeps=int(options.get('gmg_sweeps', 1)),
+                                                   coarse_solver=options.get('gmg_coarse_solver', 'scipy'))
 
     def solve_system(self, K, F, out, **kwargs):
         """在给定算子上求解线性系统, 解就地写入 out
@@ -979,17 +911,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         分解不跨调用复用: 求解完即释放, MUMPS 上下文的生命周期与改造前逐次
         建销一致. 状态解与伴随解共用一个分解要改 analyzer 的状态管理, 单独一步做.
-
-        这是分布式求解唯一的注入点: 并行只需在此处把 fealpy 的 cg 换成带
-        overlap 加权内积的版本, 上层的组装与边界条件处理不受影响. 覆盖本方法的
-        实现负责自行处理 dof_comm.
         """
-        if self._dof_comm is not None:
-            raise NotImplementedError(
-                "串行求解器不能用于分布式系统。请覆盖 solve_system, "
-                "提供带 overlap 加权内积的 CG, 参考 examples/matrix_free_elasticity"
-            )
-
         solver_type = kwargs.get('solver', self._solve_method)
         if solver_type not in available_solvers():
             self._log_error(
@@ -1047,45 +969,66 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return ke0
 
+    def _translation_class_count(self) -> int:
+        """网格的平移类数 N_k, 首次调用时判定并缓存.
+
+        按单元类型取 ``from_box`` 编号约定下的 N_k (四边形、六面体 1,
+        三角形 2, 四面体 6), 再逐单元检查: 单元 e 各顶点相对首顶点的偏移须与代表单元
+        e % N_k 的一致, 容差为代表单元尺寸的 1e-10 倍. 全部通过才取 N_k, 否则取 NC, 即
+        逐单元各存一份. 只认一次元: 高次元的边、面自由度顺序随实体朝向变化, 顶点平移
+        相同不足以保证单元矩阵相同.
+
+        Returns
+        -------
+        n_classes : 平移类数, 取 N_k 或 NC; N_k 整除 NC, 单元 e 属于第 e % N_k 类.
+        """
+        if self._reference_classes is not None:
+            return self._reference_classes
+        mesh = self._mesh
+        n_cells = int(mesh.number_of_cells())
+        n_classes = next((n for mesh_type, n in _TRANSLATION_CLASS_COUNTS if isinstance(mesh, mesh_type)), None)
+        if n_classes is None or self._space_degree != 1 or n_cells % n_classes != 0:
+            self._reference_classes = n_cells
+            return n_cells
+
+        node = mesh.entity('node')
+        cell = mesh.entity('cell')
+        reference = node[cell[:n_classes]]
+        reference = reference - reference[:, :1]
+        tolerance = 1e-10 * float(bm.max(bm.abs(reference)))
+        chunk = _TRANSLATION_CHECK_CHUNK * n_classes
+        for start in range(0, n_cells, chunk):
+            block = node[cell[start:start + chunk]]
+            offset = bm.reshape(block - block[:, :1], (-1, ) + tuple(reference.shape))
+            if float(bm.max(bm.abs(offset - reference[None]))) > tolerance:
+                n_classes = n_cells
+                break
+        self._reference_classes = n_classes
+        return n_classes
+
     def _reference_stiffness_matrices(self) -> TensorLike:
         """单元密度下 K_e = s_e K^0_{k(e)} 所用的参考单元矩阵, 首次计算后缓存.
 
         Returns
         -------
-        reference : (N_k, TLDOF, TLDOF) 的参考单元矩阵, 单元 e 取第 e % N_k 份. 未给
-            ``reference_classes`` 时 N_k = NC, 即 ``compute_solid_stiffness_matrix`` 的逐单元缓存.
+        reference : (N_k, TLDOF, TLDOF) 的参考单元矩阵, 单元 e 取第 e % N_k 份. 网格不满足
+            平移类约定时 N_k = NC, 即 ``compute_solid_stiffness_matrix`` 的逐单元缓存.
 
         Notes
         -----
-        给出 ``reference_classes`` 时只积分前 N_k 个代表单元, 不形成逐单元的 (NC, TLDOF, TLDOF).
-        另积分中间与最后一个单元, 与其所属类的代表比较, 相对偏差超过 1e-10 即报错; 这只能
-        拦住重编号、非等距之类的明显误用, 不能证明每个单元都满足平移类约定.
+        N_k < NC 时只积分前 N_k 个代表单元, 不形成逐单元的 (NC, TLDOF, TLDOF); 其正确性由
+        ``_translation_class_count`` 的逐单元几何检查保证.
         """
-        if self._reference_classes is None:
+        n_classes = self._translation_class_count()
+        if n_classes == int(self._mesh.number_of_cells()):
             if self._cached_ke0 is None:
                 self.compute_solid_stiffness_matrix()
             return self._cached_ke0
         if self._reference_ke0 is None:
-            n_classes = self._reference_classes
-            n_cells = int(self._mesh.number_of_cells())
-
-            def integrate(index):
-                integrator = LinearElasticIntegrator(material=self._material, coef=None,
-                                                     q=self._integration_order, index=index,
-                                                     method=self._assembly_method)
-                return integrator.assembly(space=self.tensor_space)
-
-            reference = integrate(slice(0, n_classes))
-            sample = bm.tensor(sorted({n_cells // 2, n_cells - 1}), dtype=bm.int64)
-            sampled = integrate(sample)
-            expected = reference[sample % n_classes]
-            scale = float(bm.max(bm.abs(reference)))
-            if float(bm.max(bm.abs(sampled - expected))) > 1e-10 * scale:
-                self._log_error(
-                    f"reference_classes={n_classes} 与网格不符: 抽查单元的 K_e^0 与其平移类代表不一致, "
-                    f"网格须按 create_box_mesh / from_box 的编号约定生成且等距"
-                )
-            self._reference_ke0 = reference
+            integrator = LinearElasticIntegrator(material=self._material, coef=None,
+                                                 q=self._integration_order, index=slice(0, n_classes),
+                                                 method=self._assembly_method)
+            self._reference_ke0 = integrator.assembly(space=self.tensor_space)
 
         return self._reference_ke0
 

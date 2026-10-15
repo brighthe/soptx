@@ -31,7 +31,7 @@ CURRENT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CURRENT_DIR.parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from soptx.problems.elasticity import FullMBBBeam2d, FullMBBBeam3d
+from soptx.problems import FullMBBBeamPoint2d, FullMBBBeamLine3d
 from soptx.topology.filters import apply_structured_sensitivity_filter
 from soptx.topology.optimizers import OCOptimizer
 from soptx.ml.substructure import (
@@ -154,10 +154,10 @@ def run_topopt(
 
     # 1. 物理问题与有限元分析器
     if case.dim == 2:
-        problem = FullMBBBeam2d(domain=case.domain, P=case.p_load, E=case.emax, nu=case.nu)
+        problem = FullMBBBeamPoint2d(domain=case.domain, P=case.p_load, E=case.emax, nu=case.nu)
         domain_size = (case.domain[1] - case.domain[0], case.domain[3] - case.domain[2])
     elif case.dim == 3:
-        problem = FullMBBBeam3d(domain=case.domain, P=case.p_load, E=case.emax, nu=case.nu)
+        problem = FullMBBBeamLine3d(domain=case.domain, P=case.p_load, E=case.emax, nu=case.nu)
         domain_size = (
             case.domain[1] - case.domain[0],
             case.domain[3] - case.domain[2],
@@ -184,7 +184,7 @@ def run_topopt(
     total_macro_dofs = assembler.total_macro_dofs
     c_macro = assembler.macro_corner_indices(sub_meshes)
 
-    # FullMBBBeam2d/3d 是载荷与边界条件的唯一事实源.
+    # FullMBBBeamPoint2d/3d 是载荷与边界条件的唯一事实源.
     f_macro, fixed_macro_dofs = project_problem_conditions_to_macro_system(
         problem, assembler
     )

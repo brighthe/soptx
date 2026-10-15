@@ -15,7 +15,7 @@ import pytest
 
 from soptx.backend import backend_manager as bm
 
-from soptx.mesh import create_huzhang_checkerboard_mesh
+from soptx.mesh import TriangleMesh
 from soptx.functionspace import HuZhangFESpace
 
 
@@ -26,7 +26,7 @@ def _relaxed_space(degree: int) -> Any:
     因此返回类型放宽为 Any.
     """
     bm.set_backend("numpy")
-    mesh = create_huzhang_checkerboard_mesh(box=(0.0, 1.0, 0.0, 1.0), nx=2, ny=2)
+    mesh = TriangleMesh.from_checkerboard_box(box=(0.0, 1.0, 0.0, 1.0), nx=2, ny=2)
     corners = bm.array(
         [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]], dtype=bm.float64
     )

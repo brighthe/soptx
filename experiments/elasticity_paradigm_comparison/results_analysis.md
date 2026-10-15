@@ -90,7 +90,7 @@ outputs/
 
 `compare_piml_pinn.py` 的既有算例采用制造解 `ExponentialSineManufacturedElasticity2D`，其位移在四条边上恒为零、唯一驱动是体力；而缩聚路径按 $\mathbf f_i=\mathbf 0$ 建模，在该算例上只能解出零位移场，位移误差退化为 $0/0$。同时子结构库的平面假设固定为 `plane_stress`，而该制造解是 plane strain，两条路径的物理模型并不相同。
 
-解除方式：本实验改用边界载荷驱动的 `FullMBBBeam2d`（`verify_stiffness_route.py` 已冻结的设置），四条路径均可产出非平凡位移场；PINN 在其上配硬约束边界。`cases.toml` 已按此配置。
+解除方式：本实验改用边界载荷驱动的 `FullMBBBeamPoint2d`（`verify_stiffness_route.py` 已冻结的设置），四条路径均可产出非平凡位移场；PINN 在其上配硬约束边界。`cases.toml` 已按此配置。
 
 ### 3.3 PIML 训练循环未下沉（阻塞 `piml` 适配器）
 
@@ -102,14 +102,14 @@ outputs/
 
 `run.py:build_context` 当前恒抛 `NotImplementedError`。所需的 `GlobalAssembler` 构造与外载/约束提取范式已存在于 `verify_stiffness_route.py`，下沉后在此调用即可，无能力缺口。
 
-### 3.5 参考解在 `FullMBBBeam2d` 上缺证据（阻塞 Tier A/B 的参考路径）
+### 3.5 参考解在 `FullMBBBeamPoint2d` 上缺证据（阻塞 Tier A/B 的参考路径）
 
-`cases.toml` 取 `FullMBBBeam2d` 以对齐 PIML 侧已冻结的 `verify_stiffness_route.py`（Huang 2023 §4.1）。但 Lagrange 侧的 2D 算例只覆盖 `HalfMBBBeamRight2d`（对称半域），完整域只有 3D 的 `FullMBBBeam3d`；`compare_lagrange.py` 同样是 2D 半域 + 3D 完整域。因此本实验所用的 2D 完整域组合，参考路径尚无正确性证据。该缺口已同步记录在 [`examples/lagrange_elasticity/results_analysis.md`](../../examples/lagrange_elasticity/results_analysis.md) §5 第 3 条。
+`cases.toml` 取 `FullMBBBeamPoint2d` 以对齐 PIML 侧已冻结的 `verify_stiffness_route.py`（Huang 2023 §4.1）。但 Lagrange 侧的 2D 算例只覆盖 `HalfMBBBeamPoint2d`（对称半域），完整域只有 3D 的 `FullMBBBeamLine3d`；`compare_lagrange.py` 同样是 2D 半域 + 3D 完整域。因此本实验所用的 2D 完整域组合，参考路径尚无正确性证据。该缺口已同步记录在 [`examples/lagrange_elasticity/results_analysis.md`](../../examples/lagrange_elasticity/results_analysis.md) §5 第 3 条。
 
 解除方式（待定）：
 
-- **方案 A**：保留 `FullMBBBeam2d`，在 `concentrated_load_demo.py` 增加 2D 完整域 `--problem` 选项并补跑一次。该文件已支持 `FullMBBBeam3d`，属同技术栈同文件加配置。
-- **方案 B**：`cases.toml` 改用 `HalfMBBBeamRight2d`。代价是与 PIML 侧已冻结算例脱钩，既有 PIML 证据不可比。
+- **方案 A**：保留 `FullMBBBeamPoint2d`，在 `concentrated_load_demo.py` 增加 2D 完整域 `--problem` 选项并补跑一次。该文件已支持 `FullMBBBeamLine3d`，属同技术栈同文件加配置。
+- **方案 B**：`cases.toml` 改用 `HalfMBBBeamPoint2d`。代价是与 PIML 侧已冻结算例脱钩，既有 PIML 证据不可比。
 
 ### 3.6 度量口径尚未收编
 

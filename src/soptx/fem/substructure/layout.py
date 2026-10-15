@@ -2,54 +2,38 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
+from soptx.functionspace.utils import to_tensor_dof
 from soptx.mesh import HexahedronMesh, QuadrangleMesh
 
 from soptx.materials import IsotropicLinearElasticMaterial
 
 from .mesh import resolve_material_hypothesis
 
-class HasGlobalDofs(Protocol):
-    """只提供接口全局自由度编号的视图.
-
-    ``InterfaceSystem`` 满足该协议; ``linear_corner`` 路线的宏观系统不含完整接口
-    编号, 调用方可另传 ``SimpleNamespace(global_dofs=...)`` 作为完整接口视图.
-
-    属性:
-        global_dofs: 接口自由度对应的全局自由度编号, 升序排列, 形状
-            ``(n_interface,)``.
-    """
-
-    @property
-    def global_dofs(self) -> Any:
-        """升序排列的接口全局自由度编号, 形状 ``(n_interface,)``."""
-        ...
-
-
-@dataclass(frozen=True)
-class InterfaceDofsView:
-    """只含完整接口全局自由度编号的视图, 满足 ``HasGlobalDofs``.
-
-    ``linear_corner`` 路线的宏观系统以角点自由度为行列, 不含完整接口编号;
-    载荷与支承投影, 全局迹延拓和完整位移恢复用该视图提供细网格接口编号.
-
-    属性:
-        global_dofs: 完整接口的全局自由度编号, 升序排列, 形状
-            ``(n_interface,)``, 通常取自 ``StructuredSubstructureLayout.build_interface_dofs``.
-    """
-
-    global_dofs: Any
-
-
 class StructuredSubstructureLayout:
     """管理规则子结构整体布局及其局部到全局映射.
 
     该对象统一保存整体尺寸、子结构划分、全尺度有限元上下文、自由度编号和
     结构化场重排规则, 不负责缩聚刚度装配或线性求解.
+
+    Parameters
+    ----------
+    full_mesh : HexahedronMesh or QuadrangleMesh, optional
+        已创建的规则细网格. 尺寸、剖分与编号须与布局一致, 校验后复用原对象.
+        未传入时保留惰性创建行为. 网格接入后不得修改其坐标或连接关系.
+    tensor_space : TensorFunctionSpace, optional
+        已有连续 Lagrange 位移空间, 须采用 ``shape=(-1, dim)``.
+        复用其标量空间与网格; 同时给出 full_mesh 时须为同一对象.
+        未显式指定 degree 或 p 时采用该空间的次数, 无空间时缺省为 1.
+
+    Notes
+    -----
+    全局自由度计数和坐标由 FEM 空间提供. 已接入的空间与网格应保持不变;
+    GlobalAssembler 的兼容替换入口会同步清理计数与映射缓存.
     """
 
     def __init__(
@@ -58,14 +42,16 @@ class StructuredSubstructureLayout:
         n_sub: Union[Tuple[int, ...], float, int],
         n_fine: Union[Tuple[int, ...], int],
         *args: Any,
-        degree: int = 1,
+        degree: Optional[int] = None,
         p: Optional[int] = None,
         E_base: float = 1.0,
         nu: float = 0.3,
         hypothesis: Optional[str] = None,
+        full_mesh: Optional[Any] = None,
+        tensor_space: Optional[TensorFunctionSpace] = None,
     ) -> None:
         """
-        构造全局接口系统装配器.
+        构造规则子结构布局.
 
         参数:
             domain_size: 各方向的求解域尺寸元组, 或 2D/3D 标量形式的第一个分量.
@@ -73,7 +59,7 @@ class StructuredSubstructureLayout:
             n_fine: 单个子结构在各方向的细单元数元组, 或标量形式的第一个分量.
             *args: 标量形式下的其余尺寸, 子结构数和细单元数, 之后可选跟
                 ``E_base`` 与 ``nu``; 元组形式下可选跟 ``E_base`` 与 ``nu``.
-            degree: 有限元位移空间的多项式插值次数, 缺省为 ``1``.
+            degree: 位移插值次数. 未给出时采用 tensor_space.p, 无空间时为 1.
             p: ``degree`` 的别名, 显式给出时优先于 ``degree``.
             E_base: 实体材料的杨氏模量.
             nu: 泊松比.
@@ -94,7 +80,12 @@ class StructuredSubstructureLayout:
         self.dim: int = len(self.domain_size)
         self.hypothesis = resolve_material_hypothesis(self.dim, hypothesis)
 
-        self.degree: int = int(p if p is not None else degree)
+        if tensor_space is not None and not isinstance(tensor_space, TensorFunctionSpace):
+            raise TypeError("tensor_space 必须为 TensorFunctionSpace.")
+        requested_degree = p if p is not None else degree
+        if requested_degree is None:
+            requested_degree = tensor_space.p if tensor_space is not None else 1
+        self.degree: int = int(requested_degree)
         if self.degree <= 0:
             raise ValueError(f"degree 必须为正整数; 当前为 {self.degree}.")
         self.p: int = self.degree
@@ -128,12 +119,9 @@ class StructuredSubstructureLayout:
             self.total_fine_z = self.total_fine[2]
             self.n_full_nodes_z: int = self.n_full_nodes[2]
 
-        # 自由度规模由结构化划分直接算出, 不依赖全尺度网格.
-        n_nodes = 1
-        for n in self.n_full_nodes:
-            n_nodes *= n
-        self.total_full_nodes: int = n_nodes
-        self.total_full_dofs: int = self.dim * n_nodes
+        # 格点规模用于布局校验; 实际自由度数首次查询 FEM 空间后缓存.
+        self._total_full_nodes: Optional[int] = None
+        self._total_full_dofs: Optional[int] = None
 
         self._full_mesh: Optional[Any] = None
         self._material: Optional[Any] = None
@@ -142,6 +130,114 @@ class StructuredSubstructureLayout:
         self._node_of_grid: Optional[Any] = None
         # 子结构全局自由度按 (位置, 参考子结构) 缓存; 同一子结构会被多个方法重复查询.
         self._dof_cache: dict = {}
+        if tensor_space is not None:
+            if full_mesh is not None and full_mesh is not tensor_space.mesh:
+                raise ValueError("full_mesh 必须与 tensor_space.mesh 为同一对象.")
+            self._set_space_full(tensor_space)
+        elif full_mesh is not None:
+            self._validate_full_mesh(full_mesh)
+            self._full_mesh = full_mesh
+
+    def _invalidate_dof_caches(self) -> None:
+        """空间或网格替换后清理计数与布局映射缓存."""
+        self._total_full_nodes = None
+        self._total_full_dofs = None
+        self._node_of_grid = None
+        self._dof_cache.clear()
+
+    def _set_space_full(self, space: Optional[TensorFunctionSpace]) -> None:
+        """校验并接入已有位移空间, None 清空空间并保留网格."""
+        if space is not None:
+            if not isinstance(space, TensorFunctionSpace):
+                raise TypeError("位移空间必须为 TensorFunctionSpace.")
+            scalar = space.scalar_space
+            if not isinstance(scalar, LagrangeFESpace) or scalar.ctype != 'C':
+                raise ValueError("子结构要求连续 Lagrange 标量空间.")
+            if int(space.p) != self.degree:
+                raise ValueError("位移空间次数与布局 degree 不一致.")
+            if tuple(space.shape) != (-1, self.dim):
+                raise ValueError("位移空间须采用 shape=(-1, dim) 的节点分量交错排列.")
+            self._validate_full_mesh(space.mesh)
+            self._full_mesh = space.mesh
+            self._sspace_full = scalar
+        else:
+            self._sspace_full = None
+        self._space_full = space
+        self._invalidate_dof_caches()
+
+    def _set_sspace_full(self, space: Optional[LagrangeFESpace]) -> None:
+        """兼容标量空间替换, 同步重建张量包装并清理映射缓存."""
+        if space is not None and not isinstance(space, LagrangeFESpace):
+            raise TypeError("标量空间必须为 LagrangeFESpace.")
+        self._set_space_full(
+            None if space is None else TensorFunctionSpace(space, shape=(-1, self.dim))
+        )
+
+    def _set_full_mesh(self, mesh: Optional[Any]) -> None:
+        """兼容网格替换, 清空依赖原网格的空间和映射缓存."""
+        if mesh is not None:
+            self._validate_full_mesh(mesh)
+        self._full_mesh = mesh
+        self._set_space_full(None)
+
+    @property
+    def total_full_nodes(self) -> int:
+        """FEM 标量自由度总数, 首次查询时校验规则格点规模并缓存."""
+        if self._total_full_nodes is None:
+            count = int(self.sspace_full.number_of_global_dofs())
+            expected = 1
+            for n in self.n_full_nodes:
+                expected *= n
+            if count != expected:
+                raise ValueError("FEM 标量自由度数与规则格点规模不一致.")
+            self._total_full_nodes = count
+        return self._total_full_nodes
+
+    @property
+    def total_full_dofs(self) -> int:
+        """FEM 位移自由度总数, 首次查询后缓存."""
+        if self._total_full_dofs is None:
+            expected = self.dim * self.total_full_nodes
+            count = int(self.space_full.number_of_global_dofs())
+            if count != expected:
+                raise ValueError("FEM 位移自由度数与布局维数及标量空间不一致.")
+            self._total_full_dofs = count
+        return self._total_full_dofs
+
+    def _validate_full_mesh(self, mesh: Any) -> None:
+        """校验外部细网格的几何、拓扑与规则编号.
+
+        Parameters
+        ----------
+        mesh : HexahedronMesh or QuadrangleMesh
+            原点起始的规则细网格, 须与布局尺寸及剖分一致.
+
+        Raises
+        ------
+        ValueError
+            网格类型、坐标或连接关系与布局不一致.
+
+        Notes
+        -----
+        复用网格生成器的原始数组校验编号, 不构造第二份网格及面边拓扑.
+        """
+        from soptx.mesh.generation import Box2d, Box3d
+
+        mesh_type = QuadrangleMesh if self.dim == 2 else HexahedronMesh
+        if not isinstance(mesh, mesh_type):
+            raise ValueError('full_mesh 类型与子结构布局维数不一致')
+        box = [v for length in self.domain_size for v in (0.0, length)]
+        generator = Box2d if self.dim == 2 else Box3d
+        nodes, cells = generator(box, *self.total_fine, device=mesh.device).initialize()
+        order = [0, 1, 3, 2] if self.dim == 2 else [0, 1, 3, 2, 4, 5, 7, 6]
+        actual_nodes = mesh.entity('node')
+        actual_cells = mesh.entity('cell')
+        if actual_nodes.shape != nodes.shape or not bool(
+            bm.allclose(actual_nodes, nodes, rtol=1.0e-12, atol=1.0e-12)
+        ):
+            raise ValueError('full_mesh 坐标或节点编号与布局尺寸及剖分不一致')
+        if actual_cells.shape != cells.shape or not bool(bm.all(actual_cells == cells[:, order])):
+            raise ValueError('full_mesh 单元连接或编号与布局不一致')
 
     @staticmethod
     def _parse_layout(
@@ -209,7 +305,7 @@ class StructuredSubstructureLayout:
 
     @property
     def full_mesh(self) -> Any:
-        """全尺度细网格; 首次访问时构造."""
+        """全尺度细网格; 优先复用传入对象, 未传入时首次访问构造."""
         if self._full_mesh is None:
             box = [
                 coord
@@ -255,40 +351,29 @@ class StructuredSubstructureLayout:
         return self._sspace_full
 
     def node_coordinates(self, node_indices: Optional[Any] = None) -> Any:
-        """解析计算结构化全网格节点的物理坐标, 形状 ``(N, dim)``.
+        """按全局标量自由度编号返回 FEM 插值点坐标.
 
-        说明:
-            直接基于网格步长解析计算, 彻底避免为了查询坐标而构造全尺度网格与空间.
+        Parameters
+        ----------
+        node_indices : array_like, optional
+            全局标量自由度编号. 省略时返回全部插值点.
+
+        Returns
+        -------
+        coordinates : array_like
+            节点坐标, 形状为 ``(N, dim)``.
+
+        Notes
+        -----
+        所有次数均复用标量空间的插值点接口, 首次访问可能创建全尺度空间.
         """
+        points = self.sspace_full.interpolation_points()
         if node_indices is None:
-            node_indices = bm.arange(self.total_full_nodes, dtype=bm.int64)
-        else:
-            node_indices = bm.asarray(node_indices, dtype=bm.int64)
-
-        if self.dim == 2:
-            ny1 = self.n_full_nodes[1]
-            ix = node_indices // ny1
-            iy = node_indices % ny1
-            hx = self.domain_size[0] / (self.total_fine[0] * self.degree)
-            hy = self.domain_size[1] / (self.total_fine[1] * self.degree)
-            x = bm.astype(ix, bm.float64) * hx
-            y = bm.astype(iy, bm.float64) * hy
-            return bm.stack([x, y], axis=-1)
-        else:
-            ny1 = self.n_full_nodes[1]
-            nz1 = self.n_full_nodes[2]
-            nyz = ny1 * nz1
-            ix = node_indices // nyz
-            rem = node_indices % nyz
-            iy = rem // nz1
-            iz = rem % nz1
-            hx = self.domain_size[0] / (self.total_fine[0] * self.degree)
-            hy = self.domain_size[1] / (self.total_fine[1] * self.degree)
-            hz = self.domain_size[2] / (self.total_fine[2] * self.degree)
-            x = bm.astype(ix, bm.float64) * hx
-            y = bm.astype(iy, bm.float64) * hy
-            z = bm.astype(iz, bm.float64) * hz
-            return bm.stack([x, y, z], axis=-1)
+            return points
+        indices = bm.asarray(
+            node_indices, dtype=bm.int64, device=self.sspace_full.device
+        )
+        return points[indices]
 
     @property
     def space_full(self) -> TensorFunctionSpace:
@@ -302,17 +387,59 @@ class StructuredSubstructureLayout:
     ### 全局自由度映射 ###
 
     def _node_of_grid_index(self) -> Any:
-        """返回结构化高阶网格下标到全局节点编号的映射, 形状 ``(total_full_nodes,)``.
+        """返回规则格点的 C 序编号到全局标量自由度编号的映射.
 
-        说明:
-            soptx.mesh 标准结构化网格节点按 C 序字典序排布 (x 优先, y 次之, z 内层),
-            节点下标与线性编号自然恒等, 直接由 ``bm.arange`` 给出, 彻底避免构造全尺度
-            网格与插值坐标所造成的数十 GB 内存开销.
+        Returns
+        -------
+        node_of_grid : array_like
+            形状为 ``(total_full_nodes,)`` 的整数置换.
+
+        Raises
+        ------
+        RuntimeError
+            高阶插值点数量、坐标或格点覆盖与规则布局不一致.
+
+        Notes
+        -----
+        Q1 保留恒等映射. 高阶插值点按实际有限元空间编号, 通过坐标反解
+        规则格点下标后构造逆向置换. 显式设置的非空缓存仍优先使用.
         """
         if self._node_of_grid is not None:
             return self._node_of_grid
 
-        self._node_of_grid = bm.arange(self.total_full_nodes, dtype=bm.int64)
+        if self.degree == 1:
+            self._node_of_grid = bm.arange(self.total_full_nodes, dtype=bm.int64)
+            return self._node_of_grid
+
+        points = self.sspace_full.interpolation_points()
+        if tuple(points.shape) != (self.total_full_nodes, self.dim):
+            raise RuntimeError("全局插值点数量或维数与规则布局不一致.")
+        if not bool(bm.all(bm.isfinite(points))):
+            raise RuntimeError("全局插值点坐标包含非有限值.")
+
+        device = self.full_mesh.device
+        linear_index = bm.zeros(
+            (self.total_full_nodes,), dtype=bm.int64, device=device
+        )
+        for d in range(self.dim):
+            step = self.domain_size[d] / (self.total_fine[d] * self.degree)
+            grid_coordinate = points[:, d] / step
+            rounded = bm.round(grid_coordinate)
+            if not bool(bm.all(bm.abs(grid_coordinate - rounded) <= 1.0e-6)):
+                raise RuntimeError("全局插值点未落在预期的规则高阶格点上.")
+            if not bool(bm.all(
+                (rounded >= 0) & (rounded < self.n_full_nodes[d])
+            )):
+                raise RuntimeError("全局插值点的规则格点下标越界.")
+            grid_index = bm.astype(rounded, bm.int64)
+            linear_index = linear_index * self.n_full_nodes[d] + grid_index
+
+        node_of_grid = bm.argsort(linear_index)
+        expected = bm.arange(self.total_full_nodes, dtype=bm.int64, device=device)
+        if not bool(bm.all(linear_index[node_of_grid] == expected)):
+            raise RuntimeError("全局插值点未能完整且唯一地覆盖规则高阶格点.")
+
+        self._node_of_grid = node_of_grid
         return self._node_of_grid
 
     def get_substructure_global_dofs(self, *args: Any) -> Any:
@@ -331,9 +458,9 @@ class StructuredSubstructureLayout:
             ValueError: 当子结构位置越界时抛出.
 
         说明:
-            映射由子结构自身的节点结构化下标加上子结构偏移得到, 再经全网格的
-            下标反查表转成全局节点编号, 不依赖任何编号次序约定. 结果按位置与
-            参考子结构缓存.
+            子结构节点的规则格点下标加上位置偏移后, 经全局格点到有限元编号
+            的映射转换为全局节点编号. Q1 使用恒等映射, 高阶使用实际插值点
+            生成的置换. 结果按位置与参考子结构缓存.
         """
         if len(args) == 2:
             sub_pos, sub_mesh = args[0], args[1]
@@ -370,11 +497,12 @@ class StructuredSubstructureLayout:
             linear_index = linear_index * self.n_full_nodes[d] + grid_index[:, d]
         global_nodes = node_of_grid[linear_index]
 
-        # 局部自由度按 dim * node + k 排布, 展平后与局部自由度编号逐项对应.
-        components = bm.arange(self.dim, dtype=bm.int64)
-        sub_global_dofs = bm.reshape(
-            self.dim * global_nodes[:, None] + components[None, :], (-1,)
-        )
+        # 与 TensorFunctionSpace 共用标量到张量编号的展开规则.
+        space = self.space_full
+        sub_global_dofs = to_tensor_dof(
+            global_nodes[None, :], space.dof_numel,
+            self.total_full_nodes, space.dof_priority,
+        )[0]
         # 同时持有参考子结构的引用, 避免它被回收后 id 复用导致缓存串号.
         self._dof_cache[key] = (prototype, sub_global_dofs)
         return sub_global_dofs
@@ -576,18 +704,25 @@ class StructuredSubstructureLayout:
 
         return bm.stack(rows, axis=0)
 
-    def project_global_vector(self, system: HasGlobalDofs, global_vector: Any) -> Any:
-        """把全局自由度向量投影为接口系统的右端项.
+    def project_global_vector(self, interface_dofs: TensorLike, global_vector: Any) -> Any:
+        """提取全局向量的完整接口分量.
 
-        参数:
-            system: 接口系统或至少具有 ``global_dofs`` 属性的视图.
-            global_vector: 全局自由度向量, 长度为 ``total_full_dofs``.
+        Parameters
+        ----------
+        interface_dofs : TensorLike
+            完整细网格接口的全局自由度编号, 升序且无重复, 形状 (n_interface,).
+        global_vector : array_like
+            全局自由度向量, 长度为 total_full_dofs.
 
-        返回:
-            interface_vector: 接口自由度上的分量, 形状 ``(n_interface,)``.
+        Returns
+        -------
+        interface_vector : TensorLike
+            与 interface_dofs 顺序一致的接口分量, 形状 (n_interface,).
 
-        异常:
-            ValueError: 当 ``global_vector`` 长度与全局自由度数不一致时抛出.
+        Raises
+        ------
+        ValueError
+            全局向量长度与全局自由度数不一致.
         """
         vector = bm.asarray(global_vector, dtype=bm.float64)
         if len(vector) != self.total_full_dofs:
@@ -595,21 +730,26 @@ class StructuredSubstructureLayout:
                 f"global_vector 的长度必须等于全局自由度数 {self.total_full_dofs}; "
                 f"当前为 {len(vector)}."
             )
-        return vector[system.global_dofs]
+        return vector[interface_dofs]
 
-    def project_global_dofs(self, system: HasGlobalDofs, global_dofs: Any) -> Any:
-        """把全局自由度集合投影为接口自由度集合.
+    def project_global_dofs(self, interface_dofs: TensorLike, global_dofs: Any) -> Any:
+        """把全局自由度集合转换为接口系统中的编号.
 
-        参数:
-            system: 接口系统或至少具有 ``global_dofs`` 属性的视图.
-            global_dofs: 待投影的全局自由度编号, 不在接口上的分量被丢弃.
+        Parameters
+        ----------
+        interface_dofs : TensorLike
+            完整细网格接口的全局自由度编号, 升序且无重复, 形状 (n_interface,).
+        global_dofs : array_like
+            待转换的全局自由度编号, 不在接口上的分量被丢弃.
 
-        返回:
-            interface_dofs: 升序去重的接口自由度编号.
+        Returns
+        -------
+        local_interface_dofs : TensorLike
+            升序去重的接口系统编号, 即 interface_dofs 中的位置.
         """
         dofs = bm.asarray(global_dofs, dtype=bm.int64)
-        on_interface = bm.isin(dofs, system.global_dofs)
-        return bm.unique(bm.searchsorted(system.global_dofs, dofs[on_interface]))
+        on_interface = bm.isin(dofs, interface_dofs)
+        return bm.unique(bm.searchsorted(interface_dofs, dofs[on_interface]))
 
     def to_node_grid(self, node_values: Any) -> Any:
         """把按全局节点编号排列的标量场重排为结构化网格形状.
@@ -626,8 +766,8 @@ class StructuredSubstructureLayout:
             ValueError: 当 ``node_values`` 长度与全局节点数不一致时抛出.
 
         说明:
-            重排依据由节点坐标反解出的结构化下标, 不假定网格生成器的节点编号
-            次序, 因此可直接用于云图绘制.
+            按规则格点到全局标量自由度编号的映射提取数值再重排.
+            Q1 使用恒等映射, 高阶使用实际插值点生成的置换.
         """
         values = bm.asarray(node_values)
         if len(values) != self.total_full_nodes:

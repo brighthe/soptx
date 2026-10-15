@@ -11,7 +11,7 @@ import pytest
 
 from soptx.backend import backend_manager as bm
 from soptx.fem import HuZhangMFEMAnalyzer
-from soptx.mesh import create_huzhang_checkerboard_mesh
+from soptx.mesh import TriangleMesh
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import MixedBoundarySinusoidalElasticity2D
 
@@ -28,9 +28,8 @@ def test_native_k3_coarsest_level_solves_with_mumps() -> None:
         hypothesis=problem.plane_type,
         lame_lambda=problem.lam,
         shear_modulus=problem.mu,
-        enable_logging=False,
     )
-    mesh = create_huzhang_checkerboard_mesh(box=problem.domain, nx=4, ny=4)
+    mesh = TriangleMesh.from_checkerboard_box(box=problem.domain, nx=4, ny=4)
     analyzer = HuZhangMFEMAnalyzer(
         disp_mesh=mesh,
         pde=problem,

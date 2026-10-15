@@ -1,4 +1,4 @@
-"""载荷引入垫片中"实体保留 (passive solid)"一侧的回归测试.
+"""载荷端点被动实体区中"实体保留 (passive solid)"一侧的回归测试.
 
 覆盖四件事: 保留单元的物理密度在过滤链末端被钉为满密度 (而不是只钉设计
 变量), Function 与裸张量两条路径行为一致, 保留行的密度灵敏度被清零, 以及
@@ -46,7 +46,6 @@ def _filter(mesh, mask):
         density_location="element",
         projection_params=dict(_PROJECTION),
         passive_mask=mask,
-        enable_logging=False,
     )
 
 

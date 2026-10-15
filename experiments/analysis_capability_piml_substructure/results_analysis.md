@@ -734,7 +734,7 @@ $\widehat{\mathbf{K}}_r^j=\mathbf{R}_{\perp}^j\mathbf{C}_j\mathbf{C}_j^{\mathsf{
 
 ### 7.4 整体结构求解精度与路线对比
 
-`FullMBBBeam2d` 的求解域为 $[0,12]\times[0,2]$，划分为 $12\times 2$ 共 24 个子结构，单块包含 $5\times 5$ Q1 单元，全尺度细网格共 682 自由度。
+`FullMBBBeamPoint2d` 的求解域为 $[0,12]\times[0,2]$，划分为 $12\times 2$ 共 24 个子结构，单块包含 $5\times 5$ Q1 单元，全尺度细网格共 682 自由度。
 
 
 ![图 4(c) 全局结构求解精度](figure_data/fig3_piml_panel_c.svg)

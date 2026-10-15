@@ -168,9 +168,11 @@ class SubstructurePrototype:
         self.space: TensorFunctionSpace = TensorFunctionSpace(
             self.sspace, shape=(-1, self.dim)
         )
+        # 规则子结构网格为仿射映射, 与细网格 FEM 对照统一使用 fast 单元积分.
         self.integrator: LinearElasticIntegrator = LinearElasticIntegrator(
             material=self.material,
             q=self.integration_order,
+            method='fast',
         )
 
         # i_dofs/b_dofs 按 dim * node + k 编号, 只有节点优先排布才成立.

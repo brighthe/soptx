@@ -21,7 +21,7 @@ def _analyzer(order=2, **kwargs):
     mesh = TriangleMesh.from_box([0, 1, 0, 1], nx=2, ny=2)
     material = IsotropicLinearElasticMaterial(
         lame_lambda=problem.lam, shear_modulus=problem.mu,
-        hypothesis=problem.plane_type, enable_logging=False)
+        hypothesis=problem.plane_type)
     return HuZhangMFEMAnalyzer(
         disp_mesh=mesh, pde=problem, material=material,
         interpolation_scheme=_Interpolation(), topopt_algorithm='density_based',

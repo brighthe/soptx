@@ -102,7 +102,7 @@ python examples/huzhang_elasticity/manufactured_convergence_demo.py --no-relaxat
 
 ### 2. 集中力工程基准 (concentrated_load_demo)
 
-无解析解的工程算例：[`FixedFixedBeamCenterLoad2d`](../../docs/problems/engineering-benchmarks.md#fixedfixedbeamcenterload2d)，
+无解析解的工程算例：[`FixedFixedBeamPatch2d`](../../docs/problems/engineering-benchmarks.md#fixedfixedbeampatch2d)，
 $160\times20$ 全域两端固支梁，底边中点长度 $l=1\,\mathrm{mm}$ 的载荷区上作用等效均布牵引
 $t=P/l$，合力 $P=-3\,\mathrm{N}$。判据不再是收敛阶，而是**载荷路径**：
 

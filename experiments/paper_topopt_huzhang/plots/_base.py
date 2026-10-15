@@ -99,7 +99,7 @@ def resolve_run_dir(case_dir: Path, folder: str) -> Path | None:
     """定位一次优化运行的产物目录.
 
     ``folder`` 是 run 脚本写出的运行目录名, 形如 ``analyzer-<链>__order-<k>``
-    (应力算例另带协议标签, 见 ``run_cantilever_stress.run_label``). 目录名与参数一一
+    (应力算例见 ``run_cantilever_stress.RUN_LABEL``). 目录名与参数一一
     对应, 故不做名字回落: 目录不在就返回 None, 由调用方决定报错还是画占位面板.
     """
     candidate = case_dir / folder
@@ -150,7 +150,7 @@ def load_probe_mesh(probe_dir: Path, tag: str) -> tuple[np.ndarray, np.ndarray, 
     probe_dir : Path
         探针产物目录 ``results/<case>/postprocess/discretization_probe``.
     tag : str
-        构型前缀, 如 ``lfem-3-pad-solid``.
+        构型前缀, 如 ``lfem-3``.
 
     Returns
     -------

@@ -30,15 +30,16 @@ problems/loads.py (提供 4 类 frozen dataclass 实现)
 | **体力** | `BodyForce` / `BodyForceLoad` | 区域 $\Omega$ | 0 | 单元体积数值积分（`SourceIntegrator`） |
 | **面牵引** | `BoundaryTraction` / `BoundaryTractionLoad` | 边界 $\Gamma_N$ | 1 | 边界数值面积分 或 应力法向迹插值/提升 |
 | **线载荷** | `LineTraction` / `LineTractionLoad` | 曲线 / 棱线 | 3D: 2, 2D: 1 | 高阶线单元 Gauss–Legendre 节点投影 |
-| **集中力** | `PointForce` / `PointForceLoad` | 作用点 $\boldsymbol{x}_0$ | $d$ | 节点插值匹配投影（仅位移法，`mode="exact"`） |
+| **集中力** | `PointForce` / `PointForceLoad` | 作用点 $\boldsymbol{x}_0$ | $d$ | 位移空间形函数分配，$\boldsymbol f_a=N_a(\boldsymbol x_0)\boldsymbol P$ |
 
 消费方一律基于协议类型 `isinstance` 分派，不依赖私有字段。
 
-### 1.2 两种基本离散手段
+### 1.2 基本离散手段
 
 | 离散手段 | 适用载荷 | 核心入口 | 输出排布与行为 |
 |---|---|---|---|
-| **节点投影** | `PointForce`、`LineTraction` | `load_projection.project_nodal_loads` | 节点优先排布（`dim * node + component`）。若传入体力或面牵引则显式报错。 |
+| **点力形函数分配** | `PointForce` | `load_assembly.assemble_point_force` | 按实际位移空间自由度排序，FEM 与子结构全尺度载荷共用。 |
+| **节点投影** | `LineTraction`、旧节点型 `PointForce` 接口 | `load_projection.project_nodal_loads` | 节点优先排布（`dim * node + component`）。若传入体力或面牵引则显式报错。 |
 | **变分积分** | `BoundaryTraction`、`BodyForce` | `LinearForm` + `SourceIntegrator` / `LagrangeBoundarySourceIntegrator` | 排布由 `TensorFunctionSpace.dof_priority` 决定，直接装配进全局载荷向量。 |
 
 ---
@@ -60,10 +61,9 @@ problems/loads.py (提供 4 类 frozen dataclass 实现)
 - **边界牵引**：通过 `LagrangeBoundarySourceIntegrator` 逐面做数值高斯积分。判定函数 `threshold` 在**面重心**上调用一次，面重心命中则整个面计入积分。
 
 #### 节点力投影与高阶线载荷
-对于集中力和线载荷，通过 `load_projection.py` 计算一致节点力并叠加：
-- **点力装配模式**：
-  - `mode="exact"`（全尺度位移元默认）：作用点在 $\ell_\infty$ 范数下与唯一网格插值节点的距离 $\leqslant 10^{-10}$；合力精确填入该节点自由度，命中数不为 1 则报错；
-  - `mode="nearest_boundary"`（子结构 `problem_adapter`）：按物理边界坐标面筛选候选节点后就近均分，防止边界载荷被吸附至子结构内部节点。
+集中力经 `load_assembly.assemble_point_force`，线载荷经 `load_projection.py` 形成一致节点力：
+- **点力形函数分配**：模型仅给出物理作用点和总力。节点点力直接填入对应自由度；非节点点力在轴对齐 Q1 六面体中定位后调用现有基函数，按 $N_a(\boldsymbol x_0)\boldsymbol P$ 散加。共享面或边只选一个单元，避免重复计力；域外点和不支持的几何明确报错。
+- **子结构载荷**：在 `space_full` 上调用同一个入口，处理物理域原点偏移后再作接口迹投影。内部自由度载荷仍显式拒绝。旧的仅节点坐标投影工具保留 `exact` 和 `nearest_boundary`，后者仅供旧宏观节点接口使用，不作为当前 FEM/子结构全尺度点力的离散规则。
 - **高阶线载荷一致节点力**：
   - `project_line_traction` 将命中节点按线走向排序，每 `degree` 个区间组合为一个高阶一维 Lagrange 单元，单元内采用 `degree + 2` 点 Gauss–Legendre 求积；
   - 约束：`degree` 必须等于位移空间阶次，节点在几何上必须严格共线等距（相对判据 $10^{-9} \times$ 单元长度）；
@@ -148,7 +148,7 @@ $$
 | **子结构分布载荷** | `problem_adapter._assemble_integrated_load` 当前仅验证了 $p=1$ 全尺度 Lagrange 空间。 |
 | **宏观角点系统** | 仅支持 `PointForce` 与 `LineTraction`，且固定按 $degree=1$ 投影。 |
 | **内部自由度载荷** | 完整接口缩聚拒绝直接作用在子结构内部自由度上的载荷与约束。 |
-| **面求值形状** | `CantileverMiddle2d._step_traction` 仅接受按面成批的求值点 `(..., NP, GD)`。 |
+| **面求值形状** | `CantileverMiddlePatch2d._step_traction` 仅接受按面成批的求值点 `(..., NP, GD)`。 |
 
 ---
 

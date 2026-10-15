@@ -1,9 +1,8 @@
 """点力与线载荷到节点自由度向量的公共投影.
 
-本模块是 ``PointForce`` 与 ``LineTraction`` 的唯一离散入口: LFEM 分析器与
-子结构条件投影都经由此处, 以保证同一个物理载荷对象在不同求解路径上得到
-同一个离散载荷泛函. 两条路径在点力上的差别由 ``mode`` 显式声明, 不再各自
-实现一套吸附规则.
+本模块提供仅有节点坐标时的投影工具和线载荷积分. FEM 与子结构全尺度空间的
+物理点力统一由 ``load_assembly.assemble_point_force`` 按形函数装配;
+``nearest_boundary`` 仅保留用于旧的宏观节点投影接口.
 """
 
 from __future__ import annotations
@@ -119,10 +118,10 @@ def project_point_force(
     Parameters
     ----------
     mode : {"exact", "nearest_boundary"}
-        ``"exact"`` 要求作用点精确落在唯一插值节点上, 否则报错: 位移元的
-        点力离散只有这一种无歧义写法. ``"nearest_boundary"`` 允许作用点不在
-        节点上, 把合力均分到同一物理边界上距离最近的全部节点; 子结构宏观/
-        全尺度投影使用该模式, 必须同时给出 ``domain``. 作用点恰好落在节点上
+        ``"exact"`` 要求作用点精确落在唯一插值节点上, 否则报错:
+        仅有节点坐标时无法进行单元形函数分配. ``"nearest_boundary"`` 允许作用点不在
+        节点上, 把合力均分到同一物理边界上距离最近的全部节点; 旧子结构宏观
+        节点投影使用该模式, 必须同时给出 ``domain``. 作用点恰好落在节点上
         时两种模式给出同一个结果.
     domain : Sequence[float], optional
         轴对齐盒形区域边界 ``(x0, x1, y0, y1, ...)``, 仅 ``"nearest_boundary"``

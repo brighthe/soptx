@@ -13,7 +13,7 @@ from soptx.backend import backend_manager as bm
 from soptx.fem.analyzers.lagrange_fem_analyzer import LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import QuadrangleMesh
-from soptx.problems import HalfMBBBeamRight2d
+from soptx.problems import HalfMBBBeamPoint2d
 
 DOMAIN = (0.0, 6.0, 0.0, 2.0)
 
@@ -29,18 +29,17 @@ def reset_backend():
 def _analyzer(operator_level: str, solve_method: str) -> LagrangeFEMAnalyzer:
     """6x2 四边形网格上的半 MBB 梁分析器."""
     material = IsotropicLinearElasticMaterial(
-        youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="plane_stress", enable_logging=False
+        youngs_modulus=1.0, poisson_ratio=0.3, hypothesis="plane_stress"
     )
     return LagrangeFEMAnalyzer(
         disp_mesh=QuadrangleMesh.from_box(list(DOMAIN), nx=6, ny=2),
-        pde=HalfMBBBeamRight2d(domain=DOMAIN),
+        pde=HalfMBBBeamPoint2d(domain=DOMAIN),
         material=material,
         space_degree=1,
         integration_order=3,
         operator_level=operator_level,
         solve_method=solve_method,
         topopt_algorithm=None,
-        enable_logging=False,
     )
 
 

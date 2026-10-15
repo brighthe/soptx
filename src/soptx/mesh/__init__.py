@@ -1,8 +1,8 @@
 """网格包.
 
 v0.4 网格树移植自 FEALPy ``fealpy/mesh/`` @ f474a5775 (来源见各文件头), 只保留
-SOPTX 用到的四类经典网格, 未移植绘图、半边结构与局部加密/粗化; ``structured_box``
-与 ``structured_triangle`` 为 SOPTX 自有的结构网格生成器.
+SOPTX 用到的四类经典网格, 未移植绘图、半边结构与局部加密/粗化. 矩形/长方体区域上的
+结构网格由各网格类的 ``from_*`` 类方法生成.
 
 导入本包只依赖 numpy 与 scipy; vtk 仅在调用 ``write_mesh_to_vtu`` 时加载.
 """
@@ -16,17 +16,6 @@ from .vtk_writter import write_mesh_to_vtu
 from .factory import *
 from .mesh_base import *
 from .aggregate import Mesh
-
-from .structured_box import (
-    MESH_TYPES,
-    BoxMesh,
-    BoxTranslationClasses,
-    create_box_mesh,
-)
-from .structured_triangle import (
-    create_huzhang_checkerboard_mesh,
-    create_huzhang_symmetric_single_diagonal_mesh,
-)
 
 __all__ = [
     "Mesh",
@@ -66,10 +55,4 @@ __all__ = [
     "TetrahedronMesh",
     "HexahedronMesh",
     "write_mesh_to_vtu",
-    "MESH_TYPES",
-    "BoxMesh",
-    "BoxTranslationClasses",
-    "create_box_mesh",
-    "create_huzhang_checkerboard_mesh",
-    "create_huzhang_symmetric_single_diagonal_mesh",
 ]

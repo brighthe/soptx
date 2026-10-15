@@ -4,7 +4,7 @@
 
 ## 算例设置
 
-- 问题：FullMBBBeam2d，domain (0, 12) x (0, 2)，E = 1.0，nu = 0.3，P = -1.0
+- 问题：FullMBBBeamPoint2d，domain (0, 12) x (0, 2)，E = 1.0，nu = 0.3，P = -1.0
 - 子结构划分：12 x 2（共 24 个），细网格 5 x 5，每子结构接口自由度 n_b = 40
 - 接口自由度总数 574，自由接口自由度 n_free = 571
 - 密度场：逐细单元变化，取值区间 (0.3, 1.0)（与 `piml_substructure_elasticity/_common.py` 的 DENSITY_RANGE 一致）

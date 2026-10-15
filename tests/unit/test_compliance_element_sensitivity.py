@@ -10,7 +10,7 @@ from soptx.fem.analyzers import LagrangeFEMAnalyzer
 from soptx.fem.integrators import LinearElasticIntegrator
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import HexahedronMesh
-from soptx.problems import FullMBBBeam3d
+from soptx.problems import FullMBBBeamLine3d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.topology.objectives import ComplianceObjective
 
@@ -21,19 +21,16 @@ def _setup(assembly_method, nu=0.3, target_variables=('E', )):
     grid = (6, 2, 2)
     domain = (0.0, 6.0, 0.0, 2.0, 0.0, 2.0)
     mesh = HexahedronMesh.from_box(list(domain), *grid)
-    problem = FullMBBBeam3d(domain=domain, nu=nu, support='end_lines', load_subdivisions=(grid[0], grid[2]))
-    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=nu, hypothesis='3D',
-                                              enable_logging=False)
+    problem = FullMBBBeamLine3d(domain=domain, nu=nu)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=1.0, poisson_ratio=nu, hypothesis='3D')
     interpolation = MaterialInterpolationScheme(
         density_location='element', interpolation_method='msimp',
-        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': list(target_variables)},
-        enable_logging=False)
+        options={'penalty_factor': 3.0, 'void_youngs_modulus': 1e-7, 'target_variables': list(target_variables)})
     analyzer = LagrangeFEMAnalyzer(disp_mesh=mesh, pde=problem, material=material, space_degree=1,
                                    integration_order=2, assembly_method=assembly_method, operator_level='fa',
                                    solve_method='scipy', topopt_algorithm='density_based',
-                                   interpolation_scheme=interpolation, enable_logging=False)
-    objective = ComplianceObjective(analyzer=analyzer, state_variable='u', diff_mode='manual',
-                                    enable_logging=False)
+                                   interpolation_scheme=interpolation)
+    objective = ComplianceObjective(analyzer=analyzer, state_variable='u', diff_mode='manual')
     density = bm.tensor(np.random.default_rng(0).uniform(0.1, 1.0, mesh.number_of_cells()))
     return analyzer, objective, density
 

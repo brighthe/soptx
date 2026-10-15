@@ -36,8 +36,18 @@ import numpy as np
 
 from soptx.backend import backend_manager as bm
 
+from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
+from soptx.materials import IsotropicLinearElasticMaterial
+from soptx.mesh import TriangleMesh
 from soptx.postprocess.vtk_export import read_vtu_cell_data, write_vtu
-from soptx.topology.constraints import build_exemption_mask
+from soptx.problems import CantileverMiddlePatch2d
+from soptx.topology.constraints import (
+    EpsilonRelaxedStressFormulation,
+    HuZhangStressConstraint,
+    LagrangeStressConstraint,
+    build_exemption_mask,
+)
+from soptx.topology.interpolation import MaterialInterpolationScheme
 
 import run_cantilever_stress
 from config import OUTPUT_DIR, VIEW_DIR
@@ -55,7 +65,7 @@ HUZHANG_JUMP_GATE = 1e-10
 # 论文 5.2.3 节的六份构型 (pad 1.5 mm, 判据集合 rho >= 0.5): LFEM p=2..4 与
 # Hu--Zhang k=2..4.
 DEFAULT_DESIGNS: tuple[str, ...] = tuple(
-    run_cantilever_stress.run_label(method, order)
+    run_cantilever_stress.RUN_LABEL.format(method=method, order=order)
     for method in run_cantilever_stress.METHODS
     for order in run_cantilever_stress.ORDERS
 )
@@ -77,17 +87,12 @@ def load_design(design_dir: Path) -> tuple[np.ndarray, dict[str, Any]]:
 
 
 def design_label(run_dir: str) -> str:
-    """把运行目录名压成短标签, 如 ``huzhang-3-nopad`` / ``huzhang-3-pad-solid``.
-
-    ``-solid`` 后缀表示该运行用判据集合 (solid_thr) 验收, 与同 pad 半径的旧运行区分.
-    """
+    """把运行目录名压成短标签, 如 ``huzhang-3``; 解析不出时原样返回."""
     method = re.search(r"analyzer-(\w+?)__", run_dir)
     order = re.search(r"order-(\d+)", run_dir)
     if method is None or order is None:
         return run_dir
-    pad = "pad" if "load_pad_radius" in run_dir else "nopad"
-    solid = "-solid" if "solid_thr" in run_dir else ""
-    return f"{method.group(1)}-{order.group(1)}-{pad}{solid}"
+    return f"{method.group(1)}-{order.group(1)}"
 
 
 def design_discretization(run_dir: str) -> tuple[str, int]:
@@ -152,16 +157,63 @@ def _stats(values: np.ndarray) -> dict[str, float | None]:
     }
 
 
+def build_frozen(method: str, order: int) -> SimpleNamespace:
+    """按 ``run_cantilever_stress`` 的常量组装冻结构型的分析链.
+
+    与 ``run_cantilever_stress.main`` 的组装步骤逐项对应, 改动须同步; 两者一旦失配,
+    验收门 2 (复现 summary 的 ``max_relative_violation_solid_region``) 即不通过.
+    与优化运行的区别: 应力约束不设豁免掩码, 被动实体区的真实读数一并取回; 被动实体区
+    只经过滤器钉为实体, 前向求解不需要, 故不组装过滤器与 AL 目标.
+
+    Parameters
+    ----------
+    method : {'lfem', 'huzhang'}
+        分析链.
+    order : int
+        阶次 k (LFEM 位移阶 p = k, HZMFEM 应力阶 k).
+
+    Returns
+    -------
+    SimpleNamespace
+        字段 ``method``, ``order``, ``mesh``, ``analyzer``, ``stress_constraint``, ``density``.
+    """
+    rc = run_cantilever_stress
+    problem = CantileverMiddlePatch2d(domain=(0.0, rc.L, 0.0, rc.H), P=rc.LOAD, load_width=rc.LOAD_WIDTH,
+                                 E=rc.E0, nu=rc.NU, plane_type=rc.PLANE_TYPE)
+    mesh = TriangleMesh.from_checkerboard_box(box=problem.domain, nx=rc.NX, ny=rc.NY)
+    material = IsotropicLinearElasticMaterial(
+        youngs_modulus=problem.E, poisson_ratio=problem.nu, hypothesis=problem.plane_type)
+    interpolation = MaterialInterpolationScheme(
+        density_location="element", interpolation_method="msimp",
+        options={"penalty_factor": rc.PENALTY, "void_youngs_modulus": rc.EMIN, "target_variables": ["E"]},
+    )
+    common: dict[str, Any] = dict(
+        disp_mesh=mesh, pde=problem, material=material, space_degree=order,
+        integration_order=2 * order + 2, solve_method=rc.SOLVER,
+        topopt_algorithm="density_based", interpolation_scheme=interpolation)
+    constraint_args: dict[str, Any] = dict(
+        stress_limit=rc.STRESS_LIMIT, formulation=EpsilonRelaxedStressFormulation(epsilon=rc.EPSILON),
+        exemption_mask=None, enable_logging=False)
+    if method == "lfem":
+        analyzer = LagrangeFEMAnalyzer(assembly_method=rc.ASSEMBLY_METHOD, **common)
+        stress_constraint = LagrangeStressConstraint(analyzer=analyzer, **constraint_args)
+    else:
+        analyzer = HuZhangMFEMAnalyzer(use_relaxation=rc.USE_RELAXATION, **common)
+        stress_constraint = HuZhangStressConstraint(analyzer=analyzer, **constraint_args)
+    _, density = interpolation.setup_density_distribution(
+        design_variable_mesh=mesh, displacement_mesh=mesh, relative_density=rc.INITIAL_DENSITY)
+    return SimpleNamespace(method=method, order=order, mesh=mesh, analyzer=analyzer,
+                           stress_constraint=stress_constraint, density=density)
+
+
 def evaluate(method: str, order: int, design: np.ndarray) -> dict[str, Any]:
     """在冻结构型上做一次前向求解, 返回逐单元的表观应力比与约束值.
 
-    分析链由 ``run_cantilever_stress.build`` 组装 (与优化运行同一份代码), 但垫片半径
-    取 0: 在不豁免的约束对象上求值, 被动实体区的真实读数一并取回; 构型由
-    ``rho[:] = design`` 整体覆写, 不经过过滤链, 实体保留与否不影响前向求解.
+    分析链由 ``build_frozen`` 组装, 约束不设豁免; 构型由 ``rho[:] = design`` 整体覆写,
+    不经过过滤链, 实体保留与否不影响前向求解.
     """
-    parts = run_cantilever_stress.build(method, order, load_pad_radius=0.0)
-    pipeline = SimpleNamespace(**parts)
-    rho = parts["density"]
+    pipeline = build_frozen(method, order)
+    rho = pipeline.density
     if rho.shape[0] != design.shape[0]:
         raise SystemExit(
             f"{method}-{order}: 网格单元数 {rho.shape[0]} 与构型 {design.shape[0]} 不符; "

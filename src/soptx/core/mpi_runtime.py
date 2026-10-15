@@ -6,7 +6,7 @@
 
 导入 ``mpi4py.MPI`` 会执行 ``MPI_Init``, 这正是所需的激活动作. 但它是一个
 进程级副作用, 所以不放在 :mod:`soptx` 包根: 那会让每一次 ``import soptx.*``
-(包括 :mod:`soptx.core.numerics` 与不依赖 MPI 的证据工具链) 都被迫初始化 MPI.
+都被迫初始化 MPI.
 本模块把它收成一个显式调用, 只在真正分派到 MUMPS 的求解路径上触发.
 
 ABI 由构建方式决定, 本模块不干预: 当前环境的 mpi4py 是直链构建

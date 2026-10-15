@@ -17,7 +17,8 @@ from soptx.fem.substructure import (
 from soptx.fem.substructure.streaming import assemble_exact_interface_system
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import HexahedronMesh
-from soptx.problems import FullMBBBeam3d
+from soptx.problems import FullMBBBeamLine3d
+from soptx.problems.loads import PointForceLoad
 from soptx.sparse import COOTensor
 from soptx.topology.constraints import VolumeConstraint
 from soptx.topology.interpolation import MaterialInterpolationScheme
@@ -36,15 +37,13 @@ def setup():
     layout = StructuredSubstructureLayout(
         domain_size=tuple(float(n) for n in GRID), n_sub=N_SUB, n_fine=(N_FINE, ) * 3,
         degree=1, E_base=E0, nu=NU, hypothesis='3D',
+        full_mesh=HexahedronMesh.from_box(list(DOMAIN), *GRID),
     )
-    problem = FullMBBBeam3d(domain=DOMAIN, P=-1.0, E=E0, nu=NU,
-                            support='end_corners', load_subdivisions=(GRID[0], GRID[2]))
-    material = IsotropicLinearElasticMaterial(youngs_modulus=E0, poisson_ratio=NU, hypothesis='3D',
-                                              enable_logging=False)
+    problem = FullMBBBeamLine3d(domain=DOMAIN, P=-1.0, E=E0, nu=NU)
+    material = IsotropicLinearElasticMaterial(youngs_modulus=E0, poisson_ratio=NU, hypothesis='3D')
     interpolation = MaterialInterpolationScheme(
         density_location='element', interpolation_method='msimp',
         options={'penalty_factor': PENALTY, 'void_youngs_modulus': EMIN, 'target_variables': ['E']},
-        enable_logging=False,
     )
     rng = np.random.default_rng(7)
     density = bm.asarray(rng.uniform(0.2, 1.0, size=int(np.prod(GRID))), dtype=bm.float64)
@@ -59,33 +58,35 @@ def _force_numpy(analyzer) -> np.ndarray:
 
 
 def _fa_analyzer(layout, problem, material, interpolation):
-    mesh = HexahedronMesh.from_box(list(DOMAIN), *GRID)
+    mesh = layout.full_mesh
     return LagrangeFEMAnalyzer(
         disp_mesh=mesh, pde=problem, material=material, space_degree=1, integration_order=2,
         assembly_method='fast', operator_level='fa', solve_method='scipy',
         topopt_algorithm='density_based', interpolation_scheme=interpolation,
-        enable_logging=False, reference_classes=1,
     )
 
 
 def _sub_analyzer(layout, problem, material, interpolation, trace, **kwargs):
     return SubstructureAnalyzer(
         layout=layout, pde=problem, material=material, trace=trace, chunk_size=4, space_degree=1, integration_order=2,
-        topopt_algorithm='density_based', interpolation_scheme=interpolation, enable_logging=False,
+        topopt_algorithm='density_based', interpolation_scheme=interpolation,
         **kwargs,
     )
 
 
-def test_full_trace_matches_fine_grid_fa(setup) -> None:
+@pytest.mark.parametrize('point', [None, (6.0, 2.0, 0.25)])
+def test_full_trace_matches_fine_grid_fa(setup, point) -> None:
     """full_trace 与细网格 FA 直接法: 位移、柔顺度与灵敏度一致到求解器精度."""
     layout, problem, material, interpolation, density = setup
+    if point is not None:
+        problem = _PointMBB(point)
     fa = _fa_analyzer(layout, problem, material, interpolation)
     sub = _sub_analyzer(layout, problem, material, interpolation, 'full_trace', solve_method='scipy')
     state_fa = fa.solve_state(rho_val=density)
     state_sub = sub.solve_state(rho_val=density)
     u_fa, u_sub = bm.to_numpy(state_fa['displacement'][:]), bm.to_numpy(state_sub['displacement'][:])
     assert np.max(np.abs(u_fa - u_sub)) <= 1e-9 * np.max(np.abs(u_fa))
-    obj_fa, obj_sub = (ComplianceObjective(analyzer=a, state_variable='u', diff_mode='manual', enable_logging=False)
+    obj_fa, obj_sub = (ComplianceObjective(analyzer=a, state_variable='u', diff_mode='manual')
                        for a in (fa, sub))
     c_fa, c_sub = float(obj_fa.fun(density=density, state=state_fa)), float(obj_sub.fun(density=density, state=state_sub))
     assert c_sub == pytest.approx(c_fa, rel=1e-9)
@@ -95,6 +96,46 @@ def test_full_trace_matches_fine_grid_fa(setup) -> None:
     # 柔顺度等于接口载荷与接口未知量的内积, 与细网格 F^T u 同值
     assert state_sub['interface_displacement'] is not None
     assert float(np.dot(_force_numpy(sub), u_sub)) == pytest.approx(c_sub, rel=1e-12)
+
+
+class _PointMBB(FullMBBBeamLine3d):
+    """用指定物理点力检查两条求解路径的载荷契约."""
+
+    def __init__(self, point):
+        super().__init__(domain=DOMAIN)
+        self.point = point
+
+    def loads(self):
+        """返回未拆分的物理点力."""
+        return (PointForceLoad(self.point, (0., -1., 0.)),)
+
+
+def test_linear_corner_load_preserves_fine_grid_virtual_work(setup) -> None:
+    """角点载荷由细网格形函数载荷作迹投影, 保持接口虚功."""
+    layout, _, material, interpolation, _ = setup
+    problem = _PointMBB((6.0, 2.0, 0.25))
+    fa = _fa_analyzer(layout, problem, material, interpolation)
+    sub = _sub_analyzer(layout, problem, material, interpolation, 'linear_corner', solve_method='scipy')
+    fine_load = np.asarray(bm.to_numpy(fa.assemble_external_load()))
+    np.testing.assert_allclose(bm.to_numpy(sub.assemble_external_load()), fine_load, atol=1e-14)
+    reduced = bm.to_numpy(sub._interface_load).reshape(-1, 3)
+    loaded = np.flatnonzero(reduced[:, 1])
+    coordinates = bm.to_numpy(layout.macro_node_coordinates())
+    np.testing.assert_allclose(coordinates[loaded], [[6., 2., 0.], [6., 2., 2.]])
+    np.testing.assert_allclose(reduced[loaded, 1], [-0.875, -0.125], atol=1e-14)
+    # 约化载荷对刚体平移做功等于物理总力.
+    q = np.zeros(sub._interface_load.shape)
+    q[1::3] = 1.0
+    assert float(np.dot(bm.to_numpy(sub._interface_load), q)) == pytest.approx(-1.)
+
+
+@pytest.mark.parametrize('trace', ['full_trace', 'linear_corner'])
+def test_interior_point_force_remains_explicitly_unsupported(setup, trace) -> None:
+    """形函数分配涉及子结构内部自由度时不能静默丢弃右端项."""
+    layout, _, material, interpolation, _ = setup
+    with pytest.raises(ValueError, match='内部载荷'):
+        _sub_analyzer(layout, _PointMBB((0.75, 0.75, 0.75)), material, interpolation,
+                      trace, solve_method='scipy')
 
 
 def test_injected_interpolation_matches_prototype_simp(setup) -> None:
@@ -133,8 +174,8 @@ def test_linear_corner_objective_and_constraint_work(setup) -> None:
     # 热启动: 以直接法的接口位移为初值, CG 一步内即满足容差
     warm = cg.solve_state(rho_val=density, x0=state_direct['interface_displacement'])
     assert warm['solver']['niter'] <= 1
-    objective = ComplianceObjective(analyzer=direct, state_variable='u', diff_mode='manual', enable_logging=False)
-    constraint = VolumeConstraint(analyzer=direct, volume_fraction=0.5, diff_mode='manual', enable_logging=False)
+    objective = ComplianceObjective(analyzer=direct, state_variable='u', diff_mode='manual')
+    constraint = VolumeConstraint(analyzer=direct, volume_fraction=0.5, diff_mode='manual')
     c = float(objective.fun(density=density, state=state_direct))
     assert np.isfinite(c) and c > 0
     dc = bm.to_numpy(objective.jac(density=density, state=state_direct))
@@ -154,14 +195,14 @@ def test_prototype_default_coefficient_is_simp(setup) -> None:
     assert np.array_equal(bm.to_numpy(prototype.stiffness_coefficient(rho)), 2.0 * bm.to_numpy(rho))
 
 
-def test_full_trace_multigrid_preconditioner(setup) -> None:
-    """full_trace 下 precond='mg': 与直接法一致, CG 步数远少于 Jacobi; linear_corner 下拒绝."""
+def test_full_trace_gmg_preconditioner(setup) -> None:
+    """full_trace 下 precond='gmg': 与直接法一致, CG 步数远少于 Jacobi; linear_corner 下拒绝."""
     layout, problem, material, interpolation, density = setup
     direct = _sub_analyzer(layout, problem, material, interpolation, 'full_trace', solve_method='scipy')
     u_direct = bm.to_numpy(direct.solve_state(rho_val=density)['displacement'][:])
     load_norm = float(bm.linalg.norm(direct._interface_load))
     runs = {}
-    for precond in ('jacobi', 'mg'):
+    for precond in ('jacobi', 'gmg'):
         cg = _sub_analyzer(layout, problem, material, interpolation, 'full_trace', solve_method='cg',
                            solver_options=dict(precond=precond, maxiter=5000, rtol=0.0, atol=1e-9 * load_norm))
         state = cg.solve_state(rho_val=density)
@@ -169,8 +210,8 @@ def test_full_trace_multigrid_preconditioner(setup) -> None:
         u = bm.to_numpy(state['displacement'][:])
         assert np.max(np.abs(u - u_direct)) <= 1e-7 * np.max(np.abs(u_direct))
         runs[precond] = state['solver']['niter']
-    assert runs['mg'] < runs['jacobi'] / 3
+    assert runs['gmg'] < runs['jacobi'] / 3
     corner = _sub_analyzer(layout, problem, material, interpolation, 'linear_corner', solve_method='cg',
-                           solver_options=dict(precond='mg', maxiter=100, rtol=0.0, atol=1e-6 * load_norm))
+                           solver_options=dict(precond='gmg', maxiter=100, rtol=0.0, atol=1e-6 * load_norm))
     with pytest.raises(Exception):
         corner.solve_state(rho_val=density)

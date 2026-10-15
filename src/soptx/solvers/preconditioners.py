@@ -86,11 +86,11 @@ class DiagonalPreconditioner(LinearSolver):
             self._accept_diag(diag)
 
     def _accept_diag(self, diag: TensorLike) -> None:
-        """校验并存下对角的倒数"""
+        """校验并存下对角的倒数."""
         self._inv_diag = _inverse_diagonal(diag, "Jacobi 预条件子")
 
     def setup(self, op) -> "DiagonalPreconditioner":
-        """绑定算子; 构造时没给对角就在这里向算子要"""
+        """绑定算子; 构造时没给对角就在这里向算子要."""
         super().setup(op)
         if self._inv_diag is None:
             self._accept_diag(operator_diagonal(op))
@@ -98,8 +98,7 @@ class DiagonalPreconditioner(LinearSolver):
         return self
 
     def __matmul__(self, other: TensorLike) -> TensorLike:
-        # 快速路径: 预条件子在 Krylov 每步迭代都被调用一次, 不绕 solve 的
-        # info 构造与校验
+        """快速路径: 预条件子在 Krylov 每步迭代都被调用一次, 不经 solve 的 info 构造与校验."""
         if self._inv_diag is None:
             raise RuntimeError(
                 "DiagonalPreconditioner 构造时未给对角, 请先 setup(op) 让它"
@@ -170,7 +169,7 @@ class JacobiSmoother(LinearSolver):
             self._diag = diag
 
     def setup(self, op) -> "JacobiSmoother":
-        """绑定算子; 构造时没给对角就在这里向算子要, 没给 ``omega`` 就在这里估计"""
+        """绑定算子; 构造时没给对角就在这里向算子要, 没给 ``omega`` 就在这里估计."""
         super().setup(op)
         diag = self._diag if self._diag is not None else operator_diagonal(op)
         inverse = _inverse_diagonal(diag, "Jacobi 光滑子")
@@ -209,7 +208,9 @@ def estimate_lambda_max(
     Parameters
     ----------
     op : 对称正定算子, 支持 ``@`` 与 ``shape``.
-    diag : (n, ) 的正对角缩放; 给出时估计 :math:`D^{-1} A` 的最大特征值.
+    diag : (n, ) 的正对角缩放; 给出时估计 :math:`D^{-1} A` 的最大特征值, 初值建在
+        ``diag`` 所在的设备上. 缺省时初值建在默认设备上, ``op`` 在其他设备上会报设备
+        不一致.
     n_iter : 幂迭代次数, 即 matvec 次数.
 
     Returns
@@ -221,7 +222,12 @@ def estimate_lambda_max(
     Notes
     -----
     初值取确定性的伪随机向量 :math:`\\mathrm{frac}(43758.5453 \\sin(12.9898\\, i)) - 1/2`,
-    含各频率分量且不依赖随机数发生器, 同一输入的估计逐位可重复.
+    含各频率分量且不依赖随机数发生器, 同一输入在同一后端与设备上的估计逐位可重复.
+    不同后端或设备上 ``sin`` 对大自变量的实现可能有末位差异, 估计值随之可能有舍入级
+    差异.
+
+    Rayleigh 商只在最后一步计算: 每算一次要两次归约并与主机同步一次, 前面各步的值
+    用不上.
     """
     if n_iter < 1:
         raise ValueError(f"n_iter 须为正整数, 得到 {n_iter!r}")
@@ -230,60 +236,11 @@ def estimate_lambda_max(
     index = bm.arange(n, **context)
     v = 43758.5453 * bm.sin(12.9898 * index)
     v = v - bm.floor(v) - 0.5
-    lam = 0.0
-    for _ in range(n_iter):
+    for _ in range(n_iter - 1):
         w = op @ v
-        scaled = v if diag is None else diag * v
-        lam = float(bm.sum(v * w) / bm.sum(v * scaled))
         z = w if diag is None else w / diag
         v = z / bm.linalg.norm(z)
+    w = op @ v
+    scaled = v if diag is None else diag * v
 
-    return lam
-
-
-class ChebyshevSmoother(LinearSolver):
-    """Chebyshev 多项式光滑子.
-
-    多重网格在 matrix-free 下的默认光滑子: 只用 matvec 与对角, 不需要矩阵的
-    非零结构, 也不像 Gauss--Seidel 那样依赖串行的行序遍历 -- 后者在 GPU 上
-    无法并行, 这是 3D 主线选 Chebyshev 而非 GS 的原因.
-
-    在 :math:`[\\lambda_{\\min}, \\lambda_{\\max}]` 的高频段构造衰减多项式,
-    ``lambda_min`` 通常取 ``lambda_max / 30`` 量级 (只需压高频, 低频交给粗层).
-
-    Parameters
-    ----------
-    diag : TensorLike
-        算子对角线, 用于内部的对角缩放.
-    lambda_max : float, optional
-        谱上界; 缺省时 :meth:`setup` 用 :func:`estimate_lambda_max` 估计.
-    degree : int, default 2
-        多项式次数, 即每次光滑的 matvec 次数.
-
-    Notes
-    -----
-    作多重网格光滑子时必须是**线性**算子: 固定次数, 不带自适应终止, 否则外层
-    CG 的共轭性被破坏.
-
-    .. todo:: 占位, 尚无实现.
-    """
-
-    requires = frozenset()
-
-    def __init__(
-        self,
-        diag: TensorLike,
-        *,
-        lambda_max: Optional[float] = None,
-        degree: int = 2,
-    ) -> None:
-        raise NotImplementedError
-
-    def setup(self, op) -> "ChebyshevSmoother":
-        """绑定算子; ``lambda_max`` 未给时在此估计."""
-        raise NotImplementedError
-
-    def _solve(
-        self, b: TensorLike, x0: Optional[TensorLike] = None
-    ) -> "tuple[TensorLike, SolveInfo]":
-        raise NotImplementedError
+    return float(bm.sum(v * w) / bm.sum(v * scaled))

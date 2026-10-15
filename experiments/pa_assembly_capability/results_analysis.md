@@ -78,7 +78,7 @@ import fealpy.sparse
 import soptx.fem.integrators
 import soptx.fem.matrix.csr_pattern
 import soptx.materials
-import soptx.problems.elasticity
+import soptx.problems
 ```
 
 静态导入底座产生的常驻内存为 **607 MiB**。该底座由共享依赖共同构成，不随网格规模 $n$ 变化，与 FA 实测底座（606 MiB）及 EA 实测底座（607 MiB）一致。

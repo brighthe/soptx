@@ -28,7 +28,7 @@ from .interface_space import (
     build_interface_pattern,
     build_interface_space,
 )
-from .layout import HasGlobalDofs, InterfaceDofsView, StructuredSubstructureLayout
+from .layout import StructuredSubstructureLayout
 from .recovery import (
     recover_full_displacement,
     recover_full_displacement_batches,
@@ -144,8 +144,6 @@ __all__ = [
     "FullTraceBasis",
     "LinearCornerTraceBasis",
     "InterfaceSystem",
-    "InterfaceDofsView",
-    "HasGlobalDofs",
     "normalize_local_reduction",
     "recover_full_displacement",
     "recover_full_displacement_batches",

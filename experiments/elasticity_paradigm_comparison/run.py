@@ -68,7 +68,7 @@ from solvers import SOLVER_REGISTRY, ExperimentContext  # noqa: E402
 def build_context(case: dict[str, Any], protocol: dict[str, Any]) -> ExperimentContext:
     """构造四条路径共享的算例上下文.
 
-    实现时按 ``case['model']`` 实例化 ``soptx.problems.elasticity`` 中的物理问题,
+    实现时按 ``case['model']`` 实例化 ``soptx.problems`` 中的物理问题,
     构造 ``GlobalAssembler`` 与 ``SubstructurePrototype``, 生成 ``case['density']``
     指定的密度场, 并从 ``LagrangeFEMAnalyzer`` 取施加 Dirichlet 条件之前的全局外载与
     约束掩码. 该组装范式已存在于

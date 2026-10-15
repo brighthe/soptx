@@ -387,7 +387,7 @@ $8.1\times10^{-3}$，裕度 $2.5$ 倍。故障注入确认门禁切在声明位�
 | 全局装配 | `S` 矩阵自动装配（含 conforming 约束） | 手工构建 interface DOF map + Scatter-Add |
 | 缩聚数学 | 逐单元 LU 分解 | 整块 `linalg.solve(K_ii, K_ib)` |
 | 右端项 | `ReduceRHS` 处理非零内部载荷 | 假设 $\mathbf{f}_i = \mathbf{0}$ |
-| 并行 | 完整 MPI 支持 | 无（并行归 `matrix_free_elasticity/`） |
+| 并行 | 完整 MPI 支持 | 无（原分布式线已归档，见 [`docs/archive.md`](../archive.md)） |
 | Trace 空间 | 自动从 FEColl 构造 | 无 trace 空间概念 |
 
 SOPTX 的架构直接对应 Huang 2023 §2.2 的子结构缩聚框架——规则的 $m \times m$（或

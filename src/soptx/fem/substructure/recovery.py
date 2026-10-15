@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any, Iterable, List, Sequence
 
 from soptx.backend import backend_manager as bm
+from soptx.typing import TensorLike
 
-from .layout import HasGlobalDofs, StructuredSubstructureLayout
+from .layout import StructuredSubstructureLayout
 from .reduction_adapter import normalize_local_reduction
 
 
@@ -94,7 +95,7 @@ def recover_full_displacement(
     layout: StructuredSubstructureLayout,
     sub_meshes: List[Any],
     condensors: Any,
-    system: HasGlobalDofs,
+    interface_dofs: TensorLike,
     interface_displacement: Any,
 ) -> Any:
     """由接口位移和局部缩聚结果恢复完整的全局位移向量.
@@ -108,8 +109,8 @@ def recover_full_displacement(
     condensors : Any
         缩聚器列表或单个批量缩聚结果, 形状约定见
         ``normalize_local_reduction``.
-    system : HasGlobalDofs
-        接口系统或至少具有 ``global_dofs`` 属性的视图.
+    interface_dofs : TensorLike
+        完整细网格接口的全局自由度编号, 升序且无重复, 形状 (n_interface,).
     interface_displacement : Any
         接口自由度上的位移, 形状 ``(n_interface,)``.
 
@@ -131,18 +132,18 @@ def recover_full_displacement(
     if not sub_meshes:
         raise ValueError("sub_meshes 不能为空.")
     u_b = bm.asarray(interface_displacement, dtype=bm.float64)
-    if len(u_b) != len(system.global_dofs):
+    if len(u_b) != len(interface_dofs):
         raise ValueError(
             f"interface_displacement 的长度必须等于接口自由度数 "
-            f"{len(system.global_dofs)}; 当前为 {len(u_b)}."
+            f"{len(interface_dofs)}; 当前为 {len(u_b)}."
         )
 
     n_b = int(sub_meshes[0].n_b)
-    b_interface = layout.interface_indices(sub_meshes, system.global_dofs)
+    b_interface = layout.interface_indices(sub_meshes, interface_dofs)
     _, recover = normalize_local_reduction(condensors, len(sub_meshes), n_b)
 
     U_full: Any = bm.zeros((layout.total_full_dofs,), dtype=bm.float64)
-    U_full = bm.set_at(U_full, system.global_dofs, u_b)
+    U_full = bm.set_at(U_full, interface_dofs, u_b)
 
     # (B, n_b) -> (B, n_i): 批量缩聚器一次完成, 缩聚器列表逐个恢复后堆叠.
     u_sub_i = recover(u_b[b_interface])

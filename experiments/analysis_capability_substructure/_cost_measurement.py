@@ -286,8 +286,8 @@ def _worker(request_path: Path, record_path: Path) -> int:
                 )
                 record["seconds"] = dict(phases)
                 tick = _phase_start(record, record_path, "conditions_solve")
-                interface_force = assembler.project_global_vector(system, force)
-                interface_fixed = assembler.project_global_dofs(system, fixed)
+                interface_force = assembler.project_global_vector(system.global_dofs, force)
+                interface_fixed = assembler.project_global_dofs(system.global_dofs, fixed)
                 interface_u = solve_interface_system(
                     system,
                     interface_force,
@@ -296,13 +296,13 @@ def _worker(request_path: Path, record_path: Path) -> int:
                 )
                 phases["conditions_solve"] = time.perf_counter() - tick
                 record["seconds"] = dict(phases)
-                full_view = system
+                full_interface_dofs = system.global_dofs
                 system_dofs = len(system.global_dofs)
                 free_dofs = system_dofs - len(interface_fixed)
             else:
                 trace = context["trace"]
                 projection = context["projection"]
-                full_view = context["interface_view"]
+                full_interface_dofs = context["interface_dofs"]
                 tick = _phase_start(record, record_path, "macro_assembly")
                 system = assembler.assemble_trace_system(
                     sub_meshes, condensor, trace_basis=trace
@@ -312,12 +312,12 @@ def _worker(request_path: Path, record_path: Path) -> int:
                 tick = _phase_start(record, record_path, "conditions_solve")
                 full_force = np.asarray(
                     bm.to_numpy(
-                        assembler.project_global_vector(full_view, force)
+                        assembler.project_global_vector(full_interface_dofs, force)
                     )
                 )
                 full_fixed = np.asarray(
                     bm.to_numpy(
-                        assembler.project_global_dofs(full_view, fixed)
+                        assembler.project_global_dofs(full_interface_dofs, fixed)
                     ),
                     dtype=np.int64,
                 )
@@ -375,7 +375,7 @@ def _worker(request_path: Path, record_path: Path) -> int:
                     projection @ bm.to_numpy(macro_u), dtype=bm.float64
                 )
             displacement = assembler.recover_full_displacement(
-                sub_meshes, condensor, full_view, interface_u
+                sub_meshes, condensor, full_interface_dofs, interface_u
             )
             phases["recovery"] = time.perf_counter() - tick
             record["seconds"] = dict(phases)
