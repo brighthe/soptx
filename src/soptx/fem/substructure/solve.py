@@ -143,20 +143,60 @@ class _FixedDofOperator:
         return result
 
 
-def _solve_fixed_cg(stiffness, force, matrix, values, *, atol, rtol,
-                    rtol_reference, norm_type, verify_residual, cg_maxiter, precond, x0):
+@dataclass(frozen=True)
+class PreparedFixedSystem:
+    """已施加齐次固定约束的接口系统.
+
+    Attributes
+    ----------
+    stiffness, force, matrix : Any
+        原始刚度, 原始载荷与约束矩阵, 用于残差验收.
+    fixed, rhs, operator : Any
+        固定自由度, 约束后的右端项与行列掩码算子.
+    """
+
+    stiffness: Any
+    force: Any
+    matrix: Any
+    fixed: Any
+    rhs: Any
+    operator: Any
+
+
+def _prepare_fixed_system(stiffness, force, matrix, values):
+    """准备齐次固定约束, 保留原刚度矩阵.
+
+    Parameters
+    ----------
+    stiffness, force, matrix, values : Any
+        已检查形状的刚度, 载荷, 约束矩阵和给定位移.
+
+    Returns
+    -------
+    PreparedFixedSystem
+        供 CG 直接使用的受约束系统.
+    """
+    if np.any(values != 0.0):
+        raise ValueError("CG 目前仅支持齐次固定自由度约束, 非齐次约束请使用直接法.")
+    counts = np.diff(matrix.indptr)
+    fixed = np.unique(matrix.indices[matrix.indptr[:-1][counts == 1]])
+    if not np.all(np.isin(matrix.indices, fixed)):
+        raise ValueError("约束不能由单自由度固定行覆盖, 请使用直接法处理一般线性约束.")
+    rhs = force.copy()
+    rhs[fixed] = 0.0
+    operator = _FixedDofOperator(CSRTensor.from_scipy(stiffness), bm.from_numpy(fixed))
+    return PreparedFixedSystem(stiffness, force, matrix, fixed, rhs, operator)
+
+
+def solve_prepared_fixed_system(prepared, *, atol, rtol,
+                    rtol_reference, norm_type, verify_residual, cg_maxiter, precond, x0,
+                    load=None):
     """对可等价为齐次固定自由度的约束执行 CPU CG.
 
     Parameters
     ----------
-    stiffness : scipy.sparse.csr_matrix
-        对称刚度矩阵, 自由子空间上须正定.
-    force : numpy.ndarray
-        接口载荷.
-    matrix : scipy.sparse.csr_matrix
-        约束矩阵.
-    values : numpy.ndarray
-        约束右端, 须全零.
+    prepared : PreparedFixedSystem
+        已施加约束的接口系统, 自由子空间上须正定.
     atol, rtol : float
         原样传入 CG 的绝对与相对容差.
     rtol_reference, norm_type : str
@@ -170,6 +210,8 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, atol, rtol,
         含受约束分量的完整接口向量, 受约束分量上须为恒等 (由细网格 Dirichlet 掩码保证).
     x0 : TensorLike or None
         上一轮接口位移, 在受约束位置清零.
+    load : TensorLike, optional
+        已施加约束的右端项, 缺省使用准备阶段的右端项.
 
     Returns
     -------
@@ -183,21 +225,20 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, atol, rtol,
             raise ValueError("precond 必须为 none, jacobi 或预条件子对象.")
     elif not hasattr(precond, "__matmul__"):
         raise TypeError("预条件子对象须支持 @ 运算.")
-    if np.any(values != 0.0):
-        raise ValueError("CG 目前仅支持齐次固定自由度约束, 非齐次约束请使用直接法.")
-    counts = np.diff(matrix.indptr)
-    fixed = np.unique(matrix.indices[matrix.indptr[:-1][counts == 1]])
-    if not np.all(np.isin(matrix.indices, fixed)):
-        raise ValueError("约束不能由单自由度固定行覆盖, 请使用直接法处理一般线性约束.")
-    rhs = force.copy()
-    rhs[fixed] = 0.0
+    stiffness, force, matrix = prepared.stiffness, prepared.force, prepared.matrix
+    fixed, rhs, operator = prepared.fixed, prepared.rhs, prepared.operator
+    if load is not None:
+        rhs = np.asarray(bm.to_numpy(load), dtype=np.float64)
+        if rhs.shape != prepared.rhs.shape or not np.all(np.isfinite(rhs)):
+            raise ValueError("受约束右端项形状错误或含非有限值.")
+        if np.any(rhs[fixed] != 0.0):
+            raise ValueError("右端项尚未施加齐次支承约束, 请先调用 apply_bc.")
+        force = rhs
     scale = float(np.linalg.norm(rhs))
     guess = np.zeros_like(rhs) if x0 is None else np.asarray(bm.to_numpy(x0), dtype=np.float64).copy()
     if guess.shape != rhs.shape or not np.all(np.isfinite(guess)):
         raise ValueError("CG 初值形状错误或含非有限值.")
     guess[fixed] = 0.0
-    # from_numpy 保留当前张量后端, 接口系统及迭代向量驻留 CPU.
-    operator = _FixedDofOperator(CSRTensor.from_scipy(stiffness), bm.from_numpy(fixed))
     diagonal = stiffness.diagonal().copy()
     diagonal[fixed] = 1.0
     if not np.all(np.isfinite(diagonal)) or np.any(diagonal <= 0.0):
@@ -240,71 +281,40 @@ def _solve_fixed_cg(stiffness, force, matrix, values, *, atol, rtol,
     )
 
 
-def solve_constrained_system(
-    system: InterfaceSystem,
-    load: Any,
-    constraints: Any,
-    *,
-    prescribed: Optional[Any] = None,
-    solver: str = "scipy",
-    cg_tol: Optional[float] = None,
-    atol: float = 0.0,
-    rtol: Optional[float] = None,
-    rtol_reference: str = 'rhs',
-    norm_type: str = 'unpreconditioned',
-    verify_residual: bool = True,
-    cg_maxiter: int = 20000,
-    precond: Union[str, Any] = "jacobi",
-    x0: Optional[Any] = None,
-) -> ConstrainedSolveResult:
-    """求解满足 C u = d 的接口系统.
+def prepare_fixed_interface_system(system, load, constraints):
+    """在求解前准备齐次固定约束接口系统.
 
     Parameters
     ----------
     system : InterfaceSystem
-        显式接口刚度矩阵及自由度映射.
-    load : TensorLike
-        接口载荷, 形状 (n,).
-    constraints : sparse matrix
-        约束矩阵, 形状 (m, n).
-    prescribed : TensorLike, optional
-        约束右端, 形状 (m,). 缺省为零.
-    solver : str
-        scipy, mumps 或 cg.
-    cg_tol : float
-        旧接口的相对自由载荷二范数容差, 不能与 rtol 同时指定.
-        未指定 cg_tol 或 rtol 时, rtol 默认 1e-6.
-    atol, rtol : float
-        直接传入 CG 的绝对与相对容差.
-    rtol_reference : {'initial_residual', 'rhs'}
-        相对容差参照量, 默认 rhs.
-    norm_type : str
-        停机范数, 默认 unpreconditioned; 语义同 CGSolver.
-    verify_residual : bool
-        迭代中是否复核真残差, 默认 True; 返回前始终验收真残差.
-    cg_maxiter : int
-        CG 最大迭代次数.
-    precond : str or object
-        CG 预条件子: none, jacobi, 或支持 ``@`` 的预条件子对象, 见 ``_solve_fixed_cg``.
-    x0 : TensorLike, optional
-        CG 初始接口位移, 直接法忽略.
+        未改写的接口刚度与自由度映射.
+    load, constraints : Any
+        接口载荷与齐次约束矩阵.
 
     Returns
     -------
-    ConstrainedSolveResult
-        位移与残差诊断.
-
-    Notes
-    -----
-    直接法在检查约束一致性后约化相关行, 一般约束使用 Lagrange 乘子系统.
-    CG 仅支持可由单自由度固定行覆盖的齐次约束, 使用对称行列消元.
-    CG 不收敛或真实残差未满足容差时抛出 RuntimeError.
+    PreparedFixedSystem
+        已完成约束校验, 右端处理与掩码包装的系统.
     """
-    if solver not in (*DIRECT_BACKENDS, "cg"):
-        raise ValueError(
-            f"未知求解器: {solver!r}; 可选 scipy, mumps, cg."
-        )
+    _, stiffness, force, matrix, values, _ = _interface_constraint_data(
+        system, load, constraints, None,
+    )
+    return _prepare_fixed_system(stiffness, force, matrix, values)
 
+
+def _interface_constraint_data(system, load, constraints, prescribed):
+    """校验接口系统与约束并转换为 CPU 数组.
+
+    Parameters
+    ----------
+    system, load, constraints, prescribed : Any
+        接口系统, 载荷, 约束矩阵及给定位移.
+
+    Returns
+    -------
+    tuple
+        自由度数, 刚度, 载荷, 约束, 给定位移及约束行非零数.
+    """
     n_dofs = int(len(system.global_dofs))
     force = np.asarray(
         bm.to_numpy(bm.asarray(load, dtype=bm.float64)), dtype=np.float64
@@ -362,34 +372,146 @@ def solve_constrained_system(
             f"当前为 {stiffness.shape}."
         )
 
-    if solver == "cg":
-        if cg_tol is not None:
-            if rtol is not None or rtol_reference != 'rhs' or norm_type != 'unpreconditioned':
-                raise ValueError("cg_tol 仅支持 rhs 二范数, 且不能与 rtol 同时指定.")
-            if not np.isfinite(cg_tol) or not 0.0 < cg_tol < 1.0:
-                raise ValueError("cg_tol 必须为 (0, 1) 内的有限数.")
-            rtol = cg_tol
-        return _solve_fixed_cg(stiffness, force, matrix, values,
-                               atol=atol, rtol=1e-6 if rtol is None else rtol,
-                               rtol_reference=rtol_reference, norm_type=norm_type,
-                               verify_residual=verify_residual,
-                               cg_maxiter=cg_maxiter, precond=precond, x0=x0)
+    return n_dofs, stiffness, force, matrix, values, row_counts
 
+
+def solve_constrained_system(
+    system: InterfaceSystem,
+    load: Any,
+    constraints: Any,
+    *,
+    prescribed: Optional[Any] = None,
+    solver: str = "scipy",
+    cg_tol: Optional[float] = None,
+    atol: float = 0.0,
+    rtol: Optional[float] = None,
+    rtol_reference: str = 'rhs',
+    norm_type: str = 'unpreconditioned',
+    verify_residual: bool = True,
+    cg_maxiter: int = 20000,
+    precond: Union[str, Any] = "jacobi",
+    x0: Optional[Any] = None,
+) -> ConstrainedSolveResult:
+    """求解满足 C u = d 的接口系统.
+
+    Parameters
+    ----------
+    system : InterfaceSystem
+        显式接口刚度矩阵及自由度映射.
+    load : TensorLike
+        接口载荷, 形状 (n,).
+    constraints : sparse matrix
+        约束矩阵, 形状 (m, n).
+    prescribed : TensorLike, optional
+        约束右端, 形状 (m,). 缺省为零.
+    solver : str
+        scipy, mumps 或 cg.
+    cg_tol : float
+        旧接口的相对自由载荷二范数容差, 不能与 rtol 同时指定.
+        未指定 cg_tol 或 rtol 时, rtol 默认 1e-6.
+    atol, rtol : float
+        直接传入 CG 的绝对与相对容差.
+    rtol_reference : {'initial_residual', 'rhs'}
+        相对容差参照量, 默认 rhs.
+    norm_type : str
+        停机范数, 默认 unpreconditioned; 语义同 CGSolver.
+    verify_residual : bool
+        迭代中是否复核真残差, 默认 True; 返回前始终验收真残差.
+    cg_maxiter : int
+        CG 最大迭代次数.
+    precond : str or object
+        CG 预条件子: none, jacobi, 或支持 ``@`` 的预条件子对象.
+    x0 : TensorLike, optional
+        CG 初始接口位移, 直接法忽略.
+
+    Returns
+    -------
+    ConstrainedSolveResult
+        位移与残差诊断.
+
+    Notes
+    -----
+    直接法在检查约束一致性后约化相关行, 一般约束使用 Lagrange 乘子系统.
+    CG 仅支持可由单自由度固定行覆盖的齐次约束, 使用对称行列消元.
+    CG 不收敛或真实残差未满足容差时抛出 RuntimeError.
+    """
+    if cg_tol is not None and solver == 'cg':
+        if rtol is not None or rtol_reference != 'rhs' or norm_type != 'unpreconditioned':
+            raise ValueError("cg_tol 仅支持 rhs 二范数, 且不能与 rtol 同时指定.")
+        if not np.isfinite(cg_tol) or not 0.0 < cg_tol < 1.0:
+            raise ValueError("cg_tol 必须为 (0, 1) 内的有限数.")
+        rtol = cg_tol
+    prepared = prepare_constrained_system(
+        system, load, constraints, prescribed=prescribed, solver=solver,
+    )
+    return solve_prepared_constrained_system(
+        prepared, solver=solver, atol=atol, rtol=1e-6 if rtol is None else rtol,
+        rtol_reference=rtol_reference, norm_type=norm_type,
+        verify_residual=verify_residual, cg_maxiter=cg_maxiter, precond=precond, x0=x0,
+    )
+
+
+@dataclass(frozen=True)
+class PreparedDirectSystem:
+    """已完成消元或乘子系统组装的直接法接口系统.
+
+    Attributes
+    ----------
+    stiffness, force, matrix, values : Any
+        原刚度, 载荷, 约束矩阵与给定位移, 用于验收.
+    operator, rhs : Any
+        准备阶段生成的自由子系统或乘子系统及右端项.
+    rank, independent : Any
+        约束秩与独立约束行.
+    free, prescribed_dofs : Any
+        消元路径的自由编号与给定位移; 乘子路径的 free 为 None.
+    mode : str
+        求解方式的诊断名称.
+    """
+
+    stiffness: Any
+    force: Any
+    matrix: Any
+    values: Any
+    operator: Any
+    rhs: Any
+    rank: int
+    independent: Any
+    free: Any
+    prescribed_dofs: Any
+    mode: str
+
+
+def prepare_constrained_system(system, load, constraints, *, prescribed=None, solver='scipy'):
+    """准备受约束系统, 不执行刚度分解或位移求解.
+
+    Parameters
+    ----------
+    system : InterfaceSystem
+        原接口系统.
+    load, constraints, prescribed : Any
+        接口载荷, 约束矩阵与给定位移; prescribed 缺省为零.
+    solver : {'cg', 'scipy', 'mumps'}
+        决定准备掩码算子还是直接法系统.
+
+    Returns
+    -------
+    PreparedFixedSystem or PreparedDirectSystem
+        完成约束检查, 消元或乘子组装的系统.
+    """
+    if solver not in (*DIRECT_BACKENDS, 'cg'):
+        raise ValueError(f"未知求解器: {solver!r}.")
+    n_dofs, stiffness, force, matrix, values, row_counts = _interface_constraint_data(
+        system, load, constraints, prescribed,
+    )
+    if solver == 'cg':
+        return _prepare_fixed_system(stiffness, force, matrix, values)
+    prescribed_dofs = np.zeros(n_dofs, dtype=np.float64)
     if matrix.shape[0] == 0:
-        displacement = solve_interface_system(
-            system, bm.asarray(force, dtype=bm.float64), solver=solver
+        return PreparedDirectSystem(
+            stiffness, force, matrix, values, stiffness, force.copy(), 0, matrix,
+            np.arange(n_dofs), prescribed_dofs, '无约束',
         )
-        q = np.asarray(bm.to_numpy(displacement), dtype=np.float64)
-        residual = stiffness @ q - force
-        scale = max(float(np.linalg.norm(force)), np.finfo(float).tiny)
-        return ConstrainedSolveResult(
-            displacement=displacement,
-            constraint_rank=0,
-            equilibrium_relative_residual=float(np.linalg.norm(residual)) / scale,
-            constraint_relative_residual=0.0,
-            mode="无约束",
-        )
-
     active = np.unique(matrix.indices)
     dense_active = matrix[:, active].toarray()
     _, triangular, pivots = qr(dense_active.T, mode="economic", pivoting=True)
@@ -414,67 +536,96 @@ def solve_constrained_system(
 
     if np.all(row_counts == 1):
         fixed = np.unique(independent.indices)
-        prescribed_dofs = np.zeros(n_dofs, dtype=np.float64)
         for row_index in independent_rows:
             start, end = matrix.indptr[row_index:row_index + 2]
             dof = matrix.indices[start]
             prescribed_dofs[dof] = values[row_index] / matrix.data[start]
-        displacement = solve_interface_system(
-            system,
-            bm.asarray(force, dtype=bm.float64),
-            bm.asarray(fixed, dtype=bm.int64),
-            prescribed=bm.asarray(prescribed_dofs, dtype=bm.float64),
-            solver=solver,
-        )
-        q = np.asarray(bm.to_numpy(displacement), dtype=np.float64)
         free = np.setdiff1d(np.arange(n_dofs), fixed)
-        free_internal_force = (stiffness @ q)[free]
-        residual = free_internal_force - force[free]
-        force_scale = max(
-            float(np.linalg.norm(force[free])),
-            float(np.linalg.norm((stiffness @ prescribed_dofs)[free])),
-            np.finfo(float).tiny,
-        )
-        mode = "固定角点消元"
+        operator = stiffness[free, :][:, free].tocsr()
+        rhs = (force - stiffness @ prescribed_dofs)[free]
+        mode = '固定角点消元'
     else:
-        saddle = bmat(
-            [[stiffness, independent.T], [independent, None]], format="csc"
-        )
+        free = None
+        operator = bmat([[stiffness, independent.T], [independent, None]], format='csc')
         rhs = np.concatenate((force, independent_values))
+        mode = '一般线性约束 / 稀疏乘子系统'
+    return PreparedDirectSystem(
+        stiffness, force, matrix, values, operator, rhs, rank, independent,
+        free, prescribed_dofs, mode,
+    )
+
+
+def solve_prepared_constrained_system(prepared, *, solver='scipy', load=None, **cg_options):
+    """求解已准备的系统, 恢复接口位移并验收残差.
+
+    Parameters
+    ----------
+    prepared : PreparedFixedSystem or PreparedDirectSystem
+        apply_bc 或 prepare_constrained_system 返回的系统.
+    solver : {'cg', 'scipy', 'mumps'}
+        与准备方式匹配的求解器; 直接法后端之间可切换.
+    load : TensorLike, optional
+        已处理右端项. 直接法下须与准备阶段一致, 改变载荷需重新准备.
+    **cg_options
+        传递给 solve_prepared_fixed_system 的迭代参数.
+
+    Returns
+    -------
+    ConstrainedSolveResult
+        恢复后的接口位移及原问题的残差诊断.
+    """
+    if isinstance(prepared, PreparedFixedSystem) and solver == 'cg':
+        options = dict(atol=0.0, rtol=1e-6, rtol_reference='rhs',
+                       norm_type='unpreconditioned', verify_residual=True,
+                       cg_maxiter=20000, precond='jacobi', x0=None)
+        options.update(cg_options)
+        return solve_prepared_fixed_system(prepared, load=load, **options)
+    if not isinstance(prepared, PreparedDirectSystem) or solver not in DIRECT_BACKENDS:
+        raise ValueError("求解器与已准备系统不匹配, 请用目标求解器重新调用 apply_bc.")
+    rhs = prepared.rhs
+    if load is not None:
+        candidate = np.asarray(bm.to_numpy(load), dtype=np.float64)
+        if candidate.shape != rhs.shape or not np.array_equal(candidate, rhs):
+            raise ValueError("直接法右端项与准备阶段不一致, 请重新调用 apply_bc.")
+    if rhs.size:
         linear_solver = create(solver)
         try:
-            solved, _ = linear_solver.setup(saddle).solve(rhs)
+            solved, _ = linear_solver.setup(prepared.operator).solve(rhs)
         finally:
             linear_solver.close()
-        solved_np = np.asarray(bm.to_numpy(solved), dtype=np.float64)
-        if not np.all(np.isfinite(solved_np)):
-            raise AssertionError("一般线性约束系统产生非有限解.")
-        q = solved_np[:n_dofs]
-        multipliers = solved_np[n_dofs:]
-        internal_force = stiffness @ q
-        reaction = independent.T @ multipliers
-        residual = internal_force + reaction - force
+        solved = np.asarray(bm.to_numpy(solved), dtype=np.float64)
+    else:
+        solved = np.zeros(0, dtype=np.float64)
+    if not np.all(np.isfinite(solved)):
+        raise AssertionError("约束系统产生非有限解.")
+    stiffness, force = prepared.stiffness, prepared.force
+    n_dofs = stiffness.shape[0]
+    if prepared.free is not None:
+        q = prepared.prescribed_dofs.copy()
+        q[prepared.free] = solved
+        residual = (stiffness @ q - force)[prepared.free]
         force_scale = max(
-            float(np.linalg.norm(force)),
-            float(np.linalg.norm(internal_force)),
-            float(np.linalg.norm(reaction)),
+            float(np.linalg.norm(force[prepared.free])),
+            float(np.linalg.norm((stiffness @ prepared.prescribed_dofs)[prepared.free])),
             np.finfo(float).tiny,
         )
-        displacement = bm.asarray(q, dtype=bm.float64)
-        mode = "一般线性约束 / 稀疏乘子系统"
-
-    if not np.all(np.isfinite(q)):
-        raise AssertionError("约束系统产生非有限位移.")
-    constraint_residual = matrix @ q - values
+    else:
+        q = solved[:n_dofs]
+        multipliers = solved[n_dofs:]
+        internal_force = stiffness @ q
+        reaction = prepared.independent.T @ multipliers
+        residual = internal_force + reaction - force
+        force_scale = max(
+            float(np.linalg.norm(force)), float(np.linalg.norm(internal_force)),
+            float(np.linalg.norm(reaction)), np.finfo(float).tiny,
+        )
+    constraint_residual = prepared.matrix @ q - prepared.values
     constraint_scale = max(
-        float(np.linalg.norm(values)), float(np.linalg.norm(q)), np.finfo(float).tiny
+        float(np.linalg.norm(prepared.values)), float(np.linalg.norm(q)), np.finfo(float).tiny,
     )
     return ConstrainedSolveResult(
-        displacement=displacement,
-        constraint_rank=rank,
+        displacement=bm.asarray(q, dtype=bm.float64), constraint_rank=prepared.rank,
         equilibrium_relative_residual=float(np.linalg.norm(residual)) / force_scale,
-        constraint_relative_residual=(
-            float(np.linalg.norm(constraint_residual)) / constraint_scale
-        ),
-        mode=mode,
+        constraint_relative_residual=float(np.linalg.norm(constraint_residual)) / constraint_scale,
+        mode=prepared.mode,
     )

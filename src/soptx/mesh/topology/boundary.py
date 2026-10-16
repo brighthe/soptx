@@ -43,8 +43,8 @@ class BoundaryInferencer:
         return max(storage.get_sector(name).schema.top_dim for name in storage.root_cell_sector_ids)
 
     @staticmethod
-    def _accumulate_target_counts(num_target: int, relation_targets: list[Tensor]) -> Tensor:
-        count = bm.zeros((num_target,), dtype=bm.int32)
+    def _accumulate_target_counts(num_target: int, relation_targets: list[Tensor], device=None) -> Tensor:
+        count = bm.zeros((num_target,), dtype=bm.int32, device=device)
 
         for tgt_indices in relation_targets:
             flat = bm.reshape(tgt_indices, (-1,))
@@ -98,7 +98,8 @@ class BoundaryInferencer:
                 relation = storage.relations[key]
                 relation_targets.append(relation.tgt_indices)
 
-            count = cls._accumulate_target_counts(num_target, relation_targets)
+            count = cls._accumulate_target_counts(num_target, relation_targets,
+                                                  device=bm.get_device(sector.indices))
             mask = bm.equal(count, bm.ones_like(count))
             binfo[codim1_name] = BoundaryInfo(mask=mask)
 
@@ -120,8 +121,10 @@ class BoundaryInferencer:
             return {}
 
         for top_name in top_names:
-            num_cell = len(storage.get_sector(top_name).indices)
-            cell_mask = bm.zeros((num_cell,), dtype=bm.bool)
+            cell_indices = storage.get_sector(top_name).indices
+            num_cell = len(cell_indices)
+            device = bm.get_device(cell_indices)
+            cell_mask = bm.zeros((num_cell,), dtype=bm.bool, device=device)
 
             for (src_name, tgt_name), relation in storage.relations.items():
                 if src_name != top_name:
@@ -133,7 +136,7 @@ class BoundaryInferencer:
                 hit = boundary_mask[relation.tgt_indices]
 
                 if relation.src_indices is not None:
-                    hit_count = bm.zeros((num_cell,), dtype=bm.int32)
+                    hit_count = bm.zeros((num_cell,), dtype=bm.int32, device=device)
                     hit_count = bm.index_add(
                         hit_count,
                         relation.src_indices,
@@ -174,8 +177,8 @@ class BoundaryInferencer:
             sector = storage.get_sector(name)
             if sector.schema.top_dim == codim1:
                 raise ValueError(f"{name!r} is codimension-1, use infer_codim1() instead")
-            num_entity = len(storage.get_sector(name).indices)
-            mask = bm.zeros((num_entity,), dtype=bm.bool)
+            num_entity = len(sector.indices)
+            mask = bm.zeros((num_entity,), dtype=bm.bool, device=bm.get_device(sector.indices))
 
             for (src_name, tgt_name), relation in storage.relations.items():
                 if tgt_name != name:

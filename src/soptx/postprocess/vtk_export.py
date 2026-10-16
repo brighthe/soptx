@@ -20,6 +20,8 @@ import re
 import numpy as np
 from pyevtk.hl import unstructuredGridToVTK
 
+from soptx.backend import backend_manager as bm
+
 # VTK 单元类型常量
 _VTK_TRIANGLE = 5
 _VTK_QUAD = 9
@@ -59,8 +61,9 @@ def write_vtu(
         cell_data: 单元场字典, 值为 ``(n_cells,)`` 或 ``(n_cells, ...)`` 数组.
     """
 
-    nodes = np.asarray(mesh.entity("node"), dtype=np.float64)
-    cells = np.asarray(mesh.entity("cell"), dtype=np.int32)
+    # 网格可能在 GPU 上, 经 bm.to_numpy 拷回主机再转 numpy
+    nodes = np.asarray(bm.to_numpy(mesh.entity("node")), dtype=np.float64)
+    cells = np.asarray(bm.to_numpy(mesh.entity("cell")), dtype=np.int32)
 
     n_nodes = nodes.shape[0]
     n_cells = cells.shape[0]

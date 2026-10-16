@@ -712,7 +712,7 @@ class EntityView:
             return self.schema.measure(self.context(), index)  # type: ignore[attr-defined]
         if q is None:
             q = self._default_geometry_quadrature_order()
-        quadrature = self.schema.quadrature_formula(q)
+        quadrature = self.quadrature_formula(q)
         bcs, weights = quadrature.get_quadrature_points_and_weights()
         if not isinstance(bcs, tuple):
             bcs = (bcs,)
@@ -833,7 +833,7 @@ class EntityView:
         Quadrature
             由实体 Schema 提供的积分公式对象.
         """
-        return self.schema.quadrature_formula(q, qtype)
+        return self.schema.quadrature_formula(q, qtype, device=bm.get_device(self.block.positions))
 
     def set_attribute(self, name: str, value: Any) -> None:
         """在实体分区上设置用户属性.

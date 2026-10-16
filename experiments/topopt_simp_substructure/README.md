@@ -105,3 +105,19 @@ python -m pytest tests/unit/test_substructure_external_mesh.py tests/unit/test_s
 ```
 
 验收条件：外部网格被原对象复用；二维、三维及 Q1/Q2 的自由度与接口编号和惰性构造一致；尺寸、剖分或编号不匹配被拒绝；full_trace 与 FEM 的位移、柔顺度及灵敏度等价性仍通过。两轮验收另按上方命令执行并使用新的输出目录，核对固定 `domain` 与实际 `spacing`。
+
+## 边界条件阶段统一的待执行验证
+
+FEM 与子结构均在 apply_bc 阶段准备受约束系统. FEM 保持显式矩阵消元; 子结构 CG 准备行列掩码与右端项, 直接法准备自由子矩阵与修正右端项, 一般线性约束完成一致性检查、相关行约化和乘子系统组装. solve_system 仅求解、恢复位移与验收残差, 不再隐式准备约束. 直接法的矩阵分解仍计入求解阶段.
+
+独立 solve_constrained_system 接口保留一次完成准备与求解的用法, 内部复用 prepare_constrained_system 和 solve_prepared_constrained_system. 分步使用分析器时须先调用 apply_bc; 切换 CG 与直接法应在 apply_bc(..., solver=...) 中选择目标求解器, solve_system 使用同一求解器. solve_state(..., solver=...) 自动将该选项传入准备阶段. scipy 与 mumps 可复用同一已准备的直接法系统. 直接法若改变右端项需重新准备, 不在 solve_system 中重新消元. 分析器仍仅支持齐次 Dirichlet 条件; 通用接口保留非齐次约束支持.
+
+历史 results/、outputs/ 和统计数据未改写. 原子结构约束准备计入求解阶段, 新运行计入边界条件阶段, 两种阶段口径不能直接混用.
+
+本次仅做静态核查, 以下测试尚未运行:
+
+```bash
+python -m pytest tests/unit/test_substructure_constrained_solve.py tests/unit/test_substructure_analyzer.py tests/unit/test_substructure_interface_space.py -q
+```
+
+验收条件: apply_bc 已完成 CG 掩码、直接法消元或乘子矩阵构造; 原刚度与载荷不被改写; 矛盾约束在准备阶段被拒绝; solve_system 不调用约束校验、QR 约化、乘子矩阵组装或旧的约束施加入口; 无约束、全固定、非齐次固定与冗余一般约束的解析解及残差正确; CG 热启动、FEM 等价性和单次求解器切换仍通过. MUMPS 后端需在安装环境另行验证. 如需验证阶段计时, 经授权按上文两轮小网格流程使用新输出目录运行, 不覆盖历史结果.

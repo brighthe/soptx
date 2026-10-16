@@ -46,13 +46,14 @@ NU = 0.3
 BACKEND = 'pytorch'
 
 # 分析参数: 有限元离散
-GRID = (390, 65, 65)
+# GRID = (390, 65, 65)
+GRID = (190, 32, 32)
 SPACE_DEGREE = 1
 INTEGRATION_ORDER = 2
 ASSEMBLY_METHOD = 'fast'
 OPERATOR_LEVEL = 'ea'
 
-# 分析参数: 线性系统求解
+# 分析参数: 线性系统求解; PRECONDITIONER 为 --preconditioner 的默认值
 SOLVER = 'cg'
 PRECONDITIONER = 'none'
 CG_TOLERANCE = 1.0e-6
@@ -67,25 +68,27 @@ OC_OPTIONS = dict(move_limit=0.2, damping_coef=0.5, initial_lambda=1.0e9,
 TOLERANCE = 2.0e-4
 CONVERGENCE_WINDOW = 5
 VOLUME_TOLERANCE = 1.0e-6
-MAX_ITER = 300
+MAX_ITER = 3
 
 OUTPUT_DIR = Path(__file__).resolve().parent / 'outputs'
 VTU_FIELDS = ('density', )
-# ParaView 查看根目录 (Windows 本地盘); 运行结束后帧迁移到其下同名子目录, 盘不可用时帧留在 outputs/
-VIEW_ROOT = Path('/mnt/c/workspace/soptx-results/topopt_simp_fem')
 
 
 def parse_args(argv=None):
-    """解析计算设备, 其余设置均为模块顶部常量.
+    """解析计算设备与预条件子, 其余设置均为模块顶部常量.
     """
     parser = argparse.ArgumentParser(description=__doc__)
+
+    parser.add_argument('--preconditioner', choices=('none', 'jacobi'), default=PRECONDITIONER,
+                        help=f'CG 预条件子 (默认 {PRECONDITIONER})')
     parser.add_argument('--device', choices=('cpu', 'cuda'), required=True,
                         help='计算设备: cpu 为主机 CPU, cuda 为 GPU')
+
     args = parser.parse_args(argv)
     if args.device == 'cuda' and not torch.cuda.is_available():
         parser.error('--device cuda 需要可用的 CUDA 设备')
     nx, ny, nz = GRID
-    args.output = OUTPUT_DIR / f'{args.device}_hex_{nx}x{ny}x{nz}_{SOLVER}_{PRECONDITIONER}'
+    args.output = OUTPUT_DIR / f'{args.device}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
     return args
 
 
@@ -99,6 +102,7 @@ def main(argv=None):
     # torch.get_num_threads() 记入 config.json
     torch.set_num_threads(NUM_THREADS)
     cuda = device == 'cuda'
+    precond = args.preconditioner
 
     grid = GRID
     h = ELEMENT_SIZE
@@ -128,7 +132,7 @@ def main(argv=None):
         torch=dict(version=torch.__version__, cuda=torch.version.cuda,
                    device_name=torch.cuda.get_device_name(device) if cuda else None))
     # rtol 的参照量是初始残差; 固定 rtol=0, 以载荷范数设置绝对容差.
-    cg_options = dict(precond=None if PRECONDITIONER == 'none' else PRECONDITIONER,
+    cg_options = dict(precond=None if precond == 'none' else precond,
                       maxiter=CG_MAXITER, rtol=0.0)
     config.update(cg_options=cg_options, cg_tolerance=CG_TOLERANCE)
     (output / 'config.json').write_text(
@@ -140,8 +144,8 @@ def main(argv=None):
     n_cells = grid[0] * grid[1] * grid[2]
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
     device_text = f'{device} ({config["torch"]["device_name"]})' if cuda else device
-    print(f'[配置] fem/{OPERATOR_LEVEL}, {BACKEND}/{device_text}, 线程 {torch.get_num_threads()}, '
-          f'装配 {ASSEMBLY_METHOD}, 求解 {SOLVER} ({PRECONDITIONER}, tol {CG_TOLERANCE:g}, '
+    print(f'[配置] fem/{OPERATOR_LEVEL}, {BACKEND}/{device_text}, CPU 线程 {torch.get_num_threads()}, '
+          f'装配 {ASSEMBLY_METHOD}, 求解 {SOLVER} ({precond}, tol {CG_TOLERANCE:g}, '
           f'maxiter {CG_MAXITER}), 网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
 
@@ -149,7 +153,7 @@ def main(argv=None):
     with measure(setup_stages, '网格', label='准备', device=device):
         mesh = HexahedronMesh.from_box(list(domain), *grid, device=device)
         setattr(mesh, 'meshdata', {'nx': grid[0], 'ny': grid[1], 'nz': grid[2], 'hx': h, 'hy': h, 'hz': h})
-    # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列; 运行结束后迁移到 VIEW_ROOT
+    # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列; 帧留在运行目录, 需要时手动迁移
     frames = IterationFrameWriter(output, mesh)
 
     with measure(setup_stages, '分析器', label='准备', device=device):
@@ -320,8 +324,8 @@ def main(argv=None):
     np.save(output / 'design_density_final.npy', bm.to_numpy(bm.reshape(rho, grid)))
     np.save(output / 'density_final.npy', bm.to_numpy(physical_grid))
     np.save(output / 'displacement_final.npy', bm.to_numpy(state['displacement'][:]))
-    # 初始帧与最后一帧各留一份在运行目录, 迁移查看副本后仍可直接读取: 最后一帧与最终 NPY 对应同一次
-    # 分析, 初始帧便于查看固定单元; 复用已导出的所选场
+    # 初始帧与最后一帧各另存一份到运行目录顶层, 便于直接打开: 最后一帧与最终 NPY 对应同一次分析,
+    # 初始帧便于查看固定单元; 复用已导出的所选场
     copies = {'result_final.vtu': history[-1]['vtu_file']}
     if initial_frame is not None:
         copies['result_initial.vtu'] = initial_frame
@@ -345,7 +349,6 @@ def main(argv=None):
                                               max(record['peak_gpu_gib'] for record in history))
     (output / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False),
                                          encoding='utf-8')
-    frames.publish(VIEW_ROOT)
     print(f'[完成] {summary["termination"]}，{iteration} 轮，C={compliance:.4f}，'
           f'不对称量 x {symmetry_x:.4e} / z {symmetry_z:.4e}，结果保存到 {output}', flush=True)
     return 0

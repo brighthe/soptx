@@ -1,0 +1,164 @@
+{
+  "description": "预条件子筛选 (run_fem_preconditioners.py --density) 的输入单元物理密度, 形状 (NX, NY, NZ) 即基准网格, 单元按 x 最慢、z 最快排列, 由 make_densities.py 合成",
+  "files": {
+    "uniform.npy": {
+      "kind": "均匀物理密度, 处处取 VOLFRAC, 对应优化第 1 轮 (初始设计)",
+      "value": 0.12,
+      "source": {
+        "kind": "synthetic",
+        "script": "experiments/topopt_simp_fem/fem_preconditioners/make_densities.py",
+        "command": "python experiments/topopt_simp_fem/fem_preconditioners/make_densities.py --grid 48 8 8"
+      },
+      "shape": [
+        48,
+        8,
+        8
+      ],
+      "min": 0.12,
+      "max": 0.12,
+      "mean": 0.12000000000000004,
+      "fraction_solid_gt_0_99": 0.0,
+      "fraction_intermediate_0_1_to_0_9": 1.0,
+      "sha256": "eaa23dd6532f2cc9bc205d3096c13c082664d0750d37bf5bab00235abd86d380"
+    },
+    "binary.npy": {
+      "kind": "0/1 桁架, 代表成形后的高反差细杆件",
+      "truss": {
+        "member_width_cells": 1.5,
+        "members": [
+          {
+            "name": "top_chord",
+            "segment_xy": [
+              8.0,
+              7.25,
+              40.0,
+              7.25
+            ],
+            "z": "full"
+          },
+          {
+            "name": "bottom_chord",
+            "segment_xy": [
+              0.0,
+              0.75,
+              48.0,
+              0.75
+            ],
+            "z": "walls"
+          },
+          {
+            "name": "left_leg",
+            "segment_xy": [
+              0.75,
+              0.75,
+              8.0,
+              7.25
+            ],
+            "z": "walls"
+          },
+          {
+            "name": "right_leg",
+            "segment_xy": [
+              47.25,
+              0.75,
+              40.0,
+              7.25
+            ],
+            "z": "walls"
+          },
+          {
+            "name": "vertical_1",
+            "segment_xy": [
+              16.0,
+              0.75,
+              16.0,
+              7.25
+            ],
+            "z": "walls"
+          },
+          {
+            "name": "vertical_2",
+            "segment_xy": [
+              24.0,
+              0.75,
+              24.0,
+              7.25
+            ],
+            "z": "walls"
+          },
+          {
+            "name": "vertical_3",
+            "segment_xy": [
+              32.0,
+              0.75,
+              32.0,
+              7.25
+            ],
+            "z": "walls"
+          },
+          {
+            "name": "diagonal_left",
+            "segment_xy": [
+              24.0,
+              7.25,
+              16.0,
+              0.75
+            ],
+            "z": "walls"
+          },
+          {
+            "name": "diagonal_right",
+            "segment_xy": [
+              24.0,
+              7.25,
+              32.0,
+              0.75
+            ],
+            "z": "walls"
+          }
+        ]
+      },
+      "connectivity": "scipy.ndimage.label 默认 6 邻域 (共面相连)",
+      "n_components": 1,
+      "supports_and_load_connected": true,
+      "source": {
+        "kind": "synthetic",
+        "script": "experiments/topopt_simp_fem/fem_preconditioners/make_densities.py",
+        "command": "python experiments/topopt_simp_fem/fem_preconditioners/make_densities.py --grid 48 8 8"
+      },
+      "shape": [
+        48,
+        8,
+        8
+      ],
+      "min": 0.0,
+      "max": 1.0,
+      "mean": 0.17578125,
+      "fraction_solid_gt_0_99": 0.17578125,
+      "fraction_intermediate_0_1_to_0_9": 0.0,
+      "sha256": "f7f10bc9c37d447f932d06da0eeef06cb2be5dec137f8c81a1b86f47a83618f9"
+    },
+    "gray.npy": {
+      "kind": "binary.npy 经密度过滤的灰度设计, 代表结构已成雏形但密度仍灰的中期",
+      "derived_from": "binary.npy",
+      "filter_type": "density",
+      "filter_radius_cells": 3.0,
+      "source": {
+        "kind": "synthetic",
+        "script": "experiments/topopt_simp_fem/fem_preconditioners/make_densities.py",
+        "command": "python experiments/topopt_simp_fem/fem_preconditioners/make_densities.py --grid 48 8 8"
+      },
+      "shape": [
+        48,
+        8,
+        8
+      ],
+      "min": 0.0,
+      "max": 0.7346546370080941,
+      "mean": 0.14893041332455012,
+      "fraction_solid_gt_0_99": 0.0,
+      "fraction_intermediate_0_1_to_0_9": 0.46484375,
+      "sha256": "9ef624aed86f365ad49260e6058c7702635d26e42356d8b7e26d253e2a02a2bb"
+    }
+  }
+}

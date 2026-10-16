@@ -74,6 +74,96 @@ def _sub_analyzer(layout, problem, material, interpolation, trace, **kwargs):
     )
 
 
+def test_cg_constraints_are_prepared_in_apply_bc(setup, monkeypatch):
+    """apply_bc 已生成受约束算子, 求解与回代不再次准备约束."""
+    from soptx.fem.substructure import solve as interface_solve
+    from soptx.fem.substructure.solve import PreparedFixedSystem
+
+    layout, problem, material, interpolation, density = setup
+    sub = _sub_analyzer(
+        layout, problem, material, interpolation, 'full_trace', solve_method='cg',
+        solver_options={'precond': 'jacobi', 'rtol': 1e-10, 'atol': 0., 'maxiter': 20000},
+    )
+    stiffness = sub.assemble_stiff_matrix(density)
+    prepared, rhs = sub.apply_bc(stiffness, sub.assemble_body_force_vector())
+    assert isinstance(prepared, PreparedFixedSystem)
+    np.testing.assert_array_equal(bm.to_numpy(rhs)[prepared.fixed], 0.)
+
+    def unexpected_preparation(*args, **kwargs):
+        raise AssertionError('求解阶段重复准备约束')
+
+    monkeypatch.setattr(interface_solve, '_prepare_fixed_system', unexpected_preparation)
+    monkeypatch.setattr(interface_solve._FixedDofOperator, '__init__', unexpected_preparation)
+    out = bm.zeros((layout.full_mesh.number_of_nodes() * 3,), dtype=bm.float64)
+    recovered, info = sub.solve_system(prepared, rhs, out)
+    fa = _fa_analyzer(layout, problem, material, interpolation)
+    reference = fa.solve_state(rho_val=density)['displacement']
+    np.testing.assert_allclose(bm.to_numpy(recovered), bm.to_numpy(reference[:]), rtol=1e-7, atol=1e-7)
+    assert info['converged']
+
+
+@pytest.mark.parametrize('general', [False, True])
+def test_direct_constraints_are_prepared_in_apply_bc(setup, monkeypatch, general):
+    """直接法在 apply_bc 完成消元或乘子组装, solve_system 仅求解与恢复."""
+    import soptx.fem.substructure.solve as interface_solve
+    from scipy.sparse import csr_matrix, vstack
+    from soptx.fem.substructure.solve import PreparedDirectSystem
+
+    layout, problem, material, interpolation, density = setup
+    sub = _sub_analyzer(
+        layout, problem, material, interpolation, 'full_trace', solve_method='scipy',
+    )
+    stiffness = sub.assemble_stiff_matrix(density)
+    if general:
+        constraints = sub._constraints
+        constraints = constraints.to_scipy() if hasattr(constraints, 'to_scipy') else csr_matrix(constraints)
+        free = np.setdiff1d(np.arange(constraints.shape[1]), constraints.indices)
+        coupling = csr_matrix(([1., -1.], ([0, 0], free[:2])), shape=(1, constraints.shape[1]))
+        sub._constraints = vstack((constraints, coupling), format='csr')
+    prepared, rhs = sub.apply_bc(stiffness, sub.assemble_body_force_vector())
+    assert isinstance(prepared, PreparedDirectSystem)
+    assert (prepared.free is None) == general
+    reference = solve_constrained_system(
+        stiffness, sub._interface_load, sub._constraints, solver='scipy',
+    )
+
+    def unexpected_preparation(*args, **kwargs):
+        raise AssertionError('求解阶段重复准备约束')
+
+    for name in ('qr', 'bmat', '_interface_constraint_data', 'solve_interface_system'):
+        monkeypatch.setattr(interface_solve, name, unexpected_preparation)
+    out = bm.zeros((layout.full_mesh.number_of_nodes() * 3,), dtype=bm.float64)
+    recovered, info = sub.solve_system(prepared, rhs, out)
+    np.testing.assert_allclose(sub._interface_displacement, reference.displacement, rtol=1e-10, atol=1e-10)
+    assert np.all(np.isfinite(bm.to_numpy(recovered)))
+    assert info['constraint_relres'] < 1e-10
+    assert info['relres'] < 1e-10
+
+
+@pytest.mark.parametrize('configured, requested', [('cg', 'scipy'), ('scipy', 'cg')])
+def test_solver_override_reaches_boundary_preparation(setup, monkeypatch, configured, requested):
+    """单次状态求解切换 solver 时, apply_bc 按实际求解器准备系统."""
+    import soptx.fem.analyzers.substructure_analyzer as analyzer_module
+
+    layout, problem, material, interpolation, density = setup
+    sub = _sub_analyzer(
+        layout, problem, material, interpolation, 'full_trace', solve_method=configured,
+        solver_options={'precond': 'jacobi', 'rtol': 1e-8, 'atol': 0., 'maxiter': 20000},
+    )
+    prepare = analyzer_module.prepare_constrained_system
+    seen = []
+
+    def record_preparation(*args, **kwargs):
+        seen.append(kwargs['solver'])
+        return prepare(*args, **kwargs)
+
+    monkeypatch.setattr(analyzer_module, 'prepare_constrained_system', record_preparation)
+    state = sub.solve_state(rho_val=density, solver=requested)
+    assert seen == [requested]
+    assert state['solver']['name'] == requested
+    assert state['solver']['converged']
+
+
 @pytest.mark.parametrize('point', [None, (6.0, 2.0, 0.25)])
 def test_full_trace_matches_fine_grid_fa(setup, point) -> None:
     """full_trace 与细网格 FA 直接法: 位移、柔顺度与灵敏度一致到求解器精度."""

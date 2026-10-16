@@ -186,13 +186,13 @@ def canonicalize_local_entity_occurrences(
     candidate_vertices = candidates[:, :, vertex_positions]  # (NO, NP, NV)
 
     permutation_count = allowed_vertex.shape[0]
-    best_permutation = bm.zeros((row_count,), dtype=source_dtype)
+    best_permutation = bm.zeros((row_count,), dtype=source_dtype, device=source_device)
     best_vertices = candidate_vertices[:, 0, :]
 
     for permutation_index in range(1, permutation_count):
         candidate = candidate_vertices[:, permutation_index, :]
-        candidate_is_less = bm.zeros((row_count,), dtype=bm.bool)
-        still_equal = bm.ones((row_count,), dtype=bm.bool)
+        candidate_is_less = bm.zeros((row_count,), dtype=bm.bool, device=source_device)
+        still_equal = bm.ones((row_count,), dtype=bm.bool, device=source_device)
 
         for vertex_index in range(candidate.shape[-1]):
             column_is_less = candidate[:, vertex_index] < best_vertices[:, vertex_index]

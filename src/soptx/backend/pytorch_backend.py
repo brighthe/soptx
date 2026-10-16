@@ -377,6 +377,17 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
         return torch.nonzero(x, as_tuple=True)
 
     ### 集合函数 ###
+    @staticmethod
+    def _unique_along(a, dim, **kwargs):
+        """沿 ``dim`` 去重, 返回 ``(唯一值, 逆映射, 计数)``.
+
+        一维输入不传 ``dim``: 传了 ``dim`` 时 torch 改走按切片去重的 ``unique_dim``, 其 CPU
+        实现比排序去重慢约 60 倍 (10^6 个整数 2.95 s 对 0.05 s), 结果相同.
+        """
+        if a.ndim == 1:
+            return torch.unique(a, return_inverse=True, return_counts=True, **kwargs)
+        return torch.unique(a, return_inverse=True, return_counts=True, dim=dim, **kwargs)
+
     # Python array API 标准 v2023.12
     @staticmethod
     def unique_all(a, axis=None, **kwargs):
@@ -384,9 +395,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
         if axis is None:
             a = torch.flatten(a)
             axis = 0
-        b, inverse, counts = torch.unique(a, return_inverse=True,
-                return_counts=True,
-                dim=axis, **kwargs)
+        b, inverse, counts = PyTorchBackend._unique_along(a, axis, **kwargs)
         kwargs = {'dtype': inverse.dtype, 'device': inverse.device}
         indices = torch.zeros(counts.shape, **kwargs)
         idx = torch.arange(a.shape[axis]-1, -1, -1, **kwargs)
@@ -400,9 +409,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
         if axis is None:
             a = torch.flatten(a)
             axis = 0
-        b, inverse, counts = torch.unique(a, return_inverse=True,
-                return_counts=True,
-                dim=axis, **kwargs)
+        b, inverse, counts = PyTorchBackend._unique_along(a, axis, **kwargs)
         kwargs = {'dtype': inverse.dtype, 'device': inverse.device}
 
         indices0 = torch.zeros(counts.shape, **kwargs)
@@ -419,13 +426,9 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
     def unique(a, return_index=False, return_inverse=False, return_counts=False, axis=None, **kwargs):
         """仿 ``np.unique``: 可选返回首次出现位置、逆映射与计数; ``axis`` 为 None 时先展平."""
         if axis is None:
-            b, inverse, counts = torch.unique(a.flatten(), return_inverse=True,
-                                              return_counts=True,
-                                              dim=0, **kwargs)
+            b, inverse, counts = PyTorchBackend._unique_along(a.flatten(), 0, **kwargs)
         else:
-            b, inverse, counts = torch.unique(a, return_inverse=True,
-                                              return_counts=True,
-                                              dim=axis, **kwargs)
+            b, inverse, counts = PyTorchBackend._unique_along(a, axis, **kwargs)
 
         any_return = return_index or return_inverse or return_counts
         if any_return:
@@ -628,9 +631,21 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
     ### 稀疏函数 ###
 
     # 传给这些构造函数的索引与行指针来自 SOPTX 自己的 COOTensor/CSRTensor, 它们
-    # 维护着布局不变量. torch 要求显式开启或关闭不变量检查, 否则给出警告; 这里关闭
-    # 检查, 免得 spmm 路径每次调用都做校验, 该路径在 Krylov 迭代中每步都要走.
-    _SPARSE_KWARGS = {'check_invariants': False}
+    # 维护着布局不变量, 这里关闭不变量检查, 免得 spmm 路径每次调用都做校验, 该路径在
+    # Krylov 迭代中每步都要走. torch (至少 2.11) 只把全局开关的设置视为显式选择, 单次
+    # 调用传 check_invariants=False 仍会警告"隐式关闭"; 故在上下文管理器内构造, 退出时
+    # 恢复调用者原有的全局设置, 不改动进程状态.
+    @staticmethod
+    def _sparse_coo_tensor(indices, values, shape):
+        """关闭不变量检查构造 COO 稀疏张量."""
+        with torch.sparse.check_sparse_tensor_invariants(enable=False):
+            return torch.sparse_coo_tensor(indices, values, size=shape, check_invariants=False)
+
+    @staticmethod
+    def _sparse_csr_tensor(crow, col, values, shape):
+        """关闭不变量检查构造 CSR 稀疏张量."""
+        with torch.sparse.check_sparse_tensor_invariants(enable=False):
+            return torch.sparse_csr_tensor(crow, col, values, size=shape, check_invariants=False)
 
     @staticmethod
     def coo_spmm(indices, values, shape, other):
@@ -642,8 +657,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
             ``values`` 带批量维.
         """
         if values.ndim == 1:
-            mat = torch.sparse_coo_tensor(indices, values, size=shape,
-                                          **PyTorchBackend._SPARSE_KWARGS)
+            mat = PyTorchBackend._sparse_coo_tensor(indices, values, shape)
             return PyTorchBackend._spmm(mat, other)
         else:
             raise NotImplementedError("Batch sparse matrix multiplication has "
@@ -664,8 +678,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
         if crow.dtype != col.dtype:
             raise ValueError(f"crow 与 col 的 dtype 须一致, 得到 {crow.dtype} 与 {col.dtype}")
         if values.ndim == 1:
-            mat = torch.sparse_csr_tensor(crow, col, values, size=shape,
-                                          **PyTorchBackend._SPARSE_KWARGS)
+            mat = PyTorchBackend._sparse_csr_tensor(crow, col, values, shape)
             return PyTorchBackend._spmm(mat, other)
         else:
             raise NotImplementedError("Batch sparse matrix multiplication has "
@@ -674,10 +687,8 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
     @staticmethod
     def csr_spspmm(crow1, col1, values1, shape1, crow2, col2, values2, shape2):
         """两个 CSR 矩阵相乘, 返回 ``(crow, col, values, shape)``."""
-        mat1 = torch.sparse_csr_tensor(crow1, col1, values1, size=shape1,
-                                       **PyTorchBackend._SPARSE_KWARGS)
-        mat2 = torch.sparse_csr_tensor(crow2, col2, values2, size=shape2,
-                                       **PyTorchBackend._SPARSE_KWARGS)
+        mat1 = PyTorchBackend._sparse_csr_tensor(crow1, col1, values1, shape1)
+        mat2 = PyTorchBackend._sparse_csr_tensor(crow2, col2, values2, shape2)
         mat3: Tensor = PyTorchBackend._spmm(mat1, mat2)
         return mat3.crow_indices(), mat3.col_indices(), mat3.values(), mat3.shape
 
@@ -691,8 +702,7 @@ class PyTorchBackend(BackendProxy, backend_name='pytorch'):
     @staticmethod
     def coo_tocsr(indices, values, shape):
         """COO 转 CSR (``to_sparse_csr``), 返回 ``(crow, col, values)``."""
-        mat = torch.sparse_coo_tensor(indices, values, size=shape,
-                                      **PyTorchBackend._SPARSE_KWARGS)
+        mat = PyTorchBackend._sparse_coo_tensor(indices, values, shape)
         mat = mat.to_sparse_csr()
         return mat.crow_indices(), mat.col_indices(), mat.values()
 

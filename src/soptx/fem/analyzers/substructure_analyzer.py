@@ -26,10 +26,15 @@ from soptx.fem.substructure import (
     SubstructurePrototype,
     build_interface_space,
     build_substructures,
-    solve_constrained_system,
 )
 from soptx.fem.substructure.implicit import RestrictedPreconditioner
 from soptx.fem.substructure.recovery import recover_full_displacement_batches
+from soptx.fem.substructure.solve import (
+    PreparedFixedSystem,
+    PreparedDirectSystem,
+    prepare_constrained_system,
+    solve_prepared_constrained_system,
+)
 from soptx.fem.substructure.streaming import (
     assemble_exact_interface_system,
     iter_exact_internal_displacement_batches,
@@ -49,7 +54,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     - ``assemble_stiff_matrix``: 逐批局部装配、精确 Schur 缩聚、迹降阶并散加成全局接口
       刚度 ``K_Q``, 返回 ``InterfaceSystem``;
     - ``apply_bc``: 细网格载荷照基类装配并记为 ``force_vector``, 供目标函数计算
-      ``F^T u``; 返回的右端是投影到接口未知量 ``Q`` 的载荷, 支承约束留在实例上;
+      ``F^T u``; 准备 CG 掩码算子或直接法的消元/乘子系统与右端;
     - ``solve_system``: 在约束接口系统上求 ``Q``, 再逐批恢复内部位移写入全场向量.
 
     Parameters
@@ -293,21 +298,24 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     def apply_bc(self,
                 K: Any,
                 F: TensorLike,
+                *, solver: Optional[str] = None,
             ) -> tuple[Any, TensorLike]:
-        """装配细网格载荷并记为 ``force_vector``, 返回投影到接口未知量的载荷.
+        """装配细网格载荷, 并准备所有求解路径的受约束系统.
 
         Parameters
         ----------
         K : InterfaceSystem
-            ``assemble_stiff_matrix`` 返回的接口系统, 原样返回.
+            ``assemble_stiff_matrix`` 返回的原接口系统.
         F : 细网格体力向量, 本方法把非体力载荷加到它上面.
+        solver : str, optional
+            目标求解器, 缺省使用构造时的配置.
 
         Returns
         -------
-        K : InterfaceSystem
-            输入的接口系统.
+        K : PreparedFixedSystem or PreparedDirectSystem
+            CG 掩码系统, 或已消元/组装乘子矩阵的直接法系统.
         F_Q : TensorLike
-            接口载荷, 形状 ``(N_q,)``.
+            受约束系统的右端项, 维数随消元或乘子系统变化.
 
         Notes
         -----
@@ -322,16 +330,38 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if bd_nonzero:
             self._log_error("子结构分析器只支持齐次 Dirichlet 条件")
         self._prescribed_solution = bm.copy(uh_bd[:])
-        return K, self._interface_load
+        prepared = prepare_constrained_system(
+            K, self._interface_load, self._constraints,
+            solver=self._solve_method if solver is None else solver,
+        )
+        return prepared, bm.asarray(prepared.rhs.copy(), dtype=bm.float64)
+
+    def _apply_state_bc(self, K, F, **kwargs):
+        """将状态求解的 solver 选项传给边界条件准备阶段.
+
+        Parameters
+        ----------
+        K, F : Any
+            原接口刚度与细网格载荷.
+        **kwargs
+            状态求解选项.
+
+        Returns
+        -------
+        tuple
+            按目标求解器准备的受约束系统与右端项.
+        """
+        return self.apply_bc(K, F, solver=kwargs.get('solver', self._solve_method))
 
     def solve_system(self, K: Any, F: TensorLike, out: Any, **kwargs) -> tuple[Any, Dict]:
         """在约束接口系统上求解 ``Q``, 再逐批恢复全场位移写入 ``out``.
 
         Parameters
         ----------
-        K : InterfaceSystem
-            接口刚度.
-        F : (N_q, ) 的接口载荷.
+        K : PreparedFixedSystem or PreparedDirectSystem
+            ``apply_bc`` 返回的接口系统.
+        F : TensorLike
+            apply_bc 返回的受约束右端项.
         out : 全场位移向量 (有限元函数或张量), 就地写入.
         **kwargs
             ``x0``: CG 的初值, 为接口未知量 ``Q`` 而非全场位移, 通常取上一次的
@@ -346,6 +376,8 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if self._density_cells is None:
             self._log_error("solve_system 之前须先调用 assemble_stiff_matrix")
         solver_type = kwargs.get('solver', self._solve_method)
+        if not isinstance(K, (PreparedFixedSystem, PreparedDirectSystem)):
+            raise TypeError("solve_system 需要受约束系统, 请先调用 apply_bc.")
         options = self._merged_solver_options(kwargs)
         cg_kwargs: Dict[str, Any] = {}
         if solver_type == 'cg':
@@ -359,9 +391,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
                              verify_residual=options.get('verify_residual', True),
                              cg_maxiter=options.get('maxiter', 20000),
                              precond='none' if precond is None else precond, x0=kwargs.get('x0', None))
-        result = solve_constrained_system(
-            system=K, load=F, constraints=self._constraints, solver=solver_type, **cg_kwargs,
-        )
+        result = solve_prepared_constrained_system(K, solver=solver_type, load=F, **cg_kwargs)
         self._interface_displacement = result.displacement
         # 各子结构的迹位移 q^j = A_q^j Q, 逐批 u_b = Psi q, u_i = T u_b 后写回全场
         q_local = bm.asarray(result.displacement)[self._interface_space.local_dofs]

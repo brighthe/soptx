@@ -110,6 +110,9 @@ dist/
 # (final_fields.json) 固化到这里, 故 results/ 只含小体积 json, 无需另设排除规则。
 # 须排在上面 *.json 等规则之后。
 !/experiments/topopt_simp_fem/results/**
+# 同理: topopt_simp_fem 的 fem_preconditioners/ 是预条件子筛选的输入密度 (每个 NPY 约 24 KB)
+# 与来源记录 sources.json, 不是运行产物, 整体入库。须排在上面 *.json 等规则之后。
+!/experiments/topopt_simp_fem/fem_preconditioners/**
 # 同理: topopt_simp_substructure_fa 的 results/ 由其 sync_results.py 固化, 整体入库。
 !/experiments/topopt_simp_substructure_fa/results/**
 

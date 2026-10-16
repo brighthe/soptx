@@ -644,7 +644,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         if t is not None:
             t.send('线性型组装')
 
-        K, F = self.apply_bc(K0, F0)
+        K, F = self._apply_state_bc(K0, F0, **kwargs)
         if t is not None:
             t.send('边界条件处理')
 
@@ -666,7 +666,24 @@ class LagrangeFEMAnalyzer(BaseLogged):
             'solver': solver_info,
             }
 
-    def solve_adjoint(self, 
+    def _apply_state_bc(self, K, F, **kwargs):
+        """按状态求解选项准备边界条件, 供派生分析器扩展.
+
+        Parameters
+        ----------
+        K, F : Any
+            未施加边界条件的刚度与载荷.
+        **kwargs
+            状态求解选项, 基类无需使用.
+
+        Returns
+        -------
+        tuple
+            已施加边界条件的系统与右端项.
+        """
+        return self.apply_bc(K, F)
+
+    def solve_adjoint(self,
                     rhs: TensorLike,
                     rho_val: Optional[Union[TensorLike, Function]] = None,
                     **kwargs

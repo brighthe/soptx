@@ -64,6 +64,10 @@ from .problem_adapter import (
 )
 from .solve import (
     ConstrainedSolveResult,
+    PreparedDirectSystem,
+    PreparedFixedSystem,
+    prepare_constrained_system,
+    solve_prepared_constrained_system,
     solve_constrained_system,
     solve_interface_system,
 )
@@ -154,6 +158,10 @@ __all__ = [
     "project_problem_conditions_to_macro_system",
     "project_problem_conditions_to_nodes",
     "ConstrainedSolveResult",
+    "PreparedDirectSystem",
+    "PreparedFixedSystem",
+    "prepare_constrained_system",
+    "solve_prepared_constrained_system",
     "solve_constrained_system",
     "solve_interface_system",
     "set_random_seed",

@@ -46,14 +46,14 @@ NU = 0.3
 BACKEND = 'numpy'
 DEVICE = 'cpu'
 
-# 分析参数: 有限元离散
+# 分析参数: 有限元离散; GRID 为 --grid 的默认值
 # GRID = (390, 65, 65)
 GRID = (210, 35, 35)
 SPACE_DEGREE = 1
 INTEGRATION_ORDER = 2
 ASSEMBLY_METHOD = 'fast'
 
-# 分析参数: 线性系统求解
+# 分析参数: 线性系统求解; PRECONDITIONER 为 --preconditioner 的默认值
 SOLVER = 'cg'
 PRECONDITIONER = 'gmg'
 CG_TOLERANCE = 1.0e-6
@@ -72,22 +72,25 @@ MAX_ITER = 300
 
 OUTPUT_DIR = Path(__file__).resolve().parent / 'outputs'
 VTU_FIELDS = ('density', )
-# ParaView 查看根目录 (Windows 本地盘); 运行结束后帧迁移到其下同名子目录, 盘不可用时帧留在 outputs/
-VIEW_ROOT = Path('/mnt/c/workspace/soptx-results/topopt_simp_fem')
 
 
 def parse_args(argv=None):
-    """解析刚度算子层级与输出位置, 其余设置均为模块顶部常量.
+    """解析刚度算子层级、网格与预条件子, 其余设置均为模块顶部常量.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--level', choices=('ea', 'fa'), required=True,
                         help='刚度算子层级: ea 不形成全局矩阵, fa 装配全局 CSR 矩阵')
-    parser.add_argument('--output-dir', type=Path, default=OUTPUT_DIR,
-                        help='输出根目录, 结果写入其下 {level}_hex_{nx}x{ny}x{nz}_{solver} 子目录 '
-                             '(默认: 本目录 outputs)')
+    parser.add_argument('--grid', type=int, nargs=3, default=GRID, metavar=('NX', 'NY', 'NZ'),
+                        help=f'六面体网格各方向单元数 (默认 {GRID})')
+    parser.add_argument('--preconditioner', choices=('none', 'jacobi', 'gmg'), default=PRECONDITIONER,
+                        help=f'CG 预条件子 (默认 {PRECONDITIONER})')
     args = parser.parse_args(argv)
-    nx, ny, nz = GRID
-    args.output = args.output_dir.resolve() / f'{args.level}_hex_{nx}x{ny}x{nz}_{SOLVER}'
+    if min(args.grid) < 1:
+        parser.error(f'--grid 须为正整数, 得到 {args.grid}')
+    args.grid = tuple(args.grid)
+    nx, ny, nz = args.grid
+    # 目录名含层级、网格与预条件子, 不同配置的运行互不覆盖
+    args.output = OUTPUT_DIR.resolve() / f'{args.level}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
     return args
 
 
@@ -98,7 +101,8 @@ def main(argv=None):
     bm.set_backend(BACKEND)
 
     # 添加注释
-    grid = GRID
+    grid = args.grid
+    precond = args.preconditioner
     h = ELEMENT_SIZE
     domain = (0.0, grid[0] * h, 0.0, grid[1] * h, 0.0, grid[2] * h)
     spacing = (h, h, h)
@@ -123,7 +127,7 @@ def main(argv=None):
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
         threads=dict(num_threads=NUM_THREADS, **blas_environment()))
-    cg_options = dict(precond=None if PRECONDITIONER == 'none' else PRECONDITIONER,
+    cg_options = dict(precond=None if precond == 'none' else precond,
                       maxiter=CG_MAXITER, rtol=CG_TOLERANCE, atol=0.0,
                       rtol_reference='rhs', norm_type='unpreconditioned',
                       verify_residual=True)
@@ -138,7 +142,7 @@ def main(argv=None):
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
     method_text = f'fem/{args.level}'
     print(f'[配置] {method_text}, {BACKEND}/{DEVICE}, 线程 {NUM_THREADS}, 装配 {ASSEMBLY_METHOD}, '
-          f'求解 {SOLVER} ({PRECONDITIONER}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
+          f'求解 {SOLVER} ({precond}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
           f'网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
 
@@ -146,7 +150,7 @@ def main(argv=None):
     with measure(setup_stages, '网格', label='准备'):
         mesh = HexahedronMesh.from_box(list(domain), *grid, device=DEVICE)
         setattr(mesh, 'meshdata', {'nx': grid[0], 'ny': grid[1], 'nz': grid[2], 'hx': h, 'hy': h, 'hz': h})
-    # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列; 运行结束后迁移到 VIEW_ROOT
+    # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列; 帧留在运行目录, 需要时手动迁移
     frames = IterationFrameWriter(output, mesh)
 
     with measure(setup_stages, '分析器', label='准备'):
@@ -314,8 +318,8 @@ def main(argv=None):
     np.save(output / 'design_density_final.npy', bm.to_numpy(bm.reshape(rho, grid)))
     np.save(output / 'density_final.npy', bm.to_numpy(physical_grid))
     np.save(output / 'displacement_final.npy', bm.to_numpy(state['displacement'][:]))
-    # 初始帧与最后一帧各留一份在运行目录, 迁移查看副本后仍可直接读取: 最后一帧与最终 NPY 对应同一次
-    # 分析, 初始帧便于查看固定单元; 复用已导出的所选场
+    # 初始帧与最后一帧各另存一份到运行目录顶层, 便于直接打开: 最后一帧与最终 NPY 对应同一次分析,
+    # 初始帧便于查看固定单元; 复用已导出的所选场
     copies = {'result_final.vtu': history[-1]['vtu_file']}
     if initial_frame is not None:
         copies['result_initial.vtu'] = initial_frame
@@ -336,7 +340,6 @@ def main(argv=None):
                    total_seconds=perf_counter() - run_started)
     (output / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False),
                                          encoding='utf-8')
-    frames.publish(VIEW_ROOT)
     print(f'[完成] {summary["termination"]}，{iteration} 轮，C={compliance:.4f}，'
           f'不对称量 x {symmetry_x:.4e} / z {symmetry_z:.4e}，结果保存到 {output}', flush=True)
     return 0

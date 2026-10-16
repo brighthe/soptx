@@ -1,0 +1,87 @@
+{
+  "method": "fem_preconditioner_none",
+  "domain": [
+    0.0,
+    48.0,
+    0.0,
+    8.0,
+    0.0,
+    8.0
+  ],
+  "mesh": "hex",
+  "base_grid": [
+    48,
+    8,
+    8
+  ],
+  "levels": 3,
+  "grids": [
+    [
+      48,
+      8,
+      8
+    ],
+    [
+      96,
+      16,
+      16
+    ],
+    [
+      192,
+      32,
+      32
+    ],
+    [
+      384,
+      64,
+      64
+    ]
+  ],
+  "element_sizes": [
+    1.0,
+    0.5,
+    0.25,
+    0.125
+  ],
+  "density": {
+    "name": "uniform",
+    "file": "/home/brighthe/codespace/soptx/experiments/topopt_simp_fem/fem_preconditioners/uniform.npy",
+    "mean": 0.12000000000000004,
+    "min": 0.12,
+    "max": 0.12,
+    "transfer": "piecewise_constant_injection"
+  },
+  "space_degree": 1,
+  "integration_order": 2,
+  "E0": 1.0,
+  "Emin": 1e-07,
+  "nu": 0.3,
+  "penalty": 3.0,
+  "problem": "FullMBBBeamPoint3d",
+  "load": -1.0,
+  "operator_levels": [
+    "fa"
+  ],
+  "preconditioner": "none",
+  "assembly_method": "fast",
+  "solver": "cg",
+  "cg_options": {
+    "precond": null,
+    "maxiter": 20000,
+    "rtol": 1e-06,
+    "atol": 0.0,
+    "rtol_reference": "rhs",
+    "norm_type": "unpreconditioned",
+    "verify_residual": true
+  },
+  "backend": "numpy",
+  "device": "cpu",
+  "threads": {
+    "num_threads": 1,
+    "blas_libraries": [
+      "libblis.so.4.0.0",
+      "libscipy_openblas-5f890258.so"
+    ],
+    "logical_cpu_count": 32
+  }
+}

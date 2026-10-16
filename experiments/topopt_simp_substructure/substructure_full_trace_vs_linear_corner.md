@@ -89,6 +89,112 @@
 
 子结构有限元 `linear_corner`：全局角点接口共 $2\,752$ 个节点、$8\,256$ 个自由度。
 
+记号如下，矩阵一列给出形状：
+
+| 符号 | 含义 | 取值（$m=5$） |
+|---|---|---|
+| $\mathcal T_h$，$\lvert\mathcal T_h\rvert$ | 细网格及其单元数 | 257 250 |
+| $N_{h}$ | 细网格自由度数 | 820 368 |
+| $n_{e}$ | 单元自由度数 | 24 |
+| $m$ | 子结构每边的细单元数 | 5 |
+| $N_{s}$ | 子结构数 | $42\times7\times7=2\,058$ |
+| $n_{i},\ n_{b}$ | 子结构内部、边界自由度数 | 192，456 |
+| $n_{c}$ | 子结构角点自由度数，$3\times2^3$ | 24 |
+| $N_{\Gamma}$ | 全局边界自由度数 | 425 232 |
+| $N_{C}$ | 全局角点自由度数，$3(n_x+1)(n_y+1)(n_z+1)$，$(n_x,n_y,n_z)=(42,7,7)$ | $3\times43\times8\times8=8\,256$ |
+| $\rho_e$，$\tilde\rho_e$ | 单元 $e$ 的设计密度、过滤后的物理密度 | |
+| $c(\tilde\rho_e)=E(\tilde\rho_e)/E_0$ | 相对刚度系数 | |
+| $K^{0}$ | 缓存的参考单元刚度 | $n_e\times n_e$ |
+| $A_{e}$ | 单元到细网格的提取矩阵，元素取 0 或 1 | $n_e\times N_h$ |
+| $K$，$F$ | 细网格总刚与载荷 | $N_h\times N_h$，$N_h$ |
+| $K^{j}$ | 子结构 $\Omega_j$ 的总刚，按边界 $b$、内部 $i$ 分块 | $(n_b+n_i)\times(n_b+n_i)$ |
+| $K_{s}^{j}=K_{bb}^{j}-K_{bi}^{j}(K_{ii}^{j})^{-1}K_{ib}^{j}$ | 子结构缩聚刚度（Schur 补） | $n_b\times n_b$ |
+| $A_{b}^{j}$ | 子结构边界到全局边界的提取矩阵，元素取 0 或 1 | $n_b\times N_\Gamma$ |
+| $K_{\Gamma}$，$F_{\Gamma}$ | 全局边界总刚与载荷 | $N_\Gamma\times N_\Gamma$，$N_\Gamma$ |
+| $U_{\Gamma}$ | 全局边界位移 | $N_\Gamma$ |
+| $L$ | 局部角点插值矩阵（Huang2023 式 (16)） | $n_b\times n_c=456\times24$ |
+| $A_{c}^{j}$ | 子结构角点到全局角点的提取矩阵，元素取 0 或 1 | $n_c\times N_C$ |
+| $P$ | 全局迹映射，$U_\Gamma=PU_C$ | $N_\Gamma\times N_C=425\,232\times8\,256$ |
+| $K_{C}$，$F_{C}$，$U_{C}$ | 全局角点总刚、载荷与位移 | $N_C\times N_C$，$N_C$，$N_C$ |
+
+两侧共用的局部组装与精确 Schur 缩聚见 substructure_vs_fem.md 第 3 节的第 1、2 步，得到每个子结构的缩聚刚度 $K_s^j$。分叉从 $K_s^j$ 之后开始。
+
+**full_trace** 把 $K_s^j$ 当作“单刚”，组装成全局边界总刚：
+
+$$
+K_\Gamma=\sum_{j=1}^{N_s}\bigl(A_b^{j}\bigr)^{T}K_s^{j}A_b^{j}\in\mathbb R^{N_\Gamma\times N_\Gamma}
+$$
+
+**linear_corner** 先把 $K_s^j$ 投影到角点自由度，再组装成全局角点总刚：
+
+1. 用角点位移插值接口位移。记子结构 8 个角点的位移为 $q^{j}=A_c^{j}U_C\in\mathbb R^{n_c}$，边界节点 $x_b$ 处的位移取角点的三线性插值：
+
+$$
+u_b^{j}=L\,q^{j},\qquad L=\bigl[w_c(x_b)\,\delta_{kl}\bigr]\in\mathbb R^{n_b\times n_c},\qquad
+w_c(x)=\prod_{d=1}^{3}(1-\xi_d)^{1-s_{c,d}}\,\xi_d^{\,s_{c,d}},\quad \xi_d=\frac{x_d-x_{0,d}}{mh}
+$$
+
+$s_{c,d}\in\{0,1\}$ 为角点 $c$ 在 $d$ 方向的位置；$\sum_c w_c\equiv1$，$L$ 精确再现任意仿射位移场；$L$ 与 $\tilde\rho$ 无关，对所有子结构相同。相邻子结构在公共面上共享 4 个角点，两侧插值在该面上一致，因此各子结构的 $L$ 可拼成全局迹映射 $P\in\mathbb R^{N_\Gamma\times N_C}$，满足 $A_b^{j}P=LA_c^{j}$，即 $U_\Gamma=PU_C$。
+
+2. 把缩聚刚度投影到角点自由度：
+
+$$
+K_C^{j}=L^{T}K_s^{j}L\in\mathbb R^{n_c\times n_c}
+$$
+
+3. 把 $K_C^j$ 当作“单刚”，组装成全局角点总刚：
+
+$$
+K_C=\sum_{j=1}^{N_s}\bigl(A_c^{j}\bigr)^{T}K_C^{j}A_c^{j}\in\mathbb R^{N_C\times N_C}
+$$
+
+$K_C$ 的组装式与 $K_\Gamma$ 的组装式同构，只是把 $n_b\times n_b$ 的缩聚单刚 $K_s^j$ 换成 $n_c\times n_c$ 的投影单刚 $L^TK_s^jL$，把边界提取矩阵 $A_b^j$ 换成角点提取矩阵 $A_c^j$。
+
+求解与恢复。记 $F_\Gamma$ 为细网格载荷在接口自由度上的分量，$F_C=P^{T}F_\Gamma$ 为其在角点上的等效载荷（对任意 $U_C$ 满足 $F_C^{T}U_C=F_\Gamma^{T}PU_C$）；支承点都在角点上，两侧都按固定自由度消元。
+
+$$
+\text{full\_trace:}\quad K_\Gamma U_\Gamma=F_\Gamma,\qquad u_b^{j}=A_b^{j}U_\Gamma,\qquad u_i^{j}=-\bigl(K_{ii}^{j}\bigr)^{-1}K_{ib}^{j}u_b^{j}
+$$
+
+$$
+\text{linear\_corner:}\quad K_CU_C=F_C,\qquad u_b^{j}=L\,A_c^{j}U_C,\qquad u_i^{j}=-\bigl(K_{ii}^{j}\bigr)^{-1}K_{ib}^{j}u_b^{j}
+$$
+
+两侧恢复内部位移的公式相同，只是 $u_b^j$ 的来源不同。报告的柔顺度分别为 $C_\Gamma=F_\Gamma^TU_\Gamma$ 与 $C_C=F_C^TU_C$，都等于各自恢复后全场位移的 $F^TU$。
+
+两者的关系。把 $A_b^{j}P=LA_c^{j}$ 代入 $K_C$ 的组装式：
+
+$$
+K_C=\sum_j\bigl(LA_c^{j}\bigr)^{T}K_s^{j}\bigl(LA_c^{j}\bigr)=\sum_j\bigl(A_b^{j}P\bigr)^{T}K_s^{j}\bigl(A_b^{j}P\bigr)=P^{T}K_\Gamma P,\qquad F_C=P^{T}F_\Gamma
+$$
+
+即 linear_corner 的角点系统就是 full_trace 的接口系统限制到子空间 $U_\Gamma=PU_C$ 上的 Galerkin 投影。substructure_vs_fem.md 中 $K_\Gamma$ 是 $K$ 的 Schur 补，消去的是内部自由度，解不变，所以 FA 与 full_trace 代数等价；这里 $P$ 是 $N_\Gamma\times N_C$ 的瘦矩阵，不可逆，消去的是接口上非角点的位移自由度，解会改变。因此两侧不等价，linear_corner 是 full_trace 的 Ritz 近似，差别可以写成：
+
+1. 柔顺度单调偏低，偏低量等于位移误差的能量范数平方：
+
+$$
+C_C\le C_\Gamma,\qquad C_\Gamma-C_C=\bigl\|U^{\Gamma}-U^{C}\bigr\|_K^{2}=\bigl\|U_\Gamma-PU_C\bigr\|_{K_\Gamma}^{2},\qquad \varepsilon_\Gamma=\frac{C_\Gamma-C_C}{C_\Gamma}
+$$
+
+2. 最佳逼近：$\|U^{\Gamma}-U^{C}\|_K=\min\{\|U^{\Gamma}-V\|_K:\ V_\Gamma\in\operatorname{range}P\}$。接口迹为仿射场时误差为零；$m=1$ 时 $n_b=n_c$、$L=I$，两侧相同。
+
+3. 灵敏度公式同形：子空间不随 $\tilde\rho$ 变化，$\partial C_C/\partial\tilde\rho_e=-c'(\tilde\rho_e)(u_e^{C})^{T}K^0u_e^{C}$，与 full_trace 只差代入的恢复位移。此为推导结论，代码中 `ComplianceObjective.jac` 对两种接口走同一路径，尚未用有限差分做数值核对。
+
+装配复杂度：三维 Q1 单元下 $n_i=3(m-1)^3$，$n_b=18m^2+6$，$n_c=24$，$N_s=\lvert\mathcal T_h\rvert/m^3$。
+
+| 步骤 | 运算量（散加个数 / flop） | 对 $\lvert\mathcal T_h\rvert$、$m$ 的阶 | $m=5$ |
+|---|---|---|---|
+| 共用：局部组装 $K^j$ | $N_s(n_i+n_b)^2$ | $\Theta(\lvert\mathcal T_h\rvert m^3)$ | $8.6\times10^{8}$ |
+| 共用：缩聚 $K_s^j$ | $N_s\bigl(\tfrac23n_i^3+2n_i^2n_b+2n_in_b^2\bigr)$ | $\Theta(\lvert\mathcal T_h\rvert m^6)$ | $2.4\times10^{11}$ |
+| full_trace：组装 $K_\Gamma$ | $N_sn_b^2$ | $\Theta(\lvert\mathcal T_h\rvert m)$ | $4.3\times10^{8}$ |
+| linear_corner：投影 $L^TK_s^jL$ | $N_sn_bn_c(n_b+n_c)$ | $\Theta(\lvert\mathcal T_h\rvert m)$ | $1.1\times10^{10}$ |
+| linear_corner：组装 $K_C$ | $N_sn_c^2$ | $\Theta(\lvert\mathcal T_h\rvert/m^3)$ | $1.2\times10^{6}$ |
+| 接口未知量 | $N_\Gamma$ / $N_C$ | $\Theta(\lvert\mathcal T_h\rvert/m)$ / $\Theta(\lvert\mathcal T_h\rvert/m^3)$ | $425\,232$ / $8\,256$ |
+| CG 每步 matvec 非零元上界 | $N_sn_b^2$ / $N_sn_c^2$ | $\Theta(\lvert\mathcal T_h\rvert m)$ / $\Theta(\lvert\mathcal T_h\rvert/m^3)$ | $4.3\times10^{8}$ / $1.2\times10^{6}$ |
+
+$m=5$ 一列按公式计算，不是实测；非零元一行是各子结构稠密块之和的上界，共享面会使实际值略小。两侧的主要成本都在共用的缩聚一步；linear_corner 多出的投影与缩聚相比可忽略，省下的是全局矩阵规模与接口未知量数，代价是上面的模型误差。
+
+
 ### 3.1 优化结果
 
 | 项目 | full_trace + Jacobi | linear_corner + Jacobi |
