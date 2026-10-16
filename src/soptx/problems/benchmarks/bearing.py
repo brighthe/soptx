@@ -116,11 +116,16 @@ class BearingTraction2d(ElasticityBenchmark):
         return bm.set_at(value, (on_top, 1), self.traction_intensity)
 
     def loads(self) -> tuple[BoundaryTractionLoad, ...]:
-        """返回顶边均布牵引载荷."""
+        """返回顶边均布牵引载荷.
+
+        标记只取顶边, 不取 ``is_traction_boundary`` (顶边与侧边): 分析器按边重心选边、
+        在边端点上逐点取值, 若侧边也被选中, 其顶端端点落在 ``y = y1`` 上会取到顶边载荷,
+        使角点两侧的牵引数据不相容. 侧边仍由 ``is_traction_boundary`` 强施加零牵引.
+        """
         return (
             BoundaryTractionLoad(
                 dimension=self.dimension,
-                marker=self.is_traction_boundary,
+                marker=self._on_top_boundary,
                 value=self._boundary_traction,
             ),
         )

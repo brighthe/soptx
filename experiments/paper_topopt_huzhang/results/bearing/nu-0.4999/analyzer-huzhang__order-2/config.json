@@ -1,0 +1,55 @@
+{
+  "case_id": "bearing",
+  "group": "nu-0.4999",
+  "method": "huzhang",
+  "order": 2,
+  "label": "analyzer-huzhang__order-2",
+  "model": {
+    "domain": [
+      0.0,
+      120.0,
+      0.0,
+      40.0
+    ],
+    "traction": -0.08,
+    "E0": 1.0,
+    "nu": 0.4999,
+    "plane_type": "plane_strain"
+  },
+  "discretization": {
+    "mesh_type": "triangle-single-diagonal-symmetric",
+    "nx": 120,
+    "ny": 40,
+    "integration_order": 6,
+    "use_relaxation": false,
+    "assembly_method": "standard",
+    "solver": "mumps"
+  },
+  "optimization": {
+    "optimizer": "oc",
+    "volume_fraction": 0.35,
+    "initial_density": 0.35,
+    "filter_type": "density",
+    "filter_radius": 2.0,
+    "interpolation": {
+      "method": "msimp",
+      "variables": "E+nu",
+      "penalty": 3.0,
+      "emin": 1e-09,
+      "nu_penalty_factor": 1.0,
+      "void_poisson_ratio": 0.3
+    },
+    "max_iterations": 1000,
+    "change_tolerance": 0.01,
+    "move_limit": 0.2,
+    "damping": 0.5,
+    "initial_lambda": 1000000000.0,
+    "bisection_tol": 0.001
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-15T11:56:37+00:00",
+    "git_revision": "c0b5a69f3af9bddcd571e62822d8732b579a256c",
+    "git_dirty": true,
+    "reproducible": false
+  }
+}

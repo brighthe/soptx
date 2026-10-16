@@ -228,6 +228,8 @@ class MMAOptimizer(BaseLogged):
 
         # ==================== 优化状态初始化 ====================
         self.history = OptimizationHistory()
+        # 记录第 0 步构型: rho_phys 已含滤波, 即优化的真实起点
+        self.history.log_initial(rho_phys)
         # 初始化目标函数缩放因子 (投影时使用)
         self._obj_scale_factor = None
 

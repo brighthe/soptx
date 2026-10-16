@@ -113,7 +113,7 @@ def require_run_dir(case_dir: Path, folder: str) -> Path:
         raise FileNotFoundError(
             f"缺少产物目录 {case_dir.name}/{folder}; "
             "请先运行对应算例的 run 脚本 (run_fixed_fixed.py / run_bearing.py / "
-            "run_cantilever_stress.py)"
+            "run_cantilever_stress.py), 并经 sync_results.py 固化到 results/"
         )
     return run_dir
 

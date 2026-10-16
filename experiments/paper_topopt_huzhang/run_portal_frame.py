@@ -5,11 +5,12 @@
 空间后施加. 支座不对称, 状态场不严格对称, 因此按全域求解; 设计对称性由过滤器对 x = L/2 做
 对称化 (symmetry_planes). 设计域含斜边, 在 gmsh 生成左半域再镜像到右半的非结构三角形网格
 (严格关于 x = L/2 对称) 上求解. 以表观应力松弛约束下的体积最小化为目标, 增广拉格朗日 + MMA
-(AL-MMA) 求解. 载荷区两端点的应力奇异性由载荷端点被动实体区处置: 半径 LOAD_PAD_RADIUS 内的
-单元既豁免应力约束又钉为实体; 凹角顶点不设被动实体区.
+(AL-MMA) 求解. 顶边载荷是法向区段牵引, 端点处应力只间断不奇异 (全实体加密实测有界, 约 0.70),
+故不设被动实体区, 全部单元受应力约束 (与 PolyStress 一致); 凹角顶点同样不设.
 
 结果写入运行目录 ``outputs/<case>/<label>/`` (不入库, 已存在则拒绝覆盖); 确认后经
-``sync_results.py`` 固化到入库的 ``results/``. 逐步帧写 ``config.VIEW_DIR`` 下的查看副本.
+``sync_results.py`` 固化到入库的 ``results/``. 逐步帧 ``iterations/`` 与 ``evolution.pvd`` 留在运行目录,
+需要时手动迁移到 Windows 查看目录 ``config.VIEW_DIR``.
 
     python run_portal_frame.py --analyzer lfem --order 3   # 单组
 """
@@ -28,6 +29,7 @@ from soptx.backend import backend_manager as bm
 from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer, project_patch_traction_to_p1_trace
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import TriangleMesh
+from soptx.postprocess.iteration_frames import IterationFrameWriter
 from soptx.postprocess.vtk_export import write_vtu
 from soptx.problems import PortalFramePatch2d
 from soptx.sparse import COOTensor, CSRTensor
@@ -43,7 +45,6 @@ from soptx.topology.objectives import AugmentedLagrangianObjective, VolumeObject
 from soptx.topology.optimizers import ALMMMAOptimizer, ALMMMAOptions
 
 from analysis import provenance
-from config import VIEW_DIR
 
 CASE_ID = "portal-frame-2d-stress"
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / CASE_ID   # 运行产物, 不入库
@@ -61,14 +62,16 @@ STRESS_LIMIT = 1000.0        # MPa, 材料许用应力
 
 # 应力约束参数
 EPSILON = 1.0e-3             # 松弛参数
-LOAD_PAD_RADIUS = 0.25       # 载荷端点被动实体区半径 (mm), 取 l / 4
+LOAD_PAD_RADIUS = 0.0        # 载荷端点被动实体区半径 (mm); 0 表示不处置. 法向区段载荷端点无奇异
+                             # (2026-10-16 全实体 h 加密: 端点邻域实体应力比收敛到约 0.70), 设 0.25
+                             # 时被动区内应力比达 1.17 (HZ k=3), 是豁免被优化器利用而非奇异
 SUPPORT_PAD_RADIUS = 0.0     # 支座端点被动实体区半径 (mm); 0 表示不处置
 
 # 有限元离散参数: gmsh 在左半域生成非结构三角形网格, 再镜像到右半
-MESH_SIZE = 0.0625           # mm, 目标单元尺寸 h
+MESH_SIZE = 0.0625           # mm, 目标单元尺寸 h (R/h=4)
 MESH_ALGORITHM = 6           # gmsh Mesh.Algorithm: 6 = Frontal-Delaunay
 METHODS = ("lfem", "huzhang")
-ORDERS = (2, 3, 4)
+ORDERS = (1, 2, 3, 4)        # 1 只供 LFEM (p=1 对照 PolyStress 的线性单元); HZMFEM 要求 k >= 2
 # HZMFEM 不做角点松弛: 各几何角点处牵引为零, 两侧数据相容, 未松弛的角点由分析器按 Hu & Ma (2021)
 # 式 (4.1) 联立两侧强约束施加; 凹角与支座段内端通常不满足两单元松弛拓扑, 无法统一松弛
 USE_RELAXATION = False
@@ -93,7 +96,8 @@ HOLD_STEPS = 10               # C3 只在 C0 (beta 到顶) 后计数: 到顶后�
 INNER_STOP_RULE = "legacy"
 INNER_RELATIVE_TOLERANCE = 0.1
 INNER_ABSOLUTE_TOLERANCE = 1.0e-6
-MU_0 = 10.0                  # PolyStress Table 3 取值 (悬臂梁为 50)
+MU_0 = 50.0                  # 与悬臂梁同值; PolyStress Table 3 的 10 使连续化前期约束严重违反,
+                             # beta 到顶时拓扑未成形即被锁定 (体积 0.345, 乘子触顶)
 MU_MAX = 1.0e4
 ALPHA = 1.1
 LAMBDA_0 = 0.0
@@ -104,7 +108,8 @@ ACCEPTANCE_SOLID_THRESHOLD = 0.5  # C2 只在 rho_phys >= 0.5 的未豁免单元
 
 # 运行目录名模板 (填 method, order)
 RUN_LABEL = "analyzer-{method}__order-{order}"
-# density_final.vtu 与逐步帧写出的单元场: 'density' 物理密度, 'von_mises_normalized' 单元最大应力比
+# density_final.vtu 与逐步帧写出的单元场: 'density' 物理密度, 'von_mises_normalized' 单元最大应力比;
+# density_initial.vtu (第 0 帧的副本) 只有 'density'
 VTU_FIELDS = ("density", "von_mises_normalized")
 
 
@@ -115,9 +120,54 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--order", type=int, choices=ORDERS, required=True,
                         help="阶次 k (LFEM 位移阶 p = k, HZMFEM 应力阶 k)")
     args = parser.parse_args(argv)
+    if args.analyzer == "huzhang" and args.order < 2:
+        parser.error("HZMFEM 要求 --order >= 2")
     args.label = RUN_LABEL.format(method=args.analyzer, order=args.order)
     args.output = OUTPUT_DIR / args.label
     return args
+
+
+def format_run_header(config: dict[str, Any], output: Path, dofs: str) -> str:
+    """把本组的关键设置排成启动时打印的摘要.
+
+    Parameters
+    ----------
+    config : dict
+        ``main`` 第 0 步构造的完整设置, 与落盘的 ``config.json`` 同源.
+    output : Path
+        运行目录.
+    dofs : str
+        自由度规模的描述, 如 ``'285,818 自由度'``; 第 1 步组装分析链后才知道.
+
+    Returns
+    -------
+    header : str
+        首行为运行名与运行目录, 其后按模型、离散、约束、优化分行; 完整设置 (含代码版本戳记) 以
+        ``config.json`` 为准.
+    """
+    model, stress = config["model"], config["stress_constraint"]
+    disc, opt = config["discretization"], config["optimization"]
+    proj = opt["projection"]
+    if config["method"] == "huzhang":
+        chain = f"HZMFEM k={config['order']}"
+        variant = f"角点松弛={'开' if disc['use_relaxation'] else '关'}"
+    else:
+        chain = f"LFEM p={config['order']}"
+        variant = f"装配={disc['assembly_method']}"
+    return "\n".join([
+        f"[run] {config['label']} -> {output}",
+        f"  模型  {model['L']:g} x {model['H']:g} mm, {model['plane_type']}, E0={model['E0']:g}, "
+        f"nu={model['nu']:g}, P={model['load']:g} N 均布于 l={model['load_width']:g} mm, "
+        f"sigma_lim={model['stress_limit']:g}",
+        f"  离散  {chain}, gmsh 镜像三角 h={disc['mesh_size']:g}, {dofs}, 积分 {disc['integration_order']} 阶, "
+        f"{variant}, {disc['solver']}",
+        f"  约束  epsilon={stress['epsilon']:g}, 被动实体区 r: 载荷端点 {stress['load_pad_radius']:g} / "
+        f"支座端点 {stress['support_pad_radius']:g}",
+        f"  优化  AL-MMA, rho0={opt['initial_density']:g}, 过滤 r={opt['filter_radius']:g}, "
+        f"MSIMP p={opt['penalty']:g}, {proj['projection_type']} beta {proj['beta']:g}->{proj['beta_max']:g} "
+        f"(每 {proj['continuation_iter']} 外层步 +{proj['beta_increment']:g}), "
+        f"外层 <= {opt['max_al_iterations']} x 内层 {opt['mma_iters_per_al']}, mu0={opt['mu_0']:g}",
+    ])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -129,8 +179,6 @@ def main(argv: list[str] | None = None) -> int:
     stamp = provenance.run_stamp()
 
     method, order, label, output = args.analyzer, args.order, args.label, args.output
-    view = VIEW_DIR / CASE_ID / label if VIEW_DIR.parent.is_dir() else output
-    print(f"[run] {label}: 结果 -> {output}, 帧 -> {view}", flush=True)
 
     # 0. 开跑前记录本组的全部设置, 中途中断也能复原运行条件; summary.json 中的同名参数保留
     config = {
@@ -251,9 +299,9 @@ def main(argv: list[str] | None = None) -> int:
         density_location="element", interpolation_method="msimp",
         options={"penalty_factor": PENALTY, "void_youngs_modulus": EMIN, "target_variables": ["E"]},
     )
-    # 被动实体区: 载荷端点与支座角点 (均为应力奇点) 各自半径内的单元, 支座角点半径为 0 即不处理;
+    # 被动实体区: 载荷端点与支座角点各自半径内的单元, 半径为 0 即不处理 (本算例两者均为 0);
     # 凹角顶点不设: 优化从凹角应力集中区去料正是本算例的预期结果.
-    # 这些单元不施加应力约束, 并经过滤器 (passive_mask) 固定为实体
+    # 区内单元不施加应力约束, 并经过滤器 (passive_mask) 固定为实体
     load_pad_mask = build_exemption_mask(
         mesh=mesh, centers=problem.traction_patch_endpoints, radius=LOAD_PAD_RADIUS)
     support_pad_mask = build_exemption_mask(
@@ -273,6 +321,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         analyzer = HuZhangMFEMAnalyzer(use_relaxation=USE_RELAXATION, **common)
         constraint = HuZhangStressConstraint(analyzer=analyzer, **constraint_args)
+    # 启动摘要: 自由度规模要等分析链建好才知道, 故在此打印 (config.json 已在第 0 步写出)
+    n_u = int(analyzer.tensor_space.number_of_global_dofs())
+    if isinstance(analyzer, HuZhangMFEMAnalyzer):
+        n_sigma = int(analyzer.huzhang_space.number_of_global_dofs())
+        dofs = f"应力 {n_sigma:,} + 位移 {n_u:,} = {n_sigma + n_u:,} 自由度"
+    else:
+        dofs = f"{n_u:,} 自由度"
+    print(format_run_header(config, output, dofs), flush=True)
 
     design_variable, density = interpolation.setup_density_distribution(
         design_variable_mesh=mesh, displacement_mesh=mesh, relative_density=INITIAL_DENSITY)
@@ -402,43 +458,42 @@ def main(argv: list[str] | None = None) -> int:
         "last_inner_diagnostics": getattr(optimizer, "last_inner_diagnostics", None),
     }
 
-    # 5. 落盘: 摘要、收敛历史、最终密度场与 AL 终态写 output (不入库, 确认后经 sync_results.py
-    #    固化到 results/); 逐步帧 vtu/ 与 evolution.pvd 写 view (ParaView 查看副本, 不入库).
-    #    两类 vtu 只写 VTU_FIELDS 中的单元场
+    # 5. 落盘 (全部写 output, 不入库, 确认后经 sync_results.py 固化到 results/):
+    #    初始与最终构型 vtu、AL 终态 npz、终态位移/应力 npy、四份 json; 两类 vtu 只写 VTU_FIELDS 中的单元场.
+    #    初始构型是优化器记录的优化前物理密度 (过滤与实体保留处理之后), 只带密度; 没记录即报错,
+    #    不静默缺文件
+    if history.initial_physical_density is None:
+        raise RuntimeError("优化器没有记录初始物理密度, 无法写出 density_initial.vtu.")
+    initial_cells = {"density": np.asarray(history.initial_physical_density[:]).reshape(-1)}
+    write_vtu(mesh=mesh, filepath=str(output / "density_initial"), cell_data=initial_cells)
     final_fields = {"density": rho, "von_mises_normalized": per_cell_max(stress_measure)}
     write_vtu(mesh=mesh, filepath=str(output / "density_final"),
               cell_data={name: final_fields[name] for name in VTU_FIELDS})
     np.savez_compressed(output / "final_optimizer_state.npz", **state_arrays)
+    # 终态求解 (第 3 步) 的位移自由度向量; Hu--Zhang 另存应力自由度向量 (松弛坐标, 按 huzhang_space.value 取值)
+    np.save(output / "displacement_final.npy", np.asarray(state["displacement"][:]))
+    if "stress" in state:
+        np.save(output / "stress_final.npy", np.asarray(state["stress"][:]))
     (output / "outer_history.json").write_text(
         json.dumps(getattr(optimizer, "outer_history", []), ensure_ascii=False, indent=2),
         encoding="utf-8")
-    frames = view / "vtu"
-    frames.mkdir(parents=True, exist_ok=True)
-    stress_frames = (getattr(history, "field_histories", None) or {}).get("von_mises_stress") or []
-    # 第 0 帧是优化前的初始构型 (优化器记录了才写, 只带密度), 其后每帧对应一次迭代
-    if history.initial_physical_density is not None:
-        cells = {"density": np.asarray(history.initial_physical_density[:]).reshape(-1)}
-        write_vtu(mesh=mesh, filepath=str(frames / "density_iter_000"),
-                  cell_data={name: value for name, value in cells.items() if name in VTU_FIELDS})
-    for index, rho_i in enumerate(history.physical_densities, start=1):
-        cells = {"density": np.asarray(rho_i).reshape(-1)}
-        if len(stress_frames) >= index:
-            cells["von_mises_normalized"] = per_cell_max(stress_frames[index - 1])
-        write_vtu(mesh=mesh, filepath=str(frames / f"density_iter_{index:03d}"),
-                  cell_data={name: value for name, value in cells.items() if name in VTU_FIELDS})
-    # ParaView 时间序列集合文件, 与 vtu/ 同级; 时间步即迭代步号
-    steps = ([0] if history.initial_physical_density is not None else []) + list(
-        range(1, len(history.physical_densities) + 1))
-    (view / "evolution.pvd").write_text(
-        '<?xml version="1.0"?>\n<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">\n'
-        '<Collection>\n' + "".join(
-            f'<DataSet timestep="{i}" group="" part="0" file="vtu/density_iter_{i:03d}.vtu"/>\n'
-            for i in steps) + '</Collection>\n</VTKFile>\n', encoding="utf-8")
     payload = {"iter_indices": history.iter_indices, "changes": history.changes,
                "iteration_times": history.iteration_times,
                "scalar_histories": history.scalar_histories}
     (output / "history.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 6. 逐步帧: 第 0 帧是初始构型, 其后每帧对应一次迭代 (AL-MMA 无逐步回调, 帧由优化器记录的
+    #    历史在结束后一次写出); IterationFrameWriter 写 iterations/iter_NNNN.vtu 与 evolution.pvd
+    #    到运行目录, 留在原处, 需要时手动迁移到 Windows 查看目录
+    frames = IterationFrameWriter(output, mesh)
+    frames.write(0, cell_data=initial_cells)
+    stress_frames = (getattr(history, "field_histories", None) or {}).get("von_mises_stress") or []
+    for index, rho_i in enumerate(history.physical_densities, start=1):
+        cells = {"density": np.asarray(rho_i).reshape(-1)}
+        if len(stress_frames) >= index:
+            cells["von_mises_normalized"] = per_cell_max(stress_frames[index - 1])
+        frames.write(index, cell_data={name: value for name, value in cells.items() if name in VTU_FIELDS})
     (output / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[done] {method} k={order}: {summary['optimization_iterations']} 步, "

@@ -168,6 +168,8 @@ class OCOptimizer(BaseLogged):
 
         # 初始化历史记录
         history = OptimizationHistory()
+        # 记录第 0 步构型: rho_phys 已含滤波, 即优化的真实起点
+        history.log_initial(rho_phys)
 
         # 优化主循环
         for iter_idx in range(max_iters):

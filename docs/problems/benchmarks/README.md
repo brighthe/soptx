@@ -23,7 +23,7 @@ C 与 D 的差别只在载荷区是不是整条边界，而这一条决定了两
 | 载荷区标记的判定粒度 | 不适用 | `marker` 无排除项，不会触发 | 写新模型时检查 |
 | 额外验证 | 无 | 无 | `check_boundary_load_resultant` |
 
-两条规则的实现口径见 [`load-handling-implementation.md`](../../fem/load-handling-implementation.md) 的 6.3 与 6.4 节。
+两条规则的实现口径见 [`load-handling-implementation.md`](../../fem/load-handling-implementation.md) 的 2.1、2.2 节（面 / 边重心判定）与 3.3 节（端点对齐检查）。
 
 ## 验证判据
 

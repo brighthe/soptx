@@ -1,17 +1,11 @@
 """二维悬臂梁局部应力约束体积最小化 (论文 5.2.3 节 / 图 5.8~5.11).
 
 设计域 80 mm x 40 mm, 平面应力, 左端固支, 右端中点竖直合力 P 化为宽 LOAD_WIDTH 的
-均布牵引. 以表观应力松弛约束下的体积最小化为目标, 增广拉格朗日 + MMA
-(AL-MMA) 求解; LFEM p = 2, 3, 4 与 HZMFEM k = 2, 3, 4 各做一次优化. 牵引贴片两端点的
-应力奇异性由载荷端点被动实体区处置: 半径 LOAD_PAD_RADIUS 内的单元既豁免应力约束又钉为实体.
-
-结果写入运行目录 ``outputs/<case>/<label>/`` (不入库, 已存在则拒绝覆盖): config / summary /
-history / outer_history 四份 json, AL 终态 ``final_optimizer_state.npz``, 终态位移 (Hu--Zhang 另有
-应力) npy, 以及初始与最终构型 ``density_initial.vtu`` / ``density_final.vtu``; 确认后经
-``sync_results.py`` 固化到入库的 ``results/``. 逐步帧 ``iterations/iter_NNNN.vtu`` 与
-``evolution.pvd`` 由 ``IterationFrameWriter`` 写在运行目录, ``summary.json`` 落盘后迁移到
-``config.VIEW_DIR/<case>/<label>/`` (Windows ParaView 查看副本), 迁移位置记在
-``visualization_location.json``; 查看目录已存在且含其他条目时拒绝清空、跳过迁移, 帧留在运行目录.
+均布牵引, 再 L2 投影到右边界的连续 P1 迹空间, 两条分析链看到同一个离散载荷. 以表观应力松弛
+约束下的体积最小化为目标, 增广拉格朗日 + MMA (AL-MMA) 求解; LFEM p = 2, 3, 4 与
+HZMFEM k = 2, 3, 4 各做一次优化. 牵引贴片两端点的应力奇异性由载荷端点被动实体区处置:
+半径 LOAD_PAD_RADIUS 内的单元既豁免应力约束又钉为实体. 停止判据与终态验收在被动实体区外的
+全部受约束单元上评价 (ACCEPTANCE_SOLID_THRESHOLD = None).
 
     python run_cantilever_stress.py --analyzer huzhang --order 2   # 单组
     for m in lfem huzhang; do for k in 2 3 4; do
@@ -28,7 +22,7 @@ from typing import Any
 import numpy as np
 
 from soptx.backend import backend_manager as bm
-from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
+from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer, project_patch_traction_to_p1_trace
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import TriangleMesh
 from soptx.postprocess.iteration_frames import IterationFrameWriter
@@ -47,7 +41,6 @@ from soptx.topology.objectives import AugmentedLagrangianObjective, VolumeObject
 from soptx.topology.optimizers import ALMMMAOptimizer, ALMMMAOptions
 
 from analysis import provenance
-from config import VIEW_DIR
 
 CASE_ID = "cantilever-middle-2d-stress"
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / CASE_ID   # 运行产物, 不入库
@@ -98,7 +91,10 @@ LAMBDA_0 = 0.0
 LAMBDA_MAX = 3000.0          # 乘子安全阈 (safeguarded AL)
 MOVE_LIMIT = 0.15
 ASYMPTOTE_MIN_DISTANCE = 1.0e-4
-ACCEPTANCE_SOLID_THRESHOLD = 0.5  # C2 只在 rho_phys >= 0.5 的未豁免单元上验收
+# C2 与终态验收的单元集合 (论文 4.6.2 节的 E_acc): None 为被动实体区外全部受约束单元;
+# 取 (0, 1) 内的数则只验收 rho_phys >= 该值的单元
+ACCEPTANCE_SOLID_THRESHOLD = None
+SOLID_REPORT_THRESHOLD = 0.5      # 只用于报告实体区 (rho_phys >= 0.5) 的最大应力比, 不参与验收
 
 # 运行目录名模板 (填 method, order)
 RUN_LABEL = "analyzer-{method}__order-{order}"
@@ -119,6 +115,73 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def build_problem() -> CantileverMiddlePatch2d:
+    """构造注入 P1 迹载荷的悬臂梁问题, 优化运行与冻结重分析共用.
+
+    先按原始物理问题取载荷区几何, 再把区段常值牵引 L2 投影到右边界 (沿 y 均匀剖分 NY 段)
+    的连续 P1 迹空间后重建问题; 几何、材料与边界标记不变.
+
+    Returns
+    -------
+    problem : CantileverMiddlePatch2d
+        ``uses_step_traction`` 为 False 的问题实例.
+    """
+    kwargs: dict[str, Any] = dict(domain=(0.0, L, 0.0, H), P=LOAD, load_width=LOAD_WIDTH,
+                                  E=E0, nu=NU, plane_type=PLANE_TYPE)
+    problem = CantileverMiddlePatch2d(**kwargs)
+    _, _, ymin, ymax = problem.domain
+    traction = project_patch_traction_to_p1_trace(
+        line=(ymin, ymax), n_cells=NY, level=problem.traction_level,
+        patch=problem.traction_patch, intensity=problem.traction_intensity,
+        axis=problem.traction_axis)
+    return CantileverMiddlePatch2d(**kwargs, traction=traction)
+
+
+def format_run_header(config: dict[str, Any], output: Path, dofs: str) -> str:
+    """把本组的关键设置排成启动时打印的摘要.
+
+    Parameters
+    ----------
+    config : dict
+        ``main`` 第 0 步构造的完整设置, 与落盘的 ``config.json`` 同源.
+    output : Path
+        运行目录.
+    dofs : str
+        自由度规模的描述, 如 ``'58,322 自由度'``; 第 1 步组装分析链后才知道.
+
+    Returns
+    -------
+    header : str
+        首行为运行名与运行目录, 其后按模型、离散、约束、优化分行; 完整设置 (含代码版本戳记) 以
+        ``config.json`` 为准.
+    """
+    model, stress = config["model"], config["stress_constraint"]
+    disc, opt = config["discretization"], config["optimization"]
+    proj = opt["projection"]
+    if config["method"] == "huzhang":
+        chain = f"HZMFEM k={config['order']}"
+        variant = f"角点松弛={'开' if disc['use_relaxation'] else '关'}"
+    else:
+        chain = f"LFEM p={config['order']}"
+        variant = f"装配={disc['assembly_method']}"
+    return "\n".join([
+        f"[run] {config['label']} -> {output}",
+        f"  模型  {model['L']:g} x {model['H']:g} mm, {model['plane_type']}, E0={model['E0']:g}, "
+        f"nu={model['nu']:g}, P={model['load']:g} N 均布于 l={model['load_width']:g} mm "
+        f"({disc['load_discretization']}), sigma_lim={model['stress_limit']:g}",
+        f"  离散  {chain}, 棋盘三角 {disc['nx']}x{disc['ny']}, {dofs}, 积分 {disc['integration_order']} 阶, "
+        f"{variant}, {disc['solver']}",
+        f"  约束  epsilon={stress['epsilon']:g}, 被动实体区 r: 载荷端点 {stress['load_pad_radius']:g} / "
+        f"固支角点 {stress['support_pad_radius']:g}, 验收 "
+        + ("被动实体区外全部单元" if opt["acceptance_solid_threshold"] is None
+           else f"rho >= {opt['acceptance_solid_threshold']:g}"),
+        f"  优化  AL-MMA, rho0={opt['initial_density']:g}, 过滤 r={opt['filter_radius']:g}, "
+        f"MSIMP p={opt['penalty']:g}, {proj['projection_type']} beta {proj['beta']:g}->{proj['beta_max']:g} "
+        f"(每 {proj['continuation_iter']} 外层步 +{proj['beta_increment']:g}), "
+        f"外层 <= {opt['max_al_iterations']} x 内层 {opt['mma_iters_per_al']}, mu0={opt['mu_0']:g}",
+    ])
+
+
 def main(argv: list[str] | None = None) -> int:
     """单组: 记录配置 -> 组装 -> 投影过滤 + AL-MMA 优化 -> 终态求解与验收 -> 落盘."""
     args = parse_args(argv)
@@ -128,7 +191,6 @@ def main(argv: list[str] | None = None) -> int:
     stamp = provenance.run_stamp()
 
     method, order, label, output = args.analyzer, args.order, args.label, args.output
-    print(f"[run] {label}: 结果 -> {output}, 帧迁移到 -> {VIEW_DIR / CASE_ID / label}", flush=True)
 
     # 0. 开跑前记录本组的全部设置, 中途中断也能复原运行条件; summary.json 中的同名参数保留
     config = {
@@ -139,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
                               "support_pad_radius": SUPPORT_PAD_RADIUS},
         "discretization": {"mesh_type": "triangle-checkerboard", "nx": NX, "ny": NY,
                            "integration_order": 2 * order + 2, "use_relaxation": USE_RELAXATION,
+                           "load_discretization": "p1_trace_l2_projection",
                            "assembly_method": ASSEMBLY_METHOD, "solver": SOLVER},
         "optimization": {
             "filter_radius": FILTER_RADIUS, "penalty": PENALTY, "emin": EMIN,
@@ -166,8 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 1. 组装分析链: 问题、网格、分析器、被动实体区、应力约束与 AL 目标.
-    problem = CantileverMiddlePatch2d(domain=(0.0, L, 0.0, H), P=LOAD, load_width=LOAD_WIDTH,
-                                 E=E0, nu=NU, plane_type=PLANE_TYPE)
+    problem = build_problem()
     mesh = TriangleMesh.from_checkerboard_box(box=problem.domain, nx=NX, ny=NY)
     material = IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E, poisson_ratio=problem.nu,
@@ -197,6 +259,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         analyzer = HuZhangMFEMAnalyzer(use_relaxation=USE_RELAXATION, **common)
         constraint = HuZhangStressConstraint(analyzer=analyzer, **constraint_args)
+    # 启动摘要: 自由度规模要等分析链建好才知道, 故在此打印 (config.json 已在第 0 步写出)
+    n_u = int(analyzer.tensor_space.number_of_global_dofs())
+    if isinstance(analyzer, HuZhangMFEMAnalyzer):
+        n_sigma = int(analyzer.huzhang_space.number_of_global_dofs())
+        dofs = f"应力 {n_sigma:,} + 位移 {n_u:,} = {n_sigma + n_u:,} 自由度"
+    else:
+        dofs = f"{n_u:,} 自由度"
+    print(format_run_header(config, output, dofs), flush=True)
 
     design_variable, density = interpolation.setup_density_distribution(
         design_variable_mesh=mesh, displacement_mesh=mesh, relative_density=INITIAL_DENSITY)
@@ -246,11 +316,15 @@ def main(argv: list[str] | None = None) -> int:
     # 未加权实体应力比: 只报告不判据, 反映实体材料真实的应力水平
     solid_stress_ratio = np.asarray(constraint.compute_solid_stress_ratio(rho_phys, state))
     rho = np.asarray(rho_phys).reshape(-1)
-    solid = rho >= ACCEPTANCE_SOLID_THRESHOLD
+    # 验收集合与优化器 C2 同口径: 被动实体区外, 阈值非 None 时再限于 rho >= 阈值
+    accepted = ~np.asarray(bm.to_numpy(pad_mask)).astype(bool)
+    if ACCEPTANCE_SOLID_THRESHOLD is not None:
+        accepted &= rho >= ACCEPTANCE_SOLID_THRESHOLD
+    solid = rho >= SOLID_REPORT_THRESHOLD
     per_cell_max = lambda value: np.asarray(value).reshape(len(value), -1).max(axis=1)  # 积分点场取单元最大值
     violation_cell = per_cell_max(relative_violation)
-    g_solid = float(violation_cell[solid].max()) if solid.any() else None
-    feasible = bool((g_solid if g_solid is not None else float(relative_violation.max()))
+    g_acc = float(violation_cell[accepted].max()) if accepted.any() else None
+    feasible = bool((g_acc if g_acc is not None else float(relative_violation.max()))
                     <= STRESS_TOLERANCE)
     # 被动实体区内的约束值按未豁免口径重算 (约束对象在豁免单元上返回哨兵 -1)
     pad_constraint = np.asarray(constraint.compute_unexempted_constraint(rho_phys, state))
@@ -269,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
         "nx": NX,
         "ny": NY,
         "optimizer": "al_mma",
-        "load_discretization": "patch",
+        "load_discretization": "p1_trace_l2_projection",
         "integration_order": 2 * order + 2,
         "stabilization_coefficient": getattr(analyzer, "stabilization_coefficient", None),
         "volume_fraction": float(volume_objective.fun(density)),
@@ -287,8 +361,10 @@ def main(argv: list[str] | None = None) -> int:
         "max_relative_violation": float(relative_violation.max()),
         "relative_stress_tolerance": STRESS_TOLERANCE,
         "acceptance_solid_threshold": ACCEPTANCE_SOLID_THRESHOLD,
-        "max_relative_violation_solid_region": g_solid,
+        "max_relative_violation_accepted": g_acc,
+        "accepted_cells": int(accepted.sum()),
         "relative_stress_feasible": feasible,
+        "solid_report_threshold": SOLID_REPORT_THRESHOLD,
         "max_solid_stress_ratio_solid_region": masked_max(solid_stress_ratio, solid),
         # 被动实体区诊断: 两侧分列, 使"被动实体区掩盖了多大的应力"可直接读出
         "load_pad_radius": LOAD_PAD_RADIUS,
@@ -353,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # 6. 逐步帧: 第 0 帧是初始构型, 其后每帧对应一次迭代 (AL-MMA 无逐步回调, 帧由优化器记录的
     #    历史在结束后一次写出); IterationFrameWriter 写 iterations/iter_NNNN.vtu 与 evolution.pvd
-    #    到运行目录, summary.json 落盘后迁移到查看目录
+    #    到运行目录, 留在原处, 需要时手动迁移到 Windows 查看目录
     frames = IterationFrameWriter(output, mesh)
     frames.write(0, cell_data=initial_cells)
     stress_frames = (getattr(history, "field_histories", None) or {}).get("von_mises_stress") or []
@@ -364,9 +440,8 @@ def main(argv: list[str] | None = None) -> int:
         frames.write(index, cell_data={name: value for name, value in cells.items() if name in VTU_FIELDS})
     (output / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    frames.publish(VIEW_DIR / CASE_ID)
     print(f"[done] {method} k={order}: {summary['optimization_iterations']} 步, "
-          f"volfrac={summary['volume_fraction']:.6f}, g_max(实体)={g_solid}, "
+          f"volfrac={summary['volume_fraction']:.6f}, g_max(验收集合)={g_acc}, "
           f"converged={summary['converged']}", flush=True)
     return 0
 

@@ -34,8 +34,8 @@
   ],
   "reference": "huzhang-4",
   "provenance": {
-    "generated_at_utc": "2026-10-07T01:53:58+00:00",
-    "git_revision": "6ead0982450bedf458b53b06dd5f31e79171b8ee",
+    "generated_at_utc": "2026-10-16T08:46:30+00:00",
+    "git_revision": "c0b5a69f3af9bddcd571e62822d8732b579a256c",
     "git_dirty": true,
     "reproducible": false
   },
@@ -68,12 +68,12 @@
         },
         "huzhang-2": {
           "run_dir": "bearing/nu-0.3/analyzer-huzhang__order-2",
-          "optimization_iterations": 464,
+          "optimization_iterations": 255,
           "converged": true,
-          "summary_compliance": 127.67811313267983,
+          "summary_compliance": 127.37915995147085,
           "density_final": {
             "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.3/analyzer-huzhang__order-2/density_final.vtu",
-            "sha256": "8d8269989cdb25ad04cd5224c7eeb12c57b4e9228029448b2caa22a85d05e46d",
+            "sha256": "d75daf852b9d7bc4bf2b8189caa4922d70f85d80f947b9542b6d56be24877e30",
             "bytes": 388746
           }
         }
@@ -82,20 +82,20 @@
         "lfem-1": {
           "lfem-1": 119.32933101071151,
           "lfem-2": 123.46120001622123,
-          "huzhang-2": 131.9305405786719,
-          "huzhang-4": 125.82576337731628
+          "huzhang-2": 130.6545121637245,
+          "huzhang-4": 125.41501162729305
         },
         "lfem-2": {
-          "lfem-1": 119.60496677283983,
-          "lfem-2": 122.73318411962249,
-          "huzhang-2": 129.56690294805213,
-          "huzhang-4": 124.6379014945303
+          "lfem-1": 119.6049667728398,
+          "lfem-2": 122.73318411962248,
+          "huzhang-2": 128.52091947877798,
+          "huzhang-4": 124.25385267615724
         },
         "huzhang-2": {
-          "lfem-1": 120.00727541394642,
-          "lfem-2": 122.8057241413473,
-          "huzhang-2": 127.6781131326798,
-          "huzhang-4": 124.29661914512062
+          "lfem-1": 120.5713430896026,
+          "lfem-2": 123.32422620538362,
+          "huzhang-2": 127.37915995147135,
+          "huzhang-4": 124.47509232973059
         }
       }
     },
@@ -127,34 +127,34 @@
         },
         "huzhang-2": {
           "run_dir": "bearing/nu-0.4999/analyzer-huzhang__order-2",
-          "optimization_iterations": 343,
+          "optimization_iterations": 382,
           "converged": true,
-          "summary_compliance": 102.37374554479587,
+          "summary_compliance": 101.35767431552874,
           "density_final": {
             "path": "experiments/paper_topopt_huzhang/results/bearing/nu-0.4999/analyzer-huzhang__order-2/density_final.vtu",
-            "sha256": "bc1a8872100f3259a9e0359a4ba77ae50ad2335f0cc2bc79039f4511956ce26b",
+            "sha256": "8df98774500e16b95268b87fb7485d9d38a14c8e7320eb0d4aab301e6a4c4147",
             "bytes": 388746
           }
         }
       },
       "compliance": {
         "lfem-1": {
-          "lfem-1": 76.43465478088737,
-          "lfem-2": 120.28415395417233,
-          "huzhang-2": 129.55600708214342,
-          "huzhang-4": 123.48944009944678
+          "lfem-1": 76.43465478088733,
+          "lfem-2": 120.28415395417234,
+          "huzhang-2": 128.06195478018645,
+          "huzhang-4": 122.91240177685124
         },
         "lfem-2": {
-          "lfem-1": 82.24081395039993,
-          "lfem-2": 98.06105471955019,
-          "huzhang-2": 104.03199776882265,
-          "huzhang-4": 100.00588721332213
+          "lfem-1": 82.24081395039995,
+          "lfem-2": 98.06105471955017,
+          "huzhang-2": 103.13451222004903,
+          "huzhang-4": 99.6792758478973
         },
         "huzhang-2": {
-          "lfem-1": 82.80957439104024,
-          "lfem-2": 98.0020373529985,
-          "huzhang-2": 102.37374554479631,
-          "huzhang-4": 99.55654916337663
+          "lfem-1": 82.38722535368085,
+          "lfem-2": 97.63054020899014,
+          "huzhang-2": 101.35767431552851,
+          "huzhang-4": 98.89328371187466
         }
       }
     }

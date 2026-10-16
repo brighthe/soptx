@@ -1,31 +1,31 @@
 {
   "case_id": "compliance-fixed-fixed-half",
-  "model": "FixedFixedBeamHalfDomain2d",
+  "model": "HalfFixedFixedBeamPatch2d",
   "method": "huzhang",
   "order": 4,
+  "mesh_type": "triangle-checkerboard",
   "nx": 80,
   "ny": 20,
   "optimizer": "mma",
   "load_discretization": "p1_trace_l2_projection",
   "integration_order": 10,
-  "volume_fraction": 0.39999999169892,
-  "relative_equilibrium_residual": 1.7923459599463972e-11,
-  "optimization_iterations": 342,
+  "stabilization_coefficient": "fixed",
+  "volume_fraction": 0.39999996965229717,
+  "relative_equilibrium_residual": 1.8313690040710577e-10,
+  "optimization_iterations": 319,
   "converged": true,
   "termination_reason": null,
   "solver": "mumps",
-  "overrides": {
-    "optimizer": "mma"
+  "interpolation": {
+    "variables": "E"
   },
   "provenance": {
-    "generated_at_utc": "2026-09-10T14:51:27+00:00",
-    "git_revision": "ad95594848d57a19202a64d377f9a9cc4c281c46",
+    "generated_at_utc": "2026-10-15T13:15:49+00:00",
+    "git_revision": "c0b5a69f3af9bddcd571e62822d8732b579a256c",
     "git_dirty": true,
-    "fealpy_git_revision": "f474a5775240544674037b5b5f830042dda710e3",
-    "fealpy_git_dirty": false,
     "reproducible": false
   },
-  "compliance": 15.954920477008528,
+  "compliance": 15.956939099312555,
   "compliance_domain": "half",
   "full_structure_factor": 2.0
 }

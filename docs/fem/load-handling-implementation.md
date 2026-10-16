@@ -18,8 +18,11 @@ problems/loads.py (提供 4 类 frozen dataclass 实现)
         ▼
 ┌──────────────────────────────────────────────┐
 │ soptx/fem 离散与装配核心                      │
+│ ├─ load_assembly.py   (点力形函数分配 / 体力与 │
+│ │                      非体力载荷装配)         │
 │ ├─ load_projection.py (点力 / 线载荷节点投影)  │
-│ ├─ boundary_loads.py  (连续 P1 迹 L2 投影与核验)│
+│ ├─ boundary_loads.py  (P1 迹投影、端点对齐检查 │
+│ │                      与合力核验)             │
 │ ├─ integrators/       (边界与体积积分器)       │
 │ └─ analyzers/         (位移元装配 / 混合元强插值)│
 └──────────────────────────────────────────────┘
@@ -99,6 +102,11 @@ raise TypeError(
   - *致命陷阱*：若在边上的迹插值点 `(NEb, p+1, GD)` 逐点判定，当载荷区与挖除区（如对称边界）相邻时，处于分界点处的插值点牵引被判为 0，而 `boundary_interpolate` 仍将该点打上 `isDDof` 标记，导致在交界点强加 $\sigma_{nn} = 0$；
   - *后果*：导致离散合力凭空亏损，亏损量等于端点迹系数乘该阶 Newton–Cotes 端点权（$p=2,3,4$ 时分别亏损 $1/6$、$1/8$、$7/90$）；改用边重心整边全有或全无后彻底消除该隐患。
 
+- **标记与取值分离**：`_accumulate_traction` 把"判标记的点"与"取牵引值的点"分开。边重心只决定一条边是否属于载荷边界（`load.is_load_boundary`），牵引值仍在该边的 $p+1$ 个迹插值点上逐点调用 `load.traction` 求得。因此整边选取的语义最终取决于问题类的牵引函数：
+  - `CantileverMiddlePatch2d`、`PortalFramePatch2d` 的 `_step_traction` 自身按边中心整边判定载荷区，同一条边上的取值全是常值强度或全零；
+  - `FixedFixedBeamPatch2d`、`HalfFixedFixedBeamPatch2d` 未注入 `traction` 时，`_boundary_traction` 按点判定载荷区。即使网格与载荷区端点对齐，端点顶点也在相邻的非载荷边上取到满强度，向该边泄漏一段插值尾，合力偏大，偏大量为端点牵引值乘端点 Lagrange 基的积分权。位移元在面内高斯点取值，不受影响，两条路径因此看到不同的离散载荷。论文固支梁算例（`experiments/paper_topopt_huzhang/run_fixed_fixed.py`）注入 §3.2 的 $P_1$ 迹载荷，不走这条默认路径。
+- **顶点重复写入取平均**：一个顶点自由度被相邻两条边界边各写一次。`HuZhangFESpace2d.boundary_interpolate`（别名 `set_dirichlet_bc`）经 `_average_boundary_writes` 对同一自由度的多次写入取平均，结果与全局边编号无关：数据连续处是恒等操作；数据间断处（如贴片端点）各取半值，合力保持不变。两侧边标架不同的几何角点上，平均没有良定义的意义，由 `set_corner_traction_bc` 联立两侧求解；数据不相容时报错，或改用角点松弛，见 [`huzhang-mixed-fem-implementation.md`](huzhang-mixed-fem-implementation.md)。
+
 ---
 
 ## 3. 局部与集中载荷的正则化、迹投影与核验
@@ -129,11 +137,17 @@ $$
 
 投影结果在载荷区外带有几何衰减的振荡尾（三对角质量矩阵的 Green 函数，每单元约 0.27）。网格过粗时尾部触及 Dirichlet 边界，那部分载荷会被强加自由度真实吞掉，量级约 $P \cdot 0.27^{n_x/2}$——此时残差依然为 0，只有 §3.3 的合力核验能报警；$n_x \ge 40$ 起已在 $10^{-6}$ 相对容差之下。
 
-### 3.3 离散合力与核验门禁
+### 3.3 端点对齐检查与离散合力核验
 
-常规有限元程序以“面/边重心落在载荷区内”进行整面选取。当载荷端点落在单元内部时，会整面多算或少算，产生相对误差可达 $O(h_F / w)$ 的静默偏差（计算照常收敛，但收敛到错误的合力）。
+整面选取以"面/边重心落在载荷区内"为准。载荷区端点落在单元内部时，跨端点的面会被整个多算或少算，相对误差可达 $O(h_F / w)$；载荷区整个落在一条边内部时合力为零。计算照常收敛，只是收敛到错误的合力，因此 `boundary_loads.py` 在两个环节拦截这种偏差。
 
-`boundary_loads.py` 提供了自动核验工具：
+**构造时：端点对齐检查。** `check_traction_patch_alignment(mesh, pde)` 在 `LagrangeFEMAnalyzer` 与 `HuZhangMFEMAnalyzer` 构造时自动调用：
+- 只检查 `pde.uses_step_traction` 为 True 的二维问题，也就是带 `traction_patch` 且未注入 `traction` 的 D 组模型；注入 §3.2 的 $P_1$ 迹载荷后检查自动跳过；
+- 端点由 `traction_patch`、`traction_axis` 与 `traction_level` 给出，与所有网格节点的最近距离超过容差 $\max(\texttt{GEOMETRIC\_TOL},\ 10^{-10} \times \text{区域尺寸})$ 时抛出 `ValueError`，并提示调整网格或注入 $P_1$ 迹载荷。
+
+这一条对应 [`benchmarks/README.md`](../problems/benchmarks/README.md) D 组的"检查一"。"检查二"（`marker` 排除项不能压在载荷区端点上）由 §2.1 的面重心判定与 §2.2 的边重心判定保证，没有自动检查，写新模型时需要逐个核对。
+
+**装配后：合力核验。** 对齐检查只看几何，不看载荷值；装配后的合力用以下工具核对：
 - `boundary_load_resultant(force, dimension)`：将全局已装配载荷向量按自由度求和还原离散合力；
 - `check_boundary_load_resultant(force, dimension, expected)`：输出 `LoadResultantReport`，比对绝对误差、相对误差并在超出容差（默认 $10^{-10}$）时触发门禁。
 
@@ -148,7 +162,8 @@ $$
 | **子结构分布载荷** | `problem_adapter._assemble_integrated_load` 当前仅验证了 $p=1$ 全尺度 Lagrange 空间。 |
 | **宏观角点系统** | 仅支持 `PointForce` 与 `LineTraction`，且固定按 $degree=1$ 投影。 |
 | **内部自由度载荷** | 完整接口缩聚拒绝直接作用在子结构内部自由度上的载荷与约束。 |
-| **面求值形状** | `CantileverMiddlePatch2d._step_traction` 仅接受按面成批的求值点 `(..., NP, GD)`。 |
+| **面求值形状** | `CantileverMiddlePatch2d`、`PortalFramePatch2d` 的 `_step_traction` 仅接受按面成批的求值点 `(..., NP, GD)`，纯点集直接报错。 |
+| **逐点阶跃牵引** | `FixedFixedBeamPatch2d`、`HalfFixedFixedBeamPatch2d` 的默认牵引按点判定载荷区，Hu--Zhang 路径在端点顶点泄漏插值尾（§2.2）；需要两法一致时注入 $P_1$ 迹载荷。 |
 
 ---
 
@@ -158,4 +173,4 @@ $$
 - `dut-postdoc:concepts/huzhang/huzhang-mixed-fem.md` — 胡张混合有限元变分原理与对偶边界条件
 - [`huzhang-mixed-fem-implementation.md`](huzhang-mixed-fem-implementation.md) — 胡张元特有的边界与载荷实现要点（角点松弛等）
 - [`substructure-condensation-implementation.md`](substructure-condensation-implementation.md) — 静力缩聚求解流程与载荷投影上下文
-- [`../problems/engineering-benchmarks.md`](../problems/engineering-benchmarks.md) — 各工程基准算例的载荷与边界设置
+- [`../problems/benchmarks/README.md`](../problems/benchmarks/README.md) — 工程基准的载荷分组（A–D）与 D 组的两条离散检查

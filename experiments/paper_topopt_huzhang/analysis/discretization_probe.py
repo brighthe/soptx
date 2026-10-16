@@ -19,7 +19,7 @@
 
 1. Hu--Zhang 的内边相对跳量必须 < 1e-10 (协调性的直接后果), 否则跳量求值 (第二节) 有错;
 2. 重分析在判据集合上的最大 ``g`` 必须复现 summary 的
-   ``max_relative_violation_solid_region``, 否则掩码或阈值口径与优化器不同.
+   ``max_relative_violation_accepted``, 否则掩码或阈值口径与优化器不同.
 """
 
 from __future__ import annotations
@@ -40,7 +40,6 @@ from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import TriangleMesh
 from soptx.postprocess.vtk_export import read_vtu_cell_data, write_vtu
-from soptx.problems import CantileverMiddlePatch2d
 from soptx.topology.constraints import (
     EpsilonRelaxedStressFormulation,
     HuZhangStressConstraint,
@@ -161,7 +160,7 @@ def build_frozen(method: str, order: int) -> SimpleNamespace:
     """按 ``run_cantilever_stress`` 的常量组装冻结构型的分析链.
 
     与 ``run_cantilever_stress.main`` 的组装步骤逐项对应, 改动须同步; 两者一旦失配,
-    验收门 2 (复现 summary 的 ``max_relative_violation_solid_region``) 即不通过.
+    验收门 2 (复现 summary 的 ``max_relative_violation_accepted``) 即不通过.
     与优化运行的区别: 应力约束不设豁免掩码, 被动实体区的真实读数一并取回; 被动实体区
     只经过滤器钉为实体, 前向求解不需要, 故不组装过滤器与 AL 目标.
 
@@ -178,8 +177,8 @@ def build_frozen(method: str, order: int) -> SimpleNamespace:
         字段 ``method``, ``order``, ``mesh``, ``analyzer``, ``stress_constraint``, ``density``.
     """
     rc = run_cantilever_stress
-    problem = CantileverMiddlePatch2d(domain=(0.0, rc.L, 0.0, rc.H), P=rc.LOAD, load_width=rc.LOAD_WIDTH,
-                                 E=rc.E0, nu=rc.NU, plane_type=rc.PLANE_TYPE)
+    # 与优化运行共用问题构造 (含 P1 迹载荷), 载荷口径不会失配
+    problem = rc.build_problem()
     mesh = TriangleMesh.from_checkerboard_box(box=problem.domain, nx=rc.NX, ny=rc.NY)
     material = IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E, poisson_ratio=problem.nu, hypothesis=problem.plane_type)
@@ -519,7 +518,7 @@ def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray
             "threshold": HUZHANG_JUMP_GATE,
             "passed": value is not None and value < HUZHANG_JUMP_GATE,
         }
-    recorded = design_summary.get("max_relative_violation_solid_region")
+    recorded = design_summary.get("max_relative_violation_accepted")
     if recorded is not None:
         reproduced = float(g[accepted].max())
         checks["accepted_max_g_matches_summary"] = {
@@ -546,7 +545,7 @@ def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray
             for key in (
                 "optimization_iterations", "converged", "volume_fraction",
                 "max_constraint", "max_relative_violation",
-                "max_relative_violation_solid_region", "acceptance_solid_threshold",
+                "max_relative_violation_accepted", "acceptance_solid_threshold",
                 "load_pad_radius", "pad_cells", "lambda_max", "multiplier_capped_count",
             )
         },

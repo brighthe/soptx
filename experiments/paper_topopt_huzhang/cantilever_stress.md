@@ -41,7 +41,7 @@ for m in lfem huzhang; do for k in 2 3 4; do
 | 阶次 | 命令行 `--order k`，$k \in \{2, 3, 4\}$，传入 `space_degree=order` |
 | 数值积分 | $2k + 2$ 阶：`integration_order=2 * order + 2` |
 | LFEM 装配 | 标准逐单元装配：`ASSEMBLY_METHOD = "standard"` |
-| HZMFEM 角点松弛 | 关闭。本模型四个角点的强施加写入互不冲突：两个自由角点的相邻边都是零牵引且标架与坐标轴对齐，两个固支角点只由顶/底边写一次，松弛不是必需：`USE_RELAXATION = False` |
+| HZMFEM 角点松弛 | 关闭：`USE_RELAXATION = False`。Hu 与 Ma（2021）4.1 节的角点松弛只针对两条牵引边在角点处牵引数据不一致的情形；本模型两个自由角点 $(80, 0)$、$(80, 40)$ 是牵引–牵引角点，相邻两边都是零牵引，满足一致性条件，常规节点插值即可精确施加；两个固支角点 $(0, 0)$、$(0, 40)$ 是位移–牵引角点，只由顶/底边写一次牵引，不出现约束冲突；载荷区端点在直边上，不是几何角点。与此前开松弛结果的对照见 3.3 节 |
 | 线性求解器 | MUMPS 直接法：`SOLVER = "mumps"` |
 | 载荷区端点对齐 | 端点 $(80, 17)$、$(80, 23)$ 落在网格节点上，分析器构造时经 `check_traction_patch_alignment` 检查 |
 | 终态验收 | 优化结束后在最终物理密度上重解一次：记录相对平衡残差 `relative_equilibrium_residual`（LFEM 只计非 Dirichlet 自由度），并在判据集合上复算 $\delta_g$；`summary.json` 的 `converged` 是优化器停止准则与这次复验 $\delta_g \le 5 \times 10^{-3}$ 的合取 |
@@ -96,9 +96,9 @@ for m in lfem huzhang; do for k in 2 3 4; do
 | LFEM | 2 | 245 | 0.3528 | $3.75 \times 10^{-3}$ | $6.77 \times 10^{-3}$ | 1.026 | 0.648 | $7.1 \times 10^{-12}$ |
 | LFEM | 3 | 248 | 0.3439 | $3.92 \times 10^{-3}$ | $6.36 \times 10^{-3}$ | 1.020 | 0.633 | $2.0 \times 10^{-11}$ |
 | LFEM | 4 | 256 | 0.3495 | $4.70 \times 10^{-3}$ | $1.10 \times 10^{-2}$ | 1.028 | 0.642 | $4.2 \times 10^{-11}$ |
-| HZMFEM | 2 | 253 | 0.3486 | $2.79 \times 10^{-3}$ | $7.28 \times 10^{-3}$ | 1.027 | 0.638 | $2.8 \times 10^{-11}$ |
-| HZMFEM | 3 | 256 | 0.3501 | $2.82 \times 10^{-3}$ | $4.80 \times 10^{-3}$ | 1.022 | 0.648 | $1.6 \times 10^{-8}$ |
-| HZMFEM | 4 | 258 | 0.3530 | $4.92 \times 10^{-3}$ | $1.25 \times 10^{-2}$ | 1.061 | 0.643 | $4.2 \times 10^{-8}$ |
+| HZMFEM | 2 | 257 | 0.3504 | $3.17 \times 10^{-3}$ | $9.56 \times 10^{-3}$ | 1.041 | 0.627 | $3.3 \times 10^{-11}$ |
+| HZMFEM | 3 | 256 | 0.3513 | $3.30 \times 10^{-3}$ | $6.94 \times 10^{-3}$ | 1.031 | 0.646 | $1.4 \times 10^{-8}$ |
+| HZMFEM | 4 | 252 | 0.3518 | $2.80 \times 10^{-3}$ | $1.46 \times 10^{-2}$ | 1.039 | 0.648 | $4.7 \times 10^{-7}$ |
 
 列的来源：体积分数 `volume_fraction`（含被动实体区）；判据集合 `max_relative_violation_solid_region`，全域 `max_relative_violation`（含 $\tilde\rho < 0.5$ 的单元，不作验收）；实体区最大应力比 `max_solid_stress_ratio_solid_region`；被动区最大应力比 `max_solid_stress_ratio_pad`（冻结重分析取回的真实读数，均低于 $1$，被动实体区没有掩盖过应力）；平衡残差 `relative_equilibrium_residual`。
 
@@ -121,20 +121,43 @@ for m in lfem huzhang; do for k in 2 3 4; do
 |---|---|
 | `config.json` | 开跑前记录的全部设置：模型、应力约束、离散（含角点松弛开关）、优化参数与代码版本戳记 |
 | `history.json` | 逐 MMA 更新的记录：步号、设计变化量、耗时与标量历史（目标、体积分数、最大约束等） |
-| `outer_history.json` | 逐外层 AL 步的记录：乘子、罚参数与停止准则各项的取值 |
+| `outer_history.json` | 逐外层 AL 步的内层诊断（`ALMMMAOptimizer.outer_history`：$\beta$、$\mu$、内层残差与目标、内层步数、是否接受、外层首末设计变化、最大约束与超限量），只在 `inner_stop_rule = "projected_gradient"` 时记录；本算例用 `legacy`，六组均为空列表 `[]`，`summary.json` 的 `last_inner_diagnostics` 同理为 `null` |
 | `summary.json` | 终态验收：体积分数、迭代数、终止原因、各口径的最大应力比与超限量、被动实体区诊断、平衡残差 |
 | `final_optimizer_state.npz` | AL 终态：设计变量 `design`、物理密度 `density`、乘子 `lamb`、罚参数 `mu`，供冻结复算与内层诊断，不支持精确断点续算 |
-| `displacement_final.npy`、`stress_final.npy` | 终态求解的位移自由度向量；`stress_final.npy` 只有 Hu--Zhang 写出，是松弛坐标下的应力自由度向量 |
+| `displacement_final.npy`、`stress_final.npy` | 终态求解的位移自由度向量；`stress_final.npy` 只有 Hu--Zhang 写出，是应力自由度向量，编号随 `use_relaxation` 而定（本算例不松弛，即原始 Hu--Zhang 空间的编号） |
 | `density_initial.vtu` | 第 0 帧的副本：初始设计经过滤与实体保留处理后的物理密度，只含 `density`，用来查看被动实体区 |
 | `density_final.vtu` | 最终构型：`density` 与单元最大表观应力比 `von_mises_normalized`，冻结重分析与插图的输入 |
-| `visualization_location.json` | 逐步帧迁移到了哪里、帧数、校验方式与迁移时间 |
 
-逐步帧 `iterations/iter_NNNN.vtu` 与 `evolution.pvd` 运行时写在运行目录，`summary.json` 落盘后迁移到 Windows 查看目录 `C:\workspace\soptx-results\paper_topopt_huzhang\cantilever-middle-2d-stress\<run>\`：第 0 帧是初始构型（只含 `density`），第 1 帧到末帧每次 MMA 更新一帧，字段由 `VTU_FIELDS` 决定；`.visualization_sync.json` 为同步清单（来源、配置摘要、每帧的 SHA-256）。查看目录已存在且含这三类以外的条目时拒绝清空并跳过迁移，帧留在运行目录；`sync_results.py` 不拷帧。
+逐步帧 `iterations/iter_NNNN.vtu` 与 `evolution.pvd` 在优化结束后由优化器记录的历史一次写入运行目录并留在原处：第 0 帧是初始构型（只含 `density`），第 1 帧到末帧每次 MMA 更新一帧，字段由 `VTU_FIELDS` 决定。脚本不迁移帧，需要在 Windows ParaView 中查看时手动拷到 `C:\workspace\soptx-results\paper_topopt_huzhang\cantilever-middle-2d-stress\<run>\`；`sync_results.py` 不拷帧。
 
-入库的六组是 2026-09-18 与 2026-10-07 的运行：`density_initial.vtu` 由当时查看目录的第 0 帧回填（与常量重建逐位相同），`displacement_final.npy`、`stress_final.npy` 与 `visualization_location.json` 自下次运行起才有。
+入库的 LFEM 三组是 2026-09-18 与 2026-10-07 的运行：`density_initial.vtu` 由当时查看目录的第 0 帧回填（与常量重建逐位相同），没有 `config.json`、`displacement_final.npy`。HZMFEM 三组是 2026-10-15 用 `git 0218413` 关闭角点松弛重跑的，产物齐全；此前开松弛的三组（`5a8ab5a`、`ad95594`）已被替换，可从 git 历史取回。
+
+### 3.3 角点松弛对照
+
+HZMFEM 三组此前曾以开松弛跑过（四个几何角点全部松弛），2026-10-15 关闭松弛用当前代码重跑并替换入库。两组的代码版本不同：关松弛为 `0218413`，开松弛为 `5a8ab5a`（$k = 2$）与 `ad95594`（$k = 3, 4$，FEALPy 移植前），故下表只说明关闭松弛后结论不变，差异不能全部归于松弛开关。开松弛数据取自 `git 0218413` 版本的 `results/cantilever-middle-2d-stress/analyzer-huzhang__order-{2,3,4}/`（`summary.json`、`final_optimizer_state.npz`），可用 `git show` 取回。
+
+| $k$ | 松弛 | 代码 | MMA 更新 | 体积分数 | $g_{\max}$（判据集合） | $g_{\max}$（全域） | 实体区最大应力比 | 被动区最大应力比 | 平衡残差 |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | 关 | `0218413` | 257 | 0.3504 | $3.17 \times 10^{-3}$ | $9.56 \times 10^{-3}$ | 1.041 | 0.627 | $3.34 \times 10^{-11}$ |
+|  | 开 | `5a8ab5a` | 253 | 0.3486 | $2.79 \times 10^{-3}$ | $7.28 \times 10^{-3}$ | 1.027 | 0.638 | $2.78 \times 10^{-11}$ |
+| 3 | 关 | `0218413` | 256 | 0.3513 | $3.30 \times 10^{-3}$ | $6.94 \times 10^{-3}$ | 1.031 | 0.646 | $1.45 \times 10^{-8}$ |
+|  | 开 | `ad95594` | 256 | 0.3501 | $2.82 \times 10^{-3}$ | $4.80 \times 10^{-3}$ | 1.022 | 0.648 | $1.62 \times 10^{-8}$ |
+| 4 | 关 | `0218413` | 252 | 0.3518 | $2.80 \times 10^{-3}$ | $1.46 \times 10^{-2}$ | 1.039 | 0.648 | $4.66 \times 10^{-7}$ |
+|  | 开 | `ad95594` | 258 | 0.3530 | $4.92 \times 10^{-3}$ | $1.25 \times 10^{-2}$ | 1.061 | 0.643 | $4.22 \times 10^{-8}$ |
+
+终态物理密度的差异：
+
+| $k$ | 体积分数差（关 − 开） | $\tilde\rho = 0.5$ 两侧翻转的单元 | 其中固支角点 $5$ mm 内 | 平均 $\lvert\Delta\tilde\rho\rvert$：固支角点 $5$ mm 内 / 其余 |
+|---|---|---|---|---|
+| 2 | +0.0017 | 99（1.55%） | 0 | 0.0009 / 0.0158 |
+| 3 | +0.0012 | 73（1.14%） | 0 | 0.0015 / 0.0125 |
+| 4 | -0.0011 | 59（0.92%） | 0 | 0.0006 / 0.0109 |
+
+三组都收敛到相同拓扑，差异是杆件边界的小幅平移，体积分数差有正有负；固支角点是位移–牵引角点，也是应力奇点，若松弛在此起作用，差异应集中于该处，实测该处无翻转单元、密度差比其余区域小一个量级。
 
 ## 4. 实验结论
 
-- 六组离散都在 $245 \sim 258$ 次 MMA 更新内按同一准则收敛，最终体积分数在 $0.344 \sim 0.353$ 之间，判据集合上的相对超限量均在 $5 \times 10^{-3}$ 容差内。
-- 实体区最大应力比在 $1.02 \sim 1.06$，与 $\varepsilon$ 松弛和 $\delta_g$ 容差的量级一致；被动实体区内冻结重分析得到的真实应力比为 $0.63 \sim 0.65$，豁免没有掩盖过应力。
+- 六组离散都在 $245 \sim 257$ 次 MMA 更新内按同一准则收敛，最终体积分数在 $0.344 \sim 0.352$ 之间，判据集合上的相对超限量均在 $5 \times 10^{-3}$ 容差内。
+- 实体区最大应力比在 $1.02 \sim 1.04$，与 $\varepsilon$ 松弛和 $\delta_g$ 容差的量级一致；被动实体区内冻结重分析得到的真实应力比为 $0.63 \sim 0.65$，豁免没有掩盖过应力。
 - Hu--Zhang 的应力自由度 $H(\mathrm{div})$ 协调，冻结构型实体带上的单元间牵引跳量整幅为零，LFEM 则非零（图 5.11）；两类离散的构型与约束满足情况在同一验收口径下可比。
+- HZMFEM 不需要角点松弛（2.2 节）：按 Hu 与 Ma 的判据本模型没有牵引数据不一致的角点；关闭松弛后 $k = 2, 3, 4$ 收敛到与开松弛相同的拓扑，体积分数相差不超过 $0.002$，固支角点附近无差异（3.3 节）。两次运行的代码版本也不同，差异不能全部归于松弛开关。

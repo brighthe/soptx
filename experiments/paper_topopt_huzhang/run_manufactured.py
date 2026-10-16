@@ -11,8 +11,8 @@
 ``table5_2.md`` (只在对应阶次都跑了时写出); 确认后经 ``sync_results.py`` 固化到入库的
 ``results/``.
 
-    python run_manufactured.py                       # 论文口径, 全部阶次, 目录名按设置自动取
-    python run_manufactured.py --no-relaxation       # 关闭角点松弛的对照, 目录 relaxation-off
+    python run_manufactured.py                       # 论文口径 (不松弛), 全部阶次, 目录 relaxation-off
+    python run_manufactured.py --relaxation          # 开启角点松弛的对照, 目录 relaxation-on
     python run_manufactured.py --degree 2            # 只跑单个阶次, 同样落盘
 """
 
@@ -40,7 +40,9 @@ RESULT_FILE = "manufactured_convergence.json"
 LAME_LAMBDA = 1.0
 SHEAR_MODULUS = 0.5
 SUBDIVISIONS = (4, 8, 16, 32, 64)
-USE_RELAXATION = True         # 角点松弛缺省值, 命令行 --relaxation / --no-relaxation 可覆盖
+# 角点松弛缺省值, 命令行 --relaxation / --no-relaxation 可覆盖. 论文口径不松弛: 唯一的牵引--牵引
+# 角点 (1, 1) 处两边牵引来自同一光滑对称应力, 满足 Hu--Ma (2021) 4.1 节的一致性条件
+USE_RELAXATION = False
 SOLVER = "mumps"
 # 阶次 -> 稳定化; k >= 3 时分析器走原生鞍点装配, 只能写 none
 STABILIZATION: dict[int, Literal["none", "matrix_jump"]] = {

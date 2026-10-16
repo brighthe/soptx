@@ -6,11 +6,12 @@
 HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑). 位移元从下方逼近 (误差为负),
 混合元从上方逼近 (误差为正), 图上只画绝对值, 符号写在图注.
 
-参考值不是任一离散在某网格上的值: 120x40 上 $k=4$ 自身仍高出真值 0.3% 至 0.4%, 与被评估
-离散的误差同量级. 这里取 $k=4$ 前三级按逐级差等比递减外推的极限 (Aitken delta^2, 按实测差比,
-不假定收敛阶), 与 ``analysis/bearing_h_locking.py`` 终端表同一公式; 改用其余序列外推, 参考值变化
-不超过 0.06% (实测 0.01% 至 0.05%), 即其不确定度, 因此 $p=2$ 在 $\\nu_0 = 0.3$ 最细两级的点
-(0.016%, 0.013%) 不可信.
+参考值不是任一离散在某网格上的值: 120x40 上 $k=4$ 自身仍高出参考值 0.002% ($\\nu_0 = 0.3$) 至
+0.045% ($\\nu_0 = 0.4999$), 与被评估离散的误差同量级. 这里取 $k=4$ 前三级按逐级差等比递减外推的
+极限 (Aitken delta^2, 按实测差比, 不假定收敛阶), 与 ``analysis/bearing_h_locking.py`` 终端表同一
+公式; 改用 $p=2$ 或 $k=2$ 前三级外推, 参考值变化不超过 0.003% (实测 0.000% 至 0.002%), 即其
+不确定度, 因此低于这一量级的点不可信: $\\nu_0 = 0.3$ 下 $p=2$ 在 240x80 (0.0018%) 与 $k=4$ 在
+120x40 (0.0022%) 的点. 数值取自 2026-10-16 重生成的数据; 重跑后需按新数据核对本段.
 
 数据不重解方程, 只读 ``analysis/bearing_h_locking.py`` 落盘的
 ``results/bearing/postprocess/solid_h_sweep.json``; 缺文件即报错.
@@ -106,7 +107,8 @@ def main() -> None:
         ax.set_title(f"{tag} $\\nu_0 = {nu:g}$", fontsize=9.5, pad=4)
         ax.tick_params(axis="y", labelsize=8)
 
-    axes[0].set_ylim(5e-3, 100.0)
+    # 下限取 1e-3: 全部点 (最小 0.0018%) 落在坐标范围内
+    axes[0].set_ylim(1e-3, 100.0)
     axes[0].set_ylabel("Compliance deviation $|\\Delta C / C|$ (%)", fontsize=9)
     axes[0].legend(loc="upper left", fontsize=8, framealpha=0.95, edgecolor="#cccccc",
                    borderpad=0.4, labelspacing=0.3, handlelength=2.0)

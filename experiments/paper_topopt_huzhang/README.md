@@ -9,10 +9,14 @@ experiments/paper_topopt_huzhang/
 |-- README.md
 |-- run_manufactured.py         # 5.1 节 / 表 5.1~5.2: MixedBoundarySinusoidalElasticity2D 前向求解 -> outputs/manufactured-convergence/<run>/
 |-- manufactured.md             # 5.1 节实验记录: 设置、结果指针与角点松弛开/关对照
-|-- run_fixed_fixed.py          # 5.2.1 节 / 图 5.2~5.3、表 5.3: HalfFixedFixedBeamPatch2d, MMA -> results/compliance-fixed-fixed-half/
-|-- run_bearing.py              # 5.2.2 节 / 图 5.5~5.6、表 5.4: BearingTraction2d, OC, 两组材料 -> results/bearing/{nu-0.3,nu-0.4999}/
+|-- run_fixed_fixed.py          # 5.2.1 节 / 图 5.2~5.3、表 5.3: HalfFixedFixedBeamPatch2d, MMA -> outputs/compliance-fixed-fixed-half/<run>/
+|-- fixed_fixed.md              # 5.2.1 节实验记录: 设置、结果与角点松弛开/关对照
+|-- run_bearing.py              # 5.2.2 节 / 图 5.5~5.6、表 5.4: BearingTraction2d, OC, 两组材料 -> outputs/bearing/{nu-0.3,nu-0.4999}/<run>/
+|-- bearing.md                  # 5.2.2 节实验记录: 设置、结果与角点松弛开/关对照
 |-- run_cantilever_stress.py    # 5.2.3 节 / 图 5.8~5.11: CantileverMiddlePatch2d, AL-MMA -> outputs/cantilever-middle-2d-stress/<run>/
+|-- cantilever_stress.md        # 5.2.3 节实验记录: 设置、被动实体区、结果与角点松弛开/关对照
 |-- run_portal_frame.py         # 5.2.4 节 / 图 5.11~5.13: PortalFramePatch2d (全域, 左铰右滚), gmsh 半域网格镜像成全域, 过滤器对 x = L/2 设计对称化, AL-MMA -> outputs/portal-frame-2d-stress/<run>/
+|-- portal_frame.md             # 5.2.4 节实验记录: 设置、HZ k=3 结果与 LFEM 诊断对照 (灰度填角、交叉重分析)
 |-- sync_results.py             # 把 outputs/<case>/<run> 固化到 results/ (确认后入库; 已有产物须 --force)
 |-- table.py                    # 表格入口: 冻结设计交叉再分析 + 论文表格 (表 5.3 / 5.4)
 |-- plot.py                     # 绘图入口: 插图数据 (重分析) + 成图
@@ -26,13 +30,15 @@ experiments/paper_topopt_huzhang/
 |   `-- provenance.py               # 上述再分析的溯源戳记
 |-- plots/                      # 每张图一个模块, 文件名即 plot.py --case 的 id; 共用底座 _base.py
 |-- outputs/                    # run 脚本的运行产物 (不入库, .gitignore 整体忽略): <case>/<run>/, 已有目录拒绝覆盖
-|                               #   逐步帧 iterations/iter_NNNN.vtu + evolution.pvd 运行结束后迁移到 Windows 查看目录
-|                               #   config.VIEW_DIR/<case>/<run>/ (迁移位置记在 visualization_location.json), 运行目录只留核查依据
+|                               #   优化类 run 脚本的逐步帧 iterations/iter_NNNN.vtu + evolution.pvd 留在运行目录,
+|                               #   需要时手动迁移到 Windows 查看目录 config.VIEW_DIR/<case>/<run>/
 `-- results/                    # 论文证据, 入库 (config.OUTPUT_DIR), 只经 sync_results.py 写入
+    |-- manufactured-convergence/{relaxation-off,relaxation-on}/
+    |                                  # 5.1 节: 不松弛 (论文口径) 与松弛对照, 各含数据 json 与 table5_1 / table5_2
     |-- <case>/<run>/                  # 优化运行: config / summary / history / outer_history 四份 json, final_optimizer_state.npz,
     |                                  #   displacement_final.npy (Hu--Zhang 另有 stress_final.npy), density_initial.vtu / density_final.vtu
     |-- <case>/postprocess/            # 冻结设计再分析与插图数据
-    |-- tables/                        # 表 5.1~5.4 (Markdown, 可直接贴入草稿)
+    |-- tables/                        # 表 5.1~5.4 (Markdown, 可直接贴入草稿); 表 5.1 / 5.2 经 sync_results.py --paper-tables 拷入
     `-- figures/                       # 成图
 ```
 

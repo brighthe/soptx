@@ -4,7 +4,7 @@
 产物 case ``stress-cubic-convergence``: 与图 5.8 同构, 2x2 四宫格 ——
 - (a)(c) 收敛历史: 只读两次优化运行目录下的 history.json 与 summary.json, 不重解方程.
   运行目录按 run_cantilever_stress.RUN_LABEL 命名, 取 k = 3 的两组 (按判据集合验收);
-  本模块启动时核对 summary 记录了 ``acceptance_solid_threshold``, 缺失即报错,
+  本模块启动时核对 summary 记录了 ``acceptance_solid_threshold`` 字段 (值可为 None), 缺失即报错,
   免得静默画出旧口径的历史.
 - (b)(d) 主应力空间内的单元应力分布: 取 postprocess/ 下的 npz
   (sig1/sig2/vm/solid_mask/pad_mask), 由 ``plot.py export --run lfem-k3 --run
@@ -88,7 +88,8 @@ def load_history(base, folder: str):
     """
     run_dir = require_run_dir(base, folder)
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-    if summary.get("acceptance_solid_threshold") is None:
+    # 记录值为 None 表示在被动实体区外全部受约束单元上验收, 是合法口径; 只拒绝没有记录该字段的旧运行
+    if "acceptance_solid_threshold" not in summary:
         raise RuntimeError(f"{folder}: summary 无 acceptance_solid_threshold, 不是判据集合验收的运行.")
 
     histories = json.loads((run_dir / "history.json").read_text(encoding="utf-8"))
