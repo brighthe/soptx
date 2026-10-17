@@ -42,12 +42,12 @@ E0 = 1.0
 EMIN = 1.0e-7
 NU = 0.3
 
-# 计算后端wor
+# 计算后端
 BACKEND = 'pytorch'
 
-# 分析参数: 有限元离散
-# GRID = (390, 65, 65)
-GRID = (190, 32, 32)
+# 分析参数: 有限元离散; OPERATOR_LEVEL 为 --level 的默认值
+GRID = (390, 65, 65)
+# GRID = (190, 32, 32)
 SPACE_DEGREE = 1
 INTEGRATION_ORDER = 2
 ASSEMBLY_METHOD = 'fast'
@@ -55,7 +55,7 @@ OPERATOR_LEVEL = 'ea'
 
 # 分析参数: 线性系统求解; PRECONDITIONER 为 --preconditioner 的默认值
 SOLVER = 'cg'
-PRECONDITIONER = 'none'
+PRECONDITIONER = 'jacobi'
 CG_TOLERANCE = 1.0e-6
 CG_MAXITER = 20000
 
@@ -68,14 +68,14 @@ OC_OPTIONS = dict(move_limit=0.2, damping_coef=0.5, initial_lambda=1.0e9,
 TOLERANCE = 2.0e-4
 CONVERGENCE_WINDOW = 5
 VOLUME_TOLERANCE = 1.0e-6
-MAX_ITER = 3
+MAX_ITER = 300
 
 OUTPUT_DIR = Path(__file__).resolve().parent / 'outputs'
 VTU_FIELDS = ('density', )
 
 
 def parse_args(argv=None):
-    """解析计算设备与预条件子, 其余设置均为模块顶部常量.
+    """解析计算设备、刚度算子层级与预条件子, 其余设置均为模块顶部常量.
     """
     parser = argparse.ArgumentParser(description=__doc__)
 
@@ -83,12 +83,14 @@ def parse_args(argv=None):
                         help=f'CG 预条件子 (默认 {PRECONDITIONER})')
     parser.add_argument('--device', choices=('cpu', 'cuda'), required=True,
                         help='计算设备: cpu 为主机 CPU, cuda 为 GPU')
+    parser.add_argument('--level', choices=('ea', 'fa'), default=OPERATOR_LEVEL,
+                        help=f'刚度算子层级: ea 不形成全局矩阵, fa 装配全局 CSR 矩阵 (默认 {OPERATOR_LEVEL})')
 
     args = parser.parse_args(argv)
     if args.device == 'cuda' and not torch.cuda.is_available():
         parser.error('--device cuda 需要可用的 CUDA 设备')
     nx, ny, nz = GRID
-    args.output = OUTPUT_DIR / f'{args.device}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
+    args.output = OUTPUT_DIR / f'{args.device}_{args.level}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
     return args
 
 
@@ -117,13 +119,13 @@ def main(argv=None):
     output.mkdir(parents=True)
     # 同一处记录公共参数, 设备相关信息另行补充.
     config: dict[str, Any] = dict(
-        method=f'fem_{OPERATOR_LEVEL}_{device}',
+        method=f'fem_{args.level}_{device}',
         domain=list(domain), mesh='hex', grid=list(grid), spacing=spacing,
         space_degree=SPACE_DEGREE, integration_order=INTEGRATION_ORDER,
         E0=E0, Emin=EMIN, nu=NU, penalty=PENALTY, volfrac=VOLFRAC,
         filter_type='density', filter_radius=radius, optimizer=OC_OPTIONS,
         problem=FullMBBBeamPoint3d.__name__, load=LOAD,
-        operator_level=OPERATOR_LEVEL, assembly_method=ASSEMBLY_METHOD, solver=SOLVER,
+        operator_level=args.level, assembly_method=ASSEMBLY_METHOD, solver=SOLVER,
         backend=BACKEND, device=device, max_iter=MAX_ITER,
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
@@ -144,7 +146,7 @@ def main(argv=None):
     n_cells = grid[0] * grid[1] * grid[2]
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
     device_text = f'{device} ({config["torch"]["device_name"]})' if cuda else device
-    print(f'[配置] fem/{OPERATOR_LEVEL}, {BACKEND}/{device_text}, CPU 线程 {torch.get_num_threads()}, '
+    print(f'[配置] fem/{args.level}, {BACKEND}/{device_text}, CPU 线程 {torch.get_num_threads()}, '
           f'装配 {ASSEMBLY_METHOD}, 求解 {SOLVER} ({precond}, tol {CG_TOLERANCE:g}, '
           f'maxiter {CG_MAXITER}), 网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
@@ -169,7 +171,7 @@ def main(argv=None):
         analyzer = LagrangeFEMAnalyzer(
             disp_mesh=mesh, pde=problem, material=material,
             space_degree=SPACE_DEGREE, integration_order=INTEGRATION_ORDER,
-            assembly_method=ASSEMBLY_METHOD, operator_level=OPERATOR_LEVEL, solve_method=SOLVER,
+            assembly_method=ASSEMBLY_METHOD, operator_level=args.level, solve_method=SOLVER,
             solver_options=dict(cg_options, atol=CG_TOLERANCE * load_norm),
             topopt_algorithm='density_based', interpolation_scheme=interpolation,
         )

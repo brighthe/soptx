@@ -10,9 +10,8 @@
 
 from typing import Any, Dict, Optional, Tuple
 
-from soptx.backend import backend_manager as bm
 from soptx.solvers import LinearSolver, create
-from soptx.sparse import COOTensor, CSRTensor
+from soptx.sparse import COOTensor
 
 DEFAULT_CG_MAXITER = 5000
 DEFAULT_CG_ATOL = 1e-12
@@ -153,25 +152,16 @@ def as_iterative_operator(K: Any) -> Any:
 
     Returns
     -------
-    operator : PyTorch 后端下的稀疏矩阵转为 torch 原生 CSR, 其余原样返回.
+    operator : COO 稀疏矩阵转为 CSR, 其余 (含 CSR) 原样返回, 不复制数据.
 
     Notes
     -----
-    numpy 后端的 csr_spmm 就是 scipy 的 csr_matvec, 直接用 CSR; 转 COO 只会多出 (2, nnz)
-    的 int64 索引 (首档约 6 GiB). PyTorch 后端下 soptx 的稀疏张量 matmul 在 GPU 上有问题,
-    改用 torch 原生稀疏矩阵.
+    CSR 的 ``@`` 落到后端的 ``csr_spmm``: numpy 端为 scipy 的 csr_matvec, pytorch 端把
+    crow/col/values 包成 torch CSR (不复制) 再作 SpMV, CPU 与 CUDA 同一路径. COO 的 ``@``
+    在 pytorch 端每次调用都要先合并 (排序全部非零元), 故先转 CSR. 曾经的 CSR -> COO ->
+    torch CSR 中转用于绕开 crow 与 col 的 dtype 不一致 (已在 ``COOTensor.tocsr`` 修复),
+    在 390x65x65 的 'fa' 上每轮多出十余 GB 临时量.
     """
-    if bm.backend_name != 'pytorch' or not isinstance(K, (CSRTensor, COOTensor)):
-        return K
-
-    import torch
-    K_coo_torch = torch.sparse_coo_tensor(
-                                    indices=bm.stack([K.row, K.col]),
-                                    values=bm.tensor(K.data),
-                                    size=K.shape,
-                                    device=K.data.device
-                                )
-    #? matmul 函数下 K 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-    K._values = bm.copy(K._values)
-
-    return K_coo_torch.to_sparse_csr()
+    if isinstance(K, COOTensor):
+        return K.tocsr()
+    return K

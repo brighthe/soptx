@@ -809,8 +809,7 @@ class LagrangeFEMAnalyzer(BaseLogged):
         -----
         预条件算子默认就是主算子本身, 给了 preconditioner_level 就另建一个; 两者都已施加
         边界条件, 对预条件子而言等价. 先在 fem 侧的算子上 setup 再交给 CG (CG 只对未 setup
-        的预条件子做级联): 一是 ``as_iterative_operator`` 的产物在 pytorch 后端是原生 torch
-        稀疏张量, 取对角要另说; 二是级联用的是主算子, 那样 preconditioner_level 就白设了.
+        的预条件子做级联): 级联用的是主算子, 那样 preconditioner_level 就白设了.
 
         直接法当预条件子: ``LinearSolver.__matmul__`` 本就是"零初值解一次"的预条件子模式.
         它是精确逆, CG 应一步收敛, 因此主要用途是验证两个层级确实是同一个离散算子.

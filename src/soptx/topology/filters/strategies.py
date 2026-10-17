@@ -6,7 +6,7 @@ from soptx.backend import backend_manager as bm
 from soptx.functionspace import Function
 from soptx.mesh import HomogeneousMesh
 from soptx.typing import TensorLike
-from soptx.sparse import CSRTensor
+from soptx.sparse import COOTensor
 
 from soptx.core import BaseLogged, timer
 from soptx.fem.utils import reshape_multiresolution_data
@@ -111,20 +111,17 @@ class NoneStrategy(_FilterStrategy, BaseLogged):
 class SensitivityStrategy(_FilterStrategy, BaseLogged):
     """灵敏度过滤策略"""
     def __init__(self, 
-                H: CSRTensor, 
-                design_mesh: HomogeneousMesh, 
-                density_location: Literal['element', 'node', 'element_multiresolution'], 
-                disp_mesh: Optional[HomogeneousMesh] = None, 
+                H: COOTensor,
+                design_mesh: HomogeneousMesh,
+                density_location: Literal['element', 'node', 'element_multiresolution'],
+                disp_mesh: Optional[HomogeneousMesh] = None,
             ) -> None:
-        
+
         # 只用 BaseLogged 的 _log_error, 不受日志开关影响
         super().__init__(enable_logging=False)
-        
-        H_device = H.data.device
-        if H_device != design_mesh.device:
-            self._H = H.device_put(design_mesh.device)
-        else:
-            self._H = H
+
+        # 在 H 所在设备 (构造在 CPU 上) 转为 CSR 再移到计算设备: SpMV 不再逐次合并 COO
+        self._H = H.tocsr().device_put(design_mesh.device)
         self._design_mesh = design_mesh
         self._density_location = density_location
 
@@ -244,17 +241,19 @@ class SensitivityStrategy(_FilterStrategy, BaseLogged):
 class DensityStrategy(_FilterStrategy, BaseLogged):
     """密度过滤策略"""
     def __init__(self, 
-                H: CSRTensor, 
-                design_mesh: HomogeneousMesh, 
+                H: COOTensor,
+                design_mesh: HomogeneousMesh,
                 density_location: Literal['element', 'node', 'element_multiresolution'],
-                disp_mesh: Optional[HomogeneousMesh] = None, 
+                disp_mesh: Optional[HomogeneousMesh] = None,
             ) -> None:
-        
+
         # 只用 BaseLogged 的 _log_error, 不受日志开关影响
         super().__init__(enable_logging=False)
 
-        self._H = H
-        self._design_mesh = design_mesh                           
+        # 在 H 所在设备 (构造在 CPU 上) 转为 CSR 再移到计算设备: COO 的 SpMV 每次调用都要先合并
+        # (排序全部非零元), 大网格上的临时显存约为 H 本身的数倍
+        self._H = H.tocsr().device_put(design_mesh.device)
+        self._design_mesh = design_mesh
         self._density_location = density_location
 
         self._disp_mesh = disp_mesh
@@ -284,13 +283,7 @@ class DensityStrategy(_FilterStrategy, BaseLogged):
             self._log_error(error_msg)
 
         # 预计算卷积归一化因子
-        #? matmul 函数下 self._H 必须是 COO 格式, 不能是 CSR 格式, 否则 GPU 下 device_put 函数会出错
-        device = self._design_mesh.device
-        self._H = self._H.device_put(device)
         self._Hs = self._H.matmul(self._measure_weight)
-        # val = bm.tensor(data=1, dtype=bm.float32, device='cpu')
-        # val = bm.device_put(val, device='cuda')
-        # print("------------")
         
     def get_initial_density(self, 
                         density:  Union[TensorLike, Function]
@@ -384,7 +377,7 @@ class ProjectionStrategy(DensityStrategy):
     该策略首先执行线性密度过滤, 然后应用 Heaviside 投影    
     """
     def __init__(self, 
-                H: CSRTensor, 
+                H: COOTensor, 
                 design_mesh: HomogeneousMesh, 
                 density_location: Literal['element', 'node', 'element_multiresolution'],
                 projection_type: Literal['tanh', 'exponential'] = 'tanh', 
