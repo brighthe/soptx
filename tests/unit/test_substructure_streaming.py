@@ -597,3 +597,26 @@ def test_eager_interface_assembly_matches_two_step_route(
         rtol=1.0e-12,
         atol=1.0e-12,
     )
+
+
+@pytest.mark.parametrize("n_fine", [(1, 1), (2, 2), (1, 1, 1), (5, 5, 5)])
+def test_direct_corner_batches_match_full_schur(n_fine):
+    """二维、三维及无内部节点情形均保持完整 Schur 投影结果."""
+    from types import SimpleNamespace
+    from soptx.fem.substructure.streaming import assemble_corner_system_with_recovery
+    bm.set_backend("numpy")
+    prototype = SubstructurePrototype(
+        cell_size=(1.,) * len(n_fine), n_fine=n_fine, E_base=1., nu=.3)
+    basis = LinearCornerTraceBasis.from_prototype(prototype)
+    rho = np.random.default_rng(12).uniform(.1, 1., size=(3, prototype.n_cells))
+    space = SimpleNamespace(
+        trace_basis=basis,
+        assemble=lambda batches: np.concatenate([b.stiffness for b in batches]))
+    actual, cache = assemble_corner_system_with_recovery(
+        prototype, rho, space, chunk_size=2)
+    legacy = list(iter_exact_condensation_batches(prototype, rho, chunk_size=2))
+    expected = np.concatenate([basis.project_stiffness(b.stiffness) for b in legacy])
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-13)
+    for (_, _, recovery), batch in zip(cache, legacy):
+        np.testing.assert_allclose(recovery, batch.recovery @ basis.matrix,
+                                   rtol=1e-10, atol=1e-12)

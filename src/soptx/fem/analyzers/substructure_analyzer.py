@@ -37,6 +37,7 @@ from soptx.fem.substructure.solve import (
 )
 from soptx.fem.substructure.streaming import (
     assemble_exact_interface_system,
+    assemble_corner_system_with_recovery,
     iter_exact_internal_displacement_batches,
 )
 
@@ -142,6 +143,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         # 载荷与支承先投影到完整接口, 再经全局迹映射转到 Q; 只依赖问题, 构造时算一次
         self._interface_load, self._constraints = self._interface_space.constrained_conditions(pde)
         self._density_cells: Optional[TensorLike] = None
+        self._corner_recovery_batches = None
         self._interface_displacement: Optional[TensorLike] = None
         # 接口 MG 预条件子所需的细网格单元限制算子, 只依赖拓扑, 首次构造后缓存
         self._fine_restriction: Optional[ElementRestriction] = None
@@ -286,8 +288,20 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             接口刚度 ``K_Q`` 的 CSR 及其自由度编号. 类型标注放宽为 Any 以兼容基类协议,
             基类返回的是细网格刚度算子.
         """
+        # 每次装配先失效旧缓存, 防止密度更新或装配失败后复用旧恢复矩阵.
+        self._corner_recovery_batches = None
+        self._density_cells = None
         self._update_density_coefficient(rho_val)
-        self._density_cells = self._to_density_cells(rho_val)
+        density_cells = self._to_density_cells(rho_val)
+        if self._trace == 'linear_corner':
+            system, recovery = assemble_corner_system_with_recovery(
+                self._prototype, density_cells, self._interface_space,
+                chunk_size=self._chunk_size,
+            )
+            self._density_cells = density_cells
+            self._corner_recovery_batches = recovery
+            return system
+        self._density_cells = density_cells
         return assemble_exact_interface_system(
             self._prototype, self._density_cells, self._interface_space, chunk_size=self._chunk_size,
         )
@@ -393,11 +407,12 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
                              precond='none' if precond is None else precond, x0=kwargs.get('x0', None))
         result = solve_prepared_constrained_system(K, solver=solver_type, load=F, **cg_kwargs)
         self._interface_displacement = result.displacement
-        # 各子结构的迹位移 q^j = A_q^j Q, 逐批 u_b = Psi q, u_i = T u_b 后写回全场
+        # 角点接口用当前密度缓存的 T_corner q 回代; 完整接口沿用逐批重算.
         q_local = bm.asarray(result.displacement)[self._interface_space.local_dofs]
         batches = iter_exact_internal_displacement_batches(
             self._prototype, self._density_cells, q_local, self._interface_space.trace_basis,
             chunk_size=self._chunk_size,
+            recovery_batches=self._corner_recovery_batches,
         )
         out[:] = recover_full_displacement_batches(self._layout, self._sub_meshes, batches)
         info = {'name': solver_type,

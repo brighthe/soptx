@@ -250,6 +250,60 @@ def assemble_exact_interface_system(
     return interface_space.assemble(batches)
 
 
+def assemble_corner_system_with_recovery(
+    prototype: Any, density: Any, interface_space: Any, *, chunk_size: int,
+) -> tuple[Any, list]:
+    """直接装配角点缩聚系统并缓存当前密度的内部恢复矩阵.
+
+    Parameters
+    ----------
+    prototype : SubstructurePrototype
+        同构子结构原型.
+    density : TensorLike
+        当前物理密度.
+    interface_space : InterfaceSpace
+        linear_corner 接口空间.
+    chunk_size : int
+        每批子结构数.
+
+    Returns
+    -------
+    system : InterfaceSystem
+        角点接口刚度.
+    recovery_batches : list
+        (start, end, T_corner) 列表, T_corner = -solve(K_ii, K_ib P).
+        不保存完整 Schur 补, 仅在装配成功后交给分析器.
+    """
+    basis = interface_space.trace_basis
+    if basis.name != "linear_corner":
+        raise ValueError("直接角点缩聚仅支持 linear_corner.")
+    i = bm.asarray(prototype.i_dofs, dtype=bm.int64)
+    b = bm.asarray(prototype.b_dofs, dtype=bm.int64)
+    if basis.n_boundary_dofs != prototype.n_b:
+        raise ValueError('迹基边界自由度数与子结构不一致.')
+    P = basis.matrix
+    recovery_batches = []
+
+    def batches():
+        """逐批投影边界块, 只求解角点数目的右端项."""
+        for start, end, local in prototype.iter_local_stiffness_batches(
+            density, chunk_size=chunk_size,
+        ):
+            K_ii = local[..., i[:, None], i]
+            B = local[..., i[:, None], b] @ P
+            K_cc = bm.matrix_transpose(P) @ local[..., b[:, None], b] @ P
+            if len(i):
+                recovery = -bm.linalg.solve(K_ii, B)
+            else:
+                recovery = B
+            stiffness = K_cc + bm.matrix_transpose(B) @ recovery
+            recovery_batches.append((start, end, recovery))
+            yield TraceStiffnessBatch(start, end, stiffness)
+
+    system = interface_space.assemble(batches())
+    return system, recovery_batches
+
+
 def iter_exact_internal_displacement_batches(
     prototype: Any,
     density: Any,
@@ -257,6 +311,7 @@ def iter_exact_internal_displacement_batches(
     trace_basis: TraceBasis,
     *,
     chunk_size: int,
+    recovery_batches: Any = None,
 ) -> Iterator[InternalDisplacementBatch]:
     """流式恢复各子结构的边界与内部位移, 对应概念文档 §3.3.
 
@@ -273,6 +328,9 @@ def iter_exact_internal_displacement_batches(
     chunk_size : int
         单次处理的最大子结构数, 必须为正整数.
 
+    recovery_batches : list, optional
+        与当前密度和接口系统对应的角点恢复缓存, 由装配函数生成.
+
     Yields
     ------
     InternalDisplacementBatch
@@ -285,10 +343,10 @@ def iter_exact_internal_displacement_batches(
 
     Notes
     -----
-    全局接口系统求解后, 本方法按批重新装配局部刚度并执行 Exact Schur, 用该批
+    提供 recovery_batches 时直接使用当前装配缓存的角点恢复矩阵, 不重新缩聚.
+    未提供缓存时, 本方法按批重新装配局部刚度并执行 Exact Schur, 用该批
     的 ``T_full`` 计算 ``u_i = T_full Psi q``. 恢复矩阵不跨批保存, 以重算换
-    内存. 这是流式路线下位移恢复的唯一实现, 单元应变能与全尺度位移向量都建在
-    它之上.
+    内存. 单元应变能与全尺度位移向量都建在此恢复接口之上.
     """
     if trace_basis.n_boundary_dofs != prototype.n_b:
         raise ValueError(
@@ -305,6 +363,23 @@ def iter_exact_internal_displacement_batches(
             f"trace_displacement 形状必须为 {expected_shape}; "
             f"当前为 {tuple(displacement.shape)}."
         )
+
+    if recovery_batches is not None:
+        expected_start = 0
+        for start, end, recovery in recovery_batches:
+            if (start != expected_start or end <= start or end > n_substructure
+                    or tuple(recovery.shape) !=
+                    (end - start, len(prototype.i_dofs), trace_basis.n_trace_dofs)):
+                raise ValueError("恢复缓存的批次或形状与当前接口系统不一致.")
+            q = displacement[start:end]
+            yield InternalDisplacementBatch(
+                start, end, trace_basis.expand_displacement(q),
+                bm.einsum("...ij,...j->...i", recovery, q),
+            )
+            expected_start = end
+        if expected_start != n_substructure:
+            raise ValueError("恢复缓存未覆盖全部子结构.")
+        return
 
     for batch in iter_exact_condensation_batches(
         prototype,

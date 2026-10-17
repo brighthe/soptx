@@ -169,3 +169,52 @@ summary.json 和最终场文件仅在优化正常结束时产生.
 本入口只执行所选模式的优化, 不自动启动最终密度的 full_trace 参考验证,
 也不生成包装脚本原有的入口快照或资源外推文件.
 outputs/ 不入 Git; 推送代码不会同步本机已有计算结果.
+
+## linear_corner 直接缩聚与恢复缓存
+
+SubstructureAnalyzer 的 linear_corner 分支先计算 B = K_ib P, 再求解
+X = solve(K_ii, B), 直接形成 K_c = P^T K_bb P - B^T X.
+不再形成完整边界 Schur 补. m=5 的三维 Q1 子结构只有 24 个右端项,
+而完整边界路径有 456 个右端项; 两者采用相同的有限元刚度和角点插值空间.
+
+每次成功装配保留 T_corner = -X, 求解后用 u_i = T_corner q 恢复内部位移,
+不重新装配或缩聚局部刚度. 每次密度更新装配前先释放旧缓存;
+装配失败不保留可用的旧缓存. full_trace 继续使用原完整缩聚流式路径.
+恢复缓存不写入结果文件. float64 下论文规模的恢复缓存约 0.453 GiB,
+210 x 35 x 35 网格约 0.071 GiB; 这不是整个进程的内存峰值.
+运算顺序改变会产生舍入差异, 不要求优化轨迹逐位相同.
+
+独立验证使用旧完整 Schur 投影路径作为基准, 对比刚度、全场位移、
+柔顺度、物理密度灵敏度. 新旧各运行三次并交替顺序, 默认小算例含均匀和随机密度.
+输出目录必须不存在. 从仓库根目录执行:
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python -B -u \
+  experiments/topopt_simp_substructure/verify_corner_direct.py \
+  --output experiments/topopt_simp_substructure/outputs/verify_corner_direct_run01
+```
+
+若本机保留原 linear_corner_hex_210x35x35_m5_cg_jacobi/iterations/iter_0094.vtu,
+可以增加 --iter94 对真实非均匀密度验证. 原帧只读, 不重复过滤.
+验证记录在新目录的 config.json 与 report.json, 不修改原结果.
+数值验收为四项相对误差小于 1e-8, 两侧残差小于 1e-8.
+计时采用 scipy 直接求解器以分离迭代次数影响, 包含装配、接口求解与位移恢复,
+不包含边界条件、过滤、输出和 OC, 不能直接当作完整优化每轮的加速比.
+
+2026-10-17 验证: 均匀及随机密度小算例 (60 x 10 x 10, m=5) 的四项相对误差
+均小于 2e-12. 第 94 轮真实密度 (210 x 35 x 35, m=5) 三次结果一致:
+刚度 7.41e-16, 位移 7.74e-11, 柔顺度 1.87e-13, 灵敏度 2.03e-11,
+新旧求解残差均小于 6e-13. 三次中位数:
+
+| 阶段 | 旧路径 / 秒 | 新路径 / 秒 |
+|---|---:|---:|
+| 装配 | 31.674 | 10.061 |
+| 接口求解及恢复 | 29.411 | 0.224 |
+
+本机固定 OpenBLAS/OMP 为 1, chunk_size=64, 另有此前授权的优化进程运行,
+不是独占硬件基准. 这些数据不是 390 x 65 x 65 的完整优化计时.
+报告保留在 outputs/verify_corner_direct_20261017/ 和
+outputs/verify_corner_direct_iter94_20261017/, 不入 Git.
+70 项直接相关回归通过; 扩展检查共 107 项通过、3 项训练测试失败.
+3 项失败均为 independent_training_records_optimizer 的 KeyError: stiffness,
+已在临时目录导出的修改前 HEAD 上复现, 本次未修改无关训练代码.

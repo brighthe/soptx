@@ -229,7 +229,7 @@ def test_interior_point_force_remains_explicitly_unsupported(setup, trace) -> No
 
 
 def test_injected_interpolation_matches_prototype_simp(setup) -> None:
-    """注入插值方案后的接口系统与参考子结构自带的修正 SIMP 路径逐位相同 (linear_corner)."""
+    """注入插值方案后的接口系统与参考子结构自带的修正 SIMP 路径数值一致 (linear_corner)."""
     layout, problem, material, interpolation, density = setup
     sub = _sub_analyzer(layout, problem, material, interpolation, 'linear_corner', solve_method='scipy')
     system = sub.assemble_stiff_matrix(rho_val=density)
@@ -246,7 +246,9 @@ def test_injected_interpolation_matches_prototype_simp(setup) -> None:
     state = sub.solve_state(rho_val=density)
     load, constraints = space.constrained_conditions(problem)
     legacy_q = solve_constrained_system(system=legacy, load=load, constraints=constraints, solver='scipy').displacement
-    assert np.max(np.abs(bm.to_numpy(state['interface_displacement']) - bm.to_numpy(legacy_q))) <= 1e-12
+    # 直接角点缩聚改变浮点运算顺序, 位移误差按解的尺度验收.
+    delta = bm.to_numpy(state['interface_displacement']) - bm.to_numpy(legacy_q)
+    assert np.linalg.norm(delta) / np.linalg.norm(bm.to_numpy(legacy_q)) <= 1e-10
 
 
 def test_linear_corner_objective_and_constraint_work(setup) -> None:
@@ -305,3 +307,41 @@ def test_full_trace_gmg_preconditioner(setup) -> None:
                            solver_options=dict(precond='gmg', maxiter=100, rtol=0.0, atol=1e-6 * load_norm))
     with pytest.raises(Exception):
         corner.solve_state(rho_val=density)
+
+
+def test_corner_cached_recovery_matches_legacy_and_refreshes(setup, monkeypatch):
+    """两次密度更新均与完整缩聚一致, 缓存回代不重新装配."""
+    from soptx.fem.substructure.streaming import iter_exact_internal_displacement_batches
+    from soptx.fem.substructure.recovery import recover_full_displacement_batches
+
+    layout, problem, material, interpolation, density = setup
+    sub = _sub_analyzer(layout, problem, material, interpolation, 'linear_corner',
+                        solve_method='scipy')
+    for rho in (density, density[::-1].copy()):
+        current = sub.assemble_stiff_matrix(rho)
+        legacy = assemble_exact_interface_system(
+            sub.prototype, sub._density_cells, sub.interface_space, chunk_size=4)
+        np.testing.assert_allclose(current.stiffness.to_scipy().toarray(),
+                                   legacy.stiffness.to_scipy().toarray(), rtol=1e-11, atol=1e-13)
+        prepared, rhs = sub.apply_bc(current, sub.assemble_body_force_vector())
+        out = sub.tensor_space.function()
+        with monkeypatch.context() as patch:
+            def forbidden(*args, **kwargs):
+                raise AssertionError('缓存回代不应重新装配局部刚度')
+            patch.setattr(sub.prototype, 'iter_local_stiffness_batches', forbidden)
+            sub.solve_system(prepared, rhs, out)
+        q = sub.interface_displacement[sub.interface_space.local_dofs]
+        old = recover_full_displacement_batches(
+            layout, sub.sub_meshes, iter_exact_internal_displacement_batches(
+                sub.prototype, sub._density_cells, q, sub.interface_space.trace_basis,
+                chunk_size=4))
+        np.testing.assert_allclose(out[:], old, rtol=1e-10, atol=1e-10)
+    # 装配失败后旧缓存也不可复用.
+    with monkeypatch.context() as patch:
+        def fail(*args, **kwargs):
+            raise RuntimeError('模拟局部装配失败')
+        patch.setattr(sub.prototype, 'iter_local_stiffness_batches', fail)
+        with pytest.raises(RuntimeError, match='模拟'):
+            sub.assemble_stiff_matrix(density)
+    assert sub._corner_recovery_batches is None
+    assert sub._density_cells is None
