@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from operator import index as integer_index
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from soptx.backend import backend_manager as bm
@@ -128,6 +129,7 @@ class StructuredSubstructureLayout:
         self._sspace_full: Optional[LagrangeFESpace] = None
         self._space_full: Optional[TensorFunctionSpace] = None
         self._node_of_grid: Optional[Any] = None
+        self._substructure_cell_grid_ids: Optional[Any] = None
         # 子结构全局自由度按 (位置, 参考子结构) 缓存; 同一子结构会被多个方法重复查询.
         self._dof_cache: dict = {}
         if tensor_space is not None:
@@ -143,6 +145,7 @@ class StructuredSubstructureLayout:
         self._total_full_nodes = None
         self._total_full_dofs = None
         self._node_of_grid = None
+        self._substructure_cell_grid_ids = None
         self._dof_cache.clear()
 
     def _set_space_full(self, space: Optional[TensorFunctionSpace]) -> None:
@@ -776,6 +779,49 @@ class StructuredSubstructureLayout:
                 f"当前为 {len(values)}."
             )
         return bm.reshape(values[self._node_of_grid_index()], self.n_full_nodes)
+
+    def substructure_cell_ids(self, start: int, end: int, *, prototype: Any) -> Any:
+        """取得一批子结构按参考 FE 单元顺序排列的全局细单元编号.
+
+        Parameters
+        ----------
+        start, end : int
+            子结构编号的半开区间, 顺序与 ``split_global_cell_field`` 一致.
+        prototype : SubstructurePrototype
+            与布局细分和次数一致的参考子结构, 提供局部 FE 单元重排规则.
+
+        Returns
+        -------
+        TensorLike
+            形状为 (end - start, NC_sub) 的 int64 编号. 每行单元顺序
+            与 ``prototype.cell2dof`` 一致, 可展平后传给 FEM 单元刚度接口.
+
+        Raises
+        ------
+        TypeError
+            start 或 end 不是整数.
+        ValueError
+            区间越界或参考子结构与布局不相容.
+
+        Notes
+        -----
+        复用全局结构化场切块与参考子结构单元重排, 不另设编号公式.
+        全局网格编号已由布局校验. 只缓存整数编号, 不持有材料或刚度数据;
+        网格或空间替换时随其他布局缓存一起失效.
+        """
+        start, end = integer_index(start), integer_index(end)
+        n_sub_total = 1
+        for count in self.n_sub:
+            n_sub_total *= count
+        if not 0 <= start <= end <= n_sub_total:
+            raise ValueError(f"子结构区间须位于 [0, {n_sub_total}].")
+        if tuple(prototype.n_fine) != self.n_fine or prototype.degree != self.degree:
+            raise ValueError("参考子结构的细分和次数须与布局一致.")
+        if self._substructure_cell_grid_ids is None:
+            mesh = self.full_mesh
+            ids = bm.arange(int(mesh.number_of_cells()), dtype=bm.int64, device=mesh.device)
+            self._substructure_cell_grid_ids = self.split_global_cell_field(ids)
+        return prototype.grid_to_cell_field(self._substructure_cell_grid_ids[start:end])
 
     def split_global_cell_field(self, global_field: Any) -> Any:
         """把全局结构化 cell 场拆成 block-major 子结构局部网格场.

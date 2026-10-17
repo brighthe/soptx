@@ -3,7 +3,8 @@
 细网格与位移空间由 ``StructuredSubstructureLayout`` 给出, 与基类自建的空间同编号;
 刚度算子是接口 Schur 系统而不是细网格矩阵, 求解在接口未知量上进行, 再逐批恢复
 全场位移. 材料插值、载荷、Dirichlet 数据与单元能量导数全部复用基类, 插值公式只在
-``MaterialInterpolationScheme`` 中定义一次, 并注入参考子结构的局部装配.
+``MaterialInterpolationScheme`` 中定义一次. FEM 层产生细单元刚度, 独立局部组装
+内核仅按编号散加, 缩聚与位移恢复消费矩阵批次.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from soptx.fem.substructure import (
 )
 from soptx.fem.substructure.implicit import RestrictedPreconditioner
 from soptx.fem.substructure.recovery import recover_full_displacement_batches
+from soptx.fem.substructure.local_assembly import assemble_local_stiffness, build_local_assembly_map
 from soptx.fem.substructure.solve import (
     PreparedFixedSystem,
     PreparedDirectSystem,
@@ -37,9 +39,10 @@ from soptx.fem.substructure.solve import (
     solve_prepared_constrained_system,
 )
 from soptx.fem.substructure.streaming import (
-    assemble_exact_interface_system,
-    assemble_corner_system_with_recovery,
-    iter_exact_internal_displacement_batches,
+    assemble_corner_from_stiffness_batches,
+    iter_condensation_from_stiffness_batches,
+    iter_trace_stiffness_from_local_batches,
+    iter_displacement_from_recovery_batches,
 )
 
 TraceName = Literal['full_trace', 'linear_corner']
@@ -87,10 +90,9 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
 
     Notes
     -----
-    局部刚度写成 ``coef(rho) * KE_unit``, ``coef = E(rho) / E_0`` 由 ``interpolation_scheme``
-    给出并注入 ``SubstructurePrototype.coefficient_function``; 参考子结构自身的
-    ``penal`` 与 ``rho_min`` 路径不参与. 泊松比随密度插值时局部刚度不再是单位刚度的
-    倍数, 不支持.
+    每轮材料系数由基类更新一次. ``element_stiffness`` 复用 FEM 参考矩阵或按批积分,
+    局部组装只消费 KE 与拓扑映射. prototype 上的材料回调仅为旧密度调用方保留,
+    不参与正式装配或恢复. 当前仍只支持逐单元标量材料系数, 不扩展泊松比插值.
     """
 
     def __init__(
@@ -135,8 +137,10 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self._chunk_size = int(chunk_size)
         self._assembler = GlobalAssembler(layout)
         prototype, sub_meshes, _ = build_substructures(self._assembler, integration_order=integration_order)
+        # 兼容历史密度入口; 正式路径不调用此回调或 prototype 的刚度生成方法.
         prototype.coefficient_function = self._relative_stiffness
         self._prototype: SubstructurePrototype = prototype
+        self._local_assembly_map = build_local_assembly_map(prototype.cell2dof, prototype.n_total_dofs)
         self._sub_meshes: tuple = tuple(sub_meshes)
         self._interface_space: InterfaceSpace = build_interface_space(
             kind=trace, assembler=self._assembler, sub_meshes=self._sub_meshes, prototype=prototype,
@@ -145,6 +149,11 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self._interface_load, self._constraints = self._interface_space.constrained_conditions(pde)
         self._density_cells: Optional[TensorLike] = None
         self._corner_recovery_batches = None
+        self._assembly_ready = False
+        self._material_state_ready = False
+        self._assembled_coefficient = None
+        self._assembled_interface_system = None
+        self._prepared_systems = []
         self.assembly_timings = {}
         self.boundary_timings = {}
         self._interface_displacement: Optional[TensorLike] = None
@@ -193,6 +202,92 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     ##############################################################################################
     # 材料插值
     ##############################################################################################
+
+    def _update_density_coefficient(self, rho_val=None):
+        """更新材料状态并失效上轮系统, 正式路径每轮仅调用一次.
+
+        Parameters
+        ----------
+        rho_val : TensorLike or None
+            全局细单元物理密度.
+
+        Returns
+        -------
+        TensorLike or None
+            当前逐单元标量系数, 实体分析为 None.
+        """
+        self._assembly_ready = False
+        self._material_state_ready = False
+        self._assembled_coefficient = None
+        self._assembled_interface_system = None
+        self._prepared_systems = []
+        self._corner_recovery_batches = None
+        self._density_cells = None
+        coef = super()._update_density_coefficient(rho_val)
+        if coef is not None and tuple(coef.shape) != (int(self._mesh.number_of_cells()),):
+            raise ValueError("子结构分析器只支持全局逐单元标量材料系数.")
+        self._material_state_ready = True
+        return coef
+
+    def _iter_local_stiffness_batches(self):
+        """由 FEM 单元矩阵与局部拓扑映射逐批产生子结构刚度.
+
+        Yields
+        ------
+        tuple
+            (start, end, K_local), 每次调用返回新的生成器, 可供完整接口恢复重算.
+
+        Raises
+        ------
+        RuntimeError
+            当前材料状态尚未准备成功.
+        """
+        if not self._material_state_ready:
+            raise RuntimeError("生成局部刚度前须先更新材料状态.")
+        mapping = self._local_assembly_map
+        for start in range(0, len(self._sub_meshes), self._chunk_size):
+            end = min(start + self._chunk_size, len(self._sub_meshes))
+            cell_ids = self._layout.substructure_cell_ids(start, end, prototype=self._prototype)
+            matrices = self.element_stiffness(bm.reshape(cell_ids, (-1,)))
+            matrices = bm.reshape(matrices, (
+                end - start, mapping.n_cells, mapping.n_element_dofs, mapping.n_element_dofs,
+            ))
+            local = assemble_local_stiffness(matrices, mapping)
+            del matrices, cell_ids
+            yield start, end, local
+            del local
+
+    def _assemble_interface_from_local_batches(self, stiffness_batches):
+        """将局部矩阵批次缩聚并组装接口系统.
+
+        Parameters
+        ----------
+        stiffness_batches : iterable
+            连续的 (start, end, K_local) 批次.
+
+        Returns
+        -------
+        tuple
+            (InterfaceSystem, recovery), 完整接口不保存恢复矩阵, recovery 为 None.
+        """
+        prototype = self._prototype
+        if self._trace == 'linear_corner':
+            return assemble_corner_from_stiffness_batches(
+                stiffness_batches, self._interface_space,
+                i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
+                timings=self.assembly_timings,
+            )
+        batches = iter_trace_stiffness_from_local_batches(
+            stiffness_batches, self._interface_space.trace_basis,
+            i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
+        )
+        return self._interface_space.assemble(batches), None
+
+    def _require_assembled_state(self):
+        """拒绝未成功装配或材料状态已被替换的系统."""
+        if (not self._assembly_ready
+                or self._integrator.coef is not self._assembled_coefficient):
+            raise RuntimeError("须先成功调用 assemble_stiff_matrix, 且随后不得改变材料状态.")
 
     def _relative_stiffness(self, rho: TensorLike) -> TensorLike:
         """相对刚度系数 E(rho) / E_0, 由插值方案给出; 标准有限元分析下恒为 1.
@@ -292,23 +387,18 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             基类返回的是细网格刚度算子.
         """
         self.assembly_timings = {}
-        # 每次装配先失效旧缓存, 防止密度更新或装配失败后复用旧恢复矩阵.
-        self._corner_recovery_batches = None
-        self._density_cells = None
         self._update_density_coefficient(rho_val)
+        # 仅保留给历史对照调用方, 正式矩阵生成和恢复不读取此密度副本.
         density_cells = self._to_density_cells(rho_val)
-        if self._trace == 'linear_corner':
-            system, recovery = assemble_corner_system_with_recovery(
-                self._prototype, density_cells, self._interface_space,
-                chunk_size=self._chunk_size, timings=self.assembly_timings,
-            )
-            self._density_cells = density_cells
-            self._corner_recovery_batches = recovery
-            return system
-        self._density_cells = density_cells
-        return assemble_exact_interface_system(
-            self._prototype, self._density_cells, self._interface_space, chunk_size=self._chunk_size,
+        system, recovery = self._assemble_interface_from_local_batches(
+            self._iter_local_stiffness_batches(),
         )
+        self._density_cells = density_cells
+        self._corner_recovery_batches = recovery
+        self._assembled_coefficient = self._integrator.coef
+        self._assembled_interface_system = system
+        self._assembly_ready = True
+        return system
 
     # 基类的 apply_bc 是按 operator_level 分派的变体方法, 元类按名合并变体; 本类以同键 'fa'
     # 注册覆盖基类的 'fa' 变体, 基类构造函数里的 apply_bc.set('fa') 便分派到这里
@@ -340,6 +430,9 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         子结构缩聚不缩聚载荷, 载荷与支承须落在接口自由度上, 由接口空间的投影检查.
         Dirichlet 数据只支持零位移; 基准向量照基类记录, 作为位移的 Dirichlet 分量参照.
         """
+        self._require_assembled_state()
+        if K is not self._assembled_interface_system:
+            raise ValueError("apply_bc 须使用本轮成功装配的接口系统.")
         self.boundary_timings = {}
         started = perf_counter()
         load_cached = self._non_body_cache is not None
@@ -364,6 +457,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         )
         rhs = bm.asarray(prepared.rhs.copy(), dtype=bm.float64)
         self.boundary_timings["prepare_system"] = perf_counter() - started
+        self._prepared_systems.append(prepared)
         return prepared, rhs
 
     def _apply_state_bc(self, K, F, **kwargs):
@@ -403,11 +497,12 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         info : 求解诊断, 含 'name', 'niter', 'relres', 'converged', 'constraint_relres' 与 'mode';
             'relres' 为自由接口上的真实残差相对接口载荷二范数, 直接法下 'niter' 为 0.
         """
-        if self._density_cells is None:
-            self._log_error("solve_system 之前须先调用 assemble_stiff_matrix")
+        self._require_assembled_state()
         solver_type = kwargs.get('solver', self._solve_method)
         if not isinstance(K, (PreparedFixedSystem, PreparedDirectSystem)):
             raise TypeError("solve_system 需要受约束系统, 请先调用 apply_bc.")
+        if not any(K is prepared for prepared in self._prepared_systems):
+            raise ValueError("solve_system 须使用本轮 apply_bc 准备的系统.")
         options = self._merged_solver_options(kwargs)
         cg_kwargs: Dict[str, Any] = {}
         if solver_type == 'cg':
@@ -425,10 +520,20 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self._interface_displacement = result.displacement
         # 角点接口用当前密度缓存的 T_corner q 回代; 完整接口沿用逐批重算.
         q_local = bm.asarray(result.displacement)[self._interface_space.local_dofs]
-        batches = iter_exact_internal_displacement_batches(
-            self._prototype, self._density_cells, q_local, self._interface_space.trace_basis,
-            chunk_size=self._chunk_size,
-            recovery_batches=self._corner_recovery_batches,
+        recovery_on_trace = self._corner_recovery_batches is not None
+        recovery_batches = self._corner_recovery_batches
+        if recovery_batches is None:
+            # 完整接口恢复重新消费同一材料状态的矩阵, 不重新进行材料插值.
+            recovery_batches = (
+                (batch.start, batch.end, batch.recovery)
+                for batch in iter_condensation_from_stiffness_batches(
+                    self._iter_local_stiffness_batches(),
+                    i_dofs=self._prototype.i_dofs, b_dofs=self._prototype.b_dofs,
+                )
+            )
+        batches = iter_displacement_from_recovery_batches(
+            recovery_batches, q_local, self._interface_space.trace_basis,
+            n_internal=len(self._prototype.i_dofs), recovery_on_trace=recovery_on_trace,
         )
         out[:] = recover_full_displacement_batches(self._layout, self._sub_meshes, batches)
         info = {'name': solver_type,

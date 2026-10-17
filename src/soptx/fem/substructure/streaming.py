@@ -131,11 +131,42 @@ def iter_exact_condensation_batches(
     不施加接口迹投影, 迹投影由 ``iter_exact_trace_stiffness_batches`` 在其之上
     完成.
     """
-    reduction = ExactSchurReduction(prototype.i_dofs, prototype.b_dofs)
-    for start, end, local_stiffness in prototype.iter_local_stiffness_batches(
-        density,
-        chunk_size=chunk_size,
-    ):
+    yield from iter_condensation_from_stiffness_batches(
+        prototype.iter_local_stiffness_batches(density, chunk_size=chunk_size),
+        i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
+    )
+
+
+def iter_condensation_from_stiffness_batches(
+    stiffness_batches: Any, *, i_dofs: Any, b_dofs: Any,
+) -> Iterator[LocalCondensationBatch]:
+    """消费局部刚度批次, 执行完整边界上的 Exact Schur 缩聚.
+
+    Parameters
+    ----------
+    stiffness_batches : iterable
+        从 0 开始连续的 (start, end, K_local), 矩阵形状为
+        (end - start, n_dof, n_dof). 完整覆盖由下游组装或恢复校验.
+    i_dofs, b_dofs : array_like
+        内部和边界自由度编号, 须完整划分局部自由度.
+
+    Yields
+    ------
+    LocalCondensationBatch
+        完整边界缩聚刚度及恢复矩阵, 不跨批缓存.
+
+    Raises
+    ------
+    ValueError
+        批次不连续、区间为空或矩阵形状不符.
+    """
+    reduction = ExactSchurReduction(i_dofs, b_dofs)
+    n_dof = len(i_dofs) + len(b_dofs)
+    expected_start = 0
+    for start, end, local_stiffness in stiffness_batches:
+        if (start != expected_start or end <= start
+                or tuple(local_stiffness.shape) != (end - start, n_dof, n_dof)):
+            raise ValueError("局部刚度批次的区间或形状不符.")
         result = reduction.reduce_many(local_stiffness)
         yield LocalCondensationBatch(
             start=start,
@@ -143,6 +174,7 @@ def iter_exact_condensation_batches(
             stiffness=result.stiffness,
             recovery=result.recovery,
         )
+        expected_start = end
 
 
 def iter_exact_trace_stiffness_batches(
@@ -187,10 +219,40 @@ def iter_exact_trace_stiffness_batches(
             f"当前为 {trace_basis.n_boundary_dofs} 与 {prototype.n_b}."
         )
 
-    for batch in iter_exact_condensation_batches(
-        prototype,
-        density,
-        chunk_size=chunk_size,
+    yield from iter_trace_stiffness_from_local_batches(
+        prototype.iter_local_stiffness_batches(density, chunk_size=chunk_size),
+        trace_basis, i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
+    )
+
+
+def iter_trace_stiffness_from_local_batches(
+    stiffness_batches: Any, trace_basis: TraceBasis, *, i_dofs: Any, b_dofs: Any,
+) -> Iterator[TraceStiffnessBatch]:
+    """消费局部刚度批次, 完成完整 Schur 缩聚与迹投影.
+
+    Parameters
+    ----------
+    stiffness_batches : iterable
+        连续的 (start, end, K_local) 批次.
+    trace_basis : TraceBasis
+        完整边界与迹空间之间的映射.
+    i_dofs, b_dofs : array_like
+        内部和边界自由度编号.
+
+    Yields
+    ------
+    TraceStiffnessBatch
+        可直接交给 InterfaceSpace.assemble 的矩阵批次.
+
+    Raises
+    ------
+    ValueError
+        迹基与边界自由度数不一致, 或局部矩阵批次不合法.
+    """
+    if trace_basis.n_boundary_dofs != len(b_dofs):
+        raise ValueError("迹基边界自由度数与子结构不一致.")
+    for batch in iter_condensation_from_stiffness_batches(
+        stiffness_batches, i_dofs=i_dofs, b_dofs=b_dofs,
     ):
         yield TraceStiffnessBatch(
             start=batch.start,
@@ -269,7 +331,8 @@ def assemble_corner_system_with_recovery(
         每批子结构数.
 
     timings : dict, optional
-        写入互斥的 CPU 墙钟分项秒数, global_csr 包含编排差额.
+        写入 CPU 墙钟分项秒数及 local_condensation_total 汇总.
+        汇总不参与分项累加, global_csr 包含编排差额.
 
     Returns
     -------
@@ -279,22 +342,64 @@ def assemble_corner_system_with_recovery(
         (start, end, T_corner) 列表, T_corner = -solve(K_ii, K_ib P).
         不保存完整 Schur 补, 仅在装配成功后交给分析器.
     """
+    return assemble_corner_from_stiffness_batches(
+        prototype.iter_local_stiffness_batches(density, chunk_size=chunk_size),
+        interface_space, i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
+        timings=timings,
+    )
+
+
+def assemble_corner_from_stiffness_batches(
+    stiffness_batches: Any, interface_space: Any, *, i_dofs: Any, b_dofs: Any,
+    timings: Any = None,
+) -> tuple[Any, list]:
+    """消费局部刚度批次, 直接组装角点系统并保存恢复矩阵.
+
+    Parameters
+    ----------
+    stiffness_batches : iterable
+        从 0 开始连续的 (start, end, K_local) 批次.
+    interface_space : InterfaceSpace
+        linear_corner 接口空间.
+    i_dofs, b_dofs : array_like
+        内部和边界自由度编号.
+    timings : dict, optional
+        写入分项墙钟时间. local_stiffness 统计获取上游批次的时间,
+        已在调用前生成矩阵时不包含其生成成本. block_projection、local_solve
+        和 condensation_assembly 分别统计分块投影、内部求解与缩聚刚度合成;
+        local_condensation_total 是三项之和, 不可再作为独立分项累加.
+
+    Returns
+    -------
+    system : InterfaceSystem
+        全局角点接口刚度.
+    recovery_batches : list
+        (start, end, T_corner), 满足 u_i = T_corner q.
+
+    Raises
+    ------
+    ValueError
+        接口空间不是 linear_corner, 或批次区间及矩阵形状不符.
+    """
     measured = {key: 0.0 for key in
-                ("local_stiffness", "block_projection", "local_solve", "global_csr")}
+                ("local_stiffness", "block_projection", "local_solve",
+                 "condensation_assembly", "global_csr")}
     total_started = perf_counter()
     basis = interface_space.trace_basis
     if basis.name != "linear_corner":
         raise ValueError("直接角点缩聚仅支持 linear_corner.")
-    i = bm.asarray(prototype.i_dofs, dtype=bm.int64)
-    b = bm.asarray(prototype.b_dofs, dtype=bm.int64)
-    if basis.n_boundary_dofs != prototype.n_b:
+    i = bm.asarray(i_dofs, dtype=bm.int64)
+    b = bm.asarray(b_dofs, dtype=bm.int64)
+    if basis.n_boundary_dofs != len(b):
         raise ValueError('迹基边界自由度数与子结构不一致.')
     P = basis.matrix
     recovery_batches = []
 
     def batches():
         """逐批投影边界块, 只求解角点数目的右端项."""
-        iterator = iter(prototype.iter_local_stiffness_batches(density, chunk_size=chunk_size))
+        iterator = iter(stiffness_batches)
+        expected_start = 0
+        n_dof = len(i) + len(b)
         while True:
             started = perf_counter()
             try:
@@ -304,6 +409,10 @@ def assemble_corner_system_with_recovery(
                 break
             measured["local_stiffness"] += perf_counter() - started
             started = perf_counter()
+            if (start != expected_start or end <= start
+                    or tuple(local.shape) != (end - start, n_dof, n_dof)):
+                raise ValueError("局部刚度批次的区间或形状不符.")
+            expected_start = end
             K_ii = local[..., i[:, None], i]
             B = local[..., i[:, None], b] @ P
             K_cc = bm.matrix_transpose(P) @ local[..., b[:, None], b] @ P
@@ -317,12 +426,16 @@ def assemble_corner_system_with_recovery(
             started = perf_counter()
             stiffness = K_cc + bm.matrix_transpose(B) @ recovery
             recovery_batches.append((start, end, recovery))
-            measured["block_projection"] += perf_counter() - started
+            measured["condensation_assembly"] += perf_counter() - started
             yield TraceStiffnessBatch(start, end, stiffness)
 
     system = interface_space.assemble(batches())
     # 生成器内部计算已单独累计, 差额含 CSR 模式构建、散加和编排开销.
     measured["global_csr"] = max(0.0, perf_counter() - total_started - sum(measured.values()))
+    # 汇总在互斥分项结算后添加, 避免从 global_csr 中重复扣减.
+    measured["local_condensation_total"] = sum(
+        measured[key] for key in ("block_projection", "local_solve", "condensation_assembly")
+    )
     if timings is not None:
         timings.update(measured)
     return system, recovery_batches
@@ -389,37 +502,85 @@ def iter_exact_internal_displacement_batches(
         )
 
     if recovery_batches is not None:
-        expected_start = 0
-        for start, end, recovery in recovery_batches:
-            if (start != expected_start or end <= start or end > n_substructure
-                    or tuple(recovery.shape) !=
-                    (end - start, len(prototype.i_dofs), trace_basis.n_trace_dofs)):
-                raise ValueError("恢复缓存的批次或形状与当前接口系统不一致.")
-            q = displacement[start:end]
-            yield InternalDisplacementBatch(
-                start, end, trace_basis.expand_displacement(q),
-                bm.einsum("...ij,...j->...i", recovery, q),
-            )
-            expected_start = end
-        if expected_start != n_substructure:
-            raise ValueError("恢复缓存未覆盖全部子结构.")
+        yield from iter_displacement_from_recovery_batches(
+            recovery_batches, displacement, trace_basis,
+            n_internal=len(prototype.i_dofs), recovery_on_trace=True,
+        )
         return
 
-    for batch in iter_exact_condensation_batches(
-        prototype,
-        rho_cells,
-        chunk_size=chunk_size,
-    ):
-        u_boundary = trace_basis.expand_displacement(
-            displacement[batch.start:batch.end]
+    recovery = (
+        (batch.start, batch.end, batch.recovery)
+        for batch in iter_exact_condensation_batches(
+            prototype, rho_cells, chunk_size=chunk_size,
         )
-        u_internal = bm.einsum("...ij,...j->...i", batch.recovery, u_boundary)
+    )
+    yield from iter_displacement_from_recovery_batches(
+        recovery, displacement, trace_basis,
+        n_internal=len(prototype.i_dofs), recovery_on_trace=False,
+    )
+
+
+def iter_displacement_from_recovery_batches(
+    recovery_batches: Any, trace_displacement: Any, trace_basis: TraceBasis,
+    *, n_internal: int, recovery_on_trace: bool,
+) -> Iterator[InternalDisplacementBatch]:
+    """仅由恢复矩阵批次与迹位移计算边界和内部位移.
+
+    Parameters
+    ----------
+    recovery_batches : iterable
+        连续覆盖全部子结构的 (start, end, T) 批次.
+    trace_displacement : TensorLike
+        形状为 (n_substructure, n_trace) 的局部迹位移.
+    trace_basis : TraceBasis
+        用于计算 u_b = Psi q 的迹基.
+    n_internal : int
+        每个子结构的内部自由度数.
+    recovery_on_trace : bool
+        True 时 T 的形状为 (b, n_internal, n_trace), 计算 T q;
+        False 时形状为 (b, n_internal, n_boundary), 计算 T u_b.
+
+    Yields
+    ------
+    InternalDisplacementBatch
+        可交给全场位移拼接接口的局部位移批次.
+
+    Raises
+    ------
+    ValueError
+        位移或恢复矩阵形状不符, 批次不连续或覆盖不完整.
+
+    Notes
+    -----
+    不读取密度、材料或局部刚度, 不执行缩聚. 显式区分恢复矩阵的输入空间,
+    保留完整边界恢复的 T (Psi q) 运算顺序, 不额外形成 T Psi.
+    """
+    displacement = bm.asarray(trace_displacement)
+    if (displacement.ndim != 2
+            or displacement.shape[1] != trace_basis.n_trace_dofs or n_internal < 0):
+        raise ValueError("迹位移形状或内部自由度数不符.")
+    n_substructure = displacement.shape[0]
+    n_input = (trace_basis.n_trace_dofs if recovery_on_trace
+               else trace_basis.n_boundary_dofs)
+    expected_start = 0
+    for start, end, recovery in recovery_batches:
+        if (start != expected_start or end <= start or end > n_substructure
+                or tuple(recovery.shape) != (end - start, n_internal, n_input)):
+            raise ValueError("恢复缓存的批次或形状与当前接口系统不一致.")
+        q = displacement[start:end]
+        u_boundary = trace_basis.expand_displacement(q)
+        u_internal = bm.einsum(
+            "...ij,...j->...i", recovery, q if recovery_on_trace else u_boundary,
+        )
         yield InternalDisplacementBatch(
-            start=batch.start,
-            end=batch.end,
+            start=start,
+            end=end,
             boundary=u_boundary,
             internal=u_internal,
         )
+        expected_start = end
+    if expected_start != n_substructure:
+        raise ValueError("恢复缓存未覆盖全部子结构.")
 
 
 def iter_exact_element_energy_batches(

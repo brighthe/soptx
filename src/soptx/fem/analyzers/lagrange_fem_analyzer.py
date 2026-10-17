@@ -453,6 +453,63 @@ class LagrangeFEMAnalyzer(BaseLogged):
 
         return self._K
 
+    def element_stiffness(self, cell_ids: TensorLike) -> TensorLike:
+        """取得指定细单元在当前材料状态下的刚度矩阵.
+
+        Parameters
+        ----------
+        cell_ids : array_like
+            非空的一维 int32 或 int64 全局单元编号, 允许乱序和重复.
+
+        Returns
+        -------
+        TensorLike
+            形状为 (len(cell_ids), ndof_e, ndof_e) 的单元矩阵. 单元顺序
+            与输入一致, 行列顺序与 ``tensor_space.cell_to_dof()`` 一致.
+
+        Raises
+        ------
+        ValueError
+            编号为空、形状或类型不符、编号越界, 或材料系数不覆盖全网格.
+        RuntimeError
+            拓扑优化模式下尚未更新材料系数.
+
+        Notes
+        -----
+        调用方须先通过 ``_update_density_coefficient`` 更新本轮材料状态.
+        本方法不执行材料插值, 不改变当前积分子、全局算子或装配层级.
+        标量系数优先复用共享参考矩阵或已有逐单元参考缓存; 无可复用缓存时
+        仅积分选中单元. 其他系数使用现有积分子支持的形状和装配方法.
+        """
+        ids = bm.asarray(cell_ids, device=self._mesh.device)
+        n_cells = int(self._mesh.number_of_cells())
+        if ids.ndim != 1 or ids.shape[0] == 0 or ids.dtype not in (bm.int32, bm.int64):
+            raise ValueError("cell_ids 须为非空的一维 int32 或 int64 单元编号.")
+        if bool(bm.any(ids < 0)) or bool(bm.any(ids >= n_cells)):
+            raise ValueError(f"cell_ids 须位于 [0, {n_cells}).")
+        ids = bm.astype(ids, bm.int64)
+        coef = self._integrator.coef
+        if self._topopt_algorithm is not None and coef is None:
+            raise RuntimeError("取得单元刚度前须先更新本轮材料系数.")
+        if coef is not None and (coef.ndim < 1 or coef.shape[0] != n_cells):
+            raise ValueError("当前材料系数的首轴须覆盖全网格单元.")
+
+        if coef is None or coef.ndim == 1:
+            n_classes = self._translation_class_count()
+            if n_classes < n_cells or self._cached_ke0 is not None:
+                reference = self._reference_stiffness_matrices()
+                matrices = reference[ids % n_classes]
+                if coef is not None:
+                    matrices = matrices * coef[ids, None, None]
+                return matrices
+
+        # 使用独立的子集积分子, 不修改带有几何缓存的现有积分子的 index.
+        integrator = LinearElasticIntegrator(
+            material=self._material, coef=None if coef is None else coef[ids],
+            q=self._integration_order, index=ids, method=self._assembly_method,
+        )
+        return integrator.assembly(self._tensor_space)
+
     def assemble_body_force_vector(self) -> TensorLike:
         """组装 ``Problem.loads()`` 中全部体力的体积分."""
         return assemble_body_forces(self._tensor_space, self._pde.loads(), q=self._integration_order)

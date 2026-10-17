@@ -29,6 +29,7 @@ from .interface_space import (
     build_interface_space,
 )
 from .layout import StructuredSubstructureLayout
+from .local_assembly import LocalAssemblyMap, assemble_local_stiffness, build_local_assembly_map
 from .recovery import (
     recover_full_displacement,
     recover_full_displacement_batches,
@@ -47,6 +48,10 @@ from .streaming import (
     InternalDisplacementBatch,
     LocalCondensationBatch,
     TraceStiffnessBatch,
+    assemble_corner_from_stiffness_batches,
+    iter_condensation_from_stiffness_batches,
+    iter_trace_stiffness_from_local_batches,
+    iter_displacement_from_recovery_batches,
     assemble_exact_interface_system,
     iter_exact_condensation_batches,
     iter_exact_element_energy_batches,
@@ -132,6 +137,13 @@ __all__ = [
     "LocalCondensationBatch",
     "TraceStiffnessBatch",
     "assemble_exact_interface_system",
+    "LocalAssemblyMap",
+    "assemble_local_stiffness",
+    "build_local_assembly_map",
+    "assemble_corner_from_stiffness_batches",
+    "iter_condensation_from_stiffness_batches",
+    "iter_trace_stiffness_from_local_batches",
+    "iter_displacement_from_recovery_batches",
     "iter_exact_condensation_batches",
     "iter_exact_element_energy_batches",
     "iter_exact_internal_displacement_batches",

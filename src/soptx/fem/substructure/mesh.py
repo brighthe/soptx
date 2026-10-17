@@ -1,11 +1,12 @@
-"""子结构网格与局部刚度装配.
+"""子结构网格、局部编号与旧密度装配的兼容入口.
 
 同一模型中的全部子结构在几何上互为平移, 因此离散结构 (网格拓扑, 函数空间,
 内部/接口自由度划分, 单位密度单元刚度阵) 与位置无关, 由 ``SubstructurePrototype``
 持有并只构造一次. ``SubstructureMesh`` 是原型加上一个全局位置的轻量封装.
 
-局部刚度装配接口接受任意可变前导维 ``...``: 单个子结构是前导维为空的特例,
-批量子结构对应前导维 ``B``, 与 ``condensation`` 模块的形状约定一致.
+旧局部刚度入口接受任意可变前导维 ``...``: 单个子结构是前导维为空的特例,
+批量子结构对应前导维 ``B``. 纯矩阵散加实现在 ``local_assembly`` 中;
+正式分析器由 FEM 获取细单元刚度, 不经这里的密度计算路径.
 """
 
 from typing import Tuple, Any, Callable, Optional, Sequence, List, Dict, Iterator
@@ -15,6 +16,8 @@ from soptx.mesh import QuadrangleMesh, HexahedronMesh
 from soptx.functionspace import LagrangeFESpace, TensorFunctionSpace
 from soptx.fem.integrators.linear_elastic_integrator import LinearElasticIntegrator
 from soptx.materials import IsotropicLinearElasticMaterial
+
+from .local_assembly import LocalAssemblyMap, assemble_local_stiffness, build_local_assembly_map
 
 
 def resolve_material_hypothesis(dim: int, hypothesis: Optional[str]) -> str:
@@ -190,19 +193,30 @@ class SubstructurePrototype:
         self._build_node_mapping()
         self._build_cell_mappings()
 
-        # 单位密度单元刚度阵; coef 为 None 即密度恒为 1.
-        self.integrator.coef = None
-        self.KE_unit: Any = self.integrator.assembly(self.space)
-        self.n_element_dofs: int = self.KE_unit.shape[-1]
+        # 旧密度入口首次使用时才积分, 正式路径由 FEM 层提供单元刚度.
+        self._ke_unit: Any = None
+        self.n_element_dofs: int = int(self.cell2dof.shape[1])
 
         # 局部刚度矩阵展平后的散加位置, 全体子结构共用.
-        flat_index = (
-            self.cell2dof[:, :, None] * self.n_total_dofs + self.cell2dof[:, None, :]
-        )
-        self._scatter_index: Any = bm.reshape(flat_index, (-1,))
+        self._scatter_index: Any = build_local_assembly_map(
+            self.cell2dof, self.n_total_dofs,
+        ).scatter_index
 
         self._corner_nodes: Optional[Any] = None
         self._linear_boundary_matrix: Optional[Any] = None
+
+    @property
+    def KE_unit(self) -> Any:
+        """旧密度及能量入口使用的参考单元刚度, 首次读取时积分并缓存."""
+        if self._ke_unit is None:
+            self.integrator.coef = None
+            self._ke_unit = self.integrator.assembly(self.space)
+        return self._ke_unit
+
+    @KE_unit.setter
+    def KE_unit(self, value: Any) -> None:
+        """保留旧调用方显式替换参考矩阵的入口, 包括独立后端训练路径."""
+        self._ke_unit = value
 
     @property
     def corner_nodes(self) -> Any:
@@ -766,8 +780,9 @@ class SubstructurePrototype:
             ValueError: 当 ``chunk_size`` 非正时抛出.
 
         说明:
-            本方法是局部刚度装配的唯一实现; ``assemble_local_stiffness_batch``
-            只是它的整批包装. 本方法不保存已生成批次, 也不在末尾执行
+            本方法是旧密度入口的流式包装, 矩阵散加委托 ``local_assembly``.
+            ``assemble_local_stiffness_batch`` 是它的整批包装.
+            本方法不保存已生成批次, 也不在末尾执行
             ``bm.concat``. 调用方消费一个批次后即可释放局部刚度矩阵, 从而把
             峰值内存限制在 ``chunk_size`` 对应的规模.
 
@@ -829,22 +844,30 @@ class SubstructurePrototype:
             形状为 (b, n_dof, n_dof) 的局部刚度矩阵.
         """
         backend = bm.get_current_backend() if backend is None else backend
-        n_chunk = rho_chunk.shape[0]
-        n_dof = self.n_total_dofs
         coef = self.stiffness_coefficient(rho_chunk)
         KE = backend.einsum('be, eij -> beij', coef, self.KE_unit)
+        return self.assemble_from_element_matrices(KE, backend=backend)
 
-        # 把 batch 编号并入平坦索引, 一次 bincount 完成全批散加.
-        offsets = backend.arange(n_chunk, dtype=backend.int64, device=backend.get_device(rho_chunk)) * (n_dof * n_dof)
-        indices = backend.reshape(offsets[:, None] + self._scatter_index[None, :], (-1,))
-        accumulated = backend.bincount(
-            indices,
-            weights=backend.reshape(KE, (-1,)),
-            minlength=n_chunk * n_dof * n_dof,
+    def assemble_from_element_matrices(self, KE_chunk: Any, *, backend: Any = None) -> Any:
+        """兼容入口, 将细单元矩阵交给独立的局部组装内核.
+
+        Parameters
+        ----------
+        KE_chunk : array_like
+            形状为 (b, NC, n_edof, n_edof), 顺序须与 cell2dof 一致.
+        backend : backend proxy or None
+            与矩阵和编号相容的后端, None 使用当前后端.
+
+        Returns
+        -------
+        array_like
+            形状为 (b, n_dof, n_dof) 的局部刚度矩阵.
+        """
+        # 旧训练路径会显式替换 _scatter_index, 因此不缓存另一份映射对象.
+        assembly_map = LocalAssemblyMap(
+            self.n_cells, self.n_element_dofs, self.n_total_dofs, self._scatter_index,
         )
-        K_local = backend.reshape(accumulated, (n_chunk, n_dof, n_dof))
-
-        return K_local
+        return assemble_local_stiffness(KE_chunk, assembly_map, backend=backend)
 
     def compute_element_strain_energy(
         self,

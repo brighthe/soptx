@@ -329,6 +329,7 @@ def test_corner_cached_recovery_matches_legacy_and_refreshes(setup, monkeypatch)
             def forbidden(*args, **kwargs):
                 raise AssertionError('缓存回代不应重新装配局部刚度')
             patch.setattr(sub.prototype, 'iter_local_stiffness_batches', forbidden)
+            patch.setattr(sub, 'element_stiffness', forbidden)
             sub.solve_system(prepared, rhs, out)
         q = sub.interface_displacement[sub.interface_space.local_dofs]
         old = recover_full_displacement_batches(
@@ -340,8 +341,61 @@ def test_corner_cached_recovery_matches_legacy_and_refreshes(setup, monkeypatch)
     with monkeypatch.context() as patch:
         def fail(*args, **kwargs):
             raise RuntimeError('模拟局部装配失败')
-        patch.setattr(sub.prototype, 'iter_local_stiffness_batches', fail)
+        patch.setattr(sub, 'element_stiffness', fail)
         with pytest.raises(RuntimeError, match='模拟'):
             sub.assemble_stiff_matrix(density)
     assert sub._corner_recovery_batches is None
     assert sub._density_cells is None
+    assert not sub._assembly_ready
+    with pytest.raises(RuntimeError, match='成功'):
+        sub.solve_system(prepared, rhs, out)
+
+
+@pytest.mark.parametrize('trace', ['full_trace', 'linear_corner'])
+def test_formal_stiffness_and_recovery_use_fem_only(setup, monkeypatch, trace):
+    """正式装配与恢复不调用旧密度入口, 每轮只进行一次材料插值."""
+    layout, problem, material, interpolation, density = setup
+    sub = _sub_analyzer(layout, problem, material, interpolation, trace, solve_method='scipy')
+    calls = []
+    original_interpolate = interpolation.interpolate_material
+
+    def interpolate(*args, **kwargs):
+        calls.append(1)
+        return original_interpolate(*args, **kwargs)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('正式路径不得调用 prototype 的材料或局部刚度生成')
+
+    monkeypatch.setattr(interpolation, 'interpolate_material', interpolate)
+    monkeypatch.setattr(sub.prototype, 'coefficient_function', forbidden)
+    monkeypatch.setattr(sub.prototype, 'iter_local_stiffness_batches', forbidden)
+    monkeypatch.setattr(sub.prototype, 'assemble_from_element_matrices', forbidden)
+    assert sub.prototype._ke_unit is None
+    for rho in (density, density[::-1].copy()):
+        calls.clear()
+        system = sub.assemble_stiff_matrix(rho)
+        prepared, rhs = sub.apply_bc(system, sub.assemble_body_force_vector())
+        out = sub.tensor_space.function()
+        _, info = sub.solve_system(prepared, rhs, out)
+        assert info['converged']
+        assert len(calls) == 1
+        assert sub.prototype._ke_unit is None
+        old_prepared, old_rhs = prepared, rhs
+        sub._update_density_coefficient(rho)
+        with pytest.raises(RuntimeError, match='成功'):
+            sub.solve_system(old_prepared, old_rhs, out)
+
+
+@pytest.mark.parametrize('trace', ['full_trace', 'linear_corner'])
+def test_fem_local_stiffness_matches_legacy_and_rejects_stale_system(setup, trace):
+    """比较逐批局部刚度, 并拒绝密度更新前的受约束系统."""
+    layout, problem, material, interpolation, density = setup
+    sub = _sub_analyzer(layout, problem, material, interpolation, trace, solve_method='scipy')
+    system = sub.assemble_stiff_matrix(density)
+    expected = sub.prototype.assemble_local_stiffness_batch(sub._density_cells)
+    actual = np.concatenate([matrix for _, _, matrix in sub._iter_local_stiffness_batches()])
+    np.testing.assert_allclose(actual, expected, rtol=1e-11, atol=1e-13)
+    prepared, rhs = sub.apply_bc(system, sub.assemble_body_force_vector())
+    sub.assemble_stiff_matrix(density[::-1].copy())
+    with pytest.raises(ValueError, match='本轮'):
+        sub.solve_system(prepared, rhs, sub.tensor_space.function())
