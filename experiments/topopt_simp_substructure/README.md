@@ -218,3 +218,40 @@ outputs/verify_corner_direct_iter94_20261017/, 不入 Git.
 70 项直接相关回归通过; 扩展检查共 107 项通过、3 项训练测试失败.
 3 项失败均为 independent_training_records_optimizer 的 KeyError: stiffness,
 已在临时目录导出的修改前 HEAD 上复现, 本次未修改无关训练代码.
+
+## 装配与边界条件分项计时
+
+run_substructure_full_trace_vs_linear_corner.py 每轮打印装配分项及边界分项,
+同时写入 history.json 每轮记录的 assembly_breakdown 和 boundary_breakdown.
+summary.json 继承末轮记录. 不新增命令行参数, 不改变求解算法或输出目录规则.
+
+linear_corner 的 assembly_breakdown 单位均为秒, 分项互斥:
+- local_stiffness: 逐批生成局部刚度, 含生成器初始化和结束处理;
+- block_projection: 提取 K_ii/K_ib/K_bb、形成 B 与 K_cc、缩聚矩阵乘积及缓存登记;
+- local_solve: 求解 K_ii X = B;
+- global_csr: 总缩聚装配耗时扣除前三项, 含 CSR 符号模式、散加与编排开销,
+  不是纯 CSR 内核计时;
+- other: 外层装配计时扣除上述项, 含密度准备、旧缓存释放及外层测量开销.
+
+占比的分母为 stages["装配"]["seconds"]. 原 assembly_seconds 字段仍包含装配和
+边界条件, 不可混作本分项的分母. full_trace 暂不拆装配分项, 记录为空字典.
+采用 perf_counter 的 CPU 墙钟, 适用于当前 numpy/cpu 实验, 不作为 CUDA 异步内核计时.
+
+boundary_breakdown 分别记录 body_force、non_body_load、dirichlet_data、
+prepare_system 和 allocate_state. non_body_load 含集中力向量复制与载荷相加,
+dirichlet_data 含基准位移复制, prepare_system 含接口矩阵转换、约束校验及右端复制,
+allocate_state 含旧刚度引用释放和全场位移向量创建.
+两个 *_cache_present_before 布尔字段仅表示调用前缓存存在, 不代表任意载荷变化时一定命中.
+
+静态检查: 接口载荷与约束投影在分析器构造时完成; 纯集中力有指纹缓存,
+Dirichlet 插值也已有缓存. 同一问题的后续迭代不会重新插值支承或重新定位集中力.
+但每轮仍分配/复制载荷和位移向量, 并准备对应新刚度的约束系统;
+固定约束编号的提取与一致性检查也会重复. 本次只计时和检查, 不新增缓存优化.
+
+2026-10-17 独立两轮验证 (210 x 35 x 35, m=5, chunk_size=256, OpenBLAS/OMP=1):
+首轮装配 12.33 秒, 局部刚度 21.8%、块提取与投影 53.5%、局部求解 24.6%、
+CSR 及编排约 0.1%; 第二轮分别为 20.0%、55.2%、24.7%、约 0.1%.
+边界条件首轮约 0.87 秒, 其中 Dirichlet 数据约 0.71 秒; 第二轮约 0.013 秒,
+载荷及 Dirichlet 缓存均已存在. 这些比例不能直接代替另一台机器的测量.
+独立结果位于 outputs/verify_assembly_timing_210_20261017/, 原结果未修改.
+61 项缩聚与分析器回归通过; 分项之和与外层装配时间核对通过.

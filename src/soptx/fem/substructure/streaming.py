@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from dataclasses import dataclass
 from typing import Any, Iterator
 
@@ -252,6 +253,7 @@ def assemble_exact_interface_system(
 
 def assemble_corner_system_with_recovery(
     prototype: Any, density: Any, interface_space: Any, *, chunk_size: int,
+    timings: Any = None,
 ) -> tuple[Any, list]:
     """直接装配角点缩聚系统并缓存当前密度的内部恢复矩阵.
 
@@ -266,6 +268,9 @@ def assemble_corner_system_with_recovery(
     chunk_size : int
         每批子结构数.
 
+    timings : dict, optional
+        写入互斥的 CPU 墙钟分项秒数, global_csr 包含编排差额.
+
     Returns
     -------
     system : InterfaceSystem
@@ -274,6 +279,9 @@ def assemble_corner_system_with_recovery(
         (start, end, T_corner) 列表, T_corner = -solve(K_ii, K_ib P).
         不保存完整 Schur 补, 仅在装配成功后交给分析器.
     """
+    measured = {key: 0.0 for key in
+                ("local_stiffness", "block_projection", "local_solve", "global_csr")}
+    total_started = perf_counter()
     basis = interface_space.trace_basis
     if basis.name != "linear_corner":
         raise ValueError("直接角点缩聚仅支持 linear_corner.")
@@ -286,21 +294,37 @@ def assemble_corner_system_with_recovery(
 
     def batches():
         """逐批投影边界块, 只求解角点数目的右端项."""
-        for start, end, local in prototype.iter_local_stiffness_batches(
-            density, chunk_size=chunk_size,
-        ):
+        iterator = iter(prototype.iter_local_stiffness_batches(density, chunk_size=chunk_size))
+        while True:
+            started = perf_counter()
+            try:
+                start, end, local = next(iterator)
+            except StopIteration:
+                measured["local_stiffness"] += perf_counter() - started
+                break
+            measured["local_stiffness"] += perf_counter() - started
+            started = perf_counter()
             K_ii = local[..., i[:, None], i]
             B = local[..., i[:, None], b] @ P
             K_cc = bm.matrix_transpose(P) @ local[..., b[:, None], b] @ P
+            measured["block_projection"] += perf_counter() - started
+            started = perf_counter()
             if len(i):
                 recovery = -bm.linalg.solve(K_ii, B)
             else:
                 recovery = B
+            measured["local_solve"] += perf_counter() - started
+            started = perf_counter()
             stiffness = K_cc + bm.matrix_transpose(B) @ recovery
             recovery_batches.append((start, end, recovery))
+            measured["block_projection"] += perf_counter() - started
             yield TraceStiffnessBatch(start, end, stiffness)
 
     system = interface_space.assemble(batches())
+    # 生成器内部计算已单独累计, 差额含 CSR 模式构建、散加和编排开销.
+    measured["global_csr"] = max(0.0, perf_counter() - total_started - sum(measured.values()))
+    if timings is not None:
+        timings.update(measured)
     return system, recovery_batches
 
 

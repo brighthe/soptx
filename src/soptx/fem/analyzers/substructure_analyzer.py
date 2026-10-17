@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any, Dict, Literal, Optional, Sequence, Union
 
 from soptx.backend import backend_manager as bm
@@ -144,6 +145,8 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self._interface_load, self._constraints = self._interface_space.constrained_conditions(pde)
         self._density_cells: Optional[TensorLike] = None
         self._corner_recovery_batches = None
+        self.assembly_timings = {}
+        self.boundary_timings = {}
         self._interface_displacement: Optional[TensorLike] = None
         # 接口 MG 预条件子所需的细网格单元限制算子, 只依赖拓扑, 首次构造后缓存
         self._fine_restriction: Optional[ElementRestriction] = None
@@ -288,6 +291,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             接口刚度 ``K_Q`` 的 CSR 及其自由度编号. 类型标注放宽为 Any 以兼容基类协议,
             基类返回的是细网格刚度算子.
         """
+        self.assembly_timings = {}
         # 每次装配先失效旧缓存, 防止密度更新或装配失败后复用旧恢复矩阵.
         self._corner_recovery_batches = None
         self._density_cells = None
@@ -296,7 +300,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if self._trace == 'linear_corner':
             system, recovery = assemble_corner_system_with_recovery(
                 self._prototype, density_cells, self._interface_space,
-                chunk_size=self._chunk_size,
+                chunk_size=self._chunk_size, timings=self.assembly_timings,
             )
             self._density_cells = density_cells
             self._corner_recovery_batches = recovery
@@ -336,19 +340,31 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         子结构缩聚不缩聚载荷, 载荷与支承须落在接口自由度上, 由接口空间的投影检查.
         Dirichlet 数据只支持零位移; 基准向量照基类记录, 作为位移的 Dirichlet 分量参照.
         """
+        self.boundary_timings = {}
+        started = perf_counter()
+        load_cached = self._non_body_cache is not None
         F_non_body = self._non_body_loads_by_boundary_type()
         if F_non_body is not None:
             F = F + F_non_body
         self._F = F
+        self.boundary_timings["non_body_load"] = perf_counter() - started
+        self.boundary_timings["load_cache_present_before"] = load_cached
+        started = perf_counter()
+        dirichlet_cached = self._dirichlet_cache is not None
         uh_bd, _, bd_nonzero = self._dirichlet_data()
         if bd_nonzero:
             self._log_error("子结构分析器只支持齐次 Dirichlet 条件")
         self._prescribed_solution = bm.copy(uh_bd[:])
+        self.boundary_timings["dirichlet_data"] = perf_counter() - started
+        self.boundary_timings["dirichlet_cache_present_before"] = dirichlet_cached
+        started = perf_counter()
         prepared = prepare_constrained_system(
             K, self._interface_load, self._constraints,
             solver=self._solve_method if solver is None else solver,
         )
-        return prepared, bm.asarray(prepared.rhs.copy(), dtype=bm.float64)
+        rhs = bm.asarray(prepared.rhs.copy(), dtype=bm.float64)
+        self.boundary_timings["prepare_system"] = perf_counter() - started
+        return prepared, rhs
 
     def _apply_state_bc(self, K, F, **kwargs):
         """将状态求解的 solver 选项传给边界条件准备阶段.

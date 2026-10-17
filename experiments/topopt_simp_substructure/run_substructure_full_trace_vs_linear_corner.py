@@ -256,9 +256,30 @@ def main(argv=None):
         with measure(stages, '装配', label):
             stiffness = analyzer.assemble_stiff_matrix(rho_val=physical)
         with measure(stages, '边界条件', label):
-            system_matrix, system_load = analyzer.apply_bc(stiffness, analyzer.assemble_body_force_vector())
+            detail_started = perf_counter()
+            body_force = analyzer.assemble_body_force_vector()
+            body_force_seconds = perf_counter() - detail_started
+            system_matrix, system_load = analyzer.apply_bc(stiffness, body_force)
+            del body_force
+            detail_started = perf_counter()
             del stiffness
             displacement = analyzer.tensor_space.function()
+            allocate_seconds = perf_counter() - detail_started
+        assembly_breakdown = dict(analyzer.assembly_timings)
+        if assembly_breakdown:
+            assembly_breakdown['other'] = max(
+                0.0, stages['装配']['seconds'] - sum(assembly_breakdown.values()))
+        boundary_breakdown = dict(analyzer.boundary_timings,
+                                  body_force=body_force_seconds, allocate_state=allocate_seconds)
+        if assembly_breakdown:
+            names = dict(local_stiffness='局部刚度生成', block_projection='块提取与投影',
+                         local_solve='局部求解', global_csr='全局CSR及编排', other='其他')
+            print(f'[迭代 {iteration}/装配分项] ' + ', '.join(
+                f'{names[k]} {v:.3f}s ({v / stages["装配"]["seconds"]:.1%})'
+                for k, v in assembly_breakdown.items()), flush=True)
+        print(f'[迭代 {iteration}/边界分项] ' + ', '.join(
+            f'{k}={v}' if isinstance(v, bool) else f'{k}={v:.3f}s'
+            for k, v in boundary_breakdown.items()), flush=True)
         with measure(stages, '求解', label):
             # 初值为接口未知量: full_trace 为完整接口位移, linear_corner 为角点位移; 首轮由分析器取零
             warm_start = {'x0': previous_interface} if previous_interface is not None else {}
@@ -315,7 +336,8 @@ def main(argv=None):
                       cg_relative_residual=solver_info['relres'],
                       cg_converged=solver_info['converged'],
                       analysis_seconds=analysis_seconds, peak_rss_gib=peak_gib,
-                      vtu_file=frame_file, stages=stages)
+                      vtu_file=frame_file, stages=stages,
+                      assembly_breakdown=assembly_breakdown, boundary_breakdown=boundary_breakdown)
         history.append(record)
         # 停止时不再更新, 保留刚完成分析的密度, 避免最终柔顺度与密度错位
         stop = converged or iteration == MAX_ITER
