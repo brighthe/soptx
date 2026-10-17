@@ -121,3 +121,33 @@ python -m pytest tests/unit/test_substructure_constrained_solve.py tests/unit/te
 ```
 
 验收条件: apply_bc 已完成 CG 掩码、直接法消元或乘子矩阵构造; 原刚度与载荷不被改写; 矛盾约束在准备阶段被拒绝; solve_system 不调用约束校验、QR 约化、乘子矩阵组装或旧的约束施加入口; 无约束、全固定、非齐次固定与冗余一般约束的解析解及残差正确; CG 热启动、FEM 等价性和单次求解器切换仍通过. MUMPS 后端需在安装环境另行验证. 如需验证阶段计时, 经授权按上文两轮小网格流程使用新输出目录运行, 不覆盖历史结果.
+
+## Huang2023 论文规模的 linear_corner 运行
+
+在另一台已安装 SOPTX 及其依赖的 Linux/WSL 电脑上, 从仓库根目录运行:
+
+```bash
+python -B -u experiments/topopt_simp_substructure/run_paper_scale_linear_corner.py \
+  --run-dir experiments/topopt_simp_substructure/outputs/paper_scale_linear_corner_run01
+```
+
+此入口复用 run_substructure_full_trace_vs_linear_corner.py, 固定细网格为
+390 x 65 x 65, 子结构为 78 x 13 x 13, m=5, CG/Jacobi, 单线程.
+物理域仍为 210 x 35 x 35, 细单元边长为 7/13, 物理过滤半径为 21/13.
+体积分数为 0.12, 最多 300 轮, 连续 5 轮柔顺度相对变化小于 0.0002 时停止.
+不施加强制设计对称.
+
+--run-dir 必须是不存在的新目录; 已存在时直接拒绝, 不清空旧结果.
+该目录保存运行入口快照, 内部的 linear_corner_hex_390x65x65_m5_cg_jacobi/
+采用与 full_trace_hex_210x35x35_m5_cg_gmg 相同的主要输出形式:
+
+- config.json、history.json、summary.json;
+- density_final.npy、design_density_final.npy、displacement_final.npy;
+- result_initial.vtu、result_final.vtu;
+- iterations/iter_XXXX.vtu 和 evolution.pvd, 均保留在运行目录, 不自动迁移.
+
+summary.json 和最终场文件仅在优化正常结束时产生; 达到 300 轮时
+termination=max_iter, 不能视为已收敛. 本入口完成后在 --run-dir 下写入
+reference_resource_estimate.json, 记录 full_trace 的历史规模外推内存和当时可用内存.
+这只是资源初估, 不会自动启动 full_trace 参考求解, 也不是最终密度的误差验证.
+outputs/ 不入 Git; 推送入口代码不会同步本机已有计算结果.

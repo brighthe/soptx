@@ -358,9 +358,9 @@ def main(argv=None):
     np.save(output / 'displacement_final.npy', bm.to_numpy(state['displacement'][:]))
     # 初始帧与最后一帧各复制一份到运行目录顶层, 不必翻 iterations/: 最后一帧与最终 NPY 对应同一次
     # 分析, 初始帧便于查看固定单元; 复用已导出的所选场
-    copies = {'density_final.vtu': history[-1]['vtu_file']}
+    copies = {'result_final.vtu': history[-1]['vtu_file']}
     if initial_frame is not None:
-        copies['density_initial.vtu'] = initial_frame
+        copies['result_initial.vtu'] = initial_frame
     for name, frame_file in copies.items():
         temporary = output / f'.{name}.tmp'
         try:
