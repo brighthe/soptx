@@ -48,7 +48,7 @@ BACKEND = 'numpy'
 DEVICE = 'cpu'
 
 # 分析参数: 有限元离散与子结构
-GRID = (210, 35, 35)
+GRID = (390, 65, 65)
 N_FINE = 5
 CHUNK_SIZE = 256
 ASSEMBLY_METHOD = 'fast'
@@ -139,11 +139,9 @@ def main(argv=None):
     radius = FILTER_RADIUS_CELLS * h
 
     # 创建输出目录.
-    # outputs/ 是临时目录, 同名结果目录直接清空重建, 避免新旧运行的文件混在同一目录
+    # 排他创建目录, 已有输出时报错, 保留历史结果.
     output = args.output
-    if output.exists():
-        shutil.rmtree(output)
-    output.mkdir(parents=True)
+    output.mkdir(parents=True, exist_ok=False)
 
     config: dict[str, Any] = dict(
         method=f'substructure_{trace}', trace=trace,

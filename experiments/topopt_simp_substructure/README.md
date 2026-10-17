@@ -28,7 +28,7 @@ parse_args 仅解析 --analysis-method 并生成 args.output; main 直接读取�
 
 run_substructure_vs_fem.py 直接包含完整流程: 统一建细网格、子结构布局与分析器、密度过滤、装配、边界条件、求解、柔顺度与灵敏度、停止判断、OC 更新、结果输出. 成本汇总由独立后处理脚本 summarize_cost.py 按需执行. --analysis-method 仅控制子结构布局与分析器构造及热启动位移空间: FEM 使用全场位移, 子结构使用接口位移. 两侧共用同一个优化循环, 直接调用 soptx 的数值接口, 不再转调用其他运行脚本. 原有独立入口保留.
 
-三个入口统一固定 `DOMAIN = (0.0, 210.0, 0.0, 35.0, 0.0, 35.0)`，再用 `HexahedronMesh.from_box` 从计算域与剖分数创建细网格。子结构布局通过 `full_mesh=mesh` 复用同一对象，未传网格的其他调用仍按原方式惰性创建。两个独立子结构入口默认划分改为 `42 7 7`、细分数 5，与正式网格一致。
+三个入口统一固定 `DOMAIN = (0.0, 210.0, 0.0, 35.0, 0.0, 35.0)`，再用 `HexahedronMesh.from_box` 从计算域与剖分数创建细网格。子结构布局通过 `full_mesh=mesh` 复用同一对象，未传网格的其他调用仍按原方式惰性创建。历史上两个独立子结构入口的默认划分改为 `42 7 7`、细分数 5，与正式网格一致。
 
 `run_substructure_vs_fem.py` 的准备阶段将公共材料与插值单独计为“材料与插值”.
 子结构分支先创建布局, 再创建分析器, 分别计为“子结构布局与校验”和“分析器”;
@@ -40,7 +40,7 @@ FEM 分支只创建分析器. 这些计时块互不嵌套, “分析器”不再
 
 当前入口不施加强制设计对称: 体积梯度和柔顺度灵敏度经过过滤后直接用于 OC, 不再作镜像平均, config.json 不再写入 symmetry 字段. 逐轮及末轮的 symmetry_error_*、design_symmetry_error_z 仍作为诊断统计保留, 不要求其为零. 历史结果包含原来的 z 向梯度对称处理, 不作为当前设置下已复现的结果; 已有文件不改写.
 
-每种方法在 outputs/ 下有独立运行目录. outputs/ 是不入库的临时目录, 重跑时脚本直接清空同名目录再重写, 避免新旧运行的文件混在一起; 需要保留的结果先用 sync_results.py 固化到 results/ 或自行备份. 运行入口仅保存原始 config.json、history.json、summary.json 与场文件; 逐轮 ParaView 帧的去向见下文 "ParaView 帧" 一节. 运行完成后, 用 [summarize_cost.py](summarize_cost.py) 单独生成 cost_summary.json, 包含:
+每种方法在 outputs/ 下有独立运行目录. full_trace 与 linear_corner 对照入口遇到已有目录直接报错, 详见下方论文规模运行说明. 其他入口的 outputs/ 是不入库的临时目录, 重跑时脚本直接清空同名目录再重写, 避免新旧运行的文件混在一起; 需要保留的结果先用 sync_results.py 固化到 results/ 或自行备份. 运行入口仅保存原始 config.json、history.json、summary.json 与场文件; 逐轮 ParaView 帧的去向见下文 "ParaView 帧" 一节. 运行完成后, 用 [summarize_cost.py](summarize_cost.py) 单独生成 cost_summary.json, 包含:
 
 - 收敛状态、迭代数、最终柔顺度与体积分数.
 - 准备耗时, 第 2 轮起的装配、边界条件、求解与每轮总耗时.
@@ -124,30 +124,34 @@ python -m pytest tests/unit/test_substructure_constrained_solve.py tests/unit/te
 
 ## Huang2023 论文规模的 linear_corner 运行
 
-在另一台已安装 SOPTX 及其依赖的 Linux/WSL 电脑上, 从仓库根目录运行:
+直接使用 run_substructure_full_trace_vs_linear_corner.py, 不使用包装脚本.
+在已安装 SOPTX 及其依赖的 Linux/WSL 电脑上, 从仓库根目录运行:
 
 ```bash
-python -B -u experiments/topopt_simp_substructure/run_paper_scale_linear_corner.py \
-  --run-dir experiments/topopt_simp_substructure/outputs/paper_scale_linear_corner_run01
+python -B -u experiments/topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py \
+  --trace linear_corner --preconditioner jacobi
 ```
 
-此入口复用 run_substructure_full_trace_vs_linear_corner.py, 固定细网格为
-390 x 65 x 65, 子结构为 78 x 13 x 13, m=5, CG/Jacobi, 单线程.
-物理域仍为 210 x 35 x 35, 细单元边长为 7/13, 物理过滤半径为 21/13.
-体积分数为 0.12, 最多 300 轮, 连续 5 轮柔顺度相对变化小于 0.0002 时停止.
-不施加强制设计对称.
+本入口顶部 GRID=(390, 65, 65), 子结构为 78 x 13 x 13, m=5.
+仅解析 --trace 和 --preconditioner (以及 --help), 不提供 --grid 或 --output-dir.
+其余参数仍在顶部配置区: 单线程, CG 容差 1e-6, 物理域 210 x 35 x 35,
+细单元边长 7/13, 物理过滤半径 21/13, 体积分数 0.12.
+最多 300 轮, 连续 5 轮柔顺度相对变化小于 0.0002 时停止, 不强制设计对称.
+该 GRID 同时适用于本入口的 full_trace 模式, 不改变 run_substructure_vs_fem.py 的配置.
 
---run-dir 必须是不存在的新目录; 已存在时直接拒绝, 不清空旧结果.
-该目录保存运行入口快照, 内部的 linear_corner_hex_390x65x65_m5_cg_jacobi/
-采用与 full_trace_hex_210x35x35_m5_cg_gmg 相同的主要输出形式:
+输出根据接口、网格、细分数、求解器和预条件子自动命名为
+outputs/linear_corner_hex_390x65x65_m5_cg_jacobi/.
+目录已存在时抛出 FileExistsError, 不清空、覆盖或自动续算.
+需要再次运行时, 先自行将已有目录备份到其他名称.
+主要输出与 full_trace_hex_210x35x35_m5_cg_gmg 一致:
 
 - config.json、history.json、summary.json;
 - density_final.npy、design_density_final.npy、displacement_final.npy;
 - result_initial.vtu、result_final.vtu;
 - iterations/iter_XXXX.vtu 和 evolution.pvd, 均保留在运行目录, 不自动迁移.
 
-summary.json 和最终场文件仅在优化正常结束时产生; 达到 300 轮时
-termination=max_iter, 不能视为已收敛. 本入口完成后在 --run-dir 下写入
-reference_resource_estimate.json, 记录 full_trace 的历史规模外推内存和当时可用内存.
-这只是资源初估, 不会自动启动 full_trace 参考求解, 也不是最终密度的误差验证.
-outputs/ 不入 Git; 推送入口代码不会同步本机已有计算结果.
+summary.json 和最终场文件仅在优化正常结束时产生.
+达到 300 轮时 termination=max_iter, 不能视为已收敛.
+本入口只执行所选模式的优化, 不自动启动最终密度的 full_trace 参考验证,
+也不生成包装脚本原有的入口快照或资源外推文件.
+outputs/ 不入 Git; 推送代码不会同步本机已有计算结果.
