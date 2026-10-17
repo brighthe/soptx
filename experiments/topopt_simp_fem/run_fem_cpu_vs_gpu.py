@@ -45,7 +45,7 @@ NU = 0.3
 # 计算后端
 BACKEND = 'pytorch'
 
-# 分析参数: 有限元离散; OPERATOR_LEVEL 为 --level 的默认值
+# 分析参数: 有限元离散; GRID 与 OPERATOR_LEVEL 分别为 --grid 与 --level 的默认值
 GRID = (390, 65, 65)
 # GRID = (190, 32, 32)
 SPACE_DEGREE = 1
@@ -59,7 +59,7 @@ PRECONDITIONER = 'jacobi'
 CG_TOLERANCE = 1.0e-6
 CG_MAXITER = 20000
 
-# 优化参数
+# 优化参数; MAX_ITER 为 --max-iter 的默认值
 VOLFRAC = 0.12
 FILTER_RADIUS_CELLS = 3.0
 PENALTY = 3.0
@@ -75,7 +75,7 @@ VTU_FIELDS = ('density', )
 
 
 def parse_args(argv=None):
-    """解析计算设备、刚度算子层级与预条件子, 其余设置均为模块顶部常量.
+    """解析计算设备、网格、刚度算子层级、预条件子与优化迭代上限, 其余设置均为模块顶部常量.
     """
     parser = argparse.ArgumentParser(description=__doc__)
 
@@ -85,13 +85,48 @@ def parse_args(argv=None):
                         help='计算设备: cpu 为主机 CPU, cuda 为 GPU')
     parser.add_argument('--level', choices=('ea', 'fa'), default=OPERATOR_LEVEL,
                         help=f'刚度算子层级: ea 不形成全局矩阵, fa 装配全局 CSR 矩阵 (默认 {OPERATOR_LEVEL})')
+    parser.add_argument('--grid', type=int, nargs=3, default=GRID, metavar=('NX', 'NY', 'NZ'),
+                        help=f'六面体网格各方向单元数 (默认 {GRID})')
+    parser.add_argument('--max-iter', type=int, default=MAX_ITER,
+                        help=f'优化迭代上限 (默认 {MAX_ITER})')
 
     args = parser.parse_args(argv)
     if args.device == 'cuda' and not torch.cuda.is_available():
         parser.error('--device cuda 需要可用的 CUDA 设备')
-    nx, ny, nz = GRID
+    if min(args.grid) < 1:
+        parser.error(f'--grid 须为正整数, 得到 {args.grid}')
+    if args.max_iter < 1:
+        parser.error(f'--max-iter 须为正整数, 得到 {args.max_iter}')
+    args.grid = tuple(args.grid)
+    nx, ny, nz = args.grid
     args.output = OUTPUT_DIR / f'{args.device}_{args.level}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
     return args
+
+
+def summarize_stages(history: list[dict]) -> dict[str, dict]:
+    """按阶段汇总各轮迭代的用时, 首轮与之后各轮分开统计.
+
+    首轮含一次性开销 (如 FA 的 CSR 骨架构建、GPU 的冷启动), 不能代表每轮的稳态用时.
+
+    Parameters
+    ----------
+    history : 各轮记录, 每条的 ``stages`` 为 ``{阶段名: {'seconds': ...}}``.
+
+    Returns
+    -------
+    stage_seconds : 以阶段名为键, 值含 ``first`` (首轮用时, 首轮无该阶段时为 None)、``steady_mean``
+        (第 2 轮起的均值, 无数据时为 None)、``total`` (各轮合计) 与 ``count`` (出现的轮数).
+        OC 不在停止的那一轮执行, 故其 count 比轮数少 1.
+    """
+    names = list(dict.fromkeys(name for record in history for name in record['stages']))
+    stage_seconds = {}
+    for name in names:
+        first = history[0]['stages'].get(name, {}).get('seconds')
+        later = [record['stages'][name]['seconds'] for record in history[1:] if name in record['stages']]
+        values = ([] if first is None else [first]) + later
+        stage_seconds[name] = dict(first=first, steady_mean=sum(later) / len(later) if later else None,
+                                   total=sum(values), count=len(values))
+    return stage_seconds
 
 
 def main(argv=None):
@@ -106,7 +141,8 @@ def main(argv=None):
     cuda = device == 'cuda'
     precond = args.preconditioner
 
-    grid = GRID
+    grid = args.grid
+    max_iter = args.max_iter
     h = ELEMENT_SIZE
     domain = (0.0, grid[0] * h, 0.0, grid[1] * h, 0.0, grid[2] * h)
     spacing = (h, h, h)
@@ -126,7 +162,7 @@ def main(argv=None):
         filter_type='density', filter_radius=radius, optimizer=OC_OPTIONS,
         problem=FullMBBBeamPoint3d.__name__, load=LOAD,
         operator_level=args.level, assembly_method=ASSEMBLY_METHOD, solver=SOLVER,
-        backend=BACKEND, device=device, max_iter=MAX_ITER,
+        backend=BACKEND, device=device, max_iter=max_iter,
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
         threads=dict(num_threads=NUM_THREADS, torch_num_threads=torch.get_num_threads(),
@@ -289,7 +325,7 @@ def main(argv=None):
             record['peak_gpu_gib'] = max(stage['gpu_peak_gib'] for stage in stages.values())
         history.append(record)
         # 停止时不再更新, 保留刚完成分析的密度, 避免最终柔顺度与密度错位
-        stop = converged or iteration == MAX_ITER
+        stop = converged or iteration == max_iter
 
         # 6. OC 更新 (计入下一轮之前, 记在本轮记录中)
         if not stop:
@@ -306,13 +342,15 @@ def main(argv=None):
                     raise RuntimeError('OC 乘子搜索未满足物理体积约束')
             rho = rho_new
 
-        # 每轮一行; Rel. change 为停止判断所用的柔顺度相对变化, Time 为本轮全部阶段的用时
+        # 每轮一行; Rel. change 为停止判断所用的柔顺度相对变化, 另附装配与求解两阶段的用时 (其余阶段
+        # 见运行结束时的耗时汇总), Time 为本轮全部阶段的用时
         record['iteration_seconds'] = perf_counter() - started
         (output / 'history.json').write_text(json.dumps(history, ensure_ascii=False, indent=2, allow_nan=False),
                                              encoding='utf-8')
         relative_text = f'{relative:.4e}' if relative is not None else '-'
         print(f'Iteration: {iteration}, Objective: {compliance:.4f}, Volfrac: {volume_fraction:.4f}, '
               f'Rel. change: {relative_text}, CG: {solver_info["niter"]}, '
+              f'装配 {stages["装配"]["seconds"]:.2f} s, 求解 {stages["求解"]["seconds"]:.2f} s, '
               f'Time: {record["iteration_seconds"]:.1f} sec', flush=True)
         if stop:
             break
@@ -342,7 +380,7 @@ def main(argv=None):
                    termination='converged' if converged else 'max_iter',
                    n_cells=n_cells, n_dofs=n_dofs,
                    symmetry_error_x=symmetry_x, symmetry_error_z=symmetry_z,
-                   setup_stages=setup_stages,
+                   setup_stages=setup_stages, stage_seconds=summarize_stages(history),
                    process_peak_rss_gib=max(max(stage['peak_gib'] for stage in setup_stages.values()),
                                             max(record['peak_rss_gib'] for record in history)),
                    total_seconds=perf_counter() - run_started)
@@ -351,6 +389,12 @@ def main(argv=None):
                                               max(record['peak_gpu_gib'] for record in history))
     (output / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False),
                                          encoding='utf-8')
+    # 逐阶段耗时汇总, 首轮与第 2 轮起的稳态分开; 准备阶段已在开始时逐项打印
+    for name, item in summary['stage_seconds'].items():
+        first = '-' if item['first'] is None else f'{item["first"]:.3f} s'
+        steady = '-' if item['steady_mean'] is None else f'{item["steady_mean"]:.3f} s'
+        print(f'[耗时/{name}] 第 1 轮 {first}, 第 2 轮起均值 {steady}, 合计 {item["total"]:.2f} s '
+              f'({item["count"]} 轮)', flush=True)
     print(f'[完成] {summary["termination"]}，{iteration} 轮，C={compliance:.4f}，'
           f'不对称量 x {symmetry_x:.4e} / z {symmetry_z:.4e}，结果保存到 {output}', flush=True)
     return 0
