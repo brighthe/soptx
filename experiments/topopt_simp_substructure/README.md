@@ -225,13 +225,25 @@ run_substructure_full_trace_vs_linear_corner.py 每轮打印装配分项及边�
 同时写入 history.json 每轮记录的 assembly_breakdown 和 boundary_breakdown.
 summary.json 继承末轮记录. 不新增命令行参数, 不改变求解算法或输出目录规则.
 
-linear_corner 的 assembly_breakdown 单位均为秒, 分项互斥:
+linear_corner 的 assembly_breakdown 单位均为秒. 以下为互斥分项:
 - local_stiffness: 逐批生成局部刚度, 含生成器初始化和结束处理;
-- block_projection: 提取 K_ii/K_ib/K_bb、形成 B 与 K_cc、缩聚矩阵乘积及缓存登记;
-- local_solve: 求解 K_ii X = B;
-- global_csr: 总缩聚装配耗时扣除前三项, 含 CSR 符号模式、散加与编排开销,
+- block_projection (分块与角点投影): 批次检查、提取 K_ii/K_ib/K_bb,
+  计算 B = K_ib P 和 K_cc = P^T K_bb P;
+- local_solve (内部线性系统求解): 计算 T = -solve(K_ii, B), 含结果取负;
+- condensation_assembly (缩聚刚度合成): 计算 K_c = K_cc + B^T T, 并登记恢复缓存;
+- global_csr: 总缩聚装配耗时扣除以上四项, 含 CSR 符号模式、散加与编排开销,
   不是纯 CSR 内核计时;
 - other: 外层装配计时扣除上述项, 含密度准备、旧缓存释放及外层测量开销.
+
+另有汇总字段 local_condensation_total (局部缩聚总耗时), 严格等于
+block_projection + local_solve + condensation_assembly. 该字段与三项明细重叠,
+不得参与互斥分项求和, global_csr 与 other 的差额计算均不重复扣除它.
+终端打印三阶段明细及单独的汇总行; history.json 的 assembly_breakdown 保存
+全部字段, summary.json 继承末轮记录.
+
+历史 block_projection 同时包含求解前投影和求解后合成; 新口径只包含求解前阶段.
+对照旧数据时应将新 block_projection 与 condensation_assembly 相加, 不改写旧 JSON.
+本次计时拆分仅做静态检查, 尚未运行验证, 下文历史测试记录不覆盖本次修改.
 
 占比的分母为 stages["装配"]["seconds"]. 原 assembly_seconds 字段仍包含装配和
 边界条件, 不可混作本分项的分母. full_trace 暂不拆装配分项, 记录为空字典.
@@ -255,3 +267,29 @@ CSR 及编排约 0.1%; 第二轮分别为 20.0%、55.2%、24.7%、约 0.1%.
 载荷及 Dirichlet 缓存均已存在. 这些比例不能直接代替另一台机器的测量.
 独立结果位于 outputs/verify_assembly_timing_210_20261017/, 原结果未修改.
 61 项缩聚与分析器回归通过; 分项之和与外层装配时间核对通过.
+
+## 局部刚度职责分离 (待运行验证)
+
+正式 SubstructureAnalyzer 每轮由 FEM 更新一次材料系数, 按布局提供的全局细单元
+编号调用 element_stiffness, 再由 local_assembly.assemble_local_stiffness 将 KE
+散加成 K^j. local_assembly 只持有尺寸和编号, 不依赖 prototype、材料或积分子.
+mesh.py 的旧密度入口保留为兼容包装, 参考单元刚度改为首次使用旧入口时惰性积分.
+
+full_trace 与 linear_corner 共用上述矩阵来源. 前者恢复位移时逐批重算完整缩聚,
+不重复材料插值; 后者继续使用本轮角点恢复缓存. 更新材料或装配失败后旧系统失效,
+apply_bc 与 solve_system 须使用当前成功装配及准备的系统.
+
+verify_corner_direct.py 的两侧现在共用正式 FEM 矩阵来源; old 表示完整 Schur
+后投影, new 表示直接角点缩聚, 不再代表修改前软件版本的完整执行路径.
+历史测量不因此视为本次重构的验证结果. local_stiffness 仍包含获取 KE 与局部散加,
+一次全局材料更新计入外层装配及 other, 不将其遗漏在总装配时间之外.
+
+本次仅做静态检查, 未运行测试或实验. 经授权后可执行:
+
+```bash
+python -m pytest tests/unit/test_substructure_local_assembly.py tests/unit/test_substructure_analyzer.py tests/unit/test_substructure_streaming.py tests/unit/test_substructure_interface_space.py tests/unit/test_substructure_external_mesh.py tests/unit/test_substructure_field_mapping.py -q
+```
+
+验收条件: 任意单元矩阵的散加与显式参考一致; NumPy/PyTorch 兼容包装可用;
+新旧局部刚度、两种迹空间的位移和灵敏度对照通过; 正式装配及恢复不调用旧密度入口;
+每轮材料插值仅一次; 角点恢复不重新生成 KE; 材料更新或装配失败后拒绝旧系统.

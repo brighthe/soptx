@@ -170,10 +170,13 @@ def main(argv=None):
     n_cells = grid[0] * grid[1] * grid[2]
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
     print(f'[配置] substructure/{trace}, n_sub={n_sub}, m={N_FINE}, {BACKEND}/{DEVICE}, '
-          f'装配 {ASSEMBLY_METHOD}, '
+          f'线程由外部环境/数值库默认设置, 装配 {ASSEMBLY_METHOD}, '
           f'求解 {SOLVER} ({preconditioner}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
           f'网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
+    print('[线程环境] ' + ', '.join(
+        f'{name}={value if value is not None else "未设置"}'
+        for name, value in thread_environment.items()), flush=True)
 
     # 准备阶段按对照文档 4.1 节分为 网格 / 分析器 / 过滤矩阵 / 目标与约束 四块, 互不嵌套
     setup_stages = {}
@@ -268,15 +271,23 @@ def main(argv=None):
         assembly_breakdown = dict(analyzer.assembly_timings)
         if assembly_breakdown:
             assembly_breakdown['other'] = max(
-                0.0, stages['装配']['seconds'] - sum(assembly_breakdown.values()))
+                0.0, stages['装配']['seconds'] - sum(
+                    value for key, value in assembly_breakdown.items()
+                    if key != 'local_condensation_total'))
         boundary_breakdown = dict(analyzer.boundary_timings,
                                   body_force=body_force_seconds, allocate_state=allocate_seconds)
         if assembly_breakdown:
-            names = dict(local_stiffness='局部刚度生成', block_projection='块提取与投影',
-                         local_solve='局部求解', global_csr='全局CSR及编排', other='其他')
+            names = dict(local_stiffness='局部刚度生成', block_projection='分块与角点投影',
+                         local_solve='内部线性系统求解', condensation_assembly='缩聚刚度合成',
+                         global_csr='全局CSR及编排', other='其他')
             print(f'[迭代 {iteration}/装配分项] ' + ', '.join(
                 f'{names[k]} {v:.3f}s ({v / stages["装配"]["seconds"]:.1%})'
-                for k, v in assembly_breakdown.items()), flush=True)
+                for k, v in assembly_breakdown.items()
+                if k != 'local_condensation_total'), flush=True)
+            condensation_total = assembly_breakdown['local_condensation_total']
+            print(f'[迭代 {iteration}/局部缩聚总耗时] {condensation_total:.3f}s '
+                  f'({condensation_total / stages["装配"]["seconds"]:.1%}, 上述三阶段之和)',
+                  flush=True)
         print(f'[迭代 {iteration}/边界分项] ' + ', '.join(
             f'{k}={v}' if isinstance(v, bool) else f'{k}={v:.3f}s'
             for k, v in boundary_breakdown.items()), flush=True)

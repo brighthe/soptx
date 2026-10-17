@@ -11,23 +11,24 @@
 | 项目 | fem | substructure |
 |---|---|---|
 | 刚度算子 | 细网格全局 CSR 矩阵 $K$ | 各子结构局部 Schur 补装配为全局边界 CSR 矩阵 $K_\Gamma$ |
-| 未知量 | 全场位移 $U$ | 全局边界自由度 $U_\Gamma$ |
+| 未知量 | 全场位移 $U$ | 全局边界位移 $U_\Gamma$ |
 
 ### 1.1 矩阵组装与局部缩聚
 
-`fem` 将单元刚度直接组装为细网格总刚：
+`fem`：将细网格单元刚度 $K_e(\rho_e)$ 直接组装为细网格总刚：
 
 $$
-K=\sum_e A_e^T\bigl[c(\tilde\rho_e)K^0\bigr]A_e.
+K=\sum_e A_e^{\mathsf T}K_e(\rho_e)A_e\in\mathbb R^{N_h\times N_h}.
 $$
 
-`substructure` 先将单元刚度组装为子结构矩阵：
+`substructure`：首先将细网格单元刚度 $K_e(\rho_e)$ 组装为子结构总刚 $K^j$，并按边界 $b$、内部 $i$ 分块：
 
 $$
-K^j=\sum_{e\in\Omega_j}(L_e^j)^T\bigl[c(\tilde\rho_e)K^0\bigr]L_e^j.
+K^j=\sum_{e\in\Omega_j}(G_e^j)^{\mathsf T}K_e(\rho_e)\,G_e^j
+=\begin{bmatrix}K_{bb}^j&K_{bi}^j\\K_{ib}^j&K_{ii}^j\end{bmatrix}\in\mathbb R^{n_d\times n_d}
 $$
 
-其中 $L_e^j$ 为子结构内的单元自由度提取矩阵。再消去内部自由度 $i$，得到子结构的 Schur 补 $K_s^j$，即边界自由度 $b$ 上的缩聚刚度矩阵：
+再消去内部自由度 $i$，得到子结构的 Schur 补 $K_s^j$，即边界自由度 $b$ 上的缩聚刚度矩阵：
 
 $$
 K_s^j=K_{bb}^j-K_{bi}^j(K_{ii}^j)^{-1}K_{ib}^j.
@@ -36,7 +37,7 @@ $$
 将各子结构的缩聚刚度矩阵组装为全局边界总刚：
 
 $$
-K_\Gamma=\sum_j(A_b^j)^T K_s^j A_b^j.
+K_\Gamma=\sum_j(A_b^j)^{\mathsf T} K_s^j A_b^j\in\mathbb R^{N_\Gamma\times N_\Gamma}.
 $$
 
 ### 1.2 求解与内部位移回代
@@ -57,11 +58,47 @@ u_b^j=A_b^jU_\Gamma,\qquad
 u_i^j=-(K_{ii}^j)^{-1}K_{ib}^ju_b^j.
 $$
 
-将边界与内部位移按全局编号恢复为全场位移 $U$。
+将边界与内部位移按全局编号恢复为全场位移 $U$：
 
-### 1.3 代数等价性与比较范围
+$$
+U=R_\Gamma^{\mathsf T} U_\Gamma+\sum_j(R_i^j)^{\mathsf T} u_i^j.
+$$
 
-相同离散与物理条件下，精确缩聚和回代使两侧的全场位移、柔顺度与灵敏度代数等价。实验核对浮点与迭代误差下的结果一致性，并比较组装、求解与回代的时间和内存成本。
+### 1.3 代数等价
+
+本算例内部载荷为零，原载荷的边界分量与缩聚后的载荷相同，统一记为 $F_\Gamma$。线性方程组的分块表示为：
+
+$$
+U=\begin{bmatrix}U_\Gamma\\U_I\end{bmatrix},\qquad
+K=\begin{bmatrix}
+K_{\Gamma\Gamma}&K_{\Gamma I}\\
+K_{I\Gamma}&K_{II}
+\end{bmatrix},\qquad
+F=\begin{bmatrix}
+F_\Gamma\\
+0
+\end{bmatrix}.
+$$
+
+消去内部自由度后，得到全局边界刚度矩阵：
+
+$$
+K_\Gamma=K_{\Gamma\Gamma}-K_{\Gamma I}K_{II}^{-1}K_{I\Gamma}.
+$$
+
+结合内部位移回代：
+
+$$
+KU=F
+\quad\Longleftrightarrow\quad
+\begin{cases}
+K_\Gamma U_\Gamma=F_\Gamma,\\
+U_I=-K_{II}^{-1}K_{I\Gamma}U_\Gamma.
+\end{cases}
+$$
+
+在相同离散、材料、载荷与边界条件下，`full_trace` 保留全部边界自由度，仅精确消去内部自由度。因此，精确缩聚与回代得到的全场解与传统有限元解代数等价；实际数值差异来自浮点运算与线性求解误差。
+
 
 ## 2. 实验设置
 

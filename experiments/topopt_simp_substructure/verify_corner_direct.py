@@ -10,11 +10,34 @@ from soptx.backend import backend_manager as bm
 from soptx.mesh import HexahedronMesh
 from soptx.fem.analyzers import SubstructureAnalyzer
 from soptx.fem.substructure import StructuredSubstructureLayout
-from soptx.fem.substructure.streaming import assemble_exact_interface_system
+from soptx.fem.substructure.streaming import iter_trace_stiffness_from_local_batches
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.problems import FullMBBBeamPoint3d
 from soptx.topology.interpolation import MaterialInterpolationScheme
 from soptx.topology.objectives import ComplianceObjective
+
+
+class FullSchurReferenceAnalyzer(SubstructureAnalyzer):
+    """复用正式 FEM 单元矩阵来源, 以完整 Schur 投影作为角点缩聚基准."""
+
+    def _assemble_interface_from_local_batches(self, stiffness_batches):
+        """通过完整边界缩聚和迹投影构造参考接口系统.
+
+        Parameters
+        ----------
+        stiffness_batches : iterable
+            正式分析器提供的局部刚度批次.
+
+        Returns
+        -------
+        tuple
+            接口系统与 None, 恢复阶段逐批重算完整 Schur.
+        """
+        batches = iter_trace_stiffness_from_local_batches(
+            stiffness_batches, self.interface_space.trace_basis,
+            i_dofs=self.prototype.i_dofs, b_dofs=self.prototype.b_dofs,
+        )
+        return self.interface_space.assemble(batches), None
 
 
 def main():
@@ -48,9 +71,9 @@ def main():
             size=struct.unpack("<Q",f.read(8))[0]
             rho=np.frombuffer(f.read(size),dtype="<f8").copy()
         densities=[("iter94",rho)]
-    def analyzer():
+    def analyzer(analyzer_class=SubstructureAnalyzer):
         """为两条路径构造相同配置的分析器."""
-        return SubstructureAnalyzer(layout=layout,
+        return analyzer_class(layout=layout,
             pde=FullMBBBeamPoint3d(domain=domain,P=-1.,E=1.,nu=.3),
             material=material,trace="linear_corner",chunk_size=64,
             space_degree=1,integration_order=2,solve_method="scipy",
@@ -59,22 +82,17 @@ def main():
         grid=grid, n_fine=5, chunk_size=64, solver="scipy", repeats=3,
         thread_environment={k:os.environ.get(k) for k in
             ("OPENBLAS_NUM_THREADS","MKL_NUM_THREADS","OMP_NUM_THREADS","BLIS_NUM_THREADS")},
-        note="耗时包含装配与接口求解/位移恢复, 不含边界条件、过滤、输出及 OC; 非完整优化计时."
+        note="两侧共用正式 FEM 单元刚度来源, old 表示完整 Schur 投影而非历史版本. "
+             "耗时包含装配与接口求解/位移恢复, 不含边界条件、过滤、输出及 OC; 非完整优化计时."
     ),indent=2))
-    old,new=analyzer(),analyzer()
+    old,new=analyzer(FullSchurReferenceAnalyzer),analyzer()
     report=[]
     for label,rho in densities:
         for repeat in range(3):
             results={}
             for name,a in ([("old",old),("new",new)] if repeat%2==0 else [("new",new),("old",old)]):
                 started=perf_counter()
-                if name=="old":
-                    a._update_density_coefficient(rho)
-                    a._density_cells=a._to_density_cells(rho)
-                    a._corner_recovery_batches=None
-                    K=assemble_exact_interface_system(a.prototype,a._density_cells,a.interface_space,chunk_size=64)
-                else:
-                    K=a.assemble_stiff_matrix(rho)
+                K=a.assemble_stiff_matrix(rho)
                 assembly=perf_counter()-started
                 prepared,rhs=a.apply_bc(K,a.assemble_body_force_vector())
                 out=a.tensor_space.function()
