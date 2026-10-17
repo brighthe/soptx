@@ -134,10 +134,21 @@ python -B -u experiments/topopt_simp_substructure/run_substructure_full_trace_vs
 
 本入口顶部 GRID=(390, 65, 65), 子结构为 78 x 13 x 13, m=5.
 仅解析 --trace 和 --preconditioner (以及 --help), 不提供 --grid 或 --output-dir.
-其余参数仍在顶部配置区: 单线程, CG 容差 1e-6, 物理域 210 x 35 x 35,
+其余参数仍在顶部配置区: CG 容差 1e-6, 物理域 210 x 35 x 35,
 细单元边长 7/13, 物理过滤半径 21/13, 体积分数 0.12.
 最多 300 轮, 连续 5 轮柔顺度相对变化小于 0.0002 时停止, 不强制设计对称.
 该 GRID 同时适用于本入口的 full_trace 模式, 不改变 run_substructure_vs_fem.py 的配置.
+
+本入口不再强制单线程, 不写入或清除 BLIS_NUM_THREADS、OPENBLAS_NUM_THREADS、
+MKL_NUM_THREADS、OMP_NUM_THREADS. 已设置的外部环境原样保留;
+未设置时由相应数值库决定默认线程数, 不保证使用全部核心或一定加速.
+config.json 的 threads 记录 policy、environment、blas_libraries 和 logical_cpu_count,
+不再写入固定 num_threads=1. environment 中 null 表示未设置;
+这些环境变量和逻辑 CPU 数均不代表运行时实际活跃线程数.
+启动信息显示线程策略和各环境变量值. 不新增线程解析参数.
+如需指定线程数, 可在启动前从 shell 设置, 例如 OPENBLAS_NUM_THREADS=8.
+修改只对新启动进程生效, 不影响已运行的优化.
+
 
 输出根据接口、网格、细分数、求解器和预条件子自动命名为
 outputs/linear_corner_hex_390x65x65_m5_cg_jacobi/.

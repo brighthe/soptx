@@ -5,12 +5,6 @@
 """
 import os
 
-# 运行环境: BLAS 与 OpenMP 在加载时读取线程数, 须在导入 numpy/scipy 之前写入环境变量才生效.
-# 固定单线程, 与 topopt_simp_fem 的传统有限元运行口径一致
-NUM_THREADS = 1
-for _name in ('BLIS_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'OMP_NUM_THREADS'):
-    os.environ[_name] = str(NUM_THREADS)
-
 import argparse
 import json
 import math
@@ -143,6 +137,12 @@ def main(argv=None):
     output = args.output
     output.mkdir(parents=True, exist_ok=False)
 
+    # 只记录外部线程环境, 不覆盖变量; 未设置时由数值库自行选择.
+    thread_environment = {
+        name: os.environ.get(name)
+        for name in ('BLIS_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+                     'MKL_NUM_THREADS', 'OMP_NUM_THREADS')
+    }
     config: dict[str, Any] = dict(
         method=f'substructure_{trace}', trace=trace,
         domain=list(domain), mesh='hex', grid=list(grid), spacing=spacing,
@@ -155,7 +155,8 @@ def main(argv=None):
         backend=BACKEND, device=DEVICE, max_iter=MAX_ITER,
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
-        threads=dict(num_threads=NUM_THREADS, **blas_environment()))
+        threads=dict(policy='external_environment_or_library_default',
+                     environment=thread_environment, **blas_environment()))
     cg_options = dict(precond=None if preconditioner == 'none' else preconditioner,
                       maxiter=CG_MAXITER, rtol=CG_TOLERANCE, atol=0.0,
                       rtol_reference='rhs', norm_type='unpreconditioned',
@@ -169,10 +170,13 @@ def main(argv=None):
     n_cells = grid[0] * grid[1] * grid[2]
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
     print(f'[配置] substructure/{trace}, n_sub={n_sub}, m={N_FINE}, {BACKEND}/{DEVICE}, '
-          f'线程 {NUM_THREADS}, 装配 {ASSEMBLY_METHOD}, '
+          f'线程由外部环境/数值库默认设置, 装配 {ASSEMBLY_METHOD}, '
           f'求解 {SOLVER} ({preconditioner}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
           f'网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
+    print('[线程环境] ' + ', '.join(
+        f'{name}={value if value is not None else "未设置"}'
+        for name, value in thread_environment.items()), flush=True)
 
     # 准备阶段按对照文档 4.1 节分为 网格 / 分析器 / 过滤矩阵 / 目标与约束 四块, 互不嵌套
     setup_stages = {}
