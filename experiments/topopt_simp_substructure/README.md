@@ -145,7 +145,7 @@ MKL_NUM_THREADS、OMP_NUM_THREADS. 已设置的外部环境原样保留;
 config.json 的 threads 记录 policy、environment、blas_libraries 和 logical_cpu_count,
 不再写入固定 num_threads=1. environment 中 null 表示未设置;
 这些环境变量和逻辑 CPU 数均不代表运行时实际活跃线程数.
-启动信息显示线程策略和各环境变量值. 不新增线程解析参数.
+终端不打印线程策略或环境变量, 相关信息仅保存在 config.json 中. 不新增线程解析参数.
 如需指定线程数, 可在启动前从 shell 设置, 例如 OPENBLAS_NUM_THREADS=8.
 修改只对新启动进程生效, 不影响已运行的优化.
 
