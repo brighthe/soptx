@@ -5,9 +5,16 @@
 且不精确的方式不同 —— 强施加尤其没有出路, 因为跨边连续的迹空间在跳变点处只有一个
 单值自由度, 装不下跳跃.
 
-本模块把这类载荷先投影到边界的连续 P1 迹空间上: 常数落在该空间内, 所以 L2 投影
-精确保持合力; 而连续分片线性函数又能被足够高阶的迹空间精确插值、被足够高阶的
-数值积分精确积分. 于是两条离散路径看到的是同一个离散载荷泛函.
+本模块把这类载荷先离散到边界的连续 P1 迹空间上: 连续分片线性函数能被足够高阶的
+迹空间精确插值、被足够高阶的数值积分精确积分, 于是两条离散路径看到的是同一个离散
+载荷泛函. 提供两种离散算子:
+
+- ``project_patch_traction_to_p1_trace``: L2 投影. 常数与一次函数落在空间内, 合力与
+  一阶矩精确保持, 载荷区端点不必与网格节点对齐; 代价是投影在载荷区外带有逐单元衰减
+  的振荡尾巴 (含反向牵引), 适合柔顺度等整体量.
+- ``interpolate_patch_traction_to_p1_trace``: 节点插值, 端点取左右极限的平均. 要求端点
+  是网格节点, 此时合力与一阶矩同样精确, 且非零牵引只延伸到端点外一个单元, 适合局部
+  应力约束等对载荷区外牵引敏感的问题.
 """
 
 from __future__ import annotations
@@ -153,6 +160,101 @@ def project_patch_traction_to_p1_trace(
         start=start,
         h=h,
         coefficients=bm.linalg.solve(mass, rhs),
+        level=float(level),
+        axis=axis,
+        component=component,
+    )
+
+
+def interpolate_patch_traction_to_p1_trace(
+    *,
+    line: tuple[float, float],
+    n_cells: int,
+    level: float,
+    patch: tuple[float, float],
+    intensity: float,
+    axis: int = 0,
+    component: int = 1,
+) -> P1TraceLoad:
+    """把区间常值牵引节点插值到边界的连续 P1 迹空间, 端点取左右极限的平均.
+
+    节点值: 载荷区内部的节点取 ``intensity``, 载荷区端点取 ``intensity / 2``, 其余取
+    ``0``. 端点同时是 ``line`` 的端点时 (如载荷区紧贴对称面), 该处只有一侧有定义,
+    取单侧值 ``intensity``.
+
+    端点为网格节点时, 每个端点处插值与常值牵引之差在端点两侧各一个单元内反对称, 故
+    合力精确等于 ``intensity * (right - left)``; 两端的一阶矩误差 ``-+ intensity * h**2 / 6``
+    互相抵消, 一阶矩同样精确. 非零牵引只延伸到端点外一个单元, 再往外严格为零, 也不
+    变号; 与 L2 投影 (``project_patch_traction_to_p1_trace``) 相比没有振荡尾巴, 适合局部
+    应力约束: 尾巴落在载荷区外的低密度单元上时, 强施加牵引的混合元会把这些单元的应力
+    钉在数据值上.
+
+    Parameters
+    ----------
+    line : tuple of float
+        载荷所在直线沿 ``axis`` 方向的起止坐标 ``(start, end)``.
+    n_cells : int
+        该直线上的均匀单元数.
+    level : float
+        该直线在垂直方向上的坐标.
+    patch : tuple of float
+        常值牵引所占的区间 ``(left, right)``, 两端须为网格节点.
+    intensity : float
+        载荷区间内的常值牵引强度 (即合力除以载荷区长度).
+    axis : int, optional
+        直线所沿的坐标轴, 默认 ``0``.
+    component : int, optional
+        牵引作用的分量下标, 默认 ``1``.
+
+    Returns
+    -------
+    P1TraceLoad
+        节点系数为上述插值的连续分片线性牵引.
+
+    Raises
+    ------
+    ValueError
+        几何参数不合法, 或载荷区端点不是网格节点 (此时插值不保持合力, 应改用
+        ``project_patch_traction_to_p1_trace``).
+    """
+    start, end = float(line[0]), float(line[1])
+    left, right = float(patch[0]), float(patch[1])
+    if n_cells <= 0:
+        raise ValueError("n_cells 必须为正整数.")
+    if end <= start:
+        raise ValueError("line 的终点必须大于起点.")
+    if right <= left:
+        raise ValueError("patch 的右端必须大于左端.")
+    if left < start or right > end:
+        raise ValueError("patch 必须落在 line 之内.")
+    if axis not in (0, 1):
+        raise ValueError("axis 仅支持 0 或 1.")
+
+    h = (end - start) / n_cells
+    tolerance = max(GEOMETRIC_TOL, 1.0e-9 * h)
+    # 端点所在的节点编号; 不是节点即报错, 插值在单元内部的端点处无处取半值
+    endpoint_nodes = []
+    for value in (left, right):
+        index = round((value - start) / h)
+        if abs(start + index * h - value) > tolerance:
+            raise ValueError(
+                f"载荷区端点 {value} 不是网格节点 (h = {h:g}): 节点插值不保持合力, "
+                "请调整剖分使端点落在节点上, 或改用 project_patch_traction_to_p1_trace."
+            )
+        endpoint_nodes.append(index)
+    first, last = endpoint_nodes
+
+    coefficients = bm.zeros((n_cells + 1,), dtype=bm.float64)
+    coefficients = bm.set_at(coefficients, slice(first, last + 1), float(intensity))
+    # 端点取左右极限的平均; 落在直线端点上时只有一侧, 保持单侧值
+    for index in (first, last):
+        if 0 < index < n_cells:
+            coefficients = bm.set_at(coefficients, index, 0.5 * float(intensity))
+
+    return P1TraceLoad(
+        start=start,
+        h=h,
+        coefficients=coefficients,
         level=float(level),
         axis=axis,
         component=component,

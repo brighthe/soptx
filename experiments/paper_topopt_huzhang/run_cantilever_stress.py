@@ -1,7 +1,8 @@
 """二维悬臂梁局部应力约束体积最小化 (论文 5.2.3 节 / 图 5.8~5.11).
 
 设计域 80 mm x 40 mm, 平面应力, 左端固支, 右端中点竖直合力 P 化为宽 LOAD_WIDTH 的
-均布牵引, 再 L2 投影到右边界的连续 P1 迹空间, 两条分析链看到同一个离散载荷. 以表观应力松弛
+均布牵引, 再节点插值到右边界的连续 P1 迹空间 (端点取半值), 两条分析链看到同一个离散载荷.
+不用 L2 投影: 其振荡尾巴落在载荷区外的低密度单元上, 局部应力约束因此难以满足. 以表观应力松弛
 约束下的体积最小化为目标, 增广拉格朗日 + MMA (AL-MMA) 求解; LFEM p = 2, 3, 4 与
 HZMFEM k = 2, 3, 4 各做一次优化. 牵引贴片两端点的应力奇异性由载荷端点被动实体区处置:
 半径 LOAD_PAD_RADIUS 内的单元既豁免应力约束又钉为实体. 停止判据与终态验收在被动实体区外的
@@ -22,7 +23,7 @@ from typing import Any
 import numpy as np
 
 from soptx.backend import backend_manager as bm
-from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer, project_patch_traction_to_p1_trace
+from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer, interpolate_patch_traction_to_p1_trace
 from soptx.materials import IsotropicLinearElasticMaterial
 from soptx.mesh import TriangleMesh
 from soptx.postprocess.iteration_frames import IterationFrameWriter
@@ -118,8 +119,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def build_problem() -> CantileverMiddlePatch2d:
     """构造注入 P1 迹载荷的悬臂梁问题, 优化运行与冻结重分析共用.
 
-    先按原始物理问题取载荷区几何, 再把区段常值牵引 L2 投影到右边界 (沿 y 均匀剖分 NY 段)
-    的连续 P1 迹空间后重建问题; 几何、材料与边界标记不变.
+    先按原始物理问题取载荷区几何, 再把区段常值牵引节点插值到右边界 (沿 y 均匀剖分 NY 段)
+    的连续 P1 迹空间后重建问题: 载荷区内部节点取 P / l, 端点取一半, 其余为零; 端点须为
+    网格节点, 否则报错. 几何、材料与边界标记不变.
 
     Returns
     -------
@@ -130,7 +132,7 @@ def build_problem() -> CantileverMiddlePatch2d:
                                   E=E0, nu=NU, plane_type=PLANE_TYPE)
     problem = CantileverMiddlePatch2d(**kwargs)
     _, _, ymin, ymax = problem.domain
-    traction = project_patch_traction_to_p1_trace(
+    traction = interpolate_patch_traction_to_p1_trace(
         line=(ymin, ymax), n_cells=NY, level=problem.traction_level,
         patch=problem.traction_patch, intensity=problem.traction_intensity,
         axis=problem.traction_axis)
@@ -201,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
                               "support_pad_radius": SUPPORT_PAD_RADIUS},
         "discretization": {"mesh_type": "triangle-checkerboard", "nx": NX, "ny": NY,
                            "integration_order": 2 * order + 2, "use_relaxation": USE_RELAXATION,
-                           "load_discretization": "p1_trace_l2_projection",
+                           "load_discretization": "p1_trace_interpolation",
                            "assembly_method": ASSEMBLY_METHOD, "solver": SOLVER},
         "optimization": {
             "filter_radius": FILTER_RADIUS, "penalty": PENALTY, "emin": EMIN,
@@ -343,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
         "nx": NX,
         "ny": NY,
         "optimizer": "al_mma",
-        "load_discretization": "p1_trace_l2_projection",
+        "load_discretization": "p1_trace_interpolation",
         "integration_order": 2 * order + 2,
         "stabilization_coefficient": getattr(analyzer, "stabilization_coefficient", None),
         "volume_fraction": float(volume_objective.fun(density)),

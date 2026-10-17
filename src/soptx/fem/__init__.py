@@ -14,6 +14,7 @@ from .boundary_loads import (
     boundary_load_resultant,
     check_boundary_load_resultant,
     check_traction_patch_alignment,
+    interpolate_patch_traction_to_p1_trace,
     project_patch_traction_to_p1_trace,
 )
 from .integrators import LinearElasticIntegrator, SourceIntegrator
@@ -65,6 +66,7 @@ __all__ = [
     "check_boundary_load_resultant",
     "check_traction_patch_alignment",
     "create_level",
+    "interpolate_patch_traction_to_p1_trace",
     "project_patch_traction_to_p1_trace",
     "register_level",
 ]
