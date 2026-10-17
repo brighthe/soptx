@@ -59,17 +59,20 @@ python experiments/topopt_simp_substructure/summarize_cost.py experiments/topopt
 
 ## ParaView 帧
 
-每轮帧 iterations/iter_XXXX.vtu 与 evolution.pvd 运行时先写在 WSL 的运行目录, 第 0 帧 iter_0000.vtu 是初始设计经过滤与实体保留单元处理后的物理密度 (只含 density), 在计时之前写出, 便于查看固定单元; 由 soptx.postprocess.iteration_frames.IterationFrameWriter 原子写出, 跨文件系统写入不计入逐轮耗时. 运行结束 (summary.json 写出) 后, 脚本自动把帧迁移到脚本顶部 VIEW_ROOT (/mnt/c/workspace/soptx-results/topopt_simp_substructure) 下的同名子目录, 在 Windows ParaView 中打开其中的 evolution.pvd 即可; WSL 的运行目录只保留 json、npy 与末帧、初始帧的副本 result_final.vtu、result_initial.vtu, 迁移位置记在 visualization_location.json. sync_results.py 只读 json 与 npy, 不受迁移影响.
+run_substructure_vs_fem.py 与 run_substructure_full_trace_vs_linear_corner.py
+统一将所有结果保留在 outputs/ 下各自的运行目录, 不配置 VIEW_ROOT,
+不调用自动迁移, 也不生成 visualization_location.json.
 
-- 查看目录已存在时先清空再迁移, 此迁移规则与运行输出目录的拒绝覆盖规则不同; 其中出现 iterations/、evolution.pvd、.visualization_sync.json 以外的条目时拒绝清空并跳过迁移.
-- /mnt/c/workspace/soptx-results 不存在或迁移失败时只打印提示, 帧留在 WSL 的运行目录, 运行不报错.
-- 运行中断或迁移被跳过时, 在仓库根目录手动补迁, 例如:
+每轮帧 iterations/iter_XXXX.vtu 与 evolution.pvd 由
+soptx.postprocess.iteration_frames.IterationFrameWriter 原子写出.
+第 0 帧 iter_0000.vtu 是初始物理密度 (只含 density), 在迭代计时之前写出.
+运行正常结束后, JSON、最终 NPY、全部逐轮帧及 PVD 均留在原目录,
+同时在目录顶层保留 result_initial.vtu 和 result_final.vtu, 便于直接查看.
+在 ParaView 中打开运行目录中的 evolution.pvd 即可查看迭代过程.
+跨电脑查看时复制整个运行目录, 保持 PVD 与 iterations/ 的相对位置不变.
 
-```bash
-python -m soptx.postprocess.sync_visualization --source-dir experiments/topopt_simp_substructure/outputs/full_trace_hex_210x35x35_m5_cg --destination-dir /mnt/c/workspace/soptx-results/topopt_simp_substructure/full_trace_hex_210x35x35_m5_cg --move
-```
-
---move 要求运行目录已有 summary.json; 中断的运行没有该文件, 此时去掉 --move 只复制, 确认后自行删除 WSL 中的帧.
+本次调整不迁回或改写历史上已经迁移的结果, 不修改已有文件.
+sync_results.py 仍可用于按需固化历史结果, 不由优化入口自动调用.
 
 ## 待执行的验证
 

@@ -73,8 +73,6 @@ MAX_ITER = 300
 # 输出设置
 OUTPUT_DIR = Path(__file__).resolve().parent / 'outputs'
 VTU_FIELDS = ('density',)
-# ParaView 查看根目录 (Windows 本地盘); 运行结束后帧迁移到其下同名子目录, 盘不可用时帧留在 outputs/
-VIEW_ROOT = Path('/mnt/c/workspace/soptx-results/topopt_simp_substructure')
 
     
 def parse_args(argv=None):
@@ -170,7 +168,7 @@ def main(argv=None):
     with measure(setup_stages, '网格', label='准备'):
         mesh = HexahedronMesh.from_box(list(domain), *grid, device=DEVICE)
         setattr(mesh, 'meshdata', {'nx': grid[0], 'ny': grid[1], 'nz': grid[2], 'hx': h, 'hy': h, 'hz': h})
-    # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列; 运行结束后迁移到 VIEW_ROOT
+    # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列, 均保留在运行目录
     frames = IterationFrameWriter(output, mesh)
 
     with measure(setup_stages, '材料与插值', label='准备'):
@@ -357,7 +355,7 @@ def main(argv=None):
     np.save(output / 'design_density_final.npy', bm.to_numpy(bm.reshape(rho, grid)))
     np.save(output / 'density_final.npy', bm.to_numpy(physical_grid))
     np.save(output / 'displacement_final.npy', bm.to_numpy(state['displacement'][:]))
-    # 初始帧与最后一帧各留一份在运行目录, 迁移查看副本后仍可直接读取: 最后一帧与最终 NPY 对应同一次
+    # 初始帧与最后一帧各复制一份到运行目录顶层, 便于直接读取: 最后一帧与最终 NPY 对应同一次
     # 分析, 初始帧便于查看固定单元; 复用已导出的所选场
     copies = {'result_final.vtu': history[-1]['vtu_file']}
     if initial_frame is not None:
@@ -379,7 +377,6 @@ def main(argv=None):
                    total_seconds=perf_counter() - run_started)
     (output / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False),
                                          encoding='utf-8')
-    frames.publish(VIEW_ROOT)
     print(f'[完成] {summary["termination"]}，{iteration} 轮，C={compliance:.4f}，'
           f'不对称量 x {symmetry_x:.4e} / z {symmetry_z:.4e}，结果保存到 {output}', flush=True)
     return 0
