@@ -56,7 +56,6 @@ OPERATOR_LEVEL = 'fa'
 
 # 分析参数: 线性系统求解
 SOLVER = 'cg'
-PRECONDITIONER = 'gmg'
 CG_TOLERANCE = 1.0e-6
 CG_MAXITER = 20000
 
@@ -79,16 +78,30 @@ VIEW_ROOT = Path('/mnt/c/workspace/soptx-results/topopt_simp_substructure')
 
     
 def parse_args(argv=None):
-    """解析分析方法并确定输出目录, 其余设置均为模块顶部常量.
+    """解析分析方法、预条件子并确定输出目录.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        命令行参数, 缺省读取 sys.argv.
+
+    Returns
+    -------
+    argparse.Namespace
+        分析方法、预条件子和自动生成的输出目录.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--analysis-method', choices=('fem', 'substructure'), required=True,
                         help='分析方法: fem 为传统有限元, substructure 为子结构')
+    parser.add_argument('--preconditioner', choices=('none', 'jacobi', 'gmg', 'scipy', 'mumps'),
+                        default='gmg', help='CG 预条件子, 默认 gmg; scipy/mumps 仅支持 fem')
     args = parser.parse_args(argv)
+    if args.analysis_method == 'substructure' and args.preconditioner in ('scipy', 'mumps'):
+        parser.error('substructure 仅支持 none/jacobi/gmg 预条件子')
     size = 'x'.join(map(str, GRID))
     name = (f'{TRACE}_hex_{size}_m{N_FINE}_{SOLVER}' if args.analysis_method == 'substructure'
             else f'fa_hex_{size}_{SOLVER}')
-    args.output = OUTPUT_DIR.resolve() / name
+    args.output = OUTPUT_DIR.resolve() / f'{name}_{args.preconditioner}'
     return args
 
 
@@ -99,6 +112,7 @@ def main(argv=None):
     bm.set_backend(BACKEND)
     
     is_substructure = args.analysis_method == 'substructure'
+    preconditioner = args.preconditioner
 
     # 验网格划分与细单元边长, 计算子结构数及密度过滤半径.
     grid = GRID
@@ -114,11 +128,9 @@ def main(argv=None):
     radius = FILTER_RADIUS_CELLS * h
 
     # 创建输出目录.
-    # outputs/ 是临时目录, 同名结果目录直接清空重建, 避免新旧运行的文件混在同一目录
+    # 排他创建目录, 保留已有计算结果.
     output = args.output
-    if output.exists():
-        shutil.rmtree(output)
-    output.mkdir(parents=True)
+    output.mkdir(parents=True, exist_ok=False)
 
     # 同一处记录公共参数, 方法专属参数另行补充.
     config: dict[str, Any] = dict(
@@ -133,7 +145,7 @@ def main(argv=None):
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
         threads=dict(num_threads=NUM_THREADS, **blas_environment()))
-    cg_options = dict(precond=None if PRECONDITIONER == 'none' else PRECONDITIONER,
+    cg_options = dict(precond=None if preconditioner == 'none' else preconditioner,
                       maxiter=CG_MAXITER, rtol=CG_TOLERANCE, atol=0.0,
                       rtol_reference='rhs', norm_type='unpreconditioned',
                       verify_residual=True)
@@ -150,7 +162,7 @@ def main(argv=None):
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
     method_text = f'substructure/{TRACE}, n_sub={n_sub}, m={N_FINE}' if is_substructure else 'fem/fa'
     print(f'[配置] {method_text}, {BACKEND}/{DEVICE}, 线程 {NUM_THREADS}, 装配 {ASSEMBLY_METHOD}, '
-          f'求解 {SOLVER} ({PRECONDITIONER}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
+          f'求解 {SOLVER} ({preconditioner}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
           f'网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
 
