@@ -2,12 +2,40 @@
 """
 
 import os
+import sys
 
 # 运行环境: OpenMP 与 BLAS 在加载时读取线程数, 须在导入 numpy/scipy/torch 之前写入环境变量才生效.
-# CPU 侧每个物理核一个线程; GPU 侧的 kernel 不受此设置影响, 主机侧运算 (回拷、写盘等) 同用此线程数
+# 默认每个物理核一个线程; GPU 侧的 kernel 不受此设置影响, 主机侧运算 (回拷、写盘等) 同用此线程数.
+# NUM_THREADS 为 --threads 的默认值; 该参数须在导入之前生效, 故先从 sys.argv 预取, 校验仍由 parse_args 完成
 NUM_THREADS = 16
+
+
+def _threads_from_argv(argv: list[str], default: int) -> int:
+    """在导入 numpy/torch 之前从命令行预取 ``--threads``.
+
+    Parameters
+    ----------
+    argv : 命令行参数 (不含程序名).
+    default : 未给出或取值不是正整数时的线程数; 非法取值由 ``parse_args`` 报错.
+
+    Returns
+    -------
+    threads : 写入环境变量的线程数.
+    """
+    for index, arg in enumerate(argv):
+        if arg == '--threads' and index + 1 < len(argv):
+            value = argv[index + 1]
+        elif arg.startswith('--threads='):
+            value = arg.split('=', 1)[1]
+        else:
+            continue
+        return int(value) if value.isdigit() and int(value) > 0 else default
+    return default
+
+
+ENV_THREADS = _threads_from_argv(sys.argv[1:], NUM_THREADS)
 for _name in ('BLIS_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'OMP_NUM_THREADS'):
-    os.environ[_name] = str(NUM_THREADS)
+    os.environ[_name] = str(ENV_THREADS)
 
 import argparse
 import json
@@ -75,7 +103,7 @@ VTU_FIELDS = ('density', )
 
 
 def parse_args(argv=None):
-    """解析计算设备、网格、刚度算子层级、预条件子与优化迭代上限, 其余设置均为模块顶部常量.
+    """解析计算设备、网格、刚度算子层级、预条件子、优化迭代上限与线程数, 其余设置均为模块顶部常量.
     """
     parser = argparse.ArgumentParser(description=__doc__)
 
@@ -89,6 +117,8 @@ def parse_args(argv=None):
                         help=f'六面体网格各方向单元数 (默认 {GRID})')
     parser.add_argument('--max-iter', type=int, default=MAX_ITER,
                         help=f'优化迭代上限 (默认 {MAX_ITER})')
+    parser.add_argument('--threads', type=int, default=NUM_THREADS,
+                        help=f'CPU 线程数, 写入 OpenMP 与 BLAS 线程变量并设置 torch 线程池 (默认 {NUM_THREADS})')
 
     args = parser.parse_args(argv)
     if args.device == 'cuda' and not torch.cuda.is_available():
@@ -97,9 +127,16 @@ def parse_args(argv=None):
         parser.error(f'--grid 须为正整数, 得到 {args.grid}')
     if args.max_iter < 1:
         parser.error(f'--max-iter 须为正整数, 得到 {args.max_iter}')
+    if args.threads < 1:
+        parser.error(f'--threads 须为正整数, 得到 {args.threads}')
+    # 线程变量已在导入时按命令行预取的值写入; 以缩写等预取不到的形式给出, 或经 main(argv) 传入时两者不符
+    if args.threads != ENV_THREADS:
+        parser.error(f'--threads {args.threads} 与导入时写入环境变量的线程数 {ENV_THREADS} 不符; '
+                     '须在命令行以 --threads N 完整给出')
     args.grid = tuple(args.grid)
     nx, ny, nz = args.grid
-    args.output = OUTPUT_DIR / f'{args.device}_{args.level}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
+    args.output = (OUTPUT_DIR / f'{args.device}_{args.level}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
+                   f'_t{args.threads}')
     return args
 
 
@@ -137,7 +174,7 @@ def main(argv=None):
     bm.set_backend(BACKEND)
     # PyTorch 的 CPU 算子线程池导入时按 OMP_NUM_THREADS 取值; 再显式设置一次, 实际取值以
     # torch.get_num_threads() 记入 config.json
-    torch.set_num_threads(NUM_THREADS)
+    torch.set_num_threads(args.threads)
     cuda = device == 'cuda'
     precond = args.preconditioner
 
@@ -165,7 +202,7 @@ def main(argv=None):
         backend=BACKEND, device=device, max_iter=max_iter,
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
-        threads=dict(num_threads=NUM_THREADS, torch_num_threads=torch.get_num_threads(),
+        threads=dict(num_threads=args.threads, torch_num_threads=torch.get_num_threads(),
                      **blas_environment()),
         torch=dict(version=torch.__version__, cuda=torch.version.cuda,
                    device_name=torch.cuda.get_device_name(device) if cuda else None))
