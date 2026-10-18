@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """应力算例的插图场数据导出: 运行目录解析与 npz 冻结重分析.
 
-经 ``discretization_probe.build_frozen`` (按 run_cantilever_stress 的常量组装) 重建分析链,
-对最终设计做冻结重分析, 导出论文 5.2.3 节插图所需的场量 (原 ``export_fig_data.py``,
+经 ``discretization_probe.build_frozen`` (按各算例 run 脚本的常量组装) 重建分析链,
+对最终设计做冻结重分析, 导出论文 5.2.3 节 (悬臂梁) 与 5.2.4 节 (门式框架) 插图所需的场量 (原 ``export_fig_data.py``,
 2026-09-01 并入; 同期并入的梯度校验与冻结指标两段已随论文结果收口删除).
 
 入口函数由 ``plot.py`` 的 ``COMMAND_MODULES`` 派发, 本模块不直接执行.
@@ -22,12 +22,17 @@ from soptx.postprocess.stress_report import StressPostProcessor
 from soptx.postprocess.vtk_export import read_vtu_cell_data
 
 import run_cantilever_stress
+import run_portal_frame
 from config import EXPERIMENT_DIR, OUTPUT_DIR, REPOSITORY_ROOT
 
 
 # ============================================ 一、运行目录解析
-# 在 results/cantilever-middle-2d-stress 下按 run_cantilever_stress 的目录名定位正式运行.
+# 在 results/<case> 下按算例 run 脚本的目录名定位正式运行; 缺省算例为悬臂梁.
 
+CASE_MODULES = {
+    run_cantilever_stress.CASE_ID: run_cantilever_stress,
+    run_portal_frame.CASE_ID: run_portal_frame,
+}
 OUT = OUTPUT_DIR / run_cantilever_stress.CASE_ID
 
 
@@ -40,19 +45,21 @@ def resolve_run_dir(
     method: str,
     order: int,
     *,
+    case: str = run_cantilever_stress.CASE_ID,
     announce: bool = True,
 ) -> Path:
-    """定位 run_cantilever_stress 写出的正式运行, 并核对其收敛与约束元数据.
+    """定位算例 run 脚本写出的正式运行, 并核对其收敛与约束元数据.
 
-    目录名由 ``run_cantilever_stress.RUN_LABEL`` 给出; 缺文件、未收敛或元数据不是
+    目录名由该 run 脚本的 ``RUN_LABEL`` 给出; 缺文件、未收敛或元数据不是
     apparent 时直接报错, 不另找替代目录.
     """
-    run_dir = OUT / run_cantilever_stress.RUN_LABEL.format(method=method, order=order)
+    module = CASE_MODULES[case]
+    run_dir = OUTPUT_DIR / case / module.RUN_LABEL.format(method=method, order=order)
     required = ("density_final.vtu", "summary.json")
     missing = [name for name in required if not (run_dir / name).is_file()]
     if missing:
         raise FileNotFoundError(
-            f"缺少 {run_dir} 下的 {missing}; 先运行 run_cantilever_stress.py "
+            f"缺少 {run_dir} 下的 {missing}; 先运行 {Path(module.__file__).name} "
             f"--analyzer {method} --order {order}."
         )
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
@@ -76,29 +83,35 @@ def resolve_run_dir(
 
 
 # ============================================ 二、插图场数据导出 (npz)
-# 论文 5.2.3 节的图 5.9 (b)(d) 不直接读优化历程, 而是读
-# results/cantilever-middle-2d-stress/postprocess/stress_fields/fig_data_<run>.npz;
-# 本段是其唯一来源.
+# 论文图 5.9 (b)(d) 与图 5.13 (b) 不直接读优化历程, 而是读
+# results/<case>/postprocess/stress_fields/fig_data_<run>.npz; 本段是其唯一来源.
 # npz 写在 results/ 下随结果入库; 数字的溯源依据是各 run 目录下
 # summary.json 自带的运行戳记 (provenance.run_stamp).
 
 CASE_ID = run_cantilever_stress.CASE_ID
 POSTPROCESS_DIR = OUTPUT_DIR / CASE_ID / "postprocess" / "stress_fields"
-# 插图只用 k=3 主对比的两次运行 (plots/stress_cubic_convergence 的主应力面板);
-# 其余阶次的场图改由 discretization_probe 的 fields.npz 供数.
-RUNS: dict[str, tuple[str, int]] = {
-    "lfem-k3": ("lfem", 3),
-    "huzhang-k3": ("huzhang", 3),
+# 导出名 -> (算例, 分析链, 阶次). 悬臂梁只用 k=3 主对比的两次运行 (plots/stress_cubic_convergence
+# 的主应力面板), 门式框架只用 Hu--Zhang k=3 (plots/stress_portal_convergence); 其余阶次的场图
+# 改由 discretization_probe 的 fields.npz 供数.
+RUNS: dict[str, tuple[str, str, int]] = {
+    "lfem-k3": (run_cantilever_stress.CASE_ID, "lfem", 3),
+    "huzhang-k3": (run_cantilever_stress.CASE_ID, "huzhang", 3),
+    "portal-huzhang-k3": (run_portal_frame.CASE_ID, "huzhang", 3),
 }
+
+
+def postprocess_dir(name: str) -> Path:
+    """导出名所属算例的插图数据目录 ``results/<case>/postprocess/stress_fields``."""
+    return OUTPUT_DIR / RUNS[name][0] / "postprocess" / "stress_fields"
 
 
 def export_run(name: str) -> dict[str, Any]:
     """对单次运行做冻结重分析, 返回 npz 待写入的场量字典."""
-    method, order = RUNS[name]
-    run_dir = resolve_run_dir(method, order)
+    case, method, order = RUNS[name]
+    run_dir = resolve_run_dir(method, order, case=case)
     density_file = run_dir / "density_final.vtu"
     from .discretization_probe import build_frozen, pad_mask_from_summary  # 延迟导入: 该模块拉起求解栈
-    pipeline = build_frozen(method, order)
+    pipeline = build_frozen(method, order, case, run_dir=run_dir)
 
     rho_final = read_vtu_cell_density(density_file)
     rho = pipeline.density
@@ -107,7 +120,7 @@ def export_run(name: str) -> dict[str, Any]:
     rho[:] = rho_final
 
     processor = StressPostProcessor(
-        analyzer=pipeline.analyzer, stress_limit=run_cantilever_stress.STRESS_LIMIT
+        analyzer=pipeline.analyzer, stress_limit=CASE_MODULES[case].STRESS_LIMIT
     )
     results = processor.check_stress_constraints(rho)
     mesh = pipeline.mesh
@@ -146,8 +159,8 @@ def compare(fields: dict[str, Any], path: Path) -> list[str]:
 
 def export_fingerprint(name: str) -> str:
     """计算源结果与本地后处理实现的内容指纹."""
-    method, order = RUNS[name]
-    run_dir = resolve_run_dir(method, order, announce=False)
+    case, method, order = RUNS[name]
+    run_dir = resolve_run_dir(method, order, case=case, announce=False)
     paths = [run_dir / "density_final.vtu", run_dir / "summary.json"]
     paths.extend(sorted(EXPERIMENT_DIR.glob("*.py")))
     paths.extend(sorted((EXPERIMENT_DIR / "analysis").glob("*.py")))
@@ -170,11 +183,11 @@ def save_export(fields: dict[str, Any], path: Path, fingerprint: str) -> None:
 def prepare_exports(names: list[str]) -> None:
     """只准备本图需要的运行; 全部源结果齐全后才开始重分析."""
     for name in names:
-        method, order = RUNS[name]
-        resolve_run_dir(method, order, announce=False)
-    target = POSTPROCESS_DIR
-    target.mkdir(parents=True, exist_ok=True)
+        case, method, order = RUNS[name]
+        resolve_run_dir(method, order, case=case, announce=False)
     for name in names:
+        target = postprocess_dir(name)
+        target.mkdir(parents=True, exist_ok=True)
         path = target / f"fig_data_{name}.npz"
         fingerprint = export_fingerprint(name)
         valid = False
@@ -201,11 +214,10 @@ def run_export(argv: list[str] | None = None) -> int:
                         help="只与现有 npz 比对, 不写盘.")
     arguments = parser.parse_args(argv)
 
-    target_dir = POSTPROCESS_DIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-
     mismatched = 0
     for name in arguments.run or sorted(RUNS):
+        target_dir = postprocess_dir(name)
+        target_dir.mkdir(parents=True, exist_ok=True)
         fields = export_run(name)
         path = target_dir / f"fig_data_{name}.npz"
         if arguments.check:

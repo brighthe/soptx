@@ -1,12 +1,13 @@
 """门式框架局部应力约束体积最小化 (论文 5.2.4 节 / 图 5.11~5.13).
 
 完整域 L x H 的矩形去掉底部中央三角形缺口, 平面应力, 左支座段固定铰、右支座段滚动铰
-(PolyStress 口径), 顶边中点竖直合力 P 化为宽 l 的均布牵引, 按论文口径投影到顶边连续 P1 迹
+(PolyStress 口径), 顶边中点竖直合力 P 化为宽 l 的均布牵引, 按所选方式映射到顶边连续 P1 迹
 空间后施加. 支座不对称, 状态场不严格对称, 因此按全域求解; 设计对称性由过滤器对 x = L/2 做
 对称化 (symmetry_planes). 设计域含斜边, 在 gmsh 生成左半域再镜像到右半的非结构三角形网格
 (严格关于 x = L/2 对称) 上求解. 以表观应力松弛约束下的体积最小化为目标, 增广拉格朗日 + MMA
 (AL-MMA) 求解. 顶边载荷是法向区段牵引, 端点处应力只间断不奇异 (全实体加密实测有界, 约 0.70),
-故不设被动实体区, 全部单元受应力约束 (与 PolyStress 一致); 凹角顶点同样不设.
+故不设被动实体区, 全部单元受应力约束 (与 PolyStress 一致); 凹角顶点同样不设. 停止判据与终态
+验收在全部受约束单元上评价 (ACCEPTANCE_SOLID_THRESHOLD = None).
 
 结果写入运行目录 ``outputs/<case>/<label>/`` (不入库, 已存在则拒绝覆盖); 确认后经
 ``sync_results.py`` 固化到入库的 ``results/``. 逐步帧 ``iterations/`` 与 ``evolution.pvd`` 留在运行目录,
@@ -22,13 +23,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-import gmsh
 import numpy as np
 
 from soptx.backend import backend_manager as bm
-from soptx.fem import HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer, project_patch_traction_to_p1_trace
+from soptx.fem import (
+    HuZhangMFEMAnalyzer, LagrangeFEMAnalyzer,
+    interpolate_patch_traction_to_p1_trace, project_patch_traction_to_p1_trace,
+)
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.mesh import TriangleMesh
 from soptx.postprocess.iteration_frames import IterationFrameWriter
 from soptx.postprocess.vtk_export import write_vtu
 from soptx.problems import PortalFramePatch2d
@@ -45,6 +47,7 @@ from soptx.topology.objectives import AugmentedLagrangianObjective, VolumeObject
 from soptx.topology.optimizers import ALMMMAOptimizer, ALMMMAOptions
 
 from analysis import provenance
+from portal_frame_mesh import build_mesh
 
 CASE_ID = "portal-frame-2d-stress"
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / CASE_ID   # 运行产物, 不入库
@@ -101,30 +104,93 @@ MU_0 = 50.0                  # 与悬臂梁同值; PolyStress Table 3 的 10 使
 MU_MAX = 1.0e4
 ALPHA = 1.1
 LAMBDA_0 = 0.0
-LAMBDA_MAX = 3000.0          # 乘子安全阈 (safeguarded AL)
+LAMBDA_MAX = 10000.0          # 乘子安全阈 (safeguarded AL)
 MOVE_LIMIT = 0.15
 ASYMPTOTE_MIN_DISTANCE = 1.0e-4
-ACCEPTANCE_SOLID_THRESHOLD = 0.5  # C2 只在 rho_phys >= 0.5 的未豁免单元上验收
+# C2 与终态验收的单元集合 (论文 4.6.2 节的 E_acc): None 为被动实体区外全部受约束单元 (本算例无被动区,
+# 即全部单元); 取 (0, 1) 内的数则只验收 rho_phys >= 该值的单元
+ACCEPTANCE_SOLID_THRESHOLD = None
+SOLID_REPORT_THRESHOLD = 0.5      # 只用于报告实体区 (rho_phys >= 0.5) 的最大应力比, 不参与验收
 
 # 运行目录名模板 (填 method, order)
-RUN_LABEL = "analyzer-{method}__order-{order}"
+LOAD_DISCRETIZATION = "p1-interpolation"
+LOAD_DISCRETIZATIONS = {
+    "p1-interpolation": "p1_trace_interpolation",
+    "p1-l2-projection": "p1_trace_l2_projection",
+}
+
+
+RUN_LABEL = (
+    "analyzer-{method}__order-{order}"
+    f"__{LOAD_DISCRETIZATION}"
+    + (f"__load-pad-radius-{LOAD_PAD_RADIUS!r}" if LOAD_PAD_RADIUS > 0.0 else "")
+    + f"__all-cells__lambda-max-{LAMBDA_MAX!r}"
+)
 # density_final.vtu 与逐步帧写出的单元场: 'density' 物理密度, 'von_mises_normalized' 单元最大应力比;
 # density_initial.vtu (第 0 帧的副本) 只有 'density'
 VTU_FIELDS = ("density", "von_mises_normalized")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """解析要跑的分析链与阶次, 并据此确定运行目录名与输出目录; 其余设置均为模块顶部常量."""
+    """解析分析链、载荷离散、被动区半径与乘子上限, 并生成独立运行目录."""
     parser = argparse.ArgumentParser(description="门式框架局部应力约束体积最小化 (论文 5.2.4 节)")
     parser.add_argument("--analyzer", choices=METHODS, required=True, help="分析链")
     parser.add_argument("--order", type=int, choices=ORDERS, required=True,
                         help="阶次 k (LFEM 位移阶 p = k, HZMFEM 应力阶 k)")
+    parser.add_argument("--load-discretization", choices=tuple(LOAD_DISCRETIZATIONS),
+                        default=LOAD_DISCRETIZATION, help="顶边连续 P1 牵引的离散方式")
+    parser.add_argument("--load-pad-radius", type=float, default=LOAD_PAD_RADIUS,
+                        help="载荷端点被动实体区半径 (mm), 0 表示不设置")
+    parser.add_argument("--lambda-max", type=float, default=LAMBDA_MAX, help="乘子上限")
     args = parser.parse_args(argv)
+    if not np.isfinite(args.load_pad_radius) or args.load_pad_radius < 0.0:
+        parser.error("--load-pad-radius 必须是有限非负数")
+    if not np.isfinite(args.lambda_max) or args.lambda_max <= 0.0:
+        parser.error("--lambda-max 必须是有限正数")
     if args.analyzer == "huzhang" and args.order < 2:
         parser.error("HZMFEM 要求 --order >= 2")
-    args.label = RUN_LABEL.format(method=args.analyzer, order=args.order)
+    args.label = f"analyzer-{args.analyzer}__order-{args.order}__{args.load_discretization}"
+    if args.load_pad_radius > 0.0:
+        args.label += f"__load-pad-radius-{args.load_pad_radius!r}"
+    args.label += f"__all-cells__lambda-max-{args.lambda_max!r}"
     args.output = OUTPUT_DIR / args.label
     return args
+
+
+def build_problem(h: float = MESH_SIZE,
+                  load_discretization: str = LOAD_DISCRETIZATION) -> PortalFramePatch2d:
+    """构造注入 P1 迹载荷的门式框架问题, 优化运行、冻结重分析与全实体验证共用.
+
+    先按缺省阶跃牵引构造, 只为取载荷区几何; 再把牵引换成它在顶边 (按 h 均匀剖分) 连续 P1
+    迹空间上按指定方式离散后重建问题. 节点插值时内部节点取均布值, 端点取半值,
+    其余取零; L2 投影通过边界质量矩阵求解. 几何、材料与边界标记不变.
+
+    Parameters
+    ----------
+    h : float, optional
+        顶边剖分尺寸, 须与 build_mesh 所用网格尺寸一致, 缺省 MESH_SIZE.
+    load_discretization : str, optional
+        p1-interpolation 为节点插值, p1-l2-projection 为 L2 投影.
+
+    Returns
+    -------
+    problem : PortalFramePatch2d
+        ``uses_step_traction`` 为 False 的问题实例.
+    """
+    problem = PortalFramePatch2d(L=L, H=H, load_width=LOAD_WIDTH, b=SUPPORT_WIDTH, h_c=CORNER_HEIGHT, P=LOAD,
+                                 E=E0, nu=NU, plane_type=PLANE_TYPE)
+    xmin, xmax, _, _ = problem.domain
+    builders = {
+        "p1-interpolation": interpolate_patch_traction_to_p1_trace,
+        "p1-l2-projection": project_patch_traction_to_p1_trace,
+    }
+    if load_discretization not in builders:
+        raise ValueError(f"未知载荷离散: {load_discretization}")
+    traction = builders[load_discretization](
+        line=(xmin, xmax), n_cells=int(round((xmax - xmin) / h)), level=problem.traction_level,
+        patch=problem.traction_patch, intensity=problem.traction_intensity, axis=problem.traction_axis)
+    return PortalFramePatch2d(L=L, H=H, load_width=LOAD_WIDTH, b=SUPPORT_WIDTH, h_c=CORNER_HEIGHT, P=LOAD,
+                              E=E0, nu=NU, plane_type=PLANE_TYPE, traction=traction)
 
 
 def format_run_header(config: dict[str, Any], output: Path, dofs: str) -> str:
@@ -162,7 +228,9 @@ def format_run_header(config: dict[str, Any], output: Path, dofs: str) -> str:
         f"  离散  {chain}, gmsh 镜像三角 h={disc['mesh_size']:g}, {dofs}, 积分 {disc['integration_order']} 阶, "
         f"{variant}, {disc['solver']}",
         f"  约束  epsilon={stress['epsilon']:g}, 被动实体区 r: 载荷端点 {stress['load_pad_radius']:g} / "
-        f"支座端点 {stress['support_pad_radius']:g}",
+        f"支座端点 {stress['support_pad_radius']:g}, 验收 "
+        + ("被动实体区外全部单元" if opt["acceptance_solid_threshold"] is None
+           else f"rho >= {opt['acceptance_solid_threshold']:g}"),
         f"  优化  AL-MMA, rho0={opt['initial_density']:g}, 过滤 r={opt['filter_radius']:g}, "
         f"MSIMP p={opt['penalty']:g}, {proj['projection_type']} beta {proj['beta']:g}->{proj['beta_max']:g} "
         f"(每 {proj['continuation_iter']} 外层步 +{proj['beta_increment']:g}), "
@@ -186,9 +254,10 @@ def main(argv: list[str] | None = None) -> int:
         "model": {"L": L, "H": H, "load_width": LOAD_WIDTH, "support_width": SUPPORT_WIDTH,
                   "corner_height": CORNER_HEIGHT, "load": LOAD, "E0": E0, "nu": NU,
                   "plane_type": PLANE_TYPE, "stress_limit": STRESS_LIMIT},
-        "stress_constraint": {"epsilon": EPSILON, "load_pad_radius": LOAD_PAD_RADIUS,
+        "stress_constraint": {"epsilon": EPSILON, "load_pad_radius": args.load_pad_radius,
                               "support_pad_radius": SUPPORT_PAD_RADIUS},
         "discretization": {"mesh_type": "triangle-gmsh-mirrored", "mesh_size": MESH_SIZE,
+                           "load_discretization": LOAD_DISCRETIZATIONS[args.load_discretization],
                            "mesh_algorithm": MESH_ALGORITHM,
                            "integration_order": 2 * order + 2, "use_relaxation": USE_RELAXATION,
                            "assembly_method": ASSEMBLY_METHOD, "solver": SOLVER},
@@ -201,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             "inner_stop_rule": INNER_STOP_RULE, "inner_relative_tolerance": INNER_RELATIVE_TOLERANCE,
             "inner_absolute_tolerance": INNER_ABSOLUTE_TOLERANCE,
             "mu_0": MU_0, "mu_max": MU_MAX, "alpha": ALPHA, "lambda_0": LAMBDA_0,
-            "lambda_max": LAMBDA_MAX, "move_limit": MOVE_LIMIT,
+            "lambda_max": args.lambda_max, "move_limit": MOVE_LIMIT,
             "asymptote_min_distance": ASYMPTOTE_MIN_DISTANCE,
             "acceptance_solid_threshold": ACCEPTANCE_SOLID_THRESHOLD,
         },
@@ -218,79 +287,9 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 1. 组装分析链: 问题、网格、分析器、被动实体区、应力约束与 AL 目标.
-    # 问题: 先按缺省阶跃牵引构造, 只为取载荷区几何; 再把牵引换成它在顶边 P1 迹空间上的
-    # L2 投影 (顶边均匀剖分) 重新构造, 几何与边界标记不变
-    h = MESH_SIZE
-    problem = PortalFramePatch2d(L=L, H=H, load_width=LOAD_WIDTH, b=SUPPORT_WIDTH, h_c=CORNER_HEIGHT, P=LOAD,
-                                 E=E0, nu=NU, plane_type=PLANE_TYPE)
-    xmin, xmax, _, _ = problem.domain
-    traction = project_patch_traction_to_p1_trace(
-        line=(xmin, xmax), n_cells=int(round((xmax - xmin) / h)), level=problem.traction_level,
-        patch=problem.traction_patch, intensity=problem.traction_intensity, axis=problem.traction_axis)
-    problem = PortalFramePatch2d(L=L, H=H, load_width=LOAD_WIDTH, b=SUPPORT_WIDTH, h_c=CORNER_HEIGHT, P=LOAD,
-                                 E=E0, nu=NU, plane_type=PLANE_TYPE, traction=traction)
-
-    # 网格: gmsh 在左半域五边形上生成三角形网格, 再镜像到右半, 得到关于 x = L/2 严格对称的全域网格
-    x_mid, x_patch = problem.symmetry_axis, problem.traction_patch[0]
-    for name, length in (("l/2", x_mid - x_patch), ("L/2 - l/2", x_patch)):
-        ratio = length / h
-        if abs(ratio - round(ratio)) > 1e-9:
-            raise ValueError(f"h={h} 不能整除顶边分段 {name}={length}; 请取 0.5/k 形式的 h, 如 0.25, 0.125, 0.1.")
-
-    gmsh.initialize()
-    try:
-        gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("portal_half")
-        geo = gmsh.model.geo
-        points = [geo.addPoint(x, y, 0.0, h) for x, y in
-                  ((0.0, 0.0), (problem.b, 0.0), (x_mid, problem.h_c),
-                   (x_mid, problem.H), (x_patch, problem.H), (0.0, problem.H))]
-        # 边依次为: 支座段, 斜边, 对称面, 顶边载荷区, 顶边其余, 左边
-        lines = [geo.addLine(points[i], points[(i + 1) % 6]) for i in range(6)]
-        geo.addPlaneSurface([geo.addCurveLoop(lines)])
-        geo.synchronize()
-        gmsh.model.mesh.setTransfiniteCurve(lines[3], int(round((x_mid - x_patch) / h)) + 1)
-        gmsh.model.mesh.setTransfiniteCurve(lines[4], int(round(x_patch / h)) + 1)
-        gmsh.option.setNumber("Mesh.Algorithm", MESH_ALGORITHM)
-        gmsh.option.setNumber("Mesh.MeshSizeMin", h)
-        gmsh.option.setNumber("Mesh.MeshSizeMax", h)
-        gmsh.model.mesh.generate(2)
-
-        tags, coords, _ = gmsh.model.mesh.getNodes()
-        coords = np.asarray(coords, dtype=np.float64).reshape(-1, 3)[:, :2]
-        types, _, node_tags = gmsh.model.mesh.getElements(2)
-        if list(types) != [2]:
-            raise RuntimeError(f"期望只有线性三角形 (gmsh type 2), 实际 {list(types)}")
-        tri = np.asarray(node_tags[0], dtype=np.int64).reshape(-1, 3)
-    finally:
-        gmsh.finalize()
-
-    # gmsh 节点标签不保证连续: 映射到 0 基编号并去掉未被单元引用的节点
-    index = {int(tag): i for i, tag in enumerate(tags)}
-    cell_half = np.vectorize(index.__getitem__)(tri)
-    used = np.unique(cell_half)
-    remap = -np.ones(coords.shape[0], dtype=np.int64)
-    remap[used] = np.arange(used.size)
-    node_half, cell_half = coords[used], remap[cell_half]
-
-    # 对称面上的节点横坐标钉到精确值, 镜像合并时按精确相等判定
-    node_half[np.abs(node_half[:, 0] - x_mid) < 1e-8 * problem.L, 0] = x_mid
-
-    # 半域单元统一为逆时针
-    p0, p1, p2 = node_half[cell_half[:, 0]], node_half[cell_half[:, 1]], node_half[cell_half[:, 2]]
-    flip = (p1[:, 0] - p0[:, 0]) * (p2[:, 1] - p0[:, 1]) - (p1[:, 1] - p0[:, 1]) * (p2[:, 0] - p0[:, 0]) < 0
-    cell_half[flip] = cell_half[flip][:, [0, 2, 1]]
-
-    # 镜像: 对称面上的节点被两半共用, 镜像单元翻转顶点顺序以保持逆时针; 左半编号在前, 右半在后
-    off_axis = node_half[:, 0] != x_mid
-    new_index = np.arange(node_half.shape[0])
-    new_index[off_axis] = node_half.shape[0] + np.arange(int(off_axis.sum()))
-    node_right = np.column_stack((2.0 * x_mid - node_half[off_axis, 0], node_half[off_axis, 1]))
-    mesh: Any = TriangleMesh(bm.array(np.vstack((node_half, node_right))),
-                             bm.array(np.vstack((cell_half, new_index[cell_half][:, [0, 2, 1]]))))
-    mesh.meshdata = {"domain": list(problem.domain), "mesh_type": "triangle-gmsh-mirrored", "h": h,
-                     "symmetry_axis": x_mid}
-
+    # 问题与网格由 build_problem / build_mesh 构造, 冻结重分析与全实体验证共用同一份代码
+    problem = build_problem(load_discretization=args.load_discretization)
+    mesh = build_mesh(problem, MESH_SIZE, algorithm=MESH_ALGORITHM)
 
     material = IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E, poisson_ratio=problem.nu,
@@ -303,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     # 凹角顶点不设: 优化从凹角应力集中区去料正是本算例的预期结果.
     # 区内单元不施加应力约束, 并经过滤器 (passive_mask) 固定为实体
     load_pad_mask = build_exemption_mask(
-        mesh=mesh, centers=problem.traction_patch_endpoints, radius=LOAD_PAD_RADIUS)
+        mesh=mesh, centers=problem.traction_patch_endpoints, radius=args.load_pad_radius)
     support_pad_mask = build_exemption_mask(
         mesh=mesh, centers=problem.support_corner_points, radius=SUPPORT_PAD_RADIUS)
     pad_mask = bm.logical_or(load_pad_mask, support_pad_mask)
@@ -342,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         max_al_iterations=MAX_AL_ITERATIONS, mma_iters_per_al=MMA_ITERS_PER_AL,
         mu_0=MU_0, mu_max=MU_MAX, alpha=ALPHA, lambda_0_init_val=LAMBDA_0,
         move_limit=MOVE_LIMIT, asymptote_min_distance=ASYMPTOTE_MIN_DISTANCE,
-        change_measure=CHANGE_MEASURE, lambda_max=LAMBDA_MAX,
+        change_measure=CHANGE_MEASURE, lambda_max=args.lambda_max,
         acceptance_solid_threshold=ACCEPTANCE_SOLID_THRESHOLD,
     )
     al = AugmentedLagrangianObjective(
@@ -379,11 +378,15 @@ def main(argv: list[str] | None = None) -> int:
     # 未加权实体应力比: 只报告不判据, 反映实体材料真实的应力水平
     solid_stress_ratio = np.asarray(constraint.compute_solid_stress_ratio(rho_phys, state))
     rho = np.asarray(rho_phys).reshape(-1)
-    solid = rho >= ACCEPTANCE_SOLID_THRESHOLD
+    # 验收集合与优化器 C2 同口径: 被动实体区外, 阈值非 None 时再限于 rho >= 阈值
+    accepted = ~np.asarray(bm.to_numpy(pad_mask)).astype(bool)
+    if ACCEPTANCE_SOLID_THRESHOLD is not None:
+        accepted &= rho >= ACCEPTANCE_SOLID_THRESHOLD
+    solid = rho >= SOLID_REPORT_THRESHOLD
     per_cell_max = lambda value: np.asarray(value).reshape(len(value), -1).max(axis=1)  # 积分点场取单元最大值
     violation_cell = per_cell_max(relative_violation)
-    g_solid = float(violation_cell[solid].max()) if solid.any() else None
-    feasible = bool((g_solid if g_solid is not None else float(relative_violation.max()))
+    g_acc = float(violation_cell[accepted].max()) if accepted.any() else None
+    feasible = bool((g_acc if g_acc is not None else float(relative_violation.max()))
                     <= STRESS_TOLERANCE)
     # 被动实体区内的约束值按未豁免口径重算 (约束对象在豁免单元上返回哨兵 -1)
     pad_constraint = np.asarray(constraint.compute_unexempted_constraint(rho_phys, state))
@@ -401,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         "mesh_type": "triangle-gmsh-mirrored",
         "mesh_size": MESH_SIZE,
         "optimizer": "al_mma",
-        "load_discretization": "p1_trace_l2_projection",
+        "load_discretization": LOAD_DISCRETIZATIONS[args.load_discretization],
         "integration_order": 2 * order + 2,
         "stabilization_coefficient": getattr(analyzer, "stabilization_coefficient", None),
         "volume_fraction": float(volume_objective.fun(density)),
@@ -419,11 +422,13 @@ def main(argv: list[str] | None = None) -> int:
         "max_relative_violation": float(relative_violation.max()),
         "relative_stress_tolerance": STRESS_TOLERANCE,
         "acceptance_solid_threshold": ACCEPTANCE_SOLID_THRESHOLD,
-        "max_relative_violation_solid_region": g_solid,
+        "max_relative_violation_accepted": g_acc,
+        "accepted_cells": int(accepted.sum()),
         "relative_stress_feasible": feasible,
+        "solid_report_threshold": SOLID_REPORT_THRESHOLD,
         "max_solid_stress_ratio_solid_region": masked_max(solid_stress_ratio, solid),
         # 被动实体区诊断: 两侧分列, 使"被动实体区掩盖了多大的应力"可直接读出
-        "load_pad_radius": LOAD_PAD_RADIUS,
+        "load_pad_radius": args.load_pad_radius,
         "load_pad_centers": [[float(v) for v in c] for c in problem.traction_patch_endpoints] or None,
         "pad_cells": int(bm.sum(pad_mask)),
         "load_pad_cells": int(bm.sum(load_pad_mask)),
@@ -436,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
                                        else float(change)),
         **{key: (None if value is None or not np.isfinite(value) else float(value))
            for key, value in outer.items()},
-        "lambda_max": LAMBDA_MAX,
+        "lambda_max": args.lambda_max,
         "multiplier_capped_count": int(getattr(al, "last_capped_count", 0)),
     }
 
@@ -497,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     (output / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[done] {method} k={order}: {summary['optimization_iterations']} 步, "
-          f"volfrac={summary['volume_fraction']:.6f}, g_max(实体)={g_solid}, "
+          f"volfrac={summary['volume_fraction']:.6f}, g_max(验收)={g_acc}, "
           f"converged={summary['converged']}", flush=True)
     return 0
 

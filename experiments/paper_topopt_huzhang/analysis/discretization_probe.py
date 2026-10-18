@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-"""悬臂梁应力算例的冻结构型重分析: 图 5.8、5.10、5.11 的数据源.
+"""应力算例的冻结构型重分析: 悬臂梁图 5.8、5.10 与门式框架图 5.12 的数据源, 牵引跳量统计.
 
 每份最终构型冻结后, 在优化所用的离散下重解一次状态方程, 导出逐单元的表观应力比
 ``vm_app``、约束值 ``g`` 与内边法向牵引绝对跳量 ``A_e`` (见本模块第二节). Hu--Zhang
 因 H(div, S) 协调该跳量恒为舍入量级, LFEM 由位移梯度逐单元恢复应力, 跳量非零;
-论文 5.2.3 节的牵引连续性对比即取自本模块.
+论文 5.2.3 节与 5.2.4 节的牵引连续性统计即取自本模块.
 
-入口由 ``plot.py`` 派发, 本模块不直接执行::
+两个算例由 ``CASES`` 登记: 悬臂梁 (``run_cantilever_stress``, 棋盘网格) 与门式框架
+(``run_portal_frame``, gmsh 镜像网格), 问题与网格取自运行入口共用的构造函数, 与优化运行
+同一份代码. 入口由 ``plot.py`` 派发, 本模块不直接执行::
 
-    plot.py discretization-probe [--design <目录名>]...
+    plot.py discretization-probe [--case <算例>] [--design <目录名>]...
 
 产出写到 ``results/<case>/postprocess/discretization_probe/``: 逐构型一份 npz (逐单元
 场, 供成图模块读取)、一份 json (跳量统计、验收门与 provenance) 与一份 vtu; 终端同时
@@ -19,7 +21,8 @@
 
 1. Hu--Zhang 的内边相对跳量必须 < 1e-10 (协调性的直接后果), 否则跳量求值 (第二节) 有错;
 2. 重分析在判据集合上的最大 ``g`` 必须复现 summary 的
-   ``max_relative_violation_accepted``, 否则掩码或阈值口径与优化器不同.
+   ``max_relative_violation_accepted`` (该字段之前的运行记为 ``max_relative_violation_solid_region``),
+   否则掩码或阈值口径与优化器不同.
 """
 
 from __future__ import annotations
@@ -49,10 +52,12 @@ from soptx.topology.constraints import (
 from soptx.topology.interpolation import MaterialInterpolationScheme
 
 import run_cantilever_stress
+import run_portal_frame
 from config import OUTPUT_DIR, VIEW_DIR
 
 from . import provenance
 
+# 缺省算例 (悬臂梁); stress_metrics 按此调用 build_frozen 与 pad_mask_from_summary.
 CASE_ID = run_cantilever_stress.CASE_ID
 # 停止准则的容差 delta_g; 仅作跳量的尺度参照.
 DELTA_G = run_cantilever_stress.STRESS_TOLERANCE
@@ -61,13 +66,34 @@ SOLID_THRESHOLD = 0.9
 # Hu--Zhang 相对跳量的硬门.
 HUZHANG_JUMP_GATE = 1e-10
 
-# 论文 5.2.3 节的六份构型 (pad 1.5 mm, 判据集合 rho >= 0.5): LFEM p=2..4 与
-# Hu--Zhang k=2..4.
-DEFAULT_DESIGNS: tuple[str, ...] = tuple(
-    run_cantilever_stress.RUN_LABEL.format(method=method, order=order)
-    for method in run_cantilever_stress.METHODS
-    for order in run_cantilever_stress.ORDERS
-)
+
+
+def _cantilever_mesh(problem) -> TriangleMesh:
+    rc = run_cantilever_stress
+    return TriangleMesh.from_checkerboard_box(box=problem.domain, nx=rc.NX, ny=rc.NY)
+
+
+# 算例登记: run 模块 (常量与问题构造) / 网格构造 / 缺省构型.
+# 悬臂梁: 论文 5.2.3 节的六份构型 (pad 1.5 mm), LFEM p=2..4 与 Hu--Zhang k=2..4;
+# 门式框架: 论文 5.2.4 节只报 Hu--Zhang k=3 (无被动实体区).
+CASES: dict[str, SimpleNamespace] = {
+    run_cantilever_stress.CASE_ID: SimpleNamespace(
+        module=run_cantilever_stress,
+        build_mesh=_cantilever_mesh,
+        default_designs=tuple(
+            run_cantilever_stress.RUN_LABEL.format(method=method, order=order)
+            for method in run_cantilever_stress.METHODS
+            for order in run_cantilever_stress.ORDERS
+        ),
+    ),
+    run_portal_frame.CASE_ID: SimpleNamespace(
+        module=run_portal_frame,
+        build_mesh=lambda problem, h=run_portal_frame.MESH_SIZE: run_portal_frame.build_mesh(
+            problem, h, algorithm=run_portal_frame.MESH_ALGORITHM),
+        default_designs=(run_portal_frame.RUN_LABEL.format(method="huzhang", order=3),),
+    ),
+}
+DEFAULT_DESIGNS: tuple[str, ...] = CASES[CASE_ID].default_designs
 
 
 # ================================================================ 一、工具
@@ -156,11 +182,48 @@ def _stats(values: np.ndarray) -> dict[str, float | None]:
     }
 
 
-def build_frozen(method: str, order: int) -> SimpleNamespace:
-    """按 ``run_cantilever_stress`` 的常量组装冻结构型的分析链.
+def portal_frozen_settings(run_dir: Path) -> dict[str, Any]:
+    """读取门式框架运行的载荷与网格配置, 兼容旧摘要并拒绝冲突记录.
 
-    与 ``run_cantilever_stress.main`` 的组装步骤逐项对应, 改动须同步; 两者一旦失配,
-    验收门 2 (复现 summary 的 ``max_relative_violation_accepted``) 即不通过.
+    Parameters
+    ----------
+    run_dir : Path
+        含 config.json 与 summary.json 的原运行目录.
+
+    Returns
+    -------
+    dict
+        build_problem 使用的 load_discretization 与 mesh_size.
+    """
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    disc = config["discretization"]
+    config_load = disc.get("load_discretization")
+    summary_load = summary.get("load_discretization")
+    if config_load is not None and summary_load is not None and config_load != summary_load:
+        raise ValueError(f"{run_dir}: 配置与摘要的载荷离散不一致")
+    saved_load = config_load if config_load is not None else summary_load
+    modes = {value: key for key, value in run_portal_frame.LOAD_DISCRETIZATIONS.items()}
+    if saved_load not in modes:
+        raise ValueError(f"{run_dir}: 缺少或无法识别载荷离散记录 {saved_load!r}")
+    for section, key in (("stress_constraint", "load_pad_radius"),
+                         ("optimization", "lambda_max")):
+        saved_value = config[section][key]
+        if key in summary and saved_value != summary[key]:
+            raise ValueError(f"{run_dir}: 配置与摘要的 {key} 不一致")
+    h = float(disc["mesh_size"])
+    if "mesh_size" in summary and h != float(summary["mesh_size"]):
+        raise ValueError(f"{run_dir}: 配置与摘要的网格尺寸不一致")
+    return {"load_discretization": modes[saved_load], "mesh_size": h}
+
+
+def build_frozen(method: str, order: int, case: str = CASE_ID,
+                 mesh_size: float | None = None, *,
+                 run_dir: Path | None = None) -> SimpleNamespace:
+    """按算例 run 脚本的常量组装冻结构型的分析链.
+
+    与对应 run 脚本 ``main`` 的组装步骤逐项对应, 改动须同步; 两者一旦失配,
+    验收门 2 (复现 summary 的判据集合最大 ``g``) 即不通过.
     与优化运行的区别: 应力约束不设豁免掩码, 被动实体区的真实读数一并取回; 被动实体区
     只经过滤器钉为实体, 前向求解不需要, 故不组装过滤器与 AL 目标.
 
@@ -170,16 +233,36 @@ def build_frozen(method: str, order: int) -> SimpleNamespace:
         分析链.
     order : int
         阶次 k (LFEM 位移阶 p = k, HZMFEM 应力阶 k).
+    case : str, optional
+        ``CASES`` 中的算例名, 缺省悬臂梁.
+    mesh_size : float, optional
+        只对门式框架有效: 以该尺寸重建问题 (顶边 P1 迹剖分) 与网格, 供全实体加密验证;
+        缺省取 run 脚本的 ``MESH_SIZE``, 即优化所用网格.
+    run_dir : Path, optional
+        门式框架冻结运行目录. 提供时读取原载荷与网格配置; 不提供时用于当前设置的全实体诊断.
 
     Returns
     -------
     SimpleNamespace
         字段 ``method``, ``order``, ``mesh``, ``analyzer``, ``stress_constraint``, ``density``.
     """
-    rc = run_cantilever_stress
-    # 与优化运行共用问题构造 (含 P1 迹载荷), 载荷口径不会失配
-    problem = rc.build_problem()
-    mesh = TriangleMesh.from_checkerboard_box(box=problem.domain, nx=rc.NX, ny=rc.NY)
+    spec = CASES[case]
+    rc = spec.module
+    # 与优化运行共用问题与网格构造 (含 P1 迹载荷), 载荷与网格口径不会失配
+    if case == run_portal_frame.CASE_ID and run_dir is not None:
+        settings = portal_frozen_settings(run_dir)
+        if mesh_size is not None and mesh_size != settings["mesh_size"]:
+            raise ValueError("冻结设计不允许覆盖原运行网格尺寸")
+        problem = rc.build_problem(settings["mesh_size"], settings["load_discretization"])
+        mesh = spec.build_mesh(problem, settings["mesh_size"])
+    elif mesh_size is None:
+        problem = rc.build_problem()
+        mesh = spec.build_mesh(problem)
+    elif case == run_portal_frame.CASE_ID:
+        problem = rc.build_problem(mesh_size)
+        mesh = spec.build_mesh(problem, mesh_size)
+    else:
+        raise ValueError(f"{case}: 只有门式框架支持 mesh_size.")
     material = IsotropicLinearElasticMaterial(
         youngs_modulus=problem.E, poisson_ratio=problem.nu, hypothesis=problem.plane_type)
     interpolation = MaterialInterpolationScheme(
@@ -205,13 +288,16 @@ def build_frozen(method: str, order: int) -> SimpleNamespace:
                            stress_constraint=stress_constraint, density=density)
 
 
-def evaluate(method: str, order: int, design: np.ndarray) -> dict[str, Any]:
+def evaluate(method: str, order: int, design: np.ndarray, case: str = CASE_ID,
+             *, run_dir: Path | None = None) -> dict[str, Any]:
     """在冻结构型上做一次前向求解, 返回逐单元的表观应力比与约束值.
 
     分析链由 ``build_frozen`` 组装, 约束不设豁免; 构型由 ``rho[:] = design`` 整体覆写,
     不经过过滤链, 实体保留与否不影响前向求解.
     """
-    pipeline = build_frozen(method, order)
+    if case == run_portal_frame.CASE_ID and run_dir is None:
+        raise ValueError("门式框架冻结设计必须指定原运行目录 run_dir")
+    pipeline = build_frozen(method, order, case, run_dir=run_dir)
     rho = pipeline.density
     if rho.shape[0] != design.shape[0]:
         raise SystemExit(
@@ -466,7 +552,7 @@ def interior_edge_traction_jump(
 # ================================================================ 三、主流程
 
 
-def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray], Any]:
+def probe_design(design_dir: Path, case: str = CASE_ID) -> tuple[dict[str, Any], dict[str, np.ndarray], Any]:
     """在构型自身的离散下重分析一份冻结构型.
 
     Returns
@@ -481,10 +567,10 @@ def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray
     design, design_summary = load_design(design_dir)
     method, order = design_discretization(design_dir.name)
     discretization = f"{method}-{order}"
-    stress_limit = run_cantilever_stress.STRESS_LIMIT
+    stress_limit = CASES[case].module.STRESS_LIMIT
     solid_threshold = design_summary.get("acceptance_solid_threshold")
 
-    result = evaluate(method, order, design)
+    result = evaluate(method, order, design, case, run_dir=design_dir)
     pipeline = result["pipeline"]
     mesh = pipeline.mesh
     g = result["constraint_value"]
@@ -518,7 +604,9 @@ def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray
             "threshold": HUZHANG_JUMP_GATE,
             "passed": value is not None and value < HUZHANG_JUMP_GATE,
         }
-    recorded = design_summary.get("max_relative_violation_accepted")
+    # 字段改名前的运行记为 max_relative_violation_solid_region, 口径相同 (由 summary 记录的阈值定)
+    recorded = design_summary.get("max_relative_violation_accepted",
+                                  design_summary.get("max_relative_violation_solid_region"))
     if recorded is not None:
         reproduced = float(g[accepted].max())
         checks["accepted_max_g_matches_summary"] = {
@@ -536,7 +624,7 @@ def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray
         f"absjump__{discretization}": abs_cell,
     }
     payload: dict[str, Any] = {
-        "case_id": CASE_ID,
+        "case_id": case,
         "design": design_label(design_dir.name),
         "design_run_dir": str(design_dir.relative_to(OUTPUT_DIR)),
         "design_digest": provenance.file_digest(design_dir / "density_final.vtu"),
@@ -550,7 +638,7 @@ def probe_design(design_dir: Path) -> tuple[dict[str, Any], dict[str, np.ndarray
             )
         },
         "discretization": discretization,
-        "delta_g": DELTA_G,
+        "delta_g": CASES[case].module.STRESS_TOLERANCE,
         "pad_cells": int(pad.sum()),
         "accepted_cells": int(accepted.sum()),
         "max_g_accepted": float(g[accepted].max()),
@@ -600,9 +688,10 @@ def write_outputs(payload: dict[str, Any], fields: dict[str, np.ndarray], mesh) 
     results/ 但不入库, 缺失时重跑本探针即可; vtu 只供 ParaView 查看, 写到 Windows
     查看目录 ``VIEW_DIR`` 下的同名路径, 该盘不可用时退回 results/ (同样不入库).
     """
-    target = OUTPUT_DIR / CASE_ID / "postprocess" / "discretization_probe"
+    case = payload["case_id"]
+    target = OUTPUT_DIR / case / "postprocess" / "discretization_probe"
     target.mkdir(parents=True, exist_ok=True)
-    view = (VIEW_DIR / CASE_ID / "postprocess" / "discretization_probe"
+    view = (VIEW_DIR / case / "postprocess" / "discretization_probe"
             if VIEW_DIR.parent.is_dir() else target)
     view.mkdir(parents=True, exist_ok=True)
     label = payload["design"]
@@ -633,23 +722,27 @@ def build_parser() -> argparse.ArgumentParser:
         description="应力算例: 冻结构型在自身离散下重分析, 导出应力比与牵引跳量.",
     )
     parser.add_argument(
+        "--case", choices=sorted(CASES), default=CASE_ID,
+        help="算例, 缺省悬臂梁 (论文 5.2.3 节); 门式框架为论文 5.2.4 节.",
+    )
+    parser.add_argument(
         "--design", action="append", default=None, metavar="<目录名>",
-        help="results/<case>/ 下的运行目录名, 可重复; 默认论文 5.2.3 节的六份构型.",
+        help="results/<case>/ 下的运行目录名, 可重复; 缺省为该算例论文所用的构型.",
     )
     return parser
 
 
 def run_discretization_probe(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv or [])
-    designs = arguments.design or list(DEFAULT_DESIGNS)
-    root = OUTPUT_DIR / CASE_ID
+    designs = arguments.design or list(CASES[arguments.case].default_designs)
+    root = OUTPUT_DIR / arguments.case
 
     failed = False
     for run_dir in designs:
         design_dir = root / run_dir
         if not design_dir.is_dir():
             raise SystemExit(f"没有运行目录 {design_dir}.")
-        payload, fields, mesh = probe_design(design_dir)
+        payload, fields, mesh = probe_design(design_dir, arguments.case)
         payload["provenance"] = provenance.run_stamp()
         print_markdown(payload)
         target = write_outputs(payload, fields, mesh)
