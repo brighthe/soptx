@@ -31,7 +31,6 @@ from soptx.fem import (
     interpolate_patch_traction_to_p1_trace, project_patch_traction_to_p1_trace,
 )
 from soptx.materials import IsotropicLinearElasticMaterial
-from soptx.postprocess.iteration_frames import IterationFrameWriter
 from soptx.postprocess.vtk_export import write_vtu
 from soptx.problems import PortalFramePatch2d
 from soptx.sparse import COOTensor, CSRTensor
@@ -48,6 +47,7 @@ from soptx.topology.optimizers import ALMMMAOptimizer, ALMMMAOptions
 
 from analysis import provenance
 from portal_frame_mesh import build_mesh
+from iteration_output import ALMIterationOutput
 
 CASE_ID = "portal-frame-2d-stress"
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / CASE_ID   # 运行产物, 不入库
@@ -355,8 +355,10 @@ def main(argv: list[str] | None = None) -> int:
                             symmetry_planes={0: problem.symmetry_axis})
     optimizer = ALMMMAOptimizer(al_objective=al, filter=density_filter,
                                 options=options, enable_logging=True)
+    iteration_output = ALMIterationOutput(output, mesh, VTU_FIELDS)
     density, history = optimizer.optimize(
-        design_variable=design_variable, density_distribution=density)
+        design_variable=design_variable, density_distribution=density,
+        progress_callback=iteration_output)
 
     # 3. 在最终物理密度上重新求解并验收; 优化器判据基于迭代末态
     state = analyzer.solve_state(rho_val=density)
@@ -479,26 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     np.save(output / "displacement_final.npy", np.asarray(state["displacement"][:]))
     if "stress" in state:
         np.save(output / "stress_final.npy", np.asarray(state["stress"][:]))
-    (output / "outer_history.json").write_text(
-        json.dumps(getattr(optimizer, "outer_history", []), ensure_ascii=False, indent=2),
-        encoding="utf-8")
-    payload = {"iter_indices": history.iter_indices, "changes": history.changes,
-               "iteration_times": history.iteration_times,
-               "scalar_histories": history.scalar_histories}
-    (output / "history.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    # 6. 逐步帧: 第 0 帧是初始构型, 其后每帧对应一次迭代 (AL-MMA 无逐步回调, 帧由优化器记录的
-    #    历史在结束后一次写出); IterationFrameWriter 写 iterations/iter_NNNN.vtu 与 evolution.pvd
-    #    到运行目录, 留在原处, 需要时手动迁移到 Windows 查看目录
-    frames = IterationFrameWriter(output, mesh)
-    frames.write(0, cell_data=initial_cells)
-    stress_frames = (getattr(history, "field_histories", None) or {}).get("von_mises_stress") or []
-    for index, rho_i in enumerate(history.physical_densities, start=1):
-        cells = {"density": np.asarray(rho_i).reshape(-1)}
-        if len(stress_frames) >= index:
-            cells["von_mises_normalized"] = per_cell_max(stress_frames[index - 1])
-        frames.write(index, cell_data={name: value for name, value in cells.items() if name in VTU_FIELDS})
+    # 逐轮帧与内外层历史已在回调中保存, 不在结束后重复写出.
     (output / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[done] {method} k={order}: {summary['optimization_iterations']} 步, "

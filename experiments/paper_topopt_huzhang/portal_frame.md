@@ -202,3 +202,15 @@ HZMFEM k=3 前两级为 0.6527/0.6872; 未发现必须增加端点被动区的�
 仅 Gmsh 镜像网格函数移至 `portal_frame_mesh.py`, 显式接收网格尺寸与算法参数.
 移除此前的 `portal_frame_common.py`, 分析模块同步引用运行脚本配置与独立网格函数.
 命令、默认参数、目录名称、原运行配置读取机制不变; 本轮不启动计算.
+
+
+### 2026-10-18: 逐轮保存运行结果
+
+`run_portal_frame.py` 通过 ALM-MMA 的可选输出回调复用 `IterationFrameWriter`.
+过滤后的初始物理密度立即写为第 0 帧和 `density_initial.vtu`; 每次 MMA 更新并完成新设计
+状态分析后写出对应的密度、表观应力比帧, 更新 `evolution.pvd` 与 `history.json`.
+每个 ALM 外层完成后更新 `outer_history.json`, 记录更新后的乘子最大值、罚参数和停止计数.
+历史 JSON 通过同目录临时文件替换; 初始帧不计入 MMA 更新次数.
+终态冻结再分析、最终场、`final_optimizer_state.npz` 与 `summary.json` 仍在正常结束后生成.
+优化参数、状态求解与停止判据保持不变, 新增磁盘 I/O 会增加运行耗时.
+逐轮文件只用于查看与核查, 不支持精确断点续算. 已启动的旧进程不会自动采用新输出逻辑.

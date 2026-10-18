@@ -302,9 +302,34 @@ class ALMMMAOptimizer(MMAOptimizer):
                 design_variable: Union[Function, TensorLike], 
                 density_distribution: Union[Function, TensorLike], 
                 enable_timing: bool = None,
+                progress_callback=None,
                 **kwargs
             ) -> Tuple[Union[Function, TensorLike], OptimizationHistory]:
         
+        """执行 ALM-MMA 优化, 可选地同步通知输出端.
+
+        Parameters
+        ----------
+        design_variable : Function or TensorLike
+            初始设计变量.
+        density_distribution : Function or TensorLike
+            初始密度.
+        enable_timing : bool, optional
+            是否启用分阶段计时.
+        progress_callback : callable, optional
+            以 ``(event, history, record)`` 调用的只读输出回调. event 为
+            initial, iteration 或 outer; 前两者 record 为 None, outer 为外层
+            诊断字典. 回调不得修改历史或优化状态; 写出异常直接传播.
+        **kwargs : dict
+            保留的兼容参数.
+
+        Returns
+        -------
+        density : Function or TensorLike
+            最终物理密度.
+        history : OptimizationHistory
+            优化历史.
+        """
         analyzer = self._al_objective._analyzer
         opts = self.options
         
@@ -339,6 +364,8 @@ class ALMMMAOptimizer(MMAOptimizer):
         self.history = OptimizationHistory()
         # 记录第 0 步构型: rho_phys 已含滤波与 passive solid 覆写, 即优化的真实起点
         self.history.log_initial(rho_phys)
+        if progress_callback is not None:
+            progress_callback("initial", self.history, None)
         global_iter = 0
 
         # 停止准则状态: hold_count 记录连续满足 C0-C2 的 ALM 外层步数 (C3);
@@ -594,6 +621,8 @@ class ALMMMAOptimizer(MMAOptimizer):
                             'von_mises_stress': SM,          # 表观应力比, 不用于可行性判断
                         },
                 )
+                if progress_callback is not None:
+                    progress_callback("iteration", self.history, None)
                 inner_steps += 1
 
                 # 内层收敛判定: 最大设计变化及相对约束超限均达标
@@ -652,6 +681,9 @@ class ALMMMAOptimizer(MMAOptimizer):
                 self.last_inner_diagnostics = inner_diagnostics
 
                 if not inner_accepted:
+                    if progress_callback is not None:
+                        progress_callback("outer", self.history, {
+                            **inner_diagnostics, "multiplier_updated": False})
                     inner_iteration_failed = True
                     # 本外层未执行乘子更新, 因此乘子变化精确为零.
                     self.last_multiplier_change = 0.0
@@ -805,6 +837,26 @@ class ALMMMAOptimizer(MMAOptimizer):
                 hold_count += 1
             else:
                 hold_count = 0
+
+            if progress_callback is not None:
+                progress_callback("outer", self.history, {
+                    "outer_index": al_iter + 1,
+                    "global_iteration": global_iter,
+                    "inner_steps": inner_steps,
+                    "beta": outer_beta,
+                    "beta_updated": bool(beta_updated),
+                    "mu": outer_mu,
+                    "mu_after_update": float(self._al_objective.mu),
+                    "max_multiplier_after_update": float(bm.max(self._al_objective.lamb)),
+                    "multiplier_relative_change": self.last_multiplier_change,
+                    "multiplier_updated": True,
+                    "change_outer_mean": change_outer_mean,
+                    "change_outer_max": self.last_change_outer_max,
+                    "max_relative_violation": max_relative_violation,
+                    "max_relative_violation_solid": max_relative_violation_solid,
+                    "hold_count": hold_count,
+                    "inner_diagnostics": self.last_inner_diagnostics,
+                })
 
             # C3: 连续 hold_steps 个 ALM 外层步同时满足 C0-C2 才终止, 用于排除
             # 乘子更新与渐近线调整造成的振幅穿越阈值的偶然命中.
