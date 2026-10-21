@@ -17,7 +17,7 @@
 当前运行入口统一采用 `rtol=CG_TOLERANCE`、`atol=0`、`rtol_reference='rhs'`、
 `norm_type='unpreconditioned'`、`verify_residual=True`, 由 CG 根据施加边界条件后的实际
 右端项计算停机阈值, 不再手算 `load_norm`. EA 与 FA 共用这套设置.
-`results/` 中 210x35x35 Jacobi 的 EA 与 FA 结果按这套设置生成; 390x65x65 GMG 的旧结果 (`*_hex_390x65x65_cg*`, `final_fields_390x65x65_gmg.json`) 保留生成时的配置, `fem_ea_vs_fa.md` 不再引用.
+`results/` 中 210x35x35 (3 轮) Jacobi 的 EA 与 FA 结果按这套设置生成; 390x65x65 GMG 的旧结果 (`*_hex_390x65x65_cg*`, `final_fields_390x65x65_gmg.json`) 保留生成时的配置, `fem_ea_vs_fa.md` 不再引用.
 
 ## 运行
 
