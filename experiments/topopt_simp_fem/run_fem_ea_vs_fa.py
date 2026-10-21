@@ -55,7 +55,7 @@ ASSEMBLY_METHOD = 'fast'
 
 # 分析参数: 线性系统求解; PRECONDITIONER 为 --preconditioner 的默认值
 SOLVER = 'cg'
-PRECONDITIONER = 'gmg'
+PRECONDITIONER = 'jacobi'
 CG_TOLERANCE = 1.0e-6
 CG_MAXITER = 20000
 
@@ -75,7 +75,7 @@ VTU_FIELDS = ('density', )
 
 
 def parse_args(argv=None):
-    """解析刚度算子层级、网格与预条件子, 其余设置均为模块顶部常量.
+    """解析刚度算子层级、网格、预条件子与最大优化步数, 其余设置均为模块顶部常量.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--level', choices=('ea', 'fa'), required=True,
@@ -84,9 +84,13 @@ def parse_args(argv=None):
                         help=f'六面体网格各方向单元数 (默认 {GRID})')
     parser.add_argument('--preconditioner', choices=('none', 'jacobi', 'gmg'), default=PRECONDITIONER,
                         help=f'CG 预条件子 (默认 {PRECONDITIONER})')
+    parser.add_argument('--max-iter', type=int, default=MAX_ITER,
+                        help=f'最大优化步数 (默认 {MAX_ITER})')
     args = parser.parse_args(argv)
     if min(args.grid) < 1:
         parser.error(f'--grid 须为正整数, 得到 {args.grid}')
+    if args.max_iter < 1:
+        parser.error(f'--max-iter 须为正整数, 得到 {args.max_iter}')
     args.grid = tuple(args.grid)
     nx, ny, nz = args.grid
     # 目录名含层级、网格与预条件子, 不同配置的运行互不覆盖
@@ -123,7 +127,7 @@ def main(argv=None):
         filter_type='density', filter_radius=radius, optimizer=OC_OPTIONS,
         problem=FullMBBBeamPoint3d.__name__, load=LOAD,
         operator_level=args.level, assembly_method=ASSEMBLY_METHOD, solver=SOLVER,
-        backend=BACKEND, device=DEVICE, max_iter=MAX_ITER,
+        backend=BACKEND, device=DEVICE, max_iter=args.max_iter,
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
         threads=dict(num_threads=NUM_THREADS, **blas_environment()))
@@ -281,7 +285,7 @@ def main(argv=None):
                       vtu_file=frame_file, stages=stages)
         history.append(record)
         # 停止时不再更新, 保留刚完成分析的密度, 避免最终柔顺度与密度错位
-        stop = converged or iteration == MAX_ITER
+        stop = converged or iteration == args.max_iter
 
         # 6. OC 更新 (计入下一轮之前, 记在本轮记录中)
         if not stop:

@@ -31,10 +31,10 @@ SOLID_THRESHOLD = 0.5
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description='把选定的 EA 与 FA 运行从 outputs/ 固化到 results/')
-    parser.add_argument('--ea', type=Path, default=EXPERIMENT_DIR / 'outputs' / 'ea_hex_390x65x65_cg_gmg',
-                        help='EA 运行目录 (默认: outputs/ea_hex_390x65x65_cg_gmg)')
-    parser.add_argument('--fa', type=Path, default=EXPERIMENT_DIR / 'outputs' / 'fa_hex_390x65x65_cg_gmg',
-                        help='FA 运行目录 (默认: outputs/fa_hex_390x65x65_cg_gmg)')
+    parser.add_argument('--ea', type=Path, default=EXPERIMENT_DIR / 'outputs' / 'ea_hex_210x35x35_cg_jacobi',
+                        help='EA 运行目录 (默认: outputs/ea_hex_210x35x35_cg_jacobi)')
+    parser.add_argument('--fa', type=Path, default=EXPERIMENT_DIR / 'outputs' / 'fa_hex_210x35x35_cg_jacobi',
+                        help='FA 运行目录 (默认: outputs/fa_hex_210x35x35_cg_jacobi)')
     parser.add_argument('--results-dir', type=Path, default=EXPERIMENT_DIR / 'results',
                         help='固化目标目录 (默认: results)')
     return parser.parse_args(argv)

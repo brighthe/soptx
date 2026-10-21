@@ -1,0 +1,108 @@
+{
+  "iteration": 3,
+  "compliance": 358.87027939248003,
+  "volume_fraction": 0.11995360565221334,
+  "relative_change": 0.8253133213249141,
+  "symmetry_error_z": 1.0405985578776367e-07,
+  "design_symmetry_error_z": 1.1593020521338815e-07,
+  "assembly_seconds": 0.5811185499915155,
+  "solve_seconds": 54.406980202998966,
+  "cg_iterations": 2299,
+  "cg_relative_residual": 9.863208104145888e-07,
+  "cg_converged": true,
+  "analysis_seconds": 55.119996150999214,
+  "peak_rss_gib": 2.980297088623047,
+  "vtu_file": "iterations/iter_0003.vtu",
+  "stages": {
+    "过滤": {
+      "seconds": 0.0077670049940934405,
+      "peak_gib": 2.488689422607422,
+      "net_gib": 0.0,
+      "after_gib": 2.488689422607422,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "装配": {
+      "seconds": 0.5352545119967544,
+      "peak_gib": 2.7337112426757812,
+      "net_gib": 0.24502182006835938,
+      "after_gib": 2.488689422607422,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "边界条件": {
+      "seconds": 0.04586403799476102,
+      "peak_gib": 2.964111328125,
+      "net_gib": 0.4754219055175781,
+      "after_gib": 2.964111328125,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "求解": {
+      "seconds": 54.406980202998966,
+      "peak_gib": 2.980297088623047,
+      "net_gib": 0.016185760498046875,
+      "after_gib": 2.50537109375,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "灵敏度": {
+      "seconds": 0.12313392000214662,
+      "peak_gib": 2.68603515625,
+      "net_gib": 0.1806640625,
+      "after_gib": 2.4565963745117188,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "输出": {
+      "seconds": 0.260749321008916,
+      "peak_gib": 2.5549278259277344,
+      "net_gib": 0.09833145141601562,
+      "after_gib": 2.4948387145996094,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    }
+  },
+  "iteration_seconds": 55.38154424200184,
+  "converged": false,
+  "termination": "max_iter",
+  "n_cells": 257250,
+  "n_dofs": 820368,
+  "symmetry_error_x": 0.11452907822368776,
+  "setup_stages": {
+    "网格": {
+      "seconds": 0.9579041700053494,
+      "peak_gib": 0.7462654113769531,
+      "net_gib": 0.6768379211425781,
+      "after_gib": 0.47666168212890625,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "分析器": {
+      "seconds": 0.004547653996269219,
+      "peak_gib": 0.47669219970703125,
+      "net_gib": 2.6702880859375e-05,
+      "after_gib": 0.47669219970703125,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "过滤矩阵": {
+      "seconds": 1.191469818004407,
+      "peak_gib": 1.5047988891601562,
+      "net_gib": 1.028106689453125,
+      "after_gib": 1.0281486511230469,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    },
+    "目标与约束": {
+      "seconds": 0.2176334130053874,
+      "peak_gib": 1.1659049987792969,
+      "net_gib": 0.13775634765625,
+      "after_gib": 1.0281600952148438,
+      "major_faults": 0,
+      "swap_gib": 0.0
+    }
+  },
+  "process_peak_rss_gib": 2.980388641357422,
+  "total_seconds": 148.16368655499537
+}

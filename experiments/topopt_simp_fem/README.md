@@ -17,23 +17,23 @@
 当前运行入口统一采用 `rtol=CG_TOLERANCE`、`atol=0`、`rtol_reference='rhs'`、
 `norm_type='unpreconditioned'`、`verify_residual=True`, 由 CG 根据施加边界条件后的实际
 右端项计算停机阈值, 不再手算 `load_norm`. EA 与 FA 共用这套设置.
-已有结果保留生成时的配置; 本次容差配置更新尚未运行测试或重新生成对照结果.
+`results/` 中 210x35x35 Jacobi 的 EA 与 FA 结果按这套设置生成; 390x65x65 GMG 的旧结果 (`*_hex_390x65x65_cg*`, `final_fields_390x65x65_gmg.json`) 保留生成时的配置, `fem_ea_vs_fa.md` 不再引用.
 
 ## 运行
 
 在仓库根目录、已安装 SOPTX 的 Python 环境中执行, 两侧各为一次独立运行:
 
 ```bash
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level ea
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa --grid 48 8 8 --preconditioner jacobi
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level ea --max-iter 3
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa --max-iter 3
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa --grid 48 8 8 --preconditioner gmg
 ```
 
 线程固定为单线程: 脚本顶部的 `NUM_THREADS = 1` 在导入 numpy/scipy 之前写入全部 BLAS / OpenMP 线程变量, 覆盖 shell 中的已有设置, 实际取值与已加载的 BLAS 库记入 `config.json` 的 `threads`。EA 的单元作用经由 BLAS, FA 的稀疏矩阵向量积与 `bincount` 不经由 BLAS, 多线程会让对照混入库的线程支持差异; 且不设置时 NumPy 链接的 BLIS 默认单线程, SciPy 内置的 OpenBLAS 默认用满全部核, 口径不一。
 
-每次运行只跑一侧: 内存按进程 RSS 记录, 两侧同进程连跑会互相污染。命令行有必填的 `--level` 与可选的 `--grid NX NY NZ` (默认常量 `GRID = (210, 35, 35)`)、`--preconditioner {none,jacobi,gmg}` (默认常量 `PRECONDITIONER = 'gmg'`), 其余设置 (后端与设备、MGCG 选项、优化迭代上限与 VTU 场) 均为脚本顶部常量, 改设置须改常量。
+每次运行只跑一侧: 内存按进程 RSS 记录, 两侧同进程连跑会互相污染。命令行有必填的 `--level` 与可选的 `--grid NX NY NZ` (默认常量 `GRID = (210, 35, 35)`)、`--preconditioner {none,jacobi,gmg}` (默认常量 `PRECONDITIONER = 'jacobi'`)、`--max-iter N` (默认常量 `MAX_ITER = 300`), 其余设置 (后端与设备、MGCG 选项与 VTU 场) 均为脚本顶部常量, 改设置须改常量。
 
-结果写入本目录的 `outputs/{level}_hex_{NX}x{NY}x{NZ}_cg_{preconditioner}/`, 如默认配置为 `outputs/{ea,fa}_hex_210x35x35_cg_gmg/`; 目录名含层级、网格与预条件子, 不同配置互不覆盖。2026-10-15 之前的运行目录名不含预条件子 (如 `ea_hex_390x65x65_cg`), 保持原名。`outputs/` 是不入库的临时目录, 输出目录已存在时脚本直接清空再重写; 需要保留的结果先用 `sync_results.py` 固化到 `results/` 或自行备份。
+结果写入本目录的 `outputs/{level}_hex_{NX}x{NY}x{NZ}_cg_{preconditioner}/`, 如默认配置为 `outputs/{ea,fa}_hex_210x35x35_cg_jacobi/`; 目录名含层级、网格与预条件子, 不同配置互不覆盖。2026-10-15 之前的运行目录名不含预条件子 (如 `ea_hex_390x65x65_cg`), 保持原名。`outputs/` 是不入库的临时目录, 输出目录已存在时脚本直接清空再重写; 需要保留的结果先用 `sync_results.py` 固化到 `results/` 或自行备份。
 
 ## 预条件子对照
 
@@ -67,7 +67,7 @@ python experiments/topopt_simp_fem/fem_preconditioners/make_densities.py --grid 
 
 运行脚本把结果写入 `outputs/{ea,fa}_hex_{NX}x{NY}x{NZ}_cg_{preconditioner}/` (不入库), 再由 `sync_results.py` 固化到 `results/`。
 
-在仓库根目录执行 `python experiments/topopt_simp_fem/sync_results.py` 固化默认运行 (`outputs/{ea,fa}_hex_390x65x65_cg_gmg/`)；旧命名的运行目录须以 `--ea`、`--fa` 显式指定；可用 `--ea`、`--fa` 与 `--results-dir` 指定来源与目标。固化两侧 JSON 和末轮场比对统计，NPY 本身不入库。
+在仓库根目录执行 `python experiments/topopt_simp_fem/sync_results.py` 固化默认运行 (`outputs/{ea,fa}_hex_210x35x35_cg_jacobi/`)；旧命名的运行目录须以 `--ea`、`--fa` 显式指定；可用 `--ea`、`--fa` 与 `--results-dir` 指定来源与目标。固化两侧 JSON 和末轮场比对统计，NPY 本身不入库。
 
 ## ParaView 帧
 
@@ -76,7 +76,7 @@ python experiments/topopt_simp_fem/fem_preconditioners/make_densities.py --grid 
 帧体积大 ($190\times32\times32$ 每帧约 14 MB，$390\times65\times65$ 每帧约 120 MB)，长跑前留意 WSL 盘空间。需要在 Windows ParaView 中查看时，在本实验目录下手动迁移，例如：
 
 ```bash
-python -m soptx.postprocess.sync_visualization --source-dir outputs/fa_hex_390x65x65_cg_gmg --destination-dir /mnt/c/workspace/soptx-results/topopt_simp_fem/fa_hex_390x65x65_cg_gmg --move
+python -m soptx.postprocess.sync_visualization --source-dir outputs/fa_hex_210x35x35_cg_jacobi --destination-dir /mnt/c/workspace/soptx-results/topopt_simp_fem/fa_hex_210x35x35_cg_jacobi --move
 ```
 
 `--move` 迁移后删除 WSL 中的源帧，位置记在结果目录的 `visualization_location.json`；它要求结果目录已有 `summary.json`，中断的运行没有该文件，此时去掉 `--move` 只复制，确认后自行删除 WSL 中的帧。

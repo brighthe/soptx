@@ -2,106 +2,106 @@
   "description": "EA 与 FA 末轮场: 各场的统计指纹与 sha256, 及两侧比对. 原始 npy 未存档; sha256 只能确认逐字节相同的文件, 重跑结果按容差与统计指纹比较",
   "fields": {
     "ea": {
-      "directory": "outputs/ea_hex_390x65x65_cg",
+      "directory": "outputs/ea_hex_210x35x35_cg_jacobi",
       "density_final.npy": {
-        "sha256": "646402da4f85ffb8ec927c0e473250be523ed15f261d7630e9b219761ea13b87",
+        "sha256": "538042d9d95b239e483e10557f7a513aac728d8b6b96bf8e01a6a667ab3ce7cb",
         "shape": [
-          390,
-          65,
-          65
+          210,
+          35,
+          35
         ],
         "dtype": "float64",
-        "min": 0.0,
-        "max": 1.0,
-        "mean": 0.1199990563918773,
-        "l2_norm": 399.60892057211316,
-        "n_solid": 196273
+        "min": 0.0001556253869008132,
+        "max": 0.5200000000000005,
+        "mean": 0.11995360562227851,
+        "l2_norm": 71.40999561425137,
+        "n_solid": 180
       },
       "design_density_final.npy": {
-        "sha256": "02d05da3a912ec31e07fb886580d349765895f3bd506aeb148b992086dd1739a",
+        "sha256": "b0cda9d355943076a1593d75d0f174dd3ae8d9d2a0602af4d765ed9ef0cabdc3",
         "shape": [
-          390,
-          65,
-          65
+          210,
+          35,
+          35
         ],
         "dtype": "float64",
-        "min": 0.0,
-        "max": 1.0,
-        "mean": 0.12037717791764171,
-        "l2_norm": 443.0124559976557
+        "min": 3.0216470638403724e-05,
+        "max": 0.52,
+        "mean": 0.12033170862575261,
+        "l2_norm": 72.84489538781668
       },
       "displacement_final.npy": {
-        "sha256": "d8a3991a58b366e4dd7cd5ae8477050c3d60b713ea7cf63d6eb50e2370e89d25",
+        "sha256": "7cf7e8819ea229f172b05e752e2bae3ed6ebc5fd3e83447d835480d824b77b61",
         "shape": [
-          5109588
+          820368
         ],
         "dtype": "float64",
-        "min": -9.420926548874691,
-        "max": 4.060791403687851,
-        "mean": -1.2878857369820003,
-        "l2_norm": 8533.325832639395
+        "min": -358.8702795572923,
+        "max": 103.94401426379913,
+        "mean": -41.16485921833537,
+        "l2_norm": 109090.89944966235
       }
     },
     "fa": {
-      "directory": "outputs/fa_hex_390x65x65_cg",
+      "directory": "outputs/fa_hex_210x35x35_cg_jacobi",
       "density_final.npy": {
-        "sha256": "f144591e41747d793fb04d8bb14c4a1d8358352b50ad9638ac8609c671047a07",
+        "sha256": "cba3685acbc2e4c4d0869d15d3c77a259451cae5bee240ce367baecf6de32c24",
         "shape": [
-          390,
-          65,
-          65
+          210,
+          35,
+          35
         ],
         "dtype": "float64",
-        "min": 0.0,
-        "max": 1.0,
-        "mean": 0.11999905639748834,
-        "l2_norm": 399.6089205764531,
-        "n_solid": 196273
+        "min": 0.00015562525243507824,
+        "max": 0.5200000000000005,
+        "mean": 0.11995360565221334,
+        "l2_norm": 71.40999566701322,
+        "n_solid": 180
       },
       "design_density_final.npy": {
-        "sha256": "83ced92393be715e867ffbaffc480064d95053c5e015db5255ec8990f20782c9",
+        "sha256": "f3ec5e14862e8dc1a849ab977e81e44e782d852f9d3297dc375be30a66f978a1",
         "shape": [
-          390,
-          65,
-          65
+          210,
+          35,
+          35
         ],
         "dtype": "float64",
-        "min": 0.0,
-        "max": 1.0,
-        "mean": 0.12037717792308045,
-        "l2_norm": 443.01245601112527
+        "min": 3.0216421438970554e-05,
+        "max": 0.52,
+        "mean": 0.12033170865542918,
+        "l2_norm": 72.84489544840947
       },
       "displacement_final.npy": {
-        "sha256": "1da9aa69036ea3c3335e2ab5e9567bb2716b04a41f7d29118a59e45bcb22a1ef",
+        "sha256": "9ac8a2df7b3c876f32113928d84be361e997629ebf0e05fc01c582d0b2dd8235",
         "shape": [
-          5109588
+          820368
         ],
         "dtype": "float64",
-        "min": -9.42092654857241,
-        "max": 4.0607914037078965,
-        "mean": -1.2878857365950183,
-        "l2_norm": 8533.325832336126
+        "min": -358.87027945183246,
+        "max": 103.94400434558241,
+        "mean": -41.164859588742836,
+        "l2_norm": 109090.89898761001
       }
     }
   },
   "comparison": {
     "physical_density_max_abs_diff": {
       "definition": "max |rho_EA - rho_FA|, density_final.npy",
-      "value": 3.237454959670316e-08
+      "value": 5.692614146735053e-08
     },
     "design_density_max_abs_diff": {
       "definition": "max |x_EA - x_FA|, design_density_final.npy",
-      "value": 6.519110699598762e-07
+      "value": 7.251270439656565e-08
     },
     "displacement_relative_l2_diff": {
       "definition": "||u_EA - u_FA||_2 / ||u_EA||_2, displacement_final.npy",
-      "value": 1.7231075137121945e-10
+      "value": 3.4031876964064105e-08
     },
     "binary_topology": {
       "definition": "density_final.npy 取 rho > 0.5 后逐单元比较",
       "identical": true,
       "n_mismatch": 0,
-      "min_distance_to_threshold": 1.6505967371294172e-05
+      "min_distance_to_threshold": 0.00040441354891279646
     }
   }
 }
