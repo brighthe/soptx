@@ -134,3 +134,27 @@ def test_lookup_uses_metadata_only(generated):
     stub = SimpleNamespace(metadata=lambda: manifest["provider"])
     path, _ = find_training_data(root, stub, **SAMPLING)
     assert path == root / "20260101T000000000000Z"
+
+
+def test_shape_only_dataset_writes_only_shape_targets(provider, tmp_path):
+    """只选 shape 时不写刚度标签文件, manifest 记录 targets, 查找按 targets 区分."""
+    root = tmp_path / "samples"
+    path = prepare_training_data(
+        provider, root / "shape_only", batch_size=3, targets=("shape",), **SAMPLING,
+    )
+    assert (path / "train_shape_targets.npy").exists()
+    assert not (path / "train_stiffness_targets.npy").exists()
+    manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["targets"] == ["shape"]
+    assert find_training_data(root, provider, targets=("shape",), **SAMPLING)[0] == path
+    assert find_training_data(root, provider, **SAMPLING)[0] is None
+
+
+def test_legacy_manifest_without_targets_counts_as_both(provider, generated):
+    """旧记录没有 targets 字段时视为两类齐全, 仍被默认查找命中."""
+    root, manifest = generated
+    manifest.pop("targets")
+    (root / "20260101T000000000000Z" / "manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8")
+    assert find_training_data(root, provider, **SAMPLING)[0] == root / "20260101T000000000000Z"
+    assert find_training_data(root, provider, targets=("shape",), **SAMPLING)[0] is None

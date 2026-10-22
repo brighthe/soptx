@@ -14,9 +14,10 @@ from math import isfinite
 from pathlib import Path
 import re
 
-DATA_ROOT = Path.home() / "codespace" / "data" / "soptx" / "piml_substructure"
+# 产物根目录固定为脚本旁的 outputs/, 与其他实验入口相同, 不开命令行参数
+OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
 LAYOUT = "independent_15_layer"
-DATASET_NAME = "mbb_linear_corner_m5_h1_nu0p3_emin1e-7_seed2026"
+DATASET_NAME = "mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026"
 STIFFNESS_HIDDEN_DIMS = (50, 60, 70, 80, 90, 100, 90, 80, 70, 60, 50)
 STIFFNESS_ACTIVATIONS = (
     "tanh", "elu", "tanh", "elu", "tanh", "elu",
@@ -41,7 +42,7 @@ def parse_args(argv=None):
         description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--samples-dir", type=Path,
-                        default=DATA_ROOT / LAYOUT / "samples" / DATASET_NAME,
+                        default=OUTPUT_DIR / LAYOUT / "samples" / DATASET_NAME,
                         help="已有完整样本目录, 局部配置由 manifest.json 恢复")
     parser.add_argument("--init-checkpoint", type=Path,
                         help="从相同局部契约的已有权重微调, 恢复网络结构并新建优化器")
@@ -55,8 +56,11 @@ def parse_args(argv=None):
                         help="各隐藏层宽度, 角点默认 shape 15 层或 stiffness 11 层")
     parser.add_argument("--activations", nargs="+", choices=("tanh", "elu", "relu"),
                         help="各隐藏层激活函数, 与 --hidden-dims 同时指定且等长")
+    parser.add_argument("--loss", choices=("decoded_full_matrix_mse",), default="decoded_full_matrix_mse",
+                        help="基本损失: 网络输出经刚体约束补全后与精确标签矩阵的逐元素 MSE (当前唯一取值); "
+                             "刚度一致性项由 --stiffness-loss-weight 另行叠加")
     parser.add_argument("--stiffness-loss-weight", type=float, default=0.,
-                        help="shape 相对重构刚度监督权重, 0 保持原 MSE")
+                        help="shape 相对重构刚度监督权重, 0 保持基本损失不变")
     parser.add_argument("--train-stiffness-weights", type=Path,
                         help="训练专用刚度权重 npy 及同名 json 来源记录, 验证仍等权")
     parser.add_argument("--loss-chunk-size", type=int,
@@ -74,8 +78,6 @@ def parse_args(argv=None):
     parser.add_argument("--backend", choices=("pytorch",), required=True,
                         help="显式指定训练后端, 当前仅支持 pytorch")
     parser.add_argument("--device", default="cpu", help="训练设备: cpu, cuda 或 cuda:N")
-    parser.add_argument("--outputs-root", type=Path, default=DATA_ROOT,
-                        help="训练产物根目录")
     parser.add_argument("--output-dir", type=Path,
                         help="显式指定新训练目录, 默认按数据集名称与训练种子命名")
     args = parser.parse_args(argv)
@@ -107,13 +109,13 @@ def parse_args(argv=None):
         parser.error("--patience 与 --train-seed 不能为负数")
     if not re.fullmatch(r"cpu|cuda(?::[0-9]+)?", args.device):
         parser.error("--device 须为 cpu, cuda 或 cuda:N")
-    for name in ("samples_dir", "outputs_root", "output_dir", "init_checkpoint", "train_stiffness_weights"):
+    for name in ("samples_dir", "output_dir", "init_checkpoint", "train_stiffness_weights"):
         path = getattr(args, name)
         if path is not None:
             setattr(args, name, path.expanduser().resolve())
     args.automatic_output = args.output_dir is None
     if args.output_dir is None:
-        args.output_dir = (args.outputs_root / LAYOUT / "training" / args.route
+        args.output_dir = (OUTPUT_DIR / LAYOUT / "training" / args.route
                            / f"{args.samples_dir.name}_trainseed{args.train_seed}")
     return args
 
@@ -219,14 +221,14 @@ def main(argv=None):
         args.output_dir = args.output_dir.with_name(args.output_dir.name + suffix)
     if args.automatic_output and args.train_stiffness_weights is not None:
         args.output_dir = args.output_dir.with_name(args.output_dir.name + "_hardweights")
-    print(f"[损失] stiffness_loss_weight={args.stiffness_loss_weight}, "
+    print(f"[损失] loss={args.loss}, stiffness_loss_weight={args.stiffness_loss_weight}, "
           f"loss_chunk_size={args.loss_chunk_size}; 刚度教师为精确标签", flush=True)
     if args.output_dir.exists() or args.output_dir.is_symlink():
         raise FileExistsError(f"训练目录已存在, 不覆盖或续训: {args.output_dir}")
     print(f"[输出] {args.output_dir}", flush=True)
     result = train_network(args.samples_dir, args.output_dir, route=args.route,
                            network=network, provider=provider, device=device, config=config,
-                           initialization=initialization,
+                           initialization=initialization, loss=args.loss,
                            stiffness_loss_weight=args.stiffness_loss_weight,
                            loss_chunk_size=args.loss_chunk_size,
                            train_stiffness_weights=args.train_stiffness_weights)

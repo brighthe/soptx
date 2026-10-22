@@ -69,8 +69,10 @@ from .problem_adapter import (
 )
 from .solve import (
     ConstrainedSolveResult,
+    FixedDofConstraints,
     PreparedDirectSystem,
     PreparedFixedSystem,
+    fixed_dofs_from_constraints,
     prepare_constrained_system,
     solve_prepared_constrained_system,
     solve_constrained_system,
@@ -170,8 +172,10 @@ __all__ = [
     "project_problem_conditions_to_macro_system",
     "project_problem_conditions_to_nodes",
     "ConstrainedSolveResult",
+    "FixedDofConstraints",
     "PreparedDirectSystem",
     "PreparedFixedSystem",
+    "fixed_dofs_from_constraints",
     "prepare_constrained_system",
     "solve_prepared_constrained_system",
     "solve_constrained_system",

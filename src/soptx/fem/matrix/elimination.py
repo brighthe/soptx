@@ -71,22 +71,33 @@ class SymmetricElimination:
     def apply(self,
               matrix: Union[CSRTensor, COOTensor],
               is_dirichlet: TensorLike,
+              *, inplace: bool = False,
             ) -> Union[CSRTensor, COOTensor]:
-        """只对左端矩阵施加 Dirichlet 边界条件, 不改写原矩阵.
+        """只对左端矩阵施加 Dirichlet 边界条件, 默认不改写原矩阵.
 
         Parameters
         ----------
         matrix : 线性系统原始的左端稀疏矩阵.
         is_dirichlet : (gdof, ) 的布尔掩码, 标记 Dirichlet 自由度.
+        inplace : 为 True 时直接改写 CSR 矩阵的值数组, 不另存一份; 结果与复制消元逐位相同.
+            只支持 CSR: COO 消元会删除非零元, 改变结构.
 
         Returns
         -------
-        A : 施加边界条件后的左端稀疏矩阵. CSR 下与原矩阵共用骨架; COO 下删去受约束行列
-            的非零元后补上单位对角; 其他类型原样返回.
+        A : 施加边界条件后的左端稀疏矩阵. CSR 下与原矩阵共用骨架, ``inplace=True`` 时还共用
+            值数组; COO 下删去受约束行列的非零元后补上单位对角; 其他类型原样返回.
+
+        Raises
+        ------
+        ValueError
+            ``inplace=True`` 而矩阵不是 CSR.
         """
+        if inplace and not isinstance(matrix, CSRTensor):
+            raise ValueError(f"inplace=True 只支持 CSRTensor, 得到 {type(matrix).__name__}")
         if isinstance(matrix, CSRTensor):
             zero_slots, diag_slots = self._slots(matrix, is_dirichlet)
-            values = bm.copy(matrix.values)
+            # 槽位只依赖骨架与掩码, 与数值无关; 原地改写后重复消元结果不变
+            values = matrix.values if inplace else bm.copy(matrix.values)
             values = bm.set_at(values, zero_slots, 0.0)
             values = bm.set_at(values, diag_slots, 1.0)
             return CSRTensor(matrix.crow, matrix.col, values, matrix.sparse_shape)

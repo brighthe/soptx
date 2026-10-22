@@ -16,10 +16,53 @@ from .independent_contract import (
     SCHEMA, metadata_widths, provider_metadata_matches, write_json,
 )
 
+TARGET_NAMES = ("shape", "stiffness")
+
+
+def normalize_targets(targets):
+    """校验并规范标签路线集合, 返回按 TARGET_NAMES 顺序排列的元组.
+
+    Parameters
+    ----------
+    targets : iterable of str
+        要生成或要求的标签路线, 取自 "shape" 与 "stiffness", 至少一个.
+
+    Returns
+    -------
+    tuple of str
+        去重并按 TARGET_NAMES 顺序排列的路线.
+
+    Raises
+    ------
+    ValueError
+        含未知路线或为空.
+    """
+    chosen = tuple(name for name in TARGET_NAMES if name in set(targets))
+    unknown = set(targets) - set(TARGET_NAMES)
+    if unknown or not chosen:
+        raise ValueError(f"targets 须为 {TARGET_NAMES} 的非空子集, 得到 {tuple(targets)!r}")
+    return chosen
+
+
+def dataset_targets(manifest):
+    """读取数据集记录中实际包含的标签路线; 旧记录无 targets 字段时视为两类齐全.
+
+    Parameters
+    ----------
+    manifest : dict
+        数据集的 manifest.json 内容.
+
+    Returns
+    -------
+    tuple of str
+        数据集含有的标签路线.
+    """
+    return normalize_targets(manifest.get("targets", TARGET_NAMES))
+
 
 def generate_samples(
     provider, output_dir, *, file_prefix, n_samples, rng,
-    batch_size=64, min_modulus=1e-6, input_sampler=None,
+    batch_size=64, min_modulus=1e-6, input_sampler=None, targets=TARGET_NAMES,
 ):
     """分批生成一组独立随机材料及精确标签并写入磁盘.
 
@@ -44,13 +87,15 @@ def generate_samples(
     input_sampler : callable or None
         可选采样回调 (rng, count, n_cells), 返回有限且位于 [min_modulus, 1] 的输入.
         None 保持原有独立均匀采样. 回调状态及分组由调用方记录.
+    targets : iterable of str
+        要写盘的标签路线, "shape" 与 "stiffness" 的非空子集, 默认两类都写.
+        provider 仍同时算出两类标签, 未选的路线只是不写盘.
 
     Returns
     -------
     None
-        将 {file_prefix}_inputs.npy, {file_prefix}_shape_targets.npy 和
-        {file_prefix}_stiffness_targets.npy 写入 output_dir.
-        所有数组均为 float64, 第一维为 n_samples.
+        将 {file_prefix}_inputs.npy 与所选路线的 {file_prefix}_<route>_targets.npy
+        写入 output_dir. 所有数组均为 float64, 第一维为 n_samples.
 
     Notes
     -----
@@ -62,8 +107,10 @@ def generate_samples(
         raise ValueError("min_modulus 必须位于 (0, 1)")
     if not isinstance(file_prefix, str) or not file_prefix:
         raise ValueError("file_prefix 必须为非空字符串")
+    targets = normalize_targets(targets)
 
     widths = metadata_widths(provider.metadata())
+    widths = {name: widths[name] for name in ("inputs", *(f"{route}_targets" for route in targets))}
     output_dir = Path(output_dir)
     paths = {
         name: output_dir / f"{file_prefix}_{name}.npy"
@@ -89,11 +136,11 @@ def generate_samples(
                 or not np.isfinite(inputs).all()
                 or np.any(inputs < min_modulus) or np.any(inputs > 1.0)):
             raise ValueError(f"{file_prefix} 样本 {start}:{stop} 的输入形状或取值非法")
-        targets = provider(inputs)
+        labels = provider(inputs)
         arrays["inputs"][start:stop] = inputs
-        for name in ("shape_targets", "stiffness_targets"):
+        for name in (f"{route}_targets" for route in targets):
             width = widths[name]
-            values = np.asarray(targets[name.removesuffix("_targets")])
+            values = np.asarray(labels[name.removesuffix("_targets")])
             if values.shape != (stop - start, width) or not np.isfinite(values).all():
                 raise ValueError(f"{file_prefix} 样本 {start}:{stop} 的 {name} 非法")
             arrays[name][start:stop] = values
@@ -104,7 +151,7 @@ def generate_samples(
     del arrays
 
 
-def _dataset_manifest(meta, *, n_train, n_validation, min_modulus, seed):
+def _dataset_manifest(meta, *, n_train, n_validation, min_modulus, seed, targets=TARGET_NAMES):
     """构造除完成标记外的数据集记录, 供生成与查找共用."""
     return {
         "schema": SCHEMA, "provider": meta,
@@ -112,12 +159,13 @@ def _dataset_manifest(meta, *, n_train, n_validation, min_modulus, seed):
         "sampling": "independent_uniform", "min_modulus": min_modulus,
         "max_modulus": 1.0, "dtype": "float64",
         "counts": {"train": n_train, "validation": n_validation},
+        "targets": list(normalize_targets(targets)),
     }
 
 
 def prepare_training_data(
     provider, output_dir, *, n_train=400_000, n_validation=40_000,
-    batch_size=64, min_modulus=1e-6, seed=2026,
+    batch_size=64, min_modulus=1e-6, seed=2026, targets=TARGET_NAMES,
 ):
     """准备相互独立的训练集与验证集及其精确标签.
 
@@ -136,6 +184,9 @@ def prepare_training_data(
         归一化杨氏模量的严格正下界, 避免零刚度样本.
     seed : int
         派生训练与验证独立随机流的主种子.
+    targets : iterable of str
+        要写盘的标签路线, "shape" 与 "stiffness" 的非空子集, 默认两类都写;
+        未选的路线不生成对应 NPY 文件, 记入 manifest 的 targets.
 
     Returns
     -------
@@ -144,7 +195,7 @@ def prepare_training_data(
 
         - manifest.json: 数据格式版本、参考子结构及独立分量配置、
           输入物理量、采样方式、随机种子、材料取值范围、数据类型、
-          训练与验证样本数及完成标记 complete.
+          训练与验证样本数、标签路线 targets 及完成标记 complete.
         - train_inputs.npy: 训练集归一化杨氏模量,
           形状为 (n_train, n_cells).
         - validation_inputs.npy: 验证集归一化杨氏模量,
@@ -166,6 +217,7 @@ def prepare_training_data(
         raise ValueError("样本数与 batch_size 必须为正")
     if not np.isfinite(min_modulus) or not 0 < min_modulus < 1:
         raise ValueError("min_modulus 必须位于 (0, 1)")
+    targets = normalize_targets(targets)
     meta = provider.metadata()
     metadata_widths(meta)
     output_dir = Path(output_dir)
@@ -174,7 +226,7 @@ def prepare_training_data(
         "complete": False,
         **_dataset_manifest(
             meta, n_train=n_train, n_validation=n_validation,
-            min_modulus=min_modulus, seed=seed,
+            min_modulus=min_modulus, seed=seed, targets=targets,
         ),
     }
     write_json(output_dir / "manifest.json", manifest)
@@ -183,7 +235,7 @@ def prepare_training_data(
         generate_samples(
             provider, output_dir, file_prefix=file_prefix, n_samples=count,
             rng=np.random.default_rng(stream), batch_size=batch_size,
-            min_modulus=min_modulus,
+            min_modulus=min_modulus, targets=targets,
         )
     manifest["complete"] = True
     write_json(output_dir / "manifest.json", manifest)
@@ -192,7 +244,7 @@ def prepare_training_data(
 
 def find_training_data(
     samples_root, provider, *, n_train=400_000, n_validation=40_000,
-    min_modulus=1e-6, seed=2026,
+    min_modulus=1e-6, seed=2026, targets=TARGET_NAMES,
 ):
     """在样本根目录下按目录名降序查找与给定配置一致的已完成数据集.
 
@@ -208,6 +260,8 @@ def find_training_data(
         期望的归一化杨氏模量采样下界.
     seed : int
         期望的材料采样主种子.
+    targets : iterable of str
+        期望的标签路线集合; 旧记录无 targets 字段时视为两类齐全.
 
     Returns
     -------
@@ -229,9 +283,10 @@ def find_training_data(
         return None, []
     expected = _dataset_manifest(
         provider.metadata(), n_train=n_train, n_validation=n_validation,
-        min_modulus=min_modulus, seed=seed,
+        min_modulus=min_modulus, seed=seed, targets=targets,
     )
     expected_provider = expected.pop("provider")
+    expected_targets = tuple(expected.pop("targets"))
     skipped = []
     for directory in sorted(
             (path for path in samples_root.iterdir() if path.is_dir()),
@@ -246,7 +301,13 @@ def find_training_data(
         if not isinstance(manifest, dict) or manifest.get("complete") is not True:
             skipped.append(directory)
             continue
+        try:
+            actual_targets = dataset_targets(manifest)
+        except ValueError:
+            skipped.append(directory)
+            continue
         if (provider_metadata_matches(manifest.get("provider"), expected_provider)
+                and actual_targets == expected_targets
                 and all(manifest.get(key) == value
                         for key, value in expected.items())):
             return directory, skipped

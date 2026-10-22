@@ -12,6 +12,8 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any, Dict, Literal, Optional, Sequence, Union
 
+import numpy as np
+
 from soptx.backend import backend_manager as bm
 from soptx.backend.base import TensorLike
 from soptx.decorator import variantmethod
@@ -33,8 +35,10 @@ from soptx.fem.substructure.implicit import RestrictedPreconditioner
 from soptx.fem.substructure.recovery import recover_full_displacement_batches
 from soptx.fem.substructure.local_assembly import assemble_local_stiffness, build_local_assembly_map
 from soptx.fem.substructure.solve import (
+    FixedDofConstraints,
     PreparedFixedSystem,
     PreparedDirectSystem,
+    fixed_dofs_from_constraints,
     prepare_constrained_system,
     solve_prepared_constrained_system,
 )
@@ -47,6 +51,8 @@ from soptx.fem.substructure.streaming import (
 
 TraceName = Literal['full_trace', 'linear_corner']
 TRACES: tuple[str, ...] = ('full_trace', 'linear_corner')
+OperatorLevel = Literal['fa', 'ea']
+OPERATOR_LEVELS: tuple[str, ...] = ('fa', 'ea')
 
 
 class SubstructureAnalyzer(LagrangeFEMAnalyzer):
@@ -79,6 +85,15 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         局部装配、缩聚与恢复时每批处理的子结构数, 只影响峰值内存.
     space_degree, integration_order : int
         位移插值次数与数值积分阶, 前者须与 ``layout.degree`` 一致.
+    operator_level : {'fa', 'ea'}
+        接口刚度 ``K_Q = sum_j (A_q^j)^T K_r^j A_q^j`` 的存储与作用方式, 两者对应同一个
+        离散算子, 只差在以什么形式常驻:
+
+        - 'fa': 散加为全局接口 CSR 矩阵, 支持迭代解法与直接解法;
+        - 'ea': 只保留各子结构的缩聚刚度块 ``K_r^j``, matvec 时 gather-批量 GEMV-scatter,
+          不形成全局矩阵, 只能用 ``solve_method='cg'``. 接口已确定, 实现待补, 当前构造时报错.
+
+        细网格层级与此无关, 基类内部固定为 'fa', 只用于单元刚度与 GMG 预条件子的细网格层.
     solve_method : {'cg', 'mumps', 'scipy'}
         接口系统求解器.
     solver_options : dict, optional
@@ -87,6 +102,11 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         按 ``norm_type`` 度量; ``rtol_reference`` 选择初始残差或施加支承后的右端项.
     topopt_algorithm, interpolation_scheme
         同基类.
+    corner_condensation : callable, optional
+        替换 ``linear_corner`` 的精确角点缩聚, 调用协议同
+        ``assemble_corner_from_stiffness_batches``, 另接收 ``modulus_lookup(start, end)``
+        取该批子结构的归一化模量; 其 ``report`` 属性经 ``condensation_report`` 暴露.
+        只支持 ``trace='linear_corner'``; 见 ``PIMLShapeCornerCondensation``.
 
     Notes
     -----
@@ -105,15 +125,26 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         chunk_size: int = 256,
         space_degree: int = 1,
         integration_order: int = 2,
+        operator_level: OperatorLevel = 'fa',
         solve_method: Literal['mumps', 'scipy', 'cg'] = 'cg',
         solver_options: Optional[Dict] = None,
         topopt_algorithm: Literal[None, 'density_based'] = 'density_based',
         interpolation_scheme: Optional[Any] = None,
+        corner_condensation: Optional[Any] = None,
     ) -> None:
         if trace not in TRACES:
             raise ValueError(f"trace 须为 {TRACES} 之一, 得到 {trace!r}")
+        if corner_condensation is not None and trace != 'linear_corner':
+            raise ValueError(f"corner_condensation 只支持 trace='linear_corner', 得到 {trace!r}")
         if int(chunk_size) < 1:
             raise ValueError(f"chunk_size 须为正整数, 得到 {chunk_size!r}")
+        if operator_level not in OPERATOR_LEVELS:
+            raise ValueError(f"operator_level 须为 {OPERATOR_LEVELS} 之一, 得到 {operator_level!r}")
+        if operator_level == 'ea' and solve_method != 'cg':
+            raise ValueError(f"operator_level='ea' 不形成全局矩阵, 只支持 solve_method='cg', "
+                             f"得到 {solve_method!r}")
+        if operator_level == 'ea':
+            raise NotImplementedError("operator_level='ea' 的接口已确定, 实现待补; 当前只支持 'fa'")
         if int(layout.degree) != int(space_degree):
             raise ValueError(f"space_degree={space_degree} 与 layout.degree={layout.degree} 不一致")
         if float(layout.E_base) != float(material.youngs_modulus) or float(layout.nu) != float(material.poisson_ratio):
@@ -124,7 +155,8 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if topopt_algorithm not in (None, 'density_based'):
             raise ValueError(f"子结构分析器只支持 topopt_algorithm=None 或 'density_based', 得到 {topopt_algorithm!r}")
         # 布局的细网格与张量空间交给基类, 编号与 layout 的局部到全局映射一致;
-        # 接口系统是显式 CSR, 对应基类的 'fa' 层级; 结构化细网格由基类判定为单一平移类, 只存一份参考单元刚度
+        # 基类的细网格层级固定为 'fa', 只供单元刚度与 GMG 细网格层使用, 接口层级另存于 _interface_level;
+        # 结构化细网格由基类判定为单一平移类, 只存一份参考单元刚度
         super().__init__(
             disp_mesh=layout.full_mesh, pde=pde, material=material,
             space_degree=space_degree, integration_order=integration_order,
@@ -134,19 +166,25 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         )
         self._layout = layout
         self._trace = trace
+        self._corner_condensation = corner_condensation
+        self._interface_level = operator_level
         self._chunk_size = int(chunk_size)
         self._assembler = GlobalAssembler(layout)
         prototype, sub_meshes, _ = build_substructures(self._assembler, integration_order=integration_order)
         # 兼容历史密度入口; 正式路径不调用此回调或 prototype 的刚度生成方法.
         prototype.coefficient_function = self._relative_stiffness
         self._prototype: SubstructurePrototype = prototype
-        self._local_assembly_map = build_local_assembly_map(prototype.cell2dof, prototype.n_total_dofs)
+        # 参考子结构总在主机上构造; 散加编号每轮与细网格设备上的单元刚度相加, 须先移到同一设备
+        self._local_assembly_map = build_local_assembly_map(
+            bm.device_put(prototype.cell2dof, self._mesh.device), prototype.n_total_dofs)
         self._sub_meshes: tuple = tuple(sub_meshes)
         self._interface_space: InterfaceSpace = build_interface_space(
             kind=trace, assembler=self._assembler, sub_meshes=self._sub_meshes, prototype=prototype,
         )
-        # 载荷与支承先投影到完整接口, 再经全局迹映射转到 Q; 只依赖问题, 构造时算一次
+        # 载荷与支承先投影到完整接口, 再经全局迹映射转到 Q; 只依赖问题, 构造时算一次.
+        # 接口载荷与接口编号同设备; 约束矩阵留在主机, CG 用到时再解析为固定自由度
         self._interface_load, self._constraints = self._interface_space.constrained_conditions(pde)
+        self._fixed_constraints: Optional[FixedDofConstraints] = None
         self._density_cells: Optional[TensorLike] = None
         self._corner_recovery_batches = None
         self._assembly_ready = False
@@ -157,6 +195,8 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self.assembly_timings = {}
         self.boundary_timings = {}
         self._interface_displacement: Optional[TensorLike] = None
+        # 本轮接口求解是否已完成, 回代只接受本轮的接口位移
+        self._interface_solved = False
         # 接口 MG 预条件子所需的细网格单元限制算子, 只依赖拓扑, 首次构造后缓存
         self._fine_restriction: Optional[ElementRestriction] = None
 
@@ -173,6 +213,11 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     def trace(self) -> str:
         """接口迹空间名"""
         return self._trace
+
+    @property
+    def operator_level(self) -> str:
+        """接口刚度的算子层级 ('fa' 或 'ea'), 不是基类内部的细网格层级"""
+        return self._interface_level
 
     @property
     def chunk_size(self) -> int:
@@ -193,6 +238,13 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     def interface_space(self) -> InterfaceSpace:
         """接口空间"""
         return self._interface_space
+
+    @property
+    def condensation_report(self) -> Optional[dict]:
+        """注入的角点缩聚器最近一轮的诊断记录; 未注入时为 None."""
+        if self._corner_condensation is None:
+            return None
+        return getattr(self._corner_condensation, 'report', None)
 
     @property
     def interface_displacement(self) -> Optional[TensorLike]:
@@ -223,6 +275,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self._prepared_systems = []
         self._corner_recovery_batches = None
         self._density_cells = None
+        self._interface_solved = False
         coef = super()._update_density_coefficient(rho_val)
         if coef is not None and tuple(coef.shape) != (int(self._mesh.number_of_cells()),):
             raise ValueError("子结构分析器只支持全局逐单元标量材料系数.")
@@ -272,6 +325,13 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         """
         prototype = self._prototype
         if self._trace == 'linear_corner':
+            if self._corner_condensation is not None:
+                return self._corner_condensation(
+                    stiffness_batches, self._interface_space,
+                    i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
+                    modulus_lookup=self._local_modulus_batch,
+                    timings=self.assembly_timings,
+                )
             return assemble_corner_from_stiffness_batches(
                 stiffness_batches, self._interface_space,
                 i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
@@ -282,6 +342,43 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
         )
         return self._interface_space.assemble(batches), None
+
+    def _local_modulus_batch(self, start: int, end: int) -> Any:
+        """取一批子结构按参考单元顺序排列的归一化模量 ``E(rho)/E0``.
+
+        Parameters
+        ----------
+        start, end : int
+            子结构编号的半开区间, 与局部刚度批次相同.
+
+        Returns
+        -------
+        numpy.ndarray
+            形状 ``(end - start, n_cells)``, 即积分子当前的相对刚度系数按子结构重排;
+            实体分析 (系数为 None) 时全为 1.
+        """
+        if not self._material_state_ready:
+            raise RuntimeError("取局部模量前须先更新材料状态.")
+        cell_ids = self._layout.substructure_cell_ids(start, end, prototype=self._prototype)
+        coef = self._integrator.coef
+        if coef is None:
+            return np.ones((end - start, int(self._prototype.n_cells)), dtype=np.float64)
+        values = bm.to_numpy(bm.asarray(coef)[bm.reshape(cell_ids, (-1, ))])
+        return np.asarray(values, dtype=np.float64).reshape(end - start, -1)
+
+    def _fixed_dof_constraints(self) -> FixedDofConstraints:
+        """CG 路径的固定自由度, 首次使用时由约束矩阵解析一次并放到细网格设备.
+
+        Returns
+        -------
+        FixedDofConstraints
+            固定自由度编号、自由分量掩码与约束矩阵, 只依赖问题, 各轮共用.
+        """
+        if self._fixed_constraints is None:
+            self._fixed_constraints = fixed_dofs_from_constraints(
+                self._constraints, self._interface_space.n_global, device=self._mesh.device,
+            )
+        return self._fixed_constraints
 
     def _require_assembled_state(self):
         """拒绝未成功装配或材料状态已被替换的系统."""
@@ -451,11 +548,19 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self.boundary_timings["dirichlet_data"] = perf_counter() - started
         self.boundary_timings["dirichlet_cache_present_before"] = dirichlet_cached
         started = perf_counter()
-        prepared = prepare_constrained_system(
-            K, self._interface_load, self._constraints,
-            solver=self._solve_method if solver is None else solver,
-        )
-        rhs = bm.asarray(prepared.rhs.copy(), dtype=bm.float64)
+        solver = self._solve_method if solver is None else solver
+        if solver == 'cg':
+            # CG 在接口刚度所在设备上准备: 复用已解析的固定自由度, 对角按缓存的槽位取值
+            prepared = prepare_constrained_system(
+                K, self._interface_load, self._constraints, solver=solver,
+                fixed=self._fixed_dof_constraints(),
+                diagonal=self._interface_space.diagonal(K.stiffness),
+            )
+        else:
+            prepared = prepare_constrained_system(
+                K, self._interface_load, self._constraints, solver=solver,
+            )
+        rhs = bm.copy(bm.asarray(prepared.rhs, dtype=bm.float64))
         self.boundary_timings["prepare_system"] = perf_counter() - started
         self._prepared_systems.append(prepared)
         return prepared, rhs
@@ -477,8 +582,8 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         """
         return self.apply_bc(K, F, solver=kwargs.get('solver', self._solve_method))
 
-    def solve_system(self, K: Any, F: TensorLike, out: Any, **kwargs) -> tuple[Any, Dict]:
-        """在约束接口系统上求解 ``Q``, 再逐批恢复全场位移写入 ``out``.
+    def solve_interface(self, K: Any, F: TensorLike, **kwargs) -> Dict:
+        """在约束接口系统上求解接口未知量 ``Q``, 不恢复全场位移.
 
         Parameters
         ----------
@@ -486,23 +591,26 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             ``apply_bc`` 返回的接口系统.
         F : TensorLike
             apply_bc 返回的受约束右端项.
-        out : 全场位移向量 (有限元函数或张量), 就地写入.
         **kwargs
             ``x0``: CG 的初值, 为接口未知量 ``Q`` 而非全场位移, 通常取上一次的
             ``interface_displacement``; ``solver``: 覆盖构造时的求解器名; ``gmg_*``: 几何多重网格选项.
 
         Returns
         -------
-        out : 全场位移.
         info : 求解诊断, 含 'name', 'niter', 'relres', 'converged', 'constraint_relres' 与 'mode';
             'relres' 为自由接口上的真实残差相对接口载荷二范数, 直接法下 'niter' 为 0.
+
+        Notes
+        -----
+        解存为 ``interface_displacement``, 与细网格同设备; 随后由 ``recover_displacement``
+        恢复全场位移. 两步分开调用便于分别计量, ``solve_system`` 依次调用二者.
         """
         self._require_assembled_state()
         solver_type = kwargs.get('solver', self._solve_method)
         if not isinstance(K, (PreparedFixedSystem, PreparedDirectSystem)):
-            raise TypeError("solve_system 需要受约束系统, 请先调用 apply_bc.")
+            raise TypeError("solve_interface 需要受约束系统, 请先调用 apply_bc.")
         if not any(K is prepared for prepared in self._prepared_systems):
-            raise ValueError("solve_system 须使用本轮 apply_bc 准备的系统.")
+            raise ValueError("solve_interface 须使用本轮 apply_bc 准备的系统.")
         options = self._merged_solver_options(kwargs)
         cg_kwargs: Dict[str, Any] = {}
         if solver_type == 'cg':
@@ -517,9 +625,48 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
                              cg_maxiter=options.get('maxiter', 20000),
                              precond='none' if precond is None else precond, x0=kwargs.get('x0', None))
         result = solve_prepared_constrained_system(K, solver=solver_type, load=F, **cg_kwargs)
-        self._interface_displacement = result.displacement
-        # 角点接口用当前密度缓存的 T_corner q 回代; 完整接口沿用逐批重算.
-        q_local = bm.asarray(result.displacement)[self._interface_space.local_dofs]
+        # CG 的解已在细网格设备上; 直接法在主机上求解, 解移回细网格设备, 与设备上的恢复矩阵一同回代
+        self._interface_displacement = bm.device_put(result.displacement, self._mesh.device)
+        self._interface_solved = True
+        info = {'name': solver_type,
+                'niter': 0 if result.iterations is None else int(result.iterations),
+                'relres': float(result.equilibrium_relative_residual),
+                'converged': bool(result.converged),
+                'constraint_relres': float(result.constraint_relative_residual),
+                'mode': result.mode}
+        if result.solver_info is not None:
+            for key in ('rtol_reference', 'norm_type', 'rhs_norm', 'reference_norm',
+                        'initial_residual_norm', 'stopping_threshold',
+                        'recursive_residual', 'true_residual'):
+                info[key] = result.solver_info.get(key)
+            info['reason'] = result.solver_info['reason'].name
+        return info
+
+    def recover_displacement(self, out: Any) -> Any:
+        """由本轮的接口未知量逐批恢复内部位移, 拼成全场位移写入 ``out``.
+
+        Parameters
+        ----------
+        out : 全场位移向量 (有限元函数或张量), 就地写入.
+
+        Returns
+        -------
+        out : 全场位移.
+
+        Raises
+        ------
+        RuntimeError
+            本轮尚未调用 ``solve_interface``, 或其后材料状态已被替换.
+
+        Notes
+        -----
+        角点接口用组装时缓存的恢复矩阵回代; 完整接口不缓存恢复矩阵, 逐批重做局部组装与
+        精确缩聚后回代.
+        """
+        self._require_assembled_state()
+        if not self._interface_solved:
+            raise RuntimeError("须先调用本轮的 solve_interface, 再恢复全场位移.")
+        q_local = bm.asarray(self._interface_displacement)[self._interface_space.local_dofs]
         recovery_on_trace = self._corner_recovery_batches is not None
         recovery_batches = self._corner_recovery_batches
         if recovery_batches is None:
@@ -536,19 +683,32 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             n_internal=len(self._prototype.i_dofs), recovery_on_trace=recovery_on_trace,
         )
         out[:] = recover_full_displacement_batches(self._layout, self._sub_meshes, batches)
-        info = {'name': solver_type,
-                'niter': 0 if result.iterations is None else int(result.iterations),
-                'relres': float(result.equilibrium_relative_residual),
-                'converged': bool(result.converged),
-                'constraint_relres': float(result.constraint_relative_residual),
-                'mode': result.mode}
-        if result.solver_info is not None:
-            for key in ('rtol_reference', 'norm_type', 'rhs_norm', 'reference_norm',
-                        'initial_residual_norm', 'stopping_threshold',
-                        'recursive_residual', 'true_residual'):
-                info[key] = result.solver_info.get(key)
-            info['reason'] = result.solver_info['reason'].name
-        return out, info
+        return out
+
+    def solve_system(self, K: Any, F: TensorLike, out: Any, **kwargs) -> tuple[Any, Dict]:
+        """在约束接口系统上求解 ``Q``, 再逐批恢复全场位移写入 ``out``.
+
+        Parameters
+        ----------
+        K : PreparedFixedSystem or PreparedDirectSystem
+            ``apply_bc`` 返回的接口系统.
+        F : TensorLike
+            apply_bc 返回的受约束右端项.
+        out : 全场位移向量 (有限元函数或张量), 就地写入.
+        **kwargs
+            同 ``solve_interface``.
+
+        Returns
+        -------
+        out : 全场位移.
+        info : 求解诊断, 同 ``solve_interface``.
+
+        Notes
+        -----
+        依次调用 ``solve_interface`` 与 ``recover_displacement``.
+        """
+        info = self.solve_interface(K, F, **kwargs)
+        return self.recover_displacement(out), info
 
     def solve_state(self,
                     rho_val: Optional[Union[TensorLike, Function]] = None,
@@ -567,4 +727,4 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         return {**state, 'interface_displacement': self._interface_displacement}
 
 
-__all__ = ['SubstructureAnalyzer', 'TRACES']
+__all__ = ['OPERATOR_LEVELS', 'SubstructureAnalyzer', 'TRACES']

@@ -3,7 +3,8 @@
 1. CSR 保结构消元与稠密的删除行列参考一致, 共用原骨架且不改写原值;
 2. 骨架与掩码不变时复用槽位缓存, 掩码变了就重算;
 3. COO 消元与同一参考一致;
-4. 受约束行缺对角元时报错.
+4. 受约束行缺对角元时报错;
+5. CSR 原地消元与复制消元逐位相同且改写原值数组, COO 不支持原地消元.
 """
 
 from __future__ import annotations
@@ -99,3 +100,23 @@ def test_missing_diagonal_is_rejected() -> None:
 
     with pytest.raises(RuntimeError, match="对角元"):
         SymmetricElimination().apply(_csr(a), bm.tensor(MASK))
+
+
+def test_csr_inplace_matches_copy_and_overwrites_values() -> None:
+    a = _dense_matrix(seed=2)
+    copied = SymmetricElimination().apply(_csr(a), bm.tensor(MASK))
+    matrix = _csr(a)
+
+    result = SymmetricElimination().apply(matrix, bm.tensor(MASK), inplace=True)
+
+    np.testing.assert_array_equal(np.asarray(result.values), np.asarray(copied.values))
+    assert result.values is matrix.values
+    np.testing.assert_array_equal(matrix.to_scipy().toarray(), _reference(a, MASK))
+    # 已消元的矩阵再次原地消元, 结果不变
+    again = SymmetricElimination().apply(matrix, bm.tensor(MASK), inplace=True)
+    np.testing.assert_array_equal(np.asarray(again.values), np.asarray(copied.values))
+
+
+def test_coo_inplace_is_rejected() -> None:
+    with pytest.raises(ValueError, match="inplace"):
+        SymmetricElimination().apply(_coo(_dense_matrix()), bm.tensor(MASK), inplace=True)

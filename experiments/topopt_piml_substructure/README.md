@@ -157,7 +157,7 @@
 | 参数 | 数值或设置 | 来源 |
 |---|---|---|
 | 输出分组 | 独立条目连续均分；默认角点形函数路线每个网络 $864$ 个输出，角点刚度单网络 $171$ 个输出 | 实验补定，采用现有分组实现 |
-| 基本损失 | 按路线计算约束补全后内部形函数或接口刚度矩阵的 MSE | 论文采用补全后 MSE；此处按现有实现计算 |
+| 基本损失 | 按路线计算约束补全后内部形函数或接口刚度矩阵的 MSE：`--loss decoded_full_matrix_mse`（当前唯一取值，记入 `run_config.json` 的 `base_loss`） | 论文采用补全后 MSE；此处按现有实现计算 |
 | 后期一致性损失 | 当前未启用；论文在形函数训练最后阶段加入形函数构造刚度与预测刚度之间的 MSE | 与论文的差异，尚待接入 |
 | 优化器 | Adam，初始学习率 $10^{-3}$，weight decay $0$ | 实验补定，参考现有脚本 |
 | 训练 batch size | $256$ | 实验补定，参考现有脚本 |
@@ -167,11 +167,11 @@
 | 选模规则 | 保存验证 MSE 最低的权重 | 实验补定，参考现有脚本 |
 | 训练随机种子 | $2026$ | 实验补定，参考现有脚本 |
 | 训练设备与精度 | PyTorch；默认 CPU，可选择 `cuda` 或 `cuda:N`；`float64` | 实验补定 |
-| 权重保存目录 | `~/codespace/data/soptx/piml_substructure/independent_15_layer/training/<route>/<dataset-name>_trainseed<train-seed>/`，文件名为 `<route>_best.pt`；可用 `--output-dir` 指定新目录 | 本目录入口约定；已有目录拒绝覆盖或续训 |
+| 权重保存目录 | `experiments/topopt_piml_substructure/outputs/independent_15_layer/training/<route>/<dataset-name>_trainseed<train-seed>/`，根目录固定为脚本旁的 `outputs/`，文件名为 `<route>_best.pt`；可用 `--output-dir` 指定新目录 | 本目录入口约定；已有目录拒绝覆盖或续训 |
 
 ## 执行入口
 
-`generate_samples.py` 为三维 MBB 局部样本生成入口，同时生成形函数与接口刚度的独立条目标签，不启动网络训练。默认配置与上面的样本参数一致；本目录尚无 PIML 拓扑优化执行入口。
+`generate_samples.py` 为三维 MBB 局部样本生成入口，同时生成形函数与接口刚度的独立条目标签，不启动网络训练。默认配置与上面的样本参数一致。PIML 拓扑优化入口为 `run_substructure_exact_vs_piml_shape.py`，对照设置与结果见 [substructure_linear_corner_piml_shape_vs_exact.md](substructure_linear_corner_piml_shape_vs_exact.md)。
 
 `train_network.py` 为本目录的网络训练入口，仅使用已有样本，每次训练 `shape` 或 `stiffness` 一条路线。子结构分析走查参考 [PIML 子结构分析](../analysis_capability_piml_substructure/README.md)；这些入口尚不能替代完整 MBB 拓扑优化流程。上文配置为复现目标，尚未完成本算例的端到端数值验证。
 
@@ -181,9 +181,9 @@
 ~/miniconda3/envs/ihpcm/bin/python experiments/topopt_piml_substructure/generate_samples.py
 ```
 
-使用 `--n-sub NX NY NZ` 设置子结构网格，`--n-fine` 设置 $m$，`--fine-cell-size` 设置样本参考细单元边长（默认 1）。参考子结构各方向尺寸为 $m h_{\mathrm{sample}}$，整体域尺寸为各方向细单元数乘以 $h_{\mathrm{sample}}$；保持 MBB 长宽高比时，各方向网格数量之比须为 $6:1:1$。`--trace-kind` 选择接口类型，`--nu` 设置泊松比。`--n-train`、`--n-validation`、`--min-modulus` 和 `--sample-seed` 设置数据规模与采样；`--generation-batch-size` 与 `--outputs-root` 设置生成批量和产物根目录。空间维数固定为三维，有限元固定为 Q1、二阶高斯积分，数据精度固定为 `float64`。
+使用 `--n-sub NX NY NZ` 设置子结构网格，`--n-fine` 设置 $m$，`--fine-cell-size` 设置样本参考细单元边长（默认 1）。参考子结构各方向尺寸为 $m h_{\mathrm{sample}}$，整体域尺寸为各方向细单元数乘以 $h_{\mathrm{sample}}$；保持 MBB 长宽高比时，各方向网格数量之比须为 $6:1:1$。`--trace-kind` 选择接口类型，`--nu` 设置泊松比。`--n-train`、`--n-validation`、`--min-modulus` 和 `--sample-seed` 设置数据规模与采样；`--targets` 选择写盘的标签路线（`shape`、`stiffness` 或默认的 `both`），两类标签出自同一次局部求解，未选的路线只是不写盘；`--generation-batch-size` 设置生成批量；产物根目录固定为脚本旁的 `outputs/`，与其他实验入口相同，不开参数。空间维数固定为三维，有限元固定为 Q1、二阶高斯积分，数据精度固定为 `float64`。
 
-生成写入 `--dataset-name` 指定的数据集目录，未指定时按接口、细分数、参考细单元边长、子结构网格、泊松比、采样下界、样本数量与随机种子生成配置名称，不使用时间戳。保存 `manifest.json`、六个 NPY 文件及 `generation_config.json`。后者记录参考细单元边长、全局细网格、子结构与整体域的派生尺寸、积分阶数与生成批量等运行配置。只有全部样本写完后，`manifest.json` 的 `complete` 才为 `true`；已有同配置完整数据集时拒绝重复生成；目标目录已存在时，无论是否完成都拒绝覆盖或续写。
+生成写入 `--dataset-name` 指定的数据集目录，未指定时按接口、细分数、参考细单元边长、子结构网格、泊松比、采样下界、标签路线（`shape`、`stiffness` 或 `both`）、样本数量与随机种子生成配置名称，不使用时间戳。保存 `manifest.json`、输入与所选标签的 NPY 文件（`both` 时六个）及 `generation_config.json`，`manifest.json` 的 `targets` 记录含有的标签路线，训练入口按 `--route` 核对。后者记录参考细单元边长、全局细网格、子结构与整体域的派生尺寸、积分阶数与生成批量等运行配置。只有全部样本写完后，`manifest.json` 的 `complete` 才为 `true`；已有同配置完整数据集时拒绝重复生成；目标目录已存在时，无论是否完成都拒绝覆盖或续写。
 
 验收时核对尺寸、采样下界、随机种子、训练与验证数量、两类标签维度及完成标记。当前 $h=1$ 数据集已完成生成，并通过文件完整性、全量有限性及配置核对。
 
@@ -194,9 +194,10 @@
 | 计算后端 | `numpy`（默认）、`pytorch` |
 | 计算设备 | `cpu`（默认）、`cuda` 或 `cuda:N` |
 | 样本生成批量 | $32$ |
-| 样本保存目录 | `~/codespace/data/soptx/piml_substructure/independent_15_layer/samples/<dataset-name>/` |
+| 标签路线 | `both`（默认）、`shape`、`stiffness`；`mixed` 采样只支持 `both` |
+| 样本保存目录 | `experiments/topopt_piml_substructure/outputs/independent_15_layer/samples/<dataset-name>/`，根目录固定为脚本旁的 `outputs/` |
 
-当前使用 $h=1$ 的数据集 `mbb_linear_corner_m5_h1_nu0p3_emin1e-7_seed2026`，参考子结构尺寸为 $5\times5\times5$。自动名称包含 `_h1_`；显式指定 `--dataset-name` 时也应标明参考尺度。`nu0p3` 中的 `p` 代替小数点，表示泊松比 $0.3$，与位移插值次数或 SIMP 惩罚指数无关。目录名用于引用数据集，完整配置以 `manifest.json` 和 `generation_config.json` 为准。
+当前复现使用 $h=1$ 的自动命名数据集 `mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026`（生成命令见 [substructure_linear_corner_piml_shape_vs_exact.md](substructure_linear_corner_piml_shape_vs_exact.md) §2.4），参考子结构尺寸为 $5\times5\times5$。此前的 `mbb_linear_corner_m5_h1_nu0p3_emin1e-7_seed2026` 及其派生数据与权重仍在 `~/codespace/data/soptx/piml_substructure/independent_15_layer/` 下，不再是默认路径。自动名称包含 `_h1_`；显式指定 `--dataset-name` 时也应标明参考尺度。`nu0p3` 中的 `p` 代替小数点，表示泊松比 $0.3$，与位移插值次数或 SIMP 惩罚指数无关。目录名用于引用数据集，完整配置以 `manifest.json` 和 `generation_config.json` 为准。
 
 生成批量控制内存与计算效率，保存目录指定输出位置。`--backend` 可选 `numpy` 或 `pytorch`，默认 `numpy`；`--device` 可选 `cpu`、`cuda` 或 `cuda:N`，默认 `cpu`。NumPy 仅支持 CPU，GPU 计算需选择 PyTorch；CUDA 不可用或设备编号越界时直接报错。
 
@@ -210,16 +211,16 @@ GPU 生成命令:
 
 参考子结构使用 `--backend` 指定的后端在 CPU 上构建，独立条目编号由该参考结构确定并保存到 `manifest.json`；局部装配、批量内部消元、接口刚度计算、标签编码与补全检查在所选设备执行，最终标签转回 CPU 写盘。采样继续使用 NumPy 的独立随机子流，CPU/GPU 路线的同种子输入一致；标签可能存在浮点舍入差异。数据均为 `float64`，`generation_config.json` 记录实际后端与设备。后端和设备不改变样本的物理配置，但不同后端构建参考结构可能产生浮点或独立条目编号差异。数据查找严格核对参考结构元数据；本目录训练入口直接从保存的元数据恢复 codec。在线权重加载仍检查参考尺寸与独立条目契约，跨后端及跨尺度在线复用尚未验证。
 
-尚未执行 CPU/GPU 数值对照或性能测量。建议先在不同输出根目录生成小规模同种子数据:
+尚未执行 CPU/GPU 数值对照或性能测量。建议先以不同数据集名生成小规模同种子数据:
 
 ```bash
 ~/miniconda3/envs/ihpcm/bin/python experiments/topopt_piml_substructure/generate_samples.py \
   --backend numpy --device cpu --n-train 64 --n-validation 16 \
-  --outputs-root /tmp/soptx_piml_samples_cpu
+  --dataset-name probe_cpu_train64_val16_seed2026
 
 ~/miniconda3/envs/ihpcm/bin/python experiments/topopt_piml_substructure/generate_samples.py \
   --backend pytorch --device cuda:0 --n-train 64 --n-validation 16 \
-  --outputs-root /tmp/soptx_piml_samples_gpu
+  --dataset-name probe_gpu_train64_val16_seed2026
 ```
 
 验收条件为两套输入逐元素一致、两类标签有限且一致到双精度容差、完整记录与完成标记正确。不同后端的独立条目编号可能不同，不能直接比较展平标签；应先用各自保存的 codec 补全为物理矩阵，再按每个样本的 Frobenius 范数检验 $\lVert A_{GPU}-A_{CPU}\rVert_F\leq10^{-8}\lVert A_{CPU}\rVert_F+10^{-10}$。之后再比较包含传输与写盘的总耗时，确定生成批量及是否采用 GPU。
@@ -232,12 +233,11 @@ GPU 生成命令:
 
 ```bash
 ~/miniconda3/envs/ihpcm/bin/python experiments/topopt_piml_substructure/train_network.py \
-  --samples-dir ~/codespace/data/soptx/piml_substructure/independent_15_layer/samples/mbb_linear_corner_m5_h1_nu0p3_emin1e-7_seed2026 \
+  --samples-dir experiments/topopt_piml_substructure/outputs/independent_15_layer/samples/mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026 \
   --route shape --num-networks 4 \
   --epochs 500 --batch-size 256 \
   --optimizer adam --lr 1e-3 --weight-decay 0 \
-  --patience 40 --train-seed 2026 --backend pytorch --device cpu \
-  --outputs-root ~/codespace/data/soptx/piml_substructure
+  --patience 40 --train-seed 2026 --backend pytorch --device cpu
 ```
 
 GPU 训练改为 `--device cuda:0`。刚度网络训练使用 `--route stiffness --num-networks 1`，默认采用上表的 11 层配置；仅训练刚度网络，不同时训练形函数网络。自定义结构需同时指定 `--hidden-dims` 与等长的 `--activations`，后者支持 `tanh`、`elu` 和 `relu`。
@@ -247,6 +247,8 @@ GPU 训练改为 `--device cuda:0`。刚度网络训练使用 `--route stiffness
 ### 混合材料补充样本与微调试验
 
 当前独立均匀样本缺少优化中的低模量尺度, 高材料对比度及空间相关模式. `--sampling mixed` 是针对这一差异的实验扩展, 不属于 Huang2023 明示的采样配置. 原始模式仍为 `independent_uniform`, 默认参数保持不变.
+
+本节及其后各节的命令按运行当时的脚本参数记录: `--outputs-root` 已删除, 产物根目录固定为脚本旁的 `outputs/`; `--replay-samples-dir` 不再有默认值, `--sampling mixed` 时须显式给出. 所引数据与权重仍在 `~/codespace/data/soptx/piml_substructure/independent_15_layer/` 下.
 
 | 样本类型 | 训练 | 验证 | 独立测试 |
 |---|---:|---:|---:|

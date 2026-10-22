@@ -263,8 +263,9 @@ def project_problem_conditions_to_macro_system(
         raise ValueError(
             f"problem.domain 长度应为 {2 * dim}, 实际为 {len(domain)}."
         )
-    origin = bm.asarray(domain[0::2], dtype=bm.float64)
-    physical_coordinates = assembler.macro_node_coordinates() + origin
+    coordinates = assembler.macro_node_coordinates()
+    origin = bm.asarray(domain[0::2], dtype=bm.float64, device=bm.get_device(coordinates))
+    physical_coordinates = coordinates + origin
     return project_problem_conditions_to_nodes(problem, physical_coordinates)
 
 
@@ -288,8 +289,9 @@ def project_problem_conditions_to_full_system(
         raise ValueError(
             f"problem.domain 长度应为 {2 * dim}, 实际为 {len(domain)}."
         )
-    origin = bm.asarray(domain[0::2], dtype=bm.float64)
-    physical_coordinates = assembler.node_coordinates() + origin
+    coordinates = assembler.node_coordinates()
+    origin = bm.asarray(domain[0::2], dtype=bm.float64, device=bm.get_device(coordinates))
+    physical_coordinates = coordinates + origin
     needs_space = any(
         isinstance(load, (PointForce, BodyForce, BoundaryTraction))
         for load in problem.loads()

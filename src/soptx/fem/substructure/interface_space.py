@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Iterator, Optional, Sequence, Tuple
 
 import numpy as np
@@ -79,7 +79,8 @@ def build_interface_pattern(
     Returns
     -------
     CSRPattern
-        不预分配数值缓冲区的符号模式, 可在同一 ``local_dofs`` 上反复组装.
+        不预分配数值缓冲区的符号模式, 可在同一 ``local_dofs`` 上反复组装. 行指针与列号
+        按 nnz 自动选型, 见 ``_with_compact_indices``.
 
     Raises
     ------
@@ -91,10 +92,10 @@ def build_interface_pattern(
     device = getattr(local_dofs, "device", None)
     dtype = bm.float64 if dtype is None else dtype
     if GD == 1:
-        return build_csr_pattern_from_dofmap(
+        return _with_compact_indices(build_csr_pattern_from_dofmap(
             local, int(n_global), dof_numel=1,
             device=device, dtype=dtype, allocate_buffer=False,
-        )
+        ))
 
     mapping = np.asarray(bm.to_numpy(local), dtype=np.int64)
     if int(n_global) % GD != 0 or mapping.shape[1] % GD != 0:
@@ -106,7 +107,7 @@ def build_interface_pattern(
         raise ValueError(
             "local_dofs 必须采用节点优先排列: dof = dof_numel * node + k."
         )
-    return build_csr_pattern_from_dofmap(
+    return _with_compact_indices(build_csr_pattern_from_dofmap(
         local[:, ::GD] // GD,
         int(n_global),
         dof_numel=GD,
@@ -114,7 +115,31 @@ def build_interface_pattern(
         device=device,
         dtype=dtype,
         allocate_buffer=False,
-    )
+    ))
+
+
+def _with_compact_indices(pattern: CSRPattern) -> CSRPattern:
+    """nnz 不超过 int32 上限时把行指针与列号转为 int32, 否则保持 int64.
+
+    Parameters
+    ----------
+    pattern : CSRPattern
+        行指针与列号为 int64 的符号模式.
+
+    Returns
+    -------
+    CSRPattern
+        行指针与列号同为 int32 或同为 int64 的符号模式, 其余字段不变.
+
+    Notes
+    -----
+    选型规则与 scipy 稀疏矩阵一致. PyTorch CPU 上 int64 编号的 CSR 矩阵向量积比 int32 慢约
+    3 倍, CUDA 上也略慢, 且列号多占一倍内存. 装配只用 ``slot_base`` 计算写入位置, 不依赖列号
+    类型; torch 要求 CSR 的行指针与列号同类型, 故两者一起转换.
+    """
+    if pattern.nnz > np.iinfo(np.int32).max:
+        return pattern
+    return replace(pattern, crow=bm.astype(pattern.crow, bm.int32), col=bm.astype(pattern.col, bm.int32))
 
 
 def assemble_interface_stiffness(
@@ -180,6 +205,48 @@ def assemble_interface_stiffness(
             del stiffness
 
     return assemble_csr_chunks(chunks(), pattern)
+
+
+def _csr_diagonal_slots(crow: Any, col: Any, chunk_nnz: int = 1 << 25) -> Any:
+    """求 CSR 各行对角元在值数组中的位置.
+
+    Parameters
+    ----------
+    crow, col : TensorLike
+        行指针与列号, 每行须恰含一个对角元.
+    chunk_nnz : int, optional
+        每块处理的非零元数上限, 决定临时行号数组的大小.
+
+    Returns
+    -------
+    TensorLike
+        形状 ``(n_rows,)`` 的位置, 与 ``col`` 同设备.
+
+    Raises
+    ------
+    ValueError
+        某行缺少对角元或对角元重复.
+    """
+    crow_host = np.asarray(bm.to_numpy(crow), dtype=np.int64)
+    n_rows = len(crow_host) - 1
+    device = bm.get_device(col)
+    slots = bm.zeros((n_rows,), dtype=bm.int64, device=device)
+    found = 0
+    r0 = 0
+    while r0 < n_rows:
+        # 取一段行, 使其非零元数不超过 chunk_nnz; 单行超过时也至少取一行
+        r1 = int(np.searchsorted(crow_host, crow_host[r0] + chunk_nnz, side="right")) - 1
+        r1 = min(max(r1, r0 + 1), n_rows)
+        s0, s1 = int(crow_host[r0]), int(crow_host[r1])
+        lengths = bm.device_put(bm.from_numpy(np.diff(crow_host[r0:r1 + 1])), device)
+        rows = bm.repeat(bm.arange(r0, r1, dtype=bm.int64, device=device), lengths)
+        hit = bm.nonzero(col[s0:s1] == rows)[0]
+        slots = bm.set_at(slots, rows[hit], hit + s0)
+        found += int(hit.shape[0])
+        r0 = r1
+    if found != n_rows:
+        raise ValueError(f"CSR 符号模式应每行恰含一个对角元; {n_rows} 行中找到 {found} 个.")
+    return slots
 
 
 def linear_corner_global_map(
@@ -292,6 +359,9 @@ class InterfaceSpace:
     _pattern: Optional[CSRPattern] = field(
         default=None, init=False, repr=False, compare=False
     )
+    _diagonal_slots: Optional[Any] = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if not self.sub_meshes:
@@ -381,6 +451,35 @@ class InterfaceSpace:
                 ),
             )
         return self._pattern
+
+    def diagonal(self, stiffness: CSRTensor) -> Any:
+        """取全局接口刚度 ``K_Q`` 的主对角, 形状 ``(N_q,)``.
+
+        Parameters
+        ----------
+        stiffness : CSRTensor
+            ``assemble`` 返回的接口刚度, 与 ``pattern`` 同一符号模式.
+
+        Returns
+        -------
+        TensorLike
+            主对角, 与 ``stiffness`` 的值同设备.
+
+        Notes
+        -----
+        对角元在值数组中的位置只依赖符号模式, 首次调用时按行块求出并缓存, 之后每次只做一次
+        取值. ``CSRTensor.diagonal`` 在非 numpy 后端每次都要展开长度为 nnz 的行号, 接口矩阵
+        的 nnz 很大时会带来同量级的临时显存.
+        """
+        if self._diagonal_slots is None:
+            pattern = self.pattern
+            object.__setattr__(
+                self, "_diagonal_slots", _csr_diagonal_slots(pattern.crow, pattern.col)
+            )
+        values = stiffness.values
+        if values is None or int(values.shape[0]) != self.pattern.nnz:
+            raise ValueError("stiffness 须为 assemble 返回的、与 pattern 同模式的接口刚度.")
+        return values[self._diagonal_slots]
 
     def assemble(self, stiffness_batches: Iterable[Any]) -> InterfaceSystem:
         """由迹空间刚度批次组装 ``K_Q = sum_j (A_q^j)^T K_r^j A_q^j``.
@@ -510,9 +609,10 @@ class InterfaceSpace:
         """
         interface_force, fixed_dofs = self.interface_conditions(problem)
         P = self.global_trace_map()
+        # 载荷在主机上投影, 再放到接口编号所在设备, 供 CG 路径直接使用
         load = bm.asarray(
             P.T @ np.asarray(bm.to_numpy(interface_force), dtype=np.float64),
-            dtype=bm.float64,
+            dtype=bm.float64, device=bm.get_device(self.global_dofs),
         )
         rows = np.asarray(bm.to_numpy(fixed_dofs), dtype=np.int64)
         constraints = P[rows].tocsr()
@@ -628,12 +728,14 @@ class InterfaceSpace:
                 sub_meshes=tuple(sub_meshes),
             )
         if isinstance(trace_basis, LinearCornerTraceBasis):
+            local_dofs = assembler.macro_corner_indices(sub_meshes)
             return cls(
                 name="linear_corner",
                 trace_basis=trace_basis,
-                local_dofs=assembler.macro_corner_indices(sub_meshes),
+                local_dofs=local_dofs,
                 global_dofs=bm.arange(
-                    int(assembler.total_macro_dofs), dtype=bm.int64
+                    int(assembler.total_macro_dofs), dtype=bm.int64,
+                    device=bm.get_device(local_dofs),
                 ),
                 assembler=assembler,
                 sub_meshes=tuple(sub_meshes),
@@ -678,7 +780,7 @@ def build_interface_space(
     if kind == "full_trace":
         trace_basis: TraceBasis = FullTraceBasis.from_prototype(prototype)
     elif kind == "linear_corner":
-        trace_basis = LinearCornerTraceBasis.from_prototype(prototype)
+        trace_basis = LinearCornerTraceBasis.from_prototype(prototype, device=assembler.device)
     else:
         raise ValueError(
             f"未知的接口空间: {kind!r}; 可选 {INTERFACE_SPACE_KINDS}."

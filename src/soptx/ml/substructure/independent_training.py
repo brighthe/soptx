@@ -19,7 +19,10 @@ import torch
 from .independent_contract import (
     SCHEMA, activation_names, metadata_widths, provider_metadata_matches, write_json,
 )
+from .independent_data import dataset_targets
 from .nets import IndependentOutputNet, SplitOutputNet
+
+BASE_LOSSES = ("decoded_full_matrix_mse",)
 from .training import TrainingConfig, build_optimizer
 
 if TYPE_CHECKING:
@@ -246,6 +249,7 @@ def train_network(
     device: str | torch.device = "cpu",
     config: TrainingConfig | None = None,
     initialization: dict[str, Any] | None = None,
+    loss: str = "decoded_full_matrix_mse",
     stiffness_loss_weight: float = 0.,
     loss_chunk_size: int | None = None,
     train_stiffness_weights: str | Path | None = None,
@@ -272,8 +276,11 @@ def train_network(
     initialization : dict or None
         可选的初始化权重来源记录. 仅记录来源, 本函数始终新建优化器和调度器.
 
+    loss : str
+        基本损失, 须为 BASE_LOSSES 之一; 当前只有 decoded_full_matrix_mse, 即网络输出经
+        刚体约束补全后与精确标签矩阵的逐元素 MSE. 记入 run_config.json 的 base_loss.
     stiffness_loss_weight : float
-        shape 相对重构刚度监督权重, 默认 0 保持原 MSE.
+        shape 相对重构刚度监督权重, 默认 0 保持基本损失不变.
     loss_chunk_size : int or None
         梯度累积的计算块大小, 不改变优化器 batch_size.
 
@@ -288,6 +295,8 @@ def train_network(
     """
     if route not in ("shape", "stiffness"):
         raise ValueError("route 必须为 shape 或 stiffness")
+    if loss not in BASE_LOSSES:
+        raise ValueError(f"loss 须为 {BASE_LOSSES} 之一, 得到 {loss!r}")
     if not np.isfinite(stiffness_loss_weight) or stiffness_loss_weight < 0:
         raise ValueError("刚度监督权重须有限且非负")
     if stiffness_loss_weight and route != "shape":
@@ -318,6 +327,11 @@ def train_network(
             or not provider_metadata_matches(manifest.get("provider"), provider_metadata)
             or manifest.get("input_quantity") != "normalized_young_modulus"):
         raise ValueError("数据集未完成, 或独立分量编号/材料配置与解码器不一致")
+    available = dataset_targets(manifest)
+    required = (route, "stiffness") if stiffness_loss_weight else (route,)
+    missing = [name for name in required if name not in available]
+    if missing:
+        raise ValueError(f"数据集只含 {available} 标签, 缺少本次训练所需的 {tuple(missing)}")
     data = {}
     for split in ("train", "validation"):
         count = manifest["counts"][split]
@@ -358,7 +372,8 @@ def train_network(
         "num_networks": {
             route: len(network.nets) if isinstance(network, SplitOutputNet) else 1,
         },
-        "loss": loss_name, "loss_settings": loss_settings, "consistency_loss": "not_enabled",
+        "loss": loss_name, "base_loss": loss, "loss_settings": loss_settings,
+        "consistency_loss": "not_enabled",
     })
     rng = np.random.default_rng(config.seed)
     model = network.to(device=device, dtype=torch.float64)

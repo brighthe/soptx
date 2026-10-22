@@ -329,6 +329,18 @@ class StructuredSubstructureLayout:
         return self._full_mesh
 
     @property
+    def device(self) -> Any:
+        """细网格所在设备, 布局导出的编号张量随之放置.
+
+        Returns
+        -------
+        device : Any
+            细网格的设备; 细网格尚未构造时为 None, 即后端默认设备. 只读取已有网格,
+            不触发 ``full_mesh`` 的按需构造.
+        """
+        return None if self._full_mesh is None else self._full_mesh.device
+
+    @property
     def material(self) -> Any:
         """全尺度各向同性线弹性材料; 首次访问时构造."""
         if self._material is None:
@@ -411,7 +423,7 @@ class StructuredSubstructureLayout:
             return self._node_of_grid
 
         if self.degree == 1:
-            self._node_of_grid = bm.arange(self.total_full_nodes, dtype=bm.int64)
+            self._node_of_grid = bm.arange(self.total_full_nodes, dtype=bm.int64, device=self.device)
             return self._node_of_grid
 
         points = self.sspace_full.interpolation_points()
@@ -705,7 +717,8 @@ class StructuredSubstructureLayout:
                         dofs.append(3 * node + k)
                 rows.append(bm.asarray(dofs, dtype=bm.int64))
 
-        return bm.stack(rows, axis=0)
+        # 编号在主机上逐个子结构生成, 整体移到细网格设备一次
+        return bm.device_put(bm.stack(rows, axis=0), self.device)
 
     def project_global_vector(self, interface_dofs: TensorLike, global_vector: Any) -> Any:
         """提取全局向量的完整接口分量.

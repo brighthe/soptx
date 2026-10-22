@@ -587,8 +587,39 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def apply_bc(self,
                 K: Union[CSRTensor, COOTensor],
                 F: TensorLike,
-            ) -> tuple[Union[CSRTensor, COOTensor], TensorLike]:
-        """在全局矩阵上施加边界条件 (对称消元)"""
+                *, explicit: Optional[bool] = None,
+                inplace: bool = False,
+            ) -> tuple[Union[CSRTensor, COOTensor, ConstrainedOperator], TensorLike]:
+        """在全局矩阵上强形式施加 Dirichlet 边界条件.
+
+        Parameters
+        ----------
+        K : CSRTensor or COOTensor
+            未施加边界条件的全局刚度矩阵; 除 ``inplace=True`` 外本方法不改写它.
+        F : TensorLike
+            体力载荷向量, 本方法把非体力载荷加到它上面.
+        explicit : bool, optional
+            是否显式形成约束后的矩阵. None 或 True 时对称消元, 返回与 K 共用骨架、另有一份
+            数值数组的新矩阵; False 时不复制, 返回包住 K 的 ConstrainedOperator, 作用时把
+            Dirichlet 自由度置零再还原, 与对称消元是同一个算子.
+        inplace : bool, optional
+            为 True 时在 K 的值数组上原地对称消元, 不另存一份值数组, 结果与复制消元逐位相同;
+            只用于显式消元 (``explicit`` 不为 False) 与 CSR 矩阵. 原地消元后 ``stiffness_matrix``
+            与 ``assembly_level`` 持有的也是约束后的矩阵, 直到下次 ``assemble_stiff_matrix``;
+            之后还要用未约束 K 的调用方 (如以 K u - F 核算残差) 不应开启.
+
+        Returns
+        -------
+        K : CSRTensor, COOTensor or ConstrainedOperator
+            约束后的系统算子. ConstrainedOperator 只提供 ``@`` 与 ``diagonal``, 不能交给
+            直接法, 也不能以直接法为预条件子.
+        F : TensorLike
+            约束后的右端项, 与 explicit 取值无关.
+        """
+        if explicit is not None and not isinstance(explicit, bool):
+            self._log_error(f"explicit 须为 None 或 bool, 得到 {explicit!r}")
+        if inplace and explicit is False:
+            self._log_error("inplace=True 只用于显式消元, 不能与 explicit=False 同时给出")
         space_uh = self._tensor_space
 
         #* 1. 非体力载荷处理 (边界类型分派由 _non_body_loads_by_boundary_type 统一负责) *#
@@ -608,8 +639,17 @@ class LagrangeFEMAnalyzer(BaseLogged):
             F = F - K.matmul(uh_bd[:])
         F = bm.set_at(F, isBdDof, uh_bd[isBdDof])
 
-        # 保结构消元, 不改写原矩阵 (self._K 仍为未施加边界条件的刚度矩阵)
-        K = self._elimination.apply(K, isBdDof)
+        if explicit is False:
+            # 只包装不复制: K 与 self._K 均保持为未施加边界条件的矩阵
+            if isinstance(K, COOTensor):
+                K = K.tocsr()
+            operator = ConstrainedOperator(FullAssembly(space_uh, K),
+                                           gd=self._pde.dirichlet_bc, isDDof=isBdDof)
+            return operator, F
+
+        # 保结构消元; 默认不改写原矩阵 (self._K 仍为未施加边界条件的刚度矩阵), inplace 时原地改写.
+        # K u_D 已在上面用未约束的 K 算好, 原地改写不影响载荷
+        K = self._elimination.apply(K, isBdDof, inplace=inplace)
 
         return K, F
 
@@ -617,6 +657,8 @@ class LagrangeFEMAnalyzer(BaseLogged):
     def apply_bc(self,
                 K: AssemblyLevelExtension,
                 F: TensorLike,
+                *, explicit: Optional[bool] = None,
+                inplace: bool = False,
             ) -> tuple[ConstrainedOperator, TensorLike]:
         """在矩阵自由算子上施加边界条件
 
@@ -624,8 +666,15 @@ class LagrangeFEMAnalyzer(BaseLogged):
         Dirichlet 自由度置零, 作用后再还原, 等价于 'fa' 的对称消元系统.
 
         本变体只用到 AssemblyLevelExtension 的接口, 不碰常驻形式, 因此 'ea' 与
-        'pa' 共用它.
+        'pa' 共用它. ``explicit`` 与 ``inplace`` 与 'fa' 变体同签名: ``explicit`` 只接受
+        None 或 False, ``inplace`` 只接受 False, 本层级没有显式矩阵可给或可改写.
         """
+        if explicit:
+            self._log_error(f"operator_level={self._operator_level!r} 下没有显式矩阵, "
+                            f"apply_bc 不支持 explicit=True")
+        if inplace:
+            self._log_error(f"operator_level={self._operator_level!r} 下没有显式矩阵, "
+                            f"apply_bc 不支持 inplace=True")
         F_non_body = self._non_body_loads_by_boundary_type()
         if F_non_body is not None:
             F = F + F_non_body
@@ -887,11 +936,14 @@ class LagrangeFEMAnalyzer(BaseLogged):
         try:
             M.setup(K_pc)
         except OperatorCapabilityError as exc:
+            # 'fa' 下主算子是掩码算子时, 也可改回默认的 apply_bc 拿显式矩阵
+            masked_fa = self._operator_level == 'fa' and isinstance(K_pc, ConstrainedOperator)
             self._log_error(
                 f"预条件子 {precond!r} 无法绑定到 {pc_level!r} 层级的算子 "
                 f"(operator_level={self._operator_level!r}, "
                 f"preconditioner_level={self._preconditioner_level!r}): "
                 f"{exc} 请把 preconditioner_level 设为 'fa'"
+                + ("; 或用默认的 apply_bc (不传 explicit=False) 重新施加边界条件" if masked_fa else "")
             )
 
         return M
@@ -1005,6 +1057,12 @@ class LagrangeFEMAnalyzer(BaseLogged):
             info = run_solver(solver, operator, F, out, name=solver_type, extra=extra, tol=tol,
                               x0=kwargs.get('x0', None))
         except OperatorCapabilityError as exc:
+            # 'fa' 下拿到掩码算子只可能来自 apply_bc(explicit=False), 指向重新施加边界条件
+            if self._operator_level == 'fa' and isinstance(K, ConstrainedOperator):
+                self._log_error(
+                    f"求解器 '{solver_type}' 需要显式矩阵, 但 K 是 apply_bc(explicit=False) 返回的"
+                    f"掩码算子: {exc} 请用默认的 apply_bc 重新施加边界条件"
+                )
             self._log_error(
                 f"operator_level={self._operator_level!r} 下无法使用求解器 "
                 f"'{solver_type}': {exc} 请改用 solver='cg'; "

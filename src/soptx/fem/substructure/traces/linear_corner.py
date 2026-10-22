@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from soptx.backend import backend_manager as bm
+
 from .base import TraceBasis
 
 
@@ -18,6 +20,20 @@ class LinearCornerTraceBasis(TraceBasis):
     name = "linear_corner"
 
     @classmethod
-    def from_prototype(cls, prototype: Any) -> "LinearCornerTraceBasis":
-        """由子结构原型已有的式 (16) 插值矩阵构造迹基."""
-        return cls(prototype.linear_boundary_matrix)
+    def from_prototype(cls, prototype: Any, device: Any = None) -> "LinearCornerTraceBasis":
+        """由子结构原型已有的式 (16) 插值矩阵构造迹基.
+
+        Parameters
+        ----------
+        prototype : SubstructurePrototype
+            参考子结构, 提供插值矩阵 ``linear_boundary_matrix``.
+        device : Any, optional
+            迹基矩阵的目标设备. 参考子结构总在主机上构造, 迹基每轮参与局部刚度投影与
+            位移展开, 须与细网格同设备; None 时保持原型所在设备.
+
+        Returns
+        -------
+        LinearCornerTraceBasis
+        """
+        matrix = prototype.linear_boundary_matrix
+        return cls(matrix if device is None else bm.device_put(matrix, device))

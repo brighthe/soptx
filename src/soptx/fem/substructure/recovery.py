@@ -51,7 +51,7 @@ def recover_full_displacement_batches(
     n_sub_total = len(sub_meshes)
     positions = layout._substructure_positions(sub_meshes)
 
-    U_full: Any = bm.zeros((layout.total_full_dofs,), dtype=bm.float64)
+    U_full: Any = bm.zeros((layout.total_full_dofs,), dtype=bm.float64, device=layout.device)
     next_start = 0
     for batch in displacement_batches:
         start = int(batch.start)
@@ -142,7 +142,7 @@ def recover_full_displacement(
     b_interface = layout.interface_indices(sub_meshes, interface_dofs)
     _, recover = normalize_local_reduction(condensors, len(sub_meshes), n_b)
 
-    U_full: Any = bm.zeros((layout.total_full_dofs,), dtype=bm.float64)
+    U_full: Any = bm.zeros((layout.total_full_dofs,), dtype=bm.float64, device=layout.device)
     U_full = bm.set_at(U_full, interface_dofs, u_b)
 
     # (B, n_b) -> (B, n_i): 批量缩聚器一次完成, 缩聚器列表逐个恢复后堆叠.
