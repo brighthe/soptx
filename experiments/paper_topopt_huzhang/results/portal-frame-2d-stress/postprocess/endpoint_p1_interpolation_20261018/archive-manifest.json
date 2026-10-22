@@ -1,0 +1,8 @@
+{
+  "source": "outputs/portal-endpoint-p1-interpolation-20261018/endpoint_h_sweep.json",
+  "destination": "results/portal-frame-2d-stress/postprocess/endpoint_p1_interpolation_20261018/endpoint_h_sweep.json",
+  "bytes": 3697,
+  "sha256": "1debfe82293cc4d25d7c4094905a6762e12c66d1aa78411d08948e9ec01e760e",
+  "archived_at_utc": "2026-10-18T13:57:40.568139+00:00",
+  "operation": "verbatim-copy; no recomputation"
+}

@@ -105,13 +105,19 @@ VTU_FIELDS = ("density", "von_mises_normalized")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """解析要跑的分析链与阶次, 并据此确定运行目录名与输出目录; 其余设置均为模块顶部常量."""
+    """解析分析链、阶次及可选乘子上限; 非默认上限自动使用独立运行目录."""
     parser = argparse.ArgumentParser(description="二维悬臂梁局部应力约束体积最小化 (论文 5.2.3 节)")
     parser.add_argument("--analyzer", choices=METHODS, required=True, help="分析链")
     parser.add_argument("--order", type=int, choices=ORDERS, required=True,
                         help="阶次 k (LFEM 位移阶 p = k, HZMFEM 应力阶 k)")
+    parser.add_argument("--lambda-max", type=float, default=LAMBDA_MAX,
+                        help="乘子上限; 非默认值自动添加目录后缀, 保留基准结果")
     args = parser.parse_args(argv)
+    if not np.isfinite(args.lambda_max) or args.lambda_max <= 0.0:
+        parser.error("--lambda-max 必须是有限正数")
     args.label = RUN_LABEL.format(method=args.analyzer, order=args.order)
+    if args.lambda_max != LAMBDA_MAX:
+        args.label += f"__lambda-max-{args.lambda_max!r}"
     args.output = OUTPUT_DIR / args.label
     return args
 
@@ -180,7 +186,8 @@ def format_run_header(config: dict[str, Any], output: Path, dofs: str) -> str:
         f"  优化  AL-MMA, rho0={opt['initial_density']:g}, 过滤 r={opt['filter_radius']:g}, "
         f"MSIMP p={opt['penalty']:g}, {proj['projection_type']} beta {proj['beta']:g}->{proj['beta_max']:g} "
         f"(每 {proj['continuation_iter']} 外层步 +{proj['beta_increment']:g}), "
-        f"外层 <= {opt['max_al_iterations']} x 内层 {opt['mma_iters_per_al']}, mu0={opt['mu_0']:g}",
+        f"外层 <= {opt['max_al_iterations']} x 内层 {opt['mma_iters_per_al']}, mu0={opt['mu_0']:g}, "
+        f"lambda_max={opt['lambda_max']:g}",
     ])
 
 
@@ -214,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             "inner_stop_rule": INNER_STOP_RULE, "inner_relative_tolerance": INNER_RELATIVE_TOLERANCE,
             "inner_absolute_tolerance": INNER_ABSOLUTE_TOLERANCE,
             "mu_0": MU_0, "mu_max": MU_MAX, "alpha": ALPHA, "lambda_0": LAMBDA_0,
-            "lambda_max": LAMBDA_MAX, "move_limit": MOVE_LIMIT,
+            "lambda_max": args.lambda_max, "move_limit": MOVE_LIMIT,
             "asymptote_min_distance": ASYMPTOTE_MIN_DISTANCE,
             "acceptance_solid_threshold": ACCEPTANCE_SOLID_THRESHOLD,
         },
@@ -282,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         max_al_iterations=MAX_AL_ITERATIONS, mma_iters_per_al=MMA_ITERS_PER_AL,
         mu_0=MU_0, mu_max=MU_MAX, alpha=ALPHA, lambda_0_init_val=LAMBDA_0,
         move_limit=MOVE_LIMIT, asymptote_min_distance=ASYMPTOTE_MIN_DISTANCE,
-        change_measure=CHANGE_MEASURE, lambda_max=LAMBDA_MAX,
+        change_measure=CHANGE_MEASURE, lambda_max=args.lambda_max,
         acceptance_solid_threshold=ACCEPTANCE_SOLID_THRESHOLD,
     )
     al = AugmentedLagrangianObjective(
@@ -382,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
                                        else float(change)),
         **{key: (None if value is None or not np.isfinite(value) else float(value))
            for key, value in outer.items()},
-        "lambda_max": LAMBDA_MAX,
+        "lambda_max": args.lambda_max,
         "multiplier_capped_count": int(getattr(al, "last_capped_count", 0)),
     }
 

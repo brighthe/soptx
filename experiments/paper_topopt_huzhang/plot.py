@@ -45,19 +45,21 @@ COMMAND_MODULES: dict[str, str] = {
     "export": "analysis.stress_metrics:run_export",
     "bearing-h-locking": "analysis.bearing_h_locking:run",
     "discretization-probe": "analysis.discretization_probe:run_discretization_probe",
+    "portal-endpoint-check": "analysis.portal_endpoint_check:run",
 }
 
 # 需要把子命令之后的参数透传下去的模块 (其余不接受参数)
-FORWARDS_ARGV = {"export", "discretization-probe"}
+FORWARDS_ARGV = {"export", "discretization-probe", "bearing-h-locking"}
 
 # 会按冻结设计重新组装并求解的动词: 比纯读产物慢, --help 里标出来免得误当作秒回
-REANALYSIS = {"export", "bearing-h-locking", "discretization-probe"}
+REANALYSIS = {"export", "bearing-h-locking", "discretization-probe", "portal-endpoint-check"}
 
 # 动词的说明; 产物 case 的说明取自各 plots 模块自己的 docstring, 不在此重复
 DESCRIPTIONS: dict[str, str] = {
     "export": "冻结重分析导出插图场数据 (npz)",
-    "bearing-h-locking": "轴承算例全实体域 h 收敛闭锁考察: 两档 nu x 四级网格 x 四种离散 (论文图 5.5)",
-    "discretization-probe": "应力算例: 冻结构型在自身离散下重分析, 导出应力比与牵引跳量 (图 5.8 / 5.10 / 5.11)",
+    "bearing-h-locking": "轴承全实体域 h 收敛: LFEM p=1,2 与 HZMFEM k=2,3,4, 支持增量补算 (图 5.5)",
+    "discretization-probe": "应力算例: 冻结构型在自身离散下重分析, 导出应力比与牵引跳量 (悬臂梁图 5.8 / 5.10, 门式框架图 5.12; --case 选算例)",
+    "portal-endpoint-check": "门式框架全实体域载荷端点应力有界性验证: 五种离散 x 三级网格 (5.2.4 节不设被动区的依据)",
 }
 
 
@@ -66,6 +68,7 @@ RUN_SCRIPTS: dict[str, str] = {
     "compliance-fixed-fixed-half": "run_fixed_fixed.py",
     "bearing": "run_bearing.py",
     "cantilever-middle-2d-stress": "run_cantilever_stress.py",
+    "portal-frame-2d-stress": "run_portal_frame.py",
 }
 
 # 冻结重分析导出的数据文件 -> 产出它的数据动词, 按路径片段匹配 (未命中时退回 export).
@@ -73,6 +76,7 @@ RUN_SCRIPTS: dict[str, str] = {
 DATA_COMMANDS: tuple[tuple[str, str], ...] = (
     ("discretization_probe", "plot.py discretization-probe"),
     ("solid_h_sweep", "plot.py bearing-h-locking"),
+    ("endpoint_h_sweep", "plot.py portal-endpoint-check"),
     ("fig_data_", "plot.py export"),
 )
 

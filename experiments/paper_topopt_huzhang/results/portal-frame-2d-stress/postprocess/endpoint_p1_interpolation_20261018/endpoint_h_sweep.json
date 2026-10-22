@@ -1,0 +1,99 @@
+{
+  "load_discretization": "p1_trace_interpolation",
+  "design": "solid",
+  "radius": 0.25,
+  "quantity": "cell-centroid solid von Mises stress ratio",
+  "rows": [
+    {
+      "method": "lfem",
+      "order": 2,
+      "mesh_size": 0.125,
+      "cells": 8022,
+      "ndof": 32702,
+      "seconds": 7.662025112018455,
+      "load_endpoints_max": 0.6486154145457161,
+      "apex_max": 1.2179940853808342,
+      "support_ends_max": 1.0924780383845145,
+      "archived_l2_load_endpoints_max": 0.6552510057165077,
+      "relative_difference_from_archived_l2": -0.010126792805965512
+    },
+    {
+      "method": "lfem",
+      "order": 2,
+      "mesh_size": 0.0625,
+      "cells": 31554,
+      "ndof": 127438,
+      "seconds": 12.912381108035333,
+      "load_endpoints_max": 0.6840038968616307,
+      "apex_max": 1.623639058630525,
+      "support_ends_max": 1.6623499099201087,
+      "archived_l2_load_endpoints_max": 0.6845684845883991,
+      "relative_difference_from_archived_l2": -0.000824735201048532
+    },
+    {
+      "method": "lfem",
+      "order": 2,
+      "mesh_size": 0.03125,
+      "cells": 126096,
+      "ndof": 506826,
+      "seconds": 50.75517521100119,
+      "load_endpoints_max": 0.6996378815161537,
+      "apex_max": 2.1471021815457885,
+      "support_ends_max": 2.455887256604399,
+      "archived_l2_load_endpoints_max": 0.6996899385257579,
+      "relative_difference_from_archived_l2": -7.440011173220906e-05
+    },
+    {
+      "method": "huzhang",
+      "order": 3,
+      "mesh_size": 0.125,
+      "cells": 8022,
+      "ndof": 229701,
+      "seconds": 8.403486277966294,
+      "load_endpoints_max": 0.6527313902930169,
+      "apex_max": 1.311205696274075,
+      "support_ends_max": 1.1590076025275435,
+      "archived_l2_load_endpoints_max": 0.6589038569691622,
+      "relative_difference_from_archived_l2": -0.009367780459713204
+    },
+    {
+      "method": "huzhang",
+      "order": 3,
+      "mesh_size": 0.0625,
+      "cells": 31554,
+      "ndof": 901427,
+      "seconds": 40.73581421299605,
+      "load_endpoints_max": 0.6872055534398783,
+      "apex_max": 1.7586355137838068,
+      "support_ends_max": 1.6694124304067746,
+      "archived_l2_load_endpoints_max": 0.6876575370593098,
+      "relative_difference_from_archived_l2": -0.0006572801068455147
+    }
+  ],
+  "provenance": {
+    "git_revision": "b37ee69c2b7d43f487332b8ee908cc364a17ad88",
+    "git_dirty": true,
+    "source_sha256": {
+      "experiments/paper_topopt_huzhang/run_portal_frame.py": "6ed70101e0f2d130f9b0ad54bdc647dedab5b5487fb58cf1f1b806aa86ee27dd",
+      "experiments/paper_topopt_huzhang/analysis/portal_endpoint_check.py": "2a5481a3ce3830f6512d9f33f91d31f2b905a95dfec70e73602212f92e97aecc",
+      "experiments/paper_topopt_huzhang/analysis/discretization_probe.py": "6bfc162285d8db7a7731f94d95cb57c9a1339feffa281ddb537286ce8480ba0d",
+      "src/soptx/fem/boundary_loads.py": "f70f76e5ca50021967530501941ade1890aec330ad4c892bc6f86235ebe196f1"
+    }
+  },
+  "procedure": "Reuse portal_endpoint_check.solid_stress_ratio; replace run_portal_frame.project_patch_traction_to_p1_trace in diagnostic process with interpolate_patch_traction_to_p1_trace. Original source and archived runs unchanged. Full solid rho=1; no optimization. LFEM p2 three levels; HZMFEM k3 first two levels. Comparison L2 values are archived, not rerun.",
+  "resultant_checks": [
+    {
+      "h": 0.125,
+      "vertical_resultant": -300.0
+    },
+    {
+      "h": 0.0625,
+      "vertical_resultant": -300.0
+    },
+    {
+      "h": 0.03125,
+      "vertical_resultant": -300.0
+    }
+  ],
+  "limitation": "Cell-centroid neighborhood maxima only; finite mesh study does not prove pointwise stress boundedness or optimized-design feasibility."
+}

@@ -1,0 +1,168 @@
+[
+  {
+    "case_id": "cantilever-middle-2d-stress",
+    "design": "lfem-3",
+    "design_run_dir": "cantilever-middle-2d-stress/analyzer-lfem__order-3__lambda-max-10000.0",
+    "design_digest": {
+      "path": "experiments/paper_topopt_huzhang/results/cantilever-middle-2d-stress/analyzer-lfem__order-3__lambda-max-10000.0/density_final.vtu",
+      "sha256": "15537f25d490d695aa922bfea19475dd81c838e5f741c11a3951056678192b2c",
+      "bytes": 311106
+    },
+    "design_summary": {
+      "optimization_iterations": 249,
+      "converged": true,
+      "volume_fraction": 0.3448071703625656,
+      "max_constraint": 0.004711311127004514,
+      "max_relative_violation": 0.004711311127004514,
+      "max_relative_violation_accepted": 0.004711311127004514,
+      "acceptance_solid_threshold": null,
+      "load_pad_radius": 1.5,
+      "pad_cells": 16,
+      "lambda_max": 10000.0,
+      "multiplier_capped_count": 0
+    },
+    "discretization": "lfem-3",
+    "delta_g": 0.005,
+    "pad_cells": 16,
+    "accepted_cells": 6384,
+    "max_g_accepted": 0.004711311127134354,
+    "seconds": 3.8292560560512356,
+    "traction_jump": {
+      "integration_order": 8,
+      "interior_faces": 9480,
+      "relative_jump_max": 2.6663975886544686,
+      "solid_cells": 1780,
+      "cell_abs_solid_median": 0.015500616597506555,
+      "cell_abs_solid_p95": 0.0843305791447305,
+      "cell_abs_solid_max": 0.11806988561263143
+    },
+    "checks": {
+      "accepted_max_g_matches_summary": {
+        "reproduced": 0.004711311127134354,
+        "recorded": 0.004711311127004514,
+        "passed": true
+      }
+    },
+    "provenance": {
+      "generated_at_utc": "2026-10-17T13:04:30+00:00",
+      "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
+      "git_dirty": true,
+      "reproducible": false
+    },
+    "observed_multiplier_max": 408.5995837215533
+  },
+  {
+    "case_id": "cantilever-middle-2d-stress",
+    "design": "huzhang-2",
+    "design_run_dir": "cantilever-middle-2d-stress/analyzer-huzhang__order-2",
+    "design_digest": {
+      "path": "experiments/paper_topopt_huzhang/results/cantilever-middle-2d-stress/analyzer-huzhang__order-2/density_final.vtu",
+      "sha256": "16917daccb5dfec56271b15c11e83292745fb91ccedf99e98f58bcaa91107850",
+      "bytes": 311106
+    },
+    "design_summary": {
+      "optimization_iterations": 314,
+      "converged": true,
+      "volume_fraction": 0.3487703530882995,
+      "max_constraint": 0.004903359360419187,
+      "max_relative_violation": 0.004903359360419187,
+      "max_relative_violation_accepted": 0.004903359360419187,
+      "acceptance_solid_threshold": null,
+      "load_pad_radius": 1.5,
+      "pad_cells": 16,
+      "lambda_max": 3000.0,
+      "multiplier_capped_count": 0
+    },
+    "discretization": "huzhang-2",
+    "delta_g": 0.005,
+    "pad_cells": 16,
+    "accepted_cells": 6384,
+    "max_g_accepted": 0.004903359360418785,
+    "seconds": 1.8342547869542614,
+    "traction_jump": {
+      "integration_order": 6,
+      "interior_faces": 9480,
+      "relative_jump_max": 1.4643439888186204e-13,
+      "solid_cells": 1765,
+      "cell_abs_solid_median": 5.590991236310105e-17,
+      "cell_abs_solid_p95": 1.0698284783915203e-16,
+      "cell_abs_solid_max": 1.5728112801468385e-16
+    },
+    "checks": {
+      "huzhang_jump_gate": {
+        "value": 1.4643439888186204e-13,
+        "threshold": 1e-10,
+        "passed": true
+      },
+      "accepted_max_g_matches_summary": {
+        "reproduced": 0.004903359360418785,
+        "recorded": 0.004903359360419187,
+        "passed": true
+      }
+    },
+    "provenance": {
+      "generated_at_utc": "2026-10-17T13:04:33+00:00",
+      "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
+      "git_dirty": true,
+      "reproducible": false
+    },
+    "observed_multiplier_max": 1129.6390307558986
+  },
+  {
+    "case_id": "cantilever-middle-2d-stress",
+    "design": "huzhang-3",
+    "design_run_dir": "cantilever-middle-2d-stress/analyzer-huzhang__order-3",
+    "design_digest": {
+      "path": "experiments/paper_topopt_huzhang/results/cantilever-middle-2d-stress/analyzer-huzhang__order-3/density_final.vtu",
+      "sha256": "27bd2586042247117f4c4163f3d3e723f9036a8bfe5c2e9df333d933ed007814",
+      "bytes": 311106
+    },
+    "design_summary": {
+      "optimization_iterations": 381,
+      "converged": true,
+      "volume_fraction": 0.34971349631192694,
+      "max_constraint": 0.004850876591597642,
+      "max_relative_violation": 0.004850876591597642,
+      "max_relative_violation_accepted": 0.004850876591597642,
+      "acceptance_solid_threshold": null,
+      "load_pad_radius": 1.5,
+      "pad_cells": 16,
+      "lambda_max": 3000.0,
+      "multiplier_capped_count": 0
+    },
+    "discretization": "huzhang-3",
+    "delta_g": 0.005,
+    "pad_cells": 16,
+    "accepted_cells": 6384,
+    "max_g_accepted": 0.004850876591580361,
+    "seconds": 3.399323955993168,
+    "traction_jump": {
+      "integration_order": 8,
+      "interior_faces": 9480,
+      "relative_jump_max": 1.8680564971593634e-13,
+      "solid_cells": 1775,
+      "cell_abs_solid_median": 7.645463001543777e-17,
+      "cell_abs_solid_p95": 1.3094237459638793e-16,
+      "cell_abs_solid_max": 1.8055371340586768e-16
+    },
+    "checks": {
+      "huzhang_jump_gate": {
+        "value": 1.8680564971593634e-13,
+        "threshold": 1e-10,
+        "passed": true
+      },
+      "accepted_max_g_matches_summary": {
+        "reproduced": 0.004850876591580361,
+        "recorded": 0.004850876591597642,
+        "passed": true
+      }
+    },
+    "provenance": {
+      "generated_at_utc": "2026-10-17T13:04:38+00:00",
+      "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
+      "git_dirty": true,
+      "reproducible": false
+    },
+    "observed_multiplier_max": 2253.965940548084
+  }
+]

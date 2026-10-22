@@ -14,27 +14,42 @@ python experiments/topopt_simp_substructure/run_substructure_vs_fem.py --analysi
 python experiments/topopt_simp_substructure/run_substructure_vs_fem.py --analysis-method substructure
 ```
 
-命令行解析必填的 --analysis-method fem|substructure 和可选的 --preconditioner (默认 gmg), 以及 --help. 其余实验设置统一在脚本顶部按类别定义:
+命令行解析必填的 --analysis-method fem|substructure, 可选的 --preconditioner (默认 gmg)、--grid NX NY NZ、--n-sub NX NY NZ、--n-fine M 与 --max-iter (默认取顶部 MAX_ITER), 以及 --help. 其余实验设置统一在脚本顶部按类别定义:
 
 - 计算后端: BACKEND='numpy', DEVICE='cpu'.
-- 模型: 固定 DOMAIN=(0, 210, 0, 35, 0, 35), 以及载荷、材料和支承.
-- 离散与子结构: GRID=(210, 35, 35), N_FINE=5, CHUNK_SIZE=256, TRACE='full_trace', ASSEMBLY_METHOD='fast', OPERATOR_LEVEL='fa'.
+- 模型: ELEMENT_SIZE=1.0 (细单元边长), 计算域由网格推出, 以及载荷、材料和支承.
+- 离散与子结构: GRID=(210, 35, 35) (--grid 的默认值), N_FINE=5 (--n-fine 的默认值), N_SUB=GRID // N_FINE (仅用于显示, 不单独修改), CHUNK_SIZE=256, TRACE='full_trace', ASSEMBLY_METHOD='fast', OPERATOR_LEVEL='fa'.
 - 线性求解: SOLVER='cg', CG_TOLERANCE=1e-6, CG_MAXITER=20000.
-- 优化与输出: MAX_ITER=300, OUTPUT_DIR 为本目录下 outputs, VTU_FIELDS=('density',), 其余优化常量保持原值.
+- 优化与输出: MAX_ITER=300 (--max-iter 的默认值), OUTPUT_DIR 为本目录下 outputs, VTU_FIELDS=('density',), 其余优化常量保持原值.
 
-parse_args 解析分析方法和预条件子并生成 args.output; main 使用所选预条件子及其余顶部配置. 输出目录自动添加预条件子后缀, 例如 full_trace_hex_210x35x35_m5_cg_gmg 或 fa_hex_210x35x35_cg_jacobi; 已有目录报错, 不覆盖. main 在创建输出目录前检查子结构网格能否被 N_FINE 整除, 防止整数除法静默截断, 并保留三个方向细单元等边长的检查. 其余配置不在 parse_args 中逐项校验.
+parse_args 解析分析方法、预条件子、细网格、子结构划分与最大优化步数并生成 args.output; main 使用这些参数及其余顶部配置. 输出目录名由实际网格生成并自动添加预条件子后缀, 例如 full_trace_hex_210x35x35_m5_cg_gmg、full_trace_hex_390x65x65_m5_cg_jacobi 或 fa_hex_210x35x35_cg_jacobi; 已有目录报错, 不覆盖. parse_args 检查 --grid、--n-sub 各方向与 --max-iter 为正整数, 并按下表确定子结构划分, 防止整数除法静默截断; main 检查 --grid 满足 6:1:1 (nx=6ny, ny=nz), 计算域按 ELEMENT_SIZE 由网格推出. 其余配置不在 parse_args 中逐项校验.
+
+substructure 下 grid、n_sub、n_fine 须满足 grid = n_sub * n_fine; fem 只用 --grid, 给出 --n-sub 或 --n-fine 时报错.
+
+| 传入 | 处理 |
+|---|---|
+| 都不传 | grid 取 GRID, n_fine 取 N_FINE, n_sub = grid // n_fine |
+| 只传 --grid | n_fine 取 N_FINE, n_sub = grid // n_fine, 须整除 |
+| 只传 --n-sub | n_fine 取 N_FINE, grid = n_sub * n_fine |
+| 只传 --n-fine | grid 取 GRID, n_sub = grid // n_fine, 须整除 |
+| --grid + --n-fine | n_sub = grid // n_fine, 须整除 |
+| --n-sub + --n-fine | grid = n_sub * n_fine |
+| --grid + --n-sub | n_fine = grid // n_sub, 须整除且三个方向相同 |
+| 三者都传 | 检查 grid == n_sub * n_fine, 不满足时报错 |
+
+各情形均要求 n_fine >= 2 (子结构内部须有节点可消元); grid 的 6:1:1 比例由 main 检查.
 
 当前脚本按 CG 求解流程编写, 顶部 SOLVER 保持 cg; 删除参数校验不代表扩展了求解器支持范围. FEM 的 --preconditioner 可取 none/jacobi/gmg/scipy/mumps, full_trace 子结构可取 none/jacobi/gmg; none 传入分析器时转换为 None. MUMPS 预条件器依赖本机安装, 此次未验证可用性. CG 统一设置 rtol=CG_TOLERANCE、atol=0、rtol_reference=rhs、norm_type=unpreconditioned、verify_residual=True. 各自在施加边界条件后的实际系统上验收 ||b-Ax||_2 <= CG_TOLERANCE*||b||_2, 不随热启动残差变化; 子结构接口残差与 FEM 全场残差不等同, 全场误差仍须单独对照. 对照时保持两侧公共配置一致. 实际运行设置仍写入 config.json, trace 与子结构划分仅在子结构运行中记录.
 
 run_substructure_vs_fem.py 直接包含完整流程: 统一建细网格、子结构布局与分析器、密度过滤、装配、边界条件、求解、柔顺度与灵敏度、停止判断、OC 更新、结果输出. 成本汇总由独立后处理脚本 summarize_cost.py 按需执行. --analysis-method 仅控制子结构布局与分析器构造及热启动位移空间: FEM 使用全场位移, 子结构使用接口位移. 两侧共用同一个优化循环, 直接调用 soptx 的数值接口, 不再转调用其他运行脚本. 原有独立入口保留.
 
-三个入口统一固定 `DOMAIN = (0.0, 210.0, 0.0, 35.0, 0.0, 35.0)`，再用 `HexahedronMesh.from_box` 从计算域与剖分数创建细网格。子结构布局通过 `full_mesh=mesh` 复用同一对象，未传网格的其他调用仍按原方式惰性创建。历史上两个独立子结构入口的默认划分改为 `42 7 7`、细分数 5，与正式网格一致。
+各入口统一取 `ELEMENT_SIZE = 1.0`，由网格推出 `domain = (0, nx*h, 0, ny*h, 0, nz*h)`，再用 `HexahedronMesh.from_box` 创建细网格。子结构布局通过 `full_mesh=mesh` 复用同一对象，未传网格的其他调用仍按原方式惰性创建。历史上两个独立子结构入口的默认划分改为 `42 7 7`、细分数 5，与正式网格一致。
 
 `run_substructure_vs_fem.py` 的准备阶段将公共材料与插值单独计为“材料与插值”.
 子结构分支先创建布局, 再创建分析器, 分别计为“子结构布局与校验”和“分析器”;
 FEM 分支只创建分析器. 这些计时块互不嵌套, “分析器”不再包含材料与插值的准备耗时.
 
-默认网格的边长仍为 1，其他剖分下由固定尺寸计算 `spacing`；例如 `30 5 5` 的边长为 7，过滤半径为 21（仍取 3 个单元边长）。原始结果不变，小网格新结果不再对应此前固定边长 1 的物理尺寸。新运行的 `config.json` 记录实际 `domain`、`grid`、`spacing` 与过滤半径。
+细单元边长固定为 1，计算域随网格变化；例如 `30 5 5` 的计算域为 $30\times5\times5$，过滤半径为 3。此前按固定计算域 $210\times35\times35$ 运行的非默认网格结果（如 `outputs/*_390x65x65_*`，边长 7/13）属于旧约定，物理尺寸以各自 `config.json` 为准。新运行的 `config.json` 记录实际 `domain`、`grid`、`spacing` 与过滤半径。
 
 ## 输出与比较
 
@@ -82,18 +97,18 @@ sync_results.py 仍可用于按需固化历史结果, 不由优化入口自动�
 python experiments/topopt_simp_substructure/run_substructure_vs_fem.py --help
 ```
 
-验收条件: 自定义命令行参数只有 --analysis-method 和 --preconditioner; 原 --grid、--max-iter、--n-fine、--chunk-size、--cg-tolerance、--cg-maxiter、--output-dir 以及 --solver 均应被拒绝.
+验收条件: 自定义命令行参数为 --analysis-method、--preconditioner、--grid、--n-sub、--n-fine 与 --max-iter; 原 --chunk-size、--cg-tolerance、--cg-maxiter、--output-dir 以及 --solver 均应被拒绝.
 
-两轮小网格验收前, 经授权将顶部 GRID 临时设为 (30, 5, 5)、MAX_ITER=2、OUTPUT_DIR 设为未使用的验证目录; 保持 DOMAIN、N_FINE=5 和默认 CG 参数不变. 然后运行:
+两轮小网格验收前, 经授权将顶部 GRID 临时设为 (30, 5, 5)、MAX_ITER=2、OUTPUT_DIR 设为未使用的验证目录; 保持 ELEMENT_SIZE、N_FINE=5 和默认 CG 参数不变. 然后运行:
 
 ```bash
 python experiments/topopt_simp_substructure/run_substructure_vs_fem.py --analysis-method fem
 python experiments/topopt_simp_substructure/run_substructure_vs_fem.py --analysis-method substructure
 ```
 
-验收条件: 每条命令只运行指定方法; 原始 JSON 与场文件齐全, 运行入口不生成 cost_summary.json; 随后对两个运行目录分别执行 summarize_cost.py, 确认生成 cost_summary.json; 两轮达到上限时标记 max_iter, 不标记优化收敛; 重复运行同名目录时应报错, 保留原文件. config.json、首行打印和顶部设置一致, spacing=(7, 7, 7), 过滤半径为 21; 子结构 n_sub=(6, 1, 1). 求解设置为 cg/gmg、maxiter=20000、rtol=1e-6、atol=0、rtol_reference=rhs、norm_type=unpreconditioned、verify_residual=True、cg_tolerance=1e-6. 核对 cost_summary.json 与阶段记录一致, 重复后处理须拒绝覆盖, 原始 JSON 与场文件不变; 单轮记录的稳态均值应为 null. 两种方法柔顺度相对差初步要求不超过 1e-5、位移相对 L2 差不超过 1e-4、CG 相对残差不超过 1e-6、体积分数不超过 0.12+1e-6. 超限先定位原因, 不自动放宽标准. 完成验证后恢复正式顶部配置, 保留验证输出.
+验收条件: 每条命令只运行指定方法; 原始 JSON 与场文件齐全, 运行入口不生成 cost_summary.json; 随后对两个运行目录分别执行 summarize_cost.py, 确认生成 cost_summary.json; 两轮达到上限时标记 max_iter, 不标记优化收敛; 重复运行同名目录时应报错, 保留原文件. config.json、首行打印和顶部设置一致, spacing=(1, 1, 1), 过滤半径为 3; 子结构 n_sub=(6, 1, 1). 求解设置为 cg/gmg、maxiter=20000、rtol=1e-6、atol=0、rtol_reference=rhs、norm_type=unpreconditioned、verify_residual=True、cg_tolerance=1e-6. 核对 cost_summary.json 与阶段记录一致, 重复后处理须拒绝覆盖, 原始 JSON 与场文件不变; 单轮记录的稳态均值应为 null. 两种方法柔顺度相对差初步要求不超过 1e-5、位移相对 L2 差不超过 1e-4、CG 相对残差不超过 1e-6、体积分数不超过 0.12+1e-6. 超限先定位原因, 不自动放宽标准. 完成验证后恢复正式顶部配置, 保留验证输出.
 
-另需验证: GRID=(36, 6, 6)、N_FINE=5 时, --analysis-method substructure 在创建输出目录前因不能整除而报错; --analysis-method fem 不执行子结构整除检查. 改动 GRID 使三个方向细单元边长不同时, main 的等边长检查应报错. parse_args 不再承担顶部配置的通用合法性校验.
+另需验证: --grid 36 6 6 时, --analysis-method substructure 在创建输出目录前因不能被 n_fine=5 整除而报错; --analysis-method fem 不执行子结构整除检查, 但同时给出 --n-sub 或 --n-fine 时报错. substructure 下三者都传且 grid != n_sub * n_fine、--grid 与 --n-sub 推出的各方向 m 不同、n_fine < 2 时均应报错. 改动 GRID 使其不满足 6:1:1 时, main 的比例检查应报错. parse_args 不再承担顶部配置的通用合法性校验.
 
 ## 历史资料
 
@@ -107,11 +122,11 @@ python experiments/topopt_simp_substructure/run_substructure_vs_fem.py --analysi
 python -m pytest tests/unit/test_substructure_external_mesh.py tests/unit/test_substructure_analyzer.py tests/unit/test_substructure_field_mapping.py -q
 ```
 
-验收条件：外部网格被原对象复用；二维、三维及 Q1/Q2 的自由度与接口编号和惰性构造一致；尺寸、剖分或编号不匹配被拒绝；full_trace 与 FEM 的位移、柔顺度及灵敏度等价性仍通过。两轮验收另按上方命令执行并使用新的输出目录，核对固定 `domain` 与实际 `spacing`。
+验收条件：外部网格被原对象复用；二维、三维及 Q1/Q2 的自由度与接口编号和惰性构造一致；尺寸、剖分或编号不匹配被拒绝；full_trace 与 FEM 的位移、柔顺度及灵敏度等价性仍通过。两轮验收另按上方命令执行并使用新的输出目录，核对由网格推出的 `domain` 与 `spacing=(1, 1, 1)`。
 
 ## 边界条件阶段统一的待执行验证
 
-FEM 与子结构均在 apply_bc 阶段准备受约束系统. FEM 保持显式矩阵消元; 子结构 CG 准备行列掩码与右端项, 直接法准备自由子矩阵与修正右端项, 一般线性约束完成一致性检查、相关行约化和乘子系统组装. solve_system 仅求解、恢复位移与验收残差, 不再隐式准备约束. 直接法的矩阵分解仍计入求解阶段.
+FEM 与子结构均在 apply_bc 阶段准备受约束系统. FEM 保持显式矩阵消元, 在本轮刚度矩阵的值数组上原地进行 (apply_bc(..., inplace=True)), 不另存约束后的值数组; 子结构 CG 准备行列掩码与右端项, 直接法准备自由子矩阵与修正右端项, 一般线性约束完成一致性检查、相关行约化和乘子系统组装. solve_system 仅求解、恢复位移与验收残差, 不再隐式准备约束. 直接法的矩阵分解仍计入求解阶段.
 
 独立 solve_constrained_system 接口保留一次完成准备与求解的用法, 内部复用 prepare_constrained_system 和 solve_prepared_constrained_system. 分步使用分析器时须先调用 apply_bc; 切换 CG 与直接法应在 apply_bc(..., solver=...) 中选择目标求解器, solve_system 使用同一求解器. solve_state(..., solver=...) 自动将该选项传入准备阶段. scipy 与 mumps 可复用同一已准备的直接法系统. 直接法若改变右端项需重新准备, 不在 solve_system 中重新消元. 分析器仍仅支持齐次 Dirichlet 条件; 通用接口保留非齐次约束支持.
 
@@ -123,7 +138,7 @@ FEM 与子结构均在 apply_bc 阶段准备受约束系统. FEM 保持显式矩
 python -m pytest tests/unit/test_substructure_constrained_solve.py tests/unit/test_substructure_analyzer.py tests/unit/test_substructure_interface_space.py -q
 ```
 
-验收条件: apply_bc 已完成 CG 掩码、直接法消元或乘子矩阵构造; 原刚度与载荷不被改写; 矛盾约束在准备阶段被拒绝; solve_system 不调用约束校验、QR 约化、乘子矩阵组装或旧的约束施加入口; 无约束、全固定、非齐次固定与冗余一般约束的解析解及残差正确; CG 热启动、FEM 等价性和单次求解器切换仍通过. MUMPS 后端需在安装环境另行验证. 如需验证阶段计时, 经授权按上文两轮小网格流程使用新输出目录运行, 不覆盖历史结果.
+验收条件: apply_bc 已完成 CG 掩码、直接法消元或乘子矩阵构造; 子结构的原刚度与载荷不被改写 (FEM 原地消元改写本轮刚度矩阵, 下一轮重新装配); 矛盾约束在准备阶段被拒绝; solve_system 不调用约束校验、QR 约化、乘子矩阵组装或旧的约束施加入口; 无约束、全固定、非齐次固定与冗余一般约束的解析解及残差正确; CG 热启动、FEM 等价性和单次求解器切换仍通过. MUMPS 后端需在安装环境另行验证. 如需验证阶段计时, 经授权按上文两轮小网格流程使用新输出目录运行, 不覆盖历史结果.
 
 ## Huang2023 论文规模的 linear_corner 运行
 
@@ -132,25 +147,25 @@ python -m pytest tests/unit/test_substructure_constrained_solve.py tests/unit/te
 
 ```bash
 python -B -u experiments/topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py \
-  --trace linear_corner --preconditioner jacobi
+  --trace linear_corner --preconditioner jacobi --threads 1
 ```
 
-本入口顶部 GRID=(390, 65, 65), 子结构为 78 x 13 x 13, m=5.
-仅解析 --trace 和 --preconditioner (以及 --help), 不提供 --grid 或 --output-dir.
-其余参数仍在顶部配置区: CG 容差 1e-6, 物理域 210 x 35 x 35,
-细单元边长 7/13, 物理过滤半径 21/13, 体积分数 0.12.
+本入口顶部 GRID=(210, 35, 35), 子结构为 42 x 7 x 7, m=5, 为 --grid、--n-sub、--n-fine 的默认值;
+三者的推导与校验规则同 run_substructure_vs_fem.py (见上表), 输出目录名含实际 grid、m 与线程数后缀 _t{threads}.
+不提供 --output-dir. 其余参数仍在顶部配置区: CG 容差 1e-6, 细单元边长 1, 计算域默认 210 x 35 x 35,
+过滤半径 3, 体积分数 0.12. 已有的 outputs/linear_corner_hex_390x65x65_m5_cg_jacobi
+按旧约定运行 (计算域 210 x 35 x 35, 边长 7/13), 柔顺度为新约定的 13/7 倍.
 最多 300 轮, 连续 5 轮柔顺度相对变化小于 0.0002 时停止, 不强制设计对称.
 该 GRID 同时适用于本入口的 full_trace 模式, 不改变 run_substructure_vs_fem.py 的配置.
 
-本入口不再强制单线程, 不写入或清除 BLIS_NUM_THREADS、OPENBLAS_NUM_THREADS、
-MKL_NUM_THREADS、OMP_NUM_THREADS. 已设置的外部环境原样保留;
-未设置时由相应数值库决定默认线程数, 不保证使用全部核心或一定加速.
-config.json 的 threads 记录 policy、environment、blas_libraries 和 logical_cpu_count,
-不再写入固定 num_threads=1. environment 中 null 表示未设置;
-这些环境变量和逻辑 CPU 数均不代表运行时实际活跃线程数.
-终端不打印线程策略或环境变量, 相关信息仅保存在 config.json 中. 不新增线程解析参数.
-如需指定线程数, 可在启动前从 shell 设置, 例如 OPENBLAS_NUM_THREADS=8.
-修改只对新启动进程生效, 不影响已运行的优化.
+线程数由 --threads 指定, 默认 1 (主对照两侧均单线程). 脚本在导入 numpy/scipy 之前从命令行预取该值,
+写入 BLIS_NUM_THREADS、OPENBLAS_NUM_THREADS、MKL_NUM_THREADS、OMP_NUM_THREADS 四个变量,
+覆盖外部环境中的同名设置; 不从 shell 设置, 以免漏设实际加载的 BLAS 所读的变量.
+--threads 须以 --threads N 或 --threads=N 完整给出, 否则 parse_args 报错.
+只在直接运行时写入: 重分析脚本 reanalyze_full_trace_vs_linear_corner.py 导入本模块取顶部常量时不写入,
+仍沿用其外部环境.
+config.json 的 threads 记录 num_threads、environment、blas_libraries 和 logical_cpu_count;
+这些变量和逻辑 CPU 数均不代表运行时实际活跃线程数.
 
 
 输出根据接口、网格、细分数、求解器和预条件子自动命名为

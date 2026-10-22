@@ -1,13 +1,13 @@
-"""不同泊松比下三种离散的拓扑构型对比 (论文图 5.6).
+"""不同泊松比下四种离散的拓扑构型对比 (论文图 5.6).
 
-产物 case ``bearing-topologies``: 3x2 六格, 三排依次 LFEM p=1 / LFEM p=2 / HZMFEM k=2,
-左列可压缩基准组右列近不可压实验组, 同一离散的两种材料左右并置, 六格的运行目录见
+产物 case ``bearing-topologies``: 4x2 八格, 四排依次 LFEM p=1 / HZMFEM k=2 / LFEM p=2 / HZMFEM k=3,
+左列可压缩基准组右列近不可压实验组, 同一离散的两种材料左右并置, 八格的运行目录见
 REQUIRED_RUNS.
 
 输出: results/figures/bearing_topologies.png, 自动同步至 papers/huzhang-topopt/figures/
 
 2026-09-28 起按版心尺寸出图: 图宽取 CICP 版心 150 mm (5.9 in), 论文里以 ``width=\\textwidth``
-原尺寸嵌入, 面板标题字号即纸面字号; 高度按 3 行 120x40 面板加 3 行标题算出. 面板标题只写
+原尺寸嵌入, 面板标题字号即纸面字号; 高度按 4 行 120x40 面板加 4 行标题算出. 面板标题只写
 编号、方法、阶次与泊松比, 柔顺度数值由论文表 (优化所得柔顺度列) 给出. 密度场是分片常数,
 矢量输出会显出三角形接缝, 故只出 600 dpi 的 PNG.
 
@@ -31,8 +31,8 @@ from ._base import (
 
 paper_rcparams()
 
-# 版心宽 150 mm; 高度 = 3 行面板 (每行约 0.95 in) + 3 行 9 pt 标题 + 行距.
-FIG_SIZE_IN = (5.9, 3.55)
+# 版心宽 150 mm; 高度 = 4 行面板 (每行约 0.95 in) + 4 行 9 pt 标题 + 行距.
+FIG_SIZE_IN = (5.9, 4.73)
 TITLE_PT = 9.0
 DPI = 600
 
@@ -43,25 +43,29 @@ SOURCE_CASE = "bearing"
 REQUIRED_RUNS = (
     "nu-0.3/analyzer-lfem__order-1",
     "nu-0.4999/analyzer-lfem__order-1",
-    "nu-0.3/analyzer-lfem__order-2",
-    "nu-0.4999/analyzer-lfem__order-2",
     "nu-0.3/analyzer-huzhang__order-2",
     "nu-0.4999/analyzer-huzhang__order-2",
+    "nu-0.3/analyzer-lfem__order-2",
+    "nu-0.4999/analyzer-lfem__order-2",
+    "nu-0.3/analyzer-huzhang__order-3",
+    "nu-0.4999/analyzer-huzhang__order-3",
 )
 
 OUTPUTS_ROOT = config.OUTPUT_DIR / SOURCE_CASE
 
 # 面板顺序与 REQUIRED_RUNS 逐项对齐, 按 subplots 的行优先展开: 每排一种离散
-# (LFEM p=1 / LFEM p=2 / HZMFEM k=2), 排内左可压缩右近不可压. 下面 zip 起来即成
+# (LFEM p=1 / HZMFEM k=2 / LFEM p=2 / HZMFEM k=3), 排内左可压缩右近不可压. 下面 zip 起来即成
 # PANELS: run 路径只在 REQUIRED_RUNS 里写一遍, 不在本文件出现第二处, 免得改一处漏一
 # 处. 阶次标签 LFEM 用 p, HZMFEM 用 k.
 PANEL_LABELS = [
     ("(a)", "LFEM", "p=1", r"\nu_0 = 0.30"),
     ("(b)", "LFEM", "p=1", r"\nu_0 = 0.4999"),
-    ("(c)", "LFEM", "p=2", r"\nu_0 = 0.30"),
-    ("(d)", "LFEM", "p=2", r"\nu_0 = 0.4999"),
-    ("(e)", "HZMFEM", "k=2", r"\nu_0 = 0.30"),
-    ("(f)", "HZMFEM", "k=2", r"\nu_0 = 0.4999"),
+    ("(c)", "HZMFEM", "k=2", r"\nu_0 = 0.30"),
+    ("(d)", "HZMFEM", "k=2", r"\nu_0 = 0.4999"),
+    ("(e)", "LFEM", "p=2", r"\nu_0 = 0.30"),
+    ("(f)", "LFEM", "p=2", r"\nu_0 = 0.4999"),
+    ("(g)", "HZMFEM", "k=3", r"\nu_0 = 0.30"),
+    ("(h)", "HZMFEM", "k=3", r"\nu_0 = 0.4999"),
 ]
 PANELS = [
     (*labels, *run.split("/", 1))
@@ -70,7 +74,7 @@ PANELS = [
 
 
 def main():
-    fig, axes = plt.subplots(3, 2, figsize=FIG_SIZE_IN, layout="constrained")
+    fig, axes = plt.subplots(4, 2, figsize=FIG_SIZE_IN, layout="constrained")
     fig.get_layout_engine().set(w_pad=0.02, h_pad=0.02, wspace=0.03, hspace=0.06)
     axes = axes.flat
 

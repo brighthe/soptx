@@ -1,0 +1,247 @@
+{
+  "iteration": 3,
+  "compliance": 358.8704009721624,
+  "volume_fraction": 0.11995359885995552,
+  "relative_change": 0.8253124337541871,
+  "symmetry_error_z": 8.314929023089945e-09,
+  "design_symmetry_error_z": 9.819795143695131e-09,
+  "assembly_seconds": 1.1555492889965535,
+  "solve_seconds": 9.666668183999718,
+  "cg_iterations": 1417,
+  "cg_relative_residual": 9.843171716981076e-07,
+  "cg_converged": true,
+  "analysis_seconds": 10.830262491996109,
+  "peak_rss_gib": 2.640918731689453,
+  "vtu_file": "iterations/iter_0003.vtu",
+  "stages": {
+    "过滤": {
+      "seconds": 0.0006159719996503554,
+      "peak_gib": 2.5827407836914062,
+      "net_gib": 0.0,
+      "after_gib": 2.5827407836914062,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 4.992115497589111,
+      "gpu_net_gib": 0.008954524993896484,
+      "gpu_after_gib": 4.985077857971191,
+      "gpu_reserved_gib": 9.7109375
+    },
+    "装配": {
+      "seconds": 1.1529324669972993,
+      "peak_gib": 2.5827407836914062,
+      "net_gib": 0.0,
+      "after_gib": 2.5827407836914062,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 8.101544380187988,
+      "gpu_net_gib": 3.116466522216797,
+      "gpu_after_gib": 4.975934028625488,
+      "gpu_reserved_gib": 9.7109375
+    },
+    "边界条件": {
+      "seconds": 0.002616821999254171,
+      "peak_gib": 2.5827407836914062,
+      "net_gib": 0.0,
+      "after_gib": 2.5827407836914062,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 5.012089252471924,
+      "gpu_net_gib": 0.03615522384643555,
+      "gpu_after_gib": 4.994945526123047,
+      "gpu_reserved_gib": 9.7109375
+    },
+    "接口求解": {
+      "seconds": 9.004599363004672,
+      "peak_gib": 2.582744598388672,
+      "net_gib": 3.814697265625e-06,
+      "after_gib": 2.582744598388672,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 5.031527519226074,
+      "gpu_net_gib": 0.036581993103027344,
+      "gpu_after_gib": 4.991776943206787,
+      "gpu_reserved_gib": 9.7109375
+    },
+    "回代": {
+      "seconds": 0.6620688209950458,
+      "peak_gib": 2.582744598388672,
+      "net_gib": 0.0,
+      "after_gib": 2.582744598388672,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 8.132303237915039,
+      "gpu_net_gib": 3.140526294708252,
+      "gpu_after_gib": 4.991776943206787,
+      "gpu_reserved_gib": 9.7109375
+    },
+    "灵敏度": {
+      "seconds": 0.004522461000306066,
+      "peak_gib": 2.582744598388672,
+      "net_gib": 0.0,
+      "after_gib": 2.582744598388672,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 5.131147384643555,
+      "gpu_net_gib": 0.14548301696777344,
+      "gpu_after_gib": 4.985678672790527,
+      "gpu_reserved_gib": 9.7109375
+    },
+    "输出": {
+      "seconds": 0.21219487700000172,
+      "peak_gib": 2.640918731689453,
+      "net_gib": 0.05817413330078125,
+      "after_gib": 2.58282470703125,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 4.985678672790527,
+      "gpu_net_gib": 0.0,
+      "gpu_after_gib": 4.985678672790527,
+      "gpu_reserved_gib": 9.7109375
+    }
+  },
+  "assembly_breakdown": {},
+  "boundary_breakdown": {
+    "non_body_load": 0.00011398800415918231,
+    "load_cache_present_before": true,
+    "dirichlet_data": 1.766100467648357e-05,
+    "dirichlet_cache_present_before": true,
+    "prepare_system": 0.0004228850011713803
+  },
+  "peak_gpu_gib": 8.132303237915039,
+  "iteration_seconds": 11.043291738002154,
+  "converged": false,
+  "termination": "max_iter",
+  "n_cells": 257250,
+  "n_dofs": 820368,
+  "n_interface_dofs": 425232,
+  "interface_nnz": 364941180,
+  "interface_index_dtype": "int32",
+  "symmetry_error_x": 0.11452874842240288,
+  "setup_stages": {
+    "网格": {
+      "seconds": 0.6785552419969463,
+      "peak_gib": 1.1805572509765625,
+      "net_gib": 0.5118789672851562,
+      "after_gib": 1.0936660766601562,
+      "major_faults": 12,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 0.6781578063964844,
+      "gpu_net_gib": 0.6781578063964844,
+      "gpu_after_gib": 0.17632293701171875,
+      "gpu_reserved_gib": 0.7421875
+    },
+    "材料与插值": {
+      "seconds": 0.0003797800018219277,
+      "peak_gib": 1.0937042236328125,
+      "net_gib": 0.0,
+      "after_gib": 1.0937042236328125,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 0.17632341384887695,
+      "gpu_net_gib": 4.76837158203125e-07,
+      "gpu_after_gib": 0.17632341384887695,
+      "gpu_reserved_gib": 0.7421875
+    },
+    "子结构布局与校验": {
+      "seconds": 0.030332935995829757,
+      "peak_gib": 1.1137504577636719,
+      "net_gib": 0.0200042724609375,
+      "after_gib": 1.1137504577636719,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 0.21149826049804688,
+      "gpu_net_gib": 0.03517484664916992,
+      "gpu_after_gib": 0.17632341384887695,
+      "gpu_reserved_gib": 0.7421875
+    },
+    "分析器": {
+      "seconds": 1.0235245670046424,
+      "peak_gib": 1.4541854858398438,
+      "net_gib": 0.34039306640625,
+      "after_gib": 1.4541854858398438,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 0.30565690994262695,
+      "gpu_net_gib": 0.12933349609375,
+      "gpu_after_gib": 0.20764398574829102,
+      "gpu_reserved_gib": 0.755859375
+    },
+    "过滤矩阵": {
+      "seconds": 1.6819824699996389,
+      "peak_gib": 2.8774185180664062,
+      "net_gib": 1.4232292175292969,
+      "after_gib": 2.411571502685547,
+      "major_faults": 10,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 0.7009234428405762,
+      "gpu_net_gib": 0.49327945709228516,
+      "gpu_after_gib": 0.47418928146362305,
+      "gpu_reserved_gib": 0.94140625
+    },
+    "目标与约束": {
+      "seconds": 0.022990209006820805,
+      "peak_gib": 2.411670684814453,
+      "net_gib": 3.4332275390625e-05,
+      "after_gib": 2.411670684814453,
+      "major_faults": 0,
+      "swap_gib": 0.0,
+      "gpu_peak_gib": 0.7076573371887207,
+      "gpu_net_gib": 0.23346805572509766,
+      "gpu_after_gib": 0.4780235290527344,
+      "gpu_reserved_gib": 0.94140625
+    }
+  },
+  "stage_seconds": {
+    "过滤": {
+      "first": 0.011537428996234667,
+      "steady_mean": 0.0006077649995859247,
+      "total": 0.012752958995406516,
+      "count": 3
+    },
+    "装配": {
+      "first": 6.3669937509985175,
+      "steady_mean": 1.1305129934989964,
+      "total": 8.62801973799651,
+      "count": 3
+    },
+    "边界条件": {
+      "first": 0.06348439199791756,
+      "steady_mean": 0.0025026250004884787,
+      "total": 0.06848964199889451,
+      "count": 3
+    },
+    "接口求解": {
+      "first": 5.129756192000059,
+      "steady_mean": 8.866385070505203,
+      "total": 22.862526333010464,
+      "count": 3
+    },
+    "回代": {
+      "first": 0.6636020349978935,
+      "steady_mean": 0.663614103996224,
+      "total": 1.9908302429903415,
+      "count": 3
+    },
+    "灵敏度": {
+      "first": 0.009296117998019326,
+      "steady_mean": 0.004508085999987088,
+      "total": 0.018312289997993503,
+      "count": 3
+    },
+    "输出": {
+      "first": 0.2557792539955699,
+      "steady_mean": 0.21374342550188885,
+      "total": 0.6832661049993476,
+      "count": 3
+    },
+    "OC": {
+      "first": 0.007379012000455987,
+      "steady_mean": 0.007435270999849308,
+      "total": 0.014814283000305295,
+      "count": 2
+    }
+  },
+  "process_peak_rss_gib": 7.604377746582031,
+  "total_seconds": 34.321690493998176,
+  "process_peak_gpu_gib": 8.132930278778076
+}

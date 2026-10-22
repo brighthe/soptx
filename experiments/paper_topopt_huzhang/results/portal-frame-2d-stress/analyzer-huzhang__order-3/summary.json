@@ -1,0 +1,69 @@
+{
+  "case_id": "portal-frame-2d-stress",
+  "model": "PortalFramePatch2d",
+  "method": "huzhang",
+  "order": 3,
+  "mesh_type": "triangle-gmsh-mirrored",
+  "mesh_size": 0.0625,
+  "optimizer": "al_mma",
+  "load_discretization": "p1_trace_l2_projection",
+  "integration_order": 8,
+  "stabilization_coefficient": "fixed",
+  "volume_fraction": 0.23620042202819563,
+  "relative_equilibrium_residual": 2.679685328615954e-08,
+  "optimization_iterations": 315,
+  "converged": true,
+  "termination_reason": "criterion-met: C0-C2 held for 10 consecutive ALM steps (change=1.500e-01, change_phys=2.774e-02, change_outer_mean=2.789e-04, measure=mean, max_rel_solid=1.263e-03 (C2 quantity, threshold=0.5), max_rel_global=1.905e-03, beta=10.0, p=3.5)",
+  "solver": "mumps",
+  "interpolation": {
+    "variables": "E"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-16T07:38:45+00:00",
+    "git_revision": "c0b5a69f3af9bddcd571e62822d8732b579a256c",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "stress_constraint_formulation": "apparent",
+  "max_constraint": 0.0019053092660603265,
+  "max_apparent_stress_ratio": 1.0004419073637099,
+  "max_relative_violation": 0.0019053092660603265,
+  "relative_stress_tolerance": 0.005,
+  "acceptance_solid_threshold": 0.5,
+  "max_relative_violation_solid_region": 0.001263203925037315,
+  "relative_stress_feasible": true,
+  "max_solid_stress_ratio_solid_region": 1.014865005420411,
+  "load_pad_radius": 0.0,
+  "load_pad_centers": [
+    [
+      5.5,
+      6.0
+    ],
+    [
+      6.5,
+      6.0
+    ]
+  ],
+  "pad_cells": 0,
+  "load_pad_cells": 0,
+  "max_solid_stress_ratio_constrained": 8.404609068406971,
+  "max_solid_stress_ratio_pad": null,
+  "max_constraint_pad": null,
+  "complementarity_residual": 1.6211429936033837,
+  "multiplier_relative_change": 0.040491131437805125,
+  "change_outer_mean": 0.00027886843960172296,
+  "change_outer_max": 0.30000000000000004,
+  "lambda_max": 3000.0,
+  "multiplier_capped_count": 0,
+  "optimizer_state": {
+    "file": "final_optimizer_state.npz",
+    "purpose": "frozen-analysis-and-inner-diagnostics",
+    "exact_restart_supported": false,
+    "beta": 10.0,
+    "inner_stop_rule": "legacy",
+    "inner_relative_tolerance": 0.1,
+    "inner_absolute_tolerance": 1e-06,
+    "max_inner_iterations": 5,
+    "last_inner_diagnostics": null
+  }
+}

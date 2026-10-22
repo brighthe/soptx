@@ -1,10 +1,10 @@
 # 传统有限元拓扑优化: EA 与 FA 对照
 
-本目录验证传统有限元 (Q1 六面体, Lagrange 位移元) 下 EA 与 FA 两种刚度算子层级的拓扑优化结果一致性与计算代价。两条流程除算子层级外完全相同, 由同一脚本以 `--level` 切换, 算例为 Huang2023 的三维 MBB 梁首档。
+本目录验证传统有限元 (Q1 六面体, Lagrange 位移元) 下 EA 与 FA 两种刚度算子层级的拓扑优化结果一致性与计算代价。两条流程除算子层级外完全相同, 由同一脚本以 `--assemble-level` 切换, 算例为 Huang2023 的三维 MBB 梁首档。
 
 | 文件 | 内容 |
 |---|---|
-| [`run_fem_ea_vs_fa.py`](run_fem_ea_vs_fa.py) | 运行入口, `--level ea` 为一份参考单元刚度乘逐单元系数、不形成全局矩阵, `--level fa` 为全局 CSR 稀疏矩阵; `--grid`、`--preconditioner` 选网格与 CG 预条件子 |
+| [`run_fem_ea_vs_fa.py`](run_fem_ea_vs_fa.py) | 运行入口, `--assemble-level ea` 为一份参考单元刚度乘逐单元系数、不形成全局矩阵, `--assemble-level fa` 为全局 CSR 稀疏矩阵; `--grid`、`--preconditioner` 选网格与 CG 预条件子, `--backend`、`--device` 选后端与设备 |
 | [`fem_ea_vs_fa.md`](fem_ea_vs_fa.md) | EA 与 FA 公共实验参数、结果一致性与耗时、内存对照 |
 | [`run_fem_preconditioners.py`](run_fem_preconditioners.py) | CG 预条件子有效性对照: 固定密度场下逐档加密网格, 以 `--preconditioner` 选择 none / jacobi / gmg, 比较 CG 步数随单元尺寸的增长, 见 [预条件子对照](#预条件子对照) |
 | [`fem_preconditioners.md`](fem_preconditioners.md) | 预条件子对照的实验设置、各密度下的步数与耗时、结论 |
@@ -24,14 +24,14 @@
 在仓库根目录、已安装 SOPTX 的 Python 环境中执行, 两侧各为一次独立运行:
 
 ```bash
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level ea --max-iter 3
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa --max-iter 3
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa --grid 48 8 8 --preconditioner gmg
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level ea --max-iter 3
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level fa --max-iter 3
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level fa --grid 48 8 8 --preconditioner gmg
 ```
 
 线程固定为单线程: 脚本顶部的 `NUM_THREADS = 1` 在导入 numpy/scipy 之前写入全部 BLAS / OpenMP 线程变量, 覆盖 shell 中的已有设置, 实际取值与已加载的 BLAS 库记入 `config.json` 的 `threads`。EA 的单元作用经由 BLAS, FA 的稀疏矩阵向量积与 `bincount` 不经由 BLAS, 多线程会让对照混入库的线程支持差异; 且不设置时 NumPy 链接的 BLIS 默认单线程, SciPy 内置的 OpenBLAS 默认用满全部核, 口径不一。
 
-每次运行只跑一侧: 内存按进程 RSS 记录, 两侧同进程连跑会互相污染。命令行有必填的 `--level` 与可选的 `--grid NX NY NZ` (默认常量 `GRID = (210, 35, 35)`)、`--preconditioner {none,jacobi,gmg}` (默认常量 `PRECONDITIONER = 'jacobi'`)、`--max-iter N` (默认常量 `MAX_ITER = 300`), 其余设置 (后端与设备、MGCG 选项与 VTU 场) 均为脚本顶部常量, 改设置须改常量。
+每次运行只跑一侧: 内存按进程 RSS 记录, 两侧同进程连跑会互相污染。命令行有必填的 `--assemble-level` 与可选的 `--grid NX NY NZ` (默认常量 `GRID = (210, 35, 35)`)、`--preconditioner {none,jacobi,gmg}` (默认常量 `PRECONDITIONER = 'jacobi'`)、`--max-iter N` (默认常量 `MAX_ITER = 300`)、`--backend {numpy,pytorch}` (默认 numpy)、`--device {cpu,cuda}` (默认 cpu, cuda 须配 pytorch)、`--gpu-memory-limit GIB` (只用于 cuda, 默认常量 `CUDA_MEMORY_LIMIT_GIB = 14.0`) 与 `--cpu-memory-limit GIB` (只用于 cpu, 按启动后新增的虚拟内存计, 不给则不设上限); pytorch 后端只支持 none/jacobi 预条件子, 超出内存或显存上限时写 `failure.json` 并以返回码 2 退出; numpy/cpu 沿用原输出目录名, 其余组合加 `<backend>_<device>_` 前缀。其余设置 (MGCG 选项与 VTU 场) 均为脚本顶部常量, 改设置须改常量。
 
 结果写入本目录的 `outputs/{level}_hex_{NX}x{NY}x{NZ}_cg_{preconditioner}/`, 如默认配置为 `outputs/{ea,fa}_hex_210x35x35_cg_jacobi/`; 目录名含层级、网格与预条件子, 不同配置互不覆盖。2026-10-15 之前的运行目录名不含预条件子 (如 `ea_hex_390x65x65_cg`), 保持原名。`outputs/` 是不入库的临时目录, 输出目录已存在时脚本直接清空再重写; 需要保留的结果先用 `sync_results.py` 固化到 `results/` 或自行备份。
 
@@ -57,7 +57,7 @@ python experiments/topopt_simp_fem/fem_preconditioners/make_densities.py --grid 
 ```
 
 - 粗网格密度以 $2^k \times 2^k \times 2^k$ 分片常数注入各档, 各档几何与刚度反差相同。注入保留的是粗网格的杆件, 比真实细网格优化的细杆件温和, 结论偏乐观, 通过筛选的预条件子仍需一次完整优化确认。
-- `--levels K` 为网格加密次数, 共 K + 1 档 (默认取常量 `LEVELS = 2`, 即 48x8x8 至 192x32x32; `--levels 3` 再加 384x64x64, 约 485 万自由度, none 与 jacobi 在单线程下很慢); `OPERATOR_LEVELS` 默认只含 `ea`, `fa` 为同一算子, 加入时同档两层级的解逐分量比较, 仅作交叉核对。
+- `--levels K` 为网格加密次数, 共 K + 1 档 (默认取常量 `LEVELS = 2`, 即 48x8x8 至 192x32x32; `--levels 3` 再加 384x64x64, 约 485 万自由度, none 与 jacobi 在单线程下很慢); `OPERATOR_LEVELS` 取 `('ea', 'fa')`: 两者为同一算子, 同档两层级的解逐分量比较; 两层级的 matvec 耗时供 `fem_ea_vs_fa.md` 3.2 对照, jacobi + uniform 的这次运行固化为 `results/ea_vs_fa_matvec_jacobi_uniform_48x8x8_L2/` (输出目录名不含层级, 与 `results/` 下只含 `fa` 的旧目录 `preconditioner_jacobi_uniform_48x8x8_L2/` 区分)。
 - 各档在同一进程内依次执行, 单档出错只记录不中断; 只比较步数与耗时, 不记录内存。耗时分解: `solve_seconds` 为实测求解耗时 (含 `solve_system` 内部的预条件子构造); 求解后另构造一次预条件子单独计时为 `preconditioner_setup_seconds` (GMG 层次结构已缓存, 即优化中每轮重建的成本), 再以 CG 内部同样的 `A @ p`、`M @ r` 对随机向量重复作用取平均得 `matvec_seconds`、`apply_seconds`; `other_seconds` = 实测 − (构造 + 步数 × (matvec + 作用)), 含向量运算、GMG 首次建立层次结构与调用开销。
 - 结果写入 `outputs/preconditioner_{none,jacobi,gmg}_{密度}_{NX}x{NY}x{NZ}_L{K}/` (已存在即清空重写): `config.json`、逐档的 `results.json`、含斜率的 `summary.json` 与逐档位移 `displacement_{层级}_{NX}x{NY}x{NZ}.npy`, 运行结束打印步数表。
 

@@ -3,13 +3,13 @@
 设计域 120 mm x 40 mm, 平面应变, 底边固支, 顶边竖直向下均布牵引. 两组材料:
 可压缩基准组 nu = 0.3 (只插值 Young 模量) 与近不可压缩组 nu = 0.4999 (按式 (4.4)
 同时插值 Young 模量与 Poisson 比). 每组以 LFEM p = 1, 2 与 HZMFEM k = 2 (跳量
-稳定化) 各做一次 OC 优化, 共六次; LFEM p = 1 用于对照线性位移元的体积自锁.
+稳定化), k = 3 (无需稳定化) 各做一次 OC 优化, 共八次; LFEM p = 1 用于对照线性位移元的体积自锁.
 
 结果写入运行目录 ``outputs/<case>/<group>/<label>/`` (不入库, 已存在则拒绝覆盖); 确认后经
 ``sync_results.py`` (算例名取 ``<case>/<group>``) 固化到入库的 ``results/``. 逐步帧 ``iterations/`` 与
 ``evolution.pvd`` 留在运行目录, 需要时手动迁移到 Windows 查看目录 ``config.VIEW_DIR``.
 
-    python run_bearing.py                                          # 两组材料 x 三种离散
+    python run_bearing.py                                          # 两组材料 x 四种离散
     python run_bearing.py --group nu-0.4999 --analyzer lfem --order 1
 """
 
@@ -57,7 +57,7 @@ NU_PENALTY = 1.0             # E+nu 插值: Poisson 比惩罚指数
 # 离散: 对称单向对角三角网格 (nx 须为偶数)
 NX, NY = 120, 40
 MESH_TYPE = "triangle-single-diagonal-symmetric"
-RUNS = (("lfem", 1), ("lfem", 2), ("huzhang", 2))   # 每组材料的三种离散
+RUNS = (("lfem", 1), ("huzhang", 2), ("lfem", 2), ("huzhang", 3))   # 按位移逼近次数配对
 # HZMFEM 角点松弛: 不松弛. Hu--Ma (2021) 4.1 节只在两条牵引边的角点数据不一致时需要松弛;
 # 本模型顶边角点受法向压载 (0, t), 与零牵引侧边对 sigma_xy 的要求都是 0, 一致; 底边角点为位移--牵引角点
 USE_RELAXATION = False
@@ -78,13 +78,13 @@ CHANGE_TOLERANCE = 1.0e-2
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """解析要跑的材料组、分析链与阶次; 缺省为两组材料 x 三种离散."""
+    """解析要跑的材料组、分析链与阶次; 缺省为两组材料 x 四种离散."""
     parser = argparse.ArgumentParser(description="二维轴承装置近不可压缩拓扑优化 (论文 5.2.2 节)")
     parser.add_argument("--group", choices=tuple(GROUPS), action="append",
                         help="只跑指定材料组 (可重复); 缺省为两组")
     parser.add_argument("--analyzer", choices=("lfem", "huzhang"), action="append",
                         help="只跑指定分析链 (可重复)")
-    parser.add_argument("--order", type=int, choices=(1, 2), action="append",
+    parser.add_argument("--order", type=int, choices=(1, 2, 3), action="append",
                         help="只跑指定阶次 (可重复)")
     return parser.parse_args(argv)
 

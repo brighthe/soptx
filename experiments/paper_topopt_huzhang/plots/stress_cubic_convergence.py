@@ -9,9 +9,10 @@
 - (b)(d) 主应力空间内的单元应力分布: 取 postprocess/ 下的 npz
   (sig1/sig2/vm/solid_mask/pad_mask), 由 ``plot.py export --run lfem-k3 --run
   huzhang-k3`` 从 density_final.vtu 冻结重分析导出; export 认的运行目录与本模块的
-  REQUIRED_RUNS 前两项是同一批 (analysis.stress_metrics.resolve_run_dir 按注册口径解析). 散点只画
-  判据集合 E_acc: solid_mask (rho > 0.5) 剔除 pad_mask (被动实体区, rho 固定 1 但不
-  施加约束).
+  REQUIRED_RUNS 前两项是同一批 (analysis.stress_metrics.resolve_run_dir 按注册口径解析). 散点画
+  被动实体区外的全部受约束单元 (剔除 pad_mask: rho 固定 1 但不施加约束), 与 PolyStress
+  (Giraldo-Londono & Paulino 2021) 图 6 / 8 的屈服面图同口径: 全部应力评价点的表观主应力,
+  空洞与灰度单元的表观应力被 m_E 压小, 聚在原点附近. 2026-10-16 前只画 rho > 0.5 的单元.
 
 右轴画 ``max_relative_violation_solid``, 即判据集合上的 g_max, 停止准则判的就是它
 <= delta_g; 全域 (含灰度单元) 的 ``max_relative_violation`` 不画, 正文亦不引.
@@ -115,8 +116,113 @@ def load_fields(base, relpath: str):
 
 
 def acceptance_mask(fields) -> np.ndarray:
-    """判据集合 E_acc = 实体单元 (rho > 0.5) 剔除被动实体区."""
-    return fields["solid_mask"].astype(bool) & ~fields["pad_mask"].astype(bool)
+    """散点单元集合: 被动实体区外的全部受约束单元 (论文 4.6.2 节的 E_acc)."""
+    return ~fields["pad_mask"].astype(bool)
+
+
+def plot_convergence(axes, volfrac, g_max, tolerance, title, volume_ylim=(0.30, 0.70)):
+    """左列收敛历史面板: 体积分数 (左轴) 与最大局部约束值 (右轴, 对数) 及容差线.
+
+    Parameters
+    ----------
+    axes : Axes
+        目标坐标轴.
+    volfrac, g_max : ndarray
+        逐 MMA 更新的体积分数与最大局部约束值.
+    tolerance : float
+        约束容差 delta_g.
+    title : str
+        面板标题.
+    volume_ylim : tuple of float, optional
+        体积分数轴范围, 缺省按悬臂梁取 (0.30, 0.70).
+    """
+    iterations = np.arange(1, len(volfrac) + 1)
+    line_volume, = axes.plot(iterations, volfrac, color=COLOR_PRIMARY, lw=1.2,
+                             label="$f_V$")
+    axes.set_xlabel("Iteration", fontsize=LABEL_PT)
+    axes.set_ylabel("Volume fraction $f_V$", fontsize=LABEL_PT, color=COLOR_PRIMARY)
+    axes.tick_params(axis="both", labelsize=TICK_PT)
+    axes.set_ylim(*volume_ylim)
+
+    twin = axes.twinx()
+    line_violation, = twin.plot(iterations, g_max, color=COLOR_SECONDARY, lw=1.1,
+                                ls="--", label="$g_{\\max}$")
+    line_tolerance = twin.axhline(tolerance, color=COLOR_SECONDARY, ls=":", lw=0.9,
+                                  alpha=0.7, label=f"$\\delta_g = {tolerance:g}$")
+    twin.set_yscale("log")
+    twin.set_ylabel("Max. local constraint $g_{\\max}$", fontsize=LABEL_PT,
+                    color=COLOR_SECONDARY)
+    twin.tick_params(axis="y", labelsize=TICK_PT)
+    twin.set_ylim(min(tolerance, float(g_max.min())) * 0.5,
+                  float(g_max.max()) * 2.0)
+
+    twin.legend(handles=[line_volume, line_violation, line_tolerance], loc="upper right",
+                **{**LEGEND_STYLE, "handlelength": 1.6})
+    axes.set_title(title, fontsize=TITLE_PT, pad=4)
+    axes.grid(True, ls=":", lw=0.5, alpha=0.5)
+
+def plot_yield_surface(axes, fields, title, *, compact_apparent=False):
+    """右列主应力平面面板: 全部受约束单元的归一化表观主应力散点、许用应力椭圆与色标.
+
+    Parameters
+    ----------
+    axes : Axes
+        目标坐标轴.
+    fields : dict of ndarray
+        ``load_fields`` 的返回.
+    title : str
+        面板标题.
+    compact_apparent : bool, optional
+        是否仅保留红线图例、收紧纵轴范围并显式标注表观应力.
+    """
+    # 紧凑模式仅保留许用应力线图例, 并显式标注表观应力.
+    stress_1 = r"$\sigma_1^{\mathrm{app}} / \bar{\sigma}$" if compact_apparent else r"$\sigma_1 / \bar{\sigma}$"
+    stress_2 = r"$\sigma_2^{\mathrm{app}} / \bar{\sigma}$" if compact_apparent else r"$\sigma_2 / \bar{\sigma}$"
+    stress_vm = r"$\sigma_{\mathrm{vm}}^{\mathrm{app}} / \bar{\sigma}$" if compact_apparent else r"$\sigma_{\mathrm{vm}} / \bar{\sigma}$"
+    # 画全部受约束单元: 空洞与灰度单元的表观应力被 m_E 压小, 聚在原点附近; 被动实体区
+    # rho 固定为 1 但不受约束, 不属于受约束单元, 剔除.
+    keep = acceptance_mask(fields)
+    sig1 = fields["sig1"][keep]
+    sig2 = fields["sig2"][keep]
+    vm = fields["vm"][keep]
+
+    # von Mises 许用应力边界: sig1^2 - sig1*sig2 + sig2^2 = 1 (参数化椭圆)
+    th = np.linspace(0.0, 2.0 * np.pi, 400)
+    ct, st = np.cos(th), np.sin(th)
+    scale = 1.0 / np.sqrt(ct ** 2 - ct * st + st ** 2)
+    yield_line, = axes.plot(ct * scale, st * scale, color=COLOR_YIELD, lw=1.1,
+                            label="$\\sigma_{\\mathrm{vm}} = \\bar{\\sigma}$")
+
+    # 色标固定在 [0, 1], 两图可直接对比.
+    sc = axes.scatter(sig1, sig2, c=vm, cmap=STRESS_CMAP, vmin=0.0, vmax=1.0,
+                      s=2.5, alpha=0.85, linewidths=0)
+
+    marker_proxy = Line2D([], [], linestyle="none", marker="o", markersize=3.5,
+                          markerfacecolor=plt.get_cmap(STRESS_CMAP)(0.75),
+                          markeredgecolor="none",
+                          label=r"Constrained elements ($\mathcal{E}_{\mathrm{acc}}$)")
+
+    axes.axhline(0.0, color=COLOR_REFERENCE, lw=0.6, ls=":")
+    axes.axvline(0.0, color=COLOR_REFERENCE, lw=0.6, ls=":")
+    axes.set_xlim(-1.5, 1.5)
+    axes.set_ylim(-1.4, 1.4) if compact_apparent else axes.set_ylim(-1.5, 1.9)
+    axes.set_aspect("equal")
+    if compact_apparent:
+        yield_line.set_label(r"$\sigma_{\mathrm{vm}}^{\mathrm{app}} = \bar{\sigma}$")
+    axes.legend(handles=[yield_line] if compact_apparent else [yield_line, marker_proxy], loc="upper left",
+                **{**LEGEND_STYLE, "fontsize": 7.0, "handlelength": 1.2,
+                   "borderpad": 0.3})
+    axes.set_xlabel(stress_1, fontsize=LABEL_PT)
+    axes.set_ylabel(stress_2, fontsize=LABEL_PT)
+    axes.tick_params(labelsize=TICK_PT)
+    axes.set_title(title, fontsize=TITLE_PT, pad=4)
+    axes.grid(True, ls=":", lw=0.5, alpha=0.5)
+
+    cax = axes.inset_axes([1.05, 0.0, 0.05, 1.0])
+    cbar = axes.figure.colorbar(sc, cax=cax)
+    cbar.set_ticks(np.linspace(0.0, 1.0, 6))
+    cbar.ax.tick_params(labelsize=TICK_PT)
+    cbar.set_label(stress_vm, fontsize=LABEL_PT)
 
 
 def main() -> None:
@@ -125,76 +231,6 @@ def main() -> None:
     hz_vf, hz_g, hz_tol = load_history(base, REQUIRED_RUNS[1])
     lf_fields = load_fields(base, REQUIRED_RUNS[2])
     hz_fields = load_fields(base, REQUIRED_RUNS[3])
-
-    def plot_convergence(axes, volfrac, g_max, tolerance, title):
-        iterations = np.arange(1, len(volfrac) + 1)
-        line_volume, = axes.plot(iterations, volfrac, color=COLOR_PRIMARY, lw=1.2,
-                                 label="$f_V$")
-        axes.set_xlabel("Iteration", fontsize=LABEL_PT)
-        axes.set_ylabel("Volume fraction $f_V$", fontsize=LABEL_PT, color=COLOR_PRIMARY)
-        axes.tick_params(axis="both", labelsize=TICK_PT)
-        axes.set_ylim(0.30, 0.70)
-
-        twin = axes.twinx()
-        line_violation, = twin.plot(iterations, g_max, color=COLOR_SECONDARY, lw=1.1,
-                                    ls="--", label="$g_{\\max}$")
-        line_tolerance = twin.axhline(tolerance, color=COLOR_SECONDARY, ls=":", lw=0.9,
-                                      alpha=0.7, label=f"$\\delta_g = {tolerance:g}$")
-        twin.set_yscale("log")
-        twin.set_ylabel("Max. local constraint $g_{\\max}$", fontsize=LABEL_PT,
-                        color=COLOR_SECONDARY)
-        twin.tick_params(axis="y", labelsize=TICK_PT)
-        twin.set_ylim(min(tolerance, float(g_max.min())) * 0.5,
-                      float(g_max.max()) * 2.0)
-
-        twin.legend(handles=[line_volume, line_violation, line_tolerance], loc="upper right",
-                    **{**LEGEND_STYLE, "handlelength": 1.6})
-        axes.set_title(title, fontsize=TITLE_PT, pad=4)
-        axes.grid(True, ls=":", lw=0.5, alpha=0.5)
-
-    def plot_yield_surface(axes, fields, title):
-        # 只画判据集合: 空洞单元的表观应力被 m_E 压到接近零, 全堆在原点; 被动实体区
-        # rho 固定为 1 但不受约束, 也不属于判据集合, 一并剔除.
-        keep = acceptance_mask(fields)
-        sig1 = fields["sig1"][keep]
-        sig2 = fields["sig2"][keep]
-        vm = fields["vm"][keep]
-
-        # von Mises 许用应力边界: sig1^2 - sig1*sig2 + sig2^2 = 1 (参数化椭圆)
-        th = np.linspace(0.0, 2.0 * np.pi, 400)
-        ct, st = np.cos(th), np.sin(th)
-        scale = 1.0 / np.sqrt(ct ** 2 - ct * st + st ** 2)
-        yield_line, = axes.plot(ct * scale, st * scale, color=COLOR_YIELD, lw=1.1,
-                                label="$\\sigma_{\\mathrm{vm}} = \\bar{\\sigma}$")
-
-        # 色标固定在 [0, 1], 两图可直接对比.
-        sc = axes.scatter(sig1, sig2, c=vm, cmap=STRESS_CMAP, vmin=0.0, vmax=1.0,
-                          s=2.5, alpha=0.85, linewidths=0)
-
-        marker_proxy = Line2D([], [], linestyle="none", marker="o", markersize=3.5,
-                              markerfacecolor=plt.get_cmap(STRESS_CMAP)(0.75),
-                              markeredgecolor="none",
-                              label=r"Solid elements ($\mathcal{E}_{\mathrm{acc}}$)")
-
-        axes.axhline(0.0, color=COLOR_REFERENCE, lw=0.6, ls=":")
-        axes.axvline(0.0, color=COLOR_REFERENCE, lw=0.6, ls=":")
-        axes.set_xlim(-1.5, 1.5)
-        axes.set_ylim(-1.5, 1.9)
-        axes.set_aspect("equal")
-        axes.legend(handles=[yield_line, marker_proxy], loc="upper left",
-                    **{**LEGEND_STYLE, "fontsize": 7.0, "handlelength": 1.2,
-                       "borderpad": 0.3})
-        axes.set_xlabel(r"$\sigma_1 / \bar{\sigma}$", fontsize=LABEL_PT)
-        axes.set_ylabel(r"$\sigma_2 / \bar{\sigma}$", fontsize=LABEL_PT)
-        axes.tick_params(labelsize=TICK_PT)
-        axes.set_title(title, fontsize=TITLE_PT, pad=4)
-        axes.grid(True, ls=":", lw=0.5, alpha=0.5)
-
-        cax = axes.inset_axes([1.05, 0.0, 0.05, 1.0])
-        cbar = axes.figure.colorbar(sc, cax=cax)
-        cbar.set_ticks(np.linspace(0.0, 1.0, 6))
-        cbar.ax.tick_params(labelsize=TICK_PT)
-        cbar.set_label(r"$\sigma_{\mathrm{vm}} / \bar{\sigma}$", fontsize=LABEL_PT)
 
     # MMA 更新次数由正文给出, 标题不写.
     fig = plt.figure(figsize=FIG_SIZE_IN)

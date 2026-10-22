@@ -3,8 +3,8 @@
 
 优化跑出的柔顺度只在各自离散下可比: 低阶位移元在近不可压缩材料上因体积闭锁
 低估柔顺度, 不同离散优化出的设计不能直接横比. 本模块只做前向求解, 不做优化:
-把每组材料 (nu = 0.3 / 0.4999) 的三个最终设计 (density_final.vtu) 冻结, 分别用四种离散 (三种
-参赛离散 lfem p=1 / lfem p=2 / Hu--Zhang k=2, 加一列参考离散 Hu--Zhang k=4)
+把每组材料 (nu = 0.3 / 0.4999) 的四个最终设计 (density_final.vtu) 冻结, 分别用五种离散 (四种
+参赛离散 lfem p=1 / lfem p=2 / Hu--Zhang k=2,3, 加一列参考离散 Hu--Zhang k=4)
 重新求解一次柔顺度, 得到按"设计"逐行的交叉表. 参考列的作用是
 给每个设计一个与参赛离散无关的柔顺度基准, 使 p=1 的闭锁、p=2 与 k=2 的残余
 离散误差各自可量化, 而不是互相为分母.
@@ -14,7 +14,7 @@
     table.py bearing-reanalysis -> run_bearing_reanalysis()
 
 分析链由 ``run_bearing.build`` 组装, 与优化运行同一份代码. 两组材料的交叉表写进同一个
-``results/bearing/postprocess/frozen_reanalysis.json``, 带 provenance 戳记与六个
+``results/bearing/postprocess/frozen_reanalysis.json``, 带 provenance 戳记与八个
 density_final.vtu 的 sha256. 终端同时打印两张 Markdown 表, 偏差列一律相对 Hu--Zhang
 k=4 参考值.
 """
@@ -40,7 +40,7 @@ GROUPS = tuple(run_bearing.GROUPS)
 
 # 参赛离散 (各自跑过优化, 有 density_final.vtu): lfem p=1 /
 # lfem p=2 / Hu--Zhang k=2 (跳量稳定化, 位移分片 P1)
-DESIGNS: tuple[tuple[str, int], ...] = (("lfem", 1), ("lfem", 2), ("huzhang", 2))
+DESIGNS: tuple[tuple[str, int], ...] = (("lfem", 1), ("huzhang", 2), ("lfem", 2), ("huzhang", 3))
 # 参考离散 (只做再分析, 不跑优化): Hu--Zhang k=4
 REFERENCES: tuple[tuple[str, int], ...] = (("huzhang", 4),)
 ANALYSES: tuple[tuple[str, int], ...] = DESIGNS + REFERENCES
@@ -90,7 +90,7 @@ def frozen_compliance(parts: dict[str, Any], rho_np: np.ndarray) -> tuple[float,
     return compliance, time.perf_counter() - started
 
 
-# ============================================ 一、交叉表: 每组材料 3 设计 x 4 离散
+# ============================================ 一、交叉表: 每组材料 4 设计 x 5 离散
 
 def cross_table(group: str) -> dict[str, Any]:
     case_id = f"{CASE}/{group}"

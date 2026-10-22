@@ -3,7 +3,45 @@
 两种接口迹空间共用同一细网格、子结构划分、求解配置与优化循环, 仅 ``--trace`` 不同.
 参数与结果对照见 substructure_full_trace_vs_linear_corner.md.
 """
+
 import os
+import sys
+
+# 运行环境: OpenMP 与 BLAS 在加载时读取线程数, 须在导入 numpy/scipy 之前写入环境变量才生效.
+# NUM_THREADS 为 --threads 的默认值, 主对照两侧均单线程; 该参数须在导入之前生效, 故先从 sys.argv 预取,
+# 校验仍由 parse_args 完成
+NUM_THREADS = 1
+THREAD_VARIABLES = ('BLIS_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'OMP_NUM_THREADS')
+
+
+def _threads_from_argv(argv: list[str], default: int) -> int:
+    """在导入 numpy 之前从命令行预取 ``--threads``.
+
+    Parameters
+    ----------
+    argv : 命令行参数 (不含程序名).
+    default : 未给出或取值不是正整数时的线程数; 非法取值由 ``parse_args`` 报错.
+
+    Returns
+    -------
+    threads : 写入环境变量的线程数.
+    """
+    for index, arg in enumerate(argv):
+        if arg == '--threads' and index + 1 < len(argv):
+            value = argv[index + 1]
+        elif arg.startswith('--threads='):
+            value = arg.split('=', 1)[1]
+        else:
+            continue
+        return int(value) if value.isdigit() and int(value) > 0 else default
+    return default
+
+
+# 只在直接运行时写入: 重分析脚本在导入 numpy 之后才导入本模块取顶部常量, 此时写入既不生效, 又会改动其环境
+ENV_THREADS = _threads_from_argv(sys.argv[1:], NUM_THREADS) if __name__ == '__main__' else None
+if ENV_THREADS is not None:
+    for _name in THREAD_VARIABLES:
+        os.environ[_name] = str(ENV_THREADS)
 
 import argparse
 import json
@@ -31,7 +69,7 @@ from soptx.topology.optimizers import OCOptimizer
 
 
 # 模型参数
-DOMAIN = (0.0, 210.0, 0.0, 35.0, 0.0, 35.0)
+ELEMENT_SIZE = 1.0
 LOAD = -1.0
 E0 = 1.0
 EMIN = 1.0e-7
@@ -42,8 +80,9 @@ BACKEND = 'numpy'
 DEVICE = 'cpu'
 
 # 分析参数: 有限元离散与子结构
-GRID = (390, 65, 65)
+GRID = (210, 35, 35)
 N_FINE = 5
+N_SUB = tuple(n // N_FINE for n in GRID)  # 由 GRID 与 N_FINE 推出, 不单独修改
 CHUNK_SIZE = 256
 ASSEMBLY_METHOD = 'fast'
 SPACE_DEGREE = 1
@@ -73,7 +112,10 @@ VTU_FIELDS = ('density',)
 
 
 def parse_args(argv=None):
-    """解析接口迹空间与 CG 预条件子并确定输出目录, 其余设置均为模块顶部常量.
+    """解析边界位移表示、CG 预条件子、细网格、子结构划分、最大优化步数与线程数并确定输出目录, 其余设置均为模块顶部常量.
+
+    grid、n_sub、n_fine 须满足 grid = n_sub * n_fine: 三者都给出时检查一致性, 缺一个时由另外两个推出.
+    n_fine 无法由 grid 与 n_sub 推出时取 N_FINE, grid 无法由 n_sub 推出时取 GRID.
 
     Parameters
     ----------
@@ -83,21 +125,70 @@ def parse_args(argv=None):
     Returns
     -------
     args : argparse.Namespace
-        含 ``trace``、``preconditioner`` 与输出目录 ``output``.
+        含 ``trace``、``preconditioner``、细网格 ``grid``、子结构数 ``n_sub``、细单元数 ``n_fine``、
+        最大优化步数 ``max_iter``、线程数 ``threads`` 与输出目录 ``output``.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--trace', choices=('full_trace', 'linear_corner'), required=True,
-                        help='接口迹空间: full_trace 保留全部接口自由度, linear_corner 为角点线性插值')
+                        help='边界位移表示: full_trace 保留全部边界自由度, linear_corner 为角点三线性插值')
     parser.add_argument('--preconditioner', choices=('jacobi', 'gmg', 'none'), default='jacobi',
                         help='CG 预条件子: 主对照两侧均为 jacobi (默认); gmg 由 SubstructureAnalyzer 提供, '
                              '仅支持 full_trace, 用于可选的 full_trace + GMG 对照')
+    parser.add_argument('--grid', type=int, nargs=3, default=None, metavar=('NX', 'NY', 'NZ'),
+                        help=f'细网格各方向单元数, 默认 {" ".join(map(str, GRID))}; 须满足 grid = n_sub * n_fine')
+    parser.add_argument('--n-sub', type=int, nargs=3, default=None, metavar=('NX', 'NY', 'NZ'),
+                        help=f'各方向子结构数, 默认 {" ".join(map(str, N_SUB))} (= GRID // N_FINE), '
+                             '缺省时由 grid 与 n_fine 推出')
+    parser.add_argument('--n-fine', type=int, default=None,
+                        help='每个子结构各方向的细单元数 m; 缺省时由 grid 与 n_sub 推出, '
+                             f'两者不全时取 {N_FINE}')
+    parser.add_argument('--max-iter', type=int, default=MAX_ITER,
+                        help=f'最大优化步数, 默认 {MAX_ITER}')
+    parser.add_argument('--threads', type=int, default=NUM_THREADS,
+                        help=f'CPU 线程数, 在导入前写入 OpenMP 与 BLAS 线程变量 (默认 {NUM_THREADS})')
     args = parser.parse_args(argv)
     # 角点接口的未知量不是细网格自由度, 分析器不支持 gmg; 在创建输出目录前拒绝
     if args.trace == 'linear_corner' and args.preconditioner == 'gmg':
         parser.error('--preconditioner gmg 只支持 --trace full_trace')
-    size = 'x'.join(map(str, GRID))
-    # 目录名含预条件子, 可选的 full_trace + gmg 运行不覆盖主对照结果
-    args.output = OUTPUT_DIR.resolve() / f'{args.trace}_hex_{size}_m{N_FINE}_{SOLVER}_{args.preconditioner}'
+    if args.max_iter < 1:
+        parser.error('--max-iter 须为正整数')
+    if args.threads < 1:
+        parser.error(f'--threads 须为正整数, 得到 {args.threads}')
+    # 线程变量已在导入时按命令行预取的值写入; 以缩写等预取不到的形式给出、经 main(argv) 传入,
+    # 或本模块被导入而非直接运行 (ENV_THREADS 为 None) 时两者不符
+    if args.threads != ENV_THREADS:
+        parser.error(f'--threads {args.threads} 与导入时写入环境变量的线程数 {ENV_THREADS} 不符; '
+                     '须直接运行本脚本, 并在命令行以 --threads N 完整给出')
+    for option, value in (('--grid', args.grid), ('--n-sub', args.n_sub)):
+        if value is not None and min(value) < 1:
+            parser.error(f'{option} 各方向须为正整数')
+
+    grid, n_sub, n_fine = args.grid, args.n_sub, args.n_fine
+    if n_fine is None:
+        if grid is not None and n_sub is not None:
+            if any(g % s for g, s in zip(grid, n_sub)) or len({g // s for g, s in zip(grid, n_sub)}) != 1:
+                parser.error(f'--grid {tuple(grid)} 须为 --n-sub {tuple(n_sub)} 的同一整数倍')
+            n_fine = grid[0] // n_sub[0]
+        else:
+            n_fine = N_FINE
+    # 子结构每向至少 2 个细单元才有内部节点可消元
+    if n_fine < 2:
+        parser.error(f'n_fine 至少为 2, 以保留内部节点, 实际为 {n_fine}')
+    if grid is None:
+        grid = GRID if n_sub is None else tuple(s * n_fine for s in n_sub)
+    # 子结构数由整数除法得到, 不整除时会静默截断, 须在生成目录名之前拒绝
+    if n_sub is None:
+        if any(g % n_fine for g in grid):
+            parser.error(f'grid 各方向须能被 n_fine={n_fine} 整除, 实际为 {tuple(grid)}')
+        n_sub = tuple(g // n_fine for g in grid)
+    if tuple(grid) != tuple(s * n_fine for s in n_sub):
+        parser.error(f'须满足 grid = n_sub * n_fine, 实际 grid={tuple(grid)}, '
+                     f'n_sub={tuple(n_sub)}, n_fine={n_fine}')
+    args.grid, args.n_sub, args.n_fine = tuple(grid), tuple(n_sub), n_fine
+    size = 'x'.join(map(str, args.grid))
+    # 目录名含预条件子与线程数, 可选的 full_trace + gmg 运行与不同线程数的运行不覆盖主对照结果
+    args.output = (OUTPUT_DIR.resolve() / f'{args.trace}_hex_{size}_m{args.n_fine}_{SOLVER}'
+                   f'_{args.preconditioner}_t{args.threads}')
     return args
 
 
@@ -119,17 +210,14 @@ def main(argv=None):
     trace = args.trace
     preconditioner = args.preconditioner
 
-    # 验网格划分与细单元边长, 计算子结构数及密度过滤半径.
-    grid = GRID
-    if any(n % N_FINE for n in grid):
-        raise ValueError('GRID 各方向须能被 N_FINE 整除')
-    n_sub = tuple(n // N_FINE for n in grid)
-    domain = DOMAIN
-    domain_size = tuple(domain[2 * d + 1] - domain[2 * d] for d in range(3))
-    spacing = tuple(domain_size[d] / grid[d] for d in range(3))
-    if not all(math.isclose(value, spacing[0]) for value in spacing):
-        raise ValueError('当前密度过滤要求三个方向的细单元边长相同')
-    h = spacing[0]
+    # 验网格比例, 取子结构划分并计算密度过滤半径; grid = n_sub * n_fine 已在 parse_args 中保证.
+    grid, n_sub, n_fine = args.grid, args.n_sub, args.n_fine
+    if grid[0] != 6 * grid[1] or grid[1] != grid[2]:
+        raise ValueError('MBB 梁要求网格各方向单元数满足 6:1:1')
+    h = ELEMENT_SIZE
+    domain = (0.0, grid[0] * h, 0.0, grid[1] * h, 0.0, grid[2] * h)
+    domain_size = tuple(grid[d] * h for d in range(3))
+    spacing = (h, h, h)
     radius = FILTER_RADIUS_CELLS * h
 
     # 创建输出目录.
@@ -137,26 +225,21 @@ def main(argv=None):
     output = args.output
     output.mkdir(parents=True, exist_ok=False)
 
-    # 只记录外部线程环境, 不覆盖变量; 未设置时由数值库自行选择.
-    thread_environment = {
-        name: os.environ.get(name)
-        for name in ('BLIS_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
-                     'MKL_NUM_THREADS', 'OMP_NUM_THREADS')
-    }
+    # 记录导入前写入的线程变量, 供核对
+    thread_environment = {name: os.environ.get(name) for name in THREAD_VARIABLES}
     config: dict[str, Any] = dict(
         method=f'substructure_{trace}', trace=trace,
         domain=list(domain), mesh='hex', grid=list(grid), spacing=spacing,
-        n_sub=n_sub, n_fine=(N_FINE,) * 3, chunk_size=CHUNK_SIZE,
+        n_sub=n_sub, n_fine=(n_fine,) * 3, chunk_size=CHUNK_SIZE,
         space_degree=SPACE_DEGREE, integration_order=INTEGRATION_ORDER,
         E0=E0, Emin=EMIN, nu=NU, penalty=PENALTY, volfrac=VOLFRAC,
         filter_type='density', filter_radius=radius, optimizer=OC_OPTIONS,
         problem=FullMBBBeamPoint3d.__name__, load=LOAD,
         assembly_method=ASSEMBLY_METHOD, solver=SOLVER,
-        backend=BACKEND, device=DEVICE, max_iter=MAX_ITER,
+        backend=BACKEND, device=DEVICE, max_iter=args.max_iter,
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
-        threads=dict(policy='external_environment_or_library_default',
-                     environment=thread_environment, **blas_environment()))
+        threads=dict(num_threads=args.threads, environment=thread_environment, **blas_environment()))
     cg_options = dict(precond=None if preconditioner == 'none' else preconditioner,
                       maxiter=CG_MAXITER, rtol=CG_TOLERANCE, atol=0.0,
                       rtol_reference='rhs', norm_type='unpreconditioned',
@@ -169,8 +252,8 @@ def main(argv=None):
     problem = FullMBBBeamPoint3d(domain=domain, P=LOAD, E=E0, nu=NU)
     n_cells = grid[0] * grid[1] * grid[2]
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
-    print(f'[配置] substructure/{trace}, n_sub={n_sub}, m={N_FINE}, {BACKEND}/{DEVICE}, '
-          f'线程由外部环境/数值库默认设置, 装配 {ASSEMBLY_METHOD}, '
+    print(f'[配置] substructure/{trace}, n_sub={n_sub}, m={n_fine}, {BACKEND}/{DEVICE}, '
+          f'{args.threads} 线程, 装配 {ASSEMBLY_METHOD}, '
           f'求解 {SOLVER} ({preconditioner}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
           f'网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
@@ -185,7 +268,7 @@ def main(argv=None):
         setattr(mesh, 'meshdata', {'nx': grid[0], 'ny': grid[1], 'nz': grid[2], 'hx': h, 'hy': h, 'hz': h})
         layout = StructuredSubstructureLayout(
             domain_size=domain_size,
-            n_sub=n_sub, n_fine=(N_FINE,) * 3, degree=SPACE_DEGREE,
+            n_sub=n_sub, n_fine=(n_fine,) * 3, degree=SPACE_DEGREE,
             E_base=E0, nu=NU, hypothesis='3D', full_mesh=mesh)
     # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列, 均留在运行目录
     frames = IterationFrameWriter(output, mesh)
@@ -351,7 +434,7 @@ def main(argv=None):
                       assembly_breakdown=assembly_breakdown, boundary_breakdown=boundary_breakdown)
         history.append(record)
         # 停止时不再更新, 保留刚完成分析的密度, 避免最终柔顺度与密度错位
-        stop = converged or iteration == MAX_ITER
+        stop = converged or iteration == args.max_iter
 
         # 6. OC 更新 (计入下一轮之前, 记在本轮记录中)
         if not stop:

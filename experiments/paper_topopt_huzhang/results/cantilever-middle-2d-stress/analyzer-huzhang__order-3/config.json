@@ -1,0 +1,74 @@
+{
+  "case_id": "cantilever-middle-2d-stress",
+  "method": "huzhang",
+  "order": 3,
+  "label": "analyzer-huzhang__order-3",
+  "model": {
+    "L": 80.0,
+    "H": 40.0,
+    "load_width": 6.0,
+    "load": -400.0,
+    "E0": 1.0,
+    "nu": 0.25,
+    "plane_type": "plane_stress",
+    "stress_limit": 180.0
+  },
+  "stress_constraint": {
+    "epsilon": 0.001,
+    "load_pad_radius": 1.5,
+    "support_pad_radius": 0.0
+  },
+  "discretization": {
+    "mesh_type": "triangle-checkerboard",
+    "nx": 80,
+    "ny": 40,
+    "integration_order": 8,
+    "use_relaxation": false,
+    "load_discretization": "p1_trace_interpolation",
+    "assembly_method": "standard",
+    "solver": "mumps"
+  },
+  "optimization": {
+    "filter_radius": 6.0,
+    "penalty": 3.5,
+    "emin": 1e-09,
+    "initial_density": 0.5,
+    "projection": {
+      "continuation_strategy": "additive",
+      "projection_type": "tanh",
+      "beta": 1.0,
+      "beta_max": 10.0,
+      "continuation_iter": 5,
+      "beta_increment": 1.0
+    },
+    "max_al_iterations": 200,
+    "mma_iters_per_al": 5,
+    "change_tolerance": 0.002,
+    "change_measure": "mean",
+    "stress_tolerance": 0.005,
+    "hold_steps": 3,
+    "inner_stop_rule": "legacy",
+    "inner_relative_tolerance": 0.1,
+    "inner_absolute_tolerance": 1e-06,
+    "mu_0": 50.0,
+    "mu_max": 10000.0,
+    "alpha": 1.1,
+    "lambda_0": 0.0,
+    "lambda_max": 3000.0,
+    "move_limit": 0.15,
+    "asymptote_min_distance": 0.0001,
+    "acceptance_solid_threshold": null
+  },
+  "output": {
+    "vtu_fields": [
+      "density",
+      "von_mises_normalized"
+    ]
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-17T01:54:52+00:00",
+    "git_revision": "73d3ad9b295b61393695df3d49e1f9bbe4275493",
+    "git_dirty": true,
+    "reproducible": false
+  }
+}

@@ -23,8 +23,8 @@ import numpy as np
 EXPERIMENT_DIR = Path(__file__).resolve().parent
 RUN_FILES = ('config.json', 'summary.json', 'history.json')
 FIELD_FILES = ('density_final.npy', 'design_density_final.npy', 'displacement_final.npy')
-# 两侧 config.json 中允许不同的键: 只差算子层级及由它决定的方法名
-CONFIG_KEYS_ALLOWED_TO_DIFFER = {'method', 'operator_level'}
+# 两侧 config.json 中允许不同的键: 只差算子层级及由它决定的方法名与 FA 的边界条件施加方式
+CONFIG_KEYS_ALLOWED_TO_DIFFER = {'method', 'operator_level', 'fa_dirichlet'}
 # 二值化阈值
 SOLID_THRESHOLD = 0.5
 

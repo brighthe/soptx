@@ -1,0 +1,53 @@
+[
+  {
+    "run": "analyzer-lfem__order-3__lambda-max-10000.0",
+    "density_digest": {
+      "path": "experiments/paper_topopt_huzhang/results/cantilever-middle-2d-stress/analyzer-lfem__order-3__lambda-max-10000.0/density_final.vtu",
+      "sha256": "15537f25d490d695aa922bfea19475dd81c838e5f741c11a3951056678192b2c",
+      "bytes": 311106
+    },
+    "points": 6384,
+    "max_vm": 1.0012084762963365,
+    "max_g": 0.004711311127004514,
+    "source": {
+      "generated_at_utc": "2026-10-17T13:45:01+00:00",
+      "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
+      "git_dirty": true,
+      "reproducible": false
+    }
+  },
+  {
+    "run": "analyzer-huzhang__order-2",
+    "density_digest": {
+      "path": "experiments/paper_topopt_huzhang/results/cantilever-middle-2d-stress/analyzer-huzhang__order-2/density_final.vtu",
+      "sha256": "16917daccb5dfec56271b15c11e83292745fb91ccedf99e98f58bcaa91107850",
+      "bytes": 311106
+    },
+    "points": 6384,
+    "max_vm": 1.001005226403918,
+    "max_g": 0.004903359360420335,
+    "source": {
+      "generated_at_utc": "2026-10-17T13:45:03+00:00",
+      "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
+      "git_dirty": true,
+      "reproducible": false
+    }
+  },
+  {
+    "run": "analyzer-huzhang__order-3",
+    "density_digest": {
+      "path": "experiments/paper_topopt_huzhang/results/cantilever-middle-2d-stress/analyzer-huzhang__order-3/density_final.vtu",
+      "sha256": "27bd2586042247117f4c4163f3d3e723f9036a8bfe5c2e9df333d933ed007814",
+      "bytes": 311106
+    },
+    "points": 6384,
+    "max_vm": 1.000421033064322,
+    "max_g": 0.004850876591597642,
+    "source": {
+      "generated_at_utc": "2026-10-17T13:45:07+00:00",
+      "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
+      "git_dirty": true,
+      "reproducible": false
+    }
+  }
+]

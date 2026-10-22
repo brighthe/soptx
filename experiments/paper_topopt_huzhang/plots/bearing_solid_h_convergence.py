@@ -3,15 +3,15 @@
 产物 case ``bearing-solid-h-convergence``: 左右两幅并排, (a) $\\nu_0 = 0.3$, (b) $\\nu_0 = 0.4999$;
 横轴单元尺寸 $h$ (30x10 … 240x80 四级, 对数刻度), 纵轴各离散在全域实体 ($\\rho_e \\equiv 1$,
 无材料插值) 上的柔顺度相对误差绝对值 (%, 对数刻度). 四条曲线 LFEM $p=1$ / LFEM $p=2$ /
-HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=4$ (原生, 最细一级未跑). 位移元从下方逼近 (误差为负),
+HZMFEM $k=2$ (跳量稳定化) / HZMFEM $k=3$ (无需稳定化). 位移元从下方逼近 (误差为负),
 混合元从上方逼近 (误差为正), 图上只画绝对值, 符号写在图注.
 
 参考值不是任一离散在某网格上的值: 120x40 上 $k=4$ 自身仍高出参考值 0.002% ($\\nu_0 = 0.3$) 至
 0.045% ($\\nu_0 = 0.4999$), 与被评估离散的误差同量级. 这里取 $k=4$ 前三级按逐级差等比递减外推的
 极限 (Aitken delta^2, 按实测差比, 不假定收敛阶), 与 ``analysis/bearing_h_locking.py`` 终端表同一
 公式; 改用 $p=2$ 或 $k=2$ 前三级外推, 参考值变化不超过 0.003% (实测 0.000% 至 0.002%), 即其
-不确定度, 因此低于这一量级的点不可信: $\\nu_0 = 0.3$ 下 $p=2$ 在 240x80 (0.0018%) 与 $k=4$ 在
-120x40 (0.0022%) 的点. 数值取自 2026-10-16 重生成的数据; 重跑后需按新数据核对本段.
+比较尺度, 因此低于这一量级的点不作精细定量解释: $\\nu_0 = 0.3$ 下 $p=2$ 在 240x80
+(0.0018%) 与 $k=3$ 在 240x80 (0.00154%) 的点. k=3 于 2026-10-17 补算, 旧参考数据保留.
 
 数据不重解方程, 只读 ``analysis/bearing_h_locking.py`` 落盘的
 ``results/bearing/postprocess/solid_h_sweep.json``; 缺文件即报错.
@@ -51,7 +51,7 @@ SERIES = (
     ("lfem-1", "LFEM $p=1$", "#d62728", "-", "o"),
     ("lfem-2", "LFEM $p=2$", "#1f77b4", "--", "s"),
     ("huzhang-2", "HZMFEM $k=2$", "#2ca02c", "-.", "^"),
-    ("huzhang-4", "HZMFEM $k=4$", "#9467bd", ":", "D"),
+    ("huzhang-3", "HZMFEM $k=3$", "#9467bd", ":", "D"),
 )
 
 
@@ -85,15 +85,19 @@ def main() -> None:
         block = sorted((r for r in rows if r["poisson_ratio"] == nu), key=lambda r: r["nx"])  # 由粗到细
         reference = extrapolated_reference(block)
         for key, label, color, ls, marker in SERIES:
+            if len(block) != 4 or any(key not in r["compliance"] for r in block):
+                raise RuntimeError(f"nu={nu} 的 {key} 缺少四级网格数据, 请先补算")
             pts = [(DOMAIN_LENGTH / r["nx"], 100.0 * abs(r["compliance"][key] / reference - 1.0))
                    for r in block if key in r["compliance"]]
             h = np.array([p[0] for p in pts])
             err = np.array([p[1] for p in pts])
             ax.loglog(h, err, color=color, lw=1.2, ls=ls, marker=marker, ms=3.5,
-                      mec="white", mew=0.5, label=label, zorder=3)
+                      mfc="none" if key == "lfem-2" else color,
+                      mec=color if key == "lfem-2" else "white",
+                      mew=0.8 if key == "lfem-2" else 0.5, label=label, zorder=3)
         # 一阶参考斜率: 放在右下, 不压任何曲线
-        h0, h1 = 1.6, 3.2
-        e0 = 0.008
+        h0, h1 = 2.0, 4.0
+        e0 = 0.002
         ax.loglog([h0, h1, h1, h0], [e0, e0 * 2.0, e0, e0], color="#555555", lw=0.7, zorder=2)
         ax.text(h1 * 1.05, e0 * 1.3, "1", fontsize=7.5, color="#555555", va="center")
 

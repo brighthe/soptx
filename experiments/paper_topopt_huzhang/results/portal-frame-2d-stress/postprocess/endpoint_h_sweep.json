@@ -1,0 +1,201 @@
+{
+  "case_id": "portal-frame-2d-stress",
+  "design": "solid",
+  "quantity": "单元形心实体 von Mises 应力比, 邻域内最大值",
+  "radius": 0.25,
+  "points": {
+    "load_endpoints": [
+      [
+        5.5,
+        6.0
+      ],
+      [
+        6.5,
+        6.0
+      ]
+    ],
+    "apex": [
+      [
+        6.0,
+        3.5
+      ]
+    ],
+    "support_ends": [
+      [
+        0.55,
+        0.0
+      ],
+      [
+        11.45,
+        0.0
+      ]
+    ]
+  },
+  "mesh_levels": [
+    0.125,
+    0.0625,
+    0.03125
+  ],
+  "provenance": {
+    "generated_at_utc": "2026-10-16T13:31:43+00:00",
+    "git_revision": "deb2eb9ef5a166ea70fc517e9bd27981c2c56530",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "rows": [
+    {
+      "method": "lfem",
+      "order": 1,
+      "mesh_size": 0.125,
+      "cells": 8022,
+      "ndof": 8330,
+      "seconds": 2.154632998019224,
+      "load_endpoints_max": 0.6832866320885306,
+      "apex_max": 1.417588748500078,
+      "support_ends_max": 1.3476144298675308
+    },
+    {
+      "method": "lfem",
+      "order": 1,
+      "mesh_size": 0.0625,
+      "cells": 31554,
+      "ndof": 32166,
+      "seconds": 1.7019876489939634,
+      "load_endpoints_max": 0.7056196832986117,
+      "apex_max": 1.8909606883502295,
+      "support_ends_max": 1.983611656478363
+    },
+    {
+      "method": "lfem",
+      "order": 1,
+      "mesh_size": 0.03125,
+      "cells": 126096,
+      "ndof": 127318,
+      "seconds": 6.724488167004893,
+      "load_endpoints_max": 0.7110658470135638,
+      "apex_max": 2.4999669777288926,
+      "support_ends_max": 2.8689365530022752
+    },
+    {
+      "method": "lfem",
+      "order": 2,
+      "mesh_size": 0.125,
+      "cells": 8022,
+      "ndof": 32702,
+      "seconds": 1.0440159040153958,
+      "load_endpoints_max": 0.6552510057165077,
+      "apex_max": 1.2186298429706424,
+      "support_ends_max": 1.0926463575095458
+    },
+    {
+      "method": "lfem",
+      "order": 2,
+      "mesh_size": 0.0625,
+      "cells": 31554,
+      "ndof": 127438,
+      "seconds": 4.628857253002934,
+      "load_endpoints_max": 0.6845684845883991,
+      "apex_max": 1.6238544000083621,
+      "support_ends_max": 1.6624138118546126
+    },
+    {
+      "method": "lfem",
+      "order": 2,
+      "mesh_size": 0.03125,
+      "cells": 126096,
+      "ndof": 506826,
+      "seconds": 20.494870169000933,
+      "load_endpoints_max": 0.6996899385257579,
+      "apex_max": 2.147173885844236,
+      "support_ends_max": 2.4559105157886365
+    },
+    {
+      "method": "lfem",
+      "order": 3,
+      "mesh_size": 0.125,
+      "cells": 8022,
+      "ndof": 73118,
+      "seconds": 2.37439268201706,
+      "load_endpoints_max": 0.6527602686045935,
+      "apex_max": 1.0547322606730514,
+      "support_ends_max": 0.9251177354227924
+    },
+    {
+      "method": "lfem",
+      "order": 3,
+      "mesh_size": 0.0625,
+      "cells": 31554,
+      "ndof": 285818,
+      "seconds": 11.413431419001427,
+      "load_endpoints_max": 0.6847642946831201,
+      "apex_max": 1.4056895930125417,
+      "support_ends_max": 1.2805316325274587
+    },
+    {
+      "method": "lfem",
+      "order": 3,
+      "mesh_size": 0.03125,
+      "cells": 126096,
+      "ndof": 1138526,
+      "seconds": 51.04871241201181,
+      "load_endpoints_max": 0.6998746763701484,
+      "apex_max": 1.8564398243265616,
+      "support_ends_max": 1.9123914921157572
+    },
+    {
+      "method": "huzhang",
+      "order": 2,
+      "mesh_size": 0.125,
+      "cells": 8022,
+      "ndof": 109065,
+      "seconds": 2.1227328199893236,
+      "load_endpoints_max": 0.6653244442317672,
+      "apex_max": 1.5771445665741932,
+      "support_ends_max": 1.5455299661759347
+    },
+    {
+      "method": "huzhang",
+      "order": 2,
+      "mesh_size": 0.0625,
+      "cells": 31554,
+      "ndof": 427507,
+      "seconds": 9.856227319018217,
+      "load_endpoints_max": 0.6898076079495193,
+      "apex_max": 2.0931916823561285,
+      "support_ends_max": 2.0754172376870916
+    },
+    {
+      "method": "huzhang",
+      "order": 2,
+      "mesh_size": 0.03125,
+      "cells": 126096,
+      "ndof": 1705349,
+      "seconds": 55.09429075798835,
+      "load_endpoints_max": 0.7021954217407016,
+      "apex_max": 2.7655573788698358,
+      "support_ends_max": 2.9322391520999256
+    },
+    {
+      "method": "huzhang",
+      "order": 3,
+      "mesh_size": 0.125,
+      "cells": 8022,
+      "ndof": 229701,
+      "seconds": 3.594795477023581,
+      "load_endpoints_max": 0.6589038569691622,
+      "apex_max": 1.3119038639142944,
+      "support_ends_max": 1.159166663775064
+    },
+    {
+      "method": "huzhang",
+      "order": 3,
+      "mesh_size": 0.0625,
+      "cells": 31554,
+      "ndof": 901427,
+      "seconds": 19.470986398984678,
+      "load_endpoints_max": 0.6876575370593098,
+      "apex_max": 1.7588696573293041,
+      "support_ends_max": 1.6694721866785311
+    }
+  ]
+}

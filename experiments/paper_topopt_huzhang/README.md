@@ -16,6 +16,7 @@ experiments/paper_topopt_huzhang/
 |-- run_cantilever_stress.py    # 5.2.3 节 / 图 5.8~5.11: CantileverMiddlePatch2d, AL-MMA -> outputs/cantilever-middle-2d-stress/<run>/
 |-- cantilever_stress.md        # 5.2.3 节实验记录: 设置、被动实体区、结果与角点松弛开/关对照
 |-- run_portal_frame.py         # 5.2.4 节 / 图 5.11~5.13: PortalFramePatch2d (全域, 左铰右滚), gmsh 半域网格镜像成全域, 过滤器对 x = L/2 设计对称化, AL-MMA -> outputs/portal-frame-2d-stress/<run>/
+|-- portal_frame_mesh.py        # 门式框架 Gmsh 半域剖分与镜像网格构造, 参数由运行脚本传入
 |-- portal_frame.md             # 5.2.4 节实验记录: 设置、HZ k=3 结果与 LFEM 诊断对照 (灰度填角、交叉重分析)
 |-- sync_results.py             # 把 outputs/<case>/<run> 固化到 results/ (确认后入库; 已有产物须 --force)
 |-- table.py                    # 表格入口: 冻结设计交叉再分析 + 论文表格 (表 5.3 / 5.4)
@@ -23,10 +24,11 @@ experiments/paper_topopt_huzhang/
 |-- config.py                   # 共用路径常量 (table.py / plot.py、analysis/ 与 plots/ 使用; run 脚本各自定义)
 |-- analysis/                   # table.py / plot.py 背后的数值计算, 由入口派发, 不直接运行
 |   |-- compliance_reanalysis.py    # 表 5.3: 固支梁六个冻结设计 x 六种离散的柔顺度交叉再分析
-|   |-- bearing_reanalysis.py       # 表 5.4: 轴承冻结设计 x 四种离散的柔顺度交叉再分析
+|   |-- bearing_reanalysis.py       # 表 5.4: 轴承冻结设计 x 五种离散的柔顺度交叉再分析
 |   |-- bearing_h_locking.py        # 图 5.5 的数据: 轴承全实体域 h 收敛闭锁考察
-|   |-- discretization_probe.py     # 图 5.8 / 5.10 / 5.11 的数据: 应力算例冻结构型重分析, 应力比与牵引跳量
-|   |-- stress_metrics.py           # 图 5.9 的数据: 应力算例插图 npz 导出 (主应力面板)
+|   |-- discretization_probe.py     # 图 5.8 / 5.10 / 5.12 的数据: 应力算例 (--case 悬臂梁 / 门式框架) 冻结构型重分析, 应力比与牵引跳量
+|   |-- stress_metrics.py           # 图 5.9 / 5.13 的数据: 应力算例插图 npz 导出 (主应力面板)
+|   |-- portal_endpoint_check.py    # 5.2.4 节: 门式框架全实体域载荷端点应力有界性验证 (不设被动区的依据)
 |   `-- provenance.py               # 上述再分析的溯源戳记
 |-- plots/                      # 每张图一个模块, 文件名即 plot.py --case 的 id; 共用底座 _base.py
 |-- outputs/                    # run 脚本的运行产物 (不入库, .gitignore 整体忽略): <case>/<run>/, 已有目录拒绝覆盖
@@ -80,3 +82,27 @@ experiments/paper_topopt_huzhang/
 
 核对走 `plot.py discretization-probe`: 构型冻结后在自身离散下重解, 不施加豁免,
 被动实体区的真实读数一并取回。
+
+## 当前悬臂梁图表入口（2026-10-17）
+
+论文 5.2.3 采用 LFEM p=3 与 HZMFEM k=2,3；通过 `plot.py --case stress-cantilever-comparison` 生成图 5.8--5.10 和表 5.5。运行目录、参数差异及历史结果边界见 `cantilever_stress.md` 第 3 节。入口复用冻结再分析与牵引跳量验收，不运行优化。
+
+- 当前悬臂梁主应力散点图（图 5.9）：`plot.py --case stress-cantilever-principal`，从当前 LFEM p=3 与 HZMFEM k=2,3 终态冻结导出；后续收敛历史、牵引跳量为图 5.10、5.11，门式框架图号顺延为 5.12--5.14。
+
+
+### 2026-10-17: 合并优化历史与主应力图
+
+当前图 5.9 由 `plot.py --case stress-cantilever-history-principal` 生成，上排为体积和约束历史，下排为 LFEM p=3 与 HZMFEM k=2,3 的终态主应力散点。复用已有历史及已核验的散点数据，不重新求解；输出 `stress_cantilever_history_principal.png/pdf`。原独立图保留为历史产物，正文不再引用；牵引跳量现为图 5.10，门式框架为图 5.11--5.13。此前记录中的编号按历史版本理解。
+
+
+### 2026-10-17: 牵引跳量仅保留表格
+
+正文删除原图 5.10 的牵引跳量空间分布，保留定义与统计范围，以表 5.5 展示量化证据；表格删除实体带单元数列，底层统计及原图件仍保留。门式框架图号调整为 5.10--5.12。生成表格的代码同步更新，未重新计算。
+
+
+## 门式框架运行选项 (2026-10-18)
+
+`run_portal_frame.py` 支持 `--load-discretization p1-interpolation|p1-l2-projection`,
+`--load-pad-radius` (mm, 默认 0) 和 `--lambda-max` (默认 10000).
+新运行按参数生成独立目录, 不覆盖旧 L2 投影结果. 冻结再分析读取指定运行的载荷配置,
+不使用当前默认值替代旧配置; 具体命令与历史差异见 `portal_frame.md`.

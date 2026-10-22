@@ -54,7 +54,11 @@ def resolve_run_dir(
     apparent 时直接报错, 不另找替代目录.
     """
     module = CASE_MODULES[case]
-    run_dir = OUTPUT_DIR / case / module.RUN_LABEL.format(method=method, order=order)
+    if case == run_portal_frame.CASE_ID and method == "huzhang" and order == 3:
+        folder = "analyzer-huzhang__order-3__p1-interpolation__all-cells__lambda-max-10000.0"
+    else:
+        folder = module.RUN_LABEL.format(method=method, order=order)
+    run_dir = OUTPUT_DIR / case / folder
     required = ("density_final.vtu", "summary.json")
     missing = [name for name in required if not (run_dir / name).is_file()]
     if missing:

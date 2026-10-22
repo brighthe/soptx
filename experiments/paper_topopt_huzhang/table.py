@@ -4,7 +4,7 @@
 
     python table.py --list
     python table.py compliance-reanalysis   # 固支梁 6x6 交叉再分析 (表 5.3)
-    python table.py bearing-reanalysis      # 轴承 3x4 交叉再分析 (表 5.4)
+    python table.py bearing-reanalysis      # 轴承 4x5 交叉再分析 (表 5.4)
 
 再分析的完整结果 (含能量分量与自检) 照旧写入 ``results/<case>/postprocess/
 frozen_reanalysis.json`` (轴承两组材料合在 ``results/bearing/postprocess/`` 一个文件里); 本入口只在其后把论文表格写到 ``results/tables/``.
@@ -68,11 +68,11 @@ def _poisson(nu: float) -> str:
 
 
 def bearing_table() -> str:
-    """表 5.4: 两组泊松比的三个设计, k=4 再分析值及其余离散相对它的偏差."""
+    """表 5.4: 两组泊松比的四个设计, k=4 再分析值及其余离散相对它的偏差."""
     reference = "huzhang-4"
-    deviations = ("lfem-1", "lfem-2", "huzhang-2")
+    deviations = ("lfem-1", "huzhang-2", "lfem-2", "huzhang-3")
     lines = [
-        "**表 5.4**  二维轴承装置六组最终设计的优化迭代步数、优化所得柔顺度、"
+        "**表 5.4**  二维轴承装置八组最终设计的优化迭代步数、优化所得柔顺度、"
         "HZMFEM $k=4$ 再分析柔顺度（单位 N·mm）及各离散再分析值相对后者的偏差",
         "",
         "| 泊松比 $\\nu_0$ | 优化设计 | 迭代步数 | 优化所得柔顺度 | HZMFEM $k=4$ 再分析柔顺度 | "
@@ -104,7 +104,7 @@ TABLES: dict[str, tuple[str, Callable[[], str], str, str]] = {
     ),
     "bearing-reanalysis": (
         "analysis.bearing_reanalysis:run_bearing_reanalysis", bearing_table, "table5_4.md",
-        "轴承冻结设计 x 四种离散的柔顺度交叉再分析 (论文表 5.4)",
+        "轴承冻结设计 x 五种离散的柔顺度交叉再分析 (论文表 5.4)",
     ),
 }
 

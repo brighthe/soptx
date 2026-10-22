@@ -53,8 +53,8 @@ DISCRETIZATIONS: tuple[tuple[str, int], ...] = tuple(
     (method, order) for method in run_fixed_fixed.METHODS for order in run_fixed_fixed.ORDERS
 )
 
-# 论文正文摘出的两列: 两条链各自的最高阶, 作为"统一泛函"给六个设计打分.
-PAPER_COLUMNS: tuple[str, ...] = ("lfem-4", "huzhang-4")
+# 论文正文摘出的四列: LFEM p=3,4 与 HZMFEM k=3,4, 各列统一评价六个设计.
+PAPER_COLUMNS: tuple[str, ...] = ("lfem-3", "lfem-4", "huzhang-3", "huzhang-4")
 
 
 def energy_identity_diagnostics(parts: dict[str, Any], state: dict[str, Any]) -> dict[str, float | str]:

@@ -1,0 +1,77 @@
+{
+  "case_id": "portal-frame-2d-stress",
+  "method": "huzhang",
+  "order": 3,
+  "label": "analyzer-huzhang__order-3__p1-interpolation__all-cells__lambda-max-10000.0",
+  "model": {
+    "L": 12.0,
+    "H": 6.0,
+    "load_width": 1.0,
+    "support_width": 0.55,
+    "corner_height": 3.5,
+    "load": -300.0,
+    "E0": 1.0,
+    "nu": 0.25,
+    "plane_type": "plane_stress",
+    "stress_limit": 1000.0
+  },
+  "stress_constraint": {
+    "epsilon": 0.001,
+    "load_pad_radius": 0.0,
+    "support_pad_radius": 0.0
+  },
+  "discretization": {
+    "mesh_type": "triangle-gmsh-mirrored",
+    "mesh_size": 0.0625,
+    "load_discretization": "p1_trace_interpolation",
+    "mesh_algorithm": 6,
+    "integration_order": 8,
+    "use_relaxation": false,
+    "assembly_method": "standard",
+    "solver": "mumps"
+  },
+  "optimization": {
+    "filter_radius": 0.25,
+    "design_symmetry_axis": 6.0,
+    "penalty": 3.5,
+    "emin": 1e-09,
+    "initial_density": 0.5,
+    "projection": {
+      "continuation_strategy": "additive",
+      "projection_type": "tanh",
+      "beta": 1.0,
+      "beta_max": 10.0,
+      "continuation_iter": 5,
+      "beta_increment": 1.0
+    },
+    "max_al_iterations": 200,
+    "mma_iters_per_al": 5,
+    "change_tolerance": 0.002,
+    "change_measure": "mean",
+    "stress_tolerance": 0.005,
+    "hold_steps": 10,
+    "inner_stop_rule": "legacy",
+    "inner_relative_tolerance": 0.1,
+    "inner_absolute_tolerance": 1e-06,
+    "mu_0": 50.0,
+    "mu_max": 10000.0,
+    "alpha": 1.1,
+    "lambda_0": 0.0,
+    "lambda_max": 10000.0,
+    "move_limit": 0.15,
+    "asymptote_min_distance": 0.0001,
+    "acceptance_solid_threshold": null
+  },
+  "output": {
+    "vtu_fields": [
+      "density",
+      "von_mises_normalized"
+    ]
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-18T03:00:12+00:00",
+    "git_revision": "ee06c0594f024396c9cedab5f7b0ae102907d55e",
+    "git_dirty": false,
+    "reproducible": true
+  }
+}

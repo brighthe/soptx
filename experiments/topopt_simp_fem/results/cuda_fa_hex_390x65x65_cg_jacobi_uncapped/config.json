@@ -1,0 +1,76 @@
+{
+  "method": "fem_fa_cuda",
+  "domain": [
+    0.0,
+    390.0,
+    0.0,
+    65.0,
+    0.0,
+    65.0
+  ],
+  "mesh": "hex",
+  "grid": [
+    390,
+    65,
+    65
+  ],
+  "spacing": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "space_degree": 1,
+  "integration_order": 2,
+  "E0": 1.0,
+  "Emin": 1e-07,
+  "nu": 0.3,
+  "penalty": 3.0,
+  "volfrac": 0.12,
+  "filter_type": "density",
+  "filter_radius": 3.0,
+  "optimizer": {
+    "move_limit": 0.2,
+    "damping_coef": 0.5,
+    "initial_lambda": 1000000000.0,
+    "bisection_tol": 0.001,
+    "design_variable_min": 0.0
+  },
+  "problem": "FullMBBBeamPoint3d",
+  "load": -1.0,
+  "operator_level": "fa",
+  "assembly_method": "fast",
+  "solver": "cg",
+  "backend": "pytorch",
+  "device": "cuda",
+  "max_iter": 1,
+  "tolerance": 0.0002,
+  "convergence_window": 5,
+  "volume_tolerance": 1e-06,
+  "vtu_fields": [
+    "density"
+  ],
+  "threads": {
+    "num_threads": 16,
+    "torch_num_threads": 16,
+    "blas_libraries": [
+      "libblis.so.4.0.0",
+      "libscipy_openblas-5f890258.so"
+    ],
+    "logical_cpu_count": 32
+  },
+  "torch": {
+    "version": "2.11.0+cu128",
+    "cuda": "12.8",
+    "device_name": "NVIDIA GeForce RTX 5070 Ti"
+  },
+  "cg_options": {
+    "precond": "jacobi",
+    "maxiter": 20000,
+    "rtol": 1e-06,
+    "atol": 0.0,
+    "rtol_reference": "rhs",
+    "norm_type": "unpreconditioned",
+    "verify_residual": true
+  },
+  "cg_tolerance": 1e-06
+}

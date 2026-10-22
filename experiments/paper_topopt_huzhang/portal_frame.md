@@ -11,7 +11,8 @@
 实验脚本为 [`run_portal_frame.py`](run_portal_frame.py)，论文组的命令：
 
 ```bash
-python experiments/paper_topopt_huzhang/run_portal_frame.py --analyzer huzhang --order 3
+python experiments/paper_topopt_huzhang/run_portal_frame.py --analyzer huzhang --order 3 \
+  --load-discretization p1-interpolation --load-pad-radius 0 --lambda-max 10000
 ```
 
 ### 2.1 模型参数
@@ -22,7 +23,7 @@ python experiments/paper_topopt_huzhang/run_portal_frame.py --analyzer huzhang -
 |---|---|
 | 设计域 | $12\ \mathrm{mm} \times 6\ \mathrm{mm}$ 矩形去掉底边中央三角形缺口，缺口顶点 $(b, 0)$、$(L/2, h_c)$、$(L - b, 0)$，$b = 0.55$ mm，$h_c = 3.5$ mm，平面应力：`L, H = 12.0, 6.0`，`SUPPORT_WIDTH = 0.55`，`CORNER_HEIGHT = 3.5`，`PLANE_TYPE = "plane_stress"` |
 | 支座 | 左支座段 $x \in [0, b]$ 固定铰 $u_x = u_y = 0$；右支座段 $x \in [L - b, L]$ 滚动铰 $u_y = 0$。支座不对称，状态场不严格对称，必须求全域 |
-| 载荷 | 顶边中点竖直合力 $P = -300$ N，分布于以 $x = L/2$ 为中心、宽 $l = 1$ mm 的区段，强度 $\bar t = P/l$；按论文口径投影到顶边连续 $\mathbb P_1$ 迹空间（顶边按 $h$ 均匀剖分）后施加：`LOAD = -300.0`，`LOAD_WIDTH = 1.0`，`project_patch_traction_to_p1_trace(...)` |
+| 载荷 | 顶边中点竖直合力 $P = -300$ N，分布于以 $x = L/2$ 为中心、宽 $l = 1$ mm 的区段，强度 $\bar t = P/l$；通过节点插值映射至顶边连续 $\mathbb P_1$ 迹空间（载荷区端点取半值）后施加：`LOAD = -300.0`，`LOAD_WIDTH = 1.0`，`load_discretization="p1_trace_interpolation"` |
 | 实体材料 | $\nu = 0.25$；$E_0$ 物理参考值 $100000$ MPa，计算取 $1$ MPa（同比缩放理由同 5.2.3 节）：`E0 = 1.0`，`NU = 0.25` |
 | 许用应力 | $\bar\sigma = 1000$ MPa：`STRESS_LIMIT = 1000.0` |
 
@@ -49,6 +50,66 @@ python experiments/paper_topopt_huzhang/run_portal_frame.py --analyzer huzhang -
 | 支座端点被动实体区 | 不设：`SUPPORT_PAD_RADIUS = 0.0` |
 | 凹角顶点 | 不设：优化从凹角应力集中区去料是本算例要观察的现象 |
 
+本算例采用法向区间牵引。连续 P1 节点插值下的全实体网格加密检查未显示载荷端点附近的应力发散，因此不设置载荷端点被动实体区；凹角与支座附近同样不设被动区。全部单元均参与局部应力约束、停止判据中的应力检查与终态验收。
+
+P1 节点插值端点诊断已原样归档到 `results/portal-frame-2d-stress/postprocess/endpoint_p1_interpolation_20261018/endpoint_h_sweep.json`。在 $h=0.125,0.0625,0.03125$ mm 下，LFEM $p=2$ 的端点邻域最大形心实体应力比分别为 0.6486、0.6840、0.6996；HZMFEM $k=3$ 前两级为 0.6527、0.6872，最细一级未计算。该检查支持当前不设端点被动区的选择，不替代优化终态的全域验收。旧载荷诊断与被动区对照保留在第 4 节。
+
+### 2.4 优化参数
+
+除下表所列各项外，材料插值、初始密度、投影与 $\beta$ 连续化、AL 罚参数与乘子安全阈、MMA 参数与内层停止规则均同 5.2.3 节 2.4 节（$\mu_0 = 50$，$\mu_{\max} = 10^4$，$\lambda_{\max} = 10^4$，移动限 $0.15$，$\beta$ 从 $1$ 起每 $5$ 个外层步加 $1$ 至 $10$）。
+
+| 参数 | 数值或设置 |
+|---|---|
+| 密度过滤 | $r_{\min} = 0.25$ mm，与 PolyStress 一致（$r_{\min}/h = 4$）：`FILTER_RADIUS = 0.25` |
+| 停止准则 C3 | C0 至 C2 连续 $10$ 个外层步同时满足（5.2.3 节为 $3$）：`HOLD_STEPS = 10` |
+| 罚参数初值 | $\mu_0 = 50$，与 5.2.3 节相同，不取 PolyStress 表 3 的 $10$（见第 4 节）：`MU_0 = 50.0` |
+| 判据集合 | 全部受约束单元（本算例无被动实体区，即全部单元），与 5.2.3 节同口径：`ACCEPTANCE_SOLID_THRESHOLD = None`。当前运行从优化开始即采用全部单元验收；旧运行的密度筛选及等价性核查保留在第 4 节 |
+
+当前运行实际采用 `hold_steps=10`，与 5.2.3 节的 3 步分别如实记录。第 52--61 个外层步连续满足 C0--C2，采用第 61 步结束时的最终设计，不将其解释为 `hold_steps=3` 的首次停止结果。历史 hold 对照见第 4 节。
+
+## 3. 当前论文结果（2026-10-18 更新）
+
+当前来源为 `results/portal-frame-2d-stress/analyzer-huzhang__order-3__p1-interpolation__all-cells__lambda-max-10000.0/`。HZMFEM $k=3$ 采用连续 P1 节点插值牵引、无被动区、全部 31554 个单元验收、乘子上限 10000 与 `hold_steps=10`，已按停止准则收敛。
+
+| MMA 更新次数 | 外层步数 | 体积分数 | 全域最大约束值 | 最大表观应力比 | 实体区最大应力比 | 相对平衡残差 | 乘子截断数 |
+|---|---|---|---|---|---|---|---|
+| 278 | 61 | 0.2356840147 | 0.0042426110 | 0.9997972890 | 1.0223761383 | $5.3865\times10^{-9}$ | 0 |
+
+数值取自当前运行的 `summary.json`；实体区最大应力比仅作诊断，按物理密度不小于 0.5 统计，不是停止判据的验收范围。论文采用体积分数 $23.57\%$、最大局部约束值 $4.243\times10^{-3}$，低于容差 $0.005$。
+
+构型由上部弦杆、斜杆及凹角上方的连接杆件组成，形成从顶边载荷区通向两侧支座的主要传力路径。高应力区域主要沿承载杆件分布，部分杆件的表观应力接近许用水平，交汇处保留少量中间密度区域。应力与主应力散点均采用最终设计在自身离散下的单元形心值。
+
+冻结再分析在全部单元上复现最大约束值 $0.0042426107161$，与运行摘要一致并通过验收。在 $\rho_{\mathrm{phys}}>0.9$ 的实体区域内，最大归一化牵引跳量为 $2.6871749455\times10^{-16}$，处于浮点舍入误差量级；相对跳量检查值为 $5.8146\times10^{-12}<10^{-10}$。这些结果体现了高阶 Hu--Zhang 元在所检查非结构化网格上的几何适应能力与跨单元法向牵引连续性，支持其用于含斜边与凹角设计域的局部应力约束优化，不据此宣称设计性能优于 LFEM。
+
+### 3.1 论文插图与数据来源
+
+| 图 | 文件 / 入口 | 内容与来源 |
+|---|---|---|
+| 5.10 | 论文侧 `fig5_11_portal_schematic.png` | 几何尺寸、载荷与边界条件示意图，文件名保留历史编号 |
+| 5.11 | `portal_mesh.png/pdf`；`portal-mesh` | 非结构化全域网格与凹角、载荷区间局部放大 |
+| 5.12 | `stress_portal_hz_k3_topology.png`；`stress-portal-topology` | 最终物理密度与表观应力比，使用当前终态及冻结场数据 |
+| 5.13 | `stress_portal_hz_k3_convergence.png/pdf`；`stress-portal-convergence` | 体积分数、全域最大约束值历史与全部单元的归一化表观主应力散点 |
+
+图 5.11--5.13 的图件位于 `results/figures/`。牵引跳量仅在正文报告统计结果，不单列插图。当前后处理数据位于 `results/portal-frame-2d-stress/postprocess/`：
+
+- `discretization_probe/huzhang-3__probe.json`：来源目录、密度 SHA-256、冻结验收与牵引跳量统计；同名前缀 `__fields.npz` 保存逐单元数据。实体带统计单元数 6112 保留在记录中，正文不列出。
+- `stress_fields/fig_data_portal-huzhang-k3.npz` 及配套 JSON：网格、密度、表观主应力与 von Mises 应力比等成图数据。
+- `endpoint_p1_interpolation_20261018/endpoint_h_sweep.json`：当前 P1 节点插值的全实体端点诊断；旧 `endpoint_h_sweep.json` 保留为历史载荷诊断，不覆盖。
+
+### 3.2 产物与溯源
+
+当前运行已从 `outputs/portal-frame-2d-stress/analyzer-huzhang__order-3__p1-interpolation__all-cells__lambda-max-10000.0/` 经 `sync_results.py` 固化至同名 `results/` 目录。原始配置和摘要记录 `git_revision=ee06c0594f024396c9cedab5f7b0ae102907d55e`、`git_dirty=false`，生成时间为 `2026-10-18T03:00:12+00:00`；后处理另有各自的版本记录，不覆盖运行溯源。
+
+已入库的核心文件包括 `config.json`、`summary.json`、`history.json`、`outer_history.json`、`final_optimizer_state.npz`、`displacement_final.npy`、`stress_final.npy`、`density_initial.vtu` 与 `density_final.vtu`。历史分别包含 278 次 MMA 更新与 61 个外层步，终态保存全部 31554 个单元的设计变量、物理密度、乘子和罚参数，供冻结分析，不支持精确断点续算。
+
+逐步 `iterations/` 帧与 `evolution.pvd` 不属于核心入库文件。旧的无后缀 `results/portal-frame-2d-stress/analyzer-huzhang__order-3/` 保留旧载荷运行，不作为当前论文结果来源。P1 端点诊断由原输出文件逐字节复制到第 3.1 节所列独立目录，并附 `archive-manifest.json` 记录源路径、大小与 SHA-256；此次归档未重新计算。
+
+## 4. 历史结果与诊断记录（不作为当前论文结果）
+
+以下保留旧载荷、旧验收口径及 LFEM 对照，不用当前默认配置解释旧运行。
+
+### 4.1 旧载荷端点与被动区诊断
+
 与 5.2.3 节不同，本算例不设载荷端点被动实体区，与 PolyStress 一致（其 `PortalDomain.m` 以等分节点力加载，`Passive = []`，全部单元受约束）。依据是两个算例载荷方向不同：悬臂梁的竖向载荷作用在竖直边上，是**切向**区段牵引，区段端点处 $\sigma_{xx}$ 有对数奇异；门式框架的竖向载荷作用在水平顶边上，是**法向**区段牵引，端点处应力只间断、不奇异，且投影到 $\mathbb P_1$ 迹空间后间断也被抹平。
 
 全实体（$\rho = 1$）加密验证（`plot.py portal-endpoint-check`，`postprocess/endpoint_h_sweep.json`）：网格 $h = 0.125 / 0.0625 / 0.03125$，单元形心实体 von Mises 应力比的最大值如下。
@@ -65,20 +126,7 @@ python experiments/paper_topopt_huzhang/run_portal_frame.py --analyzer huzhang -
 
 曾以 $r_{\mathrm{pad}} = 0.25$（$118$ 个单元）跑过 HZMFEM $k = 3$（第 4 节）：被动区内最大实体应力比 $1.168$，体积 $0.2401$。端点既无奇异，这一超限是豁免被优化器利用（被动区不受约束，载荷下方不必加材料），与 5.2.3 节 2.3 节记录的"只豁免不保留"属同一类现象；去掉被动区后体积反降为 $0.2362$，全域最大表观应力比为 $1.0004$。
 
-### 2.4 优化参数
-
-除下表所列各项外，材料插值、初始密度、投影与 $\beta$ 连续化、AL 罚参数与乘子安全阈、MMA 参数与内层停止规则均同 5.2.3 节 2.4 节（$\mu_0 = 50$，$\mu_{\max} = 10^4$，$\lambda_{\max} = 3000$，移动限 $0.15$，$\beta$ 从 $1$ 起每 $5$ 个外层步加 $1$ 至 $10$）。
-
-| 参数 | 数值或设置 |
-|---|---|
-| 密度过滤 | $r_{\min} = 0.25$ mm，与 PolyStress 一致（$r_{\min}/h = 4$）：`FILTER_RADIUS = 0.25` |
-| 停止准则 C3 | C0 至 C2 连续 $10$ 个外层步同时满足（5.2.3 节为 $3$）：`HOLD_STEPS = 10` |
-| 罚参数初值 | $\mu_0 = 50$，与 5.2.3 节相同，不取 PolyStress 表 3 的 $10$（见第 4 节）：`MU_0 = 50.0` |
-| 判据集合 | 全部受约束单元（本算例无被动实体区，即全部单元），与 5.2.3 节同口径：`ACCEPTANCE_SOLID_THRESHOLD = None`（2026-10-16 起）。论文组运行时脚本取 $\tilde\rho \ge 0.5$，两口径的判定全程一致，见第 3 节 |
-
-`HOLD_STEPS = 10` 的来历：原以为 $3$ 步时平均变化判据在中部灰度区尚未定型时就已满足；LFEM $p = 3$ 的两次对照（第 4 节）显示 $3$ 步与 $10$ 步的终态几乎相同，灰度区在停机前已稳定，这一理由不成立。保留 $10$ 只多耗约 $18$ 次 MMA 更新，无害。
-
-## 3. 结果
+### 4.2 旧 L2 投影运行结果
 
 HZMFEM $k = 3$ 按停止准则收敛（`termination_reason: criterion-met`）。下表取自运行目录的 `summary.json`，列含义同 5.2.3 节。
 
@@ -92,7 +140,9 @@ HZMFEM $k = 3$ 按停止准则收敛（`termination_reason: criterion-met`）。
 
 构型特征：顶部上弦、斜杆、中央菱形与贴着凹角顶点通过的横杆，与 PolyStress 图 8 的定性特征一致；横杆压在凹角顶点上（图 8 亦然），沿斜边的材料只延伸约 $0.1$ mm，小于 $r_{\min}$；跨中上弦实体厚约 $0.47$ mm。主要杆件基本满应力，全域最大表观应力比 $1.0004$，应力图色标可直接取 $[0, 1]$。中部交汇处只剩小块淡灰（中部灰度面积 $0.97$，灰度单元实体应力比中位 $0.69$）。整体布局（斜肩短柱）与图 8 的直柱贯通横梁不同，第 4 节的网格加密对照显示该差异随网格分辨率改变。
 
-### 3.1 论文插图
+#### 历史图表对应关系（旧编号）
+
+以下图号、数值与路径描述旧运行；当前同名后处理文件已更新为 P1 节点插值结果，不能用于复核这些旧统计。当前图表以第 3.1 节为准。
 
 | 图 | 产物 case | 内容 | 数据来源 |
 |---|---|---|---|
@@ -102,9 +152,9 @@ HZMFEM $k = 3$ 按停止准则收敛（`termination_reason: criterion-met`）。
 
 图 5.11(a) 示意图是论文侧 TikZ。牵引跳量统计取自 `huzhang-3__probe.json`：$\overline\rho_e > 0.9$ 的单元 $6090$ 个，$A_e$ 中位 $9.4 \times 10^{-17}$、最大 $2.634 \times 10^{-16}$；探针两道验收门（Hu--Zhang 相对跳量 $4.4 \times 10^{-12} < 10^{-10}$，判据集合 $g_{\max}$ 复现 $1.263 \times 10^{-3}$）均通过。2.3 节的全实体端点验证由 `plot.py portal-endpoint-check` 产出 `postprocess/endpoint_h_sweep.json`。
 
-### 3.2 产物与溯源
+#### 旧运行产物与溯源
 
-运行写 `outputs/portal-frame-2d-stress/analyzer-huzhang__order-3/`，产物种类与 5.2.3 节 3.2 节相同（含 `stress_final.npy`、`iterations/` 帧 $316$ 帧）。尚未经 `sync_results.py` 固化到 `results/`：
+运行写 `outputs/portal-frame-2d-stress/analyzer-huzhang__order-3/`，产物种类与 5.2.3 节 3.2 节相同（含 `stress_final.npy`、`iterations/` 帧 $316$ 帧）。该旧运行现已入库至同名 `results/` 目录；以下保留当时的入库命令供追溯：
 
 ```bash
 python experiments/paper_topopt_huzhang/sync_results.py portal-frame-2d-stress analyzer-huzhang__order-3
@@ -112,13 +162,17 @@ python experiments/paper_topopt_huzhang/sync_results.py portal-frame-2d-stress a
 
 溯源：运行于 2026-10-16（`generated_at_utc` 07:38:45），`config.json` 记 `git c0b5a69`、`git_dirty = true`。数值上与提交 `7a58f4b` 一致：`c0b5a69..HEAD` 间 Hu--Zhang 数值路径（分析器、函数空间、约束、过滤、优化器、问题类）只有 `mma.py` / `oc.py` 增记初始帧两行；`run_portal_frame.py` 在此区间只经 `7a58f4b` 一次提交，其常量与本次 `config.json` 逐项相同。其余运行时未提交的改动（网格拓扑的 `device=` 参数、`vtk_export.py` 输出转换）不影响 numpy 后端上的数值。
 
-## 4. 诊断记录（不进论文）
+### 4.3 LFEM 与参数诊断
+
+`HOLD_STEPS = 10` 的来历：原以为 $3$ 步时平均变化判据在中部灰度区尚未定型时就已满足；LFEM $p = 3$ 的两次对照（第 4 节）显示 $3$ 步与 $10$ 步的终态几乎相同，灰度区在停机前已稳定，这一理由不成立。保留 $10$ 只多耗约 $18$ 次 MMA 更新，无害。
+
+
 
 以下运行均在 `outputs/portal-frame-2d-stress/` 下，不入库。除第一行外均设载荷端点被动实体区 $r_{\mathrm{pad}} = 0.25$（$118$ 个单元）。
 
 | 运行目录 | 离散 | $\mu_0$ / hold | MMA 更新 | 体积分数 | $g_{\max}$（$\tilde\rho \ge 0.5$ / 全域） | 收敛 | 说明 |
 |---|---|---|---|---|---|---|---|
-| `analyzer-huzhang__order-3__pad0.25` | HZMFEM $k = 3$，$h = 0.0625$ | 50 / 10 | 279 | 0.2401 | $3.21 \times 10^{-3}$ / $4.54 \times 10^{-3}$ | 是 | 被动区内最大实体应力比 $1.168$（受约束区域 $1.011$）；去掉被动区即现论文组（2.3 节） |
+| `analyzer-huzhang__order-3__pad0.25` | HZMFEM $k = 3$，$h = 0.0625$ | 50 / 10 | 279 | 0.2401 | $3.21 \times 10^{-3}$ / $4.54 \times 10^{-3}$ | 是 | 被动区内最大实体应力比 $1.168$（受约束区域 $1.011$）；去掉被动区对应旧 L2 投影无被动区运行（第 4.2 节） |
 | `analyzer-lfem__order-3__old` | LFEM $p = 3$，$h = 0.0625$ | 10 / 10 | 808 | 0.3446 | $4.84 \times 10^{-3}$ / $1.78 \times 10^{-2}$ | 是 | $42$ 个乘子触 $\lambda_{\max}$；连续化前期严重超限，$\beta$ 到顶时拓扑被锁成多细杆网格 |
 | `analyzer-lfem__order-3__mu50-hold3` | LFEM $p = 3$，$h = 0.0625$ | 50 / 3 | 265 | 0.2271 | $3.98 \times 10^{-3}$ / $4.04 \times 10^{-3}$ | 是 | 中部有三角灰度填角；逐步帧未保留 |
 | `analyzer-lfem__order-3` | LFEM $p = 3$，$h = 0.0625$ | 50 / 10 | 283 | 0.2258 | $2.90 \times 10^{-3}$ / $3.15 \times 10^{-3}$ | 是 | 与 hold 3 几乎相同，灰度填角约第 235 步起稳定不变 |
@@ -143,7 +197,11 @@ python experiments/paper_topopt_huzhang/sync_results.py portal-frame-2d-stress a
 - $p = 3$ 设计在 HZMFEM $k = 3$ 下的最大超限位于凹角顶点 $(6, 3.5)$ 附近（材料内角约 $245°$，奇异）：各设计只在自身离散下可行。
 
 
-## 2026-10-18: P1 节点插值与全域验收的新运行设置
+## 历史实施记录
+
+以下按实施顺序保留记录，其中“未启动”“未入库”描述当时状态；当前完成状态与来源以第 3 节为准。
+
+### 2026-10-18: P1 节点插值与全域验收的新运行设置
 
 新运行采用 `p1_trace_interpolation`, 端点取半值; 不设置载荷或支座被动区.
 `ACCEPTANCE_SOLID_THRESHOLD=None`, 停止判据与终态验收覆盖全部受约束单元;
@@ -214,3 +272,13 @@ HZMFEM k=3 前两级为 0.6527/0.6872; 未发现必须增加端点被动区的�
 终态冻结再分析、最终场、`final_optimizer_state.npz` 与 `summary.json` 仍在正常结束后生成.
 优化参数、状态求解与停止判据保持不变, 新增磁盘 I/O 会增加运行耗时.
 逐轮文件只用于查看与核查, 不支持精确断点续算. 已启动的旧进程不会自动采用新输出逻辑.
+
+## 2026-10-18: P1 节点插值新结果入库与论文更新
+
+- 来源: `outputs/portal-frame-2d-stress/analyzer-huzhang__order-3__p1-interpolation__all-cells__lambda-max-10000.0`, 经 `sync_results.py` 固化到同名 `results/` 目录; 旧运行保留.
+- 连续 P1 节点插值牵引, 无被动区, 全部 31554 个单元验收, 乘子上限 10000.
+- **实际运行 hold_steps=10, 未修改原始配置与终止记录.** 第 52--61 个外层步连续满足 C0--C2, 第 61 步结束, 累计 278 次 MMA 更新. 第 54 步 (263 次 MMA 更新) 的 hold_count 为 3; 论文采用第 61 步的最终设计, 不将其冒记为 hold_steps=3 的首次停止结果.
+- 论文按实际运行设置表述: 5.2.3 采用 N_hold=3, 5.2.4 采用 N_hold=10. 不再使用统一为“连续至少 3 步”的表述.
+- 最终体积分数 0.23568401473285952, 最大局部约束值 0.00424261101844331, 最大表观 von Mises 应力比 0.9997972889696697, 外层平均设计变化量 0.00025886574958888835.
+- 最新冻结再分析复现 summary 的最大约束值, 全部单元验收通过; rho_phys>0.9 实体带最大归一化牵引跳量约 2.687e-16, 相对跳量门限检查通过. 精确结果见 `postprocess/discretization_probe/huzhang-3__probe.json`.
+- 图 5.12/5.13 改用本次运行的冻结应力与优化历史. 正文体积分数更新为 23.57%, 最大约束值为 4.243e-3, 跳量为 2.687e-16. 本次仅后处理, 未重跑优化.

@@ -1,0 +1,72 @@
+{
+  "case_id": "cantilever-middle-2d-stress",
+  "model": "CantileverMiddlePatch2d",
+  "method": "lfem",
+  "order": 3,
+  "mesh_type": "triangle-checkerboard",
+  "nx": 80,
+  "ny": 40,
+  "optimizer": "al_mma",
+  "load_discretization": "p1_trace_interpolation",
+  "integration_order": 8,
+  "stabilization_coefficient": null,
+  "volume_fraction": 0.3448071703625656,
+  "relative_equilibrium_residual": 2.0283885294633818e-11,
+  "optimization_iterations": 249,
+  "converged": true,
+  "termination_reason": "criterion-met: C0-C2 held for 3 consecutive ALM steps (change=1.378e-01, change_phys=2.880e-02, change_outer_mean=5.511e-04, measure=mean, max_rel_solid=4.711e-03 (C2 quantity, threshold=global), max_rel_global=4.711e-03, beta=10.0, p=3.5)",
+  "solver": "mumps",
+  "interpolation": {
+    "variables": "E"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-17T12:37:45+00:00",
+    "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "stress_constraint_formulation": "apparent",
+  "max_constraint": 0.004711311127004514,
+  "max_apparent_stress_ratio": 1.0012084762963365,
+  "max_relative_violation": 0.004711311127004514,
+  "relative_stress_tolerance": 0.005,
+  "acceptance_solid_threshold": null,
+  "max_relative_violation_accepted": 0.004711311127004514,
+  "accepted_cells": 6384,
+  "relative_stress_feasible": true,
+  "solid_report_threshold": 0.5,
+  "max_solid_stress_ratio_solid_region": 1.0361517739739852,
+  "load_pad_radius": 1.5,
+  "load_pad_centers": [
+    [
+      80.0,
+      17.0
+    ],
+    [
+      80.0,
+      23.0
+    ]
+  ],
+  "pad_cells": 16,
+  "load_pad_cells": 16,
+  "max_solid_stress_ratio_constrained": 4.893002602935039,
+  "max_solid_stress_ratio_pad": 0.6299539076319115,
+  "max_constraint_pad": -0.3700460923680885,
+  "complementarity_residual": 1.249829367760908,
+  "multiplier_relative_change": 0.06950823438406209,
+  "change_outer_mean": 0.0005511119159563571,
+  "change_outer_max": 0.13775732548677344,
+  "lambda_max": 10000.0,
+  "multiplier_capped_count": 0,
+  "optimizer_state": {
+    "file": "final_optimizer_state.npz",
+    "purpose": "frozen-analysis-and-inner-diagnostics",
+    "exact_restart_supported": false,
+    "beta": 10.0,
+    "inner_stop_rule": "legacy",
+    "inner_relative_tolerance": 0.1,
+    "inner_absolute_tolerance": 1e-06,
+    "max_inner_iterations": 5,
+    "last_inner_diagnostics": null
+  }
+}

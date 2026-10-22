@@ -4,7 +4,8 @@
 import os
 
 # 运行环境: BLAS 与 OpenMP 在加载时读取线程数, 须在导入 numpy/scipy 之前写入环境变量才生效.
-# 固定单线程: EA 的单元作用经由 BLAS, FA 的稀疏矩阵向量积不经由 BLAS, 多线程会混入库的线程支持差异
+# 固定单线程: EA 的单元作用经由 BLAS, FA 的稀疏矩阵向量积不经由 BLAS, 多线程会混入库的线程支持差异;
+# pytorch 后端与 --device cuda 时主机侧同样单线程, 显存占用与主机线程数无关
 NUM_THREADS = 1
 for _name in ('BLIS_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'OMP_NUM_THREADS'):
     os.environ[_name] = str(NUM_THREADS)
@@ -21,7 +22,8 @@ import math
 import numpy as np
 
 from soptx.backend import backend_manager as bm
-from soptx.core import blas_environment, measure
+from soptx.core import (blas_environment, is_out_of_memory, limit_cpu_memory, limit_cuda_memory, measure,
+                        record_out_of_memory)
 from soptx.mesh import HexahedronMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
@@ -42,9 +44,8 @@ E0 = 1.0
 EMIN = 1.0e-7
 NU = 0.3
 
-# 计算后端
+# 计算后端: --backend 的默认值; cuda 须用 pytorch
 BACKEND = 'numpy'
-DEVICE = 'cpu'
 
 # 分析参数: 有限元离散; GRID 为 --grid 的默认值
 # GRID = (390, 65, 65)
@@ -73,36 +74,136 @@ MAX_ITER = 300
 OUTPUT_DIR = Path(__file__).resolve().parent / 'outputs'
 VTU_FIELDS = ('density', )
 
+# GPU 显存上限 (GiB), 即 --gpu-memory-limit 的默认值: 固定值使各次运行可用显存相同, 与 run_fem_cpu_vs_gpu.py
+# 一致; 启动时空闲显存不足此值即拒绝运行
+CUDA_MEMORY_LIMIT_GIB = 14.0
+
+# 各阶段的执行顺序, 仅供内存或显存不足时判定失败阶段: measure 只在阶段正常结束时写入记录,
+# 顺序中第一个尚无记录的阶段即失败阶段
+SETUP_STAGES = ('网格', '分析器', '过滤矩阵', '目标与约束')
+ITERATION_STAGES = ('过滤', '装配', '边界条件', '求解', '灵敏度', '输出', 'OC')
+
 
 def parse_args(argv=None):
-    """解析刚度算子层级、网格、预条件子与最大优化步数, 其余设置均为模块顶部常量.
+    """解析刚度算子层级、网格、预条件子、优化步数、计算后端、计算设备与内存上限并确定输出目录.
+
+    cuda 须用 pytorch 后端, pytorch 后端只支持 none/jacobi 预条件子. numpy/cpu 的输出目录名与之前相同,
+    其余组合加 ``<backend>_<device>_`` 前缀. 其余设置均为模块顶部常量.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        命令行参数, 缺省读取 sys.argv.
+
+    Returns
+    -------
+    argparse.Namespace
+        刚度算子层级 assemble_level、网格 grid、预条件子、最大优化步数 max_iter、计算后端 backend、计算设备
+        device、GPU 显存上限 gpu_memory_limit (cpu 下为 None)、CPU 内存上限 cpu_memory_limit (未给出或 cuda
+        下为 None) 和自动生成的输出目录.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--level', choices=('ea', 'fa'), required=True,
+    parser.add_argument('--assemble-level', choices=('ea', 'fa'), required=True,
                         help='刚度算子层级: ea 不形成全局矩阵, fa 装配全局 CSR 矩阵')
     parser.add_argument('--grid', type=int, nargs=3, default=GRID, metavar=('NX', 'NY', 'NZ'),
                         help=f'六面体网格各方向单元数 (默认 {GRID})')
     parser.add_argument('--preconditioner', choices=('none', 'jacobi', 'gmg'), default=PRECONDITIONER,
-                        help=f'CG 预条件子 (默认 {PRECONDITIONER})')
+                        help=f'CG 预条件子 (默认 {PRECONDITIONER}); pytorch 后端只支持 none/jacobi')
     parser.add_argument('--max-iter', type=int, default=MAX_ITER,
                         help=f'最大优化步数 (默认 {MAX_ITER})')
+    parser.add_argument('--backend', choices=('numpy', 'pytorch'), default=BACKEND,
+                        help=f'计算后端, 默认 {BACKEND}; --device cuda 须用 pytorch')
+    parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu',
+                        help='计算设备, 默认 cpu')
+    parser.add_argument('--gpu-memory-limit', type=float, default=None, metavar='GIB',
+                        help=f'GPU 显存上限 (GiB), 只用于 --device cuda (默认 {CUDA_MEMORY_LIMIT_GIB})')
+    parser.add_argument('--cpu-memory-limit', type=float, default=None, metavar='GIB',
+                        help='CPU 内存上限 (GiB), 按启动后新增的虚拟内存计, 只用于 --device cpu; 不给则不设上限')
     args = parser.parse_args(argv)
+    if args.backend == 'pytorch':
+        # 只在 pytorch 后端导入 torch, numpy 运行的进程内存不含 torch
+        import torch
+        if args.preconditioner not in ('none', 'jacobi'):
+            parser.error('--backend pytorch 仅支持 none/jacobi 预条件子')
+    if args.device == 'cuda':
+        if args.backend != 'pytorch':
+            parser.error('--device cuda 须配 --backend pytorch')
+        if not torch.cuda.is_available():
+            parser.error('--device cuda 需要可用的 CUDA 设备')
+        if args.cpu_memory_limit is not None:
+            parser.error('--cpu-memory-limit 只用于 --device cpu')
+        if args.gpu_memory_limit is None:
+            args.gpu_memory_limit = CUDA_MEMORY_LIMIT_GIB
+        elif args.gpu_memory_limit <= 0:
+            parser.error(f'--gpu-memory-limit 须为正数, 得到 {args.gpu_memory_limit}')
+    else:
+        if args.gpu_memory_limit is not None:
+            parser.error('--gpu-memory-limit 只用于 --device cuda')
+        if args.cpu_memory_limit is not None and args.cpu_memory_limit <= 0:
+            parser.error(f'--cpu-memory-limit 须为正数, 得到 {args.cpu_memory_limit}')
     if min(args.grid) < 1:
         parser.error(f'--grid 须为正整数, 得到 {args.grid}')
     if args.max_iter < 1:
         parser.error(f'--max-iter 须为正整数, 得到 {args.max_iter}')
     args.grid = tuple(args.grid)
     nx, ny, nz = args.grid
-    # 目录名含层级、网格与预条件子, 不同配置的运行互不覆盖
-    args.output = OUTPUT_DIR.resolve() / f'{args.level}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}'
+    # 目录名含层级、网格与预条件子, 不同配置的运行互不覆盖; numpy/cpu 沿用原目录名, 已入库的结果不受影响
+    prefix = '' if (args.backend, args.device) == ('numpy', 'cpu') else f'{args.backend}_{args.device}_'
+    args.output = (OUTPUT_DIR.resolve()
+                   / f'{prefix}{args.assemble_level}_hex_{nx}x{ny}x{nz}_{SOLVER}_{args.preconditioner}')
     return args
 
 
 def main(argv=None):
-    """运行选定方法的完整拓扑优化流程.
+    """运行拓扑优化; 内存或显存不足时记录失败点.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        命令行参数, 缺省时读取 ``sys.argv``.
+
+    Returns
+    -------
+    status : int
+        正常结束时为 0, 内存或显存不足时为 2.
     """
     args = parse_args(argv)
-    bm.set_backend(BACKEND)
+    progress: dict[str, Any] = {}
+    try:
+        return run(args, progress)
+    except (MemoryError, RuntimeError) as error:
+        # torch.OutOfMemoryError 是 RuntimeError 的子类; 其余 RuntimeError 原样抛出
+        if not is_out_of_memory(error):
+            raise
+        record_out_of_memory(args.output, args.device, progress, error, SETUP_STAGES, ITERATION_STAGES)
+        return 2
+
+
+def run(args, progress: dict) -> int:
+    """运行选定方法的完整拓扑优化流程.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``parse_args`` 的结果.
+    progress : dict
+        运行中就地更新的进度, 供内存或显存不足时定位失败点, 键见 ``soptx.core.record_out_of_memory``.
+
+    Returns
+    -------
+    status : int
+        正常结束时为 0.
+    """
+    device = args.device
+    cuda = device == 'cuda'
+    backend = args.backend
+    bm.set_backend(backend)
+    # 给 PyTorch 分配器设固定显存上限, 超出即报 OOM, 不让 WDDM 驱动静默落到系统内存;
+    # 须在首次分配显存之前设置
+    gpu_memory = limit_cuda_memory(device, args.gpu_memory_limit) if cuda else None
+    # 主机内存上限按启动后新增的虚拟内存计, 超出即抛 MemoryError, 不换出到 swap; 依赖均已导入, 基线不含后续分配
+    cpu_memory = (limit_cpu_memory(args.cpu_memory_limit)
+                  if not cuda and args.cpu_memory_limit is not None else None)
 
     # 添加注释
     grid = args.grid
@@ -120,22 +221,31 @@ def main(argv=None):
 
     # 同一处记录公共参数, 方法专属参数另行补充.
     config: dict[str, Any] = dict(
-        method=f'fem_{args.level}',
+        method=f'fem_{args.assemble_level}',
         domain=list(domain), mesh='hex', grid=list(grid), spacing=spacing,
         space_degree=SPACE_DEGREE, integration_order=INTEGRATION_ORDER,
         E0=E0, Emin=EMIN, nu=NU, penalty=PENALTY, volfrac=VOLFRAC,
         filter_type='density', filter_radius=radius, optimizer=OC_OPTIONS,
         problem=FullMBBBeamPoint3d.__name__, load=LOAD,
-        operator_level=args.level, assembly_method=ASSEMBLY_METHOD, solver=SOLVER,
-        backend=BACKEND, device=DEVICE, max_iter=args.max_iter,
+        operator_level=args.assemble_level, assembly_method=ASSEMBLY_METHOD, solver=SOLVER,
+        backend=backend, device=device, gpu_memory=gpu_memory, cpu_memory=cpu_memory, max_iter=args.max_iter,
         tolerance=TOLERANCE, convergence_window=CONVERGENCE_WINDOW,
         volume_tolerance=VOLUME_TOLERANCE, vtu_fields=list(VTU_FIELDS),
         threads=dict(num_threads=NUM_THREADS, **blas_environment()))
+    if backend == 'pytorch':
+        import torch
+        config.update(torch=dict(version=torch.__version__, cuda=torch.version.cuda,
+                                 device_name=torch.cuda.get_device_name(device) if cuda else None))
     cg_options = dict(precond=None if precond == 'none' else precond,
                       maxiter=CG_MAXITER, rtol=CG_TOLERANCE, atol=0.0,
                       rtol_reference='rhs', norm_type='unpreconditioned',
                       verify_residual=True)
     config.update(cg_options=cg_options, cg_tolerance=CG_TOLERANCE)
+    # FA 交给求解器的是显式的约束后矩阵, 在 K 的值数组上原地对称消元, 不另存一份值数组;
+    # EA 没有显式矩阵, 施加边界条件只包一层 ConstrainedOperator
+    is_fa = args.assemble_level == 'fa'
+    bc_options = dict(inplace=True) if is_fa else {}
+    config.update(fa_dirichlet='eliminate_inplace' if is_fa else None)
     (output / 'config.json').write_text(
         json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
 
@@ -144,23 +254,33 @@ def main(argv=None):
     # 首行在准备阶段之前打印; 单元数与 Q1 位移自由度数由网格剖分算出, 分析器建好后核对
     n_cells = grid[0] * grid[1] * grid[2]
     n_dofs = 3 * (grid[0] + 1) * (grid[1] + 1) * (grid[2] + 1)
-    method_text = f'fem/{args.level}'
-    print(f'[配置] {method_text}, {BACKEND}/{DEVICE}, 线程 {NUM_THREADS}, 装配 {ASSEMBLY_METHOD}, '
+    method_text = f'fem/{args.assemble_level}'
+    device_text = f'{device} ({config["torch"]["device_name"]})' if cuda else device
+    print(f'[配置] {method_text}, {backend}/{device_text}, 线程 {NUM_THREADS}, 装配 {ASSEMBLY_METHOD}, '
           f'求解 {SOLVER} ({precond}, tol {CG_TOLERANCE:g}, maxiter {CG_MAXITER}), '
           f'网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
+    if gpu_memory is not None:
+        print(f'[显存上限] 空闲 {gpu_memory["free_gib"]:.2f} / 总量 {gpu_memory["total_gib"]:.2f} GiB, '
+              f'PyTorch 分配器上限 {gpu_memory["limit_gib"]:.2f} GiB (固定), '
+              '超出即报 OOM', flush=True)
+    if cpu_memory is not None:
+        print(f'[内存上限] 系统可用 {cpu_memory["available_gib"]:.2f} GiB, 启动时虚拟内存 '
+              f'{cpu_memory["base_virtual_gib"]:.2f} GiB, 新增上限 {cpu_memory["limit_gib"]:.2f} GiB, 超出即报错', flush=True)
 
     setup_stages = {}
-    with measure(setup_stages, '网格', label='准备'):
-        mesh = HexahedronMesh.from_box(list(domain), *grid, device=DEVICE)
+    progress.update(phase='准备', setup_stages=setup_stages, stages=setup_stages, gpu_memory=gpu_memory,
+                    cpu_memory=cpu_memory)
+    with measure(setup_stages, '网格', label='准备', device=device):
+        mesh = HexahedronMesh.from_box(list(domain), *grid, device=device)
         setattr(mesh, 'meshdata', {'nx': grid[0], 'ny': grid[1], 'nz': grid[2], 'hx': h, 'hy': h, 'hz': h})
     # 每轮一帧 VTU 写在 output/iterations/, 由 evolution.pvd 串成 ParaView 时间序列; 帧留在运行目录, 需要时手动迁移
     frames = IterationFrameWriter(output, mesh)
 
-    with measure(setup_stages, '分析器', label='准备'):
+    with measure(setup_stages, '分析器', label='准备', device=device):
         # 材料、修正 SIMP 插值 E = Emin + rho^q (E0 - Emin) 与所选层级的分析器
         material = IsotropicLinearElasticMaterial(youngs_modulus=E0, poisson_ratio=NU, hypothesis='3D',
-                                                  device=DEVICE)
+                                                  device=device)
         interpolation = MaterialInterpolationScheme(
             density_location='element', interpolation_method='msimp',
             options={'penalty_factor': PENALTY, 'void_youngs_modulus': EMIN, 'target_variables': ['E']},
@@ -168,21 +288,21 @@ def main(argv=None):
         analyzer = LagrangeFEMAnalyzer(
             disp_mesh=mesh, pde=problem, material=material,
             space_degree=SPACE_DEGREE, integration_order=INTEGRATION_ORDER,
-            assembly_method=ASSEMBLY_METHOD, operator_level=args.level, solve_method=SOLVER,
+            assembly_method=ASSEMBLY_METHOD, operator_level=args.assemble_level, solve_method=SOLVER,
             solver_options=dict(cg_options),
             topopt_algorithm='density_based', interpolation_scheme=interpolation,
         )
         if (int(mesh.number_of_cells()), int(analyzer.tensor_space.number_of_global_dofs())) != (n_cells, n_dofs):
             raise RuntimeError('网格单元数或位移自由度数与首行打印的不符')
 
-    with measure(setup_stages, '过滤矩阵', label='准备'):
+    with measure(setup_stages, '过滤矩阵', label='准备', device=device):
         density_filter = Filter(design_mesh=mesh, filter_type='density', rmin=radius,
                                 density_location='element')
 
-    with measure(setup_stages, '目标与约束', label='准备'):
+    with measure(setup_stages, '目标与约束', label='准备', device=device):
         objective = ComplianceObjective(analyzer=analyzer, state_variable='u', diff_mode='manual')
         constraint = VolumeConstraint(analyzer=analyzer, volume_fraction=VOLFRAC, diff_mode='manual')
-        rho = bm.full((n_cells, ), VOLFRAC, dtype=bm.float64, device=DEVICE)
+        rho = bm.full((n_cells, ), VOLFRAC, dtype=bm.float64, device=device)
         volume_gradient = density_filter.filter_constraint_sensitivities(
             design_variable=rho, con_grad_rho=constraint.jac(density=rho))
 
@@ -191,7 +311,7 @@ def main(argv=None):
     if 'density' in VTU_FIELDS:
         initial = density_filter.filter_design_variable(
             design_variable=rho,
-            physical_density=bm.zeros((n_cells, ), dtype=bm.float64, device=DEVICE))[:]
+            physical_density=bm.zeros((n_cells, ), dtype=bm.float64, device=device))[:]
         initial_frame = frames.write(0, cell_data={'density': bm.to_numpy(initial)})
         del initial
 
@@ -207,26 +327,28 @@ def main(argv=None):
         iteration += 1
         started = perf_counter()
         stages = {}
+        progress.update(phase='迭代', iteration=iteration, stages=stages)
         # 首轮逐阶段打印, 便于定位大规模下出问题的阶段; 之后只打印汇总行
         label = '迭代 1' if iteration == 1 else None
 
         # 1. 密度过滤
-        with measure(stages, '过滤', label):
+        with measure(stages, '过滤', label, device=device):
             physical = density_filter.filter_design_variable(
                 design_variable=rho,
-                physical_density=bm.zeros((n_cells, ), dtype=bm.float64, device=DEVICE))[:]
+                physical_density=bm.zeros((n_cells, ), dtype=bm.float64, device=device))[:]
             volume_fraction = float(bm.mean(physical))
 
         # 2. 分析: 依次调用 solve_state 内部的公开步骤, 以便把装配与求解分开计量. EA 的装配只更新
         #    逐单元系数, 施加边界条件只包一层 ConstrainedOperator (Pi_I K Pi_I + Pi_D); FA 的装配散加
-        #    CSR 值数组, 施加边界条件在其上对称消元
-        with measure(stages, '装配', label):
+        #    CSR 值数组, 施加边界条件在其上原地对称消元
+        with measure(stages, '装配', label, device=device):
             stiffness = analyzer.assemble_stiff_matrix(rho_val=physical)
-        with measure(stages, '边界条件', label):
-            system_matrix, system_load = analyzer.apply_bc(stiffness, analyzer.assemble_body_force_vector())
+        with measure(stages, '边界条件', label, device=device):
+            system_matrix, system_load = analyzer.apply_bc(stiffness, analyzer.assemble_body_force_vector(),
+                                                           **bc_options)
             del stiffness
             displacement = analyzer.tensor_space.function()
-        with measure(stages, '求解', label):
+        with measure(stages, '求解', label, device=device):
             # 首轮以 Dirichlet 基准向量为初值 (两侧一致, 同 solve_state 在非 FA 层级下的默认), 之后
             # 以上一轮位移热启动; 二者的 Dirichlet 分量都取给定值 (本例为零)
             x0 = analyzer.prescribed_solution if previous_displacement is None else previous_displacement
@@ -239,7 +361,7 @@ def main(argv=None):
                   f'相对残差 {solver_info["relres"]:.3e}', flush=True)
 
         # 3. 柔顺度与灵敏度
-        with measure(stages, '灵敏度', label):
+        with measure(stages, '灵敏度', label, device=device):
             compliance = float(objective.fun(density=physical, state=state))
             if not math.isfinite(compliance) or compliance <= 0:
                 raise FloatingPointError('柔顺度必须为有限正数')
@@ -252,7 +374,7 @@ def main(argv=None):
 
         # 4. 输出: 保存本轮分析所用设计的所选场; 帧与 PVD 由 IterationFrameWriter 原子写出.
         #    位移按节点优先编号 (3 n + c), 可直接重排为 (NN, 3)
-        with measure(stages, '输出', label):
+        with measure(stages, '输出', label, device=device):
             cell_data = {'density': bm.to_numpy(physical)} if 'density' in VTU_FIELDS else {}
             point_data = ({'u': bm.to_numpy(displacement[:]).reshape(-1, 3)}
                           if 'displacement' in VTU_FIELDS else {})
@@ -283,13 +405,15 @@ def main(argv=None):
                       cg_converged=solver_info['converged'],
                       analysis_seconds=analysis_seconds, peak_rss_gib=peak_gib,
                       vtu_file=frame_file, stages=stages)
+        if cuda:
+            record['peak_gpu_gib'] = max(stage['gpu_peak_gib'] for stage in stages.values())
         history.append(record)
         # 停止时不再更新, 保留刚完成分析的密度, 避免最终柔顺度与密度错位
         stop = converged or iteration == args.max_iter
 
         # 6. OC 更新 (计入下一轮之前, 记在本轮记录中)
         if not stop:
-            with measure(stages, 'OC', label):
+            with measure(stages, 'OC', label, device=device):
                 rho_new = OCOptimizer.update_design_variable(
                     design_variable=rho, objective_gradient=dc, constraint_gradient=volume_gradient,
                     constraint_function=lambda candidate: bm.sum(volume_gradient * candidate) - VOLFRAC,
@@ -342,6 +466,9 @@ def main(argv=None):
                    process_peak_rss_gib=max(max(stage['peak_gib'] for stage in setup_stages.values()),
                                             max(record['peak_rss_gib'] for record in history)),
                    total_seconds=perf_counter() - run_started)
+    if cuda:
+        summary['process_peak_gpu_gib'] = max(max(stage['gpu_peak_gib'] for stage in setup_stages.values()),
+                                              max(record['peak_gpu_gib'] for record in history))
     (output / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False),
                                          encoding='utf-8')
     print(f'[完成] {summary["termination"]}，{iteration} 轮，C={compliance:.4f}，'

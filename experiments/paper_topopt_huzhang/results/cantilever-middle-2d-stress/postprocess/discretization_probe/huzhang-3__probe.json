@@ -4,17 +4,17 @@
   "design_run_dir": "cantilever-middle-2d-stress/analyzer-huzhang__order-3",
   "design_digest": {
     "path": "experiments/paper_topopt_huzhang/results/cantilever-middle-2d-stress/analyzer-huzhang__order-3/density_final.vtu",
-    "sha256": "13cc43ff99d19336dab6c48f38d1aaca94243f608e4b56c1980d8d0c7531b93d",
+    "sha256": "27bd2586042247117f4c4163f3d3e723f9036a8bfe5c2e9df333d933ed007814",
     "bytes": 311106
   },
   "design_summary": {
-    "optimization_iterations": 256,
+    "optimization_iterations": 381,
     "converged": 1,
-    "volume_fraction": 0.35005063535587644,
-    "max_constraint": 0.004799766586228026,
-    "max_relative_violation": 0.004799766586228026,
-    "max_relative_violation_solid_region": 0.0028161813468552954,
-    "acceptance_solid_threshold": 0.5,
+    "volume_fraction": 0.34971349631192694,
+    "max_constraint": 0.004850876591597642,
+    "max_relative_violation": 0.004850876591597642,
+    "max_relative_violation_accepted": 0.004850876591597642,
+    "acceptance_solid_threshold": null,
     "load_pad_radius": 1.5,
     "pad_cells": 16,
     "lambda_max": 3000.0,
@@ -23,34 +23,35 @@
   "discretization": "huzhang-3",
   "delta_g": 0.005,
   "pad_cells": 16,
-  "accepted_cells": 2249,
-  "max_g_accepted": 0.0028161813475358066,
-  "seconds": 2.524637773982249,
+  "accepted_cells": 6384,
+  "max_g_accepted": 0.004850876591580361,
+  "seconds": 3.399323955993168,
   "traction_jump": {
     "integration_order": 8,
     "interior_faces": 9480,
-    "relative_jump_max": 1.4113952257565158e-13,
-    "solid_cells": 1797,
-    "cell_abs_solid_median": 7.368716408815445e-17,
-    "cell_abs_solid_p95": 1.3062241296216415e-16,
-    "cell_abs_solid_max": 1.980767712472795e-16
+    "relative_jump_max": 1.8680564971593634e-13,
+    "solid_cells": 1775,
+    "cell_abs_solid_median": 7.645463001543777e-17,
+    "cell_abs_solid_p95": 1.3094237459638793e-16,
+    "cell_abs_solid_max": 1.8055371340586768e-16
   },
   "checks": {
     "huzhang_jump_gate": {
-      "value": 1.4113952257565158e-13,
+      "value": 1.8680564971593634e-13,
       "threshold": 1e-10,
       "passed": 1
     },
     "accepted_max_g_matches_summary": {
-      "reproduced": 0.0028161813475358066,
-      "recorded": 0.0028161813468552954,
+      "reproduced": 0.004850876591580361,
+      "recorded": 0.004850876591597642,
       "passed": 1
     }
   },
   "provenance": {
-    "generated_at_utc": "2026-10-07T23:49:34+00:00",
-    "git_revision": "19f08ce90f8514430b32b1d8b6a32dabc02d1e14",
+    "generated_at_utc": "2026-10-17T13:04:38+00:00",
+    "git_revision": "2226a7b7ec76067bdce87084a27d0a2f84085c97",
     "git_dirty": 1,
     "reproducible": 0
-  }
+  },
+  "observed_multiplier_max": 2253.965940548084
 }

@@ -113,8 +113,12 @@ dist/
 # 同理: topopt_simp_fem 的 fem_preconditioners/ 是预条件子筛选的输入密度 (每个 NPY 约 24 KB)
 # 与来源记录 sources.json, 不是运行产物, 整体入库。须排在上面 *.json 等规则之后。
 !/experiments/topopt_simp_fem/fem_preconditioners/**
-# 同理: topopt_simp_substructure_fa 的 results/ 由其 sync_results.py 固化, 整体入库。
-!/experiments/topopt_simp_substructure_fa/results/**
+# 同理: topopt_simp_substructure 的 results/ 整体入库, 内容为 outputs/ 中选定运行的 config/summary/history.json
+# 与末轮场 npy; 逐轮帧 iterations/、可由 npy 重建的 VTU 与指向逐轮帧的 evolution.pvd 不入库。
+!/experiments/topopt_simp_substructure/results/**
+/experiments/topopt_simp_substructure/results/**/iterations/
+/experiments/topopt_simp_substructure/results/**/*.vtu
+/experiments/topopt_simp_substructure/results/**/*.pvd
 
 # 根目录兜底：figs/、logs/、outputs/、old/ 不是架构目录，正式产物一律放在
 # examples/<topic>/ 或 experiments/<topic>/ 内部；根目录出现的这些目录均为

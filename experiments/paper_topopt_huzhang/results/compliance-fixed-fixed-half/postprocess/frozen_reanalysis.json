@@ -27,7 +27,9 @@
     ]
   ],
   "paper_columns": [
+    "lfem-3",
     "lfem-4",
+    "huzhang-3",
     "huzhang-4"
   ],
   "provenance": {

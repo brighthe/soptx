@@ -13,10 +13,11 @@
 
 本脚本对每一对做两件事:
 
-1. 把两侧运行目录下的 ``config.json``, ``summary.json``, ``history.json`` 原样拷入
-   ``results/<运行目录名>/``;
+1. 把两侧运行目录下的 ``config.json``, ``summary.json``, ``history.json`` 与末轮场
+   ``density_final.npy``, ``design_density_final.npy``, ``displacement_final.npy`` 原样拷入
+   ``results/<运行目录名>/``; 逐轮帧 ``iterations/``、VTU 与 ``evolution.pvd`` 不拷;
 2. 读两侧末轮的 ``*_final.npy``, 写出 ``results/final_fields.json`` 中该对的条目: 各场的统计指纹
-   与 sha256, 及两侧的逐场比对. npy 本身不入库.
+   与 sha256, 及两侧的逐场比对.
 
 各对可以分别固化: 某一对的 A 侧目录尚不存在时跳过该对, 保留 ``final_fields.json`` 中已有的其他对.
 只依赖 numpy 与标准库, 不导入 soptx.
@@ -261,11 +262,11 @@ def main(argv=None):
         for run in runs.values():
             target = results / run.name
             target.mkdir(exist_ok=True)
-            for f in RUN_FILES:
+            for f in RUN_FILES + FIELD_FILES:
                 # copy2 保留修改时间, 它是运行时间的唯一记录
                 shutil.copy2(run / f, target / f)
     fields_path.write_text(json.dumps({
-        'description': ('两侧末轮场: 各场的统计指纹与 sha256, 及两侧比对, 按对照对分组. 原始 npy 未存档; '
+        'description': ('两侧末轮场: 各场的统计指纹与 sha256, 及两侧比对, 按对照对分组. 原始 npy 一并存于各运行目录; '
                         'sha256 只能确认逐字节相同的文件, 重跑结果按容差与统计指纹比较'),
         'pairs': merged,
     }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

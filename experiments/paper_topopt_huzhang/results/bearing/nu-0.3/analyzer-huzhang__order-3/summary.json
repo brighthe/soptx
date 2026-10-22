@@ -1,0 +1,33 @@
+{
+  "case_id": "bearing",
+  "group": "nu-0.3",
+  "poisson_ratio": 0.3,
+  "model": "BearingTraction2d",
+  "method": "huzhang",
+  "order": 3,
+  "mesh_type": "triangle-single-diagonal-symmetric",
+  "nx": 120,
+  "ny": 40,
+  "optimizer": "oc",
+  "load_discretization": null,
+  "integration_order": 8,
+  "stabilization_coefficient": "fixed",
+  "volume_fraction": 0.35002277293458,
+  "relative_equilibrium_residual": 1.9285367189576762e-09,
+  "optimization_iterations": 302,
+  "converged": true,
+  "termination_reason": null,
+  "solver": "mumps",
+  "interpolation": {
+    "variables": "E"
+  },
+  "provenance": {
+    "generated_at_utc": "2026-10-17T03:24:43+00:00",
+    "git_revision": "7cafae90d7fd8a40202590b1c15b4809abd5b8ba",
+    "git_dirty": true,
+    "reproducible": false
+  },
+  "compliance": 124.83144845563142,
+  "compliance_domain": "full",
+  "full_structure_factor": 1.0
+}

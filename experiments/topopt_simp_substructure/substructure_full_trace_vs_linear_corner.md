@@ -6,25 +6,26 @@
 
 ## 1. 研究对象
 
-对照相同细网格、相同子结构划分下，子结构边界位移的两种表示 `full_trace` 与 `linear_corner` 对 Huang2023 三维 MBB 梁拓扑优化设计质量和计算成本的影响。
+对照相同细网格、相同子结构划分下，子结构边界位移的两种表示 `full_trace` 与 `linear_corner` 对 Huang2023 三维 MBB 梁上的完整优化结果。
+
+两侧的子结构位移都用基函数插值表示：$u^j=N^jq^j$，$q^j$ 为待求系数，$N^j$ 为子结构的多尺度基函数，每一列是某个系数取单位值、其余为零时子结构的静力位移，其边界节点行给出边界位移，内部节点行给出内部位移。两侧的内部位移都由边界位移精确回代得到，差别只在系数 $q^j$ 的选取：`full_trace` 取全部边界节点位移，`linear_corner` 取 8 个角点位移，基函数随之确定。
 
 | 项目 | full_trace | linear_corner |
 |---|---|---|
-| 子结构边界位移 | 全部边界节点位移为未知量，$\Psi=I$ | 由 8 个角点位移三线性插值，$\Psi=L$ |
-| 刚度算子 | 各子结构 Schur 补装配为全局边界 CSR 矩阵 $K_\Gamma$ | 各子结构投影到角点的 Schur 补装配为全局角点 CSR 矩阵 $K_C=P^{\mathsf T}K_\Gamma P$ |
-| 未知量 | 全局边界位移 $U_\Gamma$ | 全局角点位移 $U_C$，边界位移由 $U_\Gamma=PU_C$ 插值得到 |
+| 子结构边界位移 | 全部边界节点位移：$u_b^j=q^j$ |  8 个角点位移 $q^j$ 三线性插值：$u_b^j=Lq^j$ |
+| 刚度算子 | 各子结构 Schur 补 $K_s^j$ 组装为全局边界矩阵 $K_\Gamma$ | 各子结构投影到角点的 Schur 补 $L^{\mathsf T}K_s^jL$ 组装为全局角点矩阵 $K_C=P^{\mathsf T}K_\Gamma P$ |
+| 未知量 | 全局边界位移 $U_\Gamma$ | 全局角点位移 $U_C$ 与插值得到的边界位移 $U_\Gamma=PU_C$ |
 
-### 1.1 矩阵组装、局部缩聚与角点投影
+### 1.1 矩阵组装、边界参数化、局部缩聚与全局组装
 
-首先将细网格单元刚度 $K_e(\rho_e)$ 组装为子结构总刚 $K^j$，并按边界 $b$、内部 $i$ 分块：
+**矩阵组装**。首先将细网格单元刚度 $E(\rho_e)K^0$ 组装为子结构总刚 $K^j$，$K^0$ 为单位模量的单元刚度，并按边界 $b$、内部 $i$ 分块：
 
 $$
-K^j=\sum_{e\in\Omega_j}(G_e^j)^{\mathsf T}K_e(\rho_e)\,G_e^j
+K^j=\sum_{e\in\Omega_j}(G_e^j)^{\mathsf T}E(\rho_e)K^0\,G_e^j
 =\begin{bmatrix}K_{bb}^j&K_{bi}^j\\K_{ib}^j&K_{ii}^j\end{bmatrix}\in\mathbb R^{n_d\times n_d}
 $$
 
-
-子结构平衡方程按同一分块写为
+**边界位移的参数化**。子结构平衡方程按同一分块写为
 
 $$
 \begin{bmatrix}K_{bb}^j&K_{bi}^j\\K_{ib}^j&K_{ii}^j\end{bmatrix}
@@ -32,63 +33,87 @@ $$
 \begin{bmatrix}f_b^j\\0\end{bmatrix},
 $$
 
-其中 $f_b^j$ 为作用在子结构边界节点上的力；内部载荷为零。由第二行解出内部位移
+其中 $f_b^j$ 为子结构边界节点上的节点力，组装后边界右端项只剩外载荷 $F_\Gamma$；内部载荷为零。边界自由度在子结构中占多数，两侧用不同的参数 $q^j$ 表示边界位移，$u_b^j=\Psi q^j$：
+
+- `full_trace` 取 $\Psi=I$，$q^j=u_b^j$ 就是全部边界节点位移，不做降维。
+- `linear_corner` 取 $\Psi=L$，$q^j$ 为 8 个角点的 24 个位移，$L\in\mathbb R^{n_b\times24}$ 为角点位移到全部边界节点位移的三线性插值矩阵。
+
+**局部缩聚**。第二行 $K_{ib}^ju_b^j+K_{ii}^ju_i^j=0$ 即内部平衡方程。代入 $u_b^j=\Psi q^j$，解出内部位移对参数的响应：
 
 $$
-u_i^j=-(K_{ii}^j)^{-1}K_{ib}^ju_b^j ,
+u_i^j=N_i^jq^j,\qquad N_i^j=-(K_{ii}^j)^{-1}K_{ib}^j\Psi ,
 $$
 
-代入第一行，消去内部自由度：
+$N_i^j$ 的每一列是某个参数取单位值、其余为零时内部节点的静力位移，两侧都由内部平衡方程精确解出。再把 $u_b^j=\Psi q^j$、$u_i^j=N_i^jq^j$ 代入第一行，消去内部自由度，并左乘 $\Psi^{\mathsf T}$ 把 $n_b$ 个方程投影到 $q^j$ 的维数，得到只含 $q^j$ 的缩聚平衡方程：
 
 $$
-\bigl(K_{bb}^j-K_{bi}^j(K_{ii}^j)^{-1}K_{ib}^j\bigr)u_b^j=f_b^j .
+\Psi^{\mathsf T}\bigl(K_{bb}^j-K_{bi}^j(K_{ii}^j)^{-1}K_{ib}^j\bigr)\Psi\,q^j=\Psi^{\mathsf T}f_b^j .
 $$
 
-这是只含边界位移的缩聚平衡方程 $K_s^ju_b^j=f_b^j$，其系数矩阵即缩聚刚度，也就是 Schur 补：
-
-$$
-K_s^j=K_{bb}^j-K_{bi}^j(K_{ii}^j)^{-1}K_{ib}^j\in\mathbb R^{n_b\times n_b}.
-$$
-
-这一步是局部精确消元，两侧相同。
-
-消元后每个子结构只剩边界位移 $u_b^j$ 作为未知量，但边界自由度在子结构中占多数。记子结构边界位移的表示为 $u_b^j=\Psi q^j$，以 $q^j$ 作为子结构的未知量：`full_trace` 保留全部边界自由度，`linear_corner` 用少量参数表示边界位移，以缩小全局系统。两侧的差别就在 $\Psi$ 的取法：
-
-- `full_trace` 取 $\Psi=I$，$q^j=u_b^j$ 为全部边界自由度，不做降维。消元后不再施加任何约束，缩聚刚度就是 Schur 补 $K_s^j$。
-- `linear_corner` 取 $\Psi=L$，$q^j$ 为 8 个角点的 24 个位移，$L\in\mathbb R^{n_b\times24}$ 为角点位移到全部边界节点位移的三线性插值矩阵。将 $u_b^j=Lq^j$ 代入 $K_s^ju_b^j=f_b^j$ 并左乘 $L^{\mathsf T}$，得 $L^{\mathsf T}K_s^jL\,q^j=L^{\mathsf T}f_b^j$，缩聚刚度为 $K_c^j=L^{\mathsf T}K_s^jL$。
-
-两种缩聚刚度统一写为 $\Psi^{\mathsf T}K_s^j\Psi$：
+括号内即 Schur 补 $K_s^j=K_{bb}^j-K_{bi}^j(K_{ii}^j)^{-1}K_{ib}^j\in\mathbb R^{n_b\times n_b}$，缩聚刚度为
 
 $$
 \Psi^{\mathsf T}K_s^j\Psi=
 \begin{cases}
-K_{s}^j\in\mathbb R^{n_b\times n_b}, & \texttt{full\_trace}\ (\Psi=I),\\[4pt]
+K_s^j\in\mathbb R^{n_b\times n_b}, & \texttt{full\_trace}\ (\Psi=I),\\[4pt]
 K_c^j=L^{\mathsf T}K_s^jL\in\mathbb R^{24\times24}, & \texttt{linear\_corner}\ (\Psi=L).
 \end{cases}
 $$
 
-`full_trace` 的 $K_s^j$ 与细网格 FEM 代数等价；`linear_corner` 的 $K_c^j$ 是 $K_s^j$ 在角点插值空间上的 Galerkin 投影，引入了边界位移约束，是 Ritz 近似。
+`full_trace` 不施加任何约束，缩聚刚度就是 Schur 补；`linear_corner` 的 $K_c^j$ 是 $K_s^j$ 在角点插值空间上的 Galerkin 投影，引入了边界位移约束，是 Ritz 近似。
 
-再将各自的子结构缩聚刚度矩阵组装为全局系统刚度：
+**全局未知量与组装**。相邻子结构共享边界，各子结构的 $q^j$ 不独立，而是同一个全局未知量 $Q$ 的分量，$q^j=A^jQ$，$A^j$ 为限制矩阵（布尔定位矩阵，即以子结构为单元的 cell2dof）。三层量的对应如下：
+
+| | 边界位移 $u_b^j$ | 子结构参数 $q^j$ | 全局未知量 $Q$ |
+|---|---|---|---|
+| `full_trace` | $u_b^j=q^j$ | 全部边界节点位移，$n_b$ 个 | 全局边界位移 $U_\Gamma$，$q^j=A_b^jU_\Gamma$ |
+| `linear_corner` | $u_b^j=Lq^j$ | 8 个角点的 24 个位移 | 全局角点位移 $U_C$，$q^j=A_c^jU_C$ |
+
+把 $q^j=A^jQ$ 代入各子结构的缩聚方程并求和，得到全局系统刚度：
 
 $$
 K_\Gamma=\sum_j(A_b^j)^{\mathsf T}K_s^jA_b^j\in\mathbb R^{N_\Gamma\times N_\Gamma},\qquad
-K_C=\sum_j(A_c^j)^{\mathsf T}K_c^jA_c^j\in\mathbb R^{N_C\times N_C},
+K_C=\sum_j(A_c^j)^{\mathsf T}K_c^jA_c^j\in\mathbb R^{N_C\times N_C}.
 $$
 
-其中 $A_b^j,A_c^j$ 分别提取子结构的边界位移与角点位移，$P$ 为全局的角点到边界插值，满足 $A_b^jP=LA_c^j$。
+两个全局未知量由全局插值 $P$ 联系，$U_\Gamma=PU_C$，且 $A_b^jP=LA_c^j$。`full_trace` 下单个 $K_s^j$ 只是局部对象，组装后的 $K_\Gamma$ 是细网格总刚对接口自由度的 Schur 补，$K_\Gamma U_\Gamma=F_\Gamma$ 与细网格 FEM 代数等价。
 
 ### 1.2 求解与位移恢复
 
-`full_trace`：$K_\Gamma U_\Gamma=F_\Gamma$，$q^j=A_b^jU_\Gamma$；`linear_corner`：$K_CU_C=F_C$，$q^j=A_c^jU_C$。两侧都用形函数矩阵恢复子结构位移，再按全局编号拼成全场位移：
+`full_trace` 首先得到全局边界位移：
 
 $$
-u^j=N^jq^j,\qquad
+K_\Gamma U_\Gamma=F_\Gamma .
+$$
+
+`linear_corner` 首先得到全局角点位移：
+
+$$
+K_CU_C=F_C ,
+$$
+
+其中 $F_C=P^{\mathsf T}F_\Gamma=\sum_j(A_c^j)^{\mathsf T}L^{\mathsf T}f_b^j$ 为投影到角点的载荷。
+
+提取各子结构的边界位移参数 $q^j$，由 $u_b^j=\Psi q^j$ 得到子结构边界位移，回代内部位移：
+
+$$
+q^j=
+\begin{cases}
+A_b^jU_\Gamma, & \texttt{full\_trace},\\[4pt]
+A_c^jU_C, & \texttt{linear\_corner},
+\end{cases}\qquad
+u_b^j=\Psi q^j,\qquad
+u_i^j=N_i^jq^j.
+$$
+
+将边界与内部位移按全局编号恢复为全场位移 $U^\Gamma$、$U^C$：
+
+$$
 U^\Gamma=R_\Gamma^{\mathsf T}U_\Gamma+\sum_j(R_i^j)^{\mathsf T}u_i^j,\qquad
 U^C=R_\Gamma^{\mathsf T}PU_C+\sum_j(R_i^j)^{\mathsf T}u_i^j .
 $$
 
-展开即回代 $u_i^j=-(K_{ii}^j)^{-1}K_{ib}^ju_b^j$，其中 $u_b^j=A_b^jU_\Gamma$ 或 $u_b^j=LA_c^jU_C$；两侧内部位移都精确满足细网格内部平衡。
+两侧内部位移都由精确解出的 $N_i^j$ 回代得到，精确满足细网格内部平衡，差别只在边界位移 $u_b^j$。
 
 ### 1.3 Ritz 近似
 
@@ -136,18 +161,18 @@ $$
 
 实验脚本为 [`run_substructure_full_trace_vs_linear_corner.py`](run_substructure_full_trace_vs_linear_corner.py)。
 
-本实验均采用 NumPy / CPU：`BACKEND = 'numpy'`，`DEVICE = 'cpu'`；单线程：`NUM_THREADS = 1`，脚本在导入 numpy/scipy 之前把全部 BLAS / OpenMP 线程变量设为 1，取值记入 `config.json` 的 `threads`。
+本实验均采用 NumPy / CPU：`BACKEND = 'numpy'`，`DEVICE = 'cpu'`；单线程：线程数由 `--threads` 指定，默认 `NUM_THREADS = 1`，脚本在导入 numpy/scipy 之前把全部 BLAS / OpenMP 线程变量设为该值，取值记入 `config.json` 的 `threads`，输出目录名带后缀 `_t1`。
 
 ### 2.1 模型参数
 
 ![MBB 梁的几何、载荷与支承](../topopt_piml_substructure/assets/Huang2023_Fig5.png)
 
-采用整体三维 MBB 梁模型，长、高、宽分别记为 $L_x,L_y,L_z$，比例为 $6:1:1$，计算域为 $\Omega=[0,L_x]\times[0,L_y]\times[0,L_z]$。顶面中心施加竖直向下的单位集中力 $F=1$。支承取在两端底边的四个角点：左端两角点铰支（$u_x=u_y=u_z=0$），右端两角点滚支（$u_y=0$）。
+采用整体三维 MBB 梁模型，长、高、宽分别记为 $L_x,L_y,L_z$，比例为 $6:1:1$，以细单元边长为长度单位（$h=1$），计算域 $\Omega=[0,L_x]\times[0,L_y]\times[0,L_z]$ 的尺寸由网格剖分数确定。顶面中心施加竖直向下的单位集中力 $F=1$。支承取在两端底边的四个角点：左端两角点铰支（$u_x=u_y=u_z=0$），右端两角点滚支（$u_y=0$）。
 
 | 参数 | 数值或设置 |
 |---|---|
-| 几何与计算域 | 整体三维 MBB 梁，长、高、宽为 $210,35,35$：`domain = (0, 210, 0, 35, 0, 35)`，`FullMBBBeamPoint3d(domain=domain, ...)` |
-| 长度约定 | 默认剖分下 $h=1$；计算域固定，实际边长按 $h_i=L_i/n_i$ 计算并记录到 `spacing` |
+| 几何与计算域 | 整体三维 MBB 梁，$L_x:L_y:L_z=6:1:1$，尺寸由网格确定：`domain = (0, nx*h, 0, ny*h, 0, nz*h)`，`FullMBBBeamPoint3d(domain=domain, ...)` |
+| 长度约定 | 以细单元边长为长度单位，$h=1$：`ELEMENT_SIZE = 1.0`；网格须满足 $n_x:n_y:n_z=6:1:1$ |
 | 载荷 | 顶面中心集中力，沿 $y$ 方向向下，合力为 $-1$：`LOAD = -1.0` |
 | 支承 | 齐次 Dirichlet 边界条件：左端两底角点 $u_x=u_y=u_z=0$，右端两底角点 $u_y=0$：`FullMBBBeamPoint3d` |
 | 实体材料杨氏模量 $E_0$ | $1$：`E0 = 1.0` |
@@ -163,92 +188,91 @@ $$
 | 有限元 | 线性元：`SPACE_DEGREE = 1` |
 | 数值积分 | 二阶高斯积分：`INTEGRATION_ORDER = 2`，传入 `integration_order=INTEGRATION_ORDER` |
 | 单元刚度积分 | `fast` 积分实现：`LinearElasticIntegrator(..., method='fast')` |
-| 分析网格 | 结构化六面体网格：`mesh = HexahedronMesh.from_box(box=domain, nx=210, ny=35, nz=35, ...)` |
+| 分析网格 | 结构化六面体网格，各方向单元数由 `--grid` 设定，须满足 $6:1:1$；也可由 `--n-sub` 与 `--n-fine` 推出：`mesh = HexahedronMesh.from_box(box=domain, nx=nx, ny=ny, nz=nz, ...)` |
 
 **子结构缩聚**
 
 | 参数 | 数值或设置 |
 |---|---|
-| 子结构划分 | $42\times7\times7$ 个子结构，每个含 $5\times5\times5$ 个细单元：`StructuredSubstructureLayout(..., n_sub=(42, 7, 7), n_fine=(5, 5, 5), full_mesh=mesh)` |
-| 接口空间 | full_trace 保留全部接口自由度，$\boldsymbol\Psi=\boldsymbol I$：`SubstructureAnalyzer(..., trace='full_trace')`；linear_corner 采用角点线性插值空间：`SubstructureAnalyzer(..., trace='linear_corner')` |
+| 子结构划分 | 子结构数由 `--n-sub` 设定，每个子结构含 $m\times m\times m$ 个细单元，$m$ 由 `--n-fine` 设定，须满足 $\text{grid}=n_{\text{sub}}\times m$，缺省项由其余两项推出：`StructuredSubstructureLayout(..., n_sub=n_sub, n_fine=(m, m, m), full_mesh=mesh)` |
+| 边界位移表示 | full_trace 保留全部边界自由度，$\Psi=I$：`SubstructureAnalyzer(..., trace='full_trace')`；linear_corner 取角点三线性插值，$\Psi=L$：`SubstructureAnalyzer(..., trace='linear_corner')` |
 | 分批大小 | 每批处理 256 个子结构：`chunk_size=256` |
 
 **线性求解参数**
 
 | 参数 | 数值或设置 |
 |---|---|
-| 求解器 | CG + GMG（MGCG）：`SOLVER = 'cg'`，`PRECONDITIONER = 'gmg'` |
-| 停机准则 | 绝对容差为 $10^{-6}\lVert F\rVert$：`CG_TOLERANCE = 1.0e-6`，`rtol=0` |
-| 最大 CG 步数 | `--cg-maxiter 20000`，对应 `maxiter=args.cg_maxiter` |
-| 迭代初值 | 首轮均为零向量；第 2 轮起取上一轮拓扑优化的接口位移解：`x0=previous_displacement`，`full_trace` 为完整接口位移，`linear_corner` 为角点位移 |
+| 求解器 | CG：`SOLVER = 'cg'`；预条件子由 `--preconditioner` 指定，可选 `none`、`jacobi`、`gmg`（默认 `jacobi`，`gmg` 仅支持 full_trace）；实际取值记入 `config.json` 与结果表 |
+| 停机准则 | 相对右端项的容差 $10^{-6}$：`CG_TOLERANCE = 1.0e-6`，`rtol=CG_TOLERANCE`，`atol=0`，`rtol_reference='rhs'` |
+| 最大 CG 步数 | `CG_MAXITER = 20000` |
+| 迭代初值 | 首轮为零向量；第 2 轮起取上一轮的解：`x0=previous_interface`，`full_trace` 为全局边界位移，`linear_corner` 为全局角点位移 |
 
 ### 2.3 优化参数
 
 | 参数 | 数值或设置 |
 |---|---|
-| 优化目标 | 最小化柔顺度 |
+| 优化目标 | 最小化柔顺度：`ComplianceObjective(..., state_variable='u', diff_mode='manual')` |
 | 体积约束 | 物理体积分数 $0.12$：`VOLFRAC = 0.12` |
+| 初始密度 | 均匀取 $0.12$：`rho = bm.full((n_cells, ), VOLFRAC, ...)` |
 | 材料插值 | 修正 SIMP：`interpolation_method='msimp'` |
 | SIMP 惩罚指数 $q$ | $3$：`PENALTY = 3.0` |
 | 密度过滤 | `filter_type='density'` |
-| 过滤半径 | $3h$：`FILTER_RADIUS_CELLS = 3.0` |
-| 优化器 | OC |
+| 过滤半径 | $3h=3$：`FILTER_RADIUS_CELLS = 3.0` |
+| 灵敏度过滤 | `filter_objective_sensitivities(...)`，`filter_constraint_sensitivities(...)` |
+| 优化器 | OC：`OCOptimizer.update_design_variable(..., **OC_OPTIONS)` |
 | 移动限 | $0.2$：`move_limit=0.2` |
 | 阻尼指数 | $0.5$：`damping_coef=0.5` |
-| 收敛判据 | 柔顺度相对变化连续 5 轮小于 $2\times10^{-4}$：`TOLERANCE = 2.0e-4`，`CONVERGENCE_WINDOW = 5` |
+| 设计变量下界 | $0$：`design_variable_min=0.0` |
+| Lagrange 乘子 | 二分法：`initial_lambda=1.0e9`，`bisection_tol=1.0e-3` |
 | 体积可行性容差 | $10^{-6}$：`VOLUME_TOLERANCE = 1.0e-6` |
-| 最大迭代数 | 正式优化 `--max-iter 300`；小网格验收 `--max-iter 2` |
+| 收敛判据 | 柔顺度相对变化连续 5 轮小于 $2\times10^{-4}$：`TOLERANCE = 2.0e-4`，`CONVERGENCE_WINDOW = 5` |
+| 最大迭代数 | 由 `--max-iter` 指定，实际取值记入 `config.json` |
 
 ## 3. 结果对照
 
-### 3.1 优化结果
+```bash
+python experiments/topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py --trace full_trace --threads 1
+python experiments/topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py --trace linear_corner --threads 1
+```
 
-| 项目 | full_trace + Jacobi | linear_corner + Jacobi |
+### 3.1 linear_corner 近似的正确性
+
+在同一物理密度场上分别用 full_trace 与 linear_corner 各做一次分析（固定密度，不过滤、不做 OC 更新，求解配置同优化运行），核对第 1.3 节的 Ritz 关系：$C_C\le C_\Gamma$；按能量范数直接算的 $\varepsilon_E=\|U^\Gamma-U^C\|_K/\|U^\Gamma\|_K$ 与 $\sqrt{\varepsilon_C}$ 吻合到 CG 容差；恢复后的 $U^C$ 代回细网格方程，残差 $r=KU^C-F$ 的内部分量 $r_I$ 在 CG 容差量级，接口分量 $r_\Gamma$ 非零但与角点子空间正交，$P^{\mathsf T}r_\Gamma$ 在自由角点分量上为 CG 容差量级。密度场取初始均匀密度（两侧首轮共用）。
+
+| 物理密度场 | $C_\Gamma$ | $C_C$ | $\varepsilon_C$ | $\varepsilon_E$ | $\|r_I\|_2/\|F\|_2$ | $\|P^{\mathsf T}r_\Gamma\|_2/\|P^{\mathsf T}F_\Gamma\|_2$ |
+|---|---|---|---|---|---|---|
+| 初始均匀密度，$m=5$（$42\times7\times7$） | $2562.4025$ | $1238.0029$ | $0.517$ | $0.719$ | $3.6\times10^{-13}$ | $7.7\times10^{-7}$ |
+| 初始均匀密度，$m=7$（$30\times5\times5$） | $2562.4025$ | $1132.5640$ | $0.558$ | $0.747$ | $3.7\times10^{-13}$ | $7.7\times10^{-7}$ |
+
+残差两列为 linear_corner 的值，投影只计自由角点分量；未投影的接口残差 $\|r_\Gamma\|_2/\|F\|_2$ 为 $1.08$、$1.06$，投影后与角点系统 CG 的相对残差一致（相对差小于 $10^{-8}$），即 $K_C=P^{\mathsf T}K_\Gamma P$、$F_C=P^{\mathsf T}F_\Gamma$ 在细网格方程上成立。full_trace 的内部残差为 $2.2\times10^{-12}$，接口残差 $9.3\times10^{-7}$ 即 CG 的相对残差。均匀密度 $m=5$ 行与两次 3 轮探针首轮的柔顺度一致（相对差小于 $10^{-10}$）；$\varepsilon_E$ 与 $\sqrt{\varepsilon_C}$ 的相对差为 $1.9\times10^{-8}$。$m=7$ 的 $C_\Gamma$ 与 $m=5$ 相对差 $1.7\times10^{-11}$，full_trace 不依赖子结构划分；子结构变大后 $\varepsilon_C$ 由 $0.517$ 增至 $0.558$，两种划分不嵌套，此为观察而非理论保证。重分析由 [`reanalyze_full_trace_vs_linear_corner.py`](reanalyze_full_trace_vs_linear_corner.py) 完成。
+
+均匀密度上 linear_corner 把柔顺度低估一半。本节只核对近似的性质是否与理论一致，不以误差大小作判据；近似对设计的影响见 3.2，成本见第 4 节。
+
+### 3.2 优化结果
+
+| 指标 | full_trace | linear_corner |
 |---|---|---|
-| 日期 / 硬件 / 线程配置 | 待填 | 待填 |
-| Git revision / 工作区状态 | 待填 | 待填 |
-| 软件环境 / BLAS | 待填 | 待填 |
-| 原始结果目录 | 待填 | 待填 |
-| 小网格流程验收 | 待执行 | 待执行 |
-| 正式运行状态 | 待执行 | 待执行 |
-| 线性求解失败或其他异常 | 待填 | 待填 |
-
-两侧优化结果:
-
-| 指标 | full_trace + Jacobi | linear_corner + Jacobi |
-|---|---|---|
-| 接口自由度 (约束前, 核对值) | 待填 | 待填 |
-| 优化终止状态 / 轮数 | 待填 | 待填 |
-| 最终 C_opt | 待填 | 待填 |
+| 接口自由度（约束前） | $425\,232$ | $8\,256$ |
+| 终止 / 轮数 | 待填 | 待填 |
+| 最终 $C_{\mathrm{opt}}$ | 待填 | 待填 |
 | 最终体积分数 | 待填 | 待填 |
-| 最终 C_Fine (FEM 重分析) | 待重分析 | 待重分析 |
-| 柔顺度相对偏差 ε_C | 待重分析 | 待重分析 |
-| CG 步数 (首轮 / 均值 / 最大 / 总计) | 待填 | 待填 |
-| CG 相对残差 (末轮 / 最大) | 待填 | 待填 |
-| z 向物理密度对称误差 | 待填 | 待填 |
-| 最终拓扑图 / 场文件链接 | 待填 | 待填 |
+| 每轮 CG 步数（首轮 / 第 2 轮起均值 / 最大） | 待填 | 待填 |
+| 末轮 CG 相对残差 | 待填 | 待填 |
+| 末轮 z 向物理密度对称误差（诊断） | 待填 | 待填 |
 
-| 两份主对照设计的差异指标 | linear_corner 相对 full_trace |
+两份设计的质量以同一精确模型下的真实柔顺度 $C_\Gamma(\rho_\Gamma)$、$C_\Gamma(\rho_C)$ 比较，并同时看体积分数：前者即 full_trace 运行的最终 $C_{\mathrm{opt}}$（停止时不再做 OC 更新，最终密度即末轮分析所用密度），后者对 $\rho_C$ 用 full_trace 重分析一次得到；同一次重分析给出的 $C_C(\rho_C)$ 应与 linear_corner 自报的 $C_{\mathrm{opt}}$ 一致。linear_corner 自己报告的 $C_{\mathrm{opt}}=C_C(\rho_C)$ 低估真实柔顺度，不用于设计比较。
+
+| 设计差异 | linear_corner 相对 full_trace |
 |---|---|
-| C_Fine 相对变化 (带符号, 以 full_trace 设计为分母) | 待重分析 |
-| 最终物理密度相对 L2 差 (以 full_trace 密度范数为分母) | 待填 |
-| 阈值 0.5 的二值拓扑不一致单元数 / 总单元数 | 待填 |
+| 真实柔顺度相对变化 $\bigl(C_\Gamma(\rho_C)-C_\Gamma(\rho_\Gamma)\bigr)/C_\Gamma(\rho_\Gamma)$ | 待重分析 |
+| 物理密度相对 $L^2$ 差 $\|\rho_C-\rho_\Gamma\|_2/\|\rho_\Gamma\|_2$ | 待填 |
+| 阈值 $0.5$ 的二值拓扑不一致单元比例 | 待填 |
 
+图：两侧柔顺度随轮数的收敛曲线（同图，纵轴对数）；两侧最终拓扑（同视角、同色标）。文件名待定。
 
+两侧轨迹从首轮起就分开（探针第 2、3 轮柔顺度 full_trace 为 $655.05$、$358.87$，linear_corner 为 $571.70$、$315.75$），各轮密度不再相同，逐轮柔顺度之差不是 Ritz 误差，只反映轨迹差异。
 
-### 3.2 最终设计的统一重分析 (待准备)
-
-分别使用两侧 `density_final.npy` 中的物理密度, 在相同细网格 FEM、材料插值、载荷与支承下仅求解一次状态方程. 不重新过滤物理密度, 不执行 OC 更新. 两侧重分析采用相同求解配置与验收容差.
-
-记各自优化报告值为 $C_{\mathrm{opt}}$, 细网格重分析值为 $C_{\mathrm{Fine}}$. 记录接口模型在自身最终设计上的偏差:
-
-\[
-\varepsilon_C=\frac{|C_{\mathrm{opt}}-C_{\mathrm{Fine}}|}{|C_{\mathrm{Fine}}|}.
-\]
-
-设计质量比较采用两份设计的 $C_{\mathrm{Fine}}$, 并同时报告体积分数. 拓扑比较采用相同视角与色标展示物理密度, 辅以密度相对 L2 差和阈值 0.5 的二值拓扑不一致比例; 这些是设计差异指标, 不是 linear_corner 的求解正确性判据.
-
-当前两个优化入口未提供固定最终密度的 FEM 重分析命令. 此步骤须后续检查并复用仓库能力, 明确入口后再执行; 本文不虚构命令, 不将优化柔顺度填入 C_Fine 栏. 重分析成本独立记录, 不混入优化耗时.
+数据来源：`results/full_trace_hex_210x35x35_m5_cg_jacobi_t1/`、`results/linear_corner_hex_210x35x35_m5_cg_jacobi_t1/`，对 $\rho_C$ 的重分析结果 `results/reanalysis_*/`（目录名待定）。
 
 ## 4. 计算成本
 
@@ -272,13 +296,13 @@ $$
 | 阶段 | full_trace | linear_corner | 说明 |
 |---|---|---|---|
 | 过滤 | 待填 | 待填 | 设计密度过滤为物理密度 |
-| 装配 | 待填 | 待填 | 局部装配、内部消元与接口装配 |
+| 组装 | 待填 | 待填 | 局部组装、内部消元与接口组装 |
 | 边界条件 | 待填 | 待填 | 载荷与边界条件处理 |
 | 求解 | 待填 | 待填 | 接口求解及全场位移恢复 |
 | 灵敏度 | 待填 | 待填 | 柔顺度与灵敏度计算 |
 | 输出 | 待填 | 待填 | VTU/PVD 输出 |
 | OC | 待填 | 待填 | 仅统计实际执行 OC 的轮次 |
-| 首轮装配 | 待填 | 待填 | 单列首次缓存建立成本 |
+| 首轮组装 | 待填 | 待填 | 单列首次缓存建立成本 |
 | 首轮求解及恢复 | 待填 | 待填 | 与稳态均值区分 |
 
 整个流程:
@@ -312,7 +336,7 @@ $$
 | 阶段 | 峰值 full_trace | 峰值 linear_corner | 说明 |
 |---|---|---|---|
 | 过滤 | 待填 | 待填 | 物理密度计算 |
-| 装配 | 待填 | 待填 | 局部缩聚、接口 CSR 及构造中间量 |
+| 组装 | 待填 | 待填 | 局部缩聚、接口 CSR 及构造中间量 |
 | 边界条件 | 待填 | 待填 | 载荷与边界条件处理 |
 | 求解 | 待填 | 待填 | 接口求解及全场位移恢复 |
 | 灵敏度 | 待填 | 待填 | 单元级能量与梯度计算 |

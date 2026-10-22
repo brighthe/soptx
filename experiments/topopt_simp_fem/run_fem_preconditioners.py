@@ -47,8 +47,8 @@ LEVELS = 2
 SPACE_DEGREE = 1
 INTEGRATION_ORDER = 2
 ASSEMBLY_METHOD = 'fast'
-# 刚度算子层级: fa 与 ea 为同一算子, 加入 'fa' 仅作交叉核对
-OPERATOR_LEVELS = ('fa', )
+# 刚度算子层级: ea 与 fa 为同一算子, 同档两层级的解逐分量比较; 两层级的 matvec 耗时供 fem_ea_vs_fa.md 3.2.2 对照
+OPERATOR_LEVELS = ('ea', 'fa')
 
 # 分析参数: 线性系统求解, 停机判据与 run_fem_ea_vs_fa.py 相同
 SOLVER = 'cg'

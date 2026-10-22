@@ -32,9 +32,9 @@ $$
 
 ## 2. 实验设置
 
-实验脚本为 [`run_fem_ea_vs_fa.py`](run_fem_ea_vs_fa.py)，两侧以 `--level ea`、`--level fa` 各运行一次，结果经 [`sync_results.py`](sync_results.py) 固化到 `results/`。
+实验脚本为 [`run_fem_ea_vs_fa.py`](run_fem_ea_vs_fa.py)，两侧以 `--assemble-level ea`、`--assemble-level fa` 各运行一次，结果经 [`sync_results.py`](sync_results.py) 固化到 `results/`。
 
-本实验均采用 NumPy / CPU：`BACKEND = 'numpy'`，`DEVICE = 'cpu'`；单线程：`NUM_THREADS = 1`。
+3.1 节采用 NumPy / CPU，即默认的 `--backend numpy --device cpu`；3.2 节采用 PyTorch，分别在 GPU 与 CPU 上运行：`--backend pytorch --device cuda` 或 `--device cpu`。主机侧均为单线程：`NUM_THREADS = 1`。
 
 ### 2.1 模型参数
 
@@ -61,7 +61,7 @@ $$
 | 有限元 | 线性元：`SPACE_DEGREE = 1` |
 | 数值积分 | 二阶高斯积分：`INTEGRATION_ORDER = 2`，传入 `integration_order=INTEGRATION_ORDER` |
 | 单元刚度积分 | `fast` 积分实现：`LinearElasticIntegrator(..., method='fast')` |
-| 刚度算子层级 | 对照变量，EA 不形成全局矩阵，FA 装配全局 CSR 矩阵：命令行 `--level ea` 或 `--level fa`，传入 `operator_level=args.level` |
+| 刚度算子层级 | 对照变量，EA 不形成全局矩阵，FA 装配全局 CSR 矩阵：命令行 `--assemble-level ea` 或 `--assemble-level fa`，传入 `operator_level=args.assemble_level` |
 | 分析网格 | 结构化六面体网格，各方向单元数由 `--grid` 设定，须满足 $6:1:1$：`mesh = HexahedronMesh.from_box(box=domain, nx=nx, ny=ny, nz=nz, ...)` |
 
 **线性求解参数**
@@ -96,12 +96,12 @@ $$
 
 ## 3. 结果对照
 
-```bash
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level ea --max-iter 3
-python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa --max-iter 3
-```
-
 ### 3.1 结果一致性
+
+```bash
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level ea --max-iter 3
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level fa --max-iter 3
+```
 
 | 指标 | EA | FA |
 |---|---|---|
@@ -113,42 +113,58 @@ python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --level fa --max-iter 3
 
 两侧逐轮柔顺度相对差不超过 $3.1\times10^{-10}$，第 3 轮全场位移相对 $L^2$ 差为 $3.4\times10^{-8}$，阈值 $0.5$ 下的二值化拓扑逐单元相同，均在 CG 容差 $10^{-6}$ 以内。
 
-### 3.2 计算成本
+### 3.2 内存占用
 
-| 阶段 | 方法 | 对应步骤 | 耗时 / s | 常驻 / GiB | 临时 / GiB |
+**刚度算子存储**
+
+| 网格 | 单元数 $N_C$ | 自由度 | FA：$K$ 非零元 | EA：`cell2dof` 元素数 $24N_C$ | 比值 |
 |---|---|---|---|---|---|
-| 组装 | EA | 只更新单元模量 $E(\rho_e)$ | 0.00 | 0.07 | 0.00 |
-| | FA | 按 $E(\rho_e)$ 缩放 $K^0$，散加为 $K$ | 0.54 | 1.41 | 0.25 |
-| 边界条件 | EA | 包装为 `ConstrainedOperator` | 0.01 | 0.00 | 0.00 |
-| | FA | 复制值数组并对称消元 | 0.05 | 0.00 | 0.48 |
-| 求解 | EA | CG，逐单元矩阵向量积 | 122.32 | 0.00 | 0.14 |
-| | FA | CG，CSR 矩阵向量积 | 54.96 | 0.00 | 0.02 |
+| $210\times35\times35$ | $257\,250$ | $820\,368$ | $6.38\times10^7$ | $6.17\times10^6$ | 10.3 |
+| $240\times40\times40$ | $384\,000$ | $1\,215\,363$ | $9.50\times10^7$ | $9.22\times10^6$ | 10.3 |
+| $390\times65\times65$ | $1\,647\,750$ | $5\,109\,588$ | $4.05\times10^8$ | $3.95\times10^7$ | 10.2 |
 
-耗时与临时内存取第 2、3 轮的均值，常驻内存为首轮该阶段新增并保留到轮末的量。
+线程环境变量固定设为 1：`NUM_THREADS = 1`
 
-| 项目 | EA | FA |
-|---|---|---|
-| 两侧共有 / GiB | 1.03 | 1.03 |
-| 迭代阶段峰值 / GiB | 1.34 | 2.98 |
-| 全程峰值 / GiB | 1.50 | 2.98 |
-| 每步 CG / ms | 53.7 | 24.2 |
-| 每轮合计 / s | 122.7 | 55.9 |
+```bash
+# GPU
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level ea --grid 240 40 40 --preconditioner jacobi --max-iter 3 --backend pytorch --device cuda --gpu-memory-limit 14
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level fa --grid 240 40 40 --preconditioner jacobi --max-iter 3 --backend pytorch --device cuda --gpu-memory-limit 14
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level ea --grid 390 65 65 --preconditioner jacobi --max-iter 3 --backend pytorch --device cuda --gpu-memory-limit 14
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level fa --grid 390 65 65 --preconditioner jacobi --max-iter 3 --backend pytorch --device cuda --gpu-memory-limit 14
+```
 
-两侧共有为准备结束时的常驻（网格、过滤矩阵、体积约束梯度等）；峰值为进程 RSS；每步 CG 与每轮合计取第 2、3 轮的均值。
+单位 GiB，取第 1 轮各阶段 `torch.cuda.max_memory_allocated` 的记录。
 
-内存：
+| 部分 | EA 240 | FA 240 | EA 390 | FA 390 |
+|---|---|---|---|---|
+| 共有部分（常驻） | 待测 | 待测 | 2.86 | 2.86 |
+| 刚度算子（常驻） | 待测 | 待测 | 0.33 | 未测 |
+| 边界条件（常驻） | 待测 | 待测 | 0.20 | 未执行 |
+| 装配阶段峰值 | 待测 | 待测 | 3.47 | > 14 |
+| 求解阶段峰值 | 待测 | 待测 | 4.66 | 未执行 |
 
-- **刚度算子本身**：FA 的全局矩阵与装配缓存约 1.8 KB/自由度，边界条件复制的值数组约 0.62 KB/自由度。EA 的刚度算子常驻只有 0.07 GiB，已接近 RSS 的测量分辨率，按数组形状估算主要是 `cell2dof`，约 60 B/自由度。只看刚度算子，FA 约为 EA 的 20 倍。
-- **分析部分**：迭代阶段峰值减去两侧共有部分，EA 为 0.32 GiB，FA 为 1.95 GiB，FA 约为 EA 的 6 倍。EA 的这部分主要是求解临时量，即逐单元矩阵向量积的中间数组 $(N_c,24)$；FA 的主要是全局矩阵及其副本。
-- **整个进程**：全程峰值 FA 约为 EA 的 2 倍。EA 的全程峰值不在分析阶段，而在两侧共有的过滤矩阵构造，所以按全程峰值看，EA 的优势被共有部分摊薄了。
-- **可解规模**：上述数据结构的大小都与自由度数成正比，全程峰值折合 FA 约 3.9 KB/自由度，EA 约 2.0 KB/自由度。据此线性外推，45 GiB 内存下 FA 约可解 1200 万自由度（约 522×87×87），EA 约 2400 万自由度（约 660×110×110），约为 FA 的 2 倍。EA 的上限由共有的过滤矩阵构造决定，这一步若再优化，EA 的余量还会更大。
 
-耗时：两侧 CG 步数几乎相同，按步均摊 EA 每步约慢 2.2 倍。FA 首轮另建 CSR 骨架与装配缓存，组装为 2.73 s，此后每轮组装相对求解可以忽略。EA 慢在矩阵向量积：每次都要逐单元 gather、作用 $K^0$、乘单元模量、scatter-add，由多个 NumPy 操作拼成；FA 是 scipy 的单个编译循环。这是本文设置（NumPy 后端、单线程）下的结果，不代表两种层级的固有快慢：EA 的单元作用经由 BLAS GEMM，多线程 BLAS 或 GPU 上两者的快慢可能改变。
+```bash
+# CPU
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level ea --grid 240 40 40 --preconditioner jacobi --max-iter 3 --backend pytorch --device cpu --cpu-memory-limit 14
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level fa --grid 240 40 40 --preconditioner jacobi --max-iter 3 --backend pytorch --device cpu --cpu-memory-limit 14
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level ea --grid 390 65 65 --preconditioner jacobi --max-iter 3 --backend pytorch --device cpu --cpu-memory-limit 14
+python experiments/topopt_simp_fem/run_fem_ea_vs_fa.py --assemble-level fa --grid 390 65 65 --preconditioner jacobi --max-iter 3 --backend pytorch --device cpu --cpu-memory-limit 14
+```
 
-数据来源：`results/ea_hex_210x35x35_cg_jacobi/`、`results/fa_hex_210x35x35_cg_jacobi/` 的 `summary.json` 与 `history.json`，以及 `results/final_fields.json`。
+单位 GiB，PyTorch 后端、CPU 单线程，取第 1 轮进程 RSS 的记录，常驻量与阶段峰值的取法同 GPU 表；共有部分含 Python 与 PyTorch 等库本身的常驻内存，各部分构成同上。内存上限由 `--cpu-memory-limit` 指定，本文取 14 GiB，按启动后新增的虚拟内存计（大数组申请时即整块计入，比按 RSS 计更严，可能稍早报错）；启动时系统可用内存不足即拒绝运行，超出即报内存不足，不换出到 swap。失败的分配若发生在 BLAS 库内部，进程会被库直接终止而不写 `failure.json`。
+
+| 部分 | EA 240 | FA 240 | EA 390 | FA 390 |
+|---|---|---|---|---|
+| 共有部分（常驻） | 待测 | 待测 | 待测 | 待测 |
+| 刚度算子（常驻） | 待测 | 待测 | 待测 | 待测 |
+| 边界条件（常驻） | 待测 | 待测 | 待测 | 待测 |
+| 装配阶段峰值 | 待测 | 待测 | 待测 | 待测 |
+| 求解阶段峰值 | 待测 | 待测 | 待测 | 待测 |
+
+数据来源：`outputs/pytorch_{cuda,cpu}_{ea,fa}_hex_{240x40x40,390x65x65}_cg_jacobi/`（待固化到 `results/`）；未加上限的 390 档：`outputs/cuda_ea_hex_390x65x65_cg_jacobi_t16/`、`results/cuda_fa_hex_390x65x65_cg_jacobi_uncapped/`。
 
 ## 4. 实验结论
 
-1. **结果一致**：EA 与 FA 前 3 轮的逐轮柔顺度相对差不超过 $3.1\times10^{-10}$，每轮 CG 步数至多相差 1 步，阈值 $0.5$ 下的二值化拓扑逐单元相同。两种刚度算子层级对优化结果等价。
-2. **内存**：EA 不形成全局矩阵，刚度算子的常驻内存约为 FA 的 1/20；FA 的全局矩阵约 1.8 KB/自由度，施加边界条件时还要复制约 0.62 KB/自由度的值数组。计入两侧共有部分后，全程峰值 FA 约为 EA 的 2 倍，45 GiB 内存下 EA 的可解规模约为 FA 的 2 倍。FA 的全局矩阵是全局矩阵形式固有的开销；边界条件复制的值数组属于当前实现，改为原地消元即可消除。
-3. **代价**：本文设置（NumPy / CPU，单线程，Jacobi 预条件 CG）下，EA 的求解每步约慢 2.2 倍，每轮耗时约为 FA 的 2.2 倍。EA 以求解时间换取内存；这一代价取决于后端与线程数，不是 EA 固有的。
+1. **结果一致**：EA 与 FA 的优化结果只差浮点舍入，两种刚度算子层级对优化结果等价。
+2. **内存**：EA 不形成全局矩阵，390 档 GPU 上刚度算子常驻显存约为 FA 的 1/20，峰值需求约为 FA 的 1/4（4.66 对 19.17 GiB）；14 GiB 显存上限下 FA 在 390 档超限，EA 可以运行。240 档与 CPU 上的结论待测。

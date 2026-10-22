@@ -1,0 +1,18 @@
+{
+  "preconditioner": "jacobi",
+  "slopes": {
+    "ea": {
+      "slope": -1.020513634130028,
+      "converged_levels": 3
+    },
+    "fa": {
+      "slope": -1.020513634130028,
+      "converged_levels": 3
+    }
+  },
+  "max_level_difference": 3.94657017568124e-09,
+  "n_cases": 6,
+  "n_converged": 6,
+  "n_not_converged": 0,
+  "n_error": 0
+}

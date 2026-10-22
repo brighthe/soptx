@@ -50,7 +50,7 @@ import numpy as np
 import torch
 
 from soptx.backend import backend_manager as bm
-from soptx.core import blas_environment, measure
+from soptx.core import blas_environment, limit_cuda_memory, measure, record_cuda_out_of_memory
 from soptx.mesh import HexahedronMesh
 
 from soptx.fem.analyzers import LagrangeFEMAnalyzer
@@ -101,9 +101,18 @@ MAX_ITER = 300
 OUTPUT_DIR = Path(__file__).resolve().parent / 'outputs'
 VTU_FIELDS = ('density', )
 
+# 各阶段的执行顺序, 仅供显存不足时判定失败阶段: measure 只在阶段正常结束时写入记录,
+# 顺序中第一个尚无记录的阶段即失败阶段
+SETUP_STAGES = ('网格', '分析器', '过滤矩阵', '目标与约束')
+ITERATION_STAGES = ('过滤', '装配', '边界条件', '求解', '灵敏度', '输出', 'OC')
+
+# GPU 显存上限 (GiB), 即 --gpu-memory-limit 的默认值: 固定值使各次运行可用显存相同; 总显存 15.89 GiB, 余下约 1.9 GiB 留给 CUDA 上下文、
+# cuSPARSE 等不经 PyTorch 分配器的工作区与桌面. 启动时空闲显存不足此值即拒绝运行
+CUDA_MEMORY_LIMIT_GIB = 14.0
+
 
 def parse_args(argv=None):
-    """解析计算设备、网格、刚度算子层级、预条件子、优化迭代上限与线程数, 其余设置均为模块顶部常量.
+    """解析计算设备、网格、刚度算子层级、预条件子、优化迭代上限、线程数与 GPU 显存上限, 其余设置均为模块顶部常量.
     """
     parser = argparse.ArgumentParser(description=__doc__)
 
@@ -118,7 +127,9 @@ def parse_args(argv=None):
     parser.add_argument('--max-iter', type=int, default=MAX_ITER,
                         help=f'优化迭代上限 (默认 {MAX_ITER})')
     parser.add_argument('--threads', type=int, default=NUM_THREADS,
-                        help=f'CPU 线程数, 写入 OpenMP 与 BLAS 线程变量并设置 torch 线程池 (默认 {NUM_THREADS})')
+                        help=f'CPU 线程数, 在导入前写入 OpenMP 与 BLAS 线程变量, torch 线程池随之取值 (默认 {NUM_THREADS})')
+    parser.add_argument('--gpu-memory-limit', type=float, default=None, metavar='GIB',
+                        help=f'GPU 显存上限 (GiB), 只用于 --device cuda (默认 {CUDA_MEMORY_LIMIT_GIB})')
 
     args = parser.parse_args(argv)
     if args.device == 'cuda' and not torch.cuda.is_available():
@@ -129,6 +140,14 @@ def parse_args(argv=None):
         parser.error(f'--max-iter 须为正整数, 得到 {args.max_iter}')
     if args.threads < 1:
         parser.error(f'--threads 须为正整数, 得到 {args.threads}')
+    # CPU 的内存上限由外层 systemd-run 的 cgroup 控制, 不归本参数管
+    if args.gpu_memory_limit is not None:
+        if args.device != 'cuda':
+            parser.error('--gpu-memory-limit 只用于 --device cuda')
+        if args.gpu_memory_limit <= 0:
+            parser.error(f'--gpu-memory-limit 须为正数, 得到 {args.gpu_memory_limit}')
+    elif args.device == 'cuda':
+        args.gpu_memory_limit = CUDA_MEMORY_LIMIT_GIB
     # 线程变量已在导入时按命令行预取的值写入; 以缩写等预取不到的形式给出, 或经 main(argv) 传入时两者不符
     if args.threads != ENV_THREADS:
         parser.error(f'--threads {args.threads} 与导入时写入环境变量的线程数 {ENV_THREADS} 不符; '
@@ -167,15 +186,53 @@ def summarize_stages(history: list[dict]) -> dict[str, dict]:
 
 
 def main(argv=None):
-    """在选定设备上运行完整拓扑优化流程.
+    """运行拓扑优化; 显存不足时记录失败点.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        命令行参数, 缺省时读取 ``sys.argv``.
+
+    Returns
+    -------
+    status : int
+        正常结束时为 0, 显存不足时为 2.
     """
     args = parse_args(argv)
+    progress: dict[str, Any] = {}
+    try:
+        return run(args, progress)
+    except torch.OutOfMemoryError as error:
+        record_cuda_out_of_memory(args.output, args.device, progress, error, SETUP_STAGES, ITERATION_STAGES)
+        return 2
+
+
+def run(args, progress: dict) -> int:
+    """在选定设备上运行完整拓扑优化流程.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        ``parse_args`` 的结果.
+    progress : dict
+        运行中就地更新的进度, 供显存不足时定位失败点, 键见 ``soptx.core.record_cuda_out_of_memory``.
+
+    Returns
+    -------
+    status : int
+        正常结束时为 0.
+    """
     device = args.device
     bm.set_backend(BACKEND)
-    # PyTorch 的 CPU 算子线程池导入时按 OMP_NUM_THREADS 取值; 再显式设置一次, 实际取值以
-    # torch.get_num_threads() 记入 config.json
-    torch.set_num_threads(args.threads)
+    # PyTorch 的 CPU 算子线程池导入时按 OMP_NUM_THREADS 取值, 此处只核对, 实际取值记入 config.json.
+    # 不再调用 torch.set_num_threads: 在 PyTorch 2.11 + MKL 2024.2 下, 导入后以大于 1 的值调用它
+    # (即使与环境变量相同) 会使批量 lu_factor 返回无效主元, linalg.solve 随之报错
+    if torch.get_num_threads() != args.threads:
+        raise RuntimeError(f'torch 线程池为 {torch.get_num_threads()} 个线程, 与 --threads {args.threads} 不符')
     cuda = device == 'cuda'
+    # 给 PyTorch 分配器设固定显存上限, 超出即报 OOM, 不让 WDDM 驱动静默落到系统内存;
+    # 须在首次分配显存之前设置
+    gpu_memory = limit_cuda_memory(device, args.gpu_memory_limit) if cuda else None
     precond = args.preconditioner
 
     grid = args.grid
@@ -205,10 +262,14 @@ def main(argv=None):
         threads=dict(num_threads=args.threads, torch_num_threads=torch.get_num_threads(),
                      **blas_environment()),
         torch=dict(version=torch.__version__, cuda=torch.version.cuda,
-                   device_name=torch.cuda.get_device_name(device) if cuda else None))
-    # rtol 的参照量是初始残差; 固定 rtol=0, 以载荷范数设置绝对容差.
+                   device_name=torch.cuda.get_device_name(device) if cuda else None),
+        gpu_memory=gpu_memory)
+    # 以施加边界条件后的实际右端项为参照: ||r||_2 <= CG_TOLERANCE * ||b||_2, 与 README 及子结构入口同口径.
+    # 集中力不落在节点上 (如 nz 为奇数) 时按节点分摊, ||b||_2 小于力的模长, 不能手算载荷范数代替
     cg_options = dict(precond=None if precond == 'none' else precond,
-                      maxiter=CG_MAXITER, rtol=0.0)
+                      maxiter=CG_MAXITER, rtol=CG_TOLERANCE, atol=0.0,
+                      rtol_reference='rhs', norm_type='unpreconditioned',
+                      verify_residual=True)
     config.update(cg_options=cg_options, cg_tolerance=CG_TOLERANCE)
     (output / 'config.json').write_text(
         json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -223,8 +284,13 @@ def main(argv=None):
           f'装配 {ASSEMBLY_METHOD}, 求解 {SOLVER} ({precond}, tol {CG_TOLERANCE:g}, '
           f'maxiter {CG_MAXITER}), 网格 hex {grid} = {n_cells} 单元 / {n_dofs} 自由度, '
           f'问题 {type(problem).__name__}, 输出 {output}', flush=True)
+    if gpu_memory is not None:
+        print(f'[显存上限] 空闲 {gpu_memory["free_gib"]:.2f} / 总量 {gpu_memory["total_gib"]:.2f} GiB, '
+              f'PyTorch 分配器上限 {gpu_memory["limit_gib"]:.2f} GiB (固定), '
+              '超出即报 OOM', flush=True)
 
     setup_stages = {}
+    progress.update(phase='准备', setup_stages=setup_stages, stages=setup_stages, gpu_memory=gpu_memory)
     with measure(setup_stages, '网格', label='准备', device=device):
         mesh = HexahedronMesh.from_box(list(domain), *grid, device=device)
         setattr(mesh, 'meshdata', {'nx': grid[0], 'ny': grid[1], 'nz': grid[2], 'hx': h, 'hy': h, 'hz': h})
@@ -235,8 +301,6 @@ def main(argv=None):
         # 材料、修正 SIMP 插值 E = Emin + rho^q (E0 - Emin) 与 EA 层级的分析器
         material = IsotropicLinearElasticMaterial(youngs_modulus=E0, poisson_ratio=NU, hypothesis='3D',
                                                   device=device)
-        # 载荷落在互不相同且不受约束的节点上, ||F||_2 即各点力模长的平方和开方, 与网格无关
-        load_norm = math.sqrt(sum(value ** 2 for load in problem.loads() for value in load.force()))
         interpolation = MaterialInterpolationScheme(
             density_location='element', interpolation_method='msimp',
             options={'penalty_factor': PENALTY, 'void_youngs_modulus': EMIN, 'target_variables': ['E']},
@@ -245,7 +309,7 @@ def main(argv=None):
             disp_mesh=mesh, pde=problem, material=material,
             space_degree=SPACE_DEGREE, integration_order=INTEGRATION_ORDER,
             assembly_method=ASSEMBLY_METHOD, operator_level=args.level, solve_method=SOLVER,
-            solver_options=dict(cg_options, atol=CG_TOLERANCE * load_norm),
+            solver_options=dict(cg_options),
             topopt_algorithm='density_based', interpolation_scheme=interpolation,
         )
         if (int(mesh.number_of_cells()), int(analyzer.tensor_space.number_of_global_dofs())) != (n_cells, n_dofs):
@@ -283,6 +347,7 @@ def main(argv=None):
         iteration += 1
         started = perf_counter()
         stages = {}
+        progress.update(phase='迭代', iteration=iteration, stages=stages)
         # 首轮逐阶段打印, 便于定位大规模下出问题的阶段; 之后只打印汇总行
         label = '迭代 1' if iteration == 1 else None
 
