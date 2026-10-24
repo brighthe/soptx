@@ -78,6 +78,8 @@ def parse_args(argv=None):
     parser.add_argument("--backend", choices=("pytorch",), required=True,
                         help="显式指定训练后端, 当前仅支持 pytorch")
     parser.add_argument("--device", default="cpu", help="训练设备: cpu, cuda 或 cuda:N")
+    parser.add_argument("--dtype", choices=("float64",), default="float64",
+                        help="训练精度, 网络参数与样本均以此计算, 当前仅支持 float64")
     parser.add_argument("--output-dir", type=Path,
                         help="显式指定新训练目录, 默认按数据集名称与训练种子命名")
     args = parser.parse_args(argv)
@@ -209,7 +211,7 @@ def main(argv=None):
     print(f"[配置] 接口={metadata['trace']}, 网格={metadata['n_fine']}, "
           f"尺寸={metadata['cell_size']}, nu={metadata['poisson_ratio']}", flush=True)
     print(f"[网络] 路线={args.route}, 网络数={count}, 隐藏层={hidden_dims}", flush=True)
-    print(f"[训练] backend={args.backend}, device={device}, float64, epochs={args.epochs}, "
+    print(f"[训练] backend={args.backend}, device={device}, {args.dtype}, epochs={args.epochs}, "
           f"batch={args.batch_size}, optimizer={args.optimizer}, lr={args.lr}, "
           f"seed={args.train_seed}, 一致性损失未启用", flush=True)
     print(f"[输入] input_normalization={network.input_normalization}", flush=True)
@@ -221,13 +223,16 @@ def main(argv=None):
         args.output_dir = args.output_dir.with_name(args.output_dir.name + suffix)
     if args.automatic_output and args.train_stiffness_weights is not None:
         args.output_dir = args.output_dir.with_name(args.output_dir.name + "_hardweights")
+    stiffness_note = ("刚度一致性损失以数据集的精确刚度标签为参照" if args.stiffness_loss_weight
+                      else "不加刚度一致性损失, 只用形函数 MSE")
     print(f"[损失] loss={args.loss}, stiffness_loss_weight={args.stiffness_loss_weight}, "
-          f"loss_chunk_size={args.loss_chunk_size}; 刚度教师为精确标签", flush=True)
+          f"loss_chunk_size={args.loss_chunk_size}; {stiffness_note}", flush=True)
     if args.output_dir.exists() or args.output_dir.is_symlink():
         raise FileExistsError(f"训练目录已存在, 不覆盖或续训: {args.output_dir}")
     print(f"[输出] {args.output_dir}", flush=True)
     result = train_network(args.samples_dir, args.output_dir, route=args.route,
-                           network=network, provider=provider, device=device, config=config,
+                           network=network, provider=provider, device=device, dtype=args.dtype,
+                           config=config,
                            initialization=initialization, loss=args.loss,
                            stiffness_loss_weight=args.stiffness_loss_weight,
                            loss_chunk_size=args.loss_chunk_size,

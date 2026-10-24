@@ -106,8 +106,8 @@ dist/
 /experiments/paper_topopt_huzhang/results/**/postprocess/discretization_probe/*.vtu
 
 # 例外: topopt_simp_fem 的证据目录 results/ 整体入库。运行脚本只写 outputs/ (不入库),
-# 由 sync_results.py 把选定运行的 config/summary/history.json 与末轮场的指纹和比对
-# (final_fields.json) 固化到这里, 故 results/ 只含小体积 json, 无需另设排除规则。
+# 选定运行的 config/summary/history.json 与末轮场的指纹和比对 (final_fields.json) 拷到这里,
+# 故 results/ 只含小体积 json, 无需另设排除规则。
 # 须排在上面 *.json 等规则之后。
 !/experiments/topopt_simp_fem/results/**
 # 同理: topopt_simp_fem 的 fem_preconditioners/ 是预条件子筛选的输入密度 (每个 NPY 约 24 KB)

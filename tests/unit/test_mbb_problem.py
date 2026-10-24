@@ -158,7 +158,7 @@ def test_mbb3d_line_loads_keep_the_resultant_on_a_mesh() -> None:
 
 
 def test_full_mbb3d_point_supports_are_the_four_bottom_end_corners() -> None:
-    """左端两底角点约束全部分量, 右端两底角点只约束 u_y, 底棱中部不约束."""
+    """左端两底角点约束全部分量, 右端两底角点约束 u_y 与 u_z, 底棱中部不约束."""
     bm.set_backend("numpy")
     problem = FullMBBBeamPoint3d(domain=MBB3D_DOMAIN)
     assert problem.plane_type == "3D"
@@ -174,7 +174,7 @@ def test_full_mbb3d_point_supports_are_the_four_bottom_end_corners() -> None:
     dirichlet_x, dirichlet_y, dirichlet_z = problem.is_dirichlet_boundary()
     np.testing.assert_array_equal(bm.to_numpy(dirichlet_x(points)), [True, True, False, False, False, False])
     np.testing.assert_array_equal(bm.to_numpy(dirichlet_y(points)), [True, True, True, True, False, False])
-    np.testing.assert_array_equal(bm.to_numpy(dirichlet_z(points)), [True, True, False, False, False, False])
+    np.testing.assert_array_equal(bm.to_numpy(dirichlet_z(points)), [True, True, True, True, False, False])
     np.testing.assert_array_equal(bm.to_numpy(problem.dirichlet_bc(points)), np.zeros((6, 3)))
 
 
@@ -186,7 +186,7 @@ def test_full_mbb3d_point_removes_rigid_body_modes_on_any_mesh() -> None:
 
     is_ddof = bm.to_numpy(space.is_boundary_dof(threshold=problem.is_dirichlet_boundary(),
                                                 method="interp")).reshape(-1, 3)
-    np.testing.assert_array_equal(is_ddof.sum(axis=0), [2, 4, 2])
+    np.testing.assert_array_equal(is_ddof.sum(axis=0), [2, 4, 4])
     _assert_rigid_body_modes_removed(problem, mesh)
 
 

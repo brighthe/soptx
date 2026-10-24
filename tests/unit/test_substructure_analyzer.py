@@ -357,16 +357,20 @@ def test_formal_stiffness_and_recovery_use_fem_only(setup, monkeypatch, trace):
     layout, problem, material, interpolation, density = setup
     sub = _sub_analyzer(layout, problem, material, interpolation, trace, solve_method='scipy')
     calls = []
-    original_interpolate = interpolation.interpolate_material
+    variant = type(interpolation).interpolate_material
+    key = variant.get_key(interpolation)
+    original_interpolate = variant[key]
 
-    def interpolate(*args, **kwargs):
-        calls.append(1)
-        return original_interpolate(*args, **kwargs)
+    def interpolate(instance, *args, **kwargs):
+        if instance is interpolation:
+            calls.append(1)
+        return original_interpolate(instance, *args, **kwargs)
 
     def forbidden(*args, **kwargs):
         raise AssertionError('正式路径不得调用 prototype 的材料或局部刚度生成')
 
-    monkeypatch.setattr(interpolation, 'interpolate_material', interpolate)
+    # 描述符禁止实例赋值; 包装当前变体, 测试结束后由 monkeypatch 恢复.
+    monkeypatch.setitem(variant.virtual_table, key, interpolate)
     monkeypatch.setattr(sub.prototype, 'coefficient_function', forbidden)
     monkeypatch.setattr(sub.prototype, 'iter_local_stiffness_batches', forbidden)
     monkeypatch.setattr(sub.prototype, 'assemble_from_element_matrices', forbidden)
@@ -399,3 +403,109 @@ def test_fem_local_stiffness_matches_legacy_and_rejects_stale_system(setup, trac
     sub.assemble_stiff_matrix(density[::-1].copy())
     with pytest.raises(ValueError, match='本轮'):
         sub.solve_system(prepared, rhs, sub.tensor_space.function())
+
+
+@pytest.mark.parametrize('precond', ['none', 'jacobi'])
+@pytest.mark.parametrize('level', ['fa', 'ea'])
+def test_implicit_matches_explicit_and_fem_without_interface_csr(setup, monkeypatch, precond, level):
+    """非均匀密度两轮对照, 检查无接口 CSR、精确对角与分解复用."""
+    from soptx.fem.substructure import interface_space as interface_module
+
+    layout, problem, material, interpolation, density = setup
+    implicit = _sub_analyzer(
+        layout, problem, material, interpolation, 'full_trace',
+        schur_mode='implicit', operator_level=level, solve_method='cg',
+        solver_options={'precond': precond, 'rtol': 1e-10, 'atol': 0.,
+                        'rtol_reference': 'rhs', 'maxiter': 20000},
+    )
+    explicit = _sub_analyzer(
+        layout, problem, material, interpolation, 'full_trace', solve_method='scipy')
+    fem = _fa_analyzer(layout, problem, material, interpolation)
+    previous = None
+    stale = None
+
+    def unexpected_csr(*args, **kwargs):
+        raise AssertionError('隐式路径不得创建接口 CSR')
+
+    def unexpected_local_assembly(*args, **kwargs):
+        raise AssertionError('隐式求解与恢复不得重新装配局部刚度')
+
+    for rho in (density, density * 0.8):
+        reference_system = explicit.assemble_stiff_matrix(rho)
+        reference = fem.solve_state(rho_val=rho)['displacement'][:]
+        fine_stiffness = fem.assemble_stiff_matrix(rho)
+        with monkeypatch.context() as patch:
+            patch.setattr(interface_module, 'build_interface_pattern', unexpected_csr)
+            system = implicit.assemble_stiff_matrix(rho)
+            if stale is not None:
+                with pytest.raises(ValueError, match='本轮'):
+                    implicit.apply_bc(stale, implicit.assemble_body_force_vector())
+            prepared, rhs = implicit.apply_bc(system, implicit.assemble_body_force_vector())
+            free = prepared.free_mask
+            vector = np.random.default_rng(19).normal(size=len(free)) * free
+            np.testing.assert_allclose(
+                (system.stiffness @ vector) * free,
+                (reference_system.stiffness @ vector) * free, rtol=1e-10, atol=1e-12)
+            expected_diagonal = explicit.interface_space.diagonal(reference_system.stiffness)
+            np.testing.assert_allclose(
+                prepared.diagonal, expected_diagonal * free + (1. - free),
+                rtol=1e-10, atol=1e-12)
+            patch.setattr(implicit, '_iter_local_stiffness_batches', unexpected_local_assembly)
+            out = implicit.tensor_space.function()
+            implicit.solve_system(prepared, rhs, out, x0=previous)
+            np.testing.assert_allclose(out[:], reference, rtol=1e-7, atol=1e-7)
+            residual = fine_stiffness @ out[:] - implicit.force_vector
+            _, fixed, _ = implicit._dirichlet_data()
+            assert np.linalg.norm(residual[~fixed]) / np.linalg.norm(
+                implicit.force_vector[~fixed]) < 1e-9
+            assert implicit.interface_space._pattern is None
+            if level == 'ea':
+                assert implicit._fine_operator.num_classes == 1
+            else:
+                assert implicit._fine_operator is None
+                assert implicit._local_schur.boundary is not None
+            previous = implicit.interface_displacement.copy()
+            stale = system
+
+
+@pytest.mark.parametrize('mode', ['explicit', 'implicit'])
+def test_local_fa_reuses_factorization_and_recovery_cache(setup, monkeypatch, mode):
+    """两侧求解和恢复不重装配或分解, 密度更新后重建全部数值缓存."""
+    from soptx.fem.substructure.implicit import InteriorBlockSolver
+
+    layout, problem, material, interpolation, density = setup
+    analyzer = _sub_analyzer(
+        layout, problem, material, interpolation, 'full_trace',
+        schur_mode=mode, operator_level='fa', solve_method='cg',
+        solver_options={'precond': 'jacobi', 'rtol': 1e-10, 'atol': 0.,
+                        'rtol_reference': 'rhs', 'maxiter': 20000})
+    old_blocks = None
+    old_system = None
+    previous = None
+    for rho in (density, density[::-1].copy(), density * 0.8):
+        system = analyzer.assemble_stiff_matrix(rho)
+        blocks = analyzer._local_schur
+        assert blocks is not old_blocks
+        assert (blocks.boundary is None) == (mode == 'explicit')
+        assert analyzer._fine_operator is None
+        if old_blocks is not None:
+            assert not np.shares_memory(blocks.interior.factors, old_blocks.interior.factors)
+            with pytest.raises(ValueError, match='本轮'):
+                analyzer.apply_bc(old_system, analyzer.assemble_body_force_vector())
+        prepared, rhs = analyzer.apply_bc(system, analyzer.assemble_body_force_vector())
+
+        def unexpected(*args, **kwargs):
+            raise AssertionError('求解或恢复重新装配/分解')
+
+        with monkeypatch.context() as patch:
+            patch.setattr(analyzer, 'element_stiffness', unexpected)
+            patch.setattr(analyzer, '_iter_local_stiffness_batches', unexpected)
+            patch.setattr(InteriorBlockSolver, 'factor_batch', unexpected)
+            displacement, info = analyzer.solve_system(
+                prepared, rhs, analyzer.tensor_space.function(), x0=previous)
+            assert info['converged']
+            np.testing.assert_allclose(
+                displacement[:], blocks.recover(analyzer.interface_displacement),
+                rtol=1e-13, atol=1e-13)
+        previous = analyzer.interface_displacement.copy()
+        old_blocks, old_system = blocks, system

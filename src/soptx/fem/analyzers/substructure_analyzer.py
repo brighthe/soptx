@@ -31,7 +31,13 @@ from soptx.fem.substructure import (
     build_interface_space,
     build_substructures,
 )
-from soptx.fem.substructure.implicit import RestrictedPreconditioner
+from soptx.fem.substructure.implicit import (
+    FullInterfaceSchurOperator, ImplicitSchurOperator, InteriorBlockSolver,
+    RestrictedPreconditioner,
+)
+from soptx.fem.substructure.local_schur import (
+    LocalSchurBlocks, LocalSchurOperator, build_local_block_patterns,
+)
 from soptx.fem.substructure.recovery import recover_full_displacement_batches
 from soptx.fem.substructure.local_assembly import assemble_local_stiffness, build_local_assembly_map
 from soptx.fem.substructure.solve import (
@@ -43,6 +49,7 @@ from soptx.fem.substructure.solve import (
     solve_prepared_constrained_system,
 )
 from soptx.fem.substructure.streaming import (
+    TraceStiffnessBatch,
     assemble_corner_from_stiffness_batches,
     iter_condensation_from_stiffness_batches,
     iter_trace_stiffness_from_local_batches,
@@ -86,14 +93,14 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
     space_degree, integration_order : int
         位移插值次数与数值积分阶, 前者须与 ``layout.degree`` 一致.
     operator_level : {'fa', 'ea'}
-        接口刚度 ``K_Q = sum_j (A_q^j)^T K_r^j A_q^j`` 的存储与作用方式, 两者对应同一个
-        离散算子, 只差在以什么形式常驻:
-
-        - 'fa': 散加为全局接口 CSR 矩阵, 支持迭代解法与直接解法;
-        - 'ea': 只保留各子结构的缩聚刚度块 ``K_r^j``, matvec 时 gather-批量 GEMV-scatter,
-          不形成全局矩阵, 只能用 ``solve_method='cg'``. 接口已确定, 实现待补, 当前构造时报错.
-
-        细网格层级与此无关, 基类内部固定为 'fa', 只用于单元刚度与 GMG 预条件子的细网格层.
+        装配层级, 与 schur_mode 组合选择实现. explicit/fa 装配全局接口 CSR;
+        implicit/fa 用已装配局部稀疏块作用, implicit/ea 使用共享参考细单元作用.
+        两种隐式路径均不形成细网格或接口 CSR. explicit/ea 尚未实现.
+        基类内部的 'fa' 分派仅用于复用单元刚度与本类边界条件协议.
+    schur_mode : {'explicit', 'implicit'}
+        默认为 explicit. NumPy/PyTorch full_trace/fa 两侧共用局部 Cholesky 与恢复缓存.
+        implicit/fa 支持 NumPy 与 PyTorch CPU/CUDA; implicit/ea 仅 NumPy/CPU. 隐式仅支持 full_trace、CG 与 none/jacobi. 缓存内部 Cholesky 分解,
+        用精确内部求解计算 Schur 作用与恢复, 不保存完整边界缩聚块.
     solve_method : {'cg', 'mumps', 'scipy'}
         接口系统求解器.
     solver_options : dict, optional
@@ -126,6 +133,7 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         space_degree: int = 1,
         integration_order: int = 2,
         operator_level: OperatorLevel = 'fa',
+        schur_mode: Literal['explicit', 'implicit'] = 'explicit',
         solve_method: Literal['mumps', 'scipy', 'cg'] = 'cg',
         solver_options: Optional[Dict] = None,
         topopt_algorithm: Literal[None, 'density_based'] = 'density_based',
@@ -143,8 +151,19 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if operator_level == 'ea' and solve_method != 'cg':
             raise ValueError(f"operator_level='ea' 不形成全局矩阵, 只支持 solve_method='cg', "
                              f"得到 {solve_method!r}")
-        if operator_level == 'ea':
-            raise NotImplementedError("operator_level='ea' 的接口已确定, 实现待补; 当前只支持 'fa'")
+        if schur_mode not in ('explicit', 'implicit'):
+            raise ValueError("schur_mode 须为 'explicit' 或 'implicit'.")
+        if schur_mode == 'explicit' and operator_level != 'fa':
+            raise NotImplementedError("显式 Schur 当前只支持 operator_level='fa'.")
+        if schur_mode == 'implicit':
+            if trace != 'full_trace' or solve_method != 'cg':
+                raise ValueError("隐式 Schur 当前只支持 full_trace + fa/ea + cg.")
+            if bm.backend_name not in ('numpy', 'pytorch'):
+                raise ValueError("隐式 Schur 只支持 NumPy 或 PyTorch.")
+            if operator_level == 'ea' and bm.backend_name != 'numpy':
+                raise ValueError("隐式 EA 当前只支持 NumPy/CPU.")
+            if (solver_options or {}).get('precond', 'jacobi') not in (None, 'none', 'jacobi'):
+                raise ValueError("隐式 Schur 当前只支持 none/jacobi 预条件子.")
         if int(layout.degree) != int(space_degree):
             raise ValueError(f"space_degree={space_degree} 与 layout.degree={layout.degree} 不一致")
         if float(layout.E_base) != float(material.youngs_modulus) or float(layout.nu) != float(material.poisson_ratio):
@@ -168,6 +187,13 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self._trace = trace
         self._corner_condensation = corner_condensation
         self._interface_level = operator_level
+        self._schur_mode = schur_mode
+        self._implicit_operator = None
+        self._fine_operator = None
+        self._interior_dofs = None
+        self._local_schur = None
+        self._local_schur_patterns = None
+        self._torch_schur_patterns = None
         self._chunk_size = int(chunk_size)
         self._assembler = GlobalAssembler(layout)
         prototype, sub_meshes, _ = build_substructures(self._assembler, integration_order=integration_order)
@@ -216,8 +242,13 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
 
     @property
     def operator_level(self) -> str:
-        """接口刚度的算子层级 ('fa' 或 'ea'), 不是基类内部的细网格层级"""
+        """与 schur_mode 组合解释的装配层级, 不改变基类方法分派."""
         return self._interface_level
+
+    @property
+    def schur_mode(self) -> str:
+        """Schur 算子的显式或隐式实现方式."""
+        return self._schur_mode
 
     @property
     def chunk_size(self) -> int:
@@ -276,6 +307,9 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self._corner_recovery_batches = None
         self._density_cells = None
         self._interface_solved = False
+        self._implicit_operator = None
+        self._fine_operator = None
+        self._local_schur = None
         coef = super()._update_density_coefficient(rho_val)
         if coef is not None and tuple(coef.shape) != (int(self._mesh.number_of_cells()),):
             raise ValueError("子结构分析器只支持全局逐单元标量材料系数.")
@@ -342,6 +376,180 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
             i_dofs=prototype.i_dofs, b_dofs=prototype.b_dofs,
         )
         return self._interface_space.assemble(batches), None
+
+    def _schur_dof_data(self):
+        """准备公共内部编号, 检查局部 Schur 路径的支承条件.
+
+        Returns
+        -------
+        tuple[TensorLike, TensorLike]
+            同设备的全局接口编号与全场固定自由度掩码.
+        """
+        device = self._mesh.device
+        interface = bm.asarray(self._interface_space.global_dofs, dtype=bm.int64, device=device)
+        _, fixed_mask, nonzero = self._dirichlet_data()
+        if nonzero:
+            raise ValueError("局部 Schur 只支持齐次 Dirichlet 条件.")
+        if self._interior_dofs is None:
+            internal = bm.asarray(self._prototype.i_dofs, dtype=bm.int64, device=device)
+            self._interior_dofs = bm.stack([
+                bm.asarray(self._layout.get_substructure_global_dofs(pos, mesh),
+                           dtype=bm.int64, device=device)[internal]
+                for pos, mesh in zip(
+                    self._layout.substructure_positions(self._sub_meshes), self._sub_meshes)
+            ])
+        if bool(bm.any(fixed_mask[self._interior_dofs])):
+            raise ValueError("局部 Schur 不支持子结构内部支承.")
+        return interface, fixed_mask
+
+    def _assemble_local_schur_system(self):
+        """由同一局部装配流建立显式或隐式 FA 系统及公共恢复缓存.
+
+        Returns
+        -------
+        InterfaceSystem
+            显式接口 CSR 或局部未缩聚块隐式算子.
+
+        Notes
+        -----
+        用于 NumPy/PyTorch 的 full_trace, 数值缓存与矩阵同设备. 两侧都保存稀疏 K_ib 和内部 Cholesky 因子,
+        隐式另外保存稀疏 K_bb. CSR 模式由单元连接关系建立, 不按数值删项.
+        """
+        using_torch = bm.backend_name == 'pytorch'
+        clock = perf_counter
+        if using_torch:
+            from soptx.fem.substructure.torch_local_schur import (
+                TorchBlockPattern, TorchInteriorBlockSolver, TorchLocalSchurBlocks,
+            )
+            import torch
+
+            def clock():
+                """同步 CUDA 后读取分项计时点."""
+                if str(self._mesh.device).startswith('cuda'):
+                    torch.cuda.synchronize(self._mesh.device)
+                return perf_counter()
+
+        started = clock()
+        interface, fixed_mask = self._schur_dof_data()
+        # prototype 的局部编号保留在主机, 数值索引另移到矩阵所在设备.
+        internal_host = np.asarray(self._prototype.i_dofs, dtype=np.int64)
+        boundary_host = np.asarray(self._prototype.b_dofs, dtype=np.int64)
+        internal = bm.asarray(internal_host, dtype=bm.int64, device=self._mesh.device)
+        boundary = bm.asarray(boundary_host, dtype=bm.int64, device=self._mesh.device)
+        if self._local_schur_patterns is None:
+            self._local_schur_patterns = build_local_block_patterns(
+                self._local_assembly_map, internal_host, boundary_host)
+        explicit = self._schur_mode == 'explicit'
+        full_size = int(self._tensor_space.number_of_global_dofs())
+        if using_torch:
+            if self._torch_schur_patterns is None:
+                self._torch_schur_patterns = tuple(
+                    TorchBlockPattern(pattern, self._mesh.device)
+                    for pattern in self._local_schur_patterns)
+            blocks = TorchLocalSchurBlocks(
+                TorchInteriorBlockSolver(self._interior_dofs, full_size),
+                interface, self._interface_space.local_dofs, self._torch_schur_patterns,
+                keep_boundary=not explicit, chunk_size=self._chunk_size)
+        else:
+            blocks = LocalSchurBlocks(
+                InteriorBlockSolver(self._interior_dofs, full_size),
+                interface, self._interface_space.local_dofs, self._local_schur_patterns,
+                keep_boundary=not explicit)
+        timings = self.assembly_timings
+        timings['local_setup'] = clock() - started
+        timings.update(local_stiffness=0.0, internal_factorization=0.0, local_blocks=0.0)
+        timings['schur_formation' if explicit else 'schur_diagonal'] = 0.0
+
+        def batches():
+            """逐批装配、分解和缩聚, 不跨批保存完整局部刚度."""
+            source = iter(self._iter_local_stiffness_batches())
+            while True:
+                started = clock()
+                try:
+                    first, last, local = next(source)
+                except StopIteration:
+                    timings['local_stiffness'] += clock() - started
+                    break
+                timings['local_stiffness'] += clock() - started
+                schur = blocks.prepare_batch(
+                    first, local, internal, boundary, explicit=explicit, timings=timings)
+                del local
+                yield TraceStiffnessBatch(first, last, schur)
+                del schur
+
+        started = clock()
+        if explicit:
+            system = self._interface_space.assemble(batches())
+            # 整个流消费时间扣除局部准备, 剩余为接口模式与数值装配.
+            timings['global_csr'] = max(
+                0.0, clock() - started - sum(
+                    value for key, value in timings.items() if key != 'local_setup'))
+        else:
+            for _ in batches():
+                pass
+            free_positions = bm.nonzero(~fixed_mask[interface])[0]
+            diagonal = bm.copy(blocks.diagonal)
+            diagonal[fixed_mask[interface]] = 1.0
+            core = LocalSchurOperator(blocks, free_positions)
+            self._implicit_operator = FullInterfaceSchurOperator(core, free_positions, diagonal)
+            system = InterfaceSystem(self._implicit_operator, self._interface_space.global_dofs)
+        if not blocks.ready.all():
+            raise RuntimeError("局部刚度批次未覆盖全部子结构.")
+        self._local_schur = blocks
+        return system
+
+    def _assemble_implicit_system(self):
+        """创建共享参考 EA 与缓存内部分解的完整接口算子.
+
+        Returns
+        -------
+        InterfaceSystem
+            不携带细网格 CSR 或接口 CSR 的隐式系统.
+        """
+        started = perf_counter()
+        if self._translation_class_count() != 1:
+            raise ValueError("隐式 Schur + 共享参考 EA 当前要求 Q1 单一平移类网格.")
+        interface, fixed_mask = self._schur_dof_data()
+        if self._fine_restriction is None:
+            self._fine_restriction = ElementRestriction.from_integrator(
+                self._integrator, self._tensor_space, layout='flat')
+        fine = SharedReferenceElementAssembly(
+            self._tensor_space, restriction=self._fine_restriction,
+            reference_matrices=self._reference_stiffness_matrices(),
+            scale=self._integrator.coef)
+        interior = InteriorBlockSolver(self._interior_dofs, fine.shape[0])
+        diagonal = np.zeros(len(interface), dtype=np.float64)
+        self.assembly_timings['fine_operator'] = perf_counter() - started
+        self.assembly_timings.update(local_stiffness=0.0, internal_factorization=0.0,
+                                     schur_diagonal=0.0)
+        batches = iter(self._iter_local_stiffness_batches())
+        while True:
+            started = perf_counter()
+            try:
+                start, end, local = next(batches)
+            except StopIteration:
+                self.assembly_timings['local_stiffness'] += perf_counter() - started
+                break
+            self.assembly_timings['local_stiffness'] += perf_counter() - started
+            started = perf_counter()
+            internal = self._prototype.i_dofs
+            boundary = self._prototype.b_dofs
+            interior.factor_batch(start, local[:, internal[:, None], internal])
+            self.assembly_timings['internal_factorization'] += perf_counter() - started
+            started = perf_counter()
+            local_diagonal = interior.schur_diagonal(start, local, internal, boundary)
+            np.add.at(diagonal, self._interface_space.local_dofs[start:end].ravel(),
+                      local_diagonal.ravel())
+            self.assembly_timings['schur_diagonal'] += perf_counter() - started
+            del local, local_diagonal
+        free_positions = np.flatnonzero(~fixed_mask[interface])
+        diagonal[fixed_mask[interface]] = 1.0
+        core = ImplicitSchurOperator(
+            ConstrainedOperator(fine, gd=self._pde.dirichlet_bc, isDDof=fixed_mask),
+            interior, interface[free_positions], np.flatnonzero(fixed_mask))
+        self._fine_operator = fine
+        self._implicit_operator = FullInterfaceSchurOperator(core, free_positions, diagonal)
+        return InterfaceSystem(self._implicit_operator, self._interface_space.global_dofs)
 
     def _local_modulus_batch(self, start: int, end: int) -> Any:
         """取一批子结构按参考单元顺序排列的归一化模量 ``E(rho)/E0``.
@@ -480,16 +688,22 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         Returns
         -------
         InterfaceSystem
-            接口刚度 ``K_Q`` 的 CSR 及其自由度编号. 类型标注放宽为 Any 以兼容基类协议,
+            接口刚度 ``K_Q`` 的 CSR 或隐式算子及其自由度编号. 类型标注放宽为 Any 以兼容基类协议,
             基类返回的是细网格刚度算子.
         """
         self.assembly_timings = {}
         self._update_density_coefficient(rho_val)
         # 仅保留给历史对照调用方, 正式矩阵生成和恢复不读取此密度副本.
         density_cells = self._to_density_cells(rho_val)
-        system, recovery = self._assemble_interface_from_local_batches(
-            self._iter_local_stiffness_batches(),
-        )
+        if (self._trace == 'full_trace' and self._interface_level == 'fa'
+                and bm.backend_name in ('numpy', 'pytorch')):
+            system, recovery = self._assemble_local_schur_system(), None
+        elif self._schur_mode == 'implicit':
+            system, recovery = self._assemble_implicit_system(), None
+        else:
+            system, recovery = self._assemble_interface_from_local_batches(
+                self._iter_local_stiffness_batches(),
+            )
         self._density_cells = density_cells
         self._corner_recovery_batches = recovery
         self._assembled_coefficient = self._integrator.coef
@@ -549,16 +763,25 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         self.boundary_timings["dirichlet_cache_present_before"] = dirichlet_cached
         started = perf_counter()
         solver = self._solve_method if solver is None else solver
+        interface_load = self._interface_load
+        if self._schur_mode == 'implicit' and solver != 'cg':
+            raise ValueError("隐式 Schur 只支持 CG.")
+        if self._schur_mode == 'implicit' or self._local_schur is not None:
+            if bool(bm.any(F[self._interior_dofs] != 0)):
+                raise ValueError("局部 Schur 当前不支持子结构内部载荷.")
+            interface_load = F[self._interface_space.global_dofs]
         if solver == 'cg':
             # CG 在接口刚度所在设备上准备: 复用已解析的固定自由度, 对角按缓存的槽位取值
             prepared = prepare_constrained_system(
-                K, self._interface_load, self._constraints, solver=solver,
+                K, interface_load, self._constraints, solver=solver,
                 fixed=self._fixed_dof_constraints(),
-                diagonal=self._interface_space.diagonal(K.stiffness),
+                diagonal=(K.stiffness.diagonal() if self._schur_mode == 'implicit'
+                          else self._local_schur.diagonal if self._local_schur is not None
+                          else self._interface_space.diagonal(K.stiffness)),
             )
         else:
             prepared = prepare_constrained_system(
-                K, self._interface_load, self._constraints, solver=solver,
+                K, interface_load, self._constraints, solver=solver,
             )
         rhs = bm.copy(bm.asarray(prepared.rhs, dtype=bm.float64))
         self.boundary_timings["prepare_system"] = perf_counter() - started
@@ -612,6 +835,9 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
         if not any(K is prepared for prepared in self._prepared_systems):
             raise ValueError("solve_interface 须使用本轮 apply_bc 准备的系统.")
         options = self._merged_solver_options(kwargs)
+        if self._schur_mode == 'implicit':
+            if solver_type != 'cg' or options.get('precond', 'jacobi') not in (None, 'none', 'jacobi'):
+                raise ValueError("隐式 Schur 只支持 CG 与 none/jacobi 预条件子.")
         cg_kwargs: Dict[str, Any] = {}
         if solver_type == 'cg':
             precond = options.get('precond', 'jacobi')
@@ -634,6 +860,8 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
                 'converged': bool(result.converged),
                 'constraint_relres': float(result.constraint_relative_residual),
                 'mode': result.mode}
+        if self._schur_mode == 'implicit':
+            info['schur_matvec_count'] = self._implicit_operator.core.matvec_count
         if result.solver_info is not None:
             for key in ('rtol_reference', 'norm_type', 'rhs_norm', 'reference_norm',
                         'initial_residual_norm', 'stopping_threshold',
@@ -660,12 +888,19 @@ class SubstructureAnalyzer(LagrangeFEMAnalyzer):
 
         Notes
         -----
-        角点接口用组装时缓存的恢复矩阵回代; 完整接口不缓存恢复矩阵, 逐批重做局部组装与
-        精确缩聚后回代.
+        NumPy/PyTorch full_trace/fa 两侧复用局部稀疏 K_ib 与内部 Cholesky 因子.
+        隐式 EA 复用内部分解与细网格 EA; 角点接口使用缓存的恢复矩阵.
+        其他后端的显式完整接口保留逐批重新装配与缩聚的恢复策略.
         """
         self._require_assembled_state()
         if not self._interface_solved:
             raise RuntimeError("须先调用本轮的 solve_interface, 再恢复全场位移.")
+        if self._local_schur is not None:
+            out[:] = self._local_schur.recover(self._interface_displacement)
+            return out
+        if self._schur_mode == 'implicit':
+            out[:] = self._implicit_operator.recover(self._interface_displacement)
+            return out
         q_local = bm.asarray(self._interface_displacement)[self._interface_space.local_dofs]
         recovery_on_trace = self._corner_recovery_batches is not None
         recovery_batches = self._corner_recovery_batches

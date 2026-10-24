@@ -4,7 +4,6 @@
 
 软件：Ubuntu 24.04（WSL2），`ihpcm` 环境，Python 3.12.13；NumPy 2.5.3（内置 scipy-openblas 0.3.34），SciPy 1.18.1（内置 scipy-openblas 0.3.31），PyTorch 2.13.0（CUDA 13.0）；PyMUMPS 0.4.0，链接系统 MUMPS 5.6.2（OpenBLAS 0.3.26、Open MPI 4.1.6、ScaLAPACK 2.2.1，单进程运行）；pyevtk 1.7.0。
 
-
 ## 1. 研究对象
 
 对照相同细网格、相同子结构划分及 `linear_corner` 下，精确子结构（Exact）与形函数预测 PIML（shape 路线）在 Huang2023 三维 MBB 梁上的完整优化结果。
@@ -35,22 +34,27 @@ $$
 
 其中 $f_b^j$ 为子结构边界节点上的节点力，组装后边界右端项只剩外载荷 $F_\Gamma$；内部载荷为零。两侧都取 `linear_corner` 参数化：边界位移为 8 个角点位移的三线性插值，$u_b^j=Lq^j$，$q^j$ 为子结构 8 个角点的 24 个位移，$L\in\mathbb R^{n_b\times24}$ 与材料无关，所有子结构相同。
 
-**局部缩聚**。第二行 $K_{ib}^ju_b^j+K_{ii}^ju_i^j=0$ 即内部平衡方程。代入 $u_b^j=Lq^j$，内部位移对角点位移的响应记为 $N_i^j\in\mathbb R^{n_i\times24}$，$n_i$ 为子结构内部自由度数，$u_i^j=N_i^jq^j$。两侧的差别只在 $N_i^j$ 怎么来：
+**局部缩聚**。第二行 $K_{ib}^ju_b^j+K_{ii}^ju_i^j=0$ 即内部平衡方程。代入 $u_b^j=Lq^j$，内部位移对角点位移的响应记为 $N_i^j\in\mathbb R^{n_i\times24}$，$n_i$ 为子结构内部自由度数，$u_i^j=N_i^jq^j$。记 $Q\in\mathbb R^{24\times6}$、$\Phi\in\mathbb R^{n_i\times6}$ 为角点与内部节点上的刚体模态，$N_i^j$ 满足 $N_i^jQ=\Phi$；把 24 个角点自由度分成 6 个 pivot 与 18 个 free，使 $Q_P\in\mathbb R^{6\times6}$ 可逆。$Q$、$\Phi$ 与 pivot 划分均与材料无关，所有子结构相同。两侧的差别只在 $N_i^j$ 怎么来：
 
 - `Exact` 解内部平衡方程：$N_i^j=-(K_{ii}^j)^{-1}K_{ib}^jL$。
-- `PIML_shape` 不解方程，由网络以子结构内各细单元的模量 $E(\rho_e)$ 为输入直接预测 $\widehat N_i^j$（网络输出经刚体约束补全为 $n_i\times24$）。$\widehat N_i^j$ 一般不满足内部平衡 $K_{ii}^j\widehat N_i^j=-K_{ib}^jL$。
 
-子结构位移 $u^j=N^jq^j$，$N^j=[L;N_i^j]$ 为多尺度基函数，缩聚刚度按变分式 $K_c^j=(N^j)^{\mathsf T}K^jN^j$ 构造，展开为四项：
+- `PIML_shape` 不解方程，网络以子结构内各细单元的模量 $E(\rho_e)$ 为输入，只输出 free 列 $\widehat N_{i,F}^j\in\mathbb R^{n_i\times18}$，pivot 列由刚体约束补全 $\widehat N_{i,P}^j=(\Phi-\widehat N_{i,F}^jQ_F)Q_P^{-1}$，按原列号放回得 $\widehat N_i^j\in\mathbb R^{n_i\times24}$。$\widehat N_i^j$ 精确满足 $\widehat N_i^jQ=\Phi$，但一般不满足内部平衡 $K_{ii}^j\widehat N_i^j=-K_{ib}^jL$。
+
+**缩聚刚度**。子结构位移 $u^j=N^jq^j$，$N^j=[L;N_i^j]$ 为多尺度基函数。将其代入子结构势能 $\tfrac12(u^j)^{\mathsf T}K^ju^j-(u^j)^{\mathsf T}f^j$ 并对 $q^j$ 取驻值，得角点方程 $K_c^jq^j=f_c^j$，其中
 
 $$
-K_c^j=L^{\mathsf T}K_{bb}^jL+L^{\mathsf T}K_{bi}^jN_i^j
-+(N_i^j)^{\mathsf T}\bigl(K_{ib}^jL+K_{ii}^jN_i^j\bigr).
+K_c^j=(N^j)^{\mathsf T}K^jN^j
+=L^{\mathsf T}K_{bb}^jL+L^{\mathsf T}K_{bi}^jN_i^j
++(N_i^j)^{\mathsf T}\bigl(K_{ib}^jL+K_{ii}^jN_i^j\bigr),
+\qquad
+f_c^j=(N^j)^{\mathsf T}f^j=L^{\mathsf T}f_b^j,
 $$
 
-将两侧的 $N_i^j$ 代入：
+载荷项用到内部载荷为零。$K^j$ 对称半正定，故对任何 $N^j$，$K_c^j$ 都对称半正定。两侧的缩聚刚度都按此式构造，差别只在代入的 $N_i^j$：
 
-- `Exact`：$N_i^j$ 满足内部平衡，括号项为零，$K_c^j=L^{\mathsf T}K_{bb}^jL+L^{\mathsf T}K_{bi}^jN_i^j=L^{\mathsf T}K_s^jL$，其中 $K_s^j=K_{bb}^j-K_{bi}^j(K_{ii}^j)^{-1}K_{ib}^j$ 为 Schur 补。
-- `PIML_shape`：$\widehat N_i^j$ 不满足内部平衡，括号项不为零，$\widehat K_c^j$ 须保留四项；若只取前两项，刚度不对称且无正定性保证。对预测的 $\widehat K_c^j$ 逐子结构记录三项诊断量：刚体模态下的内力（$\widehat K_c^jZ_c$，$Z_c$ 为 24 个角点自由度上的 6 个刚体模态）、相对内部固支刚度 $L^{\mathsf T}K_{bb}^jL$ 的刚化幅度、变形子空间上的条件数。它们只用于衡量预测质量，不触发替换，见 §2.4。
+- `Exact`：$N_i^j$ 满足内部平衡，括号项为零，$K_c^j=L^{\mathsf T}K_{bb}^jL+L^{\mathsf T}K_{bi}^jN_i^j=L^{\mathsf T}K_s^jL$，其中 $K_s^j=K_{bb}^j-K_{bi}^j(K_{ii}^j)^{-1}K_{ib}^j$ 为 Schur 补，与块消元得到的静力缩聚一致，见 [`substructure_full_trace_vs_linear_corner.md`](../topopt_simp_substructure/substructure_full_trace_vs_linear_corner.md) §1.1 的局部缩聚段。
+
+- `PIML_shape`：$\widehat N_i^j$ 不满足内部平衡，括号项不为零，$\widehat K_c^j$ 须保留四项；若只取前两项，刚度不对称且无正定性保证。$\widehat K_c^j$ 是在不含精确内部响应的子空间上的投影，按 Ritz 原理不低于精确值。
 
 **全局组装**。各子结构的 $q^j$ 是全局角点位移 $U_C$ 的分量，$q^j=A_c^jU_C$，$A_c^j$ 为限制矩阵。两侧以相同方式组装全局角点刚度：
 
@@ -119,26 +123,24 @@ $$
 
 两个不等号来源不同：$C_{\mathrm{Exact}}\le C_{\mathrm{FEM}}$ 来自边界位移的角点插值，是 linear_corner 自身的 Ritz 误差，两侧共有；$\widehat C\le C_{\mathrm{Exact}}$ 来自刚度不等式，是 PIML 额外引入的。能量恒等式是协调 Ritz 近似的通用结论，对两侧都成立。
 
-**评价准则**。PIML 报告的柔顺度偏低不表示设计更好。评价以统一细网格重分析 $C_{\mathrm{Fine}}$ 为准，对 PIML 恒有 $C_{\mathrm{Fine}}\ge C_{\mathrm{opt}}$；§3.1 同时报告 $C_{\mathrm{FEM}}$、$C_{\mathrm{Exact}}$、$\widehat C$，以分离两层误差。
+**评价准则**。PIML 报告的柔顺度偏低不表示设计更好。评价以统一细网格重分析 $C_{\mathrm{Fine}}$ 为准，对 PIML 恒有 $C_{\mathrm{Fine}}\ge C_{\mathrm{opt}}$；3.2 同时报告 $C_{\mathrm{FEM}}$、$C_{\mathrm{Exact}}$、$\widehat C$，以分离两层误差。
 
 ## 2. 实验设置
 
-实验脚本为 [`run_substructure_exact_vs_piml_shape.py`](run_substructure_exact_vs_piml_shape.py)。
-
-本实验均采用 NumPy / CPU：`BACKEND = 'numpy'`，`DEVICE = 'cpu'`；单线程：`NUM_THREADS = 1`（`--threads` 的默认值），脚本在导入 numpy/scipy/torch 之前把全部 BLAS / OpenMP 线程变量设为该值，torch 推理同用，取值记入 `config.json` 的 `threads`，输出目录名带 `_t1`。
+PIML 侧的入口为 [`run_piml_substructure.py`](run_piml_substructure.py)，Exact 侧复用 [`run_substructure_full_trace_vs_linear_corner.py`](../topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py) 的 `--trace linear_corner`，均在仓库根目录运行。两个入口的模型、离散、线性求解与优化常量相同，下表所列即两者共同的取值；以各次运行的 `config.json` 核对。
 
 ### 2.1 模型参数
 
 ![MBB 梁的几何、载荷与支承](assets/Huang2023_Fig5.png)
 
-采用整体三维 MBB 梁模型，长、高、宽分别记为 $L_x,L_y,L_z$，比例为 $6:1:1$，以细单元边长为长度单位（$h=1$），计算域 $\Omega=[0,L_x]\times[0,L_y]\times[0,L_z]$ 的尺寸由网格剖分数确定。顶面中心施加竖直向下的单位集中力 $F=1$。支承取在两端底边的四个角点：左端两角点铰支（$u_x=u_y=u_z=0$），右端两角点滚支（$u_y=0$）。
+采用整体三维 MBB 梁模型，长、高、宽分别记为 $L_x,L_y,L_z$，比例为 $6:1:1$，以细单元边长为长度单位（$h=1$），计算域 $\Omega=[0,L_x]\times[0,L_y]\times[0,L_z]$ 的尺寸由网格剖分数确定。顶面中心施加竖直向下的单位集中力 $F=1$。支承取在两端底边的四个角点：左端两角点铰支（$u_x=u_y=u_z=0$），右端两角点滚支（沿 $x$ 可滚动，$u_y=u_z=0$）。
 
 | 参数 | 数值或设置 |
 |---|---|
 | 几何与计算域 | 整体三维 MBB 梁，$L_x:L_y:L_z=6:1:1$，尺寸由网格确定：`domain = (0, nx*h, 0, ny*h, 0, nz*h)`，`FullMBBBeamPoint3d(domain=domain, ...)` |
 | 长度约定 | 以细单元边长为长度单位，$h=1$：`ELEMENT_SIZE = 1.0`；网格须满足 $n_x:n_y:n_z=6:1:1$ |
 | 载荷 | 顶面中心集中力，沿 $y$ 方向向下，合力为 $-1$：`LOAD = -1.0` |
-| 支承 | 齐次 Dirichlet 边界条件：左端两底角点 $u_x=u_y=u_z=0$，右端两底角点 $u_y=0$：`FullMBBBeamPoint3d` |
+| 支承 | 齐次 Dirichlet 边界条件：左端两底角点 $u_x=u_y=u_z=0$，右端两底角点 $u_y=u_z=0$：`FullMBBBeamPoint3d` |
 | 实体材料杨氏模量 $E_0$ | $1$：`E0 = 1.0` |
 | 弱材料杨氏模量 $E_{\min}$ | $10^{-7}$：`EMIN = 1.0e-7` |
 | 泊松比 $\nu$ | $0.3$：`NU = 0.3` |
@@ -159,14 +161,16 @@ $$
 | 参数 | 数值或设置 |
 |---|---|
 | 子结构划分 | 子结构数由 `--n-sub` 设定，每个子结构含 $m\times m\times m$ 个细单元，$m$ 由 `--n-fine` 设定，须满足 $\text{grid}=n_{\text{sub}}\times m$，缺省项由其余两项推出：`StructuredSubstructureLayout(..., n_sub=n_sub, n_fine=(m, m, m), full_mesh=mesh)` |
-| 边界位移表示 | full_trace 保留全部边界自由度，$\Psi=I$：`SubstructureAnalyzer(..., trace='full_trace')`；linear_corner 取角点三线性插值，$\Psi=L$：`SubstructureAnalyzer(..., trace='linear_corner')` |
+| 边界位移表示 | linear_corner 取角点三线性插值，$\Psi=L$：`SubstructureAnalyzer(..., trace='linear_corner')`；PIML 入口 `--trace linear_corner`，Exact 入口 `--trace linear_corner` |
 | 分批大小 | 每批处理 256 个子结构：`chunk_size=256` |
+| 算子层级 | 装配全局角点 CSR：PIML 入口 `--assemble-level fa`（默认，传给 `SubstructureAnalyzer(..., operator_level=...)`；`ea` 已列入可选值，实现待补），Exact 入口固定为 `fa` |
 
 **线性求解参数**
 
 | 参数 | 数值或设置 |
 |---|---|
-| 求解器 | CG：`SOLVER = 'cg'`；预条件子由 `--preconditioner` 指定，可选 `none`、`jacobi`、`gmg`（默认 `jacobi`，`gmg` 仅支持 full_trace）；实际取值记入 `config.json` 与结果表 |
+| 求解器 | CG + Jacobi：`SOLVER = 'cg'`，两个入口均为 `--preconditioner jacobi`（默认）；实际取值记入 `config.json` |
+| 计算后端 | NumPy / CPU：两个入口均为 `--backend numpy --device cpu`（默认）；PIML 入口的 `pytorch`、`cuda` 已列入可选值，实现待补，`--gpu-memory-limit` 随 `cuda` 启用 |
 | 停机准则 | 相对右端项的容差 $10^{-6}$：`CG_TOLERANCE = 1.0e-6`，`rtol=CG_TOLERANCE`，`atol=0`，`rtol_reference='rhs'` |
 | 最大 CG 步数 | `CG_MAXITER = 20000` |
 | 迭代初值 | 首轮为零向量；第 2 轮起取上一轮的解：`x0=previous_displacement`，`full_trace` 为全局边界位移，`linear_corner` 为全局角点位移 |
@@ -198,29 +202,72 @@ $$
 
 **离线阶段：样本生成**。
 
-```bash
-python experiments/topopt_piml_substructure/generate_samples.py \
-  --n-sub 78 13 13 --n-fine 5 --fine-cell-size 1.0 --nu 0.3 --trace-kind linear_corner \
-  --sampling independent_uniform --n-train 400000 --n-validation 40000 \
-  --min-modulus 1e-7 --sample-seed 2026 --targets shape \
-  --backend numpy --device cpu --generation-batch-size 32
-```
-
-产物写入脚本旁的 `outputs/independent_15_layer/samples/`，目录名由参数自动拼出：`mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026`。
-
 | 参数 | 数值或设置 |
 |---|---|
 | 子结构 | $m=5$，$h=1$，$\nu=0.3$，线性元，linear_corner 接口：`--n-fine 5`，`--fine-cell-size 1.0`，`--nu 0.3`，`--trace-kind linear_corner`；`--n-sub 78 13 13` 只决定记入 `generation_config.json` 的整体域尺寸，不影响局部样本 |
 | 采样量 | 各细单元的归一化杨氏模量 $\widehat E_e$，逐单元独立均匀采样：`--sampling independent_uniform` |
 | 采样范围 | $\widehat E_e\in[10^{-7},1]$，上界固定为 $1$：`--min-modulus 1e-7` |
 | 样本数 | 训练 $400\,000$，验证 $40\,000$：`--n-train 400000`，`--n-validation 40000` |
-| 采样种子 | $2026$，驱动材料采样的随机流：`--sample-seed 2026` |
-| 标签 | 精确内部形函数 $N_i^j=-(K_{ii}^j)^{-1}K_{ib}^jL$，只写形函数标签：`--targets shape` |
-| 生成后端 | NumPy / CPU，float64：`--backend numpy`，`--device cpu`，`--generation-batch-size 32` |
+| 采样种子 | 驱动材料采样：`--sample-seed 2026` |
+| 标签 | 形函数标签：`--targets shape` |
+| 生成后端 | NumPy / CPU：`--backend numpy`，`--device cpu`，`--generation-batch-size 32` |
+| 数据精度 | float64，局部求解与标签写盘均为 float64：`--dtype float64` |
 
 **离线阶段：网络训练**。
 
+| 参数 | 数值或设置 |
+|---|---|
+| 网络数 | $4$ 个网络共用同一输入，3456 维输出按下标连续均分给各网络，每个 864 维，拼接后按刚体约束补全：`--num-networks 4` |
+| 隐藏层宽度 | $[60,80,100,120,140,160,180,200,180,160,140,120,100,80,60]$：`--hidden-dims 60 80 ... 60` |
+| 隐藏层激活 | $[\tanh,\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu},\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu}]$：`--activations tanh elu ... elu` |
+| 损失 | 网络输出经刚体约束补全为 $\widehat N_i^j$ 后与精确 $N_i^j$ 的逐元素 MSE：`--loss decoded_full_matrix_mse` |
+| 优化器 | Adam：`--optimizer adam` |
+| 初始学习率 | $10^{-3}$：`--lr 1e-3` |
+| batch size | $256$：`--batch-size 256` |
+| 学习率调度 | `ReduceLROnPlateau`，验证损失 10 轮未降则减半，下限 $10^{-6}$；代码固定，不开参数 |
+| 提前停止 | 验证损失 $40$ 轮未降：`--patience 40` |
+| 最大轮数 | $500$：`--epochs 500` |
+| 训练种子 | 驱动网络初始化：`--train-seed 2026` |
+| 训练后端 | PyTorch / CPU：`--backend pytorch`，`--device cpu` |
+| 训练精度 | float64，网络参数与样本均以 float64 计算：`--dtype float64` |
+
+**在线阶段：预测、缩聚与恢复**。
+
+| 参数 | 数值或设置 |
+|---|---|
+| 接口与路线 | linear_corner 接口、shape 路线：`--trace linear_corner`，`--route shape`；两者必填，当前各只有这一个取值，载入时与权重文件记录的接口、路线核对 |
+| 权重文件 | 上述训练得到的 `shape_best.pt`：`--weights`，必填，无默认值 |
+| 推理后端与精度 | PyTorch / CPU，float64；代码固定，不开参数，载入权重时校验网络位于 CPU 且为 float64 |
+
+## 3. 结果对照
+
 ```bash
+# Exact
+python experiments/topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py --trace linear_corner --backend numpy --device cpu --threads 1
+# PIML shape
+python experiments/topopt_piml_substructure/run_piml_substructure.py --trace linear_corner --route shape --weights experiments/topopt_piml_substructure/outputs/independent_15_layer/training/shape/mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026_trainseed2026/shape_best.pt --threads 1
+```
+
+### 3.1 样本生成与网络训练
+
+```bash
+# 样本生成
+python experiments/topopt_piml_substructure/generate_samples.py \
+  --n-sub 78 13 13 --n-fine 5 --fine-cell-size 1.0 --nu 0.3 --trace-kind linear_corner \
+  --sampling independent_uniform --n-train 400000 --n-validation 40000 \
+  --min-modulus 1e-7 --sample-seed 2026 --targets shape \
+  --backend numpy --device cpu --dtype float64 --generation-batch-size 32
+```
+
+| 项目 | 内容 |
+|---|---|
+| 产物 | `train_inputs.npy`、`train_shape_targets.npy`、`validation_inputs.npy`、`validation_shape_targets.npy`、`manifest.json`、`generation_config.json` |
+| 数据 | 训练 400000、验证 40000，targets `[shape]` |
+| 输入与标签 | 每个样本输入为 125 个细单元的模量，标签为精确 $N_i^j$ 的 free 列 $N_{i,F}^j\in\mathbb R^{192\times18}$，展平为 3456 维向量 |
+| 存储 | `train_shape_targets.npy` 10.30 GiB（$400000\times3456$ 个 float64），四个 `.npy` 合计约 11.7 GiB |
+
+```bash
+# 网络训练
 python experiments/topopt_piml_substructure/train_network.py \
   --samples-dir experiments/topopt_piml_substructure/outputs/independent_15_layer/samples/mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026 \
   --route shape --num-networks 4 \
@@ -228,44 +275,20 @@ python experiments/topopt_piml_substructure/train_network.py \
   --activations tanh elu tanh elu tanh elu tanh elu elu tanh elu tanh elu tanh elu \
   --input-normalization none --loss decoded_full_matrix_mse --stiffness-loss-weight 0 \
   --epochs 500 --batch-size 256 --optimizer adam --lr 1e-3 --weight-decay 0 --patience 40 \
-  --train-seed 2026 --backend pytorch --device cpu
+  --train-seed 2026 --backend pytorch --device cpu --dtype float64
 ```
 
-权重写入 `outputs/independent_15_layer/training/shape/<数据集名>_trainseed2026/shape_best.pt`，即在线脚本 `SHAPE_WEIGHTS` 的默认值。
-
-| 参数 | 数值或设置 |
+| 项目 | 内容 |
 |---|---|
-| 网络数 | $4$ 个网络共用同一输入，形函数的独立条目按下标连续均分给各网络，输出拼接后按刚体约束补全：`--num-networks 4` |
-| 隐藏层宽度 | $[60,80,100,120,140,160,180,200,180,160,140,120,100,80,60]$：`--hidden-dims 60 80 ... 60` |
-| 隐藏层激活 | $[\tanh,\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu},\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu},\tanh,\mathrm{elu}]$：`--activations tanh elu ... elu` |
-| 输入归一化 | 不做：`--input-normalization none` |
-| 损失 | 网络输出经刚体约束补全为 $\widehat N_i^j$ 后与精确 $N_i^j$ 的逐元素 MSE：`--loss decoded_full_matrix_mse` |
-| 刚度一致性损失 | 叠加于基本损失之上的加权项：由 $\widehat N_i^j$ 按变分式构造的角点刚度与精确刚度标签的相对误差；权重 $0$ 即不启用：`--stiffness-loss-weight 0` |
-| 优化器 | Adam：`--optimizer adam` |
-| 初始学习率 | $10^{-3}$：`--lr 1e-3` |
-| 权重衰减 | $0$：`--weight-decay 0` |
-| batch size | $256$：`--batch-size 256` |
-| 提前停止 | 验证损失 $40$ 轮未降：`--patience 40` |
-| 最大轮数 | $500$：`--epochs 500` |
-| 训练种子 | $2026$，驱动网络初始化与每轮样本打乱：`--train-seed 2026` |
-| 训练后端 | PyTorch / CPU，float64：`--backend pytorch`，`--device cpu` |
+| 产物 | `shape_best.pt`、`run_config.json`、`shape_history.json`、`summary.json` |
+| 网络 | `SplitOutputNet`，4 个子网络，输入 125，输出 3456，参数约 $1.28\times10^6$ |
+| 结果 | 跑满 500 轮，patience 未触发，最佳轮 491；验证 MSE $6.3926\times10^{-6}$，同轮训练 MSE $6.3732\times10^{-6}$ |
 
-**在线阶段：预测、缩聚与恢复**。仅 `--side piml_shape`：每轮装配时以各子结构的 $E(\rho_e)/E_0$ 为输入，网络预测 $\widehat N_i^j$，缩聚按 §1.1，求得角点位移后内部位移同样用 $\widehat N_i^j$ 回代；启动时核对权重的局部配置与本实验一致。
+验证损失第 1 / 10 / 100 / 300 轮为 $1.62\times10^{-4}$ / $2.53\times10^{-5}$ / $7.49\times10^{-6}$ / $6.40\times10^{-6}$，学习率第 127 轮首次减半、第 437 轮到下限；验证与训练损失几乎相等且第 300 轮后持平，训练已收敛、无过拟合。该损失是 $\widehat N_i^j$ 逐元素的 MSE，不直接度量 $\widehat K_c^j$ 与柔顺度误差。
 
-| 参数 | 数值或设置 |
-|---|---|
-| 权重文件 | 上述训练得到的 `shape_best.pt`：`--shape-weights`，默认 `SHAPE_WEIGHTS` |
+数据来源：样本 `outputs/independent_15_layer/samples/mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026/`，训练 `outputs/independent_15_layer/training/shape/mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026_trainseed2026/`，日志 `outputs/generate_samples_shape_seed2026.log` 与 `outputs/train_shape_seed2026.log`。
 
-每轮另按子结构记录三项预测质量比值的分布到 `history.json` 的 `condensation_report`，只记录不替换：刚体零空间残量 $\|\widehat K_c^jZ_c\|_F/\|\widehat K_c^j\|_F$、相对 $L^{\mathsf T}K_{bb}^jL$ 的刚化比 $\lambda_{\max}(\widehat K_c^j-L^{\mathsf T}K_{bb}^jL)/\lambda_{\max}(L^{\mathsf T}K_{bb}^jL)$、变形子空间条件数倒数 $\lambda_{\min}/\lambda_{\max}$。
-
-## 3. 结果对照
-
-```bash
-python experiments/topopt_piml_substructure/run_substructure_exact_vs_piml_shape.py --side exact
-python experiments/topopt_piml_substructure/run_substructure_exact_vs_piml_shape.py --side piml_shape
-```
-
-### 3.1 固定同一密度场的分析对照
+### 3.2 训练结果验证
 
 先固定物理密度进行双侧分析，不执行 OC 更新。样本包括均匀场、非对称非均匀场及优化中间场；对优化场记录其来源，避免仅在单侧最终设计上评价。使用同一输入密度比较，才能分离代理误差与优化轨迹变化。
 
@@ -293,7 +316,37 @@ $$
 
 其中预测基函数的导数一般不能自动忽略；若载荷映射也随材料变化，还需包含载荷导数项。Exact 内部平衡导致的消项不能直接移植到近似形函数。应记录使用完整梯度还是近似梯度，并用有限差分核对，否则完整优化差异不能仅归因于状态求解误差。
 
-### 3.2 完整拓扑优化结果
+### 3.3 内存占用
+
+两侧的全局角点系统同阶、同稀疏结构：210、390 档的 $K_C$ 维数为 $8\,256$、$46\,452$（约束前），非零元个数相同，故不列非零元表，见 [`substructure_full_trace_vs_linear_corner.md`](../topopt_simp_substructure/substructure_full_trace_vs_linear_corner.md) §3.1。两侧差别只在局部缩聚：Exact 逐批求解 $K_{ii}^j$，PIML 逐批推理并按变分式构造 $\widehat K_c^j$，另有网络的常驻开销。
+
+NumPy 后端，推理为 PyTorch / CPU；单线程：`--threads 1`。PIML 在线阶段尚不支持 GPU，只列 CPU。
+
+```bash
+python experiments/topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py --trace linear_corner --backend numpy --device cpu --grid 210 35 35 --max-iter 3 --threads 1
+python experiments/topopt_piml_substructure/run_piml_substructure.py --trace linear_corner --route shape --weights experiments/topopt_piml_substructure/outputs/independent_15_layer/training/shape/mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026_trainseed2026/shape_best.pt --grid 210 35 35 --max-iter 3 --threads 1
+python experiments/topopt_simp_substructure/run_substructure_full_trace_vs_linear_corner.py --trace linear_corner --backend numpy --device cpu --grid 390 65 65 --max-iter 3 --threads 1
+python experiments/topopt_piml_substructure/run_piml_substructure.py --trace linear_corner --route shape --weights experiments/topopt_piml_substructure/outputs/independent_15_layer/training/shape/mbb_linear_corner_m5_h1_sub78x13x13_nu0p3_emin1e-7_shape_train400000_val40000_seed2026_trainseed2026/shape_best.pt --grid 390 65 65 --max-iter 3 --threads 1
+```
+
+单位 GiB，取第 1 轮进程 RSS 的记录（`history.json` 各阶段的 `after_gib` 与 `peak_gib`）。常驻量取相邻阶段结束时 `after_gib` 之差：共有部分为第 1 轮过滤阶段结束时的占用，刚度算子为装配阶段的增量减去恢复矩阵，边界条件为边界条件阶段的增量；网络为准备阶段 网络 的增量 `after_gib - (peak_gib - net_gib)`，已含在共有部分内。
+
+| 部分 | Exact 210 | PIML 210 | Exact 390 | PIML 390 |
+|---|---|---|---|---|
+| 共有部分（常驻） | 待填 | 待填 | 待填 | 待填 |
+| 其中网络（常驻） | 不适用 | 待填 | 不适用 | 待填 |
+| 刚度算子（常驻） | 待填 | 待填 | 待填 | 待填 |
+| 恢复矩阵（常驻） | 0.071 | 0.071 | 0.453 | 0.453 |
+| 边界条件（常驻） | 待填 | 待填 | 待填 | 待填 |
+| 装配阶段峰值 | 待填 | 待填 | 待填 | 待填 |
+| 求解阶段峰值 | 待填 | 待填 | 待填 | 待填 |
+| 恢复阶段峰值 | 待填 | 待填 | 待填 | 待填 |
+
+恢复矩阵两侧同规模：$N_i^j$ 与 $\widehat N_i^j$ 都在装配时缓存，合计 $n_{\text{sub}}\times n_i\times24$ 个 float64（$m=5$ 时 $n_i=192$），表中按此解析值填写。装配阶段峰值含每批 256 个子结构的局部总刚（约 0.80 GiB，两侧相同）及各自的局部缩聚瞬时量。解读与全程峰值待填。
+
+数据来源：待填。
+
+### 3.4 完整拓扑优化结果
 
 | 运行信息 | Exact linear_corner | PIML shape linear_corner |
 |---|---|---|
@@ -303,11 +356,7 @@ $$
 | 求解器与预条件器 | CG + Jacobi，同 §2 | CG + Jacobi，同 §2 |
 | 小规模验收 / 正式运行状态 | 待填 | 待填 |
 | 求解失败、回退或其他异常 | 待填 | 待填 |
-| 权重路径、sha256、训练代码版本 | 不适用 | 待填，取 `config.json` 的 `checkpoint` |
-| 实际网络结构、激活、输出分组及 dtype | 不适用 | 待填 |
-| 训练 / 验证 / 独立测试数据及分布 | 不适用 | 待填，取训练目录的 `run_config.json` 与样本 `manifest.json` |
-| 输入排序、预处理和额外缩放 | 不适用 | 待填，取 `checkpoint.input_normalization` |
-| 权重训练结果与验收状态 | 不适用 | 跑满 500 轮，最优轮 491，验证损失 $6.39\times10^{-6}$；无独立测试集，验证损失为唯一泛化指标；README 记录默认权重尚未通过正式复现前置验收 |
+| 权重 | 不适用 | 见 3.1 |
 
 | 指标 | Exact linear_corner | PIML shape linear_corner |
 |---|---|---|
@@ -331,111 +380,13 @@ $$
 
 优化收敛曲线应同时展示柔顺度与体积分数，拓扑图采用相同视角、阈值和色标。两侧可能有不同优化轮数，不能用总耗时单独推断单次分析加速比。
 
-### 3.3 最终设计的统一 FEM 重分析
 
-对两侧最终物理密度，使用同一细网格 FEM、材料插值、载荷、支承及求解设置各分析一次。不再次过滤，不执行 OC 更新。记录：
+## 4. 未来工作
 
-$$
-\varepsilon_{\mathrm{model}}=
-\frac{|C_{\mathrm{opt}}-C_{\mathrm{Fine}}|}{|C_{\mathrm{Fine}}|},\qquad
-\Delta_{\mathrm{design}}=
-\frac{C_{\mathrm{Fine}}(\rho_{\mathrm{PIML}})-C_{\mathrm{Fine}}(\rho_{\mathrm{Exact}})}
-{|C_{\mathrm{Fine}}(\rho_{\mathrm{Exact}})|}.
-$$
+以下是本实验不做、但方法上值得做的事，与 §3 各小节要做的事分开。
 
-前者评价各自模型在自身设计上的偏差，后者比较最终设计质量，必须结合体积分数解读。对 PIML 最终设计还应补做 Exact linear_corner 重分析，以分离同一设计上的代理偏差与角点插值偏差。重分析入口和求解配置待确定，实测数据待填。
-
-## 4. 计算成本
-
-成本分为离线训练、在线分析与完整优化。同一硬件和线程条件下对照，推理设备或精度不同须明示。不预设 PIML 一定更快：网络推理之外，细尺度局部刚度构造、N 转置 K N、数据转换及恢复仍可能占主要成本。
-
-### 4.1 在线耗时（s）
-
-| 准备阶段 | Exact | PIML shape |
-|---|---|---|
-| 网格与子结构布局 | 待填 | 待填 |
-| 材料、参考刚度、边界位移表示与分析器 | 待填 | 待填 |
-| 权重加载、契约检查与推理初始化 | 不适用 | 待填 |
-| 过滤矩阵、目标与约束 | 待填 | 待填 |
-| 准备合计 | 待填 | 待填 |
-
-| 每轮阶段 | Exact | PIML shape |
-|---|---|---|
-| 密度过滤及材料插值 | 待填 | 待填 |
-| 局部细尺度刚度构造 | 待填 | 待填 |
-| 精确内部消元及角点投影 | 待填 | 回退部分待填，无回退则不适用 |
-| 输入转换、网络推理及基函数补全 | 不适用 | 待填 |
-| 预测基函数构造角点刚度 | 不适用 | 待填 |
-| 全局角点矩阵组装 | 待填 | 待填 |
-| 载荷与边界条件 | 待填 | 待填 |
-| 线性求解 | 待填 | 待填 |
-| 全场位移恢复 | 待填 | 待填 |
-| 柔顺度与灵敏度 | 待填 | 待填 |
-| 输出 | 待填 | 待填 |
-| OC 更新 | 待填 | 待填 |
-| 首轮完整耗时 | 待填 | 待填 |
-| 第 2 轮起每轮完整耗时均值 | 待填 | 待填 |
-
-上述是目标计时分项，现有入口是否提供相应字段尚待核实。如果实际实现融合了若干步骤，报告可测的合并阶段，不凭空拆分耗时。缓存判别与回退耗时应归入相应阶段并另记次数，避免重复计时。GPU 推理若启用，需明确同步与主机设备传输计时边界。
-
-| 汇总 | Exact | PIML shape |
-|---|---|---|
-| 固定同一密度场的单次分析耗时 | 待填 | 待填 |
-| 准备合计 / s | 待填 | 待填 |
-| 全部优化迭代耗时 / s | 待填 | 待填 |
-| 准备与优化总耗时 / min | 待填 | 待填 |
-| 最终设计 FEM 重分析 / s，单列 | 待填 | 待填 |
-| 单次分析 / 完整优化加速比 | 基准 | 待填 |
-
-加速比定义为 Exact 耗时除以 PIML 耗时，两者必须使用相同计时范围。每轮总耗时先对实际阶段求和再取均值，与包含阶段外开销的墙钟时间区分。OC 仅统计实际执行轮次；只有一轮时稳态均值不适用。首轮、模型预热及缓存建立单列，不隐去其成本。
-
-### 4.2 内存（GiB）
-
-| 阶段峰值或汇总 | Exact RSS | PIML RSS |
-|---|---|---|
-| 网格与布局准备 | 待填 | 待填 |
-| 分析器、参考数据与模型加载 | 待填 | 待填 |
-| 过滤矩阵及优化准备 | 待填 | 待填 |
-| 局部计算与整体组装 | 待填 | 待填 |
-| 载荷与边界条件 | 待填 | 待填 |
-| 求解与位移恢复 | 待填 | 待填 |
-| 灵敏度计算 | 待填 | 待填 |
-| 场输出与 OC | 待填 | 待填 |
-| 准备阶段峰值 | 待填 | 待填 |
-| 优化阶段峰值 | 待填 | 待填 |
-| 全进程峰值 | 待填 | 待填 |
-
-RSS 为进程常驻内存绝对值，阶段峰值不可相加。记录测量工具、采样方式及是否包含子进程。若启用 GPU，显存峰值单列表记录，不与 RSS 混合；框架 allocated、reserved 与设备进程用量采用何种口径需说明。不在缺少证据时推断临时内存组成。
-
-### 4.3 离线成本与摊销
-
-| PIML 离线项目 | 耗时 / 资源记录 |
-|---|---|
-| 样本生成与精确标签 | 待填 |
-| 网络训练与选模 | 待填 |
-| 独立测试与模型验收 | 待填 |
-| 数据集 / 权重存储量 | 待填 |
-| 可复用的几何、材料与边界表示范围 | 待填 |
-
-离线成本不混入单轮在线成本，但需与在线收益并列报告。只有在每次任务在线成本确实降低且模型可复用时，才讨论摊销次数；不以未测量的网络推理耗时宣称整体加速。
-
-## 5. 验证状态与后续步骤
-
-本轮仅重写文档，未运行测试、训练、benchmark 或优化。后续按以下顺序推进，运行前另行明确命令、验收阈值并取得授权：
-
-1. 检查并复用现有分析和优化入口，确认两侧相同的 L、编号、材料映射、载荷及支承；确定求解器配置。
-2. 选择与局部尺寸相容的权重，固定模型与输入契约；明确缓存、均匀近似、质量诊断量和梯度实现。
-3. 在小规模固定密度上核对局部刚度、载荷、位移、柔顺度、梯度及真残差，完成计时与内存字段检查。
-4. 完成短程优化流程验收后再执行正式对照，记录原始配置、逐轮数据和失败情况。
-5. 对最终设计进行统一 FEM 重分析，填写结果与成本表，再形成精度与性能结论。
-
-参考文档中的实测结果或历史软件版本不自动适用于本文。本目录 README 说明尚无完整 PIML 拓扑优化执行入口，因此这里的实验设计不代表该入口已经接通；在检查现有能力前不提供虚构运行命令。
-
-## 6. 未来工作
-
-以下是本实验不做、但方法上值得做的事，与本实验的完成步骤（§5）分开。
-
-1. **预测质量检查与改用 Exact**。soptx 已实现三项检查及未通过者改用 Exact 缩聚（§2.4），Huang2023 无此步骤，本实验只记录三项诊断量不替换。若 §3.1 的诊断显示某类密度场的预测质量明显偏差，可启用替换；届时结果须标明为预测与精确缩聚的混合流程，并记录替换比例，1.3 的不等式在被替换的子结构上以 $D^j=0$ 平凡成立。
+1. **预测质量检查与改用 Exact**。soptx 已实现三项检查及未通过者改用 Exact 缩聚（`reductions/piml_shape.py` 的 `rigid_tol`、`excess_rtol`、`rcond_min` 阈值；现行入口不走该路径），Huang2023 无此步骤，本实验不替换。若 3.2 的对照显示某类密度场的预测质量明显偏差，可启用替换；届时结果须标明为预测与精确缩聚的混合流程，并记录替换比例，1.3 的不等式在被替换的子结构上以 $D^j=0$ 平凡成立。
 2. **直接预测刚度路线**。Huang2023 的路线一直接由网络预测 $\widehat K_c^j$，本文不比较。论文自述该路线在柔性机构算例上结果更差，且预测的刚度与预测的 $N^j$ 一般不满足变分式，1.3 的关系对它不成立。
 3. **自洽损失**。Huang2023 在训练末期加入第二类损失，即由预测 $N^j$ 经变分式算出的刚度与直接预测刚度之差。本文网络是否使用记入 §2.4，可作为改进训练的选项。
 4. **均匀替代的变分化**。现行均匀子结构替代用缩放的实体刚度，不是变分构造，阈值量级内可能破坏 1.3 的不等式。可改为用实体基函数经变分式 $(N^j)^{\mathsf T}K^jN^j$ 构造，代价是每个均匀子结构多一次矩阵乘。
+5. **full_trace 下的 PIML**。不做。$\Psi=I$ 时 $n_q=n_b=456$，预测对象与网络输出放大 19 倍与 25 倍，四项式中 $\widehat N_i^{\mathsf T}K_{ii}\widehat N_i$ 使局部运算量反超 Exact，而整轮主项是 $K_\Gamma$ 的求解与常驻内存，网络不触及；精度上只是把与 FEM 等价的 Exact full_trace 换成偏硬的近似。分析见 [`piml_shape_substructure_linear_corner_vs_full_trace.md`](piml_shape_substructure_linear_corner_vs_full_trace.md)。

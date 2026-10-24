@@ -1,6 +1,6 @@
 """基于细网格算子与内部块分解的精确 Schur 作用, 不存储接口 CSR.
 
-当前仅用于 NumPy / CPU 的齐次支承、内部无载荷问题. 内部分解在一次固定密度
+细网格 EA 核心与内部求解器用于 NumPy/CPU; 完整接口适配器同时支持 PyTorch. 内部分解在一次固定密度
 分析内缓存, 改变密度后必须重建. 所有内部求解均为 Cholesky 直接求解.
 """
 
@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.linalg import cholesky, cho_solve
+
+from soptx.backend import backend_manager as bm
 
 
 class InteriorBlockSolver:
@@ -62,6 +64,58 @@ class InteriorBlockSolver:
             self.factors[start + offset] = cholesky(matrix, lower=True, check_finite=True)
         self.ready[start:end] = True
 
+    def solve_block(self, index, rhs):
+        """复用一个内部块的 Cholesky 因子求解向量或多列右端.
+
+        Parameters
+        ----------
+        index : int
+            子结构编号.
+        rhs : numpy.ndarray
+            第一维为内部自由度的向量或矩阵.
+
+        Returns
+        -------
+        numpy.ndarray
+            内部方程的解, 不重新分解.
+        """
+        if index < 0 or index >= len(self.ready) or not self.ready[index]:
+            raise ValueError("内部块尚未分解或编号越界.")
+        rhs = np.asarray(rhs)
+        if rhs.ndim not in (1, 2) or rhs.shape[0] != self.factors.shape[1]:
+            raise ValueError("内部右端形状错误.")
+        return cho_solve((self.factors[index], True), rhs, check_finite=False)
+
+    def schur_diagonal(self, start, matrices, i_dofs, b_dofs, column_chunk=32):
+        """利用已缓存分解按列计算局部 Schur 对角, 不形成完整缩聚块.
+
+        Parameters
+        ----------
+        start : int
+            首个子结构编号.
+        matrices : numpy.ndarray
+            对应批次的完整局部刚度.
+        i_dofs, b_dofs : numpy.ndarray
+            内部与边界局部编号.
+        column_chunk : int, optional
+            一次内部求解的边界列数.
+
+        Returns
+        -------
+        numpy.ndarray
+            每个子结构的边界 Schur 对角.
+        """
+        if column_chunk < 1 or not self.ready[start:start + len(matrices)].all():
+            raise ValueError("须提供正的列批大小并先完成内部分解.")
+        diagonal = np.diagonal(matrices, axis1=1, axis2=2)[:, b_dofs].copy()
+        for offset, matrix in enumerate(matrices):
+            for first in range(0, len(b_dofs), column_chunk):
+                last = min(first + column_chunk, len(b_dofs))
+                coupling = matrix[np.ix_(i_dofs, b_dofs[first:last])]
+                solved = self.solve_block(start + offset, coupling)
+                diagonal[offset, first:last] -= np.sum(coupling * solved, axis=0)
+        return diagonal
+
     def solve_into(self, rhs, result):
         """把各内部块解写入全场向量的内部位置.
 
@@ -81,8 +135,8 @@ class InteriorBlockSolver:
             raise RuntimeError("内部刚度尚未全部分解.")
         if rhs.shape != (self.full_size,) or result.shape != rhs.shape:
             raise ValueError("内部求解向量形状错误.")
-        for indices, factor in zip(self.indices, self.factors):
-            result[indices] = cho_solve((factor, True), rhs[indices], check_finite=False)
+        for index, indices in enumerate(self.indices):
+            result[indices] = self.solve_block(index, rhs[indices])
 
 
 class ImplicitSchurOperator:
@@ -140,6 +194,45 @@ class ImplicitSchurOperator:
         """按内部平衡恢复后提取界面力."""
         self.matvec_count += 1
         return (self.full_operator @ self.recover(vector))[self.free_interface]
+
+
+class FullInterfaceSchurOperator:
+    """将自由接口 Schur 算子适配为含固定分量的完整接口向量协议.
+
+    Parameters
+    ----------
+    core : ImplicitSchurOperator or LocalSchurOperator
+        提供自由接口作用与 recover 的算子.
+    free_positions : numpy.ndarray
+        自由分量在完整接口向量中的位置, 顺序与 core 一致.
+    diagonal : numpy.ndarray
+        完整接口 Schur 对角. 固定位置设为 1.
+    """
+
+    def __init__(self, core, free_positions, diagonal):
+        self.core = core
+        device = bm.get_device(diagonal)
+        self.free_positions = bm.asarray(free_positions, dtype=bm.int64, device=device)
+        self._diagonal = bm.asarray(diagonal, dtype=bm.float64, device=device)
+        self.shape = (len(self._diagonal),) * 2
+        if core.shape[0] != len(self.free_positions):
+            raise ValueError("自由接口维数不一致.")
+
+    def diagonal(self):
+        """返回接口对角, 供 Jacobi 预条件使用."""
+        return self._diagonal
+
+    def __matmul__(self, vector):
+        """自由位置作用 Schur 算子, 固定位置作用恒等算子."""
+        if vector.shape != (self.shape[0],):
+            raise ValueError("完整接口向量形状错误.")
+        result = bm.copy(vector)
+        result[self.free_positions] = self.core @ vector[self.free_positions]
+        return result
+
+    def recover(self, vector):
+        """提取自由接口分量并复用内部分解恢复全场位移."""
+        return self.core.recover(vector[self.free_positions])
 
 
 class RestrictedPreconditioner:

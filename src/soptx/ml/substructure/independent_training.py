@@ -23,6 +23,7 @@ from .independent_data import dataset_targets
 from .nets import IndependentOutputNet, SplitOutputNet
 
 BASE_LOSSES = ("decoded_full_matrix_mse",)
+TRAINING_DTYPES = ("float64",)
 from .training import TrainingConfig, build_optimizer
 
 if TYPE_CHECKING:
@@ -247,6 +248,7 @@ def train_network(
     network: IndependentOutputNet | SplitOutputNet,
     provider: IndependentPredictionDecoder,
     device: str | torch.device = "cpu",
+    dtype: str = "float64",
     config: TrainingConfig | None = None,
     initialization: dict[str, Any] | None = None,
     loss: str = "decoded_full_matrix_mse",
@@ -270,6 +272,8 @@ def train_network(
         生成或读取数据集时使用的接口空间对象.
     device : str or torch.device
         显式选择 cpu 或 cuda 设备.
+    dtype : str
+        训练精度, 须为 TRAINING_DTYPES 之一; 当前只有 float64. 记入 run_config.json 与 checkpoint.
     config : TrainingConfig, optional
         支持 Adam、AdamW 或 SGD; 默认 Adam, 500 轮, batch 256, 学习率 1e-3, 提前停止 40 轮.
 
@@ -297,6 +301,8 @@ def train_network(
         raise ValueError("route 必须为 shape 或 stiffness")
     if loss not in BASE_LOSSES:
         raise ValueError(f"loss 须为 {BASE_LOSSES} 之一, 得到 {loss!r}")
+    if dtype not in TRAINING_DTYPES:
+        raise ValueError(f"dtype 须为 {TRAINING_DTYPES} 之一, 得到 {dtype!r}")
     if not np.isfinite(stiffness_loss_weight) or stiffness_loss_weight < 0:
         raise ValueError("刚度监督权重须有限且非负")
     if stiffness_loss_weight and route != "shape":
@@ -368,7 +374,7 @@ def train_network(
         "input_normalization": input_normalization,
         "dataset": manifest, "training_config": vars(config),
         "scheduler": {"stale_epochs_to_reduce": 10, "factor": 0.5, "min_lr": 1e-6},
-        "route": route, "device": str(device), "dtype": "float64",
+        "route": route, "device": str(device), "dtype": dtype,
         "num_networks": {
             route: len(network.nets) if isinstance(network, SplitOutputNet) else 1,
         },
@@ -432,7 +438,7 @@ def train_network(
                                              (tuple(range(widths[f"{route}_targets"])),)),
                     "model_class": type(model).__name__,
                     "grouping_origin": "experiment_contiguous_balanced_split",
-                    "dtype": "float64",
+                    "dtype": dtype,
                 },
                 "loss": loss_name, "loss_settings": loss_settings,
                 "consistency_loss": "not_enabled",

@@ -4,6 +4,7 @@
 ``SubstructureAnalyzer(corner_condensation=...)`` 注入. 每批把网络预测的内部形函数
 ``N_i`` 与角点迹矩阵 ``L`` 拼成 ``basis = [L; N_i]``, 角点刚度取 ``basis^T K_local basis``;
 恢复批次直接给出 ``N_i``, 与分析器的角点恢复路径一致. 三项预测质量诊断量只记录不替换.
+推理、补全、变分式与诊断都在接口迹矩阵所在的设备上进行, 只把诊断比值取回主机汇总.
 """
 from __future__ import annotations
 
@@ -32,7 +33,8 @@ class PIMLShapeCornerCondensation:
     decoder : IndependentPredictionDecoder
         由分析器的参考子结构构造的 linear_corner 解码器, 提供独立条目补全与刚体基.
     network : torch.nn.Module
-        位于 CPU 且参数为 float64 的形函数网络, 输入归一化模量 ``E(rho)/E0``.
+        参数为 float64 的形函数网络, 输入归一化模量 ``E(rho)/E0``; 须与分析器的接口迹矩阵位于
+        同一设备 (numpy 后端为 CPU), 调用时核对.
     provider_metadata : dict
         权重保存的提供器元数据, 用于核对解码器契约.
     uniform_threshold : float, optional
@@ -70,8 +72,6 @@ class PIMLShapeCornerCondensation:
         if not decoder_metadata_matches(provider_metadata, decoder.metadata()):
             raise ValueError("解码器的子结构配置或独立条目编号与权重不一致")
         parameters = tuple(network.parameters())
-        if any(p.device.type != "cpu" for p in parameters):
-            raise ValueError("形函数网络须位于 CPU")
         if any(p.dtype != torch.float64 for p in parameters):
             raise ValueError("形函数网络须为 torch.float64")
         if uniform_threshold is not None:
@@ -87,6 +87,11 @@ class PIMLShapeCornerCondensation:
         prototype = decoder.prototype
         self._i = np.asarray(bm.to_numpy(prototype.i_dofs), dtype=np.int64)
         self._b = np.asarray(bm.to_numpy(prototype.b_dofs), dtype=np.int64)
+        # 边界行在前、内部行在后拼接后, 按 _order 重排即回到参考子结构的自由度顺序
+        stacked = np.concatenate((self._b, self._i))
+        if not np.array_equal(np.sort(stacked), np.arange(len(stacked))):
+            raise ValueError("内部与边界自由度须恰好划分参考子结构的全部自由度")
+        self._order = np.argsort(stacked)
         self._n_cells = int(prototype.n_cells)
         rigid, deformation, _ = prototype.trace_interface_bases(decoder.trace)
         self._rigid = np.asarray(bm.to_numpy(rigid), dtype=np.float64)
@@ -97,24 +102,29 @@ class PIMLShapeCornerCondensation:
                              f"得到 {self.solid_shape.shape}")
         self.report: dict = {}
 
-    def _predict(self, modulus: np.ndarray) -> np.ndarray:
-        """由归一化模量预测并补全内部形函数 ``(B, n_i, n_q)``."""
+    def _predict(self, modulus: Any) -> Any:
+        """由归一化模量预测并补全内部形函数 ``(B, n_i, n_q)``, 与 ``modulus`` 同设备."""
         from soptx.ml.substructure.inference import predict_independent_outputs
 
         outputs = predict_independent_outputs(self.network, modulus, "shape")
-        shapes = np.asarray(self.decoder.shape_codec.decode(outputs), dtype=np.float64)
-        if shapes.shape != (len(modulus), len(self._i), self._rigid.shape[0]):
-            raise ValueError(f"补全后的形函数形状 {shapes.shape} 不符")
+        shapes = self.decoder.shape_codec.decode(outputs)
+        if tuple(shapes.shape) != (len(modulus), len(self._i), self._rigid.shape[0]):
+            raise ValueError(f"补全后的形函数形状 {tuple(shapes.shape)} 不符")
         return shapes
 
-    def _diagnostics(self, stiffness: np.ndarray, K_bb_trace: np.ndarray) -> dict:
-        """对一批角点刚度计算三项比值."""
-        R, D = self._rigid, self._deformation
-        rigid = np.linalg.norm(stiffness @ R, axis=(1, 2)) / np.linalg.norm(stiffness, axis=(1, 2))
-        excess = np.linalg.eigvalsh(stiffness - K_bb_trace)[:, -1] / np.linalg.eigvalsh(K_bb_trace)[:, -1]
-        reduced = np.linalg.eigvalsh(np.swapaxes(D, -1, -2) @ stiffness @ D)
+    @staticmethod
+    def _diagnostics(stiffness: Any, K_bb_trace: Any, R: Any, D: Any) -> dict:
+        """对一批角点刚度计算三项比值, 取回主机为 numpy 数组."""
+        def frobenius(matrices):
+            return bm.sqrt(bm.sum(matrices * matrices, axis=(-2, -1)))
+
+        rigid = frobenius(stiffness @ R) / frobenius(stiffness)
+        excess = (bm.linalg.eigvalsh(stiffness - K_bb_trace)[:, -1]
+                  / bm.linalg.eigvalsh(K_bb_trace)[:, -1])
+        reduced = bm.linalg.eigvalsh(bm.matrix_transpose(D) @ stiffness @ D)
         rcond = reduced[:, 0] / reduced[:, -1]
-        return dict(rigid_residual=rigid, excess_ratio=excess, reduced_rcond=rcond)
+        return {key: np.asarray(bm.to_numpy(value), dtype=np.float64) for key, value in
+                dict(rigid_residual=rigid, excess_ratio=excess, reduced_rcond=rcond).items()}
 
     def __call__(
         self,
@@ -160,11 +170,23 @@ class PIMLShapeCornerCondensation:
         b = np.asarray(bm.to_numpy(bm.asarray(b_dofs)), dtype=np.int64)
         if not (np.array_equal(i, self._i) and np.array_equal(b, self._b)):
             raise ValueError("分析器的内部/边界自由度编号与解码器的参考子结构不一致.")
-        P = np.asarray(bm.to_numpy(basis_trace.matrix), dtype=np.float64)
-        if P.shape != self._decoder_trace.shape or not np.allclose(P, self._decoder_trace, rtol=0, atol=1e-12):
+        P = basis_trace.matrix
+        P_host = np.asarray(bm.to_numpy(P), dtype=np.float64)
+        if (P_host.shape != self._decoder_trace.shape
+                or not np.allclose(P_host, self._decoder_trace, rtol=0, atol=1e-12)):
             raise ValueError("接口空间的角点迹矩阵与解码器的不一致.")
+        # 计算设备取接口迹矩阵所在设备, 与分析器的局部刚度及接口散加一致; 网络须已在该设备上
+        device = bm.get_device(P)
+        import torch
+        if any(p.device != torch.device(device) for p in self.network.parameters()):
+            raise ValueError(f"形函数网络须与接口迹矩阵位于同一设备 {device}.")
+        b_device = bm.asarray(b, device=device)
+        order = bm.asarray(self._order, device=device)
+        R = bm.asarray(self._rigid, device=device)
+        D = bm.asarray(self._deformation, device=device)
+        solid = None if self.solid_shape is None else bm.asarray(self.solid_shape, device=device)
+        K_trace = bm.matrix_transpose(P)
         n_dof = len(i) + len(b)
-        n_q = P.shape[1]
         recovery_batches: list = []
         collected = {key: [] for key in DIAGNOSTIC_KEYS}
         counts = dict(predicted=0, uniform_replaced=0)
@@ -184,37 +206,36 @@ class PIMLShapeCornerCondensation:
                         or tuple(local.shape) != (end - start, n_dof, n_dof)):
                     raise ValueError("局部刚度批次的区间或形状不符.")
                 expected_start = end
-                local_np = np.asarray(bm.to_numpy(local), dtype=np.float64)
 
                 started = perf_counter()
-                modulus = np.asarray(modulus_lookup(start, end), dtype=np.float64)
-                if modulus.shape != (end - start, self._n_cells):
-                    raise ValueError(f"模量批次形状 {modulus.shape} 须为 {(end - start, self._n_cells)}")
+                modulus = bm.asarray(modulus_lookup(start, end), dtype=bm.float64, device=device)
+                if tuple(modulus.shape) != (end - start, self._n_cells):
+                    raise ValueError(f"模量批次形状 {tuple(modulus.shape)} 须为 {(end - start, self._n_cells)}")
                 shapes = self._predict(modulus)
                 counts["predicted"] += end - start
                 if self.uniform_threshold is not None:
-                    uniform = (modulus.max(axis=1) - modulus.mean(axis=1)) < self.uniform_threshold
-                    if uniform.any():
-                        shapes[uniform] = self.solid_shape
-                        counts["uniform_replaced"] += int(uniform.sum())
+                    uniform = (bm.max(modulus, axis=1) - bm.mean(modulus, axis=1)) < self.uniform_threshold
+                    n_uniform = int(bm.sum(uniform))
+                    if n_uniform:
+                        shapes = bm.where(uniform[:, None, None], solid, shapes)
+                        counts["uniform_replaced"] += n_uniform
                 measured["inference"] += perf_counter() - started
 
                 started = perf_counter()
-                basis = np.empty((end - start, n_dof, n_q))
-                basis[:, b] = P
-                basis[:, i] = shapes
-                stiffness = np.swapaxes(basis, -1, -2) @ local_np @ basis
+                trace_rows = bm.broadcast_to(P, (end - start, ) + tuple(P.shape))
+                basis = bm.concat((trace_rows, shapes), axis=1)[:, order]
+                stiffness = bm.matrix_transpose(basis) @ local @ basis
                 # 变分式结果对称到舍入; 对称化后交给 CG, 与精确路径的对称性一致
-                stiffness = 0.5 * (stiffness + np.swapaxes(stiffness, -1, -2))
-                recovery_batches.append((start, end, bm.asarray(shapes)))
+                stiffness = 0.5 * (stiffness + bm.matrix_transpose(stiffness))
+                recovery_batches.append((start, end, shapes))
                 measured["basis_assembly"] += perf_counter() - started
 
                 started = perf_counter()
-                K_bb_trace = np.swapaxes(P, -1, -2) @ local_np[..., b[:, None], b] @ P
-                for key, value in self._diagnostics(stiffness, K_bb_trace).items():
+                K_bb_trace = K_trace @ local[..., b_device[:, None], b_device] @ P
+                for key, value in self._diagnostics(stiffness, K_bb_trace, R, D).items():
                     collected[key].append(value)
                 measured["diagnostics"] += perf_counter() - started
-                yield TraceStiffnessBatch(start, end, bm.asarray(stiffness))
+                yield TraceStiffnessBatch(start, end, stiffness)
 
         system = interface_space.assemble(batches())
         measured["global_csr"] = max(0.0, perf_counter() - total_started - sum(measured.values()))

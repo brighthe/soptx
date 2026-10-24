@@ -33,6 +33,29 @@ def test_prediction_rejects_incompatible_parameters(device, dtype, message):
         predict_independent_outputs(model, np.ones((2, 2)), "stiffness")
 
 
+@pytest.mark.parametrize("device", [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="无可用 CUDA 设备")),
+])
+def test_tensor_prediction_stays_on_input_device(device):
+    """torch 输入返回同设备的 float64 张量, 数值与 numpy 输入一致."""
+    model = nn.Linear(2, 3, dtype=torch.float64)
+    inputs = np.array([[0.4, 0.3], [0.2, 0.6]], dtype=np.float64)
+    expected = predict_independent_outputs(model, inputs, "shape")
+    model.to(device)
+    predicted = predict_independent_outputs(model, torch.from_numpy(inputs).to(device), "shape")
+    assert isinstance(predicted, torch.Tensor)
+    assert predicted.device.type == device and predicted.dtype == torch.float64
+    np.testing.assert_allclose(predicted.cpu().numpy(), expected, rtol=1e-14, atol=1e-14)
+
+
+def test_tensor_prediction_rejects_device_mismatch():
+    """torch 输入与网络不在同一设备时在网络执行前拒绝."""
+    model = nn.Linear(2, 1, device="meta", dtype=torch.float64)
+    with pytest.raises(ValueError, match="同一设备"):
+        predict_independent_outputs(model, torch.ones((2, 2), dtype=torch.float64), "shape")
+
+
 @pytest.mark.parametrize("invalid_output,message", [
     ("shape", "形状"),
     ("nonfinite", "非有限值"),

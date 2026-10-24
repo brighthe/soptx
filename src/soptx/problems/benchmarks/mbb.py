@@ -353,9 +353,10 @@ class FullMBBBeamPoint3d(ElasticityBenchmark):
 
     坐标轴 x, y, z 分别沿长、高、宽, y 向上. 左端底棱的两个角点 ``(x0, y0, z0)``,
     ``(x0, y0, z1)`` 铰支 ``u_x = u_y = u_z = 0``; 右端底棱的两个角点 ``(x1, y0, z0)``,
-    ``(x1, y0, z1)`` 滚支 ``u_y = 0``. 共 8 个约束, 消除全部 6 个刚体运动 (另有 2 个
-    冗余), 且关于 z 中面对称. 顶面中心 ``((x0 + x1)/2, y1, (z0 + z1)/2)`` 受竖直集中力
-    ``P``, 节点分配由有限元装配层完成.
+    ``(x1, y0, z1)`` 滚支, 沿 x 可滚动, ``u_y = u_z = 0``. 共 10 个约束, 消除全部 6 个
+    刚体运动 (另有 4 个冗余); 两端的 ``u_y``, ``u_z`` 约束相同, 左端的 ``u_x`` 约束在竖直
+    载荷下反力为零, 位移场关于 z 中面和跨中截面都对称. 顶面中心
+    ``((x0 + x1)/2, y1, (z0 + z1)/2)`` 受竖直集中力 ``P``, 节点分配由有限元装配层完成.
 
     Parameters
     ----------
@@ -403,8 +404,11 @@ class FullMBBBeamPoint3d(ElasticityBenchmark):
 
     @cartesian
     def is_dirichlet_boundary_dof_z(self, points: TensorLike) -> TensorLike:
-        """标记 ``u_z`` 的 Dirichlet 边界: 左端两底角点."""
-        return self._on_end_corners(points, self.domain[0])
+        """标记 ``u_z`` 的 Dirichlet 边界: 两端四个底角点."""
+        return (
+            self._on_end_corners(points, self.domain[0])
+            | self._on_end_corners(points, self.domain[1])
+        )
 
     def is_dirichlet_boundary(
         self,

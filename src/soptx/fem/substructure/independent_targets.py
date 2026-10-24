@@ -260,6 +260,9 @@ class IndependentPredictionDecoder:
         已由整体子结构流程创建的参考子结构.
     trace_kind : str
         linear_corner 或 full_trace, 默认保留角点接口.
+    pivot_indices : sequence of int, optional
+        刚体约束消去的 pivot 迹自由度编号. 缺省时由刚体基现选; 立方体子结构的刚体基各行范数相同,
+        现选结果取决于舍入, 随后端变化, 加载权重时须传入权重记录的编号.
     """
 
     def __init__(
@@ -267,6 +270,7 @@ class IndependentPredictionDecoder:
         prototype: SubstructurePrototype,
         *,
         trace_kind: str = "linear_corner",
+        pivot_indices: Optional[Sequence[int]] = None,
     ) -> None:
         """从已有参考子结构初始化接口空间与独立条目补全器."""
         trace_types = {
@@ -285,7 +289,7 @@ class IndependentPredictionDecoder:
         interior_numpy = np.asarray(
             bm.to_numpy(rigid_interior), dtype=np.float64
         )
-        pivots = _pivot_rows(rigid_numpy)
+        pivots = _pivot_rows(rigid_numpy) if pivot_indices is None else pivot_indices
         self.shape_codec = ShapeIndependentCodec(
             rigid_numpy, interior_numpy, pivot_indices=pivots
         )
@@ -440,6 +444,7 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
         integration_order: Optional[int] = None,
         backend: str = "numpy",
         device: str = "cpu",
+        pivot_indices: Optional[Sequence[int]] = None,
     ) -> None:
         """初始化子结构及独立条目补全器.
 
@@ -463,6 +468,8 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
             批量精确计算后端, numpy 或 pytorch. 不改变参考子结构编码.
         device : str
             CPU 或 CUDA 设备, numpy 仅支持 cpu.
+        pivot_indices : sequence of int, optional
+            pivot 迹自由度编号, 含义同 ``IndependentPredictionDecoder``; 由权重恢复时须传入权重记录的编号.
         """
         cell_size = tuple(cell_size)
         n_fine = tuple(n_fine)
@@ -496,7 +503,7 @@ class IndependentTargetProvider(IndependentPredictionDecoder):
             hypothesis=hypothesis,
             integration_order=integration_order,
         )
-        super().__init__(prototype, trace_kind=trace_kind)
+        super().__init__(prototype, trace_kind=trace_kind, pivot_indices=pivot_indices)
         self._trace_matrix = np.asarray(
             bm.to_numpy(self.trace.matrix), dtype=np.float64
         )

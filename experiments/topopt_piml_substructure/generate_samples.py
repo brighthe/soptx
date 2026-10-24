@@ -73,6 +73,8 @@ def parse_args(argv=None):
                          help="参考子结构与批量局部计算使用的后端")
     runtime.add_argument("--device", default="cpu",
                          help="批量计算设备: cpu, cuda 或 cuda:N, CUDA 需要 pytorch")
+    runtime.add_argument("--dtype", choices=("float64",), default="float64",
+                         help="局部精确求解与标签写盘的数据精度, 当前仅支持 float64")
     runtime.add_argument("--generation-batch-size", type=int, default=32,
                          help="每批局部精确求解的样本数")
     runtime.add_argument("--dataset-name", help="数据集目录名, 未指定时按配置生成, 不使用时间戳")
@@ -212,7 +214,7 @@ def main(argv=None):
     print(f"[局部配置] 三维 Q1, 二阶高斯积分, 接口 {args.trace_kind}, "
           f"网格 {(args.n_fine,) * 3}, 尺寸 {args.cell_size}, nu={args.nu}", flush=True)
     print(f"[样本] 训练 {args.n_train:,}, 验证 {args.n_validation:,}, 测试 {args.n_test:,}, "
-          f"采样={args.sampling}, seed={args.sample_seed}, float64",
+          f"采样={args.sampling}, seed={args.sample_seed}, {args.dtype}",
           flush=True)
     print("[标签] " + ", ".join(
         f"{'形函数' if route == 'shape' else '刚度'}独立条目 {metadata[f'n_{route}_targets']}"
@@ -249,7 +251,7 @@ def main(argv=None):
             filter_radius=args.filter_radius, penal=args.penal,
             replay_samples_dir=str(args.replay_samples_dir),
         ), "generation_batch_size": args.generation_batch_size,
-        "backend": args.backend, "device": provider.device, "dtype": "float64",
+        "backend": args.backend, "device": provider.device, "dtype": args.dtype,
     }
     (output_dir / "generation_config.json").write_text(
         json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",

@@ -40,15 +40,15 @@ class InterfaceSystem:
 
     Attributes
     ----------
-    stiffness : CSRTensor
-        接口刚度矩阵 ``K_Q``, 形状 ``(N_q, N_q)``, 供 ``soptx.solvers.spsolve``
-        直接求解.
+    stiffness : CSRTensor or object
+        接口刚度矩阵或隐式算子, 形状 ``(N_q, N_q)``. 隐式算子提供 matvec,
+        只供迭代求解, 不支持直接法.
     global_dofs : TensorLike
         ``Q`` 各分量对应的全局自由度编号, 升序排列, 形状 ``(N_q,)``. 升序是
         契约的一部分, 全局到接口的反查依赖二分定位而非字典.
     """
 
-    stiffness: CSRTensor
+    stiffness: Any
     global_dofs: Any
 
 
