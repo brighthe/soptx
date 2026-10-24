@@ -36,7 +36,7 @@ PyTorch 两侧采用相同的批量 Cholesky 和恢复策略, 稀疏块共享设
 数值按子结构存储; 作用与恢复均在目标设备完成, 不在迭代中转到 NumPy。
 CUDA 分项计时同步设备后记录。
 四组 240/390 三轮 GPU 命令见
-[局部刚度 Schur 内存对照](substructure_implicit_schur_ea.md#22-四组实验运行命令)。
+[局部刚度 Schur 内存对照](substructure_schur_explicit_vs_implicit.md#3-四组运行命令)。
 
 本次未运行任何测试或实验。下方 2026-10-23 的通过记录属于旧显式策略与 implicit/ea,
 不能视为新局部刚度 FA 路径的验证。新输出通过
@@ -72,8 +72,8 @@ Jacobi 对角由
 
 本实现保留内部稠密分解、局部刚度批次、EA 工作向量、网格和过滤矩阵等成本.
 **小规模 CPU 两轮一致性验证已通过; 尚未验证 full_trace 390 在 14 GiB 内能完成.**
-数学说明与实现预算见 [隐式 Schur + EA](substructure_implicit_schur_ea.md);
-其中待测结果不能视为本次实现的实测结果.
+显式与局部刚度隐式 FA 的 GPU 显存对照见
+[显式与隐式 Schur](substructure_schur_explicit_vs_implicit.md)，该对照不属于本节的共享参考 EA 路径。
 
 ## 运行设置
 
@@ -144,7 +144,7 @@ max_iter, 不代表完整优化收敛. 本轮只修复测试的 Variantmethod �
 implicit/ea 9.2605e-7, 均满足 1e-6 门槛.
 实测阶段峰值 RSS 的最大值分别为 0.158726、0.109261 GiB;
 这些是小规模 CPU 记录, 不推断 390 或 GPU 的内存是否达标.
-历史参考验证概述见 [验证背景](substructure_implicit_schur_ea.md#23-验证背景与验收); 当前结果表仅保留 240/390 FA GPU 显存对照.
+240/390 FA GPU 显存对照见 [显存结果](substructure_schur_explicit_vs_implicit.md#2-显存结果)。
 
 原始输出:
 [explicit/fa](outputs/full_trace_explicit_fa_hex_30x5x5_m5_cg_jacobi_t1/summary.json)、

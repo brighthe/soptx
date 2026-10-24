@@ -52,7 +52,7 @@ $$
 | 每行非零元 | $81$（内部节点） | $3(11m^2-2m+3)$（公共面内节点） |
 | 非零元总数 | $\approx81N_h$ | $\approx\dfrac3m N_h\cdot33m^2\approx1.2m\cdot81N_h$ |
 
-上述非零元增长对应显式存储 Schur 补的路径。也可保留全部边界自由度，通过内部线性系统求解隐式计算 $K_\Gamma v$，不形成局部 Schur 补或全局接口 CSR；这不引入 `linear_corner` 的边界插值降阶，但需承担每次算子作用中的内部求解及相关缓存成本。方法等价性、存储与计算成本、待执行验证见 [full_trace 隐式 Schur 与共享参考单元 EA：实现与对照](substructure_implicit_schur_ea.md)。下文实测结果仍属于显式路径，不代表隐式方法的性能。
+上述非零元增长对应显式存储 Schur 补的路径。也可保留全部边界自由度，通过内部线性系统求解隐式计算 $K_\Gamma v$，不形成局部 Schur 补或全局接口 CSR；这不引入 `linear_corner` 的边界插值降阶，但需承担每次算子作用中的内部求解及相关缓存成本。方法差异与实测显存结果见 [显式与局部刚度隐式 Schur 补的显存对比](substructure_schur_explicit_vs_implicit.md)。下文实测结果仍属于显式路径，不代表隐式方法的性能。
 
 ### 1.2 求解与位移恢复
 
